@@ -363,15 +363,6 @@ describe('giving a match\'s own lineup up', () => {
     expect(view.result.current.error).toBe('');
     expect(view.result.current.warning).toBe('');
   });
-
-  it('removes any other stored lineup the same way (a legacy round)', async () => {
-    api.fetchLineupInForce.mockResolvedValueOnce({ ...NAMES, sourceRound: 1 }).mockResolvedValue(STARTING);
-    const view = await mount();
-    const remove = vi.fn().mockResolvedValue(true);
-    await act(async () => { await view.result.current.removeStored(remove, 'Failed to remove the lineup'); });
-    expect(remove).toHaveBeenCalledTimes(1);
-    expect(view.result.current.source).toEqual({ round: 0 });
-  });
 });
 
 describe('a save of the lineup that is still queued', () => {
@@ -598,6 +589,21 @@ describe('a lineup change announced for the competition', () => {
     await mount();
     await announce({ competitionId: 'another' });
     expect(reads()).toBe(1);
+  });
+
+  it('ignores a change announced for another team of the competition: neither its lineup nor its members are read', async () => {
+    await mount();
+    await announce({ competitionId: 'c', teamId: 'u' });
+    expect(reads()).toBe(1);
+    expect(api.fetchSquads).toHaveBeenCalledTimes(1);
+  });
+
+  it('follows a change announced for this team, and one that names no team', async () => {
+    await mount();
+    await announce({ competitionId: 'c', teamId: 't' });
+    expect(reads(), 'this team\'s').toBe(2);
+    await announce({ competitionId: 'c', matchId: 'm1' });
+    expect(reads(), 'one that names no team is read as every team\'s').toBe(3);
   });
 
   // A read that replaced the first one could fail where the first would have shown the
@@ -1147,6 +1153,53 @@ describe('the team\'s members', () => {
     expect(view.result.current.squad).toEqual([...MEMBERS, NEW_MEMBER]);
   });
 
+  // The editors call memberRenamed once the server holds a rename, or a cleared name (the
+  // name ""): the one place that shows it on the members, the positions and the baseline.
+  describe('a member renamed on the server', () => {
+    // The members are read again after the change, and the server then holds the rename.
+    const renamed = (view, id, name) => {
+      api.fetchSquads.mockResolvedValue({ t: MEMBERS.map((m) => (m.id === id ? { ...m, name } : m)) });
+      return act(async () => { view.result.current.memberRenamed(id, name); });
+    };
+
+    it('shows the new name on the members, the positions that hold the member and the baseline: a rename alone is no edit', async () => {
+      const view = await mount();
+
+      await renamed(view, 'mem-2', 'Sato-san');
+
+      expect(view.result.current.squad.find((m) => m.id === 'mem-2').name).toBe('Sato-san');
+      expect(view.result.current.squadRef.current.find((m) => m.id === 'mem-2').name).toBe('Sato-san');
+      expect(view.result.current.values).toEqual({ 1: 'Aoki', 2: 'Sato-san', 3: 'Ito' });
+      expect(view.result.current.baseline.positions[2]).toBe('Sato-san');
+      expect(view.result.current.dirty).toBe(false);
+      expect(sessionStorage.getItem(DRAFT_KEY), 'and leaves no draft').toBeNull();
+    });
+
+    it('shows a cleared name the same way, with the member still placed', async () => {
+      const view = await mount();
+
+      await renamed(view, 'mem-2', '');
+
+      expect(view.result.current.squad.find((m) => m.id === 'mem-2').name).toBe('');
+      expect(view.result.current.values[2]).toBe('');
+      expect(view.result.current.memberIds[2], 'the member keeps its place').toBe('mem-2');
+      expect(view.result.current.dirty).toBe(false);
+    });
+
+    it('reads the positions as they are now: a position the member was moved to meanwhile takes the name, the one it left keeps what the operator made of it', async () => {
+      const view = await mount();
+      // While the rename was out the operator put Sato at Position 1, and cleared Position 2.
+      act(() => {
+        view.result.current.setValues((v) => ({ ...v, 1: 'Sato', 2: '' }));
+        view.result.current.setMemberIds((ids) => ({ ...ids, 1: 'mem-2', 2: '' }));
+      });
+
+      await renamed(view, 'mem-2', 'Sato-san');
+
+      expect(view.result.current.values).toEqual({ 1: 'Sato-san', 2: '', 3: 'Ito' });
+    });
+  });
+
   // A read begun before an editor's change can answer after it, with the list from
   // before: a rename undone by it would also leave the typed new name resolving to
   // nobody, and a typed name that finds nobody is named onto a blank slot or minted
@@ -1495,7 +1548,25 @@ describe('the team\'s members', () => {
     expect(view.result.current.squad, 'the list is').toEqual([...MEMBERS, NEW_MEMBER]);
 
     await announce();
-    expect(api.fetchSquads, 'an edited form is not followed again').toHaveBeenCalledTimes(2);
+    expect(api.fetchLineupInForce, 'the lineup of an edited form is not read again').toHaveBeenCalledTimes(2);
+    expect(api.fetchSquads, 'its members are').toHaveBeenCalledTimes(3);
+  });
+
+  it('are read again while the form holds edits, and the edits stay: the list is not the operator\'s edit', async () => {
+    const view = await mount();
+    edit(view, { 1: 'Mori' });
+    api.fetchSquads.mockResolvedValue({ t: [...MEMBERS, NEW_MEMBER] });
+    api.fetchLineupInForce.mockResolvedValue(FOLLOWED);
+
+    await announce();
+
+    expect(api.fetchSquads, 'a member another device added is read').toHaveBeenCalledTimes(2);
+    expect(view.result.current.squad).toContainEqual(NEW_MEMBER);
+    expect(view.result.current.squadRef.current, 'and is on the ref a Save resolves a typed name against').toContainEqual(NEW_MEMBER);
+    expect(api.fetchLineupInForce, 'the lineup is not read over the edit').toHaveBeenCalledTimes(1);
+    expect(view.result.current.values[1]).toBe('Mori');
+    expect(view.result.current.values[2], 'nor is a position the operator left alone replaced').toBe('Sato');
+    expect(view.result.current.dirty).toBe(true);
   });
 
   it('are read again when a Save shows a lineup another device changed, and the Save waits for them: nothing of that read lands after the Save\'s own writes', async () => {

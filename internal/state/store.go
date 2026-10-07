@@ -336,6 +336,20 @@ func (s *Store) cachedBracket(compID string) (*Bracket, error) {
 	return bracket, nil
 }
 
+// cachedCompetition is cachedPoolMatches's competition twin: the no-copy
+// accessor for config.md, pairing it with parseCompetitionFile in one place. The
+// result is nil when the competition has no config.md. Callers MUST NOT mutate
+// it: writers replace the cached record and never change it in place, and
+// LoadCompetition copies it for a caller that needs an owned one.
+func (s *Store) cachedCompetition(compID string) (*Competition, error) {
+	data, err := s.loadCached(compID, "config.md", parseCompetitionFile)
+	if err != nil {
+		return nil, err
+	}
+	comp, _ := data.(*Competition)
+	return comp, nil
+}
+
 // invalidCompDir is where a rejected competition id resolves. No legal id can
 // collide with it: validIDPattern requires a leading alphanumeric.
 const invalidCompDir = ".invalid"

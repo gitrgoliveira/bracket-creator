@@ -2,8 +2,11 @@ package state
 
 import (
 	"fmt"
+	"os"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/stretchr/testify/assert"
@@ -402,4 +405,95 @@ func TestSettleRoundLineups_LineupsThatLandedBeforeTheRecordOnlyAddThePairs(t *t
 	assert.True(t, next.givenGrew)
 	assert.Equal(t, landed.given, next.given)
 	assert.Equal(t, landed.lineups, next.lineups)
+}
+
+// markedTeamStore is a store holding a team competition with a pool draw whose
+// round-lineup conversion is done: it carries the marker, as every competition
+// this release creates does, so every write of its draw asks the settlement and
+// finds nothing to do.
+func markedTeamStore(t testing.TB) (*Store, string) {
+	t.Helper()
+	store, err := NewStore(t.TempDir())
+	require.NoError(t, err)
+	const compID = "marked"
+	require.NoError(t, store.SaveCompetition(&Competition{
+		ID: compID, Name: "Marked", Kind: "team", TeamSize: 3, Format: CompFormatLeague, Status: CompStatusPools,
+		Courts: []string{"A", "B"}, StartTime: "09:00", RoundLineupsConverted: true,
+	}))
+	players := make([]domain.Player, 8)
+	for i := range players {
+		players[i] = domain.Player{ID: fmt.Sprintf("00000000-0000-4000-8000-%012d", i), Name: fmt.Sprintf("Team%d", i), Dojo: fmt.Sprintf("Dojo%d", i)}
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	var matches []MatchResult
+	for i := 0; i < len(players); i++ {
+		for j := i + 1; j < len(players); j++ {
+			matches = append(matches, MatchResult{
+				ID:    fmt.Sprintf("Pool A-%d", len(matches)),
+				SideA: players[i].Name, SideAID: players[i].ID, SideB: players[j].Name, SideBID: players[j].ID,
+			})
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+	return store, compID
+}
+
+// A write of the draw asks the settlement whether anything waits, and for a
+// competition that is marked the answer comes from the competition record the
+// store already holds: it neither reads config.md from disk nor parses it again.
+func TestSettleRoundLineupsAfterWrite_AMarkedCompetitionCostsNothing(t *testing.T) {
+	store, compID := markedTeamStore(t)
+	mu := store.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
+	store.settleRoundLineupsAfterWrite(compID) // warm the competition record
+
+	allocs := testing.AllocsPerRun(50, func() { store.settleRoundLineupsAfterWrite(compID) })
+
+	t.Logf("allocations per settlement of a marked competition: %.0f", allocs)
+	assert.Less(t, allocs, 40.0, "a marked competition must not be read from disk and parsed on every write of its draw (that costs about 200)")
+}
+
+// The record the settlement answers from is the store's cached one, which is
+// checked against the file on every use: a config.md edited by hand since, to take
+// the marker off, is read again and settled, not answered from the old record.
+func TestSettleRoundLineupsAfterWrite_AHandEditedMarkerIsNotAnsweredFromTheCache(t *testing.T) {
+	store, compID := markedTeamStore(t)
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "00000000-0000-4000-8000-000000000000", CompetitionID: compID, Round: 1,
+		Positions: map[domain.Position]string{domain.PositionNumbered(1): "tora-round1"},
+	}, 3))
+	mu := store.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
+	store.settleRoundLineupsAfterWrite(compID) // the record is cached, marked
+	path := store.compPath(compID, "config.md")
+	raw, err := os.ReadFile(path) // #nosec G304 -- a path under the test store
+	require.NoError(t, err)
+	edited := strings.ReplaceAll(string(raw), "round_lineups_converted: true\n", "")
+	require.NotEqual(t, string(raw), edited, "precondition: the marker was in config.md")
+	require.NoError(t, os.WriteFile(path, []byte(edited), 0o600))
+	later := time.Now().Add(time.Hour)
+	require.NoError(t, os.Chtimes(path, later, later)) // a coarse clock cannot make the two edits look alike
+
+	store.settleRoundLineupsAfterWrite(compID)
+
+	lineups, err := store.loadTeamLineupsLocked(compID)
+	require.NoError(t, err)
+	assert.Contains(t, lineups, teamLineupMatchKey("00000000-0000-4000-8000-000000000000", "Pool A-0"),
+		"the unmarked competition was settled: its legacy team was given its lineup at a match")
+}
+
+// BenchmarkSettleRoundLineupsAfterWrite_Marked is the cost, per write of the
+// draw, of a competition that is marked.
+func BenchmarkSettleRoundLineupsAfterWrite_Marked(b *testing.B) {
+	store, compID := markedTeamStore(b)
+	mu := store.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		store.settleRoundLineupsAfterWrite(compID)
+	}
 }

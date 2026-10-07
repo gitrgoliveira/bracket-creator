@@ -1000,22 +1000,31 @@ function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", a
   const ref = useRefA(null);
   const triggerRef = useRefA(null);
   const optionRefs = useRefA([]);
+  // Whether the close in flight was made inside the picker (Escape, a choice, its
+  // own button). An outside tap closes it too, but by the time the close lands the
+  // tapped control has taken focus, and it keeps it.
+  const closedFromInside = useRefA(false);
+  const close = (fromInside) => { closedFromInside.current = fromInside; setOpen(false); };
 
-  window.useClickOutside(ref, () => setOpen(false), open);
+  window.useClickOutside(ref, () => close(false), open);
 
   // On open, seed the active option to the current court and move focus into
-  // the popover. On close, return focus to the trigger so keyboard users
-  // aren't dropped to <body>; only on a close, never as the picker mounts (it
-  // is closed then too): every queue and score row carries a picker, and focus
-  // jumped to the last one mounted, scrolling the page to it.
+  // the popover. On a close made inside the picker, return focus to the trigger
+  // so keyboard users aren't dropped to <body>, without scrolling: the button is
+  // where the operator was. Only on a close, never as the picker mounts (it is
+  // closed then too): every queue and score row carries a picker, and focus
+  // jumped to the last one mounted, scrolling the page to it. Never on an outside
+  // tap: taking focus back from the control that was tapped blurred a name box
+  // (dropping the iPad keyboard) and scrolled the Scores page back to the button.
   const wasOpen = useRefA(false);
   useEffectA(() => {
     if (open) {
       const cur = Math.max(0, courts.indexOf(value));
       setActiveIdx(cur);
-    } else if (wasOpen.current) {
-      triggerRef.current && triggerRef.current.focus();
+    } else if (wasOpen.current && closedFromInside.current) {
+      triggerRef.current && triggerRef.current.focus({ preventScroll: true });
     }
+    if (!open) closedFromInside.current = false;
     wasOpen.current = open;
   }, [open]);
 
@@ -1026,13 +1035,13 @@ function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", a
     }
   }, [open, activeIdx]);
 
-  const select = (cc) => { setOpen(false); if (cc !== value) onChange(cc); };
+  const select = (cc) => { close(true); if (cc !== value) onChange(cc); };
 
   const onPopoverKeyDown = (e) => {
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
-      setOpen(false);
+      close(true);
       return;
     }
     // Every branch below indexes into `courts`; with no courts there's nothing
@@ -1062,7 +1071,7 @@ function CourtPicker({ value, courts, onChange, btnClassName = "", label = "", a
       <button type="button"
         ref={triggerRef}
         className={btnClassName}
-        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+        onClick={(e) => { e.stopPropagation(); if (open) close(true); else setOpen(true); }}
         title="Change shiaijo"
         aria-haspopup="listbox"
         aria-expanded={open}

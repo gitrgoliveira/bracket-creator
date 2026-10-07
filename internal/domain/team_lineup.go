@@ -1,8 +1,10 @@
 package domain
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -151,20 +153,54 @@ type LineupSlot struct {
 	MemberID string
 }
 
+// fikPositionOrder is the five FIK names of a 5-person team in the order they
+// are fielded, senpo first and taisho last. Both canonicalPositionOrder and
+// ComparePositions read it, so the order is defined once.
+var fikPositionOrder = [...]Position{PosSenpo, PosJiho, PosChuken, PosFukusho, PosTaisho}
+
 // canonicalPositionOrder returns the position traversal order OrderedMembers
 // walks: the five FIK names for a 5-person team, else 1..teamSize
-// numerically. It has a single consumer today, but stays its own named step
-// rather than being inlined into OrderedMembers, so the order itself stays
-// separately readable and testable.
+// numerically. It stays its own named step rather than being inlined into
+// OrderedMembers, so the order itself stays separately readable and testable.
 func canonicalPositionOrder(teamSize int) []Position {
 	if teamSize == 5 {
-		return []Position{PosSenpo, PosJiho, PosChuken, PosFukusho, PosTaisho}
+		return slices.Clone(fikPositionOrder[:])
 	}
 	order := make([]Position, teamSize)
 	for i := 1; i <= teamSize; i++ {
 		order[i-1] = PositionNumbered(i)
 	}
 	return order
+}
+
+// ComparePositions orders two positions the way a lineup is fielded, the order
+// canonicalPositionOrder walks: the five FIK names from senpo to taisho, then
+// numbered positions by their number (10 after 2), then any other position by
+// name. A reader that must walk the positions a lineup holds without a team size
+// (the Kachinuki Detail export, which labels a fighter by the first position it
+// holds) orders them with this, so it agrees with the roster that walks
+// OrderedMembers about which position comes first.
+func ComparePositions(a, b Position) int {
+	groupA, rankA := positionRank(a)
+	groupB, rankB := positionRank(b)
+	return cmp.Or(
+		cmp.Compare(groupA, groupB),
+		cmp.Compare(rankA, rankB),
+		cmp.Compare(a, b),
+	)
+}
+
+// positionRank places a position in the order ComparePositions gives: group 0
+// for a FIK name (its rank is its place in fikPositionOrder), group 1 for a
+// numbered position (its rank is its number), group 2 for any other.
+func positionRank(p Position) (group, rank int) {
+	if i := slices.Index(fikPositionOrder[:], p); i >= 0 {
+		return 0, i
+	}
+	if n, err := strconv.Atoi(string(p)); err == nil && n >= 0 {
+		return 1, n
+	}
+	return 2, 0
 }
 
 // OrderedMembers returns the occupied lineup slots in canonical position

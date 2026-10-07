@@ -233,6 +233,53 @@ describe('a lineup saved meanwhile', () => {
     expect(view.result.current.draft).toMatchObject({ restored: false, stale: null });
     expect(hasDraft(map)).toBe(false);
   });
+
+  // The operator's own save, sent after they left (or queued, and written later), holds
+  // what the draft held with the member id the save attached to a name they typed in:
+  // the draft never had one. That is their save having landed, not another device's change.
+  describe('that is the operator\'s own save, landed', () => {
+    const TYPED = side({ 1: 'Mori' });
+    const SAVED_WITH_ID = side({ 1: 'Mori' }, { 1: 'mem-4' });
+
+    it('is dropped without a word: the id a save attached to a name typed in is no change', () => {
+      const { map } = installStorage();
+      seed(map, { savedAt: Date.now(), baseline: BLANK, current: TYPED });
+      const view = mount({ baseline: SAVED_WITH_ID });
+      expect(view.onRestore).not.toHaveBeenCalled();
+      expect(view.result.current.draft).toMatchObject({ restored: false, stale: null });
+      expect(hasDraft(map)).toBe(false);
+    });
+
+    it('holds whatever member id the name was given, also over the id of the member it replaced', () => {
+      const { map } = installStorage();
+      seed(map, { savedAt: Date.now(), baseline: NAMED, current: side({ 1: 'Mori', 2: 'Sato' }, { 1: 'mem-1', 2: 'mem-2' }) });
+      const view = mount({ baseline: side({ 1: 'Mori', 2: 'Sato' }, { 1: 'mem-4', 2: 'mem-2' }) });
+      expect(view.result.current.draft.stale).toBeNull();
+      expect(hasDraft(map)).toBe(false);
+    });
+
+    it('still names what was not restored when the saved lineup holds another name', () => {
+      const { map } = installStorage();
+      seed(map, { savedAt: Date.now(), baseline: BLANK, current: TYPED });
+      const view = mount({ baseline: side({ 1: 'Kato' }, { 1: 'mem-5' }) });
+      expect(view.result.current.draft.stale).toEqual({ names: ['Mori'] });
+    });
+
+    it('still names what was not restored when a position the draft holds by number alone holds another member', () => {
+      const { map } = installStorage();
+      seed(map, { savedAt: Date.now(), baseline: BLANK, current: side({}, { 1: 'mem-6' }) });
+      const view = mount({ baseline: side({}, { 1: 'mem-7' }) });
+      expect(view.result.current.draft.stale).toEqual({ names: [] });
+    });
+
+    it('holds a position the draft holds by number alone when the saved lineup holds that member', () => {
+      const { map } = installStorage();
+      seed(map, { savedAt: Date.now(), baseline: BLANK, current: side({}, { 1: 'mem-6' }) });
+      const view = mount({ baseline: side({}, { 1: 'mem-6' }) });
+      expect(view.result.current.draft.stale).toBeNull();
+      expect(hasDraft(map)).toBe(false);
+    });
+  });
 });
 
 // "Not restored, the lineup changed since" names the names the draft could not

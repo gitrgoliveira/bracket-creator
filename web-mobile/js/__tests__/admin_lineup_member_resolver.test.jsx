@@ -6,7 +6,7 @@
 // mounting anything.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { resolveMemberIdForName, resolveMemberIdsForPositions, memberIdentityWarning, blankMemberForPosition } from '../admin_lineup.jsx';
+import { resolveMemberIdForName, resolveMemberIdsForPositions, memberIdentityWarning, blankMemberForPosition, typedNameTarget } from '../admin_lineup.jsx';
 
 // The server's sentence for a participant's rename of a team member who
 // already has a name (errMemberAlreadyNamed, internal/mobileapp/handlers_squad.go).
@@ -301,6 +301,35 @@ describe('blankMemberForPosition', () => {
     const squad = [{ id: 'm1', index: 1, name: '' }];
     expect(blankMemberForPosition(squad, 'senpo', { senpo: 'm1' })).toEqual(squad[0]);
     expect(blankMemberForPosition(squad, 'senpo', {})).toEqual(squad[0]);
+  });
+});
+
+// typedNameTarget is the ONE order a name typed at a position is placed by: the resolver
+// above, the Lineups page's add and the at-court panel's check before a Save (which
+// asks it of a copy of the members and writes nothing) all drive it.
+describe('typedNameTarget', () => {
+  const MEMBERS = [
+    { id: 'm1', index: 1, name: 'Ito' },
+    { id: 'm2', index: 2, name: '' },
+    { id: 'm3', index: 3, name: '' },
+  ];
+
+  it('is the member the name belongs to, whatever the position holds: nothing is written', () => {
+    expect(typedNameTarget(MEMBERS, '2', ' ito ', {})).toEqual({ member: MEMBERS[0], write: 'none' });
+  });
+
+  it('is the unnamed member the position holds, else the one seeded for it, which the name is written to', () => {
+    expect(typedNameTarget(MEMBERS, '2', 'Mori', {})).toEqual({ member: MEMBERS[1], write: 'rename' });
+    expect(typedNameTarget(MEMBERS, '2', 'Mori', { 2: 'm3' })).toEqual({ member: MEMBERS[2], write: 'rename' });
+  });
+
+  it('is a member that does not exist yet when no member is unnamed at the position (the seeded one is fielded elsewhere, or named)', () => {
+    expect(typedNameTarget(MEMBERS, '2', 'Mori', { 1: 'm2' })).toEqual({ member: null, write: 'add' });
+    expect(typedNameTarget(MEMBERS, '1', 'Mori', {})).toEqual({ member: null, write: 'add' });
+  });
+
+  it('tries the name before the position: a name a member has is never written to another', () => {
+    expect(typedNameTarget(MEMBERS, '2', 'Ito', { 2: 'm2' }).write).toBe('none');
   });
 });
 

@@ -86,20 +86,20 @@ afterEach(() => {
 });
 
 // The competition page holds the config beside the match data, as props.
+const pageFor = (props = {}) => (
+  <AdminTeamLineupsList
+    comp={COMP}
+    poolMatches={POOL_MATCHES}
+    bracket={BRACKET}
+    password="pw"
+    showToast={vi.fn()}
+    {...props}
+  />
+);
+
 async function mountPage(props = {}) {
   let utils;
-  await act(async () => {
-    utils = render(
-      <AdminTeamLineupsList
-        comp={COMP}
-        poolMatches={POOL_MATCHES}
-        bracket={BRACKET}
-        password="pw"
-        showToast={vi.fn()}
-        {...props}
-      />
-    );
-  });
+  await act(async () => { utils = render(pageFor(props)); });
   await act(async () => { await Promise.resolve(); });
   return utils;
 }
@@ -370,6 +370,110 @@ describe('Use the previous match\'s lineup', () => {
     await click(utils.getByRole('button', { name: "Use the previous match's lineup" }));
     expect(utils.getByText('Failed to delete match lineup')).toBeTruthy();
     expect(utils.getByText('Lineup for this match')).toBeTruthy();
+  });
+});
+
+// The match chosen in "Lineup for" can stop seating the team while the page is open:
+// a feeding match is reopened or corrected on another device, or the draw is
+// discarded. The page never falls back to the starting lineup by itself: the next edit
+// and Save there would rewrite a lineup that every later match without its own carries.
+describe('a match the team is no longer in', () => {
+  // Team C plays the final until the match feeding it is corrected and team B plays it.
+  const finalWith = (sideB) => ({
+    rounds: [
+      [match('m-r0-0', A, D, { matchNumber: 1 }), match('m-r0-1', B, C, { matchNumber: 2 })],
+      [match('m-r1-0', A, sideB, { matchNumber: 3 })],
+    ],
+  });
+  const pageWith = (bracket) => pageFor({ poolMatches: undefined, bracket });
+  const notInMatch = (utils) => utils.getByTestId('lineup-not-in-match');
+
+  // Team C's lineup for the final, chosen and edited: an unsaved change for that match.
+  async function editFinalAsTeamC() {
+    api.fetchSquads.mockResolvedValue({ 'team-a': SQUAD, 'team-c': SQUAD });
+    api.fetchLineupInForce.mockResolvedValue(lineupFor({ teamId: 'team-c', matchId: 'm-r1-0', sourceMatchId: 'm-r0-1' }));
+    api.fetchTeamLineup.mockResolvedValue(lineupFor({ teamId: 'team-c', round: 0, sourceRound: 0 }));
+    const utils = await mountPage({ poolMatches: undefined, bracket: finalWith(C) });
+    await act(async () => { fireEvent.change(utils.getByLabelText('Team'), { target: { value: 'team-c' } }); });
+    await chooseTarget(utils, 'm-r1-0');
+    await pick(utils, 2, 'mem-4');
+    return utils;
+  }
+
+  async function giveTheFinalTo(utils, bracket) {
+    await act(async () => { utils.rerender(pageWith(bracket)); });
+    await act(async () => { await Promise.resolve(); });
+  }
+
+  it('keeps the match chosen and says plainly that the team is no longer in it', async () => {
+    const utils = await editFinalAsTeamC();
+    expect(targetSelect(utils).value).toBe('m-r1-0');
+
+    await giveTheFinalTo(utils, finalWith(B));
+
+    expect(targetSelect(utils).value, 'the chosen match is still chosen').toBe('m-r1-0');
+    expect(optionTexts(targetSelect(utils)), 'and still named').toEqual(['Starting lineup', 'Match 2', 'Match 3']);
+    expect(notInMatch(utils).textContent).toBe(
+      'Team C is no longer in Match 3. Choose another match, or the starting lineup, in Lineup for.',
+    );
+    expect(utils.queryByText('Starting lineup', { selector: '.overline' }), 'the starting lineup is not shown').toBeNull();
+  });
+
+  it('keeps Save off for it, and the operator\'s edit stays on the form', async () => {
+    const utils = await editFinalAsTeamC();
+    expect(saveButton(utils).disabled).toBe(false);
+
+    await giveTheFinalTo(utils, finalWith(B));
+    await click(saveButton(utils));
+
+    expect(saveButton(utils).disabled).toBe(true);
+    expect(api.putMatchLineup, 'nothing is written for a match the team is not in').not.toHaveBeenCalled();
+    expect(api.putTeamLineup, 'and nothing is written over the starting lineup').not.toHaveBeenCalled();
+    expect(utils.getByTestId('lineup-position-2').value, 'the edit is not lost from view').toBe('mem-4');
+    expect(utils.getByTestId('lineup-position-2').disabled, 'but cannot be taken further').toBe(true);
+  });
+
+  it('is the same for a match that has left the draw altogether', async () => {
+    const utils = await editFinalAsTeamC();
+
+    // The final is gone from the data, not re-seated.
+    await giveTheFinalTo(utils, { rounds: [finalWith(B).rounds[0]] });
+
+    expect(targetSelect(utils).value).toBe('m-r1-0');
+    expect(notInMatch(utils).textContent).toContain('Team C is no longer in Match 3.');
+    expect(saveButton(utils).disabled).toBe(true);
+  });
+
+  it('lets the operator choose another lineup, and the notice goes with the match', async () => {
+    const utils = await editFinalAsTeamC();
+    await giveTheFinalTo(utils, finalWith(B));
+    expect(targetSelect(utils).value, 'the chosen match waits for the operator').toBe('m-r1-0');
+
+    await chooseTarget(utils, '');
+    expect(targetSelect(utils).value).toBe('');
+    expect(utils.queryByTestId('lineup-not-in-match')).toBeNull();
+    expect(utils.getByText('Starting lineup', { selector: '.overline' })).toBeTruthy();
+    expect(optionTexts(targetSelect(utils)), 'the match that was kept is not offered again').toEqual(['Starting lineup', 'Match 2']);
+
+    await pick(utils, 1, 'mem-4');
+    await click(saveButton(utils));
+    expect(api.putTeamLineup, 'the starting lineup is saved because the operator chose it').toHaveBeenCalledTimes(1);
+
+    await chooseTarget(utils, 'm-r0-1');
+    expect(utils.queryByTestId('lineup-not-in-match')).toBeNull();
+    expect(utils.getByText('Match 2', { selector: '.overline' })).toBeTruthy();
+  });
+
+  it('goes when the team is seated in the match again, with the edit still there to save', async () => {
+    const utils = await editFinalAsTeamC();
+    await giveTheFinalTo(utils, finalWith(B));
+    expect(utils.queryByTestId('lineup-not-in-match')).not.toBeNull();
+
+    await giveTheFinalTo(utils, finalWith(C));
+
+    expect(utils.queryByTestId('lineup-not-in-match')).toBeNull();
+    expect(utils.getByTestId('lineup-position-2').value).toBe('mem-4');
+    expect(saveButton(utils).disabled).toBe(false);
   });
 });
 

@@ -173,7 +173,10 @@ import (
 //   - a team's lineups.yaml positions (occupied Positions entries with no
 //     MemberIDs counterpart) convert ON READ, below (bc-tmid pass 2),
 //     AFTER the team-members.yaml migration above so a team migrated in the SAME
-//     pass is still resolvable. Unlike every upgrade above this one is not
+//     pass is still resolvable, and AFTER the round-lineup step in the next
+//     bullet, which keys a lineup saved under a team's NAME by the team's id
+//     and copies it, so the repair reaches every lineup that step moved or
+//     gave. Unlike every upgrade above this one is not
 //     resolving against the roster at all, but against the TEAM'S OWN
 //     squad (team-members.yaml), and needs none of the NameCount-gated
 //     uniqueness dance those upgrades carry: two members of ONE team
@@ -198,8 +201,9 @@ import (
 //     storeTx.settleRoundLineupsAtCommit, the one place the draw's writers
 //     share). Competition.RoundLineupsGiven records which (team, match) pairs
 //     were settled, so a lineup the operator removes stays removed. Keyed on
-//     Competition.RoundLineupsConverted, set when the competition is
-//     completed.
+//     Competition.RoundLineupsConverted, set as soon as nothing waits: at
+//     once for a competition with no team that has a round lineup, else when
+//     the competition is completed.
 //
 //   - pool-matches.csv / bracket.json SUB-BOUT rows (SubMatchResult's
 //     SideAMemberID/SideBMemberID/WinnerMemberID) convert in the SAME pass
@@ -365,13 +369,18 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	if err := s.upgradeBracketLocked(compID, roster); err != nil {
 		log.Printf("state: legacy bracket upgrade for %s: %v", compID, err)
 	}
-	if err := s.upgradeLineupMemberIDsLocked(compID, roster); err != nil {
-		log.Printf("state: legacy lineup-member-id upgrade for %s: %v", compID, err)
-	}
 	// After the three id repairs above: a round lineup moves only onto a match
-	// its team is seated in by id, and the copies carry the member ids.
+	// its team is seated in by id.
 	if err := s.upgradeRoundLineupsLocked(compID, roster); err != nil {
 		log.Printf("state: legacy round-lineup upgrade for %s: %v", compID, err)
+	}
+	// After the round-lineup step, not before it: the repair resolves a position
+	// against the squad of the team a lineup is stored under, and a lineup stored
+	// under a team's NAME has none until that step has keyed it by the team's id.
+	// Run here it also reaches the starting lineup that step seeds and the lineup
+	// it gives each match, so none of them is left without its member ids.
+	if err := s.upgradeLineupMemberIDsLocked(compID, roster); err != nil {
+		log.Printf("state: legacy lineup-member-id upgrade for %s: %v", compID, err)
 	}
 	if err := s.upgradeTeamDefaultWinBoutPaddingLocked(compID, roster); err != nil {
 		log.Printf("state: legacy team-decision-bout-padding upgrade for %s: %v", compID, err)
@@ -2179,7 +2188,8 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 // to v2.1.1 saved (round_lineups.go owns the rule): the first settlement of a
 // competition that has not been settled, over what its files hold now. Runs
 // after the side-id repairs (a lineup is given only for a match its team is
-// seated in by id) and the lineup member-id repair (so the copies carry the ids).
+// seated in by id) and before the lineup member-id repair, which then gives the
+// lineups this step keys by id, seeds and gives to matches their member ids.
 // Caller holds the per-comp lock.
 func (s *Store) upgradeRoundLineupsLocked(compID string, roster *legacyUpgradeRoster) error {
 	st := s.directRoundLineupStage(compID)

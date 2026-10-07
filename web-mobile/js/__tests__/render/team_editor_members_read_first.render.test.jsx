@@ -771,3 +771,14 @@ describe('team editor: the effect that notices a side given another team is decl
     expect(noticesSide, 'declared first').toBeLessThan(readsLineups);
   });
 });
+
+// A side is given another team once, and the lineup sync's epoch (raised when it drops
+// the side's lineup) is the one counter that says so: a pick asks the epoch it began on,
+// not a second count kept beside it. The team of a side is read through sideTeam alone.
+describe('team editor: one counter says a side was given another team', () => {
+  it('keeps no second generation counter, and no wrapper over sideTeam', () => {
+    const code = readCode('admin_scoring_team.jsx');
+    expect(code).not.toMatch(/sideGeneration/);
+    expect(code).not.toMatch(/teamIdForSide/);
+  });
+});

@@ -6,6 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { API } from '../api_client.jsx';
+import { FETCH_TIMEOUT_MS } from '../write_result.jsx';
 
 function mockFetch(status, body) {
   return vi.fn(() =>
@@ -130,6 +131,70 @@ describe('the member writes throw a refusal\'s sentence, not its code', () => {
     const err = await send(API).catch((e) => e);
     expect(err.message).toBe('team member not found');
     expect(err.code).toBeUndefined();
+  });
+});
+
+// The team score sheet holds every name box disabled, and the side's lineup
+// announcements back, while a member write is out, so one the server never answers
+// would keep naming off until the browser gave up on the connection. Both writes are
+// bounded like every sibling request (the deadline covers the body too) and end in a
+// plain sentence the sheet shows as it is.
+describe('the member writes when the server does not answer', () => {
+  const sends = [
+    ['addTeamMember', () => API.addTeamMember('c1', 'team-1', 'Ito', 'pw'), 'The team member was not added'],
+    ['renameTeamMember', () => API.renameTeamMember('c1', 'team-1', 'm1', 'Ito', 'pw'), 'The team member was not renamed'],
+  ];
+  let originalFetch;
+  beforeEach(() => { originalFetch = global.fetch; });
+  afterEach(() => { global.fetch = originalFetch; vi.useRealTimers(); });
+
+  // What a write has come to so far, without waiting on it.
+  function watch(send) {
+    const seen = { outcome: 'waiting' };
+    send().then((value) => { seen.outcome = value; }, (error) => { seen.outcome = error; });
+    return seen;
+  }
+  const sentence = (notDone) => `${notDone}: the server did not answer. Check the connection and try again.`;
+
+  it.each(sends)('%s gives up at the deadline when the request is never answered', async (_name, send, notDone) => {
+    vi.useFakeTimers();
+    global.fetch = vi.fn(() => new Promise(() => {}));
+    const seen = watch(send);
+    await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS - 1);
+    expect(seen.outcome).toBe('waiting');
+    await vi.advanceTimersByTimeAsync(2);
+    expect(seen.outcome).toBeInstanceOf(Error);
+    expect(seen.outcome.message).toBe(sentence(notDone));
+  });
+
+  it.each(sends)('%s gives up on an answer whose body never completes, too', async (_name, send, notDone) => {
+    vi.useFakeTimers();
+    global.fetch = vi.fn(() => Promise.resolve({ ok: true, status: 201, json: () => new Promise(() => {}) }));
+    const seen = watch(send);
+    await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS + 1);
+    expect(seen.outcome).toBeInstanceOf(Error);
+    expect(seen.outcome.message).toBe(sentence(notDone));
+  });
+
+  it.each(sends)('%s aborts the request it gave up on, which frees its connection', async (_name, send) => {
+    vi.useFakeTimers();
+    global.fetch = vi.fn((_url, { signal }) => new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+    }));
+    const seen = watch(send);
+    await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS + 1);
+    expect(global.fetch.mock.calls[0][1].signal.aborted).toBe(true);
+    expect(seen.outcome).toBeInstanceOf(Error);
+  });
+
+  it.each(sends)('%s answers a connection that is down in the same sentence, not the browser\'s own', async (_name, send, notDone) => {
+    global.fetch = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')));
+    await expect(send()).rejects.toThrow(sentence(notDone));
+  });
+
+  it('addTeamMember does not hand an unreadable answer on as a member', async () => {
+    global.fetch = vi.fn(() => Promise.resolve({ ok: true, status: 201, json: () => Promise.reject(new SyntaxError('Unexpected token < in JSON')) }));
+    await expect(API.addTeamMember('c1', 'team-1', 'Ito', 'pw')).rejects.toThrow(sentence('The team member was not added'));
   });
 });
 

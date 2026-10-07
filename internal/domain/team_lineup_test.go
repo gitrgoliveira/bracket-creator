@@ -1,7 +1,11 @@
 package domain_test
 
 import (
+	"cmp"
 	"errors"
+	"fmt"
+	"maps"
+	"slices"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -31,6 +35,51 @@ func TestTeamLineup_OrderedMembers_FivePerson(t *testing.T) {
 		{Position: domain.PosTaisho, Name: "T"},
 	}
 	assert.Equal(t, want, got)
+}
+
+// TestComparePositions_IsTheOrderOrderedMembersWalks pins that the order the
+// Kachinuki Detail export labels a fighter's first position by is the order the
+// roster walks the lineup in: for every team size, ordering the positions a full
+// lineup holds with ComparePositions gives what OrderedMembers returns.
+func TestComparePositions_IsTheOrderOrderedMembersWalks(t *testing.T) {
+	for size := 1; size <= 12; size++ {
+		t.Run(fmt.Sprintf("team of %d", size), func(t *testing.T) {
+			positions := map[domain.Position]string{}
+			var walked []domain.Position
+			if size == 5 {
+				for _, p := range []domain.Position{domain.PosTaisho, domain.PosChuken, domain.PosSenpo, domain.PosFukusho, domain.PosJiho} {
+					positions[p] = string(p)
+				}
+			} else {
+				for n := size; n >= 1; n-- {
+					positions[domain.PositionNumbered(n)] = fmt.Sprintf("fighter-%d", n)
+				}
+			}
+			for _, slot := range (domain.TeamLineup{Positions: positions}).OrderedMembers(size) {
+				walked = append(walked, slot.Position)
+			}
+
+			ordered := slices.SortedFunc(maps.Keys(positions), domain.ComparePositions)
+
+			assert.Equal(t, walked, ordered)
+			assert.Len(t, ordered, size)
+		})
+	}
+}
+
+// TestComparePositions: the FIK names come before the numbered positions, which
+// are ordered by number and not as text, and anything else comes last, by name.
+func TestComparePositions(t *testing.T) {
+	ordered := []domain.Position{
+		domain.PosSenpo, domain.PosJiho, domain.PosChuken, domain.PosFukusho, domain.PosTaisho,
+		"1", "2", "10", "11",
+		"-1", "alpha", "beta",
+	}
+	for i, a := range ordered {
+		for j, b := range ordered {
+			assert.Equalf(t, cmp.Compare(i, j), domain.ComparePositions(a, b), "%q against %q", a, b)
+		}
+	}
 }
 
 // TestTeamLineup_OrderedMembers_ThreePerson verifies the numeric-position

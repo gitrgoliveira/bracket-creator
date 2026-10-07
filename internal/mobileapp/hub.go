@@ -47,8 +47,11 @@ const (
 	// aside and the knockout stage rebuilt. Every device is showing a wedged
 	// competition when this happens, so they all need to reload.
 	EventBracketQuarantined EventType = "bracket_quarantined"
-	EventLineupUpdated      EventType = "lineup_updated"
-	EventResyncRequired     EventType = "resync_required"
+	// EventLineupUpdated: a team's lineups or members changed. Payload:
+	// {competitionId, teamId} and, for a lineup saved for a match, matchId
+	// (lineupUpdatedPayload builds it for every writer).
+	EventLineupUpdated  EventType = "lineup_updated"
+	EventResyncRequired EventType = "resync_required"
 )
 
 // AutoCompleteErrorHeader is set on score/start responses when the

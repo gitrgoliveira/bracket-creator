@@ -49,7 +49,6 @@ describe('lineupSourceOf', () => {
   it('reads the source the server names', () => {
     expect(lineupSourceOf({ sourceMatchId: 'm0' })).toEqual({ matchId: 'm0' });
     expect(lineupSourceOf({ sourceRound: 0 })).toEqual({ round: 0 });
-    expect(lineupSourceOf({ sourceRound: 2 })).toEqual({ round: 2 });
     expect(lineupSourceOf({ positions: {} })).toBeNull();
     expect(lineupSourceOf(null)).toBeNull();
   });

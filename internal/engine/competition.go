@@ -710,11 +710,14 @@ func (e *Engine) DiscardDraw(id string) error {
 	if err := e.store.DeleteMatchHistory(id); err != nil {
 		return fmt.Errorf("DiscardDraw: failed to delete the match history: %w", err)
 	}
-	// So do the lineups saved for those matches: left behind, one would become
-	// a team's own lineup at the reused id and be carried to every later match.
-	// The round lineups (the starting lineup is round 0) stay.
-	if err := e.store.DeleteMatchScopedTeamLineups(id); err != nil {
-		return fmt.Errorf("DiscardDraw: failed to delete the match lineups: %w", err)
+	// So do the lineups saved for those matches, and the record of the pairs the
+	// round-lineup conversion settled in them: the next draw reuses the match ids,
+	// so a lineup left behind would become a team's own lineup at the reused id
+	// and be carried to every later match, and a pair left in the record would keep
+	// the new match from being given its lineup. The round lineups (the starting
+	// lineup is round 0) stay.
+	if err := e.store.ClearDrawLineups(id); err != nil {
+		return fmt.Errorf("DiscardDraw: failed to clear the match lineups: %w", err)
 	}
 	_, err = e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
 		if current == nil {
@@ -725,10 +728,6 @@ func (e *Engine) DiscardDraw(id string) error {
 		}
 		current.Status = state.CompStatusSetup
 		current.SwissCurrentRound = 0 // reset so a fresh GenerateDraw can re-initialise it
-		// The pairs the round-lineup conversion had settled belong to this
-		// draw's match ids, which the next draw reuses: its matches are given
-		// their lineups again.
-		current.RoundLineupsGiven = nil
 		return current, nil
 	})
 	return err
@@ -1224,7 +1223,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// competition can start holding a duplicate in the first place. isTeam
 	// mirrors the same Kind/TeamSize discriminator the write-floor check
 	// uses (comp.TeamSize is already defaulted above when Kind=="team").
-	isTeam := comp.Kind == "team" || comp.TeamSize > 0
+	isTeam := comp.IsTeam()
 	if err := helper.ValidateNoDuplicateTeamMembers(players, isTeam); err != nil {
 		return validationErrorf("competition %s cannot generate a draw: %s", id, err.Error())
 	}
@@ -1257,8 +1256,26 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// per-comp lock acquisitions, so they run OUTSIDE the
 	// UpdateCompetitionChanged transform below (re-entering the lock would
 	// deadlock).
+	//
+	// A draw generated from Setup starts with none of an earlier draw's lineups:
+	// a competition in Setup holds no draw that stands, so whatever is on disk is
+	// the leftover of an attempt that failed after it wrote its matches (the
+	// refusal and the drift check below both come after the writes), and the write
+	// that saved those matches gave the legacy teams lineups at them and recorded
+	// the pairs. This draw reuses the match ids with other pairings, so neither may
+	// outlive its draw, as DiscardDraw leaves things. Cleared just before the
+	// first write, after every refusal that leaves the files alone.
+	clearEarlierDraw := func() error {
+		if err := e.store.ClearDrawLineups(id); err != nil {
+			return fmt.Errorf("competition %s: failed to clear the lineups of an earlier draw: %w", id, err)
+		}
+		return nil
+	}
 	switch comp.Format {
 	case state.CompFormatMixed, state.CompFormatLeague:
+		if err := clearEarlierDraw(); err != nil {
+			return err
+		}
 		if err := e.generatePools(comp, players, seeds); err != nil {
 			return err
 		}
@@ -1300,6 +1317,9 @@ func (e *Engine) runDrawPipeline(id string) error {
 		if err != nil {
 			return err
 		}
+		if err := clearEarlierDraw(); err != nil {
+			return err
+		}
 		if err := e.store.SavePoolMatches(id, r1); err != nil {
 			return err
 		}
@@ -1309,6 +1329,9 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// A standalone knockout competition (the only remaining knockout case
 		// after the derived-knockout path was removed in mp-turx) uses standalone
 		// seeding, there is no pool-preview topology to mirror.
+		if err := clearEarlierDraw(); err != nil {
+			return err
+		}
 		if err := e.generateKnockout(comp, players, seeds); err != nil {
 			return err
 		}
@@ -1338,7 +1361,10 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// Note: our generated pools.csv / bracket.json have already been
 	// written by this point (see pipeline limitations in the function
 	// comment), aborting here leaves them as orphaned artifacts that
-	// the next successful start overwrites. Pre-existing partial-
+	// the next successful start overwrites. So are the lineups the
+	// round-lineup settlement gave the legacy teams at those matches, and
+	// its record of the pairs: the next start clears them before it
+	// generates (clearEarlierDraw above). Pre-existing partial-
 	// atomicity issue; the fix here only guarantees comp-config
 	// consistency.
 	_, err = e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {

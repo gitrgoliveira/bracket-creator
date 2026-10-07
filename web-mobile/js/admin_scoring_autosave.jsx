@@ -40,17 +40,22 @@ export function useChangedGroups(match) {
   matchRef.current = match;
   const stateRef = useRefA(null);
   const keyOf = (m) => `${(m && m.compId) || ""}\u0000${(m && m.id) || ""}`;
-  const reopened = !!(match && match.reopenPending);
+  const finished = !!(match && match.status === "completed");
   // The editor moving to another match starts over from that match.
   if (!stateRef.current || stateRef.current.key !== keyOf(match)) {
-    stateRef.current = { key: keyOf(match), seed: matchWire(match), agreed: {}, last: null, reopened };
+    stateRef.current = { key: keyOf(match), seed: matchWire(match), agreed: {}, last: null, finished };
   }
   // A reopen is a write the server makes, not one the editor builds, so no build
   // moves the result the editor agrees with off the finished one. Once the server
-  // marks the match reopened the editor agrees with the reopened result, so ending
-  // it again with the same verdict still says the result changed.
-  if (reopened && !stateRef.current.reopened) stateRef.current.agreed[GROUP_RESULT] = matchWire(match);
-  stateRef.current.reopened = reopened;
+  // no longer holds the match finished the editor agrees with the result as it now
+  // stands, so ending it again with the same verdict still says the result changed.
+  // That is the status leaving "completed", not the reopenPending stamp: a reopen
+  // without a reason carries the stamp, but one a correction's reason comes with (a
+  // downstream reopen, a requalification, a pool-rank override) leaves the match
+  // scheduled with its points and no stamp, and an editor that only watched the stamp
+  // named no result for it: the server kept the match as it was, with no error.
+  if (!finished && stateRef.current.finished) stateRef.current.agreed[GROUP_RESULT] = matchWire(match);
+  stateRef.current.finished = finished;
   return (patch) => {
     if (!patch) return patch;
     const m = matchRef.current;

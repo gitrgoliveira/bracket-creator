@@ -185,6 +185,36 @@ describe('individual editor', () => {
     expect(lastWrite().changed).toEqual(['points']);
   });
 
+  // A reopen the server makes WITH a correction's reason (a downstream reopen, a
+  // requalification, a pool-rank override) leaves the match scheduled with its
+  // points and no reopenPending stamp. The editor opened on the finished result, so
+  // that is the result it agrees with: finishing again rebuilds the same result and
+  // must still say it changed it, or the server, told nothing changed, keeps the
+  // match as it is and the editor closes as if it had finished.
+  it('names the result when the match it opened finished is reopened with a reason elsewhere, and finished again', async () => {
+    const { rerender } = await mount(individual({ status: 'completed', ipponsA: ['M', 'K'], winner: { id: 'p1', name: 'Yamada' } }));
+    await act(async () => { rerender(editorFor(individual({ status: 'scheduled', ipponsA: ['M', 'K'] }))); });
+    await finish();
+    expect(lastWrite().status).toBe('completed');
+    expect(lastWrite().changed).toContain('result');
+  });
+
+  it('names the result each time the server reopens the match the editor opened finished', async () => {
+    // The agreement follows the server leaving the finished result every time, not once.
+    const done = () => individual({ status: 'completed', ipponsA: ['M', 'K'], winner: { id: 'p1', name: 'Yamada' } });
+    const reopened = () => individual({ status: 'scheduled', ipponsA: ['M', 'K'] });
+    const { rerender } = await mount(done());
+    await act(async () => { rerender(editorFor(reopened())); });
+    await finish();
+    expect(lastWrite().changed).toContain('result');
+    await act(async () => { rerender(editorFor(done())); });
+    await act(async () => { rerender(editorFor(reopened())); });
+    const before = writes.length;
+    await finish();
+    expect(writes.length, 'the second finish is sent').toBeGreaterThan(before);
+    expect(lastWrite().changed).toContain('result');
+  });
+
   it('an editor that followed a change elsewhere does not name it back', async () => {
     // Nothing unsaved: the editor re-seeds to the overtime recorded
     // elsewhere, and its next point names the points alone.

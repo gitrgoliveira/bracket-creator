@@ -6,7 +6,7 @@
 
 import React from 'react';
 import { render, act, fireEvent, cleanup } from '@testing-library/react';
-import { describe, it, expect, beforeAll, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
 
 let CourtPicker;
 
@@ -45,5 +45,62 @@ describe('the court picker and focus', () => {
     await act(async () => { fireEvent.keyDown(document.activeElement, { key: 'Escape' }); });
     expect(container.querySelector('[role="listbox"]'), 'the list is closed').toBeNull();
     expect(document.activeElement, 'focus is back on the button').toBe(trigger);
+  });
+
+  // Focus goes back only for a close made inside the picker, and without scrolling:
+  // the button is where the operator was, so the page has no reason to move.
+  it('gives focus back without scrolling the page, for Escape and for a choice', async () => {
+    const onChange = vi.fn();
+    const { container } = render(<CourtPicker value="A" courts={COURTS} onChange={onChange} />);
+    const trigger = container.querySelector('button');
+    const focus = vi.spyOn(trigger, 'focus');
+    await act(async () => { trigger.click(); });
+    await act(async () => { fireEvent.keyDown(document.activeElement, { key: 'Escape' }); });
+    expect(focus).toHaveBeenCalledTimes(1);
+    expect(focus, 'Escape').toHaveBeenCalledWith({ preventScroll: true });
+
+    await act(async () => { trigger.click(); });
+    const option = [...container.querySelectorAll('[role="option"]')].find((o) => o.textContent === 'B');
+    await act(async () => { option.click(); });
+    expect(onChange).toHaveBeenCalledWith('B');
+    expect(container.querySelector('[role="listbox"]'), 'the choice closed the list').toBeNull();
+    expect(focus).toHaveBeenCalledTimes(2);
+    expect(focus, 'a choice').toHaveBeenLastCalledWith({ preventScroll: true });
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  // A tap on another control closes the list from outside: its mousedown closes the
+  // list, then the browser gives the tapped control focus, and only after that does
+  // the picker's close effect run. Taking focus back there blurred the tapped name
+  // box (and dropped the iPad keyboard), and without preventScroll it scrolled the
+  // Scores page back to the button (1682 to 0).
+  it('leaves focus where an outside tap put it', async () => {
+    const { container, getByTestId } = render(
+      <div>
+        <input data-testid="elsewhere" />
+        <CourtPicker value="A" courts={COURTS} onChange={() => {}} />
+      </div>
+    );
+    const trigger = container.querySelector('button');
+    const focus = vi.spyOn(trigger, 'focus');
+    await act(async () => { trigger.click(); });
+    expect(container.querySelector('[role="listbox"]'), 'the list is open').not.toBeNull();
+
+    const other = getByTestId('elsewhere');
+    await act(async () => { fireEvent.mouseDown(other); other.focus(); });
+
+    expect(container.querySelector('[role="listbox"]'), 'the outside tap closed the list').toBeNull();
+    expect(document.activeElement, 'the tapped control keeps focus').toBe(other);
+    expect(focus, 'the picker did not reach for its button').not.toHaveBeenCalled();
+  });
+
+  it('gives focus back when its own button closes the list', async () => {
+    const { container } = render(<CourtPicker value="A" courts={COURTS} onChange={() => {}} />);
+    const trigger = container.querySelector('button');
+    const focus = vi.spyOn(trigger, 'focus');
+    await act(async () => { trigger.click(); });
+    await act(async () => { trigger.click(); });
+    expect(container.querySelector('[role="listbox"]'), 'the list is closed').toBeNull();
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
   });
 });

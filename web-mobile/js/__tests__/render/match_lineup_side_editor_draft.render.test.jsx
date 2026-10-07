@@ -230,6 +230,54 @@ describe('a lineup saved meanwhile', () => {
   });
 });
 
+// The operator's own save can land after the panel was closed: it was queued (offline),
+// or still out when they closed it. A name typed in is given its member by the save, so
+// the lineup the server then holds carries an id the draft never had. That is their
+// save having landed, not another device's change, and it is never reported as one.
+describe('the operator\'s own save, landed after the panel was closed', () => {
+  const LANDED = { ...OWN, positions: { 1: 'Mori', 2: 'Sato', 3: 'Ito' }, memberIds: { 1: 'mem-9', 2: 'mem-2', 3: 'mem-3' } };
+
+  beforeEach(() => {
+    window.AdminLineupHelpers.resolveMemberIdsForPositions.mockResolvedValueOnce({
+      memberIds: { 1: 'mem-9' }, squad: [...SQUAD, { id: 'mem-9', index: 4, name: 'Mori' }], failures: [],
+    });
+  });
+
+  it('is no conflict when the save was queued and has since been written', async () => {
+    api.putMatchLineup.mockResolvedValue({ queued: true });
+    const first = await mountPanel();
+    await typeName(first, 1, 'Mori');
+    await click(saveButton(first));
+    expect(api.putMatchLineup.mock.calls[0][5], 'the save carried the id of the member it named').toEqual({ 1: 'mem-9', 2: 'mem-2', 3: 'mem-3' });
+    first.unmount();
+    api.fetchLineupInForce.mockResolvedValue(LANDED);
+
+    const again = await mountPanel();
+
+    expect(again.queryByTestId(NOTICE), 'no "Not restored" and no restored draft').toBeNull();
+    expect(again.getByLabelText('1 player').value).toBe('Mori');
+    expect(saveButton(again).disabled).toBe(true);
+    expect(sessionStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+
+  it('is no conflict either when the panel was closed while the save was still out', async () => {
+    let answer;
+    api.putMatchLineup.mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
+    const first = await mountPanel();
+    await typeName(first, 1, 'Mori');
+    await click(saveButton(first));
+    first.unmount();
+    await act(async () => { answer({ positions: LANDED.positions, memberIds: LANDED.memberIds }); });
+    api.fetchLineupInForce.mockResolvedValue(LANDED);
+
+    const again = await mountPanel();
+
+    expect(again.queryByTestId(NOTICE)).toBeNull();
+    expect(again.getByLabelText('1 player').value).toBe('Mori');
+    expect(sessionStorage.getItem(STORAGE_KEY)).toBeNull();
+  });
+});
+
 describe('a lineup that could not be read', () => {
   it('keeps the draft and shows no notice, and offers the draft once the lineup loads', async () => {
     const first = await mountPanel();

@@ -772,6 +772,29 @@ func TestCompetition_IsKachinuki(t *testing.T) {
 	})
 }
 
+// TestCompetition_IsTeam pins the one spelling of "is a team competition": Kind
+// "team" or a positive TeamSize, whichever of the two marks it.
+func TestCompetition_IsTeam(t *testing.T) {
+	cases := []struct {
+		name string
+		comp *Competition
+		want bool
+	}{
+		{"nil receiver is false", nil, false},
+		{"an individual competition", &Competition{Kind: "individual"}, false},
+		{"no kind and no team size", &Competition{}, false},
+		{"Kind team", &Competition{Kind: "team", TeamSize: 3}, true},
+		{"Kind team with no team size yet", &Competition{Kind: "team"}, true},
+		{"a team size with no kind", &Competition{TeamSize: 3}, true},
+		{"a team size of one is positive", &Competition{TeamSize: 1}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, tc.comp.IsTeam())
+		})
+	}
+}
+
 // TestCompetition_TeamBoutRows pins the one owner of a team block's bout-row
 // count: a team match prints TeamSize rows, a kachinuki encounter the
 // 2*TeamSize-1 bouts it can take at most, an individual competition none.

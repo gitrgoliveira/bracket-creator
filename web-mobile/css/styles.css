@@ -2186,13 +2186,17 @@ a:hover {
 }
 
 /* ---------- Modal ---------- */
+/* The modal layer: above the announcement cards (900), which sit over the page's
+   own chrome, so an open modal is never obscured by one. Every overlay score
+   editor and the shared Modal are a plain .modal-backdrop, so this one rule lifts
+   them all; the confirm dialogs go higher still (below). */
 .modal-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(15, 20, 35, 0.55);
   display: grid;
   place-items: center;
-  z-index: 100;
+  z-index: 1000;
   padding: 20px;
 }
 @supports (backdrop-filter: blur(2px)) {
@@ -2200,9 +2204,9 @@ a:hover {
 }
 /* The confirm and prompt dialogs (DialogHost) open on top of whatever asked for
    them. The viewer's match modal and the at-court lineup panel are fixed layers
-   at 1000, so a dialog left at the default 100 opened UNDER them, out of reach.
-   Above every overlay, and under the toast (1200). After .modal-backdrop: same
-   specificity, so the later rule wins. */
+   at 1000, the modal layer's own value, so a dialog left on it opened UNDER them,
+   out of reach. Above every overlay, and under the toast (1200). After
+   .modal-backdrop: same specificity, so the later rule wins. */
 .modal-backdrop--dialog {
   z-index: 1100;
 }
@@ -8687,8 +8691,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    corner. pointer-events:none on the container means empty space never blocks
    bracket/score affordances behind it; each card re-enables pointer events.
    z-index 900 sits ABOVE normal viewer chrome (max 200, the tooltips) but BELOW
-   the modal layer (the viewer's match modal and the at-court lineup panel at
-   1000, the confirm dialogs at 1100) so open dialogs stay modal and are never
+   the modal layer (every .modal-backdrop, the overlay score editors and the shared
+   Modal among them, and the viewer's match modal and the at-court lineup panel,
+   at 1000; the confirm dialogs at 1100) so open dialogs stay modal and are never
    obscured by announcement cards. */
 @keyframes announcement-slide-in {
   from {

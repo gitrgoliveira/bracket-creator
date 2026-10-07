@@ -16,6 +16,7 @@ import { createTimerPool } from './timer_pool.jsx';
 import { applyPatch, keepNewerCompetitions } from './patch.jsx';
 import { SideCell } from './side_cell.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
+import { useDialogFocus } from './dialog_focus.jsx';
 // Imported DIRECTLY from the leaf rather than read off `window`. Two of the
 // call sites below sit inside a `try { } catch (_e) { }` that swallows, so a
 // missing global there would degrade into exactly the silent not-saved failure
@@ -805,8 +806,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // A scheduled team match whose lineup the operator is entering before start.
     // Opens the team scoresheet as a modal; positions persist via putMatchLineup
     // independent of scoring, so the operator can set the lineup and close
-    // without starting (or hit Start from inside the modal).
-    const [lineupMatch, setLineupMatch] = useStateSh(null);
+    // without starting (or hit Start from inside the modal). Held as a key and
+    // resolved from the court's matches below, like pickedKey: a snapshot would
+    // keep the panel's editors on the teams the match had when it was opened,
+    // when a feeding match decided on another device has since seated another
+    // team on a side.
+    const [lineupKey, setLineupKey] = useStateSh(null);
     // A pending placeholder final the operator is resolving to run during an
     // update outage (mp-y3nk Phase 3): opens ResolveFeedersModal.
     const [resolveMatch, setResolveMatch] = useStateSh(null);
@@ -825,25 +830,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // control that opened it once it closes, without scrolling the page.
     const confirmOpen = Boolean(pendingMove || pendingRevert);
     const confirmBoxRef = useRefSh(null);
-    const confirmOpenerRef = useRefSh(null);
     window.useEscapeToClose(confirmOpen && !movingCourt && !reverting
         ? () => { setPendingMove(null); setPendingRevert(null); }
         : undefined);
-    useEffectSh(() => {
-        if (confirmOpen) {
-            confirmOpenerRef.current = document.activeElement;
-            // A 0ms timer, as DialogHost's: a focus moved during the commit is reset.
-            const timer = setTimeout(() => {
-                const first = confirmBoxRef.current && confirmBoxRef.current.querySelector("button");
-                if (first) first.focus({ preventScroll: true });
-            }, 0);
-            return () => clearTimeout(timer);
-        }
-        const opener = confirmOpenerRef.current;
-        confirmOpenerRef.current = null;
-        if (opener && opener !== document.body && document.contains(opener)) opener.focus({ preventScroll: true });
-        return undefined;
-    }, [confirmOpen]);
+    useDialogFocus(confirmBoxRef, confirmOpen);
     // Selected competition for filtering the queue. Default: running match's comp,
     // else first comp with scheduled matches here, else any comp with matches here.
     const [selectedCompId, setSelectedCompId] = useStateSh(null);
@@ -965,6 +955,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const correctingMatch = useMemoSh(
         () => correctingKey ? sorted.find((x) => matchKey(x) === correctingKey) || null : null,
         [correctingKey, sorted]
+    );
+    const lineupMatch = useMemoSh(
+        () => lineupKey ? sorted.find((x) => matchKey(x) === lineupKey) || null : null,
+        [lineupKey, sorted]
     );
     // A correction that is REOPENED (a kachinuki Reopen, or Clear withdrawal
     // and reopen: completed -> running) is no longer a correction of a past
@@ -1597,7 +1591,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                                 {startingKey === matchKey(upNext) ? "Starting…" : "Start match"}
                                             </button>
                                             {isTeamMatch(upNext) && (
-                                                <button type="button" className="btn btn--sm" onClick={() => setLineupMatch(upNext)}
+                                                <button type="button" className="btn btn--sm" onClick={() => setLineupKey(matchKey(upNext))}
                                                     title="Set the team lineup before starting">
                                                     Enter lineup
                                                 </button>
@@ -1637,7 +1631,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 <ShiaijoQueueGroup
                                     label="Upcoming" subGroup matches={upcomingQueueMatches}
                                     courts={courts} onMoveCourt={requestMoveCourt}
-                                    onMove={moveMatch} onEnterLineup={setLineupMatch}
+                                    onMove={moveMatch} onEnterLineup={(m) => setLineupKey(matchKey(m))}
                                     onPick={pickMatch}
                                     onCall={callToCourt} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
                                     scheduled={filteredScheduled}
@@ -1962,7 +1956,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                     tournament={{ competitions: courtCompetitions }}
                     password={password}
                     showToast={typeof showToast === "function" ? showToast : undefined}
-                    onClose={() => setLineupMatch(null)}
+                    onClose={() => setLineupKey(null)}
                 />
             )}
             {resolveMatch && Modal && (

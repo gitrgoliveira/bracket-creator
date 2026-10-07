@@ -825,7 +825,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// admin UI hides the Engi toggle unless kind=individual, but reject the
 		// contradictory combination here so a hand-crafted POST can't create a
 		// team comp with engi=true and route its matches to the wrong scorer.
-		if comp.Engi && (comp.Kind == "team" || comp.TeamSize > 0) {
+		if comp.Engi && comp.IsTeam() {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "engi is only valid for individual competitions, not team"})
 			return
 		}
@@ -2061,7 +2061,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// competitions (engi is never a team). Kind/TeamSize were already
 				// applied above, so reject rather than persist a contradictory
 				// team+engi state that would route matches to the wrong scorer.
-				if comp.Engi && (comp.Kind == "team" || comp.TeamSize > 0) {
+				if comp.Engi && comp.IsTeam() {
 					validationErr = fmt.Errorf("engi is only valid for individual competitions, not team")
 					return nil, nil
 				}

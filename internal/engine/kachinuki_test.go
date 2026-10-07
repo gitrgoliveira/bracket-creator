@@ -933,7 +933,7 @@ func TestKachinukiRemainingRoster_MatchesALineupByTheSidesParticipantID(t *testi
 	t.Run("a lineup stored under the id is the side's, though one under its name sits beside it", func(t *testing.T) {
 		parent := &state.MatchResult{ID: "P1-0", SideA: "Ryu", SideAID: "red-id", SideB: "Tora", SideBID: "white-id", SubResults: bouts}
 
-		remainingA, remainingB, ok := kachinukiRemainingRoster(comp, parent, newLineupRuleFrom(lineups, nil, nil))
+		remainingA, remainingB, ok := kachinukiRemainingRoster(comp, parent, ruleOver(lineups, nil, nil))
 
 		require.True(t, ok, "Red's lineup resolves")
 		assert.Equal(t, fighters("R-1", "R-2", "R-3"), remainingA)
@@ -943,7 +943,7 @@ func TestKachinukiRemainingRoster_MatchesALineupByTheSidesParticipantID(t *testi
 	t.Run("a side with no id has no lineup, whatever is stored", func(t *testing.T) {
 		parent := &state.MatchResult{ID: "P1-0", SideA: "Ryu", SideB: "Tora", SubResults: bouts}
 
-		_, _, ok := kachinukiRemainingRoster(comp, parent, newLineupRuleFrom(lineups, nil, nil))
+		_, _, ok := kachinukiRemainingRoster(comp, parent, ruleOver(lineups, nil, nil))
 
 		assert.False(t, ok, "no side carries an id, so no lineup resolves")
 	})

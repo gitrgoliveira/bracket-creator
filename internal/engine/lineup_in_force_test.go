@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -69,6 +70,14 @@ func lineupDrawFixture() ([]state.MatchResult, *state.Bracket) {
 
 func senpoOf(in InForceLineup) string {
 	return in.Lineup.Positions[domain.PosSenpo]
+}
+
+// ruleOver is the rule over a draw loaded from pool and bracket, for a
+// competition that plays a knockout stage: the bracket of every fixture here
+// is one. A test about a competition that does not play one asks
+// newLineupRuleFrom with false.
+func ruleOver(lineups map[string]domain.TeamLineup, pool []state.MatchResult, bracket *state.Bracket) *lineupRule {
+	return newLineupRuleFrom(lineups, pool, bracket, true)
 }
 
 // TestLineupInForce_Rule is the operator's rule (2026-10-05) as a table: a
@@ -206,7 +215,7 @@ func TestLineupInForce_Rule(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			pool, bracket := lineupDrawFixture()
-			rule := newLineupRuleFrom(lineupsOf(tc.lineups...), pool, bracket)
+			rule := ruleOver(lineupsOf(tc.lineups...), pool, bracket)
 
 			got := rule.inForce(lineupTeam, tc.match)
 
@@ -230,7 +239,7 @@ func TestLineupInForce_SameRoundOrder(t *testing.T) {
 		{drawnKnockoutMatch("a", "o1", "o2")},
 		{drawnKnockoutMatch("b", lineupTeam, "o1"), drawnKnockoutMatch("c", lineupTeam, "o2")},
 	}}
-	rule := newLineupRuleFrom(lineupsOf(
+	rule := ruleOver(lineupsOf(
 		lineupOf(lineupTeam, "", 1, "round1"),
 		lineupOf(lineupTeam, "b", 0, "b"),
 	), nil, bracket)
@@ -248,7 +257,7 @@ func TestLineupInForce_MatchOrder(t *testing.T) {
 			drawnPoolMatch("Pool A-0", lineupTeam, "o1"),
 			drawnPoolMatch("Pool A-1", lineupTeam, "o2"),
 		}
-		rule := newLineupRuleFrom(lineupsOf(lineupOf(lineupTeam, "Pool A-0", 0, "m0")), pool, nil)
+		rule := ruleOver(lineupsOf(lineupOf(lineupTeam, "Pool A-0", 0, "m0")), pool, nil)
 
 		assert.True(t, rule.inForce(lineupTeam, "Pool A-1").Found, "match 2 follows match 1")
 		assert.True(t, rule.inForce(lineupTeam, "Pool A-2").Found, "match 3 follows match 1, though stored first")
@@ -259,7 +268,7 @@ func TestLineupInForce_MatchOrder(t *testing.T) {
 			drawnPoolMatch("Pool A-10", lineupTeam, "o1"),
 			drawnPoolMatch("Pool A-2", lineupTeam, "o2"),
 		}
-		rule := newLineupRuleFrom(lineupsOf(lineupOf(lineupTeam, "Pool A-2", 0, "m2")), pool, nil)
+		rule := ruleOver(lineupsOf(lineupOf(lineupTeam, "Pool A-2", 0, "m2")), pool, nil)
 
 		assert.Equal(t, "m2", senpoOf(rule.inForce(lineupTeam, "Pool A-10")), "numbered numerically, not as text")
 	})
@@ -269,7 +278,7 @@ func TestLineupInForce_MatchOrder(t *testing.T) {
 			drawnPoolMatch("Swiss-R2-0", lineupTeam, "o2"),
 			drawnPoolMatch("Swiss-R1-3", lineupTeam, "o1"),
 		}
-		rule := newLineupRuleFrom(lineupsOf(lineupOf(lineupTeam, "Swiss-R1-3", 0, "round1")), pool, nil)
+		rule := ruleOver(lineupsOf(lineupOf(lineupTeam, "Swiss-R1-3", 0, "round1")), pool, nil)
 
 		assert.Equal(t, "round1", senpoOf(rule.inForce(lineupTeam, "Swiss-R2-0")))
 		assert.Equal(t, "round1", senpoOf(rule.inForce(lineupTeam, "Swiss-R1-3")), "its own entry")
@@ -277,11 +286,52 @@ func TestLineupInForce_MatchOrder(t *testing.T) {
 
 	t.Run("the knockout follows the pool, and rounds follow one another", func(t *testing.T) {
 		pool, bracket := lineupDrawFixture()
-		rule := newLineupRuleFrom(lineupsOf(lineupOf(lineupTeam, "r0-m0", 0, "k0")), pool, bracket)
+		rule := ruleOver(lineupsOf(lineupOf(lineupTeam, "r0-m0", 0, "k0")), pool, bracket)
 
 		assert.False(t, rule.inForce(lineupTeam, "Pool A-2").Found, "the pool is before the knockout")
 		assert.Equal(t, "k0", senpoOf(rule.inForce(lineupTeam, "r1-m0")))
 		assert.Equal(t, "k0", senpoOf(rule.inForce(lineupTeam, "bronze")))
+	})
+
+	t.Run("a bracket the competition does not play holds no team match", func(t *testing.T) {
+		pool, bracket := lineupDrawFixture()
+		lineups := lineupsOf(lineupOf(lineupTeam, "", 0, "start"), lineupOf(lineupTeam, "Pool A-0", 0, "m0"))
+
+		played := newLineupRuleFrom(lineups, pool, bracket, true).inForce(lineupTeam, "r0-m0")
+		vestigial := newLineupRuleFrom(lineups, pool, bracket, false).inForce(lineupTeam, "r0-m0")
+
+		assert.Equal(t, "m0", senpoOf(played), "a knockout match comes after the pool, so the pool's lineup is carried to it")
+		assert.Equal(t, "start", senpoOf(vestigial), "a vestigial one has no place in the order: only its own lineup and the starting one apply")
+	})
+
+	t.Run("a Swiss bye is not a match the team plays", func(t *testing.T) {
+		// A Swiss round with an odd number of teams stores its odd team out as a
+		// completed match against nobody.
+		pool := []state.MatchResult{
+			drawnPoolMatch("Swiss-R1-0", lineupTeam, "o1"),
+			{ID: "Swiss-R2-0", SideA: "name-" + lineupTeam, SideAID: lineupTeam, Status: state.MatchStatusCompleted},
+			drawnPoolMatch("Swiss-R3-0", lineupTeam, "o2"),
+		}
+		rule := ruleOver(lineupsOf(
+			lineupOf(lineupTeam, "Swiss-R1-0", 0, "round1"),
+			lineupOf(lineupTeam, "Swiss-R2-0", 0, "bye"),
+		), pool, nil)
+
+		assert.Equal(t, "round1", senpoOf(rule.inForce(lineupTeam, "Swiss-R3-0")), "the bye is no earlier match of the team")
+	})
+
+	t.Run("a structural bye is not a match the team plays", func(t *testing.T) {
+		bracket := &state.Bracket{Rounds: [][]state.BracketMatch{
+			{drawnKnockoutMatch("r0-m0", "o1", "o2")},
+			{{ID: "r1-m0", SideA: "name-" + lineupTeam, SideAID: lineupTeam, Hidden: true}, drawnKnockoutMatch("r1-m1", "o3", "o4")},
+			{drawnKnockoutMatch("r2-m0", lineupTeam, "o1")},
+		}}
+		rule := ruleOver(lineupsOf(
+			lineupOf(lineupTeam, "", 0, "start"),
+			lineupOf(lineupTeam, "r1-m0", 0, "bye"),
+		), nil, bracket)
+
+		assert.Equal(t, "start", senpoOf(rule.inForce(lineupTeam, "r2-m0")), "the bye is no earlier match of the team")
 	})
 }
 
@@ -293,7 +343,7 @@ func TestLineupInForce_TeamIdentity(t *testing.T) {
 			{ID: "Pool A-0", SideA: "Old Name", SideAID: lineupTeam, SideB: "Other", SideBID: "o1"},
 			drawnPoolMatch("Pool A-1", lineupTeam, "o2"),
 		}
-		rule := newLineupRuleFrom(lineupsOf(lineupOf(lineupTeam, "Pool A-0", 0, "m0")), pool, nil)
+		rule := ruleOver(lineupsOf(lineupOf(lineupTeam, "Pool A-0", 0, "m0")), pool, nil)
 
 		assert.Equal(t, "m0", senpoOf(rule.inForce(lineupTeam, "Pool A-1")))
 	})
@@ -303,7 +353,7 @@ func TestLineupInForce_TeamIdentity(t *testing.T) {
 			{ID: "Pool A-0", SideA: "TeamT", SideAID: "imposter", SideB: "Other", SideBID: "o1"},
 			drawnPoolMatch("Pool A-1", lineupTeam, "o2"),
 		}
-		rule := newLineupRuleFrom(lineupsOf(
+		rule := ruleOver(lineupsOf(
 			lineupOf(lineupTeam, "", 0, "start"),
 			lineupOf(lineupTeam, "Pool A-0", 0, "stale"),
 		), pool, nil)
@@ -317,7 +367,7 @@ func TestLineupInForce_TeamIdentity(t *testing.T) {
 			{ID: "Pool A-0", SideA: "TeamT", SideB: "Other"},
 			drawnPoolMatch("Pool A-1", lineupTeam, "o2"),
 		}
-		rule := newLineupRuleFrom(lineupsOf(
+		rule := ruleOver(lineupsOf(
 			lineupOf(lineupTeam, "", 0, "start"),
 			lineupOf(lineupTeam, "Pool A-0", 0, "stale"),
 		), pool, nil)
@@ -327,7 +377,7 @@ func TestLineupInForce_TeamIdentity(t *testing.T) {
 
 	t.Run("a lineup stored under the team's name is not the team's", func(t *testing.T) {
 		pool, bracket := lineupDrawFixture()
-		rule := newLineupRuleFrom(lineupsOf(
+		rule := ruleOver(lineupsOf(
 			lineupOf("TeamT", "", 0, "start-by-name"),
 			lineupOf("TeamT", "Pool A-0", 0, "m0-by-name"),
 		), pool, bracket)
@@ -340,7 +390,7 @@ func TestLineupInForce_TeamIdentity(t *testing.T) {
 
 	t.Run("an id-less side has no lineup, whatever is stored", func(t *testing.T) {
 		pool, bracket := lineupDrawFixture()
-		rule := newLineupRuleFrom(lineupsOf(lineupOf("", "", 0, "under-no-key"), lineupOf(lineupTeam, "", 0, "start")), pool, bracket)
+		rule := ruleOver(lineupsOf(lineupOf("", "", 0, "under-no-key"), lineupOf(lineupTeam, "", 0, "start")), pool, bracket)
 
 		assert.False(t, rule.inForce("", "Pool A-0").Found)
 	})
@@ -376,6 +426,25 @@ func TestLineupInForce_ThroughTheStore(t *testing.T) {
 		require.True(t, got.Found)
 		assert.Equal(t, "start", senpoOf(got))
 		assert.Equal(t, LineupSource{Round: 0}, got.Source)
+	})
+
+	t.Run("a league's vestigial bracket is not a match the team plays", func(t *testing.T) {
+		const league = "lineup-league"
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: league, TeamSize: 5, Kind: "team", Format: state.CompFormatLeague}))
+		pool, bracket := lineupDrawFixture()
+		require.NoError(t, store.SavePoolMatches(league, pool))
+		require.NoError(t, store.SaveBracket(league, bracket))
+		require.NoError(t, store.SetTeamLineup(league, lineupOf(lineupTeam, "", 0, "start"), 5))
+		require.NoError(t, store.SetTeamLineup(league, lineupOf(lineupTeam, "Pool A-0", 0, "m0"), 5))
+
+		got, err := eng.LineupInForce(league, lineupTeam, "r0-m0")
+
+		require.NoError(t, err)
+		require.True(t, got.Found)
+		assert.Equal(t, "start", senpoOf(got), "the league plays no knockout, so the bracket match is no team match")
+		got, err = eng.LineupInForce(league, lineupTeam, "Pool A-2")
+		require.NoError(t, err)
+		assert.Equal(t, "m0", senpoOf(got), "a pool match carries as ever")
 	})
 
 	t.Run("pool matches, the bracket and the lineups are read from the store", func(t *testing.T) {
@@ -436,6 +505,105 @@ func TestLineupInForce_ReadsByTheTeamIDAlone(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, got.Found, "stored under its id, it is found")
 	assert.Equal(t, "start", senpoOf(got))
+}
+
+// bigLeagueWithLineups is an eight-team league of five-person teams in which
+// every team holds a lineup of its own for each of its seven matches, as the
+// round-lineup conversion leaves a competition recorded by an older release: 56
+// match lineups and 8 starting lineups, each with its member ids. It returns the
+// engine and the first team's id and last match.
+func bigLeagueWithLineups(t testing.TB) (eng *Engine, teamID, matchID string) {
+	t.Helper()
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	eng = New(store)
+	const compID = "big-league"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Kind: "team", TeamSize: 5, Format: state.CompFormatLeague, RoundLineupsConverted: true,
+	}))
+	players := make([]domain.Player, 8)
+	for i := range players {
+		players[i] = domain.Player{ID: helper.NewUUID4(), Name: fmt.Sprintf("Team%d", i), Dojo: fmt.Sprintf("Dojo%d", i)}
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	var matches []state.MatchResult
+	for i := range players {
+		for j := i + 1; j < len(players); j++ {
+			matches = append(matches, state.MatchResult{
+				ID:    fmt.Sprintf("Pool A-%d", len(matches)),
+				SideA: players[i].Name, SideAID: players[i].ID, SideB: players[j].Name, SideBID: players[j].ID,
+			})
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+	lineupFor := func(team domain.Player, matchID string) domain.TeamLineup {
+		l := domain.TeamLineup{
+			TeamID: team.ID, MatchID: matchID,
+			Positions: map[domain.Position]string{}, MemberIDs: map[domain.Position]string{},
+		}
+		for _, pos := range []domain.Position{domain.PosSenpo, domain.PosJiho, domain.PosChuken, domain.PosFukusho, domain.PosTaisho} {
+			l.Positions[pos] = team.Name + "-" + string(pos)
+			l.MemberIDs[pos] = helper.NewUUID4()
+		}
+		return l
+	}
+	byID := map[string]domain.Player{}
+	for _, p := range players {
+		byID[p.ID] = p
+		require.NoError(t, store.SetTeamLineup(compID, lineupFor(p, ""), 5))
+	}
+	for _, m := range matches {
+		require.NoError(t, store.SetTeamLineup(compID, lineupFor(byID[m.SideAID], m.ID), 5))
+		require.NoError(t, store.SetTeamLineup(compID, lineupFor(byID[m.SideBID], m.ID), 5))
+	}
+	return eng, players[0].ID, matches[len(matches)-1].ID
+}
+
+// A read answers with a copy of the one lineup it returns: changing it leaves the
+// stored lineups, and the next read, alone.
+func TestLineupInForce_ReturnsACopyOfTheStoredLineup(t *testing.T) {
+	eng, teamID, matchID := bigLeagueWithLineups(t)
+	first, err := eng.LineupInForce("big-league", teamID, matchID)
+	require.NoError(t, err)
+	require.True(t, first.Found)
+	was := first.Lineup.Positions[domain.PosSenpo]
+	require.NotEmpty(t, was)
+
+	first.Lineup.Positions[domain.PosSenpo] = "changed by the caller"
+	first.Lineup.MemberIDs[domain.PosSenpo] = "changed by the caller"
+	again, err := eng.LineupInForce("big-league", teamID, matchID)
+
+	require.NoError(t, err)
+	assert.Equal(t, was, again.Lineup.Positions[domain.PosSenpo])
+	assert.NotEqual(t, "changed by the caller", again.Lineup.MemberIDs[domain.PosSenpo])
+}
+
+// The read copies only the lineup it returns, so what it costs does not grow with
+// the lineups the competition holds: against 64 stored lineups it allocates a
+// small fraction of what copying them all does (LoadTeamLineups).
+func TestLineupInForce_DoesNotCopyEveryLineupOfTheCompetition(t *testing.T) {
+	eng, teamID, matchID := bigLeagueWithLineups(t)
+	_, err := eng.LineupInForce("big-league", teamID, matchID) // warm the caches and the one-time legacy upgrade
+	require.NoError(t, err)
+
+	read := testing.AllocsPerRun(20, func() { _, _ = eng.LineupInForce("big-league", teamID, matchID) })
+	copyAll := testing.AllocsPerRun(20, func() { _, _ = eng.store.LoadTeamLineups("big-league") })
+
+	t.Logf("allocations per read: LineupInForce %.0f, copying every lineup %.0f", read, copyAll)
+	assert.Less(t, read*3, copyAll, "a read allocates %.0f against %.0f for copying every stored lineup", read, copyAll)
+}
+
+// BenchmarkLineupInForce is the cost of one read of the lineup in force, in a
+// competition holding a lineup for every match of every team.
+func BenchmarkLineupInForce(b *testing.B) {
+	eng, teamID, matchID := bigLeagueWithLineups(b)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := eng.LineupInForce("big-league", teamID, matchID); err != nil {
+			b.Fatal(err)
+		}
+	}
 }
 
 // TestLineupInForce_DegradesOnAnUnreadableMatchFile pins that a damaged match

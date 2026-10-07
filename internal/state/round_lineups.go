@@ -11,14 +11,16 @@ package state
 // highest round there was. A team now fields the lineup of its previous match
 // unless one is entered for the match (engine.LineupInForce), which has no place
 // for a lineup that waits for a round. So a team with a lineup for a round
-// r >= 1 (a legacy team) is given, for every match it is seated in by id (in
-// match order, MatchPlace), a lineup of its own for that match equal to what
-// v2.1.1 showed there, written exactly as PUT .../match-lineups/:matchId writes
-// one (a match-scoped entry, Round 0). A match that already has an own lineup of
-// the team keeps it: that is v2.1.1's own reading. Every match a legacy team is
-// seated in then holds its own lineup, so nothing the operator enters later for
-// another match changes it, and settling again finds nothing to give. A team
-// with no lineup for a round r >= 1 is left exactly as it is.
+// r >= 1 (a legacy team) is given, for every team match it is seated in by id (in
+// match order, MatchPlace; TeamMatches says which matches are team matches, a
+// bye being none, since nobody plays it), a lineup of its own for that match
+// equal to what v2.1.1 showed there, written exactly as
+// PUT .../match-lineups/:matchId writes one (a match-scoped entry, Round 0). A
+// match that already has an own lineup of the team keeps it: that is v2.1.1's own
+// reading. Every match a legacy team is seated in then holds its own lineup, so
+// nothing the operator enters later for another match changes it, and settling
+// again finds nothing to give. A team with no lineup for a round r >= 1 is left
+// exactly as it is.
 //
 // The round a match had is the one the client read the lineup by
 // (resolveRoundIndex, web-mobile/js/admin_helpers.jsx, identical in v2.0.0,
@@ -33,8 +35,12 @@ package state
 // The round lineups themselves stay on disk (engine.LineupInForce never reads
 // one) until the competition is completed: a correction can seat a team in a
 // match until it is over, and the match is given the lineup v2.1.1 showed there
-// from them. When it is completed they are removed, and the competition's
-// RoundLineupsConverted marker is set. Every write of the draw settles again
+// from them. When it is completed they are removed. The competition's
+// RoundLineupsConverted marker is set as soon as nothing waits: at the first
+// settlement, whatever the status, for a competition with no legacy team (and
+// none waiting for an id, below), so such a competition costs nothing after it;
+// for one that has a legacy team, when the competition is completed and the
+// round lineups are removed. Every write of the draw settles again
 // (Store.settleRoundLineupsAfterWrite for a write that goes straight to disk,
 // storeTx.settleRoundLineupsAtCommit for a transaction), so a match a team is
 // seated in later is given its lineup in the write that seats it; a competition
@@ -78,12 +84,6 @@ func legacyLineupRound(m DrawMatch) int {
 		return m.Round
 	}
 	return max(m.PoolRound, 0)
-}
-
-// isTeamCompetition reports whether lineups apply to c at all. The engine
-// identifies a team competition by Kind and by TeamSize in different paths.
-func isTeamCompetition(c *Competition) bool {
-	return c.Kind == "team" || c.TeamSize > 0
 }
 
 // lineupRoster is the teams of a competition, by participant id and by name.
@@ -204,7 +204,7 @@ func settleRoundLineups(comp *Competition, players []domain.Player, lineups map[
 	roster := newLineupRoster(players)
 	res.keyByTeamID(roster, onLoad)
 	legacy := res.legacyTeams(roster)
-	res.giveMatchLineups(comp, legacy, teamMatches(comp, draw))
+	res.giveMatchLineups(comp, legacy, TeamMatches(draw, comp.IsKnockoutEnabled()))
 	if onLoad {
 		res.seedStartingLineups(comp.ID, legacy)
 	}
@@ -293,32 +293,6 @@ func legacyReading(rounds []domain.TeamLineup, round int) domain.TeamLineup {
 	return rounds[len(rounds)-1]
 }
 
-// orderedMatch is a team match with its place in match order.
-type orderedMatch struct {
-	DrawMatch
-	place MatchPlace
-}
-
-// teamMatches lists the team matches of the draw a team can be seated in, in
-// match order. A league or Swiss competition has no knockout stage, so its
-// bracket.json, vestigial, is not read; a structural bye (hidden) is a match
-// nobody plays; a pool representative bout or tie-break is one individual bout,
-// not a team match.
-func teamMatches(comp *Competition, draw []DrawMatch) []orderedMatch {
-	knockout := comp.IsKnockoutEnabled()
-	var matches []orderedMatch
-	for seq, m := range draw {
-		if (m.Knockout && !knockout) || m.Hidden {
-			continue
-		}
-		if place, ok := m.Place(seq); ok {
-			matches = append(matches, orderedMatch{DrawMatch: m, place: place})
-		}
-	}
-	slices.SortFunc(matches, func(a, b orderedMatch) int { return a.place.Compare(b.place) })
-	return matches
-}
-
 // giveMatchLineups settles each pair of a legacy team and a match it is seated in
 // by id that the competition's record does not list: the team is given the lineup
 // v2.1.1 showed there (legacyReading at the round the match was read at) unless
@@ -328,7 +302,7 @@ func teamMatches(comp *Competition, draw []DrawMatch) []orderedMatch {
 // reading is taken from the round lineups as the pass finds them, so a starting
 // lineup an earlier pass seeded is one of them: it is the one v2.1.1 fell back to
 // for a match read below the team's lowest round, so it changes no reading.
-func (r *roundLineupSettlement) giveMatchLineups(comp *Competition, legacy map[string][]domain.TeamLineup, matches []orderedMatch) {
+func (r *roundLineupSettlement) giveMatchLineups(comp *Competition, legacy map[string][]domain.TeamLineup, matches []TeamMatch) {
 	settled := make(map[string]map[string]struct{}, len(comp.RoundLineupsGiven))
 	for team, matchIDs := range comp.RoundLineupsGiven {
 		for _, id := range matchIDs {
@@ -466,8 +440,11 @@ func (st *roundLineupStage) loadPlayers(comp *Competition) ([]domain.Player, err
 // draw, and lineups saved before the record failed to be are found there
 // already, so the next settlement only lists their pairs.
 func (st *roundLineupStage) settle(onLoad bool) (saved *Competition, err error) {
+	if st.store.roundLineupsSettled(st.compID) {
+		return nil, nil
+	}
 	comp, err := st.comp()
-	if err != nil || comp == nil || comp.RoundLineupsConverted || !isTeamCompetition(comp) {
+	if err != nil || comp == nil || comp.RoundLineupsConverted || !comp.IsTeam() {
 		return nil, err
 	}
 	if comp.ID != st.compID {
@@ -519,6 +496,28 @@ func (st *roundLineupStage) settle(onLoad bool) (saved *Competition, err error) 
 		return nil, fmt.Errorf("round lineups settled but the competition's record of them was not saved: %w", err)
 	}
 	return &next, nil
+}
+
+// roundLineupsSettled reports, from the competition record the store already
+// holds and without reading config.md, that compID has nothing to settle: it is
+// not a team competition, or its marker is set. Every write of the draw asks the
+// settlement, and nearly every competition is marked (a new one is, and so is one
+// with no legacy team), so the question is answered without a disk read and a
+// parse of the file under the lock. The cached record is checked against the
+// file's modification time before it is believed, as every cached read is, and a
+// record that is not cached, or is not current, answers false: the settlement
+// reads config.md itself then. Caller holds the per-comp lock, which is why this
+// takes only the cache's own, and a transaction's staged competition, which the
+// cache holds as well, is the record it reads there.
+func (s *Store) roundLineupsSettled(compID string) bool {
+	cache := s.getFileCache(compID, "config.md")
+	cache.mu.RLock()
+	defer cache.mu.RUnlock()
+	comp, _ := cache.data.(*Competition)
+	if comp == nil || cache.mtime != s.FileMtime(compID, "config.md") {
+		return false
+	}
+	return comp.RoundLineupsConverted || !comp.IsTeam()
 }
 
 // settleRoundLineupsAfterWrite settles after a draw write that went straight to

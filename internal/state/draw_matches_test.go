@@ -42,6 +42,33 @@ func TestDrawMatchesFrom(t *testing.T) {
 		}, DrawMatchesFrom(pool, bracket))
 	})
 
+	t.Run("a pool-shaped match is a bye when a side has neither a name nor an id", func(t *testing.T) {
+		pool := []MatchResult{
+			{ID: "Swiss-R1-0", SideA: "A", SideAID: "a"},
+			{ID: "Swiss-R1-1", SideB: "B", SideBID: "b"},
+			{ID: "Pool A-0", SideA: "A", SideB: "B"},
+			{ID: "Pool A-1", SideAID: "a", SideBID: "b"},
+			{ID: "Pool A-2", SideA: "A", SideAID: "a", SideB: "B"},
+			{ID: "Pool A-3"},
+		}
+		bracket := &Bracket{Rounds: [][]BracketMatch{{{ID: "r0-m0", SideA: "A", SideAID: "a"}}}}
+
+		var got []bool
+		for _, m := range DrawMatchesFrom(pool, bracket) {
+			got = append(got, m.Bye)
+		}
+
+		assert.Equal(t, []bool{
+			true,  // the odd team out of a Swiss round, in side A
+			true,  // or in side B
+			false, // names alone name both sides, as a legacy row does before its ids are repaired
+			false, // and so do ids alone
+			false, // a side with a name and no id is still a side
+			true,  // nothing at all is no pairing
+			false, // a knockout match is never a Bye: its byes are Hidden
+		}, got)
+	})
+
 	t.Run("a nil bracket leaves the knockout out", func(t *testing.T) {
 		got := DrawMatchesFrom(pool, nil)
 
@@ -213,5 +240,85 @@ func TestStoreDrawMatches(t *testing.T) {
 		t.Logf("allocations per read: projection %.0f, deep-copying loader %.0f", projected, cloned)
 		assert.Less(t, projected*4, cloned,
 			"the projection allocates %.0f per read against the loader's %.0f: it must not copy each match's results", projected, cloned)
+	})
+}
+
+// TestStoreTeamMatches covers the team matches of what the store holds: the
+// competition's own format says whether its bracket is a knockout.
+func TestStoreTeamMatches(t *testing.T) {
+	seed := func(t *testing.T, format string) (*Store, string) {
+		t.Helper()
+		store, compID := newDrawMatchesStore(t)
+		comp, err := store.LoadCompetition(compID)
+		require.NoError(t, err)
+		comp.Format = format
+		require.NoError(t, store.SaveCompetition(comp))
+		pool, bracket := drawMatchesFixture()
+		require.NoError(t, store.SavePoolMatches(compID, pool))
+		require.NoError(t, store.SaveBracket(compID, bracket))
+		return store, compID
+	}
+	idsOf := func(t *testing.T, store *Store, compID string) []string {
+		t.Helper()
+		matches, err := store.TeamMatches(compID)
+		require.NoError(t, err)
+		var ids []string
+		for _, m := range matches {
+			ids = append(ids, m.ID)
+		}
+		return ids
+	}
+
+	for format, want := range map[string][]string{
+		"":                 {"Pool A-0", "r0-m0", "r0-m1", "r1-m0", "bronze"},
+		CompFormatKnockout: {"Pool A-0", "r0-m0", "r0-m1", "r1-m0", "bronze"},
+		CompFormatMixed:    {"Pool A-0", "r0-m0", "r0-m1", "r1-m0", "bronze"},
+		CompFormatLeague:   {"Pool A-0"},
+		CompFormatSwiss:    {"Pool A-0"},
+	} {
+		t.Run("format "+format, func(t *testing.T) {
+			store, compID := seed(t, format)
+
+			assert.Equal(t, want, idsOf(t, store, compID))
+		})
+	}
+
+	t.Run("the format is read as it is now", func(t *testing.T) {
+		store, compID := seed(t, CompFormatMixed)
+		require.Len(t, idsOf(t, store, compID), 5)
+
+		comp, err := store.LoadCompetition(compID)
+		require.NoError(t, err)
+		comp.Format = CompFormatLeague
+		require.NoError(t, store.SaveCompetition(comp))
+
+		assert.Equal(t, []string{"Pool A-0"}, idsOf(t, store, compID))
+	})
+
+	t.Run("a competition with no config.md plays a knockout as far as this goes", func(t *testing.T) {
+		store, compID := seed(t, CompFormatLeague)
+		require.NoError(t, os.Remove(filepath.Join(store.GetFolder(), "competitions", compID, "config.md")))
+
+		assert.Equal(t, []string{"Pool A-0", "r0-m0", "r0-m1", "r1-m0", "bronze"}, idsOf(t, store, compID))
+	})
+
+	t.Run("an unreadable file is named and the rest is still returned", func(t *testing.T) {
+		store, compID := seed(t, CompFormatMixed)
+		writeCompFile(t, store, compID, "bracket.json", "{not json")
+
+		matches, err := store.TeamMatches(compID)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "bracket.json")
+		require.Len(t, matches, 1)
+		assert.Equal(t, "Pool A-0", matches[0].ID)
+	})
+
+	t.Run("invalid compID errors", func(t *testing.T) {
+		store, _ := newDrawMatchesStore(t)
+
+		_, err := store.TeamMatches("../traversal")
+
+		assert.Error(t, err)
 	})
 }

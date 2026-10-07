@@ -857,6 +857,56 @@ func TestRoundLineups_ANameKeyedRoundLineupIsKeyedFirstAndThenGivenToItsMatches(
 	rlHas(t, lineups, teams.kuma, "", 0, "kuma-round1-by-name")
 }
 
+// TestRoundLineups_ALineupKeyedByIdOnLoadAndItsCopiesCarryTheMemberIds: the lineup
+// member-id repair resolves a position's name against the squad of the team the
+// lineup is stored under, and a lineup stored under a team's NAME has no squad to
+// resolve against until the round-lineup step has keyed it by the team's id. The
+// repair therefore runs after that step, so the re-keyed lineup, the starting
+// lineup seeded from it and the lineup given to each match all carry the member
+// ids, in the one load that moved them, and none is left to the next.
+func TestRoundLineups_ALineupKeyedByIdOnLoadAndItsCopiesCarryTheMemberIds(t *testing.T) {
+	teams := newRLTeams()
+	dir := rlSeed(t, rlTeamComp(state.CompFormatKnockout), teams, nil, rlKnockout(teams))
+	seed, err := state.NewStore(dir)
+	require.NoError(t, err)
+	sato, err := seed.AddTeamMember(rlComp, teams.kuma, "Sato")
+	require.NoError(t, err)
+	// Reading the competition above found no round lineup waiting and marked it,
+	// which v2.1.1 never did.
+	_, err = seed.UpdateCompetitionChanged(rlComp, func(c *state.Competition) (*state.Competition, error) {
+		c.RoundLineupsConverted = false
+		return c, nil
+	})
+	require.NoError(t, err)
+	// v2.0.0's shape: the team's name for a key, a position's name and no id.
+	rlWriteLineups(t, dir, rlComp, domain.TeamLineup{
+		TeamID: "Kuma", CompetitionID: rlComp, Round: 1,
+		Positions: map[domain.Position]string{domain.PositionNumbered(1): "Sato"},
+	})
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	lineups := rlLoad(t, store)
+
+	for _, scope := range []struct {
+		name    string
+		matchID string
+		round   int
+	}{
+		{"the round lineup, keyed by id", "", 1},
+		{"the starting lineup it seeded", "", 0},
+		{"the lineup given to the match it is seated in", "r0-m0", 0},
+	} {
+		got, ok := rlFind(lineups, teams.kuma, scope.matchID, scope.round)
+		if !assert.Truef(t, ok, "%s is not stored; have %v", scope.name, lineups) {
+			continue
+		}
+		assert.Equal(t, "Sato", got.Positions[domain.PositionNumbered(1)], scope.name)
+		assert.Equal(t, sato.ID, got.MemberIDs[domain.PositionNumbered(1)], "%s carries the member id of the name it holds", scope.name)
+	}
+	assert.NotContains(t, rlRaw(t, dir, "lineups.yaml"), "teamId: Kuma\n", "nothing is left under the name")
+}
+
 // TestRoundLineups_TheMarkerStopsTheRepair: the repair is keyed on the marker,
 // not on the lineups' shape, and an individual competition, which has no
 // lineups, is neither converted nor marked.
@@ -984,6 +1034,42 @@ func TestRoundLineups_ALeaguesVestigialBracketIsNotItsKnockout(t *testing.T) {
 	rlHas(t, lineups, teams.tora, "", 1, "tora-round1")
 	assert.NotContains(t, rlGiven(t, store)[teams.tora], "r0-m0", "a match in the vestigial bracket seats no one")
 	assert.False(t, rlMarker(t, store), "the league is not completed")
+}
+
+// TestRoundLineups_ASwissByeHoldsNoLineup: a Swiss round with an odd number of
+// teams stores its odd team out as a completed match against nobody (a side
+// with neither a name nor an id). Nobody plays it, so a team is given a lineup
+// for the matches it plays and never for the bye, which the Lineups page does
+// not list: a lineup there could be neither seen nor removed.
+func TestRoundLineups_ASwissByeHoldsNoLineup(t *testing.T) {
+	teams := newRLTeams()
+	comp := rlTeamComp(state.CompFormatSwiss)
+	comp.SwissRounds, comp.SwissCurrentRound = 2, 2
+	bye := func(id, team string) state.MatchResult {
+		return state.MatchResult{ID: id, SideA: teams.names()[team], SideAID: team, Winner: teams.names()[team], WinnerID: team, Status: state.MatchStatusCompleted}
+	}
+	pool := []state.MatchResult{
+		rlBout(teams, "Swiss-R1-0", 0, teams.tora, teams.usagi),
+		bye("Swiss-R1-1", teams.kuma),
+		rlBout(teams, "Swiss-R2-0", 0, teams.kuma, teams.tora),
+		bye("Swiss-R2-1", teams.usagi),
+	}
+	dir := rlSeed(t, comp, teams, pool, nil, rlLineup(teams.kuma, "", 1, "kuma-round1"), rlLineup(teams.usagi, "", 1, "usagi-round1"))
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	lineups := rlLoad(t, store)
+
+	rlHas(t, lineups, teams.kuma, "Swiss-R2-0", 0, "kuma-round1")
+	rlLacks(t, lineups, teams.kuma, "Swiss-R1-1", 0)
+	rlHas(t, lineups, teams.usagi, "Swiss-R1-0", 0, "usagi-round1")
+	rlLacks(t, lineups, teams.usagi, "Swiss-R2-1", 0)
+	assert.Equal(t, map[string][]string{
+		teams.kuma:  {"Swiss-R2-0"},
+		teams.usagi: {"Swiss-R1-0"},
+	}, rlGiven(t, store), "a bye is no pair to settle")
+	assert.NotContains(t, rlRaw(t, dir, "lineups.yaml"), "Swiss-R1-1")
+	assert.NotContains(t, rlRaw(t, dir, "lineups.yaml"), "Swiss-R2-1")
 }
 
 // TestRoundLineups_EveryDoorThatWritesTheDrawSettles: the move is made by the
@@ -1734,6 +1820,91 @@ func TestRoundLineups_AnIdlessRosterKeepsItsNameKeyedLineupsWaitingForIds(t *tes
 		require.NoError(t, err)
 		rlHas(t, lineups, toraID, "r0-m0", 0, "tora-start")
 		rlHas(t, lineups, toraID, "", 1, "tora-round1")
+	})
+}
+
+// TestRoundLineups_ASetupRostersNameKeyedLineupsAreKeyedByTheIdsItsWriteMints: a
+// team competition recorded by v2.0.0 and still in Setup has a roster with no
+// ids and lineups saved under the teams' names (the Lineups page addressed a team
+// with no id by its name). The roster write that mints the ids also prunes the
+// lineups of teams no longer on the roster, which it read as every name-keyed
+// lineup there was: it deleted them all. They are keyed by the ids the write
+// mints instead, through whichever door the write came, and a lineup under a name
+// no team has is still an orphan.
+func TestRoundLineups_ASetupRostersNameKeyedLineupsAreKeyedByTheIdsItsWriteMints(t *testing.T) {
+	seed := func(t *testing.T) (*state.Store, []domain.Player) {
+		t.Helper()
+		dir := t.TempDir()
+		store, err := state.NewStore(dir)
+		require.NoError(t, err)
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: rlComp, Name: "Round Lineups", Kind: "team", TeamSize: 3, Format: state.CompFormatKnockout, Status: state.CompStatusSetup,
+		}))
+		roster := "Tora, Tora Dojo, 1dan\nUsagi, Usagi Dojo, 1dan\nKuma, Kuma Dojo, 1dan\n"
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "competitions", rlComp, "participants.csv"), []byte(roster), 0o600))
+		rlWriteLineups(t, dir, rlComp,
+			rlLineup("Tora", "", 0, "tora-start"),
+			rlLineup("Tora", "", 1, "tora-round1"),
+			rlLineup("Usagi", "", 0, "usagi-start"),
+			rlLineup("Nobody", "", 0, "nobody-start"),
+		)
+		store, err = state.NewStore(dir)
+		require.NoError(t, err)
+		players, err := store.LoadParticipants(rlComp, false)
+		require.NoError(t, err)
+		require.Len(t, players, 3)
+		require.Empty(t, players[0].ID, "precondition: the roster has no ids yet")
+		return store, players
+	}
+	idOf := func(t *testing.T, store *state.Store, name string) string {
+		t.Helper()
+		players, err := store.LoadParticipants(rlComp, false)
+		require.NoError(t, err)
+		for _, p := range players {
+			if p.Name == name {
+				require.NotEmpty(t, p.ID)
+				return p.ID
+			}
+		}
+		require.Failf(t, "no such team", "%s", name)
+		return ""
+	}
+	keyedByIDs := func(t *testing.T, store *state.Store) {
+		t.Helper()
+		lineups := rlLoad(t, store)
+		rlHas(t, lineups, idOf(t, store, "Tora"), "", 0, "tora-start")
+		rlHas(t, lineups, idOf(t, store, "Tora"), "", 1, "tora-round1")
+		rlHas(t, lineups, idOf(t, store, "Usagi"), "", 0, "usagi-start")
+		rlLacks(t, lineups, "Tora", "", 0)
+		rlLacks(t, lineups, "Tora", "", 1)
+		rlLacks(t, lineups, "Usagi", "", 0)
+		rlLacks(t, lineups, "Nobody", "", 0)
+		assert.Len(t, lineups, 3, "a lineup under a name no team has is an orphan, as it was")
+	}
+
+	t.Run("a roster saved", func(t *testing.T) {
+		store, players := seed(t)
+
+		require.NoError(t, store.SaveParticipants(rlComp, players))
+
+		keyedByIDs(t, store)
+	})
+
+	t.Run("a participant added", func(t *testing.T) {
+		store, _ := seed(t)
+
+		_, err := store.AddParticipant(rlComp, domain.Player{Name: "Saru", Dojo: "Saru Dojo"}, false)
+		require.NoError(t, err)
+
+		keyedByIDs(t, store)
+	})
+
+	t.Run("a roster restored", func(t *testing.T) {
+		store, players := seed(t)
+
+		require.NoError(t, store.SaveParticipantsRestored(rlComp, players))
+
+		keyedByIDs(t, store)
 	})
 }
 

@@ -17,6 +17,7 @@ package state
 
 import (
 	"fmt"
+	"log"
 	"maps"
 	"os"
 	"sort"
@@ -99,6 +100,24 @@ func (s *Store) LoadTeamLineups(compID string) (map[string]domain.TeamLineup, er
 		return nil, err
 	}
 	return copyTeamLineups(data.(map[string]domain.TeamLineup)), nil
+}
+
+// ReadTeamLineups calls read with the lineups persisted for compID, keyed as
+// LoadTeamLineups keys them, taken from the cache without copying them: a caller
+// that answers with one lineup copies that one instead of all of them. read must
+// not modify the map or any lineup in it, nor keep either after it returns. A
+// write replaces the cached map and never changes one in place, so the map read
+// holds stays whole for as long as it holds it, though a write may have replaced
+// it by then. A missing file is no lineups yet, an empty map.
+func (s *Store) ReadTeamLineups(compID string, read func(lineups map[string]domain.TeamLineup)) error {
+	data, err := s.loadCached(compID, teamLineupFilename, func(path string) (any, error) {
+		return parseTeamLineupsFile(path)
+	})
+	if err != nil {
+		return err
+	}
+	read(data.(map[string]domain.TeamLineup))
+	return nil
 }
 
 // loadTeamLineupsLocked reads the lineup file directly from disk WITHOUT
@@ -190,12 +209,18 @@ func (s *Store) saveTeamLineupsLocked(compID string, lineups map[string]domain.T
 }
 
 // pruneOrphanedTeamLineupsLocked drops lineups.yaml entries for teams no
-// longer present in keepIDs, the lineup sibling of
-// pruneOrphanedTeamMembersLocked in squad.go (bc-tmfn): same trigger (a
-// roster write that already landed), same Kind/TeamSize gate, same
-// best-effort contract (a failure here is logged by the caller, not
-// propagated). Only writes when an entry was actually dropped.
-func (s *Store) pruneOrphanedTeamLineupsLocked(compID string, comp *Competition, keepIDs map[string]bool) error {
+// longer on the roster that was just written, players, whose ids are already
+// minted: the lineup sibling of pruneOrphanedTeamMembersLocked in squad.go
+// (bc-tmfn): same trigger (a roster write that already landed), same Kind/TeamSize
+// gate, same best-effort contract (a failure here is logged by the caller, not
+// propagated). Only writes when an entry was actually dropped or re-keyed.
+//
+// A lineup saved under a team's NAME, which v2.0.0's Lineups page did for a team
+// that had no id yet, belongs to the team this very write has just given an id:
+// it is keyed by that id first, by the rule the round-lineup settlement keys it
+// by (roundLineupSettlement.keyByTeamID), so the write that mints the ids keeps
+// it. One whose name is no team's, or is several teams', is left to the prune.
+func (s *Store) pruneOrphanedTeamLineupsLocked(compID string, comp *Competition, players []domain.Player) error {
 	if comp == nil || (comp.Kind != "team" && comp.TeamSize == 0) {
 		return nil
 	}
@@ -214,9 +239,15 @@ func (s *Store) pruneOrphanedTeamLineupsLocked(compID string, comp *Competition,
 	if len(lineups) == 0 {
 		return nil
 	}
-	changed := false
+	roster := newLineupRoster(players)
+	keyed := roundLineupSettlement{lineups: lineups}
+	keyed.keyByTeamID(roster, false)
+	for _, note := range keyed.notes {
+		log.Printf("state: roster write for %s: %s", compID, note)
+	}
+	changed := keyed.changed
 	for key, l := range lineups {
-		if !keepIDs[l.TeamID] {
+		if !roster.has(l.TeamID) {
 			delete(lineups, key)
 			changed = true
 		}
@@ -322,35 +353,46 @@ func (s *Store) DeleteTeamLineupForMatch(compID, teamID, matchID string) error {
 	return s.saveTeamLineupsLocked(compID, current, s.directWrite)
 }
 
-// DeleteMatchScopedTeamLineups removes every match-scoped lineup of compID and
-// keeps the round-scoped ones (a team's starting lineup is round 0). A discarded
-// draw calls it: generating the draw again reuses the match ids, so a lineup
-// left behind for one would become a team's own lineup at the reused id, and
-// every later match of the team would carry it.
+// ClearDrawLineups removes what a draw leaves in the lineup state of compID, in
+// one transaction: every match-scoped lineup (the round-scoped ones stay, a
+// team's starting lineup is round 0) and the record of the (team, match) pairs
+// the round-lineup conversion settled (Competition.RoundLineupsGiven). Generating
+// a draw again reuses the match ids, so a lineup left behind for one would become
+// a team's own lineup at the reused id and every later match of the team would
+// carry it, and a pair left in the record would keep the conversion from giving
+// the new draw's match its lineup. A discarded draw calls it, and so does a draw
+// generated from Setup, which may be the retry of one that failed after it wrote
+// its matches.
 //
-// Rewrites lineups.yaml only when an entry was dropped, and never creates the
-// competition directory (see saveTeamLineupsLocked).
-func (s *Store) DeleteMatchScopedTeamLineups(compID string) error {
+// Writes only what changed, and never creates the competition directory (see
+// saveTeamLineupsLocked).
+func (s *Store) ClearDrawLineups(compID string) error {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
-	mu := s.getCompLock(compID)
-	mu.Lock()
-	defer mu.Unlock()
-
-	current, err := s.loadTeamLineupsLocked(compID)
-	if err != nil {
-		return err
-	}
-	dropped := false
-	for key, l := range current {
-		if l.MatchID != "" {
-			delete(current, key)
-			dropped = true
+	return s.WithTransaction(compID, func(tx StoreTx) error {
+		write := tx.(*storeTx).txWriteFn()
+		lineups, err := tx.LoadTeamLineups(compID)
+		if err != nil {
+			return err
 		}
-	}
-	if !dropped {
-		return nil
-	}
-	return s.saveTeamLineupsLocked(compID, current, s.directWrite)
+		dropped := false
+		for key, l := range lineups {
+			if l.MatchID != "" {
+				delete(lineups, key)
+				dropped = true
+			}
+		}
+		if dropped {
+			if err := s.saveTeamLineupsLocked(compID, lineups, write); err != nil {
+				return err
+			}
+		}
+		comp, err := tx.LoadCompetition(compID)
+		if err != nil || comp == nil || len(comp.RoundLineupsGiven) == 0 {
+			return err
+		}
+		comp.RoundLineupsGiven = nil
+		return s.saveCompetitionLocked(comp, write)
+	})
 }

@@ -70,7 +70,7 @@ func (e *Engine) collectKachinukiMatches(compID string, comp *state.Competition)
 	// force for its teams at that match, over the draw loaded above. The
 	// lineups are read once per export; they may be missing entirely, in which
 	// case positions render as empty strings.
-	rule := e.lineupRuleOrNone("engine.collectKachinukiMatches", compID, poolMatches, bracket)
+	rule := e.lineupRuleOrNone("engine.collectKachinukiMatches", compID, comp.IsKnockoutEnabled(), poolMatches, bracket)
 
 	// Squad member labels (bc-pnum: "make a team member's label available
 	// to the public surfaces" -- the printed record is one of the
@@ -364,13 +364,16 @@ func (r *lineupRule) positionsForMatch(m *state.MatchResult) map[string]string {
 // indexLineupPositions adds each position a lineup fills to out, under
 // lineupKey(team, fighter), by name and by member id.
 //
-// Both are indexed over SORTED positions, first write wins, because one fighter
-// can still hold two positions of a lineup: the duplicate guard is new, and
-// rows written before it are live data repaired by hand. Both loops compute the
-// same map key for such a fighter, so a plain range let Go's randomised map
-// order decide which position label survived, and the same competition exported
-// "Senpo" on one run and "Chuken" on the next. Which of the two wins is
-// arbitrary either way; that it is the SAME one every time is not.
+// Both are indexed over the positions in the order a lineup is fielded
+// (domain.ComparePositions), first write wins, because one fighter can still hold
+// two positions of a lineup: the duplicate guard is new, and rows written before
+// it are live data repaired by hand. Both loops compute the same map key for such
+// a fighter, so a plain range let Go's randomised map order decide which position
+// label survived, and the same competition exported "Senpo" on one run and
+// "Chuken" on the next. The winner is the first position fielded, the one the
+// roster (TeamLineup.OrderedMembers) fields the fighter at; a text order of the
+// position names gave "Chuken" here for a fighter the roster fields as "Senpo",
+// and "10" ahead of "2".
 func indexLineupPositions(out map[string]string, team string, lineup domain.TeamLineup) {
 	indexFirstPositionHeld(out, team, lineup.Positions, func(name string) string { return name })
 	// Every position held by id is indexed under the id as well, so a
@@ -381,11 +384,11 @@ func indexLineupPositions(out map[string]string, team string, lineup domain.Team
 
 // indexFirstPositionHeld indexes held (position to a fighter's name or member
 // id, empty for a vacant position) into out under lineupKey(team, key(held)),
-// walking the positions in sorted order so a fighter held twice keeps the label
-// of the first.
+// walking the positions in the order a lineup is fielded so a fighter held twice
+// keeps the label of the first.
 func indexFirstPositionHeld(out map[string]string, team string, held map[domain.Position]string, key func(string) string) {
 	indexed := make(map[string]struct{}, len(held))
-	for _, pos := range slices.Sorted(maps.Keys(held)) {
+	for _, pos := range slices.SortedFunc(maps.Keys(held), domain.ComparePositions) {
 		fighter := held[pos]
 		if fighter == "" {
 			continue

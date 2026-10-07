@@ -1155,10 +1155,11 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
       else if (active === matches.length && canAddNew) commit(q);
       else if (q) commit(q);
     } else if (e.key === "Escape") {
-      // One Escape closes one layer: an open list takes it, and keeps it from the
+      // One Escape closes one layer: a DRAWN list takes it, and keeps it from the
       // overlay score editor's own Escape (a window listener that closes the
-      // editor). A closed list leaves it to the editor, as before.
-      if (!open) return;
+      // editor). No list drawn (it is drawn only with an option to show: a closed
+      // box, or an open one with nothing to offer) leaves it to the editor.
+      if (!open || optionCount === 0) return;
       e.preventDefault();
       e.stopPropagation();
       setOpen(false);

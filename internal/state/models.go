@@ -519,8 +519,10 @@ type Competition struct {
 	// instead, so a team with such a lineup is given a lineup of its own for
 	// every match it is seated in, equal to what v2.1.1 showed there
 	// (settleRoundLineups, round_lineups.go). The load repair and the writes
-	// that seat a team in the draw run only while it is false, and set it once
-	// the competition is completed (the round lineups are removed then);
+	// that seat a team in the draw run only while it is false, and set it as
+	// soon as nothing waits: at once for a competition with no team that has
+	// such a lineup, and for one that has, when the competition is completed
+	// (the round lineups are removed then);
 	// POST /competitions sets it on a new competition, which has nothing to
 	// convert and no writer left that creates a round lineup. Server-managed:
 	// `json:"-"` keeps it off the wire, and the settings PUT copies onto the
@@ -600,6 +602,16 @@ func (c Competition) EffectiveFormat() string {
 		return CompFormatKnockout
 	}
 	return c.Format
+}
+
+// IsTeam reports whether c is a team competition: its Kind is "team" or its
+// TeamSize is positive. The single spelling of this predicate: it was written
+// out at a dozen call sites, since the engine identifies a team competition by
+// Kind in some paths and by TeamSize in others (ValidateCompetitionTeamSize
+// keeps the two in step for a competition that was created or edited through
+// the API, so for one the two readings agree).
+func (c *Competition) IsTeam() bool {
+	return c != nil && (c.Kind == "team" || c.TeamSize > 0)
 }
 
 // IsKachinuki reports whether c is a kachinuki (winner-stays-on) team

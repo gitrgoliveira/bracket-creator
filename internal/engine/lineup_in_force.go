@@ -25,8 +25,12 @@ package engine
 // Match order is state.MatchPlace: pool and league matches in pool-match number,
 // which is playing order (a Swiss team's rounds in round order); knockout matches
 // after them at their bracket round index, in position order; the 3rd-place match
-// last, at len(Rounds). A pool daihyosen or tiebreaker is one individual bout,
-// not a team match: it holds no lineup and is never a previous match.
+// last, at len(Rounds). Which matches are team matches is state.TeamMatches's to
+// say, here and in the round-lineup settlement alike: a pool daihyosen or
+// tiebreaker is one individual bout, a bye (a hidden bracket match, or a Swiss
+// round's odd team out against nobody) is played by nobody, and a league or Swiss
+// competition's vestigial bracket is no match of the team's. None of them holds a
+// lineup or is a previous match.
 //
 // A team is its participant id, and nothing else. Every caller asks with the id
 // (the HTTP read's :tid, a match's SideAID/SideBID) and a lineup is the team's
@@ -39,6 +43,7 @@ package engine
 
 import (
 	"log"
+	"maps"
 	"slices"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -60,33 +65,24 @@ type LineupSource struct {
 
 // InForceLineup is the lineup a team fields at a match and where it came from.
 type InForceLineup struct {
-	// Lineup is the stored entry itself, so its own MatchID and Round name
-	// the source as well.
+	// Lineup is the stored entry, so its own MatchID and Round name the source
+	// as well. It is the caller's to change: it is never the cache's own.
 	Lineup domain.TeamLineup
 	Source LineupSource
 	// Found is false when the team has no saved lineup that applies.
 	Found bool
 }
 
-// drawnMatch is one team match of the draw: who is seated, and its place in
-// match order.
-type drawnMatch struct {
-	state.DrawMatch
-	place state.MatchPlace
-}
+// lineupDraw is the draw as the rule sees it: every team match by id, each with
+// its place in match order. Which matches are team matches is state.TeamMatches's
+// to say, here as in the round-lineup settlement.
+type lineupDraw map[string]state.TeamMatch
 
-// lineupDraw is the draw as the rule sees it: every team match by id.
-type lineupDraw map[string]drawnMatch
-
-// newLineupDraw places each team match of a projected draw in match order
-// (state.DrawMatch.Place). A pool daihyosen or tiebreaker is not a team match
-// and is left out.
-func newLineupDraw(matches []state.DrawMatch) lineupDraw {
+// newLineupDraw indexes the team matches of a draw by id.
+func newLineupDraw(matches []state.TeamMatch) lineupDraw {
 	draw := make(lineupDraw, len(matches))
-	for seq, m := range matches {
-		if place, ok := m.Place(seq); ok {
-			draw[m.ID] = drawnMatch{DrawMatch: m, place: place}
-		}
+	for _, m := range matches {
+		draw[m.ID] = m
 	}
 	return draw
 }
@@ -100,21 +96,26 @@ type lineupRule struct {
 	draw    lineupDraw
 }
 
-// newLineupRule builds the rule over lineups and the draw they were saved
-// against. With no lineups there is nothing to place, so the draw is not built.
-func newLineupRule(lineups map[string]domain.TeamLineup, draw []state.DrawMatch) *lineupRule {
+// newLineupRule builds the rule over lineups and the team matches of the draw
+// they were saved against. With no lineups there is nothing to place, so the
+// draw is not indexed.
+func newLineupRule(lineups map[string]domain.TeamLineup, matches []state.TeamMatch) *lineupRule {
 	if len(lineups) == 0 {
 		return &lineupRule{}
 	}
-	return &lineupRule{lineups: lineups, draw: newLineupDraw(draw)}
+	return &lineupRule{lineups: lineups, draw: newLineupDraw(matches)}
 }
 
 // newLineupRuleFrom is newLineupRule for a caller that already holds the pool
 // matches and the bracket, which the kachinuki advance and the export do, so
-// the draw is projected from what they loaded rather than read again. A nil
-// bracket leaves the knockout out of the draw.
-func newLineupRuleFrom(lineups map[string]domain.TeamLineup, poolMatches []state.MatchResult, bracket *state.Bracket) *lineupRule {
-	return newLineupRule(lineups, state.DrawMatchesFrom(poolMatches, bracket))
+// the draw is projected from what they loaded rather than read again. knockout
+// is whether the competition plays a knockout stage (Competition.IsKnockoutEnabled);
+// a nil bracket leaves the knockout out of the draw as well.
+func newLineupRuleFrom(lineups map[string]domain.TeamLineup, poolMatches []state.MatchResult, bracket *state.Bracket, knockout bool) *lineupRule {
+	if len(lineups) == 0 {
+		return &lineupRule{}
+	}
+	return newLineupRule(lineups, state.TeamMatches(state.DrawMatchesFrom(poolMatches, bracket), knockout))
 }
 
 // placedLineup is a saved lineup of the team being asked about, for an earlier
@@ -151,8 +152,8 @@ func (r *lineupRule) inForce(teamID, matchID string) InForceLineup {
 			own = append(own, l)
 		default:
 			earlier, drawn := r.draw[l.MatchID]
-			if located && drawn && earlier.Seats(teamID) && earlier.place.Compare(at.place) < 0 {
-				before = append(before, placedLineup{lineup: l, place: earlier.place})
+			if located && drawn && earlier.Seats(teamID) && earlier.Place.Compare(at.Place) < 0 {
+				before = append(before, placedLineup{lineup: l, place: earlier.Place})
 			}
 		}
 	}
@@ -179,39 +180,50 @@ func (r *lineupRule) inForce(teamID, matchID string) InForceLineup {
 
 // lineupRuleOrNone builds the rule for a caller that holds the pool matches and
 // the bracket and keeps working without lineups, the kachinuki advance and the
-// Kachinuki Detail export. A lineups.yaml that cannot be read is logged, naming
-// caller, and answers no lineup, so the roster falls back to the bout log and
-// no position is labelled.
-func (e *Engine) lineupRuleOrNone(caller, compID string, poolMatches []state.MatchResult, bracket *state.Bracket) *lineupRule {
+// Kachinuki Detail export. knockout is whether the competition plays a knockout
+// stage. A lineups.yaml that cannot be read is logged, naming caller, and answers
+// no lineup, so the roster falls back to the bout log and no position is
+// labelled.
+func (e *Engine) lineupRuleOrNone(caller, compID string, knockout bool, poolMatches []state.MatchResult, bracket *state.Bracket) *lineupRule {
 	lineups, err := e.store.LoadTeamLineups(compID)
 	if err != nil {
 		log.Printf("%s compId=%s: lineups.yaml load error: %v; resolving no lineup", caller, compID, err)
 		return &lineupRule{}
 	}
-	return newLineupRuleFrom(lineups, poolMatches, bracket)
+	return newLineupRuleFrom(lineups, poolMatches, bracket, knockout)
 }
 
 // LineupInForce returns the lineup the team with participant id teamID fields
 // at match matchID, and where it was saved. Found is false when the team has
-// no saved lineup that applies.
+// no saved lineup that applies. The lineup is a copy of the stored one.
 //
 // A lineups.yaml that cannot be read is returned, since an answer of "nothing
-// saved" would be false. A pool-matches.csv or bracket.json that cannot be read
-// is logged, naming the file, and the draw is built from the one that loaded, so
-// a damaged match file costs only the carry across the matches it held, not
-// every lineup read. The competition itself is not read, and a competition with
-// no saved lineups skips the draw read.
+// saved" would be false. A pool-matches.csv, bracket.json or config.md that
+// cannot be read is logged, naming the file, and the draw is built from the ones
+// that loaded, so a damaged file costs only the carry across the matches it
+// held, not every lineup read. A competition with no saved lineups skips the
+// draw read. The rule reads the stored lineups where they are cached and copies
+// only the one it returns, so a read costs the same however many lineups the
+// competition holds.
 func (e *Engine) LineupInForce(compID, teamID, matchID string) (InForceLineup, error) {
-	lineups, err := e.store.LoadTeamLineups(compID)
-	if err != nil {
-		return InForceLineup{}, err
-	}
-	if len(lineups) == 0 {
-		return InForceLineup{}, nil
-	}
-	draw, err := e.store.DrawMatches(compID)
-	if err != nil {
-		log.Printf("engine.LineupInForce compId=%s: %v; the draw is built from the files that loaded", compID, err)
-	}
-	return newLineupRule(lineups, draw).inForce(teamID, matchID), nil
+	var in InForceLineup
+	err := e.store.ReadTeamLineups(compID, func(lineups map[string]domain.TeamLineup) {
+		if len(lineups) == 0 {
+			return
+		}
+		matches, err := e.store.TeamMatches(compID)
+		if err != nil {
+			log.Printf("engine.LineupInForce compId=%s: %v; the draw is built from the files that loaded", compID, err)
+		}
+		in = newLineupRule(lineups, matches).inForce(teamID, matchID)
+		in.Lineup = copyLineup(in.Lineup)
+	})
+	return in, err
+}
+
+// copyLineup is l with its own copies of the position maps.
+func copyLineup(l domain.TeamLineup) domain.TeamLineup {
+	l.Positions = maps.Clone(l.Positions)
+	l.MemberIDs = maps.Clone(l.MemberIDs)
+	return l
 }

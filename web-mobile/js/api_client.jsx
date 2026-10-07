@@ -2706,6 +2706,30 @@ async function _readLineup(url) {
     return lineupOrNull(body);
 }
 
+// What a team member write leaves undone when the server does not answer it.
+const TEAM_MEMBER_NOT_ADDED = 'The team member was not added';
+const TEAM_MEMBER_NOT_RENAMED = 'The team member was not renamed';
+
+// _memberWrite: a team member's POST (add) or PUT (rename). The team score sheet holds
+// every name box disabled, and the side's lineup announcements back, until the write
+// settles, so it is bounded like every sibling request (_fetchJson: the deadline covers
+// the body) and answered in a plain sentence when the server cannot be reached or does
+// not answer, never the browser's "Failed to fetch". Resolves to { res, body }.
+async function _memberWrite(url, method, name, password, notDone) {
+    try {
+        return await _fetchJson(url, {
+            method,
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            },
+            body: JSON.stringify({ name })
+        });
+    } catch (_e) {
+        throw new Error(noAnswerSentence(notDone));
+    }
+}
+
 const API = {
     async fetchTournament() {
         const res = await fetch('/api/viewer/tournament');
@@ -4184,35 +4208,18 @@ const API = {
     // nearest counterpart and only blanks a name: an index, once minted, is
     // never freed.
     async addTeamMember(compID, teamId, name, password) {
-        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/members`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tournament-Password': password
-            },
-            body: JSON.stringify({ name })
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw _refusalError(err, "Failed to add team member");
-        }
-        return res.json();
+        const { res, body } = await _memberWrite(`/api/competitions/${compID}/teams/${teamId}/members`, 'POST', name, password, TEAM_MEMBER_NOT_ADDED);
+        if (!res.ok) throw _refusalError(body, "Failed to add team member");
+        // _fetchJson reads an unreadable body as {}, which cannot be told from a member
+        // the server sent: one with no id is no member, and is not handed on as one.
+        if (!body.id) throw new Error(noAnswerSentence(TEAM_MEMBER_NOT_ADDED));
+        return body;
     },
     // Keeps memberId's id and index; only the display name changes.
     // 204 No Content on success.
     async renameTeamMember(compID, teamId, memberId, name, password) {
-        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/members/${memberId}`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tournament-Password': password
-            },
-            body: JSON.stringify({ name })
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw _refusalError(err, "Failed to rename team member");
-        }
+        const { res, body } = await _memberWrite(`/api/competitions/${compID}/teams/${teamId}/members/${memberId}`, 'PUT', name, password, TEAM_MEMBER_NOT_RENAMED);
+        if (!res.ok) throw _refusalError(body, "Failed to rename team member");
         return true;
     },
     // The operator's "removal": blanks memberId's Name back to "" and

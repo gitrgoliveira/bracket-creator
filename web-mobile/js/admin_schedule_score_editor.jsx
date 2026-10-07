@@ -125,9 +125,12 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
   // panel resolves `pickedKey`/`correctingKey` out of `sorted` — so it is a
   // third site joining them rather than a new idea.
   const [openKey, setOpenKey] = useStateA(null);
-  // mp-bkg: per-match lineup panel state. lineupMatch holds the match
-  // currently open in the lineup panel (null = panel closed).
-  const [lineupMatch, setLineupMatch] = useStateA(null);
+  // mp-bkg: per-match lineup panel state. lineupKey is the match open in the
+  // lineup panel (null = panel closed). Held as a key and resolved below, like
+  // openKey: a snapshot would keep the panel's editors on the teams the match
+  // had when it was opened, when a feeding match decided on another device has
+  // since seated another team on a side.
+  const [lineupKey, setLineupKey] = useStateA(null);
   // ScoreEditorModal's onSubmit / onSubmitAndNext callbacks await
   // onEditScore (which routes through AdminApp.editMatchScore: a
   // server PUT). If AdminScoreEditor unmounts during the in-flight
@@ -147,6 +150,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
   // its own bug. Nav (prev/next) still scopes to the filtered same-court slice.
   const scoreKeyOf = (m) => `${m.compId}:${m.id}`;
   const openMatch = openKey ? allMatches.find((m) => scoreKeyOf(m) === openKey) || null : null;
+  const lineupMatch = lineupKey ? allMatches.find((m) => scoreKeyOf(m) === lineupKey) || null : null;
 
   const f = filter.trim().toLowerCase();
   const filtered = allMatches.filter((m) => {
@@ -318,7 +322,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                   <button type="button"
                     className="btn btn--ghost btn--sm"
                     style={{ fontSize: 11 }}
-                    onClick={() => setLineupMatch(m)}
+                    onClick={() => setLineupKey(scoreKeyOf(m))}
                   >
                     Lineup
                   </button>
@@ -346,7 +350,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
           tournament={tournament}
           password={password}
           showToast={showToast}
-          onClose={() => setLineupMatch(null)}
+          onClose={() => setLineupKey(null)}
         />
       )}
 

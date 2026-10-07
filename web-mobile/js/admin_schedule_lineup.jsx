@@ -7,8 +7,13 @@ import { scoreRowMatchLabel } from './pool_ids.jsx';
 import { squadRosterEntries, rosterWithoutPlacedElsewhere, lineupDuplicateNote, lineupPositionLabel } from './lineup_resolver.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
 import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice } from './lineup_draft.jsx';
+import { useOpenedTapGuard } from './tap_guard.jsx';
+import { useDialogFocus } from './dialog_focus.jsx';
 
-const { useState: useStateA, useMemo: useMemoA } = React;
+const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA, useCallback: useCallbackA } = React;
+
+// What an editor standing alone holds open: nothing.
+const holdsNothing = () => undefined;
 
 // MatchLineupSideEditor: inline lineup editor for one team side within
 // the per-match lineup panel, for a single (compId, teamId, matchId) triple. The
@@ -19,8 +24,9 @@ const { useState: useStateA, useMemo: useMemoA } = React;
 // Reuses admin_lineup.jsx's exported helpers (positionsForSize, rosterFor,
 // teamIdOf) so there is no duplication of position-label / roster logic.
 // The helpers are read lazily on each render so module evaluation order
-// does not matter (safe in test/bundler contexts too).
-export function MatchLineupSideEditor({ comp, team, match, allMatches, password, showToast }) {
+// does not matter (safe in test/bundler contexts too). `holdOpen` is the panel's:
+// called while a write of this editor's own is out, it returns what ends the hold.
+export function MatchLineupSideEditor({ comp, team, match, allMatches, password, showToast, holdOpen = holdsNothing }) {
   const teamSize = comp?.teamSize || 5;
   const { positionsForSize: lineupPositionsForSize, rosterFor: lineupRosterFor, teamIdOf: lineupTeamIdOf } = window.AdminLineupHelpers || {};
   const positions = (typeof lineupPositionsForSize === "function")
@@ -61,7 +67,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     matchLabel: match ? scoreRowMatchLabel(match) : "", teamName: team?.name || team?.Name,
   });
   const {
-    values, setValues, memberIds, setMemberIds, memberIdsRef, setBaseline,
+    values, setValues, memberIds, setMemberIds,
     error, setError, warning: lineupWarning, setWarning: setLineupWarning,
     squad, changeMembers, squadUnavailable,
   } = form;
@@ -156,24 +162,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     setError("");
     try {
       await window.API.renameTeamMember(compId, teamId, id, name, password);
-      changeMembers(sq => sq.map(m => (m && m.id === id ? { ...m, name } : m)));
-      setValues(v => {
-        const next = { ...v };
-        // Read the CURRENT placements, not the ones this handler closed over
-        // before its round trip: the pickers stay interactive while a rename
-        // is in flight, so a position moved meanwhile would otherwise take the
-        // new name while the position it moved to kept the old spelling.
-        const ids = memberIdsRef.current;
-        Object.keys(ids).forEach(key => { if (ids[key] === id) next[key] = name; });
-        return next;
-      });
-      // The server already rewrote the stored lineup's names by id, so the
-      // baseline follows: a rename alone must not make the side look edited.
-      setBaseline(b => {
-        const positionsNext = { ...b.positions };
-        Object.keys(b.memberIds).forEach(key => { if (b.memberIds[key] === id) positionsNext[key] = name; });
-        return { ...b, positions: positionsNext };
-      });
+      form.memberRenamed(id, name);
       cancelRename();
     } catch (e) {
       setError(e?.message || "Failed to rename team member");
@@ -193,7 +182,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // goes through it, against the team's members as the Save's re-read left them
   // (form.squadRef), not the list this closure held when Save was tapped: a typed
   // name resolves to a member another device created, never mints it a second time.
-  const doSave = async (successMsg = "Match lineup saved") => {
+  const doSave = async () => {
     setError("");
     setLineupWarning("");
     setSaving(true);
@@ -249,22 +238,19 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         if (waiting && !(await waiting)) membersUnavailable = true;
       }
       // The member the resolver will put each typed name on, asked of the list the
-      // resolver is given (the team's members as the Save's re-read left them), in its
-      // order and with its own two lookups: the member the name belongs to, else the
-      // unnamed member it names in place (the one the position holds, else the
-      // position's seeded slot while that slot is free). Else it mints, and a minted
-      // member collides with no member that exists. The next typed position can: the
-      // resolver goes through the names one after another, and a name it has just
-      // given a member is found again for the next position that carries it, so a new
-      // name typed at two positions is one member at both, which it finds out only
-      // once it has named or minted the first. The same walk is made here on a copy of
-      // the list, a member of its own standing in for a mint, and nothing is written.
-      const { resolveMemberIdForName: memberNamed, blankMemberForPosition: blankFor } = window.AdminLineupHelpers || {};
+      // resolver is given (the team's members as the Save's re-read left them) through
+      // the resolver's own decision (typedNameTarget). A minted member collides with
+      // no member that exists. The next typed position can: the resolver goes through
+      // the names one after another, and a name it has just given a member is found
+      // again for the next position that carries it, so a new name typed at two
+      // positions is one member at both, which it finds out only once it has named or
+      // minted the first. The same walk is made here on a copy of the list, a member
+      // of its own standing in for a mint, and nothing is written.
+      const { typedNameTarget: targetOf } = window.AdminLineupHelpers || {};
       const walked = form.squadRef.current.map(m => ({ ...m }));
       const placedByResolver = {};
       Object.entries(positionsForResolver).forEach(([key, name]) => {
-        let member = (typeof memberNamed === "function" ? memberNamed(walked, name) : null)
-          || (typeof blankFor === "function" ? blankFor(walked, key, composedIds) : null);
+        let member = typeof targetOf === "function" ? targetOf(walked, key, name, composedIds).member : null;
         if (!member) {
           member = { id: `new-at-${key}` };
           walked.push(member);
@@ -336,7 +322,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       }
       // Reflect exactly what was persisted.
       form.confirmSaved({ positions: updated.positions, memberIds: { ...memberIdsOut, ...updated.memberIds } });
-      if (typeof showToast === "function") showToast(successMsg);
+      if (typeof showToast === "function") showToast("Match lineup saved");
       const composer = window.AdminLineupHelpers?.memberIdentityWarning;
       if (typeof composer === "function") {
         setLineupWarning(composer(memberFailures, membersUnavailable));
@@ -358,6 +344,9 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // The boxes are for a lineup that was read: until then Save is off too, and the
   // problem line below says why.
   const locked = busy || !form.read;
+  // A write of this editor's own that is out keeps Escape from closing the panel.
+  const writing = busy || renameBusy;
+  useEffectA(() => (writing ? holdOpen() : undefined), [writing]);
 
   if (form.loading) return <div style={{ fontSize: 12, color: "var(--ink-3)" }}>Loading lineup…</div>;
 
@@ -483,6 +472,21 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
 // one MatchLineupSideEditor per team side (sideA / sideB). Only shown for
 // team competitions (compKind === "team" || teamSize > 0).
 export function MatchLineupPanel({ match, tournament, password, showToast, onClose, variant = "modal" }) {
+  // The overlay is a layer over the page, and takes what the app's other layers take:
+  // the bounce of the tap that opened it lands on nothing, Escape closes it unless a
+  // write is out (its editors hold it open meanwhile), and focus goes into it and back
+  // to the control that opened it. The inline variant sits in the page, and is none of it.
+  const overlay = variant !== "inline";
+  const { openedRef, onClickCapture } = useOpenedTapGuard();
+  const boxRef = useRefA(null);
+  const writesOut = useRefA(0);
+  const holdOpen = useCallbackA(() => {
+    writesOut.current += 1;
+    return () => { writesOut.current -= 1; };
+  }, []);
+  window.useEscapeToClose(overlay ? () => { if (!writesOut.current) onClose(); } : undefined);
+  useDialogFocus(boxRef, overlay);
+
   const m = match;
   // Find the competition this match belongs to so we can access teamSize,
   // players (roster), etc.
@@ -553,6 +557,7 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
                 allMatches={allMatches}
                 password={password}
                 showToast={showToast}
+                holdOpen={holdOpen}
               />
             ) : (
               <div style={{ color: "var(--ink-3)", fontSize: 12, fontStyle: "italic" }}>Team not found in roster.</div>
@@ -571,6 +576,7 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
                 allMatches={allMatches}
                 password={password}
                 showToast={showToast}
+                holdOpen={holdOpen}
               />
             ) : (
               <div style={{ color: "var(--ink-3)", fontSize: 12, fontStyle: "italic" }}>Team not found in roster.</div>
@@ -583,17 +589,17 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
   // Inline (mp-c2yr): render in-flow inside the operator console's main
   // column: no fixed overlay, no backdrop. The shiaijo page owns the
   // surrounding card; here we just provide padding + scroll.
-  if (variant === "inline") {
+  if (!overlay) {
     return <div className="scoring-panel lineup-panel--inline" aria-label="Lineup for this match">{inner}</div>;
   }
 
   return (
-    <div style={{
+    <div ref={openedRef} onClickCapture={onClickCapture} style={{
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)",
       display: "flex", alignItems: "center", justifyContent: "center",
       zIndex: 1000, padding: 16
     }}>
-      <div style={{
+      <div ref={boxRef} role="dialog" aria-modal="true" aria-label="Lineup for this match" style={{
         background: "var(--bg)", borderRadius: 8,
         boxShadow: "0 8px 32px rgba(0,0,0,0.18)", padding: 24,
         width: "100%", maxWidth: 680, maxHeight: "90vh", overflowY: "auto"

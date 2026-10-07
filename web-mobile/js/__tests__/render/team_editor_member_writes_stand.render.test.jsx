@@ -458,4 +458,123 @@ describe('team editor: the admin sheet follows the members another device change
 
     expect((await options(container)).some((o) => o.includes('Ren Older')), 'the only answer so far is taken').toBe(true);
   });
+
+  // The announcement names the team it changed (teamId): the sheet reads the members
+  // again only when that is one of its two teams, and still reads on one that names none.
+  it('reads again for an announcement that names one of its teams, and not for another team\'s', async () => {
+    const announceFor = (teamId, competitionId = 'comp1') => act(async () => {
+      window.dispatchEvent(new CustomEvent('lineup-updated', { detail: { competitionId, teamId } }));
+    });
+    await open(['Ren Abe', ...OTHERS]);
+
+    await announceFor('team-elsewhere');
+    expect(memberReads, 'nothing is read for another team').toHaveLength(2);
+    await announceFor('team-B');
+    expect(memberReads, 'its Shiro team is read').toHaveLength(3);
+    await announceFor('team-A');
+    expect(memberReads, 'and its Aka team').toHaveLength(4);
+    await announce();
+    expect(memberReads, 'an announcement that names no team is read, as before').toHaveLength(5);
+  });
+
+  // The warning that the members could not be read speaks for the LATEST read: the opening
+  // read failing after a later read already showed the members is stale news.
+  it('says nothing when the opening read fails after a later read showed the members', async () => {
+    let utils;
+    await act(async () => {
+      utils = render(<ScoreEditorModal match={teamMatch()} onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue(undefined)} password="" />);
+    });
+    expect(memberReads, 'the opening read is out').toHaveLength(1);
+    await announce();
+    expect(memberReads, 'and a later one begins').toHaveLength(2);
+    await act(async () => { memberReads[1](shiro('', ...OTHERS)); });
+    await flush();
+
+    await act(async () => { memberFailures[0](new TypeError('Failed to fetch')); });
+    await flush();
+    await typeName(bout(utils.container, 0, 'shiro'), 'Ito');
+
+    expect(window.API.renameTeamMember, 'resolved against the list the later read showed').toHaveBeenCalledWith('comp1', 'team-B', 'b1', 'Ito', '');
+    expect(notices(utils.container), 'no warning that the members could not be read').toHaveLength(0);
+  });
+
+  it('still says so when the opening read fails and no later read showed the members', async () => {
+    let utils;
+    await act(async () => {
+      utils = render(<ScoreEditorModal match={teamMatch()} onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue(undefined)} password="" />);
+    });
+    await act(async () => { memberFailures[0](new TypeError('Failed to fetch')); });
+    await flush();
+
+    await typeName(bout(utils.container, 0, 'shiro'), 'Ito');
+
+    expect(notices(utils.container)).toHaveLength(1);
+    expect(notices(utils.container)[0].textContent).toContain('team member list could not be loaded');
+  });
+});
+
+// A kachinuki row past the first names its fighters on the bout itself, and it can be
+// the removable one: its notice goes with the bout it was about, and a rename that is
+// still out when another team is given the side does not reach the new team's list.
+describe('team editor: a kachinuki row\'s name box', () => {
+  const PLAYED = [
+    { position: 1, sideA: 'A One', sideB: 'Mei Ito', ipponsA: ['M', 'M'], ipponsB: [], winner: 'A One' },
+    { position: 2, sideA: 'A One', sideB: '', ipponsA: [], ipponsB: [] },
+  ];
+  const BEFORE = { 'team-A': blank('a'), 'team-B': blank('b') };
+  const kachinuki = (sideB) => teamMatch({ phase: 'pool', compFormat: 'mixed', teamMatchType: 'kachinuki', subResults: PLAYED, ...(sideB ? { sideB } : {}) });
+  const shiroNow = (container) => [...container.querySelectorAll('.team-sub-match__side--shiro input')].pop();
+  const shiroOptions = (container) => [...container.querySelectorAll('.team-sub-match__side--shiro .pmf__option')].map((o) => o.textContent);
+
+  // Picks the numbered member T2.3 from the current bout's list and types a name over it.
+  async function nameTheThirdMember(container) {
+    await act(async () => { fireEvent.focus(shiroNow(container)); });
+    const slot = [...container.querySelectorAll('.team-sub-match__side--shiro .pmf__option')].find((o) => o.textContent.includes('T2.3'));
+    await act(async () => { fireEvent.click(slot); });
+    await typeName(shiroNow(container), 'Ito');
+  }
+
+  it('shows no warning about the old pairing on a bout added at the place of a removed one', async () => {
+    window.API.renameTeamMember = vi.fn().mockRejectedValue(new Error('offline'));
+    window.API.removeKachinukiBout = vi.fn().mockResolvedValue({ id: 'm1', subResults: [PLAYED[0]] });
+    const { container } = await mountWithSecondReadOut(BEFORE, kachinuki());
+
+    await nameTheThirdMember(container);
+    expect(notices(container), 'the rename that failed is reported in the bout row').toHaveLength(1);
+
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-remove-bout-button')); });
+    await flush();
+    expect(window.API.removeKachinukiBout).toHaveBeenCalledTimes(1);
+    // The next pairing is added by hand, at the same place.
+    await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-add-bout-button')); });
+    await flush();
+
+    expect(container.querySelectorAll('.team-sub-match').length, 'the new bout is a row of its own').toBeGreaterThan(1);
+    expect(notices(container), 'nothing is said about the pairing that was removed').toHaveLength(0);
+  });
+
+  it('does not put the old team\'s renamed member in the list of the team the side was given while the rename was out', async () => {
+    const rename = deferred();
+    const { container, rerender } = await mountWithSecondReadOut(BEFORE, kachinuki());
+    window.API.renameTeamMember = vi.fn(() => rename.promise);
+
+    await nameTheThirdMember(container);
+    expect(window.API.renameTeamMember).toHaveBeenCalledWith('comp1', 'team-B', 'b3', 'Ito', '');
+
+    // Another team is given the Shiro side, and its members are read.
+    await act(async () => {
+      rerender(<ScoreEditorModal match={kachinuki({ id: 'team-C', name: 'Team C', number: 'T3' })} onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue(undefined)} password="" />);
+    });
+    await flush();
+    await act(async () => { memberReads[memberReads.length - 1]({ 'team-A': blank('a'), 'team-C': blank('c') }); });
+    await flush();
+
+    // The rename the old team's member was waiting on lands.
+    await act(async () => { rename.resolve(true); });
+    await flush();
+
+    await act(async () => { fireEvent.focus(shiroNow(container)); });
+    expect(shiroOptions(container).some((o) => o.includes('Ito')), 'the old team\'s member is not offered to the new team').toBe(false);
+    expect(notices(container)[0].textContent).toBe('Nothing was saved because another team is now on this side. Type the name again.');
+  });
 });

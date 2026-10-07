@@ -326,7 +326,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 		c.Status(http.StatusNoContent)
-		hub.Broadcast(EventLineupUpdated, gin.H{"competitionId": compID})
+		hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, ""))
 	})
 
 	// Match-scoped PUT/DELETE (mp-825). Mirrors the round-scoped flow but
@@ -400,7 +400,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 		c.Status(http.StatusNoContent)
-		hub.Broadcast(EventLineupUpdated, gin.H{"competitionId": compID})
+		hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, matchID))
 	})
 }
 
@@ -521,7 +521,21 @@ func saveLineup(c *gin.Context, tx CompetitionTransactor, hub Broadcaster, lineu
 		return
 	}
 	c.JSON(http.StatusOK, persistedLineup)
-	hub.Broadcast(EventLineupUpdated, gin.H{"competitionId": compID})
+	hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, lineup.TeamID, lineup.MatchID))
+}
+
+// lineupUpdatedPayload is the data of an EventLineupUpdated, the one place it is
+// built: the competition, the team whose lineups changed and, for a lineup saved
+// for a match, that match. A team's starting lineup names no match, and nor does
+// a change to a team's members (a rename or a clear), which can reach the team's
+// lineups at several matches. A listener that reads one team's lineup can tell by
+// this whether the change is its own.
+func lineupUpdatedPayload(compID, teamID, matchID string) gin.H {
+	data := gin.H{"competitionId": compID, "teamId": teamID}
+	if matchID != "" {
+		data["matchId"] = matchID
+	}
+	return data
 }
 
 // parseLineupParams extracts (compID, teamID, round) from the URL and

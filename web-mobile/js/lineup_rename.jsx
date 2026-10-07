@@ -56,7 +56,13 @@ export function renameMemberFields({
       onChange={(e) => onChange(e.target.value)}
       onKeyDown={(e) => {
         if (e.key === "Enter") { e.preventDefault(); onCommit(); }
-        else if (e.key === "Escape") { e.preventDefault(); onCancel(); }
+        else if (e.key === "Escape") {
+          // One Escape closes one layer: cancelling the rename must not also close
+          // the at-court panel the box is in (its Escape is a window listener).
+          e.preventDefault();
+          e.stopPropagation();
+          onCancel();
+        }
       }}
     />
   );

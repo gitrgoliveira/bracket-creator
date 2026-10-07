@@ -94,6 +94,20 @@ function draftNames(draft, keys) {
   return names;
 }
 
+// Whether `loaded` already holds everything a draft shows (`shown`): the same name at
+// every position, and at one with no name the same member. A name is held by the
+// name alone: a name typed in has no member id in the draft, and the save that wrote
+// it attached one, so the operator's own landed save differs from their draft by ids
+// the draft never had.
+function holdsDraft(loaded, shown, keys) {
+  const held = lineupFields(loaded, keys);
+  const wanted = lineupFields(shown, keys);
+  const name = (side, key) => String(side.positions[key]).trim();
+  return keys.every((key) => (name(wanted, key)
+    ? name(held, key) === name(wanted, key)
+    : !name(held, key) && held.memberIds[key] === wanted.memberIds[key]));
+}
+
 const NOTHING = { restored: false, stale: null };
 
 // useLineupDraft: keeps and restores one lineup's draft.
@@ -146,8 +160,9 @@ export function useLineupDraft({ key, ready, baseline, current, positionKeys, on
       }
       const expired = Date.now() - draft.savedAt > MAX_AGE_MS;
       if (expired || changedLineupPositions(draft.baseline, draft.current, keys).length === 0
-        || changedLineupPositions(draft.current, loaded, keys).length === 0) {
-        // Too old, nothing in it, or the saved lineup already holds all of it.
+        || holdsDraft(loaded, draft.current, keys)) {
+        // Too old, nothing in it, or the saved lineup already holds all of it (the
+        // operator's own save, written after they left, included).
         removeDraft(key);
         settle(NOTHING);
       } else if (changedLineupPositions(draft.baseline, loaded, keys).length > 0) {
@@ -210,11 +225,27 @@ const NO_CHANGES_TITLE = 'No changes to save';
 // A name box per position, all empty: the form of a lineup nothing is known of.
 const blankNames = (positionKeys) => Object.fromEntries(positionKeys.map((key) => [key, '']));
 
+// The request for every team's members of a competition, shared by the reads begun in
+// the same tick: the at-court panel's two editors each ask for their own team's as they
+// open and when a lineup change is announced, and one answer holds both. A read begun
+// any later is a request of its own, so it holds whatever the server has by then: an
+// editor reads again after a change it made, and must not be handed an answer that
+// began before it.
+const requestsOfThisTick = new Map();
+function requestMembers(compId, password) {
+  const key = `${compId}\n${password}`;
+  if (!requestsOfThisTick.has(key)) {
+    requestsOfThisTick.set(key, window.API.fetchSquads(compId, password));
+    Promise.resolve().then(() => requestsOfThisTick.delete(key));
+  }
+  return requestsOfThisTick.get(key);
+}
+
 // The team's members (the API answers every team's, keyed by id), or null when
 // they cannot be read: whoever asks keeps the list it has.
 async function readMembers(compId, teamId, password) {
   try {
-    const squads = await window.API.fetchSquads(compId, password);
+    const squads = await requestMembers(compId, password);
     return (squads && squads[teamId]) || [];
   } catch (_e) {
     return null;
@@ -364,12 +395,14 @@ export function newMembersWait(onTimeout) {
 //                         Save waits for (up to the deadline of any bounded
 //                         request) so that nothing of that read lands after the
 //                         Save's own writes
+//   memberRenamed(id, name)  after the server renamed a member, or cleared the name
+//                         (""): shown on the members, the positions that hold them and
+//                         the baseline, so the rename makes no edit of the lineup
 //   confirmSaved(lineup)  after the server confirmed a save: that is now the
 //                         baseline, and a match's own lineup, and what a draft
 //                         could not restore no longer applies
 //   dropOwnLineup()       confirm, then remove a match's own lineup, so the match
 //                         carries its team's previous one, and show that one
-//   removeStored(remove, failure)  the same for any other stored lineup
 //   retry()               read again ("Try again")
 //   waitForMembers()      what an editor awaits before it resolves a typed name:
 //                         null when nothing is out to wait for (a list of the team's
@@ -385,8 +418,10 @@ export function newMembersWait(onTimeout) {
 // read, and is followed once it has shown the lineup, or dropped when it fails),
 // and the team's members are read again with it, so a member another device
 // created is in the list when the lineup names them. They are shown whether or
-// not the lineup is (the list is not the operator's edit); a members read that
-// fails or is not answered shows nothing and keeps the list as it was.
+// not the lineup is (the list is not the operator's edit): a form with edits reads
+// them on their own, and leaves its positions as they are. A members read that
+// fails or is not answered shows nothing and keeps the list as it was. A change
+// announced for another team is not followed (one that names no team is).
 // The editors keep their layouts and their save bodies.
 export function useLineupForm({ compId, teamId, matchId = '', positionKeys, password, matchLabel, teamName }) {
   const { useState, useRef, useEffect } = React;
@@ -514,6 +549,28 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     readMembers(compId, teamId, password).then((members) => showMembers(mine, members));
   };
 
+  // The server renamed a team member (a cleared name is the name ""): the members, every
+  // position that holds them and the baseline show the new name, so a rename alone makes
+  // no edit of the lineup (the server rewrote the names of every stored lineup by id). The
+  // positions are read as they are now, not as the handler that asks closed over before
+  // its round trip: the pickers stay interactive meanwhile, and a position moved
+  // meanwhile would otherwise take the new name while the position it moved to kept the
+  // old spelling.
+  const memberRenamed = (id, name) => {
+    changeMembers((list) => list.map((m) => (m && m.id === id ? { ...m, name } : m)));
+    setValues((v) => {
+      const next = { ...v };
+      const ids = memberIdsRef.current;
+      Object.keys(ids).forEach((key) => { if (ids[key] === id) next[key] = name; });
+      return next;
+    });
+    setBaseline((b) => {
+      const positions = { ...b.positions };
+      Object.keys(b.memberIds).forEach((key) => { if (b.memberIds[key] === id) positions[key] = name; });
+      return { ...b, positions };
+    });
+  };
+
   const readLineup = () => (matchId
     ? resolveMatchLineup(compId, teamId, matchId, window.API, { throwOnError: true })
     : window.API.fetchTeamLineup(compId, teamId, STARTING_ROUND));
@@ -607,10 +664,20 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     setLoading(false);
   };
 
+  // The team's members, read again on their own: the list is not the operator's edit,
+  // so a form that holds edits or a removal still shows a member another device
+  // created, and a typed name finds that member instead of minting it a second time.
+  // The read begins now, so it holds what the server holds now, and is shown unless a
+  // read begun later is.
+  const readMembersAgain = async () => {
+    const mine = ++membersRead.current;
+    showMembers(mine, await withinDeadline(readMembers(compId, teamId, password), FETCH_TIMEOUT_MS));
+  };
+
   // The effects below key on the lineup alone and call these as of the render they
   // run in.
   const live = useRef(null);
-  live.current = { load, follow, queuedNow, touched: dirty || removing };
+  live.current = { load, follow, readMembersAgain, queuedNow, touched: dirty || removing };
 
   useEffect(() => {
     if (!compId || !teamId) {
@@ -625,8 +692,12 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     if (!compId || !teamId) return undefined;
     const onUpdated = (e) => {
       if (e.detail && e.detail.competitionId !== compId) return;
+      // A change to another team's lineup or members is none of this team's: an
+      // announcement that names no team is read as a change to every team's.
+      if (e.detail && e.detail.teamId && e.detail.teamId !== teamId) return;
       if (reading.current === attempt.current) followDue.current = true;
-      else if (!live.current.touched) live.current.follow();
+      else if (live.current.touched) live.current.readMembersAgain();
+      else live.current.follow();
     };
     window.addEventListener('lineup-updated', onUpdated);
     return () => window.removeEventListener('lineup-updated', onUpdated);
@@ -749,8 +820,7 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
       setValues(composed.positions);
       setMemberIds(composed.memberIds);
       setSource(lineupSourceOf(stored));
-      const membersMine = ++membersRead.current;
-      showMembers(membersMine, await withinDeadline(readMembers(compId, teamId, password), FETCH_TIMEOUT_MS));
+      await readMembersAgain();
     }
     return { ...composed, changed };
   };
@@ -767,12 +837,15 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     draft.resolved();
   };
 
-  // Removes a stored lineup, then shows what the match carries without it. A
+  // Removes the match's own lineup, then shows what the match carries without it. A
   // removal the server refuses changes nothing. Once it is done the draft goes
   // (it was made against the lineup that has just gone), and a read of what is
   // carried now that fails leaves an empty form that cannot be saved, never the
   // removed lineup shown as the match's own.
-  const removeStored = async (remove, failure) => {
+  const dropOwnLineup = async () => {
+    if (saveQueued) return;
+    const ok = await window.confirmDialog(previousLineupConfirm(matchLabel, teamName));
+    if (!ok) return;
     setRemoving(true);
     setError('');
     setWarning('');
@@ -780,9 +853,9 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     attempt.current += 1;
     try {
       try {
-        await remove();
+        await window.API.deleteMatchLineup(compId, teamId, matchId, password);
       } catch (e) {
-        setError(e?.message || failure);
+        setError(e?.message || "Failed to use the previous match's lineup");
         return;
       }
       removeDraft(draftKey);
@@ -798,25 +871,15 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     }
   };
 
-  const dropOwnLineup = async () => {
-    if (saveQueued) return;
-    const ok = await window.confirmDialog(previousLineupConfirm(matchLabel, teamName));
-    if (!ok) return;
-    await removeStored(
-      () => window.API.deleteMatchLineup(compId, teamId, matchId, password),
-      "Failed to use the previous match's lineup",
-    );
-  };
-
   return {
-    values, setValues, memberIds, setMemberIds, memberIdsRef, baseline, setBaseline, source,
+    values, setValues, memberIds, setMemberIds, memberIdsRef, baseline, source,
     loading, loadError, retry, read, dirty, canSave: read && dirty,
     saveTitle: read && !dirty ? NO_CHANGES_TITLE : undefined,
     // A form that holds nothing read has no draft to offer back or discard.
     draft: read ? draft : { ...draft, restored: false, stale: null },
     error, setError, warning, setWarning,
-    squad, changeMembers, squadRef, squadUnavailable, waitForMembers: () => firstMembers.current.pending(),
-    removing, removeStored, dropOwnLineup, saveQueued, lineupToSave, confirmSaved,
+    squad, changeMembers, memberRenamed, squadRef, squadUnavailable, waitForMembers: () => firstMembers.current.pending(),
+    removing, dropOwnLineup, saveQueued, lineupToSave, confirmSaved,
   };
 }
 

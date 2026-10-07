@@ -35,7 +35,9 @@
 // lineup makes any unrelated inline pick, its write spreads the whole stale
 // positions map, and the operator's correction is reverted on disk. So these
 // two fire the EXISTING lineup event rather than a new squad one, which is why
-// no squad reader needs a new subscriber.
+// no squad reader needs a new subscriber. The event names the team
+// (lineupUpdatedPayload) and no match, since a rename reaches the team's
+// lineups at every match.
 //
 // They fire it unconditionally, without asking whether a position actually
 // changed. A spurious refetch costs one request; a missed one costs the
@@ -173,7 +175,7 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 			return
 		}
 		c.Status(http.StatusNoContent)
-		hub.Broadcast(EventLineupUpdated, gin.H{"competitionId": compID})
+		hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, ""))
 	})
 
 	// DELETE is the operator's "removal": it clears the member's Name back
@@ -201,7 +203,7 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 			return
 		}
 		c.Status(http.StatusNoContent)
-		hub.Broadcast(EventLineupUpdated, gin.H{"competitionId": compID})
+		hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, ""))
 	})
 }
 

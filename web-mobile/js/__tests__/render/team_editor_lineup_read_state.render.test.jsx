@@ -22,7 +22,7 @@ import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { FETCH_TIMEOUT_MS } from '../../write_result.jsx';
+import { FETCH_TIMEOUT_MS, QUEUED_NOTICE, QUEUED_UNSAVED_NOTICE } from '../../write_result.jsx';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -489,9 +489,56 @@ describe('team editor: a lineup write is composed on the lineup the server holds
     const chuken = container.querySelectorAll('.team-sub-match')[2].querySelector('.team-sub-match__side--shiro input');
     await typeName(chuken, 'Yui Sato');
 
-    expect(notices(container)).toHaveLength(0);
+    // Each pick only reached the outbox, and says so in its row (the latest pick's: a
+    // pick clears the notice before it); a notice that said it was saved, or none,
+    // would have the operator believe it was.
+    expect([...notices(container)].map((n) => n.textContent)).toEqual([QUEUED_NOTICE]);
     expect(window.API.putMatchLineup).toHaveBeenCalledTimes(2);
     expect(window.API.putMatchLineup.mock.calls[1][3]).toEqual({ senpo: 'Ren Abe', jiho: 'Kai Mori', chuken: 'Yui Sato' });
+  });
+
+  describe('a pick that only reached the outbox is not reported as saved', () => {
+    const noticeTexts = (container) => [...notices(container)].map((n) => n.textContent);
+
+    it('says it is not sent yet, in the row, the way every held write is worded', async () => {
+      window.API.putMatchLineup = vi.fn(async () => ({ queued: true }));
+      const { container } = await mountFivePerson();
+
+      await typeName(jihoInput(container, 'shiro'), 'Kai Mori');
+
+      expect(noticeTexts(container)).toEqual([QUEUED_NOTICE]);
+      expect(notices(container)[0].getAttribute('data-tone'), 'a held write is amber, not an error').toBe('warn');
+      expect(notices(container)[0].textContent, 'it leads with what is true: not sent yet').toMatch(/^Not sent yet/);
+      expect(notices(container)[0].textContent).not.toMatch(/Lineup saved/);
+    });
+
+    it('says to keep the page open when the browser could not store it either', async () => {
+      window.API.putMatchLineup = vi.fn(async () => ({ queued: true, persisted: false }));
+      const { container } = await mountFivePerson();
+
+      await typeName(jihoInput(container, 'shiro'), 'Kai Mori');
+
+      expect(noticeTexts(container)).toEqual([QUEUED_UNSAVED_NOTICE]);
+    });
+
+    it('does not say "Lineup saved" over a name that could not be linked to a team member either', async () => {
+      window.API.putMatchLineup = vi.fn(async () => ({ queued: true }));
+      window.API.addTeamMember = vi.fn().mockRejectedValue(new Error('offline'));
+      const { container } = await mountFivePerson();
+
+      await typeName(jihoInput(container, 'shiro'), 'Newcomer');
+
+      expect(window.API.addTeamMember).toHaveBeenCalled();
+      expect(noticeTexts(container)).toEqual([QUEUED_NOTICE]);
+    });
+
+    it('still says nothing for a pick the server took', async () => {
+      const { container } = await mountFivePerson();
+
+      await typeName(jihoInput(container, 'shiro'), 'Kai Mori');
+
+      expect(notices(container)).toHaveLength(0);
+    });
   });
 
   it('writes on the lineup it holds, and frees the boxes, when the lineup is not answered in time', async () => {
@@ -708,6 +755,24 @@ describe('team editor: it follows a lineup change announced for this competition
     await mountFivePerson();
     await announceLineupChange(undefined);
     expect([readsOf('team-A'), readsOf('team-B')]).toEqual([2, 2]);
+  });
+
+  // The announcement names the team it changed (teamId): only that team's lineup is read
+  // again, by the side that has it, and nothing for a team that plays neither side.
+  it('reads only the side whose team the announcement names', async () => {
+    await mountFivePerson();
+
+    await announceLineupChange({ competitionId: 'comp1', teamId: 'team-B' });
+    expect([readsOf('team-A'), readsOf('team-B')], 'the Shiro team alone').toEqual([1, 2]);
+
+    await announceLineupChange({ competitionId: 'comp1', teamId: 'team-A' });
+    expect([readsOf('team-A'), readsOf('team-B')], 'the Aka team alone').toEqual([2, 2]);
+  });
+
+  it('reads nothing for an announcement that names a team playing neither side', async () => {
+    await mountFivePerson();
+    await announceLineupChange({ competitionId: 'comp1', teamId: 'team-elsewhere' });
+    expect([readsOf('team-A'), readsOf('team-B')]).toEqual([1, 1]);
   });
 
   it('reads nothing when a change is announced after the editor closed', async () => {

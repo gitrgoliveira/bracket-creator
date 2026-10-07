@@ -286,6 +286,181 @@ func TestRoundLineups_EveryMatchOfARealDrawShowsWhatV211Showed(t *testing.T) {
 	}
 }
 
+// TestRoundLineups_ARetriedDrawIsGivenItsOwnLineups: a draw that fails after it
+// wrote its matches (here the fill-bracket half-capacity refusal, which
+// generatePoolPreviewBracket raises once generatePools has saved the pools) leaves
+// the competition in Setup, with those matches on disk. The write that saved them
+// gave every legacy team a lineup at each match it was seated in and recorded the
+// pairs. The operator seeds the field, as the refusal advises, and retries: the new
+// draw reuses the match ids with other pairings, so what the failed attempt
+// settled belongs to a draw that no longer exists. The retried draw is settled
+// from nothing, and each team shows what v2.1.1 showed at the matches of the draw
+// that stands.
+func TestRoundLineups_ARetriedDrawIsGivenItsOwnLineups(t *testing.T) {
+	_, seed, dir := setupTestEngine(t)
+	const compID = "round-lineups-retried-draw"
+	createTestCompetition(t, seed, compID, state.CompFormatMixed, 3, func(c *state.Competition) {
+		c.Kind, c.TeamSize = "team", 3
+		c.PoolWinners = 1
+		c.ExtraQualifiers = state.ExtraQualifiersFillBracket
+		c.Courts = []string{"A", "B", "C", "D"}
+	})
+	names := make([]string, 18)
+	players := make([]domain.Player, len(names))
+	for i := range names {
+		names[i] = fmt.Sprintf("Team%02d", i)
+		players[i] = domain.Player{Name: names[i], Dojo: fmt.Sprintf("Dojo%02d", i)}
+	}
+	require.NoError(t, seed.SaveParticipants(compID, players))
+	roster, err := seed.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	ids := map[string]string{}
+	for _, p := range roster {
+		ids[p.Name] = p.ID
+	}
+	// Every team has a lineup for each round its pool could play, as v2.1.1's
+	// Lineups page could save them, so the lineup shown at a match depends on the
+	// round the match was read at.
+	var legacy []domain.TeamLineup
+	for _, name := range names {
+		for round := 0; round <= 3; round++ {
+			legacy = append(legacy, domain.TeamLineup{
+				TeamID: ids[name], CompetitionID: compID, Round: round,
+				Positions: map[domain.Position]string{domain.PositionNumbered(1): fmt.Sprintf("%s-round%d", name, round)},
+			})
+		}
+	}
+	writeLegacyLineups(t, seed, dir, compID, legacy)
+	store, err := state.NewStore(dir) // the upgrade: the load repair runs
+	require.NoError(t, err)
+	eng := New(store)
+
+	err = eng.StartCompetition(compID)
+	var refusal *ValidationError
+	require.ErrorAs(t, err, &refusal, "precondition: the unseeded draw is refused after its pools were saved")
+	failed, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, failed, "precondition: the failed attempt left its matches on disk")
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	require.Equal(t, state.CompStatusSetup, comp.Status)
+	require.NotEmpty(t, comp.RoundLineupsGiven, "precondition: the failed attempt's matches were settled, and the pairs recorded")
+	// What the failed attempt gave a team at a match is marked, so a team seated at
+	// the same match id by the retried draw shows whether it was given its lineup
+	// again or kept the failed attempt's.
+	failedLineups, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	for _, l := range failedLineups {
+		if l.MatchID != "" {
+			l.Positions = map[domain.Position]string{domain.PositionNumbered(1): "from-the-failed-draw"}
+			require.NoError(t, store.SetTeamLineup(compID, l, 3))
+		}
+	}
+
+	var seeds []domain.SeedAssignment
+	for i := 0; i < 4; i++ {
+		seeds = append(seeds, domain.SeedAssignment{Name: names[i], SeedRank: i + 1})
+	}
+	require.NoError(t, store.SaveSeeds(compID, seeds))
+	require.NoError(t, eng.StartCompetition(compID), "the seeded draw succeeds")
+
+	pool, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	seated := map[string]bool{}
+	for _, m := range pool {
+		seated[m.SideAID+"|"+m.ID] = true
+		seated[m.SideBID+"|"+m.ID] = true
+	}
+	stored, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	for _, l := range stored {
+		if l.MatchID != "" {
+			assert.Truef(t, seated[l.TeamID+"|"+l.MatchID], "team %s holds a lineup for %s, where the draw that stands does not seat it", l.TeamID, l.MatchID)
+		}
+	}
+	comp, err = store.LoadCompetition(compID)
+	require.NoError(t, err)
+	for team, matchIDs := range comp.RoundLineupsGiven {
+		for _, id := range matchIDs {
+			assert.Truef(t, seated[team+"|"+id], "the record lists team %s at %s, where the draw that stands does not seat it", team, id)
+		}
+	}
+	for _, m := range pool {
+		for _, side := range []string{m.SideAID, m.SideBID} {
+			got, err := eng.LineupInForce(compID, side, m.ID)
+			require.NoError(t, err)
+			assert.Equal(t, v211Reading(legacy, side, m.ID, max(m.Round, 0)), legacyLineupTag(got.Lineup),
+				"the lineup in force at %s (round %d) for %s", m.ID, m.Round, side)
+		}
+	}
+}
+
+// TestRoundLineups_EveryFormatsDrawStartsFromNoLineupsOfAnEarlierDraw: whichever
+// generator the pipeline runs (pools, a knockout, a Swiss round), a draw from
+// Setup first clears the match lineups and the record of settled pairs that an
+// attempt that failed after its writes left behind, and keeps the round lineups.
+func TestRoundLineups_EveryFormatsDrawStartsFromNoLineupsOfAnEarlierDraw(t *testing.T) {
+	for _, format := range []string{state.CompFormatMixed, state.CompFormatLeague, state.CompFormatKnockout, state.CompFormatSwiss} {
+		t.Run(format, func(t *testing.T) {
+			_, seed, dir := setupTestEngine(t)
+			const compID = "round-lineups-earlier-draw"
+			createTestCompetition(t, seed, compID, format, 3, func(c *state.Competition) {
+				c.Kind, c.TeamSize = "team", 3
+			})
+			names := []string{"Tora", "Usagi", "Kuma", "Saru", "Inu", "Neko", "Tori", "Uma"}
+			saveTestParticipants(t, seed, compID, names)
+			roster, err := seed.LoadParticipants(compID, false)
+			require.NoError(t, err)
+			ids := map[string]string{}
+			for _, p := range roster {
+				ids[p.Name] = p.ID
+			}
+			lineup := func(team, matchID string, round int) domain.TeamLineup {
+				return domain.TeamLineup{
+					TeamID: ids[team], CompetitionID: compID, Round: round, MatchID: matchID,
+					Positions: map[domain.Position]string{domain.PositionNumbered(1): team},
+				}
+			}
+			// Every team has a lineup for the second round (stored 1), so the
+			// competition has legacy teams and the record is kept; one of them
+			// also has a lineup for a match of an earlier draw, and that draw's
+			// pair is recorded.
+			var legacy []domain.TeamLineup
+			for _, name := range names {
+				legacy = append(legacy, lineup(name, "", 1))
+			}
+			legacy = append(legacy, lineup("Tora", "earlier-draw-match", 0))
+			writeLegacyLineups(t, seed, dir, compID, legacy)
+			_, err = seed.UpdateCompetitionChanged(compID, func(c *state.Competition) (*state.Competition, error) {
+				c.RoundLineupsGiven = map[string][]string{ids["Tora"]: {"earlier-draw-match"}}
+				return c, nil
+			})
+			require.NoError(t, err)
+			store, err := state.NewStore(dir)
+			require.NoError(t, err)
+
+			require.NoError(t, New(store).StartCompetition(compID))
+
+			lineups, err := store.LoadTeamLineups(compID)
+			require.NoError(t, err)
+			for _, l := range lineups {
+				assert.NotEqual(t, "earlier-draw-match", l.MatchID, "the earlier draw's lineup is gone")
+			}
+			comp, err := store.LoadCompetition(compID)
+			require.NoError(t, err)
+			assert.NotContains(t, comp.RoundLineupsGiven[ids["Tora"]], "earlier-draw-match", "and so is its pair in the record")
+			held := 0
+			for _, l := range lineups {
+				if l.MatchID == "" && l.Round >= 1 {
+					held++
+				}
+			}
+			assert.Equal(t, len(names), held, "the round lineups stay")
+			assert.False(t, comp.RoundLineupsConverted, "the legacy teams still wait for the competition to be completed")
+		})
+	}
+}
+
 // TestRoundLineups_ASemiFinalOnlyLineupDoesNotHideTheRoundLineupAtTheFinal: a
 // team has a lineup for the second round (stored 1) and one entered for its
 // semi-final alone. v2.1.1 showed the semi-final lineup at the semi-final only,

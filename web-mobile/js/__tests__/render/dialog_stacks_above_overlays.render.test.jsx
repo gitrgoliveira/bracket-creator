@@ -63,3 +63,28 @@ describe('the stacking order of the overlays', () => {
     expect(cssBlock(css, '.toast')).toMatch(/pointer-events:\s*none/);
   });
 });
+
+// The announcement cards sit above the page's own chrome and under the modals, so
+// an open dialog is never obscured by one: on the self-run public page a
+// participant's score editor was covered by a card (the editor's backdrop sat at
+// the default 100, under the cards at 900), and a tap on its Close button landed on
+// the card. Every overlay editor and the shared Modal are a plain .modal-backdrop,
+// so that one rule is the modal layer for all of them.
+describe('the announcement cards and the modals', () => {
+  it('stack under every .modal-backdrop, so an open modal is never obscured by a card', () => {
+    expect(zOf('.modal-backdrop')).toBeGreaterThan(zOf('.announcement-overlay'));
+  });
+
+  it('stay above the viewer\'s own chrome, the tooltips (200) included', () => {
+    expect(zOf('.announcement-overlay')).toBeGreaterThan(zOf('.tw-tooltip'));
+  });
+
+  it.each(['admin_scoring_team.jsx', 'admin_scoring_individual.jsx', 'admin_scoring_engi.jsx'])(
+    'the root of the overlay editor in %s is a plain .modal-backdrop, with no lower z-index of its own',
+    (file) => {
+      const root = /<div className="modal-backdrop"[^>]*data-testid="scoring-modal-root"[^>]*>/.exec(readCode(file));
+      expect(root, 'the overlay root is found').not.toBeNull();
+      expect(root[0]).not.toMatch(/zIndex/);
+    },
+  );
+});

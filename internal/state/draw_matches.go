@@ -25,6 +25,11 @@ type DrawMatch struct {
 	// Hidden is true for a structural bye: a bracket match nobody plays, which
 	// the draw can still seat a team in (a bye's winner is seated at once).
 	Hidden bool
+	// Bye is true for a pool, league or Swiss match with a side that has neither
+	// a name nor a participant id: a Swiss round with an odd number of teams
+	// stores its odd team out as a completed match against nobody. A bracket's
+	// byes are Hidden instead, and a knockout match is never a Bye.
+	Bye bool
 	// PoolRound is a pool or league match's stored Round: its circle-method
 	// round, or -1 for a pool drawn without rounds. 0 for a knockout match, and
 	// for a Swiss match, which never stored one.
@@ -48,7 +53,8 @@ func DrawMatchesFrom(poolMatches []MatchResult, bracket *Bracket) []DrawMatch {
 	out := make([]DrawMatch, 0, n)
 	for i := range poolMatches {
 		m := &poolMatches[i]
-		out = append(out, DrawMatch{ID: m.ID, SideAID: m.SideAID, SideBID: m.SideBID, PoolRound: m.Round})
+		bye := m.SideA == "" && m.SideAID == "" || m.SideB == "" && m.SideBID == ""
+		out = append(out, DrawMatch{ID: m.ID, SideAID: m.SideAID, SideBID: m.SideBID, PoolRound: m.Round, Bye: bye})
 	}
 	if bracket == nil {
 		return out
@@ -91,4 +97,19 @@ func (s *Store) DrawMatches(compID string) ([]DrawMatch, error) {
 		bracketErr = fmt.Errorf("bracket.json: %w", bracketErr)
 	}
 	return DrawMatchesFrom(poolMatches, bracket), errors.Join(poolErr, bracketErr)
+}
+
+// TeamMatches is TeamMatches over DrawMatches, with the competition's own
+// format deciding whether its bracket is a knockout: the format is read from
+// the cached config.md without copying it, so the call adds no parse of its own.
+// A competition with no config.md plays a knockout as far as this goes, so no
+// bracket match is dropped for want of a record. A file that cannot be read is
+// named in the returned error and contributes nothing, as in DrawMatches.
+func (s *Store) TeamMatches(compID string) ([]TeamMatch, error) {
+	draw, drawErr := s.DrawMatches(compID)
+	comp, compErr := s.cachedCompetition(compID)
+	if compErr != nil {
+		compErr = fmt.Errorf("config.md: %w", compErr)
+	}
+	return TeamMatches(draw, comp == nil || comp.IsKnockoutEnabled()), errors.Join(drawErr, compErr)
 }

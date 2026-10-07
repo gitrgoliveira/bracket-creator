@@ -315,7 +315,7 @@ func TestKachinukiPositions_StartingLineup(t *testing.T) {
 		},
 	}, 5))
 
-	posMap := eng.lineupRuleOrNone("test", compID, nil, nil).positionsForMatch(
+	posMap := eng.lineupRuleOrNone("test", compID, true, nil, nil).positionsForMatch(
 		&state.MatchResult{ID: "P1-0", SideA: "RedTeam", SideAID: "red-id", SideB: "WhiteTeam", SideBID: "white-id"})
 
 	assert.Equal(t, "Senpo", posMap[lineupKey("RedTeam", "R-Senpo")])
@@ -368,7 +368,7 @@ func TestKachinukiPositions_ParticipantIDKeyed(t *testing.T) {
 		Positions: map[domain.Position]string{domain.PosSenpo: "R-ByName"},
 	}, 5))
 
-	rule := eng.lineupRuleOrNone("test", compID, nil, nil)
+	rule := eng.lineupRuleOrNone("test", compID, true, nil, nil)
 
 	t.Run("by id", func(t *testing.T) {
 		posMap := rule.positionsForMatch(&state.MatchResult{ID: "SF-1", SideA: "RedTeam", SideAID: redID})
@@ -996,7 +996,7 @@ func TestKachinukiPositions_MatchScopedLineupReachesLaterMatchesOnly(t *testing.
 		{ID: "Pool A-1", SideA: "TeamA", SideAID: teamID, SideB: "TeamC", SideBID: "team-c-id"},
 		{ID: "Pool A-2", SideA: "TeamA", SideAID: teamID, SideB: "TeamD", SideBID: "team-d-id"},
 	}
-	rule := New(store).lineupRuleOrNone("test", compID, poolMatches, nil)
+	rule := New(store).lineupRuleOrNone("test", compID, true, poolMatches, nil)
 	aliceAt := func(i int) string {
 		return resolveKachinukiPosition(rule.positionsForMatch(&poolMatches[i]), "TeamA", "alice")
 	}
@@ -1353,7 +1353,7 @@ func TestKachinukiPositions_NamelessFighterResolvesByMemberID(t *testing.T) {
 		MemberIDs: map[domain.Position]string{domain.PosSenpo: "mem-senpo", domain.PosJiho: "mem-jiho"},
 	}, 5))
 
-	posMap := eng.lineupRuleOrNone("test", compID, nil, nil).positionsForMatch(&state.MatchResult{ID: "SF-2", SideA: "RedTeam", SideAID: redID})
+	posMap := eng.lineupRuleOrNone("test", compID, true, nil, nil).positionsForMatch(&state.MatchResult{ID: "SF-2", SideA: "RedTeam", SideAID: redID})
 
 	assert.Equal(t, "Jiho", resolveKachinukiBoutPosition(posMap, "RedTeam", "mem-jiho", ""), "a nameless fighter resolves by id")
 	assert.Equal(t, "Senpo", resolveKachinukiBoutPosition(posMap, "RedTeam", "mem-senpo", "R-Senpo"), "id wins for a named fighter too")
@@ -1398,7 +1398,7 @@ func TestKachinukiPositions_DuplicateMemberIDLabelsDeterministically(t *testing.
 
 	match := &state.MatchResult{ID: "P1-0", SideA: "RedTeam", SideAID: "red-id", SideB: "WhiteTeam", SideBID: "white-id"}
 	labelOf := func() string {
-		return eng.lineupRuleOrNone("test", compID, nil, nil).positionsForMatch(match)[lineupKey("RedTeam", memberKey("m-dup"))]
+		return eng.lineupRuleOrNone("test", compID, true, nil, nil).positionsForMatch(match)[lineupKey("RedTeam", memberKey("m-dup"))]
 	}
 
 	// Repeated because the defect was map-order-dependent: one run could agree
@@ -1408,7 +1408,7 @@ func TestKachinukiPositions_DuplicateMemberIDLabelsDeterministically(t *testing.
 	for i := 0; i < 24; i++ {
 		require.Equal(t, first, labelOf(), "the surviving label must not depend on map iteration order")
 	}
-	assert.Equal(t, "Chuken", first, "sorted key order keeps the first, which is chuken before senpo")
+	assert.Equal(t, "Senpo", first, "the order a lineup is fielded in keeps the first, which is senpo before chuken: the roster fields this fighter at senpo")
 }
 
 // The same defect for NAMES: a lineup can hold one name at two positions (two
@@ -1436,8 +1436,28 @@ func TestIndexLineupPositions_DuplicateNameLabelsDeterministically(t *testing.T)
 	for i := 0; i < 24; i++ {
 		require.Equal(t, first, labelOf("R-Twice"), "the surviving label must not depend on map iteration order")
 	}
-	assert.Equal(t, "Chuken", first, "sorted position order keeps the first, which is chuken before senpo")
+	assert.Equal(t, "Senpo", first, "the order a lineup is fielded in keeps the first, which is senpo before chuken")
 	assert.Equal(t, "Taisho", labelOf("R-Once"), "a name held once keeps its position")
+}
+
+// A team of ten or more fields numbered positions, and a fighter held at "2" and
+// at "10" is at 2: the roster walks numbered positions by their number
+// (TeamLineup.OrderedMembers), and so does the export. A text order put "10" first.
+func TestIndexLineupPositions_NumberedPositionsAreOrderedByNumber(t *testing.T) {
+	lineup := domain.TeamLineup{
+		TeamID: "red-id",
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(10): "R-Twice",
+			domain.PositionNumbered(2):  "R-Twice",
+			domain.PositionNumbered(11): "R-Once",
+		},
+	}
+	out := map[string]string{}
+
+	indexLineupPositions(out, "RedTeam", lineup)
+
+	assert.Equal(t, "2", out[lineupKey("RedTeam", "R-Twice")])
+	assert.Equal(t, "11", out[lineupKey("RedTeam", "R-Once")])
 }
 
 // A pool section is numbered as BlankKachinukiSections numbers the same draw:

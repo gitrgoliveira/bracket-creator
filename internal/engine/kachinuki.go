@@ -630,7 +630,7 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 	// retirements (A2, GAP 1 / GAP 2a). Without a lineup the function
 	// degrades to the bout-log-only heuristic so existing competitions
 	// without lineups continue to work.
-	rule := e.lineupRuleOrNone("engine.MaybeAdvanceKachinuki", compID, located.PoolMatches, located.Bracket)
+	rule := e.lineupRuleOrNone("engine.MaybeAdvanceKachinuki", compID, comp.IsKnockoutEnabled(), located.PoolMatches, located.Bracket)
 	remainingA, remainingB, rosterAvailable := kachinukiRemainingRoster(comp, parent, rule)
 
 	out := AdvanceKachinuki(AdvanceKachinukiInput{

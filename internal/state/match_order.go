@@ -1,13 +1,15 @@
 package state
 
-// match_order.go owns the order a team plays its matches in: the one order the
-// lineup rule (engine.LineupInForce) asks "which of a team's lineups comes
-// before this match" by, and the one the round-lineup settlement
-// (round_lineups.go) asks "which is the first match of the team from round r
-// on" by. The two share it so they cannot disagree.
+// match_order.go owns which matches of a draw are team matches and the order a
+// team plays them in. TeamMatches is the one list of them, and MatchPlace the
+// one order, that the lineup rule (engine.LineupInForce, which asks "which of a
+// team's lineups comes before this match") and the round-lineup settlement
+// (round_lineups.go, which gives a team a lineup for each match it is seated in)
+// both read, so the two cannot disagree about either.
 
 import (
 	"cmp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -95,9 +97,9 @@ func (a MatchPlace) Compare(b MatchPlace) int {
 }
 
 // Place is where m falls in match order, seq being its position in the slice
-// DrawMatchesFrom returned. ok is false for a match that is not a team match:
+// DrawMatchesFrom returned. ok is false for a match with no place in the order:
 // a pool daihyosen or tiebreaker is one individual bout, and a match with no id
-// cannot be named.
+// cannot be named. TeamMatches leaves out the rest of what is not a team match.
 func (m DrawMatch) Place(seq int) (place MatchPlace, ok bool) {
 	if m.ID == "" {
 		return MatchPlace{}, false
@@ -116,4 +118,32 @@ func (m DrawMatch) Place(seq int) (place MatchPlace, ok bool) {
 // match. A side that carries no id (a bye, an unresolved feeder) seats nobody.
 func (m DrawMatch) Seats(teamID string) bool {
 	return teamID != "" && (m.SideAID == teamID || m.SideBID == teamID)
+}
+
+// TeamMatch is a team match of the draw and its place in match order.
+type TeamMatch struct {
+	DrawMatch
+	Place MatchPlace
+}
+
+// TeamMatches lists the team matches of a projected draw, the matches a team can
+// be seated in and play, in match order. knockout says whether the competition
+// plays a knockout stage (Competition.IsKnockoutEnabled): a league or Swiss
+// competition has none, so whatever a vestigial bracket.json holds is left out.
+// Also left out are a structural bye (Hidden) and a pool-shaped match with an
+// empty side (Bye, a Swiss round's odd team out), which nobody plays; a pool
+// representative bout or tie-break, which is one individual bout; and a match
+// with no id, which cannot be named (DrawMatch.Place).
+func TeamMatches(draw []DrawMatch, knockout bool) []TeamMatch {
+	matches := make([]TeamMatch, 0, len(draw))
+	for seq, m := range draw {
+		if (m.Knockout && !knockout) || m.Hidden || m.Bye {
+			continue
+		}
+		if place, ok := m.Place(seq); ok {
+			matches = append(matches, TeamMatch{DrawMatch: m, Place: place})
+		}
+	}
+	slices.SortFunc(matches, func(a, b TeamMatch) int { return a.Place.Compare(b.Place) })
+	return matches
 }

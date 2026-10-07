@@ -45,7 +45,7 @@ func TestWithdrawalRemoved_DecisionReplacingATeamWithdrawalRestores(t *testing.T
 			require.False(t, wrEligible(t, store, compID, wrTeamAID), "precondition: the kiken barred Ryu")
 			require.NotEmpty(t, wrPoolMatch(t, store, compID).SubResults, "precondition: the kiken kept the fought bout")
 
-			_, status, err := eng.RecordDecision(compID, "Pool A-0", decision, "aka", "", nil, false)
+			_, status, err := eng.RecordDecision(compID, "Pool A-0", decision, "aka", "", nil)
 			require.NoError(t, err)
 
 			m := wrPoolMatch(t, store, compID)
@@ -78,7 +78,7 @@ func TestWithdrawalRemoved_BracketTxDoorRestores(t *testing.T) {
 		ID: "m-r1-0", SideA: wrTeamA, SideAID: wrTeamAID, SideB: wrTeamB, SideBID: wrTeamBID,
 		Status: state.MatchStatusRunning,
 	}}}}))
-	_, _, err := eng.RecordDecision(compID, "m-r1-0", "fusenpai", "shiro", "", nil, false)
+	_, _, err := eng.RecordDecision(compID, "m-r1-0", "fusenpai", "shiro", "", nil)
 	require.NoError(t, err)
 	require.False(t, wrEligible(t, store, compID, wrTeamBID))
 
@@ -113,7 +113,7 @@ func wrFoughtBouts() []state.SubMatchResult {
 func TestWithdrawalRemoved_SupersededWriteRestoresNothing(t *testing.T) {
 	eng, store, compID, dir := seedPoolWithdrawal(t, "kiken-voluntary")
 	// Re-record the same withdrawal with a stamp, so there is a time to lose to.
-	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "knee", nil, false, 1_900_000_000_000)
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "knee", nil, 1_900_000_000_000)
 	require.NoError(t, err)
 	before := string(readStatusFile(t, dir, compID))
 	stored := wrPoolMatch(t, store, compID)

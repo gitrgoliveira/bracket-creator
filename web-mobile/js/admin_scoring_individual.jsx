@@ -295,12 +295,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   //   in which case we advance to the next match instead (item 7). Kiken
   //   follows this exact rule too now (operator ruling 2026-09-26):
   //   recording a withdrawal changes only the match it was recorded on.
-  // - T103/CHK024: when the server replies 409 decision_locked (the
-  //   prior kiken on this match can't be safely overwritten because a
-  //   subsequent match for either side has started), prompt the
-  //   operator to confirm and re-send with force=true.
+  // - Recording the withdrawal on the other side of a recorded one applies
+  //   with no confirm: it changes only this match.
   // Shared factory (admin_scoring_shared.jsx): the individual + team modals had
-  // byte-identical copies; "competitors" is the only per-modal wording.
+  // byte-identical copies.
   // Item 7: a decision (fusenpai, kiken, or any future non-points decision)
   // routes through onAfterDecision when the host page provides it (and this
   // isn't a correction) so the court advances to the next match: mirroring
@@ -309,7 +307,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const submitDecision = makeSubmitDecision({
     match: m, enchoPeriodCount, password, mountedRef,
     setDecisionSubmitting, setDecisionErr, setDecisionPromptKind,
-    onClose, onAfterDecision, isComplete, entityLabel: "competitors",
+    onClose, onAfterDecision, isComplete,
     // F5: thread pending-write handles so the factory can show the sticky banner
     // when the decision write is only queued (offline / transient failure).
     setPendingWrite, pendingFnRef,

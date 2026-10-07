@@ -465,14 +465,12 @@ function resolveDecisionPassword(propPassword) {
 }
 
 // T093/T094: build the /decision POST body. Pure helper so we can pin the
-// wire shape (decision/decisionBy/decisionReason/encho/force) against a
-// moving server contract. `force` is the T103 override flag used when the
-// server replies decision_locked and the operator confirms the override.
+// wire shape (decision/decisionBy/decisionReason/encho) against a
+// moving server contract.
 function buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCount, opts = {}) {
   const body = { decision: kind, decisionBy };
   if (decisionReason) body.decisionReason = decisionReason;
   if (enchoPeriodCount > 0) body.encho = { periodCount: enchoPeriodCount };
-  if (opts.force) body.force = true;
   // The match the decision was recorded on (bc-hlck): recordDecision floors
   // the stamp by it and never sends it.
   if (opts.seenModifiedAt > 0) body.seenModifiedAt = opts.seenModifiedAt;
@@ -484,8 +482,7 @@ function buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCoun
 // resolves the password from the explicit prop. Extracted so the regression
 // test pins the production call site (rather than re-implementing the chain
 // inside the test, which was how the original gap slipped through). Returns
-// the promise from window.API.recordDecision so callers can await + handle
-// the 409 decision_locked retry-with-force loop.
+// the promise from window.API.recordDecision so callers can await it.
 //
 // bc-cse: routed through attemptScoreWrite (write_result.jsx), the SAME
 // confirm-and-retry loop admin.jsx's editMatchScore gives the score path, so
@@ -511,15 +508,12 @@ function submitDecisionRequest(compId, matchId, kind, decisionPayload, enchoPeri
 
 // makeSubmitDecision builds the kiken/fusenpai decision submit handler shared by
 // ScoreEditorModal and TeamScoreEditorModal. The two modals had byte-identical
-// copies of this (the only difference was the "competitors"/"teams" wording in
-// the decision_locked confirm), so it lives here once. The returned closure:
+// copies of this, so it lives here once. The returned closure:
 //   - POSTs the decision, then for every decision alike (kiken included:
 //     operator ruling 2026-09-26, recording a withdrawal changes only the
 //     match it is recorded on) calls onAfterDecision when provided and the
 //     match is not a correction (item 7: starts next match), else falls back
-//     to onClose;
-//   - on 409 decision_locked, confirms then retries with force (recursing
-//     into itself).
+//     to onClose.
 // Call it fresh each render so it captures the current enchoPeriodCount/password.
 function makeSubmitDecision({
   match,
@@ -540,7 +534,6 @@ function makeSubmitDecision({
   // from its own existing notice, when it comes up.
   onAfterDecision,
   isComplete,       // item 7: corrections (isComplete=true) must not auto-advance
-  entityLabel = 'competitors',
   // F5: optional pending-write handles threaded in from ScoreEditorModal so
   // a queued (offline) decision write shows the sticky "Not sent yet" banner
   // (handed the queued answer, which queuedNotice words).
@@ -614,22 +607,9 @@ function makeSubmitDecision({
         if (mountedRef.current) setDecisionErr(DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED);
         return;
       }
-      // T103: server returns "decision_locked" when a kiken-undo would
-      // invalidate a downstream match: confirm and retry with force.
-      if (!opts.force && /decision_locked/i.test(msg)) {
-        const ok = mountedRef.current && await window.confirmDialog({
-          message:
-            `A subsequent match for one of these ${entityLabel} has already started.\n\n` +
-            'Overwriting the prior decision now may make those downstream results inconsistent. Proceed anyway?',
-          confirmLabel: 'Proceed anyway',
-          danger: true,
-        });
-        if (!mountedRef.current) return;
-        if (ok) { await submit(kind, { decisionBy, decisionReason }, { force: true }); return; }
-        setDecisionErr('Override cancelled.');
-      } else if (mountedRef.current) {
-        setDecisionErr(msg);
-      }
+      // Any other refusal is shown as the server worded it; nothing is
+      // retried with a stronger flag.
+      if (mountedRef.current) setDecisionErr(msg);
     } finally {
       if (mountedRef.current) setDecisionSubmitting(false);
     }

@@ -542,9 +542,7 @@ func TestMerge_WriteAfterARenameIsAcceptedByItsIDs(t *testing.T) {
 
 // A queued decision whose first send landed but whose answer was lost is sent
 // again by the offline queue with the same stamp. That replay is the same
-// write landing twice: it answers as recorded, never with the T103 lock's
-// decision_locked (which the queue now reports to the operator as a refusal
-// instead of swallowing it as success).
+// write landing twice: it answers as recorded, and changes nothing.
 func TestMerge_ExactDecisionReplayAnswersAsRecorded(t *testing.T) {
 	h := mmIndividual(t, false)
 	ms, err := h.store.LoadPoolMatches(h.compID)
@@ -555,10 +553,10 @@ func TestMerge_ExactDecisionReplayAnswersAsRecorded(t *testing.T) {
 	})
 	require.NoError(t, h.store.SavePoolMatches(h.compID, ms))
 
-	_, _, err = h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT2)
+	_, _, err = h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, mmT2)
 	require.NoError(t, err)
 	// The withdrawer's later match is put under way (a fusenpai, say, was
-	// not recorded yet), which arms the T103 lock against an UNDO.
+	// not recorded yet).
 	ms, err = h.store.LoadPoolMatches(h.compID)
 	require.NoError(t, err)
 	for i := range ms {
@@ -568,13 +566,15 @@ func TestMerge_ExactDecisionReplayAnswersAsRecorded(t *testing.T) {
 	}
 	require.NoError(t, h.store.SavePoolMatches(h.compID, ms))
 
-	got, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT2)
+	got, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, mmT2)
 	require.NoError(t, err, "an exact replay is the recorded write, not an undo")
 	require.NotNil(t, got)
 	assert.Equal(t, "kiken-voluntary", got.Decision)
 
-	t.Run("a different decision is still locked", func(t *testing.T) {
-		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "fusenpai", "aka", "", nil, false, mmT3)
-		require.ErrorIs(t, err, ErrDecisionLocked)
+	t.Run("a different decision at a newer stamp is recorded, with no confirm", func(t *testing.T) {
+		res, _, err := h.eng.RecordDecision(h.compID, h.matchID, "fusenpai", "aka", "", nil, mmT3)
+		require.NoError(t, err)
+		require.NotNil(t, res)
+		assert.Equal(t, "fusenpai", res.Decision)
 	})
 }

@@ -1343,7 +1343,7 @@ func preserveLoserScore(result, prior *state.MatchResult, decisionBy string) {
 	// Preserve only points the loser actually STRUCK (Art. 32 says "any point
 	// scored"): strip the maru marker so a prior default-win decision's ○○
 	// fill is never carried forward as if it were struck points. This matters
-	// on the T103 re-decision path when decisionBy flips — the side that was
+	// on the re-decision path when decisionBy flips — the side that was
 	// the prior winner holds maru, not real points, and must not inherit it as
 	// the new loser.
 	if decisionBy == "shiro" {
@@ -2684,8 +2684,7 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 			// correction that actually changes the winner from one that does
 			// not. force skips the guard's played refusal, and an unconditional requeue there
 			// cleared the next round for a write that stored the same winner --
-			// including one confirmed for an unrelated reason, since the
-			// decision path's own T103 force used to arrive as this flag.
+			// including one confirmed for an unrelated reason.
 			priorWinner, priorWinnerID := propagatedWinnerOf(bracket, rIdx, mIdx, bm)
 			if _, err := applyBracketMatchResult(bm, result, policy); err != nil {
 				return nil, false, err

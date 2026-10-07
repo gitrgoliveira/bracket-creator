@@ -639,7 +639,7 @@ function matchLabelList(ms) {
 // api_client.jsx is the parser, exactly as it is for the 200 shapes: it
 // attaches the four fields to the thrown Error as `.downstreamKnockoutPlayed`
 // so a catcher never re-derives the shape from a raw response body or a
-// message-string regex (the T103 decision_locked precedent this mirrors).
+// message-string regex (the precedent the earlier 409 parsers set).
 // Ask downstreamKnockoutPlayedRefusal(err) rather than testing
 // `err.downstreamKnockoutPlayed` by hand -- the same reason every other
 // predicate in this file exists.

@@ -71,7 +71,7 @@ func scoreBracketMatch(t *testing.T, eng *Engine, store *state.Store, compID, ma
 // and the bye passes P01 into the final.
 func recordMistakenKiken(t *testing.T, eng *Engine, store *state.Store, compID string) {
 	t.Helper()
-	_, st, err := eng.RecordDecision(compID, "m-r1-0", "kiken-voluntary", "aka", "", nil, false)
+	_, st, err := eng.RecordDecision(compID, "m-r1-0", "kiken-voluntary", "aka", "", nil)
 	require.NoError(t, err)
 	require.NotNil(t, st)
 	b := loadBracket(t, store, compID)

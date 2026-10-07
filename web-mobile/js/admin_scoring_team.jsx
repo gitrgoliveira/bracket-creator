@@ -1944,8 +1944,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     }
   };
 
-  // Shared factory (admin_scoring_shared.jsx): same handler as ScoreEditorModal;
-  // "teams" is the only per-modal wording (in the decision_locked confirm).
+  // Shared factory (admin_scoring_shared.jsx): same handler as ScoreEditorModal.
   // Item 7: fusenpai routes through onAfterDecision (host-supplied) to advance
   // the court, same as ScoreEditorModal. Kiken follows the same rule now too
   // (operator ruling 2026-09-26): recording a withdrawal changes only the
@@ -1953,7 +1952,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const submitDecision = makeSubmitDecision({
     match: m, enchoPeriodCount: encounterEnchoCount, password, mountedRef,
     setDecisionSubmitting, setDecisionErr, setDecisionPromptKind,
-    onClose, onAfterDecision, isComplete, entityLabel: "teams",
+    onClose, onAfterDecision, isComplete,
   });
 
   const existingSub = m.subResults || [];

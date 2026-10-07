@@ -162,7 +162,7 @@ func TestRecordDecision_KikenResolvesLoserByID_NotFirstRegisteredNamesake(t *tes
 	}))
 
 	// decisionBy "aka" => SideA (Tanaka@A) is the withdrawing/losing side.
-	_, status, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "injury", nil, false)
+	_, status, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "injury", nil)
 	require.NoError(t, err)
 	require.NotNil(t, status, "a CompetitorStatus must be written for the kiken")
 	assert.Equal(t, tanakaA, status.PlayerID, "the ineligibility must land on Tanaka@A, the competitor who actually withdrew")
@@ -210,7 +210,7 @@ func TestRecordDecision_PartiallyStampedRow_StillRecordsIneligibility(t *testing
 	}))
 
 	// decisionBy "aka" => SideA (Tanaka) is the withdrawing/losing side.
-	_, status, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "injury", nil, false)
+	_, status, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "injury", nil)
 	require.NoError(t, err)
 	require.NotNil(t, status, "a CompetitorStatus must be written -- the losing SIDE is known even though her id field on this row is empty")
 	assert.Equal(t, tanakaID, status.PlayerID, "the ineligibility must land on Tanaka, resolved by name fallback for the known losing side")
@@ -251,7 +251,7 @@ func TestRecordDecisionTx_SameNamePairing_RescoreAsFoughtRestoresEligibility(t *
 	}))
 
 	// decisionBy "aka" => SideA (Tanaka@DojoA) withdraws.
-	_, status, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "injury", nil, false)
+	_, status, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "injury", nil)
 	require.NoError(t, err)
 	require.NotNil(t, status)
 	assert.Equal(t, tanakaAID, status.PlayerID)
@@ -266,7 +266,7 @@ func TestRecordDecisionTx_SameNamePairing_RescoreAsFoughtRestoresEligibility(t *
 	// for this match -- the stale Pool A-0 ineligibility entry must be
 	// restored by the record itself, not re-derived from the row's (still
 	// same-name, still id-less-on-WinnerID) sides.
-	_, restoredStatus, err := eng.RecordDecision(compID, "Pool A-0", "fought", "aka", "", nil, false)
+	_, restoredStatus, err := eng.RecordDecision(compID, "Pool A-0", "fought", "aka", "", nil)
 	require.NoError(t, err)
 	require.NotNil(t, restoredStatus, "the stale ineligibility for THIS match must be restored, not silently skipped as ambiguous")
 	assert.Equal(t, tanakaAID, restoredStatus.PlayerID)
@@ -572,7 +572,7 @@ func TestRecordDecisionTx_SameNamePairing_AttributesWinnerBySide(t *testing.T) {
 	}))
 
 	// decisionBy "aka" => SideA (Tokyo) withdraws; SideB (Osaka) survives.
-	result, status, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "injury", &state.EnchoMetadata{PeriodCount: 1}, false)
+	result, status, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "injury", &state.EnchoMetadata{PeriodCount: 1})
 	require.NoError(t, err)
 	require.NotNil(t, result)
 

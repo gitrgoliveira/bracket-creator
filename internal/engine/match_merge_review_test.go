@@ -448,7 +448,7 @@ func TestMergeReview_KachinukiPoolRepBoutKeepsItsEncho(t *testing.T) {
 	})
 	t.Run("a withdrawal in encho gives one circle", func(t *testing.T) {
 		h := seed(t)
-		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", &state.EnchoMetadata{PeriodCount: 1}, false, mmT1)
+		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", &state.EnchoMetadata{PeriodCount: 1}, mmT1)
 		require.NoError(t, err)
 		m := h.load(t)
 		assert.Equal(t, wrTeamB, m.Winner)

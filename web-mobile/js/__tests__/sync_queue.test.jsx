@@ -1351,7 +1351,7 @@ describe('_flushQueue: downstream_knockout_played 409 on a queued correction (bc
     it('drops a queued DECISION correction (kiken/fusenpai/daihyosen) and reports the human reason, not the raw token', async () => {
         // Pre-fix this landed in the decision-specific 409 branch
         // (terminal && kind === 'decision' && res.status === 409), which reads
-        // any body.error other than decision_locked/already_ineligible as an
+        // any body.error other than already_ineligible as an
         // "unexpected" 409 and reported body.reasonHuman || body.error --
         // i.e. the literal string "downstream_knockout_played" -- with no
         // advice at all.
@@ -1395,38 +1395,6 @@ describe('_flushQueue: downstream_knockout_played 409 on a queued correction (bc
         expect(rejected.length).toBeGreaterThanOrEqual(1);
         expect(rejected[0].detail).toContain('m9');
         expect(rejected[0].detail).not.toBe('downstream_knockout_played');
-    });
-
-    it('reports decision_locked on a queued replay instead of taking it as success (bc-mrgc phase 3)', async () => {
-        // A queued decision the server refuses on replay is the operator's
-        // result not landing, whatever the 409's code. It used to be swallowed
-        // on the theory that an earlier send had landed; the server now answers
-        // that exact replay (same decision, side and stamp) as recorded, so a
-        // decision_locked here is a real refusal and must be reported.
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        mockFetch(() => Promise.reject(new TypeError('offline')));
-        await API.recordDecision('c1', 'mlocked', { decision: 'fusenpai', decisionBy: 'shiro' }, 'pw');
-
-        const failures = [];
-        const unsubFail = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
-        const alerts = [];
-        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
-
-        mockFetch(() => Promise.resolve({
-            ok: false,
-            status: 409,
-            json: () => Promise.resolve({ error: 'decision_locked' }),
-        }));
-        window.dispatchEvent(new Event('online'));
-        await tick(50);
-        unsubFail();
-        unsubAlert();
-        warnSpy.mockRestore();
-
-        expect(API.hasPendingTerminalWrite('c1', 'mlocked')).toBe(false);
-        expect(failures.length).toBe(1);
-        expect(failures[0]).toMatchObject({ compID: 'c1', matchID: 'mlocked', kind: 'decision', status: 409 });
-        expect(alerts.filter((a) => a.kind === 'rejected')).toHaveLength(1);
     });
 
     it('reports already_ineligible on a queued replay in the server\'s own words', async () => {

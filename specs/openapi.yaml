@@ -3660,8 +3660,7 @@ paths:
             places a decision on a mixed competition's pool match moves), or
             one that would move a qualifier out of, or change a side of, a
             knockout match being fought now (`downstream_knockout_running`,
-            not confirmable, and answered before `decision_locked` so no
-            confirm precedes it). Same bodies as PUT .../score.
+            not confirmable, and answered before any confirm). Same bodies as PUT .../score.
           content:
             application/json:
               schema:

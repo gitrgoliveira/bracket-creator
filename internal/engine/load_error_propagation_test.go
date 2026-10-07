@@ -80,12 +80,6 @@ func TestMatchLookupsPropagateLoadErrors(t *testing.T) {
 						return err
 					})
 				}},
-				{"hasDownstreamMatchStarted", func() error {
-					return inTxErr(func(tx state.StoreTx) error {
-						_, err := eng.hasDownstreamMatchStarted(tx, compID, []string{"Alice"}, matchID)
-						return err
-					})
-				}},
 				{"matchSideParticipantIDs", func() error {
 					return inTxErr(func(tx state.StoreTx) error {
 						_, err := eng.matchSideParticipantIDs(tx, compID, matchID)

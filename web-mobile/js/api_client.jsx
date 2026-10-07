@@ -1807,7 +1807,7 @@ async function _flushQueue() {
                     } else if (terminal && kind === 'decision' && res.status === 409) {
                         // A queued decision the server refused on replay. Every 409 is
                         // REPORTED, never taken as success (bc-mrgc phase 3, "Nothing
-                        // should be dropped"). decision_locked and already_ineligible
+                        // should be dropped"). A 409 such as already_ineligible
                         // used to be swallowed on the theory that an earlier send whose
                         // answer was lost had landed; the server now answers that exact
                         // replay (same decision, side and stamp) as recorded
@@ -1819,7 +1819,7 @@ async function _flushQueue() {
                         // forceDownstreamReopen automatically.
                         //
                         // The direct recordDecision call path always throws on 409 so the
-                        // score editor's force-retry prompt still fires.
+                        // score editor shows the refusal.
                         console.warn(`[sync] queued decision write rejected (409):`, body);
                         const refusal = _replayRefusal(body, 'conflict (409)');
                         _notifyTerminalWriteFailed({ compID, matchID, kind, status: 409, ...refusal });
@@ -3548,9 +3548,9 @@ const API = {
     //
     // F1: bounded (12 s abort on stalled wifi), the body read included.
     // F5: on network failure / abort / 5xx / 429 the decision is enqueued as a
-    // terminal write for durable re-delivery. 4xx (including 409 decision_locked
+    // terminal write for durable re-delivery. 4xx (including a 409
     // on the DIRECT call) always throw: the score editor relies on a thrown 409
-    // to show its force-retry prompt. A queued replay's 409 is reported too
+    // to show the refusal. A queued replay's 409 is reported too
     // (_flushQueue), never taken as success (bc-mrgc phase 3).
     async recordDecision(compID, matchID, body, password) {
         const decisionUrl = `/api/competitions/${compID}/matches/${matchID}/decision`;
@@ -3598,7 +3598,7 @@ const API = {
                 );
                 return _queuedAnswer();
             }
-            // 4xx (including 409 decision_locked): throw immediately so the UI
+            // 4xx (including a 409): throw immediately so the UI
             // can surface the error (a queued replay's refusal is reported by
             // _flushQueue the same way).
             // bc-rawm: the eligibility gate (mp-dc52 Phase 3) refuses a

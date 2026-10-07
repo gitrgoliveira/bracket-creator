@@ -22,7 +22,7 @@ func TestRefusedCorrectionRollbackKeepsAReinstatedCompetitorEligible(t *testing.
 
 	// A2 withdraws injured from Pool A-0 (A1 is aka, A2 shiro), so A1 wins
 	// the pool; B1 wins Pool B; A1 then beats B1 in the knockout.
-	_, st, err := f.eng.RecordDecision(f.compID, "Pool A-0", "kiken-injury", "shiro", "", nil, false)
+	_, st, err := f.eng.RecordDecision(f.compID, "Pool A-0", "kiken-injury", "shiro", "", nil)
 	require.NoError(t, err)
 	require.NotNil(t, st)
 	require.Equal(t, rqID("A2"), st.PlayerID)

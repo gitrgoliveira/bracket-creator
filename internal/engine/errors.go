@@ -52,13 +52,6 @@ func notFoundErrorf(format string, args ...any) *NotFoundError {
 	return &NotFoundError{Msg: fmt.Sprintf(format, args...)}
 }
 
-// ErrDecisionLocked is returned when a decision-overwrite (kiken-undo
-// or similar) is attempted on a match whose participants have started
-// a subsequent match. Handlers should return HTTP 409.
-//
-// T103, CHK024.
-var ErrDecisionLocked = errors.New("decision locked: a subsequent match has started")
-
 // ErrDownstreamKnockoutPlayed is the sentinel matched by errors.Is for
 // DownstreamKnockoutPlayedError. Handlers should return HTTP 409.
 //

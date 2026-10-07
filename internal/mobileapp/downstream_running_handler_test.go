@@ -156,12 +156,11 @@ func TestRunningDownstream_BulkScoreReason(t *testing.T) {
 	}
 }
 
-// TestRunningDownstream_DecisionRefusesBeforeTheLock is the J4 repro on the
+// TestRunningDownstream_DecisionRefuses is the J4 repro on the
 // wire: a wrong-side kiken on a semifinal, the final started, the kiken
-// re-recorded on the other side. The answer is the running refusal, never
-// decision_locked, so the editor shows the sentence and no "Proceed
-// anyway?" confirm.
-func TestRunningDownstream_DecisionRefusesBeforeTheLock(t *testing.T) {
+// re-recorded on the other side. The answer is the running refusal, so the
+// editor shows the sentence and no "Proceed anyway?" confirm.
+func TestRunningDownstream_DecisionRefuses(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 	compID := "rfsw-decision-lock"
@@ -197,7 +196,7 @@ func TestRunningDownstream_DecisionRefusesBeforeTheLock(t *testing.T) {
 	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Equal(t, "downstream_knockout_running", resp["error"], "not decision_locked")
+	assert.Equal(t, "downstream_knockout_running", resp["error"])
 	assert.Equal(t, "Match 3 (Final) is being fought now on Shiaijo A. Finish it or send it back to the queue, then save this correction again.", resp["message"])
 
 	b, err = store.LoadBracket(compID)

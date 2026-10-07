@@ -216,7 +216,7 @@ func TestViewerCompetitionDetail_IneligibleSides_RemovedAfterReinstate(t *testin
 	// The kiken-injury status itself (RecordDecision's normal write path,
 	// exercised directly here for a smaller fixture than a full /decision
 	// HTTP round trip).
-	_, _, err = eng.RecordDecision(compID, "Pool A-0", "kiken-injury", "aka", "test", nil, false)
+	_, _, err = eng.RecordDecision(compID, "Pool A-0", "kiken-injury", "aka", "test", nil)
 	require.NoError(t, err)
 
 	gin.SetMode(gin.TestMode)
@@ -293,9 +293,9 @@ func TestViewerCompetitionDetail_WithdrawnStatus_AfterEveryMatchIsFinished(t *te
 	}))
 	// Alice withdraws in Pool A-0, then a no-show is recorded against her on
 	// Pool A-1, which chains onto that bar (bc-kfup). Every match is now over.
-	_, _, err = eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "test", nil, false)
+	_, _, err = eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "test", nil)
 	require.NoError(t, err)
-	_, _, err = eng.RecordDecision(compID, "Pool A-1", "fusenpai", "aka", "", nil, false)
+	_, _, err = eng.RecordDecision(compID, "Pool A-1", "fusenpai", "aka", "", nil)
 	require.NoError(t, err)
 
 	gin.SetMode(gin.TestMode)

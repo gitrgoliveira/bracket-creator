@@ -49,7 +49,7 @@ func TestReopenHandler_DownstreamRunning_RespondsWithLabel(t *testing.T) {
 			Status: state.MatchStatusRunning, DisplayRound: 2, MatchNumber: 1}},
 		{{ID: "m-r2-0", SideB: "Carol", SideBID: carolID, DisplayRound: 1, MatchNumber: 2, Court: "A"}},
 	}}))
-	_, _, err = eng.RecordDecision(compID, "m-r1-0", "fusenpai", "shiro", "", nil, false)
+	_, _, err = eng.RecordDecision(compID, "m-r1-0", "fusenpai", "shiro", "", nil)
 	require.NoError(t, err)
 	require.NoError(t, store.UpdateBracket(compID, func(b *state.Bracket) error {
 		b.Rounds[1][0].Status = state.MatchStatusRunning

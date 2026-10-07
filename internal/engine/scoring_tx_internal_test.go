@@ -378,97 +378,6 @@ func TestRecordMatchResultWithIneligibilityTx_BracketPath(t *testing.T) {
 	assert.Equal(t, state.MatchStatusCompleted, b.Rounds[0][0].Status)
 }
 
-// TestHasDownstreamMatchStartedTx_PoolPath exercises the pool-match
-// branch in hasDownstreamMatchStarted (through a tx handle). Two cases: the Running match
-// is excluded (returns false) and a Running match is NOT excluded
-// (returns true).
-func TestHasDownstreamMatchStartedTx_PoolPath(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "hdmstx-pool"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	// Use proper "PoolName-MatchIdx" ID format so the CSV round-trip
-	// preserves the IDs.
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning},
-		{ID: "Pool A-1", SideA: "Alice", SideB: "Carol", Status: state.MatchStatusScheduled},
-	}))
-
-	t.Run("excluded running match → false", func(t *testing.T) {
-		var (
-			started bool
-			txErr   error
-		)
-		_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-			// Exclude "Pool A-0" (Alice Running) → only P A-1 (Scheduled) left → false.
-			started, txErr = eng.hasDownstreamMatchStarted(tx, compID, []string{"Alice"}, "Pool A-0")
-			return nil
-		})
-		require.NoError(t, txErr)
-		assert.False(t, started, "excluded running match must not count")
-	})
-
-	t.Run("non-excluded running match → true", func(t *testing.T) {
-		var (
-			started bool
-			txErr   error
-		)
-		_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-			// Exclude "Pool A-1" (Scheduled) → "Pool A-0" (Running+Alice) detected.
-			started, txErr = eng.hasDownstreamMatchStarted(tx, compID, []string{"Alice"}, "Pool A-1")
-			return nil
-		})
-		require.NoError(t, txErr)
-		assert.True(t, started, "running match involving Alice must be detected")
-	})
-}
-
-// TestHasDownstreamMatchStartedTx_BracketPath exercises the bracket
-// branch and asserts a running bracket match involving the player is
-// detected.
-func TestHasDownstreamMatchStartedTx_BracketPath(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "hdmstx-bracket"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
-	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
-		Rounds: [][]state.BracketMatch{
-			{
-				{ID: "B1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning},
-				{ID: "B2", SideA: "Carol", SideB: "Dave", Status: state.MatchStatusScheduled},
-			},
-		},
-	}))
-
-	var (
-		started bool
-		txErr   error
-	)
-	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		// Check from a hypothetical other match; B1 (Alice+Bob) is running.
-		started, txErr = eng.hasDownstreamMatchStarted(tx, compID, []string{"Alice"}, "OTHER")
-		return nil
-	})
-	require.NoError(t, txErr)
-	assert.True(t, started, "B1 is running and involves Alice → should be detected")
-}
-
-// TestStartMatchTx_EmptyWantSet verifies that empty player names list
-// returns false immediately.
-func TestHasDownstreamMatchStartedTx_EmptyNames(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "hdmstx-empty"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-
-	var started bool
-	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		var txErr error
-		started, txErr = eng.hasDownstreamMatchStarted(tx, compID, []string{}, "M1")
-		require.NoError(t, txErr)
-		return nil
-	})
-	assert.False(t, started)
-}
-
 // TestRecordIneligibilityFromDecisionTx_NilResult confirms nil result
 // is a no-op.
 func TestRecordIneligibilityFromDecisionTx_NilResult(t *testing.T) {
@@ -764,7 +673,7 @@ func TestRecordDecisionTx_ValidationError(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		_, _, txErr = eng.RecordDecisionTx(tx, compID, "Pool A-0", "kiken", "invalid-side", "", nil, false)
+		_, _, txErr = eng.RecordDecisionTx(tx, compID, "Pool A-0", "kiken", "invalid-side", "", nil)
 		return nil
 	})
 	require.Error(t, txErr)

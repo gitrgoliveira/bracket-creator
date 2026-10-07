@@ -114,37 +114,9 @@ describe('buildDecisionBody', () => {
     expect(body.decision).toBe('daihyosen');
   });
 
-  describe('force flag (T103 override loop)', () => {
-    // T103 (decision_locked) uses a confirm-and-retry-with-force flow.
-    // The helper accepts `opts.force` so the parent's retry path can
-    // call back into it without re-implementing the body shape.
-
-    it('attaches force=true when opts.force is set', () => {
-      const body = buildDecisionBody('kiken-voluntary', { decisionBy: 'shiro' }, 0, { force: true });
-      expect(body.force).toBe(true);
-    });
-
-    it('omits force when opts.force is missing or false', () => {
-      expect(buildDecisionBody('kiken-voluntary', { decisionBy: 'shiro' }, 0)).not.toHaveProperty('force');
-      expect(buildDecisionBody('kiken-voluntary', { decisionBy: 'shiro' }, 0, {})).not.toHaveProperty('force');
-      expect(buildDecisionBody('kiken-voluntary', { decisionBy: 'shiro' }, 0, { force: false })).not.toHaveProperty('force');
-    });
-
-    it('force combines with reason + encho cleanly', () => {
-      const body = buildDecisionBody(
-        'kiken-voluntary',
-        { decisionBy: 'aka', decisionReason: 'no-show' },
-        3,
-        { force: true },
-      );
-      expect(body).toEqual({
-        decision: 'kiken-voluntary',
-        decisionBy: 'aka',
-        decisionReason: 'no-show',
-        encho: { periodCount: 3 },
-        force: true,
-      });
-    });
+  it('never emits a force flag (the decision lock was removed)', () => {
+    expect(buildDecisionBody('kiken-voluntary', { decisionBy: 'shiro' }, 0)).not.toHaveProperty('force');
+    expect(buildDecisionBody('kiken-voluntary', { decisionBy: 'shiro' }, 0, { force: true })).not.toHaveProperty('force');
   });
 });
 
@@ -443,33 +415,28 @@ describe('DecisionPrompt → /decision POST integration', () => {
     );
   });
 
-  it('parent flow attaches force=true on the retry-after-409 path', async () => {
-    // T103: when the server replies decision_locked the parent's
-    // submitDecision recurses with { force: true } after the operator
-    // confirms. The body must carry that flag through to the server so
-    // the second attempt isn't also rejected.
-    const onSubmit = vi.fn((payload) => {
-      const body = buildDecisionBody('kiken-voluntary', payload, 0, { force: true });
-      const password = resolveDecisionPassword('pw');
-      return window.API.recordDecision('comp-1', 'match-1', body, password);
+  it("an unknown 409 on a decision shows the server's message and never retries with force", async () => {
+    window.API = {
+      recordDecision: vi.fn().mockRejectedValue(new Error('some_other_conflict')),
+    };
+    window.confirmDialog = vi.fn();
+    const setDecisionErr = vi.fn();
+    const submit = makeSubmitDecision({
+      match: { compId: 'c1', id: 'm1', sideA: { id: 'pa', name: 'A' }, sideB: { id: 'pb', name: 'B' } },
+      enchoPeriodCount: 0,
+      password: 'pw',
+      mountedRef: { current: true },
+      setDecisionSubmitting: vi.fn(),
+      setDecisionErr,
+      setDecisionPromptKind: vi.fn(),
+      onClose: vi.fn(),
+      isComplete: true,
     });
-    const tree = DecisionPrompt({
-      kind: 'kiken',
-      sideA: { name: 'A' },
-      sideB: { name: 'B' },
-      defaultSide: 'shiro',
-      askReason: false,
-      onCancel: vi.fn(),
-      onSubmit,
-      submitting: false,
-    });
-    await tree.props.onSubmit({ preventDefault: () => {} });
-    expect(window.API.recordDecision).toHaveBeenCalledWith(
-      'comp-1',
-      'match-1',
-      { decision: 'kiken-voluntary', decisionBy: 'shiro', force: true },
-      'pw',
-    );
+    await submit('kiken-voluntary', { decisionBy: 'shiro', decisionReason: '' });
+    expect(window.confirmDialog).not.toHaveBeenCalled();
+    expect(window.API.recordDecision).toHaveBeenCalledTimes(1);
+    expect(window.API.recordDecision.mock.calls[0][2]).not.toHaveProperty('force');
+    expect(setDecisionErr).toHaveBeenLastCalledWith('some_other_conflict');
   });
 
   it('fusenpai: decisionBy is the ABSENT/LOSING side, not the winning side', () => {
@@ -1372,7 +1339,6 @@ describe('item 7: non-points decisions advance to next match', () => {
       const submit = makeSubmitDecision({
         match: makeMatch('m1'), enchoPeriodCount: 0, password: 'pw',
         ...makeSetters(), onClose, onAfterDecision, isComplete: false,
-        entityLabel: 'competitors',
       });
       await submit('fusenpai', { decisionBy: 'aka', decisionReason: '' });
       expect(onAfterDecision).toHaveBeenCalled();
@@ -1388,7 +1354,6 @@ describe('item 7: non-points decisions advance to next match', () => {
       const submit = makeSubmitDecision({
         match: makeMatch('m1b'), enchoPeriodCount: 0, password: 'pw',
         ...makeSetters(), onClose: vi.fn(), onAfterDecision, isComplete: false,
-        entityLabel: 'competitors',
       });
       await submit('fusenpai', { decisionBy: 'aka', decisionReason: '' });
       expect(onAfterDecision).toHaveBeenCalledWith(
@@ -1400,7 +1365,7 @@ describe('item 7: non-points decisions advance to next match', () => {
       const onClose = vi.fn();
       const submit = makeSubmitDecision({
         match: makeMatch('m2'), enchoPeriodCount: 0, password: 'pw',
-        ...makeSetters(), onClose, isComplete: false, entityLabel: 'competitors',
+        ...makeSetters(), onClose, isComplete: false,
       });
       await submit('fusenpai', { decisionBy: 'aka', decisionReason: '' });
       expect(onClose).toHaveBeenCalled();
@@ -1412,7 +1377,6 @@ describe('item 7: non-points decisions advance to next match', () => {
       const submit = makeSubmitDecision({
         match: makeMatch('m3'), enchoPeriodCount: 0, password: 'pw',
         ...makeSetters(), onClose, onAfterDecision, isComplete: true,
-        entityLabel: 'competitors',
       });
       await submit('fusenpai', { decisionBy: 'aka', decisionReason: '' });
       // Correction: must close rather than advance
@@ -1430,7 +1394,6 @@ describe('item 7: non-points decisions advance to next match', () => {
       const submit = makeSubmitDecision({
         match: makeMatch('m4'), enchoPeriodCount: 0, password: 'pw',
         ...makeSetters(), onClose, onAfterDecision, isComplete: false,
-        entityLabel: 'competitors',
       });
       await submit('kiken-voluntary', { decisionBy: 'aka', decisionReason: '' });
       expect(onAfterDecision).toHaveBeenCalled();
@@ -1443,7 +1406,6 @@ describe('item 7: non-points decisions advance to next match', () => {
       const submit = makeSubmitDecision({
         match: makeMatch('m4b'), enchoPeriodCount: 0, password: 'pw',
         ...makeSetters(), onClose, onAfterDecision, isComplete: true,
-        entityLabel: 'competitors',
       });
       await submit('kiken-voluntary', { decisionBy: 'aka', decisionReason: '' });
       expect(onClose).toHaveBeenCalled();
@@ -1536,7 +1498,6 @@ describe('submitDecisionRequest / makeSubmitDecision: downstream_knockout_played
       setDecisionPromptKind: vi.fn(),
       onClose: vi.fn(),
       isComplete: true, // correcting an already-completed match
-      entityLabel: 'competitors',
     });
 
     await submit('kiken-voluntary', { decisionBy: 'aka', decisionReason: '' });
@@ -1546,7 +1507,7 @@ describe('submitDecisionRequest / makeSubmitDecision: downstream_knockout_played
     expect(window.API.recordDecision).toHaveBeenCalledTimes(1);
     expect(setDecisionErr).toHaveBeenCalledWith(DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED);
     // Must not fall through to the generic error text (the raw refusal
-    // message, or the decision_locked confirm copy).
+    // message, or a confirm copy).
     expect(setDecisionErr).not.toHaveBeenCalledWith(
       expect.stringContaining('already played match'),
     );
@@ -1574,7 +1535,6 @@ describe('submitDecisionRequest / makeSubmitDecision: downstream_knockout_played
       setDecisionPromptKind: vi.fn(),
       onClose,
       isComplete: true,
-      entityLabel: 'competitors',
     });
 
     // fusenpai here, but kiken takes the identical isComplete gate now

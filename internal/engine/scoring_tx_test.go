@@ -40,7 +40,7 @@ func TestRecordDecisionTx_BasicEquivalence(t *testing.T) {
 		engErr error
 	)
 	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
-		result, status, engErr = eng.RecordDecisionTx(tx, compID, "Pool A-0", "kiken", "aka", "knee injury", nil, false)
+		result, status, engErr = eng.RecordDecisionTx(tx, compID, "Pool A-0", "kiken", "aka", "knee injury", nil)
 		return nil
 	})
 	require.NoError(t, txErr)
@@ -105,7 +105,7 @@ func TestRecordDecisionTx_ConcurrentDoesNotDeadlock(t *testing.T) {
 		defer wg.Done()
 		var engErr error
 		_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-			_, _, engErr = eng.RecordDecisionTx(tx, compID, "Pool A-0", "kiken", "aka", "race A", nil, false)
+			_, _, engErr = eng.RecordDecisionTx(tx, compID, "Pool A-0", "kiken", "aka", "race A", nil)
 			return nil
 		})
 		results <- res{err: engErr, matchID: "Pool A-0"}
@@ -114,7 +114,7 @@ func TestRecordDecisionTx_ConcurrentDoesNotDeadlock(t *testing.T) {
 		defer wg.Done()
 		var engErr error
 		_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-			_, _, engErr = eng.RecordDecisionTx(tx, compID, "Pool A-1", "kiken", "shiro", "race B", nil, false)
+			_, _, engErr = eng.RecordDecisionTx(tx, compID, "Pool A-1", "kiken", "shiro", "race B", nil)
 			return nil
 		})
 		results <- res{err: engErr, matchID: "Pool A-1"}
@@ -168,10 +168,9 @@ func TestRecordDecisionTx_ConcurrentDoesNotDeadlock(t *testing.T) {
 	}
 }
 
-// TestRecordDecisionTx_KikenUndoSucceeds verifies that the T103 kiken-
-// undo path works correctly under the tx-aware variant, both the
-// downstream-match lock check and the prior-loser eligibility restore
-// dispatch through the supplied StoreTx without re-acquiring the lock.
+// TestRecordDecisionTx_KikenUndoSucceeds verifies that the kiken-
+// undo path works correctly under the tx-aware variant: the
+// prior-loser eligibility restore dispatches through the supplied StoreTx without re-acquiring the lock.
 func TestRecordDecisionTx_KikenUndoSucceeds(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "tx-undo"
@@ -192,7 +191,7 @@ func TestRecordDecisionTx_KikenUndoSucceeds(t *testing.T) {
 
 	// Record kiken (Alice loser) via the tx variant.
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		_, _, err := eng.RecordDecisionTx(tx, compID, "Pool A-0", "kiken", "aka", "knee injury", nil, false)
+		_, _, err := eng.RecordDecisionTx(tx, compID, "Pool A-0", "kiken", "aka", "knee injury", nil)
 		return err
 	})
 
@@ -203,7 +202,7 @@ func TestRecordDecisionTx_KikenUndoSucceeds(t *testing.T) {
 		engErr error
 	)
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		result, status, engErr = eng.RecordDecisionTx(tx, compID, "Pool A-0", "kiken", "shiro", "scoring fix", nil, false)
+		result, status, engErr = eng.RecordDecisionTx(tx, compID, "Pool A-0", "kiken", "shiro", "scoring fix", nil)
 		return nil
 	})
 	require.NoError(t, engErr)
@@ -252,7 +251,7 @@ func TestRecordDecisionTx_RenamedLoser_RescoreStillResolvesByID(t *testing.T) {
 	require.Equal(t, bobID, bracket.Rounds[0][0].SideBID, "precondition: generation stamps Bob's id onto the round-0 row")
 
 	// First kiken: decisionBy=shiro -> Bob (SideB) withdraws.
-	_, status, err := eng.RecordDecision(compID, matchID, "kiken-voluntary", "shiro", "injury", nil, false)
+	_, status, err := eng.RecordDecision(compID, matchID, "kiken-voluntary", "shiro", "injury", nil)
 	require.NoError(t, err)
 	require.NotNil(t, status)
 	assert.Equal(t, bobID, status.PlayerID)
@@ -271,7 +270,7 @@ func TestRecordDecisionTx_RenamedLoser_RescoreStillResolvesByID(t *testing.T) {
 	// kiken, so the verdict moves and the eligibility is recorded again (an
 	// identical one is an echo and records no status, bc-mrgc). The stored
 	// id survives the rename, so this still resolves to Bob.
-	_, status2, err := eng.RecordDecision(compID, matchID, "kiken-injury", "shiro", "injury", nil, false)
+	_, status2, err := eng.RecordDecision(compID, matchID, "kiken-injury", "shiro", "injury", nil)
 	require.NoError(t, err)
 	require.NotNil(t, status2, "the id survives the rename, so the write still resolves the SAME loser")
 	assert.Equal(t, bobID, status2.PlayerID)
@@ -332,7 +331,7 @@ func TestRecordDecisionTx_RenamedLoser_UnstampedBracketRescoreDoesNotRestore(t *
 
 	// First kiken: decisionBy=shiro -> Bob (SideB) withdraws, resolved by
 	// name (this row carries no ids at all).
-	_, status, err := eng.RecordDecision(compID, matchID, "kiken-voluntary", "shiro", "injury", nil, false)
+	_, status, err := eng.RecordDecision(compID, matchID, "kiken-voluntary", "shiro", "injury", nil)
 	require.NoError(t, err)
 	require.NotNil(t, status)
 	assert.Equal(t, bobID, status.PlayerID)
@@ -349,7 +348,7 @@ func TestRecordDecisionTx_RenamedLoser_UnstampedBracketRescoreDoesNotRestore(t *
 	// The name-based roster scan can no longer find "Bob" at all, so this
 	// write resolves no CompetitorStatus -- it neither confirms nor changes
 	// anyone's eligibility.
-	_, status2, err := eng.RecordDecision(compID, matchID, "kiken-voluntary", "shiro", "injury", nil, false)
+	_, status2, err := eng.RecordDecision(compID, matchID, "kiken-voluntary", "shiro", "injury", nil)
 	require.NoError(t, err)
 	assert.Nil(t, status2, "the write did not resolve/write a loser after the rename, so it must not report a restore")
 
@@ -359,9 +358,12 @@ func TestRecordDecisionTx_RenamedLoser_UnstampedBracketRescoreDoesNotRestore(t *
 	assert.False(t, statuses[bobID].Eligible, "Bob is STILL withdrawn; a re-score the engine could not attribute must never silently restore him")
 }
 
-// TestRecordDecisionTx_DownstreamLockReturnsErr asserts the T103
-// decision-lock check fires correctly in the tx-aware path.
-func TestRecordDecisionTx_DownstreamLockReturnsErr(t *testing.T) {
+// TestRecordDecisionTx_WithdrawalCorrectionChangesNoOtherMatch asserts that
+// recording the withdrawal on the other side applies in the tx-aware path with
+// no confirm, although the first withdrawer has a later match under way, and
+// that it changes no other match (operator ruling 2026-09-27, "do not
+// cascade").
+func TestRecordDecisionTx_WithdrawalCorrectionChangesNoOtherMatch(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "tx-lock"
 	createTestCompetition(t, store, compID, "league", 3)
@@ -380,22 +382,37 @@ func TestRecordDecisionTx_DownstreamLockReturnsErr(t *testing.T) {
 	}))
 
 	// Pre-record a kiken so the next call is the "undo" path.
-	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "first", nil, false)
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "first", nil)
 	require.NoError(t, err)
 
-	// Now try the undo via the tx variant, should hit ErrDecisionLocked.
-	var engErr error
+	before, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+
+	// Now correct it via the tx variant: Bob (shiro) is the one who withdrew.
+	var (
+		engErr error
+		result *state.MatchResult
+	)
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		_, _, engErr = eng.RecordDecisionTx(tx, compID, "Pool A-0", "kiken", "shiro", "undo", nil, false)
+		result, _, engErr = eng.RecordDecisionTx(tx, compID, "Pool A-0", "kiken", "shiro", "undo", nil)
 		return nil
 	})
-	require.Error(t, engErr)
-	assert.Truef(t, errors.Is(engErr, ErrDecisionLocked), "expected ErrDecisionLocked, got %v", engErr)
+	require.NoError(t, engErr)
+	assert.Equal(t, "Alice", result.Winner)
+
+	after, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for i := range before {
+		if before[i].ID == "Pool A-0" {
+			continue
+		}
+		assert.Equal(t, before[i], after[i], "%s is untouched", before[i].ID)
+	}
+	assert.Equal(t, state.MatchStatusRunning, after[1].Status, "the match under way stays under way")
 }
 
 // A stale decision (an offline replay older than the stored match) is
-// superseded before any refusal judges it: the T103 lock and the
-// already-barred check would otherwise answer it as something to resolve and
+// superseded before any refusal judges it: the already-barred check would otherwise answer it as something to resolve and
 // send again, when a newer result is already stored. A newer stamp still
 // meets each refusal, which is what makes these the controls.
 func TestRecordDecisionTx_StaleReplayIsSupersededBeforeTheRefusals(t *testing.T) {
@@ -414,28 +431,27 @@ func TestRecordDecisionTx_StaleReplayIsSupersededBeforeTheRefusals(t *testing.T)
 			{ID: "Pool A-1", SideA: "Carol", SideB: "Alice", Status: state.MatchStatusRunning, ModifiedAt: 10_000},
 		}))
 		// Alice withdraws in Pool A-0, stamped 10_000.
-		_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "first", nil, false, 10_000)
+		_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "first", nil, 10_000)
 		require.NoError(t, err)
 		return eng, store, compID
 	}
 	decide := func(eng *Engine, store *state.Store, compID, matchID, decisionBy string, stamp int64) error {
 		var engErr error
 		_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-			_, _, engErr = eng.RecordDecisionTx(tx, compID, matchID, "kiken", decisionBy, "replay", nil, false, stamp)
+			_, _, engErr = eng.RecordDecisionTx(tx, compID, matchID, "kiken", decisionBy, "replay", nil, stamp)
 			return nil
 		})
 		return engErr
 	}
 
-	t.Run("the T103 lock", func(t *testing.T) {
-		// Undoing Pool A-0's kiken while Alice's Pool A-1 is running.
+	t.Run("a withdrawal moved to the other side", func(t *testing.T) {
+		// Moving Pool A-0's kiken to the other side while Alice's Pool A-1 is running.
 		eng, store, compID := setup(t)
 		err := decide(eng, store, compID, "Pool A-0", "shiro", 5_000)
 		require.ErrorIs(t, err, ErrMatchSuperseded)
-		assert.NotErrorIs(t, err, ErrDecisionLocked)
 
 		err = decide(eng, store, compID, "Pool A-0", "shiro", 20_000)
-		assert.ErrorIs(t, err, ErrDecisionLocked, "a newer stamp still meets the lock")
+		assert.NoError(t, err, "a newer stamp applies")
 	})
 
 	t.Run("the already-barred check", func(t *testing.T) {
@@ -624,7 +640,7 @@ func TestStartMatchTx_BlocksIneligibleParticipant(t *testing.T) {
 		{ID: "Pool A-1", SideA: "Alice", SideB: "Carol", Status: state.MatchStatusScheduled},
 	}))
 	// Kiken Alice from Pool A-0.
-	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "knee", nil, false)
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "knee", nil)
 	require.NoError(t, err)
 
 	// StartMatchTx for Pool A-1 (different match, Alice still a

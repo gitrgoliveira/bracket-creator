@@ -26,14 +26,14 @@
 // tx-shaped orchestration, not duplicated persistence.
 //
 // A follow-up pass collapsed four more twins the same way: lookupMatchSides,
-// checkConcurrentIneligibility, hasDownstreamMatchStarted, and (at the time)
+// checkConcurrentIneligibility, and (at the time)
 // restoreCompetitorEligibility, all taking `h`. restoreCompetitorEligibility
 // itself was later removed outright (second-Opus-pass item 3):
 // RecordDecisionTx's restore-on-rescore no longer re-derives the prior
 // loser's identity from the match's side names/ids at all -- it restores
 // whichever competitor-status entry carries this exact MatchID and is still
 // Eligible:false, which is exact by construction and needs no roster lookup.
-// lookupMatchSides, checkConcurrentIneligibility and hasDownstreamMatchStarted
+// lookupMatchSides and checkConcurrentIneligibility
 // remain, living in eligibility.go, taking `h`.
 // RecordDecisionTx below is the last of the original hand-copied pairs to be
 // resolved — unlike the others it keeps ITS name (mobileapp's ScoringEngine
@@ -933,48 +933,36 @@ func clientWriteStamp(stamp []int64) int64 {
 // points it had already struck (FIK Art. 32, via preserveLoserScore).
 //
 // When the match already has a kiken/fusenpai decision recorded (the
-// "undo" path, T103/CHK024) the engine enforces the
-// contracts/match-decisions.md §Decision lock & undo rule: if any
-// subsequent match involving either prior participant has started
-// since the original decision was recorded, the engine returns
-// ErrDecisionLocked unless force is true. On a successful overwrite
-// where the prior loser is no longer the new loser, the prior loser's
-// CompetitorStatus is restored to Eligible: true and surfaced as the
-// returned status so the handler can broadcast the change.
+// "undo" path) the write is never refused for what the competitors have
+// done since: recording the withdrawal on the other side applies with no
+// confirm and changes no other match (operator ruling 2026-09-27, "do not
+// cascade"). On a successful overwrite where the prior loser is no longer
+// the new loser, the prior loser's CompetitorStatus is restored to
+// Eligible: true and surfaced as the returned status so the handler can
+// broadcast the change.
 //
-// Runs the sides lookup, the T105 concurrent-kiken check, the T103
-// downstream-match lock check, the match write, and the prior-loser
-// eligibility restore on undo, ALL through the supplied tx, so the whole
-// sequence commits under ONE per-comp lock acquire (T156).
+// Runs the sides lookup, the T105 concurrent-kiken check, the match write,
+// and the prior-loser eligibility restore on undo, ALL through the supplied
+// tx, so the whole sequence commits under ONE per-comp lock acquire (T156).
 //
 // This is the canonical body: RecordDecision (eligibility.go) is a thin
-// WithTransaction shim over this function — bc-twin, mirroring the
+// WithTransaction shim over this function (bc-twin, mirroring the
 // RecordMatchResultWithIneligibility / RecordMatchResultWithIneligibilityTx
-// pair in scoring.go / scoring_tx.go. Call this directly when already
+// pair in scoring.go / scoring_tx.go). Call this directly when already
 // inside a WithTransaction closure (e.g. the decision HTTP handler); call
 // RecordDecision otherwise.
 //
-// T090, T103, T156, contracts/match-decisions.md §POST /decision, bc-twin.
+// T090, T156, contracts/match-decisions.md §POST /decision, bc-twin.
 //
-// bc-cse finding 5: force here governs ONLY the T103 downstream-match lock
-// above -- a different operator confirmation from the bc-kcdg
-// downstream-knockout-correction guard the underlying write applies (see
-// applyBracketResultIn / guardDownstreamKnockoutCorrection). This entry
-// point has always reused the SAME value for both, and its own
-// RecordMatchResultWithIneligibilityTx call below still does, purely
-// because every existing caller (the /decision HTTP handler, deps.go's
-// ScoringEngine interface, this function's own tests) has exactly ONE
-// force flag to give it and no channel to receive the reopened ids back --
-// see RecordDecisionTxWithOptions for the twin that decouples the two and
-// surfaces Reopened. RecordDecisionTx stays the pre-existing behaviour so
-// none of those callers need to change.
-func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
-	return e.recordDecisionTx(tx, compID, matchID, decision, decisionBy, decisionReason, encho, force, ForceOptions{}, clientWriteStamp(modifiedAt))
+// The underlying write applies the bc-kcdg downstream-knockout-correction
+// guard with an EMPTY ForceOptions here; RecordDecisionTxWithOptions is the
+// twin that carries the operator's bc-kcdg answer and surfaces Reopened.
+func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
+	return e.recordDecisionTx(tx, compID, matchID, decision, decisionBy, decisionReason, encho, ForceOptions{}, clientWriteStamp(modifiedAt))
 }
 
 // RecordDecisionTxWithOptions is RecordDecisionTx's bc-kcdg-aware twin
-// (bc-cse finding 5). `force` still governs ONLY the T103 downstream-match
-// lock (the "undo" override); `kcdgOpts` is the SEPARATE authorization for
+// (bc-cse finding 5). `kcdgOpts` is the authorization for
 // the bc-kcdg downstream-knockout-correction guard the underlying bracket
 // write applies, and its Reopened field, when non-nil, is populated with
 // the ids of every bracket match the write forced open -- the same contract
@@ -985,8 +973,8 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 // confirmations, or has only one flag to give, should keep calling
 // RecordDecisionTx instead (source-compatible with every caller that
 // predates this split).
-func (e *Engine) RecordDecisionTxWithOptions(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool, kcdgOpts ForceOptions, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
-	return e.recordDecisionTx(tx, compID, matchID, decision, decisionBy, decisionReason, encho, force, kcdgOpts, clientWriteStamp(modifiedAt))
+func (e *Engine) RecordDecisionTxWithOptions(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, kcdgOpts ForceOptions, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
+	return e.recordDecisionTx(tx, compID, matchID, decision, decisionBy, decisionReason, encho, kcdgOpts, clientWriteStamp(modifiedAt))
 }
 
 // recordDecisionTx is the canonical body RecordDecisionTx and
@@ -997,11 +985,11 @@ func (e *Engine) RecordDecisionTxWithOptions(tx state.StoreTx, compID, matchID, 
 // the resolved clientWriteStamp value (a plain int64, since a private
 // function need not preserve the exported variadic ergonomics its two
 // public callers offer for their own source compatibility).
-func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool, kcdgOpts ForceOptions, modifiedAtStamp int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
+func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, kcdgOpts ForceOptions, modifiedAtStamp int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
 	if decisionBy != "shiro" && decisionBy != "aka" {
 		return nil, nil, validationErrorf("decisionBy must be 'shiro' or 'aka', got %q", decisionBy)
 	}
-	// T103: look up the prior result FIRST (ahead of the T105 concurrent
+	// Look up the prior result FIRST (ahead of the T105 concurrent
 	// check below, which needs it): for a pool match this already carries
 	// the generation-time SideAID/SideBID (stamped once at draw time,
 	// present even before the match is ever scored, mirrors pools.go), which
@@ -1035,7 +1023,7 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// A stale decision (an offline replay older than the stored match) is
 	// superseded before anything judges it: the write below would hold it by
 	// this same rule (the merge, mergeMatchWrite), so the refusals that follow
-	// (already barred, a running later match, the T103 lock) would only
+	// (already barred, a running later match) would only
 	// misreport it as something to resolve and send again, when a newer
 	// change is already stored. It is kept in the match's history (bc-mrgc).
 	if decisionHeldByMerge(prior, result, comp) {
@@ -1046,9 +1034,9 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// An exact replay of the decision already recorded (the same decision,
 	// side and stamp: a queued write whose first send landed but whose answer
 	// was lost) is that same write landing again, so it answers as recorded,
-	// before any refusal below (the T103 lock would otherwise refuse the
-	// replay of a withdrawal whose competitor has a later match under way,
-	// and the client would report a recorded result as refused). It changes
+	// before any refusal below (the running-match refusal would otherwise
+	// refuse the replay of a withdrawal whose competitor has a later match
+	// under way, and the client would report a recorded result as refused). It changes
 	// nothing; its history entry says so (bc-mrgc phase 3).
 	if exactDecisionReplay(prior, decision, decisionBy, modifiedAtStamp) {
 		probe := *result
@@ -1108,52 +1096,21 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 			return nil, nil, cerr
 		}
 	}
-	hadPriorLoser := false
-	if domain.IsWithdrawalDecisionStr(prior.Decision) {
-		// losingSide, so a prior decision that itself came through
-		// RecordDecisionTx -- and so already carries WinnerSide -- is
-		// attributed by that authoritative hint rather than an ambiguous
-		// name/ippon guess. hadPriorLoser=false (skipping the T103 lock
-		// below, i.e. failing OPEN) is losingSide's answer whenever it
-		// cannot attribute the loss at all; see its own doc comment for the
-		// one known, narrow case that reaches.
-		_, name, ok := losingSide(prior)
-		hadPriorLoser = ok && name != ""
-	}
-	// bc-rfsw: refused BEFORE the T103 lock below, so the operator is never
-	// asked to confirm a write the bracket write would then refuse.
+	// bc-rfsw: a decision reaching a later match already being fought is
+	// refused outright (terminal, not confirmable).
 	if err := refuseDecisionReachingRunningMatch(tx, compID, matchID, decisionBy, prior); err != nil {
 		return nil, nil, err
 	}
-	// T103: downstream-match check. The contract scope is "either
-	// participant", if any subsequent match for either side has been
-	// started or completed since the kiken/fusenpai, refuse the undo
-	// unless force is set.
-	if hadPriorLoser && !force {
-		started, err := e.hasDownstreamMatchStarted(tx, compID, []string{sideA, sideB}, matchID)
-		if err != nil {
-			return nil, nil, err
-		}
-		if started {
-			return nil, nil, ErrDecisionLocked
-		}
-	}
-	// kcdgOpts is the caller's own bc-kcdg authorization and is NOT derived
-	// from the T103 `force` above. They answer different questions: T103's
-	// force confirms undoing a kiken or fusenpai whose loser has since been
-	// scheduled, while this one confirms clearing an already-played later
-	// match. Feeding T103's flag in here (as the first cut did) meant an
-	// operator confirming an unrelated decision-lock override silently
-	// authorized a round being requeued, with no dialog naming it.
-	// RecordDecisionTx therefore passes an EMPTY ForceOptions; only
-	// RecordDecisionTxWithOptions callers, which have the operator's actual
-	// answer, can set it, and they read back the reopened ids via
-	// kcdgOpts.Reopened.
+	// kcdgOpts is the caller's own bc-kcdg authorization (confirming the
+	// clearing of an already-played later match). RecordDecisionTx passes an
+	// EMPTY ForceOptions; only RecordDecisionTxWithOptions callers, which have
+	// the operator's actual answer, can set it, and they read back the
+	// reopened ids via kcdgOpts.Reopened.
 	status, err := e.RecordMatchResultWithIneligibilityTx(tx, compID, matchID, result, kcdgOpts)
 	if err != nil {
 		return nil, nil, err
 	}
-	// T103 undo: the write above already restored whoever the withdrawal it
+	// Undo: the write above already restored whoever the withdrawal it
 	// replaced had barred (restoreIfWithdrawalRemoved, called by
 	// RecordMatchResultWithIneligibilityTx for every door), keeping the new
 	// withdrawer, and returned the restored status in priority. A second
@@ -1267,7 +1224,7 @@ func (e *Engine) holdWriteTx(tx state.StoreTx, compID, matchID string, result *s
 // whose winner (the side decisionBy does not name, exactly as
 // recordDecisionTx assigns it) differs from the one already propagated, while
 // a later match it fed is being fought, is a *DownstreamKnockoutRunningError.
-// Asked before the T103 decision lock so no confirm precedes a write that
+// Asked before the write so no confirm precedes a write that
 // would be refused (operator decision 2026-09-27). It asks the score door's
 // own rules (propagatedWinnerOf, winnerDiffers, downstreamCorrectionRefusal
 // with force, so only the running half applies) rather than a copy of them.

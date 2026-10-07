@@ -547,7 +547,7 @@ function makeSubmitDecision({
   setPendingWrite,
   pendingFnRef,
 }) {
-  const submit = async (kind, { decisionBy, decisionReason }, opts = {}) => {
+  const submit = async (kind, { decisionBy, decisionReason }) => {
     setDecisionSubmitting(true);
     setDecisionErr('');
     // F5: clear any prior pending-write state when the operator retries.
@@ -555,7 +555,7 @@ function makeSubmitDecision({
     try {
       const updated = await submitDecisionRequest(
         match.compId, match.id, kind, { decisionBy, decisionReason }, enchoPeriodCount, password,
-        { ...opts, seenModifiedAt: match.modifiedAt || 0 },
+        { seenModifiedAt: match.modifiedAt || 0 },
       );
       if (!mountedRef.current) return;
       // A decision that did not land must not advance ANYTHING below this
@@ -581,7 +581,7 @@ function makeSubmitDecision({
       if (writeDidNotLand(updated)) {
         if (setPendingWrite && writeRetryable(updated)) {
           setPendingWrite(updated);
-          if (pendingFnRef) pendingFnRef.current = () => submit(kind, { decisionBy, decisionReason }, opts);
+          if (pendingFnRef) pendingFnRef.current = () => submit(kind, { decisionBy, decisionReason });
         }
         return;
       }
@@ -811,7 +811,13 @@ function DecisionPrompt({ kind, sideA, sideB, askReason, onCancel, onSubmit, sub
   const title = isKiken || kind === "fusenpai"
     ? React.createElement(TermAS, { name: kind }, withdrawalLabel(kind))
     : "Decision";
-  const sideName = (key) => (key === "shiro" ? sideB?.name : sideA?.name) || (key === "shiro" ? "Shiro" : "Aka");
+  // Each side's words and competitor, in one place: Shiro is sideB, Aka is
+  // sideA, as everywhere in the editors. The side word comes from sideWord.
+  const sides = {
+    shiro: { colour: "White", name: sideB?.name },
+    aka: { colour: "Red", name: sideA?.name },
+  };
+  const nameOf = (key) => sides[key].name || sideWord(key);
 
   const submit = (e) => {
     e?.preventDefault?.();
@@ -820,10 +826,10 @@ function DecisionPrompt({ kind, sideA, sideB, askReason, onCancel, onSubmit, sub
   };
 
   const verb = isKiken ? "withdrew" : "did not show up";
-  const sideOption = (key, word, colour, name) => (
+  const sideOption = (key) => (
     <label className={`radio-pill decision-prompt__side${side === key ? " is-active" : ""}`}>
       <input type="radio" name="decision-side" value={key} checked={side === key} onChange={() => setSide(key)} />
-      <span>{word} ({colour}){name ? `: ${name}` : ""}</span>
+      <span>{sideWord(key).toUpperCase()} ({sides[key].colour}){sides[key].name ? `: ${sides[key].name}` : ""}</span>
     </label>
   );
 
@@ -832,13 +838,13 @@ function DecisionPrompt({ kind, sideA, sideB, askReason, onCancel, onSubmit, sub
       <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>{title}</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
         <div style={{ fontWeight: 600 }}>{isKiken ? "Which side withdrew?" : "Which side did not show up?"}</div>
-        <div className="decision-prompt__sides">
-          {sideOption("shiro", "SHIRO", "White", sideB?.name)}
-          {sideOption("aka", "AKA", "Red", sideA?.name)}
+        <div className="radio-group">
+          {sideOption("shiro")}
+          {sideOption("aka")}
         </div>
         {side ? (
           <div className="decision-prompt__consequence" data-testid="decision-prompt-consequence" aria-live="polite">
-            {withdrawalConsequence(kind, sideName(side), sideName(side === "shiro" ? "aka" : "shiro"))}
+            {withdrawalConsequence(kind, nameOf(side), nameOf(side === "shiro" ? "aka" : "shiro"))}
           </div>
         ) : (
           <div className="decision-prompt__hint" data-testid="decision-prompt-hint">
@@ -865,7 +871,7 @@ function DecisionPrompt({ kind, sideA, sideB, askReason, onCancel, onSubmit, sub
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
         <button type="button" className="btn btn--sm" onClick={onCancel} disabled={submitting}>Cancel</button>
         <button type="submit" className="btn btn--primary btn--sm" disabled={submitting || !side}>
-          {submitting ? "Saving…" : side ? `Record: ${side === "shiro" ? "SHIRO" : "AKA"} ${verb}` : "Record"}
+          {submitting ? "Saving…" : side ? `Record: ${sideWord(side).toUpperCase()} ${verb}` : "Record"}
         </button>
       </div>
     </form>

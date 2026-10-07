@@ -969,10 +969,8 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 // RecordMatchResultWithIneligibility(Tx) and OverrideBracketWinner already
 // give their callers, so this decision entry point no longer silently drops
 // the list and leaves the caller unable to broadcast match_updated for the
-// reopened matches. A caller that does not need to distinguish the two
-// confirmations, or has only one flag to give, should keep calling
-// RecordDecisionTx instead (source-compatible with every caller that
-// predates this split).
+// reopened matches. A caller with no bc-kcdg answer to give calls
+// RecordDecisionTx, which passes an empty ForceOptions.
 func (e *Engine) RecordDecisionTxWithOptions(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, kcdgOpts ForceOptions, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
 	return e.recordDecisionTx(tx, compID, matchID, decision, decisionBy, decisionReason, encho, kcdgOpts, clientWriteStamp(modifiedAt))
 }

@@ -2,7 +2,6 @@ package engine
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -384,11 +383,7 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 	// of the old storage-order scheduling owes it nothing (TimesSettled).
 	// A pools + knockout draw starts each court's knockout after that court's
 	// last pool bout (bc-kosc); knockout-only (nil poolMatches) keeps the day start.
-	var courtStart map[string]time.Time
-	if len(poolMatches) > 0 {
-		courtStart = poolPhaseEndByCourt(poolMatches, comp, tournament)
-	}
-	assignBracketMatchSlots(bracket.Rounds, comp, tournament, courtStart)
+	assignBracketMatchSlots(bracket.Rounds, comp, tournament, poolPhaseEndByCourt(poolMatches, comp, tournament))
 	bracket.TimesSettled = true
 
 	// Bronze (3rd-place) knockout: only when this competition's format

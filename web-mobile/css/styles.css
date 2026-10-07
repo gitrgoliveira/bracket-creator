@@ -8605,12 +8605,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 
 /* --- Decision prompt side picker (bc-dsid) ------------------------------ */
-.decision-prompt__sides {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-/* The native radio stays in the tab order and the accessibility tree; the
+/* The side pills sit in a .radio-group row. The native radio stays in the tab order and the accessibility tree; the
    pill is what the eye and the thumb see. */
 .decision-prompt__side {
   position: relative;

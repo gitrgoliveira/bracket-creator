@@ -1130,41 +1130,9 @@ describe('subBoutHasBeenPlayed (drops untouched kachinuki bouts)', () => {
 // Item 7: hantei and fusenpai must route through onSubmitAndNext/onAfterDecision
 // so the next match on the same court is started without an extra operator tap.
 describe('item 7: non-points decisions advance to next match', () => {
-  // A hantei is committed by Finish (bc-htsd; hantei_single_tap.render.test.jsx
-  // pins it through the real editor), whose routing logic
-  //   `(!isComplete && onSubmitAndNext) ? onSubmitAndNext: onSubmit`
-  // is a pure predicate we can test directly.
-  it('routes hantei to onSubmitAndNext when provided and match is not a correction', () => {
-    const onSubmit = vi.fn();
-    const onSubmitAndNext = vi.fn();
-    const isComplete = false; // live match, not a correction
-    const submitFn = (!isComplete && onSubmitAndNext) ? onSubmitAndNext : onSubmit;
-    const patch = { winner: { id: 'p1', name: 'Hayashi' }, decidedByHantei: true, status: 'completed' };
-    submitFn(patch);
-    expect(onSubmitAndNext).toHaveBeenCalledWith(patch);
-    expect(onSubmit).not.toHaveBeenCalled();
-  });
-
-  it('routes hantei to onSubmit (not onSubmitAndNext) when correcting a completed match', () => {
-    const onSubmit = vi.fn();
-    const onSubmitAndNext = vi.fn();
-    const isComplete = true; // correction: do not auto-advance
-    const submitFn = (!isComplete && onSubmitAndNext) ? onSubmitAndNext : onSubmit;
-    const patch = { winner: { id: 'p1', name: 'Hayashi' }, decidedByHantei: true, status: 'completed' };
-    submitFn(patch);
-    expect(onSubmit).toHaveBeenCalledWith(patch);
-    expect(onSubmitAndNext).not.toHaveBeenCalled();
-  });
-
-  it('routes hantei to onSubmit when onSubmitAndNext is not provided', () => {
-    const onSubmit = vi.fn();
-    const onSubmitAndNext = undefined;
-    const isComplete = false;
-    const submitFn = (!isComplete && onSubmitAndNext) ? onSubmitAndNext : onSubmit;
-    const patch = { winner: { id: 'p2', name: 'Mori' }, decidedByHantei: true, status: 'completed' };
-    submitFn(patch);
-    expect(onSubmit).toHaveBeenCalledWith(patch);
-  });
+  // A hantei is committed by Finish and routed like any finish; that path is
+  // pinned through the real editor in hantei_single_tap.render.test.jsx
+  // (bc-htsd), so no copy of the routing ternary is tested here.
 
   // makeSubmitDecision: onAfterDecision is called for fusenpai when provided
   // and the match is not complete.

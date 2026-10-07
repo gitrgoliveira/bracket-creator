@@ -1016,24 +1016,30 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // The "Another bout is running" list: the bouts beyond the one the panel
     // shows, plus the running one itself while a correction holds the panel.
     const alsoRunning = openCorrection ? running : running.slice(1);
-    // The notice for a refused tap, derived: text only while its condition
-    // still holds, composed from the live match each render.
+    // What refuses a tap right now, by kind: a live bout refuses a Correct,
+    // an open correction refuses a Start. ONE place builds each sentence, for
+    // the toast and the notice alike.
+    const refusalBlocker = (why) => (why === "running" ? liveBout : openCorrection);
+    const refusalText = (why) => {
+        const blocker = refusalBlocker(why);
+        if (!blocker) return null;
+        return why === "running"
+            ? correctWhileRunningMessage({ court, label: scoreRowMatchName(blocker) })
+            : startWhileCorrectingMessage({ label: scoreRowMatchName(blocker) });
+    };
+    // The notice for a refused tap, derived: shown only while the match that
+    // refused it still does, so it goes by itself when that match is finished,
+    // sent back or cancelled, and a later, unrelated one never revives it.
     const refusalNotice = (key) => {
         if (!refusedTap || refusedTap.key !== key) return null;
-        if (refusedTap.why === "running" && liveBout) {
-            return correctWhileRunningMessage({ court, label: scoreRowMatchName(liveBout) });
-        }
-        if (refusedTap.why === "correcting" && openCorrection) {
-            return startWhileCorrectingMessage({ label: scoreRowMatchName(openCorrection) });
-        }
-        return null;
+        const blocker = refusalBlocker(refusedTap.why);
+        return blocker && matchKey(blocker) === refusedTap.against ? refusalText(refusedTap.why) : null;
     };
-    // Drop the stored tap once its condition ends, so a later, unrelated
-    // running match or correction cannot bring an old refusal back.
-    const refusalHolds = !!refusedTap && (refusedTap.why === "running" ? !!liveBout : !!openCorrection);
-    useEffectSh(() => {
-        if (refusedTap && !refusalHolds) setRefusedTap(null);
-    }, [refusedTap, refusalHolds]);
+    // Refuse a tap: remember it against the match that blocks it, and toast.
+    const refuseTap = (m, why) => {
+        setRefusedTap({ key: matchKey(m), why, against: matchKey(refusalBlocker(why)) });
+        if (showToast) showToast(refusalText(why), "error");
+    };
 
     // For pool daihyosen/tiebreaker bouts, enrich the selected match with
     // rep-player roster data so ScoreEditorModal renders the rep-picker dropdowns
@@ -1116,6 +1122,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // queue row (the default-win action, or Reinstate) rather than having it
     // offered as the next thing to start.
     const upNext = filteredScheduled.find((m) => !isBarredMatch(m)) || null;
+    // The Up next card's alert line: a refused tap's notice wins over a stored
+    // start refusal, being the newer tap.
+    const upNextNotice = upNext
+        ? refusalNotice(matchKey(upNext)) || (startError && startError.key === matchKey(upNext) ? startError.msg : null)
+        : null;
     // Everything else in Upcoming: the whole scheduled list minus whichever
     // match became Up Next (by key, not index: Up Next may not be [0] when a
     // barred match sits ahead of it). Any barred match stays here, rendered
@@ -1275,8 +1286,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const pickMatch = async (m) => {
         if (!m || m.status === "completed") return;
         if (openCorrection) {
-            setRefusedTap({ key: matchKey(m), why: "correcting" });
-            if (showToast) showToast(startWhileCorrectingMessage({ label: scoreRowMatchName(openCorrection) }), "error");
+            refuseTap(m, "correcting");
             return;
         }
         setRefusedTap(null);
@@ -1326,8 +1336,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const correctMatch = (m) => {
         if (!m || m.status !== "completed") return;
         if (liveBout) {
-            setRefusedTap({ key: matchKey(m), why: "running" });
-            if (showToast) showToast(correctWhileRunningMessage({ court, label: scoreRowMatchName(liveBout) }), "error");
+            refuseTap(m, "running");
             return;
         }
         setRefusedTap(null);
@@ -1676,12 +1685,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                                 <button type="button" className="btn btn--sm btn--ghost" aria-label="Move down" onClick={() => moveMatch(upNext, "down")} title="Move this match later in the queue">↓</button>
                                             )}
                                         </div>
-                                        {(() => {
-                                            // The newer tap's notice wins over a stored start refusal.
-                                            const msg = refusalNotice(matchKey(upNext))
-                                                || (startError && startError.key === matchKey(upNext) ? startError.msg : null);
-                                            return msg ? <div className="shiaijo-upnext__error" role="alert">{msg}</div> : null;
-                                        })()}
+                                        {upNextNotice && <div className="shiaijo-upnext__error" role="alert">{upNextNotice}</div>}
                                         <div className="shiaijo-upnext__hint">
                                             {calledKey === matchKey(upNext)
                                                 ? "Announced to spectators. Start the match when both are at the line."

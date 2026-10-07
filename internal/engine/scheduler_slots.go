@@ -314,11 +314,11 @@ func assignBracketMatchSlots(rounds [][]state.BracketMatch, comp *state.Competit
 		return time.Time{}
 	}
 	dayStart, openingMin, lunchMin, lunchStart := parseCeremonyParams(comp, tournament)
+	openAt := dayStart.Add(time.Duration(openingMin) * time.Minute)
 	if len(rounds) == 0 {
-		return dayStart.Add(time.Duration(openingMin) * time.Minute)
+		return openAt
 	}
 
-	openAt := dayStart.Add(time.Duration(openingMin) * time.Minute)
 	startFor := func(court string) time.Time {
 		if t, ok := courtStart[court]; ok && t.After(openAt) {
 			return t

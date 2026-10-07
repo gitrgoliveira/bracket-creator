@@ -839,7 +839,7 @@ export function startWhileCorrectingMessage({ label }) {
 }
 
 export function correctWhileRunningMessage({ court, label }) {
-    return `Shiaijo ${court} is running ${label}. Finish it or send it back to the queue first, then correct this match.`;
+    return `${courtBusyMessage({ court, label })} Then correct this match.`;
 }
 
 // runningParts names the matches being fought and where, the same words as

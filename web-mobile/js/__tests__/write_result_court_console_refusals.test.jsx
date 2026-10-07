@@ -15,7 +15,7 @@ describe('startWhileCorrectingMessage', () => {
 describe('correctWhileRunningMessage', () => {
     it('names the court and the running bout, with the court-busy remedy', () => {
         const msg = correctWhileRunningMessage({ court: 'A', label: 'Match 3 · Ito vs Abe' });
-        expect(msg).toBe('Shiaijo A is running Match 3 · Ito vs Abe. Finish it or send it back to the queue first, then correct this match.');
+        expect(msg).toBe('Shiaijo A is running Match 3 · Ito vs Abe. Finish it or send it back to the queue first. Then correct this match.');
         // Same wording and order as the server's court-busy refusal, plus the next step.
         expect(msg.startsWith(courtBusyMessage({ court: 'A', label: 'Match 3 · Ito vs Abe' }).replace(/\.$/, ''))).toBe(true);
     });

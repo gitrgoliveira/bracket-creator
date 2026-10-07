@@ -3,6 +3,8 @@ import { render, fireEvent, act, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
+import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
+import { pointerTap, keyboardClick } from '../helpers/tap_events.js';
 
 // bc-htsd: the SHIRO wins / AKA wins buttons only PICK a side. Finish (under
 // the two-tap guard) commits, so a mis-tap on the neighbouring button cannot
@@ -50,7 +52,10 @@ const tied = (overrides = {}) => ({
   ...overrides,
 });
 
-const click = (el) => act(async () => { fireEvent.click(el); });
+// Most steps are keyboard-style clicks (no bounce guard); the Finish two-tap
+// below is driven as a real finger would, through the bounce window.
+const click = keyboardClick;
+const wait = (ms) => act(async () => { vi.advanceTimersByTime(ms); });
 const finishBtn = () => [...document.querySelectorAll('.score-nav button')].find((b) => /Finish|Tap again/.test(b.textContent));
 const armAndPick = async (testid) => {
   await click(screen.getByTestId('scoring-modal-hantei-arm'));
@@ -59,6 +64,7 @@ const armAndPick = async (testid) => {
 
 describe('hantei side buttons only pick (bc-htsd)', () => {
   it('picking a side commits nothing; Finish, tapped twice, commits exactly the pick', async () => {
+    vi.useFakeTimers();
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const onSubmitAndNext = vi.fn().mockResolvedValue(undefined);
     render(<ScoreEditorModal match={tied()} onClose={vi.fn()} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} password="" />);
@@ -68,9 +74,12 @@ describe('hantei side buttons only pick (bc-htsd)', () => {
     expect(screen.getByTestId('scoring-modal-hantei-aka').getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByTestId('scoring-modal-hantei-shiro').getAttribute('aria-pressed')).toBe('false');
 
-    await click(finishBtn());
+    await pointerTap(finishBtn());
     expect(onSubmitAndNext, 'the first Finish tap only arms').not.toHaveBeenCalled();
-    await click(finishBtn());
+    await pointerTap(finishBtn());
+    expect(onSubmitAndNext, 'the bounce of the arming tap does not commit').not.toHaveBeenCalled();
+    await wait(TAP_BOUNCE_MS + 50);
+    await pointerTap(finishBtn());
     expect(onSubmitAndNext).toHaveBeenCalledTimes(1);
     expect(onSubmit).not.toHaveBeenCalled();
     const patch = onSubmitAndNext.mock.calls[0][0];

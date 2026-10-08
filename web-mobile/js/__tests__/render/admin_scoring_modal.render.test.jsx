@@ -150,8 +150,7 @@ describe('ScoreEditorModal side labelling', () => {
 // bc-rfsw: a withdrawal re-recorded on a knockout match whose later match is
 // being fought now is refused (409 downstream_knockout_running, operator
 // decision 2026-09-27). The editor shows the operator's sentence on the
-// decision error line, asks nothing first (it is not decision_locked, so no
-// "Proceed anyway?"), and does not move the court on.
+// decision error line, asks nothing first (no "Proceed anyway?"), and does not move the court on.
 describe('ScoreEditorModal: a decision refused because a later match is being fought', () => {
   for (const [label, make] of [
     ['individual', () => makeIndividualMatch({ id: 'm-r1-0', compId: 'c1', status: 'running', phase: 'knockout', ipponsA: [], ipponsB: [] })],

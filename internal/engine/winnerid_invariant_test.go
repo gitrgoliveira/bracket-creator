@@ -90,7 +90,7 @@ func TestWinnerIDInvariant_EveryWritePathStampsASideID(t *testing.T) {
 		m := matches[0]
 
 		// decisionBy "aka" withdraws SideA; SideB survives as the winner.
-		_, _, err = eng.RecordDecision(compID, m.ID, "kiken", "aka", "voluntary", nil, false)
+		_, _, err = eng.RecordDecision(compID, m.ID, "kiken", "aka", "voluntary", nil)
 		require.NoError(t, err)
 
 		assertWinnerIDMatchesASide(t, loadPoolMatch(t, store, compID, m.ID))

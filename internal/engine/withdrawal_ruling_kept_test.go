@@ -70,7 +70,7 @@ func seedPoolWithdrawal(t *testing.T, decision string) (*Engine, *state.Store, s
 		ID: "Pool A-0", SideA: wrTeamA, SideAID: wrTeamAID, SideB: wrTeamB, SideBID: wrTeamBID,
 		Status: state.MatchStatusRunning, SubResults: []state.SubMatchResult{wrBout1("M")},
 	}}))
-	_, _, err := eng.RecordDecision(compID, "Pool A-0", decision, "aka", "knee", nil, false)
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", decision, "aka", "knee", nil)
 	require.NoError(t, err)
 	return eng, store, compID, dir
 }
@@ -197,7 +197,7 @@ func TestWithdrawalRulingKept_SingleBoutCorrectionKeepsTheRuling(t *testing.T) {
 				IpponsA: []string{"M"}, IpponsB: []string{"K"},
 				Status: state.MatchStatusRunning,
 			}}))
-			_, _, err := eng.RecordDecision(compID, tc.matchID, "kiken-voluntary", "aka", "knee", nil, false)
+			_, _, err := eng.RecordDecision(compID, tc.matchID, "kiken-voluntary", "aka", "knee", nil)
 			require.NoError(t, err)
 			ms, err := store.LoadPoolMatches(compID)
 			require.NoError(t, err)
@@ -259,7 +259,7 @@ func seedBracketWithdrawal(t *testing.T, bronze bool) (*Engine, *state.Store, st
 		}
 	}
 	require.NoError(t, store.SaveBracket(compID, b))
-	_, _, err := eng.RecordDecision(compID, matchID, "kiken-voluntary", "aka", "knee", nil, false)
+	_, _, err := eng.RecordDecision(compID, matchID, "kiken-voluntary", "aka", "knee", nil)
 	require.NoError(t, err)
 	if !bronze {
 		_, err = eng.RecordMatchResultWithIneligibility(compID, "m-r2-0", &state.MatchResult{
@@ -439,7 +439,7 @@ func TestWithdrawalRulingKept_OtherSideStillFixesAWrongWithdrawal(t *testing.T) 
 	_, err := eng.RecordMatchResultWithIneligibility(compID, "Pool A-0", wrCorrection("Pool A-0"))
 	require.NoError(t, err)
 
-	_, status, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "shiro", "wrong team", nil, false)
+	_, status, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "shiro", "wrong team", nil)
 	require.NoError(t, err)
 	require.NotNil(t, status)
 	assert.Equal(t, wrTeamAID, status.PlayerID)

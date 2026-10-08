@@ -70,7 +70,7 @@ func newRQFixture(t *testing.T, compID string, poolWinners int, names [][]string
 	draw := helper.BuildKnockoutDraw(pools, poolWinners, 1)
 	stored, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	bracket, err := eng.buildBracketFromDraw(stored, draw, nil)
+	bracket, err := eng.buildBracketFromDraw(stored, draw, nil, nil)
 	require.NoError(t, err)
 	require.NoError(t, store.SaveBracket(compID, bracket))
 	return &rqFix{t: t, eng: eng, store: store, compID: compID}
@@ -286,7 +286,7 @@ func TestRequalify_ForcedReopenRestoresWithdrawalEligibility(t *testing.T) {
 	if ko.SideA == "B1" {
 		decisionBy = "aka"
 	}
-	_, st, err := f.eng.RecordDecision(f.compID, ko.ID, "kiken-voluntary", decisionBy, "", nil, false)
+	_, st, err := f.eng.RecordDecision(f.compID, ko.ID, "kiken-voluntary", decisionBy, "", nil)
 	require.NoError(t, err)
 	require.NotNil(t, st)
 	require.Equal(t, rqID("B1"), st.PlayerID)
@@ -400,7 +400,7 @@ func TestRequalify_TieRevertsToLabelThenTieBreakSeats(t *testing.T) {
 func TestRequalify_ReopenThenFinish(t *testing.T) {
 	f := newRQFixture(t, "rq-reopen", 1, [][]string{{"A1", "A2"}, {"B1", "B2"}})
 	// A2 (shiro, SideB) withdraws from Pool A-0, so A1 qualifies.
-	_, _, err := f.eng.RecordDecision(f.compID, "Pool A-0", "kiken-voluntary", "shiro", "", nil, false)
+	_, _, err := f.eng.RecordDecision(f.compID, "Pool A-0", "kiken-voluntary", "shiro", "", nil)
 	require.NoError(t, err)
 	f.scorePool("Pool B-0", "B1")
 	f.resolve()

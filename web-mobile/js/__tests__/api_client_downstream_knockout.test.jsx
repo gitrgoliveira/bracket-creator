@@ -240,19 +240,19 @@ describe('API.recordDecision: downstream_knockout_played (bc-cse)', () => {
     });
   });
 
-  it('does not decorate an unrelated 409 (e.g. decision_locked)', async () => {
+  it('does not decorate an unrelated 409 (e.g. already_ineligible)', async () => {
     originalFetch = global.fetch;
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 409,
-      json: async () => ({ error: 'decision_locked' }),
+      json: async () => ({ error: 'already_ineligible' }),
     });
 
     const err = await API.recordDecision('c1', 'm1', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'pw').then(
       () => { throw new Error('expected a rejection'); },
       (e) => e,
     );
-    expect(err.message).toBe('decision_locked');
+    expect(err.message).toBe('already_ineligible');
     expect(downstreamKnockoutPlayedRefusal(err)).toBeNull();
   });
 

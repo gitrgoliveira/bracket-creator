@@ -427,7 +427,10 @@ describe('kachinuki reopen: a busy court gets a remedy, not a dead end', () => {
 
     expect(screen.queryByTestId('decision-reason')).toBeNull();
     expect(screen.queryByText(/ending it again needs a reason/)).toBeNull();
-    expect(screen.getByRole('button', { name: 'Record' }).disabled).toBe(false);
+    // No side is preselected: Record is off until one is picked, never because of a reason.
+    expect(screen.getByRole('button', { name: 'Record' }).disabled).toBe(true);
+    fireEvent.click(document.querySelector('input[name="decision-side"][value="aka"]'));
+    expect(screen.getByRole('button', { name: /^Record: / }).disabled).toBe(false);
   });
 
   it('leaves the reason optional when the match was not reopened', async () => {
@@ -435,7 +438,10 @@ describe('kachinuki reopen: a busy court gets a remedy, not a dead end', () => {
     await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-fusenpai-button')); });
 
     expect(screen.queryByTestId('decision-reason')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Record' }).disabled).toBe(false);
+    // No side is preselected: Record is off until one is picked, never because of a reason.
+    expect(screen.getByRole('button', { name: 'Record' }).disabled).toBe(true);
+    fireEvent.click(document.querySelector('input[name="decision-side"][value="aka"]'));
+    expect(screen.getByRole('button', { name: /^Record: / }).disabled).toBe(false);
   });
 
   it('recovers when the atomic remedy fails on the target (downstream fought)', async () => {
@@ -959,7 +965,8 @@ describe('kachinuki encho stays on the bout, never on the encounter', () => {
     window.API.recordDecision = vi.fn().mockResolvedValue({ id: 'm1', status: 'completed' });
     await renderEditor({ match: reopenedKachinukiMatch({ encho: { periodCount: 1 } }) });
     await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-fusenpai-button')); });
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Record' })); });
+    await act(async () => { fireEvent.click(document.querySelector('input[name="decision-side"][value="aka"]')); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Record: / })); });
     await waitFor(() => expect(window.API.recordDecision).toHaveBeenCalledTimes(1));
     const body = window.API.recordDecision.mock.calls[0][2];
     expect(body.decision).toBe('fusenpai');
@@ -976,7 +983,8 @@ describe('kachinuki encho stays on the bout, never on the encounter', () => {
     expect(screen.getByTestId('scoring-modal-encho-checkbox')).toBeTruthy();
     expect(document.querySelector('.editor-modal__eyebrow').textContent).toContain('Overtime');
     await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-fusenpai-button')); });
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Record' })); });
+    await act(async () => { fireEvent.click(document.querySelector('input[name="decision-side"][value="aka"]')); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^Record: / })); });
     await waitFor(() => expect(window.API.recordDecision).toHaveBeenCalledTimes(1));
     expect(window.API.recordDecision.mock.calls[0][2].encho).toEqual({ periodCount: 1 });
   });

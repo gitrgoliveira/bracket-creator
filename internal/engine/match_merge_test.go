@@ -231,7 +231,7 @@ func TestMerge_EchoOfAHeldGroupIsNotListedAsHeld(t *testing.T) {
 		point.IpponsA = []string{"M"}
 		require.NoError(t, h.write(point))
 
-		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT1)
+		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, mmT1)
 		require.ErrorIs(t, err, ErrMatchSuperseded)
 		assert.NotContains(t, HeldGroupsOf(err), state.GroupEncho, "an echo of the stored overtime is not a held change")
 		assert.Contains(t, HeldGroupsOf(err), state.GroupResult)
@@ -258,7 +258,7 @@ func TestMerge_LateKikenOlderThanAPointIsHeld(t *testing.T) {
 			point.IpponsA = []string{"M"}
 			require.NoError(t, h.write(point))
 
-			_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT1)
+			_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, mmT1)
 			require.ErrorIs(t, err, ErrMatchSuperseded)
 			// The decision changes result, points and encho; it carries no
 			// overtime over a match with none, so encho echoes the stored
@@ -284,7 +284,7 @@ func TestMerge_LateKikenOlderThanAPointIsHeld(t *testing.T) {
 			point.IpponsA = []string{"M"}
 			require.NoError(t, h.write(point))
 
-			_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT1)
+			_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, mmT1)
 			require.ErrorIs(t, err, ErrMatchSuperseded)
 			m := h.load(t)
 			assert.Equal(t, state.MatchStatusRunning, m.Status)
@@ -299,7 +299,7 @@ func TestMerge_LateKikenOlderThanAPointIsHeld(t *testing.T) {
 			bout.SubResults = []state.SubMatchResult{{Position: 2, SideA: "r2", SideB: "t2", Winner: "r2", IpponsA: []string{"K"}}}
 			require.NoError(t, h.write(bout))
 
-			_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT1)
+			_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, mmT1)
 			require.ErrorIs(t, err, ErrMatchSuperseded, "a withdrawal declared before a bout was scored no longer describes the match")
 			m := h.load(t)
 			assert.Equal(t, state.MatchStatusRunning, m.Status)
@@ -321,7 +321,7 @@ func TestMerge_LateKikenOlderThanAPointIsHeld(t *testing.T) {
 			status := mmRunning(h, mmT2, state.GroupResult)
 			require.NoError(t, h.write(status))
 
-			_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT1)
+			_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, mmT1)
 			require.ErrorIs(t, err, ErrMatchSuperseded)
 			m := h.load(t)
 			assert.Empty(t, m.IpponsB, "no default-win circles without the withdrawal they belong to")
@@ -334,7 +334,7 @@ func TestMerge_LateKikenOlderThanAPointIsHeld(t *testing.T) {
 			point.IpponsA = []string{"M"}
 			require.NoError(t, h.write(point))
 
-			_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT2)
+			_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, mmT2)
 			require.NoError(t, err)
 			m := h.load(t)
 			assert.Equal(t, state.MatchStatusCompleted, m.Status)
@@ -353,7 +353,7 @@ func TestMerge_LateKikenOlderThanAPointIsHeld(t *testing.T) {
 func TestMerge_ScoringAfterAWithdrawalClearsIt(t *testing.T) {
 	bothBranches(t, func(t *testing.T, knockout bool) {
 		h := mmIndividual(t, knockout)
-		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT1)
+		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, mmT1)
 		require.NoError(t, err)
 		require.False(t, wrEligible(t, h.store, h.compID, wrTeamAID), "precondition: Ryu is barred")
 
@@ -383,7 +383,7 @@ func TestMerge_ScoringAfterADefaultWinForABarElsewhereIsHeld(t *testing.T) {
 	bothBranches(t, func(t *testing.T, knockout bool) {
 		h := mmIndividual(t, knockout)
 		// Ryu (aka) cannot fight: the default win is Tora's.
-		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "fusensho", "aka", "", nil, false, mmT1)
+		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "fusensho", "aka", "", nil, mmT1)
 		require.NoError(t, err)
 		before := h.load(t)
 		require.Equal(t, wrTeamB, before.Winner, "precondition: Tora has the default win")
@@ -452,7 +452,7 @@ func TestMerge_ScoringAfterATeamDefaultWinForABarElsewhereIsHeld(t *testing.T) {
 func TestMerge_ScoringAndOvertimeAfterADefaultWinAreBothHeld(t *testing.T) {
 	bothBranches(t, func(t *testing.T, knockout bool) {
 		h := mmIndividual(t, knockout)
-		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "fusensho", "aka", "", nil, false, mmT1)
+		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "fusensho", "aka", "", nil, mmT1)
 		require.NoError(t, err)
 		before := h.load(t)
 
@@ -478,7 +478,7 @@ func TestMerge_ScoringAndOvertimeAfterADefaultWinAreBothHeld(t *testing.T) {
 func TestMerge_OvertimeAloneAfterAWithdrawalIsHeld(t *testing.T) {
 	bothBranches(t, func(t *testing.T, knockout bool) {
 		h := mmIndividual(t, knockout)
-		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT1)
+		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, mmT1)
 		require.NoError(t, err)
 
 		board := mmRunning(h, mmT2, state.GroupEncho)
@@ -503,7 +503,7 @@ func TestMerge_OvertimeAloneAfterAWithdrawalIsHeld(t *testing.T) {
 func TestMerge_EchoedOvertimeOverADefaultWinAppliesAsANoOp(t *testing.T) {
 	bothBranches(t, func(t *testing.T, knockout bool) {
 		h := mmIndividual(t, knockout)
-		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "fusensho", "aka", "", nil, false, mmT1)
+		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "fusensho", "aka", "", nil, mmT1)
 		require.NoError(t, err)
 		before := h.load(t)
 		require.False(t, before.Encho.On(), "precondition: no overtime on a default win")
@@ -548,7 +548,7 @@ func TestMerge_OvertimeOverAHandSetWinnerAppliesWithNoReason(t *testing.T) {
 func TestMerge_ScoringAndOvertimeTogetherClearAWithdrawal(t *testing.T) {
 	bothBranches(t, func(t *testing.T, knockout bool) {
 		h := mmIndividual(t, knockout)
-		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT1)
+		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, mmT1)
 		require.NoError(t, err)
 		require.False(t, wrEligible(t, h.store, h.compID, wrTeamAID), "precondition: Ryu is barred")
 
@@ -577,7 +577,7 @@ func TestMerge_ScoringAndOvertimeTogetherClearAWithdrawal(t *testing.T) {
 // holding the scoring AND the overtime together.
 func TestMerge_ClearingAWithdrawalThatWouldTieAKnockoutLeavesItStanding(t *testing.T) {
 	h := mmIndividual(t, true)
-	_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT1)
+	_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, mmT1)
 	require.NoError(t, err)
 	before := h.load(t)
 
@@ -607,7 +607,7 @@ func TestMerge_ClearingAWithdrawalThatWouldTieAKnockoutLeavesItStanding(t *testi
 // behaviour, unaffected by the knockout fix above.
 func TestMerge_ClearingAWithdrawalThatTiesAPoolMatchBecomesADraw(t *testing.T) {
 	h := mmIndividual(t, false)
-	_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT1)
+	_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, mmT1)
 	require.NoError(t, err)
 
 	board := mmRunning(h, mmT2, state.GroupPoints, state.GroupEncho)
@@ -630,14 +630,14 @@ func TestMerge_ClearingAWithdrawalThatTiesAPoolMatchBecomesADraw(t *testing.T) {
 func TestMerge_SameDecisionSentAgainLeavesAReinstatement(t *testing.T) {
 	bothBranches(t, func(t *testing.T, knockout bool) {
 		h := mmIndividual(t, knockout)
-		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-injury", "aka", "knee", nil, false, mmT1)
+		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-injury", "aka", "knee", nil, mmT1)
 		require.NoError(t, err)
 		require.False(t, wrEligible(t, h.store, h.compID, wrTeamAID), "precondition: Ryu is barred")
 		_, err = h.eng.ReinstateCompetitor(h.compID, wrTeamAID)
 		require.NoError(t, err)
 		require.True(t, wrEligible(t, h.store, h.compID, wrTeamAID), "precondition: Ryu is reinstated")
 
-		_, status, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-injury", "aka", "knee", nil, false, mmT2)
+		_, status, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-injury", "aka", "knee", nil, mmT2)
 		require.NoError(t, err)
 		assert.Nil(t, status, "a verdict that did not move records no status")
 		assert.True(t, wrEligible(t, h.store, h.compID, wrTeamAID), "the reinstatement stands")
@@ -692,8 +692,8 @@ func TestMerge_NamedEchoTakesItsOwnStamp(t *testing.T) {
 // the stored result group's stamp to the replay's own stamp, so a decision
 // echoed at T2 must leave the result group stamped T2 -- not reverted to
 // T1, the stamp of the ORIGINAL send -- or a later exact replay of the T2
-// send can no longer recognise itself and falls through to the T103
-// downstream lock instead of being answered as already recorded.
+// send can no longer recognise itself and falls through to
+// the ordinary write instead of being answered as already recorded.
 func TestMerge_ExactReplayOfANamedEchoedDecisionStillMatches(t *testing.T) {
 	h := mmIndividual(t, false)
 	ms, err := h.store.LoadPoolMatches(h.compID)
@@ -704,20 +704,19 @@ func TestMerge_ExactReplayOfANamedEchoedDecisionStillMatches(t *testing.T) {
 	})
 	require.NoError(t, h.store.SavePoolMatches(h.compID, ms))
 
-	_, _, err = h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT1)
+	_, _, err = h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, mmT1)
 	require.NoError(t, err)
 
 	// The same decision sent again: it moves nothing (an echo), but a
 	// decision always names its groups (decisionChangedGroups), so under
 	// the fix it still takes T2 as the result group's own stamp.
-	_, status, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT2)
+	_, status, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, mmT2)
 	require.NoError(t, err)
 	assert.Nil(t, status, "the echo moved nothing, so it has no eligibility consequence")
 	afterEcho := h.load(t)
 	assert.Equal(t, mmT2, afterEcho.GroupStamp(state.GroupResult), "the named echo took its own stamp")
 
-	// The withdrawer's later match is put under way, which arms the T103
-	// lock against an UNDO.
+	// The withdrawer's later match is put under way.
 	ms, err = h.store.LoadPoolMatches(h.compID)
 	require.NoError(t, err)
 	for i := range ms {
@@ -728,8 +727,8 @@ func TestMerge_ExactReplayOfANamedEchoedDecisionStillMatches(t *testing.T) {
 	require.NoError(t, h.store.SavePoolMatches(h.compID, ms))
 
 	// An exact replay of the T2 send (the operator's lost-answer retry) is
-	// answered as recorded, not refused as an undo the lock would catch.
-	got, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, false, mmT2)
+	// answered as recorded, as a replay, not a new decision.
+	got, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, mmT2)
 	require.NoError(t, err, "an exact replay of the T2 write is the recorded write, not an undo")
 	require.NotNil(t, got)
 	assert.Equal(t, "kiken-voluntary", got.Decision)

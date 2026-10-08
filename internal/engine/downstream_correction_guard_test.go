@@ -769,36 +769,28 @@ func TestDownstreamKnockoutCorrection_GuardResolvesWinnerFromStoredSidesWhenOmit
 	assert.Equal(t, "alice", b.Rounds[0][0].WinnerID, "a refused correction must not corrupt the stored winner id either")
 }
 
-// TestRecordDecisionTxWithOptions_DecouplesForceFromBcKcdg pins bc-cse
-// finding 5: RecordDecisionTx's T103 `force` (the kiken/fusenpai
-// decision-lock override) and the bc-kcdg downstream-knockout-correction
-// guard are different operator confirmations. RecordDecisionTxWithOptions
-// must evaluate them independently -- a decision write with the T103 force
-// flag set must still be refused by the bc-kcdg guard when kcdgOpts.Force is
-// false -- and must surface the reopened match ids to the caller once
-// kcdgOpts.Force authorizes the write, the same contract
+// TestRecordDecisionTxWithOptions_BcKcdgForce pins that
+// RecordDecisionTxWithOptions applies the bc-kcdg downstream-knockout-correction
+// guard by default and, once kcdgOpts.Force authorizes the write, surfaces the
+// reopened match ids to the caller, the same contract
 // RecordMatchResultWithIneligibility(Tx) and OverrideBracketWinner already
 // give theirs.
-func TestRecordDecisionTxWithOptions_DecouplesForceFromBcKcdg(t *testing.T) {
+func TestRecordDecisionTxWithOptions_BcKcdgForce(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "kcdg-decision-decouple"
 	seedThreeRoundBracket(t, store, compID)
 
-	t.Run("T103 force does not imply bc-kcdg force", func(t *testing.T) {
+	t.Run("without kcdgOpts.Force the guard refuses", func(t *testing.T) {
 		// decisionBy="aka" makes m-r1-0's SideA (Alice, the current winner)
 		// the WITHDRAWER, so Bob (SideB) becomes the new winner by default --
-		// exactly the winner change the bc-kcdg guard exists to catch. The
-		// prior result carries no withdrawal decision, so hadPriorLoser is
-		// false and T103's own lock check never even runs regardless of
-		// `force`: passing force=true here exercises ONLY whether it leaks
-		// into the unrelated bc-kcdg guard.
+		// exactly the winner change the bc-kcdg guard exists to catch.
 		txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
 			_, _, err := eng.RecordDecisionTxWithOptions(tx, compID, "m-r1-0", "kiken-voluntary", "aka", "reason",
-				nil, true, ForceOptions{})
+				nil, ForceOptions{})
 			return err
 		})
 		var dkErr *DownstreamKnockoutPlayedError
-		require.ErrorAs(t, txErr, &dkErr, "the bc-kcdg guard must run regardless of the unrelated T103 force flag")
+		require.ErrorAs(t, txErr, &dkErr, "the bc-kcdg guard must run")
 		assert.Equal(t, "m-r2-0", dkErr.BlockingMatchID)
 
 		b, err := store.LoadBracket(compID)
@@ -810,7 +802,7 @@ func TestRecordDecisionTxWithOptions_DecouplesForceFromBcKcdg(t *testing.T) {
 		var reopened []ReopenedMatch
 		txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
 			_, _, err := eng.RecordDecisionTxWithOptions(tx, compID, "m-r1-0", "kiken-voluntary", "aka", "reason",
-				nil, false, ForceOptions{Force: true, Reopened: &reopened})
+				nil, ForceOptions{Force: true, Reopened: &reopened})
 			return err
 		})
 		require.NoError(t, txErr)
@@ -997,32 +989,6 @@ func TestDownstreamKnockoutCorrection_DaihyosenSilentRescoreIsNotAWinnerChange(t
 	require.NoError(t, lerr)
 	assert.Equal(t, "TeamA", b.Rounds[0][0].Winner, "the restored verdict still wins the encounter")
 	assert.Equal(t, state.MatchStatusCompleted, b.Rounds[1][0].Status, "and the next round is untouched")
-}
-
-// TestRecordDecisionTx_T103ForceDoesNotAuthorizeDownstreamClear pins that the
-// two confirmations stay separate. T103's `force` answers "undo this kiken even
-// though its loser has a later match"; the bc-kcdg override answers "clear the
-// already-played next round". Feeding the first into the second meant an
-// operator confirming a decision-lock override silently authorized a played
-// match being sent back to the queue, with no dialog ever naming it.
-func TestRecordDecisionTx_T103ForceDoesNotAuthorizeDownstreamClear(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "kcdg-t103-separate"
-	seedThreeRoundBracket(t, store, compID)
-
-	err := inTx(t, store, compID, func(tx state.StoreTx) error {
-		_, _, e := eng.RecordDecisionTx(tx, compID, "m-r1-0", "kiken-voluntary", "aka", "withdrew",
-			nil, true /* T103 force */)
-		return e
-	})
-	var dkErr *DownstreamKnockoutPlayedError
-	require.ErrorAs(t, err, &dkErr,
-		"T103's force must not stand in for the bc-kcdg confirmation: the refusal must still be raised")
-
-	b, lerr := store.LoadBracket(compID)
-	require.NoError(t, lerr)
-	assert.Equal(t, state.MatchStatusCompleted, b.Rounds[1][0].Status, "and nothing downstream may be cleared")
-	assert.Equal(t, "Alice", b.Rounds[1][0].Winner)
 }
 
 // TestDownstreamKnockoutCorrection_ReopenedCarriesTheMatchNumber pins the

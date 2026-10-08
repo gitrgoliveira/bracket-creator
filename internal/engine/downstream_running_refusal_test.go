@@ -6,7 +6,7 @@ package engine
 // (downstream_correction_guard_test.go) pins the score door; these pin the
 // rest: the bronze a semifinal feeds, a running match past a bye, the
 // override and engi doors, a feeder assertion overtaken by the real result,
-// and /decision, where the refusal must come before the T103 lock.
+// and /decision.
 
 import (
 	"encoding/json"
@@ -295,13 +295,12 @@ func TestFeederAssertion_RealResultMustAgreeWhileTheFinalRuns(t *testing.T) {
 	})
 }
 
-// TestRecordDecisionTx_RunningDownstreamRefusesBeforeTheLock: a wrong-side
+// TestRecordDecisionTx_RunningDownstreamRefuses: a wrong-side
 // kiken on a semifinal, the final started, then the kiken re-recorded on the
 // other side. The write is refused because the final is being fought, and
-// that refusal comes FIRST: the operator is never asked to confirm the T103
-// decision lock for a write that would then be refused anyway.
-func TestRecordDecisionTx_RunningDownstreamRefusesBeforeTheLock(t *testing.T) {
-	for _, t103Force := range []bool{false, true} {
+// the operator is never asked to confirm it.
+func TestRecordDecisionTx_RunningDownstreamRefuses(t *testing.T) {
+	{
 		eng, store, _ := setupTestEngine(t)
 		compID := "kcdg-decision-running"
 		require.NoError(t, store.SaveCompetition(&state.Competition{
@@ -324,7 +323,7 @@ func TestRecordDecisionTx_RunningDownstreamRefusesBeforeTheLock(t *testing.T) {
 		}))
 		// The hasty kiken: Alice (aka) recorded as withdrawing, so Bob goes on.
 		require.NoError(t, inTx(t, store, compID, func(tx state.StoreTx) error {
-			_, _, e := eng.RecordDecisionTx(tx, compID, "m-r1-0", "kiken-voluntary", "aka", "", nil, false)
+			_, _, e := eng.RecordDecisionTx(tx, compID, "m-r1-0", "kiken-voluntary", "aka", "", nil)
 			return e
 		}))
 		b, err := store.LoadBracket(compID)
@@ -335,19 +334,18 @@ func TestRecordDecisionTx_RunningDownstreamRefusesBeforeTheLock(t *testing.T) {
 
 		// The correction: it was Bob (shiro) who withdrew.
 		err = inTx(t, store, compID, func(tx state.StoreTx) error {
-			_, _, e := eng.RecordDecisionTx(tx, compID, "m-r1-0", "kiken-voluntary", "shiro", "", nil, t103Force)
+			_, _, e := eng.RecordDecisionTx(tx, compID, "m-r1-0", "kiken-voluntary", "shiro", "", nil)
 			return e
 		})
 		var runErr *DownstreamKnockoutRunningError
-		require.ErrorAs(t, err, &runErr, "t103Force=%v", t103Force)
-		assert.NotErrorIs(t, err, ErrDecisionLocked, "the refusal comes before the lock (t103Force=%v)", t103Force)
+		require.ErrorAs(t, err, &runErr)
 		assert.Equal(t, []string{"m-r2-0"}, reopenedIDs(runErr.Running))
 		assert.Equal(t, "Match 3 (Final) is being fought now on Shiaijo A. Finish it or send it back to the queue, then save this correction again.",
 			runErr.Error())
 
 		b, err = store.LoadBracket(compID)
 		require.NoError(t, err)
-		assert.Equal(t, "Bob", b.Rounds[0][0].Winner, "nothing saved (t103Force=%v)", t103Force)
+		assert.Equal(t, "Bob", b.Rounds[0][0].Winner, "nothing saved")
 		assert.Equal(t, "Bob", b.Rounds[1][0].SideA)
 		assert.Equal(t, state.MatchStatusRunning, b.Rounds[1][0].Status)
 	}
@@ -394,7 +392,7 @@ func TestRecordDecisionTx_StaleDecisionOverRunningNextIsSuperseded(t *testing.T)
 
 	// The stale kiken: Bob (shiro) withdrawing, which would make Alice the winner.
 	err := inTx(t, store, compID, func(tx state.StoreTx) error {
-		_, _, e := eng.RecordDecisionTx(tx, compID, "m-r1-0", "kiken-voluntary", "shiro", "", nil, false, 5_000)
+		_, _, e := eng.RecordDecisionTx(tx, compID, "m-r1-0", "kiken-voluntary", "shiro", "", nil, 5_000)
 		return e
 	})
 	require.ErrorIs(t, err, ErrMatchSuperseded, "a stale decision is reported as superseded, not as the running refusal")

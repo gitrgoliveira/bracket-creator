@@ -258,6 +258,147 @@ func assignPoolMatchSlots(matches []state.MatchResult, comp *state.Competition, 
 	return matches, maxCursor
 }
 
+// poolPhaseEndByCourt returns, per court, the clock time the pool phase ends:
+// the latest STORED pool ScheduledAt plus one pool slot
+// (perMatchElapsedMinutes, pool clock). Reading the stored times, rather than
+// a cursor threaded out of assignPoolMatchSlots, makes it right for both
+// callers that build the preview bracket (the draw and the quarantine
+// rebuild) and for pushKnockoutPastPools, which moves the knockout when a
+// pool bout is added after the draw or moved onto another court. Rows with no
+// parseable time are skipped. bc-kosc.
+func poolPhaseEndByCourt(matches []state.MatchResult, comp *state.Competition, tournament *state.Tournament) map[string]time.Time {
+	ends := map[string]time.Time{}
+	slot := time.Duration(perMatchElapsedMinutes(comp, tournament, false)) * time.Minute
+	for _, m := range matches {
+		if m.ScheduledAt == "" {
+			continue
+		}
+		start, err := time.Parse(scheduleClockLayout, m.ScheduledAt)
+		if err != nil {
+			continue
+		}
+		end := start.Add(slot)
+		if cur, ok := ends[m.Court]; !ok || end.After(cur) {
+			ends[m.Court] = end
+		}
+	}
+	return ends
+}
+
+// pushKnockoutPastPools moves a court's knockout matches after that court's
+// pool phase when a pool bout now runs into them (bc-kosc): a tie-break or
+// representative bout added after the draw (appended at the end of its
+// court), or a pool bout the operator moved onto another court. A time set by
+// hand moves nothing (UpdateMatchTime). It only ever moves the knockout later. A court whose first scheduled knockout match already starts at or
+// after its pool end is left exactly as it is, so a time the operator set
+// survives. Otherwise its scheduled matches keep their order and gaps and are
+// moved only as far as they must be: each starts no earlier than the pool end,
+// and no earlier than the end of the match before it, past lunch. A court
+// where a knockout match is already running or finished is not touched.
+// Courts are judged as assignBracketMatchSlots judges them: one with no pool
+// bout waits for the latest pool end on any court. Reports whether anything
+// moved.
+func pushKnockoutPastPools(b *state.Bracket, comp *state.Competition, tournament *state.Tournament, poolMatches []state.MatchResult) bool {
+	if b == nil {
+		return false
+	}
+	ends := poolPhaseEndByCourt(poolMatches, comp, tournament)
+	if len(ends) == 0 {
+		return false
+	}
+	var latest time.Time
+	for _, t := range ends {
+		if t.After(latest) {
+			latest = t
+		}
+	}
+	// A row whose time does not parse is left alone, as poolPhaseEndByCourt
+	// leaves it out: parseClockHHMM would read it as 09:00 and re-time it.
+	type timed struct {
+		m  *state.BracketMatch
+		at time.Time
+	}
+	byCourt := map[string][]timed{}
+	started := map[string]bool{}
+	visit := func(m *state.BracketMatch) {
+		switch {
+		case m.Status == state.MatchStatusScheduled && m.ScheduledAt != "":
+			if at, err := time.Parse(scheduleClockLayout, m.ScheduledAt); err == nil {
+				byCourt[m.Court] = append(byCourt[m.Court], timed{m, at})
+			}
+		case m.Status != state.MatchStatusScheduled && m.MatchNumber > 0:
+			started[m.Court] = true
+		}
+	}
+	for r := range b.Rounds {
+		for i := range b.Rounds[r] {
+			visit(&b.Rounds[r][i])
+		}
+	}
+	if b.ThirdPlaceMatch != nil {
+		visit(b.ThirdPlaceMatch)
+	}
+
+	_, _, lunchMin, lunchStart := parseCeremonyParams(comp, tournament)
+	slot := time.Duration(perMatchElapsedMinutes(comp, tournament, true)) * time.Minute
+	moved := false
+	for court, ms := range byCourt {
+		if started[court] {
+			continue
+		}
+		poolEnd, ok := ends[court]
+		if !ok {
+			poolEnd = latest
+		}
+		sort.SliceStable(ms, func(i, j int) bool { return ms[i].at.Before(ms[j].at) })
+		if !ms[0].at.Before(poolEnd) {
+			continue
+		}
+		cursor := poolEnd
+		for _, x := range ms {
+			t := x.at
+			// Only a match the push moves is moved past lunch: a later
+			// time the operator set, even one inside lunch, stays theirs.
+			if t.Before(cursor) {
+				t = skipCeremonyBlocks(cursor, lunchStart, lunchMin)
+			}
+			if !t.Equal(x.at) {
+				x.m.ScheduledAt = t.Format(scheduleClockLayout)
+				moved = true
+			}
+			cursor = t.Add(slot)
+		}
+	}
+	return moved
+}
+
+// savePoolMatchesAndKnockoutTimes saves a pool phase that gained bouts after
+// the draw and moves the knockout matches those bouts now run into, in the
+// same transaction.
+func savePoolMatchesAndKnockoutTimes(tx state.StoreTx, compID string, matches []state.MatchResult, comp *state.Competition, tournament *state.Tournament) error {
+	if err := tx.SavePoolMatches(compID, matches); err != nil {
+		return err
+	}
+	return moveKnockoutPastPools(tx, compID, matches, comp, tournament)
+}
+
+// moveKnockoutPastPools applies pushKnockoutPastPools to the stored bracket of
+// a pools + knockout competition, inside the caller's transaction, and saves
+// it only when something moved.
+func moveKnockoutPastPools(tx state.StoreTx, compID string, poolMatches []state.MatchResult, comp *state.Competition, tournament *state.Tournament) error {
+	if !comp.IsKnockoutEnabled() {
+		return nil
+	}
+	bracket, err := tx.LoadBracket(compID)
+	if err != nil {
+		return err
+	}
+	if !pushKnockoutPastPools(bracket, comp, tournament, poolMatches) {
+		return nil
+	}
+	return tx.SaveBracket(compID, bracket)
+}
+
 // assignBracketMatchSlots is the bracket analogue of
 // assignPoolMatchSlots. Bracket matches carry the same Court field
 // as pool matches; matches are walked in match-number order (see the
@@ -270,6 +411,15 @@ func assignPoolMatchSlots(matches []state.MatchResult, comp *state.Competition, 
 // a match to play. The court cursor is NOT advanced for them (they consume
 // no court time).
 //
+// courtStart is the per-court earliest start (bc-kosc): a court's cursor
+// begins at the later of dayStart + OpeningBlock and courtStart[court], so a
+// pools + knockout competition schedules each court's knockout after THAT
+// court's last pool bout (see poolPhaseEndByCourt). A court absent from a
+// non-empty map (one that holds no pool bout) starts after the latest pool
+// end on any court. A nil or empty map keeps the day start (knockout-only
+// competitions pass nil).
+// Byes still take their court's start and consume nothing.
+//
 // Returns the maximum per-court end-cursor (the clock time when the
 // last match on the busiest court finishes). Callers that only want
 // the in-place mutation may discard the return value.
@@ -277,18 +427,37 @@ func assignPoolMatchSlots(matches []state.MatchResult, comp *state.Competition, 
 // As with assignPoolMatchSlots, the end-cursor is the per-court start anchor
 // (comp.StartTime + OpeningBlock) when there are no rounds, and a zero
 // time.Time only when comp is nil.
-func assignBracketMatchSlots(rounds [][]state.BracketMatch, comp *state.Competition, tournament *state.Tournament) time.Time {
+func assignBracketMatchSlots(rounds [][]state.BracketMatch, comp *state.Competition, tournament *state.Tournament, courtStart map[string]time.Time) time.Time {
 	if comp == nil {
 		return time.Time{}
 	}
 	dayStart, openingMin, lunchMin, lunchStart := parseCeremonyParams(comp, tournament)
+	openAt := dayStart.Add(time.Duration(openingMin) * time.Minute)
 	if len(rounds) == 0 {
-		return dayStart.Add(time.Duration(openingMin) * time.Minute)
+		return openAt
 	}
 
+	// A court that holds no pool bout still waits for the pool phase: its
+	// knockout is fed by qualifiers from other courts, so it starts after
+	// the latest pool end anywhere.
+	latestPoolEnd := openAt
+	for _, t := range courtStart {
+		if t.After(latestPoolEnd) {
+			latestPoolEnd = t
+		}
+	}
+	startFor := func(court string) time.Time {
+		if t, ok := courtStart[court]; ok {
+			if t.After(openAt) {
+				return t
+			}
+			return openAt
+		}
+		return latestPoolEnd
+	}
 	courtCursor := map[string]time.Time{}
 	for _, court := range comp.Courts {
-		courtCursor[court] = dayStart.Add(time.Duration(openingMin) * time.Minute)
+		courtCursor[court] = startFor(court)
 	}
 
 	perMatchMin := perMatchElapsedMinutes(comp, tournament, true /*isKnockout*/)
@@ -318,7 +487,7 @@ func assignBracketMatchSlots(rounds [][]state.BracketMatch, comp *state.Competit
 		court := m.Court
 		cursor, ok := courtCursor[court]
 		if !ok {
-			cursor = dayStart.Add(time.Duration(openingMin) * time.Minute)
+			cursor = startFor(court)
 		}
 		cursor = skipCeremonyBlocks(cursor, lunchStart, lunchMin)
 		m.ScheduledAt = cursor.Format(scheduleClockLayout)

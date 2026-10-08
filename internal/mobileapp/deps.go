@@ -125,30 +125,28 @@ type ScoringEngine interface {
 	// RecordDecision auto-fills the scoreline + winner from the
 	// decision/decisionBy/encho triple and persists the result. When the
 	// prior result on the match already carried a kiken/fusenpai decision
-	// the engine enforces the downstream-match lock (T103/CHK024);
-	// force=true bypasses the lock so an operator can confirm an override.
+	// the write replaces it with no confirm and changes no other match.
 	// Since bc-twin this is a thin WithTransaction shim over
 	// RecordDecisionTx (the canonical body); NEVER call it from inside an
 	// existing WithTransaction, the per-comp lock is not reentrant.
-	RecordDecision(compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error)
+	RecordDecision(compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error)
 	// RecordDecisionTx is the canonical implementation RecordDecision
 	// delegates to. Used directly by the decision handler under
-	// WithTransaction (T156) so the sides lookup, T103/T105 checks, match
+	// WithTransaction (T156) so the sides lookup, T105 check, match
 	// write, and eligibility-restore-on-undo all commit under ONE per-comp
 	// lock acquire. Same contract as RecordDecision; calls flow through the
 	// supplied StoreTx.
-	RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error)
+	RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error)
 	// RecordDecisionTxWithOptions is RecordDecisionTx's bc-kcdg-aware twin
-	// (bc-cse finding 5): force still governs ONLY the T103 downstream-match
-	// lock above, while kcdgOpts is the SEPARATE authorization for the
+	// (bc-cse finding 5): kcdgOpts is the authorization for the
 	// bc-kcdg downstream-knockout-correction guard the underlying bracket
 	// write applies (engine.DownstreamKnockoutPlayedError, HTTP 409
 	// downstream_knockout_played) -- the decision handler's
-	// forceDownstreamReopen field maps to kcdgOpts.Force, never to force.
+	// forceDownstreamReopen field maps to kcdgOpts.Force.
 	// kcdgOpts.Reopened, when non-nil, is populated with the ids of every
 	// bracket match the write forced open, mirroring
 	// RecordMatchResultWithIneligibility(Tx) and OverrideBracketWinner.
-	RecordDecisionTxWithOptions(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool, kcdgOpts engine.ForceOptions, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error)
+	RecordDecisionTxWithOptions(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, kcdgOpts engine.ForceOptions, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error)
 	// MaybeAutoCompletePools transitions the competition's status to
 	// "complete" when every pool match is done, or injects supplementary
 	// ippon-shobu tiebreaker matches when ties are detected. It runs one

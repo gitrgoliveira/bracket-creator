@@ -63,6 +63,12 @@ const hanteiForYamada = (overrides = {}) => ({
   ...overrides,
 });
 
+// Save correction: the commit for a finished match, which asks for its reason.
+const saveCorrection = async () => {
+  const btn = [...document.querySelectorAll('.score-nav button')].find((b) => b.textContent === 'Save correction');
+  await act(async () => { fireEvent.click(btn); });
+};
+
 const confirmReason = async () => {
   const prompt = document.querySelector('.reason-prompt');
   expect(prompt, 'the correction asks for its reason').toBeTruthy();
@@ -75,6 +81,8 @@ describe('correcting a hantei verdict to the other side (bc-htcr)', () => {
     render(<ScoreEditorModal match={hanteiForYamada()} onClose={vi.fn()} onSubmit={onSubmit} password="" />);
 
     await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-hantei-shiro')); });
+    expect(onSubmit, 'picking a side writes nothing').not.toHaveBeenCalled();
+    await saveCorrection();
     expect(onSubmit, 'nothing is written before the reason is given').not.toHaveBeenCalled();
 
     await confirmReason();
@@ -94,6 +102,7 @@ describe('correcting a hantei verdict to the other side (bc-htcr)', () => {
     render(<ScoreEditorModal match={hanteiForYamada()} onClose={vi.fn()} onSubmit={onSubmit} password="" />);
 
     await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-hantei-shiro')); });
+    await saveCorrection();
     const cancel = [...document.querySelectorAll('.reason-prompt button')].find((b) => b.textContent === 'Cancel');
     await act(async () => { fireEvent.click(cancel); });
     expect(document.querySelector('.reason-prompt')).toBeNull();
@@ -108,6 +117,11 @@ describe('correcting a hantei verdict to the other side (bc-htcr)', () => {
 
     await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-hantei-arm')); });
     await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-hantei-aka')); });
+    expect(onSubmit, 'picking a side writes nothing').not.toHaveBeenCalled();
+    // Finish is the two-tap commit: the first tap arms, the second writes.
+    const finishBtn = () => [...document.querySelectorAll('.score-nav button')].find((b) => /Finish|Tap again/.test(b.textContent));
+    await act(async () => { fireEvent.click(finishBtn()); });
+    await act(async () => { fireEvent.click(finishBtn()); });
     expect(document.querySelector('.reason-prompt')).toBeNull();
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSubmit.mock.calls[0][0].correctionReason).toBeUndefined();

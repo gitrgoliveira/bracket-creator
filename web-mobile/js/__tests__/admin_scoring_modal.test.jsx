@@ -114,37 +114,9 @@ describe('buildDecisionBody', () => {
     expect(body.decision).toBe('daihyosen');
   });
 
-  describe('force flag (T103 override loop)', () => {
-    // T103 (decision_locked) uses a confirm-and-retry-with-force flow.
-    // The helper accepts `opts.force` so the parent's retry path can
-    // call back into it without re-implementing the body shape.
-
-    it('attaches force=true when opts.force is set', () => {
-      const body = buildDecisionBody('kiken-voluntary', { decisionBy: 'shiro' }, 0, { force: true });
-      expect(body.force).toBe(true);
-    });
-
-    it('omits force when opts.force is missing or false', () => {
-      expect(buildDecisionBody('kiken-voluntary', { decisionBy: 'shiro' }, 0)).not.toHaveProperty('force');
-      expect(buildDecisionBody('kiken-voluntary', { decisionBy: 'shiro' }, 0, {})).not.toHaveProperty('force');
-      expect(buildDecisionBody('kiken-voluntary', { decisionBy: 'shiro' }, 0, { force: false })).not.toHaveProperty('force');
-    });
-
-    it('force combines with reason + encho cleanly', () => {
-      const body = buildDecisionBody(
-        'kiken-voluntary',
-        { decisionBy: 'aka', decisionReason: 'no-show' },
-        3,
-        { force: true },
-      );
-      expect(body).toEqual({
-        decision: 'kiken-voluntary',
-        decisionBy: 'aka',
-        decisionReason: 'no-show',
-        encho: { periodCount: 3 },
-        force: true,
-      });
-    });
+  it('never emits a force flag (the decision lock was removed)', () => {
+    expect(buildDecisionBody('kiken-voluntary', { decisionBy: 'shiro' }, 0)).not.toHaveProperty('force');
+    expect(buildDecisionBody('kiken-voluntary', { decisionBy: 'shiro' }, 0, { force: true })).not.toHaveProperty('force');
   });
 });
 
@@ -305,32 +277,10 @@ describe('DecisionPrompt → /decision POST integration', () => {
     window.API = originalAPI;
   });
 
-  it('DecisionPrompt onSubmit fires the form-submit handler with default side', () => {
-    // The React mock returns `[initial, vi.fn()]` from useState, so
-    // calling DecisionPrompt as a function produces the initial-state
-    // virtual tree; the form's onSubmit is what we exercise here.
-    const onSubmit = vi.fn();
-    const tree = DecisionPrompt({
-      kind: 'kiken',
-      sideA: { name: 'Tora' },
-      sideB: { name: 'Kuma' },
-      defaultSide: 'shiro',
-      askReason: true,
-      onCancel: vi.fn(),
-      onSubmit,
-      submitting: false,
-    });
-    expect(tree.type).toBe('form');
-    expect(typeof tree.props.onSubmit).toBe('function');
-
-    tree.props.onSubmit({ preventDefault: () => {} });
-    expect(onSubmit).toHaveBeenCalledWith({
-      decisionBy: 'shiro',
-      decisionReason: '',
-    });
-  });
-
-  it('DecisionPrompt onSubmit defaults side to "shiro" when defaultSide is missing', () => {
+  // The side-picker and submit-flow tests live in
+  // render/decision_prompt_side.render.test.jsx (real React). Here, with the
+  // fake useState, only the initial state is visible: no side is picked.
+  it('DecisionPrompt submits nothing while no side is picked (no preselected side)', () => {
     const onSubmit = vi.fn();
     const tree = DecisionPrompt({
       kind: 'fusenpai',
@@ -342,57 +292,7 @@ describe('DecisionPrompt → /decision POST integration', () => {
       submitting: false,
     });
     tree.props.onSubmit({ preventDefault: () => {} });
-    expect(onSubmit).toHaveBeenCalledWith({
-      decisionBy: 'shiro',
-      decisionReason: '',
-    });
-  });
-
-  it('DecisionPrompt onSubmit is a no-op while submitting', () => {
-    // Guards against double-submit when the operator double-clicks
-    // the Record button.
-    const onSubmit = vi.fn();
-    const tree = DecisionPrompt({
-      kind: 'kiken',
-      sideA: { name: 'Tora' },
-      sideB: { name: 'Kuma' },
-      defaultSide: 'aka',
-      askReason: false,
-      onCancel: vi.fn(),
-      onSubmit,
-      submitting: true,
-    });
-    tree.props.onSubmit({ preventDefault: () => {} });
     expect(onSubmit).not.toHaveBeenCalled();
-  });
-
-  it('the parent flow: DecisionPrompt onSubmit → submitDecisionRequest → recordDecision', async () => {
-    // Route the DecisionPrompt callback through submitDecisionRequest.
-    // the same path ScoreEditorModal.submitDecision takes; so the test
-    // would fail if the password stopped flowing to recordDecision.
-    const onSubmit = vi.fn((payload) =>
-      submitDecisionRequest('comp-1', 'match-1', 'kiken-voluntary', payload, 0, 'explicit-pw'),
-    );
-
-    const tree = DecisionPrompt({
-      kind: 'kiken',
-      sideA: { name: 'Tora' },
-      sideB: { name: 'Kuma' },
-      defaultSide: 'aka',
-      askReason: true,
-      onCancel: vi.fn(),
-      onSubmit,
-      submitting: false,
-    });
-
-    await tree.props.onSubmit({ preventDefault: () => {} });
-
-    expect(window.API.recordDecision).toHaveBeenCalledWith(
-      'comp-1',
-      'match-1',
-      { decision: 'kiken-voluntary', decisionBy: 'aka' },
-      'explicit-pw',
-    );
   });
 
   it('regression: submitDecision path forwards the modal password prop to recordDecision', async () => {
@@ -413,91 +313,30 @@ describe('DecisionPrompt → /decision POST integration', () => {
     );
   });
 
-  it('parent flow includes encho.periodCount in the body when > 0', async () => {
-    // The encho counter rides alongside the decision so the server can
-    // attach periodCount to MatchResult.Encho. Pinned here so the
-    // wiring through buildDecisionBody isn't dropped during a refactor.
-    const onSubmit = vi.fn((payload) => {
-      const body = buildDecisionBody('hikiwake', payload, 3); // 3 encho periods
-      const password = resolveDecisionPassword('pw');
-      return window.API.recordDecision('comp-1', 'match-1', body, password);
+  it("an unknown 409 on a decision shows the server's message and never retries with force", async () => {
+    window.API = {
+      recordDecision: vi.fn().mockRejectedValue(new Error('some_other_conflict')),
+    };
+    window.confirmDialog = vi.fn();
+    const setDecisionErr = vi.fn();
+    const submit = makeSubmitDecision({
+      match: { compId: 'c1', id: 'm1', sideA: { id: 'pa', name: 'A' }, sideB: { id: 'pb', name: 'B' } },
+      enchoPeriodCount: 0,
+      password: 'pw',
+      mountedRef: { current: true },
+      setDecisionSubmitting: vi.fn(),
+      setDecisionErr,
+      setDecisionPromptKind: vi.fn(),
+      onClose: vi.fn(),
+      isComplete: true,
     });
-    const tree = DecisionPrompt({
-      kind: 'hikiwake',
-      sideA: { name: 'A' },
-      sideB: { name: 'B' },
-      defaultSide: 'shiro',
-      askReason: false,
-      onCancel: vi.fn(),
-      onSubmit,
-      submitting: false,
-    });
-
-    await tree.props.onSubmit({ preventDefault: () => {} });
-
-    expect(window.API.recordDecision).toHaveBeenCalledWith(
-      'comp-1',
-      'match-1',
-      { decision: 'hikiwake', decisionBy: 'shiro', encho: { periodCount: 3 } },
-      'pw',
-    );
+    await submit('kiken-voluntary', { decisionBy: 'shiro', decisionReason: '' });
+    expect(window.confirmDialog).not.toHaveBeenCalled();
+    expect(window.API.recordDecision).toHaveBeenCalledTimes(1);
+    expect(window.API.recordDecision.mock.calls[0][2]).not.toHaveProperty('force');
+    expect(setDecisionErr).toHaveBeenLastCalledWith('some_other_conflict');
   });
 
-  it('parent flow attaches force=true on the retry-after-409 path', async () => {
-    // T103: when the server replies decision_locked the parent's
-    // submitDecision recurses with { force: true } after the operator
-    // confirms. The body must carry that flag through to the server so
-    // the second attempt isn't also rejected.
-    const onSubmit = vi.fn((payload) => {
-      const body = buildDecisionBody('kiken-voluntary', payload, 0, { force: true });
-      const password = resolveDecisionPassword('pw');
-      return window.API.recordDecision('comp-1', 'match-1', body, password);
-    });
-    const tree = DecisionPrompt({
-      kind: 'kiken',
-      sideA: { name: 'A' },
-      sideB: { name: 'B' },
-      defaultSide: 'shiro',
-      askReason: false,
-      onCancel: vi.fn(),
-      onSubmit,
-      submitting: false,
-    });
-    await tree.props.onSubmit({ preventDefault: () => {} });
-    expect(window.API.recordDecision).toHaveBeenCalledWith(
-      'comp-1',
-      'match-1',
-      { decision: 'kiken-voluntary', decisionBy: 'shiro', force: true },
-      'pw',
-    );
-  });
-
-  it('fusenpai: decisionBy is the ABSENT/LOSING side, not the winning side', () => {
-    // The UI label was previously "Which side gets the default win?"
-    // operators interpreted it as picking the WINNER and sent the wrong
-    // side as decisionBy, inverting the result. The label is now
-    // "Which side did not show up?" so operators pick the ABSENT (losing)
-    // side. This test pins the wire contract: selecting "shiro" means
-    // SHIRO forfeits and AKA receives the auto-filled 2-0 win.
-    const onSubmit = vi.fn((payload) => {
-      return buildDecisionBody('fusenpai', payload, 0);
-    });
-    const tree = DecisionPrompt({
-      kind: 'fusenpai',
-      sideA: { name: 'Hayashi' },
-      sideB: { name: 'Nakamura' },
-      defaultSide: 'shiro',
-      askReason: false,
-      onCancel: vi.fn(),
-      onSubmit,
-      submitting: false,
-    });
-    tree.props.onSubmit({ preventDefault: () => {} });
-    // decisionBy = "shiro" → SHIRO is the absent side → engine gives win to AKA
-    expect(onSubmit).toHaveBeenCalledWith({ decisionBy: 'shiro', decisionReason: '' });
-    const body = buildDecisionBody('fusenpai', { decisionBy: 'shiro', decisionReason: '' }, 0);
-    expect(body).toEqual({ decision: 'fusenpai', decisionBy: 'shiro' });
-  });
 });
 
 describe('isBoutDecided / MAX_IPPONS_PER_SIDE', () => {
@@ -1291,40 +1130,9 @@ describe('subBoutHasBeenPlayed (drops untouched kachinuki bouts)', () => {
 // Item 7: hantei and fusenpai must route through onSubmitAndNext/onAfterDecision
 // so the next match on the same court is started without an extra operator tap.
 describe('item 7: non-points decisions advance to next match', () => {
-  // submitHantei is component-internal, but the routing logic
-  //   `(!isComplete && onSubmitAndNext) ? onSubmitAndNext: onSubmit`
-  // is a pure predicate we can test directly.
-  it('routes hantei to onSubmitAndNext when provided and match is not a correction', () => {
-    const onSubmit = vi.fn();
-    const onSubmitAndNext = vi.fn();
-    const isComplete = false; // live match, not a correction
-    const submitFn = (!isComplete && onSubmitAndNext) ? onSubmitAndNext : onSubmit;
-    const patch = { winner: { id: 'p1', name: 'Hayashi' }, decidedByHantei: true, status: 'completed' };
-    submitFn(patch);
-    expect(onSubmitAndNext).toHaveBeenCalledWith(patch);
-    expect(onSubmit).not.toHaveBeenCalled();
-  });
-
-  it('routes hantei to onSubmit (not onSubmitAndNext) when correcting a completed match', () => {
-    const onSubmit = vi.fn();
-    const onSubmitAndNext = vi.fn();
-    const isComplete = true; // correction: do not auto-advance
-    const submitFn = (!isComplete && onSubmitAndNext) ? onSubmitAndNext : onSubmit;
-    const patch = { winner: { id: 'p1', name: 'Hayashi' }, decidedByHantei: true, status: 'completed' };
-    submitFn(patch);
-    expect(onSubmit).toHaveBeenCalledWith(patch);
-    expect(onSubmitAndNext).not.toHaveBeenCalled();
-  });
-
-  it('routes hantei to onSubmit when onSubmitAndNext is not provided', () => {
-    const onSubmit = vi.fn();
-    const onSubmitAndNext = undefined;
-    const isComplete = false;
-    const submitFn = (!isComplete && onSubmitAndNext) ? onSubmitAndNext : onSubmit;
-    const patch = { winner: { id: 'p2', name: 'Mori' }, decidedByHantei: true, status: 'completed' };
-    submitFn(patch);
-    expect(onSubmit).toHaveBeenCalledWith(patch);
-  });
+  // A hantei is committed by Finish and routed like any finish; that path is
+  // pinned through the real editor in hantei_single_tap.render.test.jsx
+  // (bc-htsd), so no copy of the routing ternary is tested here.
 
   // makeSubmitDecision: onAfterDecision is called for fusenpai when provided
   // and the match is not complete.
@@ -1372,7 +1180,6 @@ describe('item 7: non-points decisions advance to next match', () => {
       const submit = makeSubmitDecision({
         match: makeMatch('m1'), enchoPeriodCount: 0, password: 'pw',
         ...makeSetters(), onClose, onAfterDecision, isComplete: false,
-        entityLabel: 'competitors',
       });
       await submit('fusenpai', { decisionBy: 'aka', decisionReason: '' });
       expect(onAfterDecision).toHaveBeenCalled();
@@ -1388,7 +1195,6 @@ describe('item 7: non-points decisions advance to next match', () => {
       const submit = makeSubmitDecision({
         match: makeMatch('m1b'), enchoPeriodCount: 0, password: 'pw',
         ...makeSetters(), onClose: vi.fn(), onAfterDecision, isComplete: false,
-        entityLabel: 'competitors',
       });
       await submit('fusenpai', { decisionBy: 'aka', decisionReason: '' });
       expect(onAfterDecision).toHaveBeenCalledWith(
@@ -1400,7 +1206,7 @@ describe('item 7: non-points decisions advance to next match', () => {
       const onClose = vi.fn();
       const submit = makeSubmitDecision({
         match: makeMatch('m2'), enchoPeriodCount: 0, password: 'pw',
-        ...makeSetters(), onClose, isComplete: false, entityLabel: 'competitors',
+        ...makeSetters(), onClose, isComplete: false,
       });
       await submit('fusenpai', { decisionBy: 'aka', decisionReason: '' });
       expect(onClose).toHaveBeenCalled();
@@ -1412,7 +1218,6 @@ describe('item 7: non-points decisions advance to next match', () => {
       const submit = makeSubmitDecision({
         match: makeMatch('m3'), enchoPeriodCount: 0, password: 'pw',
         ...makeSetters(), onClose, onAfterDecision, isComplete: true,
-        entityLabel: 'competitors',
       });
       await submit('fusenpai', { decisionBy: 'aka', decisionReason: '' });
       // Correction: must close rather than advance
@@ -1430,7 +1235,6 @@ describe('item 7: non-points decisions advance to next match', () => {
       const submit = makeSubmitDecision({
         match: makeMatch('m4'), enchoPeriodCount: 0, password: 'pw',
         ...makeSetters(), onClose, onAfterDecision, isComplete: false,
-        entityLabel: 'competitors',
       });
       await submit('kiken-voluntary', { decisionBy: 'aka', decisionReason: '' });
       expect(onAfterDecision).toHaveBeenCalled();
@@ -1443,7 +1247,6 @@ describe('item 7: non-points decisions advance to next match', () => {
       const submit = makeSubmitDecision({
         match: makeMatch('m4b'), enchoPeriodCount: 0, password: 'pw',
         ...makeSetters(), onClose, onAfterDecision, isComplete: true,
-        entityLabel: 'competitors',
       });
       await submit('kiken-voluntary', { decisionBy: 'aka', decisionReason: '' });
       expect(onClose).toHaveBeenCalled();
@@ -1536,7 +1339,6 @@ describe('submitDecisionRequest / makeSubmitDecision: downstream_knockout_played
       setDecisionPromptKind: vi.fn(),
       onClose: vi.fn(),
       isComplete: true, // correcting an already-completed match
-      entityLabel: 'competitors',
     });
 
     await submit('kiken-voluntary', { decisionBy: 'aka', decisionReason: '' });
@@ -1546,7 +1348,7 @@ describe('submitDecisionRequest / makeSubmitDecision: downstream_knockout_played
     expect(window.API.recordDecision).toHaveBeenCalledTimes(1);
     expect(setDecisionErr).toHaveBeenCalledWith(DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED);
     // Must not fall through to the generic error text (the raw refusal
-    // message, or the decision_locked confirm copy).
+    // message, or a confirm copy).
     expect(setDecisionErr).not.toHaveBeenCalledWith(
       expect.stringContaining('already played match'),
     );
@@ -1574,7 +1376,6 @@ describe('submitDecisionRequest / makeSubmitDecision: downstream_knockout_played
       setDecisionPromptKind: vi.fn(),
       onClose,
       isComplete: true,
-      entityLabel: 'competitors',
     });
 
     // fusenpai here, but kiken takes the identical isComplete gate now

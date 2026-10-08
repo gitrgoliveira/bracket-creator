@@ -230,7 +230,7 @@ describe('individual editor: Remove withdrawal', () => {
   });
 
   // A judges' decision is a real result too: decided after Remove, it goes
-  // out through its own write (submitHantei), which must clear the ruling
+  // out through Save correction with the picked side, which must clear the ruling
   // exactly as Save correction does.
   it('a hantei decided after Remove replaces the ruling as well', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
@@ -239,6 +239,7 @@ describe('individual editor: Remove withdrawal', () => {
     await tap(addButton('aka', 'K'));
     await tap(screen.getByTestId('scoring-modal-hantei-arm'));
     await tap(screen.getByTestId('scoring-modal-hantei-aka'));
+    await tap(navButton('Save correction'));
     const confirm = [...document.querySelectorAll('.reason-prompt button')].find((b) => b.textContent === 'Confirm');
     await tap(confirm);
     expect(onSubmit).toHaveBeenCalledTimes(1);

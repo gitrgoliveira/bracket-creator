@@ -24,6 +24,7 @@ import { EDITOR } from '../fixtures/scoring.mjs';
 import { openScoreEditor } from '../fixtures/scores.mjs';
 import { openTvBoard, openViewer, tvBoard } from '../fixtures/public.mjs';
 import { doubleTap, hastyConfirm, interrupt, retapWhileSaving, tapNeighbour } from '../fixtures/clumsy.mjs';
+import { settled } from '../fixtures/pace.mjs';
 import * as T from '../fixtures/team.mjs';
 
 const SIX_TEAMS = [
@@ -408,7 +409,7 @@ test.describe('knockout-mixed-team', () => {
         header: header.replace(/\s+/g, ' '), shiroRow: standings.replace(/\s+/g, ' '), akaRow: standingsAka.replace(/\s+/g, ' ') });
     });
 
-    await test.step('F3: a team kiken in the pool and the default-win chain for its remaining matches', async () => {
+    await test.step('F3: a team kiken in the pool and its remaining matches', async () => {
       await openShiaijo(page, 'A');
       const ed = inlineEditor(page);
       if (!(await T.boutRow(ed, 1).isVisible().catch(() => false))) await T.startUpNextTeam(page);
@@ -432,7 +433,7 @@ test.describe('knockout-mixed-team', () => {
       await shot(page, 'f3-kiken-1500ms-later');
       record({ step: 'pool kiken chain', action: 'the remaining-matches panel, 1.5 s later', variant: 'V5 lost place', stillThere, editorNow,
         upNext: await sides(upNextCard(page)).catch(() => null) });
-      const award = panel.getByRole('button', { name: 'Award default win to opponent' });
+      const award = panel.getByRole('button', { name: /opponent/ });
       const awards = await award.count();
       let nb = null;
       if (awards) {
@@ -443,12 +444,12 @@ test.describe('knockout-mixed-team', () => {
       await shot(page, 'f3-kiken-after-neighbour-tap');
       record({ step: 'pool kiken chain', action: `Kiken – Voluntary, Shiro (${pair.shiro}) withdraws`, variant: 'correct', panelShown: shown,
         panelText: panelText.slice(0, 300), awardButtons: awards, awardTapBox: awards ? await T.tapBox(award.first()).catch(() => null) : null });
-      record({ step: 'pool kiken chain', action: 'Award default win to opponent', variant: 'V1 tapNeighbour up', ...(nb || {}), panelStillOpen: panelAfterSlip });
+      record({ step: 'pool kiken chain', action: 'Award the remaining match to the opponent', variant: 'V1 tapNeighbour up', ...(nb || {}), panelStillOpen: panelAfterSlip });
       let awarded = 0;
       if (panelAfterSlip) {
         while (await award.count()) {
           const dbl = awarded === 0 ? await doubleTap(award.first()) : (await award.first().tap(), null);
-          if (dbl) record({ step: 'pool kiken chain', action: 'Award default win to opponent', variant: 'V2 doubleTap', ...dbl });
+          if (dbl) record({ step: 'pool kiken chain', action: 'Award the remaining match to the opponent', variant: 'V2 doubleTap', ...dbl });
           awarded += 1;
           await page.waitForTimeout(1200);
           if (awarded > 4) break;
@@ -824,25 +825,50 @@ test.describe('knockout-mixed-team', () => {
       if (!(await vol.isVisible())) await summary.tap();
       await vol.tap();
       await expect(prompt).toBeVisible();
-      const preselected = await prompt.locator('input[type="radio"]:checked').getAttribute('value');
+      // bc-dsid: no side is picked for the operator, and Record stays off
+      // until one is (recording-decisions.md).
+      const preselected = await prompt.locator('input[type="radio"]:checked').count();
+      const hint = (await prompt.getByTestId('decision-prompt-hint').innerText()).trim();
       await shot(page, 'sf2-kiken-prompt');
-      const radioBox = await T.tapBox(prompt.locator('label', { has: page.locator('input[type="radio"]') }).first());
+      const pill = (side) => prompt.locator('label.decision-prompt__side', { has: page.locator(`input[value="${side}"]`) });
+      const radioBox = await T.tapBox(pill('shiro'));
       const loud = prompt.locator('button.btn--primary');
       const loudLabel = (await loud.innerText()).trim();
+      const loudDisabled = await loud.isDisabled();
+      await expect(loud).toBeDisabled();
+      // V4: the hasty tap on Record, which is off. A thumb, so a touch at its
+      // centre (a locator tap would wait for it to come on).
+      const completedBefore = await completedRows(page).count();
+      const lb = await loud.boundingBox();
+      await page.touchscreen.tap(lb.x + lb.width / 2, lb.y + lb.height / 2);
+      await page.waitForTimeout(800);
+      const promptStillOpen = await prompt.isVisible();
+      const completedAfterHasty = await completedRows(page).count();
+      await shot(page, 'sf2-kiken-hasty-record-off');
+      record({ step: 'SF2 kiken', action: 'Record withdrawal before picking a side (intended: Aka)', variant: 'V4 hasty (loudest button)',
+        label: loudLabel, recordDisabled: loudDisabled, preselectedCount: preselected, hint, promptStillOpen,
+        recordedByHastyTap: completedAfterHasty !== completedBefore, promptPillTapBox: radioBox });
+      expect(promptStillOpen).toBe(true);
+      // V1: the thumb aims at AKA's pill and lands on its neighbour, SHIRO's.
+      const nbPill = await tapNeighbour(pill('aka'), 'left');
+      await expect(loud).toBeEnabled();
+      const labelAfterPick = (await loud.innerText()).trim();
+      const consequence = (await prompt.getByTestId('decision-prompt-consequence').innerText()).trim();
+      const picked = await prompt.locator('input[type="radio"]:checked').getAttribute('value');
+      await shot(page, 'sf2-kiken-side-picked');
+      // Not reading the button, the operator taps Record.
       await loud.tap();
       await page.waitForTimeout(1500);
-      const remaining = (await ed.locator('.remaining-matches').allInnerTexts()).join(' ').replace(/\s+/g, ' ');
       await shot(page, 'sf2-kiken-recorded');
       // The withdrawal is marked Kiken beside the team on the bracket.
       await expect(page.getByText('Kiken', { exact: true }).first()).toBeVisible();
-      record({ step: 'SF2 kiken', action: 'Record withdrawal (intended: Aka)', variant: 'V4 hasty (loudest button)', label: loudLabel,
-        promptRadioTapBox: radioBox,
+      record({ step: 'SF2 kiken', action: 'pick the side (aimed at Aka), then Record', variant: 'V1 tapNeighbour left', ...nbPill,
+        labelAfterPick, consequence, recordedAgainst: picked,
         completedRowResult: (await completedRows(page).last().locator('.shiaijo-qrow__result').innerText().catch(() => '')).trim(),
-        preselectedSide: preselected, recordedAgainst: preselected, remainingMatchesPanel: remaining.slice(0, 300),
-        note: 'the side picker preselects Shiro, so a hasty Record withdraws the wrong team' });
+        note: 'the button names the side picked; an operator who does not read it still records the wrong team' });
     });
 
-    await test.step('SF2 after the hasty kiken: the final starts, then the operator notices and corrects', async () => {
+    await test.step('SF2 after the wrong-side kiken: the final starts, then the operator notices and corrects', async () => {
       const close = ed.locator('.remaining-matches button', { hasText: '✕' });
       if (await close.count()) await close.first().tap();
       // Not noticing, the operator starts the next match: the final.
@@ -851,9 +877,27 @@ test.describe('knockout-mixed-team', () => {
       await T.startUpNextTeam(page);
       await shot(page, 'final-started-with-wrong-team');
       record({ step: 'SF2 kiken recovery', action: 'final started before the mistake is noticed', variant: 'V5 lost place', finalPair: finalBefore });
-      // Correct on the finished semifinal.
+      // Correct on the finished semifinal, while the final runs on the court.
       const row = completedRows(page).filter({ hasText: sf2.shiro }).filter({ hasText: sf2.aka }).last();
       const result = (await row.locator('.shiaijo-qrow__result').innerText().catch(() => '')).trim();
+      await row.getByRole('button', { name: /Correct/ }).tap();
+      // bc-crpn: Correct is refused while a bout is live on the court; the row
+      // names it and says to finish it or send it back first (scoring-a-match.md).
+      const notice = row.locator('.shiaijo-upnext__error[role="alert"]');
+      await expect(notice).toBeVisible();
+      const noticeText = (await notice.innerText()).trim();
+      const toast = (await page.locator('.toast').allInnerTexts().catch(() => [])).join(' | ');
+      await shot(page, 'sf2-correct-refused-final-running');
+      record({ step: 'SF2 kiken recovery', action: 'Correct on the semifinal while the final runs', variant: 'V5 lost place', notice: noticeText, toast,
+        editorHolds: await sides(ed).catch(() => null), correctionOpened: await ed.getByText('CORRECTION', { exact: true }).count() });
+      expect(noticeText).toMatch(/^Shiaijo D is running .+\. Finish it or send it back to the queue first\. Then correct this match\.$/);
+      // The operator sends the final back (no score entered yet), then corrects.
+      await page.getByRole('button', { name: 'Send back to queue' }).tap();
+      const revert = page.locator('.shiaijo-move-confirm[role="dialog"]');
+      await settled(revert);
+      await revert.getByRole('button', { name: 'Send back to queue' }).tap();
+      await expect(revert).toHaveCount(0);
+      await expect(upNextCard(page)).toBeVisible();
       await row.getByRole('button', { name: /Correct/ }).tap();
       await expect(ed.getByText('CORRECTION', { exact: true }).or(ed.locator('.editor-modal__eyebrow', { hasText: 'MATCH 2' })).first()).toBeVisible();
       const full = (await ed.innerText()).replace(/\s+/g, ' ');
@@ -870,18 +914,15 @@ test.describe('knockout-mixed-team', () => {
       await prompt.locator('input[value="aka"]').check();
       await shot(page, 'sf2-rekiken-aka-prompt');
       await prompt.locator('button.btn--primary').tap();
-      const dialog = page.locator('.modal[role="dialog"]').filter({ has: page.locator('.modal__foot') });
-      const locked = await dialog.waitFor({ state: 'visible', timeout: 6000 }).then(() => true, () => false);
-      let hasty = null;
-      if (locked) {
-        await shot(page, 'sf2-decision-locked-confirm');
-        hasty = await hastyConfirm(page);
-      }
+      // bc-dlck: no "A subsequent match ... Proceed anyway?" confirm follows; the
+      // final it feeds was sent back unscored, so nothing else asks either.
       await page.waitForTimeout(1500);
+      const confirmShown = await page.locator('.modal[role="dialog"]').filter({ has: page.locator('.modal__foot') }).count();
       const errs = (await ed.locator('[style*="danger"], .alert--error').allInnerTexts()).join(' | ');
       await shot(page, 'sf2-after-rekiken');
-      record({ step: 'SF2 kiken recovery', action: 'Kiken – Voluntary again, Aka, on the corrected semifinal', variant: 'V4 hastyConfirm (decision_locked)',
-        confirmShown: locked, ...(hasty || {}), errorsAfter: errs });
+      record({ step: 'SF2 kiken recovery', action: 'Kiken – Voluntary again, Aka, on the corrected semifinal', variant: 'V4 hastyConfirm (no confirm since bc-dlck)',
+        confirmShown: confirmShown > 0, errorsAfter: errs, correctionStillOpen: await ed.getByText('CORRECTION', { exact: true }).count() });
+      expect(confirmShown).toBe(0);
       await openShiaijo(page, 'D');
       await page.waitForTimeout(1000);
       await shot(page, 'court-after-kiken-recovery');
@@ -893,9 +934,13 @@ test.describe('knockout-mixed-team', () => {
 
     await test.step('Final: fusenpai (a team did not show up)', async () => {
       await openShiaijo(page, 'D');
-      if (!(await T.boutRow(ed, 1).isVisible().catch(() => false)) && (await upNextCard(page).count())) await T.startUpNextTeam(page);
-      await expect(T.boutRow(ed, 1)).toBeVisible();
+      // The final was sent back to the queue; start it again from Up next.
+      // After the correction it holds SF2's Shiro, who won by Aka's kiken.
+      const finalPair = await sides(upNextCard(page));
+      await T.startUpNextTeam(page);
       const pair = await sides(ed);
+      expect(pair).toEqual(finalPair);
+      expect([pair.shiro, pair.aka]).toContain(sf2.shiro);
       const summary = ed.locator('.decision-disclosure__summary');
       await summary.scrollIntoViewIfNeeded();
       await summary.tap();
@@ -1130,7 +1175,7 @@ test.describe('knockout-mixed-team', () => {
     await T.boutIppon(ed, 1, 'shiro', 'K');
     // The kote is saved before the fusensho.
     await expect(T.syncPill(ed)).toHaveText('Synced');
-    // Shiro's fighter cannot continue; the bout goes to Aka by default.
+    // Shiro's fighter cannot continue; the bout goes to Aka as a fusensho.
     await T.rowFusensho(T.boutRow(ed, 1), 'aka').tap();
     await expect(T.rowSlots(T.boutRow(ed, 1), 'aka')).toHaveText(['○', '○']);
     // recording-decisions.md: "Any point the withdrawing side had already

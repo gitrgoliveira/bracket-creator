@@ -148,17 +148,28 @@ export const decisionButton = (page, kind, root = INLINE_EDITOR) => page.locator
   .getByTestId({ 'kiken-voluntary': 'scoring-modal-kiken-voluntary-button', 'kiken-injury': 'scoring-modal-kiken-injury-button', fusenpai: 'scoring-modal-fusenpai-button' }[kind]);
 export const decisionPrompt = (page, root = INLINE_EDITOR) => page.locator(root).first().locator('form.decision-prompt');
 
-// Open a decision, pick the side (or leave the default, the hasty operator's
-// way when `side` is omitted), optionally type a reason, and Record.
+// Open a decision, pick the side, optionally type a reason, and Record. The
+// prompt picks no side for the operator and Record stays off until one is
+// picked (bc-dsid), so `side` is required. Returns what the prompt showed: the
+// side preselected (none), whether Record was off before the pick, and the
+// label it read once the side was picked ("Record: AKA withdrew").
 export async function recordDecision(page, kind, { side, reason, root = INLINE_EDITOR } = {}) {
+  if (!side) throw new Error('recordDecision: pick a side; the prompt preselects none (bc-dsid)');
   await decisionButton(page, kind, root).tap();
   const form = decisionPrompt(page, root);
   await expect(form).toBeVisible();
-  const defaultSide = await form.locator('input[name="decision-side"]:checked').getAttribute('value');
-  if (side) await form.locator(`input[name="decision-side"][value="${side}"]`).check();
+  const checked = form.locator('input[name="decision-side"]:checked');
+  const preselected = (await checked.count()) ? await checked.getAttribute('value') : null;
+  const record = form.locator('button[type="submit"]');
+  const recordDisabledBeforePick = await record.isDisabled();
+  // The radio covers its pill, so the tap lands where the thumb does.
+  const pick = form.locator(`input[name="decision-side"][value="${side}"]`);
+  await pick.tap();
+  await expect(pick).toBeChecked();
   if (reason) await form.getByTestId('decision-reason').fill(reason);
-  await form.getByRole('button', { name: 'Record' }).tap();
-  return { defaultSide, chosen: side || defaultSide };
+  const recordLabel = (await record.innerText()).trim();
+  await record.tap();
+  return { preselected, recordDisabledBeforePick, recordLabel, chosen: side };
 }
 
 // Is the inline editor holding a RUNNING bout (no PRE-MATCH / CORRECTION pill)?
@@ -214,6 +225,35 @@ export async function playRunningBout(page, { waza = 'M' } = {}) {
     return now && now.shiro === pair.shiro && now.aka === pair.aka ? 'same' : 'moved';
   }, { timeout: 10_000 }).toBe('moved');
   return { ...pair, winner: side };
+}
+
+// Open the correction of a completed bout on the shiaijo page, the way the
+// operator now must. The console never holds a live bout and an open
+// correction at once (bc-crpn): while a bout runs, Correct is refused with a
+// notice at the row and a toast, and the notice says what to do: send the live
+// bout back to the queue (its score is kept), then correct. Returns the bout
+// that was live (null when the court was idle) and what the refusal said.
+export async function correctCompleted(page, pair) {
+  const done = completedRowFor(page, pair);
+  const live = (await inlineRunning(page)) ? await editorSides(page) : null;
+  await done.getByRole('button', { name: 'Correct' }).tap();
+  let refusal = null;
+  if (live) {
+    const notice = done.locator('.shiaijo-upnext__error[role="alert"]');
+    await expect(notice).toBeVisible();
+    const toast = (await page.locator('.toast').allInnerTexts().catch(() => [])).join(' | ');
+    refusal = {
+      notice: (await notice.innerText()).trim(), toast,
+      editorStillOnLiveBout: (await inlineRunning(page)) && JSON.stringify(await editorSides(page)) === JSON.stringify(live),
+    };
+    expect(refusal.notice).toMatch(/^Shiaijo \S+ is running .+\. Finish it or send it back to the queue first\. Then correct this match\.$/);
+    await page.getByRole('button', { name: 'Send back to queue' }).tap();
+    refusal.sendBack = await hastyShiaijoConfirm(page);
+    await expect.poll(() => inlineRunning(page), { timeout: 10_000 }).toBe(false);
+    await done.getByRole('button', { name: 'Correct' }).tap();
+  }
+  await expect(page.locator(INLINE_EDITOR).first().locator('.editor-head-pill')).toHaveText('CORRECTION');
+  return { live, refusal };
 }
 
 // How many POOL bouts still wait in this court's queue (the Up next card and

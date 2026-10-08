@@ -31,7 +31,7 @@ import { doubleTap, hastyConfirm, interrupt, retapWhileSaving, tapNeighbour } fr
 import {
   ROSTER_12, ROSTER_6, ROSTER_4_BRONZE, ROSTER_4_JOINT, ROSTER_6B, rosterOf, auditLog, tapSize, inlineIdentity, overlayIdentity,
   editorSides, slotMarks, winnerOf, inlineRunning, ensureRunning, playRunningBout, completedRowFor,
-  hastyShiaijoConfirm, decisionButton, decisionPrompt, recordDecision, queuedPoolBouts,
+  hastyShiaijoConfirm, decisionButton, decisionPrompt, recordDecision, queuedPoolBouts, correctCompleted,
 } from '../fixtures/individual.mjs';
 
 test.describe.configure({ mode: 'serial' });
@@ -249,12 +249,19 @@ test.describe('knockout-mixed-individual', () => {
     expect((await inlineIdentity(page)).eyebrow).toMatch(/POOL/);
     await shot(page, 'court-A-last-pool-bout-running');
 
-    // Correct a completed bout in place while the last pool bout runs.
+    // Correct a completed bout while the last pool bout runs. The console
+    // refuses it (bc-crpn): the notice at the row says to finish the live bout
+    // or send it back first. The operator sends it back (its score is kept),
+    // corrects, and starts it again.
     const firstDone = completedRowFor(page, running1);
     const correctBtn = firstDone.getByRole('button', { name: 'Correct' });
     row({ step: 'correct', action: 'Correct (completed row)', variant: 'size', ...(await tapSize(correctBtn)) });
-    await correctBtn.tap();
-    await expect(inlineEditor(page).locator('.editor-head-pill')).toHaveText('CORRECTION');
+    const lastPoolLive = await editorSides(page);
+    const lastPoolMarks = await slotMarks(page, winnerOf(lastPoolLive));
+    const { live: refusedFor, refusal } = await correctCompleted(page, running1);
+    row({ step: 'correct', action: 'Correct while the last pool bout runs', variant: 'correct path (refused, bc-crpn)',
+      liveBout: refusedFor, ...refusal, shot: await shot(page, 'correct-refused-then-sent-back') });
+    expect(refusedFor).toEqual(lastPoolLive);
     const corrId = await inlineIdentity(page);
     await shot(page, 'correcting-bout-1');
     await ipponButton(page, w1, 'K').tap();
@@ -270,9 +277,13 @@ test.describe('knockout-mixed-individual', () => {
       editorCourt: corrId.court, stayedOnCorrection: stillCorrecting, result: (await completedRowFor(page, running1).locator('.shiaijo-qrow__result').innerText()).trim(),
       shot: await shot(page, 'correction-saved') });
     if (stillCorrecting) await backToCourt.tap();
-    await expect.poll(() => inlineRunning(page), { timeout: 15_000 }).toBe(true);
-    const lastPoolA = await editorSides(page);
-    await shot(page, 'back-to-live-bout');
+    // Start the sent-back bout again: it is Up next, with the point it had.
+    const lastPoolA = await ensureRunning(page);
+    const marksAfterRestart = await slotMarks(page, winnerOf(lastPoolA));
+    row({ step: 'correct', action: 'restart the bout sent back for the correction', variant: 'recovery',
+      restarted: lastPoolA, marksBefore: lastPoolMarks, marksAfterRestart, shot: await shot(page, 'back-to-live-bout') });
+    expect(lastPoolA).toEqual(lastPoolLive);
+    expect(marksAfterRestart).toEqual(lastPoolMarks);
 
     // Court B plays out all its pool bouts, so court A's last bout is the one
     // that closes the pool phase.
@@ -373,11 +384,12 @@ test.describe('knockout-mixed-individual', () => {
   });
 
   // J2. Special decisions. On F1b (court E, pools): a kiken recorded against
-  // the WRONG side by a hasty operator (the prompt defaults to Shiro), the
-  // fusensho recorded from the withdrawn competitor's next match, then the undo
-  // through the 409 decision_locked confirm;
+  // the WRONG side by a hasty operator (the prompt picks no side, bc-dsid, so
+  // they take the first one offered), the fusensho recorded from the withdrawn
+  // competitor's next match, then the undo, which asks no confirm (bc-dlck);
   // a fusenpai that auto-advances. On F2 (court C, knockout): a tied 1-1 bout
-  // through encho (an unbounded counter) to hantei.
+  // through encho (an unbounded counter) to hantei, picked then Finished
+  // (bc-htsd).
   test('J2 special decisions: kiken chain and undo, fusenpai, encho, hantei', async ({ page }) => {
     test.setTimeout(240_000);
     const J = 'J2';
@@ -407,21 +419,47 @@ test.describe('knockout-mixed-individual', () => {
     await page.keyboard.press('Escape').catch(() => {});
 
     // V4: the prompt is answered by its loud button without choosing a side.
+    // No side is picked for the operator and Record stays off until one is
+    // (bc-dsid), so the hasty tap records nothing.
     await decisionButton(page, 'kiken-voluntary').tap();
     await expect(decisionPrompt(page)).toBeVisible();
     await shot(page, 'kiken-prompt');
-    const defaultSide = await decisionPrompt(page).locator('input[name="decision-side"]:checked').getAttribute('value');
+    const preselected = await decisionPrompt(page).locator('input[name="decision-side"]:checked').count();
     const radio = decisionPrompt(page).locator('input[name="decision-side"]').first();
-    row({ step: 'kiken', action: 'side radio (Which side withdrew?)', variant: 'size', ...(await tapSize(radio)),
+    row({ step: 'kiken', action: 'side pill (Which side withdrew?)', variant: 'size', ...(await tapSize(radio)),
       label: await tapSize(decisionPrompt(page).locator('label').first()) });
-    await decisionPrompt(page).getByRole('button', { name: 'Record' }).tap();
+    const record = decisionPrompt(page).locator('button[type="submit"]');
+    const recordOff = await record.isDisabled();
+    const recordLabelBefore = (await record.innerText()).trim();
+    const hint = (await decisionPrompt(page).getByTestId('decision-prompt-hint').innerText()).trim();
+    await record.tap({ force: true });
+    await page.waitForTimeout(500);
+    const stillOpen = await decisionPrompt(page).isVisible();
+    const recordedByHastyTap = await completedRowFor(page, b1).isVisible().catch(() => false);
+    row({ step: 'kiken', action: 'Record with no side picked', variant: 'V4 hasty (inline prompt)',
+      sidePreselected: preselected > 0, recordDisabled: recordOff, label: recordLabelBefore, hint, promptStillOpen: stillOpen,
+      recorded: recordedByHastyTap, shot: await shot(page, 'kiken-record-without-side') });
+    expect(preselected).toBe(0);
+    expect(recordOff).toBe(true);
+    expect(stillOpen).toBe(true);
+    expect(recordedByHastyTap).toBe(false);
+    // What the operator must do: pick a side. The hasty one takes the first
+    // pill offered (Shiro) without reading it, though the intended withdrawer
+    // is Aka; the Record button and the line above it now name the side. The
+    // wrong side is what the fusensho chain and the undo below then work from.
+    const pickedSide = 'shiro';
+    await decisionPrompt(page).locator(`input[name="decision-side"][value="${pickedSide}"]`).tap();
+    const recordLabel = (await record.innerText()).trim();
+    const consequence = (await decisionPrompt(page).getByTestId('decision-prompt-consequence').innerText()).trim();
+    await shot(page, 'kiken-first-side-picked');
+    await record.tap();
     // Recording a withdrawal changes only that match: no panel offers the
-    // competitor's other matches. The side the prompt preselected is the one
-    // recorded.
-    const withdrawnName = b1[defaultSide];
-    row({ step: 'kiken', action: 'Record (prompt left on its default side)', variant: 'V4 hasty (inline prompt)',
-      intendedWithdrawer: `aka: ${b1.aka}`, defaultSide, recordedWithdrawer: withdrawnName,
-      wrongSide: defaultSide !== 'aka', shot: await shot(page, 'kiken-recorded-default-side') });
+    // competitor's other matches.
+    const withdrawnName = b1[pickedSide];
+    row({ step: 'kiken', action: 'pick the first side offered, then Record', variant: 'V4 hasty (inline prompt)',
+      intendedWithdrawer: `aka: ${b1.aka}`, pickedSide, recordLabel, consequence, recordedWithdrawer: withdrawnName,
+      wrongSide: pickedSide !== 'aka', shot: await shot(page, 'kiken-recorded-first-side') });
+    expect(recordLabel).toBe('Record: SHIRO withdrew');
     const kikenRow = completedRowFor(page, b1);
     await expect(kikenRow).toBeVisible();
     const kikenResult = (await kikenRow.locator('.shiaijo-qrow__result').innerText()).trim();
@@ -478,30 +516,26 @@ test.describe('knockout-mixed-individual', () => {
     const moved = await ensureRunning(page);
     row({ step: 'kiken undo', action: 'court moves on: Up next started', variant: 'correct path', running: moved,
       involvesRealWithdrawer: !!moved && (moved.shiro === b1.aka || moved.aka === b1.aka) });
-    await completedRowFor(page, b1).getByRole('button', { name: 'Correct' }).tap();
-    await expect(inlineEditor(page).locator('.editor-head-pill')).toHaveText('CORRECTION');
+    // Correct is refused while that bout runs (bc-crpn): send it back first.
+    const undoOpen = await correctCompleted(page, b1);
+    row({ step: 'kiken undo', action: 'Correct the kiken while the next bout runs', variant: 'correct path (refused, bc-crpn)',
+      liveBout: undoOpen.live, ...undoOpen.refusal });
     await shot(page, 'kiken-correction-open');
-    await recordDecision(page, 'kiken-voluntary', { side: 'aka', reason: 'wrong side recorded' });
-    const lockedDialog = page.locator('.modal[role="dialog"]').filter({ has: page.locator('.modal__foot') }).last();
-    const locked = await lockedDialog.waitFor({ state: 'visible', timeout: 8000 }).then(() => true, () => false);
-    let hasty = null;
-    if (locked) {
-      await shot(page, 'decision-locked-confirm');
-      hasty = await hastyConfirm(page);
-    }
-    await page.waitForTimeout(1500);
-    const undoneResult = (await completedRowFor(page, b1).locator('.shiaijo-qrow__result').innerText()).trim();
-    row({ step: 'kiken undo', action: 'Kiken - Voluntary on the other side (correction)', variant: 'V4 hastyConfirm (409 decision_locked)',
-      dialogShown: locked, ...(hasty || {}), result: undoneResult,
-      shot: await shot(page, 'kiken-undo-forced') });
-    expect(locked).toBe(true);
-    // Docs: the kiken now sits beside Aka, the real withdrawer.
-    expect(undoneResult).toMatch(/○○ vs Kiken|○○.*Kiken$/);
+    const undo = await recordDecision(page, 'kiken-voluntary', { side: 'aka', reason: 'wrong side recorded' });
+    // Docs: the kiken now sits beside Aka, the real withdrawer. No confirm
+    // asks first any more (bc-dlck): the correction changes only this match.
+    const undoneRow = completedRowFor(page, b1).locator('.shiaijo-qrow__result');
+    await expect.poll(async () => (await undoneRow.innerText()).trim(), { timeout: 8000 }).toMatch(/○○ vs Kiken|○○.*Kiken$/);
+    const undoneResult = (await undoneRow.innerText()).trim();
+    const confirmShown = await page.locator('.modal[role="dialog"]').filter({ has: page.locator('.modal__foot') }).isVisible().catch(() => false);
+    row({ step: 'kiken undo', action: 'Kiken - Voluntary on the other side (correction)', variant: 'correct path (no confirm, bc-dlck)',
+      ...undo, confirmShown, result: undoneResult, shot: await shot(page, 'kiken-undo-recorded') });
+    expect(confirmShown).toBe(false);
     const backToCourt = page.getByRole('button', { name: /Back to court/ });
     if (await backToCourt.isVisible().catch(() => false)) await backToCourt.tap();
     await page.waitForTimeout(1000);
     const liveAfter = await inlineRunning(page) ? await editorSides(page) : null;
-    row({ step: 'kiken undo', action: 'back to the court after the forced undo', variant: 'V5 lost place',
+    row({ step: 'kiken undo', action: 'back to the court after the undo', variant: 'V5 lost place',
       running: liveAfter, runningHasNowIneligible: !!liveAfter && (liveAfter.shiro === b1.aka || liveAfter.aka === b1.aka),
       shot: await shot(page, 'after-undo-court-E') });
     await page.goto(`/admin/competition/${comps.F1b}/pools`);
@@ -597,12 +631,9 @@ test.describe('knockout-mixed-individual', () => {
     const enchoPopover = await page.getByText('Overtime, when a knockout match').isVisible().catch(() => false);
     row({ step: 'encho', action: 'tap the Overtime pill (centre)', variant: 'correct path', counterOpened: openedByCentre,
       glossaryPopoverOpened: enchoPopover, shot: await shot(page, 'overtime-pill-tapped') });
-    if (!openedByCentre) {
-      await page.mouse.click(5, 5);
-      await inlineEditor(page).locator('.encho-pill__icon').tap();
-      await expect(encho).toBeVisible();
-      row({ step: 'encho', action: 'tap the Overtime pill icon instead', variant: 'recovery', taps: 2, counterOpened: true });
-    }
+    // The word itself opens the counter (bc-otpl); the "?" beside it is the glossary.
+    expect(openedByCentre).toBe(true);
+    expect(enchoPopover).toBe(false);
     row({ step: 'encho', action: 'Encho started checkbox', variant: 'size', ...(await tapSize(encho)),
       label: await tapSize(inlineEditor(page).locator('.encho-row__label')) });
     await encho.check();
@@ -627,14 +658,24 @@ test.describe('knockout-mixed-individual', () => {
     expect(minusDisabledAtFloor).toBe(true);
     await settle(page);
 
-    // Hantei: arm, then the thumb lands on the neighbour of SHIRO wins.
+    // Hantei: arm, then the thumb lands on the neighbour of SHIRO wins. A
+    // side button only picks (bc-htsd); Finish (two taps) records the pick.
     await inlineEditor(page).getByTestId('scoring-modal-hantei-arm').tap();
     const shiroWins = inlineEditor(page).getByTestId('scoring-modal-hantei-shiro');
     const akaWins = inlineEditor(page).getByTestId('scoring-modal-hantei-aka');
-    row({ step: 'hantei', action: 'SHIRO wins / AKA wins', variant: 'size', shiro: await tapSize(shiroWins), aka: await tapSize(akaWins) });
+    row({ step: 'hantei', action: 'SHIRO wins / AKA wins', variant: 'size', shiro: await tapSize(shiroWins), aka: await tapSize(akaWins),
+      labels: [(await shiroWins.innerText()).trim(), (await akaWins.innerText()).trim()] });
     await shot(page, 'hantei-armed');
     const nbHantei = await tapNeighbour(shiroWins, 'right');
+    await page.waitForTimeout(1000);
     const semiRow = completedRowFor(page, semi);
+    const committedByPick = await semiRow.isVisible().catch(() => false);
+    const picked = { shiro: await shiroWins.getAttribute('aria-pressed'), aka: await akaWins.getAttribute('aria-pressed') };
+    row({ step: 'hantei', action: 'SHIRO wins (intended)', variant: 'V1 tapNeighbour right', hit: nbHantei.hit.label, gapPx: nbHantei.gapPx,
+      picked, committedByPick, finishLabel: (await finishButton(page).innerText()).trim(), shot: await shot(page, 'hantei-neighbour-tapped') });
+    expect(committedByPick).toBe(false);
+    // The hasty operator Finishes without reading which side is picked.
+    await finishMatch(page, INLINE_EDITOR);
     const committed = await semiRow.waitFor({ state: 'visible', timeout: 6000 }).then(() => true, () => false);
     const firstRead = committed ? (await semiRow.locator('.shiaijo-qrow__result').innerText()).trim() : null;
     const updatedInPlace = await expect.poll(async () => (await semiRow.locator('.shiaijo-qrow__result').innerText()).trim(), { timeout: 6000 })
@@ -644,26 +685,36 @@ test.describe('knockout-mixed-individual', () => {
     const wrongResult = (await semiRow.locator('.shiaijo-qrow__result').innerText()).trim();
     row({ step: 'hantei', action: 'the recorded hantei result, read before and after a reload', variant: 'correct path',
       firstRead, htShownWithin6sWithoutReload: updatedInPlace, afterReload: wrongResult, shot: await shot(page, 'hantei-result-after-reload') });
-    row({ step: 'hantei', action: 'SHIRO wins (intended)', variant: 'V1 tapNeighbour right', hit: nbHantei.hit.label, gapPx: nbHantei.gapPx,
-      committedImmediately: committed, result: wrongResult, shot: await shot(page, 'hantei-neighbour-tapped') });
+    row({ step: 'hantei', action: 'Finish (two taps) on the neighbour\'s pick', variant: 'V4 hasty (did not read the pick)',
+      picked, committed, result: wrongResult });
     // The recorded result reads as the docs describe: the winner's points,
     // Ht beside the winner, (E) in the centre.
     expect(wrongResult).toMatch(/Ht/);
     expect(wrongResult).toMatch(/\(E\)/);
 
-    // Recovery: Correct the semi-final and give hantei to Shiro.
-    await semiRow.getByRole('button', { name: 'Correct' }).tap();
-    await expect(inlineEditor(page).locator('.editor-head-pill')).toHaveText('CORRECTION');
+    // Recovery: Correct the semi-final and give hantei to Shiro. Finish +
+    // Start Next has started the other semi-final, so Correct is refused
+    // until it is sent back (bc-crpn).
+    const htOpen = await correctCompleted(page, semi);
+    row({ step: 'hantei', action: 'Correct the hantei while the next semi-final runs', variant: 'correct path (refused, bc-crpn)',
+      liveBout: htOpen.live, ...htOpen.refusal });
     await shot(page, 'hantei-correction-open');
     const armAgain = inlineEditor(page).getByTestId('scoring-modal-hantei-arm');
     if (await armAgain.isVisible().catch(() => false)) await armAgain.tap();
     await inlineEditor(page).getByTestId('scoring-modal-hantei-shiro').tap();
-    await page.waitForTimeout(1500);
-    const reasonAsked = await inlineEditor(page).locator('.reason-prompt').isVisible().catch(() => false);
-    const toast = (await page.locator('.toast').allInnerTexts().catch(() => [])).join(' | ');
-    const fixed = (await completedRowFor(page, semi).locator('.shiaijo-qrow__result').innerText()).trim();
-    row({ step: 'hantei', action: 'Correct -> SHIRO wins', variant: 'recovery', reasonAsked, toast, result: fixed,
+    await inlineEditor(page).getByRole('button', { name: 'Save correction' }).tap();
+    const reasonPrompt = inlineEditor(page).locator('.reason-prompt');
+    const reasonAsked = await reasonPrompt.waitFor({ state: 'visible', timeout: 4000 }).then(() => true, () => false);
+    if (reasonAsked) await reasonPrompt.locator('button.btn--primary').tap();
+    await expect.poll(async () => (await semiRow.locator('.shiaijo-qrow__result').innerText()).trim(), { timeout: 10_000 })
+      .not.toBe(wrongResult);
+    // The refusal's own toast may still be up; only a toast the save raised counts.
+    const toast = (await page.locator('.toast').allInnerTexts().catch(() => []))
+      .filter((t) => t !== htOpen.refusal?.toast).join(' | ');
+    const fixed = (await semiRow.locator('.shiaijo-qrow__result').innerText()).trim();
+    row({ step: 'hantei', action: 'Correct -> SHIRO wins -> Save correction', variant: 'recovery', reasonAsked, toast, result: fixed,
       shot: await shot(page, 'hantei-corrected') });
+    expect(fixed).toMatch(/Ht/);
   });
   // J6. Confirm + advance OFFLINE (F2, court C): the second semi-final is
   // finished with the network down. The write is queued, the local bracket
@@ -952,7 +1003,7 @@ test.describe('knockout-mixed-individual', () => {
     return id;
   };
 
-  test('bc-kfup: a withdrawn competitor\'s remaining pool bout can be recorded as their default loss', async ({ page }) => {
+  test('bc-kfup: a withdrawn competitor\'s remaining pool bout can be recorded as a fusenpai', async ({ page }) => {
     await login(page);
     const id = await seedOwn(page, { name: 'Finding A2', format: 'mixed', poolSize: 3, poolWinners: 2, courts: ['H'], numberPrefix: 'FB' }, rosterOf('Atwo', 6));
     await openShiaijo(page, 'H');
@@ -971,7 +1022,7 @@ test.describe('knockout-mixed-individual', () => {
     await expect(page.locator('.score-edit-row').filter({ hasText: first.aka }).filter({ hasText: /Fus\./ })).toHaveCount(1);
   });
 
-  test.fixme('bc-otpl: tapping the Overtime pill opens the encho counter, as the docs describe', async ({ page }) => {
+  test('bc-otpl: tapping the Overtime pill opens the encho counter, as the docs describe', async ({ page }) => {
     await login(page);
     await seedOwn(page, { name: 'Finding A3', format: 'knockout', courts: ['I'], numberPrefix: 'FC' }, rosterOf('Athree', 4));
     await openShiaijo(page, 'I');
@@ -988,17 +1039,20 @@ test.describe('knockout-mixed-individual', () => {
     await ipponButton(page, 'shiro', 'M').tap();
     await ipponButton(page, 'aka', 'K').tap();
     await settle(page);
+    // A side button picks the hantei winner; Finish (two taps) records it (bc-htsd).
     await inlineEditor(page).getByTestId('scoring-modal-hantei-arm').tap();
     await inlineEditor(page).getByTestId('scoring-modal-hantei-aka').tap();
+    await finishMatch(page, INLINE_EDITOR);
     const done = completedRowFor(page, semi);
     await expect(done).toBeVisible();
     await expect(done.locator('.shiaijo-qrow__result')).toContainText('Ht');
     const before = (await done.locator('.shiaijo-qrow__result').innerText()).trim();
-    await done.getByRole('button', { name: 'Correct' }).tap();
-    await expect(inlineEditor(page).locator('.editor-head-pill')).toHaveText('CORRECTION');
+    // Finish + Start Next started the other semi-final: send it back, then correct (bc-crpn).
+    await correctCompleted(page, semi);
     const arm = inlineEditor(page).getByTestId('scoring-modal-hantei-arm');
     if (await arm.isVisible().catch(() => false)) await arm.tap();
     await inlineEditor(page).getByTestId('scoring-modal-hantei-shiro').tap();
+    await inlineEditor(page).getByRole('button', { name: 'Save correction' }).tap();
     // Docs: a correction asks for a short reason, then applies.
     const reason = inlineEditor(page).locator('.reason-prompt');
     if (await reason.isVisible().catch(() => false)) await reason.locator('button.btn--primary').tap();
@@ -1048,7 +1102,7 @@ test.describe('knockout-mixed-individual', () => {
     expect(again).toEqual(pair);
     await expect.poll(() => slotMarks(page, winnerOf(pair))).toEqual(['M']);
   });
-  test.fixme('bc-kosc: in pools + knockout, no knockout bout is scheduled before the last pool bout', async ({ page }) => {
+  test('bc-kosc: in pools + knockout, no knockout bout is scheduled before the last pool bout', async ({ page }) => {
     await login(page);
     const id = await seedOwn(page, { name: 'Finding A7', format: 'mixed', poolSize: 3, poolWinners: 2, courts: ['M'], numberPrefix: 'FG' }, rosterOf('Aseven', 6));
     await page.goto(`/admin/competition/${id}/scores`);

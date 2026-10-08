@@ -10,11 +10,12 @@
 // hikiwake, an encho, a taisho tie that exhausts a team, a fusensho walkover),
 // returns to a mis-scored earlier bout mid-encounter, then walks every
 // correction door the UI offers: Remove this bout, Reopen match on a completed
-// encounter, the court-busy "Clear its score, queue it, and reopen" panel
-// (M2, moved onto A, holds the court), and the refusal when the final that M1
-// feeds is already running. M2 ends the other way the rules allow, with the
-// taisho drawing, staying on, and then being defeated. The final is played
-// out and a spectator's phone sees the finished knockout.
+// encounter, the court console refusing Correct while another bout is live on
+// its court (bc-crpn), and from the Scores tab the court-busy "Queue it and
+// reopen" panel (M2, moved onto A, holds the court) and the refusal when the
+// final that M1 feeds is already running. M2 ends the other way the rules
+// allow, with the taisho drawing, staying on, and then being defeated. The
+// final is played out and a spectator's phone sees the finished knockout.
 //
 // Functional defects found here are test.fixme('<bead-id>: ...') blocks,
 // each a self-contained reproduction placed where the fixture supports it.
@@ -39,6 +40,8 @@ import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competi
 import { openShiaijo, sides, upNextCard } from '../fixtures/shiaijo.mjs';
 import { PUBLIC_DEVICE } from '../fixtures/devices.mjs';
 import { openViewer } from '../fixtures/public.mjs';
+import { scoreRows } from '../fixtures/scores.mjs';
+import { EDITOR } from '../../screenshots/lib/editor.mjs';
 import { dwell, settled } from '../fixtures/pace.mjs';
 // clumsy.hastyConfirm answers confirmDialog (ui.jsx) only. The other confirms
 // on this journey are the shiaijo page's own `.shiaijo-move-confirm`, the
@@ -554,15 +557,16 @@ test.describe('J5 kachinuki from the court console', () => {
       const row = completedRow(page, m1);
       await expect(row).toBeVisible();
       // Shiro won bouts 1, 5, 6 and 8 (the walkover's two maru), Aka 2 and 4:
-      // IV 4-2, PW 8-3. Does the court's own Completed record say so?
-      const want = /IV 4–2\s+PW 8–3/;
+      // IV 4-2, PW 7-3 (bout 5's double tap scores one M since bc-dtip; before
+      // it the bounce added a second). Does the court's own Completed record say so?
+      const want = /IV 4–2\s+PW 7–3/;
       const result = row.locator('.shiaijo-qrow__result');
       const settled = await expect(result).toHaveText(want, { timeout: 6000 }).then(() => true, () => false);
       const shownAtFirst = (await result.innerText()).replace(/\s+/g, ' ');
       const staleShot = await shot(page, 'm1-completed');
       await page.getByRole('button', { name: 'Refresh' }).tap();
       await page.waitForTimeout(1500);
-      record({ step: 'M1 end', action: 'Completed row after End match', variant: 'result', expected: 'IV 4–2 PW 8–3',
+      record({ step: 'M1 end', action: 'Completed row after End match', variant: 'result', expected: 'IV 4–2 PW 7–3',
         shownFor6s: shownAtFirst, settledWithoutRefresh: settled,
         afterRefresh: (await completedRow(page, m1).locator('.shiaijo-qrow__result').innerText()).replace(/\s+/g, ' '),
         screenshot: staleShot });
@@ -701,9 +705,9 @@ test.describe('J5 kachinuki from the court console', () => {
       const immediately = (await row.locator('.shiaijo-qrow__result').innerText()).replace(/\s+/g, ' ');
       const immediateShot = await shot(page, 'm1-ended-again');
       // Bout 8 is now a men (1 point) instead of the walkover (2 maru).
-      const settled = await expect(row.locator('.shiaijo-qrow__result')).toHaveText(/IV 4–2\s+PW 7–3/, { timeout: 8000 })
+      const settled = await expect(row.locator('.shiaijo-qrow__result')).toHaveText(/IV 4–2\s+PW 6–3/, { timeout: 8000 })
         .then(() => true, () => false);
-      record({ step: 'M1 reopen', action: 'ended again: Completed row', variant: 'result', expected: 'IV 4–2 PW 7–3',
+      record({ step: 'M1 reopen', action: 'ended again: Completed row', variant: 'result', expected: 'IV 4–2 PW 6–3',
         immediately, settledWithin8s: settled, after: (await row.locator('.shiaijo-qrow__result').innerText()).replace(/\s+/g, ' '),
         screenshot: immediateShot });
       // Still Kawasemi's (Shiro's) win: the final keeps its side.
@@ -713,7 +717,9 @@ test.describe('J5 kachinuki from the court console', () => {
 
   // The operator on A spots another mistake in M1, but the organiser has
   // already moved M2 onto A (shiaijo B's table is unstaffed) and it is running
-  // there. Reopening M1 meets the court-busy panel.
+  // there. The court console refuses Correct while a bout is live on its court
+  // (bc-crpn), so the organiser reopens M1 from the Scores tab, which meets the
+  // court-busy panel.
   test('J5 M1 reopened while M2 holds shiaijo A: the court-busy panel', async ({ page }) => {
     await login(page);
 
@@ -740,15 +746,20 @@ test.describe('J5 kachinuki from the court console', () => {
       await expect(syncPill(page)).toHaveText('Synced');
     });
 
+    await test.step('Correct on M1 at the court console is refused while M2 runs', async () => {
+      const refused = await correctRefusedAtConsole(page, m1, m2);
+      record({ step: 'M1 reopen, court busy', action: 'Correct (Completed row) while M2 runs on A', variant: 'refused (bc-crpn)',
+        ...refused, screenshot: await shot(page, 'm1-correct-refused-m2-running') });
+    });
+
     const conflict = page.getByTestId('kachinuki-reopen-conflict');
-    await test.step('Correct M1 -> Reopen match: the court is busy', async () => {
-      await completedRow(page, m1).locator('.shiaijo-row__correct').tap();
-      await expect(reopenButton(page)).toBeVisible();
+    await test.step('Scores tab: Correct M1 -> Reopen match: the court is busy', async () => {
+      await openScoresCorrection(page, compId, m1);
       await reopenButton(page).tap();
       await expect(conflict).toBeVisible();
       const req = await page.getByTestId('kachinuki-reopen-requeue-button').boundingBox();
       const leave = await page.getByTestId('kachinuki-reopen-conflict-dismiss').boundingBox();
-      record({ step: 'M1 reopen, court busy', action: 'Reopen match while M2 runs on A', variant: 'correct path',
+      record({ step: 'M1 reopen, court busy', action: 'Reopen match (Scores tab) while M2 runs on A', variant: 'correct path',
         panel: (await conflict.innerText()).replace(/\s+/g, ' ').trim(),
         requeueBox: req && `${Math.round(req.width)}x${Math.round(req.height)}`,
         leaveBox: leave && `${Math.round(leave.width)}x${Math.round(leave.height)}`,
@@ -759,7 +770,7 @@ test.describe('J5 kachinuki from the court console', () => {
       const v1 = await tapNeighbour(page.getByTestId('kachinuki-reopen-requeue-button'), 'right');
       await page.waitForTimeout(300);
       const panelStill = await conflict.isVisible();
-      record({ step: 'M1 reopen, court busy', action: 'Clear its score, queue it, and reopen', variant: 'V1 tapNeighbour right',
+      record({ step: 'M1 reopen, court busy', action: 'Queue it and reopen (Scores tab)', variant: 'V1 tapNeighbour right',
         ...v1, panelStill, screenshot: await shot(page, 'v1-requeue-neighbour') });
       if (!panelStill) {
         await reopenButton(page).tap();
@@ -770,12 +781,17 @@ test.describe('J5 kachinuki from the court console', () => {
     await test.step('V4: the panel answered by its loudest button without reading', async () => {
       const loud = await hastyPanel(conflict);
       await expect(conflict).toHaveCount(0, { timeout: 15_000 });
+      // The overlay follows the reopened match into bout mode.
+      await expect(page.locator(EDITOR).getByRole('button', { name: 'Record bout' })).toBeVisible({ timeout: 15_000 });
+      const overlayShot = await shot(page, 'v4-requeue-hasty');
+      // M1 back in play is the court console's to show: it is A's live bout
+      // again, with its bouts, and M2 is back in A's queue.
+      await openShiaijo(page, 'A');
       await expect(recordBoutButton(page)).toBeVisible({ timeout: 15_000 });
       const upNext = await upNextCard(page).isVisible() ? await sides(upNextCard(page)) : null;
-      record({ step: 'M1 reopen, court busy', action: 'court-busy panel', variant: 'V4 hasty (loudest button)', ...loud,
-        m1Reopened: await boutNames(currentBout(page)), upNext,
-        screenshot: await shot(page, 'v4-requeue-hasty') });
-      // M1 is back in play with its bouts; M2 is back in A's queue.
+      record({ step: 'M1 reopen, court busy', action: 'court-busy panel (Scores tab)', variant: 'V4 hasty (loudest button)', ...loud,
+        m1Reopened: await boutNames(currentBout(page)), doneRows: await doneRows(page).count(), upNext,
+        screenshot: overlayShot, console: await shot(page, 'v4-requeue-hasty-console') });
       expect(await doneRows(page).count()).toBe(7);
       expect(upNext).toEqual(m2);
     });
@@ -793,6 +809,9 @@ test.describe('J5 kachinuki from the court console', () => {
       expect(await sides(upNextCard(page))).toEqual(m2);
       await upNextCard(page).getByRole('button', { name: 'Start match' }).tap();
       await page.waitForTimeout(1500);
+      // The reopen came from the Scores tab, so the console holds no
+      // correction: M2 is the panel's live bout at once (V5's old lost place,
+      // a started match hidden behind a pinned correction, is gone, bc-crpn).
       const afterStart = {
         upNextStill: await upNextCard(page).isVisible(),
         panelShows: (await editor(page).locator('.editor-modal__eyebrow').first().innerText().catch(() => '')).replace(/\s+/g, ' '),
@@ -801,16 +820,12 @@ test.describe('J5 kachinuki from the court console', () => {
         backToCourt: await page.getByRole('button', { name: /Back to court/ }).count(),
       };
       record({ step: 'M1 reopen, court busy', action: 'End M1 again, then Start match on Up next (M2)', variant: 'V5 lost place',
-        ...afterStart, screenshot: await shot(page, 'v5-m2-started-but-not-shown') });
-      // Recover: "← Back to court" under the pinned correction.
-      let recoverTaps = 0;
-      if (!afterStart.m2Live && afterStart.backToCourt) {
-        await page.getByRole('button', { name: /Back to court/ }).tap();
-        recoverTaps += 1;
-      }
+        ...afterStart, screenshot: await shot(page, 'v5-m2-started-after-m1-ended') });
       await expect(recordBoutButton(page)).toBeVisible();
-      record({ step: 'M1 reopen, court busy', action: 'recover the started M2', variant: 'V5 lost place', recoverTaps,
-        live: await boutNames(currentBout(page)), screenshot: await shot(page, 'v5-m2-after-back-to-court') });
+      // Nothing to recover from: the row stays to say so.
+      record({ step: 'M1 reopen, court busy', action: 'recover the started M2', variant: 'V5 lost place', recoverTaps: 0,
+        live: await boutNames(currentBout(page)) });
+      expect(await boutNames(currentBout(page))).toEqual({ shiro: MEMBERS[m2.shiro][0], aka: MEMBERS[m2.aka][0] });
       const marks = await boutFilled(currentBout(page), 'aka').count();
       record({ step: 'M1 reopen, court busy', action: 'M2 restarted after the requeue', variant: 'result',
         m2Bout1AkaMarks: marks, panelSays: 'Sending it back to the queue keeps any score already entered for it: it carries on from there when it is started again',
@@ -1030,23 +1045,35 @@ test.describe('J5 kachinuki from the court console', () => {
     });
   });
 
-  // bc-crpn: while a finished match is pinned open for correction, Start
-  // match on the Up next card starts the next match but the panel keeps
-  // showing the correction: the running match appears nowhere on the page.
-  test.fixme('bc-crpn: Start match while a correction is pinned hides the match it started', async ({ page }) => {
+  // bc-crpn (fixed): the court console never holds a running match and an
+  // open correction at once. While a finished match is open for correction,
+  // Start match on the Up next card is refused with a notice at the card, the
+  // correction stays open and the queued match is not started.
+  test('bc-crpn: Start match while a correction is open is refused', async ({ page }) => {
     await login(page);
     await openShiaijo(page, 'A');
     const next = await sides(upNextCard(page));
     await completedRow(page, m1).locator('.shiaijo-row__correct').tap();
     await expect(reopenButton(page)).toBeVisible();
-    await upNextCard(page).getByRole('button', { name: 'Start match' }).tap();
-    await expect(recordBoutButton(page)).toBeVisible();
-    expect(await editor(page).locator('.team-sub-match__side--shiro input.pmf__input').first().inputValue())
-      .toBe(MEMBERS[next.shiro][0]);
-    // Leave the final as it was: back in the queue, unscored.
-    await page.getByRole('button', { name: 'Send back to queue' }).tap();
-    await page.locator('.shiaijo-move-confirm').getByRole('button', { name: 'Send back to queue' }).tap();
-    await expect(upNextCard(page)).toBeVisible();
+    const start = upNextCard(page).getByRole('button', { name: 'Start match' });
+    await start.tap();
+    const notice = upNextCard(page).locator('.shiaijo-upnext__error');
+    await expect(notice).toHaveText(new RegExp(
+      `^Save the correction of .*${m1.shiro} vs ${m1.aka}, or leave it with Back to court, then start this match\\.$`));
+    record({ step: 'bc-crpn', action: 'Start match (Up next) while M1 is open for correction', variant: 'refused',
+      notice: (await notice.innerText()).trim(),
+      toast: (await page.locator('.toast').allInnerTexts().catch(() => [])).join(' | '),
+      screenshot: await shot(page, 'bc-crpn-start-refused-during-correction') });
+    // The correction stays open, and the final is still waiting in the queue.
+    await expect(reopenButton(page)).toBeVisible();
+    await expect(recordBoutButton(page)).toHaveCount(0);
+    await expect(start).toBeVisible();
+    expect(await sides(upNextCard(page))).toEqual(next);
+    // Leave the correction; the court is as it was, with the final up next.
+    await page.getByRole('button', { name: /Back to court/ }).tap();
+    await expect(reopenButton(page)).toHaveCount(0);
+    await expect(notice).toHaveCount(0);
+    expect(await sides(upNextCard(page))).toEqual(next);
   });
 
   test('J5 final: lineups carried over, the final starts on A', async ({ page }) => {
@@ -1088,17 +1115,24 @@ test.describe('J5 kachinuki from the court console', () => {
     });
 
     await test.step('Correct M1 -> Reopen while the final (fed by M1) runs', async () => {
-      await completedRow(page, m1).locator('.shiaijo-row__correct').tap();
-      await expect(reopenButton(page)).toBeVisible();
+      // The court console refuses the Correct itself while the final is live
+      // on A (bc-crpn).
+      const refused = await correctRefusedAtConsole(page, m1, final);
+      record({ step: 'final running', action: 'Correct M1 (Completed row) while the final runs on A', variant: 'refused (bc-crpn)',
+        ...refused, screenshot: await shot(page, 'm1-correct-refused-final-running') });
+      // The Scores tab still offers the reopen; the server refuses it because
+      // the final M1 feeds is running.
+      await openScoresCorrection(page, compId, m1);
       await reopenButton(page).tap();
       const err = page.getByTestId('kachinuki-reopen-error');
       await expect(err).toBeVisible();
-      record({ step: 'final running', action: 'Reopen M1 while its downstream final runs on the same court', variant: 'correct path',
+      record({ step: 'final running', action: 'Reopen M1 (Scores tab) while its downstream final runs', variant: 'correct path',
         message: (await err.innerText()).trim(), courtBusyPanel: await page.getByTestId('kachinuki-reopen-conflict').count(),
         screenshot: await shot(page, 'm1-reopen-refused-downstream') });
-      // Back to the live final.
-      await page.getByRole('button', { name: /Back to court/ }).tap();
+      // Back to the live final on the court console.
+      await openShiaijo(page, 'A');
       await expect(recordBoutButton(page)).toBeVisible();
+      expect(await boutFilled(currentBout(page), 'shiro').count()).toBe(1);
     });
   });
 
@@ -1244,6 +1278,31 @@ async function completedOnServer(page, pair, court = 'A') {
   } finally {
     await fresh.close();
   }
+}
+
+// Correct on `pair`'s Completed row while `running` is live on the court:
+// refused (bc-crpn). The notice sits at the row, the same sentence as the
+// toast; no correction opens and the live bout keeps the panel.
+async function correctRefusedAtConsole(page, pair, running, court = 'A') {
+  await completedRow(page, pair).locator('.shiaijo-row__correct').tap();
+  const notice = completedRow(page, pair).locator('.shiaijo-upnext__error');
+  await expect(notice).toHaveText(new RegExp(`^Shiaijo ${court} is running .*${running.shiro} vs ${running.aka}\\. `
+    + 'Finish it or send it back to the queue first\\. Then correct this match\\.$'));
+  const toast = (await page.locator('.toast').allInnerTexts().catch(() => [])).join(' | ');
+  await expect(reopenButton(page)).toHaveCount(0);
+  await expect(recordBoutButton(page)).toBeVisible();
+  return { notice: (await notice.innerText()).trim(), toast, correctionOpened: await reopenButton(page).count() > 0,
+    liveBout: await boutNames(currentBout(page)) };
+}
+
+// The organiser's door: Correct on `pair`'s row of the Scores tab opens the
+// finished encounter in the overlay editor, which offers Reopen match.
+async function openScoresCorrection(page, id, pair) {
+  await page.goto(`/admin/competition/${encodeURIComponent(id)}/scores`);
+  const row = scoreRows(page).filter({ hasText: pair.shiro }).filter({ hasText: pair.aka }).first();
+  await row.getByRole('button', { name: /^Correct$/ }).tap();
+  await expect(page.locator(EDITOR)).toBeVisible();
+  await expect(reopenButton(page)).toBeVisible();
 }
 
 // V4 for the shiaijo page's own confirms (`.shiaijo-move-confirm`: Send back

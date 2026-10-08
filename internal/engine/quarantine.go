@@ -121,7 +121,11 @@ func (e *Engine) QuarantineCorruptBracket(id string) (*QuarantineResult, error) 
 
 	// The pool draw survives in pools.csv, so the knockout structure is
 	// rebuildable from it by the same builder that drew it.
-	if err := e.generatePoolPreviewBracket(comp); err != nil {
+	poolMatches, err := e.store.LoadPoolMatches(id)
+	if err != nil {
+		return nil, fmt.Errorf("loading the pool matches for %s: %w", id, err)
+	}
+	if err := e.generatePoolPreviewBracket(comp, poolMatches); err != nil {
 		return nil, fmt.Errorf("rebuilding the bracket for %s: %w", id, err)
 	}
 	result.Rebuilt = true

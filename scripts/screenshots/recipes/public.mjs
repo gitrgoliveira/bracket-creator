@@ -51,24 +51,23 @@ async function armEncho(page) {
   // EnchoControl (admin_scoring_shared.jsx): collapsed pill -> expand ->
   // check the "Encho started" box, which arms periodCount=1.
   //
-  // Click the icon span, NOT [data-testid="scoring-modal-encho-pill"] itself
-  // (confirmed by hand): the pill's own text is wrapped in a nested TermAS
-  // glossary-term trigger, so a plain .click() on the pill lands on that
-  // inner element's center and opens the "Overtime" glossary tooltip instead
-  // of the setShowCounter(true) the outer button owns. The icon span is
-  // outside the glossary term and reaches the outer button reliably.
+  // The pill's text is plain (bc-otpl), so a click anywhere on it opens the
+  // counter; the icon span is simply the stable handle.
   await page.locator('.encho-pill__icon').click();
   await page.locator('[data-testid="scoring-modal-encho-checkbox"]').click();
 }
 
 // Settle a TIED match by referee decision. The individual editor keeps this
-// behind a two-step control (admin_scoring_individual.jsx:946-1003): "Decide by
-// hantei..." arms it, then a SHIRO/AKA button commits - and that commit is also
-// what advances to the next match, exactly as Finish does. The verdict is
-// recorded as an "Ht" ippon in the winner's free slot, never as a centre mark.
+// behind a pick and a commit (admin_scoring_individual.jsx): "Decide by
+// hantei..." arms it, a SHIRO/AKA button only PICKS the winning side, and
+// Finish commits it under the usual two-tap guard (finishMatch waits out the
+// bounce window, TAP_DWELL_MS). That commit also advances to the next match,
+// exactly as Finish does. The verdict is recorded as an "Ht" ippon in the
+// winner's free slot, never as a centre mark.
 async function decideByHantei(page, side) {
   await page.locator('[data-testid="scoring-modal-hantei-arm"]').click();
   await page.locator(`[data-testid="scoring-modal-hantei-${side}"]`).click();
+  await finishMatch(page);
 }
 
 export const families = {

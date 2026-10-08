@@ -8,6 +8,8 @@ Not every bout is decided on points. The score editor records the kendo outcomes
 
 Kiken covers two distinct situations with different consequences.
 
+Pick the side that withdrew: no side is chosen for you, and **Record** stays unavailable until you pick one. Once you do, the button names it (for example **Record: AKA withdrew**) and a line beneath says who cannot fight again and who wins the match.
+
 ### Voluntary withdrawal (FIK Article 31)
 
 A voluntary kiken is permanent. The competitor takes no further matches in this competition and cannot be reinstated.
@@ -19,6 +21,8 @@ An injury kiken can be reinstated later by the operator if the competitor recove
 ## Fusenpai and fusensho
 
 **Fusenpai** is the no-show decision: the competitor who did not appear forfeits the match.
+
+Pick the side that did not show up: no side is chosen for you, and **Record** stays unavailable until you pick one. Once you do, the button names it (for example **Record: SHIRO did not show up**).
 
 **Fusensho** is used in team matches when the opposing team fields a vacant position, awarding that bout to the other side. It is also the decision the app records for the match itself when you record the win for the opponent of an already-barred competitor; refer to [Matches after a competitor is barred](#matches-after-a-competitor-is-barred). When neither team has a fighter for a position, record that bout as a **Tie** instead.
 
@@ -37,6 +41,8 @@ A hikiwake is a draw. It applies in pool, league, and Swiss matches, and in the 
 Encho is the extra period played when a match is level at the end of regulation and must still produce a winner. That is usually a knockout match, but an individual pool match can also go to encho when the tournament's rules call for it. A team pool encounter is not extended: a tie there is a draw, and teams still level on the pool standings play a daihyosen instead. Encho follows ippon-shobu rules: the first competitor to score wins.
 
 An individual knockout match cannot be finished level. While the score is tied, the **Finish** button reads **Needs a winner** instead: fight encho, then record a hantei if the competitors are still level after it.
+
+To record a hantei, tap **Decide by hantei** and pick the winning side. Each button names the side's colour and competitor, for example **SHIRO (White) wins: Tanaka** and **AKA (Red) wins: Yamada**. Then finish the match as usual: **Finish** (on the court console, **Finish + Start Next**) and tap it again to confirm, or **Save correction** when you are correcting a result. Picking a side on its own records nothing, so a slip of the thumb between the two buttons can be put right before anything is saved.
 
 In the score editor, open the **Overtime** control and tick **Encho started**. A counter appears so you can record how many overtime periods were fought, using the **+** and **-** buttons. The counter starts at 1 and has no upper limit. How many periods are fought, and how a match still level after them is finally settled, is the shimpan's call. That may be a judges' decision for an individual bout, or a daihyosen for a team encounter. Record what actually happened on court, however many periods that took.
 
@@ -101,7 +107,7 @@ If both competitors due to meet are already barred, neither can fight. In a pool
 
 A kiken or fusenpai entered in error can always be fixed. Open the match in the score editor. It shows what is recorded, for example "Recorded: Kiken – Voluntary, Kyoto withdrew", and marks the side that withdrew with **Kiken** or **Fus.** beside its name. In a team match the result under the team names, at the top of the score sheet, names the recorded winner and the decision, and the bouts after the withdrawal are credited to the other team, even though nobody actually fought them. Pick the fix that matches what happened:
 
-- **The wrong competitor or team was marked.** Record the withdrawal again for the other side. In an individual match, use the **Kiken – Voluntary**, **Kiken – Injury** or **Fusenpai** button in the editor's **Decision** row. In a team match, open **Withdrawal or no-show** and use the same buttons there. The side you first marked is eligible again, and the other side becomes the one that withdrew.
+- **The wrong competitor or team was marked.** Record the withdrawal again for the other side. In an individual match, use the **Kiken – Voluntary**, **Kiken – Injury** or **Fusenpai** button in the editor's **Decision** row. In a team match, open **Withdrawal or no-show** and use the same buttons there. The side you first marked is eligible again, and the other side becomes the one that withdrew. Nothing else changes: a competitor with a **Fusenpai** recorded on another match stays withdrawn because of that match, and matches already closed with a fusensho because of the first withdrawal keep it, so correct each of them one by one.
 - **Nobody withdrew, and the match was fought to a result.** Choose **Remove kiken**, **Remove fusenpai**, or **Remove fusensho**: the button names the decision that was recorded. The editor takes that decision off the score board: its circles go, the points the withdrawn competitor struck stay, and you enter the result as it was fought, or a draw in a pool or league. In a team match, every bout needs a result, as when you finish one. Then use **Save correction**, which asks for a short reason like any correction. The match stays finished the whole time, so the fix never needs the court and a match being fought there carries on undisturbed. **Undo** puts the recorded decision back before you save; once the correction is saved on the device and waiting to be sent, it can no longer be undone this way. In a knockout match whose bouts were tied, a representative bout decided it: use **Clear kiken and reopen** (or **Clear fusenpai and reopen**) instead, which puts the match back on the court to fight it.
 - **Nobody withdrew, and there is more of the match to fight.** Choose **Clear kiken and reopen** or **Clear fusenpai and reopen**, whichever was recorded. It takes one tap and needs no reason; the editor says what it will do beside the button. A kiken or fusenpai gives the opponent the match win, so without it the match was never decided. The match goes back to in progress and the editor stays open on it. The withdrawn competitor or team can compete again. Score the rest of the match and finish it as usual.
 
@@ -118,7 +124,6 @@ Without removing the decision first, **Save correction** never removes a kiken o
 
 A fix can change who goes through to later matches, so the app warns you first and you can cancel or go ahead:
 
-- Recording the withdrawal for the other side warns you when either side has already started a later match.
 - Clearing a decision in a knockout match, or removing one so that the other competitor wins, warns you when the next match has already been played. If you go ahead, that next match is reopened with its winner cleared and its points kept, so check them and take back any that no longer apply, and the editor names it once the reopen is done. A round after it that nobody has played yet stops showing its winner. If a withdrawal decided that next match, its withdrawn competitor is eligible again too.
 
 In a knockout, a next match that is still in progress must be finished or sent back to the queue before a decision can be cleared, removed in favour of the other competitor, or recorded for the other side. Clearing and reopening also needs this match's court: if another match is running there, the app names it and offers to send it back to the queue, which keeps any score entered for it. Removing the decision does not need the court.

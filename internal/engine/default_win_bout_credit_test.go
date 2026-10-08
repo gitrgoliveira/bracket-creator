@@ -65,7 +65,7 @@ func TestDefaultWinBoutCredit_PoolStandings(t *testing.T) {
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	// Yama C (aka = SideA) withdraws; Tora A (shiro = SideB) is credited.
-	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "no-show", nil, false)
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "no-show", nil)
 	require.NoError(t, err)
 
 	// The kiken match's OWN contribution, isolated: bouts 1-3 padded and
@@ -145,7 +145,7 @@ func TestDefaultWinBoutCredit_BracketTeamResult(t *testing.T) {
 	require.NoError(t, store.SaveBracket(compID, b))
 
 	// Ryu (shiro = SideB) withdraws; Tora (aka = SideA) is credited.
-	_, _, err := eng.RecordDecision(compID, "m-r1-0", "fusenpai", "shiro", "no-show", nil, false)
+	_, _, err := eng.RecordDecision(compID, "m-r1-0", "fusenpai", "shiro", "no-show", nil)
 	require.NoError(t, err)
 
 	loaded, err := store.LoadBracket(compID)
@@ -174,7 +174,7 @@ func TestDefaultWinBoutCredit_PoolWritePads(t *testing.T) {
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{{
 		ID: "Pool A-0", SideA: "Red", SideB: "White", Status: state.MatchStatusRunning,
 	}}))
-	result, _, err := eng.RecordDecision(compID, "Pool A-0", "fusenpai", "aka", "no-show", nil, false)
+	result, _, err := eng.RecordDecision(compID, "Pool A-0", "fusenpai", "aka", "no-show", nil)
 	require.NoError(t, err)
 
 	// Assert on the WRITE's own returned result first, in memory, before any
@@ -210,7 +210,7 @@ func TestDefaultWinBoutCredit_BracketWritePads(t *testing.T) {
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{{
 		{ID: "m-r1-0", SideA: "Red", SideB: "White", Status: state.MatchStatusRunning},
 	}}}))
-	result, _, err := eng.RecordDecision(compID, "m-r1-0", "kiken-injury", "shiro", "injured", nil, false)
+	result, _, err := eng.RecordDecision(compID, "m-r1-0", "kiken-injury", "shiro", "injured", nil)
 	require.NoError(t, err)
 
 	// Assert on the WRITE's own returned result first, in memory -- see
@@ -244,7 +244,7 @@ func TestDefaultWinBoutCredit_KachinukiNotPadded(t *testing.T) {
 			{Position: 1, SideAMemberID: "r1", SideBMemberID: "w1", WinnerMemberID: "r1", Winner: "r1", IpponsA: []string{"M"}},
 		},
 	}}))
-	_, _, err := eng.RecordDecision("dwb-kachinuki", "Pool A-0", "kiken-voluntary", "shiro", "withdrew", nil, false)
+	_, _, err := eng.RecordDecision("dwb-kachinuki", "Pool A-0", "kiken-voluntary", "shiro", "withdrew", nil)
 	require.NoError(t, err)
 
 	ms, err := store.LoadPoolMatches("dwb-kachinuki")
@@ -318,7 +318,7 @@ func TestDefaultWinBoutCredit_PoolDaihyosenRowNeverPadded(t *testing.T) {
 			require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{{
 				ID: matchID, SideA: "Red", SideB: "White", Status: state.MatchStatusRunning,
 			}}))
-			result, _, err := eng.RecordDecision(compID, matchID, "kiken-voluntary", "aka", "no-show", nil, false)
+			result, _, err := eng.RecordDecision(compID, matchID, "kiken-voluntary", "aka", "no-show", nil)
 			require.NoError(t, err)
 			assert.Empty(t, result.SubResults, "the write path never pads a pool DH/TB row")
 

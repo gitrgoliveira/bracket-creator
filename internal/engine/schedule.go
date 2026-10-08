@@ -347,17 +347,18 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 // skipCeremonyBlocks helper. ClosingBlock is not entered by the cursor, it is
 // surfaced only as CeremonyMinutes.
 //
-// Phase sequencing (intentional, and a SECOND divergence from the post-draw
-// path): each court runs its pool matches and THEN its knockout matches on the
-// same advancing cursor, pools-then-knockout, which is the realistic order
-// (knockout seeding needs pool results). The post-draw slot assigners
-// (assignPoolMatchSlots / assignBracketMatchSlots) are invoked as two separate
-// calls that EACH re-anchor to dayStart+OpeningBlock, so they OVERLAP the two
-// phases in clock time. A post-draw estimate must therefore SEQUENCE the two
-// phases rather than max() them, but it must add the OpeningBlock offset ONCE,
-// not once per phase. Summing the raw cursor durations would double-count
-// OpeningBlock (each cursor = dayStart + OpeningBlock + match-time); instead sum
-// the per-phase match durations and add OpeningBlock a single time. See mp-zoh.
+// Phase sequencing: each court runs its pool matches and THEN its knockout
+// matches on the same advancing cursor, pools-then-knockout, which is the
+// realistic order (knockout seeding needs pool results). The post-draw path
+// sequences the phases per court the same way: the knockout slot assigner
+// (assignBracketMatchSlots) starts each court's cursor at the end of that
+// court's stored pool schedule (poolPhaseEndByCourt, bc-kosc), while a
+// knockout-only competition keeps the day start. A post-draw estimate must
+// therefore SEQUENCE the two phases rather than max() them, and it must add
+// the OpeningBlock offset ONCE, not once per phase. Summing the raw cursor
+// durations would double-count OpeningBlock (each cursor = dayStart +
+// OpeningBlock + match-time); instead sum the per-phase match durations and
+// add OpeningBlock a single time. See mp-zoh.
 //
 // Negative counts are clamped to 0, the helper is exported and likely fed
 // derived/user inputs (mp-zoh), and a negative count would otherwise make

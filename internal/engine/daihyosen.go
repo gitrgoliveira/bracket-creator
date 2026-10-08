@@ -292,7 +292,7 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 		if tournErr != nil {
 			return tournErr
 		}
-		return tx.SavePoolMatches(compID, appendWithSlots(allMatches, injected, comp, tournament))
+		return savePoolMatchesAndKnockoutTimes(tx, compID, appendWithSlots(allMatches, injected, comp, tournament), comp, tournament)
 	})
 	if err != nil {
 		return nil, err

@@ -43,10 +43,10 @@ func busyCourtFusenshoFixture(t *testing.T, compID string, reinstate, crossComp 
 		{ID: "Pool A-1", SideA: "Alice", SideB: "Carol", SideAID: aliceID, SideBID: carolID, Court: "A", Status: state.MatchStatusScheduled},
 		{ID: "Pool A-2", SideA: "Dave", SideB: "Erin", SideAID: daveID, SideBID: erinID, Court: "A", Status: state.MatchStatusScheduled},
 	}))
-	_, st, err := eng.RecordDecision(compID, "Pool A-0", "kiken-injury", "aka", "injured", nil, false)
+	_, st, err := eng.RecordDecision(compID, "Pool A-0", "kiken-injury", "aka", "injured", nil)
 	require.NoError(t, err)
 	require.Equal(t, aliceID, st.PlayerID)
-	_, _, err = eng.RecordDecision(compID, "Pool A-1", "fusensho", "aka", "already ineligible", nil, false)
+	_, _, err = eng.RecordDecision(compID, "Pool A-1", "fusensho", "aka", "already ineligible", nil)
 	require.NoError(t, err)
 	if reinstate {
 		_, err = eng.ReinstateCompetitor(compID, aliceID)

@@ -25,17 +25,11 @@ import (
 // Per contracts/match-decisions.md §POST /decision the operator
 // supplies only the decision-type metadata; the server auto-fills the
 // scoreline and Winner based on decisionBy + encho.
-//
-// Force bypasses the decision-lock check (T103/CHK024) that prevents
-// overwriting a prior kiken/fusenpai when a subsequent match for
-// either participant has already started. The admin UI sets it after
-// the operator confirms the override.
 type DecisionRequest struct {
 	Decision       string               `json:"decision"`
 	DecisionBy     string               `json:"decisionBy"`
 	DecisionReason string               `json:"decisionReason,omitempty"`
 	Encho          *state.EnchoMetadata `json:"encho,omitempty"`
-	Force          bool                 `json:"force,omitempty"`
 	// ModifiedAt is the client's server-relative write stamp, the same one
 	// /score carries (mp-y3nk). Sending it puts decision writes under the
 	// timestamp last-write-wins guard instead of its unstamped bypass, and
@@ -51,10 +45,9 @@ type DecisionRequest struct {
 	// competition's POOL match that moves a qualifier the knockout already
 	// played. Same field name and contract as every
 	// other knockout-correction write (see scoreRequestBody.ForceDownstreamReopen
-	// in handlers_match.go); a SEPARATE field from Force above, which answers
-	// a different question (T103's decision-lock override): this maps to
+	// in handlers_match.go); this maps to
 	// engine.ForceOptions.Force on the RecordDecisionTxWithOptions call
-	// below, never to the force parameter Force itself feeds.
+	// below.
 	ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
 }
 
@@ -167,8 +160,8 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			return
 		}
 		// T156: run the entire RecordDecision flow inside one
-		// WithTransaction. The engine call chain, sides lookup, T103
-		// downstream-match check, T105 concurrent-kiken pre-check,
+		// WithTransaction. The engine call chain, sides lookup,
+		// T105 concurrent-kiken pre-check,
 		// pool/bracket match-write, ineligibility check-and-set, prior-
 		// loser eligibility restore on undo, all use the same StoreTx
 		// handle, so the per-comp lock is acquired exactly once for the
@@ -205,13 +198,11 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			// here left the two audit fields on one record disagreeing byte-for-
 			// byte on padding. Mirrors the score path's up-front TrimSpace of
 			// CorrectionReason (mp-gmcg review).
-			// bc-kcdg/bc-cse finding 5: RecordDecisionTxWithOptions keeps
-			// req.Force (T103 decision-lock override) and
+			// bc-kcdg/bc-cse finding 5: RecordDecisionTxWithOptions carries
 			// req.ForceDownstreamReopen (the bc-kcdg downstream-knockout-
-			// correction guard) as two independent confirmations -- setting
-			// one does not silently grant the other -- and surfaces the
-			// reopened downstream match ids so they can be broadcast below.
-			result, status, engErr = eng.RecordDecisionTxWithOptions(stx, id, mid, req.Decision, req.DecisionBy, reason, req.Encho, req.Force,
+			// correction guard) and surfaces the reopened downstream match
+			// ids so they can be broadcast below.
+			result, status, engErr = eng.RecordDecisionTxWithOptions(stx, id, mid, req.Decision, req.DecisionBy, reason, req.Encho,
 				engine.ForceOptions{Force: req.ForceDownstreamReopen, Reopened: &reopenedDownstream}, req.ModifiedAt)
 			if result != nil && result.ResultSource == "" {
 				result.ResultSource = "admin"
@@ -284,8 +275,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 // operator-actionable conflicts that must never look like a server fault.
 func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, matchID string, engErr error) {
 	// Map engine.ValidationError → 400, NotFoundError → 404,
-	// IneligibleCompetitorError → 409 (FR-035),
-	// ErrDecisionLocked → 409 (T103/CHK024).
+	// IneligibleCompetitorError → 409 (FR-035).
 	var alreadyIneligErr *engine.AlreadyIneligibleError
 	var ineligErr *engine.IneligibleCompetitorError
 	var engNotFoundErr *engine.NotFoundError
@@ -345,17 +335,11 @@ func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, 
 			"reason":      ineligErr.Reason,
 			"reasonHuman": reasonHuman,
 		})
-	case errors.Is(engErr, engine.ErrDecisionLocked):
-		c.JSON(http.StatusConflict, gin.H{
-			"error":  "decision_locked",
-			"reason": engErr.Error(),
-		})
 	case respondIfDownstreamKnockoutRunning(c, engErr):
 		// A decision on a mixed competition's POOL match that would
 		// move a qualifier out of a knockout match being fought now, or
 		// on a knockout match whose new winner would change a side of a
-		// later match being fought now (bc-rfsw, raised before the T103
-		// decision_locked check): terminal, not confirmable (see
+		// later match being fought now (bc-rfsw): terminal, not confirmable (see
 		// respondIfDownstreamKnockoutRunning's doc comment).
 	case respondIfDownstreamKnockoutPlayed(c, engErr):
 		// bc-kcdg: this decision would change an already-propagated

@@ -76,7 +76,7 @@ func (e *Engine) generateKnockout(comp *state.Competition, players []domain.Play
 	// bracket never carries it, its competitors are numbered pool by pool
 	// instead, and generatePoolPreviewBracket passes nil for exactly that
 	// reason.
-	bracket, err := e.buildBracketFromDraw(comp, draw, drawOrder)
+	bracket, err := e.buildBracketFromDraw(comp, draw, drawOrder, nil)
 	if err != nil {
 		return err
 	}
@@ -111,7 +111,11 @@ func (e *Engine) generateKnockout(comp *state.Competition, players []domain.Play
 // with pools.csv on disk and no knockout to score into). Draw building goes
 // through buildPoolFedDraw (knockout_skeleton.go), shared with the export
 // path's poolDraw, so both agree on which builder a given competition uses.
-func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
+//
+// poolMatches is the saved pool phase (the draw passes what generatePools
+// saved, the quarantine rebuild what is on disk): each court's knockout is
+// timed after that court's last pool bout (bc-kosc).
+func (e *Engine) generatePoolPreviewBracket(comp *state.Competition, poolMatches []state.MatchResult) error {
 	pools, err := e.store.LoadPools(comp.ID)
 	if err != nil {
 		return fmt.Errorf("loading pools for preview bracket: %w", err)
@@ -154,7 +158,7 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 	// never resolved competitors at draw time, so there is nothing to stamp
 	// (see buildBracketFromDraw's own doc comment). ResolveQualifiedPools
 	// stamps ids as each placeholder resolves to a real pool finisher.
-	bracket, err := e.buildBracketFromDraw(comp, draw, nil)
+	bracket, err := e.buildBracketFromDraw(comp, draw, nil, poolMatches)
 	if err != nil {
 		return err
 	}
@@ -190,7 +194,13 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 // be stamped from it (see state.Bracket.StampRoundZeroSideIDsFromDrawOrder);
 // generatePoolPreviewBracket passes nil, since a pool-fed bracket's leaves are
 // unresolved pool placeholders, not competitors, at draw time.
-func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.KnockoutDraw, drawOrder []string) (*state.Bracket, error) {
+//
+// poolMatches is the competition's stored pool phase (bc-kosc): when non-nil,
+// each court's knockout slots start after that court's last pool slot
+// (poolPhaseEndByCourt), the same pools-then-knockout sequencing the estimator
+// uses. generateKnockout passes nil, so a knockout-only competition keeps the
+// day start.
+func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.KnockoutDraw, drawOrder []string, poolMatches []state.MatchResult) (*state.Bracket, error) {
 	if draw == nil || draw.Root == nil {
 		return nil, fmt.Errorf("buildBracketFromDraw: no draw to build from")
 	}
@@ -368,7 +378,9 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 	// match-number order, so it runs after the numbering above. See pools.go
 	// for the same wiring. Scheduled in number order, so the load-time repair
 	// of the old storage-order scheduling owes it nothing (TimesSettled).
-	assignBracketMatchSlots(bracket.Rounds, comp, tournament)
+	// A pools + knockout draw starts each court's knockout after that court's
+	// last pool bout (bc-kosc); knockout-only (nil poolMatches) keeps the day start.
+	assignBracketMatchSlots(bracket.Rounds, comp, tournament, poolPhaseEndByCourt(poolMatches, comp, tournament))
 	bracket.TimesSettled = true
 
 	// Bronze (3rd-place) knockout: only when this competition's format

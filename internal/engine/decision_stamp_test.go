@@ -48,7 +48,7 @@ func TestRecordDecision_StoresTheClientWriteStamp(t *testing.T) {
 	t.Run("a stamped decision persists the stamp", func(t *testing.T) {
 		eng, store, compID := setup(t)
 		const stamp int64 = 1_700_000_000_000
-		_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "knee", nil, false, stamp)
+		_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "knee", nil, stamp)
 		require.NoError(t, err)
 		require.Equal(t, stamp, storedStamp(t, store, compID))
 	})
@@ -60,7 +60,7 @@ func TestRecordDecision_StoresTheClientWriteStamp(t *testing.T) {
 	t.Run("an unstamped decision takes the server's time", func(t *testing.T) {
 		eng, store, compID := setup(t)
 		before := time.Now().UnixMilli()
-		_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "knee", nil, false)
+		_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "knee", nil)
 		require.NoError(t, err)
 		got := storedStamp(t, store, compID)
 		require.GreaterOrEqual(t, got, before)

@@ -2459,7 +2459,7 @@ func TestHansokuFoldGuardIsScopedToThisWrite(t *testing.T) {
 			SubResults: storedOverCapRow(),
 		}}))
 
-		_, _, err := eng.RecordDecision(compID, "P1-1", "kiken-voluntary", "shiro", "withdrew", nil, false)
+		_, _, err := eng.RecordDecision(compID, "P1-1", "kiken-voluntary", "shiro", "withdrew", nil)
 		require.NoError(t, err, "the kiken payload carries no sub rows and no hansoku; the stored row is not this write's error to report")
 	})
 

@@ -66,7 +66,7 @@ func TestWriteTimeDefaultWinPaddingNeverOverwritesAnUnreadableCell(t *testing.T)
 	// Kenshikan (aka = SideA) withdraws. RecordDecision fills SideA/SideB
 	// from the stored row itself, so this exercises the SubResultsUnreadable
 	// guard in isolation from the sides-backfill-ordering fix below.
-	_, _, err = eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "no-show", nil, false)
+	_, _, err = eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "no-show", nil)
 	require.NoError(t, err)
 
 	loaded, err := store.LoadPoolMatches(compID)
@@ -163,7 +163,7 @@ func TestWriteTimeDefaultWinPaddingPadsAnExplicitHikiwakeCorrectionOverAWithdraw
 
 	// Kenshikan (aka = SideA) withdraws before any bout is fought; padded to
 	// 3 placeholder positions credited to Sanshukan.
-	_, _, err = eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "no-show", nil, false)
+	_, _, err = eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "no-show", nil)
 	require.NoError(t, err)
 
 	loaded, err := store.LoadPoolMatches(compID)

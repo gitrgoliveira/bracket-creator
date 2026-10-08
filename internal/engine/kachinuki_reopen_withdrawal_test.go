@@ -28,7 +28,7 @@ func seedKachinukiPoolWithdrawal(t *testing.T, compID, decision string) (*Engine
 		ID: "Pool A-0", SideA: wrTeamA, SideAID: wrTeamAID, SideB: wrTeamB, SideBID: wrTeamBID,
 		Court: "A", Status: state.MatchStatusRunning, SubResults: []state.SubMatchResult{wrBout1("M")},
 	}}))
-	_, _, err := eng.RecordDecision(compID, "Pool A-0", decision, "aka", "knee", nil, false)
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", decision, "aka", "knee", nil)
 	require.NoError(t, err)
 	require.False(t, wrEligible(t, store, compID, wrTeamAID), "precondition: the withdrawal barred Ryu")
 	return eng, store
@@ -83,7 +83,7 @@ func TestReopenKachinuki_BracketWithdrawalRemovedRestoresEligibility(t *testing.
 		ID: "m-r1-0", SideA: wrTeamA, SideAID: wrTeamAID, SideB: wrTeamB, SideBID: wrTeamBID,
 		Status: state.MatchStatusRunning,
 	}}}}))
-	_, _, err := eng.RecordDecision(compID, "m-r1-0", "fusenpai", "shiro", "", nil, false)
+	_, _, err := eng.RecordDecision(compID, "m-r1-0", "fusenpai", "shiro", "", nil)
 	require.NoError(t, err)
 	require.False(t, wrEligible(t, store, compID, wrTeamBID), "precondition: the no-show barred Tora")
 
@@ -113,7 +113,7 @@ func TestReopenKachinuki_NoWithdrawalRestoresNothing(t *testing.T) {
 			Status: state.MatchStatusRunning,
 		},
 	}))
-	_, _, err := eng.RecordDecision(compID, "Pool A-1", "kiken-voluntary", "aka", "", nil, false)
+	_, _, err := eng.RecordDecision(compID, "Pool A-1", "kiken-voluntary", "aka", "", nil)
 	require.NoError(t, err)
 	require.False(t, wrEligible(t, store, compID, wrTeamCID))
 

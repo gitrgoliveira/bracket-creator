@@ -6,14 +6,14 @@
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA, useLayoutEffect: useLayoutEffectA } = React;
 const Icon = window.Icon;
 
-import { DAIHYOSEN_POSITION, scoreRowMatchLabel } from './pool_ids.jsx';
+import { DAIHYOSEN_POSITION, scoreRowMatchName } from './pool_ids.jsx';
 import {
   writeDidNotLand, writeRetryable, decisionWord,
   attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED, downstreamKnockoutReopenedNotice,
   courtBusyMessage, HELD_WRITE_DISCARD_LABEL, heldWriteDiscardConfirm, queuedNotice,
 } from './write_result.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
-import { sideWord } from './side_cell.jsx';
+import { sideWord, sideWithColour } from './side_cell.jsx';
 import { sideMarks, defaultWinMaru } from './bracket.jsx';
 import { NumberedName, numberFollowsName } from './numbered_name.jsx';
 import { withdrawnSideKey } from './ineligible_match.jsx';
@@ -434,6 +434,12 @@ function nextFoulOnDecrement(currentFouls) {
 // are type="module" scripts and may execute in any order). Falls back
 // to a plain pass-through when window.Term isn't available yet (e.g.
 // vitest harness, or pre-mount of the glossary module).
+//
+// RULE (bc-otpl): a Term is never inside a button or label. A Term is itself
+// a control (its own click handler stops propagation), so nested in another
+// control it swallows the tap meant for the outer one. Put the control's text
+// in plain words and GlossaryHintAS BESIDE the control, as the Kiken/Fusenpai
+// buttons and EnchoControl do.
 function TermAS(props) {
   if (typeof window !== 'undefined' && window.Term) {
     return React.createElement(window.Term, props, props.children);
@@ -465,14 +471,12 @@ function resolveDecisionPassword(propPassword) {
 }
 
 // T093/T094: build the /decision POST body. Pure helper so we can pin the
-// wire shape (decision/decisionBy/decisionReason/encho/force) against a
-// moving server contract. `force` is the T103 override flag used when the
-// server replies decision_locked and the operator confirms the override.
+// wire shape (decision/decisionBy/decisionReason/encho) against a
+// moving server contract.
 function buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCount, opts = {}) {
   const body = { decision: kind, decisionBy };
   if (decisionReason) body.decisionReason = decisionReason;
   if (enchoPeriodCount > 0) body.encho = { periodCount: enchoPeriodCount };
-  if (opts.force) body.force = true;
   // The match the decision was recorded on (bc-hlck): recordDecision floors
   // the stamp by it and never sends it.
   if (opts.seenModifiedAt > 0) body.seenModifiedAt = opts.seenModifiedAt;
@@ -484,8 +488,7 @@ function buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCoun
 // resolves the password from the explicit prop. Extracted so the regression
 // test pins the production call site (rather than re-implementing the chain
 // inside the test, which was how the original gap slipped through). Returns
-// the promise from window.API.recordDecision so callers can await + handle
-// the 409 decision_locked retry-with-force loop.
+// the promise from window.API.recordDecision so callers can await it.
 //
 // bc-cse: routed through attemptScoreWrite (write_result.jsx), the SAME
 // confirm-and-retry loop admin.jsx's editMatchScore gives the score path, so
@@ -511,15 +514,12 @@ function submitDecisionRequest(compId, matchId, kind, decisionPayload, enchoPeri
 
 // makeSubmitDecision builds the kiken/fusenpai decision submit handler shared by
 // ScoreEditorModal and TeamScoreEditorModal. The two modals had byte-identical
-// copies of this (the only difference was the "competitors"/"teams" wording in
-// the decision_locked confirm), so it lives here once. The returned closure:
+// copies of this, so it lives here once. The returned closure:
 //   - POSTs the decision, then for every decision alike (kiken included:
 //     operator ruling 2026-09-26, recording a withdrawal changes only the
 //     match it is recorded on) calls onAfterDecision when provided and the
 //     match is not a correction (item 7: starts next match), else falls back
-//     to onClose;
-//   - on 409 decision_locked, confirms then retries with force (recursing
-//     into itself).
+//     to onClose.
 // Call it fresh each render so it captures the current enchoPeriodCount/password.
 function makeSubmitDecision({
   match,
@@ -540,7 +540,6 @@ function makeSubmitDecision({
   // from its own existing notice, when it comes up.
   onAfterDecision,
   isComplete,       // item 7: corrections (isComplete=true) must not auto-advance
-  entityLabel = 'competitors',
   // F5: optional pending-write handles threaded in from ScoreEditorModal so
   // a queued (offline) decision write shows the sticky "Not sent yet" banner
   // (handed the queued answer, which queuedNotice words).
@@ -548,7 +547,7 @@ function makeSubmitDecision({
   setPendingWrite,
   pendingFnRef,
 }) {
-  const submit = async (kind, { decisionBy, decisionReason }, opts = {}) => {
+  const submit = async (kind, { decisionBy, decisionReason }) => {
     setDecisionSubmitting(true);
     setDecisionErr('');
     // F5: clear any prior pending-write state when the operator retries.
@@ -556,7 +555,7 @@ function makeSubmitDecision({
     try {
       const updated = await submitDecisionRequest(
         match.compId, match.id, kind, { decisionBy, decisionReason }, enchoPeriodCount, password,
-        { ...opts, seenModifiedAt: match.modifiedAt || 0 },
+        { seenModifiedAt: match.modifiedAt || 0 },
       );
       if (!mountedRef.current) return;
       // A decision that did not land must not advance ANYTHING below this
@@ -582,7 +581,7 @@ function makeSubmitDecision({
       if (writeDidNotLand(updated)) {
         if (setPendingWrite && writeRetryable(updated)) {
           setPendingWrite(updated);
-          if (pendingFnRef) pendingFnRef.current = () => submit(kind, { decisionBy, decisionReason }, opts);
+          if (pendingFnRef) pendingFnRef.current = () => submit(kind, { decisionBy, decisionReason });
         }
         return;
       }
@@ -614,22 +613,9 @@ function makeSubmitDecision({
         if (mountedRef.current) setDecisionErr(DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED);
         return;
       }
-      // T103: server returns "decision_locked" when a kiken-undo would
-      // invalidate a downstream match: confirm and retry with force.
-      if (!opts.force && /decision_locked/i.test(msg)) {
-        const ok = mountedRef.current && await window.confirmDialog({
-          message:
-            `A subsequent match for one of these ${entityLabel} has already started.\n\n` +
-            'Overwriting the prior decision now may make those downstream results inconsistent. Proceed anyway?',
-          confirmLabel: 'Proceed anyway',
-          danger: true,
-        });
-        if (!mountedRef.current) return;
-        if (ok) { await submit(kind, { decisionBy, decisionReason }, { force: true }); return; }
-        setDecisionErr('Override cancelled.');
-      } else if (mountedRef.current) {
-        setDecisionErr(msg);
-      }
+      // Any other refusal is shown as the server worded it; nothing is
+      // retried with a stronger flag.
+      if (mountedRef.current) setDecisionErr(msg);
     } finally {
       if (mountedRef.current) setDecisionSubmitting(false);
     }
@@ -756,8 +742,9 @@ function EnchoControl({ enchoPeriodCount, setEnchoPeriodCount }) {
           aria-label="Show overtime (encho) controls"
         >
           <span aria-hidden="true" className="encho-pill__icon">{Icon ? <Icon name="timer" size={14} /> : "⏱"}</span>
-          <TermAS name="encho">Overtime</TermAS>
+          Overtime
         </button>
+        <GlossaryHintAS name="encho" />
       </div>
     );
   }
@@ -774,8 +761,9 @@ function EnchoControl({ enchoPeriodCount, setEnchoPeriodCount }) {
             if (!e.target.checked) setShowCounter(false);
           }}
         />
-        <TermAS name="encho">Encho</TermAS> started (overtime)
+        Encho started (overtime)
       </label>
+      <GlossaryHintAS name="encho" />
       {enchoPeriodCount > 0 && (
         <div className="encho-row__stepper">
           <button
@@ -805,41 +793,64 @@ function EnchoControl({ enchoPeriodCount, setEnchoPeriodCount }) {
 // is always optional, a reopened match included: a match can be reopened
 // without any reason, and ending it again asks for none (operator ruling
 // 2026-09-25).
-function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, onCancel, onSubmit, submitting }) {
-  const [side, setSide] = useStateA(defaultSide || "shiro");
+function DecisionPrompt({ kind, sideA, sideB, askReason, onCancel, onSubmit, submitting }) {
+  // No side is preselected (operator decision 2026-10-07, bc-dsid): a
+  // withdrawal or no-show recorded against the wrong side inverts the result,
+  // so the operator must pick, and Record stays off until they do.
+  const [side, setSide] = useStateA("");
   const [reason, setReason] = useStateA("");
   const showReason = askReason;
   // Display rule (locked, glossary.md §Display rule): render the
   // romaji term ALONE: the popover (via <Term>) carries the gloss.
   // We keep "Decision" untouched (it's already plain English) and
   // wrap the kendo terms so a volunteer hovering/tapping the title
-  // gets the full tooltip.
+  // gets the full tooltip. The title is not a control, so its Term is fine;
+  // the side options below are labels and carry plain text (the rule above
+  // TermAS).
   const isKiken = window.isKikenDecision(kind);
   const title = isKiken || kind === "fusenpai"
     ? React.createElement(TermAS, { name: kind }, withdrawalLabel(kind))
     : "Decision";
+  // Each side's words and competitor, in one place: Shiro is sideB, Aka is
+  // sideA, as everywhere in the editors. The side word comes from sideWord.
+  const sides = {
+    shiro: { name: sideB?.name },
+    aka: { name: sideA?.name },
+  };
+  const nameOf = (key) => sides[key].name || sideWord(key);
 
   const submit = (e) => {
     e?.preventDefault?.();
-    if (submitting) return;
+    if (submitting || !side) return;
     onSubmit({ decisionBy: side, decisionReason: showReason ? reason.trim() : "" });
   };
+
+  const verb = isKiken ? "withdrew" : "did not show up";
+  const sideOption = (key) => (
+    <label className={`radio-pill decision-prompt__side${side === key ? " is-active" : ""}`}>
+      <input type="radio" name="decision-side" value={key} checked={side === key} onChange={() => setSide(key)} />
+      <span>{sideWithColour(key)}{sides[key].name ? `: ${sides[key].name}` : ""}</span>
+    </label>
+  );
 
   return (
     <form className="decision-prompt" onSubmit={submit} style={{ border: "1px solid var(--line)", borderRadius: 6, padding: 12, marginTop: 8, marginBottom: 8, background: "var(--bg-2)" }}>
       <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>{title}</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
         <div style={{ fontWeight: 600 }}>{isKiken ? "Which side withdrew?" : "Which side did not show up?"}</div>
-        <div style={{ display: "flex", gap: 12 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <input type="radio" name="decision-side" value="shiro" checked={side === "shiro"} onChange={() => setSide("shiro")} />
-            <span><TermAS name="shiro">SHIRO</TermAS> (White){sideB?.name ? `: ${sideB.name}` : ""}</span>
-          </label>
-          <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <input type="radio" name="decision-side" value="aka" checked={side === "aka"} onChange={() => setSide("aka")} />
-            <span><TermAS name="aka">AKA</TermAS> (Red){sideA?.name ? `: ${sideA.name}` : ""}</span>
-          </label>
+        <div className="radio-group">
+          {sideOption("shiro")}
+          {sideOption("aka")}
         </div>
+        {side ? (
+          <div className="decision-prompt__consequence" data-testid="decision-prompt-consequence" aria-live="polite">
+            {withdrawalConsequence(kind, nameOf(side), nameOf(side === "shiro" ? "aka" : "shiro"))}
+          </div>
+        ) : (
+          <div className="decision-prompt__hint" data-testid="decision-prompt-hint">
+            Pick the side that {verb}.
+          </div>
+        )}
         {showReason && (
           <label style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
             <span style={{ fontWeight: 600 }}>
@@ -859,8 +870,8 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, onCancel, 
       </div>
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
         <button type="button" className="btn btn--sm" onClick={onCancel} disabled={submitting}>Cancel</button>
-        <button type="submit" className="btn btn--primary btn--sm" disabled={submitting}>
-          {submitting ? "Saving…" : "Record"}
+        <button type="submit" className="btn btn--primary btn--sm" disabled={submitting || !side}>
+          {submitting ? "Saving…" : side ? `Record: ${sideWord(side).toUpperCase()} ${verb}` : "Record"}
         </button>
       </div>
     </form>
@@ -1332,6 +1343,17 @@ function withdrawalLabel(decision) {
   // RecordedWithdrawal, which needs the winner's name this function does not
   // have.
   return decision === "kiken-injury" ? "Kiken – Injury" : "Kiken – Voluntary";
+}
+
+// withdrawalConsequence: the one sentence that says what recording a
+// withdrawal or no-show does, shown once the operator has picked the side
+// (DecisionPrompt). The kiken-injury kind is the reinstateable one; every
+// other kiken, the legacy bare one included, and the no-show are permanent.
+function withdrawalConsequence(kind, withdrawnName, otherName) {
+  const barred = kind === "kiken-injury"
+    ? "cannot fight again unless reinstated"
+    : "cannot fight again in this competition";
+  return `${withdrawnName} ${barred}. ${otherName} wins this match.`;
 }
 
 // withdrawnSideOf: the side a recorded withdrawal names as the one that
@@ -2052,21 +2074,17 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
           )}
           {laterDefaultWins && laterDefaultWins.length > 0 && (
             <div data-testid="clear-withdrawal-later-matches" style={{ margin: "6px 0 0" }}>
-              {/* bc-cse: named by scoreRowMatchLabel first -- a pairing alone
-                  cannot be found in the scores list, which is where the
+              {/* bc-cse: named by the match's row label first -- a pairing
+                  alone cannot be found in the scores list, which is where the
                   operator has to go to reopen it -- with the pairing appended
-                  the same way ReopenFeedback's own fetched blockerLabel joins
-                  a lead onto a pairing ("Pool A · Match 2 · Shiro vs Aka"),
-                  so the two operator lines that name a match this way agree.
-                  Falls back to the bare pairing when the match carries no
-                  number at all (see scoreRowMatchLabel's own doc). */}
+                  ("Pool A · Match 2 · Shiro vs Aka"). scoreRowMatchName owns
+                  that composition, shared with the court console's refusal
+                  notices (bc-crpn). */}
               {laterDefaultWins.map((x) => {
-                const label = scoreRowMatchLabel(x);
-                const pairing = `${x.sideB?.name || "Shiro"} vs ${x.sideA?.name || "Aka"}`;
                 const noun = decisionWord(x.decision) || "decision";
                 return (
                   <p key={x.id} data-testid={`clear-withdrawal-later-match-${x.id}`} style={{ margin: "4px 0 0" }}>
-                    {label ? `${label} · ${pairing}` : pairing} keeps its {noun}; reopen it to fight it.
+                    {scoreRowMatchName(x)} keeps its {noun}; reopen it to fight it.
                   </p>
                 );
               })}
@@ -2239,6 +2257,7 @@ export {
   ReasonPrompt,
   CORRECTION_PRESETS,
   withdrawalLabel,
+  withdrawalConsequence,
   withdrawnSideOf,
   withdrawnKeyOf,
   withdrawalInForce,

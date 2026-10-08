@@ -53,7 +53,7 @@ import { useDebouncedRunningWrite, SyncStatusPill, useChangedGroups, useKeptInHi
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
 import { serverNowMs } from './server_clock.jsx';
 import { publishHeight } from './published_height.jsx';
-import { SideLabel } from './side_cell.jsx';
+import { SideLabel, sideWithColour } from './side_cell.jsx';
 
 // Imported from the leaf, not read off `window`, for the same reason
 // admin_scoring_shared.jsx does it: write_result.jsx is import-only, and this
@@ -1944,8 +1944,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     }
   };
 
-  // Shared factory (admin_scoring_shared.jsx): same handler as ScoreEditorModal;
-  // "teams" is the only per-modal wording (in the decision_locked confirm).
+  // Shared factory (admin_scoring_shared.jsx): same handler as ScoreEditorModal.
   // Item 7: fusenpai routes through onAfterDecision (host-supplied) to advance
   // the court, same as ScoreEditorModal. Kiken follows the same rule now too
   // (operator ruling 2026-09-26): recording a withdrawal changes only the
@@ -1953,7 +1952,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const submitDecision = makeSubmitDecision({
     match: m, enchoPeriodCount: encounterEnchoCount, password, mountedRef,
     setDecisionSubmitting, setDecisionErr, setDecisionPromptKind,
-    onClose, onAfterDecision, isComplete, entityLabel: "teams",
+    onClose, onAfterDecision, isComplete,
   });
 
   const existingSub = m.subResults || [];
@@ -3579,8 +3578,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
   // left = SHIRO (White), right = AKA (Red)
   const teamSides = [
-    { key: "b", name: m.sideB?.name || m.sideB, number: m.sideB?.number, label: "SHIRO (White)", color: "shiro", iv: ivB, pw: pwB },
-    { key: "a", name: m.sideA?.name || m.sideA, number: m.sideA?.number, label: "AKA (Red)", color: "aka", iv: ivA, pw: pwA },
+    { key: "b", name: m.sideB?.name || m.sideB, number: m.sideB?.number, label: sideWithColour("shiro"), color: "shiro", iv: ivB, pw: pwB },
+    { key: "a", name: m.sideA?.name || m.sideA, number: m.sideA?.number, label: sideWithColour("aka"), color: "aka", iv: ivA, pw: pwA },
   ];
 
   // a11y: label the dialog with the match/court context (mirrors the
@@ -4408,11 +4407,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   </button>
                 )}
                 {!selfReport && daihyosenHanteiArmed && (
-                  <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                  <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 6 }}>
                     <button type="button" className={`btn btn--sm ${daihyosenHantei === "b" ? "btn--primary" : ""}`} data-testid="team-daihyosen-hantei-shiro"
-                      onClick={() => pickDaihyosenHantei("b")} disabled={submitting || decisionSubmitting}>SHIRO wins</button>
+                      onClick={() => pickDaihyosenHantei("b")} disabled={submitting || decisionSubmitting}>{sideWithColour("shiro")} wins</button>
                     <button type="button" className={`btn btn--sm ${daihyosenHantei === "a" ? "btn--primary" : ""}`} data-testid="team-daihyosen-hantei-aka"
-                      onClick={() => pickDaihyosenHantei("a")} disabled={submitting || decisionSubmitting}>AKA wins</button>
+                      onClick={() => pickDaihyosenHantei("a")} disabled={submitting || decisionSubmitting}>{sideWithColour("aka")} wins</button>
                     <button type="button" className="btn btn--ghost btn--sm" data-testid="team-daihyosen-hantei-cancel"
                       onClick={clearHantei} disabled={submitting || decisionSubmitting}>Cancel</button>
                   </div>
@@ -4475,10 +4474,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     ? <>This encounter is tied. Add a representative bout (<TermAS name="daihyosen">daihyosen</TermAS>) to decide it. Each side picks one eligible competitor, scored like any other sub-match.</>
                     : <>A knockout encounter must have a winner. If the bouts end tied, add a representative bout (<TermAS name="daihyosen">daihyosen</TermAS>) to break it.</>}
                 </div>
-                {/* Plain-text label only: a glossary <TermAS> inside the
-                    button would swallow the tap via stopPropagation (the
-                    term's own click handler), leaving a dead-zone over the
-                    word. The term is taught in the title/hint above instead. */}
+                {/* Plain-text label only (the rule above TermAS in
+                    admin_scoring_shared.jsx). The term is taught in the
+                    title/hint above instead. */}
                 {!removingWithdrawal && <div>
                   <button data-testid="scoring-modal-daihyosen-button" type="button" className={`btn btn--sm ${teamTied ? "btn--primary" : "btn--ghost"}`} onClick={onDaihyosen} disabled={daihyosenBusy || submitting || decisionSubmitting}>
                     {daihyosenBusy ? "Adding…" : "Add representative bout"}
@@ -4578,7 +4576,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               kind={decisionPromptKind}
               sideA={{ name: m.sideA?.name || m.sideA }}
               sideB={{ name: m.sideB?.name || m.sideB }}
-              defaultSide="shiro"
               askReason={window.isKikenDecision(decisionPromptKind)}
               submitting={decisionSubmitting}
               onCancel={() => { setDecisionPromptKind(""); setDecisionErr(""); }}

@@ -284,10 +284,8 @@ async function ensureOneIpponEachSide(page) {
 // Open the overtime counter and wind it to `periods`. Collapsed to a pill
 // until asked for (EnchoControl, admin_scoring_shared.jsx:573-622).
 async function setEncho(page, periods) {
-  // Click the pill's ICON, never its label: the label is a glossary <Term>
-  // (TermAS name="encho", admin_scoring_shared.jsx:585) which takes the tap to
-  // open its tooltip and never lets the pill's own handler run - so a click on
-  // the button's centre only flashes the gloss.
+  // The pill's text is plain (bc-otpl): a tap anywhere on it opens the counter.
+  // The icon is just the stable handle.
   const pill = page.locator('.encho-pill__icon');
   if (await pill.count()) {
     await pill.first().click();

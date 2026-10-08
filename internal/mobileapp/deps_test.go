@@ -70,15 +70,15 @@ func (stubScoringEngine) CheckCrossCompCourtBusy(string, string) error {
 	return nil
 }
 
-func (stubScoringEngine) RecordDecision(string, string, string, string, string, *state.EnchoMetadata, bool, ...int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
+func (stubScoringEngine) RecordDecision(string, string, string, string, string, *state.EnchoMetadata, ...int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
 	return nil, nil, nil
 }
 
-func (stubScoringEngine) RecordDecisionTx(state.StoreTx, string, string, string, string, string, *state.EnchoMetadata, bool, ...int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
+func (stubScoringEngine) RecordDecisionTx(state.StoreTx, string, string, string, string, string, *state.EnchoMetadata, ...int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
 	return nil, nil, nil
 }
 
-func (stubScoringEngine) RecordDecisionTxWithOptions(state.StoreTx, string, string, string, string, string, *state.EnchoMetadata, bool, engine.ForceOptions, ...int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
+func (stubScoringEngine) RecordDecisionTxWithOptions(state.StoreTx, string, string, string, string, string, *state.EnchoMetadata, engine.ForceOptions, ...int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
 	return nil, nil, nil
 }
 

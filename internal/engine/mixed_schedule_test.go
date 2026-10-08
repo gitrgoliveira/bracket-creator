@@ -1,0 +1,312 @@
+package engine
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
+)
+
+// numberedKnockoutTimes returns the ScheduledAt of every numbered knockout
+// match, by court.
+func numberedKnockoutTimes(b *state.Bracket) map[string][]time.Time {
+	out := map[string][]time.Time{}
+	for _, r := range b.Rounds {
+		for _, m := range r {
+			if m.MatchNumber > 0 && m.ScheduledAt != "" {
+				out[m.Court] = append(out[m.Court], parseClockHHMM(m.ScheduledAt))
+			}
+		}
+	}
+	return out
+}
+
+func drawSchedule(t *testing.T, format string, courts []string, names []string) ([]state.MatchResult, *state.Bracket, *state.Competition, *state.Tournament) {
+	t.Helper()
+	eng, store, _ := setupTestEngine(t)
+	id := "bc-kosc-" + format
+	createTestCompetition(t, store, id, format, 3, func(c *state.Competition) { c.Courts = courts })
+	saveTestParticipants(t, store, id, names)
+	require.NoError(t, eng.GenerateDraw(id))
+	pm, err := store.LoadPoolMatches(id)
+	require.NoError(t, err)
+	b, err := store.LoadBracket(id)
+	require.NoError(t, err)
+	require.NotNil(t, b)
+	comp, err := store.LoadCompetition(id)
+	require.NoError(t, err)
+	tourn, err := store.LoadTournament()
+	require.NoError(t, err)
+	return pm, b, comp, tourn
+}
+
+var kosc6 = []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"}
+
+// bc-kosc: in a pools + knockout draw every knockout bout is timed after its
+// court's last pool bout.
+func TestGenerateDraw_Mixed_KnockoutScheduledAfterPools(t *testing.T) {
+	for name, courts := range map[string][]string{"one court": {"A"}, "two courts": {"A", "B"}} {
+		t.Run(name, func(t *testing.T) {
+			pm, b, comp, tourn := drawSchedule(t, state.CompFormatMixed, courts, kosc6)
+			ends := poolPhaseEndByCourt(pm, comp, tourn)
+			require.NotEmpty(t, ends)
+			ko := numberedKnockoutTimes(b)
+			require.NotEmpty(t, ko)
+			for court, times := range ko {
+				end, ok := ends[court]
+				require.Truef(t, ok, "court %s has knockout bouts but no pool bouts", court)
+				for _, ts := range times {
+					assert.Falsef(t, ts.Before(end), "court %s knockout at %s starts before its pools end at %s", court, ts.Format("15:04"), end.Format("15:04"))
+				}
+			}
+			assert.Lenf(t, ends, len(courts), "every court should hold pool bouts")
+		})
+	}
+}
+
+// Knockout-only competitions keep the day start.
+func TestGenerateDraw_KnockoutOnly_StartsAtDayStart(t *testing.T) {
+	_, b, _, _ := drawSchedule(t, state.CompFormatKnockout, []string{"A"}, kosc6)
+	first := ""
+	for _, r := range b.Rounds {
+		for _, m := range r {
+			if m.MatchNumber == 1 {
+				first = m.ScheduledAt
+			}
+		}
+	}
+	assert.Equal(t, "09:00", first)
+}
+
+// bc-kosc: a tie-break bout added after the draw is appended after its
+// court's last pool bout, where the knockout used to start; the knockout
+// moves past it.
+func TestInjectTiebreaker_MovesTheKnockoutPastTheNewBout(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	id := "bc-kosc-tb"
+	createTestCompetition(t, store, id, state.CompFormatMixed, 3, func(c *state.Competition) { c.Courts = []string{"A"} })
+	saveTestParticipants(t, store, id, kosc6)
+	require.NoError(t, eng.GenerateDraw(id))
+
+	pm, err := store.LoadPoolMatches(id)
+	require.NoError(t, err)
+	pool := ""
+	for _, m := range pm {
+		pn, ok := poolNameFromMatchID(m.ID)
+		require.True(t, ok)
+		if pool == "" {
+			pool = pn
+		}
+		if pn != pool {
+			continue
+		}
+		found, err := store.UpdatePoolMatchByID(id, m.ID, func(r *state.MatchResult) error {
+			r.Status = state.MatchStatusCompleted
+			r.Decision = "hikiwake"
+			return nil
+		})
+		require.NoError(t, err)
+		require.True(t, found)
+	}
+
+	injected, err := eng.InjectTiebreakerMatches(id)
+	require.NoError(t, err)
+	require.NotEmpty(t, injected, "a three-way draw for first needs a tie-break")
+
+	pm, err = store.LoadPoolMatches(id)
+	require.NoError(t, err)
+	comp, err := store.LoadCompetition(id)
+	require.NoError(t, err)
+	tourn, err := store.LoadTournament()
+	require.NoError(t, err)
+	end := poolPhaseEndByCourt(pm, comp, tourn)["A"]
+	b, err := store.LoadBracket(id)
+	require.NoError(t, err)
+	times := numberedKnockoutTimes(b)["A"]
+	require.NotEmpty(t, times)
+	for _, ts := range times {
+		assert.Falsef(t, ts.Before(end), "knockout at %s starts before the tie-break ends at %s", ts.Format("15:04"), end.Format("15:04"))
+	}
+}
+
+// pushKnockoutPastPools leaves a court alone when its knockout already starts
+// after its pools (a time the operator set survives) and when a knockout
+// match there has started; otherwise it keeps the order and gaps.
+func TestPushKnockoutPastPools(t *testing.T) {
+	comp := &state.Competition{StartTime: "09:00", KnockoutMatchDurationSeconds: 240, PoolMatchDurationSeconds: 240, Courts: []string{"A", "B", "C"}}
+	pool := func(court, at string) state.MatchResult {
+		return state.MatchResult{ID: "p", Court: court, ScheduledAt: at}
+	}
+	ko := func(id, court, at string, n int, st state.MatchStatus) state.BracketMatch {
+		return state.BracketMatch{ID: id, Court: court, ScheduledAt: at, MatchNumber: n, Status: st}
+	}
+	b := &state.Bracket{Rounds: [][]state.BracketMatch{{
+		ko("a2", "A", "10:30", 2, state.MatchStatusScheduled),
+		ko("a1", "A", "10:00", 1, state.MatchStatusScheduled),
+		ko("b1", "B", "11:00", 3, state.MatchStatusScheduled),
+		ko("c1", "C", "09:30", 4, state.MatchStatusRunning),
+		ko("c2", "C", "09:36", 5, state.MatchStatusScheduled),
+	}}}
+	// One pool slot is 4 * 1.5 = 6 minutes: A's pools end 10:06, B's 10:06.
+	pm := []state.MatchResult{pool("A", "10:00"), pool("B", "10:00"), pool("C", "10:00")}
+	require.True(t, pushKnockoutPastPools(b, comp, nil, pm))
+	got := map[string]string{}
+	for _, m := range b.Rounds[0] {
+		got[m.ID] = m.ScheduledAt
+	}
+	assert.Equal(t, "10:06", got["a1"], "moved to the pool end")
+	assert.Equal(t, "10:30", got["a2"], "already clear of a1, keeps its time")
+	assert.Equal(t, "11:00", got["b1"], "already after its pools: left as set")
+	assert.Equal(t, "09:36", got["c2"], "a court whose knockout has started is not touched")
+
+	assert.False(t, pushKnockoutPastPools(b, comp, nil, pm), "nothing left to move")
+}
+
+// The push moves only what it must: a later time the operator set, even one
+// inside lunch, stays as set, and a row whose time does not parse is left
+// alone rather than read as 09:00 and re-timed.
+func TestPushKnockoutPastPools_LeavesWhatItNeedNotMove(t *testing.T) {
+	comp := &state.Competition{StartTime: "09:00", KnockoutMatchDurationSeconds: 240, PoolMatchDurationSeconds: 240, Courts: []string{"A", "B"}}
+	tournament := &state.Tournament{LunchBlock: "1h"}
+	ko := func(id, court, at string, n int) state.BracketMatch {
+		return state.BracketMatch{ID: id, Court: court, ScheduledAt: at, MatchNumber: n, Status: state.MatchStatusScheduled}
+	}
+	b := &state.Bracket{Rounds: [][]state.BracketMatch{{
+		ko("a1", "A", "11:30", 1),
+		ko("a2", "A", "12:30", 2),
+		ko("b1", "B", "9.30", 3),
+		ko("b2", "B", "09:00", 4),
+	}}}
+	// One pool slot is 6 minutes: A's pools end 11:50, B's 10:06.
+	pm := []state.MatchResult{
+		{ID: "p1", Court: "A", ScheduledAt: "11:44"},
+		{ID: "p2", Court: "B", ScheduledAt: "10:00"},
+	}
+	require.True(t, pushKnockoutPastPools(b, comp, tournament, pm))
+	got := map[string]string{}
+	for _, m := range b.Rounds[0] {
+		got[m.ID] = m.ScheduledAt
+	}
+	assert.Equal(t, "11:50", got["a1"], "moved to the pool end")
+	assert.Equal(t, "12:30", got["a2"], "already clear of a1: the operator's time inside lunch stays")
+	assert.Equal(t, "10:06", got["b2"], "moved to the pool end")
+	assert.Equal(t, "9.30", got["b1"], "a time that does not parse is left as it is")
+}
+
+// bc-kosc: a pool bout moved onto another court moves that court's knockout
+// past it. A time set by hand moves nothing: it is the operator ordering the
+// court, and the queue's up/down is two of them.
+func TestPoolScheduleEdit_CourtMoveMovesTheKnockout(t *testing.T) {
+	setup := func(t *testing.T, courts []string) (*Engine, *state.Store, string) {
+		eng, store, _ := setupTestEngine(t)
+		id := "bc-kosc-edit"
+		createTestCompetition(t, store, id, state.CompFormatMixed, 3, func(c *state.Competition) { c.Courts = courts })
+		saveTestParticipants(t, store, id, kosc6)
+		require.NoError(t, eng.GenerateDraw(id))
+		return eng, store, id
+	}
+	bracket := func(t *testing.T, store *state.Store, id string) *state.Bracket {
+		b, err := store.LoadBracket(id)
+		require.NoError(t, err)
+		return b
+	}
+	pool := func(t *testing.T, store *state.Store, id string) []state.MatchResult {
+		pm, err := store.LoadPoolMatches(id)
+		require.NoError(t, err)
+		require.NotEmpty(t, pm)
+		return pm
+	}
+
+	t.Run("a court move", func(t *testing.T) {
+		eng, store, id := setup(t, []string{"A", "B"})
+		m := pool(t, store, id)[0]
+		other := "A"
+		if m.Court == "A" {
+			other = "B"
+		}
+		// Give the bout a time inside the other court's knockout, on its own
+		// court first (a time edit, which moves nothing), then move it across.
+		ko := numberedKnockoutTimes(bracket(t, store, id))[other]
+		require.NotEmpty(t, ko)
+		require.NoError(t, eng.UpdateMatchTime(id, m.ID, ko[0].Format(scheduleClockLayout)))
+		require.NoError(t, eng.UpdateMatchCourt(id, m.ID, other))
+		comp, err := store.LoadCompetition(id)
+		require.NoError(t, err)
+		tourn, err := store.LoadTournament()
+		require.NoError(t, err)
+		end := poolPhaseEndByCourt(pool(t, store, id), comp, tourn)[other]
+		for _, ts := range numberedKnockoutTimes(bracket(t, store, id))[other] {
+			assert.Falsef(t, ts.Before(end), "court %s knockout at %s before the moved bout ends at %s", other, ts.Format("15:04"), end.Format("15:04"))
+		}
+	})
+
+	t.Run("a court move with the tournament unreadable keeps the move", func(t *testing.T) {
+		eng, store, dir := setupTestEngine(t)
+		id := "bc-kosc-tourn"
+		createTestCompetition(t, store, id, state.CompFormatMixed, 3, func(c *state.Competition) { c.Courts = []string{"A", "B"} })
+		saveTestParticipants(t, store, id, kosc6)
+		require.NoError(t, eng.GenerateDraw(id))
+		before := numberedKnockoutTimes(bracket(t, store, id))
+		m := pool(t, store, id)[0]
+		other := "A"
+		if m.Court == "A" {
+			other = "B"
+		}
+		// A directory where tournament.md belongs: the read fails.
+		path := filepath.Join(dir, "tournament.md")
+		require.NoError(t, os.RemoveAll(path))
+		require.NoError(t, os.Mkdir(path, 0o755))
+		require.NoError(t, eng.UpdateMatchCourt(id, m.ID, other))
+		for _, r := range pool(t, store, id) {
+			if r.ID == m.ID {
+				assert.Equal(t, other, r.Court, "the court move is saved")
+			}
+		}
+		assert.Equal(t, before, numberedKnockoutTimes(bracket(t, store, id)), "the knockout times are left as they were")
+	})
+
+	t.Run("a time set by hand", func(t *testing.T) {
+		eng, store, id := setup(t, []string{"A"})
+		before := numberedKnockoutTimes(bracket(t, store, id))
+		last := before["A"][len(before["A"])-1]
+		require.NoError(t, eng.UpdateMatchTime(id, pool(t, store, id)[0].ID, last.Add(time.Hour).Format(scheduleClockLayout)))
+		assert.Equal(t, before, numberedKnockoutTimes(bracket(t, store, id)))
+	})
+
+	t.Run("up on the first knockout match stays", func(t *testing.T) {
+		eng, store, id := setup(t, []string{"A"})
+		pm := pool(t, store, id)
+		lastPool := pm[0]
+		for _, m := range pm {
+			if parseClockHHMM(m.ScheduledAt).After(parseClockHHMM(lastPool.ScheduledAt)) {
+				lastPool = m
+			}
+		}
+		var first state.BracketMatch
+		for _, r := range bracket(t, store, id).Rounds {
+			for _, m := range r {
+				if m.MatchNumber == 1 {
+					first = m
+				}
+			}
+		}
+		require.NotEmpty(t, first.ID)
+		// The queue's swap: the moved match first, then its neighbour.
+		require.NoError(t, eng.UpdateMatchTime(id, first.ID, lastPool.ScheduledAt))
+		require.NoError(t, eng.UpdateMatchTime(id, lastPool.ID, first.ScheduledAt))
+		got := ""
+		for _, r := range bracket(t, store, id).Rounds {
+			for _, m := range r {
+				if m.ID == first.ID {
+					got = m.ScheduledAt
+				}
+			}
+		}
+		assert.Equal(t, lastPool.ScheduledAt, got, "the knockout match the operator moved up stays ahead of the pool bout")
+	})
+}

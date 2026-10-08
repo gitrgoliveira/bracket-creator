@@ -77,7 +77,7 @@ func seedIndividualWithdrawal(t *testing.T, decision string, encho *state.EnchoM
 		IpponsA: []string{"M"}, IpponsB: []string{"K"}, HansokuB: 1,
 		Status: state.MatchStatusRunning,
 	}}))
-	_, _, err := eng.RecordDecision(compID, "Pool A-0", decision, "aka", "", encho, false)
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", decision, "aka", "", encho)
 	require.NoError(t, err)
 	require.False(t, wrEligible(t, store, compID, wrTeamAID), "precondition: the withdrawal barred Ryu")
 	return eng, store, compID
@@ -165,7 +165,7 @@ func TestReopenWithdrawal_RunningDownstreamIsRefused(t *testing.T) {
 		{{ID: "m-r1-0", SideA: wrTeamA, SideAID: wrTeamAID, SideB: wrTeamB, SideBID: wrTeamBID, Status: state.MatchStatusRunning}},
 		{{ID: "m-r2-0", SideB: wrTeamC, SideBID: wrTeamCID}},
 	}}))
-	_, _, err := eng.RecordDecision(compID, "m-r1-0", "fusenpai", "shiro", "", nil, false)
+	_, _, err := eng.RecordDecision(compID, "m-r1-0", "fusenpai", "shiro", "", nil)
 	require.NoError(t, err)
 	require.NoError(t, store.UpdateBracket(compID, func(b *state.Bracket) error {
 		b.Rounds[1][0].Status = state.MatchStatusRunning
@@ -328,7 +328,7 @@ func TestReopenWithdrawal_TeamRepBoutKeepsWhoFought(t *testing.T) {
 		RepPlayerA: "r2", RepPlayerB: "t2", IpponsA: []string{"M"},
 		Status: state.MatchStatusRunning,
 	}}))
-	_, _, err := eng.RecordDecision(compID, "Pool A-DH-0", "kiken-voluntary", "aka", "knee", nil, false)
+	_, _, err := eng.RecordDecision(compID, "Pool A-DH-0", "kiken-voluntary", "aka", "knee", nil)
 	require.NoError(t, err)
 	ms, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
@@ -364,7 +364,7 @@ func seedKnockoutFinalWithdrawal(t *testing.T, first func(eng *Engine, compID st
 	b, err := store.LoadBracket(compID)
 	require.NoError(t, err)
 	require.Equal(t, wrTeamB, b.Rounds[1][0].SideA, "precondition: Tora went through to the final")
-	_, _, err = eng.RecordDecision(compID, "m-r2-0", "kiken-voluntary", "shiro", "knee", nil, false)
+	_, _, err = eng.RecordDecision(compID, "m-r2-0", "kiken-voluntary", "shiro", "knee", nil)
 	require.NoError(t, err)
 	require.False(t, wrEligible(t, store, compID, wrTeamCID), "precondition: the final's withdrawal barred Kuma")
 	return eng, store, compID
@@ -392,7 +392,7 @@ func TestForceReopenedDownstreamWithdrawalRestoresEligibility(t *testing.T) {
 		{
 			name: "clear withdrawal and reopen",
 			first: func(eng *Engine, compID string) {
-				_, _, err := eng.RecordDecision(compID, "m-r1-0", "fusenpai", "aka", "", nil, false)
+				_, _, err := eng.RecordDecision(compID, "m-r1-0", "fusenpai", "aka", "", nil)
 				require.NoError(t, err)
 			},
 			reopen: func(t *testing.T, eng *Engine, compID string) []ReopenedMatch {
@@ -456,7 +456,7 @@ func TestForceReopenedDownstreamWithoutWithdrawalRestoresNothing(t *testing.T) {
 		{{ID: "m-r1-0", SideA: wrTeamA, SideAID: wrTeamAID, SideB: wrTeamB, SideBID: wrTeamBID, Status: state.MatchStatusRunning, MatchNumber: 1}},
 		{{ID: "m-r2-0", SideB: wrTeamC, SideBID: wrTeamCID, MatchNumber: 2}},
 	}}))
-	_, _, err := eng.RecordDecision(compID, "m-r1-0", "fusenpai", "aka", "", nil, false)
+	_, _, err := eng.RecordDecision(compID, "m-r1-0", "fusenpai", "aka", "", nil)
 	require.NoError(t, err)
 	_, err = eng.RecordMatchResultWithIneligibility(compID, "m-r2-0", &state.MatchResult{
 		ID: "m-r2-0", SideA: wrTeamB, SideB: wrTeamC, Winner: wrTeamB,

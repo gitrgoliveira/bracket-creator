@@ -154,9 +154,9 @@ func TestWithdrawalClearedByCorrection_DefaultWinKeepsTheBarFromElsewhere(t *tes
 		{ID: "Pool A-1", SideA: wrTeamA, SideAID: wrTeamAID, SideB: wrTeamC, SideBID: wrTeamCID, Status: state.MatchStatusRunning},
 	}))
 	// Ryu withdraws in Pool A-1, then Tora is given the default win in Pool A-0.
-	_, _, err := eng.RecordDecision(compID, "Pool A-1", "kiken-voluntary", "aka", "", nil, false)
+	_, _, err := eng.RecordDecision(compID, "Pool A-1", "kiken-voluntary", "aka", "", nil)
 	require.NoError(t, err)
-	_, _, err = eng.RecordDecision(compID, "Pool A-0", "fusensho", "aka", "", nil, false)
+	_, _, err = eng.RecordDecision(compID, "Pool A-0", "fusensho", "aka", "", nil)
 	require.NoError(t, err)
 	require.Equal(t, "fusensho", wrPoolMatch(t, store, compID).Decision)
 

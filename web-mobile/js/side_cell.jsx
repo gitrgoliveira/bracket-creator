@@ -24,6 +24,14 @@ export function sideWord(side) {
   return side === "aka" ? "Aka" : "Shiro";
 }
 
+// The side as a control that PICKS it names it: the kendo word and its colour,
+// "SHIRO (White)" / "AKA (Red)", because an operator who does not know the
+// words must still tell the two buttons apart. The decision side picker, the
+// hantei winner buttons and the team summary band all read it from here.
+export function sideWithColour(side) {
+  return `${sideWord(side).toUpperCase()} (${side === "aka" ? "Red" : "White"})`;
+}
+
 // The fill class alone. SideCell builds its own from this, and exactly ONE
 // other caller is sanctioned: the watchlist hero, which names the side in
 // VISIBLE text (CLAUDE.md's size exception) and so must not also carry the

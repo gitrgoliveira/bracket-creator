@@ -312,7 +312,7 @@ func (e *Engine) checkConcurrentIneligibility(h state.StoreTx, compID, matchID, 
 //     matches, the operator's intended exit once StartMatchTx refuses to
 //     start that match. The caller records the loss and leaves the existing
 //     CompetitorStatus untouched, so its MatchID still names the match that
-//     barred them, which the T103 undo keys on. Reopening such a match
+//     barred them, which the undo keys on. Reopening such a match
 //     restores nobody (the status is not this match's), so
 //     reopenTargetStatus sends it back to the queue while the bar holds.
 func alreadyBarredRefusal(decision, playerID string, barred *domain.CompetitorStatus) error {
@@ -481,7 +481,7 @@ func (e *Engine) checkSimultaneousMatch(compID, matchID string) error {
 
 // checkEligibilityExcludingMatch is like CheckEligibility but skips
 // CompetitorStatus entries whose source MatchID equals excludeMatchID.
-// This lets a match be re-scored (the T103 undo path) even when its
+// This lets a match be re-scored (the undo path) even when its
 // own prior kiken/fusenpai created the ineligibility, the status was
 // recorded BY that match, so it should not block writing back to it.
 func (e *Engine) checkEligibilityExcludingMatch(compID string, playerIDs []string, excludeMatchID string) error {
@@ -500,14 +500,11 @@ func (e *Engine) checkEligibilityExcludingMatch(compID string, playerIDs []strin
 // points it had already struck (FIK Art. 32, via preserveLoserScore).
 //
 // When the match already has a kiken/fusenpai decision recorded (the
-// "undo" path, T103/CHK024) the engine enforces the
-// contracts/match-decisions.md §Decision lock & undo rule: if any
-// subsequent match involving either prior participant has started
-// since the original decision was recorded, the engine returns
-// ErrDecisionLocked unless force is true. On a successful overwrite
-// where the prior loser is no longer the new loser, the prior loser's
-// CompetitorStatus is restored to Eligible: true and surfaced as the
-// returned status so the handler can broadcast the change.
+// "undo" path) the write is never refused for what the competitors have
+// done since: it applies with no confirm and changes no other match. On a
+// successful overwrite where the prior loser is no longer the new loser,
+// the prior loser's CompetitorStatus is restored to Eligible: true and
+// surfaced as the returned status so the handler can broadcast the change.
 //
 // Returns the persisted MatchResult and the most-recent
 // CompetitorStatus change (new ineligibility OR restored eligibility),
@@ -517,7 +514,7 @@ func (e *Engine) checkEligibilityExcludingMatch(compID string, playerIDs []strin
 // (scoring_tx.go) — ONE body, whichever door a caller enters by. The
 // full behavioural contract above now describes RecordDecisionTx; this
 // wrapper's only job is acquiring the per-comp lock once for the whole
-// sides-lookup + T105 check + T103 lock check + write + eligibility-
+// sides-lookup + T105 check + write + eligibility-
 // restore sequence, mirroring RecordMatchResultWithIneligibility.
 //
 // NEVER call this from inside a transaction: it takes the per-competition
@@ -526,18 +523,17 @@ func (e *Engine) checkEligibilityExcludingMatch(compID string, playerIDs []strin
 // the full reasoning. Call RecordDecisionTx directly when already inside
 // a WithTransaction closure.
 //
-// T090, T103, contracts/match-decisions.md §POST /decision, bc-twin.
-func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
+// T090, contracts/match-decisions.md §POST /decision, bc-twin.
+func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
 	var (
 		result *state.MatchResult
 		status *domain.CompetitorStatus
 		engErr error
 	)
 	txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
-		result, status, engErr = e.RecordDecisionTx(tx, compID, matchID, decision, decisionBy, decisionReason, encho, force, modifiedAt...)
+		result, status, engErr = e.RecordDecisionTx(tx, compID, matchID, decision, decisionBy, decisionReason, encho, modifiedAt...)
 		// Return nil regardless: engErr is an application-level signal
-		// (validation → 400, AlreadyIneligible → 409, ErrDecisionLocked →
-		// 409) surfaced after the tx, and any K3 rollback has already
+		// (validation → 400, AlreadyIneligible → 409) surfaced after the tx, and any K3 rollback has already
 		// replayed the prior state INSIDE the tx, so committing persists
 		// exactly what the engine settled on. Mirrors the commit contract
 		// in RecordMatchResultWithIneligibility.
@@ -553,21 +549,21 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 // (bc-cse finding 5), mirroring RecordDecisionTxWithOptions the same way
 // RecordDecision mirrors RecordDecisionTx: it acquires the per-comp lock
 // once for the whole sequence, then delegates to RecordDecisionTxWithOptions
-// so `force` (T103) and `kcdgOpts` (bc-kcdg) stay the two separate
-// operator confirmations described there, with kcdgOpts.Reopened populated
+// so `kcdgOpts` (bc-kcdg) carries the operator confirmation described
+// there, with kcdgOpts.Reopened populated
 // for the caller exactly as OverrideBracketWinner's does.
 //
 // NEVER call this from inside a transaction, for the same non-reentrant-lock
 // reason documented on RecordDecision; call RecordDecisionTxWithOptions
 // directly when already inside a WithTransaction closure.
-func (e *Engine) RecordDecisionWithOptions(compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool, kcdgOpts ForceOptions, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
+func (e *Engine) RecordDecisionWithOptions(compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, kcdgOpts ForceOptions, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
 	var (
 		result *state.MatchResult
 		status *domain.CompetitorStatus
 		engErr error
 	)
 	txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
-		result, status, engErr = e.RecordDecisionTxWithOptions(tx, compID, matchID, decision, decisionBy, decisionReason, encho, force, kcdgOpts, modifiedAt...)
+		result, status, engErr = e.RecordDecisionTxWithOptions(tx, compID, matchID, decision, decisionBy, decisionReason, encho, kcdgOpts, modifiedAt...)
 		// Same commit contract as RecordDecision: engErr is surfaced after
 		// the tx regardless, so the closure always returns nil.
 		return nil
@@ -628,72 +624,6 @@ func (e *Engine) lookupExistingResultIn(h state.StoreTx, compID, matchID string)
 		}
 	}
 	return nil, false, notFoundErrorf("match %q not found in competition %q", matchID, compID)
-}
-
-// hasDownstreamMatchStarted reports whether any pool or bracket match
-// other than excludeMatchID has either SideA or SideB matching one of
-// playerNames AND has status running or completed. Used by the
-// kiken-undo flow (T103) to enforce the decision-lock rule.
-//
-// Takes h state.StoreTx so both the transactional (RecordDecisionTx) and
-// non-transactional (test) callers share one body (bc-twin follow-up).
-func (e *Engine) hasDownstreamMatchStarted(h state.StoreTx, compID string, playerNames []string, excludeMatchID string) (bool, error) {
-	wantSet := make(map[string]struct{}, len(playerNames))
-	for _, n := range playerNames {
-		if n != "" {
-			wantSet[n] = struct{}{}
-		}
-	}
-	if len(wantSet) == 0 {
-		return false, nil
-	}
-	involvesAny := func(a, b string) bool {
-		if _, ok := wantSet[a]; ok {
-			return true
-		}
-		_, ok := wantSet[b]
-		return ok
-	}
-	isStarted := func(s state.MatchStatus) bool {
-		return s == state.MatchStatusRunning || s == state.MatchStatusCompleted
-	}
-	// A load error is returned, not read as "nothing started" (see
-	// lookupExistingResult): this answer unlocks a kiken undo, so a file
-	// that cannot be read must not unlock it by default.
-	poolMatches, err := h.LoadPoolMatches(compID)
-	if err != nil {
-		return false, err
-	}
-	for _, m := range poolMatches {
-		if m.ID == excludeMatchID {
-			continue
-		}
-		if isStarted(m.Status) && involvesAny(m.SideA, m.SideB) {
-			return true, nil
-		}
-	}
-	bracket, err := h.LoadBracket(compID)
-	if err != nil {
-		return false, err
-	}
-	if bracket != nil {
-		for _, round := range bracket.Rounds {
-			for _, bm := range round {
-				if bm.ID == excludeMatchID {
-					continue
-				}
-				if isStarted(bm.Status) && involvesAny(bm.SideA, bm.SideB) {
-					return true, nil
-				}
-			}
-		}
-		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID != excludeMatchID {
-			if isStarted(bm.Status) && involvesAny(bm.SideA, bm.SideB) {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
 }
 
 // matchSideParticipantIDs resolves matchID's two participant ids the way every
@@ -1013,7 +943,7 @@ func (e *Engine) recordIneligibilityFromDecision(h state.StoreTx, compID, matchI
 // The tier 3/4 id gate has one known, narrow consequence: a PRIOR row that
 // carries side ids but was hand-edited to a kiken/fusenpai Decision with
 // neither WinnerSide nor WinnerID set resolves to ok=false, which makes
-// RecordDecisionTx's T103 downstream-match lock fail OPEN for that row --
+// callers that need the loser fail to attribute it for that row --
 // unreachable through any write path this app itself takes (see
 // TestLosingSide's "id-carrying prior with no WinnerSide/WinnerID" case).
 func losingSide(result *state.MatchResult) (id, name string, ok bool) {

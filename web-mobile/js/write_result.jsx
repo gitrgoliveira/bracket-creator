@@ -639,7 +639,7 @@ function matchLabelList(ms) {
 // api_client.jsx is the parser, exactly as it is for the 200 shapes: it
 // attaches the four fields to the thrown Error as `.downstreamKnockoutPlayed`
 // so a catcher never re-derives the shape from a raw response body or a
-// message-string regex (the T103 decision_locked precedent this mirrors).
+// message-string regex (the precedent the earlier 409 parsers set).
 // Ask downstreamKnockoutPlayedRefusal(err) rather than testing
 // `err.downstreamKnockoutPlayed` by hand -- the same reason every other
 // predicate in this file exists.
@@ -829,6 +829,18 @@ export function downstreamKnockoutRunningQueueDrop(runningMatches) {
 // shape the server never sends.
 export function courtBusyMessage({ court, label }) {
     return `Shiaijo ${court} is running ${label}. Finish it or send it back to the queue first.`;
+}
+
+// The court console never holds a running match and an open correction at
+// once (operator ruling 2026-09-27, bc-crpn). Each refused tap names the other
+// one, with the label string the caller built (scoreRowMatchName), and names
+// the console's own buttons: there is no "Cancel" there.
+export function startWhileCorrectingMessage({ label }) {
+    return `Save the correction of ${label}, or leave it with Back to court, then start this match.`;
+}
+
+export function correctWhileRunningMessage({ court, label }) {
+    return `${courtBusyMessage({ court, label })} Then correct this match.`;
 }
 
 // runningParts names the matches being fought and where, the same words as

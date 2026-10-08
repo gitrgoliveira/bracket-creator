@@ -45,13 +45,13 @@ func fusenshoBarredFixture(t *testing.T, compID string) (*Engine, *state.Store) 
 		{ID: "Pool A-1", SideA: "Alice", SideB: "Carol", SideAID: aliceID, SideBID: carolID, Status: state.MatchStatusScheduled},
 	}))
 	// Alice (aka/SideA) withdraws from Pool A-0; Bob credited.
-	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "no-show", nil, false)
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "no-show", nil)
 	require.NoError(t, err)
 	// Alice (aka/SideA) cannot fight Pool A-1 either; Carol credited by
 	// match-level fusensho. Not a withdrawal decision, so this write bars
 	// nobody itself (domain.IsWithdrawalDecisionStr excludes fusensho) --
 	// Alice's only bar is still the one Pool A-0 recorded.
-	_, _, err = eng.RecordDecision(compID, "Pool A-1", "fusensho", "aka", "already ineligible", nil, false)
+	_, _, err = eng.RecordDecision(compID, "Pool A-1", "fusensho", "aka", "already ineligible", nil)
 	require.NoError(t, err)
 	return eng, store
 }
@@ -138,9 +138,9 @@ func TestReopenMatch_ChainedFusenpai_StillBarred_GoesToScheduled(t *testing.T) {
 		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", SideAID: aliceID, SideBID: bobID, Status: state.MatchStatusScheduled},
 		{ID: "Pool A-1", SideA: "Alice", SideB: "Carol", SideAID: aliceID, SideBID: carolID, Status: state.MatchStatusScheduled},
 	}))
-	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "withdrew", nil, false)
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "withdrew", nil)
 	require.NoError(t, err)
-	_, _, err = eng.RecordDecision(compID, "Pool A-1", "fusenpai", "aka", "did not appear", nil, false)
+	_, _, err = eng.RecordDecision(compID, "Pool A-1", "fusenpai", "aka", "did not appear", nil)
 	require.NoError(t, err)
 
 	_, err = eng.ReopenMatch(compID, "Pool A-1", "")
@@ -176,7 +176,7 @@ func TestReopenMatch_OrdinaryFusenpai_GoesToRunning(t *testing.T) {
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", SideAID: aliceID, SideBID: bobID, Status: state.MatchStatusScheduled},
 	}))
-	_, _, err := eng.RecordDecision(compID, "Pool A-0", "fusenpai", "aka", "did not appear", nil, false)
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", "fusenpai", "aka", "did not appear", nil)
 	require.NoError(t, err)
 
 	_, err = eng.ReopenMatch(compID, "Pool A-0", "")
@@ -211,9 +211,9 @@ func TestReopenMatch_ClearingTheOriginMovesTheBarToAChainedFusenpai(t *testing.T
 		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", SideAID: aliceID, SideBID: bobID, Status: state.MatchStatusScheduled},
 		{ID: "Pool A-1", SideA: "Alice", SideB: "Carol", SideAID: aliceID, SideBID: carolID, Status: state.MatchStatusScheduled},
 	}))
-	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "withdrew", nil, false)
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "withdrew", nil)
 	require.NoError(t, err)
-	_, _, err = eng.RecordDecision(compID, "Pool A-1", "fusenpai", "aka", "did not appear", nil, false)
+	_, _, err = eng.RecordDecision(compID, "Pool A-1", "fusenpai", "aka", "did not appear", nil)
 	require.NoError(t, err)
 
 	restored, err := eng.ReopenMatch(compID, "Pool A-0", "")
@@ -262,11 +262,11 @@ func TestReopenMatch_ClearingAWithdrawalAfterAReinstatementLeavesThemEligible(t 
 		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", SideAID: aliceID, SideBID: bobID, Status: state.MatchStatusScheduled},
 		{ID: "Pool A-1", SideA: "Alice", SideB: "Carol", SideAID: aliceID, SideBID: carolID, Status: state.MatchStatusScheduled},
 	}))
-	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-injury", "aka", "injured", nil, false)
+	_, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-injury", "aka", "injured", nil)
 	require.NoError(t, err)
 	_, err = eng.ReinstateCompetitor(compID, aliceID)
 	require.NoError(t, err)
-	_, _, err = eng.RecordDecision(compID, "Pool A-1", "kiken-voluntary", "aka", "wrong match", nil, false)
+	_, _, err = eng.RecordDecision(compID, "Pool A-1", "kiken-voluntary", "aka", "wrong match", nil)
 	require.NoError(t, err)
 
 	_, err = eng.ReopenMatch(compID, "Pool A-1", "")

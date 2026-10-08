@@ -288,6 +288,9 @@ describe('a daihyosen verdict on a running encounter is saved on its own', () =>
   it('picking a side writes the verdict', async () => {
     await mount(teamWithDaihyosen());
     await arm();
+    // Each button names its colour, for an operator who does not know the words.
+    expect(screen.getByTestId('team-daihyosen-hantei-shiro').textContent).toBe('SHIRO (White) wins');
+    expect(screen.getByTestId('team-daihyosen-hantei-aka').textContent).toBe('AKA (Red) wins');
     await pick('shiro');
     await settle();
     expect(writes).toHaveLength(1);

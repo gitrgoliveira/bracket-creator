@@ -25,12 +25,13 @@ import { useDialogFocus } from './dialog_focus.jsx';
 // api_client.jsx does not apply to it — the same move admin_scoring_shared.jsx
 // already makes.
 import {
-    writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock, CLOCK_SKEW_REASON_TEXT,
+    writeDidNotLand, writeKeepsEditorOpen, writeWasSuperseded, writeWasRefusedForClock, CLOCK_SKEW_REASON_TEXT,
     attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, OVERRIDE_HELD_NOTICE,
+    startWhileCorrectingMessage, correctWhileRunningMessage,
 } from './write_result.jsx';
 // swissRoundLabel: single owner is pool_ids.jsx (mp-dej2); this file used to
-// carry its own copy.
-import { swissRoundLabel } from './pool_ids.jsx';
+// carry its own copy. scoreRowMatchName names a match in the refusal notices.
+import { swissRoundLabel, scoreRowMatchName } from './pool_ids.jsx';
 // NumberedName: single owner of the number-chip-on-the-outer-side rule
 // (bc-dnst); see that file's header for why this stays an ES import.
 import { NumberedName } from './numbered_name.jsx';
@@ -798,6 +799,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // is reopened (see the effect beside correctingMatch below): a running
     // match is the live bout, not a correction. null = not correcting anything.
     const [correctingKey, setCorrectingKey] = useStateSh(null);
+    // The last tap the console refused because a match is live (a Correct) or
+    // a correction is open (a Start): { key, why: "running" | "correcting" }.
+    // Only the tap is stored; the notice text is derived at render while the
+    // condition still holds (refusalNotice below), so it cannot go stale.
+    const [refusedTap, setRefusedTap] = useStateSh(null);
     // Pending court reassignment, awaiting operator confirmation. Moving a match
     // off this shiaijo is disruptive (it leaves the court and joins another's
     // queue), so it's gated behind a confirm step. {compId, matchId, to, label, from}.
@@ -991,6 +997,50 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         [correctingMatch, pickedMatch, running]
     );
 
+    // bc-strt: the match pickMatch started, until the refetch shows it
+    // running. ONE predicate for the editor's `started` prop and for liveBout
+    // below, so the two cannot drift.
+    const isStartedSnapshot = (m) => !!m && !!startedFrom && startedFrom.key === matchKey(m) && startedFrom.at === m.modifiedAt;
+    // The bout live on this court right now (bc-crpn): the pick when it is
+    // running or is the start this console just made (the feed still reads
+    // "scheduled" until the refetch; a queued offline start too), else
+    // running[0] (court-wide, never filtered by the competition selector),
+    // else the match whose start request is still in flight.
+    const liveBout = (pickedMatch && (pickedMatch.status === "running" || isStartedSnapshot(pickedMatch)))
+        ? pickedMatch
+        : running[0]
+            || (startingKey ? sorted.find((x) => matchKey(x) === startingKey) || null : null);
+    // The correction the console holds open (completed), if any. A reopened
+    // one is the live bout and is handed over by the effect above.
+    const openCorrection = correctingMatch && correctingMatch.status === "completed" ? correctingMatch : null;
+    // The "Another bout is running" list: the bouts beyond the one the panel
+    // shows, plus the running one itself while a correction holds the panel.
+    const alsoRunning = openCorrection ? running : running.slice(1);
+    // What refuses a tap right now, by kind: a live bout refuses a Correct,
+    // an open correction refuses a Start. ONE place builds each sentence, for
+    // the toast and the notice alike.
+    const refusalBlocker = (why) => (why === "running" ? liveBout : openCorrection);
+    const refusalText = (why) => {
+        const blocker = refusalBlocker(why);
+        if (!blocker) return null;
+        return why === "running"
+            ? correctWhileRunningMessage({ court, label: scoreRowMatchName(blocker) })
+            : startWhileCorrectingMessage({ label: scoreRowMatchName(blocker) });
+    };
+    // The notice for a refused tap, derived: shown only while the match that
+    // refused it still does, so it goes by itself when that match is finished,
+    // sent back or cancelled, and a later, unrelated one never revives it.
+    const refusalNotice = (key) => {
+        if (!refusedTap || refusedTap.key !== key) return null;
+        const blocker = refusalBlocker(refusedTap.why);
+        return blocker && matchKey(blocker) === refusedTap.against ? refusalText(refusedTap.why) : null;
+    };
+    // Refuse a tap: remember it against the match that blocks it, and toast.
+    const refuseTap = (m, why) => {
+        setRefusedTap({ key: matchKey(m), why, against: matchKey(refusalBlocker(why)) });
+        if (showToast) showToast(refusalText(why), "error");
+    };
+
     // For pool daihyosen/tiebreaker bouts, enrich the selected match with
     // rep-player roster data so ScoreEditorModal renders the rep-picker dropdowns
     // (repIsTeam / repRosterA / repRosterB). Regular matches pass through
@@ -1072,6 +1122,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // queue row (the default-win action, or Reinstate) rather than having it
     // offered as the next thing to start.
     const upNext = filteredScheduled.find((m) => !isBarredMatch(m)) || null;
+    // The Up next card's alert line: a refused tap's notice wins over a stored
+    // start refusal, being the newer tap.
+    const upNextNotice = upNext
+        ? refusalNotice(matchKey(upNext)) || (startError && startError.key === matchKey(upNext) ? startError.msg : null)
+        : null;
     // Everything else in Upcoming: the whole scheduled list minus whichever
     // match became Up Next (by key, not index: Up Next may not be [0] when a
     // barred match sits ahead of it). Any barred match stays here, rendered
@@ -1225,8 +1280,16 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     //     and it runs after the picked one.
     //   • A scheduled pick is started (through the eligibility gate); a pick
     //     that's already running just takes the panel.
+    //   • While a correction is open nothing starts (operator ruling
+    //     2026-09-27, bc-crpn): the tap is refused with a notice, BEFORE the
+    //     defer above, so a refused start sends nothing back to the queue.
     const pickMatch = async (m) => {
         if (!m || m.status === "completed") return;
+        if (openCorrection) {
+            refuseTap(m, "correcting");
+            return;
+        }
+        setRefusedTap(null);
         const cur = running[0] || null;
         const isSame = cur && matchKey(cur) === matchKey(m);
         if (cur && !isSame) {
@@ -1260,8 +1323,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // Scores page's "Correct" button. The court operator often spots a wrong
     // score after the match closed (frequently once the court is otherwise
     // done), so they must be able to fix it here rather than leaving for the
-    // competition admin view. This deliberately does NOT touch the running bout:
-    // a past-match correction must never defer or revert the live match. The
+    // competition admin view. It is REFUSED while a bout is live on this court
+    // (operator ruling 2026-09-27, bc-crpn: the console never holds a running
+    // match and an open correction together): the tap gets a notice naming
+    // the bout, and the operator finishes it or sends it back to the queue
+    // first. A correction never defers or reverts the live match. The
     // editor then offers Reopen (kachinuki: back to running, keep the bout log;
     // a withdrawal-decided match: Clear withdrawal and reopen) or a direct
     // score re-write (other formats), same as the Scores page. A reopen makes
@@ -1269,13 +1335,21 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // beside correctingMatch).
     const correctMatch = (m) => {
         if (!m || m.status !== "completed") return;
+        if (liveBout) {
+            refuseTap(m, "running");
+            return;
+        }
+        setRefusedTap(null);
         setCorrectingKey(matchKey(m));
     };
-    // Leave the correction and return to the live court (running bout or the
-    // done state). Only offered on a COMPLETED correction: once it is
-    // reopened it is the live bout, finished via End match / Finish or sent
-    // back to the queue like any other.
+    // Cancel the correction without saving and return to the court's ordinary
+    // view. Only offered on a COMPLETED correction: once it is reopened it is
+    // the live bout, finished via End match / Finish or sent back to the
+    // queue like any other.
     const stopCorrecting = () => { setCorrectingKey(null); };
+    // End the correction of the match keyed `key` only if it is still the one
+    // open: a write's answer may arrive after another correction was opened.
+    const endCorrectionOf = (key) => { setCorrectingKey((k) => (k === key ? null : k)); };
 
     // Call to court: optional. Broadcasts a tournament announcement so the
     // competitors (and anyone watching the public app) are notified they're
@@ -1583,10 +1657,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         <MatchSides m={upNext} large />
                                         <div className="shiaijo-upnext__actions">
                                             {/* Route through pickMatch (not startMatch) so starting the
-                                                Up Next bout honours the same lock/defer rules as the
-                                                Upcoming "Score" buttons: blocked while a different bout is
-                                                being scored, and an unscored running bout is deferred first.
-                                                With no running bout it simply starts this one. */}
+                                                Up Next bout honours the same rules as the Upcoming
+                                                "Start match" buttons: refused while a correction is open,
+                                                and a running bout is sent back to the queue first,
+                                                keeping its score (bc-sbq). With neither, it simply
+                                                starts this one. */}
                                             <button type="button" className="btn btn--primary" disabled={startingKey === matchKey(upNext)} onClick={() => pickMatch(upNext)}>
                                                 {startingKey === matchKey(upNext) ? "Starting…" : "Start match"}
                                             </button>
@@ -1613,7 +1688,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                                 <button type="button" className="btn btn--sm btn--ghost" aria-label="Move down" onClick={() => moveMatch(upNext, "down")} title="Move this match later in the queue">↓</button>
                                             )}
                                         </div>
-                                        {startError && startError.key === matchKey(upNext) && <div className="shiaijo-upnext__error" role="alert">{startError.msg}</div>}
+                                        {upNextNotice && <div className="shiaijo-upnext__error" role="alert">{upNextNotice}</div>}
                                         <div className="shiaijo-upnext__hint">
                                             {calledKey === matchKey(upNext)
                                                 ? "Announced to spectators. Start the match when both are at the line."
@@ -1632,7 +1707,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     label="Upcoming" subGroup matches={upcomingQueueMatches}
                                     courts={courts} onMoveCourt={requestMoveCourt}
                                     onMove={moveMatch} onEnterLineup={(m) => setLineupKey(matchKey(m))}
-                                    onPick={pickMatch}
+                                    onPick={pickMatch} noticeFor={(m) => refusalNotice(matchKey(m))}
                                     onCall={callToCourt} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
                                     scheduled={filteredScheduled}
                                     password={password}
@@ -1679,6 +1754,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     <ShiaijoQueueGroup
                                         matches={completedShown}
                                         courts={courts} onMoveCourt={requestMoveCourt} onCorrect={correctMatch}
+                                        noticeFor={(m) => refusalNotice(matchKey(m))}
                                     />
                                     {filteredCompleted.length > COMPLETED_PREVIEW && (
                                         <button
@@ -1732,18 +1808,25 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 </div>
                             )}
 
-                            {!allDone && running.length > 1 && (
+                            {/* While a correction holds the panel the running bout has no
+                                other home, so running[0] is listed too (a match started
+                                from another screen mid-correction, bc-crpn). */}
+                            {!allDone && alsoRunning.length > 0 && (
                                 <div className="shiaijo-also-running" role="alert">
                                     <div className="shiaijo-also-running__title">Another bout is running on Shiaijo {court}</div>
                                     <ul className="shiaijo-also-running__list">
-                                        {running.slice(1).map((m) => (
+                                        {alsoRunning.map((m) => (
                                             <li key={matchKey(m)}>
                                                 {m.sideB?.name || "?"} vs {m.sideA?.name || "?"}
                                                 {m.compName ? <span className="shiaijo-also-running__comp"> · {m.compName}</span> : null}
                                             </li>
                                         ))}
                                     </ul>
-                                    <div className="shiaijo-also-running__hint">A court runs one bout at a time. Score or correct these from their competition's admin view.</div>
+                                    <div className="shiaijo-also-running__hint">
+                                        {openCorrection
+                                            ? "Save or cancel the correction (Back to court) to score it here."
+                                            : "A court runs one bout at a time. Score or correct these from their competition's admin view."}
+                                    </div>
                                 </div>
                             )}
 
@@ -1760,14 +1843,28 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     key={matchKey(selectedMatch)}
                                     variant="inline"
                                     match={editorMatch}
-                                    // The inline editor never closes itself; every
-                                    // caller of onClose is a no-op here.
-                                    onClose={() => {}}
-                                    started={!!startedFrom && startedFrom.key === matchKey(selectedMatch) && startedFrom.at === selectedMatch.modifiedAt}
+                                    // The inline editor never closes itself. Its
+                                    // callers are a landed decision on a correction
+                                    // (which ends it) and the daihyosen add/remove
+                                    // on a running match, where nothing is open: a
+                                    // no-op.
+                                    // Both close only THIS match's correction: the answer can
+                                    // arrive after the operator opened a correction on another
+                                    // match, so the key is captured before the write and
+                                    // compared against the current one (endCorrectionOf).
+                                    onClose={() => endCorrectionOf(matchKey(selectedMatch))}
+                                    started={isStartedSnapshot(selectedMatch)}
                                     canClose={false}
                                     onSubmit={async (patch) => {
+                                        const key = matchKey(selectedMatch);
                                         try {
                                             const res = await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);
+                                            // A landed Save correction ends the correction (a
+                                            // write that did not land keeps it open, with the
+                                            // editor's not-saved banner).
+                                            if (res && patch && patch.status === "completed" && !writeKeepsEditorOpen(patch, res) && mountedRef.current) {
+                                                endCorrectionOf(key);
+                                            }
                                             // Optimistically advance the local bracket so an offline court
                                             // sees the next match resolve (reconciled by refetch online).
                                             // NOT on a supersede: that winner was discarded in favour of a
@@ -1833,7 +1930,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         type="button"
                                         className="btn btn--sm btn--ghost"
                                         onClick={stopCorrecting}
-                                        title="Stop correcting this completed match and return to the live court"
+                                        title="Stop correcting this match without saving and return to the court's queue"
                                     >
                                         ← Back to court
                                     </button>
@@ -2026,10 +2123,11 @@ export function groupQueueMatches(matches) {
     return order.map((k) => byKey.get(k));
 }
 
-function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, onCall, callingKey, calledKey, startingKey, password }) {
+function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, noticeFor, onCall, callingKey, calledKey, startingKey, password }) {
     const renderRow = (m) => (
         <ShiaijoQueueRow
             key={matchKey(m)} m={m}
+            notice={noticeFor ? noticeFor(m) : null}
             scheduled={scheduled}
             courts={courts} onMoveCourt={onMoveCourt} onMove={onMove} onEnterLineup={onEnterLineup} onPick={onPick} onCorrect={onCorrect}
             onCall={onCall} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
@@ -2058,7 +2156,7 @@ function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMove
     );
 }
 
-export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, onCall, callingKey, calledKey, startingKey, pending, onResolve, slotLabel, password }) {
+export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, onCall, callingKey, calledKey, startingKey, pending, onResolve, slotLabel, password, notice }) {
     const isComplete = m.status === "completed";
     // bc-cse: a scheduled match a competitor is barred from. `pending`
     // placeholder finals are excluded on purpose: their sides are still
@@ -2161,6 +2259,7 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                     <button type="button" className="btn btn--ghost btn--sm shiaijo-row__correct" onClick={() => onCorrect(m)} title="Reopen or fix this completed match">Correct</button>
                 </div>
             )}
+            {notice && isComplete && <div className="shiaijo-upnext__error" role="alert">{notice}</div>}
             {showActions && (
                 <div className="shiaijo-qrow__actions" onClick={(e) => e.stopPropagation()}>
                     {onMoveCourt && courts.length > 1 && (
@@ -2194,13 +2293,15 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                         </button>
                     )}
                     {/* Start match is the primary per-row action: pushed to the end (the "go" slot).
-                        Same pickMatch path as the Up Next card: defers an unscored running bout,
-                        blocks while one is being scored, then starts this match for scoring.
+                        Same pickMatch path as the Up Next card: refused while a correction is
+                        open (the notice below the actions), a running bout goes back to the
+                        queue keeping its score (bc-sbq), then this match starts for scoring.
                         bc-cse: never offered on a barred row -- BarredMatchNotice above owns its
                         one-tap resolution instead, since the server would just refuse a Start. */}
                     {onPick && !barred && <button type="button" className="btn btn--primary btn--sm shiaijo-row__pick" disabled={startingKey === matchKey(m)} onClick={() => onPick(m)} title="Start this match now and begin scoring">{startingKey === matchKey(m) ? "Starting…" : "Start match"}</button>}
                 </div>
             )}
+            {notice && !isComplete && <div className="shiaijo-upnext__error" role="alert">{notice}</div>}
             {/* Pending placeholder final: the ONLY affordance is the opt-in
                 "Run now" recovery, which opens ResolveFeedersModal so the operator
                 can assert the unsynced feeder results. No Start/Call/move here. */}

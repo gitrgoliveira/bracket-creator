@@ -195,7 +195,7 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
 // VSchedItem
 // ---------------------------------------------------------------------------
 
-export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight }) => {
+export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight, winnerTick }) => {
   // bc-pnum: sameCompetitor, never a bare `winner.id === side.id` (see
   // bracket.jsx's MatchCard for why the naked equality lights both sides
   // once both are id-less). No presence guard: sameCompetitor(null, x) is
@@ -291,6 +291,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
               above, so without it a long name clipped that mark away (or, on
               Aka, pushed its leading mark past the visible width) exactly as
               the bare number once did. */}
+          {winnerTick && bWin && <span className="bc-winner-tick" aria-label="Winner" title="Winner">✓</span>}
           <span className="n msb-name--labelled">{barredNameMark(m, "shiro", teamNameMark("shiro", teamShiroMark, <NumberedName side="shiro" clip {...numberedParts(m.sideB, undefined)} />))}</span>
           {tweaks.showDojo && m.sideB?.dojo ? <span className="d">{m.sideB.dojo}</span> : null}
         </div>
@@ -319,6 +320,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
         )}
         <div className={`vsched-item__side vsched-item__side--aka ${aWin ? "vsched-item__side--w" : ""}`}>
           <SideLabel side="aka" />
+          {winnerTick && aWin && <span className="bc-winner-tick" aria-label="Winner" title="Winner">✓</span>}
           <span className="n msb-name--labelled">{barredNameMark(m, "aka", teamNameMark("aka", teamAkaMark, <NumberedName side="aka" clip {...numberedParts(m.sideA, undefined)} />))}</span>
           {tweaks.showDojo && m.sideA?.dojo ? <span className="d">{m.sideA.dojo}</span> : null}
         </div>

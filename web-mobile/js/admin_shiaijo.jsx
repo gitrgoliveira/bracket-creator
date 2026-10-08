@@ -51,6 +51,9 @@ import { isBarredMatch, sideBarredByDecision, involvesCompetitor } from './ineli
 // stub taking effect and silently overwrote it. See barred_match_notice.jsx's
 // header.
 import { BarredMatchNotice } from './barred_match_notice.jsx';
+// bc-tmwn: team match marks (Kiken, Fus.) are placed beside the withdrawn
+// side's name via teamNameMark.
+import { teamNameMark } from './match_scoreboard.jsx';
 
 const { useState: useStateSh, useMemo: useMemoSh, useEffect: useEffectSh, useRef: useRefSh, useCallback: useCallbackSh } = React;
 
@@ -2170,6 +2173,11 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
     const aName = slotName(m.sideA?.name || "", (m.feeders || [])[0]);
     const bName = slotName(m.sideB?.name || "", (m.feeders || [])[1]);
     const scoreCell = shiaijoScoreCell(m);
+    // bc-tmwn: for completed rows, determine which side won and get team marks.
+    const winnerSide = isComplete ? window.winnerSideLR?.(m) : null;
+    const { shiro: teamShiroMark, aka: teamAkaMark } = isComplete && isTeamMatch(m) && window.teamMatchMarks
+        ? window.teamMatchMarks(m, true)
+        : { shiro: "", aka: "" };
     // Derive position in the full scheduled list to know when to disable ↑/↓.
     // `scheduled` is the court's complete scheduled array (including Up Next);
     // the row may be in the Upcoming slice but we disable based on absolute pos.
@@ -2225,12 +2233,18 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                     nothing. Removing the badge on top of it would have left the
                     side carried by colour alone on the one surface where reading
                     it wrong mis-scores a bout. */}
-                <SideCell side="shiro" className="shiaijo-qrow__side shiaijo-qrow__side--shiro">
-                    <span className="shiaijo-qrow__name"><NumberedName side="shiro" name={bName} number={m.sideB?.number} clip /></span>
+                <SideCell side="shiro" className={`shiaijo-qrow__side shiaijo-qrow__side--shiro ${winnerSide === "left" ? "shiaijo-qrow__side--win" : ""}`}>
+                    {winnerSide === "left" && <span className="bc-winner-tick" aria-label="Winner" title="Winner">✓</span>}
+                    <span className={`shiaijo-qrow__name${isTeamMatch(m) && teamShiroMark ? " msb-name--labelled" : ""}`}>
+                        {teamNameMark("shiro", teamShiroMark, <NumberedName side="shiro" name={bName} number={m.sideB?.number} clip />)}
+                    </span>
                 </SideCell>
                 <span className="shiaijo-qrow__vs">vs</span>
-                <SideCell side="aka" className="shiaijo-qrow__side shiaijo-qrow__side--aka">
-                    <span className="shiaijo-qrow__name"><NumberedName side="aka" name={aName} number={m.sideA?.number} clip /></span>
+                <SideCell side="aka" className={`shiaijo-qrow__side shiaijo-qrow__side--aka ${winnerSide === "right" ? "shiaijo-qrow__side--win" : ""}`}>
+                    {winnerSide === "right" && <span className="bc-winner-tick" aria-label="Winner" title="Winner">✓</span>}
+                    <span className={`shiaijo-qrow__name${isTeamMatch(m) && teamAkaMark ? " msb-name--labelled" : ""}`}>
+                        {teamNameMark("aka", teamAkaMark, <NumberedName side="aka" name={aName} number={m.sideA?.number} clip />)}
+                    </span>
                 </SideCell>
             </div>
             {/* bc-cse: a barred match cannot be started (the server refuses it),

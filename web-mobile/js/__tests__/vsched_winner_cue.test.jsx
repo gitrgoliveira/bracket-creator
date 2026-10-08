@@ -157,4 +157,67 @@ describe('T5: VSchedItem winner cue - completed team match', () => {
     const winners = sides.filter(n => hasClass(n, 'vsched-item__side--w'));
     expect(winners).toHaveLength(0);
   });
+
+  // bc-tmwn: W5 test for winner tick on Recent results
+  it('W5: winnerTick prop renders bc-winner-tick on the winning side only', () => {
+    const raw = {
+      id: 'm-team-4',
+      status: 'completed',
+      court: 'A',
+      phase: 'bracket',
+      round: 'Final',
+      sideA: 'Ryu',
+      sideB: 'Phoenix',
+      winner: 'Ryu',  // sideA (Aka) wins
+    };
+    const m = normalizeMatch(raw, {});
+
+    // Mount with winnerTick=true (as Recent results does)
+    const tree = runtime.mount(VSchedItem, { m, tweaks: {}, winnerTick: true });
+
+    const sides = findAll(tree, n => hasClass(n, 'vsched-item__side'));
+    const akaSide = sides.find(n => hasClass(n, 'vsched-item__side--aka'));
+    const shiroSide = sides.find(n => hasClass(n, 'vsched-item__side--shiro'));
+
+    // Find bc-winner-tick spans
+    const ticks = findAll(tree, n => n.props?.className === 'bc-winner-tick');
+
+    // Should have exactly one tick
+    expect(ticks).toHaveLength(1);
+
+    // The tick should be inside the Aka side (winning side)
+    let akaHasTick = false;
+    const akaSideTicks = findAll(akaSide, n => n.props?.className === 'bc-winner-tick');
+    akaHasTick = akaSideTicks.length > 0;
+
+    // The tick should NOT be in the Shiro side
+    let shiroHasTick = false;
+    const shiroSideTicks = findAll(shiroSide, n => n.props?.className === 'bc-winner-tick');
+    shiroHasTick = shiroSideTicks.length > 0;
+
+    expect(akaHasTick).toBe(true);
+    expect(shiroHasTick).toBe(false);
+  });
+
+  it('W5b: without winnerTick prop, no bc-winner-tick is rendered', () => {
+    const raw = {
+      id: 'm-team-5',
+      status: 'completed',
+      court: 'A',
+      phase: 'bracket',
+      round: 'SF',
+      sideA: 'Ryu',
+      sideB: 'Phoenix',
+      winner: 'Ryu',
+    };
+    const m = normalizeMatch(raw, {});
+
+    // Mount WITHOUT winnerTick prop (as Up Next/Running do)
+    const tree = runtime.mount(VSchedItem, { m, tweaks: {} });
+
+    const ticks = findAll(tree, n => n.props?.className === 'bc-winner-tick');
+
+    // Should have no ticks
+    expect(ticks).toHaveLength(0);
+  });
 });

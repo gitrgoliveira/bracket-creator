@@ -726,7 +726,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
           <div className="vsched">
             {recentMatches.map((m) => (
               <React.Fragment key={m.id}>
-                <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} highlight={isPlayerWatched(m.sideA, highlightPlayers) || isPlayerWatched(m.sideB, highlightPlayers)} />
+                <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} highlight={isPlayerWatched(m.sideA, highlightPlayers) || isPlayerWatched(m.sideB, highlightPlayers)} winnerTick={true} />
                 {!isSelfRun && expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />}
               </React.Fragment>
             ))}

@@ -1898,7 +1898,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             // Finish + start the next scheduled match, which then
                                             // becomes the running match the panel shows.
                                             if (next && next.status === "scheduled") {
-                                                try { await onEditScore(next.compId, next.id, startPatch(), next); } catch (_s) { /* gate */ }
+                                                await startMatch(next);
                                             }
                                         } catch (_e) { /* keep panel */ }
                                     }}
@@ -1917,7 +1917,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         // competitor a withdrawal or no-show has just barred.
                                         const next = nextActiveAfter(selectedMatch, sideBarredByDecision(result, selectedMatch));
                                         if (next && next.status === "scheduled") {
-                                            try { await onEditScore(next.compId, next.id, startPatch(), next); } catch (_s) { /* gate */ }
+                                            await startMatch(next);
                                         }
                                     }}
                                     password={password}

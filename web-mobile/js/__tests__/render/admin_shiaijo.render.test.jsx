@@ -2,7 +2,7 @@ import React from 'react';
 import { render, act, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, startWhileCorrectingMessage, correctWhileRunningMessage } from '../../write_result.jsx';
+import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, startWhileCorrectingMessage, correctWhileRunningMessage, CLOCK_SKEW_REASON_TEXT } from '../../write_result.jsx';
 import { scoreRowMatchName } from '../../pool_ids.jsx';
 // Window globals required by admin_shiaijo.jsx.
 // MODULE-EVAL-TIME entries (e.g. `const AdminTopbar = window.AdminTopbar;`)
@@ -1079,6 +1079,73 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
     expect(onEditScore.mock.calls[0][1]).toBe('m-run');
     expect(onEditScore.mock.calls[1][0]).toBe('c1');
     expect(onEditScore.mock.calls[1][1]).toBe('m-open');
+  });
+
+  // bc-aadv: Finish + Start Next keeps a refused start on the Up next card,
+  // instead of swallowing the error silently.
+  it('Finish + Start Next keeps a refused start on the Up next card', async () => {
+    const mRun = {
+      id: 'm-run', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+      court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    window.tournamentMatches = () => [mRun, openMatch];
+    window.filterMatchesByCourt = (m) => m;
+    const onEditScore = vi.fn()
+      .mockResolvedValueOnce({ status: 'ok' })
+      .mockRejectedValueOnce(new Error('Sato is fighting on Shiaijo B.'));
+    let utils;
+    await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+    expect(probe.props.match?.id).toBe('m-run');
+    await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed', winner: side('p1', 'Yamada') }); });
+    // The finishing write succeeds; the start-next write fails.
+    expect(onEditScore).toHaveBeenCalledTimes(2);
+    // The error is recorded on the Up next card.
+    const errorEl = utils.container.querySelector('.shiaijo-upnext__error');
+    expect(errorEl).toBeTruthy();
+    expect(errorEl.textContent).toContain('Sato is fighting on Shiaijo B.');
+  });
+
+  it('onAfterDecision keeps a refused start on the Up next card', async () => {
+    const mRun = {
+      id: 'm-run', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+      court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    window.tournamentMatches = () => [mRun, openMatch];
+    window.filterMatchesByCourt = (m) => m;
+    const onEditScore = vi.fn()
+      .mockRejectedValueOnce(new Error('Could not start the match: check eligibility and try again.'));
+    let utils;
+    await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+    expect(probe.props.match?.id).toBe('m-run');
+    await act(async () => { await probe.props.onAfterDecision({ winner: side('p1', 'Yamada') }); });
+    // The start-next write fails.
+    expect(onEditScore).toHaveBeenCalledTimes(1);
+    // The error is recorded on the Up next card.
+    const errorEl = utils.container.querySelector('.shiaijo-upnext__error');
+    expect(errorEl).toBeTruthy();
+    expect(errorEl.textContent).toContain('Could not start the match');
+  });
+
+  it('clock_skew on the auto-start is reported on the Up next card', async () => {
+    const mRun = {
+      id: 'm-run', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+      court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    window.tournamentMatches = () => [mRun, openMatch];
+    window.filterMatchesByCourt = (m) => m;
+    const onEditScore = vi.fn()
+      .mockResolvedValueOnce({ status: 'ok' })
+      .mockResolvedValueOnce({ applied: false, reason: 'clock_skew' });
+    let utils;
+    await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+    expect(probe.props.match?.id).toBe('m-run');
+    await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed', winner: side('p1', 'Yamada') }); });
+    // The finishing write succeeds; the start-next write returns clock_skew.
+    expect(onEditScore).toHaveBeenCalledTimes(2);
+    // The clock-skew error is recorded on the Up next card.
+    const errorEl = utils.container.querySelector('.shiaijo-upnext__error');
+    expect(errorEl).toBeTruthy();
+    expect(errorEl.textContent).toContain(CLOCK_SKEW_REASON_TEXT);
   });
 
   it('offers Reinstate for a reinstateable (kiken-injury) withdrawal', async () => {

@@ -15,6 +15,8 @@ On a laptop you can score without the mouse. When scoring an individual match or
 
 Everything you enter on a running match is saved as you go, so closing the editor or moving to another match keeps it, even straight after a tap. Two things are only kept when you press **Finish** or save a correction: a **Mark draw** on a running match, and changes to a finished match. If you close the editor or move to another match with one of those not yet saved, the app asks first: **Discard changes** drops it, and **Cancel** keeps you on the match.
 
+**Finish** also starts the next scheduled match automatically if one is available. If the next match cannot start for any reason (for example, one competitor is competing on another court), the Up next card shows why.
+
 To take back a strike, tap the scored mark itself in the centre of the board. The editor says so while any mark is scored: under the marks on an individual match, and once above the first bout on a team match. Taking one back frees a cell, and the next strike you award fills it. Take both back and the next two strikes fill the cells in the order you award them, from the outside in.
 
 ### Match history

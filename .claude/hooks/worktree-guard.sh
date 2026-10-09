@@ -3,7 +3,7 @@
 #
 # Blocks edits that target the MAIN git checkout of this repo, while allowing:
 #   - edits inside any worktree under <repo>/.claude/worktrees/
-#   - edits anywhere OUTSIDE the repo (e.g. ~/.claude auto-memory)
+#   - edits anywhere OUTSIDE the repo (e.g. ~/.claude settings and skills)
 #
 # Fails OPEN: if anything is ambiguous (no jq, not a git repo, no path),
 # it allows the edit rather than blocking all work.

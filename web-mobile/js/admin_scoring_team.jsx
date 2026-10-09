@@ -1285,6 +1285,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // nothing (submitRepresentative), whichever answers first: the newer pick wins.
   const repPickSeq = useRefA({ a: 0, b: 0 });
   const newRepPick = (side) => ++repPickSeq.current[side];
+  // How many typed representatives are still being named (submitRepresentative). A typed
+  // name is resolved by a member POST that may already have created the member when it
+  // answers, and the pick lands only while the sheet is mounted, so Finish, Save and
+  // Close wait for it. A counter, because the two sides can overlap.
+  const [repResolving, setRepResolving] = useStateA(0);
+  const repTyping = repResolving > 0;
   const showMembers = (side, list) => {
     membersShown.current[side] = list;
     (side === "a" ? setSquadA : setSquadB)(list);
@@ -1603,10 +1609,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const giveSideAnotherTeam = (side) => {
     dropSideMembers(side);
     dropLineup(side);
+    newRepPick(side);
     // The representative the side picked is a member of the team it no longer has, so the
-    // pick is cleared and the sheet stops sending that member's id.
-    if (daihyosenIdx >= 0) {
-      newRepPick(side);
+    // pick is cleared and the sheet stops sending that member's id. Only a pick the row
+    // holds is cleared: an update marks the sheet dirty and autosaves, which a side change
+    // with nothing picked would then do for no edit the operator made.
+    if (daihyosenIdx >= 0 && subs[daihyosenIdx]?.[`${side}MemberIdOverride`]) {
       pickDaihyosenRepresentative({ idx: daihyosenIdx, side, updateSub }, null);
     }
   };
@@ -1993,7 +2001,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // members the resolver answers are shown, and a members list that could not be read
   // is warned about in the row. No lineup is written: the REPRESENTATIVE_KEY slot is no
   // lineup position. Only the resulting member id is stored on the row.
-  const submitRepresentative = async ({ side, noticeKey, idx, value, priorId, seq }) => {
+  const resolveRepresentative = async ({ side, noticeKey, idx, value, priorId, seq }) => {
     const notify = lineupNotifier(noticeKey);
     const sideChanged = sideChangedGuard(side, noticeKey);
     // A newer pick on this side (a list pick, a clear or another typed name) makes this one
@@ -2023,6 +2031,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // No lineup is saved here, so the lineup's own warning ("Lineup saved, but...")
     // would be false: say what an unread member list can actually have done.
     if (membersUnavailable) notify("warn", `"${value}" was picked, but the team member list could not be read first, so they may have been added as a new team member. Check the team on the Lineups page.`);
+  };
+  // A typed representative is named by resolveRepresentative, counted in repResolving for as
+  // long as it is out (Finish, Save and Close wait on it: see repResolving above).
+  const submitRepresentative = async (pick) => {
+    setRepResolving(n => n + 1);
+    try {
+      await resolveRepresentative(pick);
+    } finally {
+      if (mountedRef.current) setRepResolving(n => n - 1);
+    }
   };
 
   // Shared factory (admin_scoring_shared.jsx): same handler as ScoreEditorModal.
@@ -3157,9 +3175,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         winner,
         decision,
       };
-      // Omitted, not stated empty: an absent key leaves the stored id and the
-      // server's own derivation untouched, which is what "this writer knows
-      // no id" has to mean. A typed-name override resolves to no id at all
+      // Omitted, not stated empty. On a numbered row an absent key leaves the
+      // stored id and the server's own derivation untouched, which is what "this
+      // writer knows no id" has to mean. On the representative row an absent id
+      // is how a CLEARED pick is sent: that row's group is named as changed
+      // (match_groups.jsx) and the server copies the row whole, so the omitted
+      // key clears the stored id. A typed-name override resolves to no id at all
       // (playerNamesForBout short-circuits it), so a substitution never sends
       // the replaced fighter's id under the new name.
       if (sideAMemberId) entry.sideAMemberId = sideAMemberId;
@@ -3605,7 +3626,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const leaveEditor = async (go) => {
     // Same contract as ScoreEditorModal: never close while a save,
     // decision, or daihyosen request is mid-flight.
-    if (submitting || decisionSubmitting || daihyosenBusy) return;
+    if (submitting || decisionSubmitting || daihyosenBusy || repTyping) return;
     // bc-dscn: on a RUNNING match every scoring edit is autosaved, and the
     // unmount writes one still inside the debounce window
     // (useDebouncedRunningWrite), so leaving discards nothing and asks
@@ -3729,7 +3750,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 {isComplete ? "CORRECTION" : "PRE-MATCH"}
               </div>
             )}
-            {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }}>✕ Close</button>}
+            {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting || repTyping} style={{ padding: "2px 8px" }}>✕ Close</button>}
           </div>
         </div>
 
@@ -4095,6 +4116,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               ? { roster: repRosterFor(m.sideA, lineupA, squadA), forceInput: repPickable, onSelectName: pickRepresentative("a", noticeKeyA, s.aMemberIdOverride) }
               : { roster: rosterA, forceInput: manualPathA, onSelectName: manualPathA ? pickManual("a", noticeKeyA, squadA, teamAId) : pickPlayer("a", noticeKeyA) };
 
+            // The read-only representative row (no picker: repPickable is false, as a
+            // participant's sheet is once decided or not running) names an unpicked side by
+            // its team, as the read-only scoreboards do (resolveBoutSideName's daihyosen rule).
+            // A pickable box keeps its "Representative" placeholder, and a picked side shows
+            // its representative. Display only: buildPatch sends what it always has.
+            const repTeamWhenUnpicked = (memberId, teamName) => (isDaihyoRow && !repPickable && !memberId ? teamName : "");
             // Each row: [left side, center score, right side]: left=SHIRO, right=AKA
             // T096/FR-031: manual pts/fouls edits end the per-bout fusensho
             // (updateSubScore: the default-win circles go, struck points stay,
@@ -4136,7 +4163,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 // name untouched. This covers both the live LineupNameInput's
                 // `value` and the read-only static row, which both render
                 // from this same prop.
-                playerName: resolveBoutSideDisplayName({ squad: squadB, memberId: playerBMemberId, storedName: playerBName }),
+                playerName: resolveBoutSideDisplayName({ squad: squadB, memberId: playerBMemberId, storedName: playerBName }) || repTeamWhenUnpicked(playerBMemberId, sideBName),
                 memberId: playerBMemberId,
                 memberLabel: playerBLabel, ...pickerB,
                 noticeKey: noticeKeyB,
@@ -4153,7 +4180,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 color: "aka", label: "AKA",
                 // See SHIRO note above.
                 // bc-dnst: displayed name only, see the SHIRO note above.
-                playerName: resolveBoutSideDisplayName({ squad: squadA, memberId: playerAMemberId, storedName: playerAName }),
+                playerName: resolveBoutSideDisplayName({ squad: squadA, memberId: playerAMemberId, storedName: playerAName }) || repTeamWhenUnpicked(playerAMemberId, sideAName),
                 memberId: playerAMemberId,
                 memberLabel: playerALabel, ...pickerA,
                 noticeKey: noticeKeyA,
@@ -4888,7 +4915,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   {reopenCtl.busy ? "Reopening…" : reopenCtl.landed ? "Reopened" : "Reopen match"}
                 </button>
               )}
-              {canClose && <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
+              {canClose && <button className="btn" onClick={handleDismiss} disabled={submitting || repTyping}>Cancel</button>}
               {kachinukiBoutMode ? (
                 // Kachinuki bout mode (mp-gmcg): TWO always-visible actions.
                 // [Record bout]: a RUNNING write flagged kachinukiBoutFinal;
@@ -5031,7 +5058,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   if (isComplete && !correctionReason) { setReasonPromptKind("correction"); return; }
                   if (!isComplete && !confirmFinish(ev)) return;
                   doSubmit(() => (isComplete ? onSubmit : onSubmitAndNext)(buildPatch("completed")));
-                }} disabled={submitting || koTieBlocked}
+                }} disabled={submitting || koTieBlocked || repTyping}
                   title={koTieBlocked ? koTieTitle : undefined}>
                   {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish →" : "Finish + Start Next →"}
                 </button>
@@ -5041,7 +5068,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   if (isComplete && !correctionReason) { setReasonPromptKind("correction"); return; }
                   if (!isComplete && !confirmFinish(ev)) return;
                   doSubmit(() => onSubmit(buildPatch("completed")));
-                }} disabled={submitting || koTieBlocked}
+                }} disabled={submitting || koTieBlocked || repTyping}
                   title={koTieBlocked ? koTieTitle : undefined}>
                   {submitting ? "Saving…" : koTieBlocked ? "Needs a winner" : isComplete ? "Save correction" : finishArmed ? "Tap again to finish" : "Finish"}
                 </button>

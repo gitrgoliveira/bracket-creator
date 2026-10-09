@@ -315,4 +315,46 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     const dh = dhEntryOf(onSubmit.mock.calls[0][0]);
     expect(dh.sideBMemberId, 'the later pick, not the older name that resolved last').toBe('m-frank');
   });
+
+  it('R12: Finish and Close wait while a typed representative is still being named, and the finishing write carries the pick', async () => {
+    let answerEve;
+    window.API.addTeamMember.mockImplementation(() => new Promise((resolve) => { answerEve = resolve; }));
+    const match = makeMatch({ subResults: [DH_EMPTY] });
+    const { onSubmit } = await mount(match);
+    const input = dhInput('SHIRO');
+    await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Eve' } }); });
+    const add = await screen.findByText(/Add “Eve”/);
+    await act(async () => { fireEvent.click(add.closest('button')); });
+    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Eve', ''));
+    // The member POST is still out. Finish or Close now would send or drop the pick
+    // while the member may already exist on the server, so both wait for it.
+    expect(screen.getByText('Finish').closest('button').disabled).toBe(true);
+    expect(screen.getByText('✕ Close').closest('button').disabled).toBe(true);
+    await act(async () => { answerEve({ id: 'm9', name: 'Eve', index: 3 }); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(screen.getByText('Finish').closest('button').disabled).toBe(false);
+    await clickFinishTwice();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    const dh = dhEntryOf(onSubmit.mock.calls[0][0]);
+    expect(dh.sideBMemberId).toBe('m9');
+    expect(dh.sideB).toBe('Team B');
+  });
+
+  it('R13: a side given another team with no representative picked leaves the sheet clean: nothing is autosaved', async () => {
+    const match = makeMatch({ subResults: [DH_EMPTY] });
+    const { onSubmit, rerenderWith } = await mount(match);
+    await rerenderWith(makeMatch({ sideA: { id: 't3', name: 'Team C' }, subResults: [DH_EMPTY] }));
+    // Past the autosave debounce: a sheet the side change left dirty would be written here.
+    await act(async () => { await new Promise((r) => setTimeout(r, 500)); });
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('R14: on a read-only representative row an unpicked side shows its team name, and a picked side shows the representative', async () => {
+    // selfReport on a completed match: the row offers no picker, so it is read-only.
+    const match = makeMatch({ status: 'completed', subResults: [{ ...DH_EMPTY, sideBMemberId: 'm1b' }] });
+    await mount(match, { selfReport: true });
+    expect(screen.getByText('Carol', { selector: '.tsm-name__static' })).toBeTruthy();
+    expect(screen.getByText('Team A', { selector: '.tsm-name__static' })).toBeTruthy();
+    expect(screen.queryByText('-', { selector: '.tsm-name__static' })).toBeNull();
+  });
 });

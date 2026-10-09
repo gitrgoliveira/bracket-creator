@@ -737,6 +737,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const [calledKey, setCalledKey] = useStateSh(null);
     const [callingKey, setCallingKey] = useStateSh(null);
     const [startingKey, setStartingKey] = useStateSh(null);
+    // The start in flight, as { key, match } (null = none). The guards READ this
+    // ref, never startingKey: an advance awaits its finish write and then starts
+    // the next match from the render that began the await, so a closure's state
+    // is stale by then (a start begun meanwhile was not seen; one that has
+    // landed still was). The state above only drives the rendering.
+    const startingRef = useRefSh(null);
     const callTapRef = useRefSh(null);
     // The announcement id (a promise of it, null if the send failed) of each
     // court call this console made, keyed by matchKey, so the call can be
@@ -1013,7 +1019,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // below, so the two cannot drift.
     const isStartedSnapshot = (m) => !!m && !!startedFrom && startedFrom.key === matchKey(m) && startedFrom.at === m.modifiedAt;
     // The match whose start request is still in flight (startingKey), found on
-    // the court. ONE lookup for liveBout below and the one-start refusal.
+    // the court, for the render (liveBout below). The guards read startingRef.
     const startingBlocker = startingKey ? sorted.find((x) => matchKey(x) === startingKey) || null : null;
     // The bout live on this court right now (bc-crpn): the pick when it is
     // running or is the start this console just made (the feed still reads
@@ -1033,9 +1039,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // open correction refuses a Start, and a start still out refuses a Start of
     // another match. ONE place builds each sentence, for the toast and the
     // notice alike.
+    // "starting" reads the ref, so a refusal made from an advance's async
+    // continuation names the start that is out NOW (the render's copy may be
+    // stale there). At render time the ref and the state agree.
     const refusalBlocker = (why) => {
         if (why === "running") return liveBout;
-        if (why === "starting") return startingBlocker;
+        if (why === "starting") return startingRef.current ? startingRef.current.match : null;
         return openCorrection;
     };
     const refusalText = (why) => {
@@ -1154,14 +1163,16 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         : filteredScheduled;
     // A Start refusal describes ONE match at one moment. Whenever Up next
     // changes to a different match (that one started, was moved, the operator
-    // switched competition, or the court moved on), any stored refusal is
-    // dropped, whichever match it was for. That includes a refusal for a match
-    // picked from further down the queue: when that match later reaches Up
-    // next, its cause (e.g. a competitor then fighting on another court) is
-    // usually gone, and nothing else would clear it (a finished match sends no
-    // competitor_status_updated). A refusal that still applies comes straight
-    // back on the next tap. Keyed on the key VALUE: a refetch that keeps the
-    // same Up next leaves a refusal for it where it is.
+    // switched competition, or the court moved on), the stored refusal (the
+    // server's or a thrown start's message in startError) is dropped, whichever
+    // match it was for. That includes a refusal for a match picked from further
+    // down the queue: when that match later reaches Up next, its cause (e.g. a
+    // competitor then fighting on another court) is usually gone, and nothing
+    // else would clear it (a finished match sends no competitor_status_updated).
+    // A refusal for a start still out (refuseTap, "starting") is derived instead
+    // and clears itself once that start lands. A refusal that still applies comes
+    // straight back on the next tap. Keyed on the key VALUE: a refetch that keeps
+    // the same Up next leaves a refusal for it where it is.
     const upNextKey = upNext ? matchKey(upNext) : null;
     useEffectSh(() => {
         setStartError(null);
@@ -1256,21 +1267,22 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // relies on this so it only pins pickedKey for a match that actually started
     // (a blocked-by-eligibility start must not steal the panel).
     const startMatch = async (m) => {
-        const refusalFor = (msg) => ({ key: matchKey(m), compId: m.compId, msg });
-        if (startingKey) {
+        const key = matchKey(m);
+        const refusalFor = (msg) => ({ key, compId: m.compId, msg });
+        const inFlight = startingRef.current;
+        if (inFlight) {
             // One start at a time. An advance (Finish + Start Next, or the one
             // after a decision) that asks for another match while a start is out
-            // is refused, and the refusal says so on Up next rather than doing
-            // nothing (bc-aadv). A repeat for the match already being started is
-            // silent: it is on its way. A start that cannot be found on the court
-            // gets no sentence: the refusal is still returned, never acted on.
-            if (startingKey !== matchKey(m) && startingBlocker && mountedRef.current) {
-                setStartError(refusalFor(startWhileStartingMessage({ label: scoreRowMatchName(startingBlocker) })));
-            }
+            // is refused, and the refusal says so where the refused match is
+            // shown (refuseTap: its Up next card or its queue row) and toasts,
+            // rather than doing nothing (bc-aadv). A repeat for the match already
+            // being started is silent: it is on its way.
+            if (inFlight.key !== key && mountedRef.current) refuseTap(m, "starting");
             return false;
         }
         setStartError(null);
-        setStartingKey(matchKey(m));
+        startingRef.current = { key, match: m };
+        setStartingKey(key);
         try {
             // Starting makes the match running; the scoring panel shows
             // running[0], so it picks the match up on the next refetch.
@@ -1295,7 +1307,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             if (showToast) showToast((e && e.message) || "Could not start the match", "error");
             return false;
         } finally {
-            if (mountedRef.current) setStartingKey(null);
+            // Only the start that holds the ref clears it; the state follows the ref.
+            if (startingRef.current && startingRef.current.key === key) startingRef.current = null;
+            if (mountedRef.current) setStartingKey(startingRef.current ? startingRef.current.key : null);
         }
     };
 
@@ -1323,8 +1337,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             refuseTap(m, "correcting");
             return;
         }
-        if (startingKey && m.status === "scheduled") {
-            if (startingKey !== matchKey(m) && startingBlocker) refuseTap(m, "starting");
+        const inFlight = startingRef.current;
+        if (inFlight && m.status === "scheduled") {
+            if (inFlight.key !== matchKey(m)) refuseTap(m, "starting");
             return;
         }
         setRefusedTap(null);
@@ -1402,17 +1417,26 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const b = (m.sideB && m.sideB.name) || "Shiro";
         const msg = `Now calling ${b} and ${a} to Shiaijo ${court}.`.slice(0, 200);
         setCallingKey(matchKey(m));
-        // A call already up for this match comes down before the new one goes
-        // out. The server replaces only an announcement with identical text, so a
-        // call whose text changed (a side's name resolved) would otherwise leave
-        // the earlier banner up until it expired (bc-cdbl).
-        withdrawCall(matchKey(m));
+        // The call already up for this match, if any. It comes down only once
+        // the new call is answered (below), so a send that fails leaves it up.
+        // The server replaces only an announcement with identical text, so a call
+        // whose text changed (a side's name resolved) would otherwise leave the
+        // earlier banner up until it expired (bc-cdbl).
+        const earlier = callIdsRef.current.get(matchKey(m)) || null;
         try {
             const sent = window.API.sendAnnouncement(msg, 5, password);
-            // Keep the call's id per match so starting the match can withdraw it
-            // (bc-cdbl). Kept as a promise: a start that lands before the answer
-            // must still withdraw the call once its id arrives.
-            callIdsRef.current.set(matchKey(m), sent.then((ann) => (ann && ann.id) || null, () => null));
+            // Keep the newest call's id per match so starting the match can
+            // withdraw it (bc-cdbl). Kept as a promise: a start that lands before
+            // the answer must still withdraw the call once its id arrives. If the
+            // send fails, the call that was up stays up, so the entry becomes its id.
+            const id = sent.then((ann) => (ann && ann.id) || null, () => earlier);
+            callIdsRef.current.set(matchKey(m), id);
+            // The earlier call comes down once this one is answered, unless it is
+            // the same announcement (a failed send, or the server returning the
+            // id it already had).
+            if (earlier) {
+                takeDown(Promise.all([earlier, id]).then(([oldId, newId]) => (oldId !== newId ? oldId : null)));
+            }
             await sent;
             if (!mountedRef.current) return;
             setCalledKey(matchKey(m));
@@ -1432,6 +1456,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const pending = callIdsRef.current.get(key);
         if (!pending) return;
         callIdsRef.current.delete(key);
+        takeDown(pending);
+    };
+    // takeDown: delete the announcement whose id `pending` resolves to (none
+    // when it resolves to null). Fire and forget, shared by withdrawCall and the
+    // earlier call callToCourt replaces.
+    const takeDown = (pending) => {
         pending
             .then((id) => {
                 if (!id || !window.API || typeof window.API.deleteAnnouncement !== "function") return;
@@ -1963,8 +1993,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     }}
                                     onSubmitAndNext={async (patch) => {
                                         const next = nextActiveAfter(selectedMatch);
+                                        let res;
                                         try {
-                                            const res = await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);
+                                            res = await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);
                                             // See the onSubmit handler above: a superseded write must not
                                             // advance the local bracket on a winner the server discarded.
                                             if (!writeWasSuperseded(res)) maybeAdvanceLocal(selectedMatch, patch);
@@ -1980,6 +2011,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                                 await startMatch(next);
                                             }
                                         } catch (_e) { /* keep panel */ }
+                                        // The finish write's answer, as the editor needs it (a partial
+                                        // apply's note, a refused write's banner); undefined when the
+                                        // write threw.
+                                        return res;
                                     }}
                                     onAfterDecision={async (result) => {
                                         // A fusenpai/hantei decision already persisted the bout via
@@ -1998,6 +2033,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         if (next && next.status === "scheduled") {
                                             await startMatch(next);
                                         }
+                                        // The decision's own answer, handed back as the editor gave it
+                                        // over: the editor's write is the decision, not the start.
+                                        return result;
                                     }}
                                     password={password}
                                 />

@@ -2110,6 +2110,17 @@ var errRepMemberNotInTeam = &selfRunRefusal{
 	message: "The representative chosen is not on this team. Pick again from the list.",
 }
 
+// errRepWinnerNotARepresentative refuses a participant's representative bout whose
+// winner id names neither of the two representatives the same row names. The
+// client attributes the winner by those ids, so such a winner would read as no one
+// while the server credits a team by name. Same code as errRepMemberNotInTeam, with
+// its own sentence (the winner is not a pick that is off the team).
+var errRepWinnerNotARepresentative = &selfRunRefusal{
+	status:  http.StatusBadRequest,
+	code:    codeTeamMemberNotInTeam,
+	message: "The winner chosen is neither side's representative. Pick the winner from the two representatives.",
+}
+
 // repMembersOutsideTeams judges the member ids a representative bout row names
 // against the team that holds each side. Ids are bare UUIDs, so the team's own
 // squad is the only thing that says whose they are: a pick of another team's
@@ -2121,11 +2132,17 @@ var errRepMemberNotInTeam = &selfRunRefusal{
 // the stored row does not already hold (stored, nil when the match has no
 // representative bout), and only against a stored side that carries a team id.
 // A side with no team id has nothing to judge the pick against, so it is not
-// refused.
+// refused. The winner id is judged the same way: a winner the write introduces
+// must name one of the row's two representatives (errRepWinnerNotARepresentative).
 func repMembersOutsideTeams(stx state.StoreTx, compID string, pairing domain.WinnerAttribution, row state.SubMatchResult, stored *state.SubMatchResult) error {
-	var storedA, storedB string
+	var storedA, storedB, storedWinner string
 	if stored != nil {
-		storedA, storedB = stored.SideAMemberID, stored.SideBMemberID
+		storedA, storedB, storedWinner = stored.SideAMemberID, stored.SideBMemberID, stored.WinnerMemberID
+	}
+	// WinnerIDNamesASide accepts an empty winner id, so only a non-empty one naming
+	// neither representative is refused.
+	if row.WinnerMemberID != storedWinner && !domain.WinnerIDNamesASide(row.WinnerMemberID, row.SideAMemberID, row.SideBMemberID) {
+		return errRepWinnerNotARepresentative
 	}
 	type judged struct{ teamID, memberID string }
 	var picks []judged

@@ -990,6 +990,37 @@ func TestSelfRun_RepresentativeMembersMustBeOnTheirTeam(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code, "the organiser's pick is not judged on membership: %s", w.Body.String())
 }
 
+// The winner a participant names on the representative bout must be one of the
+// two representatives the same row names: the client attributes the winner by
+// those ids, and the server credits it by name, so a winner id matching neither
+// side's pick would read as no winner on one side and a team's win on the other.
+// A winner equal to a side's representative is accepted.
+func TestSelfRun_TheRepresentativeWinnerMustBeOneOfTheRepresentatives(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	squads, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+	membersA, membersB := squads[repBoutTeamAID], squads[repBoutTeamBID]
+	require.NotEmpty(t, membersA, "team A is seeded with members")
+	require.NotEmpty(t, membersB, "team B is seeded with members")
+
+	// Team B's representative is picked on side B and scores the point; the winner
+	// id names team A's member, who is neither side's representative.
+	row := repBoutRow([]string{}, []string{"M"}, "TeamB")
+	row["sideBMemberId"] = membersB[0].ID
+	row["winnerMemberId"] = membersA[0].ID
+	w := f.score("", state.MatchStatusRunning, "", f.now+100, row)
+	requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", "The winner chosen is neither side's representative. Pick the winner from the two representatives.")
+	assert.Empty(t, f.storedRepBout(t).WinnerMemberID, "a refused winner writes nothing")
+
+	row = repBoutRow([]string{}, []string{"M"}, "TeamB")
+	row["sideBMemberId"] = membersB[0].ID
+	row["winnerMemberId"] = membersB[0].ID
+	w = f.score("", state.MatchStatusRunning, "", f.now+200, row)
+	require.Equal(t, http.StatusOK, w.Code, "a winner equal to a side's representative is accepted: %s", w.Body.String())
+	assert.Equal(t, membersB[0].ID, f.storedRepBout(t).WinnerMemberID)
+}
+
 // A pick the stored row already holds is inherited, not introduced by the write:
 // a correction that seated another team leaves the old team's member on the row,
 // and the participant's echo of it is kept rather than refused against the team

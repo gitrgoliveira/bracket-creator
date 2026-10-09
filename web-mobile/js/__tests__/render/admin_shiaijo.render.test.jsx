@@ -98,7 +98,7 @@ function renderPage(tournament, court = 'A', props = {}) {
       onLogout={vi.fn()}
       onViewerMode={vi.fn()}
       password=""
-      showToast={vi.fn()}
+      showToast={props.showToast || vi.fn()}
       tweaks={{}}
       onSwitchCourt={vi.fn()}
     />
@@ -1081,6 +1081,42 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
     expect(onEditScore.mock.calls[1][1]).toBe('m-open');
   });
 
+  // Every host hands the editor back what its write came back with: the finish
+  // write's answer, a partial apply's held groups included, is the return value.
+  it('Finish + Start Next hands the finish write\'s answer back to the editor', async () => {
+    const mRun = {
+      id: 'm-run', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+      court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    window.tournamentMatches = () => [mRun, openMatch];
+    window.filterMatchesByCourt = (m) => m;
+    const answer = { applied: true, heldGroups: ['points'] };
+    const onEditScore = vi.fn()
+      .mockResolvedValueOnce(answer)
+      .mockResolvedValueOnce({ status: 'ok' });
+    await act(async () => { renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+    let ret;
+    await act(async () => { ret = await probe.props.onSubmitAndNext({ status: 'completed', winner: side('p1', 'Yamada') }); });
+    // The start-next write still went out after the finish.
+    expect(onEditScore).toHaveBeenCalledTimes(2);
+    expect(ret).toEqual(answer);
+  });
+
+  it('onAfterDecision hands the decision\'s answer back to the editor', async () => {
+    const mRun = {
+      id: 'm-run', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+      court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    window.tournamentMatches = () => [mRun, openMatch];
+    window.filterMatchesByCourt = (m) => m;
+    const onEditScore = vi.fn().mockResolvedValue({ status: 'ok' });
+    await act(async () => { renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+    const decided = { winner: side('p1', 'Yamada') };
+    let ret;
+    await act(async () => { ret = await probe.props.onAfterDecision(decided); });
+    expect(ret).toBe(decided);
+  });
+
   // bc-aadv: Finish + Start Next keeps a refused start on the Up next card,
   // instead of swallowing the error silently.
   it('Finish + Start Next keeps a refused start on the Up next card', async () => {
@@ -1166,9 +1202,10 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
     window.API.revertMatchToQueue = vi.fn().mockResolvedValue({});
     // The queued row's start hangs; the finish of the running bout lands.
     const onEditScore = vi.fn((_compId, matchId) => (matchId === 'm-later' ? new Promise(() => {}) : Promise.resolve({ status: 'ok' })));
+    const showToast = vi.fn();
     try {
       let utils;
-      await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+      await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore, showToast }); });
       expect(probe.props.match?.id).toBe('m-run');
       await act(async () => { utils.container.querySelector('.shiaijo-row__pick').click(); });
       await act(async () => {});
@@ -1180,6 +1217,42 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
       const note = utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error');
       expect(note).toBeTruthy();
       expect(note.textContent).toBe(startWhileStartingMessage({ label: scoreRowMatchName(mLater) }));
+      // The refusal is toasted as well as noted, the same as a refused tap.
+      expect(showToast).toHaveBeenCalledWith(startWhileStartingMessage({ label: scoreRowMatchName(mLater) }), 'error');
+    } finally {
+      window.API.revertMatchToQueue = prevRevert;
+    }
+  });
+
+  // The refusal is derived from the start in flight, so it goes once that start
+  // lands, not only when Up next moves (the stored message used to outlive it).
+  it('the Up next note for a refused advance clears once the blocking start lands', async () => {
+    const mRun = {
+      id: 'm-run', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+      court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    const mLater = {
+      id: 'm-later', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:15', sideA: side('q1', 'Ito'), sideB: side('q2', 'Ishii'),
+    };
+    window.tournamentMatches = () => [mRun, openMatch, mLater];
+    window.filterMatchesByCourt = (m) => m;
+    const prevRevert = window.API.revertMatchToQueue;
+    window.API.revertMatchToQueue = vi.fn().mockResolvedValue({});
+    let landQueued;
+    const queuedStart = new Promise((resolve) => { landQueued = resolve; });
+    const onEditScore = vi.fn((_compId, matchId) => (matchId === 'm-later' ? queuedStart : Promise.resolve({ status: 'ok' })));
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+      await act(async () => { utils.container.querySelector('.shiaijo-row__pick').click(); });
+      await act(async () => {});
+      await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed', winner: side('p1', 'Yamada') }); });
+      const note = () => utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error');
+      expect(note()).toBeTruthy();
+      await act(async () => { landQueued({ status: 'ok' }); });
+      await act(async () => {});
+      expect(note()).toBeNull();
     } finally {
       window.API.revertMatchToQueue = prevRevert;
     }
@@ -1923,5 +1996,88 @@ describe('a Start tapped while another start is still out is refused before anyt
       expect(card.querySelector('[role="alert"]')).toBeNull();
       expect(c.showToast).not.toHaveBeenCalled();
     } finally { c.restore(); }
+  });
+});
+
+// The one-start guard is judged from the start in flight NOW. An advance awaits
+// its finish write and then starts the next match from the render that began the
+// await, so a guard that reads that render's state sees a start begun meanwhile
+// as absent, and one that has since landed as still out.
+describe('the one-start guard reads the start in flight now, not the render that began an advance', () => {
+  const deferred = () => {
+    let resolve;
+    const promise = new Promise((r) => { resolve = r; });
+    return { promise, resolve };
+  };
+  const side = (id, name) => ({ id, name });
+  const runM = {
+    id: 'm-run', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+    court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+  };
+  const openM = {
+    id: 'm-open', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+    court: 'A', scheduledAt: '09:10', sideA: side('s', 'Sato'), sideB: side('k', 'Kato'),
+  };
+  const laterM = {
+    id: 'm-later', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+    court: 'A', scheduledAt: '09:15', sideA: side('q1', 'Ito'), sideB: side('q2', 'Ishii'),
+  };
+  const winner = side('p1', 'Yamada');
+  // The queue row's Start button for the match whose side carries `name`.
+  const queueStart = (utils, name) => {
+    const row = [...utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes(name));
+    return [...row.querySelectorAll('button')].find((b) => /^start match$/i.test(b.textContent.trim()));
+  };
+  let prevRevert;
+  beforeEach(() => {
+    prevRevert = window.API.revertMatchToQueue;
+    window.API.revertMatchToQueue = vi.fn().mockResolvedValue({});
+    window.tournamentMatches = () => [runM, openM, laterM];
+    window.filterMatchesByCourt = (m) => m;
+  });
+  afterEach(() => {
+    window.API.revertMatchToQueue = prevRevert;
+  });
+
+  it('a) a finish that answers after a queue start began sends no second start, and says why Up next was not started', async () => {
+    const finish = deferred();
+    // The queue start hangs; the finish of the running bout waits on `finish`.
+    const onEditScore = vi.fn((_compId, matchId) => {
+      if (matchId === 'm-run') return finish.promise;
+      if (matchId === 'm-later') return new Promise(() => {});
+      return Promise.resolve({ applied: true });
+    });
+    let utils;
+    await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+    expect(probe.props.match?.id).toBe('m-run');
+    // The editor holds this closure while its finish is out.
+    const advance = probe.props.onSubmitAndNext;
+    let pending;
+    await act(async () => { pending = advance({ status: 'completed', winner }); });
+    await act(async () => { queueStart(utils, 'Ito').click(); });
+    await act(async () => {});
+    expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-run', 'm-later']);
+    await act(async () => { finish.resolve({ applied: true }); await pending; });
+    // No second start went out: the advance was refused, and the refusal shows.
+    expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-run', 'm-later']);
+    expect(utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error').textContent)
+      .toBe(startWhileStartingMessage({ label: scoreRowMatchName(laterM) }));
+  });
+
+  it('b) a finish that answers after a start that has since landed is not refused as still starting', async () => {
+    const laterStart = deferred();
+    const onEditScore = vi.fn((_compId, matchId) => (matchId === 'm-later' ? laterStart.promise : Promise.resolve({ applied: true })));
+    let utils;
+    await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+    await act(async () => { queueStart(utils, 'Ito').click(); });
+    await act(async () => {});
+    // The editor holds this closure while the queue start is still out.
+    const advance = probe.props.onSubmitAndNext;
+    await act(async () => { laterStart.resolve({ applied: true }); });
+    await act(async () => {});
+    await act(async () => { await advance({ status: 'completed', winner }); });
+    // The next match was started: the start that had landed no longer blocks it.
+    expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-later', 'm-run', 'm-open']);
+    expect(utils.container.querySelector('.shiaijo-upnext__error')).toBeNull();
   });
 });

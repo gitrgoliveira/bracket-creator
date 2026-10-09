@@ -179,20 +179,20 @@ describe('T5: VSchedItem winner cue - completed team match', () => {
     const akaSide = sides.find(n => hasClass(n, 'vsched-item__side--aka'));
     const shiroSide = sides.find(n => hasClass(n, 'vsched-item__side--shiro'));
 
-    // Find bc-winner-tick spans
-    const ticks = findAll(tree, n => n.props?.className === 'bc-winner-tick');
+    // Find WinnerTick components
+    const ticks = findAll(tree, n => n.type?.name === 'WinnerTick');
 
     // Should have exactly one tick
     expect(ticks).toHaveLength(1);
 
     // The tick should be inside the Aka side (winning side)
     let akaHasTick = false;
-    const akaSideTicks = findAll(akaSide, n => n.props?.className === 'bc-winner-tick');
+    const akaSideTicks = findAll(akaSide, n => n.type?.name === 'WinnerTick');
     akaHasTick = akaSideTicks.length > 0;
 
     // The tick should NOT be in the Shiro side
     let shiroHasTick = false;
-    const shiroSideTicks = findAll(shiroSide, n => n.props?.className === 'bc-winner-tick');
+    const shiroSideTicks = findAll(shiroSide, n => n.type?.name === 'WinnerTick');
     shiroHasTick = shiroSideTicks.length > 0;
 
     expect(akaHasTick).toBe(true);
@@ -215,7 +215,7 @@ describe('T5: VSchedItem winner cue - completed team match', () => {
     // Mount WITHOUT winnerTick prop (as Up Next/Running do)
     const tree = runtime.mount(VSchedItem, { m, tweaks: {} });
 
-    const ticks = findAll(tree, n => n.props?.className === 'bc-winner-tick');
+    const ticks = findAll(tree, n => n.type?.name === 'WinnerTick');
 
     // Should have no ticks
     expect(ticks).toHaveLength(0);

@@ -79,7 +79,7 @@ Click **Announce** from the dashboard to broadcast a short message to every view
 
 Posting the same text again while it is still showing replaces the banner rather than adding a second one: viewers see one message, and its time starts again from the full duration.
 
-A court call, made with **Call to court** on the court console, is announced the same way. It disappears when that court starts the match. A match started from another device does not take the call down, so it stays up until its five minutes run out.
+A court call, made with **Call to court** on the court console, is announced the same way. It disappears once the match starts, or is closed with a decision such as a fusensho, from any device, as long as the court console that made the call is still open. If that console was closed or reloaded meanwhile, the call stays up until its five minutes run out.
 
 ## Registration desk
 

@@ -255,4 +255,24 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     expect(dh.sideBMemberId).toBe('m3b');
     expect(dh.sideB).toBe('Team B');
   });
+
+  it('R9: a typed name with the team members unreadable goes on and says so in the row, as a lineup name does', async () => {
+    window.API.fetchSquads.mockRejectedValue(new TypeError('Failed to fetch'));
+    window.API.addTeamMember.mockResolvedValue({ id: 'm9', name: 'Eve', index: 3 });
+    const match = makeMatch({ subResults: [DH_EMPTY] });
+    const { onSubmit } = await mount(match);
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    const input = dhInput('SHIRO');
+    await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Eve' } }); });
+    const add = await screen.findByText(/Add “Eve”/);
+    await act(async () => { fireEvent.click(add.closest('button')); });
+    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Eve', ''));
+    await waitFor(() => expect(screen.getByTestId('team-editor-lineup-warning').textContent).toContain('may have been added as a new team member'));
+    expect(screen.getByTestId('team-editor-lineup-warning').getAttribute('data-tone')).toBe('warn');
+    expect(screen.getByTestId('team-editor-lineup-warning').textContent).not.toContain('Lineup saved');
+    await clickFinishTwice();
+    const dh = dhEntryOf(onSubmit.mock.calls[0][0]);
+    expect(dh.sideBMemberId).toBe('m9');
+    expect(dh.sideB).toBe('Team B');
+  });
 });

@@ -489,10 +489,14 @@ func teamMemberIDs(squads map[string][]domain.TeamMember, teamID string) map[str
 	return held
 }
 
+// codeTeamMemberNotInTeam is the refusal code for a member id the named team does
+// not hold. The lineup refusal and the representative pick's refusal both answer it.
+const codeTeamMemberNotInTeam = "team_member_not_in_team"
+
 func errLineupMemberNotInTeam(pos domain.Position) *selfRunRefusal {
 	return &selfRunRefusal{
 		status:  http.StatusBadRequest,
-		code:    "team_member_not_in_team",
+		code:    codeTeamMemberNotInTeam,
 		message: "The member chosen for " + string(pos) + " is not on this team. Pick again from the list.",
 	}
 }

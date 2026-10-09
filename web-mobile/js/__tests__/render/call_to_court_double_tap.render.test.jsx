@@ -5,7 +5,8 @@
 // callToCourt, so the bounce of a tap is never sent. The callingKey disabled
 // state stays the in-flight guard, and a deliberate tap after the bounce window
 // still calls again. The call's announcement id is kept per match and deleted
-// when the console starts that match (startMatch).
+// once the console's list shows that match out of scheduled, however it got
+// there (started here, started elsewhere, or closed by a decision).
 //
 // Pointer taps pass detail: 1 (helpers/tap_events.js), or the guard exempts
 // them and these tests could never go red.
@@ -108,6 +109,20 @@ function renderConsole(props = {}) {
   return render(consoleElement(onEditScore));
 }
 
+// The console's match list as the next refetch shows it: a rerender with a new
+// tournament object re-derives the court's matches from window.tournamentMatches.
+function showMatches(rerender, onEditScore, matches) {
+  window.tournamentMatches = () => matches;
+  rerender(consoleElement(onEditScore));
+}
+
+// The two scheduled matches with the first one changed, as a refetch shows it
+// once it has been started or closed.
+function firstMatchWith(patch) {
+  const [m1, m2] = twoScheduledMatches();
+  return [{ ...m1, ...patch }, m2];
+}
+
 // Every "Call to court" control on the page, in DOM order: the Up next card's
 // first, then one per queue row.
 const callButtons = () => screen.getAllByTitle(CALL_TITLE);
@@ -152,28 +167,57 @@ describe('Call to court double tap (bc-cdbl)', () => {
     expect(window.API.sendAnnouncement).toHaveBeenCalledTimes(2);
   });
 
-  it('starting the called match withdraws its announcement', async () => {
+  it('starting the called match withdraws its announcement once the list shows it running', async () => {
     const onEditScore = vi.fn().mockResolvedValue({ applied: true });
-    renderConsole({ onEditScore });
+    const { rerender } = renderConsole({ onEditScore });
     await pointerTap(callButtons()[0]);
     expect(window.API.sendAnnouncement).toHaveBeenCalledTimes(1);
 
     await pointerTap(screen.getAllByRole('button', { name: 'Start match' })[0]);
     await act(async () => {});
     expect(onEditScore).toHaveBeenCalled();
+    expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
+
+    showMatches(rerender, onEditScore, firstMatchWith({ status: 'running' }));
+    await act(async () => {});
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
     expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-1', '');
+  });
+
+  it('a match started on another device withdraws its call', async () => {
+    const onEditScore = vi.fn().mockResolvedValue({ applied: true });
+    const { rerender } = renderConsole({ onEditScore });
+    await pointerTap(callButtons()[0]);
+    showMatches(rerender, onEditScore, firstMatchWith({ status: 'running' }));
+    await act(async () => {});
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-1', '');
+  });
+
+  it('a call stays up while its match is scheduled or missing from the list', async () => {
+    const onEditScore = vi.fn().mockResolvedValue({ applied: true });
+    const { rerender } = renderConsole({ onEditScore });
+    await pointerTap(callButtons()[0]);
+    showMatches(rerender, onEditScore, twoScheduledMatches());
+    await act(async () => {});
+    // The list is empty while it loads: an absent match is not judged.
+    showMatches(rerender, onEditScore, []);
+    await act(async () => {});
+    showMatches(rerender, onEditScore, twoScheduledMatches());
+    await act(async () => {});
+    expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
   });
 
   it('a failed withdrawal does not fail the start', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     window.API.deleteAnnouncement = vi.fn(async () => { throw new Error('network down'); });
     const onEditScore = vi.fn().mockResolvedValue({ applied: true });
-    renderConsole({ onEditScore });
+    const { rerender } = renderConsole({ onEditScore });
     await pointerTap(callButtons()[0]);
     await pointerTap(screen.getAllByRole('button', { name: 'Start match' })[0]);
     await act(async () => {});
     expect(onEditScore).toHaveBeenCalled();
+    showMatches(rerender, onEditScore, firstMatchWith({ status: 'running' }));
+    await act(async () => {});
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
@@ -182,10 +226,13 @@ describe('Call to court double tap (bc-cdbl)', () => {
   it('a start that lands before the call is answered still withdraws it', async () => {
     let answer;
     window.API.sendAnnouncement = vi.fn(() => new Promise((resolve) => { answer = resolve; }));
-    renderConsole();
+    const onEditScore = vi.fn().mockResolvedValue({ applied: true });
+    const { rerender } = renderConsole({ onEditScore });
     await pointerTap(callButtons()[0]);
     // The call's request is still out when the match starts.
     await pointerTap(screen.getAllByRole('button', { name: 'Start match' })[0]);
+    await act(async () => {});
+    showMatches(rerender, onEditScore, firstMatchWith({ status: 'running' }));
     await act(async () => {});
     expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
     await act(async () => { answer({ id: 'ann-late', message: 'x' }); });
@@ -209,6 +256,10 @@ describe('Call to court double tap (bc-cdbl)', () => {
     await pointerTap(screen.getByTestId('barred-match-record-fusensho'));
     await act(async () => {});
     expect(window.API.recordDecision).toHaveBeenCalledTimes(1);
+    // The decision lands and the next refetch shows the match closed.
+    expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
+    showMatches(rerender, onEditScore, firstMatchWith({ status: 'completed', decision: 'fusensho' }));
+    await act(async () => {});
     expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-1', '');
   });
 

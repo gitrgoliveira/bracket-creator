@@ -225,6 +225,42 @@ export function mergeLineupIdsForPosition(existingIds, posKey, resolvedId) {
   return updated;
 }
 
+// resolveTypedMemberName: the one step that resolves a name typed into a team
+// slot to its squad member, through resolveMemberIdsForPositions (admin_lineup.jsx,
+// reached via window.AdminLineupHelpers). `key` is the name's key in the
+// resolver's map: a lineup position's posKey, or the representative of a
+// daihyosen row (bc-dhrp). A lineup position's typed name (buildInlineLineupWrite)
+// and a representative's typed name (submitRepresentative) both resolve here, so
+// they resolve the same way. Answers { squad, memberId, failures, resolverMissing }. A resolver that is
+// missing or throws answers no member, with resolverMissing set when it was
+// missing, and the caller goes on without the member: the NAME is the
+// load-bearing half of a slot and the id an enhancement over it, so an
+// identity failure must never block the write (an operator swapping a
+// fighter mid-encounter keeps the swap). The caller reports the members-
+// unavailable warning, which memberIdentityWarning composes.
+export async function resolveTypedMemberName(compId, teamId, key, value, squad, password, currentIds) {
+  const answer = { squad: Array.isArray(squad) ? squad : [], memberId: null, failures: [], resolverMissing: false };
+  try {
+    const resolver = window.AdminLineupHelpers?.resolveMemberIdsForPositions;
+    if (typeof resolver !== "function") {
+      answer.resolverMissing = true;
+    } else {
+      // currentIds: a name typed into a slot PICKED by number (its member id
+      // already set on this key) renames that same member rather than falling
+      // back to the position's index default -- see resolveMemberIdsForPositions'
+      // own doc comment.
+      const resolved = await resolver(compId, teamId, { [key]: value }, squad, password, currentIds);
+      answer.squad = resolved.squad;
+      answer.memberId = resolved.memberIds[key] || null;
+      answer.failures = resolved.failures || [];
+    }
+  } catch (_e) {
+    // The helper's own per-position mint catch sits beneath this one, and the
+    // write still proceeds: see the note above.
+  }
+  return answer;
+}
+
 // buildInlineLineupWrite computes exactly what the inline lineup picker
 // (submitInlineLineup, inside TeamScoreEditorModal in admin_scoring_team.jsx)
 // writes with putMatchLineup: the one position it changes, `changed: [posKey]`
@@ -293,28 +329,12 @@ export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posK
   let nextSquad = Array.isArray(squad) ? squad : [];
   let failures = [];
   if (!pickedMemberId && value) {
-    try {
-      const resolver = window.AdminLineupHelpers?.resolveMemberIdsForPositions;
-      if (typeof resolver === "function") {
-        // currentIds: a name typed into a slot PICKED by number (its
-        // memberId already set on this position) renames that same member
-        // rather than falling back to the position's index default -- see
-        // resolveMemberIdsForPositions' own doc comment.
-        const resolved = await resolver(compId, teamId, { [posKey]: value }, squad, password, lineup?.memberIds);
-        nextSquad = resolved.squad;
-        resolvedId = resolved.memberIds[posKey] || null;
-        failures = resolved.failures || [];
-      }
-    } catch (_e) {
-      // On top of the helper's own per-position mint catch, because this
-      // runs on the live scoring path: an operator swapping a fighter
-      // mid-encounter must not lose the swap because identity resolution
-      // failed. The NAME is the load-bearing half of a lineup slot and the
-      // id is an enhancement over it, so the write proceeds either way;
-      // mergeLineupIdsForPosition below clears this position's id, the same
-      // as any other unresolved name, and the load-time repair fills it in
-      // later from the squad.
-    }
+    // A failed resolve still writes the name: mergeLineupIdsForPosition below
+    // clears this position's id, and the load-time repair fills it in later.
+    const typed = await resolveTypedMemberName(compId, teamId, posKey, value, squad, password, lineup?.memberIds);
+    nextSquad = typed.squad;
+    resolvedId = typed.memberId;
+    failures = typed.failures;
   }
 
   const otherPosKey = memberPlacedElsewhere(lineup?.memberIds, posKey, resolvedId);
@@ -577,16 +597,18 @@ export function pickMemberIdFromLineup(lineup, index, teamSize) {
 // numbered bout's pairing is server-bout-log first, the SubMatchResult's own
 // sideAMemberId/sideBMemberId -- backfilled from team-members.yaml by the
 // legacy-upgrade repair -- so the lineup position's id must never outrank
-// it; fixed-format rows stay lineup-first). The representative bout never
-// reaches this function: its identity is the operator's pick (playerNamesForBout,
-// bc-dhrp). Callers pass
+// it; fixed-format rows stay lineup-first). The representative bout
+// (isDaihyosen) is the one row whose fighter is the operator's own pick,
+// recorded on that row (bc-dhrp), so it reads only that row's id and never a
+// lineup position. Callers pass
 // existingMemberId/lineupMemberId from the SAME existing/lineup objects
 // resolveBoutSideName was given for the SAME row, and must independently
 // block an operator's free-typed override (which has no valid lineup key to
 // resolve an id from at all) before ever reaching this function -- see
 // admin_scoring_team.jsx's playerNamesForBout for that guard.
 export function resolveBoutSideMemberId({ isKachinuki, isDaihyosen, existingMemberId, lineupMemberId }) {
-  if (isKachinuki && !isDaihyosen) return existingMemberId || lineupMemberId || "";
+  if (isDaihyosen) return existingMemberId || "";
+  if (isKachinuki) return existingMemberId || lineupMemberId || "";
   return lineupMemberId || existingMemberId || "";
 }
 

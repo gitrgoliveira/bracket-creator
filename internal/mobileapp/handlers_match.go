@@ -2061,15 +2061,14 @@ func holdSelfReportedWriteUnderTx(stx state.StoreTx, compID, matchID string, res
 		log.Printf("mobileapp: kept the representative bout a self-run score write to %s/%s left out; the rest of the write was kept", compID, matchID)
 		return nil
 	}
-	if row >= 0 {
-		// bc-dhrp: the picks name the side's own team's members (the lineup's rule).
-		if err := repMembersOutsideTeams(stx, compID, snap.Pairing, subs[row]); err != nil {
-			return err
-		}
-	}
 	if stored == nil || !stored.HanteiDecided() {
 		if row >= 0 && subs[row].HanteiDecided() {
 			return repBoutHanteiRefusal(false)
+		}
+		if row >= 0 {
+			// bc-dhrp: the picks name the side's own team's members (the lineup's rule).
+			// Not judged when a stored verdict stands: it replaces the row below.
+			return repMembersOutsideTeams(stx, compID, snap.Pairing, subs[row])
 		}
 		return nil
 	}
@@ -2107,7 +2106,7 @@ func holdSelfReportedWriteUnderTx(stx state.StoreTx, compID, matchID string, res
 // refusal (errLineupMemberNotInTeam) says the same thing about a fielded position.
 var errRepMemberNotInTeam = &selfRunRefusal{
 	status:  http.StatusBadRequest,
-	code:    "team_member_not_in_team",
+	code:    codeTeamMemberNotInTeam,
 	message: "The representative chosen is not on this team. Pick again from the list.",
 }
 

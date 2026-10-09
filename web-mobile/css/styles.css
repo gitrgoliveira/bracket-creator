@@ -3129,7 +3129,8 @@ a.vlist-item {
   background: var(--red-soft);
 }
 
-.vsched-item__side--w {
+.vsched-item__side--w,
+.shiaijo-qrow__side--win .shiaijo-qrow__name {
   color: var(--accent);
   font-weight: 700;
 }
@@ -7273,10 +7274,9 @@ button.vsched-item:not([data-clickable]) {
 .msb-name--labelled .numbered-name--clip { min-width: 0; flex: 0 1 auto; }
 .msb-name--labelled .msb-member-label,
 .msb-name--labelled .sb-result-mark,
-.msb-name--labelled .barred-chip,
-.msb-name--labelled .bc-winner-tick { flex-shrink: 0; }
+.msb-name--labelled .barred-chip { flex-shrink: 0; }
 /* The row's gap spaces the tick; its bracket-card margin would double it. */
-.msb-name--labelled .bc-winner-tick { margin-right: 0; }
+.msb-name--labelled .bc-winner-tick { flex-shrink: 0; margin-right: 0; }
 /* The decided winner's name. .msb-slots--win marks only an ippon-LESS result
    (hantei, or a default win), so without this an ordinary 2-0 or 1-0 win is
    emphasised nowhere. Set by IndividualScore from the same id-first winner key
@@ -9879,7 +9879,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .shiaijo-qrow__side { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 8px; }
 .shiaijo-qrow__side--shiro { border-radius: 6px 0 0 6px; }
 .shiaijo-qrow__side--aka { flex-direction: row-reverse; text-align: right; border-radius: 0 6px 6px 0; }
-.shiaijo-qrow__side--win .shiaijo-qrow__name { color: var(--accent); font-weight: 700; }
 .shiaijo-qrow__name { font-weight: 600; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shiaijo-qrow__vs { font-size: 11px; color: var(--ink-3); }
 /* Completed result, centred on its own line below the names (the names keep the

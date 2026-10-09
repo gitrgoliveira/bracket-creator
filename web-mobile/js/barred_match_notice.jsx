@@ -34,10 +34,7 @@ import { notLandedBanner, notSavedText, writeDidNotLand, queuedNotice } from './
 // competitor_status_updated) once it lands. `onDone`, when a caller passes
 // one, still fires so a host that wants to react sooner (e.g. close a modal)
 // can.
-// onDecisionRecorded (bc-cdbl), when given, fires once a decision (fusensho or
-// the both-barred draw) has landed or been queued: the match is closed, so a
-// court call for it is withdrawn. A reinstate does not fire it.
-export function BarredMatchNotice({ match, password, onDone, onDecisionRecorded }) {
+export function BarredMatchNotice({ match, password, onDone }) {
   const [busy, setBusy] = useState(false);
   // bc-cse: without this, a successful write's button re-enables the instant
   // busy clears and stays tappable until the SSE refetch repaints this
@@ -84,7 +81,6 @@ export function BarredMatchNotice({ match, password, onDone, onDecisionRecorded 
         setErr(queuedNotice(res));
       }
       setLanded(true);
-      if (typeof onDecisionRecorded === "function") onDecisionRecorded(res);
       if (typeof onDone === "function") onDone(res);
     } catch (e) {
       if (!mountedRef.current) return;

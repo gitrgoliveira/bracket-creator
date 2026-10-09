@@ -355,7 +355,7 @@ describe('ViewerCompetition Recent results includes completed hikiwake (drawn) b
       tweaks: {},
       winnerTick: true,
     });
-    const ticks = findAll(tree, (n) => n.props?.className === 'bc-winner-tick');
+    const ticks = findAll(tree, (n) => n.type?.name === 'WinnerTick');
     expect(ticks).toHaveLength(0);
   });
 });

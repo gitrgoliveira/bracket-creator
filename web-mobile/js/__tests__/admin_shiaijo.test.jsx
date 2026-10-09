@@ -252,11 +252,15 @@ describe('ShiaijoQueueRow; completed result placement', () => {
     expect(akaSide.props.className).toContain('shiaijo-qrow__side--aka');
     expect(akaSide.props.className).toContain('shiaijo-qrow__side--win');
 
-    // Check for the tick span in Aka side
+    // The tick is the WinnerTick component (side_cell.jsx). This runtime does not
+    // expand components, so it is found by name and rendered to reach the sr-only
+    // word a screen reader hears.
     let hasTick = false;
     walk(akaSide, (n) => {
-      if (n && n.props?.className === 'bc-winner-tick' && text(n) === '✓') {
-        hasTick = true;
+      if (n && n.type?.name === 'WinnerTick') {
+        walk(n.type(n.props), (c) => {
+          if (c && c.props?.className === 'sr-only' && text(c) === 'Winner') hasTick = true;
+        });
       }
     });
     expect(hasTick).toBe(true);
@@ -354,7 +358,7 @@ describe('ShiaijoQueueRow; completed result placement', () => {
     // No tick on either side
     let tickCount = 0;
     walk(tree, (n) => {
-      if (n && n.props?.className === 'bc-winner-tick') {
+      if (n && n.type?.name === 'WinnerTick') {
         tickCount++;
       }
     });

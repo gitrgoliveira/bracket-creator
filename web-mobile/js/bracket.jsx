@@ -18,6 +18,7 @@ import { BarredChip } from './barred_chip.jsx';
 import { realIppons, enchoOn, defaultWinMaru } from './result_slot.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { NumberedName } from './numbered_name.jsx';
+import { WinnerTick } from './side_cell.jsx';
 import { creditedBoutSide, isTeamDefaultWinDecision } from './team_default_credit.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
 
@@ -518,7 +519,7 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD,
     <div className={`bc-side bc-side--${side} ${isWinner ? "bc-side--winner" : ""}`}>
       <div className="bc-name-wrap">
         <span className="bc-name">
-          {isWinner ? <span className="bc-winner-tick" aria-label="Winner" title="Winner">✓</span> : null}
+          {isWinner ? <WinnerTick /> : null}
           <NumberedName name={m1} number={player.number} />
         </span>
         {m2 ? <span className="bc-name">{m2}</span> : null}

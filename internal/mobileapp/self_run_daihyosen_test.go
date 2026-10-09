@@ -990,6 +990,30 @@ func TestSelfRun_RepresentativeMembersMustBeOnTheirTeam(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code, "the organiser's pick is not judged on membership: %s", w.Body.String())
 }
 
+// A participant's echo of the organiser's recorded verdict is replaced by the
+// stored row whatever picks it carries, so a foreign pick on it is not refused
+// (the picks are never written).
+func TestSelfRun_RepresentativeMembersAreNotJudgedOnADecidedVerdict(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	f.recordHantei(t)
+	squads, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+	membersB := squads[repBoutTeamBID]
+	require.NotEmpty(t, membersB, "team B is seeded with members")
+
+	echo := hanteiRow()
+	echo["sideAMemberId"] = membersB[0].ID // team B's member on team A's side
+
+	w := f.score("", state.MatchStatusRunning, "", f.now+200, echo)
+	require.Equal(t, http.StatusOK, w.Code, "the verdict's echo is kept whatever its picks: %s", w.Body.String())
+	assert.NotContains(t, w.Body.String(), "team_member_not_in_team")
+	row := f.storedRepBout(t)
+	assert.Equal(t, []string{domain.HanteiMark}, row.IpponsA, "the verdict stands")
+	assert.Equal(t, "TeamA", row.Winner)
+	assert.Empty(t, row.SideAMemberID, "the stored row keeps its own picks, not the echo's")
+}
+
 // A password sent but wrong is answered 401 before the body is read, so a
 // stale organiser is not told about their clock or their body instead.
 func TestDaihyosen_AWrongPasswordIsRefusedBeforeTheStamp(t *testing.T) {

@@ -55,6 +55,18 @@ export function SideLabel({ side }) {
   return <span className="sr-only">{sideWord(side)}: </span>;
 }
 
+// The winner's tick beside the winning side's name. The glyph is decorative and
+// hidden from assistive technology; the sr-only word carries the fact, for the
+// same reason SideLabel is a span rather than an aria-label.
+export function WinnerTick() {
+  return (
+    <span className="bc-winner-tick" title="Winner">
+      <span aria-hidden="true">✓</span>
+      <span className="sr-only">Winner</span>
+    </span>
+  );
+}
+
 // A tinted side cell.
 //
 //   side       "shiro" | "aka". The one place the surface states it.

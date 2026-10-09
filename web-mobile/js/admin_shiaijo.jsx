@@ -14,7 +14,7 @@
 
 import { createTimerPool } from './timer_pool.jsx';
 import { applyPatch, keepNewerCompetitions } from './patch.jsx';
-import { SideCell } from './side_cell.jsx';
+import { SideCell, WinnerTick } from './side_cell.jsx';
 import { useOpenedTapGuard, acceptTap } from './tap_guard.jsx';
 import { useDialogFocus } from './dialog_focus.jsx';
 // Imported DIRECTLY from the leaf rather than read off `window`. Two of the
@@ -740,7 +740,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const callTapRef = useRefSh(null);
     // The announcement id (a promise of it, null if the send failed) of each
     // court call this console made, keyed by matchKey, so the call can be
-    // withdrawn once its match starts (bc-cdbl). A reload forgets them; the
+    // withdrawn once its match leaves scheduled (bc-cdbl). A reload forgets them; the
     // 5-minute expiry is the backstop.
     const callIdsRef = useRefSh(new Map());
     const [contextOpen, setContextOpen] = useStateSh(true);
@@ -1270,9 +1270,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 if (showToast) showToast(msg, "error");
                 return false;
             }
-            // The call has done its job once the competitors are at the line
-            // (bc-cdbl): withdraw it now that the match has started.
-            withdrawCall(matchKey(m));
             return true;
         } catch (e) {
             if (mountedRef.current) setStartError(refusalFor((e && e.message) || "Could not start the match: check eligibility and try again."));
@@ -1371,14 +1368,14 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const callToCourt = async (m, ev) => {
         // bc-cdbl: double tap guard. acceptTap returns false for a bounce and
         // true otherwise, stamping the tap as it goes.
-        if (ev && !acceptTap(callTapRef, ev, matchKey(m))) return;
+        if (!acceptTap(callTapRef, ev, matchKey(m))) return;
         if (!window.API || typeof window.API.sendAnnouncement !== "function") return;
         const a = (m.sideA && m.sideA.name) || "Aka";
         const b = (m.sideB && m.sideB.name) || "Shiro";
         const msg = `Now calling ${b} and ${a} to Shiaijo ${court}.`.slice(0, 200);
         setCallingKey(matchKey(m));
         try {
-            const sent = Promise.resolve(window.API.sendAnnouncement(msg, 5, password));
+            const sent = window.API.sendAnnouncement(msg, 5, password);
             // Keep the call's id per match so starting the match can withdraw it
             // (bc-cdbl). Kept as a promise: a start that lands before the answer
             // must still withdraw the call once its id arrives.
@@ -1395,7 +1392,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     };
 
     // withdrawCall: take this console's court call for the match keyed `key`
-    // back down once that match has started or been decided (bc-cdbl). Fire
+    // back down once that match has left scheduled (bc-cdbl). Fire
     // and forget: a failed delete is logged, never allowed to fail the start,
     // and the 5-minute expiry still clears the banner.
     const withdrawCall = (key) => {
@@ -1409,6 +1406,18 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             })
             .catch((e) => console.warn("Could not withdraw the court call", e));
     };
+
+    // A court call comes down once its match has left scheduled, however that
+    // happened: started here, started from another device, or closed by a
+    // decision. A key the list does not hold is left alone, since the list is
+    // empty while it loads and a match moved off this court is not this
+    // console's to judge.
+    useEffectSh(() => {
+        for (const key of callIdsRef.current.keys()) {
+            const m = courtMatchesRaw.find((x) => matchKey(x) === key);
+            if (m && m.status !== "scheduled") withdrawCall(key);
+        }
+    }, [courtMatchesRaw]);
 
     // moveMatch: reorder by swapping scheduledAt with the adjacent row.
     // direction: "up" (earlier) or "down" (later). Only scheduled matches
@@ -1745,7 +1754,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     courts={courts} onMoveCourt={requestMoveCourt}
                                     onMove={moveMatch} onEnterLineup={(m) => setLineupKey(matchKey(m))}
                                     onPick={pickMatch} noticeFor={(m) => refusalNotice(matchKey(m))}
-                                    onCall={callToCourt} onWithdrawCall={withdrawCall} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
+                                    onCall={callToCourt} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
                                     scheduled={filteredScheduled}
                                     password={password}
                                 />
@@ -2160,14 +2169,14 @@ export function groupQueueMatches(matches) {
     return order.map((k) => byKey.get(k));
 }
 
-function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, noticeFor, onCall, onWithdrawCall, callingKey, calledKey, startingKey, password }) {
+function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, noticeFor, onCall, callingKey, calledKey, startingKey, password }) {
     const renderRow = (m) => (
         <ShiaijoQueueRow
             key={matchKey(m)} m={m}
             notice={noticeFor ? noticeFor(m) : null}
             scheduled={scheduled}
             courts={courts} onMoveCourt={onMoveCourt} onMove={onMove} onEnterLineup={onEnterLineup} onPick={onPick} onCorrect={onCorrect}
-            onCall={onCall} onWithdrawCall={onWithdrawCall} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
+            onCall={onCall} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
             password={password}
         />
     );
@@ -2193,7 +2202,7 @@ function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMove
     );
 }
 
-export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, onCall, onWithdrawCall, callingKey, calledKey, startingKey, pending, onResolve, slotLabel, password, notice }) {
+export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, onCall, callingKey, calledKey, startingKey, pending, onResolve, slotLabel, password, notice }) {
     const isComplete = m.status === "completed";
     // bc-cse: a scheduled match a competitor is barred from. `pending`
     // placeholder finals are excluded on purpose: their sides are still
@@ -2209,8 +2218,9 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
     const scoreCell = shiaijoScoreCell(m);
     // bc-tmwn: for completed rows, determine which side won and get team marks.
     const winnerSide = isComplete ? window.winnerSideLR?.(m) : null;
-    const { shiro: teamShiroMark, aka: teamAkaMark } = isComplete && isTeamMatch(m) && window.teamMatchMarks
-        ? window.teamMatchMarks(m, true)
+    // teamMatchMarks itself returns no marks for a non-team row or one not completed.
+    const { shiro: teamShiroMark, aka: teamAkaMark } = window.teamMatchMarks
+        ? window.teamMatchMarks(m, isTeamMatch(m))
         : { shiro: "", aka: "" };
     // Derive position in the full scheduled list to know when to disable ↑/↓.
     // `scheduled` is the court's complete scheduled array (including Up Next);
@@ -2268,15 +2278,15 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                     side carried by colour alone on the one surface where reading
                     it wrong mis-scores a bout. */}
                 <SideCell side="shiro" className={`shiaijo-qrow__side shiaijo-qrow__side--shiro ${winnerSide === "left" ? "shiaijo-qrow__side--win" : ""}`}>
-                    {winnerSide === "left" && <span className="bc-winner-tick" aria-label="Winner" title="Winner">✓</span>}
-                    <span className={`shiaijo-qrow__name${isTeamMatch(m) && teamShiroMark ? " msb-name--labelled" : ""}`}>
+                    {winnerSide === "left" && <WinnerTick />}
+                    <span className={`shiaijo-qrow__name${teamShiroMark ? " msb-name--labelled" : ""}`}>
                         {teamNameMark("shiro", teamShiroMark, <NumberedName side="shiro" name={bName} number={m.sideB?.number} clip />)}
                     </span>
                 </SideCell>
                 <span className="shiaijo-qrow__vs">vs</span>
                 <SideCell side="aka" className={`shiaijo-qrow__side shiaijo-qrow__side--aka ${winnerSide === "right" ? "shiaijo-qrow__side--win" : ""}`}>
-                    {winnerSide === "right" && <span className="bc-winner-tick" aria-label="Winner" title="Winner">✓</span>}
-                    <span className={`shiaijo-qrow__name${isTeamMatch(m) && teamAkaMark ? " msb-name--labelled" : ""}`}>
+                    {winnerSide === "right" && <WinnerTick />}
+                    <span className={`shiaijo-qrow__name${teamAkaMark ? " msb-name--labelled" : ""}`}>
                         {teamNameMark("aka", teamAkaMark, <NumberedName side="aka" name={aName} number={m.sideA?.number} clip />)}
                     </span>
                 </SideCell>
@@ -2285,7 +2295,7 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                 so the row shows why and the one-tap resolution here instead of a
                 dead Start button. BarredMatchNotice (admin_scoring_shared.jsx) is
                 the one component: same note/action/reinstate on every surface. */}
-            {barred && <BarredMatchNotice match={m} password={password} onDecisionRecorded={() => onWithdrawCall && onWithdrawCall(matchKey(m))} />}
+            {barred && <BarredMatchNotice match={m} password={password} />}
             {/* Completed result on its own centred line BELOW the names: the
                 canonical "marks in the centre" position, but stacked so the
                 (often long) names keep the full-width line and never crowd. The

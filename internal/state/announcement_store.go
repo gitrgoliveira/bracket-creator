@@ -1,6 +1,7 @@
 package state
 
 import (
+	"slices"
 	"sync"
 	"time"
 )
@@ -29,11 +30,8 @@ func (s *AnnouncementStore) Add(msg string, dur time.Duration) (Announcement, []
 
 	// Remove the active announcement with the identical message, if any: at
 	// most one exists, since every Add replaces it (bc-cdbl).
-	for i, a := range s.active {
-		if a.Message == msg {
-			s.active = append(s.active[:i], s.active[i+1:]...)
-			break
-		}
+	if i := slices.IndexFunc(s.active, func(a Announcement) bool { return a.Message == msg }); i >= 0 {
+		s.active = slices.Delete(s.active, i, i+1)
 	}
 
 	if len(s.active) >= maxActiveAnnouncements {
@@ -51,11 +49,9 @@ func (s *AnnouncementStore) Remove(id string) (bool, []Announcement) {
 	defer s.mu.Unlock()
 
 	s.pruneExpiredLocked(time.Now())
-	for i, a := range s.active {
-		if a.ID == id {
-			s.active = append(s.active[:i], s.active[i+1:]...)
-			return true, snapshotLocked(s.active)
-		}
+	if i := slices.IndexFunc(s.active, func(a Announcement) bool { return a.ID == id }); i >= 0 {
+		s.active = slices.Delete(s.active, i, i+1)
+		return true, snapshotLocked(s.active)
 	}
 	return false, snapshotLocked(s.active)
 }

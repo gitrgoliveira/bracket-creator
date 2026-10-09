@@ -1612,10 +1612,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     newRepPick(side);
     // The representative the side picked is a member of the team it no longer has, so the
     // pick is cleared and the sheet stops sending that member's id. Only a pick the row
-    // holds is cleared: an update marks the sheet dirty and autosaves, which a side change
-    // with nothing picked would then do for no edit the operator made.
+    // holds is cleared, and it is cleared the server-following way (setSubs, not
+    // updateSub): no operator-edit stamp, no dirty mark, no autosave, and an armed Finish
+    // stays armed, since the operator changed nothing. The server still holds the old id
+    // until the operator's next write, which carries the cleared row.
     if (daihyosenIdx >= 0 && subs[daihyosenIdx]?.[`${side}MemberIdOverride`]) {
-      pickDaihyosenRepresentative({ idx: daihyosenIdx, side, updateSub }, null);
+      const followServerSub = (idx, fn) => setSubs(prev => reconcileRowsToPositions(prev, serverSubs).map((s, i) => i === idx ? fn(s) : s));
+      pickDaihyosenRepresentative({ idx: daihyosenIdx, side, updateSub: followServerSub }, null);
     }
   };
   useEffectA(() => {
@@ -2030,7 +2033,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     pickDaihyosenRepresentative({ idx, side, updateSub }, member);
     // No lineup is saved here, so the lineup's own warning ("Lineup saved, but...")
     // would be false: say what an unread member list can actually have done.
-    if (membersUnavailable) notify("warn", `"${value}" was picked, but the team member list could not be read first, so they may have been added as a new team member. Check the team on the Lineups page.`);
+    if (membersUnavailable) notify("warn", `"${value}" was picked, but the team member list could not be read first, so they may have been added as a new team member. ${selfReport ? "Ask the tournament organizer to check the team." : "Check the team on the Lineups page."}`);
   };
   // A typed representative is named by resolveRepresentative, counted in repResolving for as
   // long as it is out (Finish, Save and Close wait on it: see repResolving above).
@@ -3467,6 +3470,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // bout log and stays open (operator decision 2026-09-27).
   const runRepBoutChange = async ({ preSave, send, refusals, notDone }) => {
     setEditorErr("");
+    // A typed representative still being named answers for the row this change moves: its
+    // answer must land nothing on whatever row is then the daihyosen. Both sides' picks are
+    // superseded here (the newer pick wins). Add and Remove are disabled while one is out
+    // (repTyping), so this is the backstop, not the usual path.
+    newRepPick("a");
+    newRepPick("b");
     setDaihyosenBusy(true);
     const settle = holdScoringWrite();
     try {
@@ -4325,7 +4334,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                                picker on a participant's sheet once the judges
                                decided it or while the match is not running
                                (repPickable). It shows the picked representative,
-                               else "-", never the team name. It never gets
+                               else the side's team name (repTeamWhenUnpicked), and
+                               "-" only where a row names no one. It never gets
                                LineupNameInput's `<position> <side> player`
                                aria-label. Removing the visible SHIRO/AKA chip
                                (operator ruling: the side is named once, by the
@@ -4538,7 +4548,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     data-testid="team-daihyosen-remove"
                     title="Remove the representative bout"
                     onClick={onRemoveDaihyosen}
-                    disabled={daihyosenBusy || submitting || decisionSubmitting}
+                    disabled={daihyosenBusy || submitting || decisionSubmitting || repTyping}
                   >
                     Remove daihyosen
                   </button>
@@ -4628,7 +4638,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     admin_scoring_shared.jsx). The term is taught in the
                     title/hint above instead. */}
                 {!removingWithdrawal && <div>
-                  <button data-testid="scoring-modal-daihyosen-button" type="button" className={`btn btn--sm ${teamTied ? "btn--primary" : "btn--ghost"}`} onClick={onDaihyosen} disabled={daihyosenBusy || submitting || decisionSubmitting}>
+                  <button data-testid="scoring-modal-daihyosen-button" type="button" className={`btn btn--sm ${teamTied ? "btn--primary" : "btn--ghost"}`} onClick={onDaihyosen} disabled={daihyosenBusy || submitting || decisionSubmitting || repTyping}>
                     {daihyosenBusy ? "Adding…" : "Add representative bout"}
                   </button>
                 </div>}

@@ -51,7 +51,9 @@ info:
     not have (a sheet a moment behind a remove made elsewhere) is dropped from the
     write and the rest is written as usual, unless the write finishes the match,
     which may take its winner from that row and is refused with 409 `no_daihyosen`; a write listing
-    two is refused with 400 `duplicate_daihyosen`. Nor does it remove one: a write listing
+    two is refused with 400 `duplicate_daihyosen`, and a representative pick that names a member the
+    side's team does not hold, or a winner that names neither representative, is refused with 400
+    `team_member_not_in_team`. Nor does it remove one: a write listing
     the bouts without the representative bout the match has (a sheet a moment behind an
     add made elsewhere) keeps the stored row, scored or not, unless it finishes the match,
     which is refused with 409 `daihyosen_added`. It carries only what the competitors saw: a match
@@ -2477,6 +2479,17 @@ paths:
             participant: "A team match has one representative bout, and this
             score lists more than one. Check the scores and try again."
 
+            The same request with an empty password is refused with `error:
+            team_member_not_in_team`, with a `message` to show, when its
+            representative bout (position `-1`) names a member the side's team
+            does not hold (a pick the stored row does not already hold), or when
+            its winner id names neither of the row's two representatives (judged
+            whenever the write introduces any of the row's three ids). The
+            `message` is "The representative chosen is not on this team. Pick
+            again from the list.", or "The winner chosen is neither side's
+            representative. Pick the winner from the two representatives."
+            Nothing is written. The organiser's picks are not checked.
+
             A `completed` write whose `decision` is empty or `hikiwake` on a
             match whose stored result is a completed withdrawal (kiken or
             fusenpai) is a score sheet's correction, which cannot state a
@@ -2505,7 +2518,18 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: >
+                      The reason the payload was refused, or for the self-run refusals
+                      the machine-readable code (`duplicate_daihyosen`,
+                      `team_member_not_in_team`).
+                  message:
+                    type: string
+                    description: The sentence the public page shows as it is, for the self-run refusals.
         '401':
           description: >
             `invalid tournament password`: the password is missing or wrong in an

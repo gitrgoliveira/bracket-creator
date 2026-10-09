@@ -357,4 +357,56 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     expect(screen.getByText('Team A', { selector: '.tsm-name__static' })).toBeTruthy();
     expect(screen.queryByText('-', { selector: '.tsm-name__static' })).toBeNull();
   });
+
+  it('R15: a side given another team clears a stored pick and sends nothing: the clear is the server following, not an operator edit', async () => {
+    const match = makeMatch({ subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] });
+    const { onSubmit, rerenderWith } = await mount(match);
+    expect(dhInput('AKA').value).toBe('Alice');
+    await rerenderWith(makeMatch({ sideA: { id: 't3', name: 'Team C' }, subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] }));
+    expect(dhInput('AKA').value).toBe('');
+    // Past the autosave debounce: a clear that marked the sheet dirty would be written here.
+    await act(async () => { await new Promise((r) => setTimeout(r, 500)); });
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('R16: a side given another team leaves an armed Finish armed', async () => {
+    const match = makeMatch({ subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] });
+    const { rerenderWith } = await mount(match);
+    await act(async () => { fireEvent.click(screen.getByText('Finish')); });
+    expect(screen.getByText('Tap again to finish')).toBeTruthy();
+    await rerenderWith(makeMatch({ sideA: { id: 't3', name: 'Team C' }, subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] }));
+    expect(screen.getByText('Tap again to finish')).toBeTruthy();
+  });
+
+  it('R17: under selfReport the members-unavailable warning tells a participant to ask the organizer, not to open the Lineups page', async () => {
+    window.API.fetchSquads.mockRejectedValue(new TypeError('Failed to fetch'));
+    window.API.addTeamMember.mockResolvedValue({ id: 'm9', name: 'Eve', index: 3 });
+    const match = makeMatch({ subResults: [DH_EMPTY] });
+    await mount(match, { selfReport: true });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    const input = dhInput('SHIRO');
+    await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Eve' } }); });
+    const add = await screen.findByText(/Add “Eve”/);
+    await act(async () => { fireEvent.click(add.closest('button')); });
+    await waitFor(() => expect(screen.getByTestId('team-editor-lineup-warning').textContent).toContain('may have been added as a new team member'));
+    const text = screen.getByTestId('team-editor-lineup-warning').textContent;
+    expect(text).toContain('Ask the tournament organizer to check the team.');
+    expect(text).not.toContain('Lineups page');
+  });
+
+  it('R18: Remove daihyosen is disabled while a typed representative is still being named, and offered again once it is', async () => {
+    let answerEve;
+    window.API.addTeamMember.mockImplementation(() => new Promise((resolve) => { answerEve = resolve; }));
+    const match = makeMatch({ subResults: [DH_EMPTY] });
+    await mount(match);
+    const input = dhInput('SHIRO');
+    await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Eve' } }); });
+    const add = await screen.findByText(/Add “Eve”/);
+    await act(async () => { fireEvent.click(add.closest('button')); });
+    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Eve', ''));
+    expect(screen.getByTestId('team-daihyosen-remove').disabled).toBe(true);
+    await act(async () => { answerEve({ id: 'm9', name: 'Eve', index: 3 }); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(screen.getByTestId('team-daihyosen-remove').disabled).toBe(false);
+  });
 });

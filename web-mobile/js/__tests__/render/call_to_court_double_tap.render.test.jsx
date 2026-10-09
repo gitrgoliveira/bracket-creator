@@ -320,6 +320,54 @@ describe('Call to court double tap (bc-cdbl)', () => {
     expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-1', '');
   });
 
+  it('a re-call with unchanged text deletes nothing: the server already replaced the first banner, and starting the match withdraws the new one', async () => {
+    const onEditScore = vi.fn().mockResolvedValue({ applied: true });
+    const { rerender } = renderConsole({ onEditScore });
+    await pointerTap(callButtons()[0]);
+    expect(window.API.sendAnnouncement).toHaveBeenCalledTimes(1);
+    await wait(TAP_BOUNCE_MS + 50);
+    // The same text again. The server removes the active announcement with
+    // identical text and answers with a new id, so the earlier id is already gone
+    // and a DELETE of it would 404 ("Could not withdraw the court call").
+    await pointerTap(callButtons()[0]);
+    await act(async () => {});
+    expect(window.API.sendAnnouncement).toHaveBeenCalledTimes(2);
+    expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
+
+    await pointerTap(screen.getAllByRole('button', { name: 'Start match' })[0]);
+    await act(async () => {});
+    showMatches(rerender, onEditScore, firstMatchWith({ status: 'running' }));
+    await act(async () => {});
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-2', '');
+  });
+
+  it('after an unchanged re-call, a changed re-call takes down the banner that is up, once it is answered', async () => {
+    const onEditScore = vi.fn().mockResolvedValue({ applied: true });
+    const { rerender } = renderConsole({ onEditScore });
+    await pointerTap(callButtons()[0]);
+    await wait(TAP_BOUNCE_MS + 50);
+    await pointerTap(callButtons()[0]);
+    await act(async () => {});
+    expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
+
+    await wait(TAP_BOUNCE_MS + 50);
+    let answerThird;
+    window.API.sendAnnouncement.mockImplementationOnce(() => new Promise((resolve) => { answerThird = resolve; }));
+    const [m1, m2] = twoScheduledMatches();
+    showMatches(rerender, onEditScore, [{ ...m1, sideA: { id: 'p1', name: 'Yamada Taro' } }, m2]);
+    await act(async () => {});
+    await pointerTap(callButtons()[0]);
+    await act(async () => {});
+    expect(window.API.sendAnnouncement).toHaveBeenCalledTimes(3);
+    expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
+    await act(async () => { answerThird({ id: 'ann-3', message: 'x' }); });
+    await act(async () => {});
+    // ann-2 is the banner up for this match; ann-1 was replaced by the server.
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-2', '');
+  });
+
   it('starting a match that was never called withdraws nothing', async () => {
     renderConsole();
     await pointerTap(screen.getAllByRole('button', { name: 'Start match' })[0]);

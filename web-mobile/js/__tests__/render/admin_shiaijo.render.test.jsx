@@ -1102,21 +1102,6 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
     expect(ret).toEqual(answer);
   });
 
-  it('onAfterDecision hands the decision\'s answer back to the editor', async () => {
-    const mRun = {
-      id: 'm-run', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
-      court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
-    };
-    window.tournamentMatches = () => [mRun, openMatch];
-    window.filterMatchesByCourt = (m) => m;
-    const onEditScore = vi.fn().mockResolvedValue({ status: 'ok' });
-    await act(async () => { renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
-    const decided = { winner: side('p1', 'Yamada') };
-    let ret;
-    await act(async () => { ret = await probe.props.onAfterDecision(decided); });
-    expect(ret).toBe(decided);
-  });
-
   // bc-aadv: Finish + Start Next keeps a refused start on the Up next card,
   // instead of swallowing the error silently.
   it('Finish + Start Next keeps a refused start on the Up next card', async () => {

@@ -259,7 +259,9 @@ describe('ShiaijoQueueRow; completed result placement', () => {
     walk(akaSide, (n) => {
       if (n && n.type?.name === 'WinnerTick') {
         walk(n.type(n.props), (c) => {
-          if (c && c.props?.className === 'sr-only' && text(c) === 'Winner') hasTick = true;
+          // The separator is part of the announced text: without it a screen
+          // reader reads the tick run into the name ("WinnerK1 Alice").
+          if (c && c.props?.className === 'sr-only' && text(c) === 'Winner: ') hasTick = true;
         });
       }
     });

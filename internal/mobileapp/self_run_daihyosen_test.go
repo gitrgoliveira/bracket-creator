@@ -1021,6 +1021,56 @@ func TestSelfRun_TheRepresentativeWinnerMustBeOneOfTheRepresentatives(t *testing
 	assert.Equal(t, membersB[0].ID, f.storedRepBout(t).WinnerMemberID)
 }
 
+// A winner the write inherits from the stored row is still judged once a side's
+// representative changes: a write that keeps the stored winner id but seats a new
+// member on side A would otherwise leave the winner naming neither representative,
+// and attribution would credit nobody. A row whose ids and winner all match the
+// stored row is not judged.
+func TestSelfRun_AChangedRepresentativeJudgesAnInheritedWinner(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	squads, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+	membersA, membersB := squads[repBoutTeamAID], squads[repBoutTeamBID]
+	require.GreaterOrEqual(t, len(membersA), 3, "team A is seeded with members")
+	require.NotEmpty(t, membersB, "team B is seeded with members")
+	x, z, y := membersA[0].ID, membersA[1].ID, membersB[0].ID
+	f.setB1(t, func(bm *state.BracketMatch) {
+		row := &bm.SubResults[state.DaihyosenSubIndex(bm.SubResults)]
+		row.IpponsA = []string{"M"}
+		row.Winner = "TeamA"
+		row.SideAMemberID, row.SideBMemberID, row.WinnerMemberID = x, y, x
+	})
+	pick := func(sideA, sideB, winner string) map[string]any {
+		row := repBoutRow([]string{"M"}, []string{}, "TeamA")
+		row["sideAMemberId"] = sideA
+		row["sideBMemberId"] = sideB
+		row["winnerMemberId"] = winner
+		return row
+	}
+
+	// Side A's pick moves to team A's other member, and the winner keeps the stored
+	// id x, which is no longer either representative.
+	w := f.score("", state.MatchStatusRunning, "", f.now+100, pick(z, y, x))
+	requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", "The winner chosen is neither side's representative. Pick the winner from the two representatives.")
+	stored := f.storedRepBout(t)
+	assert.Equal(t, x, stored.SideAMemberID, "a refused write leaves the stored pick")
+	assert.Equal(t, x, stored.WinnerMemberID, "a refused write leaves the stored winner")
+
+	// The same change names the new representative as the winner, and is accepted.
+	w = f.score("", state.MatchStatusRunning, "", f.now+200, pick(z, y, z))
+	require.Equal(t, http.StatusOK, w.Code, "a winner that is the new representative is accepted: %s", w.Body.String())
+	assert.Equal(t, z, f.storedRepBout(t).WinnerMemberID)
+
+	// A row the stored row wholly matches is an echo, not a change: its winner is
+	// not judged even though it names neither representative.
+	f.setB1(t, func(bm *state.BracketMatch) {
+		bm.SubResults[state.DaihyosenSubIndex(bm.SubResults)].WinnerMemberID = membersA[2].ID
+	})
+	w = f.score("", state.MatchStatusRunning, "", f.now+300, pick(z, y, membersA[2].ID))
+	require.Equal(t, http.StatusOK, w.Code, "a wholly inherited row is not judged: %s", w.Body.String())
+}
+
 // A pick the stored row already holds is inherited, not introduced by the write:
 // a correction that seated another team leaves the old team's member on the row,
 // and the participant's echo of it is kept rather than refused against the team

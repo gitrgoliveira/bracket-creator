@@ -62,7 +62,7 @@ export function WinnerTick() {
   return (
     <span className="bc-winner-tick" title="Winner">
       <span aria-hidden="true">✓</span>
-      <span className="sr-only">Winner</span>
+      <span className="sr-only">Winner: </span>
     </span>
   );
 }

@@ -744,10 +744,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // landed still was). The state above only drives the rendering.
     const startingRef = useRefSh(null);
     const callTapRef = useRefSh(null);
-    // The announcement id (a promise of it, null if the send failed) of each
-    // court call this console made, keyed by matchKey, so the call can be
-    // withdrawn once its match leaves scheduled (bc-cdbl). A reload forgets them; the
-    // 5-minute expiry is the backstop.
+    // The newest court call this console made per match, keyed by matchKey, as
+    // { id, msg }: the announcement id (a promise of it, null if the send failed)
+    // and the text sent, so the call can be withdrawn once its match leaves
+    // scheduled (bc-cdbl). A reload forgets them; the 5-minute expiry is the
+    // backstop.
     const callIdsRef = useRefSh(new Map());
     const [contextOpen, setContextOpen] = useStateSh(true);
     // The whole queue column folds away so the scorer can take the full width;
@@ -1417,25 +1418,34 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const b = (m.sideB && m.sideB.name) || "Shiro";
         const msg = `Now calling ${b} and ${a} to Shiaijo ${court}.`.slice(0, 200);
         setCallingKey(matchKey(m));
-        // The call already up for this match, if any. It comes down only once
-        // the new call is answered (below), so a send that fails leaves it up.
-        // The server replaces only an announcement with identical text, so a call
-        // whose text changed (a side's name resolved) would otherwise leave the
-        // earlier banner up until it expired (bc-cdbl).
+        // The call already up for this match, if any: { id, msg }, where id is a
+        // promise of its announcement id. It comes down only once the new call is
+        // answered (below), so a send that fails leaves it up. The server replaces
+        // only an announcement with identical text, so a call whose text changed
+        // (a side's name resolved) would otherwise leave the earlier banner up
+        // until it expired (bc-cdbl).
         const earlier = callIdsRef.current.get(matchKey(m)) || null;
         try {
             const sent = window.API.sendAnnouncement(msg, 5, password);
-            // Keep the newest call's id per match so starting the match can
-            // withdraw it (bc-cdbl). Kept as a promise: a start that lands before
-            // the answer must still withdraw the call once its id arrives. If the
-            // send fails, the call that was up stays up, so the entry becomes its id.
-            const id = sent.then((ann) => (ann && ann.id) || null, () => earlier);
-            callIdsRef.current.set(matchKey(m), id);
-            // The earlier call comes down once this one is answered, unless it is
-            // the same announcement (a failed send, or the server returning the
-            // id it already had).
-            if (earlier) {
-                takeDown(Promise.all([earlier, id]).then(([oldId, newId]) => (oldId !== newId ? oldId : null)));
+            const key = matchKey(m);
+            // Keep the newest call per match, with its text, so starting the match
+            // can withdraw it (bc-cdbl). The id is kept as a promise: a start that
+            // lands before the answer must still withdraw the call once its id
+            // arrives. If the send fails, the earlier call stays up, and so does
+            // its entry.
+            const entry = { msg, id: sent.then((ann) => (ann && ann.id) || null, () => (earlier ? earlier.id : null)) };
+            callIdsRef.current.set(key, entry);
+            sent.catch(() => {
+                if (callIdsRef.current.get(key) !== entry) return;
+                if (earlier) callIdsRef.current.set(key, earlier);
+                else callIdsRef.current.delete(key);
+            });
+            // The earlier call comes down once this one is answered, but only when
+            // its text differs. An identical text already replaced it on the server
+            // (AnnouncementStore.Add), so a DELETE of it would 404; a failed send
+            // leaves it up (its id comes back unchanged, so nothing is taken down).
+            if (earlier && earlier.msg !== msg) {
+                takeDown(Promise.all([earlier.id, entry.id]).then(([oldId, newId]) => (oldId !== newId ? oldId : null)));
             }
             await sent;
             if (!mountedRef.current) return;
@@ -1453,10 +1463,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // and forget: a failed delete is logged, never allowed to fail the start,
     // and the 5-minute expiry still clears the banner.
     const withdrawCall = (key) => {
-        const pending = callIdsRef.current.get(key);
-        if (!pending) return;
+        const entry = callIdsRef.current.get(key);
+        if (!entry) return;
         callIdsRef.current.delete(key);
-        takeDown(pending);
+        takeDown(entry.id);
     };
     // takeDown: delete the announcement whose id `pending` resolves to (none
     // when it resolves to null). Fire and forget, shared by withdrawCall and the
@@ -2033,9 +2043,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         if (next && next.status === "scheduled") {
                                             await startMatch(next);
                                         }
-                                        // The decision's own answer, handed back as the editor gave it
-                                        // over: the editor's write is the decision, not the start.
-                                        return result;
                                     }}
                                     password={password}
                                 />

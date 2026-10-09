@@ -54,11 +54,16 @@ describe('the competitor number is a chip, not trailing text', () => {
     vi.resetModules();
   });
 
-  // The name cells, in DOM order: Shiro first, then Aka.
+  // The name cells, in DOM order: Shiro first, then Aka. The cell also holds
+  // the Recent results winner tick's slot (first on Shiro, last on Aka), which
+  // is `false` when no tick is drawn, so the name is the one child left.
   const nameCells = () => {
     const m = { id: 'm1', status: 'scheduled', court: 'A', sideA: AKA, sideB: SHIRO };
     const tree = runtime.mount(VSchedItem, { m, tweaks: {} });
-    return findAll(tree, n => hasClass(n, 'n')).map(n => n.props && n.props.children);
+    return findAll(tree, n => hasClass(n, 'n')).map((n) => {
+      const kids = [].concat(n.props && n.props.children).filter(Boolean);
+      return kids.length === 1 ? kids[0] : kids;
+    });
   };
 
   it('hands each side a NumberedName in clip mode, never a joined string', () => {

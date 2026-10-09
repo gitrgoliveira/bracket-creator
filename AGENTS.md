@@ -102,3 +102,9 @@ bd close <id>         # Complete work if the PR is merged
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
 <!-- END BEADS INTEGRATION -->
+
+<!-- Repo-specific, deliberately OUTSIDE the tool-managed BEADS INTEGRATION block above. -->
+
+## Memory (overrides the beads block above)
+
+Do NOT use `bd remember`: it is retired and the bd memory store is empty (2026-10-09). This repo's persistent memory lives in Hindsight, which Claude Code reaches through its `hindsight-memory` plugin (see CLAUDE.md). This agent has no Hindsight integration, so raise a lesson worth keeping with the user instead of storing it.

@@ -195,6 +195,10 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
 // VSchedItem
 // ---------------------------------------------------------------------------
 
+// The bracket card's winner tick (.bc-winner-tick), shown by VSchedItem on the
+// Recent results list only (its `winnerTick` prop).
+const winnerTickMark = <span className="bc-winner-tick" aria-label="Winner" title="Winner">✓</span>;
+
 export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight, winnerTick }) => {
   // bc-pnum: sameCompetitor, never a bare `winner.id === side.id` (see
   // bracket.jsx's MatchCard for why the naked equality lights both sides
@@ -291,8 +295,10 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
               above, so without it a long name clipped that mark away (or, on
               Aka, pushed its leading mark past the visible width) exactly as
               the bare number once did. */}
-          {winnerTick && bWin && <span className="bc-winner-tick" aria-label="Winner" title="Winner">✓</span>}
-          <span className="n msb-name--labelled">{barredNameMark(m, "shiro", teamNameMark("shiro", teamShiroMark, <NumberedName side="shiro" clip {...numberedParts(m.sideB, undefined)} />))}</span>
+          {/* The winner tick (Recent results only) rides INSIDE the `.n` flex
+              row, at the side's outer edge: first on Shiro, last on Aka. As a
+              sibling of `.n` it took a line of its own above the name. */}
+          <span className="n msb-name--labelled">{winnerTick && bWin && winnerTickMark}{barredNameMark(m, "shiro", teamNameMark("shiro", teamShiroMark, <NumberedName side="shiro" clip {...numberedParts(m.sideB, undefined)} />))}</span>
           {tweaks.showDojo && m.sideB?.dojo ? <span className="d">{m.sideB.dojo}</span> : null}
         </div>
         {/* No score string (pending, or completed with no recorded cells) →
@@ -320,8 +326,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
         )}
         <div className={`vsched-item__side vsched-item__side--aka ${aWin ? "vsched-item__side--w" : ""}`}>
           <SideLabel side="aka" />
-          {winnerTick && aWin && <span className="bc-winner-tick" aria-label="Winner" title="Winner">✓</span>}
-          <span className="n msb-name--labelled">{barredNameMark(m, "aka", teamNameMark("aka", teamAkaMark, <NumberedName side="aka" clip {...numberedParts(m.sideA, undefined)} />))}</span>
+          <span className="n msb-name--labelled">{barredNameMark(m, "aka", teamNameMark("aka", teamAkaMark, <NumberedName side="aka" clip {...numberedParts(m.sideA, undefined)} />))}{winnerTick && aWin && winnerTickMark}</span>
           {tweaks.showDojo && m.sideA?.dojo ? <span className="d">{m.sideA.dojo}</span> : null}
         </div>
       </div>

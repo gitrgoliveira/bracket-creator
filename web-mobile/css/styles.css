@@ -7273,7 +7273,10 @@ button.vsched-item:not([data-clickable]) {
 .msb-name--labelled .numbered-name--clip { min-width: 0; flex: 0 1 auto; }
 .msb-name--labelled .msb-member-label,
 .msb-name--labelled .sb-result-mark,
-.msb-name--labelled .barred-chip { flex-shrink: 0; }
+.msb-name--labelled .barred-chip,
+.msb-name--labelled .bc-winner-tick { flex-shrink: 0; }
+/* The row's gap spaces the tick; its bracket-card margin would double it. */
+.msb-name--labelled .bc-winner-tick { margin-right: 0; }
 /* The decided winner's name. .msb-slots--win marks only an ippon-LESS result
    (hantei, or a default win), so without this an ordinary 2-0 or 1-0 win is
    emphasised nowhere. Set by IndividualScore from the same id-first winner key

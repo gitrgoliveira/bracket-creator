@@ -16,15 +16,25 @@ func NewAnnouncementStore() *AnnouncementStore {
 	return &AnnouncementStore{}
 }
 
-// Add appends a new announcement. Returns the new item and the updated list
-// snapshot under the same lock, eliminating any race between mutation and
-// broadcast.
+// Add appends a new announcement. If an active announcement with the identical
+// message already exists, it is replaced (removed and re-added with a new ID and
+// fresh TTL). Returns the new item and the updated list snapshot under the same
+// lock, eliminating any race between mutation and broadcast.
 func (s *AnnouncementStore) Add(msg string, dur time.Duration) (Announcement, []Announcement) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	ann := makeAnnouncement(msg, dur)
 	s.pruneExpiredLocked(time.Now())
+
+	// Remove the active announcement with the identical message, if any: at
+	// most one exists, since every Add replaces it (bc-cdbl).
+	for i, a := range s.active {
+		if a.Message == msg {
+			s.active = append(s.active[:i], s.active[i+1:]...)
+			break
+		}
+	}
 
 	if len(s.active) >= maxActiveAnnouncements {
 		s.active = s.active[1:]

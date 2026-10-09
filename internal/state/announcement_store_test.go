@@ -1,6 +1,7 @@
 package state
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -135,8 +136,10 @@ func TestAnnouncementStoreRemovePrunesExpired(t *testing.T) {
 func TestAnnouncementStoreCapEvictsOldest(t *testing.T) {
 	store := NewAnnouncementStore()
 
-	for range maxActiveAnnouncements {
-		_, _ = store.Add("msg", 30*time.Minute)
+	// Distinct messages: an identical one would replace its predecessor
+	// (bc-cdbl), and this test is about the cap, not about replacement.
+	for i := range maxActiveAnnouncements {
+		_, _ = store.Add(fmt.Sprintf("msg %d", i), 30*time.Minute)
 	}
 	newest, _ := store.Add("newest", 30*time.Minute)
 	list := store.List()
@@ -196,4 +199,82 @@ func TestAnnouncementStoreConcurrentAddList(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestAnnouncementStore_AddReplacesIdenticalActive(t *testing.T) {
+	tests := []struct {
+		name     string
+		scenario func(t *testing.T, store *AnnouncementStore)
+	}{
+		{
+			name: "identical active announcement is replaced",
+			scenario: func(t *testing.T, store *AnnouncementStore) {
+				msg := "Call to court"
+				a1, _ := store.Add(msg, 5*time.Minute)
+				a2, list := store.Add(msg, 5*time.Minute)
+
+				// Only one announcement should exist
+				if len(list) != 1 {
+					t.Fatalf("expected 1 announcement, got %d", len(list))
+				}
+				// IDs should differ (a2 is the new one)
+				if a1.ID == a2.ID {
+					t.Error("new announcement should have a different ID")
+				}
+				// The stored announcement should be a2, not a1
+				if list[0].ID != a2.ID {
+					t.Errorf("expected newest announcement (ID %s), got ID %s", a2.ID, list[0].ID)
+				}
+				if list[0].Message != msg {
+					t.Errorf("expected message %q, got %q", msg, list[0].Message)
+				}
+			},
+		},
+		{
+			name: "different messages both stack",
+			scenario: func(t *testing.T, store *AnnouncementStore) {
+				a1, _ := store.Add("First call", 5*time.Minute)
+				a2, list := store.Add("Second call", 5*time.Minute)
+
+				if len(list) != 2 {
+					t.Fatalf("expected 2 announcements, got %d", len(list))
+				}
+				if list[0].ID != a1.ID {
+					t.Errorf("expected first announcement first")
+				}
+				if list[1].ID != a2.ID {
+					t.Errorf("expected second announcement second")
+				}
+			},
+		},
+		{
+			name: "identical message after expiry just adds",
+			scenario: func(t *testing.T, store *AnnouncementStore) {
+				msg := "Call to court"
+				a1, _ := store.Add(msg, 5*time.Millisecond)
+				time.Sleep(10 * time.Millisecond)
+				a2, list := store.Add(msg, 5*time.Minute)
+
+				// The expired copy is pruned, so the fresh one is the only entry
+				// and nothing is replaced: the identical message just adds.
+				if len(list) != 1 {
+					t.Fatalf("expected 1 announcement (expired first removed), got %d", len(list))
+				}
+				if list[0].ID != a2.ID {
+					t.Errorf("expected the fresh announcement, got %q", list[0].ID)
+				}
+				// a1 should be gone (expired)
+				if list[0].ID == a1.ID {
+					t.Error("expired announcement should be pruned")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := NewAnnouncementStore()
+			tt.scenario(t, store)
+		})
+	}
 }

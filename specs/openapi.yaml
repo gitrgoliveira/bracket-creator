@@ -934,7 +934,8 @@ paths:
         Sends a transient text announcement to all connected viewer screens via SSE.
         The announcement is stored in-memory only (not persisted to disk); a server
         restart clears it. Late-connecting viewers can retrieve the active announcement
-        via `GET /api/tournament/announcement`.
+        via `GET /api/tournament/announcement`. A message identical to one still active
+        replaces it (new id, fresh duration) rather than adding a second entry.
 
         **Validation:**
         - `message` must be non-empty after trimming whitespace.

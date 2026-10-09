@@ -207,3 +207,45 @@ func TestAnnouncementHandlers(t *testing.T) {
 	router.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
+
+// TestAnnouncementHandlers_IdenticalMessageReplaces pins bc-cdbl: posting the
+// text that is already showing replaces its banner rather than stacking a
+// second one, so a double tap on Call to court is one announcement from any
+// device.
+func TestAnnouncementHandlers_IdenticalMessageReplaces(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test Tournament", Password: "secret-password"}))
+
+	eng := engine.New(store)
+	res := resources.NewResources(nil, fstest.MapFS{
+		"web-mobile/index.html": {Data: []byte("<html><body>Mobile</body></html>")},
+	})
+	router, _, limiter := NewRouter(store, eng, res, NewFileVerifier(store))
+	t.Cleanup(limiter.Close)
+
+	post := func(msg string) state.Announcement {
+		t.Helper()
+		body, _ := json.Marshal(announcementRequest{Message: msg, DurationMinutes: 5})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/tournament/announce", bytes.NewReader(body))
+		req.Header.Set("X-Tournament-Password", "secret-password")
+		router.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		var ann state.Announcement
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &ann))
+		return ann
+	}
+
+	first := post("Now calling Yamada and Tanaka to Shiaijo A.")
+	second := post("Now calling Yamada and Tanaka to Shiaijo A.")
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/tournament/announcements", nil)
+	router.ServeHTTP(w, req)
+	var list []state.Announcement
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
+	require.Len(t, list, 1)
+	assert.Equal(t, second.ID, list[0].ID)
+	assert.NotEqual(t, first.ID, list[0].ID)
+}

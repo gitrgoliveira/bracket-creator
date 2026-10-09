@@ -15,7 +15,7 @@
 import { createTimerPool } from './timer_pool.jsx';
 import { applyPatch, keepNewerCompetitions } from './patch.jsx';
 import { SideCell } from './side_cell.jsx';
-import { useOpenedTapGuard } from './tap_guard.jsx';
+import { useOpenedTapGuard, acceptTap } from './tap_guard.jsx';
 import { useDialogFocus } from './dialog_focus.jsx';
 // Imported DIRECTLY from the leaf rather than read off `window`. Two of the
 // call sites below sit inside a `try { } catch (_e) { }` that swallows, so a
@@ -732,10 +732,17 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
     // Selected match for the inline scoring panel. `calledKey` marks the match
     // the operator has announced this session (local cue only); `callingKey`
-    // guards the in-flight announce request.
+    // guards the in-flight announce request. `callTapRef` guards against double
+    // taps on Call to court (bc-cdbl).
     const [calledKey, setCalledKey] = useStateSh(null);
     const [callingKey, setCallingKey] = useStateSh(null);
     const [startingKey, setStartingKey] = useStateSh(null);
+    const callTapRef = useRefSh(null);
+    // The announcement id (a promise of it, null if the send failed) of each
+    // court call this console made, keyed by matchKey, so the call can be
+    // withdrawn once its match starts (bc-cdbl). A reload forgets them; the
+    // 5-minute expiry is the backstop.
+    const callIdsRef = useRefSh(new Map());
     const [contextOpen, setContextOpen] = useStateSh(true);
     // The whole queue column folds away so the scorer can take the full width;
     // the choice is per device, like the operator's other console preferences.
@@ -1263,6 +1270,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 if (showToast) showToast(msg, "error");
                 return false;
             }
+            // The call has done its job once the competitors are at the line
+            // (bc-cdbl): withdraw it now that the match has started.
+            withdrawCall(matchKey(m));
             return true;
         } catch (e) {
             if (mountedRef.current) setStartError(refusalFor((e && e.message) || "Could not start the match: check eligibility and try again."));
@@ -1358,14 +1368,22 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // competitors (and anyone watching the public app) are notified they're
     // being summoned to this shiaijo. It does NOT start the match; Start is
     // always available on its own.
-    const callToCourt = async (m) => {
+    const callToCourt = async (m, ev) => {
+        // bc-cdbl: double tap guard. acceptTap returns false for a bounce and
+        // true otherwise, stamping the tap as it goes.
+        if (ev && !acceptTap(callTapRef, ev, matchKey(m))) return;
         if (!window.API || typeof window.API.sendAnnouncement !== "function") return;
         const a = (m.sideA && m.sideA.name) || "Aka";
         const b = (m.sideB && m.sideB.name) || "Shiro";
         const msg = `Now calling ${b} and ${a} to Shiaijo ${court}.`.slice(0, 200);
         setCallingKey(matchKey(m));
         try {
-            await window.API.sendAnnouncement(msg, 5, password);
+            const sent = Promise.resolve(window.API.sendAnnouncement(msg, 5, password));
+            // Keep the call's id per match so starting the match can withdraw it
+            // (bc-cdbl). Kept as a promise: a start that lands before the answer
+            // must still withdraw the call once its id arrives.
+            callIdsRef.current.set(matchKey(m), sent.then((ann) => (ann && ann.id) || null, () => null));
+            await sent;
             if (!mountedRef.current) return;
             setCalledKey(matchKey(m));
             if (showToast) showToast(`Called ${b} and ${a} to Shiaijo ${court}`);
@@ -1374,6 +1392,22 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         } finally {
             if (mountedRef.current) setCallingKey(null);
         }
+    };
+
+    // withdrawCall: take this console's court call for the match keyed `key`
+    // back down once that match has started or been decided (bc-cdbl). Fire
+    // and forget: a failed delete is logged, never allowed to fail the start,
+    // and the 5-minute expiry still clears the banner.
+    const withdrawCall = (key) => {
+        const pending = callIdsRef.current.get(key);
+        if (!pending) return;
+        callIdsRef.current.delete(key);
+        pending
+            .then((id) => {
+                if (!id || !window.API || typeof window.API.deleteAnnouncement !== "function") return;
+                return window.API.deleteAnnouncement(id, password);
+            })
+            .catch((e) => console.warn("Could not withdraw the court call", e));
     };
 
     // moveMatch: reorder by swapping scheduledAt with the adjacent row.
@@ -1680,7 +1714,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                                 <button type="button"
                                                     className="btn btn--sm"
                                                     disabled={callingKey === matchKey(upNext)}
-                                                    onClick={() => callToCourt(upNext)}
+                                                    onClick={(ev) => callToCourt(upNext, ev)}
                                                     title="Announce this match to spectators and competitors"
                                                 >
                                                     {Icon && <Icon name="megaphone" />}{" "}
@@ -1711,7 +1745,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     courts={courts} onMoveCourt={requestMoveCourt}
                                     onMove={moveMatch} onEnterLineup={(m) => setLineupKey(matchKey(m))}
                                     onPick={pickMatch} noticeFor={(m) => refusalNotice(matchKey(m))}
-                                    onCall={callToCourt} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
+                                    onCall={callToCourt} onWithdrawCall={withdrawCall} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
                                     scheduled={filteredScheduled}
                                     password={password}
                                 />
@@ -2126,14 +2160,14 @@ export function groupQueueMatches(matches) {
     return order.map((k) => byKey.get(k));
 }
 
-function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, noticeFor, onCall, callingKey, calledKey, startingKey, password }) {
+function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, noticeFor, onCall, onWithdrawCall, callingKey, calledKey, startingKey, password }) {
     const renderRow = (m) => (
         <ShiaijoQueueRow
             key={matchKey(m)} m={m}
             notice={noticeFor ? noticeFor(m) : null}
             scheduled={scheduled}
             courts={courts} onMoveCourt={onMoveCourt} onMove={onMove} onEnterLineup={onEnterLineup} onPick={onPick} onCorrect={onCorrect}
-            onCall={onCall} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
+            onCall={onCall} onWithdrawCall={onWithdrawCall} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
             password={password}
         />
     );
@@ -2159,7 +2193,7 @@ function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMove
     );
 }
 
-export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, onCall, callingKey, calledKey, startingKey, pending, onResolve, slotLabel, password, notice }) {
+export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, onCall, onWithdrawCall, callingKey, calledKey, startingKey, pending, onResolve, slotLabel, password, notice }) {
     const isComplete = m.status === "completed";
     // bc-cse: a scheduled match a competitor is barred from. `pending`
     // placeholder finals are excluded on purpose: their sides are still
@@ -2251,7 +2285,7 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                 so the row shows why and the one-tap resolution here instead of a
                 dead Start button. BarredMatchNotice (admin_scoring_shared.jsx) is
                 the one component: same note/action/reinstate on every surface. */}
-            {barred && <BarredMatchNotice match={m} password={password} />}
+            {barred && <BarredMatchNotice match={m} password={password} onDecisionRecorded={() => onWithdrawCall && onWithdrawCall(matchKey(m))} />}
             {/* Completed result on its own centred line BELOW the names: the
                 canonical "marks in the centre" position, but stacked so the
                 (often long) names keep the full-width line and never crowd. The
@@ -2302,7 +2336,7 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                         call to the court for a match the server would refuse to
                         start. */}
                     {onCall && window.API && typeof window.API.sendAnnouncement === "function" && !barred && (
-                        <button type="button" className="btn btn--ghost btn--sm" disabled={callingKey === matchKey(m)} onClick={() => onCall(m)} title="Announce this match to spectators and competitors">
+                        <button type="button" className="btn btn--ghost btn--sm" disabled={callingKey === matchKey(m)} onClick={(ev) => onCall(m, ev)} title="Announce this match to spectators and competitors">
                             {callingKey === matchKey(m) ? "Calling…" : (calledKey === matchKey(m) ? "Call again" : "Call to court")}
                         </button>
                     )}

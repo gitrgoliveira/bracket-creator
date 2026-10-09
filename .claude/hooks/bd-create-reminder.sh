@@ -75,7 +75,7 @@ jq -n --arg id "$id" '{
       "Decide now and record it: if it edits a lane region (export pipeline, admin_shiaijo.jsx, server core, e2e fixtures, broad JSX text), " +
       "run `bd dep add " + $id + " <bead it must merge after>` and `bd label add " + $id + " serial/<lane>`; " +
       "otherwise state in the bead that it is independent. Lanes and the rule, verbatim from Hindsight: " +
-      "`curl -s \"$(jq -r .hindsightApiUrl ~/.hindsight/claude-code.json)/v1/default/banks/bracket-creator/documents/beads%2Fmerge-concurrency-plan\" | jq -r .original_text`.")
+      "`curl -s \"$(jq -r .apiUrl ~/.hindsight/coding-agent.json)/v1/default/banks/bracket-creator/documents/beads%2Fmerge-concurrency-plan\" | jq -r .original_text`.")
   }
 }'
 exit 0

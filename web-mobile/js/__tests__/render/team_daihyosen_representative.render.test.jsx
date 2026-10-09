@@ -8,6 +8,7 @@ import { render, act, fireEvent, screen, waitFor, within } from '@testing-librar
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { toBackendMatchResult } from '../../api_serializers.jsx';
+import { FETCH_TIMEOUT_MS } from '../../write_result.jsx';
 
 const SQUADS = {
   t1: [{ id: 'm1a', name: 'Alice', index: 1 }, { id: 'm2a', name: 'Brenda', index: 2 }],
@@ -477,5 +478,33 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await act(async () => { fireEvent.click(screen.getByText('✕ Close')); });
     expect(window.confirmDialog).toHaveBeenCalledWith(expect.objectContaining({ message: 'Discard unsaved scoring changes?' }));
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('R23: a representative typed while the members are still being read is not named once the editor has closed', async () => {
+    // The member list never answers while the editor is open, so the typed name waits for it.
+    window.API.fetchSquads.mockImplementation(() => new Promise(() => {}));
+    window.API.addTeamMember.mockResolvedValue({ id: 'm9', name: 'Eve', index: 3 });
+    const match = makeMatch({ subResults: [DH_EMPTY] });
+    const { unmount } = await mount(match);
+    const input = dhInput('SHIRO');
+    await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Eve' } }); });
+    const add = await screen.findByText(/Add “Eve”/);
+    // The members wait's deadline is a setTimeout: faked from the Add tap, so the wait can end
+    // after the editor has unmounted (a cancelled read never answers it, only the deadline does).
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await act(async () => { fireEvent.click(add.closest('button')); });
+      await act(async () => { await Promise.resolve(); });
+      expect(window.API.addTeamMember).not.toHaveBeenCalled();
+      await act(async () => { unmount(); });
+      await act(async () => {
+        vi.advanceTimersByTime(FETCH_TIMEOUT_MS);
+        for (let i = 0; i < 50; i += 1) await Promise.resolve();
+      });
+      expect(window.API.addTeamMember, 'the editor is gone, so no member is minted for nobody\'s pick').not.toHaveBeenCalled();
+      expect(window.API.renameTeamMember).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

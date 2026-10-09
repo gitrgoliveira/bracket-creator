@@ -951,3 +951,45 @@ func TestPreserveSubHantei_ZeroZeroWithdrawalIsNotSilence(t *testing.T) {
 		assert.Equal(t, []string{"K"}, incoming[0].IpponsB)
 	})
 }
+
+// The winner's member id is restored WITH the winner it belongs to. The
+// restored hantei winner is the stored one, so an incoming winner id must not
+// outlive it: an empty one would lose the stored id, and a stale one naming the
+// other side's pick survives ReconcileWinnerMemberID (it does name a pick) and
+// then credits the wrong side, id-first.
+func TestPreserveSubHanteiRestoresTheWinnersMemberIDWithTheWinner(t *testing.T) {
+	dh := state.DaihyosenSubPosition
+	stored := func() []state.SubMatchResult {
+		return []state.SubMatchResult{{
+			Position: dh, SideA: "Kyoto", SideB: "Osaka",
+			SideAMemberID: "member-a", SideBMemberID: "member-b",
+			IpponsA: []string{domain.HanteiMark}, IpponsB: []string{},
+			Winner: "Kyoto", WinnerMemberID: "member-a", Decision: "daihyosen",
+		}}
+	}
+	for name, incomingWinnerID := range map[string]string{
+		"an empty incoming id restores the stored one":                          "",
+		"a stale id naming the other side's pick is replaced by the stored one": "member-b",
+	} {
+		t.Run(name, func(t *testing.T) {
+			incoming := []state.SubMatchResult{{
+				Position: dh, SideA: "Kyoto", SideB: "Osaka",
+				SideAMemberID: "member-a", SideBMemberID: "member-b",
+				WinnerMemberID: incomingWinnerID, Decision: "daihyosen",
+			}}
+			preserveSubHantei(stored(), incoming)
+			require.True(t, incoming[0].HanteiDecided())
+			assert.Equal(t, "Kyoto", incoming[0].Winner)
+			assert.Equal(t, "member-a", incoming[0].WinnerMemberID)
+		})
+	}
+
+	t.Run("a stored id naming a pick the merge replaced is derived again", func(t *testing.T) {
+		incoming := []state.SubMatchResult{{
+			Position: dh, SideA: "Kyoto", SideB: "Osaka",
+			SideAMemberID: "member-a2", SideBMemberID: "member-b", Decision: "daihyosen",
+		}}
+		preserveSubHantei(stored(), incoming)
+		assert.Equal(t, "member-a2", incoming[0].WinnerMemberID, "the winner id names a standing pick")
+	})
+}

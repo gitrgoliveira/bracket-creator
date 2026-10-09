@@ -244,13 +244,15 @@ function groupKey(wire, group, next) {
             keys.add('position');
             // On the representative bout the two picks are GROUP_REP_PICKS' (the
             // server copies the bout without them), so a pick never reads as a
-            // change of the bout. The winner's member id is the bout's: a key the
-            // row leaves out must read as empty, or a cleared one is never named.
-            // Numbered rows keep the rule above.
+            // change of the bout. The winner's member id is re-derived by the server
+            // from the bout's winner side and the stored picks (ReconcileWinnerMemberID),
+            // so a pick change moves it with no change to the bout: it is left out
+            // too, and the winner's name is what names the bout. Numbered rows keep
+            // the rule above.
             if (pos < 0) {
                 keys.delete('sideAMemberId');
                 keys.delete('sideBMemberId');
-                keys.add('winnerMemberId');
+                keys.delete('winnerMemberId');
             }
             // A row the baseline does not hold reads as an empty one, so an
             // untouched blank bout is not a change.

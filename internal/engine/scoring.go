@@ -541,8 +541,15 @@ func preserveSubHantei(stored, incoming []state.SubMatchResult) {
 	// guards it): the mark and the winner it names move as one atomic
 	// unit, never separately.
 	in.Winner = prior.Winner
-	// The winner's member id is the bout's, the representatives their own
-	// change: keep the pair consistent (SubMatchResult.ReconcileWinnerMemberID).
+	// The winner's member id travels with the winner it names: the incoming
+	// row is verdict-silent, so its own id is either empty (the stored one
+	// would be lost) or stale (it can name the OTHER side's pick, which
+	// ReconcileWinnerMemberID accepts, and id-first attribution would then
+	// credit the wrong side).
+	in.WinnerMemberID = prior.WinnerMemberID
+	// The representatives are their own change, so the stored id may now name
+	// a member no longer picked: keep the pair consistent
+	// (SubMatchResult.ReconcileWinnerMemberID).
 	in.ReconcileWinnerMemberID()
 }
 

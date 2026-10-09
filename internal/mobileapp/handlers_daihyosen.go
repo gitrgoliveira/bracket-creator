@@ -474,9 +474,13 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// What the add changes (bc-mrgc): the new representative bout and
 			// the verdict, and the scoreline when clearing the verdict took a
 			// hantei mark out of it. The new row is built with no
-			// representatives, so it names none: the picks are the pickers' to
-			// date.
-			u.Changed = daihyosenChangedGroups(match, &u, state.GroupResult)
+			// representatives, and the add names state.GroupRepPicks all the
+			// same, as the remove does: it dates the (empty) picks of THIS
+			// bout, so a pick made on the previous representative bout, stamped
+			// between the remove and the add, is older than the add and is held
+			// rather than landing on the new bout through the remove's
+			// tombstone stamp.
+			u.Changed = daihyosenChangedGroups(match, &u, state.GroupResult, state.GroupRepPicks)
 			u.WriteDoor = engine.DoorDaihyosenAdd
 			if _, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, &u); err != nil {
 				if errors.Is(err, engine.ErrMatchSuperseded) {

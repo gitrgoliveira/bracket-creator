@@ -189,9 +189,17 @@ describe('the representatives of the representative bout (repPicks)', () => {
     expect(changedGroups(next, stored)).toEqual(['repPicks', 'bout:-1']);
   });
 
-  it('the winner\'s member id belongs to the bout', () => {
-    const stored = { subResults: [bout(-1, { sideAMemberId: 'm1a' })] };
-    const next = { subResults: [bout(-1, { winner: 'Team A', winnerMemberId: 'm1a', sideAMemberId: 'm1a' })] };
+  it('a decided representative bout whose pick is swapped names repPicks and not bout:-1', () => {
+    // The server re-derives the winner's member id from the stored picks, so a swap that
+    // moves it moves no bout: the score and the winner stand.
+    const stored = { subResults: [bout(-1, { ipponsA: ['M'], winner: 'Team A', winnerMemberId: 'm1a', sideAMemberId: 'm1a', sideBMemberId: 'm1b' })] };
+    const next = { subResults: [bout(-1, { ipponsA: ['M'], winner: 'Team A', winnerMemberId: 'm2a', sideAMemberId: 'm2a', sideBMemberId: 'm1b' })] };
+    expect(changedGroups(next, stored)).toEqual(['repPicks']);
+  });
+
+  it('a decided representative bout whose winning side changes names bout:-1, and not repPicks when the picks stand', () => {
+    const stored = { subResults: [bout(-1, { winner: 'Team A', winnerMemberId: 'm1a', sideAMemberId: 'm1a', sideBMemberId: 'm1b' })] };
+    const next = { subResults: [bout(-1, { winner: 'Team B', winnerMemberId: 'm1b', sideAMemberId: 'm1a', sideBMemberId: 'm1b' })] };
     expect(changedGroups(next, stored)).toEqual(['bout:-1']);
   });
 

@@ -52,9 +52,9 @@ info:
     write and the rest is written as usual, unless the write finishes the match,
     which may take its winner from that row and is refused with 409 `no_daihyosen`; a write listing
     two is refused with 400 `duplicate_daihyosen`, a representative pick that names a member the
-    side's team does not hold is refused with 400 `team_member_not_in_team`, and a winner that names
-    neither representative is refused with 400 `representative_winner_invalid`. A write stamped before
-    the stored representative bout is not judged for its picks: the merge holds that row, and the write
+    side's team does not hold is refused with 400 `team_member_not_in_team`. The row's winner member id
+    is not judged: the merge keeps it naming one of the two stored representatives. A write stamped
+    before the stored representatives is not judged for its picks: the merge holds them, and the write
     is answered as superseded. Nor does it remove one: a write listing
     the bouts without the representative bout the match has (a sheet a moment behind an
     add made elsewhere) keeps the stored row, scored or not, unless it finishes the match,
@@ -2484,15 +2484,12 @@ paths:
             The same request with an empty password is refused with `error:
             team_member_not_in_team`, with a `message` to show, when its
             representative bout (position `-1`) names a member the side's team
-            does not hold (a pick the stored row does not already hold). It is
-            refused with `error: representative_winner_invalid`, with a `message`
-            to show, when its winner id names neither of the row's two
-            representatives (judged whenever the write introduces any of the row's
-            three ids). The `message` is "The representative chosen is not on this
-            team. Pick again from the list.", or "The winner chosen is neither
-            side's representative. Pick the winner from the two representatives."
-            A representative bout row stamped strictly before the stored one is not
-            judged: the merge holds that row, and the write is answered as
+            does not hold (a pick the stored row does not already hold). The
+            `message` is "The representative chosen is not on this team. Pick
+            again from the list." The row's winner member id is not judged: the
+            merge keeps it naming one of the two stored representatives, or empty.
+            A write whose stamp is strictly before the stored representatives is not
+            judged for its picks: the merge holds them, and the write is answered as
             superseded (an equal stamp applies, so it is judged). Nothing is
             written. The organiser's picks are not checked.
 
@@ -2532,7 +2529,7 @@ paths:
                     description: >
                       The reason the payload was refused, or for the self-run refusals
                       the machine-readable code (`duplicate_daihyosen`,
-                      `team_member_not_in_team`, `representative_winner_invalid`).
+                      `team_member_not_in_team`).
                   message:
                     type: string
                     description: The sentence the public page shows as it is, for the self-run refusals.

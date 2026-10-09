@@ -1650,8 +1650,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       if (serverSubs[daihyosenIdx]?.[memberKey] === shownPick) {
         followedRepClearRef.current = { ...followedRepClearRef.current, [side]: shownPick };
       }
-      const followServerSub = (idx, fn) => setSubs(prev => reconcileRowsToPositions(prev, serverSubs).map((s, i) => i === idx ? fn(s) : s));
-      pickDaihyosenRepresentative({ idx: daihyosenIdx, side, updateSub: followServerSub }, null);
+      setSubs(prev => reconcileRowsToPositions(prev, serverSubs).map((s, i) => i === daihyosenIdx ? { ...s, [memberKey]: "" } : s));
     }
   };
   useEffectA(() => {
@@ -2047,7 +2046,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     let membersUnavailable = squadUnavailable;
     const waiting = membersWait.current[side].pending();
     if (waiting && !(await waiting)) membersUnavailable = true;
-    if (sideChanged() || superseded()) return;
+    // An editor closed while the members were read (the court console moving on re-keys it)
+    // names no one: the resolver would POST a member nobody picked, and the pick lands nowhere.
+    if (!mountedRef.current || sideChanged() || superseded()) return;
     const teamId = sideSeen.current[side].team;
     const typed = await resolveTypedMemberName(m.compId, teamId, REPRESENTATIVE_KEY, value, membersShown.current[side], password, { [REPRESENTATIVE_KEY]: priorId });
     if (!mountedRef.current || sideChanged()) return;

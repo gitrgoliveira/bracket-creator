@@ -1101,85 +1101,75 @@ func TestDaihyosenRemove_DatesTheRepresentativesToo(t *testing.T) {
 	assert.False(t, carriesDaihyosenRow(storedB1(t, f.store, "c1").SubResults), "nothing is resurrected")
 }
 
-// The winner a participant names on the representative bout must be one of the
-// two representatives the same row names: the client attributes the winner by
-// those ids, and the server credits it by name, so a winner id matching neither
-// side's pick would read as no winner on one side and a team's win on the other.
-// A winner equal to a side's representative is accepted.
-func TestSelfRun_TheRepresentativeWinnerMustBeOneOfTheRepresentatives(t *testing.T) {
+// Adding the representative bout dates the representatives with the add, as the
+// remove does. Without it the new row inherits the stamp of the earlier removal's
+// tombstone, and a pick made on the PREVIOUS representative bout, stamped between
+// the remove and the add, lands on the new bout.
+func TestDaihyosenAdd_DatesTheRepresentativesToo(t *testing.T) {
 	f := newRepBoutFixture(t, true)
 	f.addRepBout(t)
 	squads, err := f.store.LoadSquads("c1")
 	require.NoError(t, err)
-	membersA, membersB := squads[repBoutTeamAID], squads[repBoutTeamBID]
-	require.NotEmpty(t, membersA, "team A is seeded with members")
-	require.NotEmpty(t, membersB, "team B is seeded with members")
+	membersA := squads[repBoutTeamAID]
+	require.NotEmpty(t, membersA)
 
-	// Team B's representative is picked on side B and scores the point; the winner
-	// id names team A's member, who is neither side's representative.
-	row := repBoutRow([]string{}, []string{"M"}, "TeamB")
-	row["sideBMemberId"] = membersB[0].ID
-	row["winnerMemberId"] = membersA[0].ID
-	w := f.score("", state.MatchStatusRunning, "", f.now+100, row)
-	requireRefusal(t, w, http.StatusBadRequest, "representative_winner_invalid", "The winner chosen is neither side's representative. Pick the winner from the two representatives.")
-	assert.Empty(t, f.storedRepBout(t).WinnerMemberID, "a refused winner writes nothing")
+	w := f.send(http.MethodDelete, repBoutMatchPath+"/daihyosen", "main-pw", map[string]any{"modifiedAt": f.now + 100})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	w = f.send(http.MethodPost, repBoutMatchPath+"/daihyosen", "main-pw", map[string]any{"modifiedAt": f.now + 200})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	added := storedB1(t, f.store, "c1")
+	require.Equal(t, f.now+200, added.GroupStamp(state.GroupRepPicks), "the add dates the representatives")
 
-	row = repBoutRow([]string{}, []string{"M"}, "TeamB")
-	row["sideBMemberId"] = membersB[0].ID
-	row["winnerMemberId"] = membersB[0].ID
-	w = f.score("", state.MatchStatusRunning, "", f.now+200, row)
-	require.Equal(t, http.StatusOK, w.Code, "a winner equal to a side's representative is accepted: %s", w.Body.String())
-	assert.Equal(t, membersB[0].ID, f.storedRepBout(t).WinnerMemberID)
+	// A pick made on the previous bout, between the remove and the add, arrives late.
+	pick := repBoutRow([]string{}, []string{}, "")
+	pick["sideAMemberId"] = membersA[0].ID
+	sheet := scoreSheet(state.MatchStatusRunning, "", f.now+150, pick)
+	sheet["changed"] = []string{state.GroupRepPicks}
+	late := f.send(http.MethodPut, repBoutMatchPath+"/score", "main-pw", sheet)
+	require.Equal(t, http.StatusOK, late.Code, late.Body.String())
+	assert.Contains(t, late.Body.String(), `"superseded"`, "a pick older than the add is held")
+	assert.Empty(t, f.storedRepBout(t).SideAMemberID, "the old bout's pick is not on the new bout")
 }
 
-// A winner the write inherits from the stored row is still judged once a side's
-// representative changes: a write that keeps the stored winner id but seats a new
-// member on side A would otherwise leave the winner naming neither representative,
-// and attribution would credit nobody. A row whose ids and winner all match the
-// stored row is not judged.
-func TestSelfRun_AChangedRepresentativeJudgesAnInheritedWinner(t *testing.T) {
+// The winner id a participant's write carries is not judged: the merge keeps the
+// pair consistent itself (SubMatchResult.ReconcileWinnerMemberID). Another device
+// changed side A's pick; the participant's winning point (bout:-1, not the picks)
+// still carries the OLD pick's id. The point is the participant's and applies, and
+// the stored winner id ends up naming the stored pick of the winning side, rather
+// than the write being refused and the point lost.
+func TestSelfRun_AWinningPointCarryingAReplacedPicksIdIsAcceptedAndReconciled(t *testing.T) {
 	f := newRepBoutFixture(t, true)
 	f.addRepBout(t)
 	squads, err := f.store.LoadSquads("c1")
 	require.NoError(t, err)
-	membersA, membersB := squads[repBoutTeamAID], squads[repBoutTeamBID]
-	require.GreaterOrEqual(t, len(membersA), 3, "team A is seeded with members")
-	require.NotEmpty(t, membersB, "team B is seeded with members")
-	x, z, y := membersA[0].ID, membersA[1].ID, membersB[0].ID
-	f.setB1(t, func(bm *state.BracketMatch) {
-		row := &bm.SubResults[state.DaihyosenSubIndex(bm.SubResults)]
-		row.IpponsA = []string{"M"}
-		row.Winner = "TeamA"
-		row.SideAMemberID, row.SideBMemberID, row.WinnerMemberID = x, y, x
-	})
-	pick := func(sideA, sideB, winner string) map[string]any {
-		row := repBoutRow([]string{"M"}, []string{}, "TeamA")
-		row["sideAMemberId"] = sideA
-		row["sideBMemberId"] = sideB
-		row["winnerMemberId"] = winner
-		return row
+	membersA := squads[repBoutTeamAID]
+	require.GreaterOrEqual(t, len(membersA), 2, "team A is seeded with members")
+	oldPick, newPick := membersA[0].ID, membersA[1].ID
+
+	organiserPick := func(memberID string, at int64) {
+		t.Helper()
+		row := repBoutRow([]string{}, []string{}, "")
+		row["sideAMemberId"] = memberID
+		sheet := scoreSheet(state.MatchStatusRunning, "", at, row)
+		sheet["changed"] = []string{state.GroupRepPicks}
+		w := f.send(http.MethodPut, repBoutMatchPath+"/score", "main-pw", sheet)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	}
+	organiserPick(oldPick, f.now+10)
+	organiserPick(newPick, f.now+100) // the other device's change, T2
 
-	// Side A's pick moves to team A's other member, and the winner keeps the stored
-	// id x, which is no longer either representative.
-	w := f.score("", state.MatchStatusRunning, "", f.now+100, pick(z, y, x))
-	requireRefusal(t, w, http.StatusBadRequest, "representative_winner_invalid", "The winner chosen is neither side's representative. Pick the winner from the two representatives.")
+	point := repBoutRow([]string{"M"}, []string{}, "TeamA")
+	point["sideAMemberId"] = oldPick
+	point["winnerMemberId"] = oldPick
+	sheet := scoreSheet(state.MatchStatusRunning, "", f.now+200, point)
+	sheet["changed"] = []string{state.BoutGroup(state.DaihyosenSubPosition)}
+	w := f.send(http.MethodPut, repBoutMatchPath+"/score", "", sheet)
+	require.Equal(t, http.StatusOK, w.Code, "the point is not refused for the id of the pick it replaced: %s", w.Body.String())
+
 	stored := f.storedRepBout(t)
-	assert.Equal(t, x, stored.SideAMemberID, "a refused write leaves the stored pick")
-	assert.Equal(t, x, stored.WinnerMemberID, "a refused write leaves the stored winner")
-
-	// The same change names the new representative as the winner, and is accepted.
-	w = f.score("", state.MatchStatusRunning, "", f.now+200, pick(z, y, z))
-	require.Equal(t, http.StatusOK, w.Code, "a winner that is the new representative is accepted: %s", w.Body.String())
-	assert.Equal(t, z, f.storedRepBout(t).WinnerMemberID)
-
-	// A row the stored row wholly matches is an echo, not a change: its winner is
-	// not judged even though it names neither representative.
-	f.setB1(t, func(bm *state.BracketMatch) {
-		bm.SubResults[state.DaihyosenSubIndex(bm.SubResults)].WinnerMemberID = membersA[2].ID
-	})
-	w = f.score("", state.MatchStatusRunning, "", f.now+300, pick(z, y, membersA[2].ID))
-	require.Equal(t, http.StatusOK, w.Code, "a wholly inherited row is not judged: %s", w.Body.String())
+	assert.Equal(t, []string{"M"}, stored.IpponsA, "the winning point applied")
+	assert.Equal(t, newPick, stored.SideAMemberID, "the other device's pick stands")
+	assert.Equal(t, newPick, stored.WinnerMemberID, "the winner id names the stored pick of the winning side")
 }
 
 // A pick the stored row already holds is inherited, not introduced by the write:

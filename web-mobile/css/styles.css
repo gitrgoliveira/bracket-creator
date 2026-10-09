@@ -9879,6 +9879,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .shiaijo-qrow__side { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 8px; }
 .shiaijo-qrow__side--shiro { border-radius: 6px 0 0 6px; }
 .shiaijo-qrow__side--aka { flex-direction: row-reverse; text-align: right; border-radius: 0 6px 6px 0; }
+/* The winner tick is a flex child here, so the side's gap spaces it. Its own
+   margin-right (for the bracket card's inline use) would double that gap on
+   Shiro and push Aka's tick in from its outer edge. */
+.shiaijo-qrow__side .bc-winner-tick { margin-right: 0; }
 .shiaijo-qrow__name { font-weight: 600; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shiaijo-qrow__vs { font-size: 11px; color: var(--ink-3); }
 /* Completed result, centred on its own line below the names (the names keep the

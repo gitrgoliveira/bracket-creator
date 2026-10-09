@@ -990,6 +990,53 @@ func TestSelfRun_RepresentativeMembersMustBeOnTheirTeam(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code, "the organiser's pick is not judged on membership: %s", w.Body.String())
 }
 
+// A pick the stored row already holds is inherited, not introduced by the write:
+// a correction that seated another team leaves the old team's member on the row,
+// and the participant's echo of it is kept rather than refused against the team
+// now holding that side. A pick the write changes is still judged.
+func TestSelfRun_AStoredRepresentativeIdIsNotJudgedAgainstTheTeamNow(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	squads, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+	membersB := squads[repBoutTeamBID]
+	require.GreaterOrEqual(t, len(membersB), 2, "team B is seeded with members")
+	f.setB1(t, func(bm *state.BracketMatch) {
+		bm.SubResults[state.DaihyosenSubIndex(bm.SubResults)].SideAMemberID = membersB[0].ID
+	})
+
+	echo := repBoutRow([]string{}, []string{}, "")
+	echo["sideAMemberId"] = membersB[0].ID
+	w := f.score("", state.MatchStatusRunning, "", f.now+200, echo)
+	require.Equal(t, http.StatusOK, w.Code, "the echo of the stored pick is kept: %s", w.Body.String())
+	assert.Equal(t, membersB[0].ID, f.storedRepBout(t).SideAMemberID)
+
+	changed := repBoutRow([]string{}, []string{}, "")
+	changed["sideAMemberId"] = membersB[1].ID
+	w = f.score("", state.MatchStatusRunning, "", f.now+300, changed)
+	requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", "The representative chosen is not on this team. Pick again from the list.")
+	assert.Equal(t, membersB[0].ID, f.storedRepBout(t).SideAMemberID, "a refused pick writes nothing")
+}
+
+// A side the stored match carries no participant id for has no team to judge a
+// pick against, so the pick is not refused as "not on this team". An empty team
+// id names no team, so every pick on such a side used to be refused.
+func TestSelfRun_ARepresentativePickOnAnIdlessSideIsNotJudged(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	squads, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+	membersA := squads[repBoutTeamAID]
+	require.NotEmpty(t, membersA, "team A is seeded with members")
+	f.setB1(t, func(bm *state.BracketMatch) { bm.SideAID = "" })
+
+	pick := repBoutRow([]string{}, []string{}, "")
+	pick["sideAMemberId"] = membersA[0].ID
+	w := f.score("", state.MatchStatusRunning, "", f.now+200, pick)
+	require.Equal(t, http.StatusOK, w.Code, "the pick on an id-less side is accepted: %s", w.Body.String())
+	assert.Equal(t, membersA[0].ID, f.storedRepBout(t).SideAMemberID)
+}
+
 // A participant's echo of the organiser's recorded verdict is replaced by the
 // stored row whatever picks it carries, so a foreign pick on it is not refused
 // (the picks are never written).

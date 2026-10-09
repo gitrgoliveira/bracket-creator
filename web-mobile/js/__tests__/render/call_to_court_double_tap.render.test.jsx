@@ -263,6 +263,33 @@ describe('Call to court double tap (bc-cdbl)', () => {
     expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-1', '');
   });
 
+  it('a second deliberate call withdraws the first banner, and starting the match withdraws the second', async () => {
+    const onEditScore = vi.fn().mockResolvedValue({ applied: true });
+    const { rerender } = renderConsole({ onEditScore });
+    await pointerTap(callButtons()[0]);
+    expect(window.API.sendAnnouncement).toHaveBeenCalledTimes(1);
+    await wait(TAP_BOUNCE_MS + 50);
+    // A side's name resolved between the two calls, so the second announcement's
+    // text differs. The server replaces only an announcement with identical text,
+    // so the first banner must come down here, not wait out its expiry.
+    const [m1, m2] = twoScheduledMatches();
+    showMatches(rerender, onEditScore, [{ ...m1, sideA: { id: 'p1', name: 'Yamada Taro' } }, m2]);
+    await act(async () => {});
+    await pointerTap(callButtons()[0]);
+    await act(async () => {});
+    expect(window.API.sendAnnouncement).toHaveBeenCalledTimes(2);
+    expect(window.API.sendAnnouncement.mock.calls[1][0]).toContain('Yamada Taro');
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
+    expect(window.API.deleteAnnouncement).toHaveBeenLastCalledWith('ann-1', '');
+
+    await pointerTap(screen.getAllByRole('button', { name: 'Start match' })[0]);
+    await act(async () => {});
+    showMatches(rerender, onEditScore, firstMatchWith({ status: 'running', sideA: { id: 'p1', name: 'Yamada Taro' } }));
+    await act(async () => {});
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(2);
+    expect(window.API.deleteAnnouncement).toHaveBeenLastCalledWith('ann-2', '');
+  });
+
   it('starting a match that was never called withdraws nothing', async () => {
     renderConsole();
     await pointerTap(screen.getAllByRole('button', { name: 'Start match' })[0]);

@@ -1148,6 +1148,71 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
     expect(errorEl.textContent).toContain(CLOCK_SKEW_REASON_TEXT);
   });
 
+  // A Finish + Start Next that asks for Up next while a start of ANOTHER match
+  // is still out is refused by the one-start guard. That refusal must say so on
+  // Up next, not vanish (bc-aadv).
+  it('Finish + Start Next says why Up next was not started while another match is being started', async () => {
+    const mRun = {
+      id: 'm-run', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+      court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    const mLater = {
+      id: 'm-later', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:15', sideA: side('q1', 'Ito'), sideB: side('q2', 'Ishii'),
+    };
+    window.tournamentMatches = () => [mRun, openMatch, mLater];
+    window.filterMatchesByCourt = (m) => m;
+    const prevRevert = window.API.revertMatchToQueue;
+    window.API.revertMatchToQueue = vi.fn().mockResolvedValue({});
+    // The queued row's start hangs; the finish of the running bout lands.
+    const onEditScore = vi.fn((_compId, matchId) => (matchId === 'm-later' ? new Promise(() => {}) : Promise.resolve({ status: 'ok' })));
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+      expect(probe.props.match?.id).toBe('m-run');
+      await act(async () => { utils.container.querySelector('.shiaijo-row__pick').click(); });
+      await act(async () => {});
+      expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-later']);
+      expect(probe.props.match?.id).toBe('m-run');
+      await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed', winner: side('p1', 'Yamada') }); });
+      // The finish landed and no second start went out: Up next was refused.
+      expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-later', 'm-run']);
+      const note = utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error');
+      expect(note).toBeTruthy();
+      expect(note.textContent).toBe('Not started: another match is still being started on this court. Start it once that one has.');
+    } finally {
+      window.API.revertMatchToQueue = prevRevert;
+    }
+  });
+
+  // The one-start guard stays silent for a repeat advance to the match already
+  // being started: that match is simply on its way.
+  it('a repeat Finish + Start Next to the match already being started stays silent', async () => {
+    const mRun = {
+      id: 'm-run', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+      court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    window.tournamentMatches = () => [mRun, openMatch];
+    window.filterMatchesByCourt = (m) => m;
+    const prevRevert = window.API.revertMatchToQueue;
+    window.API.revertMatchToQueue = vi.fn().mockResolvedValue({});
+    // Up next's own start hangs; the finish of the running bout lands.
+    const onEditScore = vi.fn((_compId, matchId) => (matchId === 'm-open' ? new Promise(() => {}) : Promise.resolve({ status: 'ok' })));
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+      const upNextStart = [...utils.container.querySelector('.shiaijo-upnext__card').querySelectorAll('button')].find((b) => /start match/i.test(b.textContent));
+      await act(async () => { upNextStart.click(); });
+      await act(async () => {});
+      expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-open']);
+      await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed', winner: side('p1', 'Yamada') }); });
+      expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-open', 'm-run']);
+      expect(utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error')).toBeNull();
+    } finally {
+      window.API.revertMatchToQueue = prevRevert;
+    }
+  });
+
   it('offers Reinstate for a reinstateable (kiken-injury) withdrawal', async () => {
     window.tournamentMatches = () => [barredMatch({ ineligibleSides: { b: 'kiken-injury' } }), openMatch];
     window.filterMatchesByCourt = (m) => m;

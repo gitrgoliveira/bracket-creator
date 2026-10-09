@@ -1248,10 +1248,20 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // relies on this so it only pins pickedKey for a match that actually started
     // (a blocked-by-eligibility start must not steal the panel).
     const startMatch = async (m) => {
-        if (startingKey) return false;
+        const refusalFor = (msg) => ({ key: matchKey(m), compId: m.compId, msg });
+        if (startingKey) {
+            // One start at a time. An advance (Finish + Start Next, or the one
+            // after a decision) that asks for another match while a start is out
+            // is refused, and the refusal says so on Up next rather than doing
+            // nothing (bc-aadv). A repeat for the match already being started is
+            // silent: it is on its way.
+            if (startingKey !== matchKey(m) && mountedRef.current) {
+                setStartError(refusalFor("Not started: another match is still being started on this court. Start it once that one has."));
+            }
+            return false;
+        }
         setStartError(null);
         setStartingKey(matchKey(m));
-        const refusalFor = (msg) => ({ key: matchKey(m), compId: m.compId, msg });
         try {
             // Starting makes the match running; the scoring panel shows
             // running[0], so it picks the match up on the next refetch.
@@ -1374,6 +1384,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const b = (m.sideB && m.sideB.name) || "Shiro";
         const msg = `Now calling ${b} and ${a} to Shiaijo ${court}.`.slice(0, 200);
         setCallingKey(matchKey(m));
+        // A call already up for this match comes down before the new one goes
+        // out. The server replaces only an announcement with identical text, so a
+        // call whose text changed (a side's name resolved) would otherwise leave
+        // the earlier banner up until it expired (bc-cdbl).
+        withdrawCall(matchKey(m));
         try {
             const sent = window.API.sendAnnouncement(msg, 5, password);
             // Keep the call's id per match so starting the match can withdraw it

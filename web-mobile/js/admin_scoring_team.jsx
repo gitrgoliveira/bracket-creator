@@ -1280,6 +1280,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // given another team). A pick writes for the team the side has when it goes on, and
   // stops when the side was given another team since it began (watchLineupSide).
   const sideSeen = useRefA(null);
+  // The number of each side's latest representative pick (a list pick, a clear, or a
+  // typed name). A typed name still resolving when a newer pick is made on its side lands
+  // nothing (submitRepresentative), whichever answers first: the newer pick wins.
+  const repPickSeq = useRefA({ a: 0, b: 0 });
+  const newRepPick = (side) => ++repPickSeq.current[side];
   const showMembers = (side, list) => {
     membersShown.current[side] = list;
     (side === "a" ? setSquadA : setSquadB)(list);
@@ -1598,6 +1603,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const giveSideAnotherTeam = (side) => {
     dropSideMembers(side);
     dropLineup(side);
+    // The representative the side picked is a member of the team it no longer has, so the
+    // pick is cleared and the sheet stops sending that member's id.
+    if (daihyosenIdx >= 0) {
+      newRepPick(side);
+      pickDaihyosenRepresentative({ idx: daihyosenIdx, side, updateSub }, null);
+    }
   };
   useEffectA(() => {
     const was = sideSeen.current;
@@ -1982,21 +1993,26 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // members the resolver answers are shown, and a members list that could not be read
   // is warned about in the row. No lineup is written: the REPRESENTATIVE_KEY slot is no
   // lineup position. Only the resulting member id is stored on the row.
-  const submitRepresentative = async ({ side, noticeKey, idx, value, priorId }) => {
+  const submitRepresentative = async ({ side, noticeKey, idx, value, priorId, seq }) => {
     const notify = lineupNotifier(noticeKey);
     const sideChanged = sideChangedGuard(side, noticeKey);
+    // A newer pick on this side (a list pick, a clear or another typed name) makes this one
+    // stale: it applies nothing and says nothing (the newer pick wins). The members the
+    // resolver wrote on the server are still merged, since they exist whatever pick follows.
+    const superseded = () => repPickSeq.current[side] !== seq;
     let membersUnavailable = squadUnavailable;
     const waiting = membersWait.current[side].pending();
     if (waiting && !(await waiting)) membersUnavailable = true;
-    if (sideChanged()) return;
+    if (sideChanged() || superseded()) return;
     const teamId = sideSeen.current[side].team;
     const typed = await resolveTypedMemberName(m.compId, teamId, REPRESENTATIVE_KEY, value, membersShown.current[side], password, { [REPRESENTATIVE_KEY]: priorId });
     if (!mountedRef.current || sideChanged()) return;
     if (typed.resolverMissing) {
-      notify("error", `"${value}" could not be named: the team members are not loaded. Try again in a moment.`);
+      if (!superseded()) notify("error", `"${value}" could not be named: the team members are not loaded. Try again in a moment.`);
       return;
     }
     wroteSideMembers(side, typed.squad);
+    if (superseded()) return;
     if (!typed.memberId) {
       const failure = typed.failures[0];
       notify("error", `"${value}" was not picked as the representative. ${memberRefusalNote({ code: failure?.code, reason: failure?.reason }, "Pick one from the list instead.")}`);
@@ -4062,9 +4078,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // a box cleared empties the pick. Nothing here writes a lineup.
             const pickRepresentative = (side, noticeKey, priorId) => (value, member) => {
               setLineupNotice(null);
+              const seq = newRepPick(side);
               if (member && member.id) { pickDaihyosenRepresentative({ idx, side, updateSub }, member); return; }
               if (!value) { pickDaihyosenRepresentative({ idx, side, updateSub }, null); return; }
-              submitRepresentative({ side, noticeKey, idx, value, priorId });
+              submitRepresentative({ side, noticeKey, idx, value, priorId, seq });
             };
 
             // One picker per side: the representative row's (bc-dhrp: the team's whole squad,

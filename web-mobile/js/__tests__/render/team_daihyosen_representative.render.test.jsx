@@ -275,4 +275,44 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     expect(dh.sideBMemberId).toBe('m9');
     expect(dh.sideB).toBe('Team B');
   });
+
+  it('R10: a side given another team drops the representative it picked, so the write stops naming the old team\'s member', async () => {
+    const match = makeMatch({ subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] });
+    const { onSubmit, rerenderWith } = await mount(match);
+    expect(dhInput('AKA').value).toBe('Alice');
+    // A correction elsewhere seats team t3 on side A; the stored row still names Alice.
+    await rerenderWith(makeMatch({ sideA: { id: 't3', name: 'Team C' }, subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] }));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(dhInput('AKA').value).toBe('');
+    await clickFinishTwice();
+    const dh = dhEntryOf(onSubmit.mock.calls[0][0]);
+    expect('sideAMemberId' in dh, 'the old team\'s member is not sent').toBe(false);
+    expect(dh.sideA, 'the row names the team now on the side').toBe('Team C');
+  });
+
+  it('R11: two typed names for one side: the newer pick wins even when the older name resolves last', async () => {
+    let resolveEve;
+    const eveAnswer = new Promise((resolve) => { resolveEve = resolve; });
+    window.API.addTeamMember.mockImplementation((_c, _t, name) => (name === 'Eve'
+      ? eveAnswer
+      : Promise.resolve({ id: 'm-frank', name, index: 3 })));
+    const match = makeMatch({ subResults: [DH_EMPTY] });
+    const { onSubmit } = await mount(match);
+    const input = dhInput('SHIRO');
+    await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Eve' } }); });
+    const addEve = await screen.findByText(/Add “Eve”/);
+    await act(async () => { fireEvent.click(addEve.closest('button')); });
+    await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Frank' } }); });
+    const addFrank = await screen.findByText(/Add “Frank”/);
+    await act(async () => { fireEvent.click(addFrank.closest('button')); });
+    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Frank', ''));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    // The older name answers last.
+    await act(async () => { resolveEve({ id: 'm-eve', name: 'Eve', index: 4 }); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(dhInput('SHIRO').value).toBe('Frank');
+    await clickFinishTwice();
+    const dh = dhEntryOf(onSubmit.mock.calls[0][0]);
+    expect(dh.sideBMemberId, 'the later pick, not the older name that resolved last').toBe('m-frank');
+  });
 });

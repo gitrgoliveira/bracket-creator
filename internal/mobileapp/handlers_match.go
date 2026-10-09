@@ -2068,7 +2068,7 @@ func holdSelfReportedWriteUnderTx(stx state.StoreTx, compID, matchID string, res
 		if row >= 0 {
 			// bc-dhrp: the picks name the side's own team's members (the lineup's rule).
 			// Not judged when a stored verdict stands: it replaces the row below.
-			return repMembersOutsideTeams(stx, compID, snap.Pairing, subs[row])
+			return repMembersOutsideTeams(stx, compID, snap.Pairing, subs[row], stored)
 		}
 		return nil
 	}
@@ -2115,8 +2115,29 @@ var errRepMemberNotInTeam = &selfRunRefusal{
 // squad is the only thing that says whose they are: a pick of another team's
 // member, or of an id no team holds, is refused rather than written. The
 // organiser's write is not judged here (only the self-run path calls this).
-func repMembersOutsideTeams(stx state.StoreTx, compID string, pairing domain.WinnerAttribution, row state.SubMatchResult) error {
-	if row.SideAMemberID == "" && row.SideBMemberID == "" {
+//
+// A write answers for what it introduces, not for what it inherited (the write
+// guard's rule): a side is judged only when the write names a member for it that
+// the stored row does not already hold (stored, nil when the match has no
+// representative bout), and only against a stored side that carries a team id.
+// A side with no team id has nothing to judge the pick against, so it is not
+// refused.
+func repMembersOutsideTeams(stx state.StoreTx, compID string, pairing domain.WinnerAttribution, row state.SubMatchResult, stored *state.SubMatchResult) error {
+	var storedA, storedB string
+	if stored != nil {
+		storedA, storedB = stored.SideAMemberID, stored.SideBMemberID
+	}
+	type judged struct{ teamID, memberID string }
+	var picks []judged
+	add := func(teamID, memberID, storedID string) {
+		if memberID == "" || memberID == storedID || teamID == "" {
+			return
+		}
+		picks = append(picks, judged{teamID: teamID, memberID: memberID})
+	}
+	add(pairing.SideAID, row.SideAMemberID, storedA)
+	add(pairing.SideBID, row.SideBMemberID, storedB)
+	if len(picks) == 0 {
 		return nil
 	}
 	squads, err := stx.LoadSquads(compID)
@@ -2124,11 +2145,10 @@ func repMembersOutsideTeams(stx state.StoreTx, compID string, pairing domain.Win
 		log.Printf("mobileapp: representative member check for %s: %v", compID, err)
 		return err
 	}
-	if row.SideAMemberID != "" && !teamMemberIDs(squads, pairing.SideAID)[row.SideAMemberID] {
-		return errRepMemberNotInTeam
-	}
-	if row.SideBMemberID != "" && !teamMemberIDs(squads, pairing.SideBID)[row.SideBMemberID] {
-		return errRepMemberNotInTeam
+	for _, p := range picks {
+		if !teamMemberIDs(squads, p.teamID)[p.memberID] {
+			return errRepMemberNotInTeam
+		}
 	}
 	return nil
 }

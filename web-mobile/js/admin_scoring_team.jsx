@@ -4237,7 +4237,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                             metadata at all, so a fixed-order team registered
                             without members can still name its fighters bout by
                             bout; the static fallback remains only for the
-                            daihyosen row the judges decided for a participant, and for a row beyond teamSize that is
+                            daihyosen row a participant cannot pick on (see
+                            repPickable), and for a row beyond teamSize that is
                             not a kachinuki free/manual bout. No side chip here:
                             the header badge names the side once and the tinted
                             box carries it down the sheet. */}
@@ -4270,8 +4271,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                               onSelect={rs.onSelectName}
                             />
                           ) : (
-                            /* The read-only branch: a daihyosen row the judges
-                               decided for a participant offers no picker, so it never gets
+                            /* The read-only branch: a daihyosen row offers no
+                               picker on a participant's sheet once the judges
+                               decided it or while the match is not running
+                               (repPickable). It shows the picked representative,
+                               else "-", never the team name. It never gets
                                LineupNameInput's `<position> <side> player`
                                aria-label. Removing the visible SHIRO/AKA chip
                                (operator ruling: the side is named once, by the

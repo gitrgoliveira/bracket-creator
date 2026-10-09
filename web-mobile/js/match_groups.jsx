@@ -226,6 +226,11 @@ function groupKey(wire, group, next) {
             const keys = new Set(Object.keys(own || {}).filter((k) => own[k] !== undefined));
             keys.add('encho');
             keys.add('position');
+            // bc-dhrp: on the representative bout the member ids are the pick. A
+            // pick cleared leaves its key out, and the server copies a named row
+            // WHOLE, so an absent id must read as empty here or the clear is never
+            // named and the stored id survives. Numbered rows keep the rule above.
+            if (pos < 0) { keys.add('sideAMemberId'); keys.add('sideBMemberId'); keys.add('winnerMemberId'); }
             // A row the baseline does not hold reads as an empty one, so an
             // untouched blank bout is not a change.
             return JSON.stringify(rowProjection(rowAt(w, pos) || { position: pos }, [...keys].sort()));

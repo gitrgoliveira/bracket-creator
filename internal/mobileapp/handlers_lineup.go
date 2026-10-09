@@ -470,16 +470,23 @@ func memberIDsOutsideTeam(stx state.StoreTx, compID, teamID string, memberIDs ma
 		log.Printf("mobileapp: lineup member check for %s: %v", compID, err)
 		return &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
 	}
-	held := make(map[string]bool, len(squads[teamID]))
-	for _, m := range squads[teamID] {
-		held[m.ID] = true
-	}
+	held := teamMemberIDs(squads, teamID)
 	for pos, id := range memberIDs {
 		if id != "" && !held[id] {
 			return errLineupMemberNotInTeam(pos).response()
 		}
 	}
 	return nil
+}
+
+// teamMemberIDs is the set of member ids a team holds in squads: the one answer to
+// "is this member the team's" that every member check asks.
+func teamMemberIDs(squads map[string][]domain.TeamMember, teamID string) map[string]bool {
+	held := make(map[string]bool, len(squads[teamID]))
+	for _, m := range squads[teamID] {
+		held[m.ID] = true
+	}
+	return held
 }
 
 func errLineupMemberNotInTeam(pos domain.Position) *selfRunRefusal {

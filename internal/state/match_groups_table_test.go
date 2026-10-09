@@ -148,3 +148,17 @@ func TestMergeReport_HeldDecisionRequiresTheDefaultWinStandsReason(t *testing.T)
 
 	assert.Empty(t, (*MergeReport)(nil).HeldDecision(), "a nil report names no decision")
 }
+
+// bc-dhrp: a representative pick is a change of the bout row it sits on. The row
+// is copied whole when its group applies, so a pick added or cleared is a
+// difference in the group, and the copy takes the row exactly as sent.
+func TestBoutGroup_RepresentativeMemberIDIsAChange(t *testing.T) {
+	group := BoutGroup(DaihyosenSubPosition)
+	picked := &MatchResult{SubResults: []SubMatchResult{{Position: DaihyosenSubPosition, SideA: "TeamA", SideB: "TeamB", Decision: "daihyosen", SideBMemberID: "rep-b"}}}
+	cleared := &MatchResult{SubResults: []SubMatchResult{{Position: DaihyosenSubPosition, SideA: "TeamA", SideB: "TeamB", Decision: "daihyosen"}}}
+	assert.True(t, GroupDiffers(picked, cleared, group), "a pick cleared is a change of the row")
+
+	dst := &MatchResult{SubResults: CloneSubResults(picked.SubResults)}
+	CopyGroup(dst, cleared, group)
+	assert.Empty(t, dst.SubResults[0].SideBMemberID, "the copy takes the row as sent, so a cleared id clears")
+}

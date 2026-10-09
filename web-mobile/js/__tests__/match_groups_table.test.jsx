@@ -152,3 +152,30 @@ describe('the serializer', () => {
     expect(changedGroups(write, matchWire(held))).toEqual([]);
   });
 });
+
+// bc-dhrp: the representative bout's member ids are its pick. The server copies a
+// named bout row WHOLE, so a pick cleared (the key left out) must name the group,
+// or the stored id survives. Numbered rows keep the rule they always had.
+describe('the member ids of a bout row (bc-dhrp)', () => {
+  const bout = (position, extra = {}) => ({
+    position, sideA: 'Team A', sideB: 'Team B', ipponsA: [], ipponsB: [], winner: '', decision: 'daihyosen', ...extra,
+  });
+
+  it('a representative pick cleared (key omitted) names bout:-1', () => {
+    const stored = { subResults: [bout(-1, { sideBMemberId: 'm1b' })] };
+    const next = { subResults: [bout(-1)] };
+    expect(changedGroups(next, stored)).toEqual(['bout:-1']);
+  });
+
+  it('a representative pick added names bout:-1', () => {
+    const stored = { subResults: [bout(-1)] };
+    const next = { subResults: [bout(-1, { sideBMemberId: 'm1b' })] };
+    expect(changedGroups(next, stored)).toEqual(['bout:-1']);
+  });
+
+  it('a numbered row whose id is left out is not a change, as before', () => {
+    const stored = { subResults: [bout(1, { sideBMemberId: 'm1b', decision: '' })] };
+    const next = { subResults: [bout(1, { decision: '' })] };
+    expect(changedGroups(next, stored)).toEqual([]);
+  });
+});

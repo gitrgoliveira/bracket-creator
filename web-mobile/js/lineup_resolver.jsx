@@ -515,9 +515,9 @@ export function lineupPositionLabel(posKey) {
 // there so placeHt can put the hantei mark on the winner's side, and blanking
 // them drops the mark from the wire. Filtering them here blanked both of that
 // row's name cells, and the rep bout is the ONE row with no fallback label
-// (its lineup key is the literal "daihyosen", which no lineup carries, and it
-// offers no roster or typeable box), so the editor printed "-" against both
-// teams where the two names used to be.
+// (its lineup key is the literal "daihyosen", which no lineup carries; its
+// fighters are the member ids the operator picked on the row, bc-dhrp), so the
+// editor printed "-" against both teams where the two names used to be.
 export function resolveBoutSideName({ isKachinuki, isDaihyosen, existingName, lineupName, teamNameA, teamNameB }) {
   const namesATeam = existingName === teamNameA || existingName === teamNameB;
   const stored = namesATeam && !isDaihyosen ? "" : existingName;
@@ -529,7 +529,8 @@ export function resolveBoutSideName({ isKachinuki, isDaihyosen, existingName, li
 // bootstrap (index 0), the lineup position no longer identifies who fights
 // (winner-stays advancement determines the pairing), so display surfaces must
 // suppress the position-lineup name and fall back to the bout number. The
-// daihyosen (isDaihyosen) is an operator-chosen rep bout and stays lineup-first.
+// daihyosen (isDaihyosen) is an operator-chosen rep bout, not a lineup position,
+// and is never hidden.
 // Shared by the display surfaces (match_scoreboard, streaming_overlay) so the
 // bootstrap rule lives in one place.
 export function kachinukiHidesLineupPosition(isKachinuki, isDaihyosen, index) {
@@ -576,7 +577,9 @@ export function pickMemberIdFromLineup(lineup, index, teamSize) {
 // numbered bout's pairing is server-bout-log first, the SubMatchResult's own
 // sideAMemberId/sideBMemberId -- backfilled from team-members.yaml by the
 // legacy-upgrade repair -- so the lineup position's id must never outrank
-// it; fixed-format and the daihyosen row stay lineup-first). Callers pass
+// it; fixed-format rows stay lineup-first). The representative bout never
+// reaches this function: its identity is the operator's pick (playerNamesForBout,
+// bc-dhrp). Callers pass
 // existingMemberId/lineupMemberId from the SAME existing/lineup objects
 // resolveBoutSideName was given for the SAME row, and must independently
 // block an operator's free-typed override (which has no valid lineup key to

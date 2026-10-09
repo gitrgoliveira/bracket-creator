@@ -2061,6 +2061,12 @@ func holdSelfReportedWriteUnderTx(stx state.StoreTx, compID, matchID string, res
 		log.Printf("mobileapp: kept the representative bout a self-run score write to %s/%s left out; the rest of the write was kept", compID, matchID)
 		return nil
 	}
+	if row >= 0 {
+		// bc-dhrp: the picks name the side's own team's members (the lineup's rule).
+		if err := repMembersOutsideTeams(stx, compID, snap.Pairing, subs[row]); err != nil {
+			return err
+		}
+	}
 	if stored == nil || !stored.HanteiDecided() {
 		if row >= 0 && subs[row].HanteiDecided() {
 			return repBoutHanteiRefusal(false)
@@ -2092,6 +2098,38 @@ func holdSelfReportedWriteUnderTx(stx state.StoreTx, compID, matchID string, res
 		kept := slices.Clone(subs)
 		kept[row] = state.CloneSubResults([]state.SubMatchResult{*stored})[0]
 		result.SubResults = kept
+	}
+	return nil
+}
+
+// errRepMemberNotInTeam refuses a participant's representative pick that names a
+// member the side's team does not hold (400 team_member_not_in_team). The lineup
+// refusal (errLineupMemberNotInTeam) says the same thing about a fielded position.
+var errRepMemberNotInTeam = &selfRunRefusal{
+	status:  http.StatusBadRequest,
+	code:    "team_member_not_in_team",
+	message: "The representative chosen is not on this team. Pick again from the list.",
+}
+
+// repMembersOutsideTeams judges the member ids a representative bout row names
+// against the team that holds each side. Ids are bare UUIDs, so the team's own
+// squad is the only thing that says whose they are: a pick of another team's
+// member, or of an id no team holds, is refused rather than written. The
+// organiser's write is not judged here (only the self-run path calls this).
+func repMembersOutsideTeams(stx state.StoreTx, compID string, pairing domain.WinnerAttribution, row state.SubMatchResult) error {
+	if row.SideAMemberID == "" && row.SideBMemberID == "" {
+		return nil
+	}
+	squads, err := stx.LoadSquads(compID)
+	if err != nil {
+		log.Printf("mobileapp: representative member check for %s: %v", compID, err)
+		return err
+	}
+	if row.SideAMemberID != "" && !teamMemberIDs(squads, pairing.SideAID)[row.SideAMemberID] {
+		return errRepMemberNotInTeam
+	}
+	if row.SideBMemberID != "" && !teamMemberIDs(squads, pairing.SideBID)[row.SideBMemberID] {
+		return errRepMemberNotInTeam
 	}
 	return nil
 }

@@ -1678,6 +1678,80 @@ func TestRecordBracketMatchResult_DaihyosenWinnerDerived(t *testing.T) {
 	assert.Equal(t, "TeamB", saved.Rounds[1][0].SideA, "TeamB must propagate to next round")
 }
 
+// bc-dhrp: the representative bout names each side's member (the picker's pick)
+// beside the TEAM names it keeps. The member ids change nothing about the
+// encounter: the team that wins the bout still advances, and a hantei mark
+// on the winner's side is kept in the row as recorded.
+func TestRecordBracketMatchResult_DaihyosenWithRepresentativeIDs(t *testing.T) {
+	twoRounds := func() *state.Bracket {
+		return &state.Bracket{
+			Rounds: [][]state.BracketMatch{
+				{{ID: "r0m0", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusScheduled}},
+				{{ID: "r1m0", SideA: "", SideB: "TeamC", Status: state.MatchStatusScheduled}},
+			},
+		}
+	}
+	repRow := func(ipponsA, ipponsB []string) state.SubMatchResult {
+		return state.SubMatchResult{
+			Position: -1, SideA: "TeamA", SideB: "TeamB",
+			IpponsA: ipponsA, IpponsB: ipponsB,
+			SideAMemberID: "rep-a", SideBMemberID: "rep-b", WinnerMemberID: "rep-b",
+			Decision: "daihyosen",
+		}
+	}
+
+	t.Run("a point decides the team the representative won for", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "dh-rep-ids-point"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: compID, Name: "DH Rep IDs", Format: state.CompFormatKnockout,
+			Status: state.CompStatusKnockout, TeamSize: 3,
+		}))
+		require.NoError(t, store.SaveBracket(compID, twoRounds()))
+
+		row := repRow(nil, []string{"M"})
+		row.Winner = "TeamB"
+		_, err := eng.RecordMatchResultWithIneligibility(compID, "r0m0", &state.MatchResult{
+			ID: "r0m0", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusCompleted,
+			SubResults: []state.SubMatchResult{row},
+		})
+		require.NoError(t, err)
+
+		saved, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		assert.Equal(t, "TeamB", saved.Rounds[0][0].Winner)
+		assert.Equal(t, "TeamB", saved.Rounds[1][0].SideA, "the winning team advances")
+		assert.Equal(t, "rep-b", saved.Rounds[0][0].SubResults[0].SideBMemberID, "the pick is kept on the row")
+	})
+
+	t.Run("a hantei mark on the winner's side is kept in the row", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "dh-rep-ids-hantei"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: compID, Name: "DH Rep IDs", Format: state.CompFormatKnockout,
+			Status: state.CompStatusKnockout, TeamSize: 3,
+		}))
+		require.NoError(t, store.SaveBracket(compID, twoRounds()))
+
+		// A tied scoreline (1-1) decided by the judges' mark on side B.
+		row := repRow([]string{"M"}, []string{"K", "Ht"})
+		row.Winner = "TeamB"
+		_, err := eng.RecordMatchResultWithIneligibility(compID, "r0m0", &state.MatchResult{
+			ID: "r0m0", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusCompleted,
+			SubResults: []state.SubMatchResult{row},
+		})
+		require.NoError(t, err)
+
+		saved, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		assert.Equal(t, "TeamB", saved.Rounds[0][0].Winner)
+		assert.Equal(t, "TeamB", saved.Rounds[1][0].SideA)
+		got := saved.Rounds[0][0].SubResults[0]
+		assert.Equal(t, []string{"K", "Ht"}, got.IpponsB, "the mark stays where the judges put it")
+		assert.True(t, got.HanteiDecided())
+	})
+}
+
 // TestPreviewBracket_RejectsAllMutations verifies that all bracket mutation
 // paths (scoring, override, court/time reassignment) return an error when
 // bracket.Preview is true (mp-9dz). The UI disables scoring for preview

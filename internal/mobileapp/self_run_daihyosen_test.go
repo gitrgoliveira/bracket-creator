@@ -957,6 +957,39 @@ func TestDaihyosenResponses_CarryNoAuditFields(t *testing.T) {
 	})
 }
 
+// bc-dhrp: a participant's pick of a side's representative names a member of
+// THAT side's team, the same rule a lineup places a member by (400
+// team_member_not_in_team). The organiser's pick is not judged here.
+func TestSelfRun_RepresentativeMembersMustBeOnTheirTeam(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	squads, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+	membersA, membersB := squads[repBoutTeamAID], squads[repBoutTeamBID]
+	require.NotEmpty(t, membersA, "team A is seeded with members")
+	require.NotEmpty(t, membersB, "team B is seeded with members")
+
+	pick := func(sideAID, sideBID string) map[string]any {
+		row := repBoutRow([]string{}, []string{}, "")
+		row["sideAMemberId"] = sideAID
+		row["sideBMemberId"] = sideBID
+		return row
+	}
+
+	w := f.score("", state.MatchStatusRunning, "", f.now+100, pick(membersA[0].ID, membersA[0].ID))
+	requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", "The representative chosen is not on this team. Pick again from the list.")
+	assert.Empty(t, f.storedRepBout(t).SideBMemberID, "a refused pick writes nothing")
+
+	w = f.score("", state.MatchStatusRunning, "", f.now+200, pick(membersA[0].ID, membersB[0].ID))
+	require.Equal(t, http.StatusOK, w.Code, "each side's own member is accepted: %s", w.Body.String())
+	stored := f.storedRepBout(t)
+	assert.Equal(t, membersA[0].ID, stored.SideAMemberID)
+	assert.Equal(t, membersB[0].ID, stored.SideBMemberID)
+
+	w = f.score("main-pw", state.MatchStatusRunning, "", f.now+300, pick(membersB[0].ID, membersB[0].ID))
+	assert.Equal(t, http.StatusOK, w.Code, "the organiser's pick is not judged on membership: %s", w.Body.String())
+}
+
 // A password sent but wrong is answered 401 before the body is read, so a
 // stale organiser is not told about their clock or their body instead.
 func TestDaihyosen_AWrongPasswordIsRefusedBeforeTheStamp(t *testing.T) {

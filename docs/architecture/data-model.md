@@ -383,7 +383,9 @@ That applies one level further down as well. A team bout carries its two fighter
 MEMBER ids beside their names, and the winner's id beside the winner's name. Without them
 a bout between two people who happen to share a display name could not be attributed at
 all, because the name identifies neither of them, and competitors are allowed to share
-one.
+one. The representative bout is the one row whose sides are the TEAM names: it keeps them
+and carries the two representatives' member ids beside them, the members picked for each
+side.
 
 Those are two different namespaces, and the field names keep them apart on purpose. A
 match side carries a PARTICIPANT id, which names a competitor or a whole team; a bout side

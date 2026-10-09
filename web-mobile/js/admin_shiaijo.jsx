@@ -27,7 +27,7 @@ import { useDialogFocus } from './dialog_focus.jsx';
 import {
     writeDidNotLand, writeKeepsEditorOpen, writeWasSuperseded, writeWasRefusedForClock, CLOCK_SKEW_REASON_TEXT,
     attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, OVERRIDE_HELD_NOTICE,
-    startWhileCorrectingMessage, correctWhileRunningMessage,
+    startWhileCorrectingMessage, startWhileStartingMessage, correctWhileRunningMessage,
 } from './write_result.jsx';
 // swissRoundLabel: single owner is pool_ids.jsx (mp-dej2); this file used to
 // carry its own copy. scoreRowMatchName names a match in the refusal notices.
@@ -809,8 +809,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // is reopened (see the effect beside correctingMatch below): a running
     // match is the live bout, not a correction. null = not correcting anything.
     const [correctingKey, setCorrectingKey] = useStateSh(null);
-    // The last tap the console refused because a match is live (a Correct) or
-    // a correction is open (a Start): { key, why: "running" | "correcting" }.
+    // The last tap the console refused because a match is live (a Correct), a
+    // correction is open (a Start) or another start is still out (a Start):
+    // { key, why: "running" | "correcting" | "starting" }.
     // Only the tap is stored; the notice text is derived at render while the
     // condition still holds (refusalNotice below), so it cannot go stale.
     const [refusedTap, setRefusedTap] = useStateSh(null);
@@ -1011,6 +1012,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // running. ONE predicate for the editor's `started` prop and for liveBout
     // below, so the two cannot drift.
     const isStartedSnapshot = (m) => !!m && !!startedFrom && startedFrom.key === matchKey(m) && startedFrom.at === m.modifiedAt;
+    // The match whose start request is still in flight (startingKey), found on
+    // the court. ONE lookup for liveBout below and the one-start refusal.
+    const startingBlocker = startingKey ? sorted.find((x) => matchKey(x) === startingKey) || null : null;
     // The bout live on this court right now (bc-crpn): the pick when it is
     // running or is the start this console just made (the feed still reads
     // "scheduled" until the refetch; a queued offline start too), else
@@ -1018,24 +1022,28 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // else the match whose start request is still in flight.
     const liveBout = (pickedMatch && (pickedMatch.status === "running" || isStartedSnapshot(pickedMatch)))
         ? pickedMatch
-        : running[0]
-            || (startingKey ? sorted.find((x) => matchKey(x) === startingKey) || null : null);
+        : running[0] || startingBlocker;
     // The correction the console holds open (completed), if any. A reopened
     // one is the live bout and is handed over by the effect above.
     const openCorrection = correctingMatch && correctingMatch.status === "completed" ? correctingMatch : null;
     // The "Another bout is running" list: the bouts beyond the one the panel
     // shows, plus the running one itself while a correction holds the panel.
     const alsoRunning = openCorrection ? running : running.slice(1);
-    // What refuses a tap right now, by kind: a live bout refuses a Correct,
-    // an open correction refuses a Start. ONE place builds each sentence, for
-    // the toast and the notice alike.
-    const refusalBlocker = (why) => (why === "running" ? liveBout : openCorrection);
+    // What refuses a tap right now, by kind: a live bout refuses a Correct, an
+    // open correction refuses a Start, and a start still out refuses a Start of
+    // another match. ONE place builds each sentence, for the toast and the
+    // notice alike.
+    const refusalBlocker = (why) => {
+        if (why === "running") return liveBout;
+        if (why === "starting") return startingBlocker;
+        return openCorrection;
+    };
     const refusalText = (why) => {
         const blocker = refusalBlocker(why);
         if (!blocker) return null;
-        return why === "running"
-            ? correctWhileRunningMessage({ court, label: scoreRowMatchName(blocker) })
-            : startWhileCorrectingMessage({ label: scoreRowMatchName(blocker) });
+        if (why === "running") return correctWhileRunningMessage({ court, label: scoreRowMatchName(blocker) });
+        if (why === "starting") return startWhileStartingMessage({ label: scoreRowMatchName(blocker) });
+        return startWhileCorrectingMessage({ label: scoreRowMatchName(blocker) });
     };
     // The notice for a refused tap, derived: shown only while the match that
     // refused it still does, so it goes by itself when that match is finished,
@@ -1254,9 +1262,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // after a decision) that asks for another match while a start is out
             // is refused, and the refusal says so on Up next rather than doing
             // nothing (bc-aadv). A repeat for the match already being started is
-            // silent: it is on its way.
-            if (startingKey !== matchKey(m) && mountedRef.current) {
-                setStartError(refusalFor("Not started: another match is still being started on this court. Start it once that one has."));
+            // silent: it is on its way. A start that cannot be found on the court
+            // gets no sentence: the refusal is still returned, never acted on.
+            if (startingKey !== matchKey(m) && startingBlocker && mountedRef.current) {
+                setStartError(refusalFor(startWhileStartingMessage({ label: scoreRowMatchName(startingBlocker) })));
             }
             return false;
         }
@@ -1303,10 +1312,19 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     //   • While a correction is open nothing starts (operator ruling
     //     2026-09-27, bc-crpn): the tap is refused with a notice, BEFORE the
     //     defer above, so a refused start sends nothing back to the queue.
+    //   • One start at a time (bc-aadv): while another match's start is still
+    //     out, a Start of a different scheduled match is refused with a notice
+    //     on its row, also BEFORE the defer, so the running bout is not sent
+    //     back for a start that never happens. A repeat for the match already
+    //     being started is silent: it is on its way.
     const pickMatch = async (m) => {
         if (!m || m.status === "completed") return;
         if (openCorrection) {
             refuseTap(m, "correcting");
+            return;
+        }
+        if (startingKey && m.status === "scheduled") {
+            if (startingKey !== matchKey(m) && startingBlocker) refuseTap(m, "starting");
             return;
         }
         setRefusedTap(null);

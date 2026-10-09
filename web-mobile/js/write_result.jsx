@@ -839,6 +839,11 @@ export function startWhileCorrectingMessage({ label }) {
     return `Save the correction of ${label}, or leave it with Back to court, then start this match.`;
 }
 
+// A second Start while another match's start is still out (bc-aadv, one start at a time).
+export function startWhileStartingMessage({ label }) {
+    return `${label} is still being started on this court. Start this match once it has.`;
+}
+
 export function correctWhileRunningMessage({ court, label }) {
     return `${courtBusyMessage({ court, label })} Then correct this match.`;
 }

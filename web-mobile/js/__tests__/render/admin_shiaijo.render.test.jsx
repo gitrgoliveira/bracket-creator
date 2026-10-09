@@ -2,7 +2,7 @@ import React from 'react';
 import { render, act, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, startWhileCorrectingMessage, correctWhileRunningMessage, CLOCK_SKEW_REASON_TEXT } from '../../write_result.jsx';
+import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, startWhileCorrectingMessage, startWhileStartingMessage, correctWhileRunningMessage, CLOCK_SKEW_REASON_TEXT } from '../../write_result.jsx';
 import { scoreRowMatchName } from '../../pool_ids.jsx';
 // Window globals required by admin_shiaijo.jsx.
 // MODULE-EVAL-TIME entries (e.g. `const AdminTopbar = window.AdminTopbar;`)
@@ -1179,7 +1179,7 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
       expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-later', 'm-run']);
       const note = utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error');
       expect(note).toBeTruthy();
-      expect(note.textContent).toBe('Not started: another match is still being started on this court. Start it once that one has.');
+      expect(note.textContent).toBe(startWhileStartingMessage({ label: scoreRowMatchName(mLater) }));
     } finally {
       window.API.revertMatchToQueue = prevRevert;
     }
@@ -1855,6 +1855,73 @@ describe('a running match and an open correction never coexist on the console (b
       expect(block, 'the running match is listed above the correction').toBeTruthy();
       expect(block.textContent).toContain('Another bout is running on Shiaijo A');
       expect(block.textContent).toContain('Shiro m2 vs Aka m2');
+    } finally { c.restore(); }
+  });
+});
+
+// One start at a time (bc-aadv): while a Start is still out, a Start of another
+// match is refused on its own row BEFORE the defer, so the running bout is not
+// sent back to the queue for a start that never happens (the bc-crpn rule,
+// applied to starts). A repeat for the match already being started is silent.
+describe('a Start tapped while another start is still out is refused before anything is sent back (bc-aadv)', () => {
+  const rowOf = (c, text) => [...c.utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes(text));
+  const startButton = (el) => [...el.querySelectorAll('button')].find((b) => /^start/i.test(b.textContent.trim()));
+  // m1 runs on the court; m2 (Up next) and m3 wait. Up next's start is held in
+  // flight until the test calls land().
+  const setup = async () => {
+    let land;
+    const onEditScore = vi.fn((_compId, matchId) => (matchId === 'm2'
+      ? new Promise((r) => { land = r; })
+      : Promise.resolve({ applied: true })));
+    const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled'), courtMatch('m3', 'scheduled')], { onEditScore });
+    await act(async () => { startButton(c.utils.container.querySelector('.shiaijo-upnext__card')).click(); });
+    await act(async () => {});
+    expect(onEditScore.mock.calls.map((x) => x[1])).toEqual(['m2']);
+    // m1 was sent back for m2's start; the assertions below are about what a
+    // later tap does, so the count starts again from here.
+    window.API.revertMatchToQueue.mockClear();
+    return { c, onEditScore, land: (res) => land(res) };
+  };
+
+  it('a) a Start on another row is refused on that row: the running bout is not sent back and no second start goes out', async () => {
+    const { c, onEditScore } = await setup();
+    try {
+      await act(async () => { startButton(rowOf(c, 'Aka m3')).click(); });
+      await act(async () => {});
+      const text = startWhileStartingMessage({ label: scoreRowMatchName(courtMatch('m2', 'scheduled')) });
+      expect(window.API.revertMatchToQueue).not.toHaveBeenCalled();
+      expect(onEditScore).toHaveBeenCalledTimes(1);
+      expect(c.editorMatch()).toBe('m1');
+      expect(rowOf(c, 'Aka m3').querySelector('[role="alert"]').textContent).toBe(text);
+      expect(c.showToast).toHaveBeenCalledWith(text, 'error');
+    } finally { c.restore(); }
+  });
+
+  it('b) the refusal goes once the held start lands', async () => {
+    const { c, land } = await setup();
+    try {
+      await act(async () => { startButton(rowOf(c, 'Aka m3')).click(); });
+      await act(async () => {});
+      expect(rowOf(c, 'Aka m3').querySelector('[role="alert"]')).toBeTruthy();
+      await act(async () => { land({ applied: true }); });
+      await act(async () => {});
+      expect(rowOf(c, 'Aka m3').querySelector('[role="alert"]')).toBeNull();
+    } finally { c.restore(); }
+  });
+
+  it('c) a repeat Start on the match already being started does nothing: no revert, no notice', async () => {
+    const { c, onEditScore } = await setup();
+    try {
+      // While its start is out, Up next's own button reads "Starting…" and is disabled.
+      const card = c.utils.container.querySelector('.shiaijo-upnext__card');
+      const again = startButton(card);
+      expect(again.disabled).toBe(true);
+      await act(async () => { again.click(); });
+      await act(async () => {});
+      expect(window.API.revertMatchToQueue).not.toHaveBeenCalled();
+      expect(onEditScore).toHaveBeenCalledTimes(1);
+      expect(card.querySelector('[role="alert"]')).toBeNull();
+      expect(c.showToast).not.toHaveBeenCalled();
     } finally { c.restore(); }
   });
 });

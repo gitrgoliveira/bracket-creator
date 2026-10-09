@@ -882,7 +882,7 @@ describe('AdminShiaijoPage render-smoke', () => {
     try {
       let utils;
       await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
-      const refusal = () => utils.container.querySelector('.shiaijo-upnext__error');
+      const refusal = () => utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error');
       // The Up next card's own Start (an Upcoming row carries one too).
       const start = async () => {
         const card = utils.container.querySelector('.shiaijo-upnext__card');
@@ -958,7 +958,7 @@ describe('AdminShiaijoPage render-smoke', () => {
     try {
       let utils;
       await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
-      const refusal = () => utils.container.querySelector('.shiaijo-upnext__error');
+      const refusal = () => utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error');
       const refresh = async () => { await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); }); };
 
       // Picked from the queue below Up next and refused: not shown under Up
@@ -974,6 +974,96 @@ describe('AdminShiaijoPage render-smoke', () => {
       await refresh();
       expect(utils.container.querySelector('.shiaijo-upnext__card').textContent).toContain('Sato');
       expect(refusal()).toBeNull();
+    } finally {
+      window.API.fetchCourtMatches = prevFetch;
+      window.API.subscribeToEvents = prevSub;
+    }
+  });
+
+  // The advance's own start (here the one after a decision) refused for the
+  // next match: the refusal stays on the card once a refetch makes that match
+  // Up next. The refetch is the very event the upNextKey effect used to clear
+  // it on.
+  it('a refused advance start for the next match stays on Up next once that match becomes Up next', async () => {
+    const side = (id, name) => ({ id, name });
+    const mRun = {
+      id: 'm-run', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+      court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    // Up next before the decision. It involves the withdrawing Yamada, so the
+    // advance passes over it to m3.
+    const m2 = {
+      id: 'm2', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:05', sideA: side('p1', 'Yamada'), sideB: side('p5', 'Endo'),
+    };
+    const m3 = {
+      id: 'm3', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:10', sideA: side('p4', 'Doi'), sideB: side('p6', 'Fujii'),
+    };
+    let current = [mRun, m2, m3];
+    window.tournamentMatches = () => current;
+    window.filterMatchesByCourt = (matches) => matches;
+    const prevFetch = window.API.fetchCourtMatches;
+    const prevSub = window.API.subscribeToEvents;
+    window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve([{ id: 'c1', name: 'Cup' }]));
+    window.API.subscribeToEvents = () => () => {};
+    const onEditScore = vi.fn().mockRejectedValue(new Error('Doi is fighting on shiaijo B'));
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+      expect(probe.props.match?.id).toBe('m-run');
+      await act(async () => {
+        await probe.props.onAfterDecision({
+          id: 'm-run', sideA: 'Yamada', sideB: 'Tanaka', sideAId: 'p1', sideBId: 'p2', winner: 'Tanaka', winnerId: 'p2',
+          status: 'completed', decision: 'kiken-voluntary', decisionBy: 'aka',
+        });
+      });
+      // The advance's start of m3 is refused. Up next is still m2, so the
+      // refusal is not on the card yet.
+      expect(onEditScore).toHaveBeenCalledTimes(1);
+      expect(onEditScore.mock.calls[0][1]).toBe('m3');
+      const upNextCard = () => utils.container.querySelector('.shiaijo-upnext__card');
+      expect(upNextCard().querySelector('.shiaijo-upnext__error')).toBeNull();
+
+      // The refetch: m2 carries the barred stamp the server writes, so Up next
+      // moves onto m3, the match the refused start was for.
+      current = [{ ...mRun, status: 'completed' }, { ...m2, ineligibleSides: { a: 'kiken-voluntary' } }, m3];
+      await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); });
+      expect(upNextCard().textContent).toContain('Doi');
+      expect(upNextCard().querySelector('.shiaijo-upnext__error')?.textContent).toBe('Doi is fighting on shiaijo B');
+    } finally {
+      window.API.fetchCourtMatches = prevFetch;
+      window.API.subscribeToEvents = prevSub;
+    }
+  });
+
+  // A refused Start for a queue row's match (not Up next) shows on that row,
+  // so the operator sees why it did not start where they tapped it.
+  it('a refused Start shows on the queue row of the match it refused, not on Up next', async () => {
+    const side = (id, name) => ({ id, name });
+    const m1 = {
+      id: 'm1', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:00', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    const m2 = {
+      id: 'm2', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:05', sideA: side('p3', 'Sato'), sideB: side('p4', 'Kato'),
+    };
+    window.tournamentMatches = () => [m1, m2];
+    window.filterMatchesByCourt = (matches) => matches;
+    const prevFetch = window.API.fetchCourtMatches;
+    const prevSub = window.API.subscribeToEvents;
+    window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve([{ id: 'c1', name: 'Cup' }]));
+    window.API.subscribeToEvents = () => () => {};
+    const onEditScore = vi.fn().mockRejectedValue(new Error('Kato is fighting on shiaijo B'));
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+      const rowOf = (name) => [...utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes(name));
+      await act(async () => { rowOf('Sato').querySelector('.shiaijo-row__pick').click(); });
+      expect(onEditScore.mock.calls[0][1]).toBe('m2');
+      expect(rowOf('Sato').querySelector('.shiaijo-upnext__error')?.textContent).toBe('Kato is fighting on shiaijo B');
+      expect(utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error')).toBeNull();
     } finally {
       window.API.fetchCourtMatches = prevFetch;
       window.API.subscribeToEvents = prevSub;
@@ -1121,7 +1211,7 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
     // The finishing write succeeds; the start-next write fails.
     expect(onEditScore).toHaveBeenCalledTimes(2);
     // The error is recorded on the Up next card.
-    const errorEl = utils.container.querySelector('.shiaijo-upnext__error');
+    const errorEl = utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error');
     expect(errorEl).toBeTruthy();
     expect(errorEl.textContent).toContain('Sato is fighting on Shiaijo B.');
   });
@@ -1142,7 +1232,7 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
     // The start-next write fails.
     expect(onEditScore).toHaveBeenCalledTimes(1);
     // The error is recorded on the Up next card.
-    const errorEl = utils.container.querySelector('.shiaijo-upnext__error');
+    const errorEl = utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error');
     expect(errorEl).toBeTruthy();
     expect(errorEl.textContent).toContain('Could not start the match');
   });
@@ -1164,7 +1254,7 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
     // The finishing write succeeds; the start-next write returns clock_skew.
     expect(onEditScore).toHaveBeenCalledTimes(2);
     // The clock-skew error is recorded on the Up next card.
-    const errorEl = utils.container.querySelector('.shiaijo-upnext__error');
+    const errorEl = utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error');
     expect(errorEl).toBeTruthy();
     expect(errorEl.textContent).toContain(CLOCK_SKEW_REASON_TEXT);
   });
@@ -1982,6 +2072,35 @@ describe('a Start tapped while another start is still out is refused before anyt
       expect(c.showToast).not.toHaveBeenCalled();
     } finally { c.restore(); }
   });
+
+  // A pick that defers the running bout is a start in flight from the moment
+  // it is made, not from the moment the deferred bout's revert answers: a second
+  // Start on another row during that wait must not send the running bout back
+  // a second time.
+  it('d) a second Start tapped while a pick is still deferring the running bout is refused, and the bout is not reverted twice', async () => {
+    const onEditScore = vi.fn().mockResolvedValue({ applied: true });
+    const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled'), courtMatch('m3', 'scheduled'), courtMatch('m4', 'scheduled')], { onEditScore });
+    let landRevert;
+    window.API.revertMatchToQueue = vi.fn(() => new Promise((r) => { landRevert = r; }));
+    try {
+      // The first pick: a queue row's Start, which reverts m1 and waits on it.
+      await act(async () => { startButton(rowOf(c, 'Aka m3')).click(); });
+      await act(async () => {});
+      expect(window.API.revertMatchToQueue).toHaveBeenCalledTimes(1);
+
+      // A second Start on another row while that wait is out.
+      await act(async () => { startButton(rowOf(c, 'Aka m4')).click(); });
+      await act(async () => {});
+      expect(window.API.revertMatchToQueue).toHaveBeenCalledTimes(1);
+      expect(rowOf(c, 'Aka m4').querySelector('[role="alert"]').textContent)
+        .toBe(startWhileStartingMessage({ label: scoreRowMatchName(courtMatch('m3', 'scheduled')) }));
+
+      // Once the revert answers, the first pick starts and only it.
+      await act(async () => { landRevert(true); });
+      await act(async () => {});
+      expect(onEditScore.mock.calls.map((x) => x[1])).toEqual(['m3']);
+    } finally { c.restore(); }
+  });
 });
 
 // The one-start guard is judged from the start in flight NOW. An advance awaits
@@ -2063,6 +2182,6 @@ describe('the one-start guard reads the start in flight now, not the render that
     await act(async () => { await advance({ status: 'completed', winner }); });
     // The next match was started: the start that had landed no longer blocks it.
     expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-later', 'm-run', 'm-open']);
-    expect(utils.container.querySelector('.shiaijo-upnext__error')).toBeNull();
+    expect(utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error')).toBeNull();
   });
 });

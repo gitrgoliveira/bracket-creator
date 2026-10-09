@@ -92,14 +92,14 @@ function dhEntryOf(patch) {
   return (patch.subResults || []).find((s) => s.position === -1);
 }
 
-async function mount(match, { selfReport = false } = {}) {
+async function mount(match, { selfReport = false, onClose = vi.fn() } = {}) {
   const onSubmit = vi.fn();
   const view = (m) => (
-    <ScoreEditorModal match={m} onClose={vi.fn()} onSubmit={onSubmit} password="" selfReport={selfReport} />
+    <ScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmit} password="" selfReport={selfReport} />
   );
   let utils;
   await act(async () => { utils = render(view(match)); });
-  return { ...utils, onSubmit, rerenderWith: async (m) => { await act(async () => { utils.rerender(view(m)); }); } };
+  return { ...utils, onSubmit, onClose, rerenderWith: async (m) => { await act(async () => { utils.rerender(view(m)); }); } };
 }
 
 // The daihyosen row's two name boxes, by their aria-label ("Daihyosen SHIRO player").
@@ -129,6 +129,16 @@ async function clickFinishTwice() {
   await act(async () => { fireEvent.click(screen.getByText('Tap again to finish')); });
 }
 
+// The FINISH write: the one onSubmit call whose patch completes the match. A pick
+// arms the editor's autosave, a RUNNING write sent through the same onSubmit, and
+// its debounce is real time: under load it can land between the pick and Finish.
+// So a test that means the finish cannot read calls[0] or count every call.
+function finishPatchOf(onSubmit) {
+  const finishes = onSubmit.mock.calls.map(([patch]) => patch).filter((patch) => patch.status === 'completed');
+  expect(finishes).toHaveLength(1);
+  return finishes[0];
+}
+
 describe('team daihyosen representative picker (bc-dhrp)', () => {
   it('R1: the daihyosen row renders a name box on each side, and never the team name in it', async () => {
     await mount(makeMatch({ subResults: [DH_EMPTY] }));
@@ -143,8 +153,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await pickFromDh('SHIRO', 'Carol');
     expect(dhInput('SHIRO').value).toBe('Carol');
     await clickFinishTwice();
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    const patch = onSubmit.mock.calls[0][0];
+    const patch = finishPatchOf(onSubmit);
     const dh = dhEntryOf(patch);
     expect(dh.sideBMemberId).toBe('m1b');
     expect(dh.sideA).toBe('Team A');
@@ -175,7 +184,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     });
     await rerenderWith(scored);
     await clickFinishTwice();
-    const dh = dhEntryOf(onSubmit.mock.calls[0][0]);
+    const dh = dhEntryOf(finishPatchOf(onSubmit));
     expect(dh.ipponsB).toEqual(['M']);
     expect(dh.sideBMemberId).toBe('m1b');
     expect(dh.sideB).toBe('Team B');
@@ -190,7 +199,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     const clear = within(wrap).getByRole('button', { name: 'Clear player' });
     await act(async () => { fireEvent.click(clear); });
     await clickFinishTwice();
-    const patch = onSubmit.mock.calls[0][0];
+    const patch = finishPatchOf(onSubmit);
     const dh = dhEntryOf(patch);
     expect('sideBMemberId' in dh).toBe(false);
     expect(dh.sideB).toBe('Team B');
@@ -224,7 +233,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await act(async () => { fireEvent.click(add.closest('button')); });
     await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Eve', ''));
     await clickFinishTwice();
-    const dh = dhEntryOf(onSubmit.mock.calls[0][0]);
+    const dh = dhEntryOf(finishPatchOf(onSubmit));
     expect(dh.sideBMemberId).toBe('m9');
     expect(dh.sideB).toBe('Team B');
     expect(window.API.putMatchLineup).not.toHaveBeenCalled();
@@ -251,7 +260,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await waitFor(() => expect(window.API.renameTeamMember).toHaveBeenCalledWith('comp1', 't2', 'm3b', 'Frank', ''));
     expect(window.API.addTeamMember).not.toHaveBeenCalled();
     await clickFinishTwice();
-    const dh = dhEntryOf(onSubmit.mock.calls[0][0]);
+    const dh = dhEntryOf(finishPatchOf(onSubmit));
     expect(dh.sideBMemberId).toBe('m3b');
     expect(dh.sideB).toBe('Team B');
   });
@@ -271,7 +280,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     expect(screen.getByTestId('team-editor-lineup-warning').getAttribute('data-tone')).toBe('warn');
     expect(screen.getByTestId('team-editor-lineup-warning').textContent).not.toContain('Lineup saved');
     await clickFinishTwice();
-    const dh = dhEntryOf(onSubmit.mock.calls[0][0]);
+    const dh = dhEntryOf(finishPatchOf(onSubmit));
     expect(dh.sideBMemberId).toBe('m9');
     expect(dh.sideB).toBe('Team B');
   });
@@ -285,7 +294,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     expect(dhInput('AKA').value).toBe('');
     await clickFinishTwice();
-    const dh = dhEntryOf(onSubmit.mock.calls[0][0]);
+    const dh = dhEntryOf(finishPatchOf(onSubmit));
     expect('sideAMemberId' in dh, 'the old team\'s member is not sent').toBe(false);
     expect(dh.sideA, 'the row names the team now on the side').toBe('Team C');
   });
@@ -312,7 +321,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     expect(dhInput('SHIRO').value).toBe('Frank');
     await clickFinishTwice();
-    const dh = dhEntryOf(onSubmit.mock.calls[0][0]);
+    const dh = dhEntryOf(finishPatchOf(onSubmit));
     expect(dh.sideBMemberId, 'the later pick, not the older name that resolved last').toBe('m-frank');
   });
 
@@ -334,8 +343,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     expect(screen.getByText('Finish').closest('button').disabled).toBe(false);
     await clickFinishTwice();
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    const dh = dhEntryOf(onSubmit.mock.calls[0][0]);
+    const dh = dhEntryOf(finishPatchOf(onSubmit));
     expect(dh.sideBMemberId).toBe('m9');
     expect(dh.sideB).toBe('Team B');
   });
@@ -408,5 +416,63 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await act(async () => { answerEve({ id: 'm9', name: 'Eve', index: 3 }); });
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     expect(screen.getByTestId('team-daihyosen-remove').disabled).toBe(false);
+  });
+
+  it('R19: a completed match whose side was given another team clears the stored pick, and Close closes at once with no discard prompt', async () => {
+    window.confirmDialog.mockClear();
+    const match = makeMatch({ status: 'completed', subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] });
+    const { rerenderWith, onClose } = await mount(match);
+    expect(dhInput('AKA').value).toBe('Alice');
+    // A correction elsewhere seats team t3 on side A. The clear is the server following, not an edit.
+    await rerenderWith(makeMatch({ status: 'completed', sideA: { id: 't3', name: 'Team C' }, subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] }));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(dhInput('AKA').value).toBe('');
+    await act(async () => { fireEvent.click(screen.getByText('✕ Close')); });
+    expect(window.confirmDialog).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('R20: after a side is given another team, an operator pick on that side is an unsaved change, and Close asks first', async () => {
+    window.confirmDialog.mockClear();
+    window.confirmDialog.mockResolvedValueOnce(false);
+    window.API.fetchSquads.mockResolvedValue({ ...SQUADS, t3: [{ id: 'm1c', name: 'Erin', index: 1 }] });
+    const match = makeMatch({ status: 'completed', subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] });
+    const { rerenderWith, onClose } = await mount(match);
+    await rerenderWith(makeMatch({ status: 'completed', sideA: { id: 't3', name: 'Team C' }, subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] }));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    await pickFromDh('AKA', 'Erin');
+    expect(dhInput('AKA').value).toBe('Erin');
+    await act(async () => { fireEvent.click(screen.getByText('✕ Close')); });
+    expect(window.confirmDialog).toHaveBeenCalledWith(expect.objectContaining({ message: 'Discard unsaved scoring changes?' }));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('R21: a side given another team clears the stored pick without making the representative row a touched one: the next Finish leaves its scoreline unstated', async () => {
+    const match = makeMatch({ subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] });
+    const { onSubmit, rerenderWith } = await mount(match);
+    await rerenderWith(makeMatch({ sideA: { id: 't3', name: 'Team C' }, subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] }));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    await clickFinishTwice();
+    const dh = dhEntryOf(finishPatchOf(onSubmit));
+    expect('sideAMemberId' in dh, 'the cleared pick is not sent').toBe(false);
+    expect(dh.ipponsA, 'an untouched row states no scoreline, so a stored verdict is not overwritten').toBeUndefined();
+    expect(dh.ipponsB).toBeUndefined();
+  });
+
+  it('R22: after a side is given another team, a pick the operator puts on that side and then clears is their own edit: Close asks first', async () => {
+    window.confirmDialog.mockClear();
+    window.confirmDialog.mockResolvedValueOnce(false);
+    window.API.fetchSquads.mockResolvedValue({ ...SQUADS, t3: [{ id: 'm1c', name: 'Erin', index: 1 }] });
+    const match = makeMatch({ status: 'completed', subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] });
+    const { rerenderWith, onClose } = await mount(match);
+    await rerenderWith(makeMatch({ status: 'completed', sideA: { id: 't3', name: 'Team C' }, subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] }));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    await pickFromDh('AKA', 'Erin');
+    const wrap = dhInput('AKA').closest('.lineup-name');
+    await act(async () => { fireEvent.click(within(wrap).getByRole('button', { name: 'Clear player' })); });
+    expect(dhInput('AKA').value).toBe('');
+    await act(async () => { fireEvent.click(screen.getByText('✕ Close')); });
+    expect(window.confirmDialog).toHaveBeenCalledWith(expect.objectContaining({ message: 'Discard unsaved scoring changes?' }));
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

@@ -2129,24 +2129,25 @@ var errRepWinnerNotARepresentative = &selfRunRefusal{
 //
 // A write answers for what it introduces, not for what it inherited (the write
 // guard's rule): a side is judged only when the write names a member for it that
-// the stored row does not already hold (stored, nil when the match has no
-// representative bout), and only against a stored side that carries a team id.
-// A side with no team id has nothing to judge the pick against, so it is not
-// refused. The winner id is judged whenever the write introduces any of the
-// row's three ids (see the check below): a non-empty winner must then name one of
-// the row's two representatives (errRepWinnerNotARepresentative).
+// the stored row does not already hold, and only against a stored side that
+// carries a team id. A side with no team id has nothing to judge the pick
+// against, so it is not refused. The winner id is judged whenever the write
+// introduces any of the row's three ids (see the check below): a non-empty
+// winner must then name one of the row's two representatives
+// (errRepWinnerNotARepresentative).
+//
+// stored is the match's representative bout and is never nil: the caller answers
+// a row the match does not have before it gets here (dropped or refused), so this
+// only judges a row the match already has.
 func repMembersOutsideTeams(stx state.StoreTx, compID string, pairing domain.WinnerAttribution, row state.SubMatchResult, stored *state.SubMatchResult) error {
-	var storedA, storedB, storedWinner string
-	if stored != nil {
-		storedA, storedB, storedWinner = stored.SideAMemberID, stored.SideBMemberID, stored.WinnerMemberID
-	}
-	// The winner is judged whenever the write introduces any of its three ids (no
-	// stored row, or the winner or a side id differs from the stored row's), so a
-	// winner kept from the stored row cannot be left naming neither representative
-	// once a side changes. A row wholly matching the stored one is not judged.
-	// WinnerIDNamesASide accepts an empty winner id, so only a non-empty one naming
-	// neither representative is refused.
-	introduces := stored == nil || row.WinnerMemberID != storedWinner || row.SideAMemberID != storedA || row.SideBMemberID != storedB
+	storedA, storedB, storedWinner := stored.SideAMemberID, stored.SideBMemberID, stored.WinnerMemberID
+	// The winner is judged whenever the write introduces any of its three ids (the
+	// winner or a side id differs from the stored row's), so a winner kept from the
+	// stored row cannot be left naming neither representative once a side changes.
+	// A row wholly matching the stored one is not judged. WinnerIDNamesASide accepts
+	// an empty winner id, so only a non-empty one naming neither representative is
+	// refused.
+	introduces := row.WinnerMemberID != storedWinner || row.SideAMemberID != storedA || row.SideBMemberID != storedB
 	if introduces && !domain.WinnerIDNamesASide(row.WinnerMemberID, row.SideAMemberID, row.SideBMemberID) {
 		return errRepWinnerNotARepresentative
 	}

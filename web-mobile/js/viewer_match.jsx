@@ -322,7 +322,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
         )}
         <div className={`vsched-item__side vsched-item__side--aka ${aWin ? "vsched-item__side--w" : ""}`}>
           <SideLabel side="aka" />
-          <span className="n msb-name--labelled">{barredNameMark(m, "aka", teamNameMark("aka", teamAkaMark, <NumberedName side="aka" clip {...numberedParts(m.sideA, undefined)} />))}{winnerTick && aWin && <WinnerTick />}</span>
+          <span className="n msb-name--labelled">{barredNameMark(m, "aka", teamNameMark("aka", teamAkaMark, <NumberedName side="aka" clip {...numberedParts(m.sideA, undefined)} />))}{winnerTick && aWin && <WinnerTick trailing />}</span>
           {tweaks.showDojo && m.sideA?.dojo ? <span className="d">{m.sideA.dojo}</span> : null}
         </div>
       </div>

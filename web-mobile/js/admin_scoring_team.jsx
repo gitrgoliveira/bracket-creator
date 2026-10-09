@@ -692,6 +692,28 @@ function pickDaihyosenRepresentative({ idx, side, updateSub }, member) {
   updateSub(idx, prev => ({ ...prev, [memberIdKey]: (member && member.id) || "" }));
 }
 
+// repBaselineAfterFollowedClear: serverSubs as the sheet's dirty baseline, with a
+// representative pick that a side-change clear emptied (giveSideAnotherTeam) read as
+// empty too. `followed` maps a side to the member id that clear superseded
+// (followedRepClearRef). A pick is cleared in the baseline only where the sheet shows
+// it empty AND the server still holds that same id, so a write that lands, or another
+// device's change, moves the server off it and the clear stops counting. A pick the
+// sheet shows is never hidden here.
+function repBaselineAfterFollowedClear(serverSubs, dIdx, subs, followed) {
+  const served = serverSubs[dIdx];
+  const shown = subs[dIdx];
+  if (dIdx < 0 || !served || !shown) return serverSubs;
+  let row = null;
+  for (const side of ["a", "b"]) {
+    const key = `${side}MemberIdOverride`;
+    if (!followed[side] || served[key] !== followed[side] || shown[key]) continue;
+    row = row || { ...served };
+    row[key] = "";
+  }
+  if (!row) return serverSubs;
+  return serverSubs.map((s, i) => (i === dIdx ? row : s));
+}
+
 // fusenshoSideFromSub: which side ("a" / "b" / "") a persisted fusensho sub-bout
 // was awarded to, for re-seeding the local editor state on a reopen or remount.
 // The winner is stored as the bout competitor's OWN name — for a KACHINUKI bout
@@ -1285,6 +1307,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // nothing (submitRepresentative), whichever answers first: the newer pick wins.
   const repPickSeq = useRefA({ a: 0, b: 0 });
   const newRepPick = (side) => ++repPickSeq.current[side];
+  // The representative picks giveSideAnotherTeam cleared while the server still held them:
+  // side -> the member id the clear superseded. repBaselineAfterFollowedClear reads it, and
+  // the operator's next edit to the representative row drops it (updateSub).
+  const followedRepClearRef = useRefA({});
   // How many typed representatives are still being named (submitRepresentative). A typed
   // name is resolved by a member POST that may already have created the member when it
   // answers, and the pick lands only while the sheet is mounted, so Finish, Save and
@@ -1617,6 +1643,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // stays armed, since the operator changed nothing. The server still holds the old id
     // until the operator's next write, which carries the cleared row.
     if (daihyosenIdx >= 0 && subs[daihyosenIdx]?.[`${side}MemberIdOverride`]) {
+      const memberKey = `${side}MemberIdOverride`;
+      const shownPick = subs[daihyosenIdx][memberKey];
+      // Recorded for the dirty baseline only where the server holds the pick the sheet shows.
+      // A pick the operator made and has not saved is their own edit, and clearing it still counts.
+      if (serverSubs[daihyosenIdx]?.[memberKey] === shownPick) {
+        followedRepClearRef.current = { ...followedRepClearRef.current, [side]: shownPick };
+      }
       const followServerSub = (idx, fn) => setSubs(prev => reconcileRowsToPositions(prev, serverSubs).map((s, i) => i === idx ? fn(s) : s));
       pickDaihyosenRepresentative({ idx: daihyosenIdx, side, updateSub: followServerSub }, null);
     }
@@ -2141,6 +2174,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // RENDER-SYNCHRONOUS because this very render already indexes subs for the
   // new positions — an effect would run after the crash.
   const subs = reconcileRowsToPositions(subsRaw, serverSubs);
+  // What the sheet's dirty checks (isDirty, daihyosenTouched) compare against: the server board,
+  // with a representative pick that a side-change clear emptied read as cleared too.
+  const dirtyBaseline = repBaselineAfterFollowedClear(serverSubs, daihyosenIdx, subs, followedRepClearRef.current);
   // Two kinds of write reach `subs`, and one arming rule has to tell them
   // apart: the OPERATOR editing (which disarms Finish/End and closes an open
   // reason prompt, because what they were about to confirm has changed under
@@ -2171,6 +2207,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // untapped. The server re-seed never comes through here (it uses setSubs).
   const updateSub = (idx, fn) => {
     lastRowEditRef.current.set(subs[idx]._pos, serverNowMs());
+    // An operator edit to the representative row ends the side-change clear's baseline there:
+    // from here a pick the operator puts back or clears is their own edit.
+    if (idx === daihyosenIdx) followedRepClearRef.current = {};
     setSubsByOperator(prev => {
       const rows = reconcileRowsToPositions(prev, serverSubs);
       return rows.map((s, i) => i === idx ? fn(s) : s);
@@ -3073,7 +3112,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // pre-gate explicit-[] behaviour (not a regression this change
     // introduces), not a gap this gate closes.
     const daihyosenTouched = hasDaihyosen && (
-      JSON.stringify(subs[daihyosenIdx]) !== JSON.stringify(serverSubs[daihyosenIdx]) ||
+      JSON.stringify(subs[daihyosenIdx]) !== JSON.stringify(dirtyBaseline[daihyosenIdx]) ||
       daihyosenVerdictDirty
     );
     const daihyosenKnownLocally = hasDaihyosen && (
@@ -3531,9 +3570,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // One serialisation, read three times (isDirty, the adopt signature, and the
   // per-row merge below). This editor re-renders on every SSE broadcast for the
   // competition, so serialising the same board once per consumer was pure
-  // repetition on the busiest path in the file.
+  // repetition on the busiest path in the file. isDirty compares against
+  // dirtyBaseline, which reads a side-change clear of a representative pick as no
+  // operator change; it is the server board itself (and so this signature) unless
+  // such a clear is pending.
   const serverSubsSig = JSON.stringify(serverSubs);
-  const isDirty = JSON.stringify(subs) !== serverSubsSig || daihyosenVerdictDirty
+  const isDirty = JSON.stringify(subs) !== (dirtyBaseline === serverSubs ? serverSubsSig : JSON.stringify(dirtyBaseline)) || daihyosenVerdictDirty
     // A removed withdrawal is unsaved until Save correction sends it.
     || removingWithdrawal;
   // bc-dscn: an edit the running patch would NOT carry. Under kachinuki

@@ -319,11 +319,12 @@ func (e *Engine) recordEngiMatch(
 					return err
 				}
 				priorWinner, priorWinnerID := propagatedWinnerOf(b, rIdx, mIdx, bm)
+				priorPicks := snapshotDownstreamRepPicks(b, rIdx, mIdx)
 				result = applyEngiToBracketMatch(bm, flagsA, flagsB, winnerSide, correctionReason)
 				stampEngiChanges(bm, stamp, groupStamps)
 				e.propagateBracketWinner(b, rIdx, mIdx)
 				if force && winnerActuallyChanged(priorWinner, priorWinnerID, bm) {
-					reopened = forceReopenDownstreamChain(b, rIdx, mIdx, bm.ID)
+					reopened = forceReopenDownstreamChain(b, rIdx, mIdx, bm.ID, priorPicks)
 				}
 				return nil
 			}

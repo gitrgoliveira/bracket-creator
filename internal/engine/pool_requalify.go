@@ -311,6 +311,9 @@ func (e *Engine) applyRequalification(tx state.StoreTx, compID, reason string, p
 			}
 		}
 		e.resolveSlots(b, plan.resolver)
+		// The reopens above captured each match's picks; the repaint may have
+		// given a side another team and taken its pick with it.
+		markRepPicksCleared(b, reopened)
 		return nil
 	})
 	if err != nil {

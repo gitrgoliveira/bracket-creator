@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vites
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { toBackendMatchResult } from '../../api_serializers.jsx';
 import { FETCH_TIMEOUT_MS } from '../../write_result.jsx';
+import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
 
 const SQUADS = {
   t1: [{ id: 'm1a', name: 'Alice', index: 1 }, { id: 'm2a', name: 'Brenda', index: 2 }],
@@ -293,8 +294,9 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     const match = makeMatch({ subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] });
     const { onSubmit, rerenderWith } = await mount(match);
     expect(dhInput('AKA').value).toBe('Alice');
-    // A correction elsewhere seats team t3 on side A; the stored row still names Alice.
-    await rerenderWith(makeMatch({ sideA: { id: 't3', name: 'Team C' }, subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] }));
+    // A correction elsewhere seats team t3 on side A. The server's write clears the side's
+    // stored pick in the same change, so the push that brings the new team has no pick.
+    await rerenderWith(makeMatch({ sideA: { id: 't3', name: 'Team C' }, subResults: [DH_EMPTY] }));
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     expect(dhInput('AKA').value).toBe('');
     await clickFinishTwice();
@@ -371,14 +373,20 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
   });
 
   it('R15: a side given another team clears a stored pick and sends nothing: the clear is the server following, not an operator edit', async () => {
+    window.confirmDialog.mockClear();
     const match = makeMatch({ subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] });
-    const { onSubmit, rerenderWith } = await mount(match);
+    const { onSubmit, onClose, rerenderWith } = await mount(match);
     expect(dhInput('AKA').value).toBe('Alice');
-    await rerenderWith(makeMatch({ sideA: { id: 't3', name: 'Team C' }, subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] }));
+    // The server's shape: the push that seats the new team has already cleared the side's pick.
+    await rerenderWith(makeMatch({ sideA: { id: 't3', name: 'Team C' }, subResults: [DH_EMPTY] }));
     expect(dhInput('AKA').value).toBe('');
     // Past the autosave debounce: a clear that marked the sheet dirty would be written here.
     await act(async () => { await new Promise((r) => setTimeout(r, 500)); });
     expect(onSubmit).not.toHaveBeenCalled();
+    // The board agrees with the server, so the sheet is not dirty: Close asks nothing.
+    await act(async () => { fireEvent.click(screen.getByText('✕ Close')); });
+    expect(window.confirmDialog).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('R16: a side given another team leaves an armed Finish armed', async () => {
@@ -427,8 +435,9 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     const match = makeMatch({ status: 'completed', subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] });
     const { rerenderWith, onClose } = await mount(match);
     expect(dhInput('AKA').value).toBe('Alice');
-    // A correction elsewhere seats team t3 on side A. The clear is the server following, not an edit.
-    await rerenderWith(makeMatch({ status: 'completed', sideA: { id: 't3', name: 'Team C' }, subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] }));
+    // A correction elsewhere seats team t3 on side A. The push that brings it has cleared the
+    // side's pick; adopting that is the server following, not an edit.
+    await rerenderWith(makeMatch({ status: 'completed', sideA: { id: 't3', name: 'Team C' }, subResults: [DH_EMPTY] }));
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     expect(dhInput('AKA').value).toBe('');
     await act(async () => { fireEvent.click(screen.getByText('✕ Close')); });
@@ -454,7 +463,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
   it('R21: a side given another team clears the stored pick without making the representative row a touched one: the next Finish leaves its scoreline unstated', async () => {
     const match = makeMatch({ subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] });
     const { onSubmit, rerenderWith } = await mount(match);
-    await rerenderWith(makeMatch({ sideA: { id: 't3', name: 'Team C' }, subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] }));
+    await rerenderWith(makeMatch({ sideA: { id: 't3', name: 'Team C' }, subResults: [DH_EMPTY] }));
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     await clickFinishTwice();
     const dh = dhEntryOf(finishPatchOf(onSubmit));
@@ -554,5 +563,102 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await act(async () => { await new Promise((r) => setTimeout(r, 500)); });
     expect(dhInput('SHIRO').value, 'the answer of a pick typed on the removed bout names no one on the new one').toBe('');
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  // The representative row follows the server per PART: the score and each side's pick
+  // are separate edits (bc-mrgc orders the picks apart from the bout row).
+  const dhRow = () => [...document.querySelectorAll('.team-sub-match')].pop();
+  const dhIppon = (color, letter) => [...dhRow().querySelectorAll(`.team-sub-match__side--${color} button.ipt-btn`)].find((b) => b.textContent === letter);
+  const dhMarks = (color) => [...dhRow().querySelectorAll(`.tsm-center-pts--${color} button.editor-side__pt`)].map((b) => b.textContent.trim());
+  const pastDebounce = () => act(async () => { await new Promise((r) => setTimeout(r, AUTOSAVE_DEBOUNCE_MS + 150)); });
+  const lastSubmitted = (onSubmit) => {
+    expect(onSubmit).toHaveBeenCalled();
+    const calls = onSubmit.mock.calls;
+    return calls[calls.length - 1][0];
+  };
+
+  it('R26: a pick made here does not hold another device\'s point on the bout, and a point struck here does not drop the pick', async () => {
+    const { onSubmit, rerenderWith } = await mount(makeMatch({ subResults: [DH_EMPTY] }));
+    await pickFromDh('AKA', 'Alice');
+    expect(dhInput('AKA').value).toBe('Alice');
+    // Another device scores Shiro's point. The pick has not landed there, so the push carries none.
+    await rerenderWith(makeMatch({ modifiedAt: Date.now() + 60000, subResults: [{ ...DH_EMPTY, ipponsB: ['M'] }] }));
+    expect(dhMarks('shiro'), 'the point scored elsewhere is shown').toContain('M');
+    expect(dhInput('AKA').value, 'the pick is still the operator\'s until the server holds it').toBe('Alice');
+    // Strike Aka's point here: the write carries both points and the pick, and names both groups.
+    await act(async () => { fireEvent.click(dhIppon('aka', 'M')); });
+    await pastDebounce();
+    const patch = lastSubmitted(onSubmit);
+    const dh = dhEntryOf(patch);
+    expect(dh.ipponsB, 'Shiro\'s point is not written over').toEqual(['M']);
+    expect(dh.ipponsA).toEqual(['M']);
+    expect(dh.sideAMemberId).toBe('m1a');
+    expect(patch.changed).toContain('bout:-1');
+    expect(patch.changed).toContain('repPicks');
+  });
+
+  it('R27: a pick adopted from another device and then cleared here is named in the next write', async () => {
+    // The editor MUST mount before the pick exists (R4 mounts with it, so its mount-time
+    // baseline already holds the pick and the clear is a change against it).
+    const match = makeMatch({ subResults: [DH_EMPTY] });
+    const { onSubmit, rerenderWith } = await mount(match);
+    await rerenderWith(makeMatch({ modifiedAt: Date.now() + 60000, subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1a' }] }));
+    expect(dhInput('AKA').value).toBe('Alice');
+    const wrap = dhInput('AKA').closest('.lineup-name');
+    await act(async () => { fireEvent.click(within(wrap).getByRole('button', { name: 'Clear player' })); });
+    await clickFinishTwice();
+    const patch = finishPatchOf(onSubmit);
+    expect('sideAMemberId' in dhEntryOf(patch)).toBe(false);
+    expect(toBackendMatchResult(patch, match).changed, 'the server keeps the other device\'s pick unless repPicks is named').toContain('repPicks');
+  });
+
+  it('R28: a pick adopted for one side does not hide the pick kept on the other: the next write still names repPicks and carries both', async () => {
+    const { onSubmit, rerenderWith } = await mount(makeMatch({ subResults: [DH_EMPTY] }));
+    await pickFromDh('AKA', 'Alice');
+    // Another device picks Carol for Shiro; Alice has not landed.
+    await rerenderWith(makeMatch({ modifiedAt: Date.now() + 60000, subResults: [{ ...DH_EMPTY, sideBMemberId: 'm1b' }] }));
+    expect(dhInput('SHIRO').value, 'the other side follows the server').toBe('Carol');
+    expect(dhInput('AKA').value, 'the side the operator picked stays theirs').toBe('Alice');
+    await clickFinishTwice();
+    const patch = finishPatchOf(onSubmit);
+    const dh = dhEntryOf(patch);
+    expect(dh.sideAMemberId).toBe('m1a');
+    expect(dh.sideBMemberId).toBe('m1b');
+    expect(patch.changed).toContain('repPicks');
+  });
+
+  it('R29: a pick made here and not yet written is dropped when its side is given another team: nothing is sent for it, and the sheet is not dirty', async () => {
+    window.confirmDialog.mockClear();
+    const { onSubmit, onClose, rerenderWith } = await mount(makeMatch({ subResults: [DH_EMPTY] }));
+    await pickFromDh('AKA', 'Alice');
+    expect(dhInput('AKA').value).toBe('Alice');
+    // The server never received the pick, so the push that seats team t3 cannot clear it.
+    await rerenderWith(makeMatch({ sideA: { id: 't3', name: 'Team C' }, subResults: [DH_EMPTY] }));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(dhInput('AKA').value).toBe('');
+    // The pick armed an autosave that still fires; whatever it writes names no member of the old team.
+    await pastDebounce();
+    for (const [patch] of onSubmit.mock.calls) {
+      expect('sideAMemberId' in (dhEntryOf(patch) || {}), 'the dropped pick is not sent').toBe(false);
+      expect(patch.changed || [], 'the picks did not change').not.toContain('repPicks');
+    }
+    await act(async () => { fireEvent.click(screen.getByText('✕ Close')); });
+    expect(window.confirmDialog).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('R30: the dropped pick takes its edit stamp with it: a pick another device makes for the new team is followed even when its push is stamped before the dropped pick', async () => {
+    window.API.fetchSquads.mockResolvedValue({ ...SQUADS, t3: [{ id: 'm1c', name: 'Erin', index: 1 }] });
+    const { rerenderWith } = await mount(makeMatch({ subResults: [DH_EMPTY] }));
+    await pickFromDh('AKA', 'Alice');
+    const pickedAt = Date.now();
+    await rerenderWith(makeMatch({ sideA: { id: 't3', name: 'Team C' }, subResults: [DH_EMPTY] }));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(dhInput('AKA').value).toBe('');
+    // The correction that seated team t3 reached this device late: the other device's pick for t3
+    // was made after it but before the pick dropped here, so its stamp is older than that pick's.
+    await rerenderWith(makeMatch({ modifiedAt: pickedAt - 500, sideA: { id: 't3', name: 'Team C' }, subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1c' }] }));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(dhInput('AKA').value).toBe('Erin');
   });
 });

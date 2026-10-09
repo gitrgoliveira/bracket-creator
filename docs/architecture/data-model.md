@@ -389,7 +389,13 @@ side. Those two ids are a change of their own, ordered apart from the bout's sco
 result: a point struck on the representative bout never alters who was picked, and a pick
 never alters the score, so two boards doing one each both land. The winner's member id
 stays with the bout, and after a merge it always names one of the two picked members (or is
-empty): when a pick changes under it, it is worked out again from the side that won.
+empty): when a pick changes under it, it is worked out again from the side that won. A pick
+is a member of the team seated on its side, so when a knockout match is given another team on
+a side (a winner corrected upstream, a slot taken back to its placeholder, a qualifier
+repainted), that side's pick is cleared and dated at that moment, later than the pick had
+been. The write that made the old pick, replayed from a queue, is then kept in the match's
+history instead of seating the old team's member on the new team. A side given the same team
+again, or only renamed, keeps its pick.
 
 Those are two different namespaces, and the field names keep them apart on purpose. A
 match side carries a PARTICIPANT id, which names a competitor or a whole team; a bout side

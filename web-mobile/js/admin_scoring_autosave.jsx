@@ -56,7 +56,7 @@ export function useChangedGroups(match) {
   // named no result for it: the server kept the match as it was, with no error.
   if (!finished && stateRef.current.finished) stateRef.current.agreed[GROUP_RESULT] = matchWire(match);
   stateRef.current.finished = finished;
-  return (patch) => {
+  const claim = (patch) => {
     if (!patch) return patch;
     const m = matchRef.current;
     const st = stateRef.current;
@@ -69,6 +69,19 @@ export function useChangedGroups(match) {
     st.last = next;
     return { ...patch, changed };
   };
+  // claim.agree(group): the editor ADOPTED the server's value for `group`, so it
+  // agrees with the match as it now stands. The hook cannot see an adopt, and the
+  // baseline moves only at a build where the editor's own state equals the prop
+  // (above), so after an adopt with no build in between an edit that puts the group
+  // back to the value the editor mounted with was compared against that mount-time
+  // seed and not named: the server kept the other device's value. The caller states
+  // which group it took, and only for the part it took, never from the latest prop
+  // alone (an edit the editor holds over a newer prop must stay a change). The
+  // property rides on the function so the editors that only claim are unchanged.
+  claim.agree = (group) => {
+    stateRef.current.agreed[group] = matchWire(matchRef.current);
+  };
+  return claim;
 }
 
 // ---------------------------------------------------------------------------

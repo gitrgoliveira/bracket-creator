@@ -235,3 +235,21 @@ func TestMerge_RepPicks_LegacyStampFallsBackToTheBout(t *testing.T) {
 	require.NoError(t, h.write(repWrite(h, mmT3, repRow("dana", "", nil, nil), repPicksName)))
 	assert.Equal(t, "dana", h.load(t).SubResults[0].SideAMemberID)
 }
+
+// A legacy match (no stamp map) that holds no representative bout row is not
+// given a repPicks stamp by an ordinary write: the materialization that runs
+// before the first group is stamped adds the key only for a match that has the
+// row to date. Individual matches never have one.
+func TestMerge_LegacyMatchWithoutARepBoutGainsNoRepPicksStamp(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		h := mmIndividual(t, knockout)
+		require.Nil(t, h.load(t).GroupStamps, "precondition: a legacy match")
+		w := mmRunning(h, mmT1, state.GroupPoints)
+		w.IpponsA = []string{"M"}
+		require.NoError(t, h.write(w))
+		got := h.load(t)
+		assert.Equal(t, mmT1, got.GroupStamp(state.GroupPoints), "the group the write changed is stamped")
+		require.NotNil(t, got.GroupStamps)
+		assert.NotContains(t, got.GroupStamps, repPicksName)
+	})
+}

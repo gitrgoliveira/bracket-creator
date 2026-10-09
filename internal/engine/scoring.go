@@ -541,11 +541,6 @@ func preserveSubHantei(stored, incoming []state.SubMatchResult) {
 	// guards it): the mark and the winner it names move as one atomic
 	// unit, never separately.
 	in.Winner = prior.Winner
-	// The winner's member id travels with the winner it names: the incoming
-	// row is verdict-silent, so its own id is either empty (the stored one
-	// would be lost) or stale (it can name the OTHER side's pick, and
-	// id-first attribution would then credit the wrong side).
-	in.WinnerMemberID = prior.WinnerMemberID
 	// Neither id is trusted, the stored one included: the representatives are
 	// their own change, so even the stored id may disagree with the picks this
 	// row now holds. The reconcile derives the id again from the winner's NAME
@@ -647,6 +642,15 @@ type ReopenedMatch struct {
 	// Court is the shiaijo the match is on ("" when it has none), so a
 	// refusal can tell the operator where the match is being fought.
 	Court string
+	// RepPickCleared is set when the same write that reopened the match gave
+	// one of its sides another team, which took that side's representative
+	// with it (seatBracketSide). Its reopen history line then names the
+	// repPicks group beside the verdict's.
+	RepPickCleared bool
+	// priorPickA and priorPickB are the representatives the match held when it
+	// was reopened (or, for a downstream match a winner is re-propagated into,
+	// before that write began), for markRepPicksCleared to compare.
+	priorPickA, priorPickB string
 }
 
 // bracketMatchRef is the ONE way a bracket match becomes a ReopenedMatch, so
@@ -2697,6 +2701,10 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 			// cleared the next round for a write that stored the same winner --
 			// including one confirmed for an unrelated reason.
 			priorWinner, priorWinnerID := propagatedWinnerOf(bracket, rIdx, mIdx, bm)
+			// And the representatives the matches it feeds hold before the
+			// propagation below can re-seat a side and take one away, so the
+			// reopen of a played one can say its pick went too.
+			priorPicks := snapshotDownstreamRepPicks(bracket, rIdx, mIdx)
 			if _, err := applyBracketMatchResult(bm, result, policy); err != nil {
 				return nil, false, err
 			}
@@ -2712,7 +2720,7 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 				e.propagateBracketWinner(bracket, rIdx, mIdx)
 				if force && policy == matchWriteForward &&
 					winnerActuallyChanged(priorWinner, priorWinnerID, bm) {
-					reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx, bm.ID)
+					reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx, bm.ID, priorPicks)
 				}
 			}
 			return reopened, inherited, nil
@@ -2849,11 +2857,24 @@ func winnerActuallyChanged(priorWinner, priorWinnerID string, bm *state.BracketM
 // (operator ruling 2026-09-19: "no changes in the queue necessary if the
 // matches were already played"). It carries its own audit note rather than
 // owing one -- see downstreamReopenReason.
-func forceReopenDownstreamChain(bracket *state.Bracket, rIdx, mIdx int, correctedID string) []ReopenedMatch {
+//
+// before is what snapshotDownstreamRepPicks took ahead of the propagation that
+// preceded this call (the score, override and engi doors); the reopen door,
+// which retracts afterwards, passes nil and judges the picks itself. Each
+// reopened match whose representative went with a re-seated side comes back
+// with RepPickCleared set.
+func forceReopenDownstreamChain(bracket *state.Bracket, rIdx, mIdx int, correctedID string, before downstreamRepPicks) []ReopenedMatch {
 	d := propagatedDownstreamOf(bracket, rIdx, mIdx)
 	var reopened []ReopenedMatch
 	for _, m := range d.played() {
-		reopened = append(reopened, reopenDisplacedBracketMatch(m, downstreamReopenReason(correctedID)))
+		ref := reopenDisplacedBracketMatch(m, downstreamReopenReason(correctedID))
+		// A caller that propagated before this reopen (the score, override
+		// and engi doors) took the picks the match held before the re-seat;
+		// the picks it holds now are the ones left after it.
+		if p, ok := before[m.ID]; ok {
+			ref.priorPickA, ref.priorPickB = p[0], p[1]
+		}
+		reopened = append(reopened, ref)
 		// The reopened next-round match no longer has a winner, so what it
 		// had propagated comes back out of a round nobody has touched, the
 		// same retraction a pool correction's reopen applies
@@ -2862,6 +2883,7 @@ func forceReopenDownstreamChain(bracket *state.Bracket, rIdx, mIdx int, correcte
 			retractIntoUntouched(bracket, d.feed.R+1, d.feed.M/2)
 		}
 	}
+	markRepPicksCleared(bracket, reopened)
 	return reopened
 }
 
@@ -2913,6 +2935,9 @@ func reopenDisplacedBracketMatch(m *state.BracketMatch, reason string) ReopenedM
 	}
 	ref := bracketMatchRef(m)
 	ref.PriorDecision = priorDecision
+	// The reopen leaves the picks as they were; what the re-seat of a side
+	// does to them is judged by markRepPicksCleared against these.
+	ref.priorPickA, ref.priorPickB = m.RepPicks()
 	return ref
 }
 
@@ -2949,7 +2974,12 @@ func (e *Engine) restoreForceReopened(h state.StoreTx, compID string, reopened [
 		reopened[i].Restored = e.restoreIfWithdrawalRemoved(h, compID, reopened[i].ID, reopened[i].PriorDecision, "", nil)
 		// The reopen changed the match outside the merge, so it records its
 		// own history entry (bc-mrgc).
-		e.recordDirectHistory(h, compID, reopened[i].ID, doorDownstreamReopen, serverNowMs(), reopenedBracketGroups...)
+		groups := reopenedBracketGroups
+		if reopened[i].RepPickCleared {
+			// A copy: reopenedBracketGroups is shared.
+			groups = append(append([]string(nil), groups...), state.GroupRepPicks)
+		}
+		e.recordDirectHistory(h, compID, reopened[i].ID, doorDownstreamReopen, serverNowMs(), groups...)
 	}
 }
 
@@ -3233,13 +3263,10 @@ func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) 
 	nextMatchIdx := mIdx / 2
 	nextM := &bracket.Rounds[rIdx+1][nextMatchIdx]
 
-	if mIdx%2 == 0 {
-		nextM.SideA = m.Winner
-		nextM.SideAID = m.WinnerID
-	} else {
-		nextM.SideB = m.Winner
-		nextM.SideBID = m.WinnerID
-	}
+	// seatBracketSide, not a bare assignment: a side given another team takes
+	// its representative-bout pick away with it.
+	side := feedsSide(mIdx)
+	seatBracketSide(nextM, side, m.Winner, m.WinnerID)
 
 	// Feed the loser of a SEMIFINAL into the bronze (3rd-place) knockout match.
 	// The semifinal round index is len(Rounds)-2 (the round that feeds the
@@ -3270,13 +3297,7 @@ func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) 
 			// semifinal overwrites the correct bronze slot in place. A
 			// fill-first-empty scheme would leave a stale loser pinned once
 			// both slots are populated and a semifinal is later re-scored.
-			if mIdx%2 == 0 {
-				bronze.SideA = loser
-				bronze.SideAID = loserID
-			} else {
-				bronze.SideB = loser
-				bronze.SideBID = loserID
-			}
+			seatBracketSide(bronze, side, loser, loserID)
 		}
 	}
 
@@ -3287,8 +3308,7 @@ func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) 
 		if r >= 0 && r < len(bracket.Rounds) && m >= 0 && m < len(bracket.Rounds[r]) {
 			srcM := bracket.Rounds[r][m]
 			if srcM.Status == state.MatchStatusCompleted {
-				nextM.SideA = srcM.Winner
-				nextM.SideAID = srcM.WinnerID
+				seatBracketSide(nextM, domain.MatchSideA, srcM.Winner, srcM.WinnerID)
 			}
 		}
 	}
@@ -3297,8 +3317,7 @@ func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) 
 		if r >= 0 && r < len(bracket.Rounds) && m >= 0 && m < len(bracket.Rounds[r]) {
 			srcM := bracket.Rounds[r][m]
 			if srcM.Status == state.MatchStatusCompleted {
-				nextM.SideB = srcM.Winner
-				nextM.SideBID = srcM.WinnerID
+				seatBracketSide(nextM, domain.MatchSideB, srcM.Winner, srcM.WinnerID)
 			}
 		}
 	}
@@ -3468,6 +3487,7 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 						// that names the winner already recorded must not requeue
 						// the next round.
 						priorWinner, priorWinnerID := propagatedWinnerOf(bracket, rIdx, mIdx, m)
+						priorPicks := snapshotDownstreamRepPicks(bracket, rIdx, mIdx)
 						setBracketOverrideWinner(m, winnerName)
 						m.IsOverridden = true
 						m.Status = state.MatchStatusCompleted
@@ -3483,7 +3503,7 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 						// nothing downstream to unwind. displacedWinner is this
 						// match's winner as it stood before setBracketOverrideWinner.
 						if fo.Force && winnerActuallyChanged(priorWinner, priorWinnerID, m) {
-							reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx, m.ID)
+							reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx, m.ID, priorPicks)
 						}
 						return nil
 					}

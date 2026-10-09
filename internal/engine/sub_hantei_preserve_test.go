@@ -952,9 +952,9 @@ func TestPreserveSubHantei_ZeroZeroWithdrawalIsNotSilence(t *testing.T) {
 	})
 }
 
-// The winner's member id is restored WITH the winner it belongs to. The
+// The winner's member id is derived again from the restored winner. The
 // restored hantei winner is the stored one, so an incoming winner id must not
-// outlive it: an empty one would lose the stored id, and a stale one naming the
+// outlive it: an empty one would lose the id, and a stale one naming the
 // other side's pick would credit the wrong side, id-first, were it not derived
 // again from the winner's name by ReconcileWinnerMemberID.
 func TestPreserveSubHanteiRestoresTheWinnersMemberIDWithTheWinner(t *testing.T) {

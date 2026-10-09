@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -304,7 +305,12 @@ func (e *Engine) resolveSlots(bracket *state.Bracket, resolver map[string]resolv
 		// re-run is a no-op, and so a bracket resolved once BEFORE bc-brid
 		// (name only, id still "") gets its id backfilled the next time its
 		// pool's placeholder is looked at.
-		paint := func(label string, name, id *string) {
+		//
+		// side names which of the match's two sides name/id are, or is
+		// domain.MatchSideNone for the Winner paint (not a side): a side is
+		// written through seatBracketSide, which takes away the representative
+		// the team that leaves the slot held.
+		paint := func(label string, side domain.MatchSide, name, id *string) {
 			rf, ok := resolver[label]
 			if !ok || (*name == rf.Name && *id == rf.ID) {
 				return
@@ -316,13 +322,17 @@ func (e *Engine) resolveSlots(bracket *state.Bracket, resolver map[string]resolv
 				log.Printf("engine: bracket match %s (%s) keeps %q in its %s slot: it is running or has its own result, so the new occupant %q is not written over it", m.ID, m.Status, *name, label, rf.Name)
 				return
 			}
-			*name, *id = rf.Name, rf.ID
+			if side == domain.MatchSideNone {
+				*name, *id = rf.Name, rf.ID
+			} else {
+				seatBracketSide(m, side, rf.Name, rf.ID)
+			}
 			n++
 		}
-		paint(m.PlaceholderA, &m.SideA, &m.SideAID)
-		paint(m.PlaceholderB, &m.SideB, &m.SideBID)
+		paint(m.PlaceholderA, domain.MatchSideA, &m.SideA, &m.SideAID)
+		paint(m.PlaceholderB, domain.MatchSideB, &m.SideB, &m.SideBID)
 		// Winner-only changes count too, so a bye-propagated Winner fix is persisted.
-		paint(m.PlaceholderWinner, &m.Winner, &m.WinnerID)
+		paint(m.PlaceholderWinner, domain.MatchSideNone, &m.Winner, &m.WinnerID)
 	}
 	for ri := range bracket.Rounds {
 		for mi := range bracket.Rounds[ri] {

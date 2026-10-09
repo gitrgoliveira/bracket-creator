@@ -126,29 +126,52 @@ func subAt(subs []SubMatchResult, position int) *SubMatchResult {
 	return nil
 }
 
-// RepPicks returns the two representatives the row at DaihyosenSubPosition
-// names, empty when the match has no such row.
-func (m *MatchResult) RepPicks() (sideA, sideB string) {
-	if row := subAt(m.SubResults, DaihyosenSubPosition); row != nil {
+// repPicksOf returns the two representatives the row at DaihyosenSubPosition
+// of subs names, empty when there is no such row.
+func repPicksOf(subs []SubMatchResult) (sideA, sideB string) {
+	if row := subAt(subs, DaihyosenSubPosition); row != nil {
 		return row.SideAMemberID, row.SideBMemberID
 	}
 	return "", ""
 }
 
-// SetRepPicks puts the two representatives on the row at DaihyosenSubPosition.
-// It does nothing when the match has no such row: a pick has no bout to land
-// on. The list is replaced, not edited in place, so a row another copy of the
-// match shares is never written through.
-func (m *MatchResult) SetRepPicks(sideA, sideB string) {
-	for i := range m.SubResults {
-		if m.SubResults[i].Position != DaihyosenSubPosition {
+// withRepPicks returns a copy of subs whose row at DaihyosenSubPosition names
+// the two representatives, and whether there was such a row. The list is
+// copied, never edited in place, so a row another copy of the match shares is
+// never written through.
+func withRepPicks(subs []SubMatchResult, sideA, sideB string) ([]SubMatchResult, bool) {
+	for i := range subs {
+		if subs[i].Position != DaihyosenSubPosition {
 			continue
 		}
-		subs := append([]SubMatchResult(nil), m.SubResults...)
-		subs[i].SideAMemberID, subs[i].SideBMemberID = sideA, sideB
-		m.SubResults = subs
-		return
+		out := append([]SubMatchResult(nil), subs...)
+		out[i].SideAMemberID, out[i].SideBMemberID = sideA, sideB
+		return out, true
 	}
+	return subs, false
+}
+
+// RepPicks returns the two representatives the row at DaihyosenSubPosition
+// names, empty when the match has no such row.
+func (m *MatchResult) RepPicks() (sideA, sideB string) {
+	return repPicksOf(m.SubResults)
+}
+
+// SetRepPicks puts the two representatives on the row at DaihyosenSubPosition.
+// It does nothing when the match has no such row: a pick has no bout to land
+// on. The list is replaced, not edited in place (withRepPicks).
+func (m *MatchResult) SetRepPicks(sideA, sideB string) {
+	m.SubResults, _ = withRepPicks(m.SubResults, sideA, sideB)
+}
+
+// RepPicks is MatchResult.RepPicks for a bracket match.
+func (bm *BracketMatch) RepPicks() (sideA, sideB string) {
+	return repPicksOf(bm.SubResults)
+}
+
+// SetRepPicks is MatchResult.SetRepPicks for a bracket match.
+func (bm *BracketMatch) SetRepPicks(sideA, sideB string) {
+	bm.SubResults, _ = withRepPicks(bm.SubResults, sideA, sideB)
 }
 
 // boutOrderKey sorts bout rows the way every writer appends them: numbered
@@ -393,7 +416,15 @@ func MaterializedGroupStamps(stamps map[string]int64, modifiedAt int64, position
 	if modifiedAt <= 0 {
 		return out
 	}
+	hasRepBout := slices.Contains(positions, DaihyosenSubPosition)
 	for _, g := range ScalarGroups {
+		// The representatives' group lives on the representative bout's row:
+		// a match without that row has nothing to date, so a legacy match is
+		// not given a key it never held (a stamp a write NAMED is another
+		// matter: stampGroups adds it itself).
+		if g == GroupRepPicks && !hasRepBout {
+			continue
+		}
 		out[g] = modifiedAt
 	}
 	for _, p := range positions {

@@ -1148,12 +1148,16 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 			var reopenedDownstream []ReopenedMatch
 			if !h.Bronze {
 				if fo.Force {
-					reopenedDownstream = forceReopenDownstreamChain(h.BracketRoot, h.RIdx, h.MIdx, matchID)
+					// No propagation precedes this reopen: the retraction
+					// below is what re-seats the slot, so the picks the
+					// reopened match held are judged after it.
+					reopenedDownstream = forceReopenDownstreamChain(h.BracketRoot, h.RIdx, h.MIdx, matchID, nil)
 				}
 				if derr := retractPropagatedWinner(h.BracketRoot, h.RIdx, h.MIdx); derr != nil {
 					opErr = derr
 					return nil
 				}
+				markRepPicksCleared(h.BracketRoot, reopenedDownstream)
 			}
 			prior := h.Bracket.Decision
 			reopenBracketMatchKeepingTheFight(h.Bracket, reason, targetStatus)
@@ -2209,14 +2213,10 @@ func clearPropagatedSlots(bracket *state.Bracket, rIdx, mIdx int, bronze, next *
 		// alongside the name (bc-brid): propagateBracketWinner set both
 		// together, so undoing it must clear both together too, or the
 		// bronze slot would keep a stale id pointing at a name it no longer
-		// carries.
-		if mIdx%2 == 0 {
-			bronze.SideA = ""
-			bronze.SideAID = ""
-		} else {
-			bronze.SideB = ""
-			bronze.SideBID = ""
-		}
+		// carries. Through seatBracketSide, which also takes away the
+		// representative a team match's rep bout held for the team that left
+		// the slot.
+		seatBracketSide(bronze, feedsSide(mIdx), "", "")
 	}
 	if next != nil {
 		// winnerOfPlaceholder (bracket.go) is the ONE producer this now shares
@@ -2225,14 +2225,9 @@ func clearPropagatedSlots(bracket *state.Bracket, rIdx, mIdx int, bronze, next *
 		placeholder := winnerOfPlaceholder(len(bracket.Rounds)-rIdx, mIdx)
 		// Same id-follows-name rule as the bronze clear above: a "Winner of
 		// ..." placeholder is not a resolved competitor, so its slot must
-		// carry no id (bc-brid).
-		if mIdx%2 == 0 {
-			next.SideA = placeholder
-			next.SideAID = ""
-		} else {
-			next.SideB = placeholder
-			next.SideBID = ""
-		}
+		// carry no id (bc-brid), and no pick: seatBracketSide clears the
+		// representative the team that left the slot held.
+		seatBracketSide(next, feedsSide(mIdx), placeholder, "")
 	}
 }
 

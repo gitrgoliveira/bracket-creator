@@ -221,3 +221,31 @@ func TestRepPicks_LegacyStampFollowsTheBoutOnceThenStandsAlone(t *testing.T) {
 	legacy.StampGroups(60, bout)
 	assert.Equal(t, int64(30), legacy.GroupStamp(GroupRepPicks), "materialized with every other group")
 }
+
+// A legacy (map-less) match is given a repPicks entry when it materializes only
+// if it holds a representative bout row: the picks live on that row, so a match
+// without one has nothing to date and gains no key it never held.
+func TestMaterializedGroupStamps_RepPicksOnlyWithARepresentativeRow(t *testing.T) {
+	t.Run("a match without the row gets every other scalar group, not repPicks", func(t *testing.T) {
+		got := MaterializedGroupStamps(nil, 70, []int{1, 2})
+		assert.NotContains(t, got, GroupRepPicks)
+		for _, g := range ScalarGroups {
+			if g != GroupRepPicks {
+				assert.Equal(t, int64(70), got[g], g)
+			}
+		}
+		assert.Equal(t, int64(70), got[BoutGroup(1)])
+		assert.Equal(t, int64(70), got[BoutGroup(2)])
+	})
+	t.Run("a match with the row gets repPicks at its ModifiedAt", func(t *testing.T) {
+		got := MaterializedGroupStamps(nil, 70, []int{1, DaihyosenSubPosition})
+		assert.Equal(t, int64(70), got[GroupRepPicks])
+		assert.Equal(t, int64(70), got[BoutGroup(DaihyosenSubPosition)])
+	})
+	t.Run("a stamp a write named is kept on a match with no row", func(t *testing.T) {
+		m := &MatchResult{ModifiedAt: 70}
+		m.StampGroups(90, GroupRepPicks)
+		assert.Equal(t, int64(90), m.GroupStamps[GroupRepPicks], "naming the group stamps it, row or not")
+		assert.Equal(t, int64(90), m.GroupStamp(GroupRepPicks))
+	})
+}

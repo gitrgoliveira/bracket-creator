@@ -51,6 +51,7 @@ import { isOlderRunningCopy } from './patch.jsx';
 
 import { useDebouncedRunningWrite, SyncStatusPill, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
+import { GROUP_REP_PICKS } from './match_groups.jsx';
 import { serverNowMs } from './server_clock.jsx';
 import { publishHeight } from './published_height.jsx';
 import { SideLabel, sideWithColour } from './side_cell.jsx';
@@ -689,29 +690,53 @@ const REPRESENTATIVE_KEY = "daihyosen";
 // lineup write here: "daihyosen" is not a lineup key.
 function pickDaihyosenRepresentative({ idx, side, updateSub }, member) {
   const memberIdKey = `${side}MemberIdOverride`;
-  updateSub(idx, prev => ({ ...prev, [memberIdKey]: (member && member.id) || "" }));
+  // A pick is an edit of that side's pick alone, not of the row (updateSub's repPickSide).
+  updateSub(idx, prev => ({ ...prev, [memberIdKey]: (member && member.id) || "" }), { repPickSide: side });
 }
 
-// repBaselineAfterFollowedClear: serverSubs as the sheet's dirty baseline, with a
-// representative pick that a side-change clear emptied (giveSideAnotherTeam) read as
-// empty too. `followed` maps a side to the member id that clear superseded
-// (followedRepClearRef). A pick is cleared in the baseline only where the sheet shows
-// it empty AND the server still holds that same id, so a write that lands, or another
-// device's change, moves the server off it and the clear stops counting. A pick the
-// sheet shows is never hidden here.
-function repBaselineAfterFollowedClear(serverSubs, dIdx, subs, followed) {
-  const served = serverSubs[dIdx];
-  const shown = subs[dIdx];
-  if (dIdx < 0 || !served || !shown) return serverSubs;
-  let row = null;
-  for (const side of ["a", "b"]) {
-    const key = `${side}MemberIdOverride`;
-    if (!followed[side] || served[key] !== followed[side] || shown[key]) continue;
-    row = row || { ...served };
-    row[key] = "";
-  }
-  if (!row) return serverSubs;
-  return serverSubs.map((s, i) => (i === dIdx ? row : s));
+// The representative row (position -1) follows the server per PART, not per row
+// (bc-mrgc: the server orders a representative's picks apart from the bout row).
+// A part is the score (everything on the row but the picks) or one side's pick
+// (`aMemberIdOverride` / `bMemberIdOverride`). A pick the operator makes here is an
+// edit of that side's pick alone, so another device's point on the bout is still
+// shown, and a point struck here does not hold another device's pick.
+const REP_PICK_KEYS = ["aMemberIdOverride", "bMemberIdOverride"];
+
+// withoutRepPicks: the row's score part, as a string to compare.
+function withoutRepPicks(row) {
+  const rest = { ...row };
+  for (const key of REP_PICK_KEYS) delete rest[key];
+  return JSON.stringify(rest);
+}
+
+// repRowTakes: which parts of the representative row the adopt takes from the server
+// (true) and which stay the operator's (false), each by the rule a whole row follows:
+// a snapshot written BEFORE the part's last edit here cannot know that edit (`stamps`,
+// in the server's clock frame, against the match's `modifiedAt`), and a part that
+// still equals what the server last said (`prior`) has nothing of the operator's in
+// it. `stamps` is { score, a, b }; a part never edited here has none. With no prior
+// row nothing is known to be untouched, so every part stays.
+function repRowTakes(local, served, prior, stamps, modifiedAt) {
+  const held = (stamp) => stamp !== undefined && (modifiedAt || 0) < stamp;
+  const pick = (side, key) => !held(stamps[side]) && !!prior && (local[key] || "") === (prior[key] || "");
+  return {
+    score: !held(stamps.score) && !!prior && withoutRepPicks(local) === withoutRepPicks(prior),
+    a: pick("a", REP_PICK_KEYS[0]),
+    b: pick("b", REP_PICK_KEYS[1]),
+  };
+}
+
+// composeRepRow: the representative row after the adopt, each part from the server's
+// row where `takes` says so and from the operator's otherwise. Either row keeps its
+// identity when every part comes from it, so an untouched board is not rebuilt.
+function composeRepRow(local, served, takes) {
+  if (takes.score && takes.a && takes.b) return served;
+  if (!takes.score && !takes.a && !takes.b) return local;
+  return {
+    ...(takes.score ? served : local),
+    [REP_PICK_KEYS[0]]: (takes.a ? served : local)[REP_PICK_KEYS[0]],
+    [REP_PICK_KEYS[1]]: (takes.b ? served : local)[REP_PICK_KEYS[1]],
+  };
 }
 
 // fusenshoSideFromSub: which side ("a" / "b" / "") a persisted fusensho sub-bout
@@ -1319,10 +1344,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     if (hadDaihyosen.current && !hasDaihyosen) { newRepPick("a"); newRepPick("b"); }
     hadDaihyosen.current = hasDaihyosen;
   }, [hasDaihyosen]);
-  // The representative picks giveSideAnotherTeam cleared while the server still held them:
-  // side -> the member id the clear superseded. repBaselineAfterFollowedClear reads it, and
-  // the operator's next edit to the representative row drops it (updateSub).
-  const followedRepClearRef = useRefA({});
   // How many typed representatives are still being named (submitRepresentative). A typed
   // name is resolved by a member POST that may already have created the member when it
   // answers, and the pick lands only while the sheet is mounted, so Finish, Save and
@@ -1649,19 +1670,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     dropLineup(side);
     newRepPick(side);
     // The representative the side picked is a member of the team it no longer has, so the
-    // pick is cleared and the sheet stops sending that member's id. Only a pick the row
-    // holds is cleared, and it is cleared the server-following way (setSubs, not
+    // pick is dropped and the sheet stops sending that member's id. Only a pick the row
+    // holds is dropped, and it is dropped the server-following way (setSubs, not
     // updateSub): no operator-edit stamp, no dirty mark, no autosave, and an armed Finish
-    // stays armed, since the operator changed nothing. The server still holds the old id
-    // until the operator's next write, which carries the cleared row.
+    // stays armed, since the operator changed nothing. A pick the server holds arrives
+    // cleared by the push that seats the new team, in the same update, so the board
+    // already agrees. A pick made HERE and not yet written is one the server never
+    // received and cannot clear, so this is the only place it goes. Either way the side's
+    // pick-part edit stamp goes with it: whatever was edited was about the old team, and
+    // the adopt takes the server's value for the side again.
+    lastRepPickEditRef.current[side] = undefined;
     if (daihyosenIdx >= 0 && subs[daihyosenIdx]?.[`${side}MemberIdOverride`]) {
       const memberKey = `${side}MemberIdOverride`;
-      const shownPick = subs[daihyosenIdx][memberKey];
-      // Recorded for the dirty baseline only where the server holds the pick the sheet shows.
-      // A pick the operator made and has not saved is their own edit, and clearing it still counts.
-      if (serverSubs[daihyosenIdx]?.[memberKey] === shownPick) {
-        followedRepClearRef.current = { ...followedRepClearRef.current, [side]: shownPick };
-      }
       setSubs(prev => reconcileRowsToPositions(prev, serverSubs).map((s, i) => i === daihyosenIdx ? { ...s, [memberKey]: "" } : s));
     }
   };
@@ -2187,9 +2207,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // RENDER-SYNCHRONOUS because this very render already indexes subs for the
   // new positions — an effect would run after the crash.
   const subs = reconcileRowsToPositions(subsRaw, serverSubs);
-  // What the sheet's dirty checks (isDirty, daihyosenTouched) compare against: the server board,
-  // with a representative pick that a side-change clear emptied read as cleared too.
-  const dirtyBaseline = repBaselineAfterFollowedClear(serverSubs, daihyosenIdx, subs, followedRepClearRef.current);
   // Two kinds of write reach `subs`, and one arming rule has to tell them
   // apart: the OPERATOR editing (which disarms Finish/End and closes an open
   // reason prompt, because what they were about to confirm has changed under
@@ -2205,6 +2222,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // the server's clock frame, server_clock.jsx), read by the per-row adopt
   // below.
   const lastRowEditRef = useRefA(new Map());
+  // The same, per SIDE, for the representative row's picks: a pick is an edit of that
+  // side's pick alone, so it stamps here and not on the row (updateSub's repPickSide).
+  // The row's own entry in lastRowEditRef is then the score part's.
+  const lastRepPickEditRef = useRefA({});
   // C1: updateSub is the single choke-point for all sub-bout state
   // mutations. Calling markScoringDirty() here captures every edit
   // (pts add/remove, fouls, fusensho, draw) without repetition.
@@ -2218,11 +2239,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // shows from the refused tap until the operator next edits any bout row, so
   // re-entering the points that caused the refusal does not bring it back
   // untapped. The server re-seed never comes through here (it uses setSubs).
-  const updateSub = (idx, fn) => {
-    lastRowEditRef.current.set(subs[idx]._pos, serverNowMs());
-    // An operator edit to the representative row ends the side-change clear's baseline there:
-    // from here a pick the operator puts back or clears is their own edit.
-    if (idx === daihyosenIdx) followedRepClearRef.current = {};
+  // `opts.repPickSide` ("a" / "b") says the edit is that side's representative pick on the
+  // representative row: it stamps the pick part, and every other edit of the row the score
+  // part, because the adopt follows the server for each part on its own.
+  const updateSub = (idx, fn, opts) => {
+    if (idx === daihyosenIdx && opts?.repPickSide) lastRepPickEditRef.current[opts.repPickSide] = serverNowMs();
+    else lastRowEditRef.current.set(subs[idx]._pos, serverNowMs());
     setSubsByOperator(prev => {
       const rows = reconcileRowsToPositions(prev, serverSubs);
       return rows.map((s, i) => i === idx ? fn(s) : s);
@@ -3125,7 +3147,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // pre-gate explicit-[] behaviour (not a regression this change
     // introduces), not a gap this gate closes.
     const daihyosenTouched = hasDaihyosen && (
-      JSON.stringify(subs[daihyosenIdx]) !== JSON.stringify(dirtyBaseline[daihyosenIdx]) ||
+      JSON.stringify(subs[daihyosenIdx]) !== JSON.stringify(serverSubs[daihyosenIdx]) ||
       daihyosenVerdictDirty
     );
     const daihyosenKnownLocally = hasDaihyosen && (
@@ -3233,9 +3255,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // Omitted, not stated empty. On a numbered row an absent key leaves the
       // stored id and the server's own derivation untouched, which is what "this
       // writer knows no id" has to mean. On the representative row an absent id
-      // is how a CLEARED pick is sent: that row's group is named as changed
-      // (match_groups.jsx) and the server copies the row whole, so the omitted
-      // key clears the stored id. A typed-name override resolves to no id at all
+      // is how a CLEARED pick is sent, by naming the picks' own group: the write
+      // carries that row, so statedGroups adds repPicks (match_groups.jsx) and
+      // groupKey reads an absent id as empty. The server copies the bout row
+      // WITHOUT the picks (CopyGroup keeps the destination's) and moves the picks
+      // as their own group, so an id left off the row clears the stored one only
+      // when repPicks is named. A typed-name override resolves to no id at all
       // (playerNamesForBout short-circuits it), so a substitution never sends
       // the replaced fighter's id under the new name.
       if (sideAMemberId) entry.sideAMemberId = sideAMemberId;
@@ -3583,12 +3608,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // One serialisation, read three times (isDirty, the adopt signature, and the
   // per-row merge below). This editor re-renders on every SSE broadcast for the
   // competition, so serialising the same board once per consumer was pure
-  // repetition on the busiest path in the file. isDirty compares against
-  // dirtyBaseline, which reads a side-change clear of a representative pick as no
-  // operator change; it is the server board itself (and so this signature) unless
-  // such a clear is pending.
+  // repetition on the busiest path in the file. isDirty compares the local board
+  // with the server board itself, so a representative pick the sheet dropped when its
+  // side was given another team (giveSideAnotherTeam) is no unsaved change once the
+  // server board no longer holds it.
   const serverSubsSig = JSON.stringify(serverSubs);
-  const isDirty = JSON.stringify(subs) !== (dirtyBaseline === serverSubs ? serverSubsSig : JSON.stringify(dirtyBaseline)) || daihyosenVerdictDirty
+  const isDirty = JSON.stringify(subs) !== serverSubsSig || daihyosenVerdictDirty
     // A removed withdrawal is unsaved until Save correction sends it.
     || removingWithdrawal;
   // bc-dscn: an edit the running patch would NOT carry. Under kachinuki
@@ -3637,11 +3662,29 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // untouched row would read as edited, keep its stale value, and be
       // written back over the server's by the next save.
       const priorByPos = new Map((prevServerSubsRef.current || []).map(s => [s._pos, s]));
+      // The representative row follows the server per PART (repRowTakes): the score
+      // and each side's pick are separate, so a pick made here does not hold another
+      // device's point on the bout, and a point struck here does not hold another
+      // device's pick. Decided HERE from the board this render showed, not inside the
+      // updater: whether a pick was taken is told to useChangedGroups below, and an
+      // updater may run a render later or twice. The kept parts are composed from the
+      // updater's own `prev` row, so a pick giveSideAnotherTeam dropped meanwhile is not
+      // put back.
+      const dhServed = daihyosenIdx >= 0 ? serverSubs[daihyosenIdx] : null;
+      const dhShown = daihyosenIdx >= 0 ? subs[daihyosenIdx] : null;
+      const repTakes = dhServed && dhShown
+        ? repRowTakes(dhShown, dhServed, priorByPos.get(DAIHYOSEN_POSITION), {
+          score: lastRowEditRef.current.get(DAIHYOSEN_POSITION),
+          a: lastRepPickEditRef.current.a,
+          b: lastRepPickEditRef.current.b,
+        }, m.modifiedAt)
+        : null;
       setSubs(prev => {
         const localByPos = new Map(prev.map(s => [s._pos, s]));
         return serverSubs.map(ss => {
           const local = localByPos.get(ss._pos);
           if (!local) return ss;
+          if (repTakes && ss._pos === DAIHYOSEN_POSITION) return composeRepRow(local, ss, repTakes);
           // bc-kclr: a snapshot written BEFORE the operator's last edit to
           // this row cannot know that edit, so the row stays theirs, whatever
           // it now equals. Striking a point and taking it back returns the
@@ -3661,6 +3704,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           return local;
         });
       });
+      // A pick taken from the server is one this editor now agrees with, so an edit
+      // that puts it back to what the editor mounted with (clearing a pick another
+      // device made) is still a change of the picks and is named. A side kept is the
+      // operator's own edit and stays one; both sides kept says nothing.
+      if (repTakes && (repTakes.a || repTakes.b)) claimChanged.agree(GROUP_REP_PICKS);
       // Keep the correction baseline in step. It snapshots who won the bout
       // being corrected so renderCorrectionWarning can say "you changed who won
       // bout N"; left alone across a re-seed it would compare the SERVER's new

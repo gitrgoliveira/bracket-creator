@@ -619,11 +619,14 @@ So when you hand off after changing beads, include `bd dolt push` in the sync yo
 
 Persistent memory lives in **Hindsight**, and only there (2026-10-09). This OVERRIDES the generic line above ("Use `bd remember` for persistent knowledge"): `bd remember` is retired, the bd store was emptied, and a global Bash guard refuses `bd remember`. Claude Code's built-in auto-memory (`~/.claude/projects/<slug>/memory/`, indexed by its `MEMORY.md`) is switched off too (`autoMemoryEnabled: false` in the user settings).
 
-- **Recall** is automatic: the `hindsight-memory` plugin injects a `<hindsight_memories>` block on every prompt. Search it yourself with the `agent_knowledge_recall` tool.
-- **Save** a lesson, ruling or recipe with the `agent_knowledge_ingest` tool (title = a short kebab-case key, content = the full fact with its reason). The plugin also saves the session transcript to the bank as the session runs.
-- **Where:** the server and a bank per repo (named for the repo, shared by its worktrees) come from `~/.hindsight/claude-code.json`. The bank was seeded from the old auto-memory notes (documents keyed `memory/<file>.md`) and the `bd remember` entries (`beads/<key>`), so `merge-concurrency-plan` and the other bd entries are read from there.
+The plugin is `hindsight-coding-agents` (upstream's replacement for the retired `hindsight-memory` plugin), wired for Claude Code and Antigravity CLI; its companion skill `hindsight-coding-agent` documents it.
 
-The old `memory/` directory is kept untouched as a rollback copy: do not delete it, and do not read or review it as current. The post-merge cleanup skill reviews the Hindsight bank. Only Claude Code has the plugin; AGENTS.md and GEMINI.md tell the other agents not to use `bd remember` either.
+- **Recall:** the first prompt of a session gets one memory synthesis injected (`<hindsight_memory>`), and the knowledge pages are re-offered as the session goes on (`pageRefreshEveryTurns`). Search yourself with `hindsight_search_knowledge_pages` first, then `hindsight_read_knowledge_page`; `hindsight_reflect` for the why behind a decision (slower).
+- **Save** a lesson, ruling or recipe with `hindsight_ingest_document` (title = a short kebab-case key, content = the full fact with its reason); a new initiative with `hindsight_capture_initiative`. The session transcript is saved by the plugin at each Stop, and git commit messages are seeded from history.
+- **Correct** a memory you verify is wrong with `hindsight_ingest_document`, titled `Correction: <topic>`: what memory claimed, what is true now, and the evidence.
+- **Where:** the server and a bank per repo come from `~/.hindsight/coding-agent.json`. Its `bankIdTemplate` is `{gitProject}`, so the bank is named for the main checkout and shared by every worktree. The bank was seeded from the old auto-memory notes (documents keyed `memory/<file>.md`) and the `bd remember` entries (`beads/<key>`), so `merge-concurrency-plan` and the other bd entries are read from there.
+
+The old `memory/` directory is kept untouched as a rollback copy: do not delete it, and do not read or review it as current. The post-merge cleanup skill reviews the Hindsight bank. AGENTS.md and GEMINI.md tell the other agents not to use `bd remember` either.
 
 ### Where the issues live
 

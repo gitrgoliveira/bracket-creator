@@ -216,3 +216,9 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 - Do not commit or push without clear authority from the active profile or the current user request.
 - If a required sync or push is blocked, stop and report the exact command and error.
 <!-- END BEADS INTEGRATION -->
+
+<!-- Repo-specific, deliberately OUTSIDE the tool-managed BEADS INTEGRATION block above. -->
+
+## Memory (overrides the beads block above)
+
+Do NOT use `bd remember`: it is retired and the bd memory store is empty (2026-10-09). This repo's persistent memory lives in Hindsight, which Claude Code reaches through its `hindsight-memory` plugin (see CLAUDE.md). This agent has no Hindsight integration, so raise a lesson worth keeping with the user instead of storing it.

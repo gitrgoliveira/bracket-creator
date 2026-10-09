@@ -385,7 +385,11 @@ a bout between two people who happen to share a display name could not be attrib
 all, because the name identifies neither of them, and competitors are allowed to share
 one. The representative bout is the one row whose sides are the TEAM names: it keeps them
 and carries the two representatives' member ids beside them, the members picked for each
-side.
+side. Those two ids are a change of their own, ordered apart from the bout's score and
+result: a point struck on the representative bout never alters who was picked, and a pick
+never alters the score, so two boards doing one each both land. The winner's member id
+stays with the bout, and after a merge it always names one of the two picked members (or is
+empty): when a pick changes under it, it is worked out again from the side that won.
 
 Those are two different namespaces, and the field names keep them apart on purpose. A
 match side carries a PARTICIPANT id, which names a competitor or a whole team; a bout side
@@ -577,8 +581,8 @@ sequenceDiagram
 
 **Concurrent writes are merged, never dropped.** A match result is split into groups of
 fields that change together: the scoreline, the verdict (status, winner, decision and the
-notes that describe it), the overtime, the engi flags, the representative players, and each
-bout of a team match on its own. A write names the groups it changes, and each group records
+notes that describe it), the overtime, the engi flags, the representative players, the two fighters picked for a
+representative bout, and each bout of a team match on its own. A write names the groups it changes, and each group records
 the time of the last change applied to it. A change applies only when it was made no earlier
 than the stored change to the same group, so two operators changing different things (one
 records the overtime while another enters a point, or two bouts of a team match are scored on

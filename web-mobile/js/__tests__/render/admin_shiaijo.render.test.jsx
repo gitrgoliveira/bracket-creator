@@ -2184,4 +2184,37 @@ describe('the one-start guard reads the start in flight now, not the render that
     expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-later', 'm-run', 'm-open']);
     expect(utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error')).toBeNull();
   });
+
+  // A Start refused while another start is out names that start. Once the start
+  // has landed, the refusal must not come back when the same match is started
+  // again by an advance (which, unlike a pick, does not clear the refusal).
+  it('c) a refusal made while a start was out does not come back when that match is started again by an advance', async () => {
+    const firstStart = deferred();
+    const secondStart = deferred();
+    const openStarts = [firstStart, secondStart];
+    const onEditScore = vi.fn((_compId, matchId) => (matchId === 'm-open'
+      ? openStarts.shift().promise
+      : Promise.resolve({ applied: true })));
+    let utils;
+    await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+    // Finishing the running bout advances to m-open, and that start is held.
+    let firstAdvance;
+    await act(async () => { firstAdvance = probe.props.onSubmitAndNext({ status: 'completed', winner }); });
+    await act(async () => {});
+    expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-run', 'm-open']);
+    // A Start of the queue row below is refused while m-open's start is out.
+    const itoRow = () => [...utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes('Ito'));
+    await act(async () => { queueStart(utils, 'Ito').click(); });
+    await act(async () => {});
+    expect(itoRow().querySelector('[role="alert"]')?.textContent).toBe(startWhileStartingMessage({ label: scoreRowMatchName(openM) }));
+    // The start lands: the refusal goes with it.
+    await act(async () => { firstStart.resolve({ applied: true }); await firstAdvance; });
+    await act(async () => {});
+    expect(itoRow().querySelector('[role="alert"]')).toBeNull();
+    // m-open is started again by an advance, and that start is still out.
+    await act(async () => { probe.props.onSubmitAndNext({ status: 'completed', winner }); });
+    await act(async () => {});
+    expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-run', 'm-open', 'm-run', 'm-open']);
+    expect(itoRow().querySelector('[role="alert"]'), 'the old refusal must not name the second start').toBeNull();
+  });
 });

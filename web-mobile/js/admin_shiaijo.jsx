@@ -1286,6 +1286,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const syncStartingKey = () => {
         const s = startingRef.current || pickingRef.current;
         if (mountedRef.current) setStartingKey(s ? s.key : null);
+        // With no start out, a "starting" refusal has no start left to name, so it
+        // goes: otherwise the next start of that match would bring it back. Other
+        // refusals are not about a start in flight and stay.
+        if (!s && mountedRef.current) setRefusedTap((prev) => (prev && prev.why === "starting" ? null : prev));
     };
     // `pick` is the pickingRef entry pickMatch made for THIS start, if it is one:
     // that pick is the start itself, not a start in flight against it. `advance`
@@ -1623,7 +1627,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const { compId, matchId, to } = pendingMove;
         setMovingCourt(true);
         try {
-            await onMoveCourt(compId, matchId, to);
+            // The host answers true only when the move landed (the host reports
+            // its own failure and resolves false). A move that did not land
+            // leaves this console's call for the match up.
+            const landed = await onMoveCourt(compId, matchId, to);
+            // The call names the court the match is leaving, so it comes down
+            // once the move has landed (bc-cdbl).
+            if (landed === true) withdrawCall(matchKey({ compId, id: matchId }));
             if (mountedRef.current) setPendingMove(null);
         } finally {
             if (mountedRef.current) setMovingCourt(false);

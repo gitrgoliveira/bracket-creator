@@ -200,6 +200,10 @@ func noteServerBoutChanges(result *state.MatchResult, before, stored []state.Sub
 			result.Changed = append(result.Changed, g)
 		}
 	}
+	// The representatives are a change of their own, not part of the bout row.
+	if !slices.Contains(result.Changed, state.GroupRepPicks) && state.GroupDiffers(was, result, state.GroupRepPicks) {
+		result.Changed = append(result.Changed, state.GroupRepPicks)
+	}
 }
 
 // serverNowMs is the stamp a direct writer gives the groups it changes: the

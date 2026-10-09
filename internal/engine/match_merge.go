@@ -125,6 +125,11 @@ func defaultChangedGroups(stored, incoming *state.MatchResult, nilSubsClear bool
 	for _, p := range positions {
 		out = append(out, state.BoutGroup(p))
 	}
+	// The representatives sit on the representative bout's row: a write that
+	// says nothing about that row says nothing about them.
+	if !slices.Contains(out, state.BoutGroup(state.DaihyosenSubPosition)) {
+		out = slices.DeleteFunc(out, func(g string) bool { return g == state.GroupRepPicks })
+	}
 	return out
 }
 
@@ -299,6 +304,9 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 	if holdReason == "" && finishAtomic {
 		holdReason = HoldReasonFinishAtomic
 	}
+	// What the write said about the representatives, before the loop below
+	// copies stored rows over its own.
+	payloadPickA, payloadPickB := incoming.RepPicks()
 	rep := &state.MergeReport{Stamp: stamp, Changed: changed, HoldReason: holdReason}
 	storedStamps := state.MaterializedGroupStamps(stored.GroupStamps, stored.ModifiedAt, state.SubPositions(stored.SubResults))
 	stamps := state.CloneGroupStamps(storedStamps)
@@ -314,6 +322,22 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 			reportHeld(rep, g, stored, incoming, nil)
 		}
 		state.CopyGroup(incoming, stored, g)
+	}
+	// A pick has no bout to land on once the representative bout is gone (a
+	// removal's tombstone, or a row the write carried that its stamp could not
+	// bring back): the picks are held, in the history, not applied onto nothing.
+	if i := slices.Index(rep.Applied, state.GroupRepPicks); i >= 0 && (payloadPickA != "" || payloadPickB != "") &&
+		state.DaihyosenSubIndex(incoming.SubResults) < 0 {
+		rep.Applied = slices.Delete(rep.Applied, i, i+1)
+		ghost := &state.MatchResult{SubResults: []state.SubMatchResult{{
+			Position: state.DaihyosenSubPosition, SideAMemberID: payloadPickA, SideBMemberID: payloadPickB,
+		}}}
+		reportHeld(rep, state.GroupRepPicks, stored, ghost, nil)
+		if s, ok := storedStamps[state.GroupRepPicks]; ok {
+			stamps[state.GroupRepPicks] = s
+		} else {
+			delete(stamps, state.GroupRepPicks)
+		}
 	}
 	resultApplied := inChanged[state.GroupResult] && !hold[state.GroupResult]
 	rep.ResultChanged = resultApplied
@@ -475,6 +499,12 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 	// no eligibility consequence.
 	if slices.Contains(rep.Unchanged, state.GroupResult) {
 		rep.ResultChanged = false
+	}
+	// The winner's member id is the bout's, the representatives their own
+	// change: after both are settled, an id that names neither stored pick is
+	// derived again from the winning side (or left empty).
+	if i := state.DaihyosenSubIndex(incoming.SubResults); i >= 0 {
+		incoming.SubResults[i].ReconcileWinnerMemberID()
 	}
 	if len(stamps) == 0 {
 		stamps = nil

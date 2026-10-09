@@ -1431,6 +1431,23 @@ func (s *SubMatchResult) ResolveMemberWinnerID() bool {
 	return false
 }
 
+// ReconcileWinnerMemberID keeps a representative-bout row's WinnerMemberID
+// consistent with the two representatives it names: WinnerMemberID belongs to
+// the bout's result and the representatives to their own change
+// (GroupRepPicks), so a merge can leave a winner id naming a member who is no
+// longer picked. A stored id that names neither side's representative is
+// cleared and derived again from the winner's side and the side's pick
+// (ResolveMemberWinnerID), so it names one of them or is empty. It reports
+// whether the id changed.
+func (s *SubMatchResult) ReconcileWinnerMemberID() bool {
+	if s.WinnerMemberID == "" || domain.WinnerIDNamesASide(s.WinnerMemberID, s.SideAMemberID, s.SideBMemberID) {
+		return false
+	}
+	s.WinnerMemberID = ""
+	s.ResolveMemberWinnerID()
+	return true
+}
+
 // IneligibleSidesAnnotation names which side(s) of a SCHEDULED match are
 // currently barred by a withdrawal recorded on a DIFFERENT match (bc-cse).
 // Both fields are optional and independent: either, both, or neither may be

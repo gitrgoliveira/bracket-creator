@@ -541,6 +541,9 @@ func preserveSubHantei(stored, incoming []state.SubMatchResult) {
 	// guards it): the mark and the winner it names move as one atomic
 	// unit, never separately.
 	in.Winner = prior.Winner
+	// The winner's member id is the bout's, the representatives their own
+	// change: keep the pair consistent (SubMatchResult.ReconcileWinnerMemberID).
+	in.ReconcileWinnerMemberID()
 }
 
 // preserveDaihyosenOutcome is the call every forward SubResults replacement

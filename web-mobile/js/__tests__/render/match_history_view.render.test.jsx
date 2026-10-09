@@ -155,6 +155,8 @@ describe('heldValueText', () => {
     ['result', { status: 'completed', decision: 'fusensho', decisionBy: 'shiro' }, 'Fusensho against Shiro'],
     ['result', { status: 'completed', winner: 'Tanaka' }, 'Tanaka won'],
     ['bout:-1', null, 'no bout'],
+    ['repPicks', { sideAMemberId: 'm1a', sideBMemberId: '' }, 'Shiro not picked, Aka picked'],
+    ['repPicks', null, 'not picked'],
   ])('%s %j reads "%s"', (group, value, words) => {
     expect(view.heldValueText(group, value)).toBe(words);
   });

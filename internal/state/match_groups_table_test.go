@@ -149,16 +149,75 @@ func TestMergeReport_HeldDecisionRequiresTheDefaultWinStandsReason(t *testing.T)
 	assert.Empty(t, (*MergeReport)(nil).HeldDecision(), "a nil report names no decision")
 }
 
-// bc-dhrp: a representative pick is a change of the bout row it sits on. The row
-// is copied whole when its group applies, so a pick added or cleared is a
-// difference in the group, and the copy takes the row exactly as sent.
-func TestBoutGroup_RepresentativeMemberIDIsAChange(t *testing.T) {
-	group := BoutGroup(DaihyosenSubPosition)
-	picked := &MatchResult{SubResults: []SubMatchResult{{Position: DaihyosenSubPosition, SideA: "TeamA", SideB: "TeamB", Decision: "daihyosen", SideBMemberID: "rep-b"}}}
-	cleared := &MatchResult{SubResults: []SubMatchResult{{Position: DaihyosenSubPosition, SideA: "TeamA", SideB: "TeamB", Decision: "daihyosen"}}}
-	assert.True(t, GroupDiffers(picked, cleared, group), "a pick cleared is a change of the row")
+// The two representatives of the representative bout are a change of their own
+// (GroupRepPicks), apart from the bout row they sit on (bout:-1): a pick added
+// or cleared differs in the picks and not in the bout, a point differs in the
+// bout and not in the picks, and each copy moves only its own fields, in
+// either order.
+func TestRepPicks_AreAChangeApartFromTheBout(t *testing.T) {
+	bout := BoutGroup(DaihyosenSubPosition)
+	row := func(a, b string, ippons ...string) SubMatchResult {
+		return SubMatchResult{Position: DaihyosenSubPosition, SideA: "TeamA", SideB: "TeamB", Decision: "daihyosen",
+			SideAMemberID: a, SideBMemberID: b, IpponsA: ippons}
+	}
+	match := func(r SubMatchResult) *MatchResult { return &MatchResult{SubResults: []SubMatchResult{r}} }
 
-	dst := &MatchResult{SubResults: CloneSubResults(picked.SubResults)}
-	CopyGroup(dst, cleared, group)
-	assert.Empty(t, dst.SubResults[0].SideBMemberID, "the copy takes the row as sent, so a cleared id clears")
+	picked, cleared, scored := match(row("", "rep-b")), match(row("", "")), match(row("", "", "M"))
+	assert.True(t, GroupDiffers(picked, cleared, GroupRepPicks), "a pick cleared is a change of the picks")
+	assert.False(t, GroupDiffers(picked, cleared, bout), "and not of the bout")
+	assert.True(t, GroupDiffers(cleared, scored, bout), "a point is a change of the bout")
+	assert.False(t, GroupDiffers(cleared, scored, GroupRepPicks), "and not of the picks")
+	assert.JSONEq(t, `{"sideAMemberId":"","sideBMemberId":"rep-b"}`, string(GroupValue(picked, GroupRepPicks)))
+	assert.JSONEq(t, `null`, string(GroupValue(&MatchResult{}, bout)), "a removed bout has no value")
+	assert.JSONEq(t, `{"sideAMemberId":"","sideBMemberId":""}`, string(GroupValue(&MatchResult{}, GroupRepPicks)), "no bout, no picks")
+
+	// Picks from one match, the bout from another: each copy takes only its own
+	// fields, so the result is the same in either order.
+	for _, picksFirst := range []bool{true, false} {
+		dst, stored := match(row("carol", "", "K")), match(row("dana", "", "M"))
+		if picksFirst {
+			CopyGroup(dst, stored, GroupRepPicks)
+			CopyGroup(dst, stored, bout)
+		} else {
+			CopyGroup(dst, stored, bout)
+			CopyGroup(dst, stored, GroupRepPicks)
+		}
+		assert.Equal(t, []string{"M"}, dst.SubResults[0].IpponsA, "picksFirst=%v", picksFirst)
+		assert.Equal(t, "dana", dst.SubResults[0].SideAMemberID, "picksFirst=%v", picksFirst)
+	}
+	// And a bout copy alone leaves the picks where they are.
+	dst := match(row("carol", "", "K"))
+	CopyGroup(dst, match(row("dana", "", "M")), bout)
+	assert.Equal(t, "carol", dst.SubResults[0].SideAMemberID, "the bout's copy leaves the picks alone")
+
+	// A copy of the bout onto a match with no such row brings the row whole,
+	// picks included; a copy of the picks onto no row lands nowhere.
+	empty := &MatchResult{}
+	CopyGroup(empty, picked, GroupRepPicks)
+	assert.Empty(t, empty.SubResults, "a pick has no bout to land on")
+	CopyGroup(empty, picked, bout)
+	require.Len(t, empty.SubResults, 1)
+	assert.Equal(t, "rep-b", empty.SubResults[0].SideBMemberID)
+	// A removal removes the row, picks and all.
+	CopyGroup(empty, &MatchResult{}, bout)
+	assert.Empty(t, empty.SubResults)
+}
+
+// A match written before the picks had a stamp of their own dates them with
+// the bout row they sit on, and that date is fixed the first time the map is
+// materialized, so a later stamp of the bout does not move it.
+func TestRepPicks_LegacyStampFollowsTheBoutOnceThenStandsAlone(t *testing.T) {
+	bout := BoutGroup(DaihyosenSubPosition)
+	m := &MatchResult{ModifiedAt: 50, GroupStamps: map[string]int64{bout: 40, GroupPoints: 50}}
+	assert.Equal(t, int64(40), m.GroupStamp(GroupRepPicks), "no entry yet: the bout row's date")
+	assert.Equal(t, int64(0), (&MatchResult{GroupStamps: map[string]int64{}}).GroupStamp(GroupRepPicks), "never written")
+
+	m.StampGroups(90, bout)
+	assert.Equal(t, int64(90), m.GroupStamp(bout))
+	assert.Equal(t, int64(40), m.GroupStamp(GroupRepPicks), "the point did not date the picks")
+
+	legacy := &MatchResult{ModifiedAt: 30, SubResults: []SubMatchResult{{Position: DaihyosenSubPosition}}}
+	assert.Equal(t, int64(30), legacy.GroupStamp(GroupRepPicks), "a match with no map reads ModifiedAt")
+	legacy.StampGroups(60, bout)
+	assert.Equal(t, int64(30), legacy.GroupStamp(GroupRepPicks), "materialized with every other group")
 }

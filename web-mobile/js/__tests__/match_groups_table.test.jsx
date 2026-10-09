@@ -114,6 +114,7 @@ describe('groupLabel', () => {
     ['encho', 'overtime'],
     ['flags', 'flags'],
     ['rep', 'the representative players'],
+    ['repPicks', 'the fighters picked for the representative bout'],
     ['bout:2', 'bout 2'],
     ['bout:-1', 'the representative bout'],
   ])('%s reads "%s"', (g, words) => {
@@ -153,24 +154,49 @@ describe('the serializer', () => {
   });
 });
 
-// bc-dhrp: the representative bout's member ids are its pick. The server copies a
-// named bout row WHOLE, so a pick cleared (the key left out) must name the group,
-// or the stored id survives. Numbered rows keep the rule they always had.
-describe('the member ids of a bout row (bc-dhrp)', () => {
+// The two representatives of the representative bout (the member ids on the -1 row)
+// are a change of their own, `repPicks`, dated apart from the bout row they sit on.
+// A pick never alters the score and a point never alters the pick, so a write names
+// the one it changed and not the other. Numbered rows keep the rule they always had.
+describe('the representatives of the representative bout (repPicks)', () => {
   const bout = (position, extra = {}) => ({
     position, sideA: 'Team A', sideB: 'Team B', ipponsA: [], ipponsB: [], winner: '', decision: 'daihyosen', ...extra,
   });
 
-  it('a representative pick cleared (key omitted) names bout:-1', () => {
+  it('a representative pick cleared (key omitted) names repPicks and not bout:-1', () => {
     const stored = { subResults: [bout(-1, { sideBMemberId: 'm1b' })] };
     const next = { subResults: [bout(-1)] };
+    expect(changedGroups(next, stored)).toEqual(['repPicks']);
+  });
+
+  it('a representative pick added names repPicks and not bout:-1', () => {
+    const stored = { subResults: [bout(-1)] };
+    const next = { subResults: [bout(-1, { sideBMemberId: 'm1b' })] };
+    expect(changedGroups(next, stored)).toEqual(['repPicks']);
+  });
+
+  it('a point struck on the representative bout names bout:-1 and not repPicks, whatever ids the row carries', () => {
+    // A board that never saw the pick holds the row without it, and sends it so.
+    expect(changedGroups({ subResults: [bout(-1, { ipponsA: ['M'] })] }, { subResults: [bout(-1)] })).toEqual(['bout:-1']);
+    // A board that did see it holds it and sends it back.
+    const seen = { subResults: [bout(-1, { sideAMemberId: 'm1a' })] };
+    expect(changedGroups({ subResults: [bout(-1, { ipponsA: ['M'], sideAMemberId: 'm1a' })] }, seen)).toEqual(['bout:-1']);
+  });
+
+  it('a pick and a point together name both', () => {
+    const stored = { subResults: [bout(-1)] };
+    const next = { subResults: [bout(-1, { ipponsA: ['M'], sideBMemberId: 'm1b' })] };
+    expect(changedGroups(next, stored)).toEqual(['repPicks', 'bout:-1']);
+  });
+
+  it('the winner\'s member id belongs to the bout', () => {
+    const stored = { subResults: [bout(-1, { sideAMemberId: 'm1a' })] };
+    const next = { subResults: [bout(-1, { winner: 'Team A', winnerMemberId: 'm1a', sideAMemberId: 'm1a' })] };
     expect(changedGroups(next, stored)).toEqual(['bout:-1']);
   });
 
-  it('a representative pick added names bout:-1', () => {
-    const stored = { subResults: [bout(-1)] };
-    const next = { subResults: [bout(-1, { sideBMemberId: 'm1b' })] };
-    expect(changedGroups(next, stored)).toEqual(['bout:-1']);
+  it('a write with no representative row names no picks', () => {
+    expect(changedGroups({ subResults: [bout(1, { decision: '' })] }, { subResults: [bout(1, { decision: '' })] })).toEqual([]);
   });
 
   it('a numbered row whose id is left out is not a change, as before', () => {

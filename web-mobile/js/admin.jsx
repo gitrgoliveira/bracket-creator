@@ -298,14 +298,17 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   //      real outcome.
   //   2. Post-mutation refresh: best-effort via refreshCompsBestEffort.
   //      A refresh failure cannot make the mutation "look failed."
+  // Resolves true when the move landed and false when it failed (the failure is
+  // toasted here), so a caller can tell the two apart.
   const moveMatchCourt = async (compId, matchId, newCourt) => {
     try {
       await window.API.moveMatchCourt(compId, matchId, newCourt, password);
     } catch (e) {
       showToast(e.message, "error");
-      return;
+      return false;
     }
     await refreshCompsBestEffort("Move");
+    return true;
   };
 
   // bc-kcdg: THE single chokepoint every score-editor host (the bracket

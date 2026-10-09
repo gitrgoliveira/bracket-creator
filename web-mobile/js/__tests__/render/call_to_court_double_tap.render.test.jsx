@@ -12,7 +12,7 @@
 // them and these tests could never go red.
 
 import React from 'react';
-import { render, act, screen, cleanup } from '@testing-library/react';
+import { render, act, screen, cleanup, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
@@ -24,7 +24,15 @@ const STUBBED_GLOBALS = {
   AdminTopbar: ({ children }) => <div data-testid="topbar">{children}</div>,
   Breadcrumbs: () => null,
   ScoreEditorModal: (props) => <div data-testid="score-editor" data-match={props.match ? props.match.id : ''} />,
-  CourtPicker: () => <span />,
+  // One button per OTHER court, calling onChange as the real picker does, so a
+  // test can reach the move confirm from a queue row.
+  CourtPicker: ({ value, courts, onChange }) => (
+    <span>
+      {(courts || []).filter((cc) => cc !== value).map((cc) => (
+        <button type="button" key={cc} data-testid={`move-to-${cc}`} onClick={() => onChange(cc)}>{`Move to ${cc}`}</button>
+      ))}
+    </span>
+  ),
   BracketTree: () => null,
   Icon: ({ name }) => <span>{name}</span>,
   filterMatchesByCourt: (matches) => matches,
@@ -84,14 +92,14 @@ function twoScheduledMatches() {
 
 // A new tournament object on every call, so rerender() re-derives the court's
 // matches from window.tournamentMatches (the console memoises on it).
-function consoleElement(onEditScore) {
+function consoleElement(onEditScore, onMoveCourt = vi.fn()) {
   return (
     <AdminShiaijoPage
       tournament={{ name: 'Test Tournament', courts: ['A', 'B'], competitions: [] }}
       court="A"
       onBack={vi.fn()}
       onEditScore={onEditScore}
-      onMoveCourt={vi.fn()}
+      onMoveCourt={onMoveCourt}
       onLogout={vi.fn()}
       onViewerMode={vi.fn()}
       password=""
@@ -106,7 +114,7 @@ function renderConsole(props = {}) {
   window.tournamentMatches = () => twoScheduledMatches();
   window.filterMatchesByCourt = (matches) => matches;
   const onEditScore = props.onEditScore || vi.fn().mockResolvedValue({ applied: true });
-  return render(consoleElement(onEditScore));
+  return render(consoleElement(onEditScore, props.onMoveCourt));
 }
 
 // The console's match list as the next refetch shows it: a rerender with a new
@@ -372,6 +380,37 @@ describe('Call to court double tap (bc-cdbl)', () => {
     renderConsole();
     await pointerTap(screen.getAllByRole('button', { name: 'Start match' })[0]);
     await act(async () => {});
+    expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
+  });
+
+  // Calls m2 from its queue row, then moves m2 to shiaijo B from the same row.
+  // The move confirm is the console's own dialog (requestMoveCourt, then
+  // confirmMoveCourt), so it is driven through the row's court picker.
+  const callThenMoveSuzuki = async (onMoveCourt) => {
+    const { container } = renderConsole({ onMoveCourt });
+    await pointerTap(callButtons()[1]);
+    expect(window.API.sendAnnouncement).toHaveBeenCalledTimes(1);
+    const row = [...container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes('Suzuki'));
+    await pointerTap(within(row).getByTestId('move-to-B'));
+    await wait(TAP_BOUNCE_MS + 50);
+    await pointerTap(screen.getByRole('button', { name: 'Move to Shiaijo B' }));
+    await act(async () => {});
+  };
+
+  it('moving the called match to another court from this console withdraws its call', async () => {
+    // The host answers true once the move has landed (admin.jsx moveMatchCourt).
+    const onMoveCourt = vi.fn(async () => true);
+    await callThenMoveSuzuki(onMoveCourt);
+    expect(onMoveCourt).toHaveBeenCalledWith('c1', 'm2', 'B');
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-1', '');
+  });
+
+  it('a move that fails leaves the call up', async () => {
+    // The real host catches the failed move, toasts it and resolves false.
+    const onMoveCourt = vi.fn(async () => false);
+    await callThenMoveSuzuki(onMoveCourt);
+    expect(onMoveCourt).toHaveBeenCalledWith('c1', 'm2', 'B');
     expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
   });
 });

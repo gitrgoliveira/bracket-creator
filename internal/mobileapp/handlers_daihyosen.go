@@ -267,9 +267,11 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			u.Encho = nil
 			// What the remove changes (bc-mrgc): the representative bout (its
 			// stamp stays as a tombstone, so an older write still carrying the
-			// row cannot bring it back), the verdict, the overtime, and the
-			// scoreline when clearing the verdict took a hantei mark out of it.
-			u.Changed = daihyosenChangedGroups(match, &u, state.GroupResult, state.GroupEncho)
+			// row cannot bring it back), its representatives (they go with the
+			// row, and their stamp dates the removal so a pick made before it
+			// is held, not applied onto nothing), the verdict, the overtime, and
+			// the scoreline when clearing the verdict took a hantei mark out of it.
+			u.Changed = daihyosenChangedGroups(match, &u, state.GroupResult, state.GroupEncho, state.GroupRepPicks)
 			u.WriteDoor = engine.DoorDaihyosenDel
 			if _, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, &u); err != nil {
 				if errors.Is(err, engine.ErrMatchSuperseded) {
@@ -471,7 +473,9 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			u.Status = state.MatchStatusRunning // daihyosen bout in progress
 			// What the add changes (bc-mrgc): the new representative bout and
 			// the verdict, and the scoreline when clearing the verdict took a
-			// hantei mark out of it.
+			// hantei mark out of it. The new row is built with no
+			// representatives, so it names none: the picks are the pickers' to
+			// date.
 			u.Changed = daihyosenChangedGroups(match, &u, state.GroupResult)
 			u.WriteDoor = engine.DoorDaihyosenAdd
 			if _, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, &u); err != nil {

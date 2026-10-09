@@ -147,7 +147,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     expect(dhInput('AKA').value).toBe('');
   });
 
-  it('R2: picking a member records its id on the -1 row, keeps the team names, and names bout:-1', async () => {
+  it('R2: picking a member records its id on the -1 row, keeps the team names, and names repPicks', async () => {
     const match = makeMatch({ subResults: [DH_EMPTY] });
     const { onSubmit } = await mount(match);
     await pickFromDh('SHIRO', 'Carol');
@@ -163,7 +163,8 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     const wireDh = wire.subResults.find((s) => s.position === -1);
     expect(wireDh.sideBMemberId).toBe('m1b');
     expect(wireDh.sideB).toBe('Team B');
-    expect(wire.changed).toContain('bout:-1');
+    expect(wire.changed).toContain('repPicks');
+    expect(wire.changed, 'a pick is not a change of the bout').not.toContain('bout:-1');
     // A pick is never a lineup write: "daihyosen" is not a lineup key.
     expect(window.API.putMatchLineup).not.toHaveBeenCalled();
   });
@@ -190,7 +191,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     expect(dh.sideB).toBe('Team B');
   });
 
-  it('R4: clearing a stored pick omits the id and names bout:-1 on the next write', async () => {
+  it('R4: clearing a stored pick omits the id and names repPicks on the next write', async () => {
     const match = makeMatch({ subResults: [{ ...DH_EMPTY, sideBMemberId: 'm1b' }] });
     const { onSubmit } = await mount(match);
     // The stored pick shows as the member's own name, never the team's.
@@ -203,7 +204,9 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     const dh = dhEntryOf(patch);
     expect('sideBMemberId' in dh).toBe(false);
     expect(dh.sideB).toBe('Team B');
-    expect(toBackendMatchResult(patch, match).changed).toContain('bout:-1');
+    const cleared = toBackendMatchResult(patch, match).changed;
+    expect(cleared).toContain('repPicks');
+    expect(cleared).not.toContain('bout:-1');
   });
 
   it('R5: the representative roster includes a member already placed at a numbered position', async () => {

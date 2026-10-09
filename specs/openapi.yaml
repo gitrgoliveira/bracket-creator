@@ -51,9 +51,11 @@ info:
     not have (a sheet a moment behind a remove made elsewhere) is dropped from the
     write and the rest is written as usual, unless the write finishes the match,
     which may take its winner from that row and is refused with 409 `no_daihyosen`; a write listing
-    two is refused with 400 `duplicate_daihyosen`, and a representative pick that names a member the
-    side's team does not hold, or a winner that names neither representative, is refused with 400
-    `team_member_not_in_team`. Nor does it remove one: a write listing
+    two is refused with 400 `duplicate_daihyosen`, a representative pick that names a member the
+    side's team does not hold is refused with 400 `team_member_not_in_team`, and a winner that names
+    neither representative is refused with 400 `representative_winner_invalid`. A write stamped before
+    the stored representative bout is not judged for its picks: the merge holds that row, and the write
+    is answered as superseded. Nor does it remove one: a write listing
     the bouts without the representative bout the match has (a sheet a moment behind an
     add made elsewhere) keeps the stored row, scored or not, unless it finishes the match,
     which is refused with 409 `daihyosen_added`. It carries only what the competitors saw: a match
@@ -2482,13 +2484,17 @@ paths:
             The same request with an empty password is refused with `error:
             team_member_not_in_team`, with a `message` to show, when its
             representative bout (position `-1`) names a member the side's team
-            does not hold (a pick the stored row does not already hold), or when
-            its winner id names neither of the row's two representatives (judged
-            whenever the write introduces any of the row's three ids). The
-            `message` is "The representative chosen is not on this team. Pick
-            again from the list.", or "The winner chosen is neither side's
-            representative. Pick the winner from the two representatives."
-            Nothing is written. The organiser's picks are not checked.
+            does not hold (a pick the stored row does not already hold). It is
+            refused with `error: representative_winner_invalid`, with a `message`
+            to show, when its winner id names neither of the row's two
+            representatives (judged whenever the write introduces any of the row's
+            three ids). The `message` is "The representative chosen is not on this
+            team. Pick again from the list.", or "The winner chosen is neither
+            side's representative. Pick the winner from the two representatives."
+            A representative bout row stamped strictly before the stored one is not
+            judged: the merge holds that row, and the write is answered as
+            superseded (an equal stamp applies, so it is judged). Nothing is
+            written. The organiser's picks are not checked.
 
             A `completed` write whose `decision` is empty or `hikiwake` on a
             match whose stored result is a completed withdrawal (kiken or
@@ -2526,7 +2532,7 @@ paths:
                     description: >
                       The reason the payload was refused, or for the self-run refusals
                       the machine-readable code (`duplicate_daihyosen`,
-                      `team_member_not_in_team`).
+                      `team_member_not_in_team`, `representative_winner_invalid`).
                   message:
                     type: string
                     description: The sentence the public page shows as it is, for the self-run refusals.
@@ -5392,11 +5398,16 @@ components:
         decision, decisionBy, decisionReason, and the correctionReason and
         resultSource that describe it); `encho` the match-level overtime;
         `flags` the engi flag counts; `rep` the pool representative players;
-        and `bout:<position>` one bout row (1..n, or -1 for the representative
-        bout). The sides, court, schedule and round are not groups. A write
+        `repPicks` the two representatives of a team match's representative
+        bout (the member ids `sideAMemberId` and `sideBMemberId` on its `-1`
+        row), a change of their own that a point struck on the bout never
+        alters and that never alters the bout's score; and `bout:<position>`
+        one bout row (1..n, or -1 for the representative bout, without the
+        two representatives). The sides, court, schedule and round are not
+        groups. A write
         names the groups it changes in `changed`; the match records the stamp
         of the last applied change to each in `groupStamps`.
-      pattern: '^(points|result|encho|flags|rep|bout:-?[0-9]+)$'
+      pattern: '^(points|result|encho|flags|rep|repPicks|bout:-?[0-9]+)$'
 
     DaihyosenWriteStamp:
       type: object

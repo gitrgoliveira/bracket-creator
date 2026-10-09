@@ -43,12 +43,23 @@ const (
 	GroupFlags = "flags"
 	// GroupRep holds the pool daihyosen/tiebreaker representative players.
 	GroupRep = "rep"
+	// GroupRepPicks holds the two representatives a team match's
+	// representative bout is fought by: SideAMemberID and SideBMemberID of the
+	// row at DaihyosenSubPosition. They are a change of their own, dated and
+	// ordered apart from the bout row they sit on (bout:-1), which keeps the
+	// bout's score and result: a point struck on the bout never alters who was
+	// picked, and a pick never alters the score. The row's WinnerMemberID
+	// stays with the bout (it is part of the result), and the merge
+	// re-derives it whenever the two disagree (SubMatchResult.
+	// ReconcileWinnerMemberID). Not to be confused with GroupRep, the pool
+	// daihyosen/tiebreaker players.
+	GroupRepPicks = "repPicks"
 
 	boutGroupPrefix = "bout:"
 )
 
 // ScalarGroups lists the scalar groups in their fixed order.
-var ScalarGroups = []string{GroupPoints, GroupResult, GroupEncho, GroupFlags, GroupRep}
+var ScalarGroups = []string{GroupPoints, GroupResult, GroupEncho, GroupFlags, GroupRep, GroupRepPicks}
 
 // BoutGroup names the group of the bout row at position (1..n, or
 // DaihyosenSubPosition for the representative bout).
@@ -115,6 +126,31 @@ func subAt(subs []SubMatchResult, position int) *SubMatchResult {
 	return nil
 }
 
+// RepPicks returns the two representatives the row at DaihyosenSubPosition
+// names, empty when the match has no such row.
+func (m *MatchResult) RepPicks() (sideA, sideB string) {
+	if row := subAt(m.SubResults, DaihyosenSubPosition); row != nil {
+		return row.SideAMemberID, row.SideBMemberID
+	}
+	return "", ""
+}
+
+// SetRepPicks puts the two representatives on the row at DaihyosenSubPosition.
+// It does nothing when the match has no such row: a pick has no bout to land
+// on. The list is replaced, not edited in place, so a row another copy of the
+// match shares is never written through.
+func (m *MatchResult) SetRepPicks(sideA, sideB string) {
+	for i := range m.SubResults {
+		if m.SubResults[i].Position != DaihyosenSubPosition {
+			continue
+		}
+		subs := append([]SubMatchResult(nil), m.SubResults...)
+		subs[i].SideAMemberID, subs[i].SideBMemberID = sideA, sideB
+		m.SubResults = subs
+		return
+	}
+}
+
 // boutOrderKey sorts bout rows the way every writer appends them: numbered
 // bouts ascending, the representative bout (and any other negative) after.
 func boutOrderKey(position int) int {
@@ -176,9 +212,20 @@ func CopyGroup(dst, src *MatchResult, group string) {
 		dst.FlagsA, dst.FlagsB = src.FlagsA, src.FlagsB
 	case GroupRep:
 		dst.RepPlayerA, dst.RepPlayerB = src.RepPlayerA, src.RepPlayerB
+	case GroupRepPicks:
+		dst.SetRepPicks(src.RepPicks())
 	default:
 		if pos, ok := ParseBoutGroup(group); ok {
-			dst.SubResults = setSubAt(dst.SubResults, pos, subAt(src.SubResults, pos))
+			row := subAt(src.SubResults, pos)
+			// The representatives are not the bout's: a copy of the bout keeps the
+			// picks the destination row already holds (GroupRepPicks moves them),
+			// so the two copies give the same result in either order.
+			if dstRow := subAt(dst.SubResults, pos); pos == DaihyosenSubPosition && row != nil && dstRow != nil {
+				kept := *row
+				kept.SideAMemberID, kept.SideBMemberID = dstRow.SideAMemberID, dstRow.SideBMemberID
+				row = &kept
+			}
+			dst.SubResults = setSubAt(dst.SubResults, pos, row)
 		}
 	}
 }
@@ -222,6 +269,11 @@ type flagsGroup struct {
 	FlagsB int `json:"flagsB"`
 }
 
+type repPicksGroup struct {
+	SideAMemberID string `json:"sideAMemberId"`
+	SideBMemberID string `json:"sideBMemberId"`
+}
+
 type repGroup struct {
 	RepPlayerA string `json:"repPlayerA"`
 	RepPlayerB string `json:"repPlayerB"`
@@ -248,6 +300,9 @@ func groupProjection(m *MatchResult, group string) any {
 		return flagsGroup{FlagsA: m.FlagsA, FlagsB: m.FlagsB}
 	case GroupRep:
 		return repGroup{RepPlayerA: m.RepPlayerA, RepPlayerB: m.RepPlayerB}
+	case GroupRepPicks:
+		a, b := m.RepPicks()
+		return repPicksGroup{SideAMemberID: a, SideBMemberID: b}
 	}
 	if pos, ok := ParseBoutGroup(group); ok {
 		row := subAt(m.SubResults, pos)
@@ -256,6 +311,10 @@ func groupProjection(m *MatchResult, group string) any {
 		}
 		c := CloneSubResults([]SubMatchResult{*row})[0]
 		c.IpponsA, c.IpponsB = nonNilStrings(c.IpponsA), nonNilStrings(c.IpponsB)
+		if pos == DaihyosenSubPosition {
+			// The representatives are GroupRepPicks', not the bout's.
+			c.SideAMemberID, c.SideBMemberID = "", ""
+		}
 		return &c
 	}
 	return nil
@@ -295,7 +354,13 @@ func groupStampOf(stamps map[string]int64, modifiedAt int64, group string) int64
 	if stamps == nil {
 		return modifiedAt
 	}
-	return stamps[group]
+	if v, ok := stamps[group]; ok || group != GroupRepPicks {
+		return v
+	}
+	// A map written before the representatives had a group of their own dated
+	// them with the bout row they sit on: until they are stamped themselves,
+	// that is their date.
+	return stamps[BoutGroup(DaihyosenSubPosition)]
 }
 
 // GroupStamp is the stored stamp of group on m (see groupStampOf).
@@ -314,7 +379,15 @@ func (bm *BracketMatch) GroupStamp(group string) int64 {
 // stamped, or every other group would start reading the new ModifiedAt.
 func MaterializedGroupStamps(stamps map[string]int64, modifiedAt int64, positions []int) map[string]int64 {
 	if stamps != nil {
-		return CloneGroupStamps(stamps)
+		out := CloneGroupStamps(stamps)
+		// Fix the fallback groupStampOf reads, or the picks' date would follow
+		// the bout row's every later stamp.
+		if _, ok := out[GroupRepPicks]; !ok {
+			if v, ok := out[BoutGroup(DaihyosenSubPosition)]; ok {
+				out[GroupRepPicks] = v
+			}
+		}
+		return out
 	}
 	out := map[string]int64{}
 	if modifiedAt <= 0 {

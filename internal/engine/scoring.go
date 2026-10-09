@@ -543,12 +543,13 @@ func preserveSubHantei(stored, incoming []state.SubMatchResult) {
 	in.Winner = prior.Winner
 	// The winner's member id travels with the winner it names: the incoming
 	// row is verdict-silent, so its own id is either empty (the stored one
-	// would be lost) or stale (it can name the OTHER side's pick, which
-	// ReconcileWinnerMemberID accepts, and id-first attribution would then
-	// credit the wrong side).
+	// would be lost) or stale (it can name the OTHER side's pick, and
+	// id-first attribution would then credit the wrong side).
 	in.WinnerMemberID = prior.WinnerMemberID
-	// The representatives are their own change, so the stored id may now name
-	// a member no longer picked: keep the pair consistent
+	// Neither id is trusted, the stored one included: the representatives are
+	// their own change, so even the stored id may disagree with the picks this
+	// row now holds. The reconcile derives the id again from the winner's NAME
+	// and those picks, so it is exactly the winning side's pick or empty
 	// (SubMatchResult.ReconcileWinnerMemberID).
 	in.ReconcileWinnerMemberID()
 }

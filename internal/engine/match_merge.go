@@ -501,8 +501,9 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 		rep.ResultChanged = false
 	}
 	// The winner's member id is the bout's, the representatives their own
-	// change: after both are settled, an id that names neither stored pick is
-	// derived again from the winning side (or left empty).
+	// change: after both are settled, the id is derived again from the winner's
+	// name and the stored picks, so it is exactly the winning side's pick (or
+	// empty), whatever id the write carried.
 	if i := state.DaihyosenSubIndex(incoming.SubResults); i >= 0 {
 		incoming.SubResults[i].ReconcileWinnerMemberID()
 	}

@@ -507,4 +507,52 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
       vi.useRealTimers();
     }
   });
+
+  it('R24: a representative typed on a row that then leaves the sheet lands nothing, and a bout added again shows no pick from it', async () => {
+    // The member POST is still out when another device removes the representative bout.
+    let answerEve;
+    window.API.addTeamMember.mockImplementation(() => new Promise((resolve) => { answerEve = resolve; }));
+    const t0 = Date.now();
+    const { onSubmit, rerenderWith } = await mount(makeMatch({ modifiedAt: t0, subResults: [DH_EMPTY] }));
+    const input = dhInput('SHIRO');
+    await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Eve' } }); });
+    const add = await screen.findByText(/Add “Eve”/);
+    await act(async () => { fireEvent.click(add.closest('button')); });
+    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Eve', ''));
+    // Another device removes the representative bout: the row is gone from the sheet.
+    await rerenderWith(makeMatch({ modifiedAt: t0 + 1000 }));
+    expect(dhInputs(), 'the representative row has left the sheet').toHaveLength(0);
+    // The POST answers late. The pick belonged to a row that is gone, so it lands nothing.
+    await act(async () => { answerEve({ id: 'm9', name: 'Eve', index: 3 }); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    // Past the autosave debounce: a pick that landed (and marked the sheet dirty) would be written here.
+    await act(async () => { await new Promise((r) => setTimeout(r, 500)); });
+    expect(onSubmit, 'a pick on a row that is gone arms no autosave').not.toHaveBeenCalled();
+    // The representative bout is added again (a fresh, empty row, stamped later).
+    await rerenderWith(makeMatch({ modifiedAt: t0 + 2000, subResults: [DH_EMPTY] }));
+    expect(dhInput('SHIRO').value, 'the new bout shows no pick from the old one').toBe('');
+    await clickFinishTwice();
+    const dh = dhEntryOf(finishPatchOf(onSubmit));
+    expect('sideBMemberId' in dh, 'the old pick is not sent on the new bout').toBe(false);
+  });
+
+  it('R25: a representative typed before the bout was removed and added again lands nothing on the new bout, even if it answers after the add', async () => {
+    let answerEve;
+    window.API.addTeamMember.mockImplementation(() => new Promise((resolve) => { answerEve = resolve; }));
+    const t0 = Date.now();
+    const { onSubmit, rerenderWith } = await mount(makeMatch({ modifiedAt: t0, subResults: [DH_EMPTY] }));
+    const input = dhInput('SHIRO');
+    await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Eve' } }); });
+    const add = await screen.findByText(/Add “Eve”/);
+    await act(async () => { fireEvent.click(add.closest('button')); });
+    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Eve', ''));
+    await rerenderWith(makeMatch({ modifiedAt: t0 + 1000 }));
+    await rerenderWith(makeMatch({ modifiedAt: t0 + 2000, subResults: [DH_EMPTY] }));
+    // The POST answers only now, with the new representative bout already on the sheet.
+    await act(async () => { answerEve({ id: 'm9', name: 'Eve', index: 3 }); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 500)); });
+    expect(dhInput('SHIRO').value, 'the answer of a pick typed on the removed bout names no one on the new one').toBe('');
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
 });

@@ -1307,6 +1307,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // nothing (submitRepresentative), whichever answers first: the newer pick wins.
   const repPickSeq = useRefA({ a: 0, b: 0 });
   const newRepPick = (side) => ++repPickSeq.current[side];
+  // The representative bout leaving the sheet supersedes every pick typed on it, whichever
+  // device removed it (this one's own remove bumps both sides too: runRepBoutChange). A name
+  // still being resolved then lands nothing: no pick, no dirty mark, no autosave, and no row
+  // rebuilt by the updateSub of the render the name was typed in, which a bout added again
+  // would adopt over the server's fresh row. A layout effect, so the bump is in place at the
+  // commit that drops the row, before any answer resumed after it. Only the true-to-false
+  // edge counts: an added bout, or none on mount, supersedes nothing.
+  const hadDaihyosen = useRefA(hasDaihyosen);
+  useLayoutEffectA(() => {
+    if (hadDaihyosen.current && !hasDaihyosen) { newRepPick("a"); newRepPick("b"); }
+    hadDaihyosen.current = hasDaihyosen;
+  }, [hasDaihyosen]);
   // The representative picks giveSideAnotherTeam cleared while the server still held them:
   // side -> the member id the clear superseded. repBaselineAfterFollowedClear reads it, and
   // the operator's next edit to the representative row drops it (updateSub).

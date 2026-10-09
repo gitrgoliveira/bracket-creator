@@ -1434,18 +1434,29 @@ func (s *SubMatchResult) ResolveMemberWinnerID() bool {
 // ReconcileWinnerMemberID keeps a representative-bout row's WinnerMemberID
 // consistent with the two representatives it names: WinnerMemberID belongs to
 // the bout's result and the representatives to their own change
-// (GroupRepPicks), so a merge can leave a winner id naming a member who is no
-// longer picked. A stored id that names neither side's representative is
-// cleared and derived again from the winner's side and the side's pick
-// (ResolveMemberWinnerID), so it names one of them or is empty. It reports
+// (GroupRepPicks), so a merge can leave a winner id that disagrees with them.
+// The id is always cleared and derived again by ResolveMemberWinnerID, from
+// the winner's NAME alone and the side's stored pick, so afterwards it is
+// exactly the pick of the side the Winner name names, or empty. It is empty
+// when there is no Winner, when the Winner names neither side, when the
+// winning side has no pick, and when the two side names are equal (two
+// same-named teams are forbidden by rule, so that row is legacy data and the
+// name cannot say who won; there is no special case for it).
+//
+// A stored id is never consulted to decide the winning side: SubBoutWinnerSide
+// and Attribution read WinnerMemberID first, so a stale id would decide its own
+// verdict, and an id naming the LOSING side's pick, which a test of "is it one
+// of the two picks" accepts, would credit the wrong side id-first. It reports
 // whether the id changed.
+//
+// The rule is the representative bout's only. The numbered and kachinuki rows
+// are not reconciled here: their winner id is the editor's (a same-name fighter
+// pair cannot be told apart by name, see ResolveMemberWinnerID).
 func (s *SubMatchResult) ReconcileWinnerMemberID() bool {
-	if s.WinnerMemberID == "" || domain.WinnerIDNamesASide(s.WinnerMemberID, s.SideAMemberID, s.SideBMemberID) {
-		return false
-	}
+	before := s.WinnerMemberID
 	s.WinnerMemberID = ""
 	s.ResolveMemberWinnerID()
-	return true
+	return s.WinnerMemberID != before
 }
 
 // IneligibleSidesAnnotation names which side(s) of a SCHEDULED match are

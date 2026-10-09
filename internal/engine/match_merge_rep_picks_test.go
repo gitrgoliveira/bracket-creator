@@ -159,6 +159,43 @@ func TestMerge_RepPick_ReDerivesTheWinnerMemberID(t *testing.T) {
 	assert.Empty(t, row.WinnerMemberID, "a winner id naming no stored pick is empty")
 }
 
+// A winner id that names the LOSING side's pick is as wrong as one naming nobody:
+// the merge derives it from the winner's NAME and the stored picks alone, never
+// through the id it is checking (id-first attribution would credit the side the
+// id names). The real board stamps the winner and its id together, so a
+// disagreeing pair is a crafted or confused write.
+func TestMerge_RepBout_WinnerMemberIDFollowsTheWinnersName(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		t.Run("an id naming the other side's pick is replaced by the winning side's", func(t *testing.T) {
+			h := mmTeam(t, knockout)
+			won := repRow("x", "y", []string{"M"}, nil)
+			won.Winner, won.WinnerMemberID = wrTeamB, "y"
+			require.NoError(t, h.write(repWrite(h, mmT1, won, repBoutGroup, repPicksName)))
+			require.Equal(t, "y", h.load(t).SubResults[0].WinnerMemberID, "setup: team B won, its pick y is the winner id")
+
+			crafted := repRow("x", "y", []string{"M"}, nil)
+			crafted.Winner, crafted.WinnerMemberID = wrTeamB, "x"
+			require.NoError(t, h.write(repWrite(h, mmT2, crafted, repBoutGroup)))
+
+			row := h.load(t).SubResults[0]
+			assert.Equal(t, wrTeamB, row.Winner)
+			assert.Equal(t, "y", row.WinnerMemberID, "x is team A's pick: the winner id is the winning side's, y")
+		})
+
+		t.Run("an id naming a pick of the side that has none is cleared", func(t *testing.T) {
+			h := mmTeam(t, knockout)
+			won := repRow("", "y", []string{"M"}, nil)
+			won.Winner, won.WinnerMemberID = wrTeamA, "y"
+			require.NoError(t, h.write(repWrite(h, mmT1, won, repBoutGroup, repPicksName)))
+
+			row := h.load(t).SubResults[0]
+			assert.Equal(t, wrTeamA, row.Winner)
+			assert.Equal(t, "y", row.SideBMemberID, "setup: only team B has a pick")
+			assert.Empty(t, row.WinnerMemberID, "team A won and has no pick: y is the loser's, so there is no winner id")
+		})
+	})
+}
+
 // A pick has no bout to land on once the representative bout is removed: it
 // is held, in the history, not applied onto nothing.
 func TestMerge_RepPick_OnARemovedBoutIsHeld(t *testing.T) {

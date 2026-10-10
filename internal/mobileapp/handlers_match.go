@@ -2111,16 +2111,19 @@ var errRepMemberNotInTeam = &selfRunRefusal{
 }
 
 // repRowRefusal judges what a participant's representative bout row would
-// change, as the merge will order it (bc-mrgc): the two representatives
-// (state.GroupRepPicks). A change the write does not name, or one the merge
-// holds because its stamp is strictly older than the stored change's
-// (domain.ApplyByTimestamp: an equal stamp applies), is never written, so it
-// is not judged: the picks are held and kept in the match's history, as any
-// stale change is. The rest of the write is ordered by its own stamps, so the
-// write is applied and answered with heldGroups ["repPicks"]; it is answered
-// superseded only when every group it changes is held. Judging the picks would
-// refuse a stale queued pick the merge was going to hold anyway. An unnamed
-// write (an older client) changes every group its row carries.
+// change, as the merge will order it (bc-mrgc): each side's representative
+// (state.GroupRepPickA, state.GroupRepPickB), side by side. A side's change the
+// write does not name, or one the merge holds because its stamp is strictly
+// older than the stored change's (domain.ApplyByTimestamp: an equal stamp
+// applies), is never written, so it is not judged: that pick is held and kept
+// in the match's history, as any stale change is. The rest of the write is
+// ordered by its own stamps, so the write is applied and answered with the held
+// side's group in heldGroups (e.g. ["repPickA"]); it is answered superseded only
+// when every group it changes is held. Judging a pick would refuse a stale
+// queued pick the merge was going to hold anyway, and a side the write does not
+// change is never judged against the team it has been given since (a write
+// naming one side while echoing the other's id, which a re-seat has cleared).
+// An unnamed write (an older client) changes every group its row carries.
 //
 // The bout's winner id is NOT judged: it belongs to the bout group and the
 // merge keeps it consistent with the representatives that stand
@@ -2128,11 +2131,15 @@ var errRepMemberNotInTeam = &selfRunRefusal{
 // of a pick another device has since replaced is applied and its winner id
 // re-derived, rather than refused and lost.
 func repRowRefusal(stx state.StoreTx, compID string, snap matchSnapshot, result *state.MatchResult, row state.SubMatchResult, stored *state.SubMatchResult) error {
-	named := result.Changed == nil || slices.Contains(result.Changed, state.GroupRepPicks)
-	if !named || !domain.ApplyByTimestamp(result.ModifiedAt, snap.RepPicksStamp) {
+	judges := func(side domain.MatchSide, stored int64) bool {
+		named := result.Changed == nil || slices.Contains(result.Changed, state.RepPickGroup(side))
+		return named && domain.ApplyByTimestamp(result.ModifiedAt, stored)
+	}
+	judgeA, judgeB := judges(domain.MatchSideA, snap.RepPickAStamp), judges(domain.MatchSideB, snap.RepPickBStamp)
+	if !judgeA && !judgeB {
 		return nil
 	}
-	return repMembersOutsideTeams(stx, compID, snap.Pairing, row, stored)
+	return repMembersOutsideTeams(stx, compID, snap.Pairing, row, stored, judgeA, judgeB)
 }
 
 // repMembersOutsideTeams judges the member ids a representative bout row names
@@ -2142,8 +2149,9 @@ func repRowRefusal(stx state.StoreTx, compID string, snap matchSnapshot, result 
 // organiser's write is not judged here (only the self-run path calls this).
 //
 // A write answers for what it introduces, not for what it inherited (the write
-// guard's rule): a side is judged only when the write names a member for it that
-// the stored row does not already hold, and only against a stored side that
+// guard's rule): a side is judged only when the caller says the merge will
+// apply that side's pick (judgeA, judgeB), when the write names a member for it
+// that the stored row does not already hold, and only against a stored side that
 // carries a team id. A side with no team id has nothing to judge the pick
 // against, so it is not refused. The winner id is the bout's, not the picks',
 // and is not judged at all (repRowRefusal).
@@ -2151,7 +2159,7 @@ func repRowRefusal(stx state.StoreTx, compID string, snap matchSnapshot, result 
 // stored is the match's representative bout and is never nil: the caller answers
 // a row the match does not have before it gets here (dropped or refused), so this
 // only judges a row the match already has.
-func repMembersOutsideTeams(stx state.StoreTx, compID string, pairing domain.WinnerAttribution, row state.SubMatchResult, stored *state.SubMatchResult) error {
+func repMembersOutsideTeams(stx state.StoreTx, compID string, pairing domain.WinnerAttribution, row state.SubMatchResult, stored *state.SubMatchResult, judgeA, judgeB bool) error {
 	storedA, storedB := stored.SideAMemberID, stored.SideBMemberID
 	type judged struct{ teamID, memberID string }
 	var picks []judged
@@ -2161,8 +2169,12 @@ func repMembersOutsideTeams(stx state.StoreTx, compID string, pairing domain.Win
 		}
 		picks = append(picks, judged{teamID: teamID, memberID: memberID})
 	}
-	add(pairing.SideAID, row.SideAMemberID, storedA)
-	add(pairing.SideBID, row.SideBMemberID, storedB)
+	if judgeA {
+		add(pairing.SideAID, row.SideAMemberID, storedA)
+	}
+	if judgeB {
+		add(pairing.SideBID, row.SideBMemberID, storedB)
+	}
 	if len(picks) == 0 {
 		return nil
 	}
@@ -2239,12 +2251,12 @@ type matchSnapshot struct {
 	// verdict was last changed), which the correction-reason check reads to
 	// tell a stale replay of a finish from a correction (bc-mrgc review).
 	ResultStamp int64
-	// RepPicksStamp is the stored stamp of the representatives
-	// (state.GroupRepPicks, read through GroupStamp, so a legacy match reads its
-	// ModifiedAt), a change of their own. The self-run judge orders a pick
-	// against it: the merge holds a pick stamped before it, so such a pick is
-	// not judged.
-	RepPicksStamp int64
+	// RepPickAStamp and RepPickBStamp are the stored stamps of each side's
+	// representative (state.RepPickGroup, read through GroupStamp, so a legacy
+	// match reads its ModifiedAt), a change of its own. The self-run judge
+	// orders a side's pick against that side's stamp: the merge holds a pick
+	// stamped before it, so such a pick is not judged.
+	RepPickAStamp, RepPickBStamp int64
 }
 
 // repBoutOf returns a copy of the first representative-bout row in subs, nil
@@ -2297,7 +2309,8 @@ func lookupMatchSnapshot(s matchStores, compID, matchID string) (matchSnapshot, 
 				RepBout:          repBoutOf(poolMatches[i].SubResults),
 				Pairing:          poolMatches[i].Attribution(),
 				ResultStamp:      poolMatches[i].GroupStamp(state.GroupResult),
-				RepPicksStamp:    poolMatches[i].GroupStamp(state.GroupRepPicks),
+				RepPickAStamp:    poolMatches[i].GroupStamp(state.GroupRepPickA),
+				RepPickBStamp:    poolMatches[i].GroupStamp(state.GroupRepPickB),
 			}, true, loadErr
 		}
 	}
@@ -2332,7 +2345,8 @@ func bracketMatchSnapshot(bm *state.BracketMatch) matchSnapshot {
 		RepBout:          repBoutOf(bm.SubResults),
 		Pairing:          bm.Attribution(),
 		ResultStamp:      bm.GroupStamp(state.GroupResult),
-		RepPicksStamp:    bm.GroupStamp(state.GroupRepPicks),
+		RepPickAStamp:    bm.GroupStamp(state.GroupRepPickA),
+		RepPickBStamp:    bm.GroupStamp(state.GroupRepPickB),
 	}
 }
 

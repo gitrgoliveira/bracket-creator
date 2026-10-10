@@ -150,7 +150,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     expect(dhInput('AKA').value).toBe('');
   });
 
-  it('R2: picking a member records its id on the -1 row, keeps the team names, and names repPicks', async () => {
+  it('R2: picking a member records its id on the -1 row, keeps the team names, and names repPickB', async () => {
     const match = makeMatch({ subResults: [DH_EMPTY] });
     const { onSubmit } = await mount(match);
     await pickFromDh('SHIRO', 'Carol');
@@ -166,8 +166,9 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     const wireDh = wire.subResults.find((s) => s.position === -1);
     expect(wireDh.sideBMemberId).toBe('m1b');
     expect(wireDh.sideB).toBe('Team B');
-    expect(wire.changed).toContain('repPicks');
+    expect(wire.changed).toContain('repPickB');
     expect(wire.changed, 'a pick is not a change of the bout').not.toContain('bout:-1');
+    expect(wire.changed, 'Aka\'s pick was not touched here').not.toContain('repPickA');
     // A pick is never a lineup write: "daihyosen" is not a lineup key.
     expect(window.API.putMatchLineup).not.toHaveBeenCalled();
   });
@@ -194,7 +195,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     expect(dh.sideB).toBe('Team B');
   });
 
-  it('R4: clearing a stored pick omits the id and names repPicks on the next write', async () => {
+  it('R4: clearing a stored pick omits the id and names repPickB on the next write', async () => {
     const match = makeMatch({ subResults: [{ ...DH_EMPTY, sideBMemberId: 'm1b' }] });
     const { onSubmit } = await mount(match);
     // The stored pick shows as the member's own name, never the team's.
@@ -208,8 +209,9 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     expect('sideBMemberId' in dh).toBe(false);
     expect(dh.sideB).toBe('Team B');
     const cleared = toBackendMatchResult(patch, match).changed;
-    expect(cleared).toContain('repPicks');
+    expect(cleared).toContain('repPickB');
     expect(cleared).not.toContain('bout:-1');
+    expect(cleared, 'Aka\'s pick was never set here').not.toContain('repPickA');
   });
 
   it('R5: the representative roster includes a member already placed at a numbered position', async () => {
@@ -615,7 +617,8 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     expect(dh.ipponsA).toEqual(['M']);
     expect(dh.sideAMemberId).toBe('m1a');
     expect(patch.changed).toContain('bout:-1');
-    expect(patch.changed).toContain('repPicks');
+    expect(patch.changed).toContain('repPickA');
+    expect(patch.changed, 'Shiro\'s side was not picked here').not.toContain('repPickB');
   });
 
   it('R27: a pick adopted from another device and then cleared here is named in the next write', async () => {
@@ -630,10 +633,11 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await clickFinishTwice();
     const patch = finishPatchOf(onSubmit);
     expect('sideAMemberId' in dhEntryOf(patch)).toBe(false);
-    expect(toBackendMatchResult(patch, match).changed, 'the server keeps the other device\'s pick unless repPicks is named').toContain('repPicks');
+    expect(toBackendMatchResult(patch, match).changed, 'the server keeps the other device\'s pick unless repPickA is named').toContain('repPickA');
+    expect(toBackendMatchResult(patch, match).changed, 'Shiro\'s pick was not touched here').not.toContain('repPickB');
   });
 
-  it('R28: a pick adopted for one side does not hide the pick kept on the other: the next write still names repPicks and carries both', async () => {
+  it('R28: a pick adopted for one side does not hide the pick kept on the other: the next write names only the side picked here and carries both', async () => {
     const { onSubmit, rerenderWith } = await mount(makeMatch({ subResults: [DH_EMPTY] }));
     await pickFromDh('AKA', 'Alice');
     // Another device picks Carol for Shiro; Alice has not landed.
@@ -645,7 +649,8 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     const dh = dhEntryOf(patch);
     expect(dh.sideAMemberId).toBe('m1a');
     expect(dh.sideBMemberId).toBe('m1b');
-    expect(patch.changed).toContain('repPicks');
+    expect(patch.changed).toContain('repPickA');
+    expect(patch.changed, 'the side adopted from the server is not a change').not.toContain('repPickB');
   });
 
   it('R29: a pick made here and not yet written is dropped when its side is given another team: nothing is sent for it, and the sheet is not dirty', async () => {
@@ -661,7 +666,8 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await pastDebounce();
     for (const [patch] of onSubmit.mock.calls) {
       expect('sideAMemberId' in (dhEntryOf(patch) || {}), 'the dropped pick is not sent').toBe(false);
-      expect(patch.changed || [], 'the picks did not change').not.toContain('repPicks');
+      expect(patch.changed || [], 'the picks did not change').not.toContain('repPickA');
+      expect(patch.changed || [], 'the picks did not change').not.toContain('repPickB');
     }
     await act(async () => { fireEvent.click(screen.getByText('✕ Close')); });
     expect(window.confirmDialog).not.toHaveBeenCalled();

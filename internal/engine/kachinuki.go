@@ -1978,7 +1978,7 @@ type bracketPos struct{ R, M int }
 // unresolveBye can take it back exactly.
 func resolvedByByeFrom(bm *state.BracketMatch, feedM int) bool {
 	fed, other := bm.SideB, bm.SideA
-	if feedM%2 == 0 {
+	if feedsSide(feedM) == domain.MatchSideA {
 		fed, other = bm.SideA, bm.SideB
 	}
 	return bm.Status == state.MatchStatusCompleted &&

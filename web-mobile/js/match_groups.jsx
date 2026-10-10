@@ -3,7 +3,7 @@
 // events must be ordered.").
 //
 // The server merges a score write group by group (internal/state/
-// match_groups.go): points, result, encho, flags, rep, repPicks, and one group
+// match_groups.go): points, result, encho, flags, rep, repPickA, repPickB, and one group
 // per bout row, "bout:<position>". A write names the groups it changes in `changed`;
 // each named group applies only when the write is not older than that group's
 // stored change, a group the write does not name is never overwritten, and a
@@ -36,13 +36,14 @@ export const GROUP_ENCHO = 'encho';
 export const GROUP_FLAGS = 'flags';
 export const GROUP_REP = 'rep';
 // The two representatives of the representative bout (the member ids on its -1
-// row): a change of their own, dated apart from "bout:-1", which keeps the
-// bout's score and result. Not to be confused with GROUP_REP, the pool
-// daihyosen/tiebreaker players.
-export const GROUP_REP_PICKS = 'repPicks';
+// row), one group per side: each is a change of its own, dated apart from the
+// other side's and from "bout:-1", which keeps the bout's score and result. Not
+// to be confused with GROUP_REP, the pool daihyosen/tiebreaker players.
+export const GROUP_REP_PICK_A = 'repPickA';
+export const GROUP_REP_PICK_B = 'repPickB';
 
 // The scalar groups in the server's fixed order (state.ScalarGroups).
-export const SCALAR_GROUPS = [GROUP_POINTS, GROUP_RESULT, GROUP_ENCHO, GROUP_FLAGS, GROUP_REP, GROUP_REP_PICKS];
+export const SCALAR_GROUPS = [GROUP_POINTS, GROUP_RESULT, GROUP_ENCHO, GROUP_FLAGS, GROUP_REP, GROUP_REP_PICK_A, GROUP_REP_PICK_B];
 
 const BOUT_PREFIX = 'bout:';
 
@@ -86,7 +87,8 @@ export function groupLabel(group) {
         case GROUP_ENCHO: return 'overtime';
         case GROUP_FLAGS: return 'flags';
         case GROUP_REP: return 'the representative players';
-        case GROUP_REP_PICKS: return 'the fighters picked for the representative bout';
+        case GROUP_REP_PICK_A: return 'Aka\'s pick for the representative bout';
+        case GROUP_REP_PICK_B: return 'Shiro\'s pick for the representative bout';
         default: {
             const pos = parseBoutGroup(group);
             if (pos === null) return String(group || '');
@@ -191,8 +193,9 @@ function statedGroups(next) {
     if (has(next, 'flagsA') || has(next, 'flagsB')) out.push(GROUP_FLAGS);
     if (has(next, 'repPlayerA') || has(next, 'repPlayerB')) out.push(GROUP_REP);
     // The representatives sit on the representative bout's row: a write that
-    // carries that row states them (an id left off the row is a pick cleared).
-    if (rowAt(next, -1)) out.push(GROUP_REP_PICKS);
+    // carries that row states both sides' picks (an id left off the row is that
+    // side's pick cleared).
+    if (rowAt(next, -1)) out.push(GROUP_REP_PICK_A, GROUP_REP_PICK_B);
     if (Array.isArray(next.subResults)) {
         for (const s of next.subResults) {
             const g = s ? boutGroup(num(s.position)) : null;
@@ -229,12 +232,16 @@ function groupKey(wire, group, next) {
                 has(next, 'repPlayerA') ? str(w.repPlayerA) : null,
                 has(next, 'repPlayerB') ? str(w.repPlayerB) : null,
             ]);
-        case GROUP_REP_PICKS: {
-            // The server moves the two ids as one change and copies the row's
-            // picks exactly as sent, so an absent id reads as empty: a pick
-            // cleared leaves its key out, and must still be named.
+        case GROUP_REP_PICK_A: {
+            // Each side's pick is a change of its own, so its value is that side's
+            // id alone. An absent id reads as empty: a pick cleared leaves its key
+            // out, and must still be named.
             const row = rowAt(w, -1) || {};
-            return JSON.stringify([str(row.sideAMemberId), str(row.sideBMemberId)]);
+            return str(row.sideAMemberId);
+        }
+        case GROUP_REP_PICK_B: {
+            const row = rowAt(w, -1) || {};
+            return str(row.sideBMemberId);
         }
         default: {
             const pos = parseBoutGroup(group);
@@ -242,13 +249,13 @@ function groupKey(wire, group, next) {
             const keys = new Set(Object.keys(own || {}).filter((k) => own[k] !== undefined));
             keys.add('encho');
             keys.add('position');
-            // On the representative bout the two picks are GROUP_REP_PICKS' (the
-            // server copies the bout without them), so a pick never reads as a
-            // change of the bout. The winner's member id is re-derived by the server
-            // from the bout's winner side and the stored picks (ReconcileWinnerMemberID),
-            // so a pick change moves it with no change to the bout: it is left out
-            // too, and the winner's name is what names the bout. Numbered rows keep
-            // the rule above.
+            // On the representative bout the two picks are GROUP_REP_PICK_A's and
+            // GROUP_REP_PICK_B's (the server copies the bout without them), so a
+            // pick never reads as a change of the bout. The winner's member id is
+            // re-derived by the server from the bout's winner side and the stored
+            // picks (ReconcileWinnerMemberID), so a pick change moves it with no
+            // change to the bout: it is left out too, and the winner's name is what
+            // names the bout. Numbered rows keep the rule above.
             if (pos < 0) {
                 keys.delete('sideAMemberId');
                 keys.delete('sideBMemberId');

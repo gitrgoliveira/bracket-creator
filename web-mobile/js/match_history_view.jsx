@@ -24,7 +24,7 @@ import { formatIpponsScore } from './bracket.jsx';
 import { hanteiDecided } from './result_slot.jsx';
 import { withdrawalLabel } from './admin_scoring_shared.jsx';
 import { sideWord } from './side_cell.jsx';
-import { groupLabel, parseBoutGroup, GROUP_POINTS, GROUP_RESULT, GROUP_ENCHO, GROUP_FLAGS, GROUP_REP, GROUP_REP_PICKS } from './match_groups.jsx';
+import { groupLabel, parseBoutGroup, GROUP_POINTS, GROUP_RESULT, GROUP_ENCHO, GROUP_FLAGS, GROUP_REP, GROUP_REP_PICK_A, GROUP_REP_PICK_B } from './match_groups.jsx';
 
 const { useState: useStateH, useEffect: useEffectH, useRef: useRefH } = React;
 
@@ -112,9 +112,11 @@ export function heldValueText(group, value) {
             return v ? `flags Shiro ${Number(v.flagsB) || 0}, Aka ${Number(v.flagsA) || 0}` : 'no flags';
         case GROUP_REP:
             return v ? `Shiro ${v.repPlayerB || 'not picked'}, Aka ${v.repPlayerA || 'not picked'}` : 'not picked';
-        case GROUP_REP_PICKS:
-            // The values are member ids, not names: say whether each side was picked, not who.
-            return v ? `Shiro ${v.sideBMemberId ? 'picked' : 'not picked'}, Aka ${v.sideAMemberId ? 'picked' : 'not picked'}` : 'not picked';
+        case GROUP_REP_PICK_A:
+            // The value is a member id, not a name: say whether the side was picked, not who.
+            return v && v.sideAMemberId ? 'picked' : 'not picked';
+        case GROUP_REP_PICK_B:
+            return v && v.sideBMemberId ? 'picked' : 'not picked';
         default:
             if (parseBoutGroup(group) === null) return '';
             return v ? `${scorelineText(v)}${foulsText(v)}` : 'no bout';

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"log"
+	"slices"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -14,8 +15,8 @@ import (
 // painted over a placeholder) goes through it. It owns the one consequence a
 // plain assignment misses: the representative a team match's rep bout holds
 // for a side is a member of the team that was seated there
-// (SubMatchResult.SideAMemberID/SideBMemberID, the state.GroupRepPicks
-// group), so a side given ANOTHER team takes its pick away.
+// (SubMatchResult.SideAMemberID/SideBMemberID, the state.GroupRepPickA and
+// state.GroupRepPickB groups), so a side given ANOTHER team takes its pick away.
 //
 //   - The id is unchanged (a rename, or a correction that stores the winner
 //     already recorded and so re-propagates the same team): the name is written
@@ -31,13 +32,15 @@ import (
 //     bracket they always did.
 //
 // The cleared pick is dated max(now, its previous stamp + 1, the match's
-// ModifiedAt) through StampGroups, which never lowers: strictly above the date
-// the pick held, so a replay of the write that made it is kept in the match's
-// history instead of seating the old team's member on the new team's side, and
-// never below the match. It is NOT the stamp of the correction that caused the
-// re-seat: that is a client stamp made against a different match, and a pick
-// written after the correction but before it arrived would keep a stamp at or
-// above it.
+// ModifiedAt) through StampGroups, which never lowers, and ONLY that side's
+// group is dated: the other side's pick keeps its date, so a pick made for it
+// on another device is still ordered by its own write. The date is strictly
+// above the date the pick held, so a replay of the write that made it is kept
+// in the match's history instead of seating the old team's member on the new
+// team's side, and never below the match. It is NOT the stamp of the correction
+// that caused the re-seat: that is a client stamp made against a different
+// match, and a pick written after the correction but before it arrived would
+// keep a stamp at or above it.
 //
 // It runs inside UpdateBracket callbacks, which hold no store handle, so it
 // writes the match in place and records no history line of its own (a played
@@ -73,17 +76,13 @@ func seatBracketSide(bm *state.BracketMatch, side domain.MatchSide, name, id str
 	if held == "" {
 		return
 	}
-	if side == domain.MatchSideA {
-		pickA = ""
-	} else {
-		pickB = ""
-	}
-	bm.SetRepPicks(pickA, pickB)
+	bm.SetRepPick(side, "")
 	// The bout's winner id is derived from the picks and the winner's name, so
 	// it follows the pick that went.
 	bm.SubResults[row].ReconcileWinnerMemberID()
 	log.Printf("engine: bracket match %s: side %s was given another team, so its representative pick %q is cleared", bm.ID, side, held)
-	bm.StampGroups(max(serverNowMs(), bm.GroupStamp(state.GroupRepPicks)+1, bm.ModifiedAt), state.GroupRepPicks)
+	g := state.RepPickGroup(side)
+	bm.StampGroups(max(serverNowMs(), bm.GroupStamp(g)+1, bm.ModifiedAt), g)
 }
 
 // feedsSide is the side of the next match (and of the 3rd-place match, for a
@@ -119,11 +118,12 @@ func snapshotDownstreamRepPicks(bracket *state.Bracket, rIdx, mIdx int) downstre
 	return out
 }
 
-// markRepPicksCleared sets RepPickCleared on every reopened match that no
-// longer holds a pick it held when its prior picks were captured (at its
-// reopen, or from a snapshotDownstreamRepPicks taken before the re-seat). Call
-// it once the callback's re-seats are done: the only writer of a pick inside
-// these callbacks is seatBracketSide, which only clears.
+// markRepPicksCleared records, on every reopened match that no longer holds a
+// pick it held when its prior picks were captured (at its reopen, or from a
+// snapshotDownstreamRepPicks taken before the re-seat), the group of each side
+// whose pick went (RepPicksCleared). Call it once the callback's re-seats are
+// done: the only writer of a pick inside these callbacks is seatBracketSide,
+// which only clears.
 func markRepPicksCleared(bracket *state.Bracket, reopened []ReopenedMatch) {
 	for i := range reopened {
 		m := bracket.MatchByID(reopened[i].ID)
@@ -131,9 +131,23 @@ func markRepPicksCleared(bracket *state.Bracket, reopened []ReopenedMatch) {
 			continue
 		}
 		a, b := m.RepPicks()
-		if (reopened[i].priorPickA != "" && a != reopened[i].priorPickA) ||
-			(reopened[i].priorPickB != "" && b != reopened[i].priorPickB) {
-			reopened[i].RepPickCleared = true
+		r := &reopened[i]
+		if r.priorPickA != "" && a != r.priorPickA {
+			r.RepPicksCleared = appendUnique(r.RepPicksCleared, state.RepPickGroup(domain.MatchSideA))
+		}
+		if r.priorPickB != "" && b != r.priorPickB {
+			r.RepPicksCleared = appendUnique(r.RepPicksCleared, state.RepPickGroup(domain.MatchSideB))
 		}
 	}
+}
+
+// appendUnique appends s to list unless it is already there. markRepPicksCleared
+// can judge the same reopened match twice (the reopen door marks the chain
+// forceReopenDownstreamChain already marked, after its retraction), and a group
+// must be named once.
+func appendUnique(list []string, s string) []string {
+	if slices.Contains(list, s) {
+		return list
+	}
+	return append(list, s)
 }

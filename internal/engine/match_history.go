@@ -200,10 +200,9 @@ func noteServerBoutChanges(result *state.MatchResult, before, stored []state.Sub
 			result.Changed = append(result.Changed, g)
 		}
 	}
-	// The representatives are a change of their own, not part of the bout row.
-	if !slices.Contains(result.Changed, state.GroupRepPicks) && state.GroupDiffers(was, result, state.GroupRepPicks) {
-		result.Changed = append(result.Changed, state.GroupRepPicks)
-	}
+	// No clause for the representatives' pick groups: nothing the server does
+	// between the writer's rows and this call changes a pick (a kachinuki merge
+	// and the match-level padding keep the representative row as sent).
 }
 
 // serverNowMs is the stamp a direct writer gives the groups it changes: the

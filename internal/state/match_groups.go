@@ -25,6 +25,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 )
 
 // The scalar groups. A team match additionally has one group per bout row,
@@ -43,24 +45,52 @@ const (
 	GroupFlags = "flags"
 	// GroupRep holds the pool daihyosen/tiebreaker representative players.
 	GroupRep = "rep"
-	// GroupRepPicks holds the two representatives a team match's
-	// representative bout is fought by: SideAMemberID and SideBMemberID of the
-	// row at DaihyosenSubPosition. They are a change of their own, dated and
-	// ordered apart from the bout row they sit on (bout:-1), which keeps the
-	// bout's score and result: a point struck on the bout never alters who was
-	// picked, and a pick never alters the score. The row's WinnerMemberID
+	// GroupRepPickA and GroupRepPickB hold ONE side's representative for a team
+	// match's representative bout each: SideAMemberID (side A, Aka) and
+	// SideBMemberID (side B, Shiro) of the row at DaihyosenSubPosition. Each
+	// side's pick is a change of its own, dated and ordered apart from the other
+	// side's pick and from the bout row they sit on (bout:-1), which keeps the
+	// bout's score and result: two captains picking at about the same moment on
+	// their own phones both land, a point struck on the bout never alters who
+	// was picked, and a pick never alters the score. The row's WinnerMemberID
 	// moves with the bout (CopyGroup copies the row), but it is derived state:
-	// neither group's comparison includes it, and the merge works it out again
-	// from the winner's name and the stored picks after every write
+	// no group's comparison includes it, and the merge works it out again from
+	// the winner's name and the stored picks after every write
 	// (SubMatchResult.ReconcileWinnerMemberID). Not to be confused with
-	// GroupRep, the pool daihyosen/tiebreaker players.
-	GroupRepPicks = "repPicks"
+	// GroupRep, the pool daihyosen/tiebreaker players. RepPickGroup names the
+	// group of a side.
+	GroupRepPickA = "repPickA"
+	GroupRepPickB = "repPickB"
+
+	// legacyRepPicksGroup is the one group both picks were dated under before
+	// each side had its own. Nothing is written under it any more; a stamp map
+	// from the commits that introduced the picks may still hold it, and is read
+	// as BOTH sides' stamp until the first materialization converts it
+	// (groupStampOf, MaterializedGroupStamps).
+	legacyRepPicksGroup = "repPicks"
 
 	boutGroupPrefix = "bout:"
 )
 
 // ScalarGroups lists the scalar groups in their fixed order.
-var ScalarGroups = []string{GroupPoints, GroupResult, GroupEncho, GroupFlags, GroupRep, GroupRepPicks}
+var ScalarGroups = []string{GroupPoints, GroupResult, GroupEncho, GroupFlags, GroupRep, GroupRepPickA, GroupRepPickB}
+
+// RepPickGroup names the group of side's representative pick, "" for a value
+// that is neither side.
+func RepPickGroup(side domain.MatchSide) string {
+	switch side {
+	case domain.MatchSideA:
+		return GroupRepPickA
+	case domain.MatchSideB:
+		return GroupRepPickB
+	}
+	return ""
+}
+
+// isRepPickGroup reports whether group is one side's representative pick.
+func isRepPickGroup(group string) bool {
+	return group == GroupRepPickA || group == GroupRepPickB
+}
 
 // BoutGroup names the group of the bout row at position (1..n, or
 // DaihyosenSubPosition for the representative bout).
@@ -136,20 +166,27 @@ func repPicksOf(subs []SubMatchResult) (sideA, sideB string) {
 	return "", ""
 }
 
-// withRepPicks returns a copy of subs whose row at DaihyosenSubPosition names
-// the two representatives, and whether there was such a row. The list is
-// copied, never edited in place, so a row another copy of the match shares is
-// never written through.
-func withRepPicks(subs []SubMatchResult, sideA, sideB string) ([]SubMatchResult, bool) {
+// withRepPick returns a copy of subs whose row at DaihyosenSubPosition names id
+// as side's representative, and subs itself when there is no such row or side
+// is neither side. The list is copied, never edited in place, so a row another
+// copy of the match shares is never written through.
+func withRepPick(subs []SubMatchResult, side domain.MatchSide, id string) []SubMatchResult {
+	if side != domain.MatchSideA && side != domain.MatchSideB {
+		return subs
+	}
 	for i := range subs {
 		if subs[i].Position != DaihyosenSubPosition {
 			continue
 		}
 		out := append([]SubMatchResult(nil), subs...)
-		out[i].SideAMemberID, out[i].SideBMemberID = sideA, sideB
-		return out, true
+		if side == domain.MatchSideA {
+			out[i].SideAMemberID = id
+		} else {
+			out[i].SideBMemberID = id
+		}
+		return out
 	}
-	return subs, false
+	return subs
 }
 
 // RepPicks returns the two representatives the row at DaihyosenSubPosition
@@ -158,11 +195,11 @@ func (m *MatchResult) RepPicks() (sideA, sideB string) {
 	return repPicksOf(m.SubResults)
 }
 
-// SetRepPicks puts the two representatives on the row at DaihyosenSubPosition.
-// It does nothing when the match has no such row: a pick has no bout to land
-// on. The list is replaced, not edited in place (withRepPicks).
-func (m *MatchResult) SetRepPicks(sideA, sideB string) {
-	m.SubResults, _ = withRepPicks(m.SubResults, sideA, sideB)
+// SetRepPick puts id on the row at DaihyosenSubPosition as side's
+// representative. It does nothing when the match has no such row: a pick has no
+// bout to land on. The list is replaced, not edited in place (withRepPick).
+func (m *MatchResult) SetRepPick(side domain.MatchSide, id string) {
+	m.SubResults = withRepPick(m.SubResults, side, id)
 }
 
 // RepPicks is MatchResult.RepPicks for a bracket match.
@@ -170,9 +207,9 @@ func (bm *BracketMatch) RepPicks() (sideA, sideB string) {
 	return repPicksOf(bm.SubResults)
 }
 
-// SetRepPicks is MatchResult.SetRepPicks for a bracket match.
-func (bm *BracketMatch) SetRepPicks(sideA, sideB string) {
-	bm.SubResults, _ = withRepPicks(bm.SubResults, sideA, sideB)
+// SetRepPick is MatchResult.SetRepPick for a bracket match.
+func (bm *BracketMatch) SetRepPick(side domain.MatchSide, id string) {
+	bm.SubResults = withRepPick(bm.SubResults, side, id)
 }
 
 // boutOrderKey sorts bout rows the way every writer appends them: numbered
@@ -236,14 +273,19 @@ func CopyGroup(dst, src *MatchResult, group string) {
 		dst.FlagsA, dst.FlagsB = src.FlagsA, src.FlagsB
 	case GroupRep:
 		dst.RepPlayerA, dst.RepPlayerB = src.RepPlayerA, src.RepPlayerB
-	case GroupRepPicks:
-		dst.SetRepPicks(src.RepPicks())
+	case GroupRepPickA:
+		a, _ := src.RepPicks()
+		dst.SetRepPick(domain.MatchSideA, a)
+	case GroupRepPickB:
+		_, b := src.RepPicks()
+		dst.SetRepPick(domain.MatchSideB, b)
 	default:
 		if pos, ok := ParseBoutGroup(group); ok {
 			row := subAt(src.SubResults, pos)
 			// The representatives are not the bout's: a copy of the bout keeps the
-			// picks the destination row already holds (GroupRepPicks moves them),
-			// so the two copies give the same result in either order.
+			// picks the destination row already holds (GroupRepPickA and
+			// GroupRepPickB move them), so the copies give the same result in
+			// any order.
 			if dstRow := subAt(dst.SubResults, pos); pos == DaihyosenSubPosition && row != nil && dstRow != nil {
 				kept := *row
 				kept.SideAMemberID, kept.SideBMemberID = dstRow.SideAMemberID, dstRow.SideBMemberID
@@ -293,8 +335,13 @@ type flagsGroup struct {
 	FlagsB int `json:"flagsB"`
 }
 
-type repPicksGroup struct {
+// repPickAGroup and repPickBGroup hold ONE key each, named as the row's field,
+// so a pick kept in the history reads as the field it was.
+type repPickAGroup struct {
 	SideAMemberID string `json:"sideAMemberId"`
+}
+
+type repPickBGroup struct {
 	SideBMemberID string `json:"sideBMemberId"`
 }
 
@@ -324,9 +371,12 @@ func groupProjection(m *MatchResult, group string) any {
 		return flagsGroup{FlagsA: m.FlagsA, FlagsB: m.FlagsB}
 	case GroupRep:
 		return repGroup{RepPlayerA: m.RepPlayerA, RepPlayerB: m.RepPlayerB}
-	case GroupRepPicks:
-		a, b := m.RepPicks()
-		return repPicksGroup{SideAMemberID: a, SideBMemberID: b}
+	case GroupRepPickA:
+		a, _ := m.RepPicks()
+		return repPickAGroup{SideAMemberID: a}
+	case GroupRepPickB:
+		_, b := m.RepPicks()
+		return repPickBGroup{SideBMemberID: b}
 	}
 	if pos, ok := ParseBoutGroup(group); ok {
 		row := subAt(m.SubResults, pos)
@@ -336,12 +386,13 @@ func groupProjection(m *MatchResult, group string) any {
 		c := CloneSubResults([]SubMatchResult{*row})[0]
 		c.IpponsA, c.IpponsB = nonNilStrings(c.IpponsA), nonNilStrings(c.IpponsB)
 		if pos == DaihyosenSubPosition {
-			// The representatives are GroupRepPicks', not the bout's. The row's
-			// WinnerMemberID is derived from the winner's name and those picks
-			// after every merge (SubMatchResult.ReconcileWinnerMemberID), and the
-			// client's bout comparison leaves it out, so it is no change of the
-			// bout's: a write that echoes the row with another id (or none) has
-			// changed nothing.
+			// The representatives are GroupRepPickA's and GroupRepPickB's, not
+			// the bout's. The row's WinnerMemberID is derived from the winner's
+			// name and those picks after every merge
+			// (SubMatchResult.ReconcileWinnerMemberID), and the client's bout
+			// comparison leaves it out, so it is no change of the bout's: a
+			// write that echoes the row with another id (or none) has changed
+			// nothing.
 			c.SideAMemberID, c.SideBMemberID, c.WinnerMemberID = "", "", ""
 		}
 		return &c
@@ -383,7 +434,15 @@ func groupStampOf(stamps map[string]int64, modifiedAt int64, group string) int64
 	if stamps == nil {
 		return modifiedAt
 	}
-	if v, ok := stamps[group]; ok || group != GroupRepPicks {
+	if v, ok := stamps[group]; ok || !isRepPickGroup(group) {
+		return v
+	}
+	// A side's pick with no stamp of its own yet. A map from the commits that
+	// dated both picks as one group holds that group's stamp, which is BOTH
+	// sides' stamp until the first materialization converts it: it errs toward
+	// holding a pick, the recoverable direction, since a held pick is in the
+	// history.
+	if v, ok := stamps[legacyRepPicksGroup]; ok {
 		return v
 	}
 	// A map written before the representatives had a group of their own dated
@@ -409,11 +468,21 @@ func (bm *BracketMatch) GroupStamp(group string) int64 {
 func MaterializedGroupStamps(stamps map[string]int64, modifiedAt int64, positions []int) map[string]int64 {
 	if stamps != nil {
 		out := CloneGroupStamps(stamps)
-		// Fix the fallback groupStampOf reads, or the picks' date would follow
-		// the bout row's every later stamp.
-		if _, ok := out[GroupRepPicks]; !ok {
-			if v, ok := out[BoutGroup(DaihyosenSubPosition)]; ok {
-				out[GroupRepPicks] = v
+		// Fix the fallback groupStampOf reads, or a side's pick date would
+		// follow the bout row's every later stamp. A side without a key of its
+		// own takes the legacy group's stamp (both sides', from before each had
+		// its own), else the bout row's; the legacy key is dropped so it cannot
+		// linger in the newest-stamp scans.
+		legacy, hasLegacy := out[legacyRepPicksGroup]
+		delete(out, legacyRepPicksGroup)
+		for _, g := range []string{GroupRepPickA, GroupRepPickB} {
+			if _, ok := out[g]; ok {
+				continue
+			}
+			if hasLegacy {
+				out[g] = legacy
+			} else if v, ok := out[BoutGroup(DaihyosenSubPosition)]; ok {
+				out[g] = v
 			}
 		}
 		return out
@@ -424,11 +493,11 @@ func MaterializedGroupStamps(stamps map[string]int64, modifiedAt int64, position
 	}
 	hasRepBout := slices.Contains(positions, DaihyosenSubPosition)
 	for _, g := range ScalarGroups {
-		// The representatives' group lives on the representative bout's row:
+		// The representatives' groups live on the representative bout's row:
 		// a match without that row has nothing to date, so a legacy match is
 		// not given a key it never held (a stamp a write NAMED is another
 		// matter: stampGroups adds it itself).
-		if g == GroupRepPicks && !hasRepBout {
+		if isRepPickGroup(g) && !hasRepBout {
 			continue
 		}
 		out[g] = modifiedAt

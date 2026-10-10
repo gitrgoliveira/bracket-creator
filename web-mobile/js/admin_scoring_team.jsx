@@ -51,7 +51,7 @@ import { isOlderRunningCopy } from './patch.jsx';
 
 import { useDebouncedRunningWrite, SyncStatusPill, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
-import { GROUP_REP_PICKS } from './match_groups.jsx';
+import { GROUP_REP_PICK_A, GROUP_REP_PICK_B } from './match_groups.jsx';
 import { serverNowMs } from './server_clock.jsx';
 import { publishHeight } from './published_height.jsx';
 import { SideLabel, sideWithColour } from './side_cell.jsx';
@@ -3255,14 +3255,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // Omitted, not stated empty. On a numbered row an absent key leaves the
       // stored id and the server's own derivation untouched, which is what "this
       // writer knows no id" has to mean. On the representative row an absent id
-      // is how a CLEARED pick is sent, by naming the picks' own group: the write
-      // carries that row, so statedGroups adds repPicks (match_groups.jsx) and
-      // groupKey reads an absent id as empty. The server copies the bout row
-      // WITHOUT the picks (CopyGroup keeps the destination's) and moves the picks
-      // as their own group, so an id left off the row clears the stored one only
-      // when repPicks is named. A typed-name override resolves to no id at all
-      // (playerNamesForBout short-circuits it), so a substitution never sends
-      // the replaced fighter's id under the new name.
+      // is how a CLEARED pick is sent, by naming that side's pick group: the write
+      // carries that row, so statedGroups adds repPickA and repPickB
+      // (match_groups.jsx) and groupKey reads an absent id as empty. The server
+      // copies the bout row WITHOUT the picks (CopyGroup keeps the destination's)
+      // and moves each side's pick as its own group, so an id left off the row
+      // clears the stored one only when that side's group is named. A typed-name
+      // override resolves to no id at all (playerNamesForBout short-circuits it), so
+      // a substitution never sends the replaced fighter's id under the new name.
       if (sideAMemberId) entry.sideAMemberId = sideAMemberId;
       if (sideBMemberId) entry.sideBMemberId = sideBMemberId;
       if (winnerMemberId) entry.winnerMemberId = winnerMemberId;
@@ -3706,9 +3706,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       });
       // A pick taken from the server is one this editor now agrees with, so an edit
       // that puts it back to what the editor mounted with (clearing a pick another
-      // device made) is still a change of the picks and is named. A side kept is the
-      // operator's own edit and stays one; both sides kept says nothing.
-      if (repTakes && (repTakes.a || repTakes.b)) claimChanged.agree(GROUP_REP_PICKS);
+      // device made) is still a change of that side's pick and is named. A side kept
+      // is the operator's own edit and stays one, so each side is agreed on its own.
+      if (repTakes && repTakes.a) claimChanged.agree(GROUP_REP_PICK_A);
+      if (repTakes && repTakes.b) claimChanged.agree(GROUP_REP_PICK_B);
       // Keep the correction baseline in step. It snapshots who won the bout
       // being corrected so renderCorrectionWarning can say "you changed who won
       // bout N"; left alone across a re-seed it would compare the SERVER's new

@@ -24,7 +24,8 @@ func seatFixture() *state.BracketMatch {
 		SideA: "Ryu", SideAID: "a", SideB: "Kuma", SideBID: "c",
 		ModifiedAt: 500,
 		GroupStamps: map[string]int64{
-			state.GroupRepPicks:                         400,
+			state.GroupRepPickA:                         400,
+			state.GroupRepPickB:                         400,
 			state.BoutGroup(state.DaihyosenSubPosition): 400,
 			state.GroupPoints:                           500,
 		},
@@ -45,7 +46,8 @@ func TestSeatBracketSide(t *testing.T) {
 		a, c := bm.RepPicks()
 		assert.Equal(t, "pa", a)
 		assert.Equal(t, "pc", c)
-		assert.Equal(t, int64(400), bm.GroupStamp(state.GroupRepPicks))
+		assert.Equal(t, int64(400), bm.GroupStamp(state.GroupRepPickA))
+		assert.Equal(t, int64(400), bm.GroupStamp(state.GroupRepPickB))
 		assert.Equal(t, int64(500), bm.ModifiedAt)
 	})
 
@@ -58,10 +60,11 @@ func TestSeatBracketSide(t *testing.T) {
 		assert.Empty(t, a)
 		assert.Equal(t, "pc", c, "the other side was not re-seated")
 		assert.Empty(t, bm.SubResults[0].WinnerMemberID, "the winner id is derived from the picks that stand")
-		stamp := bm.GroupStamp(state.GroupRepPicks)
+		stamp := bm.GroupStamp(state.GroupRepPickA)
 		assert.Greater(t, stamp, int64(400))
 		assert.GreaterOrEqual(t, stamp, int64(500))
 		assert.Equal(t, stamp, bm.ModifiedAt, "ModifiedAt is the newest group stamp")
+		assert.Equal(t, int64(400), bm.GroupStamp(state.GroupRepPickB), "the other side's pick keeps its date")
 		assert.Equal(t, int64(400), bm.GroupStamp(state.BoutGroup(state.DaihyosenSubPosition)), "the bout row is not what changed")
 	})
 
@@ -72,6 +75,8 @@ func TestSeatBracketSide(t *testing.T) {
 		assert.Equal(t, "pa", a)
 		assert.Empty(t, c)
 		assert.Equal(t, "pa", bm.SubResults[0].WinnerMemberID, "the winner's pick stands")
+		assert.Greater(t, bm.GroupStamp(state.GroupRepPickB), int64(400))
+		assert.Equal(t, int64(400), bm.GroupStamp(state.GroupRepPickA), "the other side's pick keeps its date")
 	})
 
 	t.Run("a slot going back to a placeholder clears the pick", func(t *testing.T) {
@@ -86,10 +91,10 @@ func TestSeatBracketSide(t *testing.T) {
 	t.Run("the cleared pick is dated above a stamp ahead of the server clock", func(t *testing.T) {
 		bm := seatFixture()
 		ahead := serverNowMs() + 3_600_000
-		bm.GroupStamps[state.GroupRepPicks] = ahead
+		bm.GroupStamps[state.GroupRepPickA] = ahead
 		bm.ModifiedAt = ahead
 		seatBracketSide(bm, domain.MatchSideA, "Tora", "b")
-		assert.Equal(t, ahead+1, bm.GroupStamp(state.GroupRepPicks))
+		assert.Equal(t, ahead+1, bm.GroupStamp(state.GroupRepPickA))
 	})
 
 	t.Run("a placeholder resolved to a team has no pick to lose and changes nothing else", func(t *testing.T) {
@@ -99,7 +104,8 @@ func TestSeatBracketSide(t *testing.T) {
 		seatBracketSide(bm, domain.MatchSideA, "Ryu", "a")
 		assert.Equal(t, "Ryu", bm.SideA)
 		assert.Equal(t, "a", bm.SideAID)
-		assert.Equal(t, int64(400), bm.GroupStamp(state.GroupRepPicks))
+		assert.Equal(t, int64(400), bm.GroupStamp(state.GroupRepPickA))
+		assert.Equal(t, int64(400), bm.GroupStamp(state.GroupRepPickB))
 		assert.Equal(t, int64(500), bm.ModifiedAt)
 	})
 
@@ -109,7 +115,8 @@ func TestSeatBracketSide(t *testing.T) {
 		seatBracketSide(bm, domain.MatchSideA, "Tora", "b")
 		_, c := bm.RepPicks()
 		assert.Equal(t, "pc", c)
-		assert.Equal(t, int64(400), bm.GroupStamp(state.GroupRepPicks))
+		assert.Equal(t, int64(400), bm.GroupStamp(state.GroupRepPickA))
+		assert.Equal(t, int64(400), bm.GroupStamp(state.GroupRepPickB))
 		assert.Equal(t, int64(500), bm.ModifiedAt)
 	})
 
@@ -201,8 +208,9 @@ func TestReopenMatch_RetractionTakesThePickOfTheClearedSlot(t *testing.T) {
 		a, c := next.RepPicks()
 		assert.Empty(t, a)
 		assert.Equal(t, rpPickC, c)
-		assert.Greater(t, next.GroupStamp(state.GroupRepPicks), mmT1)
-		assert.GreaterOrEqual(t, next.GroupStamp(state.GroupRepPicks), prior.ModifiedAt)
+		assert.Greater(t, next.GroupStamp(state.GroupRepPickA), mmT1)
+		assert.GreaterOrEqual(t, next.GroupStamp(state.GroupRepPickA), prior.ModifiedAt)
+		assert.Equal(t, mmT1, next.GroupStamp(state.GroupRepPickB), "side B's pick keeps its date")
 	})
 
 	t.Run("a match already played and reopened with it", func(t *testing.T) {
@@ -212,20 +220,24 @@ func TestReopenMatch_RetractionTakesThePickOfTheClearedSlot(t *testing.T) {
 		_, err := eng.ReopenMatch(compID, "m-r1-0", "wrong waza", ForceOptions{Force: true, Reopened: &reopened})
 		require.NoError(t, err)
 		require.Equal(t, []string{rpNextID}, reopenedIDs(reopened))
-		assert.True(t, reopened[0].RepPickCleared, "judged after the retraction, which comes after the reopen")
+		assert.Equal(t, []string{state.GroupRepPickA}, reopened[0].RepPicksCleared, "judged after the retraction, which comes after the reopen")
 
 		a, c := func() (string, string) { n := rpNext(t, store, compID); return n.RepPicks() }()
 		assert.Empty(t, a)
 		assert.Equal(t, rpPickC, c)
 		entries, err := store.LoadMatchHistory(compID, rpNextID)
 		require.NoError(t, err)
-		var named bool
+		var named, namedB bool
 		for _, e := range entries {
-			if e.Door == doorDownstreamReopen && slices.Contains(e.Changed, state.GroupRepPicks) {
+			if e.Door == doorDownstreamReopen && slices.Contains(e.Changed, state.GroupRepPickA) {
 				named = true
 			}
+			if e.Door == doorDownstreamReopen && slices.Contains(e.Changed, state.GroupRepPickB) {
+				namedB = true
+			}
 		}
-		assert.True(t, named, "the reopen line names the picks group")
+		assert.True(t, named, "the reopen line names the cleared side's pick group")
+		assert.False(t, namedB, "and not the side that kept its pick")
 	})
 }
 
@@ -238,7 +250,7 @@ func TestResolveSlots_PaintedSideLosesItsPickAndALockedMatchKeepsIt(t *testing.T
 			ID: "m", PlaceholderA: "Pool A-1st", PlaceholderB: "Pool B-1st",
 			SideA: "Ryu", SideAID: "a", SideB: "Tora", SideBID: "b",
 			Status: status, ModifiedAt: 500,
-			GroupStamps: map[string]int64{state.GroupRepPicks: 400, state.BoutGroup(state.DaihyosenSubPosition): 400},
+			GroupStamps: map[string]int64{state.GroupRepPickA: 400, state.GroupRepPickB: 400, state.BoutGroup(state.DaihyosenSubPosition): 400},
 			SubResults: []state.SubMatchResult{{
 				Position: state.DaihyosenSubPosition, SideAMemberID: "pa", SideBMemberID: "pb",
 			}},
@@ -259,7 +271,8 @@ func TestResolveSlots_PaintedSideLosesItsPickAndALockedMatchKeepsIt(t *testing.T
 		a, b := m.RepPicks()
 		assert.Empty(t, a, "side A was given another team")
 		assert.Equal(t, "pb", b, "side B was not")
-		assert.Greater(t, m.GroupStamp(state.GroupRepPicks), int64(400))
+		assert.Greater(t, m.GroupStamp(state.GroupRepPickA), int64(400))
+		assert.Equal(t, int64(400), m.GroupStamp(state.GroupRepPickB), "side B's pick keeps its date")
 	})
 
 	t.Run("running", func(t *testing.T) {
@@ -271,7 +284,8 @@ func TestResolveSlots_PaintedSideLosesItsPickAndALockedMatchKeepsIt(t *testing.T
 		a, b := m.RepPicks()
 		assert.Equal(t, "pa", a)
 		assert.Equal(t, "pb", b)
-		assert.Equal(t, int64(400), m.GroupStamp(state.GroupRepPicks))
+		assert.Equal(t, int64(400), m.GroupStamp(state.GroupRepPickA))
+		assert.Equal(t, int64(400), m.GroupStamp(state.GroupRepPickB))
 	})
 }
 
@@ -301,7 +315,12 @@ func TestRequalify_ForcedReopenTakesThePickAndItsLineNamesIt(t *testing.T) {
 	require.NoError(t, f.write("Pool A-0", f.poolResult("Pool A-0", "A2"), ForceOptions{Force: true, Reopened: &reopened}))
 	require.Len(t, reopened, 1)
 	assert.Equal(t, m1.ID, reopened[0].ID)
-	assert.True(t, reopened[0].RepPickCleared)
+	// The pick sat on the side Pool A's winner holds.
+	pickGroup, keptGroup := state.GroupRepPickB, state.GroupRepPickA
+	if s1 == "A" {
+		pickGroup, keptGroup = state.GroupRepPickA, state.GroupRepPickB
+	}
+	assert.Equal(t, []string{pickGroup}, reopened[0].RepPicksCleared)
 
 	got := findBracketMatchInBracket(f.bracket(), m1.ID)
 	name, _ := sideOf(*got, s1)
@@ -312,11 +331,15 @@ func TestRequalify_ForcedReopenTakesThePickAndItsLineNamesIt(t *testing.T) {
 
 	entries, err := f.store.LoadMatchHistory(f.compID, m1.ID)
 	require.NoError(t, err)
-	var named bool
+	var named, namedKept bool
 	for _, e := range entries {
-		if e.Door == doorDownstreamReopen && slices.Contains(e.Changed, state.GroupRepPicks) {
+		if e.Door == doorDownstreamReopen && slices.Contains(e.Changed, pickGroup) {
 			named = true
 		}
+		if e.Door == doorDownstreamReopen && slices.Contains(e.Changed, keptGroup) {
+			namedKept = true
+		}
 	}
-	assert.True(t, named, "the reopen line names the picks group")
+	assert.True(t, named, "the reopen line names the cleared side's pick group")
+	assert.False(t, namedKept, "and not the side that held no pick")
 }

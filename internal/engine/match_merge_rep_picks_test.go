@@ -3,10 +3,10 @@ package engine
 // bc-mrgc, operator ruling: "every change is dated and ordered; a change must
 // only ever apply what it changed." The two representatives a team match's
 // representative bout is fought by (SideAMemberID/SideBMemberID on the row at
-// position -1) are their own dated change, state.GroupRepPicks, ordered apart
-// from the bout's score and result: a point never alters the picks, a pick
-// never alters the point, and an older change of either is kept in the
-// match's history.
+// position -1) are each their own dated change, state.GroupRepPickA and
+// state.GroupRepPickB, ordered apart from each other and from the bout's score
+// and result: a point never alters a pick, a pick never alters the point or the
+// other side's pick, and an older change of any is kept in the match's history.
 
 import (
 	"testing"
@@ -20,7 +20,9 @@ import (
 
 const (
 	repBoutGroup = "bout:-1"
-	repPicksName = state.GroupRepPicks
+	// Each side's pick is its own group (side A is Aka, side B is Shiro).
+	repPickAName = "repPickA"
+	repPickBName = "repPickB"
 )
 
 // repRow is a representative-bout row as a board sends it: the TEAM names
@@ -47,10 +49,18 @@ func repWrite(h mmHome, at int64, row state.SubMatchResult, changed ...string) *
 // with its pick, as the picker does on a bout that already exists).
 func seedPick(t *testing.T, h mmHome) {
 	t.Helper()
-	require.NoError(t, h.write(repWrite(h, mmT1, repRow("carol", "", nil, nil), repBoutGroup, repPicksName)))
+	require.NoError(t, h.write(repWrite(h, mmT1, repRow("carol", "", nil, nil), repBoutGroup, repPickAName)))
 	got := h.load(t)
 	require.Len(t, got.SubResults, 1)
 	require.Equal(t, "carol", got.SubResults[0].SideAMemberID, "setup: the pick is stored")
+}
+
+// repStamp is the stored stamp of group on the match under test, read through
+// GroupStamp (never the map keys: a side with no key reads the bout row's date).
+func repStamp(t *testing.T, h mmHome, group string) int64 {
+	t.Helper()
+	m := h.load(t)
+	return m.GroupStamp(group)
 }
 
 // Device 1 picks Carol; device 2, whose push has not arrived, taps a point on
@@ -75,7 +85,7 @@ func TestMerge_RepPick_KeepsAnotherDevicesPoint(t *testing.T) {
 		h := mmTeam(t, knockout)
 		require.NoError(t, h.write(repWrite(h, mmT1, repRow("", "", []string{"M"}, nil), repBoutGroup)))
 
-		require.NoError(t, h.write(repWrite(h, mmT2, repRow("carol", "", nil, nil), repPicksName)))
+		require.NoError(t, h.write(repWrite(h, mmT2, repRow("carol", "", nil, nil), repPickAName)))
 
 		row := h.load(t).SubResults[0]
 		assert.Equal(t, "carol", row.SideAMemberID, "the pick applies")
@@ -87,21 +97,21 @@ func TestMerge_RepPick_KeepsAnotherDevicesPoint(t *testing.T) {
 func TestMerge_RepPick_StaleIsHeldAndANewerClearClears(t *testing.T) {
 	bothBranches(t, func(t *testing.T, knockout bool) {
 		h := mmTeam(t, knockout)
-		require.NoError(t, h.write(repWrite(h, mmT2, repRow("carol", "", nil, nil), repBoutGroup, repPicksName)))
+		require.NoError(t, h.write(repWrite(h, mmT2, repRow("carol", "", nil, nil), repBoutGroup, repPickAName)))
 
-		err := h.write(repWrite(h, mmT1, repRow("dana", "", nil, nil), repPicksName))
+		err := h.write(repWrite(h, mmT1, repRow("dana", "", nil, nil), repPickAName))
 		require.ErrorIs(t, err, ErrMatchSuperseded, "its one change is outranked")
-		assert.Equal(t, []string{repPicksName}, HeldGroupsOf(err))
+		assert.Equal(t, []string{repPickAName}, HeldGroupsOf(err))
 		assert.Equal(t, "carol", h.load(t).SubResults[0].SideAMemberID, "the newer pick stands")
 		entries := h.history(t)
 		held := entries[len(entries)-1]
-		assert.Equal(t, state.HistoryOutcomeHeld, held.Outcomes[repPicksName])
-		assert.JSONEq(t, `{"sideAMemberId":"dana","sideBMemberId":""}`, string(held.Held[repPicksName]),
+		assert.Equal(t, state.HistoryOutcomeHeld, held.Outcomes[repPickAName])
+		assert.JSONEq(t, `{"sideAMemberId":"dana"}`, string(held.Held[repPickAName]),
 			"the older pick is kept, never discarded")
 
 		// A deliberate clear is a change to the pick: the row is sent without
 		// the id and the change is named.
-		require.NoError(t, h.write(repWrite(h, mmT3, repRow("", "", nil, nil), repPicksName)))
+		require.NoError(t, h.write(repWrite(h, mmT3, repRow("", "", nil, nil), repPickAName)))
 		assert.Empty(t, h.load(t).SubResults[0].SideAMemberID, "a newer clear clears")
 	})
 }
@@ -126,7 +136,7 @@ func TestMerge_RepPicks_SurviveAWriteThatNamesNothingAndSendsNoBouts(t *testing.
 // client) is ordered like the others: picks it has no newer opinion on stay.
 func TestMerge_RepPicks_NamelessWriteIsOrderedByStamp(t *testing.T) {
 	h := mmTeam(t, true)
-	require.NoError(t, h.write(repWrite(h, mmT3, repRow("carol", "", nil, nil), repBoutGroup, repPicksName)))
+	require.NoError(t, h.write(repWrite(h, mmT3, repRow("carol", "", nil, nil), repBoutGroup, repPickAName)))
 
 	stale := repWrite(h, mmT2, repRow("dana", "", []string{"M"}, nil))
 	stale.Changed = nil
@@ -143,9 +153,9 @@ func TestMerge_RepPick_ReDerivesTheWinnerMemberID(t *testing.T) {
 	h := mmTeam(t, true)
 	won := repRow("carol", "", []string{"M"}, nil)
 	won.Winner, won.WinnerMemberID = wrTeamA, "carol"
-	require.NoError(t, h.write(repWrite(h, mmT1, won, repBoutGroup, repPicksName)))
+	require.NoError(t, h.write(repWrite(h, mmT1, won, repBoutGroup, repPickAName)))
 
-	require.NoError(t, h.write(repWrite(h, mmT2, repRow("dana", "", nil, nil), repPicksName)))
+	require.NoError(t, h.write(repWrite(h, mmT2, repRow("dana", "", nil, nil), repPickAName)))
 
 	row := h.load(t).SubResults[0]
 	assert.Equal(t, "dana", row.SideAMemberID)
@@ -153,7 +163,7 @@ func TestMerge_RepPick_ReDerivesTheWinnerMemberID(t *testing.T) {
 	assert.Equal(t, "dana", row.WinnerMemberID, "re-derived from the winning side and the stored pick")
 
 	// The pick cleared under a recorded winner id leaves no dangling id.
-	require.NoError(t, h.write(repWrite(h, mmT3, repRow("", "", nil, nil), repPicksName)))
+	require.NoError(t, h.write(repWrite(h, mmT3, repRow("", "", nil, nil), repPickAName)))
 	row = h.load(t).SubResults[0]
 	assert.Empty(t, row.SideAMemberID)
 	assert.Empty(t, row.WinnerMemberID, "a winner id naming no stored pick is empty")
@@ -170,7 +180,7 @@ func TestMerge_RepBout_WinnerMemberIDFollowsTheWinnersName(t *testing.T) {
 			h := mmTeam(t, knockout)
 			won := repRow("x", "y", []string{"M"}, nil)
 			won.Winner, won.WinnerMemberID = wrTeamB, "y"
-			require.NoError(t, h.write(repWrite(h, mmT1, won, repBoutGroup, repPicksName)))
+			require.NoError(t, h.write(repWrite(h, mmT1, won, repBoutGroup, repPickAName, repPickBName)))
 			require.Equal(t, "y", h.load(t).SubResults[0].WinnerMemberID, "setup: team B won, its pick y is the winner id")
 
 			crafted := repRow("x", "y", []string{"M"}, nil)
@@ -186,7 +196,7 @@ func TestMerge_RepBout_WinnerMemberIDFollowsTheWinnersName(t *testing.T) {
 			h := mmTeam(t, knockout)
 			won := repRow("", "y", []string{"M"}, nil)
 			won.Winner, won.WinnerMemberID = wrTeamA, "y"
-			require.NoError(t, h.write(repWrite(h, mmT1, won, repBoutGroup, repPicksName)))
+			require.NoError(t, h.write(repWrite(h, mmT1, won, repBoutGroup, repPickBName)))
 
 			row := h.load(t).SubResults[0]
 			assert.Equal(t, wrTeamA, row.Winner)
@@ -213,7 +223,7 @@ func TestMerge_RepBout_WinnerMemberIDAloneIsAnEcho(t *testing.T) {
 				h := mmTeam(t, knockout)
 				won := repRow("carol", "dana", []string{"M"}, nil)
 				won.Winner = wrTeamA
-				require.NoError(t, h.write(repWrite(h, mmT1, won, repBoutGroup, repPicksName)))
+				require.NoError(t, h.write(repWrite(h, mmT1, won, repBoutGroup, repPickAName, repPickBName)))
 				seeded := h.load(t)
 				require.Len(t, seeded.SubResults, 1)
 				require.Equal(t, "carol", seeded.SubResults[0].WinnerMemberID, "setup: derived from the winner and the picks")
@@ -246,19 +256,34 @@ func TestMerge_RepBout_WinnerMemberIDAloneIsAnEcho(t *testing.T) {
 func TestMerge_RepPick_OnARemovedBoutIsHeld(t *testing.T) {
 	h := mmTeam(t, true)
 	seedPick(t, h)
-	remove := mmRunning(h, mmT2, repBoutGroup, repPicksName)
+	remove := mmRunning(h, mmT2, repBoutGroup, repPickAName, repPickBName)
 	remove.WriteDoor = DoorDaihyosenDel
 	remove.SubResults = []state.SubMatchResult{}
 	require.NoError(t, h.write(remove))
 	require.Empty(t, h.load(t).SubResults)
 	removed := h.load(t)
-	assert.Equal(t, mmT2, removed.GroupStamp(repPicksName), "the removal dates the picks too")
+	assert.Equal(t, mmT2, removed.GroupStamp(repPickAName), "the removal dates side A's pick too")
+	assert.Equal(t, mmT2, removed.GroupStamp(repPickBName), "and side B's")
 
-	late := repWrite(h, mmT3, repRow("dana", "", nil, nil), repPicksName)
+	late := repWrite(h, mmT3, repRow("dana", "", nil, nil), repPickAName)
 	err := h.write(late)
 	require.ErrorIs(t, err, ErrMatchSuperseded)
-	assert.Equal(t, []string{repPicksName}, HeldGroupsOf(err))
+	assert.Equal(t, []string{repPickAName}, HeldGroupsOf(err))
 	assert.Empty(t, h.load(t).SubResults, "nothing is resurrected")
+
+	// Each side is held on its own, with only its own id kept in the history.
+	both := repWrite(h, mmT3+1, repRow("eve", "fay", nil, nil), repPickAName, repPickBName)
+	err = h.write(both)
+	require.ErrorIs(t, err, ErrMatchSuperseded)
+	assert.Equal(t, []string{repPickAName, repPickBName}, HeldGroupsOf(err))
+	entries := h.history(t)
+	held := entries[len(entries)-1]
+	assert.JSONEq(t, `{"sideAMemberId":"eve"}`, string(held.Held[repPickAName]))
+	assert.JSONEq(t, `{"sideBMemberId":"fay"}`, string(held.Held[repPickBName]))
+	still := h.load(t)
+	assert.Empty(t, still.SubResults, "still nothing is resurrected")
+	assert.Equal(t, mmT2, still.GroupStamp(repPickAName), "a held pick leaves the tombstone's date")
+	assert.Equal(t, mmT2, still.GroupStamp(repPickBName))
 }
 
 // A match written before the picks had a stamp of their own is ordered by the
@@ -268,23 +293,62 @@ func TestMerge_RepPicks_LegacyStampFallsBackToTheBout(t *testing.T) {
 	bracket, err := h.store.LoadBracket(h.compID)
 	require.NoError(t, err)
 	bm := &bracket.Rounds[0][0]
-	bm.SubResults = []state.SubMatchResult{repRow("carol", "", nil, nil)}
+	bm.SubResults = []state.SubMatchResult{repRow("carol", "gus", nil, nil)}
 	bm.ModifiedAt = mmT2
 	bm.GroupStamps = map[string]int64{repBoutGroup: mmT2} // a map written before the picks had an entry
 	require.NoError(t, h.store.SaveBracket(h.compID, bracket))
 
-	err = h.write(repWrite(h, mmT1, repRow("dana", "", nil, nil), repPicksName))
+	// Both sides read the row's date, until each is stamped itself.
+	require.Equal(t, mmT2, repStamp(t, h, repPickAName))
+	require.Equal(t, mmT2, repStamp(t, h, repPickBName))
+
+	err = h.write(repWrite(h, mmT1, repRow("dana", "gus", nil, nil), repPickAName))
 	require.ErrorIs(t, err, ErrMatchSuperseded, "older than the row it sits on")
 	assert.Equal(t, "carol", h.load(t).SubResults[0].SideAMemberID)
+	err = h.write(repWrite(h, mmT1, repRow("carol", "hal", nil, nil), repPickBName))
+	require.ErrorIs(t, err, ErrMatchSuperseded, "side B reads the row's date too")
+	assert.Equal(t, "gus", h.load(t).SubResults[0].SideBMemberID)
 
-	require.NoError(t, h.write(repWrite(h, mmT3, repRow("dana", "", nil, nil), repPicksName)))
-	assert.Equal(t, "dana", h.load(t).SubResults[0].SideAMemberID)
+	require.NoError(t, h.write(repWrite(h, mmT3, repRow("dana", "gus", nil, nil), repPickAName)))
+	got := h.load(t)
+	assert.Equal(t, "dana", got.SubResults[0].SideAMemberID)
+	assert.Equal(t, "gus", got.SubResults[0].SideBMemberID, "a pick the write did not name stays")
+	assert.Equal(t, mmT2, got.GroupStamp(repPickBName), "and keeps its date")
+}
+
+// A stamp map from this branch's earlier commits dated both picks as one group,
+// "repPicks". It reads as BOTH sides' stamp and is converted, and dropped, by the
+// first write that materializes the map (it errs toward holding a pick, which
+// is kept in the history).
+func TestMerge_RepPicks_DevStampOfBothPicksIsReadForEachSide(t *testing.T) {
+	h := mmTeam(t, true)
+	bracket, err := h.store.LoadBracket(h.compID)
+	require.NoError(t, err)
+	bm := &bracket.Rounds[0][0]
+	bm.SubResults = []state.SubMatchResult{repRow("carol", "gus", nil, nil)}
+	bm.ModifiedAt = mmT3
+	bm.GroupStamps = map[string]int64{repBoutGroup: mmT3, "repPicks": mmT2}
+	require.NoError(t, h.store.SaveBracket(h.compID, bracket))
+
+	require.Equal(t, mmT2, repStamp(t, h, repPickAName))
+	require.Equal(t, mmT2, repStamp(t, h, repPickBName))
+
+	err = h.write(repWrite(h, mmT1, repRow("dana", "gus", nil, nil), repPickAName))
+	require.ErrorIs(t, err, ErrMatchSuperseded)
+	assert.Equal(t, []string{repPickAName}, HeldGroupsOf(err))
+
+	require.NoError(t, h.write(repWrite(h, mmT4, repRow("dana", "gus", nil, nil), repPickAName)))
+	got := h.load(t)
+	assert.Equal(t, "dana", got.SubResults[0].SideAMemberID)
+	assert.Equal(t, mmT4, got.GroupStamp(repPickAName))
+	assert.Equal(t, mmT2, got.GroupStamp(repPickBName), "side B keeps the legacy date")
+	assert.NotContains(t, got.GroupStamps, "repPicks", "converted, not left to linger")
 }
 
 // A legacy match (no stamp map) that holds no representative bout row is not
-// given a repPicks stamp by an ordinary write: the materialization that runs
-// before the first group is stamped adds the key only for a match that has the
-// row to date. Individual matches never have one.
+// given a pick stamp by an ordinary write: the materialization that runs before
+// the first group is stamped adds the keys only for a match that has the row to
+// date. Individual matches never have one.
 func TestMerge_LegacyMatchWithoutARepBoutGainsNoRepPicksStamp(t *testing.T) {
 	bothBranches(t, func(t *testing.T, knockout bool) {
 		h := mmIndividual(t, knockout)
@@ -295,6 +359,69 @@ func TestMerge_LegacyMatchWithoutARepBoutGainsNoRepPicksStamp(t *testing.T) {
 		got := h.load(t)
 		assert.Equal(t, mmT1, got.GroupStamp(state.GroupPoints), "the group the write changed is stamped")
 		require.NotNil(t, got.GroupStamps)
-		assert.NotContains(t, got.GroupStamps, repPicksName)
+		assert.NotContains(t, got.GroupStamps, repPickAName)
+		assert.NotContains(t, got.GroupStamps, repPickBName)
+	})
+}
+
+// Two captains pick their representatives at about the same moment, each on
+// their own phone: device 1 picks Shiro's (side B), device 2, whose screen never
+// showed that pick, picks Aka's (side A) a moment later, carrying a row with no
+// side-B id. Each side's pick is its own dated change, so device 2's write
+// applies side A and leaves device 1's side B alone: both picks stand, each
+// dated by its own write. Both sides are asserted after every write.
+func TestMerge_RepPicks_TwoCaptainsBothLand(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		h := mmTeam(t, knockout)
+
+		// Device 1, at T1: the pick creates the row.
+		require.NoError(t, h.write(repWrite(h, mmT1, repRow("", "x", nil, nil), repBoutGroup, repPickBName)))
+		got := h.load(t)
+		require.Len(t, got.SubResults, 1)
+		require.Equal(t, "x", got.SubResults[0].SideBMemberID, "setup: device 1's pick is stored")
+		require.Empty(t, got.SubResults[0].SideAMemberID)
+
+		// Device 2, at T2 > T1: its row carries side A only.
+		err := h.write(repWrite(h, mmT2, repRow("y", "", nil, nil), repPickAName))
+
+		got = h.load(t)
+		require.Len(t, got.SubResults, 1)
+		assert.Equal(t, "y", got.SubResults[0].SideAMemberID, "device 2's pick applies")
+		assert.Equal(t, "x", got.SubResults[0].SideBMemberID, "and device 1's pick is not its to erase")
+		assert.NoError(t, err)
+		assert.Equal(t, mmT1, got.GroupStamp(repPickBName), "side B is still dated by device 1's write")
+		assert.Equal(t, mmT2, got.GroupStamp(repPickAName), "side A is dated by device 2's write")
+	})
+}
+
+// A stale pick on one side is held and kept in the history while a newer pick on
+// the other side, in the same write, applies. The seed order is deliberate: a
+// fresh match has no representative row, and the write that creates it dates
+// every side it does not name through the bout:-1 fallback, so side A is made
+// newer (T3) by its own write before the write under test (T2) arrives.
+func TestMerge_RepPicks_StaleSideHeldWhileTheOtherSideApplies(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		h := mmTeam(t, knockout)
+		require.NoError(t, h.write(repWrite(h, mmT1, repRow("", "b1", nil, nil), repBoutGroup, repPickBName)))
+		require.NoError(t, h.write(repWrite(h, mmT3, repRow("a1", "", nil, nil), repPickAName)))
+		seeded := h.load(t)
+		require.Equal(t, "a1", seeded.SubResults[0].SideAMemberID, "setup: side A picked at T3")
+		require.Equal(t, "b1", seeded.SubResults[0].SideBMemberID, "setup: side B picked at T1")
+
+		err := h.write(repWrite(h, mmT2, repRow("a2", "b2", nil, nil), repPickAName, repPickBName))
+
+		got := h.load(t)
+		require.Len(t, got.SubResults, 1)
+		assert.Equal(t, "a1", got.SubResults[0].SideAMemberID, "the newer side-A pick stands")
+		assert.Equal(t, "b2", got.SubResults[0].SideBMemberID, "the side-B pick, newer than what it replaces, applies")
+		assert.NoError(t, err, "applied in part: not superseded")
+		entries := h.history(t)
+		last := entries[len(entries)-1]
+		assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[repPickAName])
+		assert.Equal(t, state.HistoryOutcomeApplied, last.Outcomes[repPickBName])
+		assert.JSONEq(t, `{"sideAMemberId":"a2"}`, string(last.Held[repPickAName]), "the stale pick is kept, never discarded")
+		assert.NotContains(t, last.Held, repPickBName)
+		assert.Equal(t, mmT3, got.GroupStamp(repPickAName))
+		assert.Equal(t, mmT2, got.GroupStamp(repPickBName))
 	})
 }

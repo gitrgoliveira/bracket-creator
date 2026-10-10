@@ -1,11 +1,11 @@
 {
-  "_comment": "Shared Go/JS table of the groups a match write is merged by (bc-mrgc). Go half: TestMatchGroups_SharedTable (internal/state/match_groups_table_test.go) against state.ScalarGroups (repPicks: the two representatives of the representative bout, a change of their own, dated apart from bout:-1), BoutGroup, ParseBoutGroup and ValidGroup. JS half: web-mobile/js/__tests__/match_groups_table.test.jsx against match_groups.jsx's SCALAR_GROUPS, boutGroup, parseBoutGroup and isValidGroup. A client write names its groups by these exact strings in `changed`, and the server refuses a name it does not know, so the two lists must never drift.",
-  "scalarGroups": ["points", "result", "encho", "flags", "rep", "repPicks"],
+  "_comment": "Shared Go/JS table of the groups a match write is merged by (bc-mrgc). Go half: TestMatchGroups_SharedTable (internal/state/match_groups_table_test.go) against state.ScalarGroups (repPickA and repPickB: each side's representative of the representative bout, a change of its own, dated apart from the other side's and from bout:-1), BoutGroup, ParseBoutGroup and ValidGroup. JS half: web-mobile/js/__tests__/match_groups_table.test.jsx against match_groups.jsx's SCALAR_GROUPS, boutGroup, parseBoutGroup and isValidGroup. A client write names its groups by these exact strings in `changed`, and the server refuses a name it does not know, so the two lists must never drift.",
+  "scalarGroups": ["points", "result", "encho", "flags", "rep", "repPickA", "repPickB"],
   "bouts": [
     { "position": 1, "group": "bout:1" },
     { "position": 2, "group": "bout:2" },
     { "position": 9, "group": "bout:9" },
     { "position": -1, "group": "bout:-1" }
   ],
-  "invalid": ["", "score", "points ", "Bout:1", "bout:", "bout:x", "bout:1.5"]
+  "invalid": ["", "score", "points ", "Bout:1", "bout:", "bout:x", "bout:1.5", "repPicks"]
 }

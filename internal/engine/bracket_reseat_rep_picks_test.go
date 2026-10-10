@@ -2,8 +2,8 @@ package engine
 
 // A team knockout match whose side is given ANOTHER team loses the
 // representative it held on that side: the pick is a member of the old team,
-// and the picker offers only the seated team's members (GroupRepPicks,
-// state/match_groups.go). seatBracketSide is the one owner; these tests drive
+// and the picker offers only the seated team's members (GroupRepPickA and
+// GroupRepPickB, state/match_groups.go). seatBracketSide is the one owner; these tests drive
 // it through the doors that re-seat a side with no store handle of their own
 // (a forced score correction, override-winner) and pin what must NOT change: a
 // correction that stores the same winner, and the side nobody re-seated.
@@ -52,7 +52,8 @@ func rpSetup(t *testing.T, played bool) (*Engine, *state.Store, string) {
 		SubResults: []state.SubMatchResult{rpRow()},
 		ModifiedAt: mmT2,
 		GroupStamps: map[string]int64{
-			state.GroupRepPicks:                         mmT1,
+			state.GroupRepPickA:                         mmT1,
+			state.GroupRepPickB:                         mmT1,
 			state.BoutGroup(state.DaihyosenSubPosition): mmT1,
 			state.GroupPoints:                           mmT2,
 		},
@@ -102,13 +103,13 @@ func rpNext(t *testing.T, store *state.Store, compID string) state.BracketMatch 
 	return *m
 }
 
-// rpOldPickReplay is the write that seated both picks, replayed: it names the
-// picks alone, at the stamp they were made at, and carries no sides (the stored
+// rpOldPickReplay is the write that seated side A's pick, replayed: it names
+// that pick alone, at the stamp it was made at, and carries no sides (the stored
 // pairing fills them).
 func rpOldPickReplay() *state.MatchResult {
 	return &state.MatchResult{
 		ID: rpNextID, Status: state.MatchStatusScheduled, ModifiedAt: mmT1,
-		Changed: []string{state.GroupRepPicks}, WriteDoor: DoorScore,
+		Changed: []string{state.GroupRepPickA}, WriteDoor: DoorScore,
 		SubResults: []state.SubMatchResult{rpRow()},
 	}
 }
@@ -123,9 +124,10 @@ func assertSideAPickGone(t *testing.T, next state.BracketMatch, priorModifiedAt 
 	a, c := next.RepPicks()
 	assert.Empty(t, a, "side A was given another team: Ryu's member no longer stands for it")
 	assert.Equal(t, rpPickC, c, "side B was not re-seated: its pick stays")
-	assert.Greater(t, next.GroupStamp(state.GroupRepPicks), mmT1, "dated after the stamp the picks held")
-	assert.GreaterOrEqual(t, next.GroupStamp(state.GroupRepPicks), priorModifiedAt, "and never before the match")
-	assert.GreaterOrEqual(t, next.ModifiedAt, next.GroupStamp(state.GroupRepPicks))
+	assert.Greater(t, next.GroupStamp(state.GroupRepPickA), mmT1, "dated after the stamp the pick held")
+	assert.GreaterOrEqual(t, next.GroupStamp(state.GroupRepPickA), priorModifiedAt, "and never before the match")
+	assert.GreaterOrEqual(t, next.ModifiedAt, next.GroupStamp(state.GroupRepPickA))
+	assert.Equal(t, mmT1, next.GroupStamp(state.GroupRepPickB), "side B's pick keeps its date")
 }
 
 func TestReseat_ScheduledDownstreamLosesTheReseatedSidesPick(t *testing.T) {
@@ -142,7 +144,7 @@ func TestReseat_ScheduledDownstreamLosesTheReseatedSidesPick(t *testing.T) {
 	// clear: it is kept in the history, not put back.
 	_, err := eng.RecordMatchResultWithIneligibility(compID, rpNextID, rpOldPickReplay())
 	require.ErrorIs(t, err, ErrMatchSuperseded)
-	assert.Equal(t, []string{state.GroupRepPicks}, HeldGroupsOf(err))
+	assert.Equal(t, []string{state.GroupRepPickA}, HeldGroupsOf(err))
 	after := rpNext(t, store, compID)
 	a, c := after.RepPicks()
 	assert.Empty(t, a, "the replay did not seat Ryu's member on Tora's side")
@@ -160,7 +162,7 @@ func TestReseat_PlayedDownstreamLosesThePickAndItsReopenLineNamesIt(t *testing.T
 		return err
 	}))
 	require.Equal(t, []string{rpNextID}, reopenedIDs(reopened))
-	assert.True(t, reopened[0].RepPickCleared, "the reopened match is told its pick went with the team")
+	assert.Equal(t, []string{state.GroupRepPickA}, reopened[0].RepPicksCleared, "the reopened match is told its side A pick went with the team")
 
 	next := rpNext(t, store, compID)
 	assertSideAPickGone(t, next, prior.ModifiedAt)
@@ -177,7 +179,8 @@ func TestReseat_PlayedDownstreamLosesThePickAndItsReopenLineNamesIt(t *testing.T
 		}
 	}
 	require.NotNil(t, reopenLine, "the played match gets a line for its reopen")
-	assert.Contains(t, reopenLine.Changed, state.GroupRepPicks)
+	assert.Contains(t, reopenLine.Changed, state.GroupRepPickA)
+	assert.NotContains(t, reopenLine.Changed, state.GroupRepPickB, "side B kept its pick")
 	assert.Contains(t, reopenLine.Changed, state.GroupResult)
 }
 
@@ -196,11 +199,12 @@ func TestReseat_PlayedDownstreamReopenLineNamesNoPicksWhenNoneWentWithIt(t *test
 		return err
 	}))
 	require.Equal(t, []string{rpNextID}, reopenedIDs(reopened))
-	assert.False(t, reopened[0].RepPickCleared)
+	assert.Empty(t, reopened[0].RepPicksCleared)
 	entries, err := store.LoadMatchHistory(compID, rpNextID)
 	require.NoError(t, err)
 	for _, e := range entries {
-		assert.NotContains(t, e.Changed, state.GroupRepPicks, "there was no pick to clear")
+		assert.NotContains(t, e.Changed, state.GroupRepPickA, "there was no pick to clear")
+		assert.NotContains(t, e.Changed, state.GroupRepPickB, "there was no pick to clear")
 	}
 }
 
@@ -229,6 +233,7 @@ func TestReseat_CorrectionStoringTheSameWinnerLeavesThePicksAlone(t *testing.T) 
 	a, c := next.RepPicks()
 	assert.Equal(t, rpPickA, a)
 	assert.Equal(t, rpPickC, c)
-	assert.Equal(t, mmT1, next.GroupStamp(state.GroupRepPicks), "the picks keep their date")
+	assert.Equal(t, mmT1, next.GroupStamp(state.GroupRepPickA), "side A's pick keeps its date")
+	assert.Equal(t, mmT1, next.GroupStamp(state.GroupRepPickB), "and so does side B's")
 	assert.Equal(t, prior.ModifiedAt, next.ModifiedAt, "and the match is not touched")
 }

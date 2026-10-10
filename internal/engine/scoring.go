@@ -642,11 +642,12 @@ type ReopenedMatch struct {
 	// Court is the shiaijo the match is on ("" when it has none), so a
 	// refusal can tell the operator where the match is being fought.
 	Court string
-	// RepPickCleared is set when the same write that reopened the match gave
-	// one of its sides another team, which took that side's representative
-	// with it (seatBracketSide). Its reopen history line then names the
-	// repPicks group beside the verdict's.
-	RepPickCleared bool
+	// RepPicksCleared lists the pick groups (state.RepPickGroup) of the sides
+	// the same write that reopened the match gave another team, which took
+	// that side's representative with it (seatBracketSide); nil when none
+	// went. Its reopen history line then names those groups beside the
+	// verdict's, and only those.
+	RepPicksCleared []string
 	// priorPickA and priorPickB are the representatives the match held when it
 	// was reopened (or, for a downstream match a winner is re-propagated into,
 	// before that write began), for markRepPicksCleared to compare.
@@ -2862,7 +2863,7 @@ func winnerActuallyChanged(priorWinner, priorWinnerID string, bm *state.BracketM
 // preceded this call (the score, override and engi doors); the reopen door,
 // which retracts afterwards, passes nil and judges the picks itself. Each
 // reopened match whose representative went with a re-seated side comes back
-// with RepPickCleared set.
+// with RepPicksCleared naming that side's group.
 func forceReopenDownstreamChain(bracket *state.Bracket, rIdx, mIdx int, correctedID string, before downstreamRepPicks) []ReopenedMatch {
 	d := propagatedDownstreamOf(bracket, rIdx, mIdx)
 	var reopened []ReopenedMatch
@@ -2975,9 +2976,9 @@ func (e *Engine) restoreForceReopened(h state.StoreTx, compID string, reopened [
 		// The reopen changed the match outside the merge, so it records its
 		// own history entry (bc-mrgc).
 		groups := reopenedBracketGroups
-		if reopened[i].RepPickCleared {
+		if len(reopened[i].RepPicksCleared) > 0 {
 			// A copy: reopenedBracketGroups is shared.
-			groups = append(append([]string(nil), groups...), state.GroupRepPicks)
+			groups = append(append([]string(nil), groups...), reopened[i].RepPicksCleared...)
 		}
 		e.recordDirectHistory(h, compID, reopened[i].ID, doorDownstreamReopen, serverNowMs(), groups...)
 	}
@@ -3122,7 +3123,7 @@ func propagatedWinnerOf(bracket *state.Bracket, rIdx, mIdx int, bm *state.Bracke
 		return "", ""
 	}
 	slot, slotID := next.SideB, next.SideBID
-	if mIdx%2 == 0 {
+	if feedsSide(mIdx) == domain.MatchSideA {
 		slot, slotID = next.SideA, next.SideAID
 	}
 	if isUnresolvedBracketSide(slot) {
@@ -3177,7 +3178,7 @@ func newDownstreamKnockoutPlayedError(bm *state.BracketMatch, blocking []*state.
 // placeholder rather than a competitor.
 func displacedCompetitor(bm, blocking *state.BracketMatch, mIdx int) string {
 	slot := blocking.SideB
-	if mIdx%2 == 0 {
+	if feedsSide(mIdx) == domain.MatchSideA {
 		slot = blocking.SideA
 	}
 	if slot != "" && !helper.IsWinnerOfPlaceholder(slot) {

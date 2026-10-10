@@ -1433,8 +1433,9 @@ func (s *SubMatchResult) ResolveMemberWinnerID() bool {
 
 // ReconcileWinnerMemberID keeps a representative-bout row's WinnerMemberID
 // consistent with the two representatives it names: WinnerMemberID belongs to
-// the bout's result and the representatives to their own change
-// (GroupRepPicks), so a merge can leave a winner id that disagrees with them.
+// the bout's result and each representative to its own change
+// (GroupRepPickA, GroupRepPickB), so a merge can leave a winner id that
+// disagrees with them.
 // The id is always cleared and derived again by ResolveMemberWinnerID, from
 // the winner's NAME alone and the side's stored pick, so afterwards it is
 // exactly the pick of the side the Winner name names, or empty. It is empty

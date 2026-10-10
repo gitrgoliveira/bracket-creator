@@ -53,11 +53,12 @@ info:
     which may take its winner from that row and is refused with 409 `no_daihyosen`; a write listing
     two is refused with 400 `duplicate_daihyosen`, a representative pick that names a member the
     side's team does not hold is refused with 400 `team_member_not_in_team`. The row's winner member id
-    is not judged: the merge keeps it naming one of the two stored representatives. A write stamped
-    before the stored representatives is not judged for its picks: the merge holds the picks, which
-    are not written and are kept in the match's history. The rest of the write is ordered by its own
-    stamps, so it is applied and answered with `heldGroups: ["repPicks"]`; it is answered as
-    superseded only when every group it changes is held. Nor does it remove one: a write listing
+    is not judged: the merge keeps it naming one of the two stored representatives. A write
+    stamped before a stored representative is not judged for that side's pick: the merge holds
+    the pick, which is not written and is kept in the match's history. The rest of the write is
+    ordered by its own stamps, so it is applied and answered with `heldGroups` naming the held
+    side's group, e.g. `["repPickA"]`; it is answered as superseded only when every group it
+    changes is held. Nor does it remove one: a write listing
     the bouts without the representative bout the match has (a sheet a moment behind an
     add made elsewhere) keeps the stored row, scored or not, unless it finishes the match,
     which is refused with 409 `daihyosen_added`. It carries only what the competitors saw: a match
@@ -2490,13 +2491,14 @@ paths:
             `message` is "The representative chosen is not on this team. Pick
             again from the list." The row's winner member id is not judged: the
             merge keeps it naming one of the two stored representatives, or empty.
-            A write whose stamp is strictly before the stored representatives is not
-            judged for its picks: the merge holds them, so the picks are not
-            written and are kept in the match's history (an equal stamp applies,
+            A write whose stamp is strictly before a stored representative is not
+            judged for that side's pick: the merge holds the pick, so it is not
+            written and is kept in the match's history (an equal stamp applies,
             so it is judged). The rest of the write is ordered by its own stamps,
-            so it is applied and answered with `heldGroups: ["repPicks"]`; it is
-            answered as superseded, with nothing written, only when every group
-            it changes is held. The organiser's picks are not checked.
+            so it is applied and answered with `heldGroups` naming the held side's
+            group, e.g. `["repPickA"]`; it is answered as superseded, with nothing
+            written, only when every group it changes is held. The organiser's
+            picks are not checked.
 
             A `completed` write whose `decision` is empty or `hikiwake` on a
             match whose stored result is a completed withdrawal (kiken or
@@ -5400,17 +5402,18 @@ components:
         decision, decisionBy, decisionReason, and the correctionReason and
         resultSource that describe it); `encho` the match-level overtime;
         `flags` the engi flag counts; `rep` the pool representative players;
-        `repPicks` the two representatives of a team match's representative
-        bout (the member ids `sideAMemberId` and `sideBMemberId` on its `-1`
-        row), a change of their own that a point struck on the bout never
-        alters and that never alters the bout's score; and `bout:<position>`
+        `repPickA` and `repPickB` the two representatives of a team match's
+        representative bout (the member ids `sideAMemberId` and `sideBMemberId`
+        on its `-1` row), one group per side: each is a change of its own,
+        dated apart from the other side's, that a point struck on the bout
+        never alters and that never alters the bout's score; and `bout:<position>`
         one bout row (1..n, or -1 for the representative bout, without the
         two representatives or the winner's member id, which the server
         derives). The sides, court, schedule and round are not
         groups. A write
         names the groups it changes in `changed`; the match records the stamp
         of the last applied change to each in `groupStamps`.
-      pattern: '^(points|result|encho|flags|rep|repPicks|bout:-?[0-9]+)$'
+      pattern: '^(points|result|encho|flags|rep|repPickA|repPickB|bout:-?[0-9]+)$'
 
     DaihyosenWriteStamp:
       type: object

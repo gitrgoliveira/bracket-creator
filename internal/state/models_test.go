@@ -221,7 +221,7 @@ func TestSubMatchResult_ResolveMemberWinnerID(t *testing.T) {
 }
 
 // TestSubMatchResult_ReconcileWinnerMemberID pins the representative-bout rule
-// (bc-mrgc, GroupRepPicks): after a merge, WinnerMemberID is EXACTLY the stored
+// (bc-mrgc, GroupRepPickA and GroupRepPickB): after a merge, WinnerMemberID is EXACTLY the stored
 // pick of the side the Winner NAME names, or empty. It is derived from the name
 // alone and never decided through the stored id (SubBoutWinnerSide and
 // Attribution read WinnerMemberID first, so a stale id would decide its own

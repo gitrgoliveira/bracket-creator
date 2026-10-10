@@ -126,9 +126,11 @@ func defaultChangedGroups(stored, incoming *state.MatchResult, nilSubsClear bool
 		out = append(out, state.BoutGroup(p))
 	}
 	// The representatives sit on the representative bout's row: a write that
-	// says nothing about that row says nothing about them.
+	// says nothing about that row says nothing about either side's pick.
 	if !slices.Contains(out, state.BoutGroup(state.DaihyosenSubPosition)) {
-		out = slices.DeleteFunc(out, func(g string) bool { return g == state.GroupRepPicks })
+		out = slices.DeleteFunc(out, func(g string) bool {
+			return g == state.GroupRepPickA || g == state.GroupRepPickB
+		})
 	}
 	return out
 }
@@ -325,18 +327,27 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 	}
 	// A pick has no bout to land on once the representative bout is gone (a
 	// removal's tombstone, or a row the write carried that its stamp could not
-	// bring back): the picks are held, in the history, not applied onto nothing.
-	if i := slices.Index(rep.Applied, state.GroupRepPicks); i >= 0 && (payloadPickA != "" || payloadPickB != "") &&
-		state.DaihyosenSubIndex(incoming.SubResults) < 0 {
-		rep.Applied = slices.Delete(rep.Applied, i, i+1)
-		ghost := &state.MatchResult{SubResults: []state.SubMatchResult{{
-			Position: state.DaihyosenSubPosition, SideAMemberID: payloadPickA, SideBMemberID: payloadPickB,
-		}}}
-		reportHeld(rep, state.GroupRepPicks, stored, ghost, nil)
-		if s, ok := storedStamps[state.GroupRepPicks]; ok {
-			stamps[state.GroupRepPicks] = s
-		} else {
-			delete(stamps, state.GroupRepPicks)
+	// bring back): each side's pick is held, in the history, not applied onto
+	// nothing, and that side's stamp goes back to what it was.
+	if state.DaihyosenSubIndex(incoming.SubResults) < 0 {
+		for _, pick := range []struct {
+			side domain.MatchSide
+			id   string
+		}{{domain.MatchSideA, payloadPickA}, {domain.MatchSideB, payloadPickB}} {
+			g := state.RepPickGroup(pick.side)
+			i := slices.Index(rep.Applied, g)
+			if i < 0 || pick.id == "" {
+				continue
+			}
+			rep.Applied = slices.Delete(rep.Applied, i, i+1)
+			ghost := &state.MatchResult{SubResults: []state.SubMatchResult{{Position: state.DaihyosenSubPosition}}}
+			ghost.SetRepPick(pick.side, pick.id)
+			reportHeld(rep, g, stored, ghost, nil)
+			if s, ok := storedStamps[g]; ok {
+				stamps[g] = s
+			} else {
+				delete(stamps, g)
+			}
 		}
 	}
 	resultApplied := inChanged[state.GroupResult] && !hold[state.GroupResult]

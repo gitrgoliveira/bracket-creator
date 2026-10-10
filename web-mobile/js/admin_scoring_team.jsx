@@ -2451,8 +2451,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     onUndo: () => {
       setSubs(serverSubs);
       setFinishRefused(false);
-      // The whole board is the server's again, so the editor agrees with every row.
+      // The whole board is the server's again, so the editor agrees with every row
+      // and with both representative picks, which ride the board as their own
+      // groups: left unagreed, a pick built into an earlier write that has not
+      // echoed back would still be what the next build is compared against, and
+      // that build would name the group again under a newer stamp.
       for (const ss of serverSubs) claimChanged.agree(boutGroup(ss._pos));
+      claimChanged.agree(GROUP_REP_PICK_A);
+      claimChanged.agree(GROUP_REP_PICK_B);
     },
     onReset: () => setFinishRefused(false),
   });
@@ -2966,7 +2972,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     if (!Array.isArray(squad) || squad.length === 0) return undefined;
     const member = squad.find(mem => mem && mem.id === memberId);
     if (!member) return null;
-    return member.name || squadMemberLabel((side === "a" ? m.sideA : m.sideB)?.number || "", member.index);
+    return member.name || squadLabelFor(side, memberId);
   };
 
   // slotLabelFor: the fallback label for a NUMBERED fixed-order position

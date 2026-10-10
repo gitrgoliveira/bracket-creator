@@ -29,7 +29,7 @@ import { matchShowsScore } from './match_shows_score.jsx';
 // answer means (classifyStartOutcome, startFailureMessage) and the one-start-at-
 // a-time guard are start_match.jsx's, shared with the court console, which had
 // all three while this page swallowed a refused start.
-import { startPatch, classifyStartOutcome, startFailureMessage, createStartGuard } from './start_match.jsx';
+import { startPatch, classifyStartOutcome, startFailureMessage, createStartGuard, startRefusalStands } from './start_match.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -161,17 +161,18 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
   // start that finally went through or a result recorded another way.
   const startRefusalKey = startRefusal ? startRefusal.key : null;
   const startRefusalRow = startRefusalKey ? allMatches.find((m) => scoreKeyOf(m) === startRefusalKey) : null;
-  const startRefusalStatus = startRefusalRow ? startRefusalRow.status : null;
-  // It is dropped when the refused match leaves `scheduled` (or the data), or
-  // when the operator opens a DIFFERENT match. Closing the editor is neither:
-  // the row behind it is where the notice stays visible. A refusal is about one
-  // match at one moment, so a stale one never revives when that match is later
-  // sent back to the queue.
+  const startRefusalHolds = startRefusalStands({ row: startRefusalRow, listHoldsMatches: allMatches.length > 0 });
+  // It is dropped when the refused match leaves `scheduled` or a list that holds
+  // matches no longer holds it (start_match.jsx startRefusalStands, the rule the
+  // court console asks too), or when the operator opens a DIFFERENT match, which
+  // only this page does. Closing the editor is neither: the row behind it is
+  // where the notice stays visible. A refusal is about one match at one moment,
+  // so a stale one never revives when that match is later sent back to the queue.
   useEffectA(() => {
     if (!startRefusalKey) return;
     const openedAnother = openKey != null && openKey !== startRefusalKey;
-    if (openedAnother || startRefusalStatus !== "scheduled") setStartRefusal(null);
-  }, [openKey, startRefusalKey, startRefusalStatus]);
+    if (openedAnother || !startRefusalHolds) setStartRefusal(null);
+  }, [openKey, startRefusalKey, startRefusalHolds]);
   const startNoticeFor = (m) => (startRefusal && startRefusal.key === scoreKeyOf(m) && m.status === "scheduled" ? startRefusal.msg : null);
 
   // A refused start: land the operator on the refused match in pre-match (the

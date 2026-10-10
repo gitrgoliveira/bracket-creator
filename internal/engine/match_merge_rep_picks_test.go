@@ -630,10 +630,11 @@ func TestMerge_RepPick_OnARowAHoldTookOut_IsHeldWithItsValue(t *testing.T) {
 	})
 }
 
-// The pick judges (mobileapp: the participant's and the organiser's) judge a
-// representative pick for team membership only when the merge will APPLY it,
-// and they ask RepPicksApplied, which runs the merge on copies, rather than
-// re-deriving its rule. The table below pins the probe to the merge itself.
+// The member judges (mobileapp: the participant's and the organiser's) judge a
+// representative pick, and a participant's numbered bout row, for team
+// membership only when the merge will APPLY its group, and they ask
+// AppliedGroups, which runs the merge on copies, rather than re-deriving its
+// rule. The table below pins the probe to the merge itself.
 
 const rpaStoredAt = int64(100_000)
 
@@ -677,7 +678,7 @@ func rpaCopy(m *state.MatchResult) state.MatchResult {
 	return c
 }
 
-func TestRepPicksApplied_AgreesWithTheMerge(t *testing.T) {
+func TestAppliedGroups_AgreesWithTheMerge(t *testing.T) {
 	changeds := []struct {
 		name    string
 		changed []string
@@ -704,7 +705,8 @@ func TestRepPicksApplied_AgreesWithTheMerge(t *testing.T) {
 						stored, incoming := rpaStored(storedRow), rpaWrite(st.at, ch.changed)
 						storedBefore, incomingBefore := rpaCopy(stored), rpaCopy(incoming)
 
-						gotA, gotB := RepPicksApplied(stored, incoming, rpaComp, knockout)
+						got := AppliedGroups(stored, incoming, rpaComp, knockout)
+						gotA, gotB := slices.Contains(got, repPickAName), slices.Contains(got, repPickBName)
 
 						assert.Equal(t, storedBefore, *stored, "the stored match is not changed by the probe")
 						assert.Equal(t, incomingBefore, *incoming, "the write is not changed by the probe")
@@ -712,6 +714,7 @@ func TestRepPicksApplied_AgreesWithTheMerge(t *testing.T) {
 						// The merge, run on its own copies with the branch's context.
 						s, w := rpaCopy(stored), rpaCopy(incoming)
 						rep := mergeMatchWrite(&s, &w, matchWriteForward, mergeCtx{comp: rpaComp, knockout: knockout, nilSubsClear: !knockout})
+						assert.Equal(t, rep.Applied, got, "every group the merge applies, not only the picks")
 						assert.Equal(t, slices.Contains(rep.Applied, repPickAName), gotA, "side A")
 						assert.Equal(t, slices.Contains(rep.Applied, repPickBName), gotB, "side B")
 
@@ -739,7 +742,7 @@ func TestRepPicksApplied_AgreesWithTheMerge(t *testing.T) {
 // WHOLE (HoldReasonFinishAtomic): its picks land nowhere, whatever their own
 // stamps say. A finish that only repeats the stored verdict is not a hold, so
 // its picks are ordered by their own stamps.
-func TestRepPicksApplied_AStaleFinishLandsNoPick(t *testing.T) {
+func TestAppliedGroups_AStaleFinishLandsNoPick(t *testing.T) {
 	stored := func() *state.MatchResult {
 		m := rpaStored(true)
 		m.Status, m.Winner, m.WinnerID = state.MatchStatusCompleted, wrTeamA, wrTeamAID
@@ -754,11 +757,15 @@ func TestRepPicksApplied_AStaleFinishLandsNoPick(t *testing.T) {
 	}
 	for _, knockout := range []bool{false, true} {
 		t.Run(fmt.Sprintf("knockout=%v", knockout), func(t *testing.T) {
-			a, b := RepPicksApplied(stored(), finish(wrTeamB, wrTeamBID), rpaComp, knockout)
+			picks := func(winner, winnerID string) (a, b bool) {
+				got := AppliedGroups(stored(), finish(winner, winnerID), rpaComp, knockout)
+				return slices.Contains(got, repPickAName), slices.Contains(got, repPickBName)
+			}
+			a, b := picks(wrTeamB, wrTeamBID)
 			assert.False(t, a, "another winner, older than the stored verdict: held whole, side A")
 			assert.False(t, b, "side B")
 
-			a, b = RepPicksApplied(stored(), finish(wrTeamA, wrTeamAID), rpaComp, knockout)
+			a, b = picks(wrTeamA, wrTeamAID)
 			assert.True(t, a, "the stored verdict repeated is no hold: the pick is newer than its stored stamp, side A")
 			assert.True(t, b, "side B")
 		})

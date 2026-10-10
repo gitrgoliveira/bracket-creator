@@ -95,6 +95,21 @@ export function startFailureMessage(err) {
     return (err && err.message) || START_FAILED_MESSAGE;
 }
 
+// startRefusalStands: does a stored Start refusal still hold? A refusal is about
+// one match at one moment, so it falls when its row has left `scheduled`, or
+// when a list that holds matches no longer holds it (the match moved), and a
+// stale one never revives when that match is later sent back to the queue. An
+// EMPTY list says nothing about the match (it is empty while a feed loads and
+// across a transient empty refetch), so the refusal stands then. `row` is the
+// refused match's live row in the host's list, or null when the list lacks it;
+// `listHoldsMatches` is whether that list holds any match at all. The court
+// console and the Scores tab both ask this, so they cannot disagree on how long
+// the notice lives.
+export function startRefusalStands({ row, listHoldsMatches }) {
+    if (row) return row.status === "scheduled";
+    return !listHoldsMatches;
+}
+
 // createStartGuard: ONE start at a time. A host creates one and brackets every
 // start it makes with begin/end.
 //

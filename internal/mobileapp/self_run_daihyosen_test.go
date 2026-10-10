@@ -818,7 +818,9 @@ func TestHoldSelfReportedWriteUnderTx(t *testing.T) {
 			result := &state.MatchResult{SubResults: tc.incoming, Winner: tc.winner, WinnerID: tc.winnerID, Status: tc.status}
 
 			err := store.WithTransaction("c1", func(stx state.StoreTx) error {
-				return holdSelfReportedWriteUnderTx(stx, "c1", "B1", result, tc.startOnly)
+				snap, found, err := matchSnapshotOrErr(stx, "c1", "B1", "test")
+				require.NoError(t, err)
+				return holdSelfReportedWriteUnderTx(stx, "c1", "B1", snap, found, result, tc.startOnly)
 			})
 			if tc.want != nil {
 				var refusal *selfRunRefusal

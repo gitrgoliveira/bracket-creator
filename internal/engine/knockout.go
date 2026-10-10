@@ -337,7 +337,18 @@ func (e *Engine) resolveSlots(bracket *state.Bracket, resolver map[string]resolv
 		paint := func(label string, side domain.MatchSide) {
 			name, id := slotFields(m, side)
 			rf, ok := resolver[label]
-			if !ok || (*name == rf.Name && *id == rf.ID) {
+			if !ok {
+				return
+			}
+			// A side whose resolver entry has no id (a standings player of
+			// legacy data) keeps the id it holds, as seatBracketSide keeps it
+			// for an incoming "": it is already seated, and repainting it
+			// would count a change on every pool write that never converges.
+			// Only that direction: a slot with no id against an entry that
+			// has one is still painted, which is the id backfill above. The
+			// Winner is written directly, id included, so it keeps the exact
+			// compare and converges after one repaint.
+			if *name == rf.Name && (*id == rf.ID || (side != domain.MatchSideNone && rf.ID == "")) {
 				return
 			}
 			if frozen[qualifierLabelPool(label)] != "" {

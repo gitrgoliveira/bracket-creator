@@ -18,6 +18,14 @@ import (
 // (SubMatchResult.SideAMemberID/SideBMemberID, the state.GroupRepPickA and
 // state.GroupRepPickB groups), so a side given ANOTHER team takes its pick away.
 //
+// The one exception is ReplaceParticipantInDraw, which writes side names
+// directly (forEachBracketSideWithID) when a participant is replaced. That is
+// safe: it runs only while the competition is draw-ready (checked again under
+// the transaction lock; the participant edit is refused once it has started),
+// and no representative bout can exist before the start (adding one moves its
+// match to running, which starts a draw-ready competition), so there is no
+// pick or row name for the direct write to leave behind.
+//
 // INVARIANT: after every call -- a winner propagated, a slot cleared back to
 // "" or a "Winner of ..." placeholder, a pool qualifier painted, a rename
 // re-propagated -- the representative bout row's SideA/SideB for THIS side

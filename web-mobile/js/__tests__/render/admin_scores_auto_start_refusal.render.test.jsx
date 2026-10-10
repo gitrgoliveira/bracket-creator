@@ -291,6 +291,28 @@ describe('the refusal notice goes when it stops being true', () => {
     expect(noticeIn(rowOf(utils, 'Alice'))).toBeFalsy();
   });
 
+  // PR #463 round 15 (F): the court console keeps a refusal across an empty list
+  // (a list that is empty while it loads says nothing about the match), and the
+  // Scores tab asks the same rule (start_match.jsx startRefusalStands).
+  it('but not across an empty list: it says nothing about the match', async () => {
+    const { utils, onEditScore } = await refused();
+    matches = [];
+    await act(async () => { utils.rerender(ui(onEditScore, vi.fn())); });
+    matches = [M1, M2, M3];
+    await act(async () => { utils.rerender(ui(onEditScore, vi.fn())); });
+    expect(noticeIn(rowOf(utils, 'Alice')), 'the same refusal is still there').toBeTruthy();
+    expect(noticeIn(rowOf(utils, 'Alice')).textContent).toBe(WITHDREW);
+  });
+
+  it('when a list that still holds matches no longer holds the refused one', async () => {
+    const { utils, onEditScore } = await refused();
+    matches = [M1, M3];
+    await act(async () => { utils.rerender(ui(onEditScore, vi.fn())); });
+    matches = [M1, M2, M3];
+    await act(async () => { utils.rerender(ui(onEditScore, vi.fn())); });
+    expect(noticeIn(rowOf(utils, 'Alice')), 'moved away and back is a new situation').toBeFalsy();
+  });
+
   it('when the operator opens another match', async () => {
     const { utils } = await refused();
     const carolScore = rowOf(utils, 'Carol').querySelector('button.test-score-open');

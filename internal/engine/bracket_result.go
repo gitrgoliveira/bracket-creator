@@ -94,7 +94,7 @@ func bracketMatchAsResult(bm *state.BracketMatch) *state.MatchResult {
 
 // BracketMatchAsResult is a bracket match as the pool-shaped record every
 // write, merge and probe reads (bracketMatchAsResult), for callers outside the
-// engine that ask the merge about a stored bracket match (RepPicksApplied). The
+// engine that ask the merge about a stored bracket match (AppliedGroups). The
 // result shares bm's bout rows: a caller that changes it clones them first.
 func BracketMatchAsResult(bm *state.BracketMatch) *state.MatchResult {
 	return bracketMatchAsResult(bm)

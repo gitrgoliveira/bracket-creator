@@ -678,6 +678,62 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     expect(patch.changed).toEqual(['bout:-1']);
   });
 
+  // PR #463 round 15 (G): Remove <decision> then Undo puts the whole board back to the
+  // server's, the representative picks included, so the editor agrees with the picks
+  // the server holds (useWithdrawalRemoval's onUndo). The agreement matters when a
+  // pick was built into a write earlier and has not echoed back: the next build would
+  // otherwise compare the board the Undo restored (no pick) against that write's pick,
+  // find them different, and name the group with an EMPTY pick under a newer stamp,
+  // clearing the editor's own pick on the server.
+  it('R35: Undo of a withdrawal removal agrees the picks: a pick written before it, undone, is not named again', async () => {
+    const { onSubmit } = await mount(makeMatch({
+      status: 'completed', phase: 'bracket', round: 'Round 1',
+      decision: 'kiken-voluntary', decisionBy: 'aka', decisionReason: 'knee',
+      winner: { id: 't2', name: 'Team B' },
+      subResults: [DH_ADDED],
+    }));
+    // The first Save correction asks for the reason; the editor keeps it, so the next
+    // one is sent straight away.
+    const saveCorrection = async () => {
+      await act(async () => {
+        fireEvent.click([...document.querySelectorAll('.score-nav button')].find((b) => b.textContent === 'Save correction'));
+      });
+      const confirm = [...document.querySelectorAll('.reason-prompt button')].find((b) => b.textContent === 'Confirm');
+      if (confirm) await act(async () => { fireEvent.click(confirm); });
+    };
+    await pickFromDh('AKA', 'Alice');
+    expect(dhInput('AKA').value).toBe('Alice');
+    await saveCorrection();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0].changed, 'the first save carries Aka\'s pick').toContain('repPickA');
+    // The pick has not echoed back: the match prop still holds no pick when the operator
+    // removes the withdrawal and takes the removal back.
+    await act(async () => { fireEvent.click(screen.getByTestId('remove-withdrawal')); });
+    await act(async () => { fireEvent.click(screen.getByTestId('remove-withdrawal-undo')); });
+    expect(dhInput('AKA').value, 'Undo put the server\'s row back, without the pick').not.toBe('Alice');
+    await saveCorrection();
+    expect(onSubmit).toHaveBeenCalledTimes(2);
+    const second = onSubmit.mock.calls[1][0].changed || [];
+    expect(second, 'the pick was taken back with the board, not changed again').not.toContain('repPickA');
+    expect(second).not.toContain('repPickB');
+  });
+
+  // PR #463 round 15 (I): a team member with no name is labelled by the team's number and
+  // the member's number, as every other surface labels one (squadLabelFor).
+  it('R36: the History labels a member who has no name by the team number and the member number', async () => {
+    const at = Date.now();
+    window.API.fetchSquads.mockResolvedValue({ t1: [{ id: 'm3a', name: '', index: 3 }], t2: SQUADS.t2 });
+    window.API.fetchMatchHistory.mockResolvedValue([
+      { matchId: 'm-ko-1', door: 'score', stamp: at, receivedAt: at, changed: ['repPickA'], outcomes: { repPickA: 'held' }, held: { repPickA: { sideAMemberId: 'm3a' } } },
+    ]);
+    await mount(makeMatch({ sideA: { id: 't1', name: 'Team A', number: 'K1' }, subResults: [DH_EMPTY] }));
+    await waitFor(() => expect(window.API.fetchSquads).toHaveBeenCalled());
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    await act(async () => { fireEvent.click(screen.getByTestId('match-history-toggle')); });
+    const lines = (await screen.findAllByTestId('match-history-held')).map((el) => el.textContent);
+    expect(lines).toEqual(["Kept in history: Aka's pick for the representative bout, picked K1.3"]);
+  });
+
   it('R34: the History names the representatives the sheet holds the members of, and an id the team no longer holds', async () => {
     const at = Date.now();
     window.API.fetchMatchHistory.mockResolvedValue([

@@ -36,7 +36,7 @@ import {
 // from the same leaf, not from `window.startPatch`. The state wiring stays here:
 // startingRef/pickingRef carry the pick exemption (pickMatch), which that
 // leaf's guard has no word for.
-import { startPatch, classifyStartOutcome, startFailureMessage } from './start_match.jsx';
+import { startPatch, classifyStartOutcome, startFailureMessage, startRefusalStands } from './start_match.jsx';
 // swissRoundLabel: single owner is pool_ids.jsx (mp-dej2); this file used to
 // carry its own copy. scoreRowMatchName names a match in the refusal notices.
 import { swissRoundLabel, scoreRowMatchName } from './pool_ids.jsx';
@@ -1201,8 +1201,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         ? filteredScheduled.filter((m) => matchKey(m) !== matchKey(upNext))
         : filteredScheduled;
     // A stored Start refusal describes ONE match at one moment, so it is judged
-    // against that match's live row and nothing else (startErrorStatus above; the
-    // Scores tab keeps the same rule, admin_schedule_score_editor.jsx). It is
+    // against that match's live row and nothing else (startErrorStatus above;
+    // start_match.jsx startRefusalStands owns the rule, and the Scores tab asks
+    // the same one, admin_schedule_score_editor.jsx). It is
     // dropped when the match leaves scheduled (started here or elsewhere, closed
     // by a decision), or when the court's list is non-empty and no longer holds
     // it (the match moved). Up next changing by itself drops nothing: a refusal
@@ -1217,11 +1218,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // an empty list says nothing about the match, so the refusal is left where it
     // is then (the court-call withdrawal below leaves an absent key alone for the
     // same reason). Only a list that holds matches yet lacks this one counts.
-    const courtHoldsMatches = courtMatchesRaw.length > 0;
+    const startErrorStands = startRefusalStands({ row: startErrorRow, listHoldsMatches: courtMatchesRaw.length > 0 });
     useEffectSh(() => {
         if (!startErrorKey) return;
-        if (startErrorRow ? startErrorStatus !== "scheduled" : courtHoldsMatches) setStartError(null);
-    }, [startErrorKey, startErrorStatus, courtHoldsMatches]);
+        if (!startErrorStands) setStartError(null);
+    }, [startErrorKey, startErrorStands]);
 
     // "Which pool is next" for the context panel: the first upcoming pool on
     // this court (within the selected comp) whose pool differs from the one

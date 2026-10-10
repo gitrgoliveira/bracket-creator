@@ -96,9 +96,9 @@ export function sideMarks(decision, decidedByHantei) {
 // e.g. a genuine team match with an empty subResults array (nothing fought
 // yet) would otherwise read as non-team here.
 //
-// Returns {} for a non-team row, a not-yet-completed match, or a decision
-// sideMarks has nothing to say about (returns "" for both sides, same as
-// the individual case).
+// Returns { shiro: "", aka: "" } for a non-team row, a not-yet-completed
+// match, or a decision sideMarks has nothing to say about (the same empty
+// marks as the individual case).
 export function teamMatchMarks(match, isTeamRow) {
   const teamRow = isTeamRow === undefined
     ? Array.isArray(match?.subResults) && match.subResults.length > 0

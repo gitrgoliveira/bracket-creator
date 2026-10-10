@@ -186,7 +186,7 @@ func TestOrganiser_AStalePickTheMergeHoldsIsNotRefused(t *testing.T) {
 // A finish stamped before the stored verdict that names another winner is held
 // WHOLE by the merge (HoldReasonFinishAtomic): its picks land nowhere, even when
 // their own stamps are newer than the stored picks'. The judge asks the merge
-// (engine.RepPicksApplied), so such a write is answered superseded and kept in
+// (engine.AppliedGroups), so such a write is answered superseded and kept in
 // the history, never refused for a pick that would not have been written.
 func TestOrganiser_AStaleFinishWithAForeignPickIsSupersededNotRefused(t *testing.T) {
 	for _, mode := range organiserModes {

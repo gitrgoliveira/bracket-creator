@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { CLOCK_SKEW_REASON_TEXT } from '../write_result.jsx';
 import {
-    classifyStartOutcome, startFailureMessage, createStartGuard, startPatch,
+    classifyStartOutcome, startFailureMessage, createStartGuard, startPatch, startRefusalStands,
     START_CLOCK_SKEW_MESSAGE, START_FAILED_MESSAGE,
 } from '../start_match.jsx';
 
@@ -103,5 +103,29 @@ describe('startPatch', () => {
 
     it('hands out a fresh object each call', () => {
         expect(startPatch()).not.toBe(startPatch());
+    });
+});
+
+// PR #463 round 15 (F): how long a refused Start notice lives is ONE rule, asked
+// by the court console and the Scores tab alike.
+describe('startRefusalStands', () => {
+    it('stands while the refused match is still scheduled in the list', () => {
+        expect(startRefusalStands({ row: { status: 'scheduled' }, listHoldsMatches: true })).toBe(true);
+    });
+
+    it('falls when the refused match has left scheduled', () => {
+        for (const status of ['running', 'completed']) {
+            expect(startRefusalStands({ row: { status }, listHoldsMatches: true })).toBe(false);
+        }
+    });
+
+    it('falls when a list that holds matches no longer holds the refused one', () => {
+        expect(startRefusalStands({ row: null, listHoldsMatches: true })).toBe(false);
+        expect(startRefusalStands({ row: undefined, listHoldsMatches: true })).toBe(false);
+    });
+
+    it('stands across an empty list: it says nothing about the match', () => {
+        expect(startRefusalStands({ row: null, listHoldsMatches: false })).toBe(true);
+        expect(startRefusalStands({ row: undefined, listHoldsMatches: false })).toBe(true);
     });
 });

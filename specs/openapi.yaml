@@ -59,11 +59,11 @@ info:
     a fighter whose member id the side's team does not hold is refused with 400
     `team_member_not_in_team`, and a `winnerMemberId` that is not one of the row's two fighters
     is refused with 400 `winner_member_not_in_bout`; an id the stored row already holds is never
-    judged, and the organiser's numbered rows are not judged at all. A pick is judged only when
-    the merge would apply it: a write stamped before a stored representative, one that does not
-    name the side's pick in `changed`, one whose pick sits on a row it neither has nor creates,
-    and a finish the merge holds whole are not judged for that pick, which is not written and
-    is kept in the match's history. When the competition's `team-members.yaml` cannot be read,
+    judged, and the organiser's numbered rows are not judged at all. A pick or a numbered row is
+    judged only when the merge would apply it: a write stamped before the stored pick or row, one
+    that does not name the pick or the row's bout in `changed`, one whose pick sits on a row it
+    neither has nor creates, and a finish the merge holds whole are not judged for it; it is not
+    written and is kept in the match's history. When the competition's `team-members.yaml` cannot be read,
     a write that needs it to judge a choice (a pick, a numbered row's fighter, or the lineup
     save) is refused with 409 `team_members_unreadable` and nothing is written, so the offline
     queue does not retry it; a write that introduces no member id never reads the file. The rest of the write is
@@ -2610,8 +2610,12 @@ paths:
             ids, or the stored row's for a side the row is silent about) is refused
             with `error: winner_member_not_in_bout` and the `message` "The winner
             recorded is not one of the two fighters in this bout." An id the
-            stored row already holds is never judged. The organiser's numbered
-            rows are not judged.
+            stored row already holds is never judged, and a row is judged only
+            when the merge would apply its `bout:<position>` group: a row stamped
+            before the stored one, or one the write does not name in `changed`, is
+            not judged; it is not written and is kept in the match's history, and
+            the rest of the write is applied and answered with `heldGroups`, e.g.
+            `["bout:1"]`. The organiser's numbered rows are not judged.
 
             A `completed` write whose `decision` is empty or `hikiwake` on a
             match whose stored result is a completed withdrawal (kiken or

@@ -218,3 +218,62 @@ func TestSelfRun_UnreadableTeamMembersRefusesTheLineupTerminally(t *testing.T) {
 	_, ok := f.savedLineup(t, "PoolA-0")
 	assert.False(t, ok, "a refused lineup writes nothing")
 }
+
+// A numbered row is judged exactly when the merge APPLIES its bout group, as a
+// representative pick is (repRowRefusal): a row whose stored counterpart is
+// NEWER is held and kept in the match's history, and judging it would refuse the
+// whole write, terminally, for a fighter that would never have been written,
+// losing the groups of the write that apply. Here the stored bout 1 names fighter
+// Y, stamped T; the write names another team's member on it under T-1, beside
+// bouts 2 and 3 and the scoreline, which apply.
+func TestSelfRun_AHeldNumberedRowIsNotJudged(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	a, b := f.teamMembers(t)
+	f.setB1(t, func(bm *state.BracketMatch) {
+		bm.SubResults[0].SideAMemberID = a[0].ID
+		bm.ModifiedAt = f.now
+		bm.GroupStamps = map[string]int64{
+			state.BoutGroup(1):  f.now,
+			state.GroupPoints:   f.now - 10_000,
+			state.BoutGroup(2):  f.now - 10_000,
+			state.BoutGroup(3):  f.now - 10_000,
+			state.GroupResult:   f.now - 10_000,
+			state.GroupRepPickA: f.now - 10_000,
+		}
+	})
+
+	w := f.bouts("", f.now-1, map[int]boutIDs{1: {a: b[0].ID}})
+	require.Equal(t, http.StatusOK, w.Code, "the held row is kept in the history, not refused: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), `"heldGroups":["bout:1"]`)
+	assert.Equal(t, a[0].ID, f.storedBout(t, 1).SideAMemberID, "the newer stored fighter stands")
+}
+
+// The pin beside it: the same write stamped AFTER the stored row applies the row,
+// so its fighter is judged and refused.
+func TestSelfRun_ANewerNumberedRowIsStillJudged(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	a, b := f.teamMembers(t)
+	f.setB1(t, func(bm *state.BracketMatch) {
+		bm.SubResults[0].SideAMemberID = a[0].ID
+		bm.ModifiedAt = f.now
+		bm.GroupStamps = map[string]int64{state.BoutGroup(1): f.now}
+	})
+
+	w := f.bouts("", f.now+1, map[int]boutIDs{1: {a: b[0].ID}})
+	requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", fighterNotOnTeamBody)
+	assert.Equal(t, a[0].ID, f.storedBout(t, 1).SideAMemberID, "a refused write writes nothing")
+}
+
+// A row the write does not name in `changed` is not written either, so its
+// fighter is not judged.
+func TestSelfRun_ANumberedRowTheWriteDoesNotNameIsNotJudged(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	_, b := f.teamMembers(t)
+
+	sheet := scoreSheet(state.MatchStatusRunning, "", f.now+100, nil)
+	sheet["subResults"].([]any)[0].(map[string]any)["sideAMemberId"] = b[0].ID
+	sheet["changed"] = []string{state.GroupPoints}
+	w := f.send(http.MethodPut, repBoutMatchPath+"/score", "", sheet)
+	require.Equal(t, http.StatusOK, w.Code, "bout 1 is not among the groups the write changes: %s", w.Body.String())
+	assert.Empty(t, f.storedBout(t, 1).SideAMemberID, "and it is not written")
+}

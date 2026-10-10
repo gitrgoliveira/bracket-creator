@@ -866,6 +866,18 @@ export function startWhileStartingMessage({ label }) {
     return `${label} is still being started on this court. Start this match once it has.`;
 }
 
+// The same refusal once the start it named has LANDED (bc-aadv, item 4). While
+// that start was out the sentence above was true and was derived from it. When it
+// lands the court has a running bout, the refused match is NOT started on its own
+// (one start at a time; a second automatic start would draw court_busy or put two
+// bouts on the court unasked), and nothing else would say that the match was asked
+// for and never started. So the refusal is kept, in the past tense, on the refused
+// match until that match leaves scheduled or the operator starts one. The court
+// console and the Scores tab both word it from here.
+export function startWasBlockedByStartMessage({ label }) {
+    return `Not started: ${label} was being started when this match was asked for. Start it when the court is free.`;
+}
+
 export function correctWhileRunningMessage({ court, label }) {
     return `${courtBusyMessage({ court, label })} Then correct this match.`;
 }
@@ -1008,4 +1020,27 @@ export async function attemptScoreWrite({ recordScore, confirmDialog, compId, ma
         e.downstreamKnockoutPlayedCancelled = true;
         throw e;
     }
+}
+
+// A thrown refusal is toasted ONCE. editMatchScore (admin.jsx), the chokepoint
+// every score write goes through, toasts the error it is about to throw; a host
+// that catches that same error to show it on a card or a row (the court console's
+// startMatch, the Scores tab's startNext) used to toast the same sentence again,
+// which replaced the single-slot toast and restarted its timer. editMatchScore
+// marks every error it toasted (markToasted) and a host asks before it toasts
+// (wasToasted); the card or row notice is set either way. A refusal only the host
+// sees (a clock_skew answer is a RETURN, not a throw; a local "still being
+// started" refusal never reaches onEditScore) carries no mark and is toasted
+// there, once.
+//
+// The mark rides on the error object, the way downstreamKnockoutPlayedCancelled
+// does, so nothing is threaded through a signature. `toasted` is the field name
+// (check-write-result.mjs polices `.applied`/`.persisted`, never this).
+export function markToasted(err) {
+    if (err && typeof err === 'object') err.toasted = true;
+    return err;
+}
+
+export function wasToasted(err) {
+    return !!err && typeof err === 'object' && err.toasted === true;
 }

@@ -36,6 +36,10 @@ import {
     writeDisplacedGroups,
     writeDisplacedForWinner,
     displacedAlertText,
+    markToasted,
+    wasToasted,
+    startWhileStartingMessage,
+    startWasBlockedByStartMessage,
 } from '../write_result.jsx';
 import { heldGroupsNote, keptInHistoryNote } from '../match_groups.jsx';
 import { closingHistoryToast } from '../admin.jsx';
@@ -445,5 +449,50 @@ describe('writeHeldDecision', () => {
         expect(writeHeldDecision({ heldDecision: '' })).toBeNull();
         expect(writeHeldDecision({ heldDecision: 7 })).toBeNull();
         expect(writeHeldDecision(null)).toBeNull();
+    });
+});
+
+// A start refused because another start was still out says so while that start
+// is out (startWhileStartingMessage, present tense). Once that start has landed
+// nothing else tells the operator the match they asked for was never started, so
+// the refusal is kept, in the past tense, on the refused match
+// (startWasBlockedByStartMessage). Both surfaces that refuse a start for this
+// reason (the court console and the Scores tab) read the sentence from here.
+describe('the sentence for a start that was blocked by another start', () => {
+    it('names the start that was out and says what to do, in the past tense', () => {
+        expect(startWasBlockedByStartMessage({ label: 'Pool A · Match 2' })).toBe(
+            'Not started: Pool A · Match 2 was being started when this match was asked for. Start it when the court is free.',
+        );
+    });
+    it('is the same label as the present-tense sentence names, and a different sentence', () => {
+        const label = 'Match 3 (Final)';
+        expect(startWhileStartingMessage({ label })).toContain(label);
+        expect(startWasBlockedByStartMessage({ label })).toContain(label);
+        expect(startWasBlockedByStartMessage({ label })).not.toBe(startWhileStartingMessage({ label }));
+    });
+});
+
+// A thrown refusal is toasted ONCE. editMatchScore (admin.jsx) toasts what it
+// throws; the two hosts that start a match catch the same error and used to toast
+// the same sentence again, which replaced the single-slot toast and restarted its
+// timer. editMatchScore marks the error it toasted, and a host asks before it does.
+describe('markToasted / wasToasted', () => {
+    it('an error marked toasted reads as toasted, and markToasted hands the same error back', () => {
+        const err = new Error('x');
+        expect(wasToasted(err)).toBe(false);
+        expect(markToasted(err)).toBe(err);
+        expect(wasToasted(err)).toBe(true);
+    });
+    it('anything that is not an error object reads as not toasted and does not throw', () => {
+        expect(wasToasted(undefined)).toBe(false);
+        expect(wasToasted(null)).toBe(false);
+        expect(wasToasted('string')).toBe(false);
+        expect(wasToasted(7)).toBe(false);
+        expect(wasToasted({})).toBe(false);
+    });
+    it('marking a non-object does not throw, and leaves it not toasted', () => {
+        expect(() => markToasted(undefined)).not.toThrow();
+        expect(() => markToasted('string')).not.toThrow();
+        expect(wasToasted(markToasted('string'))).toBe(false);
     });
 });

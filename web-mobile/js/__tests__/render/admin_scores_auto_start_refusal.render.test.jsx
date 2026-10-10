@@ -12,9 +12,9 @@
 // pre-match so they see which match and why.
 import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { CLOCK_SKEW_REASON_TEXT, startWhileStartingMessage } from '../../write_result.jsx';
+import { CLOCK_SKEW_REASON_TEXT, startWhileStartingMessage, startWasBlockedByStartMessage, markToasted } from '../../write_result.jsx';
 import { scoreRowMatchName } from '../../pool_ids.jsx';
 
 const side = (id, name) => ({ id, name });
@@ -109,6 +109,27 @@ describe('Finish + Start Next on the Scores tab says why the next match did not 
     expect(probe.props.match.status).toBe('scheduled');
   });
 
+  // editMatchScore (admin.jsx) toasts what it throws and marks the error; the host
+  // that catches it must not toast the same sentence again, which replaced the
+  // single-slot toast and restarted its timer. The row still says it. The case
+  // above is the unmarked one: a host whose onEditScore does not toast does.
+  it('a thrown refusal onEditScore already toasted is not toasted again, and the row still says it', async () => {
+    const onEditScore = vi.fn(async (_c, id, patch) => {
+      if (id === 'm-2' && patch.startOnly) throw markToasted(new Error(WITHDREW));
+      return { status: 'ok' };
+    });
+    const showToast = vi.fn();
+    const utils = await mountAndOpenRunning(onEditScore, showToast);
+
+    await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed' }); });
+
+    expect(showToast).not.toHaveBeenCalled();
+    const note = noticeIn(rowOf(utils, 'Alice'));
+    expect(note, 'the refused match still says why on its own row').toBeTruthy();
+    expect(note.textContent).toBe(WITHDREW);
+    expect(probe.props.match.id).toBe('m-2');
+  });
+
   it('a clock_skew refusal (HTTP 200 applied:false) is a refused start, not a landed one', async () => {
     const onEditScore = vi.fn(async (_c, id, patch) => (id === 'm-2' && patch.startOnly
       ? { applied: false, reason: 'clock_skew' }
@@ -178,9 +199,45 @@ describe('one start at a time on the Scores tab', () => {
     expect(showToast).toHaveBeenCalledWith(sentence, 'error');
     expect(probe.props.match.id).toBe('m-3');
 
-    // That notice describes the start still out: it goes once that start lands.
+    // That sentence describes the start still out. When it lands the court has a
+    // running bout, so m-3 is not started on its own, and nothing else would say
+    // it was asked for and never started: the row keeps the refusal, in the past
+    // tense (bc-aadv, item 4).
     await act(async () => { releaseStart({ status: 'ok' }); });
+    const kept = noticeIn(rowOf(utils, 'Carol'));
+    expect(kept, 'the refusal does not vanish when the start lands').toBeTruthy();
+    expect(kept.textContent).toBe(startWasBlockedByStartMessage({ label: scoreRowMatchName(M2) }));
+    expect(kept.getAttribute('role')).toBe('status');
+    expect(onEditScore.mock.calls.filter(isStart).map((c) => c[1]), 'and m-3 was not started on its own').toEqual(['m-2']);
+
+    // It is bound to m-3 like any stored refusal here: it goes when m-3 leaves
+    // scheduled in the live data.
+    matches = [M1, M2, { ...M3, status: 'running' }];
+    await act(async () => { utils.rerender(ui(onEditScore, showToast)); });
     expect(noticeIn(rowOf(utils, 'Carol'))).toBeFalsy();
+  });
+});
+
+describe('a start that was waited for and then refused', () => {
+  // The same rule as the court console's: a start that does not land leaves the
+  // court free, so the waiting match gets no past-tense sentence, and the failed
+  // start's own refusal (stored for it before the wait ends) is what stays.
+  it('keeps its own refusal on its row, and the waiting row shows nothing', async () => {
+    let failStart;
+    const onEditScore = vi.fn((_c, id, patch) => {
+      if (id === 'm-2' && patch.startOnly) return new Promise((_resolve, reject) => { failStart = reject; });
+      return Promise.resolve({ status: 'ok' });
+    });
+    const showToast = vi.fn();
+    const utils = await mountAndOpenRunning(onEditScore, showToast);
+
+    await act(async () => { probe.props.onSubmitAndNext({ status: 'completed' }); });
+    await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed' }); });
+    expect(noticeIn(rowOf(utils, 'Carol'))?.textContent).toBe(startWhileStartingMessage({ label: scoreRowMatchName(M2) }));
+
+    await act(async () => { failStart(new Error(WITHDREW)); });
+    expect(noticeIn(rowOf(utils, 'Alice'))?.textContent, 'the failed start keeps its own refusal').toBe(WITHDREW);
+    expect(noticeIn(rowOf(utils, 'Carol')), 'the court is free: no past-tense notice').toBeFalsy();
   });
 });
 
@@ -271,5 +328,36 @@ describe('the Scores page hands its toast down', () => {
     await act(async () => { fireEvent.click(utils.container.querySelector('button.test-score-open')); });
     await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed' }); });
     expect(showToast).toHaveBeenCalledWith(WITHDREW, 'error');
+  });
+});
+
+// PR #463 batch 14, item 2: the Scores tab's completed team row asks
+// teamMatchMarks by ES import from the side_marks.jsx leaf. It used to read
+// window.teamMatchMarks and, with the global missing, painted no mark and no
+// error. This suite never publishes the global, which is the point.
+describe('a completed team row marks the withdrawn team without any window global', () => {
+  const saved = {};
+  beforeEach(() => {
+    saved.teamMatchMarks = window.teamMatchMarks;
+    delete window.teamMatchMarks;
+  });
+  afterEach(() => { if (saved.teamMatchMarks) window.teamMatchMarks = saved.teamMatchMarks; });
+
+  it('keeps Kiken beside the withdrawn team and the winner cue on the other', async () => {
+    matches = [{
+      ...mk('m-4', 'completed', '09:15', 'Hana', 'Ichi'),
+      // This surface's own team-row signal is a non-empty subResults (a bout
+      // fought before the withdrawal), the default teamMatchMarks applies.
+      compKind: 'team', teamSize: 3, decision: 'kiken-voluntary', decisionBy: 'shiro',
+      subResults: [{ position: 1, sideA: 'Hana-1', sideB: 'Ichi-1', winner: 'Hana-1' }],
+      winner: side('m-4-a', 'Hana'),
+    }];
+    let utils;
+    await act(async () => { utils = render(ui(vi.fn(), vi.fn())); });
+    const row = rowOf(utils, 'Hana');
+    expect(row, 'the completed row is listed').toBeTruthy();
+    expect(row.querySelector('[data-testid="team-summary-mark-shiro"]')?.textContent).toBe('Kiken');
+    expect(row.querySelector('[data-testid="team-summary-mark-aka"]')).toBeNull();
+    expect(row.querySelector('.score-edit-row__side--aka').classList.contains('score-edit-row__side--win')).toBe(true);
   });
 });

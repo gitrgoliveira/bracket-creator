@@ -1,7 +1,13 @@
 package helper
 
 // excel_kachinuki.go renders the "Kachinuki Detail" sheet, one section per
-// kachinuki ("winner-stays-on") team match with full bout-by-bout detail.
+// kachinuki ("winner-stays-on") team match with full bout-by-bout detail, and,
+// with the same renderer, the "Representative Bouts" sheet of a fixed-order team
+// competition: one section per match that holds a representative bout, listing
+// that bout alone (its row prints RepresentativeBoutRowLabel where a numbered
+// bout prints its number, and its fighters are the representatives each team
+// picked). Everything below describes the Kachinuki Detail sheet; the other
+// differs only in its sheet name, its section suffix and that label.
 //
 // Each section is drawn like a team match block on the Elimination Matches
 // sheet (operator decision 2026-10-02): the same seven columns and widths, the
@@ -28,7 +34,8 @@ package helper
 // domain.SideMarksAB) go in the side's outer score cell, the cell the results
 // overlay fills on the match sheets, and the centre carries the bout's one
 // closed-set middle mark (domain.MiddleMark: X or (E); kachinuki has no
-// daihyosen, so (DH) never appears here) or stays empty, as there. The
+// daihyosen, so (DH) appears only on the Representative Bouts sheet) or stays
+// empty, as there. The
 // match's own Pool or Elimination Matches row carries the result, so a
 // section has no Winner or Decision column (operator decision 2026-09-27)
 // and no tally: it ends at its last bout row (operator decision 2026-10-02).
@@ -52,7 +59,9 @@ import (
 // WhiteLeft takes the pair in side order and places it in sheet columns, so
 // nothing upstream of the sheet writer needs to know about column layout.
 type KachinukiBout struct {
-	Position  int    // 1-based bout index within the team match
+	// Position is the 1-based bout index within the team match, or -1 for a
+	// representative bout, which prints RepresentativeBoutRowLabel instead.
+	Position  int
 	SideAName string // player name for Side A
 	// SideALabel is the squad member's "T10.1"-style label (bc-pnum: "make
 	// a team member's label available to the public surfaces"), composed
@@ -73,8 +82,9 @@ type KachinukiBout struct {
 	ScoreB     string
 	// Middle is the ONE mark the bout's centre cell may carry
 	// (domain.MiddleMark): "" (the cell stays empty), "X"
-	// (hikiwake), or "(E)" (overtime). Kachinuki has no daihyosen, so
-	// "(DH)" never appears here.
+	// (hikiwake), "(E)" (overtime) or, on a representative bout's row only,
+	// "(DH)". Kachinuki has no daihyosen, so "(DH)" never appears on the
+	// Kachinuki Detail sheet.
 	Middle string
 	// MarkA/MarkB are the per-side RESULT marks (domain.SideMarksAB) in
 	// SIDE order: Ht (hantei), Kiken (withdrawer) or Fus. (no-show / a
@@ -187,6 +197,22 @@ const kachinukiFighterColWidth = 38
 // created, the caller is responsible for checking the input length AND
 // the renderer guards against accidental emission of an empty sheet.
 func WriteKachinukiDetailSheet(f *excelize.File, matches []KachinukiMatchDetail) error {
+	return writeBoutDetailSheet(f, SheetKachinukiDetail, "Kachinuki", matches)
+}
+
+// WriteRepresentativeBoutsSheet creates the SheetRepresentativeBouts sheet and
+// writes one section per match, each listing that match's representative bout
+// (the extra bout that settles a tied knockout encounter of a fixed-order team
+// competition; the caller builds each section's Bouts from it alone). It is the
+// Kachinuki Detail sheet's renderer under another name and section suffix, so
+// the two read alike, and like it creates no sheet for empty input.
+func WriteRepresentativeBoutsSheet(f *excelize.File, matches []KachinukiMatchDetail) error {
+	return writeBoutDetailSheet(f, SheetRepresentativeBouts, "Representative bout", matches)
+}
+
+// writeBoutDetailSheet is the one renderer of a bout-detail sheet: sheet names
+// it and titleSuffix closes each section's title, "<label> (<titleSuffix>)".
+func writeBoutDetailSheet(f *excelize.File, sheet, titleSuffix string, matches []KachinukiMatchDetail) error {
 	// Skip when no match has a row to print (no bouts and no blank rows):
 	// the detail sheet is purely additive, never create an empty sheet
 	// (T201 acceptance).
@@ -201,7 +227,6 @@ func WriteKachinukiDetailSheet(f *excelize.File, matches []KachinukiMatchDetail)
 		return nil
 	}
 
-	sheet := SheetKachinukiDetail
 	// Create the sheet if it doesn't already exist. (Engine export creates
 	// the workbook via NewFileFromScratch which does NOT include the
 	// detail sheet, it's opt-in.)
@@ -236,7 +261,7 @@ func WriteKachinukiDetailSheet(f *excelize.File, matches []KachinukiMatchDetail)
 			handleExcelError("InsertPageBreak", f.InsertPageBreak(sheet, "A"+strconv.Itoa(row)))
 			rowsOnPage = 0
 		}
-		nextRow := writeKachinukiMatchSection(f, sheet, styles, match, row)
+		nextRow := writeKachinukiMatchSection(f, sheet, titleSuffix, styles, match, row)
 		// Separator blank row between sections (except after the last).
 		if i < len(matches)-1 {
 			nextRow++
@@ -257,14 +282,14 @@ func WriteKachinukiDetailSheet(f *excelize.File, matches []KachinukiMatchDetail)
 // writeKachinukiMatchSection writes a single match section starting at
 // `startRow`, in the first court's columns of a match block, and returns the
 // row index immediately after the section (the row a separator would occupy).
-func writeKachinukiMatchSection(f *excelize.File, sheet string, styles matchStyles, match KachinukiMatchDetail, startRow int) int {
+func writeKachinukiMatchSection(f *excelize.File, sheet, titleSuffix string, styles matchStyles, match KachinukiMatchDetail, startRow int) int {
 	cols := buildMatchColumnNames(1)
 	bouts := match.sectionBouts()
 	row := startRow
 
 	// --- A match block's heading (title, White | vs | Red), then each side's
 	// team under its colour ---
-	row = printMatchBlockHeading(f, sheet, cols, styles, row, fmt.Sprintf("%s (Kachinuki)", match.Label), false)
+	row = printMatchBlockHeading(f, sheet, cols, styles, row, fmt.Sprintf("%s (%s)", match.Label, titleSuffix), false)
 	leftTeam, rightTeam := WhiteLeft(match.SideATeam, match.SideBTeam)
 	handleExcelError("SetCellStyle", f.SetCellStyle(sheet, cols.startColName+strconv.Itoa(row), cols.endColName+strconv.Itoa(row), styles.text))
 	handleExcelError("SetCellValue", f.SetCellValue(sheet, cols.startColName+strconv.Itoa(row), leftTeam))
@@ -292,6 +317,9 @@ func writeKachinukiBoutRow(f *excelize.File, sheet string, cols matchColumnNames
 	// position when the bout names one, side order built first, then
 	// placed left/right.
 	number := strconv.Itoa(bout.Position)
+	if bout.Position < 0 {
+		number = RepresentativeBoutRowLabel
+	}
 	akaPlayer := domain.JoinNonEmpty(number, formatKachinukiPlayer(bout.SideALabel, bout.SideAName, bout.SideAPos))
 	shiroPlayer := domain.JoinNonEmpty(number, formatKachinukiPlayer(bout.SideBLabel, bout.SideBName, bout.SideBPos))
 	leftPlayer, rightPlayer := WhiteLeft(akaPlayer, shiroPlayer)

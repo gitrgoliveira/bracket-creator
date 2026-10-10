@@ -1,14 +1,16 @@
 // Score editor components extracted from admin_schedule.jsx (mp-d7tl).
-// startPatch (re-exported from start_match.jsx), ScoreEditCourtBtn (local),
-// AdminScoreEditor, AdminScoreEditorPage.
+// ScoreEditCourtBtn (local), AdminScoreEditor, AdminScoreEditorPage.
 
-import { writeDidNotLand, writeKeepsEditorOpen, startWhileStartingMessage } from './write_result.jsx';
+import { writeDidNotLand, writeKeepsEditorOpen, startWhileStartingMessage, startWasBlockedByStartMessage, wasToasted } from './write_result.jsx';
 import { matchMentions } from './competitor_search.jsx';
 import { SideCell } from './side_cell.jsx';
 import { allMatchesCompleted } from './admin_schedule_utils.jsx';
 import { MatchLineupPanel } from './admin_schedule_lineup.jsx';
 import { boutHansokuMark, teamNameMark } from './match_scoreboard.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
+// The withdrawn team's mark, imported from its leaf rather than read off
+// `window.teamMatchMarks` (a missing global painted no mark and no error).
+import { teamMatchMarks } from './side_marks.jsx';
 import { scoreRowMatchLabel, scoreRowMatchName } from './pool_ids.jsx';
 // NumberedName: single owner of the number-chip-on-the-outer-side rule
 // (bc-dnst); see that file's header for why this stays an ES import.
@@ -89,13 +91,6 @@ function ScoreEditCourtBtn({ m, courts, onMoveCourt }) {
   );
 }
 
-// startPatch now lives in start_match.jsx (the one owner of how a Start is
-// written). Re-exported here, of the LOCAL binding imported above so the module
-// is fetched once, because admin_schedule.jsx imports it from this file to
-// publish `window.startPatch`, which admin_shiaijo.jsx reads, and the tests
-// import it from here too.
-export { startPatch };
-
 export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, password, showToast }) {
   const [filter, setFilter] = useStateA("");
   const [compFilter, setCompFilter] = useStateA(restrictToCompId || "all");
@@ -155,7 +150,8 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
   // start notice into. The toast says it at the moment it happens; the row keeps
   // saying it after the toast is gone and after the editor is closed.
   // `waitingOn` is the key of the start that was still out when this one was
-  // refused for it, so the sentence goes when that start lands.
+  // refused for it, so the sentence is rewritten in the past tense when that
+  // start lands (startWasBlockedByStartMessage) and kept.
   const [startRefusal, setStartRefusal] = useStateA(null);
   // One start at a time (start_match.jsx createStartGuard), created once.
   const startGuardRef = useRefA(null);
@@ -183,14 +179,18 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
   // on its row and toast it. openKey is set first so the effect above, which
   // drops a refusal when ANOTHER match opens, never sees the new refusal against
   // the old openKey.
-  const refuseStart = (next, msg, waitingOn = null) => {
+  //
+  // `toasted` is true for a thrown refusal editMatchScore (admin.jsx) already
+  // toasted: the toast is a single slot (app.jsx), so saying it again would only
+  // replace it and restart its timer. The row notice is set either way. A
+  // refusal only this page sees (a clock_skew answer, "still being started")
+  // carries no mark and is toasted here, once.
+  const refuseStart = (next, msg, waitingOn = null, toasted = false) => {
     if (mountedRef.current) {
       setOpenKey(scoreKeyOf(next));
       setStartRefusal({ key: scoreKeyOf(next), msg, waitingOn });
     }
-    // Single-slot toast (app.jsx): a thrown refusal, which editMatchScore has
-    // already toasted with the same words, replaces rather than stacks.
-    if (showToast) showToast(msg, "error");
+    if (showToast && !toasted) showToast(msg, "error");
   };
 
   // The ONE door both automatic starts go through: (a) refuses while another
@@ -216,12 +216,22 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
       refuseStart(next, outcome.msg);
       return false;
     } catch (e) {
-      refuseStart(next, startFailureMessage(e));
+      refuseStart(next, startFailureMessage(e), null, wasToasted(e));
       return false;
     } finally {
       guard.end(key);
-      // A "still being started" notice names THIS start; it goes when the start does.
-      if (mountedRef.current) setStartRefusal((prev) => (prev && prev.waitingOn === key ? null : prev));
+      // A "still being started" notice names THIS start. When the start ends, the
+      // present-tense sentence stops being true, but the match the operator asked
+      // for was never started and nothing else says so, so the refusal is
+      // REWRITTEN in the past tense and kept on the refused match (bound to it like
+      // any stored refusal here: it goes when that match leaves scheduled or the
+      // operator opens another). The refused match is not started on its own: the
+      // court now has a running bout, and one start at a time is the rule.
+      if (mountedRef.current) {
+        setStartRefusal((prev) => (prev && prev.waitingOn === key
+          ? { key: prev.key, msg: startWasBlockedByStartMessage({ label: scoreRowMatchName(next) }), waitingOn: null }
+          : prev));
+      }
     }
   };
 
@@ -304,11 +314,11 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
           // teamIVPWScore) is deliberately free of marks, so the match-level
           // Kiken/Fus. a default win closed a team match with rides beside
           // the withdrawn team's NAME instead -- the ONE shared computation
-          // (window.teamMatchMarks, bracket.jsx), which derives its own
+          // (teamMatchMarks, side_marks.jsx), which derives its own
           // team-row signal from m.subResults (bc-cse) so an individual
           // match's own mark, already inline in its score string below, is
           // never doubled here.
-          const { shiro: teamShiroMark, aka: teamAkaMark } = window.teamMatchMarks ? window.teamMatchMarks(m) : { shiro: "", aka: "" };
+          const { shiro: teamShiroMark, aka: teamAkaMark } = teamMatchMarks(m);
           // Show the live ippon score for a running bout too (not just completed)
           // so the list reflects scoring in progress; "vs" only before it starts.
           // matchShowsScore is the one gate: a match sent back to the queue

@@ -17,6 +17,12 @@ import { barredSides } from './ineligible_match.jsx';
 import { BarredChip } from './barred_chip.jsx';
 import { realIppons, enchoOn, defaultWinMaru } from './result_slot.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
+// The result-mark placement helpers live in the side_marks.jsx leaf, which the
+// court console imports without reaching this module (its render suite stubs
+// window.BracketTree, which this module's body reassigns). This file imports
+// them for its own use, keeps their `window.*` lines and re-exports the names,
+// so every importer of bracket.jsx and every window reader is unchanged.
+import { joinSp, placeMarks, sideMarks, winnerSideLR, teamMatchMarks } from './side_marks.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { WinnerTick } from './side_cell.jsx';
 import { creditedBoutSide, isTeamDefaultWinDecision } from './team_default_credit.jsx';
@@ -34,7 +40,6 @@ function TermBC(props) {
 // Local hikiwake check: bracket.jsx is tested in isolation, so we don't rely
 // on window.isHikiwake here. See specs/openapi.yaml.
 function isHikiwakeBC(v) { return v === "hikiwake"; }
-function isKikenDecisionBC(v) { return v === "kiken" || v === "kiken-voluntary" || v === "kiken-injury"; }
 
 // roundLabelFromEnd: the ONE mapping from "rounds still to come after this one"
 // to a round NAME. 0 = Final, 1 = Semifinals, 2 = Quarterfinals, then the
@@ -207,26 +212,6 @@ function middleMark(decision, encho) {
   return enchoLabel(encho);
 }
 
-// joinSp: join a score fragment and a result mark with a space, skipping
-// empties ("M" + "Ht" → "M Ht", "" + "Kiken" → "Kiken"). The JS twin of
-// domain.JoinNonEmpty in internal/domain/result_marks.go.
-const joinSp = (a, b) => [a, b].filter(Boolean).join(" ");
-
-// placeMarks: resolve sideMarks onto the two display slots — the winner's
-// mark rides the winning side, the loser's the other. When neither slot is
-// known to have won, no marks are placed; each caller owns that fallback
-// (score strings trail the marks, match cards drop them). The JS analogue
-// of domain.SideMarksAB (internal/domain/result_marks.go), whose marks
-// export.SideMarksLR places White-left on the sheet.
-// Companion rule: on the two-slot GRID surfaces (the shared scoreboard and the
-// team score editor) which of a side's two cells the mark takes is answered by
-// resultSlot in result_slot.jsx — a separate leaf; the dependency reasoning is
-// stated ONCE, in that file's header. Flat score strings have no slots, so
-// they concatenate instead and never call it.
-function placeMarks(marks, firstWins, secondWins) {
-  return firstWins ? [marks.winner, marks.loser] : secondWins ? [marks.loser, marks.winner] : ["", ""];
-}
-
 // isDrawResult: a result is a draw when the recorded decision OR the
 // client-derived score.type says hikiwake (quick-score paths set only
 // score.type, so both sources count).
@@ -263,86 +248,6 @@ function matchMiddleMark(match) {
   if (!match) return "";
   const mid = boutMiddle(match.decision, match.encho, match.score);
   return mid === "vs" ? "" : mid;
-}
-
-// sideMarks: the per-side RESULT marks. winner goes in the winning side's
-// score cell, loser in the losing side's — the mark names its competitor:
-//   hantei   → winner "Ht"    (FIK 7-5 / 29-6: judges picked the winner)
-//   kiken    → loser  "Kiken" (the competitor who withdrew)
-//   fusenpai → loser  "Fus."  (the no-show)
-//   fusensho → winner "Fus."  (the default WIN names the present side)
-// Mirrors domain.SideMarks (internal/domain/result_marks.go) exactly
-// (CLAUDE.md documents the pair as one mirrored rule). bc-tmfn removed the
-// earlier fusensho gap here: this surface used to omit the winner-side "Fus."
-// mark on the theory that "the viewer surfaces it via a separate bout badge",
-// but no such badge exists for a MATCH-LEVEL fusensho decision (only a
-// per-bout team row's ○○ fill, which is a different thing), so a match-level
-// default win used to render with no mark on this surface at all. There is no
-// divergence left to document: a fusensho match now reads identically here and
-// in the export.
-function sideMarks(decision, decidedByHantei) {
-  let winner = "", loser = "";
-  if (isKikenDecisionBC(decision)) loser = "Kiken";
-  else if (decision === "fusenpai") loser = "Fus.";
-  else if (decision === "fusensho") winner = "Fus.";
-  if (decidedByHantei) winner = joinSp(winner, "Ht");
-  return { winner, loser };
-}
-
-// teamMatchMarks: the match-level Kiken/Fus. mark for EACH side of a TEAM
-// match a default-win decision closed -- the same sideMarks + placeMarks
-// pattern MatchCard already applies to an individual match's score cell
-// (aWin/bWin via sameCompetitor, then placeMarks), generalized for a caller
-// that renders a side's NAME separately from its score cell (a list row, a
-// TV headline) rather than inline in a flat score string. THE one place this
-// composition lives (bc-tmfn): every consumer below calls this rather than
-// re-deriving its own copy.
-//
-// `isTeamRow` is the caller's OWN team-match signal (a subResults array, a
-// compKind check, whatever it already has) -- this function has no way to
-// tell an individual match's kiken from a team one, so it never guesses.
-// Without it, an ordinary INDIVIDUAL kiken/fusenpai match would get this
-// mark TWICE: once here, once already inline in its own matchScoreStr
-// (formatIpponsScore's sideMarks call), since teamIVPWScore is deliberately
-// free of marks and an individual score string is not.
-//
-// bc-cse: OPTIONAL. Four callers (admin_schedule_score_editor.jsx,
-// viewer_match.jsx, viewer_schedule.jsx, viewer_standings.jsx) computed the
-// exact same `Array.isArray(m.subResults) && m.subResults.length > 0` before
-// calling in, so that default now lives here instead and those four callers
-// pass nothing. A caller with a BETTER signal (viewer_match.jsx's own
-// compKind/teamSize check, display_scoreboard.jsx's competition-format
-// isTeamMatch prop) still passes it explicitly to override the default --
-// e.g. a genuine team match with an empty subResults array (nothing fought
-// yet) would otherwise read as non-team here.
-//
-// Returns {} for a non-team row, a not-yet-completed match, or a decision
-// sideMarks has nothing to say about (returns "" for both sides, same as
-// the individual case).
-function teamMatchMarks(match, isTeamRow) {
-  const teamRow = isTeamRow === undefined
-    ? Array.isArray(match?.subResults) && match.subResults.length > 0
-    : isTeamRow;
-  if (!teamRow || !match || match.status !== "completed") return { shiro: "", aka: "" };
-  const marks = sideMarks(match.decision, !!match.decidedByHantei);
-  const aWin = sameCompetitor(match.winner, match.sideA);
-  const bWin = sameCompetitor(match.winner, match.sideB);
-  const [aMark, bMark] = placeMarks(marks, aWin, bWin);
-  return { shiro: bMark, aka: aMark };
-}
-
-// winnerSideLR: which DISPLAY side won, under the SHIRO-left convention every
-// score string uses (sideB = Shiro = left, sideA = Aka = right). Returns
-// "left" | "right" | null (no winner recorded, drifted data, or a mixed
-// id/no-id pair that sameCompetitor refuses to guess on). Accepts both
-// object sides ({id, name}) and bare name strings (routed through
-// sameCompetitor, competitor_identity.jsx -- the one owner of the id/name
-// attribution rule).
-function winnerSideLR(m) {
-  if (!m || !m.winner) return null;
-  if (sameCompetitor(m.winner, m.sideB)) return "left";
-  if (sameCompetitor(m.winner, m.sideA)) return "right";
-  return null;
 }
 
 // Format ippons as a readable score string: ["M","K"] → "MK", [] → ""
@@ -1504,9 +1409,11 @@ window.sideLabel = sideLabel;
 // sideMarks/placeMarks: the same MatchCard pattern (which side gets which
 // result mark), exposed for the window-global consumers that place a
 // match-level Kiken/Fus. mark beside a withdrawn TEAM's name (bc-tmfn) --
-// VSchedItem/TWMatch/PoolNumberedMatchRow/the admin Scores row -- none of
-// which ES-import bracket.jsx (see those files' own window.matchScoreStr /
-// window.boutMiddle usage for the pre-existing pattern this follows).
+// VSchedItem/TWMatch/PoolNumberedMatchRow and the viewer/display bundles --
+// none of which ES-import bracket.jsx (see those files' own window.matchScoreStr
+// / window.boutMiddle usage for the pre-existing pattern this follows). The
+// court console and the admin Scores row import the same helpers from
+// side_marks.jsx instead, where they are defined.
 window.sideMarks = sideMarks;
 window.placeMarks = placeMarks;
 window.teamMatchMarks = teamMatchMarks;

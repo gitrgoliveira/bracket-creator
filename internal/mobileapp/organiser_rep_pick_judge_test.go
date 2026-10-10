@@ -92,6 +92,15 @@ func requireNotOnTeam(t *testing.T, w *httptest.ResponseRecorder) {
 	requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", notOnTeamBody)
 }
 
+// teamMembersUnreadableBody is the sentence the page shows, as it is, when the
+// members file cannot be read.
+const teamMembersUnreadableBody = "The team members could not be read, so this choice cannot be checked. The organiser needs to check team-members.yaml in the tournament data."
+
+func requireTeamMembersUnreadable(t *testing.T, w *httptest.ResponseRecorder) {
+	t.Helper()
+	requireRefusal(t, w, http.StatusConflict, "team_members_unreadable", teamMembersUnreadableBody)
+}
+
 // An organiser's pick of a member the side's team does not hold is refused like
 // a participant's, and nothing is written: not the id, not the pick's stamp.
 func TestOrganiser_RepresentativeMembersMustBeOnTheirTeam(t *testing.T) {
@@ -170,6 +179,43 @@ func TestOrganiser_AStalePickTheMergeHoldsIsNotRefused(t *testing.T) {
 			requireNotOnTeam(t, p.pick(p.now, nil, p.membersB[0], ""))
 			requireNotOnTeam(t, p.pick(p.now+100, nil, p.membersB[0], ""))
 			assert.Equal(t, before, *p.storedRepBout(t), "a refused pick writes nothing")
+		})
+	}
+}
+
+// A finish stamped before the stored verdict that names another winner is held
+// WHOLE by the merge (HoldReasonFinishAtomic): its picks land nowhere, even when
+// their own stamps are newer than the stored picks'. The judge asks the merge
+// (engine.RepPicksApplied), so such a write is answered superseded and kept in
+// the history, never refused for a pick that would not have been written.
+func TestOrganiser_AStaleFinishWithAForeignPickIsSupersededNotRefused(t *testing.T) {
+	for _, mode := range organiserModes {
+		t.Run(mode.name, func(t *testing.T) {
+			p := newOrganiserPickFixture(t, mode.selfRun)
+			// The match finished on TeamA at p.now; its representative bout and
+			// the picks on it were dated before that.
+			p.setB1(t, func(bm *state.BracketMatch) {
+				bm.Status, bm.Winner, bm.WinnerID = state.MatchStatusCompleted, "TeamA", repBoutTeamAID
+				bm.ModifiedAt = p.now
+				row := &bm.SubResults[state.DaihyosenSubIndex(bm.SubResults)]
+				row.IpponsA, row.Winner = []string{"M"}, "TeamA"
+				bm.GroupStamps = map[string]int64{
+					state.GroupResult: p.now,
+					state.BoutGroup(state.DaihyosenSubPosition): p.now - 40_000,
+					state.GroupRepPickA:                         p.now - 50_000,
+					state.GroupRepPickB:                         p.now - 50_000,
+				}
+			})
+			before := storedB1(t, p.store, "c1")
+
+			// Another winner, stamped between the picks' stamps and the verdict's.
+			stale := sheetWith(state.MatchStatusCompleted, "TeamB", p.now-20_000, nil,
+				repBoutRow([]string{}, []string{"M"}, "TeamB"), unheldMemberID, "")
+			w := p.send(http.MethodPut, repBoutMatchPath+"/score", organiserPassword, stale)
+			require.Equal(t, http.StatusOK, w.Code, "held whole, not refused for its pick: %s", w.Body.String())
+			assert.Contains(t, w.Body.String(), `"superseded"`)
+			assert.Equal(t, before, storedB1(t, p.store, "c1"), "a held write changes nothing")
+			assert.Empty(t, p.storedRepBout(t).SideAMemberID)
 		})
 	}
 }
@@ -280,8 +326,25 @@ func TestOrganiser_AWriteThatPicksNobodyReadsNoTeamMembers(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, "no pick, nothing to judge: %s", w.Body.String())
 
 	w = p.pick(p.now+200, nil, p.membersA[0], "")
-	assert.Equal(t, http.StatusInternalServerError, w.Code, "a pick that cannot be judged fails closed: %s", w.Body.String())
+	requireTeamMembersUnreadable(t, w)
 	assert.Empty(t, p.storedRepBout(t).SideAMemberID)
+}
+
+// A members file that cannot be read refuses a pick that needs it with a
+// refusal the queue does not retry (409, never the 500 it retries forever), for
+// the organiser as for a participant, and writes nothing.
+func TestOrganiser_UnreadableTeamMembersRefusesThePickTerminally(t *testing.T) {
+	for _, mode := range organiserModes {
+		t.Run(mode.name, func(t *testing.T) {
+			p := newOrganiserPickFixture(t, mode.selfRun)
+			require.NoError(t, os.WriteFile(
+				filepath.Join(p.store.GetFolder(), "competitions", "c1", "team-members.yaml"),
+				[]byte("not: [valid yaml"), 0o600))
+
+			requireTeamMembersUnreadable(t, p.pick(p.now+100, nil, p.membersA[0], ""))
+			assert.Empty(t, p.storedRepBout(t).SideAMemberID, "a refused pick writes nothing")
+		})
+	}
 }
 
 // The organiser's write can create the representative row (a participant's

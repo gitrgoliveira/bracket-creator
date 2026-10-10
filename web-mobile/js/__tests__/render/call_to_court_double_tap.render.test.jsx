@@ -45,7 +45,6 @@ const STUBBED_GLOBALS = {
     recordDecision: vi.fn().mockResolvedValue({ applied: true }),
     reinstateCompetitor: vi.fn().mockResolvedValue({}),
   },
-  startPatch: vi.fn(),
   confirmDialog: vi.fn().mockResolvedValue(true),
   PoolsViewer: () => null,
   compMatches: () => [],

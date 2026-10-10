@@ -59,7 +59,6 @@ const STUBBED_GLOBALS = {
   getScoreBtnClass: () => 'test-score-open',
   matchScoreStr: () => '',
   compMatches: () => [],
-  startPatch: () => ({ status: 'running', winner: null }),
   API: {
     recordScore: vi.fn(),
   },

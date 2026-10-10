@@ -838,3 +838,53 @@ func TestResolveQualifiedPools_FivePoolsTwoWinners_ByePools(t *testing.T) {
 		assert.Empty(t, m.Winner, "empty slot %d has no winner to record", idx)
 	}
 }
+
+// TestResolveSlots_PaintsTheSideItNames pins that resolveSlots paints each slot
+// into the fields its side names and no others: side A's placeholder lands on
+// SideA/SideAID, side B's on SideB/SideBID, and the winner paint on
+// Winner/WinnerID. It returns how many sides it changed, so a slot already
+// holding its resolved occupant must not be repainted (and must not count).
+func TestResolveSlots_PaintsTheSideItNames(t *testing.T) {
+	eng, _, _ := setupTestEngine(t)
+	resolver := map[string]resolvedFinisher{
+		"Pool A-1st": {Name: "Alice", ID: "id-a"},
+		"Pool B-1st": {Name: "Bob", ID: "id-b"},
+		"Pool C-1st": {Name: "Carol", ID: "id-c"},
+	}
+	tests := []struct {
+		name        string
+		sideA       string
+		sideAID     string
+		sideB       string
+		sideBID     string
+		wantPainted int
+	}{
+		{name: "empty slots take their own occupants", wantPainted: 3},
+		{name: "side A already holding its occupant is not repainted", sideA: "Alice", sideAID: "id-a", wantPainted: 2},
+		{name: "side B already holding its occupant is not repainted", sideB: "Bob", sideBID: "id-b", wantPainted: 2},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			b := &state.Bracket{Rounds: [][]state.BracketMatch{{{
+				ID:                "m1",
+				Status:            state.MatchStatusScheduled,
+				PlaceholderA:      "Pool A-1st",
+				PlaceholderB:      "Pool B-1st",
+				PlaceholderWinner: "Pool C-1st",
+				SideA:             tc.sideA,
+				SideAID:           tc.sideAID,
+				SideB:             tc.sideB,
+				SideBID:           tc.sideBID,
+			}}}}
+			got := eng.resolveSlots(b, resolver)
+			m := b.Rounds[0][0]
+			assert.Equal(t, tc.wantPainted, got, "sides changed")
+			assert.Equal(t, "Alice", m.SideA)
+			assert.Equal(t, "id-a", m.SideAID)
+			assert.Equal(t, "Bob", m.SideB)
+			assert.Equal(t, "id-b", m.SideBID)
+			assert.Equal(t, "Carol", m.Winner)
+			assert.Equal(t, "id-c", m.WinnerID)
+		})
+	}
+}

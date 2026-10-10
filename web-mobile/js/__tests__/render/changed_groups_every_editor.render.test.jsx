@@ -21,7 +21,7 @@ import { installWindowStubs } from '../helpers/stub_globals.js';
 import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
 import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
 import { pointerTap } from '../helpers/tap_events.js';
-import { startPatch } from '../../admin_schedule_score_editor.jsx';
+import { startPatch } from '../../start_match.jsx';
 
 let writes;
 

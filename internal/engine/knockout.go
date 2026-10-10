@@ -229,6 +229,28 @@ func qualifierLabelPool(label string) string {
 	return label
 }
 
+// slotFields returns the name and id fields of the bracket slot that side
+// names: side A's pair, side B's pair, or the Winner pair for
+// domain.MatchSideNone. paint compares, logs and writes through it, so a slot's
+// fields cannot disagree with its side. It only names the fields. A side write
+// still goes through seatBracketSide, which also takes away the representative
+// the leaving team held; the Winner is not a side, so it is written directly and
+// never through seatBracketSide. Any other side value is a BUG: it logs, and it
+// hands back scratch fields, so nothing on the match is compared or written.
+func slotFields(m *state.BracketMatch, side domain.MatchSide) (name, id *string) {
+	switch side {
+	case domain.MatchSideA:
+		return &m.SideA, &m.SideAID
+	case domain.MatchSideB:
+		return &m.SideB, &m.SideBID
+	case domain.MatchSideNone:
+		return &m.Winner, &m.WinnerID
+	}
+	log.Printf("engine: BUG: bracket match %s: slotFields called with side %q; nothing is compared or written", m.ID, side)
+	var scratchName, scratchID string
+	return &scratchName, &scratchID
+}
+
 // resolveSlots writes resolver's finishers into every bracket slot whose
 // draw-time label (PlaceholderA/B/Winner) is a resolver key, then completes and
 // propagates any bye that leaves. It does no I/O, so it serves both the
@@ -306,11 +328,14 @@ func (e *Engine) resolveSlots(bracket *state.Bracket, resolver map[string]resolv
 		// (name only, id still "") gets its id backfilled the next time its
 		// pool's placeholder is looked at.
 		//
-		// side names which of the match's two sides name/id are, or is
-		// domain.MatchSideNone for the Winner paint (not a side): a side is
-		// written through seatBracketSide, which takes away the representative
-		// the team that leaves the slot held.
-		paint := func(label string, side domain.MatchSide, name, id *string) {
+		// paint writes the slot labelled label, which takes the competitor of side
+		// (domain.MatchSideA or B) or the Winner (domain.MatchSideNone). Its fields
+		// come from slotFields, so the compare, the log line and the write name the
+		// same ones. A side is written through seatBracketSide, which takes away the
+		// representative the team that leaves the slot held; the Winner is not a side
+		// and is written directly.
+		paint := func(label string, side domain.MatchSide) {
+			name, id := slotFields(m, side)
 			rf, ok := resolver[label]
 			if !ok || (*name == rf.Name && *id == rf.ID) {
 				return
@@ -329,10 +354,10 @@ func (e *Engine) resolveSlots(bracket *state.Bracket, resolver map[string]resolv
 			}
 			n++
 		}
-		paint(m.PlaceholderA, domain.MatchSideA, &m.SideA, &m.SideAID)
-		paint(m.PlaceholderB, domain.MatchSideB, &m.SideB, &m.SideBID)
+		paint(m.PlaceholderA, domain.MatchSideA)
+		paint(m.PlaceholderB, domain.MatchSideB)
 		// Winner-only changes count too, so a bye-propagated Winner fix is persisted.
-		paint(m.PlaceholderWinner, domain.MatchSideNone, &m.Winner, &m.WinnerID)
+		paint(m.PlaceholderWinner, domain.MatchSideNone)
 	}
 	for ri := range bracket.Rounds {
 		for mi := range bracket.Rounds[ri] {

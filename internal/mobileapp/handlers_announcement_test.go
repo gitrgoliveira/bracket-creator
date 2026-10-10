@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/resources"
@@ -248,4 +249,79 @@ func TestAnnouncementHandlers_IdenticalMessageReplaces(t *testing.T) {
 	require.Len(t, list, 1)
 	assert.Equal(t, second.ID, list[0].ID)
 	assert.NotEqual(t, first.ID, list[0].ID)
+}
+
+// TestAnnouncementHandlers_DeleteThroughAReplacedID pins the follow-up to
+// bc-cdbl: a court console that holds the id of a call a later identical call
+// replaced (another device called the same match, or its own re-call's answer
+// was lost) still takes the call down. The DELETE answers 204 and broadcasts
+// the list without the announcement that replaced the id, instead of a 404 that
+// left the banner up until it expired. The server still tags no call with a
+// match: it only knows which id replaced which.
+func TestAnnouncementHandlers_DeleteThroughAReplacedID(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test Tournament", Password: "secret-password"}))
+
+	eng := engine.New(store)
+	res := resources.NewResources(nil, fstest.MapFS{
+		"web-mobile/index.html": {Data: []byte("<html><body>Mobile</body></html>")},
+	})
+	router, hub, limiter := NewRouter(store, eng, res, NewFileVerifier(store))
+	t.Cleanup(limiter.Close)
+
+	post := func(msg string) state.Announcement {
+		t.Helper()
+		body, _ := json.Marshal(announcementRequest{Message: msg, DurationMinutes: 5})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/tournament/announce", bytes.NewReader(body))
+		req.Header.Set("X-Tournament-Password", "secret-password")
+		router.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		var ann state.Announcement
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &ann))
+		return ann
+	}
+	del := func(id string) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("DELETE", "/api/announcements/"+id, nil)
+		req.Header.Set("X-Tournament-Password", "secret-password")
+		router.ServeHTTP(w, req)
+		return w
+	}
+
+	const call = "Now calling Yamada and Tanaka to Shiaijo A."
+	first := post(call)
+	second := post(call)
+	require.NotEqual(t, first.ID, second.ID)
+
+	// Subscribe after the POSTs, so the next event is the DELETE's broadcast.
+	ch := hub.Subscribe()
+	defer hub.Unsubscribe(ch)
+
+	w := del(first.ID)
+	assert.Equal(t, http.StatusNoContent, w.Code, "the replaced id must withdraw the announcement that replaced it")
+
+	select {
+	case msg := <-ch:
+		env := decodeHubEvent(t, msg)
+		assert.Equal(t, EventAnnouncement, env.Type)
+		list, ok := env.Data.([]any)
+		require.Truef(t, ok, "the broadcast carries the announcement list, got %T", env.Data)
+		assert.Empty(t, list, "the withdrawn call must leave the broadcast list")
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the announcement broadcast after the withdrawal")
+	}
+
+	w = httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/tournament/announcements", nil)
+	router.ServeHTTP(w, req)
+	var list []state.Announcement
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
+	assert.Empty(t, list)
+
+	// Both ids are spent: nothing is left to take down through either.
+	assert.Equal(t, http.StatusNotFound, del(first.ID).Code)
+	assert.Equal(t, http.StatusNotFound, del(second.ID).Code)
 }

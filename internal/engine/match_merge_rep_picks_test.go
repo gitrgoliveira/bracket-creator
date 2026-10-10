@@ -9,6 +9,8 @@ package engine
 // other side's pick, and an older change of any is kept in the match's history.
 
 import (
+	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -626,4 +628,139 @@ func TestMerge_RepPick_OnARowAHoldTookOut_IsHeldWithItsValue(t *testing.T) {
 		assert.Empty(t, got.SubResults)
 		assert.NotContains(t, got.GroupStamps, repPickAName, "the stored match never stamped the pick")
 	})
+}
+
+// The pick judges (mobileapp: the participant's and the organiser's) judge a
+// representative pick for team membership only when the merge will APPLY it,
+// and they ask RepPicksApplied, which runs the merge on copies, rather than
+// re-deriving its rule. The table below pins the probe to the merge itself.
+
+const rpaStoredAt = int64(100_000)
+
+var rpaComp = &state.Competition{
+	ID: "rpa", Kind: "team", TeamSize: 3, TeamMatchType: state.TeamMatchTypeFixed, Format: state.CompFormatKnockout,
+}
+
+// rpaStored is a stored running team match; withRow adds the representative
+// bout with side A's pick (carol) stamped at rpaStoredAt on all three groups.
+func rpaStored(withRow bool) *state.MatchResult {
+	m := &state.MatchResult{
+		ID: "m-r1-0", SideA: wrTeamA, SideAID: wrTeamAID, SideB: wrTeamB, SideBID: wrTeamBID,
+		Status: state.MatchStatusRunning, ModifiedAt: rpaStoredAt,
+		SubResults:  []state.SubMatchResult{{Position: 1}},
+		GroupStamps: map[string]int64{"bout:1": rpaStoredAt},
+	}
+	if withRow {
+		m.SubResults = append(m.SubResults, repRow("carol", "", nil, nil))
+		m.GroupStamps[repBoutGroup], m.GroupStamps[repPickAName], m.GroupStamps[repPickBName] = rpaStoredAt, rpaStoredAt, rpaStoredAt
+	}
+	return m
+}
+
+// rpaWrite is a client's running score write that picks dave and erin.
+func rpaWrite(at int64, changed []string) *state.MatchResult {
+	return &state.MatchResult{
+		ID: "m-r1-0", SideA: wrTeamA, SideAID: wrTeamAID, SideB: wrTeamB, SideBID: wrTeamBID,
+		Status: state.MatchStatusRunning, ModifiedAt: at, Changed: changed, WriteDoor: DoorScore,
+		SubResults: []state.SubMatchResult{repRow("dave", "erin", nil, nil)},
+	}
+}
+
+// rpaCopy is a deep copy built without the probe's own cloning.
+func rpaCopy(m *state.MatchResult) state.MatchResult {
+	c := *m
+	c.SubResults = state.CloneSubResults(m.SubResults)
+	c.GroupStamps = state.CloneGroupStamps(m.GroupStamps)
+	if m.Changed != nil {
+		c.Changed = append([]string{}, m.Changed...)
+	}
+	return c
+}
+
+func TestRepPicksApplied_AgreesWithTheMerge(t *testing.T) {
+	changeds := []struct {
+		name    string
+		changed []string
+	}{
+		{"naming nothing", nil},
+		{"naming both picks and the bout", []string{repBoutGroup, repPickAName, repPickBName}},
+		{"naming both picks", []string{repPickAName, repPickBName}},
+		{"naming side A's pick", []string{repPickAName}},
+		{"naming side B's pick", []string{repPickBName}},
+		{"naming the bout alone", []string{repBoutGroup}},
+	}
+	stamps := []struct {
+		name string
+		at   int64
+	}{
+		{"older", rpaStoredAt - 100}, {"equal", rpaStoredAt}, {"newer", rpaStoredAt + 100}, {"unstamped", 0},
+	}
+	for _, knockout := range []bool{false, true} {
+		for _, storedRow := range []bool{true, false} {
+			for _, ch := range changeds {
+				for _, st := range stamps {
+					name := fmt.Sprintf("knockout=%v/storedRow=%v/%s/%s", knockout, storedRow, ch.name, st.name)
+					t.Run(name, func(t *testing.T) {
+						stored, incoming := rpaStored(storedRow), rpaWrite(st.at, ch.changed)
+						storedBefore, incomingBefore := rpaCopy(stored), rpaCopy(incoming)
+
+						gotA, gotB := RepPicksApplied(stored, incoming, rpaComp, knockout)
+
+						assert.Equal(t, storedBefore, *stored, "the stored match is not changed by the probe")
+						assert.Equal(t, incomingBefore, *incoming, "the write is not changed by the probe")
+
+						// The merge, run on its own copies with the branch's context.
+						s, w := rpaCopy(stored), rpaCopy(incoming)
+						rep := mergeMatchWrite(&s, &w, matchWriteForward, mergeCtx{comp: rpaComp, knockout: knockout, nilSubsClear: !knockout})
+						assert.Equal(t, slices.Contains(rep.Applied, repPickAName), gotA, "side A")
+						assert.Equal(t, slices.Contains(rep.Applied, repPickBName), gotB, "side B")
+
+						// And the answer is the plain reading of the rule, so the
+						// equality above cannot hold only because both are wrong:
+						// the write names the pick, it is not older than the stored
+						// pick's stamp, and it lands on a row (the match's own, or
+						// one the write creates by naming the bout: a pick named
+						// onto a row nothing creates is held).
+						applies := func(group string) bool {
+							named := ch.changed == nil || slices.Contains(ch.changed, group)
+							onARow := storedRow || ch.changed == nil || slices.Contains(ch.changed, repBoutGroup)
+							return named && onARow && (st.at == 0 || !storedRow || st.at >= rpaStoredAt)
+						}
+						assert.Equal(t, applies(repPickAName), gotA, "side A by the rule")
+						assert.Equal(t, applies(repPickBName), gotB, "side B by the rule")
+					})
+				}
+			}
+		}
+	}
+}
+
+// A finish stamped before the stored verdict that names another winner is held
+// WHOLE (HoldReasonFinishAtomic): its picks land nowhere, whatever their own
+// stamps say. A finish that only repeats the stored verdict is not a hold, so
+// its picks are ordered by their own stamps.
+func TestRepPicksApplied_AStaleFinishLandsNoPick(t *testing.T) {
+	stored := func() *state.MatchResult {
+		m := rpaStored(true)
+		m.Status, m.Winner, m.WinnerID = state.MatchStatusCompleted, wrTeamA, wrTeamAID
+		m.GroupStamps[state.GroupResult] = rpaStoredAt
+		m.GroupStamps[repBoutGroup], m.GroupStamps[repPickAName], m.GroupStamps[repPickBName] = rpaStoredAt-40, rpaStoredAt-50, rpaStoredAt-50
+		return m
+	}
+	finish := func(winner, winnerID string) *state.MatchResult {
+		w := rpaWrite(rpaStoredAt-20, nil)
+		w.Status, w.Winner, w.WinnerID = state.MatchStatusCompleted, winner, winnerID
+		return w
+	}
+	for _, knockout := range []bool{false, true} {
+		t.Run(fmt.Sprintf("knockout=%v", knockout), func(t *testing.T) {
+			a, b := RepPicksApplied(stored(), finish(wrTeamB, wrTeamBID), rpaComp, knockout)
+			assert.False(t, a, "another winner, older than the stored verdict: held whole, side A")
+			assert.False(t, b, "side B")
+
+			a, b = RepPicksApplied(stored(), finish(wrTeamA, wrTeamAID), rpaComp, knockout)
+			assert.True(t, a, "the stored verdict repeated is no hold: the pick is newer than its stored stamp, side A")
+			assert.True(t, b, "side B")
+		})
+	}
 }

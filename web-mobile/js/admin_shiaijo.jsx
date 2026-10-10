@@ -27,14 +27,16 @@ import { useDialogFocus } from './dialog_focus.jsx';
 import {
     writeDidNotLand, writeKeepsEditorOpen, writeWasSuperseded, writeWasRefusedForClock,
     attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, OVERRIDE_HELD_NOTICE,
-    startWhileCorrectingMessage, startWhileStartingMessage, correctWhileRunningMessage,
+    startWhileCorrectingMessage, startWhileStartingMessage, startWasBlockedByStartMessage,
+    correctWhileRunningMessage, wasToasted,
 } from './write_result.jsx';
 // What a Start came back with (a clock_skew refusal, a thrown 409) is
 // start_match.jsx's to classify, shared with the Scores tab's own automatic
-// start (admin_schedule_score_editor.jsx). The state wiring stays here:
+// start (admin_schedule_score_editor.jsx). startPatch, the write itself, comes
+// from the same leaf, not from `window.startPatch`. The state wiring stays here:
 // startingRef/pickingRef carry the pick exemption (pickMatch), which that
 // leaf's guard has no word for.
-import { classifyStartOutcome, startFailureMessage } from './start_match.jsx';
+import { startPatch, classifyStartOutcome, startFailureMessage } from './start_match.jsx';
 // swissRoundLabel: single owner is pool_ids.jsx (mp-dej2); this file used to
 // carry its own copy. scoreRowMatchName names a match in the refusal notices.
 import { swissRoundLabel, scoreRowMatchName } from './pool_ids.jsx';
@@ -55,8 +57,13 @@ import { isBarredMatch, sideBarredByDecision, involvesCompetitor } from './ineli
 // stubs window.BracketTree before importing this file -- routing through
 // admin_scoring_shared.jsx pulled bracket.jsx's module body in ahead of that
 // stub taking effect and silently overwrote it. See barred_match_notice.jsx's
-// header.
+// header. The same rule is why winnerSideLR and teamMatchMarks come from the
+// side_marks.jsx leaf below, not from bracket.jsx.
 import { BarredMatchNotice } from './barred_match_notice.jsx';
+// The winner cue and a withdrawn team's mark, imported from their leaf (its one
+// import is competitor_identity.jsx), never read off `window`: a missing global
+// used to paint nothing, with no error to say why.
+import { winnerSideLR, teamMatchMarks } from './side_marks.jsx';
 // bc-tmwn: team match marks (Kiken, Fus.) are placed beside the withdrawn
 // side's name via teamNameMark.
 import { teamNameMark } from './match_scoreboard.jsx';
@@ -318,7 +325,7 @@ export function shiaijoScoreCell(m) {
     const ipponsB = m.ipponsB || [];
     const s = window.formatIpponsScore
         ? window.formatIpponsScore(ipponsB, ipponsA, m.score, m.decision, m.encho, m.decidedByHantei,
-            window.winnerSideLR ? window.winnerSideLR(m) : null)
+            winnerSideLR(m))
         : "";
     return s ? { kind: "ippon", ippon: s } : { kind: "none" };
 }
@@ -627,14 +634,16 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const wname = _bracketSideName(w);
         if (wname) applyLocalBracketWin(match.compId, match.id, wname);
     }, [applyLocalBracketWin]);
-    // The last Start the server refused, as { key, compId, msg } for the match
-    // it was refused for (null = none). It is shown under Up next only while
-    // that match IS Up next, and it is dropped once it may no longer apply:
-    // whenever Up next changes to a different match, whichever match the
-    // refusal was for (the effect beside upNext below), and when any
-    // competitor's eligibility changes in that competition (the
-    // competitor_status_updated handler just below), which is what restoring
-    // a withdrawn competitor broadcasts. A refusal that
+    // The last Start the server refused, or the console refused for a start still
+    // out that has since landed, as { key, compId, msg } for the match it was
+    // refused for (null = none). It belongs to that match: it shows on that
+    // match's Up next card or queue row for as long as the match is still
+    // scheduled on this court, and goes when the match leaves scheduled or the
+    // court's (non-empty) list no longer holds it (the effect beside upNext
+    // below), when any competitor's eligibility changes in that competition (the
+    // competitor_status_updated handler just below), which is what restoring a
+    // withdrawn competitor broadcasts, or when the operator starts a match
+    // (startMatch). Up next changing by itself does not drop it. A refusal that
     // still applies comes straight back on the next tap. Before this it was a
     // bare string nothing cleared, so "kiken-voluntary at Pool A-2" outlived
     // the restore and then sat under the NEXT match (UAT, bc-tmfn). Declared
@@ -830,9 +839,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const [correctingKey, setCorrectingKey] = useStateSh(null);
     // The last tap the console refused because a match is live (a Correct), a
     // correction is open (a Start) or another start is still out (a Start):
-    // { key, why: "running" | "correcting" | "starting" }.
+    // { key, compId, why: "running" | "correcting" | "starting", against, label }
+    // (`against` is the blocker's key, `label` its name as the operator sees it).
     // Only the tap is stored; the notice text is derived at render while the
-    // condition still holds (refusalNotice below), so it cannot go stale.
+    // condition still holds (refusalNotice below), so it cannot go stale. The one
+    // that outlives its condition is "starting": when the start it named lands,
+    // the effect beside startMatch turns it into a stored startError for the
+    // refused match, in the past tense.
     const [refusedTap, setRefusedTap] = useStateSh(null);
     // Pending court reassignment, awaiting operator confirmation. Moving a match
     // off this shiaijo is disruptive (it leaves the court and joins another's
@@ -1081,12 +1094,21 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     };
     // Refuse a tap: remember it against the match that blocks it, and toast.
     const refuseTap = (m, why) => {
-        setRefusedTap({ key: matchKey(m), why, against: matchKey(refusalBlocker(why)) });
+        const blocker = refusalBlocker(why);
+        setRefusedTap({ key: matchKey(m), compId: m.compId, why, against: matchKey(blocker), label: scoreRowMatchName(blocker) });
         if (showToast) showToast(refusalText(why), "error");
     };
+    // The stored refusal is read against the refused match's LIVE row in the
+    // court's list (the same list the court-call withdrawal reads), never against
+    // a snapshot: the notice shows only while that row is still scheduled, so it
+    // cannot outlive the match for the render before the effect below drops it.
+    const startErrorKey = startError ? startError.key : null;
+    const startErrorRow = startErrorKey ? courtMatchesRaw.find((x) => matchKey(x) === startErrorKey) : null;
+    const startErrorStatus = startErrorRow ? startErrorRow.status : null;
     // The Start notice a scheduled match's card or queue row shows: a refused
     // tap's derived notice, else the stored Start refusal for that match.
-    const startNoticeFor = (key) => refusalNotice(key) || (startError && startError.key === key ? startError.msg : null);
+    const startNoticeFor = (key) => refusalNotice(key)
+        || (startError && startError.key === key && startErrorStatus === "scheduled" ? startError.msg : null);
 
     // For pool daihyosen/tiebreaker bouts, enrich the selected match with
     // rep-player roster data so ScoreEditorModal renders the rep-picker dropdowns
@@ -1178,25 +1200,28 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const upcomingQueueMatches = upNext
         ? filteredScheduled.filter((m) => matchKey(m) !== matchKey(upNext))
         : filteredScheduled;
-    // A Start refusal describes ONE match at one moment. Whenever Up next changes
-    // to a different match (that one started, was moved, the operator switched
-    // competition, or the court moved on), the stored refusal (the server's or a
-    // thrown start's message in startError) is dropped, whichever match it was
-    // for. That includes a refusal for a match picked from further down the
-    // queue: when that match later reaches Up next, its cause (e.g. a competitor
-    // then fighting on another court) is usually gone, and nothing else would
-    // clear it (a finished match sends no competitor_status_updated). The one
-    // exception is a refused ADVANCE start (startMatch's advance flag, Finish +
-    // Start Next or the one after a decision): the refetch that follows moves Up
-    // next onto exactly that match, so its refusal stays while it is Up next.
-    // A refusal for a start still out (refuseTap, "starting") is derived instead
-    // and clears itself once that start lands. A refusal that still applies comes
-    // straight back on the next tap. Keyed on the key VALUE: a refetch that keeps
-    // the same Up next leaves a refusal for it where it is.
-    const upNextKey = upNext ? matchKey(upNext) : null;
+    // A stored Start refusal describes ONE match at one moment, so it is judged
+    // against that match's live row and nothing else (startErrorStatus above; the
+    // Scores tab keeps the same rule, admin_schedule_score_editor.jsx). It is
+    // dropped when the match leaves scheduled (started here or elsewhere, closed
+    // by a decision), or when the court's list is non-empty and no longer holds
+    // it (the match moved). Up next changing by itself drops nothing: a refusal
+    // for a match picked from further down the queue stays on its row, and is
+    // there on the card if the match later reaches Up next. A refusal is about
+    // one match at one moment, so a stale one never revives when that match is
+    // later sent back to the queue: the next tap asks the server again. A start
+    // by the operator clears it too (startMatch), and so does an eligibility
+    // change in its competition (the competitor_status_updated handler).
+    //
+    // The list is EMPTY while it loads and across a transient empty refetch, and
+    // an empty list says nothing about the match, so the refusal is left where it
+    // is then (the court-call withdrawal below leaves an absent key alone for the
+    // same reason). Only a list that holds matches yet lacks this one counts.
+    const courtHoldsMatches = courtMatchesRaw.length > 0;
     useEffectSh(() => {
-        setStartError((prev) => (prev && prev.advance && prev.key === upNextKey ? prev : null));
-    }, [upNextKey]);
+        if (!startErrorKey) return;
+        if (startErrorRow ? startErrorStatus !== "scheduled" : courtHoldsMatches) setStartError(null);
+    }, [startErrorKey, startErrorStatus, courtHoldsMatches]);
 
     // "Which pool is next" for the context panel: the first upcoming pool on
     // this court (within the selected comp) whose pool differs from the one
@@ -1272,17 +1297,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         return { entries, alsoWaiting: selHasActive };
     }, [allMatches, effectiveCompId, running, filteredScheduled, courtKnown]);
 
-    // Delegate to the canonical start-patch factory (admin_schedule.jsx) rather
-    // than re-declaring its shape: a second copy could silently drift. Both
-    // modules ship in the same admin bundle, so the global is always present;
-    // fail loudly if that ever stops being true instead of forking behaviour.
-    const startPatch = () => {
-        if (typeof window.startPatch !== "function") {
-            throw new Error("startPatch factory unavailable: admin_schedule.jsx not loaded");
-        }
-        return window.startPatch();
-    };
-
     // Returns true when the start write succeeded, false otherwise: pickMatch
     // relies on this so it only pins pickedKey for a match that actually started
     // (a blocked-by-eligibility start must not steal the panel).
@@ -1292,19 +1306,38 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const syncStartingKey = () => {
         const s = startingRef.current || pickingRef.current;
         if (mountedRef.current) setStartingKey(s ? s.key : null);
-        // With no start out, a "starting" refusal has no start left to name, so it
-        // goes: otherwise the next start of that match would bring it back. Other
-        // refusals are not about a start in flight and stay.
-        if (!s && mountedRef.current) setRefusedTap((prev) => (prev && prev.why === "starting" ? null : prev));
     };
+    // A refusal for a start that was still out ("starting") is derived while that
+    // start is out: "X is still being started". When it has landed (or failed),
+    // the sentence stops being true, but nothing else would say the match the
+    // operator asked for was never started (a 2.7s toast was the only sign,
+    // bc-aadv). So it becomes a STORED refusal for the refused match, in the past
+    // tense, bound to that match like every stored refusal (the effect beside
+    // upNext). The refused match is NOT started on its own: the court now has a
+    // running bout, so a second automatic start would draw court_busy or put two
+    // bouts on the court unasked, and one start at a time is the rule (fce5866c).
+    // The operator starts it, which clears the sentence. The effect re-runs when
+    // the start in flight changes (startingKey), and reads the refs for the truth.
+    //
+    // A start that did NOT land leaves the court free, so the past-tense sentence
+    // would be false, and that start's own refusal (a thrown 409, a clock_skew
+    // answer) is what the operator needs. It is stored for the blocker before this
+    // runs (startMatch's catch, ahead of its finally), and startMatch clears
+    // startError when a start passes the guard, so any value present when the
+    // blocker ends is the blocker's own: it is kept, and the waiting match shows
+    // nothing, as it did before the sentence existed.
+    useEffectSh(() => {
+        if (!refusedTap || refusedTap.why !== "starting") return;
+        if (startingRef.current || pickingRef.current) return;
+        const blocked = { key: refusedTap.key, compId: refusedTap.compId, msg: startWasBlockedByStartMessage({ label: refusedTap.label }) };
+        setStartError((prev) => prev ?? blocked);
+        setRefusedTap(null);
+    }, [refusedTap, startingKey]);
     // `pick` is the pickingRef entry pickMatch made for THIS start, if it is one:
-    // that pick is the start itself, not a start in flight against it. `advance`
-    // marks a start an advance (Finish + Start Next, or the one after a decision)
-    // asked for: its refusal survives the Up next change the refetch makes (see
-    // the upNextKey effect).
-    const startMatch = async (m, { pick = null, advance = false } = {}) => {
+    // that pick is the start itself, not a start in flight against it.
+    const startMatch = async (m, { pick = null } = {}) => {
         const key = matchKey(m);
-        const refusalFor = (msg) => ({ key, compId: m.compId, msg, advance });
+        const refusalFor = (msg) => ({ key, compId: m.compId, msg });
         const inFlight = startingRef.current || (pickingRef.current && pickingRef.current !== pick ? pickingRef.current : null);
         if (inFlight) {
             // One start at a time. An advance (Finish + Start Next, or the one
@@ -1341,7 +1374,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         } catch (e) {
             const msg = startFailureMessage(e);
             if (mountedRef.current) setStartError(refusalFor(msg));
-            if (showToast) showToast(msg, "error");
+            // A thrown refusal onEditScore (editMatchScore, admin.jsx) already
+            // toasted is not toasted again: the toast is a single slot, so a
+            // second one only restarts its timer. The card or row says it either way.
+            if (showToast && !wasToasted(e)) showToast(msg, "error");
             return false;
         } finally {
             // Only the start that holds the ref clears it; the state follows the refs.
@@ -2079,7 +2115,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             // Finish + start the next scheduled match, which then
                                             // becomes the running match the panel shows.
                                             if (next && next.status === "scheduled") {
-                                                await startMatch(next, { advance: true });
+                                                await startMatch(next);
                                             }
                                         } catch (_e) { /* keep panel */ }
                                         // The finish write's answer, as the editor needs it (a partial
@@ -2102,7 +2138,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         // competitor a withdrawal or no-show has just barred.
                                         const next = nextActiveAfter(selectedMatch, sideBarredByDecision(result, selectedMatch));
                                         if (next && next.status === "scheduled") {
-                                            await startMatch(next, { advance: true });
+                                            await startMatch(next);
                                         }
                                     }}
                                     password={password}
@@ -2356,11 +2392,9 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
     const bName = slotName(m.sideB?.name || "", (m.feeders || [])[1]);
     const scoreCell = shiaijoScoreCell(m);
     // bc-tmwn: for completed rows, determine which side won and get team marks.
-    const winnerSide = isComplete ? window.winnerSideLR?.(m) : null;
+    const winnerSide = isComplete ? winnerSideLR(m) : null;
     // teamMatchMarks itself returns no marks for a non-team row or one not completed.
-    const { shiro: teamShiroMark, aka: teamAkaMark } = window.teamMatchMarks
-        ? window.teamMatchMarks(m, isTeamMatch(m))
-        : { shiro: "", aka: "" };
+    const { shiro: teamShiroMark, aka: teamAkaMark } = teamMatchMarks(m, isTeamMatch(m));
     // Derive position in the full scheduled list to know when to disable ↑/↓.
     // `scheduled` is the court's complete scheduled array (including Up Next);
     // the row may be in the Upcoming slice but we disable based on absolute pos.

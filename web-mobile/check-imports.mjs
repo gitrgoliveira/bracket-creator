@@ -85,6 +85,14 @@ const CHECK_MODULES = [
   'app.jsx',
   'ui.jsx',
   'admin_shiaijo.jsx',
+  // The result-mark placement leaf (sideMarks, placeMarks, winnerSideLR,
+  // teamMatchMarks): bracket.jsx, admin_shiaijo.jsx and the Scores tab import it
+  // by name, so a renamed export would otherwise pass transpile-only.
+  'side_marks.jsx',
+  // The Scores tab imports from start_match.jsx, write_result.jsx, pool_ids.jsx
+  // and side_marks.jsx; a typo'd or renamed export in any of them would fail
+  // only in a native browser.
+  'admin_schedule_score_editor.jsx',
 ];
 
 // ---------------------------------------------------------------------------

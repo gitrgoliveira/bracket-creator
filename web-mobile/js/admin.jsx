@@ -10,6 +10,7 @@ import {
   attemptScoreWrite,
   downstreamKnockoutReopenedNotice,
   writeKeepsEditorOpen,
+  markToasted,
 } from './write_result.jsx';
 import { keptInHistoryNote } from './match_groups.jsx';
 
@@ -326,14 +327,17 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         compId, matchId, result, password, match,
       });
     } catch (e) {
+      // Every error toasted here is marked, so a host that catches it to show
+      // the same sentence on a card or a row does not toast it a second time
+      // (markToasted, write_result.jsx).
       if (e.downstreamKnockoutPlayedCancelled) {
         // Declining the override leaves everything as it was: neither this
         // match nor the later one it depends on was written.
         showToast(DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED);
-        throw e;
+        throw markToasted(e);
       }
       showToast(e.message, "error");
-      throw e;
+      throw markToasted(e);
     }
     // bc-kcdg: say what the confirmation actually did. The operator agreed to
     // reopen specific later matches; without this the only evidence is the

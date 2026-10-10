@@ -3969,6 +3969,119 @@ func TestBuildResultsWorkbook_FixedFormatNoKachinukiSheet(t *testing.T) {
 		"fixed-format comps must not emit a Kachinuki Detail sheet")
 }
 
+// saveFixedTeamBracket turns compID (as testSetup saved it) into a fixed-order
+// team knockout of two teams, Red and White, with one named member each, and
+// stores a completed bracket of their one match: a tied numbered bout, and,
+// when withRepresentativeBout, the representative bout (Red's Hiro against
+// White's Sayaka) that a hantei decided for Red. The competition's Status is
+// the knockout one because the competitor numbers (the "T1.1" labels) come
+// from the draw only once it is.
+func saveFixedTeamBracket(t *testing.T, store *state.Store, compID string, withRepresentativeBout bool) {
+	t.Helper()
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.Format = state.CompFormatKnockout
+	comp.Status = state.CompStatusKnockout
+	comp.Kind = "team"
+	comp.TeamMatchType = state.TeamMatchTypeFixed
+	comp.TeamSize = 3
+	comp.NumberPrefix = "T"
+	require.NoError(t, store.SaveCompetition(comp))
+
+	redID, whiteID := helper.NewUUID4(), helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: redID, Name: "RedTeam", Dojo: "DojoR"},
+		{ID: whiteID, Name: "WhiteTeam", Dojo: "DojoW"},
+	}))
+	hiro, err := store.AddTeamMember(compID, redID, "Hiro")
+	require.NoError(t, err)
+	sayaka, err := store.AddTeamMember(compID, whiteID, "Sayaka")
+	require.NoError(t, err)
+
+	subs := []state.SubMatchResult{
+		{Position: 1, SideA: "Hiro", SideAMemberID: hiro.ID, SideB: "Sayaka", SideBMemberID: sayaka.ID, Decision: "hikiwake"},
+	}
+	if withRepresentativeBout {
+		subs = append(subs, state.SubMatchResult{
+			Position: state.DaihyosenSubPosition, SideA: "RedTeam", SideB: "WhiteTeam",
+			SideAMemberID: hiro.ID, SideBMemberID: sayaka.ID, Winner: "RedTeam",
+			Decision: string(domain.DecisionDaihyosen), IpponsA: []string{domain.HanteiMark},
+		})
+	}
+	require.NoError(t, store.SavePools(compID, []helper.Pool{}))
+	require.NoError(t, store.SavePoolMatches(compID, nil))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		DrawOrder: []string{redID, whiteID},
+		Rounds: [][]state.BracketMatch{{{
+			ID: "R1M0", MatchNumber: 1, DisplayRound: 1,
+			SideA: "RedTeam", SideAID: redID, SideB: "WhiteTeam", SideBID: whiteID,
+			Winner: "RedTeam", Status: state.MatchStatusCompleted, SubResults: subs,
+		}}},
+	}))
+}
+
+// TestBuildResultsWorkbook_RepresentativeBoutsSheetIffARepresentativeBoutExists
+// pins the results workbook's Representative Bouts sheet (the main sheets'
+// team block lists numbered bouts only, so a representative bout and its
+// representatives reached no sheet): present, editable, naming both
+// representatives, DH as the bout number and (DH) in the centre, exactly when a
+// match of the fixed-order team competition holds a position -1 row, and never
+// beside a Kachinuki Detail sheet.
+func TestBuildResultsWorkbook_RepresentativeBoutsSheetIffARepresentativeBoutExists(t *testing.T) {
+	t.Parallel()
+
+	build := func(t *testing.T, withRepresentativeBout bool) *excelize.File {
+		t.Helper()
+		dir, store, eng, compID := testSetup(t)
+		t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+		saveFixedTeamBracket(t, store, compID, withRepresentativeBout)
+
+		data, err := BuildResultsWorkbook(store, eng, compID)
+		require.NoError(t, err)
+		f, err := excelize.OpenReader(bytes.NewReader(data))
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = f.Close() })
+		return f
+	}
+
+	t.Run("with a representative bout", func(t *testing.T) {
+		t.Parallel()
+		f := build(t, true)
+
+		require.Contains(t, f.GetSheetList(), helper.SheetRepresentativeBouts)
+		assert.NotContains(t, f.GetSheetList(), helper.SheetKachinukiDetail,
+			"a fixed-order competition never gets a Kachinuki Detail sheet")
+		protection, err := f.GetSheetProtection(helper.SheetRepresentativeBouts)
+		require.NoError(t, err)
+		assert.Equal(t, excelize.SheetProtectionOptions{}, protection, "the sheet holds no formula to protect")
+
+		rows, err := f.GetRows(helper.SheetRepresentativeBouts)
+		require.NoError(t, err)
+		var cells []string
+		for _, row := range rows {
+			cells = append(cells, row...)
+		}
+		flat := strings.Join(cells, "|")
+		assert.Contains(t, flat, "(Representative bout)", "the section is titled")
+		assert.Contains(t, flat, "Hiro", "Aka's representative")
+		assert.Contains(t, flat, "Sayaka", "Shiro's representative")
+		assert.Contains(t, flat, helper.RepresentativeBoutRowLabel+" T1.1 Hiro", "DH is the bout's number, then the representative")
+		assert.Contains(t, cells, "(DH)", "the centre carries the representative-bout mark")
+		assert.Contains(t, cells, "Ht", "the hantei mark rides beside the winner")
+		assert.NotContains(t, flat, "-1", "the stored position is never printed")
+	})
+
+	t.Run("without one", func(t *testing.T) {
+		t.Parallel()
+		f := build(t, false)
+
+		assert.NotContains(t, f.GetSheetList(), helper.SheetRepresentativeBouts,
+			"no representative bout, no sheet: the main sheets' workbook is unchanged")
+		assert.NotContains(t, f.GetSheetList(), helper.SheetKachinukiDetail)
+	})
+}
+
 // readCourtBandLetters reads a court-banded sheet's shiaijo band headers back
 // out of the rendered workbook, in column order, and asserts each band sits on
 // the court grid and is non-empty. bctest.ReadCourtBands does the reading (the

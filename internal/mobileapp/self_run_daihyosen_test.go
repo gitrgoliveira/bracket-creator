@@ -1108,6 +1108,48 @@ func TestSelfRun_ASideTheWriteDoesNotNameIsNotJudged(t *testing.T) {
 	assert.Empty(t, f.storedRepBout(t).SideBMemberID, "a refused pick writes nothing")
 }
 
+// A write that names the bout alone changes no pick, so a foreign id on its row
+// is neither judged nor written: the judge asks the merge which picks it lands.
+func TestSelfRun_AWriteNamingTheBoutAloneIsNotJudgedForThePick(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	squads, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+	membersB := squads[repBoutTeamBID]
+	require.NotEmpty(t, membersB, "team B is seeded with members")
+
+	row := repBoutRow([]string{"M"}, []string{}, "")
+	row["sideAMemberId"] = membersB[0].ID // side A is team A's
+	sheet := scoreSheet(state.MatchStatusRunning, "", f.now+100, row)
+	sheet["changed"] = []string{state.BoutGroup(state.DaihyosenSubPosition)}
+	w := f.send(http.MethodPut, repBoutMatchPath+"/score", "", sheet)
+	require.Equal(t, http.StatusOK, w.Code, "the bout is not a pick: %s", w.Body.String())
+	stored := f.storedRepBout(t)
+	assert.Equal(t, []string{"M"}, stored.IpponsA, "the bout applies")
+	assert.Empty(t, stored.SideAMemberID, "and the id it carried is no pick")
+}
+
+// A members file that cannot be read refuses a pick that needs it with a
+// refusal the offline queue does not retry (409; a 500 is retried forever),
+// and writes nothing.
+func TestSelfRun_UnreadableTeamMembersRefusesThePickTerminally(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	squads, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+	membersA := squads[repBoutTeamAID]
+	require.NotEmpty(t, membersA, "team A is seeded with members")
+	require.NoError(t, os.WriteFile(
+		filepath.Join(f.store.GetFolder(), "competitions", "c1", "team-members.yaml"),
+		[]byte("not: [valid yaml"), 0o600))
+
+	row := repBoutRow([]string{}, []string{}, "")
+	row["sideAMemberId"] = membersA[0].ID
+	w := f.score("", state.MatchStatusRunning, "", f.now+100, row)
+	requireTeamMembersUnreadable(t, w)
+	assert.Empty(t, f.storedRepBout(t).SideAMemberID, "a refused pick writes nothing")
+}
+
 // Removing the representative bout dates both sides' representatives with the
 // removal (it names state.GroupRepPickA and state.GroupRepPickB beside the
 // bout), so a pick a board made before it, on a sheet that still showed the row,

@@ -47,8 +47,8 @@ import { GROUP_RESULT } from './match_groups.jsx';
 // group alone (match_groups.jsx): the server keeps every other group of the
 // match as stored, the score a send-back kept included.
 //
-// The console reads it off `window.startPatch` (admin_schedule.jsx publishes
-// it), the Scores tab imports it; both end up here.
+// The court console and the Scores tab both import it from here; it is not
+// published on `window`.
 export function startPatch() {
     return {
         startOnly: true,

@@ -170,6 +170,28 @@ describe('Finish + Start Next on the Scores tab says why the next match did not 
     expect(utils.container.querySelectorAll('[data-testid="start-refusal-notice"]')).toHaveLength(0);
     expect(showToast).not.toHaveBeenCalled();
   });
+
+  // PIN (green by design). A superseded start (HTTP 200 applied:false, reason
+  // superseded) wrote nothing, but it is not a refusal either: this page keeps no
+  // "the start went out" record (the court console's `landed` words a past-tense
+  // notice from one), so nothing here depends on telling it from a landed start.
+  // The operator lands on the next match in pre-match, still scheduled with its
+  // Start button, which is where they want to be.
+  it('a superseded start raises no notice and no toast, and the editor lands on the next match', async () => {
+    const onEditScore = vi.fn(async (_c, id, patch) => (id === 'm-2' && patch.startOnly
+      ? { applied: false, reason: 'superseded' }
+      : { status: 'ok' }));
+    const showToast = vi.fn();
+    const utils = await mountAndOpenRunning(onEditScore, showToast);
+
+    await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed' }); });
+
+    expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-1', 'm-2']);
+    expect(utils.container.querySelectorAll('[data-testid="start-refusal-notice"]')).toHaveLength(0);
+    expect(showToast).not.toHaveBeenCalled();
+    expect(probe.props.match.id).toBe('m-2');
+    expect(probe.props.match.status).toBe('scheduled');
+  });
 });
 
 describe('one start at a time on the Scores tab', () => {
@@ -268,6 +290,22 @@ describe('the start after a decision says why too', () => {
     await act(async () => { await probe.props.onAfterDecision({ winner: side('m-1-a', 'Yamada') }); });
 
     expect(noticeIn(rowOf(utils, 'Alice')).textContent).toContain(CLOCK_SKEW_REASON_TEXT);
+    expect(probe.props.match.id).toBe('m-2');
+  });
+
+  // PIN (green by design): see the superseded case above. onAfterDecision is the
+  // one place this page reads startNext's answer, to open the next match, and a
+  // superseded start still opens it.
+  it('a superseded start after a decision still opens the next match, with no notice', async () => {
+    const onEditScore = vi.fn().mockResolvedValue({ applied: false, reason: 'superseded' });
+    const showToast = vi.fn();
+    const utils = await mountAndOpenRunning(onEditScore, showToast);
+
+    await act(async () => { await probe.props.onAfterDecision({ winner: side('m-1-a', 'Yamada') }); });
+
+    expect(onEditScore).toHaveBeenCalledTimes(1);
+    expect(utils.container.querySelectorAll('[data-testid="start-refusal-notice"]')).toHaveLength(0);
+    expect(showToast).not.toHaveBeenCalled();
     expect(probe.props.match.id).toBe('m-2');
   });
 });

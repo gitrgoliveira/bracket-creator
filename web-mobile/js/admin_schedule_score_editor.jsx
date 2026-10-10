@@ -197,8 +197,14 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
   // The ONE door both automatic starts go through: (a) refuses while another
   // start is out, (b) reads the answer, (c) reports a refusal (refuseStart).
   // Resolves true when the start went ahead (landed or queued), false otherwise;
-  // it never throws. Every start-gating rule is the server's (StartMatchTx), so
-  // a thrown 409 only needs reporting.
+  // it never throws. A SUPERSEDED start (classifyStartOutcome: nothing written, a
+  // newer change to the match's result is stored) also resolves true, on purpose:
+  // the court console records "the start went out" and words a past-tense notice
+  // from it, so it must tell the two apart; this page keeps no such record, and
+  // the answer only decides whether the decision flow opens the next match, which
+  // is right either way (still scheduled, with its Start button).
+  // Every start-gating rule is the server's (StartMatchTx), so a thrown 409 only
+  // needs reporting.
   const startNext = async (next) => {
     const key = scoreKeyOf(next);
     const guard = startGuardRef.current;

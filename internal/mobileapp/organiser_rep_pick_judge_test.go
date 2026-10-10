@@ -404,6 +404,49 @@ func TestOrganiser_BulkScoreJudgesTheRepresentativePicksPerEntry(t *testing.T) {
 	}
 }
 
+// PIN, green by design (the loop already isolates entries: each runs in its own
+// WithTransaction and a refusal is recorded against that entry and moved past).
+// The test above sends one entry per request, which cannot show it: here the
+// FIRST entry of one request carries a foreign pick and the SECOND, for the same
+// match, a valid one. The first is refused and stores nothing, history line
+// included, and does not poison the second, which is written.
+func TestOrganiser_BulkScoreRefusesOneEntryAndWritesTheNextOnTheSameMatch(t *testing.T) {
+	for _, mode := range organiserModes {
+		t.Run(mode.name, func(t *testing.T) {
+			p := newOrganiserPickFixture(t, mode.selfRun)
+			before := p.storedState(t)
+
+			entry := func(at int64, a string) map[string]any {
+				sheet := sheetWith(state.MatchStatusRunning, "", at, nil, repBoutRow([]string{}, []string{}, ""), a, "")
+				sheet["id"] = "B1"
+				return sheet
+			}
+			w := p.send(http.MethodPost, "/api/competitions/c1/matches/bulk-score", organiserPassword, []map[string]any{
+				entry(p.now+100, p.membersB[0]), // a member of the other team
+				entry(p.now+200, p.membersA[0]), // the side's own member
+			})
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			var body struct {
+				Succeeded int              `json:"succeeded"`
+				Errors    []map[string]any `json:"errors"`
+			}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+
+			assert.Equal(t, 1, body.Succeeded, "the valid entry is written: %v", body.Errors)
+			require.Len(t, body.Errors, 1)
+			assert.Equal(t, "B1", body.Errors[0]["matchId"])
+			assert.Equal(t, codeTeamMemberNotInTeam, body.Errors[0]["reason"])
+			assert.Equal(t, notOnTeamBody, body.Errors[0]["error"])
+
+			assert.Equal(t, p.membersA[0], p.storedRepBout(t).SideAMemberID, "the second entry landed")
+			assert.Empty(t, p.storedRepBout(t).SideBMemberID)
+			after := p.storedState(t)
+			assert.Len(t, after.history, len(before.history)+1,
+				"one history line, the written entry's: the refused entry left none")
+		})
+	}
+}
+
 // A members file that cannot be read refuses a bulk entry that needs it, with
 // the reason a client can branch on, and the entry stores nothing.
 func TestOrganiser_BulkScoreRefusesAPickWhenTheTeamMembersCannotBeRead(t *testing.T) {

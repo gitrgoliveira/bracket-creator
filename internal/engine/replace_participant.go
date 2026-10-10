@@ -215,7 +215,7 @@ func (e *Engine) ReplaceParticipantInDraw(
 		// manual check, while the silent-corruption direction costs someone
 		// else's match history.
 		bracketNames := make(map[string]bool)
-		forEachBracketSideWithID(bracket, func(name, id *string) {
+		forEachBracketSlot(bracket, func(_ *state.BracketMatch, _ domain.MatchSide, name, id *string) {
 			if *id == "" && *name != "" {
 				bracketNames[*name] = true
 			}
@@ -248,7 +248,7 @@ func (e *Engine) ReplaceParticipantInDraw(
 				// (seatBracketSide would read an id-less old name to a new
 				// one as another team).
 				if row := state.DaihyosenSubIndex(m.SubResults); row >= 0 && slot != domain.MatchSideNone {
-					nameRepBoutRow(m, row, slot, newName, false)
+					nameRepBoutRow(m, row, slot, newName, oldName, false)
 				}
 			}
 		})
@@ -334,8 +334,8 @@ func matchesParticipant(rowID, pid string) bool {
 
 // renameBracketSide gives side of m, which carries the renamed participant's
 // id, the participant's new name. It goes through seatBracketSide, so the
-// representative bout row's name (and its Winner, when the row named the side by
-// the old name) follows the match's: the same id is the same team, so no pick
+// representative bout row's name (and its Winner, when the row or the match named
+// the side by the old name) follows the match's: the same id is the same team, so no pick
 // is cleared. It reports whether anything was out of step, the match's name or
 // the row's, so a bracket already in step is not saved again.
 func renameBracketSide(m *state.BracketMatch, side domain.MatchSide, newName, id string) bool {
@@ -355,27 +355,20 @@ func renameBracketSide(m *state.BracketMatch, side domain.MatchSide, newName, id
 	return true
 }
 
-// forEachBracketSideWithID calls fn once for each of a bracket's three
-// (name, id) side pairs -- SideA/SideAID, SideB/SideBID, Winner/WinnerID --
-// across every round, plus the ThirdPlaceMatch sibling's when present. Both
-// pointers ALIAS the stored match (indexed slice access, never a
-// range-copy), so a caller mutating through them edits the bracket in
-// place. Shared by ReplaceParticipantInDraw's id-based rename pass, its
-// id-less name-collection pass, and its name-based fallback rename pass,
-// which would otherwise hand-copy the same enumeration three times
-// (bc-brid; this replaced the pre-bc-brid, name-only forEachBracketSide,
-// whose two callers both needed the id half once bracket.json grew one).
-func forEachBracketSideWithID(b *state.Bracket, fn func(name, id *string)) {
-	forEachBracketSlot(b, func(_ *state.BracketMatch, _ domain.MatchSide, name, id *string) {
-		fn(name, id)
-	})
-}
-
-// forEachBracketSlot is forEachBracketSideWithID with the slot's match and
+// forEachBracketSlot calls fn once for each of a bracket's three (name, id)
+// slots -- SideA/SideAID, SideB/SideBID, Winner/WinnerID -- across every round,
+// plus the ThirdPlaceMatch sibling's when present, with the slot's match and
 // which of its slots it is: domain.MatchSideA, domain.MatchSideB, or
-// domain.MatchSideNone for the Winner (not a side). The rename passes that
-// write a side through seatBracketSide, or keep the representative bout row in
-// step with one, need both.
+// domain.MatchSideNone for the Winner (not a side). Both pointers ALIAS the
+// stored match (indexed slice access, never a range-copy), so a caller mutating
+// through them edits the bracket in place. Shared by ReplaceParticipantInDraw's
+// id-based rename pass, its id-less name-collection pass, and its name-based
+// fallback rename pass, which would otherwise hand-copy the same enumeration
+// three times (bc-brid; this replaced the pre-bc-brid, name-only
+// forEachBracketSide, whose two callers both needed the id half once
+// bracket.json grew one). The passes that write a side through seatBracketSide,
+// or keep the representative bout row in step with one, need the match and the
+// slot; the collection pass ignores both.
 func forEachBracketSlot(b *state.Bracket, fn func(m *state.BracketMatch, slot domain.MatchSide, name, id *string)) {
 	visit := func(m *state.BracketMatch) {
 		fn(m, domain.MatchSideA, &m.SideA, &m.SideAID)

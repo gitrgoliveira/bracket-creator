@@ -731,7 +731,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// entry would change a side of one (terminal: finish or requeue
 			// that match, then retry); and "team_member_not_in_team" when a
 			// representative pick the entry lands is not on its side's team
-			// (the entry stores nothing; /score answers it with a 400).
+			// (the entry stores nothing; /score answers it with a 400); and
+			// "team_members_unreadable" when the competition's team members
+			// cannot be read to judge such a pick (the entry stores nothing;
+			// /score answers it with a 409).
 			//
 			// It matters because the single-match endpoints answer those
 			// conditions with a distinct body ({"applied": false, "reason":
@@ -899,7 +902,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				// landed, as /score's are (landedMembersRefusal), decided here,
 				// before the engine rewrites the entry. Its numbered rows are
 				// not: this is the organiser's tooling.
-				judgePicks := carriesJudgedMember(results[i].SubResults, false)
+				judgePicks := introducesJudgedMember(results[i].SubResults, snap, false)
 				status, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, results[i].ID, &results[i].MatchResult, engine.ForceOptions{
 					Force:    results[i].ForceDownstreamReopen,
 					Reopened: &reopenedThisItem,
@@ -2145,24 +2148,74 @@ type landedWriteRefusal struct{ refusal *selfRunRefusal }
 func (e *landedWriteRefusal) Error() string { return e.refusal.Error() }
 func (e *landedWriteRefusal) Unwrap() error { return e.refusal }
 
-// carriesJudgedMember says whether a score write, as the judges before the
-// engine leave it, names a member id on a row landedMembersRefusal judges: a
-// representative pick on the representative bout's row (anyone's write), and
-// a numbered row's fighters and winner (a participant's, numbered). The engine
-// adds an id to a row only by copying one the stored row already holds at
-// that position (preserveKachinukiMemberIDs) or by deriving the winner's from
-// the stored picks (ReconcileWinnerMemberID), and neither introduces one: a
-// write that carries none can introduce none, so the staged match is not read
-// back to look.
-func carriesJudgedMember(subs []state.SubMatchResult, numbered bool) bool {
+// introducesJudgedMember is the gate in front of landedMembersRefusal: it says
+// whether a score write, as the judges before the engine leave it (subs),
+// introduces a member id on a row that judge looks at, against the match as it
+// stood before the write (before, the snapshot read at the top of it). Those
+// rows are the representative bout's, for anyone's write (either side's pick,
+// against before.RepBout, the row the judge compares it with), and with numbered
+// a participant's numbered rows (either fighter and the winner, against the
+// stored row at the same Position). A position the stored match lacks holds no
+// id, so every id its row carries is an introduction.
+//
+// The invariant that makes the gate equivalent to judging every write: the
+// engine never lands a member id the judge would refuse that the payload did
+// not introduce. It adds an id to a row only by copying the one the stored row
+// holds at that position (preserveKachinukiMemberIDs) or by deriving the
+// winner's from the row's own landed side ids (ResolveMemberWinnerID,
+// ReconcileWinnerMemberID), which the judge accepts. So a write that introduces
+// none leaves the staged match unread. The echo is the common case: the team
+// editor stamps member ids on every row that has a lineup, and a gate that
+// fired on any id would parse pool-matches.csv (and bracket.json for a knockout
+// match) again under the competition's write lock on nearly every autosave.
+//
+// Only the ids are compared, never a team id from before.Pairing: the judge
+// reads a side's team from the LANDED pairing, and on the pool branch a payload
+// side id over an id-less stored side lands (reconcileSides), so a gate keyed on
+// the stored team ids would skip exactly that write.
+func introducesJudgedMember(subs []state.SubMatchResult, before matchSnapshot, numbered bool) bool {
+	var storedRows []state.SubMatchResult
+	if before.Stored != nil {
+		storedRows = before.Stored.SubResults
+	}
 	for _, row := range subs {
-		rep := row.Position == state.DaihyosenSubPosition
-		sides := row.SideAMemberID != "" || row.SideBMemberID != ""
-		if rep && sides || numbered && !rep && (sides || row.WinnerMemberID != "") {
+		if row.Position == state.DaihyosenSubPosition {
+			var stored state.SubMatchResult
+			if before.RepBout != nil {
+				stored = *before.RepBout
+			}
+			if introducesFighter(row, stored) {
+				return true
+			}
+			continue
+		}
+		if !numbered {
+			continue
+		}
+		stored := boutAt(storedRows, row.Position)
+		if introducesFighter(row, stored) || introducesWinnerMember(row, stored) {
 			return true
 		}
 	}
 	return false
+}
+
+// introducesFighter reports whether a row puts a member id on either side that
+// the stored row at the same position does not already hold.
+func introducesFighter(row, stored state.SubMatchResult) bool {
+	return introducesID(row.SideAMemberID, stored.SideAMemberID) ||
+		introducesID(row.SideBMemberID, stored.SideBMemberID)
+}
+
+// boutAt returns the row of subs at position, the empty row when there is none:
+// a position a match lacks holds no member id.
+func boutAt(subs []state.SubMatchResult, position int) state.SubMatchResult {
+	for _, s := range subs {
+		if s.Position == position {
+			return s
+		}
+	}
+	return state.SubMatchResult{}
 }
 
 // landedMembersRefusal judges who a score write SEATS by what it landed, read
@@ -2199,8 +2252,8 @@ func carriesJudgedMember(subs []state.SubMatchResult, numbered bool) bool {
 // A refusal is returned as a *landedWriteRefusal and the caller returns it from
 // the transaction, which writes nothing. The caller runs this only for a write
 // the engine accepted (a superseded or rolled-back write must still commit its
-// history and its restore) and that carries a judged member id
-// (carriesJudgedMember). A members file that cannot be read refuses a write
+// history and its restore) and that introduces a judged member id
+// (introducesJudgedMember). A members file that cannot be read refuses a write
 // that needs it, terminally (errTeamMembersUnreadable): nothing is written,
 // which the offline queue reads as final.
 func landedMembersRefusal(stx state.StoreTx, compID, matchID string, before matchSnapshot, numbered bool) error {
@@ -2226,13 +2279,7 @@ func membersOutsideTeams(judge *memberJudge, before, after matchSnapshot, number
 			if row.Position == state.DaihyosenSubPosition {
 				continue
 			}
-			var stored state.SubMatchResult
-			for _, s := range before.Stored.SubResults {
-				if s.Position == row.Position {
-					stored = s
-					break
-				}
-			}
+			stored := boutAt(before.Stored.SubResults, row.Position)
 			if err := winnerMemberOutsideBout(row, stored); err != nil {
 				return err
 			}
@@ -2334,7 +2381,14 @@ func (j *memberJudge) holds(teamID, memberID string) (bool, error) {
 // seated another team), and a side with no team id has nothing to judge a
 // member against.
 func introducesMember(teamID, memberID, storedID string) bool {
-	return memberID != "" && memberID != storedID && teamID != ""
+	return teamID != "" && introducesID(memberID, storedID)
+}
+
+// introducesID reports whether a write's member id is one the stored row at the
+// same position does not hold: the test every judge and the gate in front of
+// them (introducesJudgedMember) share.
+func introducesID(memberID, storedID string) bool {
+	return memberID != "" && memberID != storedID
 }
 
 // rowMembersOutsideTeams judges the member ids a landed bout row names against
@@ -2396,7 +2450,7 @@ func winnerMemberOutsideBout(row, stored state.SubMatchResult) error {
 // write changes against the stored row at the same position, as
 // introducesMember does for a side's fighter.
 func introducesWinnerMember(row, stored state.SubMatchResult) bool {
-	return row.WinnerMemberID != "" && row.WinnerMemberID != stored.WinnerMemberID
+	return introducesID(row.WinnerMemberID, stored.WinnerMemberID)
 }
 
 // isMatchFinalized reports whether the given stored status represents a
@@ -3537,7 +3591,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// numbered rows and the representative bout's picks, the
 				// organiser's picks alone. A start keeps the stored score
 				// whatever it sends, so the row it carries is no pick.
-				judgeLanded := found && !body.StartOnly && carriesJudgedMember(result.SubResults, selfReported)
+				judgeLanded := found && !body.StartOnly && introducesJudgedMember(result.SubResults, snap, selfReported)
 				// Correction audit: a completed -> completed overwrite requires a
 				// non-empty CorrectionReason for traceability. Ending a match
 				// reopened without a reason is never refused (operator ruling

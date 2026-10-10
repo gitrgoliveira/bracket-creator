@@ -1305,9 +1305,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         return { entries, alsoWaiting: selHasActive };
     }, [allMatches, effectiveCompId, running, filteredScheduled, courtKnown]);
 
-    // Returns true when the start write succeeded, false otherwise: pickMatch
-    // relies on this so it only pins pickedKey for a match that actually started
-    // (a blocked-by-eligibility start must not steal the panel).
     // The one place the Starting… state follows the refs: the start in flight,
     // else the pick still deferring the running bout (so a start settling inside
     // a pick does not blank the button the pick is still holding).
@@ -1352,6 +1349,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         }
         setRefusedTap(null);
     }, [refusedTap, startingKey]);
+    // Returns true when the start went out (landed, or was queued offline), false
+    // otherwise: pickMatch relies on this so it only pins pickedKey for a match that
+    // actually started (a blocked-by-eligibility start, a clock_skew refusal or a
+    // superseded answer must not steal the panel).
     // `pick` is the pickingRef entry pickMatch made for THIS start, if it is one:
     // that pick is the start itself, not a start in flight against it.
     const startMatch = async (m, { pick = null } = {}) => {
@@ -1390,6 +1391,14 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 if (showToast) showToast(outcome.msg, "error");
                 return false;
             }
+            // A superseded start wrote nothing (a newer change to the match's
+            // result is already stored, and the refetch editMatchScore awaited
+            // shows what that change made of the match): the court is as it was.
+            // It is not a start that went out, so no refusal waiting on it is
+            // worded as "was being started", and a pick must not pin the panel on
+            // a match the server did not start. Nothing is toasted or stored for
+            // it, as before.
+            if (outcome.superseded) return false;
             // The start went out. A refusal that waited on it (or on the pick that
             // made it) reads this, whichever record it holds.
             started.landed = true;

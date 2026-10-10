@@ -40,8 +40,9 @@ import (
 // nothing on its own (no group stamp, no ModifiedAt: a name write is not a
 // change of the bout, which is what lets a draw-time caller produce exactly
 // the bracket it always did). A side that kept its team and only has a new name
-// takes the row's Winner along when it named the side by the old name
-// (nameRepBoutRow). A match with no row has nothing to write.
+// takes the row's Winner along when it named the side by the old name, the
+// row's own or the match's (nameRepBoutRow). A match with no row has nothing to
+// write.
 //
 // Whether the side was given ANOTHER team is judged by id when both the side as
 // stored and the incoming one carry an id, and by name otherwise
@@ -100,6 +101,7 @@ func seatBracketSide(bm *state.BracketMatch, side domain.MatchSide, name, id str
 		return
 	}
 	another := seatedAnotherTeam(*nameField, *idField, name, id)
+	matchOld := *nameField
 	*nameField = name
 	// An incoming "" beside the name already seated is a writer that did not
 	// know the id, not a removal: the id a repair resolved stays.
@@ -113,7 +115,7 @@ func seatBracketSide(bm *state.BracketMatch, side domain.MatchSide, name, id str
 	}
 	// The row's name follows the match's on every call, a rename included, and
 	// dates nothing (the invariant in the doc comment).
-	nameRepBoutRow(bm, row, side, name, another)
+	nameRepBoutRow(bm, row, side, name, matchOld, another)
 	if !another {
 		return
 	}
@@ -149,8 +151,17 @@ func seatedAnotherTeam(storedName, storedID, name, id string) bool {
 // match shares is never written through (state.withRepPick does the same for a
 // pick); a name the row already has writes nothing and copies nothing. another
 // says the side was given another team: a side that kept its team (a rename)
-// also takes the row's Winner along when it names the side by the old name.
-func nameRepBoutRow(bm *state.BracketMatch, row int, side domain.MatchSide, name string, another bool) {
+// also takes the row's Winner along when it names the side by the old name,
+// whether that is the row's own old side name or matchOld, the match's name for
+// the side before the rename. The match's counts because a row's side name can
+// be blank or stale while its Winner still reads as the match's: AddDaihyosen
+// stamps the names and adoptCurrentSideName only rewrites a row carrying the old
+// name, never fills a blank, but the merge lands a payload row's names as sent,
+// so a writer that does not restate them (rows written before the names rule,
+// the ones resolveBoutSideName's filter exists for; hand-edited data) leaves
+// them blank, and the rename would otherwise leave the Winner on the old team
+// name and the hantei credited to nobody.
+func nameRepBoutRow(bm *state.BracketMatch, row int, side domain.MatchSide, name, matchOld string, another bool) {
 	field := func(r *state.SubMatchResult) *string {
 		if side == domain.MatchSideA {
 			return &r.SideA
@@ -165,9 +176,10 @@ func nameRepBoutRow(bm *state.BracketMatch, row int, side domain.MatchSide, name
 	*field(&subs[row]) = name
 	// A side that kept its team and only has a new name keeps what the row
 	// decided: the row's Winner names that team by the name it was recorded
-	// under, and the mark is placed by comparing the two. A side given another
-	// team leaves the Winner as it was, the decision of the team that left.
-	if !another && old != "" && subs[row].Winner == old {
+	// under (the row's, or the match's), and the mark is placed by comparing
+	// the two. A side given another team leaves the Winner as it was, the
+	// decision of the team that left.
+	if w := subs[row].Winner; !another && w != "" && (w == old || w == matchOld) {
 		subs[row].Winner = name
 	}
 	bm.SubResults = subs

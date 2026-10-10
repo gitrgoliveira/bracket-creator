@@ -27,7 +27,7 @@
 // write_result.jsx and result_slot.jsx). Neither host's module is imported
 // here, and both import this one directly.
 
-import { writeWasRefusedForClock, CLOCK_SKEW_REASON_TEXT } from './write_result.jsx';
+import { writeWasRefusedForClock, writeWasSuperseded, CLOCK_SKEW_REASON_TEXT } from './write_result.jsx';
 import { GROUP_RESULT } from './match_groups.jsx';
 
 // Minimal "start" patch (status -> running, empty score). Mirrors the editors'
@@ -70,21 +70,29 @@ export const START_FAILED_MESSAGE = "Could not start the match: check eligibilit
 
 // classifyStartOutcome: what did a start write come back with?
 //   { ok: true }          the start landed, or was QUEUED (a queued start lands
-//                         on reconnect, so the host treats it as started; the
-//                         court console always has), or came back without a
-//                         body.
+//                         on reconnect, so the host treats it as started), or
+//                         came back without a body.
+//   { ok: true, superseded: true }
+//                         the server held the start (applied:false, reason:
+//                         superseded): a newer change to the match's result is
+//                         already stored, nothing of the start was written and
+//                         the court is as it was. There is no refusal to report
+//                         (the live data the host re-reads shows whatever that
+//                         change made of the match), but it is NOT a start that
+//                         went out: a host that records "the start went out"
+//                         (the console's `landed`, which words the past-tense
+//                         notice on a row refused behind it) or pins its panel
+//                         on the match must not, and the Scores tab, which keeps
+//                         no such record, may carry on.
 //   { ok: false, msg }    the start was refused for the clock: nothing was
 //                         stored and nothing will land later, so a host that
 //                         called it started would pin a panel on a match that
 //                         never started while the tap looked like it worked.
-// Only a clock refusal is a refusal here. A superseded answer (applied:false,
-// reason: superseded) reads as started, as the console has always read it: a
-// newer change to the match's result is already stored, and the live data the
-// host re-reads shows whatever that change made of the match.
 // A start that THROWS (a 409) is not an answer at all; startFailureMessage
 // words it.
 export function classifyStartOutcome(res) {
     if (writeWasRefusedForClock(res)) return { ok: false, msg: START_CLOCK_SKEW_MESSAGE };
+    if (writeWasSuperseded(res)) return { ok: true, superseded: true };
     return { ok: true };
 }
 

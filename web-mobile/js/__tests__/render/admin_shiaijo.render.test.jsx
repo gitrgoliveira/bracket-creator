@@ -2179,6 +2179,42 @@ describe('a Start tapped while another start is still out is refused before anyt
           .toBe(startWasBlockedByStartMessage({ label: scoreRowMatchName(courtMatch('m3', 'scheduled')) }));
       } finally { c.restore(); }
     });
+
+    // A superseded start is HTTP 200 {applied:false, reason:'superseded'}: a newer
+    // change to the match's result is already stored, nothing of the start was
+    // written and the court is as it was. "m3 was being started" would be false,
+    // and the pick must not pin the panel on a match the server did not start.
+    const supersededStartOfM3 = () => vi.fn((_compId, matchId) => Promise.resolve(
+      matchId === 'm3' ? { applied: false, reason: 'superseded' } : { applied: true }
+    ));
+
+    it('g) a pick whose start is superseded wrote nothing, so the refused row gets no past-tense notice', async () => {
+      const onEditScore = supersededStartOfM3();
+      const { c, settleRevert } = await pickBlocker(onEditScore);
+      try {
+        await act(async () => { settleRevert().resolve(true); });
+        await act(async () => {});
+        expect(onEditScore.mock.calls.map((x) => x[1]), 'the pick did send its start').toEqual(['m3']);
+        expect(rowOf(c, 'Aka m4').querySelector('[role="alert"]'), 'the court is as it was: no sentence about a start').toBeNull();
+        expect(c.utils.container.textContent).not.toContain('was being started');
+      } finally { c.restore(); }
+    });
+
+    it('h) a pick whose start is superseded does not pin the panel on the match the server did not start', async () => {
+      const landedPick = await pickBlocker(vi.fn().mockResolvedValue({ applied: true }));
+      try {
+        await act(async () => { landedPick.settleRevert().resolve(true); });
+        await act(async () => {});
+        expect(landedPick.c.editorMatch(), 'a start that went out pins the panel on the picked match').toBe('m3');
+      } finally { landedPick.c.utils.unmount(); landedPick.c.restore(); }
+
+      const { c, settleRevert } = await pickBlocker(supersededStartOfM3());
+      try {
+        await act(async () => { settleRevert().resolve(true); });
+        await act(async () => {});
+        expect(c.editorMatch(), 'nothing was started: the panel stays where it was').not.toBe('m3');
+      } finally { c.restore(); }
+    });
   });
 });
 

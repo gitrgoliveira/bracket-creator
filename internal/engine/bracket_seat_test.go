@@ -507,6 +507,39 @@ func TestReplaceParticipantInDraw_ARenamedIdlessSideKeepsItsPick(t *testing.T) {
 	assert.Equal(t, int64(400), m.GroupStamp(state.GroupRepPickB), "and its date")
 }
 
+// Pass 2 of ReplaceParticipantInDraw renames an id-less side directly and hands
+// the representative row the match's old name (the one it matched on), so a row
+// that names no one still carries the winner recorded under that name.
+func TestReplaceParticipantInDraw_AnIdlessRenameCarriesTheWinnerOfARowThatNamesNoOne(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const compID = "rename-carries-winner"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Rename", Kind: "team", TeamSize: 3, TeamMatchType: state.TeamMatchTypeFixed,
+		Format: state.CompFormatKnockout, Courts: []string{"A"}, StartTime: "09:00",
+		Status: state.CompStatusDrawReady,
+	}))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{{{
+		ID:    "m1",
+		SideA: "Ryu", SideAID: "id-a", SideB: "Tora",
+		Status: state.MatchStatusRunning, ModifiedAt: 500,
+		SubResults: []state.SubMatchResult{{
+			Position: state.DaihyosenSubPosition, SideA: "Ryu", SideB: "",
+			IpponsB: []string{domain.HanteiMark}, Winner: "Tora", Decision: "daihyosen",
+		}},
+	}}}}))
+
+	_, err := eng.ReplaceParticipantInDraw(compID, "id-elsewhere", "Tora", "Dojo", "", "Lion", "Dojo", "")
+	require.NoError(t, err)
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	m := bracket.Rounds[0][0]
+	assert.Equal(t, "Lion", m.SideB)
+	assert.Equal(t, "Lion", m.SubResults[0].SideB)
+	assert.Equal(t, "Lion", m.SubResults[0].Winner, "the winner follows the match's old name")
+	assert.Equal(t, domain.MatchSideB, state.SubBoutWinnerSide(m.SubResults[0], m.SideA, m.SideB))
+}
+
 // The same id under a new name is the same team: the representative row's
 // winner follows the row's name, or the mark would be placed on nobody. A side
 // given another team leaves the winner alone (the row keeps what was decided).
@@ -540,6 +573,46 @@ func TestSeatBracketSide_ARenameCarriesTheRowsWinnerAndAnotherTeamDoesNot(t *tes
 		seatBracketSide(bm, domain.MatchSideB, "Kuma", "c")
 		assert.Equal(t, "Kuma", bm.SubResults[0].SideB)
 		assert.Equal(t, "Tora", bm.SubResults[0].Winner, "a decision made for the team that left is left as it was")
+	})
+
+	// A row's side name can be blank or stale: AddDaihyosen stamps the names and
+	// adoptCurrentSideName only rewrites a row carrying the OLD name, never
+	// fills a blank, while the merge lands a payload row's names as sent, so a
+	// writer that does not restate them (rows written before the names rule,
+	// hand-edited data) leaves them blank. The Winner names the team by the
+	// match's name, so the rename carries it from there too.
+	t.Run("a row that names no one carries the winner the match's old name recorded", func(t *testing.T) {
+		bm := build()
+		bm.SubResults[0].SideB = ""
+		seatBracketSide(bm, domain.MatchSideB, "Lion", "b")
+		assert.Equal(t, "Lion", bm.SubResults[0].SideB)
+		assert.Equal(t, "Lion", bm.SubResults[0].Winner, "the winner follows the match's old name")
+		assert.Equal(t, domain.MatchSideB, state.SubBoutWinnerSide(bm.SubResults[0], bm.SideA, bm.SideB))
+	})
+	t.Run("a row that names a stale team carries the winner the match's old name recorded", func(t *testing.T) {
+		bm := build()
+		bm.SubResults[0].SideB = "Tigre"
+		seatBracketSide(bm, domain.MatchSideB, "Lion", "b")
+		assert.Equal(t, "Lion", bm.SubResults[0].SideB)
+		assert.Equal(t, "Lion", bm.SubResults[0].Winner)
+	})
+	// PIN, green by design: the match's old name carries the Winner only for a
+	// side that keeps its team, as the row's own old name does.
+	t.Run("a row that names no one, given another team, leaves the winner", func(t *testing.T) {
+		bm := build()
+		bm.SubResults[0].SideB = ""
+		seatBracketSide(bm, domain.MatchSideB, "Kuma", "c")
+		assert.Equal(t, "Kuma", bm.SubResults[0].SideB)
+		assert.Equal(t, "Tora", bm.SubResults[0].Winner, "a decision made for the team that left is left as it was")
+	})
+	// PIN, green by design: the other side's rename must not take a winner that
+	// names this side, even through the match's old name.
+	t.Run("a row that names no one, the other side renamed, leaves a winner who is not it", func(t *testing.T) {
+		bm := build()
+		bm.SubResults[0].SideA = ""
+		seatBracketSide(bm, domain.MatchSideA, "Dragon", "a")
+		assert.Equal(t, "Dragon", bm.SubResults[0].SideA)
+		assert.Equal(t, "Tora", bm.SubResults[0].Winner)
 	})
 }
 

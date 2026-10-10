@@ -31,8 +31,16 @@ describe('classifyStartOutcome', () => {
         expect(classifyStartOutcome(null)).toEqual({ ok: true });
     });
 
-    it('a superseded start is not a clock refusal and keeps the console\'s reading (started)', () => {
-        expect(classifyStartOutcome({ applied: false, reason: 'superseded' })).toEqual({ ok: true });
+    it('a superseded start is not a clock refusal to report, but it is not a start that went out either', () => {
+        // Nothing of it was written: a newer change to the match's result is
+        // already stored, so a host that records "the start went out" must not.
+        expect(classifyStartOutcome({ applied: false, reason: 'superseded' })).toEqual({ ok: true, superseded: true });
+    });
+
+    it('only a superseded answer carries the flag: landed, queued and body-less starts did go out', () => {
+        for (const res of [{ applied: true }, { queued: true }, { status: 'ok' }, undefined, null]) {
+            expect(classifyStartOutcome(res).superseded, JSON.stringify(res)).toBeUndefined();
+        }
     });
 });
 

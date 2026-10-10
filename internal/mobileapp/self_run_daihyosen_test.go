@@ -986,8 +986,12 @@ func TestSelfRun_RepresentativeMembersMustBeOnTheirTeam(t *testing.T) {
 	assert.Equal(t, membersA[0].ID, stored.SideAMemberID)
 	assert.Equal(t, membersB[0].ID, stored.SideBMemberID)
 
+	// The organiser's pick is judged the same way (organiser_rep_pick_judge_test.go):
+	// another team's member is refused, the side's own is accepted at once.
 	w = f.score("main-pw", state.MatchStatusRunning, "", f.now+300, pick(membersB[0].ID, membersB[0].ID))
-	assert.Equal(t, http.StatusOK, w.Code, "the organiser's pick is not judged on membership: %s", w.Body.String())
+	requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", "The representative chosen is not on this team. Pick again from the list.")
+	w = f.score("main-pw", state.MatchStatusRunning, "", f.now+400, pick(membersA[1].ID, membersB[1].ID))
+	assert.Equal(t, http.StatusOK, w.Code, "the organiser's own-team pick is accepted: %s", w.Body.String())
 }
 
 // The merge holds a pick whose stamp is strictly older than the stored stamp of

@@ -33,6 +33,13 @@ const (
 	doorKachinukiAdvance = "kachinuki-advance"
 	doorKachinukiRemove  = "kachinuki-remove-bout"
 	doorDownstreamReopen = "downstream-reopen"
+	// doorReseat names the line a match gets when a bracket door gave one of
+	// its sides another team and so took that side's representative pick
+	// (bracket_seat_audit.go). A downstream match the same write reopens
+	// names the pick on its doorDownstreamReopen line instead. The SPA words
+	// it in DOOR_WORDS: "Side given another team by a correction to an
+	// earlier match".
+	doorReseat = "reseat"
 )
 
 // clientDoors are the doors whose writer may legitimately state no groups:

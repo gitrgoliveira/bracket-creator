@@ -17,8 +17,8 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 // closingHistoryToast (bc-mrgc): the toast editMatchScore shows for a write
 // that landed but kept something in the match's history (part of it held, or
-// a later change it moved there because that change would have left the
-// finished match without a winner), worded by keptInHistoryNote. Only when
+// a later change it moved there, worded by the reason the answer gives, if
+// any), through keptInHistoryNote. Only when
 // the write closes the editor: an editor that stays open says so itself
 // (useKeptInHistoryNote). A write that did not land keeps its editor open
 // too (writeKeepsEditorOpen), where its own banner reports it. null when

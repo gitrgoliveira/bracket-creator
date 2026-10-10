@@ -390,10 +390,12 @@ export function queueAlertMessage(alert) {
     case "sent":
       return `${n} ${noun} sent.`;
     // Held finishes that landed and moved a later change of their match to
-    // its history (it would have left the finished match without a winner).
-    // Recorded, so not an error: the history has the change.
+    // its history. `forWinner` of them say the change would have left the
+    // finished match without a winner; the rest carry no such reason, and an
+    // alert without the count words none of them so. Recorded, so not an
+    // error: the history has the change.
     case "displaced":
-      return displacedAlertText(n, one);
+      return displacedAlertText(n, one, alert.forWinner || 0);
     default:
       return null;
   }

@@ -1146,7 +1146,12 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 			// documented check-before-mutate contract (a no-op here), unwinds
 			// the byes and does the retraction.
 			var reopenedDownstream []ReopenedMatch
+			// The picks the retraction takes from the matches it re-seats
+			// without reopening, for their own history lines
+			// (bracket_seat_audit.go); the target is this door's own write.
+			var clears []repPickClear
 			if !h.Bronze {
+				before := repPickSnapshot(h.BracketRoot, matchID)
 				if fo.Force {
 					// No propagation precedes this reopen: the retraction
 					// below is what re-seats the slot, so the picks the
@@ -1158,6 +1163,7 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 					return nil
 				}
 				markRepPicksCleared(h.BracketRoot, reopenedDownstream)
+				clears = repPickClears(before, h.BracketRoot)
 			}
 			prior := h.Bracket.Decision
 			reopenBracketMatchKeepingTheFight(h.Bracket, reason, targetStatus)
@@ -1166,6 +1172,7 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 			}
 			e.recordDirectHistory(tx, compID, matchID, doorReopen, h.Bracket.GroupStamp(state.GroupResult), reopenedBracketGroups...)
 			e.restoreForceReopened(tx, compID, reopenedDownstream)
+			e.recordRepPickClears(tx, compID, clears, reopenedDownstream)
 			if fo.Reopened != nil {
 				*fo.Reopened = reopenedDownstream
 			}

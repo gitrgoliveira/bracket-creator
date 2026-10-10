@@ -45,9 +45,10 @@ const DOOR_WORDS = {
     'kachinuki-advance': 'Next kachinuki bout added',
     'kachinuki-remove-bout': 'Kachinuki bout removed',
     'downstream-reopen': 'Reopened by a correction to an earlier match',
-    // A change already recorded that an earlier-made finish, arriving later,
-    // moved out of the match because it would have left the finished match
-    // without a winner (the entry carries that change's own time).
+    // A change already recorded that a write arriving later moved out of the
+    // match: either an earlier-made finish whose later change would have left the
+    // finished match without a winner, or a representative pick made after its
+    // representative bout was removed (the entry carries that change's own time).
     'displaced': 'Later change moved to history',
     // A match that was not reopened but had a side seated again by a correction to an
     // earlier match (a feeder's winner changed), for a line of its own.

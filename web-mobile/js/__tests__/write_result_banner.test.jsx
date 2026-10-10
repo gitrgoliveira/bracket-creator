@@ -34,6 +34,7 @@ import {
     DEFAULT_WIN_STANDS_ADVICE,
     supersededAlertText,
     writeDisplacedGroups,
+    writeDisplacedForWinner,
     displacedAlertText,
 } from '../write_result.jsx';
 import { heldGroupsNote, keptInHistoryNote } from '../match_groups.jsx';
@@ -304,6 +305,8 @@ describe('a change held because a decision for a bar elsewhere stands', () => {
         const all = [
             DEFAULT_WIN_STANDS_REASON('fusensho'), DEFAULT_WIN_STANDS_ADVICE('fusensho'),
             heldGroupsNote(['points'], false, true, 'fusensho'), supersededAlertText(2, false, false, true, 'fusensho'),
+            displacedAlertText(1, true, 1), displacedAlertText(2, false, 2), displacedAlertText(1, true, 0),
+            displacedAlertText(2, false, 0), displacedAlertText(3, false, 1),
         ].join(' ');
         expect(all).not.toMatch(/—/);
         expect(all).not.toMatch(/\bmats?\b/i);
@@ -356,8 +359,57 @@ describe('a finish recorded that moved a later change to the history', () => {
     });
 
     it('the queue alert says the held result was saved', () => {
-        expect(displacedAlertText(1, true)).toMatch(/^A held result was saved\. .*moved to the match's history\.$/);
-        expect(displacedAlertText(2, false)).toMatch(/^2 held results were saved\./);
+        expect(displacedAlertText(1, true, 1)).toMatch(/^A held result was saved\. .*moved to the match's history\.$/);
+        expect(displacedAlertText(2, false, 2)).toMatch(/^2 held results were saved\./);
+    });
+
+    // The reason is per ANSWER: only an answer whose heldReason is needs_winner
+    // moved its change for a winner. A change moved for another reason (a
+    // representative's pick stamped after the representative bout's removal)
+    // carries no reason, and a decision that stands (default_win_stands) is
+    // not a winner reason either.
+    it('writeDisplacedForWinner is true only for a displaced answer that carries needs_winner', () => {
+        expect(writeDisplacedForWinner(displaced)).toBe(true);
+        expect(writeDisplacedForWinner({ ...displaced, heldReason: undefined })).toBe(false);
+        expect(writeDisplacedForWinner({ id: 'm1', status: 'completed', displacedGroups: ['repPickB'] })).toBe(false);
+        expect(writeDisplacedForWinner({ ...displaced, heldReason: 'default_win_stands' })).toBe(false);
+        expect(writeDisplacedForWinner({ id: 'm1', status: 'completed', heldReason: 'needs_winner' })).toBe(false);
+        expect(writeDisplacedForWinner({ ...displaced, displacedGroups: [] })).toBe(false);
+        expect(writeDisplacedForWinner(null)).toBe(false);
+        expect(writeDisplacedForWinner(undefined)).toBe(false);
+    });
+
+    it('a change moved for another reason is worded plainly, never with a winner the match does not lack', () => {
+        const removed = { id: 'm1', status: 'completed', displacedGroups: ['repPickB'] };
+        expect(keptInHistoryNote(removed)).not.toMatch(/without a winner/);
+        expect(keptInHistoryNote(removed)).toMatch(/^Saved\. A later change to .* was moved to the match's history\.$/);
+        expect(keptInHistoryNote({ ...removed, heldReason: 'default_win_stands' })).not.toMatch(/without a winner/);
+    });
+
+    // The queue alert follows the same rule over the replayed answers of one
+    // pass: all moved for a winner keeps the winner sentence, none says
+    // plainly that a later change was moved, and a mix says both.
+    it('the queue alert names a winner only for the changes that were moved for one', () => {
+        const FOR_ONE = "A held result was saved. A later change to that match would have left it without a winner, so the change was moved to the match's history.";
+        const FOR_MANY = "2 held results were saved. Later changes to those matches would have left them without a winner, so the changes were moved to each match's history.";
+        expect(displacedAlertText(1, true, 1)).toBe(FOR_ONE);
+        expect(displacedAlertText(2, false, 2)).toBe(FOR_MANY);
+
+        const NONE_ONE = "A held result was saved. A later change to that match was moved to the match's history.";
+        const NONE_MANY = "2 held results were saved. Later changes to those matches were moved to each match's history.";
+        expect(displacedAlertText(1, true, 0)).toBe(NONE_ONE);
+        expect(displacedAlertText(2, false, 0)).toBe(NONE_MANY);
+        expect(displacedAlertText(1, true, 0)).not.toMatch(/without a winner/);
+        expect(displacedAlertText(2, false, 0)).not.toMatch(/without a winner/);
+        // An alert that says nothing about a winner (an older caller, no
+        // third argument) reads as none for a winner.
+        expect(displacedAlertText(1, true)).toBe(NONE_ONE);
+        expect(displacedAlertText(2, false)).toBe(NONE_MANY);
+
+        expect(displacedAlertText(3, false, 1)).toBe(
+            "3 held results were saved. Later changes to those matches were moved to each match's history. 1 of those changes would have left a match without a winner.");
+        expect(displacedAlertText(3, false, 2)).toBe(
+            "3 held results were saved. Later changes to those matches were moved to each match's history. 2 of those changes would have left a match without a winner.");
     });
 });
 

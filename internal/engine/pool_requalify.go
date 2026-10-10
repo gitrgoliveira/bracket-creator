@@ -291,11 +291,16 @@ func (e *Engine) tiedQualifyingLabels(tx state.StoreTx, compID string, comp *sta
 // the bare store's per-competition lock is already held.
 func (e *Engine) applyRequalification(tx state.StoreTx, compID, reason string, plan *requalifyPlan) ([]ReopenedMatch, error) {
 	var reopened []ReopenedMatch
+	// The picks the repaint takes from the knockout matches it re-seats
+	// without reopening, for their own history lines (bracket_seat_audit.go).
+	// The write itself is a pool match, so no bracket match is excluded.
+	var clears []repPickClear
 	err := tx.UpdateBracket(compID, func(b *state.Bracket) error {
 		if b == nil {
 			return errMatchNotFound
 		}
-		reopened = nil
+		reopened, clears = nil, nil
+		before := repPickSnapshot(b, "")
 		for _, id := range plan.affected {
 			for ri := range b.Rounds {
 				for mi := range b.Rounds[ri] {
@@ -314,12 +319,14 @@ func (e *Engine) applyRequalification(tx state.StoreTx, compID, reason string, p
 		// The reopens above captured each match's picks; the repaint may have
 		// given a side another team and taken its pick with it.
 		markRepPicksCleared(b, reopened)
+		clears = repPickClears(before, b)
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("requalification: update bracket for %s: %w", compID, err)
 	}
 	e.restoreForceReopened(tx, compID, reopened)
+	e.recordRepPickClears(tx, compID, clears, reopened)
 	return reopened, nil
 }
 

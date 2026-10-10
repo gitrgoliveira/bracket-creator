@@ -41,7 +41,7 @@ import { bridge as _bridge } from './court_bridge.jsx';
 // The offset lives in a leaf so a score editor can read the same clock (server_clock.jsx).
 import { serverNowMs, serverClockOffsetMs, setServerClockOffsetMs } from './server_clock.jsx';
 import {
-    writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock, writeNeedsWinner, writeDefaultWinStands, writeHeldDecision, writeDisplacedGroups, supersededBanner,
+    writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock, writeNeedsWinner, writeDefaultWinStands, writeHeldDecision, writeDisplacedGroups, writeDisplacedForWinner, supersededBanner,
     decisionWord,
     SUPERSEDED_REASON, SUPERSEDED_ADVICE,
     CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, CLOCK_SKEW_UNHEALED_ADVICE,
@@ -719,8 +719,10 @@ function _isAllowedTerminalRequest(method, url) {
 //   'sent'          GOOD news (bc-offl): held finished results landed in one
 //                   flush; the one kind App renders as a success toast
 //   'displaced'     held finished results landed and moved a later change of
-//                   their match to its history (it would have left the
-//                   finished match without a winner); recorded, told once
+//                   their match to its history; recorded, told once.
+//                   `forWinner` of the `count` were moved because the change
+//                   would have left the finished match without a winner
+//                   (writeDisplacedForWinner); the rest carry no such reason
 // ---------------------------------------------------------------------------
 const _queueAlertListeners = new Set();
 const _pendingQueueAlerts = [];
@@ -1464,7 +1466,11 @@ async function _flushQueue() {
     };
     // Held finishes that landed and moved a LATER change of their match to
     // its history (writeDisplacedGroups): told once per pass, like 'sent'.
+    // displacedForWinnerThisPass counts those whose answer said the change
+    // would have left the finished match without a winner
+    // (writeDisplacedForWinner); the alert words the rest plainly.
     let displacedThisPass = 0;
+    let displacedForWinnerThisPass = 0;
     // bc-offl: HELD finished results that landed in this flush, counted the
     // same way and announced once at the end ('sent'), so the operator who saw
     // them held is told they arrived. A terminal write enters the queue only
@@ -1725,7 +1731,10 @@ async function _flushQueue() {
                             // applied:false answer, a clock-skew refusal included
                             // (which never reaches here: the arms above continue).
                             if (terminal && !writeWasSuperseded(body)) sentThisPass++;
-                            if (terminal && writeDisplacedGroups(body).length > 0) displacedThisPass++;
+                            if (terminal && writeDisplacedGroups(body).length > 0) {
+                                displacedThisPass++;
+                                if (writeDisplacedForWinner(body)) displacedForWinnerThisPass++;
+                            }
                             // A confirmed terminal score write needs no further rev
                             // tracking: drop its counter (mirrors recordScore's online
                             // completed path) so _matchRevCounters doesn't grow for the
@@ -1913,7 +1922,7 @@ async function _flushQueue() {
         // success, so a pass with both still ends on the error, and a pass with
         // no error shows the confirmation.
         if (sentThisPass > 0) _notifyQueueAlert({ kind: 'sent', count: sentThisPass, terminalCount: sentThisPass });
-        if (displacedThisPass > 0) _notifyQueueAlert({ kind: 'displaced', count: displacedThisPass, terminalCount: displacedThisPass });
+        if (displacedThisPass > 0) _notifyQueueAlert({ kind: 'displaced', count: displacedThisPass, terminalCount: displacedThisPass, forWinner: displacedForWinnerThisPass });
         _notifyScoreSupersededAlert(
             supersededThisPass,
             lastSupersededMatch ? lastSupersededMatch.compID : undefined,

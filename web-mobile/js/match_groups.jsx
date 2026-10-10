@@ -26,8 +26,8 @@
 
 import { IPPON_PLACEHOLDER } from './result_slot.jsx';
 import {
-    HELD_REASON_NEEDS_WINNER, NEEDS_WINNER_NOTE, DEFAULT_WIN_STANDS_NOTE, writeNeedsWinner, writeDefaultWinStands, writeHeldDecision,
-    writePartlyHeld, writeHeldGroups, writeDisplacedGroups,
+    NEEDS_WINNER_NOTE, DEFAULT_WIN_STANDS_NOTE, writeNeedsWinner, writeDefaultWinStands, writeHeldDecision,
+    writePartlyHeld, writeHeldGroups, writeDisplacedGroups, writeDisplacedForWinner,
 } from './write_result.jsx';
 
 export const GROUP_POINTS = 'points';
@@ -119,9 +119,9 @@ export function heldGroupsNote(groups, needsWinner = false, defaultWinStands = f
 
 // displacedGroupsNote: the note for a write that WAS recorded and moved a
 // later change of the match to its history (write_result.jsx
-// writeDisplacedGroups). `needsWinner` when the answer says why with
-// heldReason "needs_winner": the change would have left the finished match
-// without a winner. A change moved for another reason (a representative's pick
+// writeDisplacedGroups). `needsWinner` (writeDisplacedForWinner) when the
+// answer says why with heldReason "needs_winner": the change would have left
+// the finished match without a winner. A change moved for another reason (a representative's pick
 // stamped after the representative bout's removal, which leaves it nothing to
 // stand on) carries no such reason and is worded plainly, never with a winner
 // the match does not lack. null when nothing was moved.
@@ -144,7 +144,7 @@ export function keptInHistoryNote(res) {
     if (writePartlyHeld(res) || writeNeedsWinner(res) || writeDefaultWinStands(res)) {
         parts.push(heldGroupsNote(writeHeldGroups(res), writeNeedsWinner(res), writeDefaultWinStands(res), writeHeldDecision(res)));
     }
-    parts.push(displacedGroupsNote(writeDisplacedGroups(res), !!res && res.heldReason === HELD_REASON_NEEDS_WINNER));
+    parts.push(displacedGroupsNote(writeDisplacedGroups(res), writeDisplacedForWinner(res)));
     const text = parts.filter(Boolean).join(' ');
     return text || null;
 }

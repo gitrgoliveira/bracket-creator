@@ -2135,6 +2135,51 @@ describe('a Start tapped while another start is still out is refused before anyt
       expect(onEditScore.mock.calls.map((x) => x[1])).toEqual(['m3']);
     } finally { c.restore(); }
   });
+
+  // The past-tense sentence says the blocker WAS being started, so it is written only
+  // for a start that went out. A pick whose deferral of the running bout fails never
+  // starts anything: the court is exactly as it was, and "m3 was being started" would
+  // be false.
+  describe('the past-tense notice follows a start that happened', () => {
+    const pickBlocker = async (onEditScore) => {
+      const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled'), courtMatch('m3', 'scheduled'), courtMatch('m4', 'scheduled')], { onEditScore });
+      let settleRevert;
+      window.API.revertMatchToQueue = vi.fn(() => new Promise((resolve, reject) => { settleRevert = { resolve, reject }; }));
+      // The pick: a queue row's Start, which sends m1 back and waits on it.
+      await act(async () => { startButton(rowOf(c, 'Aka m3')).click(); });
+      await act(async () => {});
+      // A Start on another row while that wait is out is refused as "still being started".
+      await act(async () => { startButton(rowOf(c, 'Aka m4')).click(); });
+      await act(async () => {});
+      expect(rowOf(c, 'Aka m4').querySelector('[role="alert"]').textContent)
+        .toBe(startWhileStartingMessage({ label: scoreRowMatchName(courtMatch('m3', 'scheduled')) }));
+      return { c, settleRevert: () => settleRevert };
+    };
+
+    it('e) a pick whose deferral fails never started, so the refused row gets no past-tense notice', async () => {
+      const onEditScore = vi.fn().mockResolvedValue({ applied: true });
+      const { c, settleRevert } = await pickBlocker(onEditScore);
+      try {
+        await act(async () => { settleRevert().reject(new Error('Could not defer the current bout')); });
+        await act(async () => {});
+        expect(onEditScore, 'the pick was abandoned: nothing was started').not.toHaveBeenCalled();
+        expect(rowOf(c, 'Aka m4').querySelector('[role="alert"]'), 'the court is as it was: no sentence about a start').toBeNull();
+        expect(c.utils.container.textContent).not.toContain('was being started');
+      } finally { c.restore(); }
+    });
+
+    it('f) a pick that does start leaves the past-tense notice on the refused row', async () => {
+      const onEditScore = vi.fn().mockResolvedValue({ applied: true });
+      const { c, settleRevert } = await pickBlocker(onEditScore);
+      try {
+        await act(async () => { settleRevert().resolve(true); });
+        await act(async () => {});
+        expect(onEditScore.mock.calls.map((x) => x[1])).toEqual(['m3']);
+        expect(rowOf(c, 'Aka m4').querySelector('[role="alert"]').textContent)
+          .toBe(startWasBlockedByStartMessage({ label: scoreRowMatchName(courtMatch('m3', 'scheduled')) }));
+      } finally { c.restore(); }
+    });
+  });
 });
 
 // The one-start guard is judged from the start in flight NOW. An advance awaits

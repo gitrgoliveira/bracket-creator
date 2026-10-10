@@ -475,6 +475,62 @@ describe('an adopted value is agreed, never re-sent', () => {
     expect(lastWrite().changed).toContain('result');
   });
 
+  // An adopt agrees a change group only for what it took. Agreeing moves BOTH baselines to
+  // the server's value, so a group the adopt did not take whole (a point or a pick of
+  // ours still being saved) would then read as unchanged when it is taken back.
+  describe('an adopt that took only part of a group does not agree the whole', () => {
+    // A recorded verdict whose winner the match cannot place (a legacy row): its points
+    // carry no Ht mark, so the editor's markless running body can equal the baseline.
+    const unplaced = (over = {}) => individual({ decidedByHantei: true, ...over });
+
+    it('a hantei adopted while a point is still being saved: taking the point back is named (B)', async () => {
+      const { rerender } = await mount(individual());
+      await pointerTap(ipponBtn('aka', 'M'));
+      await settle();
+      expect(lastWrite().changed).toEqual(['points']);
+      // Another device's verdict arrives before the write's answer, then the point lands.
+      await act(async () => { rerender(editorFor(unplaced())); });
+      await act(async () => { rerender(editorFor(unplaced({ ipponsA: ['M'] }))); });
+      // The armed verdict locks the slots: cancel it, then take the point back.
+      await click(screen.getByTestId('scoring-modal-hantei-cancel'));
+      await pointerTap(slotWith('Aka', 'M'));
+      await settle();
+      expect(lastWrite().ipponsA).toEqual([]);
+      expect(lastWrite().changed, 'the server keeps the point unless the write names the points').toContain('points');
+    });
+
+    describe('the two picks of a representative bout are one group', () => {
+      const repBout = (over = {}) => individual({
+        id: 'Pool 1-DH-1', sideA: { id: 'team-kyoto', name: 'Kyoto' }, sideB: { id: 'team-osaka', name: 'Osaka' },
+        repIsTeam: true, repRosterA: ['Kato', 'Mori'], repRosterB: ['Sato', 'Ito'], ...over,
+      });
+      const pick = (testId, value) => act(async () => { fireEvent.change(screen.getByTestId(testId), { target: { value } }); });
+
+      it('a pick adopted on one side while the other side\'s pick is still being saved: putting it back is named (B)', async () => {
+        const { rerender } = await mount(repBout({ repPlayerB: 'Sato' }));
+        await pick('rep-shiro-select', 'Ito');
+        await settle();
+        expect(lastWrite().repPlayerB).toBe('Ito');
+        await act(async () => { rerender(editorFor(repBout({ repPlayerA: 'Mori', repPlayerB: 'Sato' }))); });
+        await act(async () => { rerender(editorFor(repBout({ repPlayerA: 'Mori', repPlayerB: 'Ito' }))); });
+        await pick('rep-shiro-select', 'Sato');
+        await settle();
+        expect(lastWrite()).toMatchObject({ repPlayerA: 'Mori', repPlayerB: 'Sato' });
+        expect(lastWrite().changed, 'the server keeps Ito unless the write names the picks').toContain('rep');
+      });
+
+      it('both picks adopted in one update are agreed: an unrelated edit does not name them (F)', async () => {
+        const { rerender } = await mount(repBout({ repPlayerA: 'Kato', repPlayerB: 'Sato' }));
+        await act(async () => { rerender(editorFor(repBout({ repPlayerA: 'Mori', repPlayerB: 'Ito' }))); });
+        expect(screen.getByTestId('rep-aka-select').value).toBe('Mori');
+        expect(screen.getByTestId('rep-shiro-select').value).toBe('Ito');
+        await pointerTap(ipponBtn('aka', 'M'));
+        await settle();
+        expect(lastWrite().changed).toEqual(['points']);
+      });
+    });
+  });
+
   it('engi: flags adopted from another device and then set back here are named (B)', async () => {
     const engiMatch = (over = {}) => ({
       id: 'm-engi', compId: 'comp1', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A',

@@ -3027,8 +3027,8 @@ func requeueBracketMatch(m *state.BracketMatch, stamp int64) {
 	m.CorrectionReason = ""
 	// Mirror of the pool branch (mp-gmcg review): clear the reopen-pending
 	// audit debt so a reopened-then-requeued bracket match can be replayed
-	// and finalized without applyCorrectionReasonUnderTx demanding a reason
-	// for a result the requeue already discarded.
+	// and finalized without the handler's applyCorrectionReason demanding a
+	// reason for a result the requeue already discarded.
 	m.ReopenPending = false
 	// Revert fence (mp-y3nk): stamp now() so any pre-revert offline write
 	// (T_stale < T_revert) cannot put the verdict back on replay. Using 0
@@ -3503,7 +3503,7 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 						m.Status = state.MatchStatusCompleted
 						// An override ends the match, so a reopened match closed out
 						// this way must not keep ReopenPending set: it bypasses
-						// applyCorrectionReasonUnderTx/dischargeReopenPendingUnderTx,
+						// applyCorrectionReason/dischargeReopenPendingUnderTx,
 						// which clear it on every other way of ending a match.
 						m.ReopenPending = false
 						m.StampGroups(modifiedAt, state.GroupResult)

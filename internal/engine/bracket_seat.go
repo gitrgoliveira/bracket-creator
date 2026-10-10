@@ -18,13 +18,15 @@ import (
 // (SubMatchResult.SideAMemberID/SideBMemberID, the state.GroupRepPickA and
 // state.GroupRepPickB groups), so a side given ANOTHER team takes its pick away.
 //
-// The one exception is ReplaceParticipantInDraw, which writes side names
-// directly (forEachBracketSideWithID) when a participant is replaced. That is
-// safe: it runs only while the competition is draw-ready (checked again under
-// the transaction lock; the participant edit is refused once it has started),
-// and no representative bout can exist before the start (adding one moves its
-// match to running, which starts a draw-ready competition), so there is no
-// pick or row name for the direct write to leave behind.
+// ReplaceParticipantInDraw, which renames a team while the competition is
+// draw-ready, writes a side through here when the side carries the team's id
+// (the same id under a new name: the same team, so no pick is cleared). A
+// representative bout CAN exist in a draw-ready competition: the add commits
+// the running match in its own transaction and starts the competition after
+// it, and a failed start is only logged. A side with no id (a legacy row) is
+// renamed there directly, and only the row's name follows it (nameRepBoutRow),
+// since this function would read an id-less old name to a new one as another
+// team. The match's Winner is written directly in both cases; it is not a side.
 //
 // INVARIANT: after every call -- a winner propagated, a slot cleared back to
 // "" or a "Winner of ..." placeholder, a pool qualifier painted, a rename
@@ -37,7 +39,9 @@ import (
 // anything is judged, so it follows a rename as well as a re-seat; it dates
 // nothing on its own (no group stamp, no ModifiedAt: a name write is not a
 // change of the bout, which is what lets a draw-time caller produce exactly
-// the bracket it always did). A match with no row has nothing to write.
+// the bracket it always did). A side that kept its team and only has a new name
+// takes the row's Winner along when it named the side by the old name
+// (nameRepBoutRow). A match with no row has nothing to write.
 //
 // Whether the side was given ANOTHER team is judged by id when both the side as
 // stored and the incoming one carry an id, and by name otherwise
@@ -109,7 +113,7 @@ func seatBracketSide(bm *state.BracketMatch, side domain.MatchSide, name, id str
 	}
 	// The row's name follows the match's on every call, a rename included, and
 	// dates nothing (the invariant in the doc comment).
-	nameRepBoutRow(bm, row, side, name)
+	nameRepBoutRow(bm, row, side, name, another)
 	if !another {
 		return
 	}
@@ -143,19 +147,29 @@ func seatedAnotherTeam(storedName, storedID, name, id string) bool {
 // nameRepBoutRow writes name as side's name on the rep bout row at index row.
 // The list is replaced, never edited in place, so a row another copy of the
 // match shares is never written through (state.withRepPick does the same for a
-// pick); a name the row already has writes nothing and copies nothing.
-func nameRepBoutRow(bm *state.BracketMatch, row int, side domain.MatchSide, name string) {
+// pick); a name the row already has writes nothing and copies nothing. another
+// says the side was given another team: a side that kept its team (a rename)
+// also takes the row's Winner along when it names the side by the old name.
+func nameRepBoutRow(bm *state.BracketMatch, row int, side domain.MatchSide, name string, another bool) {
 	field := func(r *state.SubMatchResult) *string {
 		if side == domain.MatchSideA {
 			return &r.SideA
 		}
 		return &r.SideB
 	}
-	if *field(&bm.SubResults[row]) == name {
+	old := *field(&bm.SubResults[row])
+	if old == name {
 		return
 	}
 	subs := slices.Clone(bm.SubResults)
 	*field(&subs[row]) = name
+	// A side that kept its team and only has a new name keeps what the row
+	// decided: the row's Winner names that team by the name it was recorded
+	// under, and the mark is placed by comparing the two. A side given another
+	// team leaves the Winner as it was, the decision of the team that left.
+	if !another && old != "" && subs[row].Winner == old {
+		subs[row].Winner = name
+	}
 	bm.SubResults = subs
 }
 

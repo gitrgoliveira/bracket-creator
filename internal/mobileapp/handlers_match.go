@@ -729,7 +729,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// "downstream_knockout_running" when that pool entry would move a
 			// qualifier out of a knockout match being fought now, or a knockout
 			// entry would change a side of one (terminal: finish or requeue
-			// that match, then retry).
+			// that match, then retry); and "team_member_not_in_team" when a
+			// representative pick the entry lands is not on its side's team
+			// (the entry stores nothing; /score answers it with a 400).
 			//
 			// It matters because the single-match endpoints answer those
 			// conditions with a distinct body ({"applied": false, "reason":
@@ -879,10 +881,11 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				// completed -> completed overwrite, otherwise carry the STORED
 				// reason forward; ending a match reopened without a reason is
 				// never refused). The rule itself lives in
-				// applyCorrectionReasonUnderTx, shared with the single-score path
-				// so the two cannot drift; only the error SHAPE differs here
-				// (partial-success entries carry a plain message).
-				check, snapErr := applyCorrectionReasonUnderTx(stx, id, results[i].ID, &results[i].MatchResult)
+				// applyCorrectionReason, shared with the single-score path (which
+				// calls it over its own snapshot) so the two cannot drift; only
+				// the error SHAPE differs here (partial-success entries carry a
+				// plain message).
+				check, snap, snapErr := applyCorrectionReasonUnderTx(stx, id, results[i].ID, &results[i].MatchResult)
 				if snapErr != nil {
 					return snapErr
 				}
@@ -892,6 +895,11 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				if refusal := teamFinishRefusalUnderTx(finishRefusal, check, &results[i].MatchResult); refusal != nil {
 					return errors.New(refusal.Error())
 				}
+				// The entry's representative picks are judged on what the write
+				// landed, as /score's are (landedMembersRefusal), decided here,
+				// before the engine rewrites the entry. Its numbered rows are
+				// not: this is the organiser's tooling.
+				judgePicks := carriesJudgedMember(results[i].SubResults, false)
 				status, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, results[i].ID, &results[i].MatchResult, engine.ForceOptions{
 					Force:    results[i].ForceDownstreamReopen,
 					Reopened: &reopenedThisItem,
@@ -904,6 +912,14 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				}
 				if err != nil {
 					return err
+				}
+				if judgePicks {
+					// A refusal aborts this entry's transaction: it stores
+					// nothing, history line included, and the entries beside
+					// it are unaffected.
+					if err := landedMembersRefusal(stx, id, results[i].ID, snap, false); err != nil {
+						return err
+					}
 				}
 				capturedStatus = status
 				if check.ClearBracketReopenPending {
@@ -921,7 +937,14 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				var downstreamPlayedErr *engine.DownstreamKnockoutPlayedError
 				var downstreamRunningErr *engine.DownstreamKnockoutRunningError
 				var alreadyIneligErr *engine.AlreadyIneligibleError
+				var landedRefusal *landedWriteRefusal
 				switch {
+				case errors.As(err, &landedRefusal):
+					// A pick the write landed that the side's team does not
+					// hold: the refusal's code rides in Reason and its
+					// sentence, the page's own, in Error.
+					bulkErr.Reason = landedRefusal.refusal.code
+					bulkErr.Error = landedRefusal.refusal.message
 				case errors.Is(err, engine.ErrMatchSuperseded):
 					bulkErr.Reason = "superseded"
 					bulkErr.Error = SupersededMessage
@@ -1386,7 +1409,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	// no reason either (operator ruling 2026-09-25: a match can be reopened
 	// without any reason, and nothing is gated on that). A reason-less reopen
 	// sets state.MatchResult.ReopenPending, which only lets a reason sent with
-	// the next completion be kept (see applyCorrectionReasonUnderTx).
+	// the next completion be kept (see applyCorrectionReason).
 	//
 	// A completed match that is neither kachinuki nor decided by a withdrawal
 	// gets 400 (its sanctioned edit of a finished result remains the
@@ -1901,7 +1924,7 @@ func enforceSelfRunPolicy(c *gin.Context, tl TournamentLoader, verifier Password
 
 // selfRunRefusal is a refusal of a score write the handler judged under the
 // write's lock: an anonymous self-run write, or the organiser's representative
-// pick (judgeRepPicksUnderTx, which answers the same refusal as a
+// pick (landedMembersRefusal, which answers the same refusal as a
 // participant's). It carries the status of the response, its code (the body's
 // error) and the sentence the page shows as it is (the body's message). The
 // sentence is written where the refusal is decided, so the handler that sends
@@ -2002,13 +2025,12 @@ var errRepBoutAdded = &selfRunRefusal{
 //     unscored check): a write listing the bouts without the row the match
 //     has comes from a sheet a moment behind an add, so the stored row is
 //     kept, scored or not, and a finish is refused (errRepBoutAdded).
-//   - A numbered bout row may seat only its own team's members and may name as
-//     its winner only one of its two fighters, for what the write introduces
-//     against the stored row at that position, and only when the merge applies
-//     the row's bout group (numberedRowsRefusal; errBoutFighterNotInTeam,
-//     errWinnerMemberNotInBout). The organiser's write
-//     is not judged there. A members file that cannot be read refuses a write
-//     that needs it, terminally (errTeamMembersUnreadable).
+//   - Who a write seats is not judged here. It is judged on what the write
+//     LANDS, after the engine has merged it and in the same transaction
+//     (landedMembersRefusal): the engine rewrites a write before its own merge
+//     (a kachinuki bout log is merged by position, member ids are filled in,
+//     the winner is worked out), so a reading of the payload can disagree with
+//     what is stored.
 //   - Once the organiser recorded a judges' decision on the representative
 //     bout, the write's row must send it back (sameHanteiVerdict) or leave the
 //     row's ippons out (engine.KeepsStoredDaihyosenVerdict), a write listing
@@ -2031,7 +2053,7 @@ var errRepBoutAdded = &selfRunRefusal{
 // error rather than allowing the write (matchSnapshotOrErr). A match in neither
 // store (found false) passes on purpose: the write that follows under the same
 // lock refuses it (errMatchNotFound), so nothing can land on it.
-func holdSelfReportedWriteUnderTx(stx state.StoreTx, compID, matchID string, snap matchSnapshot, found bool, result *state.MatchResult, startOnly bool) error {
+func holdSelfReportedWriteUnderTx(compID, matchID string, snap matchSnapshot, found bool, result *state.MatchResult, startOnly bool) error {
 	if !found {
 		return nil
 	}
@@ -2045,13 +2067,6 @@ func holdSelfReportedWriteUnderTx(stx state.StoreTx, compID, matchID string, sna
 	row := state.DaihyosenSubIndex(subs)
 	if row >= 0 && state.DaihyosenSubIndex(subs[row+1:]) >= 0 {
 		return errDuplicateRepBout
-	}
-	// The fighters a numbered row introduces are the team's own, and its winner
-	// is one of its two fighters. Judged before the representative bout's
-	// branches below, which return early on the rows they drop or keep.
-	judge := &memberJudge{stx: stx, compID: compID}
-	if err := numberedRowsRefusal(judge, snap, result, subs); err != nil {
-		return err
 	}
 	stored := snap.RepBout
 	if row >= 0 && stored == nil {
@@ -2077,11 +2092,6 @@ func holdSelfReportedWriteUnderTx(stx state.StoreTx, compID, matchID string, sna
 	if stored == nil || !stored.HanteiDecided() {
 		if row >= 0 && subs[row].HanteiDecided() {
 			return repBoutHanteiRefusal(false)
-		}
-		if row >= 0 {
-			// bc-dhrp: the picks name the side's own team's members (the lineup's rule).
-			// Not judged when a stored verdict stands: it replaces the row below.
-			return repRowRefusal(judge, snap, result, subs[row], stored)
 		}
 		return nil
 	}
@@ -2115,7 +2125,7 @@ func holdSelfReportedWriteUnderTx(stx state.StoreTx, compID, matchID string, sna
 }
 
 // errRepMemberNotInTeam refuses a representative pick, a participant's or the
-// organiser's (judgeRepPicksUnderTx), that names a member the side's team does
+// organiser's (landedMembersRefusal), that names a member the side's team does
 // not hold (400 team_member_not_in_team). The lineup refusal
 // (errLineupMemberNotInTeam) says the same thing about a fielded position.
 var errRepMemberNotInTeam = &selfRunRefusal{
@@ -2124,98 +2134,121 @@ var errRepMemberNotInTeam = &selfRunRefusal{
 	message: "The representative chosen is not on this team. Pick again from the list.",
 }
 
-// repRowRefusal judges what a representative bout row would change, a
-// participant's (holdSelfReportedWriteUnderTx) or the organiser's
-// (judgeRepPicksUnderTx), as the merge will order it (bc-mrgc): each side's
-// representative (state.GroupRepPickA, state.GroupRepPickB), side by side. A
-// pick is judged exactly when the merge APPLIES it, and the merge is asked
-// (memberJudge.applied: engine.AppliedGroups runs it on copies) rather than
-// re-derived here: a side's change the write does not name, one whose stamp is
-// strictly older than the stored change's (domain.ApplyByTimestamp: an equal
-// stamp applies), one on a row the write neither has nor creates, and every
-// pick of a write the merge
-// holds whole (a stale finish naming another winner) is never written, so it is
-// not judged. Such a pick is held and kept in the match's history, as any stale
-// change is, and the write is answered applied with the held side's group in
-// heldGroups (e.g. ["repPickA"]), or superseded when every group it changes is
-// held. Judging it would refuse a stale queued pick the merge was going to hold
-// anyway, and a side the write does not change is never judged against the team
-// it has been given since (a write naming one side while echoing the other's id,
-// which a re-seat has cleared). An unnamed write (an older client) changes every
-// group its row carries.
-//
-// Nothing is read for a row that introduces no pick (rowMembersOutsideTeams'
-// scope), not even the competition the merge is asked about.
-//
-// The bout's winner id is NOT judged: it belongs to the bout group and the
-// merge keeps it consistent with the representatives that stand
-// (SubMatchResult.ReconcileWinnerMemberID), so a winning point carrying the id
-// of a pick another device has since replaced is applied and its winner id
-// re-derived, rather than refused and lost.
-func repRowRefusal(j *memberJudge, snap matchSnapshot, result *state.MatchResult, row state.SubMatchResult, stored *state.SubMatchResult) error {
-	introducesA := introducesMember(snap.Pairing.SideAID, row.SideAMemberID, stored.SideAMemberID)
-	introducesB := introducesMember(snap.Pairing.SideBID, row.SideBMemberID, stored.SideBMemberID)
-	if !introducesA && !introducesB {
-		return nil
+// landedWriteRefusal carries the refusal of a write judged on what it LANDED
+// out of the write's transaction, as an error. Returning it is what aborts the
+// transaction: the engine's match write, its history line and its eligibility
+// record are all staged in that transaction, so a refusal stored into the
+// caller's engErr from inside it would commit them instead. The caller unwraps
+// it once WithTransaction has returned and answers it like any other refusal.
+type landedWriteRefusal struct{ refusal *selfRunRefusal }
+
+func (e *landedWriteRefusal) Error() string { return e.refusal.Error() }
+func (e *landedWriteRefusal) Unwrap() error { return e.refusal }
+
+// carriesJudgedMember says whether a score write, as the judges before the
+// engine leave it, names a member id on a row landedMembersRefusal judges: a
+// representative pick on the representative bout's row (anyone's write), and
+// a numbered row's fighters and winner (a participant's, numbered). The engine
+// adds an id to a row only by copying one the stored row already holds at
+// that position (preserveKachinukiMemberIDs) or by deriving the winner's from
+// the stored picks (ReconcileWinnerMemberID), and neither introduces one: a
+// write that carries none can introduce none, so the staged match is not read
+// back to look.
+func carriesJudgedMember(subs []state.SubMatchResult, numbered bool) bool {
+	for _, row := range subs {
+		rep := row.Position == state.DaihyosenSubPosition
+		sides := row.SideAMemberID != "" || row.SideBMemberID != ""
+		if rep && sides || numbered && !rep && (sides || row.WinnerMemberID != "") {
+			return true
+		}
 	}
-	applied, err := j.applied(snap, result)
-	if err != nil {
-		return err
-	}
-	return rowMembersOutsideTeams(j, snap.Pairing, row, *stored,
-		slices.Contains(applied, state.GroupRepPickA), slices.Contains(applied, state.GroupRepPickB), errRepMemberNotInTeam)
+	return false
 }
 
-// judgeRepPicksUnderTx judges the representative picks of an organiser's score
-// write exactly as a participant's are judged (repRowRefusal: the same code and
-// the same refusal, 400 team_member_not_in_team), so the organiser and a
-// participant never disagree about which pick is valid.
+// landedMembersRefusal judges who a score write SEATS by what it landed, read
+// back through stx after the engine wrote it (a StoreTx reads its own staged
+// bytes), against the match as it stood before (before, the snapshot read once
+// at the top of the write). Introduced means the stored row now holds an id it
+// did not hold before at that position: an id the row already had is its own,
+// whoever seated it, and a write answers for what it introduces, not for what it
+// inherited. In the match as it now stands:
 //
-// The decision (the operator judges it): the lineup's organiser exemption
-// (handlers_lineup.go, mp-q722) is about WHEN the organiser may write, after the
-// match finished, and that URL names the team, so the organiser is explicitly
-// writing that team's lineup. A representative pick names a SIDE, whose team a
-// correction elsewhere can change under an open editor (seatBracketSide), and
-// the bare member id is resolved later by every surface through the side's team
-// (ReconcileWinnerMemberID, resolveBoutSideDisplayName, the export), where an id
-// the team does not hold shows as nobody. The stamp order already holds a pick
-// made before the re-seat cleared it; this is the pick stamped after the clear
-// from an organiser editor that has not yet received the re-seat.
+//   - a representative bout's pick must be on its side's team
+//     (errRepMemberNotInTeam), for any caller, as the lineup's member check is
+//     (handlers_lineup.go: the pick names a SIDE, whose team a correction
+//     elsewhere can change under an open editor, and every surface resolves the
+//     bare id through the side's team);
+//   - with numbered, a participant's write: each numbered row's fighters must be
+//     on their side's team (errBoutFighterNotInTeam), and a winner member id the
+//     row now holds must be one of its two fighters (errWinnerMemberNotInBout).
+//     The organiser's numbered rows are not judged (the lineup's always-editable
+//     rule, mp-q722).
 //
-// What is judged is what the write introduces (repRowRefusal's scope): a side
-// the write names whose pick the merge will apply, a member the stored row does
-// not already hold, against a side that carries a team id. The winner id is not
-// judged (the merge reconciles it). Only team membership is read, never the
-// match's status, so the organiser can pick again at once, on a finished match
-// too (isMatchFinalized is a participant's gate and is not asked here).
+// It judges the landed match rather than the payload because the engine rewrites
+// a write before its own merge: a kachinuki bout log is merged by position,
+// member ids are filled in and the winner is worked out, and two merge rules
+// decide from that rewritten content (the newer scoring a finish displaces, a
+// finish held whole). A reading of the payload could skip a row the real write
+// landed. A group the merge does not land is the stored one in the landed
+// match, so it introduces nothing and is never judged: a stale change the write
+// NAMES is kept in the history and answered in heldGroups, never refused, and
+// one it does not name is copied from the stored match, neither written nor
+// reported. Only team membership is read, never the match's status, so the
+// organiser can pick again at once, on a finished match too.
 //
-// A match with no representative bout is judged against an empty row: the
-// organiser's write can create the row (the participant's never does), and every
-// pick on it is then introduced. A write whose row names no member judges
-// nothing, and reads neither the members nor the competition. Bulk-score and
-// quick-score do not come through here: they are main-gated, server-built
-// writes.
-//
-// Called under the write's lock, where the participant's judge is, before the
-// correction audit, over the one snapshot (snap, found) the write reads for
-// both.
-func judgeRepPicksUnderTx(stx state.StoreTx, compID string, snap matchSnapshot, found bool, result *state.MatchResult) error {
-	i := state.DaihyosenSubIndex(result.SubResults)
-	if i < 0 {
-		return nil
+// A refusal is returned as a *landedWriteRefusal and the caller returns it from
+// the transaction, which writes nothing. The caller runs this only for a write
+// the engine accepted (a superseded or rolled-back write must still commit its
+// history and its restore) and that carries a judged member id
+// (carriesJudgedMember). A members file that cannot be read refuses a write
+// that needs it, terminally (errTeamMembersUnreadable): nothing is written,
+// which the offline queue reads as final.
+func landedMembersRefusal(stx state.StoreTx, compID, matchID string, before matchSnapshot, numbered bool) error {
+	after, found, err := matchSnapshotOrErr(stx, compID, matchID, "member")
+	if err != nil || !found {
+		return err
 	}
-	row := result.SubResults[i]
-	if row.SideAMemberID == "" && row.SideBMemberID == "" {
-		return nil
+	judge := &memberJudge{stx: stx, compID: compID}
+	err = membersOutsideTeams(judge, before, after, numbered)
+	var refusal *selfRunRefusal
+	if errors.As(err, &refusal) {
+		return &landedWriteRefusal{refusal}
 	}
-	if !found {
-		return nil // the write that follows under the same lock refuses an unknown match
+	return err
+}
+
+// membersOutsideTeams is landedMembersRefusal's judgement: it answers the first
+// refusal, an error of another kind being a read that failed.
+func membersOutsideTeams(judge *memberJudge, before, after matchSnapshot, numbered bool) error {
+	pairing := after.Pairing
+	if numbered {
+		for _, row := range after.Stored.SubResults {
+			if row.Position == state.DaihyosenSubPosition {
+				continue
+			}
+			var stored state.SubMatchResult
+			for _, s := range before.Stored.SubResults {
+				if s.Position == row.Position {
+					stored = s
+					break
+				}
+			}
+			if err := winnerMemberOutsideBout(row, stored); err != nil {
+				return err
+			}
+			if err := rowMembersOutsideTeams(judge, pairing, row, stored, errBoutFighterNotInTeam); err != nil {
+				return err
+			}
+		}
 	}
-	stored := snap.RepBout
-	if stored == nil {
-		stored = &state.SubMatchResult{}
+	if i := state.DaihyosenSubIndex(after.Stored.SubResults); i >= 0 {
+		var stored state.SubMatchResult
+		if before.RepBout != nil {
+			stored = *before.RepBout
+		}
+		return rowMembersOutsideTeams(judge, pairing, after.Stored.SubResults[i], stored, errRepMemberNotInTeam)
 	}
-	return repRowRefusal(&memberJudge{stx: stx, compID: compID}, snap, result, row, stored)
+	return nil
 }
 
 // errBoutFighterNotInTeam refuses a participant's numbered bout row that seats a
@@ -2252,11 +2285,11 @@ var errTeamMembersUnreadable = &selfRunRefusal{
 }
 
 // memberJudge is what the member checks of ONE score write share: the
-// transaction they run in, and the competition's team members and the
-// competition itself (what the merge is asked about), each read at most once
-// and only when a row introduces a member id to judge. A write that introduces
-// none never reads the file, so a corrupt team-members.yaml blocks no ordinary
-// scoring; one that introduces several reads it once.
+// transaction they run in, and the competition's team members, each team's
+// member ids built at most once, and only when a row introduces a member id
+// to judge. A write that introduces none never reads the file, so a corrupt
+// team-members.yaml blocks no ordinary scoring; one that introduces several
+// reads it once.
 type memberJudge struct {
 	stx    state.StoreTx
 	compID string
@@ -2265,27 +2298,8 @@ type memberJudge struct {
 	squads map[string][]domain.TeamMember
 	err    error
 
-	compRead bool
-	comp     *state.Competition
-	compErr  error
-}
-
-// applied says which of the groups the write changes the merge would APPLY
-// onto the stored match (engine.AppliedGroups, which runs the merge on copies).
-// A member is judged exactly when the group it rides on lands: a group the merge
-// holds is kept in the match's history by the real write, and refusing the write
-// for it would lose the groups of the same write that do apply.
-func (j *memberJudge) applied(snap matchSnapshot, result *state.MatchResult) ([]string, error) {
-	if !j.compRead {
-		j.compRead = true
-		if j.comp, j.compErr = j.stx.LoadCompetition(j.compID); j.compErr != nil {
-			j.compErr = fmt.Errorf("member guard: load competition %s: %w", j.compID, j.compErr)
-		}
-	}
-	if j.compErr != nil {
-		return nil, j.compErr
-	}
-	return engine.AppliedGroups(snap.Stored, result, j.comp, snap.InBracket), nil
+	// ids is each team's member ids (teamMemberIDs), built on the first ask.
+	ids map[string]map[string]bool
 }
 
 // holds reports whether the team holds the member (teamMemberIDs, the one
@@ -2302,7 +2316,15 @@ func (j *memberJudge) holds(teamID, memberID string) (bool, error) {
 	if j.err != nil {
 		return false, errTeamMembersUnreadable
 	}
-	return teamMemberIDs(j.squads, teamID)[memberID], nil
+	held, ok := j.ids[teamID]
+	if !ok {
+		if j.ids == nil {
+			j.ids = make(map[string]map[string]bool)
+		}
+		held = teamMemberIDs(j.squads, teamID)
+		j.ids[teamID] = held
+	}
+	return held[memberID], nil
 }
 
 // introducesMember reports whether a write puts a member id on a side that the
@@ -2315,24 +2337,22 @@ func introducesMember(teamID, memberID, storedID string) bool {
 	return memberID != "" && memberID != storedID && teamID != ""
 }
 
-// rowMembersOutsideTeams judges the member ids a bout row names against the
-// team that holds each side, for the representative bout (repRowRefusal) and
-// the numbered rows (numberedRowsRefusal) alike. Ids are bare UUIDs, so the
-// team's own members are the only thing that says whose they are: a member of
-// another team, or an id no team holds, is refused (refusal) rather than
-// written. A side is judged only when the caller says so (judgeA, judgeB: the
-// merge applies the representative's pick), and only for what the row
-// introduces (introducesMember). stored is the row at the same position in the
-// stored match, an empty row when the match has none.
-func rowMembersOutsideTeams(j *memberJudge, pairing domain.WinnerAttribution, row, stored state.SubMatchResult, judgeA, judgeB bool, refusal *selfRunRefusal) error {
+// rowMembersOutsideTeams judges the member ids a landed bout row names against
+// the team that holds each side, for the representative bout and the numbered
+// rows alike (membersOutsideTeams). Ids are bare UUIDs, so the team's own
+// members are the only thing that says whose they are: a member of another
+// team, or an id no team holds, is refused (refusal) rather than kept. A side
+// is judged only for what the row introduces (introducesMember). stored is the
+// row at the same position before the write, an empty row when the match had
+// none.
+func rowMembersOutsideTeams(j *memberJudge, pairing domain.WinnerAttribution, row, stored state.SubMatchResult, refusal *selfRunRefusal) error {
 	for _, side := range []struct {
-		judged                     bool
 		teamID, memberID, storedID string
 	}{
-		{judgeA, pairing.SideAID, row.SideAMemberID, stored.SideAMemberID},
-		{judgeB, pairing.SideBID, row.SideBMemberID, stored.SideBMemberID},
+		{pairing.SideAID, row.SideAMemberID, stored.SideAMemberID},
+		{pairing.SideBID, row.SideBMemberID, stored.SideBMemberID},
 	} {
-		if !side.judged || !introducesMember(side.teamID, side.memberID, side.storedID) {
+		if !introducesMember(side.teamID, side.memberID, side.storedID) {
 			continue
 		}
 		held, err := j.holds(side.teamID, side.memberID)
@@ -2346,10 +2366,10 @@ func rowMembersOutsideTeams(j *memberJudge, pairing domain.WinnerAttribution, ro
 	return nil
 }
 
-// winnerMemberOutsideBout judges the winner member a numbered row INTRODUCES
-// (the write changes it against the stored row at the position): it must be
-// empty or one of the row's two fighters, read after the kachinuki merge's
-// inherit of a side the row is silent about (the stored row's id). A winner id
+// winnerMemberOutsideBout judges the winner member a landed numbered row
+// INTRODUCES (it differs from the row's at the same position before the write):
+// it must be empty or one of the row's two fighters, a side the landed row
+// carries no id for counting as the fighter the row held there before. A winner id
 // the stored row already holds is never judged, whoever it names: a legacy row,
 // a correction that seated another team and a renamed member leave such ids
 // behind, and refusing them would refuse every later write of the match. Pure:
@@ -2379,61 +2399,6 @@ func introducesWinnerMember(row, stored state.SubMatchResult) bool {
 	return row.WinnerMemberID != "" && row.WinnerMemberID != stored.WinnerMemberID
 }
 
-// numberedRowsRefusal judges every numbered bout row of a participant's write
-// (the representative bout's row, position -1, is repRowRefusal's): a fighter it
-// introduces must be on the side's team (errBoutFighterNotInTeam), and a winner
-// member it introduces must be one of its two fighters (errWinnerMemberNotInBout).
-// The organiser's write is not judged here, as the lineup's is not (mp-q722: the
-// organiser is always editable). Rows are compared with the stored match's at
-// the same position (snap.Stored), a row it lacks counting as introduced.
-//
-// A row is judged exactly when the merge APPLIES its bout group
-// (state.BoutGroup; memberJudge.applied, as repRowRefusal judges a pick): a
-// row whose stored counterpart is newer, or that the write does not name, is
-// held and kept in the match's history, and refusing the write for it would
-// lose the groups of the same write that do apply. The merge is asked once per
-// write, and only when some row introduces a member.
-func numberedRowsRefusal(j *memberJudge, snap matchSnapshot, result *state.MatchResult, subs []state.SubMatchResult) error {
-	var applied []string
-	probed := false
-	for _, row := range subs {
-		if row.Position == state.DaihyosenSubPosition {
-			continue
-		}
-		var stored state.SubMatchResult
-		if snap.Stored != nil {
-			for _, s := range snap.Stored.SubResults {
-				if s.Position == row.Position {
-					stored = s
-					break
-				}
-			}
-		}
-		if !introducesWinnerMember(row, stored) &&
-			!introducesMember(snap.Pairing.SideAID, row.SideAMemberID, stored.SideAMemberID) &&
-			!introducesMember(snap.Pairing.SideBID, row.SideBMemberID, stored.SideBMemberID) {
-			continue // nothing to judge, so nothing is read
-		}
-		if !probed {
-			var err error
-			if applied, err = j.applied(snap, result); err != nil {
-				return err
-			}
-			probed = true
-		}
-		if !slices.Contains(applied, state.BoutGroup(row.Position)) {
-			continue // the merge holds this row, whose fighters are not written
-		}
-		if err := winnerMemberOutsideBout(row, stored); err != nil {
-			return err
-		}
-		if err := rowMembersOutsideTeams(j, snap.Pairing, row, stored, true, true, errBoutFighterNotInTeam); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // isMatchFinalized reports whether the given stored status represents a
 // concluded match. Any completed match is finalized, anonymous callers must
 // not overwrite it regardless of whether a winner was explicitly recorded.
@@ -2454,7 +2419,7 @@ type matchStores interface {
 // matchSnapshot is the stored state of a match as this file's guards read
 // it: Status drives the correction / stale-write / finalized gates,
 // CorrectionReason carries the kachinuki reopen justification forward (see
-// applyCorrectionReasonUnderTx), and ReopenPending says a reason-less reopen
+// applyCorrectionReason), and ReopenPending says a reason-less reopen
 // has not been ended again.
 //
 // It carries only the fields the guards actually read. The post-advance
@@ -2463,8 +2428,9 @@ type matchStores interface {
 // here deep-clones the stored sub-bouts (mp-gmcg review: that was a write-only
 // value, and an expensive one, under the per-comp write lock). Stored is the
 // one reader of the stored match's rows, and it SHARES the loaded copy rather
-// than cloning it: the self-run judge (numberedRowsRefusal) and the merge probe
-// (engine.AppliedGroups) only read it, and the probe clones before it merges.
+// than cloning it: the member judge (landedMembersRefusal) only reads it, as the
+// match stood before the write, and each load hands out a copy of its own, so
+// the engine's write never reaches it.
 //
 // InBracket is the match's HOME rather than its content: the pool write is a
 // whole-struct overwrite that carries ReopenPending itself, while the bracket
@@ -2485,9 +2451,10 @@ type matchSnapshot struct {
 	// RepBout is a copy of the stored representative-bout row (position -1),
 	// nil when the match has none: the self-run judge compares a
 	// participant's write against it, and writes back a deep copy of it once
-	// the organiser has decided it (holdSelfReportedWriteUnderTx); the
-	// organiser's picks are judged against it too (judgeRepPicksUnderTx). One
-	// row, which a writer deep-clones (Stored carries the whole bout log).
+	// the organiser has decided it (holdSelfReportedWriteUnderTx); the picks the
+	// write lands are judged against it, for what they introduce
+	// (landedMembersRefusal). One row, which a writer deep-clones (Stored
+	// carries the whole bout log).
 	RepBout *state.SubMatchResult
 	// Pairing is the stored match's attribution (its sides, their ids and its
 	// winner), which the self-run judge reads a participant's winner against
@@ -2501,10 +2468,11 @@ type matchSnapshot struct {
 	// reads (a pool row as loaded; a bracket match through
 	// engine.BracketMatchAsResult). It is what the judges ask about, and it
 	// shares the loaded copy's rows, so a reader clones before it changes
-	// anything: the member judges ask the merge on copies (engine.AppliedGroups)
-	// which groups it would apply, and the participant's numbered-row judge reads
-	// the stored row at each position (numberedRowsRefusal). nil only on a
-	// zero snapshot (no match found).
+	// anything. Read before the write it is the baseline the member judge
+	// compares the landed match against, row by position; read again after the
+	// write (the same lookupMatchSnapshot, through the same transaction) it is
+	// what landed (landedMembersRefusal). nil only on a zero snapshot (no match
+	// found).
 	Stored *state.MatchResult
 }
 
@@ -2841,7 +2809,7 @@ func matchStatusFromStore(store CompetitionStore, compID, matchID string) state.
 	return status
 }
 
-// correctionCheck is applyCorrectionReasonUnderTx's verdict.
+// correctionCheck is applyCorrectionReason's verdict.
 //
 //   - StoredStatus is the match's status as stored, returned so the caller's
 //     stale-after-complete guard doesn't have to look the match up again.
@@ -2955,20 +2923,20 @@ func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult) correctionC
 	return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision}
 }
 
-// applyCorrectionReasonUnderTx reads the match's snapshot itself and applies
-// applyCorrectionReason to it: the entry point of a write that runs no other
-// guard over the stored match (bulk-score, one read per entry). The score
-// handler reads the snapshot once for all its guards and asks
-// applyCorrectionReason directly.
-func applyCorrectionReasonUnderTx(stx state.StoreTx, compID, matchID string, r *state.MatchResult) (correctionCheck, error) {
+// applyCorrectionReasonUnderTx reads the match's snapshot itself, applies
+// applyCorrectionReason to it and hands the snapshot back: the entry point of
+// bulk-score, one read per entry, whose later guard (the landed picks'
+// judge) compares the match against it. The score handler reads the snapshot
+// once for all its guards and asks applyCorrectionReason directly.
+func applyCorrectionReasonUnderTx(stx state.StoreTx, compID, matchID string, r *state.MatchResult) (correctionCheck, matchSnapshot, error) {
 	// matchSnapshotOrErr fails CLOSED on a load error: the correction-reason
 	// gate must not pass on an assumed-running status, silently overwriting a
 	// finalized result without the mandatory reason.
 	snap, _, err := matchSnapshotOrErr(stx, compID, matchID, "correction-reason")
 	if err != nil {
-		return correctionCheck{}, err
+		return correctionCheck{}, matchSnapshot{}, err
 	}
-	return applyCorrectionReason(snap, r), nil
+	return applyCorrectionReason(snap, r), snap, nil
 }
 
 // missingCorrectionReasonError is the refusal for overwriting a completed
@@ -3556,21 +3524,20 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// mp-ba3, bc-dhas: the self-run judge runs under the per-comp
 				// lock, so concurrent anonymous submissions cannot race it. It
 				// may rewrite result's representative bout before the write.
-				if resultSource == "self-reported" {
-					if err := holdSelfReportedWriteUnderTx(stx, id, mid, snap, found, result, body.StartOnly); err != nil {
-						engErr = err
-						return nil
-					}
-				} else if !body.StartOnly {
-					// The organiser's write is judged on the representative
-					// picks it introduces and on nothing else (judgeRepPicksUnderTx).
-					// A start keeps the stored score whatever it sends, so the
-					// row it carries is no pick.
-					if err := judgeRepPicksUnderTx(stx, id, snap, found, result); err != nil {
+				selfReported := resultSource == "self-reported"
+				if selfReported {
+					if err := holdSelfReportedWriteUnderTx(id, mid, snap, found, result, body.StartOnly); err != nil {
 						engErr = err
 						return nil
 					}
 				}
+				// Who the write seats is judged after the engine has written
+				// it, on what it landed (landedMembersRefusal), and decided
+				// here, before the engine rewrites result: a participant's
+				// numbered rows and the representative bout's picks, the
+				// organiser's picks alone. A start keeps the stored score
+				// whatever it sends, so the row it carries is no pick.
+				judgeLanded := found && !body.StartOnly && carriesJudgedMember(result.SubResults, selfReported)
 				// Correction audit: a completed -> completed overwrite requires a
 				// non-empty CorrectionReason for traceability. Ending a match
 				// reopened without a reason is never refused (operator ruling
@@ -3631,6 +3598,18 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// includes the K3 rollback for the AlreadyIneligible path,
 				// returning nil here commits whatever final state the engine
 				// settled on.
+				//
+				// The one exception is a refusal of what the write landed:
+				// it is RETURNED, which aborts the transaction, so nothing of
+				// the write survives (no match write, no history line, no
+				// eligibility record). It is judged only for a write the
+				// engine accepted: a superseded or rolled-back one must still
+				// commit its history and its restore.
+				if engErr == nil && judgeLanded {
+					if err := landedMembersRefusal(stx, id, mid, snap, selfReported); err != nil {
+						return err
+					}
+				}
 				if engErr == nil && check.ClearBracketReopenPending {
 					// Only after the write actually landed: this branch commits
 					// even when engErr is set, so discharging any earlier would
@@ -3641,6 +3620,12 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				return nil
 			})
 		})
+		// A refusal of what the write landed aborted the transaction
+		// (landedMembersRefusal) and is answered like any other refusal below.
+		var landed *landedWriteRefusal
+		if errors.As(txErr, &landed) {
+			engErr, txErr = landed.refusal, nil
+		}
 		if txErr != nil {
 			// txErr carries errors from CheckCrossCompCourtBusy (cross-comp
 			// court conflict or match-not-found) or from the WithTransaction

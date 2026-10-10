@@ -15,6 +15,7 @@ package mobileapp
 // carries the main password, in a self-run tournament and in an officiated one.
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -185,9 +186,10 @@ func TestOrganiser_AStalePickTheMergeHoldsIsNotRefused(t *testing.T) {
 
 // A finish stamped before the stored verdict that names another winner is held
 // WHOLE by the merge (HoldReasonFinishAtomic): its picks land nowhere, even when
-// their own stamps are newer than the stored picks'. The judge asks the merge
-// (engine.AppliedGroups), so such a write is answered superseded and kept in
-// the history, never refused for a pick that would not have been written.
+// their own stamps are newer than the stored picks'. The judge reads what the
+// write landed, and a held write lands nothing, so such a write is answered
+// superseded and kept in the history, never refused for a pick that was not
+// written.
 func TestOrganiser_AStaleFinishWithAForeignPickIsSupersededNotRefused(t *testing.T) {
 	for _, mode := range organiserModes {
 		t.Run(mode.name, func(t *testing.T) {
@@ -340,9 +342,10 @@ func TestOrganiser_UnreadableTeamMembersRefusesThePickTerminally(t *testing.T) {
 			require.NoError(t, os.WriteFile(
 				filepath.Join(p.store.GetFolder(), "competitions", "c1", "team-members.yaml"),
 				[]byte("not: [valid yaml"), 0o600))
+			before := p.storedState(t)
 
 			requireTeamMembersUnreadable(t, p.pick(p.now+100, nil, p.membersA[0], ""))
-			assert.Empty(t, p.storedRepBout(t).SideAMemberID, "a refused pick writes nothing")
+			assert.Equal(t, before, p.storedState(t), "a refused pick writes nothing, not even its history line")
 		})
 	}
 }
@@ -358,4 +361,72 @@ func TestOrganiser_APickOnARowTheWriteCreatesIsJudged(t *testing.T) {
 	w := f.send(http.MethodPut, repBoutMatchPath+"/score", organiserPassword, sheet)
 	requireNotOnTeam(t, w)
 	assert.False(t, carriesDaihyosenRow(storedB1(t, f.store, "c1").SubResults), "a refused write creates nothing")
+}
+
+// Bulk-score takes the client's subResults entry by entry, each written in its
+// own transaction, so a representative pick on an entry is judged like /score's
+// and a refused entry stores nothing, the history line included, while the
+// entries beside it are written.
+func TestOrganiser_BulkScoreJudgesTheRepresentativePicksPerEntry(t *testing.T) {
+	for _, mode := range organiserModes {
+		t.Run(mode.name, func(t *testing.T) {
+			p := newOrganiserPickFixture(t, mode.selfRun)
+			before := p.storedState(t)
+
+			entry := func(a string) map[string]any {
+				sheet := sheetWith(state.MatchStatusRunning, "", p.now+100, nil, repBoutRow([]string{}, []string{}, ""), a, "")
+				sheet["id"] = "B1"
+				return sheet
+			}
+			bulk := func(entries ...map[string]any) (succeeded int, errs []map[string]any) {
+				w := p.send(http.MethodPost, "/api/competitions/c1/matches/bulk-score", organiserPassword, entries)
+				require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+				var body struct {
+					Succeeded int              `json:"succeeded"`
+					Errors    []map[string]any `json:"errors"`
+				}
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+				return body.Succeeded, body.Errors
+			}
+
+			succeeded, errs := bulk(entry(p.membersB[0]))
+			assert.Zero(t, succeeded)
+			require.Len(t, errs, 1)
+			assert.Equal(t, "B1", errs[0]["matchId"])
+			assert.Equal(t, codeTeamMemberNotInTeam, errs[0]["reason"])
+			assert.Equal(t, notOnTeamBody, errs[0]["error"])
+			assert.Equal(t, before, p.storedState(t), "the refused entry stores nothing, not even its history line")
+
+			succeeded, errs = bulk(entry(p.membersA[0]))
+			assert.Equal(t, 1, succeeded, "the side's own member is accepted: %v", errs)
+			assert.Equal(t, p.membersA[0], p.storedRepBout(t).SideAMemberID)
+		})
+	}
+}
+
+// A members file that cannot be read refuses a bulk entry that needs it, with
+// the reason a client can branch on, and the entry stores nothing.
+func TestOrganiser_BulkScoreRefusesAPickWhenTheTeamMembersCannotBeRead(t *testing.T) {
+	p := newOrganiserPickFixture(t, true)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(p.store.GetFolder(), "competitions", "c1", "team-members.yaml"),
+		[]byte("not: [valid yaml"), 0o600))
+	before := p.storedState(t)
+
+	entry := sheetWith(state.MatchStatusRunning, "", p.now+100, nil, repBoutRow([]string{}, []string{}, ""), p.membersA[0], "")
+	entry["id"] = "B1"
+	w := p.send(http.MethodPost, "/api/competitions/c1/matches/bulk-score", organiserPassword, []any{entry})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var body struct {
+		Succeeded int `json:"succeeded"`
+		Errors    []struct {
+			Reason string `json:"reason"`
+		} `json:"errors"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Zero(t, body.Succeeded)
+	require.Len(t, body.Errors, 1)
+	assert.Equal(t, errTeamMembersUnreadable.code, body.Errors[0].Reason)
+	assert.Equal(t, before, p.storedState(t), "the refused entry stores nothing")
 }

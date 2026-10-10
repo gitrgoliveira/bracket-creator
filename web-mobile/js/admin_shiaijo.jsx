@@ -839,8 +839,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const [correctingKey, setCorrectingKey] = useStateSh(null);
     // The last tap the console refused because a match is live (a Correct), a
     // correction is open (a Start) or another start is still out (a Start):
-    // { key, compId, why: "running" | "correcting" | "starting", against, label }
-    // (`against` is the blocker's key, `label` its name as the operator sees it).
+    // { key, compId, why: "running" | "correcting" | "starting", against, label, start }
+    // (`against` is the blocker's key, `label` its name as the operator sees it, and
+    // `start` the in-flight start or pick record for "starting", null otherwise).
     // Only the tap is stored; the notice text is derived at render while the
     // condition still holds (refusalNotice below), so it cannot go stale. The one
     // that outlives its condition is "starting": when the start it named lands,
@@ -1095,7 +1096,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // Refuse a tap: remember it against the match that blocks it, and toast.
     const refuseTap = (m, why) => {
         const blocker = refusalBlocker(why);
-        setRefusedTap({ key: matchKey(m), compId: m.compId, why, against: matchKey(blocker), label: scoreRowMatchName(blocker) });
+        setRefusedTap({
+            key: matchKey(m), compId: m.compId, why, against: matchKey(blocker), label: scoreRowMatchName(blocker),
+            // The start (or pick) record itself, which startMatch marks `landed` once the
+            // start went out: the effect beside startMatch asks it before writing the
+            // past-tense sentence.
+            start: why === "starting" ? (startingRef.current || pickingRef.current) : null,
+        });
         if (showToast) showToast(refusalText(why), "error");
     };
     // The stored refusal is read against the refused match's LIVE row in the
@@ -1327,11 +1334,22 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // startError when a start passes the guard, so any value present when the
     // blocker ends is the blocker's own: it is kept, and the waiting match shows
     // nothing, as it did before the sentence existed.
+    //
+    // The sentence also needs a start that WENT OUT. The blocker can be a pick whose
+    // deferral of the running bout failed (the revert threw or was unavailable): it
+    // never started, nothing was written and the court is as it was, so "was being
+    // started" would be false. The start record the refusal holds says whether a start
+    // landed (`landed`, set by startMatch, also on the pick's record), not the court's
+    // list: the list is refreshed a moment after the write and may still show the match
+    // scheduled, and a start queued offline stays scheduled until the connection
+    // returns, yet both were sent. Otherwise the refused tap is dropped, with no sentence.
     useEffectSh(() => {
         if (!refusedTap || refusedTap.why !== "starting") return;
         if (startingRef.current || pickingRef.current) return;
-        const blocked = { key: refusedTap.key, compId: refusedTap.compId, msg: startWasBlockedByStartMessage({ label: refusedTap.label }) };
-        setStartError((prev) => prev ?? blocked);
+        if (refusedTap.start && refusedTap.start.landed) {
+            const blocked = { key: refusedTap.key, compId: refusedTap.compId, msg: startWasBlockedByStartMessage({ label: refusedTap.label }) };
+            setStartError((prev) => prev ?? blocked);
+        }
         setRefusedTap(null);
     }, [refusedTap, startingKey]);
     // `pick` is the pickingRef entry pickMatch made for THIS start, if it is one:
@@ -1351,7 +1369,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             return false;
         }
         setStartError(null);
-        startingRef.current = { key, match: m };
+        const started = { key, match: m };
+        startingRef.current = started;
         setStartingKey(key);
         try {
             // Starting makes the match running; the scoring panel shows
@@ -1371,6 +1390,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 if (showToast) showToast(outcome.msg, "error");
                 return false;
             }
+            // The start went out. A refusal that waited on it (or on the pick that
+            // made it) reads this, whichever record it holds.
+            started.landed = true;
+            if (pick) pick.landed = true;
             return true;
         } catch (e) {
             const msg = startFailureMessage(e);

@@ -340,15 +340,15 @@ func (e *Engine) resolveSlots(bracket *state.Bracket, resolver map[string]resolv
 			if !ok {
 				return
 			}
-			// A side whose resolver entry has no id (a standings player of
+			// A slot whose resolver entry has no id (a standings player of
 			// legacy data) keeps the id it holds, as seatBracketSide keeps it
-			// for an incoming "": it is already seated, and repainting it
-			// would count a change on every pool write that never converges.
-			// Only that direction: a slot with no id against an entry that
-			// has one is still painted, which is the id backfill above. The
-			// Winner is written directly, id included, so it keeps the exact
-			// compare and converges after one repaint.
-			if *name == rf.Name && (*id == rf.ID || (side != domain.MatchSideNone && rf.ID == "")) {
+			// for an incoming "" and the Winner (a bye passes its competitor
+			// through with the id the side holds) must: it is already seated,
+			// and repainting it would count a change on every pool write that
+			// never converges, and wipe the Winner's id each time. Only that
+			// direction: a slot with no id against an entry that has one is
+			// still painted, which is the id backfill above.
+			if *name == rf.Name && (*id == rf.ID || rf.ID == "") {
 				return
 			}
 			if frozen[qualifierLabelPool(label)] != "" {
@@ -507,7 +507,13 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 	resolvedNow := 0
 	allResolved := false
 	backfilled := false
-	uerr := e.store.UpdateBracket(compID, func(bracket *state.Bracket) error {
+	// The picks the repaint takes from a re-seated match, for its history lines
+	// (bracket_seat_audit.go). This resolver repaints a slot whose pool moved
+	// outside the requalification planner (DELETE .../overrides writes the
+	// overrides alone), so it owns the record of what its re-seat took, written
+	// in the transaction that writes the bracket.
+	var clears []repPickClear
+	mutate := func(bracket *state.Bracket) error {
 		if bracket == nil || len(bracket.Rounds) == 0 {
 			return errMatchNotFound // nothing to resolve; signal no-save
 		}
@@ -532,7 +538,11 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 			// pools-times-winners layout this backfill reconstructs.
 			backfilled = backfillDrawPlaceholdersV1(bracket, poolNames, poolWinners)
 		}
+		before := repPickSnapshot(bracket, "")
 		n := e.resolveSlots(bracket, resolver)
+		// The repaint may have given a side another team and taken its pick
+		// with it. No reopen names it here: a locked match is never repainted.
+		clears = repPickClears(before, bracket)
 
 		allResolved = !bracketHasPoolPlaceholders(bracket)
 		if n == 0 && !backfilled {
@@ -545,6 +555,13 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 			// call resolved nothing, so it must not flip this.
 			bracket.Preview = false
 		}
+		return nil
+	}
+	uerr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+		if err := tx.UpdateBracket(compID, mutate); err != nil {
+			return err
+		}
+		e.recordRepPickClears(tx, compID, clears, nil)
 		return nil
 	})
 	if uerr != nil && !errors.Is(uerr, errMatchNotFound) {

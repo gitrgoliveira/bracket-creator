@@ -1656,9 +1656,8 @@ type MatchResult struct {
 	//
 	// SERVER-OWNED. MatchResult binds straight from the score request body, so
 	// a client could otherwise plant or clear the flag; the handler overwrites
-	// it from the STORED value on every write (see
-	// applyCorrectionReasonUnderTx in mobileapp/handlers_match.go) and is the
-	// only thing that moves it.
+	// it from the STORED value on every write (see applyCorrectionReason in
+	// mobileapp/handlers_match.go) and is the only thing that moves it.
 	//
 	// Append-only CSV column (rec index 24, after FlagsB at 22/23); older files
 	// with the column absent load as false. Bracket matches mirror it on

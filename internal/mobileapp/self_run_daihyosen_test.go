@@ -817,11 +817,9 @@ func TestHoldSelfReportedWriteUnderTx(t *testing.T) {
 			sent := state.CloneSubResults(tc.incoming)
 			result := &state.MatchResult{SubResults: tc.incoming, Winner: tc.winner, WinnerID: tc.winnerID, Status: tc.status}
 
-			err := store.WithTransaction("c1", func(stx state.StoreTx) error {
-				snap, found, err := matchSnapshotOrErr(stx, "c1", "B1", "test")
-				require.NoError(t, err)
-				return holdSelfReportedWriteUnderTx(stx, "c1", "B1", snap, found, result, tc.startOnly)
-			})
+			snap, found, err := matchSnapshotOrErr(store, "c1", "B1", "test")
+			require.NoError(t, err)
+			err = holdSelfReportedWriteUnderTx("c1", "B1", snap, found, result, tc.startOnly)
 			if tc.want != nil {
 				var refusal *selfRunRefusal
 				require.ErrorAs(t, err, &refusal)
@@ -1111,7 +1109,7 @@ func TestSelfRun_ASideTheWriteDoesNotNameIsNotJudged(t *testing.T) {
 }
 
 // A write that names the bout alone changes no pick, so a foreign id on its row
-// is neither judged nor written: the judge asks the merge which picks it lands.
+// is neither judged nor written: the judge reads which picks the write landed.
 func TestSelfRun_AWriteNamingTheBoutAloneIsNotJudgedForThePick(t *testing.T) {
 	f := newRepBoutFixture(t, true)
 	f.addRepBout(t)
@@ -1145,11 +1143,13 @@ func TestSelfRun_UnreadableTeamMembersRefusesThePickTerminally(t *testing.T) {
 		filepath.Join(f.store.GetFolder(), "competitions", "c1", "team-members.yaml"),
 		[]byte("not: [valid yaml"), 0o600))
 
+	before := f.storedState(t)
+
 	row := repBoutRow([]string{}, []string{}, "")
 	row["sideAMemberId"] = membersA[0].ID
 	w := f.score("", state.MatchStatusRunning, "", f.now+100, row)
 	requireTeamMembersUnreadable(t, w)
-	assert.Empty(t, f.storedRepBout(t).SideAMemberID, "a refused pick writes nothing")
+	assert.Equal(t, before, f.storedState(t), "a refused pick writes nothing, not even its history line")
 }
 
 // Removing the representative bout dates both sides' representatives with the

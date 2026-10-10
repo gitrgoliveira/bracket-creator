@@ -1,16 +1,17 @@
 package mobileapp
 
 // A participant's fighters are their team's, and a bout's winner is one of its
-// two fighters. The self-run judge (holdSelfReportedWriteUnderTx) refuses a
-// score write that INTRODUCES, on a numbered bout row, a side member id the
-// side's team does not hold (400 team_member_not_in_team), or a winnerMemberId
-// that is not one of the row's two side ids (400 winner_member_not_in_bout).
-// Introduced means the write changes it against the stored row at the same
-// position: an id the row already holds is never judged, so a row that a
-// correction left with another team's fighter, or a stale winner id, does not
-// refuse every later write. The organiser is not judged here (the lineup's
-// always-editable rule), and a members file that cannot be read refuses the
-// write with a terminal 409 only when a row actually needs it.
+// two fighters. The member judge (landedMembersRefusal) refuses a score write
+// that LANDS, on a numbered bout row, a side member id the side's team does not
+// hold (400 team_member_not_in_team), or a winnerMemberId that is not one of the
+// row's two side ids (400 winner_member_not_in_bout), and the refused write
+// leaves the match and its history untouched. Landed means the stored row now
+// holds it and did not before, at the same position: an id the row already held
+// is never judged, so a row that a correction left with another team's fighter,
+// or a stale winner id, does not refuse every later write. The organiser is not
+// judged here (the lineup's always-editable rule), and a members file that
+// cannot be read refuses the write with a terminal 409 only when a row actually
+// needs it.
 
 import (
 	"net/http"
@@ -200,9 +201,10 @@ func TestSelfRun_UnreadableTeamMembersRefusesANumberedRowTerminally(t *testing.T
 	f := newRepBoutFixture(t, true)
 	a, _ := f.teamMembers(t)
 	f.corruptTeamMembers(t)
+	before := f.storedState(t)
 
 	requireTeamMembersUnreadable(t, f.bouts("", f.now+100, map[int]boutIDs{1: {a: a[0].ID}}))
-	assert.Empty(t, f.storedBout(t, 1).SideAMemberID, "a refused write writes nothing")
+	assert.Equal(t, before, f.storedState(t), "a refused write writes nothing, not even its history line")
 }
 
 // The participant's lineup PUT is refused the same way when the members file
@@ -219,13 +221,13 @@ func TestSelfRun_UnreadableTeamMembersRefusesTheLineupTerminally(t *testing.T) {
 	assert.False(t, ok, "a refused lineup writes nothing")
 }
 
-// A numbered row is judged exactly when the merge APPLIES its bout group, as a
-// representative pick is (repRowRefusal): a row whose stored counterpart is
-// NEWER is held and kept in the match's history, and judging it would refuse the
-// whole write, terminally, for a fighter that would never have been written,
-// losing the groups of the write that apply. Here the stored bout 1 names fighter
-// Y, stamped T; the write names another team's member on it under T-1, beside
-// bouts 2 and 3 and the scoreline, which apply.
+// A numbered row is judged on what LANDS, as a representative pick is
+// (landedMembersRefusal): a row whose stored counterpart is NEWER is held and
+// kept in the match's history, so the fighter it names is never written, and
+// refusing the write for it would refuse the whole write, terminally, for a
+// fighter that was not written, losing the groups of the write that apply. Here
+// the stored bout 1 names fighter Y, stamped T; the write names another team's
+// member on it under T-1, beside bouts 2 and 3 and the scoreline, which apply.
 func TestSelfRun_AHeldNumberedRowIsNotJudged(t *testing.T) {
 	f := newRepBoutFixture(t, true)
 	a, b := f.teamMembers(t)
@@ -276,4 +278,80 @@ func TestSelfRun_ANumberedRowTheWriteDoesNotNameIsNotJudged(t *testing.T) {
 	w := f.send(http.MethodPut, repBoutMatchPath+"/score", "", sheet)
 	require.Equal(t, http.StatusOK, w.Code, "bout 1 is not among the groups the write changes: %s", w.Body.String())
 	assert.Empty(t, f.storedBout(t, 1).SideAMemberID, "and it is not written")
+}
+
+// A fighter is judged on what the write LANDS, not on what its payload says it
+// changes. A kachinuki write is rewritten by the engine before the merge (the
+// bout log is merged by position and the rows' member ids are filled in), so a
+// row the payload does not name can still land: here `changed` names the match's
+// points alone, and the engine writes bout 1 with the foreign fighter anyway.
+// The write is refused and leaves the match and its history untouched.
+func TestSelfRun_AKachinukiRowTheEngineRewritesIsJudgedOnWhatLands(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	require.NoError(t, f.store.SaveCompetition(&state.Competition{
+		ID: "c1", Name: "Teams", Kind: "team", Format: state.CompFormatKnockout,
+		TeamSize: 3, TeamMatchType: state.TeamMatchTypeKachinuki,
+	}))
+	_, b := f.teamMembers(t)
+	before := f.storedState(t)
+
+	sheet := scoreSheet(state.MatchStatusRunning, "", f.now+100, nil)
+	row := sheet["subResults"].([]any)[0].(map[string]any)
+	row["sideA"], row["sideB"], row["winner"] = "Alice", "Bob", "Alice"
+	row["sideAMemberId"] = b[0].ID
+	sheet["changed"] = []string{state.GroupPoints}
+	w := f.send(http.MethodPut, repBoutMatchPath+"/score", "", sheet)
+
+	requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", fighterNotOnTeamBody)
+	assert.Equal(t, before, f.storedState(t), "a refused write leaves the match and its history as they were")
+}
+
+// The pin beside it for the other home of a match: a pool match is read back
+// from the staged pool-matches.csv, not bracket.json, and is judged the same way.
+func TestSelfRun_AKachinukiPoolRowTheEngineRewritesIsJudgedOnWhatLands(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	require.NoError(t, f.store.SaveCompetition(&state.Competition{
+		ID: "c1", Name: "Teams", Kind: "team", Format: state.CompFormatLeague,
+		TeamSize: 3, TeamMatchType: state.TeamMatchTypeKachinuki,
+	}))
+	f.setB1(t, func(bm *state.BracketMatch) { bm.Status = state.MatchStatusScheduled }) // a team fights one match at a time
+	require.NoError(t, f.store.SavePoolMatches("c1", []state.MatchResult{{
+		ID: "Pool A-0", SideA: "TeamA", SideB: "TeamB", SideAID: repBoutTeamAID, SideBID: repBoutTeamBID,
+		Status: state.MatchStatusRunning, ModifiedAt: f.now - 60_000,
+		SubResults: []state.SubMatchResult{{Position: 1, IpponsA: []string{"M"}, Winner: "TeamA"}},
+	}}))
+	_, b := f.teamMembers(t)
+	path := "/api/competitions/c1/matches/Pool%20A-0/score"
+	poolRows := func() []state.SubMatchResult {
+		matches, err := f.store.LoadPoolMatches("c1")
+		require.NoError(t, err)
+		return matches[0].SubResults
+	}
+	before := poolRows()
+
+	sheet := scoreSheet(state.MatchStatusRunning, "", f.now+100, nil)
+	row := sheet["subResults"].([]any)[0].(map[string]any)
+	row["sideA"], row["sideB"], row["winner"] = "Alice", "Bob", "Alice"
+	row["sideAMemberId"] = b[0].ID
+	sheet["changed"] = []string{state.GroupPoints}
+	w := f.send(http.MethodPut, path, "", sheet)
+
+	requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", fighterNotOnTeamBody)
+	assert.Equal(t, before, poolRows(), "a refused write leaves the pool match as it was")
+}
+
+// matchState is what a refused write must leave as it was: the bracket file's
+// bytes and the match's history.
+type matchState struct {
+	bracket string
+	history []state.MatchHistoryEntry
+}
+
+func (f *repBoutFixture) storedState(t *testing.T) matchState {
+	t.Helper()
+	bracket, err := os.ReadFile(filepath.Join(f.store.GetFolder(), "competitions", "c1", "bracket.json")) // #nosec G304 -- a test fixture path
+	require.NoError(t, err)
+	history, err := f.store.LoadMatchHistory("c1", "B1")
+	require.NoError(t, err)
+	return matchState{bracket: string(bracket), history: history}
 }

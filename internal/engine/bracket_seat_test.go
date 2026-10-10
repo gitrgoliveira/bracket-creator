@@ -417,6 +417,132 @@ func TestResolveSlots_PaintedSideLosesItsPickAndALockedMatchKeepsIt(t *testing.T
 	})
 }
 
+// A team renamed while the competition is draw-ready: the add of a
+// representative bout commits the running match in its own transaction and
+// starts the competition after it, and a failed start is only logged, so a
+// draw-ready competition can hold a representative bout. The hantei mark is
+// placed on the winner's side by comparing the winner to that row's names, so
+// the row's names and its Winner follow the rename (the row carries no pick
+// and no winner member id here: either would credit the side by id and make
+// the assertion green without the rename).
+func TestReplaceParticipantInDraw_ARenamedTeamKeepsTheRepresentativeRowInStep(t *testing.T) {
+	const compID = "rename-rep-row"
+	// The representative bout was decided for side B, the team renamed.
+	build := func(sideBID string) *state.Bracket {
+		return &state.Bracket{Rounds: [][]state.BracketMatch{{{
+			ID:    "m1",
+			SideA: "Ryu", SideAID: "id-a", SideB: "Tora", SideBID: sideBID,
+			Status: state.MatchStatusRunning, ModifiedAt: 500,
+			SubResults: []state.SubMatchResult{{
+				Position: state.DaihyosenSubPosition, SideA: "Ryu", SideB: "Tora",
+				IpponsA: []string{}, IpponsB: []string{domain.HanteiMark},
+				Winner: "Tora", Decision: "daihyosen",
+			}},
+		}}}}
+	}
+	for _, tc := range []struct {
+		name    string
+		sideBID string // "" is a legacy side no id was ever stamped on
+		pid     string
+	}{
+		{name: "a side carrying the team's id", sideBID: "id-b", pid: "id-b"},
+		{name: "a legacy side with no id", sideBID: "", pid: "id-elsewhere"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eng, store, _ := setupTestEngine(t)
+			require.NoError(t, store.SaveCompetition(&state.Competition{
+				ID: compID, Name: "Rename", Kind: "team", TeamSize: 3, TeamMatchType: state.TeamMatchTypeFixed,
+				Format: state.CompFormatKnockout, Courts: []string{"A"}, StartTime: "09:00",
+				Status: state.CompStatusDrawReady,
+			}))
+			require.NoError(t, store.SaveBracket(compID, build(tc.sideBID)))
+
+			_, err := eng.ReplaceParticipantInDraw(compID, tc.pid, "Tora", "Dojo", "", "Lion", "Dojo", "")
+			require.NoError(t, err)
+
+			bracket, err := store.LoadBracket(compID)
+			require.NoError(t, err)
+			m := bracket.Rounds[0][0]
+			require.Equal(t, "Lion", m.SideB, "the match side is renamed")
+			row := m.SubResults[state.DaihyosenSubIndex(m.SubResults)]
+			assert.Equal(t, "Lion", row.SideB, "the representative row follows the match's name")
+			assert.Equal(t, "Lion", row.Winner, "and so does its winner, which the mark is placed by")
+			assert.Equal(t, "Ryu", row.SideA, "side A is untouched")
+			assert.Equal(t, domain.MatchSideB, state.SubBoutWinnerSide(row, m.SideA, m.SideB), "side B is still credited")
+		})
+	}
+}
+
+// A rename never clears a representative pick: the side keeps its team. Pass 2
+// of the rename (a side with no id) writes the name directly and must not read
+// "Tora" -> "Lion" as another team, which seatBracketSide would for an id-less
+// side.
+func TestReplaceParticipantInDraw_ARenamedIdlessSideKeepsItsPick(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const compID = "rename-keeps-pick"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Rename", Kind: "team", TeamSize: 3, TeamMatchType: state.TeamMatchTypeFixed,
+		Format: state.CompFormatKnockout, Courts: []string{"A"}, StartTime: "09:00",
+		Status: state.CompStatusDrawReady,
+	}))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{{{
+		ID:    "m1",
+		SideA: "Ryu", SideAID: "id-a", SideB: "Tora",
+		Status: state.MatchStatusRunning, ModifiedAt: 500,
+		GroupStamps: map[string]int64{state.GroupRepPickB: 400},
+		SubResults: []state.SubMatchResult{{
+			Position: state.DaihyosenSubPosition, SideA: "Ryu", SideB: "Tora", SideBMemberID: "pb",
+		}},
+	}}}}))
+
+	_, err := eng.ReplaceParticipantInDraw(compID, "id-elsewhere", "Tora", "Dojo", "", "Lion", "Dojo", "")
+	require.NoError(t, err)
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	m := bracket.Rounds[0][0]
+	_, pickB := m.RepPicks()
+	assert.Equal(t, "pb", pickB, "the renamed side keeps its pick")
+	assert.Equal(t, "Lion", m.SubResults[0].SideB)
+	assert.Equal(t, int64(400), m.GroupStamp(state.GroupRepPickB), "and its date")
+}
+
+// The same id under a new name is the same team: the representative row's
+// winner follows the row's name, or the mark would be placed on nobody. A side
+// given another team leaves the winner alone (the row keeps what was decided).
+func TestSeatBracketSide_ARenameCarriesTheRowsWinnerAndAnotherTeamDoesNot(t *testing.T) {
+	build := func() *state.BracketMatch {
+		return &state.BracketMatch{
+			ID:    "m",
+			SideA: "Ryu", SideAID: "a", SideB: "Tora", SideBID: "b",
+			SubResults: []state.SubMatchResult{{
+				Position: state.DaihyosenSubPosition, SideA: "Ryu", SideB: "Tora",
+				IpponsB: []string{domain.HanteiMark}, Winner: "Tora", Decision: "daihyosen",
+			}},
+		}
+	}
+
+	t.Run("the same id under a new name", func(t *testing.T) {
+		bm := build()
+		seatBracketSide(bm, domain.MatchSideB, "Lion", "b")
+		assert.Equal(t, "Lion", bm.SubResults[0].SideB)
+		assert.Equal(t, "Lion", bm.SubResults[0].Winner, "the winner follows the name it was recorded under")
+		assert.Equal(t, domain.MatchSideB, state.SubBoutWinnerSide(bm.SubResults[0], bm.SideA, bm.SideB))
+	})
+	t.Run("the other side's rename leaves a winner who is not it", func(t *testing.T) {
+		bm := build()
+		seatBracketSide(bm, domain.MatchSideA, "Dragon", "a")
+		assert.Equal(t, "Dragon", bm.SubResults[0].SideA)
+		assert.Equal(t, "Tora", bm.SubResults[0].Winner)
+	})
+	t.Run("another team", func(t *testing.T) {
+		bm := build()
+		seatBracketSide(bm, domain.MatchSideB, "Kuma", "c")
+		assert.Equal(t, "Kuma", bm.SubResults[0].SideB)
+		assert.Equal(t, "Tora", bm.SubResults[0].Winner, "a decision made for the team that left is left as it was")
+	})
+}
+
 // A pool requalification that reopens a played knockout match and repaints its
 // slot with another competitor: the reopen line names the picks group.
 func TestRequalify_ForcedReopenTakesThePickAndItsLineNamesIt(t *testing.T) {
@@ -470,4 +596,61 @@ func TestRequalify_ForcedReopenTakesThePickAndItsLineNamesIt(t *testing.T) {
 	}
 	assert.True(t, named, "the reopen line names the cleared side's pick group")
 	assert.False(t, namedKept, "and not the side that held no pick")
+}
+
+// DELETE .../overrides removes a pool's hand-set order without asking the
+// planner (it only writes overrides.json), so the knockout still seats the
+// order that was removed until the next auto-complete repaints it through
+// ResolveQualifiedPools, which no confirmation or reopen answers for. A match
+// sent back to the queue keeps its representative bout's picks and is not
+// locked, so the repaint can take a pick from it; it records the re-seat in the
+// match's history like every other door that does (bracket_seat_audit.go).
+func TestResolveQualifiedPools_ARepaintTheOverridesRemovalLeftRecordsTheReseat(t *testing.T) {
+	f := newRQFixture(t, "rq-overrides-removed", 1, [][]string{{"A1", "A2"}, {"B1", "B2"}})
+	f.scorePool("Pool A-0", "A1")
+	f.scorePool("Pool B-0", "B1")
+	f.resolve()
+	// Pool A's order is set by hand: the planner seats A2.
+	_, err := f.eng.OverridePoolRanks(f.compID, "Pool A", []RankOverride{{PlayerID: rqID("A2"), Rank: 1}}, ForceOptions{})
+	require.NoError(t, err)
+	m, side := f.slot("Pool A-1st")
+	name, _ := sideOf(m, side)
+	require.Equal(t, "A2", name, "the hand-set order is seated")
+
+	// The match was sent back to the queue holding A2's representative pick.
+	b := f.bracket()
+	queued := findBracketMatchInBracket(b, m.ID)
+	require.Equal(t, state.MatchStatusScheduled, queued.Status)
+	pick := state.SubMatchResult{Position: state.DaihyosenSubPosition}
+	pickGroup := state.GroupRepPickB
+	if side == "A" {
+		pick.SideAMemberID, pickGroup = "pick-a2", state.GroupRepPickA
+	} else {
+		pick.SideBMemberID = "pick-a2"
+	}
+	queued.SubResults = []state.SubMatchResult{pick}
+	require.NoError(t, f.store.SaveBracket(f.compID, b))
+
+	changed, err := f.store.ResetOverridesChanged(f.compID)
+	require.NoError(t, err)
+	require.True(t, changed)
+	_, err = f.eng.MaybeAutoCompletePools(f.compID)
+	require.NoError(t, err)
+
+	got := findBracketMatchInBracket(f.bracket(), m.ID)
+	name, _ = sideOf(*got, side)
+	require.Equal(t, "A1", name, "the natural order is seated again")
+	a, c := got.RepPicks()
+	assert.Empty(t, a)
+	assert.Empty(t, c)
+
+	entries, err := f.store.LoadMatchHistory(f.compID, m.ID)
+	require.NoError(t, err)
+	var recorded bool
+	for _, e := range entries {
+		if e.Door == doorReseat && slices.Contains(e.Changed, pickGroup) {
+			recorded = true
+		}
+	}
+	assert.True(t, recorded, "the re-seat that took the pick is in the match's history, not only in a log line")
 }

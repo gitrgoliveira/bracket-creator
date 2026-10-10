@@ -929,3 +929,42 @@ func TestResolveSlots_ASideTheResolverKnowsByNameOnlyIsSeated(t *testing.T) {
 		})
 	}
 }
+
+// The Winner converges the same way a side does. A bye passes its competitor
+// through as the match's Winner with the id the side holds, and a resolver entry
+// with no id must not repaint it: the repaint wiped WinnerID, the legacy upgrade
+// restored it on the next start, and the next pool write wiped it again. A
+// Winner with no id against an entry that has one is still written, which is
+// the id backfill.
+func TestResolveSlots_TheWinnerTheResolverKnowsByNameOnlyIsSeated(t *testing.T) {
+	tests := []struct {
+		name        string
+		winnerID    string
+		resolverID  string
+		wantPainted int
+		wantID      string
+	}{
+		{name: "a stored id against a resolver with none converges", winnerID: "id-a", resolverID: "", wantPainted: 0, wantID: "id-a"},
+		{name: "no stored id against a resolver with one is the id backfill", winnerID: "", resolverID: "id-a", wantPainted: 1, wantID: "id-a"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			eng, _, _ := setupTestEngine(t)
+			b := &state.Bracket{Rounds: [][]state.BracketMatch{{{
+				ID:                "m1",
+				Status:            state.MatchStatusCompleted,
+				PlaceholderA:      "Pool A-1st",
+				PlaceholderWinner: "Pool A-1st",
+				SideA:             "Alice",
+				SideAID:           "id-a",
+				Winner:            "Alice",
+				WinnerID:          tc.winnerID,
+			}}}}
+			resolver := map[string]resolvedFinisher{"Pool A-1st": {Name: "Alice", ID: tc.resolverID}}
+			got := eng.resolveSlots(b, resolver)
+			assert.Equal(t, tc.wantPainted, got, "slots changed")
+			assert.Equal(t, "Alice", b.Rounds[0][0].Winner)
+			assert.Equal(t, tc.wantID, b.Rounds[0][0].WinnerID)
+		})
+	}
+}

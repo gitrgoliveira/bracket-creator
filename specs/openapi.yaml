@@ -59,11 +59,16 @@ info:
     a fighter whose member id the side's team does not hold is refused with 400
     `team_member_not_in_team`, and a `winnerMemberId` that is not one of the row's two fighters
     is refused with 400 `winner_member_not_in_bout`; an id the stored row already holds is never
-    judged, and the organiser's numbered rows are not judged at all. A pick or a numbered row is
-    judged only when the merge would apply it: a write stamped before the stored pick or row, one
-    that does not name the pick or the row's bout in `changed`, one whose pick sits on a row it
-    neither has nor creates, and a finish the merge holds whole are not judged for it; it is not
-    written and is kept in the match's history. When the competition's `team-members.yaml` cannot be read,
+    judged, and the organiser's numbered rows are not judged at all. A member a write would seat
+    (a participant's numbered row fighter or winner, a representative pick from anyone) is judged
+    on what the write LANDS, after the merge, in the same transaction: the match is read back as
+    stored, and a refused write lands nothing (no change to the match, no history entry). A stale
+    change the merge holds is therefore not judged: a pick or a row the write names (in `changed`,
+    or by default every group its row carries) and stamps before the stored one is kept in the
+    match's history and answered in `heldGroups`, e.g. `["bout:1"]`, never refused, while one the
+    write does not name (and the engine does not rewrite, as it does a kachinuki write's bout log)
+    is copied from the stored match, neither written nor reported: it is in neither `heldGroups`
+    nor the history. When the competition's `team-members.yaml` cannot be read,
     a write that needs it to judge a choice (a pick, a numbered row's fighter, or the lineup
     save) is refused with 409 `team_members_unreadable` and nothing is written, so the offline
     queue does not retry it; a write that introduces no member id never reads the file. The rest of the write is
@@ -2588,13 +2593,19 @@ paths:
             is judged against an empty row, since the organiser's write can
             create it. The row's winner member id is not judged: the
             merge keeps it naming one of the two stored representatives, or empty.
-            A pick is judged only when the merge would apply it. A write whose
-            stamp is strictly before a stored representative, one that does not
-            name the side's pick in `changed`, one whose pick sits on a row it
-            neither has nor creates, and a finish the merge holds whole (stamped
-            before the stored verdict and naming another winner) are not judged
-            for that pick: the merge holds it, so it is not written and is kept
-            in the match's history (an equal stamp applies, so it is judged).
+            A pick is judged on what the write LANDS, after the merge, in the same
+            transaction: the match is read back as stored, and a pick it now holds
+            that the stored row did not is refused when its side's team does not
+            hold the member. A refused write lands nothing: no change to the
+            match and no history entry. A pick the merge holds is not judged: one
+            the write names (in `changed`, or by default every group its row
+            carries) and stamps strictly before the stored representative, or one
+            carried by a finish the merge holds whole (stamped before the stored
+            verdict and naming another winner), is kept in the match's history and
+            answered in `heldGroups`, never refused (an equal stamp applies, so it
+            is judged). A pick the write does not name in `changed` is copied from
+            the stored match, neither written nor reported: it is in neither
+            `heldGroups` nor the history.
             The rest of the write is ordered by its own stamps,
             so it is applied and answered with `heldGroups` naming the held side's
             group, e.g. `["repPickA"]`; it is answered as superseded, with nothing
@@ -2610,12 +2621,18 @@ paths:
             ids, or the stored row's for a side the row is silent about) is refused
             with `error: winner_member_not_in_bout` and the `message` "The winner
             recorded is not one of the two fighters in this bout." An id the
-            stored row already holds is never judged, and a row is judged only
-            when the merge would apply its `bout:<position>` group: a row stamped
-            before the stored one, or one the write does not name in `changed`, is
-            not judged; it is not written and is kept in the match's history, and
-            the rest of the write is applied and answered with `heldGroups`, e.g.
-            `["bout:1"]`. The organiser's numbered rows are not judged.
+            stored row already holds is never judged. A row is judged as it
+            LANDS (see the pick above), not as its payload reads: the engine
+            rewrites a kachinuki write before its merge (it merges the bout log by
+            position and fills in member ids), so a row the payload does not name
+            in `changed` can still land, and is judged then; a refused write lands
+            nothing. A row the merge holds (named in `changed`, or by default, and
+            stamped before the stored one) is not judged: it is kept in the
+            match's history, and the rest of the write is applied and answered
+            with `heldGroups`, e.g. `["bout:1"]`. A row the write does not name
+            and the engine does not rewrite is copied from the stored match,
+            neither written nor reported. The organiser's numbered rows are not
+            judged.
 
             A `completed` write whose `decision` is empty or `hikiwake` on a
             match whose stored result is a completed withdrawal (kiken or
@@ -3499,6 +3516,14 @@ paths:
         "Bout 5 (Taisho) has no result. Record a score, a Tie, or a Fusensho before finishing."
         Nothing is written for that entry, and other entries are unaffected.
 
+        An entry is written in its own transaction and its representative bout (position `-1`)
+        is judged on what it lands, as on PUT /score: a pick the stored row did not hold that
+        names a member the side's team does not hold is refused, reported in `errors` with
+        `reason: team_member_not_in_team` and the page's sentence in `error`. When the
+        competition's `team-members.yaml` cannot be read, an entry that needs it is refused with
+        `reason: team_members_unreadable`. Nothing is written for a refused entry, its history
+        entry included, and other entries are unaffected. Numbered bout rows are not judged.
+
 
         Stays main-password-gated in self-run mode (401 without it): it writes results
         without PUT /score's self-run checks.
@@ -3541,7 +3566,7 @@ paths:
                             classes `reason` names below.
                         reason:
                           type: string
-                          enum: [superseded, clock_skew, corrupt_overrides, downstream_knockout_played, downstream_knockout_running]
+                          enum: [superseded, clock_skew, corrupt_overrides, downstream_knockout_played, downstream_knockout_running, team_member_not_in_team, team_members_unreadable]
                           description: >
                             Machine-readable discriminator, present only for the
                             classes named here and omitted for every other failure, so
@@ -3570,7 +3595,12 @@ paths:
                             fought now, or a knockout correction whose new winner would
                             change a side of a later knockout match being fought now;
                             `forceDownstreamReopen` does not get past it; finish or
-                            requeue that match, then retry. In
+                            requeue that match, then retry.
+                            `team_member_not_in_team`: the entry's representative pick
+                            names a member the side's team does not hold; `error` carries
+                            the sentence to show. `team_members_unreadable`: the
+                            competition's team-members.yaml could not be read, so the
+                            pick could not be judged. In
                             every case the entry is excluded from `succeeded` and never
                             broadcast. Other entries in the batch are unaffected.
                         heldGroups:

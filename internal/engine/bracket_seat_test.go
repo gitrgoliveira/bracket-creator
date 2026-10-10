@@ -596,6 +596,28 @@ func TestSeatBracketSide_ARenameCarriesTheRowsWinnerAndAnotherTeamDoesNot(t *tes
 		assert.Equal(t, "Lion", bm.SubResults[0].SideB)
 		assert.Equal(t, "Lion", bm.SubResults[0].Winner)
 	})
+	// The carry is not skipped for a row that already reads the new name: a writer
+	// that restated the rename on the row (the merge lands a payload row's names as
+	// sent) can leave the Winner on the match's old name.
+	t.Run("a row that already reads the new name carries the winner the match's old name recorded", func(t *testing.T) {
+		bm := build()
+		bm.SubResults[0].SideB = "Lion"
+		seatBracketSide(bm, domain.MatchSideB, "Lion", "b")
+		assert.Equal(t, "Lion", bm.SubResults[0].SideB)
+		assert.Equal(t, "Lion", bm.SubResults[0].Winner, "the winner follows the match's old name")
+		assert.Equal(t, domain.MatchSideB, state.SubBoutWinnerSide(bm.SubResults[0], bm.SideA, bm.SideB))
+	})
+	// PIN, green by design: a row that already reads the new name and whose Winner
+	// already follows it has nothing to carry, so it is not copied (the list a
+	// row's other holders share is replaced only when a row changes).
+	t.Run("a row that already reads the new name and winner is untouched and not copied", func(t *testing.T) {
+		bm := build()
+		bm.SubResults[0].SideB, bm.SubResults[0].Winner = "Lion", "Lion"
+		before := &bm.SubResults[0]
+		seatBracketSide(bm, domain.MatchSideB, "Lion", "b")
+		assert.Same(t, before, &bm.SubResults[0], "the list is the one it was")
+		assert.Equal(t, "Lion", bm.SubResults[0].Winner)
+	})
 	// PIN, green by design: the match's old name carries the Winner only for a
 	// side that keeps its team, as the row's own old name does.
 	t.Run("a row that names no one, given another team, leaves the winner", func(t *testing.T) {

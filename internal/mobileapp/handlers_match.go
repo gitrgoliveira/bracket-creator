@@ -2152,11 +2152,12 @@ func (e *landedWriteRefusal) Unwrap() error { return e.refusal }
 // whether a score write, as the judges before the engine leave it (subs),
 // introduces a member id on a row that judge looks at, against the match as it
 // stood before the write (before, the snapshot read at the top of it). Those
-// rows are the representative bout's, for anyone's write (either side's pick,
-// against before.RepBout, the row the judge compares it with), and with numbered
-// a participant's numbered rows (either fighter and the winner, against the
-// stored row at the same Position). A position the stored match lacks holds no
-// id, so every id its row carries is an introduction.
+// rows are judgedRows', the selection the judge (membersOutsideTeams) reads too:
+// the representative bout's, for anyone's write (either side's pick, against
+// before.RepBout, the row the judge compares it with), and with numbered a
+// participant's numbered rows (either fighter and the winner, against the stored
+// row at the same Position). A position the stored match lacks holds no id, so
+// every id its row carries is an introduction.
 //
 // The invariant that makes the gate equivalent to judging every write: the
 // engine never lands a member id the judge would refuse that the payload did
@@ -2174,30 +2175,50 @@ func (e *landedWriteRefusal) Unwrap() error { return e.refusal }
 // side id over an id-less stored side lands (reconcileSides), so a gate keyed on
 // the stored team ids would skip exactly that write.
 func introducesJudgedMember(subs []state.SubMatchResult, before matchSnapshot, numbered bool) bool {
-	var storedRows []state.SubMatchResult
-	if before.Stored != nil {
-		storedRows = before.Stored.SubResults
-	}
-	for _, row := range subs {
-		if row.Position == state.DaihyosenSubPosition {
-			var stored state.SubMatchResult
-			if before.RepBout != nil {
-				stored = *before.RepBout
-			}
-			if introducesFighter(row, stored) {
-				return true
-			}
-			continue
-		}
-		if !numbered {
-			continue
-		}
-		stored := boutAt(storedRows, row.Position)
-		if introducesFighter(row, stored) || introducesWinnerMember(row, stored) {
+	for _, j := range judgedRows(subs, before, numbered) {
+		if introducesFighter(j.row, j.stored) || (!j.rep && introducesWinnerMember(j.row, j.stored)) {
 			return true
 		}
 	}
 	return false
+}
+
+// judgedRow is a row the member judge looks at with the stored row it compares
+// the row with, and whether it is the representative bout's.
+type judgedRow struct {
+	row, stored state.SubMatchResult
+	rep         bool
+}
+
+// judgedRows is the ONE selection of what the member judge looks at, read by the
+// gate (introducesJudgedMember, on the payload's rows) and by the judge
+// (membersOutsideTeams, on the landed rows), so a row added to one is added to
+// the other. Per row, not per field: the winner check needs the row's two side
+// ids with the stored row's as its fallback. Every representative-bout row is
+// judged for anyone, against before.RepBout (the row the judge compares a pick
+// with, the empty row when the match has none); with numbered, a participant's
+// write, every other row too, against the stored row at its Position
+// (state.SubResultAt: a position the stored match lacks holds no id, so every id
+// its row carries is an introduction). Rows come in the order given.
+func judgedRows(subs []state.SubMatchResult, before matchSnapshot, numbered bool) []judgedRow {
+	var storedRows []state.SubMatchResult
+	if before.Stored != nil {
+		storedRows = before.Stored.SubResults
+	}
+	var out []judgedRow
+	for _, row := range subs {
+		switch {
+		case row.Position == state.DaihyosenSubPosition:
+			var stored state.SubMatchResult
+			if before.RepBout != nil {
+				stored = *before.RepBout
+			}
+			out = append(out, judgedRow{row: row, stored: stored, rep: true})
+		case numbered:
+			out = append(out, judgedRow{row: row, stored: state.SubResultAt(storedRows, row.Position)})
+		}
+	}
+	return out
 }
 
 // introducesFighter reports whether a row puts a member id on either side that
@@ -2205,17 +2226,6 @@ func introducesJudgedMember(subs []state.SubMatchResult, before matchSnapshot, n
 func introducesFighter(row, stored state.SubMatchResult) bool {
 	return introducesID(row.SideAMemberID, stored.SideAMemberID) ||
 		introducesID(row.SideBMemberID, stored.SideBMemberID)
-}
-
-// boutAt returns the row of subs at position, the empty row when there is none:
-// a position a match lacks holds no member id.
-func boutAt(subs []state.SubMatchResult, position int) state.SubMatchResult {
-	for _, s := range subs {
-		if s.Position == position {
-			return s
-		}
-	}
-	return state.SubMatchResult{}
 }
 
 // landedMembersRefusal judges who a score write SEATS by what it landed, read
@@ -2271,29 +2281,21 @@ func landedMembersRefusal(stx state.StoreTx, compID, matchID string, before matc
 }
 
 // membersOutsideTeams is landedMembersRefusal's judgement: it answers the first
-// refusal, an error of another kind being a read that failed.
+// refusal, an error of another kind being a read that failed. The rows it
+// judges are judgedRows' over the landed rows, the same selection the gate
+// (introducesJudgedMember) makes over the payload's.
 func membersOutsideTeams(judge *memberJudge, before, after matchSnapshot, numbered bool) error {
-	pairing := after.Pairing
-	if numbered {
-		for _, row := range after.Stored.SubResults {
-			if row.Position == state.DaihyosenSubPosition {
-				continue
-			}
-			stored := boutAt(before.Stored.SubResults, row.Position)
-			if err := winnerMemberOutsideBout(row, stored); err != nil {
+	for _, j := range judgedRows(after.Stored.SubResults, before, numbered) {
+		refusal := errRepMemberNotInTeam
+		if !j.rep {
+			if err := winnerMemberOutsideBout(j.row, j.stored); err != nil {
 				return err
 			}
-			if err := rowMembersOutsideTeams(judge, pairing, row, stored, errBoutFighterNotInTeam); err != nil {
-				return err
-			}
+			refusal = errBoutFighterNotInTeam
 		}
-	}
-	if i := state.DaihyosenSubIndex(after.Stored.SubResults); i >= 0 {
-		var stored state.SubMatchResult
-		if before.RepBout != nil {
-			stored = *before.RepBout
+		if err := rowMembersOutsideTeams(judge, after.Pairing, j.row, j.stored, refusal); err != nil {
+			return err
 		}
-		return rowMembersOutsideTeams(judge, pairing, after.Stored.SubResults[i], stored, errRepMemberNotInTeam)
 	}
 	return nil
 }

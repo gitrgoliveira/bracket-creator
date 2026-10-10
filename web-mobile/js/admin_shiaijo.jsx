@@ -1326,8 +1326,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     //
     // A start that did NOT land leaves the court free, so the past-tense sentence
     // would be false, and that start's own refusal (a thrown 409, a clock_skew
-    // answer) is what the operator needs. It is stored for the blocker before this
-    // runs (startMatch's catch, ahead of its finally), and startMatch clears
+    // or superseded answer) is what the operator needs. It is stored for the
+    // blocker before this runs (startMatch's refusal branch or its catch, ahead
+    // of its finally), and startMatch clears
     // startError when a start passes the guard, so any value present when the
     // blocker ends is the blocker's own: it is kept, and the waiting match shows
     // nothing, as it did before the sentence existed.
@@ -1377,28 +1378,29 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // Starting makes the match running; the scoring panel shows
             // running[0], so it picks the match up on the next refetch.
             const res = await onEditScore(m.compId, m.id, startPatch(), m);
-            // A clock_skew refusal means the server stored NOTHING and, unlike
-            // a queued start, nothing will land later — so returning true here
-            // would pin the panel on a match that never started while the tap
-            // looked like it worked. Found in browser verification: this card
-            // button is a start path none of the review sweeps enumerated (it
-            // is not one of the editor call sites). The relearn the refusal
-            // triggers means a SECOND tap normally succeeds; the toast tells
-            // the operator that, instead of leaving a dead first tap.
+            // A clock_skew or a superseded answer means the server stored
+            // NOTHING of the start and, unlike a queued start, nothing will land
+            // later, so returning true here would pin the panel on a match that
+            // never started while the tap looked like it worked. Found in
+            // browser verification: this card button is a start path none of the
+            // review sweeps enumerated (it is not one of the editor call sites).
+            // Both are a REFUSED start (start_match.jsx classifyStartOutcome): the
+            // sentence is stored on the refused match and toasted once, and
+            // `landed` stays unset, so a refusal that waited on this start is not
+            // worded as "was being started". The sentences differ in their advice
+            // (after a clock refusal a SECOND tap normally succeeds; after a
+            // superseded one the operator checks the match first), which is why
+            // the toast and the card carry the sentence and not a bare failure.
+            //
+            // For a PICK the court is not "as it was": the running bout was
+            // already sent back to the queue (deferAndStart), and this refusal
+            // leaves the court idle with that bout waiting in the queue.
             const outcome = classifyStartOutcome(res);
             if (!outcome.ok) {
                 if (mountedRef.current) setStartError(refusalFor(outcome.msg));
                 if (showToast) showToast(outcome.msg, "error");
                 return false;
             }
-            // A superseded start wrote nothing (a newer change to the match's
-            // result is already stored, and the refetch editMatchScore awaited
-            // shows what that change made of the match): the court is as it was.
-            // It is not a start that went out, so no refusal waiting on it is
-            // worded as "was being started", and a pick must not pin the panel on
-            // a match the server did not start. Nothing is toasted or stored for
-            // it, as before.
-            if (outcome.superseded) return false;
             // The start went out. A refusal that waited on it (or on the pick that
             // made it) reads this, whichever record it holds.
             started.landed = true;

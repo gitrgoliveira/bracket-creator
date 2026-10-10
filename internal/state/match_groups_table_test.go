@@ -291,3 +291,27 @@ func TestMaterializedGroupStamps_RepPicksOnlyWithARepresentativeRow(t *testing.T
 		assert.NotContains(t, m.GroupStamps, GroupRepPickB, "and only that side")
 	})
 }
+
+// TestSubResultAt_IsTheFirstRowAtThePositionAsAValue pins what the self-run
+// member judge relies on when it compares a landed row with the stored one at
+// the same position: the FIRST row at the position, copied (the caller reads
+// it, never edits the stored list), and the empty row when the match lacks the
+// position, since a position a match lacks holds no member id.
+func TestSubResultAt_IsTheFirstRowAtThePositionAsAValue(t *testing.T) {
+	t.Parallel()
+
+	subs := []SubMatchResult{
+		{Position: 1, SideAMemberID: "first"},
+		{Position: DaihyosenSubPosition, SideAMemberID: "rep"},
+		{Position: 1, SideAMemberID: "second"},
+	}
+
+	assert.Equal(t, "first", SubResultAt(subs, 1).SideAMemberID, "the first row at a position wins")
+	assert.Equal(t, "rep", SubResultAt(subs, DaihyosenSubPosition).SideAMemberID)
+	assert.Equal(t, SubMatchResult{}, SubResultAt(subs, 7), "a position the match lacks is the empty row")
+	assert.Equal(t, SubMatchResult{}, SubResultAt(nil, 1))
+
+	got := SubResultAt(subs, 1)
+	got.SideAMemberID = "edited"
+	assert.Equal(t, "first", subs[0].SideAMemberID, "the answer is a copy: editing it leaves the stored list alone")
+}

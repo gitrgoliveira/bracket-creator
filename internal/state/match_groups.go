@@ -150,6 +150,16 @@ func subAt(subs []SubMatchResult, position int) *SubMatchResult {
 	return nil
 }
 
+// SubResultAt is subAt as a value: a copy of the first bout row at position,
+// the empty row when subs has none (a position a match lacks holds no member id,
+// which is what a caller comparing a row with the stored one wants).
+func SubResultAt(subs []SubMatchResult, position int) SubMatchResult {
+	if row := subAt(subs, position); row != nil {
+		return *row
+	}
+	return SubMatchResult{}
+}
+
 // repPicksOf returns the two representatives the row at DaihyosenSubPosition
 // of subs names, empty when there is no such row.
 func repPicksOf(subs []SubMatchResult) (sideA, sideB string) {

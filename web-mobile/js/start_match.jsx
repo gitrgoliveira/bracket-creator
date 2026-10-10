@@ -65,6 +65,16 @@ export function startPatch() {
 // tap.
 export const START_CLOCK_SKEW_MESSAGE = "Could not start: " + CLOCK_SKEW_REASON_TEXT + ". The clock has been resynced; try again.";
 
+// The sentence for a start the server held as superseded (HTTP 200 applied:false,
+// reason superseded): a newer change to this match is already stored, so nothing
+// of the start was written. Unlike the clock sentence above it never says "try
+// again": the opposite is true, the operator must look at the match first, since
+// starting it again blind is exactly what that newer change may have made wrong.
+// It is the same sentence whether the newer change was a held write or another
+// device's start that landed first (the row then reads running after the refetch,
+// the stored notice drops, startRefusalStands, and only the toast is seen).
+export const START_SUPERSEDED_MESSAGE = "Not started: a newer change to this match was recorded first. Check the match before starting it.";
+
 // The sentence for a thrown start that carries none of its own.
 export const START_FAILED_MESSAGE = "Could not start the match: check eligibility and try again.";
 
@@ -72,27 +82,31 @@ export const START_FAILED_MESSAGE = "Could not start the match: check eligibilit
 //   { ok: true }          the start landed, or was QUEUED (a queued start lands
 //                         on reconnect, so the host treats it as started), or
 //                         came back without a body.
-//   { ok: true, superseded: true }
-//                         the server held the start (applied:false, reason:
-//                         superseded): a newer change to the match's result is
-//                         already stored, nothing of the start was written and
-//                         the court is as it was. There is no refusal to report
-//                         (the live data the host re-reads shows whatever that
-//                         change made of the match), but it is NOT a start that
-//                         went out: a host that records "the start went out"
-//                         (the console's `landed`, which words the past-tense
-//                         notice on a row refused behind it) or pins its panel
-//                         on the match must not, and the Scores tab, which keeps
-//                         no such record, may carry on.
-//   { ok: false, msg }    the start was refused for the clock: nothing was
-//                         stored and nothing will land later, so a host that
-//                         called it started would pin a panel on a match that
-//                         never started while the tap looked like it worked.
+//   { ok: false, msg }    the start was REFUSED and nothing will land later: a
+//                         host that called it started would pin a panel on a
+//                         match that never started while the tap looked like it
+//                         worked. Two answers are refusals, each in its own
+//                         words:
+//                           - clock_skew: the device's clock was out of step;
+//                             the relearn it triggers means a second tap
+//                             normally succeeds (START_CLOCK_SKEW_MESSAGE).
+//                           - superseded: a newer change to the match is already
+//                             stored, so nothing of the start was written
+//                             (START_SUPERSEDED_MESSAGE). The sentence never
+//                             invites a retry, since the operator must look at
+//                             the match first. Held as the same refusal whether
+//                             or not groups were held (an echo-hold has empty
+//                             heldGroups): when another device's start landed
+//                             first the row reads running after the refetch, the
+//                             stored notice drops (startRefusalStands) and only
+//                             the toast is seen, which is still true.
+// Both hosts take a refusal the same way (store it on the refused match, toast
+// it once, return not-started), so a superseded start needs no branch of its own.
 // A start that THROWS (a 409) is not an answer at all; startFailureMessage
 // words it.
 export function classifyStartOutcome(res) {
     if (writeWasRefusedForClock(res)) return { ok: false, msg: START_CLOCK_SKEW_MESSAGE };
-    if (writeWasSuperseded(res)) return { ok: true, superseded: true };
+    if (writeWasSuperseded(res)) return { ok: false, msg: START_SUPERSEDED_MESSAGE };
     return { ok: true };
 }
 

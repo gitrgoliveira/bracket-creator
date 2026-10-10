@@ -149,7 +149,8 @@ func seatedAnotherTeam(storedName, storedID, name, id string) bool {
 // nameRepBoutRow writes name as side's name on the rep bout row at index row.
 // The list is replaced, never edited in place, so a row another copy of the
 // match shares is never written through (state.withRepPick does the same for a
-// pick); a name the row already has writes nothing and copies nothing. another
+// pick); a name the row already has writes nothing and copies nothing, unless
+// its Winner still names the side by matchOld (the carry below). another
 // says the side was given another team: a side that kept its team (a rename)
 // also takes the row's Winner along when it names the side by the old name,
 // whether that is the row's own old side name or matchOld, the match's name for
@@ -169,17 +170,22 @@ func nameRepBoutRow(bm *state.BracketMatch, row int, side domain.MatchSide, name
 		return &r.SideB
 	}
 	old := *field(&bm.SubResults[row])
-	if old == name {
-		return
-	}
-	subs := slices.Clone(bm.SubResults)
-	*field(&subs[row]) = name
 	// A side that kept its team and only has a new name keeps what the row
 	// decided: the row's Winner names that team by the name it was recorded
 	// under (the row's, or the match's), and the mark is placed by comparing
 	// the two. A side given another team leaves the Winner as it was, the
-	// decision of the team that left.
-	if w := subs[row].Winner; !another && w != "" && (w == old || w == matchOld) {
+	// decision of the team that left. It is worked out before the row's own
+	// name is compared with the new one, because a row can already read the new
+	// name while its Winner still reads the old (a writer that restated the
+	// rename on the row alone).
+	w := bm.SubResults[row].Winner
+	carry := !another && w != "" && w != name && (w == old || w == matchOld)
+	if old == name && !carry {
+		return
+	}
+	subs := slices.Clone(bm.SubResults)
+	*field(&subs[row]) = name
+	if carry {
 		subs[row].Winner = name
 	}
 	bm.SubResults = subs

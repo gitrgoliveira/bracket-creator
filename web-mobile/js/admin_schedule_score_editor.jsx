@@ -184,7 +184,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
   // `toasted` is true for a thrown refusal editMatchScore (admin.jsx) already
   // toasted: the toast is a single slot (app.jsx), so saying it again would only
   // replace it and restart its timer. The row notice is set either way. A
-  // refusal only this page sees (a clock_skew answer, "still being started")
+  // refusal only this page sees (a clock_skew or superseded answer, "still being started")
   // carries no mark and is toasted here, once.
   const refuseStart = (next, msg, waitingOn = null, toasted = false) => {
     if (mountedRef.current) {
@@ -198,11 +198,15 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
   // start is out, (b) reads the answer, (c) reports a refusal (refuseStart).
   // Resolves true when the start went ahead (landed or queued), false otherwise;
   // it never throws. A SUPERSEDED start (classifyStartOutcome: nothing written, a
-  // newer change to the match's result is stored) also resolves true, on purpose:
-  // the court console records "the start went out" and words a past-tense notice
-  // from it, so it must tell the two apart; this page keeps no such record, and
-  // the answer only decides whether the decision flow opens the next match, which
-  // is right either way (still scheduled, with its Start button).
+  // newer change to the match's result is stored) is a REFUSED start like a
+  // clock_skew one: refuseStart stores its sentence on the refused match's row,
+  // toasts it once and opens that match, and the answer is false, so a caller
+  // does not move on as if the match had started. That replaces the refusal that
+  // waited on this start (`startRefusal` is a single slot and refuseStart clears
+  // `waitingOn`), which is why the finally below has nothing left to rewrite into
+  // a past-tense "was being started" for it: the same mechanism a thrown refusal
+  // relies on. `waitingOn` is this page's record of "a refusal is waiting on that
+  // start"; a start that wrote nothing replaces the refusal that carried it.
   // Every start-gating rule is the server's (StartMatchTx), so a thrown 409 only
   // needs reporting.
   const startNext = async (next) => {
@@ -234,6 +238,11 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
       // any stored refusal here: it goes when that match leaves scheduled or the
       // operator opens another). The refused match is not started on its own: the
       // court now has a running bout, and one start at a time is the rule.
+      // That holds only for a start that WENT OUT (landed or queued). One that
+      // wrote nothing (a thrown refusal, a clock_skew or a superseded answer) has
+      // stored its own refusal through refuseStart, which replaced the waiting one
+      // and cleared `waitingOn`, so this finds nothing to rewrite: the court is
+      // free and "was being started" would be false.
       if (mountedRef.current) {
         setStartRefusal((prev) => (prev && prev.waitingOn === key
           ? { key: prev.key, msg: startWasBlockedByStartMessage({ label: scoreRowMatchName(next) }), waitingOn: null }
@@ -575,8 +584,9 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                 // (honest to the label). If the
                 // next match is already running/completed, just open it. Start
                 // gating runs server-side (StartMatchTx): startNext reports a
-                // refusal (a thrown 409, or a clock_skew answer) on that match's
-                // row and by toast, and the operator stays on it in pre-match to
+                // refusal (a thrown 409, or a clock_skew or superseded answer) on
+                // that match's row and by toast, and the operator stays on it in
+                // pre-match to
                 // resolve the issue. The live lookup shows a started match:
                 // editMatchScore awaits its refresh.
                 setOpenKey(scoreKeyOf(nextActiveMatch));

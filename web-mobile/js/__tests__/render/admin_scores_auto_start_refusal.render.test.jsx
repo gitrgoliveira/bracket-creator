@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } 
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { CLOCK_SKEW_REASON_TEXT, startWhileStartingMessage, startWasBlockedByStartMessage, markToasted } from '../../write_result.jsx';
 import { scoreRowMatchName } from '../../pool_ids.jsx';
+import { START_SUPERSEDED_MESSAGE } from '../../start_match.jsx';
 
 const side = (id, name) => ({ id, name });
 
@@ -171,13 +172,13 @@ describe('Finish + Start Next on the Scores tab says why the next match did not 
     expect(showToast).not.toHaveBeenCalled();
   });
 
-  // PIN (green by design). A superseded start (HTTP 200 applied:false, reason
-  // superseded) wrote nothing, but it is not a refusal either: this page keeps no
-  // "the start went out" record (the court console's `landed` words a past-tense
-  // notice from one), so nothing here depends on telling it from a landed start.
-  // The operator lands on the next match in pre-match, still scheduled with its
-  // Start button, which is where they want to be.
-  it('a superseded start raises no notice and no toast, and the editor lands on the next match', async () => {
+  // PR #463 round 18 (this REPLACES the round-17 pin that asserted "no notice and
+  // no toast", which encoded the opposite rule). A superseded start (HTTP 200
+  // applied:false, reason superseded) wrote nothing: a newer change to the match
+  // is stored. It is a REFUSED start, through the same path a thrown or
+  // clock_skew refusal takes: the sentence is stored on the refused match's row,
+  // toasted once, and the editor lands on that match in pre-match.
+  it('a superseded start is a refused start: its notice on the next match\'s row, one toast, the editor on that match', async () => {
     const onEditScore = vi.fn(async (_c, id, patch) => (id === 'm-2' && patch.startOnly
       ? { applied: false, reason: 'superseded' }
       : { status: 'ok' }));
@@ -187,8 +188,12 @@ describe('Finish + Start Next on the Scores tab says why the next match did not 
     await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed' }); });
 
     expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-1', 'm-2']);
-    expect(utils.container.querySelectorAll('[data-testid="start-refusal-notice"]')).toHaveLength(0);
-    expect(showToast).not.toHaveBeenCalled();
+    const note = noticeIn(rowOf(utils, 'Alice'));
+    expect(note, 'the refused match says why on its own row').toBeTruthy();
+    expect(note.textContent).toBe(START_SUPERSEDED_MESSAGE);
+    expect(note.getAttribute('role')).toBe('status');
+    expect(utils.container.querySelectorAll('[data-testid="start-refusal-notice"]')).toHaveLength(1);
+    expect(showToast.mock.calls).toEqual([[START_SUPERSEDED_MESSAGE, 'error']]);
     expect(probe.props.match.id).toBe('m-2');
     expect(probe.props.match.status).toBe('scheduled');
   });
@@ -261,6 +266,33 @@ describe('a start that was waited for and then refused', () => {
     expect(noticeIn(rowOf(utils, 'Alice'))?.textContent, 'the failed start keeps its own refusal').toBe(WITHDREW);
     expect(noticeIn(rowOf(utils, 'Carol')), 'the court is free: no past-tense notice').toBeFalsy();
   });
+
+  // PR #463 round 18: a SUPERSEDED start is a start that wrote nothing, so it
+  // ends like the thrown one above: the court is free, "was being started" would
+  // be false, and its own refusal (the superseded sentence) is stored for it,
+  // which replaces the refusal that waited on it (refuseStart keeps a single
+  // slot and clears `waitingOn`, so the finally has nothing left to rewrite).
+  it('a start that is superseded keeps its own refusal on its row, and the waiting row gets no past-tense notice', async () => {
+    let releaseStart;
+    const onEditScore = vi.fn((_c, id, patch) => {
+      if (id === 'm-2' && patch.startOnly) return new Promise((resolve) => { releaseStart = resolve; });
+      return Promise.resolve({ status: 'ok' });
+    });
+    const showToast = vi.fn();
+    const utils = await mountAndOpenRunning(onEditScore, showToast);
+
+    await act(async () => { probe.props.onSubmitAndNext({ status: 'completed' }); });
+    await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed' }); });
+    expect(noticeIn(rowOf(utils, 'Carol'))?.textContent).toBe(startWhileStartingMessage({ label: scoreRowMatchName(M2) }));
+
+    await act(async () => { releaseStart({ applied: false, reason: 'superseded' }); });
+    expect(noticeIn(rowOf(utils, 'Alice'))?.textContent, 'the superseded start keeps its own refusal').toBe(START_SUPERSEDED_MESSAGE);
+    expect(noticeIn(rowOf(utils, 'Carol')), 'nothing was started: no past-tense notice on the waiting row').toBeFalsy();
+    expect(utils.container.textContent).not.toContain('was being started');
+    expect(onEditScore.mock.calls.filter(isStart).map((c) => c[1]), 'and m-3 was not started on its own').toEqual(['m-2']);
+    expect(showToast.mock.calls.map((c) => c[0])).toEqual([startWhileStartingMessage({ label: scoreRowMatchName(M2) }), START_SUPERSEDED_MESSAGE]);
+    expect(probe.props.match.id, 'the editor lands on the match that did not start').toBe('m-2');
+  });
 });
 
 describe('the start after a decision says why too', () => {
@@ -293,10 +325,11 @@ describe('the start after a decision says why too', () => {
     expect(probe.props.match.id).toBe('m-2');
   });
 
-  // PIN (green by design): see the superseded case above. onAfterDecision is the
-  // one place this page reads startNext's answer, to open the next match, and a
-  // superseded start still opens it.
-  it('a superseded start after a decision still opens the next match, with no notice', async () => {
+  // See the superseded case above (round 18: it replaces the round-17 pin that
+  // asserted no notice and no toast). refuseStart opens the refused match, so
+  // onAfterDecision lands on m-2 either way; what changed is that the operator is
+  // told why it is still scheduled.
+  it('a superseded start after a decision lands on the next match with its notice and one toast', async () => {
     const onEditScore = vi.fn().mockResolvedValue({ applied: false, reason: 'superseded' });
     const showToast = vi.fn();
     const utils = await mountAndOpenRunning(onEditScore, showToast);
@@ -304,8 +337,11 @@ describe('the start after a decision says why too', () => {
     await act(async () => { await probe.props.onAfterDecision({ winner: side('m-1-a', 'Yamada') }); });
 
     expect(onEditScore).toHaveBeenCalledTimes(1);
-    expect(utils.container.querySelectorAll('[data-testid="start-refusal-notice"]')).toHaveLength(0);
-    expect(showToast).not.toHaveBeenCalled();
+    const note = noticeIn(rowOf(utils, 'Alice'));
+    expect(note, 'the decision path shows the refusal too').toBeTruthy();
+    expect(note.textContent).toBe(START_SUPERSEDED_MESSAGE);
+    expect(utils.container.querySelectorAll('[data-testid="start-refusal-notice"]')).toHaveLength(1);
+    expect(showToast.mock.calls).toEqual([[START_SUPERSEDED_MESSAGE, 'error']]);
     expect(probe.props.match.id).toBe('m-2');
   });
 });

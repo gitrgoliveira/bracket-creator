@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } 
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, startWhileCorrectingMessage, startWhileStartingMessage, correctWhileRunningMessage, CLOCK_SKEW_REASON_TEXT, markToasted, startWasBlockedByStartMessage } from '../../write_result.jsx';
 import { scoreRowMatchName } from '../../pool_ids.jsx';
+import { START_SUPERSEDED_MESSAGE } from '../../start_match.jsx';
 // Window globals required by admin_shiaijo.jsx.
 // MODULE-EVAL-TIME entries (e.g. `const AdminTopbar = window.AdminTopbar;`)
 // must be set before the dynamic import, or the module captures undefined.
@@ -2181,9 +2182,12 @@ describe('a Start tapped while another start is still out is refused before anyt
     });
 
     // A superseded start is HTTP 200 {applied:false, reason:'superseded'}: a newer
-    // change to the match's result is already stored, nothing of the start was
-    // written and the court is as it was. "m3 was being started" would be false,
-    // and the pick must not pin the panel on a match the server did not start.
+    // change to the match's result is already stored and nothing of the start was
+    // written. For a PICK that is not "as it was": the running bout was sent back
+    // to the queue before the start, so the court is IDLE (and m3 shows the
+    // superseded refusal like any refused start; see the describe below). "m3 was
+    // being started" would be false, and the pick must not pin the panel on a
+    // match the server did not start.
     const supersededStartOfM3 = () => vi.fn((_compId, matchId) => Promise.resolve(
       matchId === 'm3' ? { applied: false, reason: 'superseded' } : { applied: true }
     ));
@@ -2420,6 +2424,63 @@ describe('the console toasts a thrown Start refusal once', () => {
       await act(async () => { startButton(rowOf(c, 'Aka m2')).click(); });
       await act(async () => {});
       expect(c.showToast.mock.calls).toEqual([[SENTENCE, 'error']]);
+    } finally { c.restore(); }
+  });
+});
+
+// PR #463 round 18: a Start the server answered SUPERSEDED (HTTP 200
+// {applied:false, reason:'superseded'}: a newer change to the match is stored,
+// nothing of the start was written) is a REFUSED start on the console, through
+// the path a thrown or clock_skew refusal takes: the sentence is stored on the
+// refused match (its Up next card or its queue row, shown while it is still
+// scheduled), toasted once, and the panel is not pinned on a match the server
+// did not start. Before this it said nothing at all.
+describe('the console reports a superseded Start as a refused one', () => {
+  const startButton = (el) => [...el.querySelectorAll('button')].find((b) => /^start/i.test(b.textContent.trim()));
+  const rowOf = (c, text) => [...c.utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes(text));
+  const mountSuperseded = () => mountCourt(
+    [courtMatch('m1', 'scheduled'), courtMatch('m2', 'scheduled')],
+    { onEditScore: vi.fn().mockResolvedValue({ applied: false, reason: 'superseded' }) },
+  );
+
+  it('the Up next card: the superseded sentence on the card, one toast, the panel not pinned', async () => {
+    const c = await mountSuperseded();
+    try {
+      const card = c.utils.container.querySelector('.shiaijo-upnext__card');
+      await act(async () => { startButton(card).click(); });
+      await act(async () => {});
+      expect(card.querySelector('.shiaijo-upnext__error[role="alert"]')?.textContent).toBe(START_SUPERSEDED_MESSAGE);
+      expect(c.showToast.mock.calls).toEqual([[START_SUPERSEDED_MESSAGE, 'error']]);
+      expect(c.editorMatch(), 'nothing was started: the panel is not pinned on m1').toBeNull();
+    } finally { c.restore(); }
+  });
+
+  it('a queue row: the superseded sentence on that row, one toast, the panel not pinned', async () => {
+    const c = await mountSuperseded();
+    try {
+      await act(async () => { startButton(rowOf(c, 'Aka m2')).click(); });
+      await act(async () => {});
+      expect(rowOf(c, 'Aka m2').querySelector('.shiaijo-upnext__error[role="alert"]')?.textContent).toBe(START_SUPERSEDED_MESSAGE);
+      expect(c.showToast.mock.calls).toEqual([[START_SUPERSEDED_MESSAGE, 'error']]);
+      expect(c.editorMatch()).toBeNull();
+    } finally { c.restore(); }
+  });
+
+  // The notice is bound to the match like every stored Start refusal: when the
+  // other device's change that superseded the start leaves the match running (it
+  // started there), the notice drops (startRefusalStands) and the toast was the
+  // only thing the operator saw.
+  it('the notice goes when the match is no longer scheduled in the live data', async () => {
+    const c = await mountSuperseded();
+    try {
+      const card = c.utils.container.querySelector('.shiaijo-upnext__card');
+      await act(async () => { startButton(card).click(); });
+      await act(async () => {});
+      expect(c.utils.container.textContent).toContain(START_SUPERSEDED_MESSAGE);
+      c.feed.current = [courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')];
+      await c.refresh();
+      await act(async () => {});
+      expect(c.utils.container.textContent).not.toContain(START_SUPERSEDED_MESSAGE);
     } finally { c.restore(); }
   });
 });

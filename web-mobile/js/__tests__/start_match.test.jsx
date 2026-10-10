@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { CLOCK_SKEW_REASON_TEXT } from '../write_result.jsx';
 import {
     classifyStartOutcome, startFailureMessage, createStartGuard, startPatch, startRefusalStands,
-    START_CLOCK_SKEW_MESSAGE, START_FAILED_MESSAGE,
+    START_CLOCK_SKEW_MESSAGE, START_FAILED_MESSAGE, START_SUPERSEDED_MESSAGE,
 } from '../start_match.jsx';
 
 describe('classifyStartOutcome', () => {
@@ -31,15 +31,27 @@ describe('classifyStartOutcome', () => {
         expect(classifyStartOutcome(null)).toEqual({ ok: true });
     });
 
-    it('a superseded start is not a clock refusal to report, but it is not a start that went out either', () => {
-        // Nothing of it was written: a newer change to the match's result is
-        // already stored, so a host that records "the start went out" must not.
-        expect(classifyStartOutcome({ applied: false, reason: 'superseded' })).toEqual({ ok: true, superseded: true });
+    it('a superseded start is a refused start, in its own words: nothing was written and nothing will land later', () => {
+        // A newer change to the match's result is already stored. The start is
+        // refused like a clock_skew one (a stored notice and a toast on both
+        // hosts), not waved through: a host that took it for a start that went
+        // out would pin a panel on a match the server did not start, say nothing
+        // to the operator, and word a past-tense "was being started" for a start
+        // that wrote nothing (PR #463 round 18).
+        const out = classifyStartOutcome({ applied: false, reason: 'superseded' });
+        expect(out.ok).toBe(false);
+        expect(out.msg).toBe(START_SUPERSEDED_MESSAGE);
+        expect(out.msg).toBe('Not started: a newer change to this match was recorded first. Check the match before starting it.');
     });
 
-    it('only a superseded answer carries the flag: landed, queued and body-less starts did go out', () => {
+    it('a superseded answer that also holds groups (heldGroups) is the same refusal', () => {
+        expect(classifyStartOutcome({ applied: false, reason: 'superseded', heldGroups: ['result'] }))
+            .toEqual({ ok: false, msg: START_SUPERSEDED_MESSAGE });
+    });
+
+    it('only a superseded or clock_skew answer is a refusal: landed, queued and body-less starts did go out', () => {
         for (const res of [{ applied: true }, { queued: true }, { status: 'ok' }, undefined, null]) {
-            expect(classifyStartOutcome(res).superseded, JSON.stringify(res)).toBeUndefined();
+            expect(classifyStartOutcome(res).ok, JSON.stringify(res)).toBe(true);
         }
     });
 });
@@ -59,9 +71,19 @@ describe('startFailureMessage', () => {
 
 describe('the start copy follows the house words', () => {
     it('carries no em-dash and never says mat', () => {
-        const all = START_CLOCK_SKEW_MESSAGE + START_FAILED_MESSAGE;
+        const all = START_CLOCK_SKEW_MESSAGE + START_FAILED_MESSAGE + START_SUPERSEDED_MESSAGE;
         expect(all).not.toMatch(/—/);
         expect(all).not.toMatch(/\bmats?\b/i);
+    });
+
+    // The two refusals give opposite advice: after a clock refusal the clock has
+    // been resynced and a second tap normally succeeds, but a superseded start
+    // means a NEWER change to the match is stored, and starting it again blind
+    // is what the sentence must not invite.
+    it('the superseded sentence never says "try again": it sends the operator to the match', () => {
+        expect(START_SUPERSEDED_MESSAGE).not.toMatch(/try again/i);
+        expect(START_SUPERSEDED_MESSAGE).toMatch(/Check the match/);
+        expect(START_CLOCK_SKEW_MESSAGE).toMatch(/try again/);
     });
 });
 

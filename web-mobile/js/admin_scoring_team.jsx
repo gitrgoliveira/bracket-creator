@@ -1485,6 +1485,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // and invisible on the wire. Hoisting the shared terms into this one const
   // makes that impossible: both callers see the same verdict-dirty answer by
   // construction.
+  //
+  // Only the VERDICT terms are shared. The two ROW halves differ on purpose:
+  // isDirty compares the whole board, so an unsaved representative pick is
+  // still unsaved work, while daihyosenTouched compares the row's score part
+  // through withoutRepPicks. A pick is its own change group (repPickA /
+  // repPickB, ordered by the server apart from the bout), so it must never
+  // un-silence the bout's scoreline.
   const daihyosenVerdictDirty =
     enchoPeriodCount !== initialEnchoPeriods ||
     daihyosenHantei !== recordedDaihyosenSide ||
@@ -3129,11 +3136,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // replay saving an unrelated bout) erased that verdict on its next save,
     // indistinguishable on the wire from an operator actually cancelling it.
     // A row is genuinely silent only when BOTH halves hold: the operator has
-    // not moved it away from what the SERVER holds (including the hantei
+    // not moved its SCORE part away from what the SERVER holds (the row
+    // without the two representative picks, `withoutRepPicks`, plus the hantei
     // arm/pick and the daihyosen encho counter) AND nothing about it is known
     // locally either (no recorded verdict, no scored points/fouls/draw, no
-    // overtime). An editor that mounted AFTER a verdict/score existed is not
-    // silent even if untouched - it is re-stating what it was shown, which is
+    // overtime). A representative pick is not part of that score part: it is
+    // its own change group (repPickA / repPickB, ordered by the server apart
+    // from the bout), so a pick on a bout nobody has scored must leave the
+    // scoreline unstated, or the write would stamp the bout and a device that
+    // had not yet seen a point struck elsewhere would erase it. An editor that
+    // mounted AFTER a verdict/score existed is not silent even if untouched -
+    // it is re-stating what it was shown, which is
     // the existing, correct behaviour (daihyosenEnchoFields below re-derives
     // and re-sends it). The first half compares against the live server
     // baseline, not a mount-time snapshot, so it now agrees with
@@ -3147,7 +3160,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // pre-gate explicit-[] behaviour (not a regression this change
     // introduces), not a gap this gate closes.
     const daihyosenTouched = hasDaihyosen && (
-      JSON.stringify(subs[daihyosenIdx]) !== JSON.stringify(serverSubs[daihyosenIdx]) ||
+      withoutRepPicks(subs[daihyosenIdx]) !== withoutRepPicks(serverSubs[daihyosenIdx]) ||
       daihyosenVerdictDirty
     );
     const daihyosenKnownLocally = hasDaihyosen && (

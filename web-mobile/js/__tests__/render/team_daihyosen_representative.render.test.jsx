@@ -73,6 +73,12 @@ const FOUGHT_BOUTS = [1, 2, 3].map((position) => ({
 
 const DH_EMPTY = { position: -1, sideA: 'Team A', sideB: 'Team B', decision: 'daihyosen' };
 
+// The representative row AS THE SERVER SENDS IT right after an add: engine.AddDaihyosen
+// (daihyosen.go) builds {Position: -1, Decision: "daihyosen"} and nothing fills the sides,
+// so Go's JSON gives nil ippon arrays and empty side names. DH_EMPTY states the team names,
+// which the server never stores on this row, and so cannot show what a pick does to it.
+const DH_ADDED = { position: -1, sideA: '', sideB: '', ipponsA: null, ipponsB: null, hansokuA: 0, hansokuB: 0, winner: '', decision: 'daihyosen' };
+
 function makeMatch(overrides = {}, { fought = true } = {}) {
   const { subResults = [], ...rest } = overrides;
   return {
@@ -687,5 +693,34 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await rerenderWith(makeMatch({ modifiedAt: pickedAt - 500, sideA: { id: 't3', name: 'Team C' }, subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1c' }] }));
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     expect(dhInput('AKA').value).toBe('Erin');
+  });
+
+  it('R31: a pick on a representative bout nobody has scored names the pick alone and leaves the bout\'s scoreline unstated', async () => {
+    // A pick is its own change group (repPickB). Naming bout:-1 as well would stamp the
+    // bout at the pick, so a device that had not yet seen a point struck elsewhere would
+    // send its stale scoreline under the newer stamp and erase that point.
+    const { onSubmit } = await mount(makeMatch({ subResults: [DH_ADDED] }));
+    await pickFromDh('SHIRO', 'Carol');
+    await pastDebounce();
+    const patch = lastSubmitted(onSubmit);
+    const dh = dhEntryOf(patch);
+    expect(patch.changed, 'the pick is the only change').toEqual(['repPickB']);
+    expect(dh.sideBMemberId).toBe('m1b');
+    expect('ipponsA' in dh, 'the untouched bout states no scoreline').toBe(false);
+    expect('ipponsB' in dh, 'the untouched bout states no scoreline').toBe(false);
+  });
+
+  it('R32: a point struck here on the same bout is still named with the pick, and carries the scoreline', async () => {
+    const { onSubmit } = await mount(makeMatch({ subResults: [DH_ADDED] }));
+    await act(async () => { fireEvent.click(dhIppon('aka', 'M')); });
+    await pickFromDh('SHIRO', 'Carol');
+    await pastDebounce();
+    const patch = lastSubmitted(onSubmit);
+    const dh = dhEntryOf(patch);
+    expect(patch.changed).toContain('bout:-1');
+    expect(patch.changed).toContain('repPickB');
+    expect(patch.changed, 'Aka\'s side was not picked here').not.toContain('repPickA');
+    expect(dh.ipponsA).toEqual(['M']);
+    expect(dh.sideBMemberId).toBe('m1b');
   });
 });

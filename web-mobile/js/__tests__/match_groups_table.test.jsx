@@ -233,4 +233,18 @@ describe('the representatives of the representative bout (repPickA, repPickB)', 
     const next = { subResults: [bout(1, { decision: '' })] };
     expect(changedGroups(next, stored)).toEqual([]);
   });
+
+  // The server stores NO side names on the representative row (engine.AddDaihyosen builds
+  // {Position: -1, Decision: "daihyosen"}), while the editor restates the match's team names
+  // on it so the hantei mark can be placed. The names are the match's sides, never a change of
+  // the bout, so they must not name it.
+  it('the team names the editor states on the representative row, which the server stores empty, are not a change of the bout', () => {
+    const stored = { subResults: [bout(-1, { sideA: '', sideB: '' })] };
+    expect(changedGroups({ subResults: [bout(-1)] }, stored)).toEqual([]);
+  });
+
+  it('a point struck on a representative row the server stores without side names still names bout:-1', () => {
+    const stored = { subResults: [bout(-1, { sideA: '', sideB: '' })] };
+    expect(changedGroups({ subResults: [bout(-1, { ipponsA: ['M'] })] }, stored)).toEqual(['bout:-1']);
+  });
 });

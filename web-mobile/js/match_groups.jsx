@@ -255,11 +255,18 @@ function groupKey(wire, group, next) {
             // re-derived by the server from the bout's winner side and the stored
             // picks (ReconcileWinnerMemberID), so a pick change moves it with no
             // change to the bout: it is left out too, and the winner's name is what
-            // names the bout. Numbered rows keep the rule above.
+            // names the bout. The row's side names are the MATCH's sides, which the
+            // editor restates on it so the hantei mark can be placed on the winner's
+            // side while the server stores none (engine.AddDaihyosen builds the row
+            // with empty sides): they too are never a change of the bout, or a pick
+            // on a bout nobody has scored would name it and stamp its scoreline.
+            // Numbered rows keep the rule above.
             if (pos < 0) {
                 keys.delete('sideAMemberId');
                 keys.delete('sideBMemberId');
                 keys.delete('winnerMemberId');
+                keys.delete('sideA');
+                keys.delete('sideB');
             }
             // A row the baseline does not hold reads as an empty one, so an
             // untouched blank bout is not a change.

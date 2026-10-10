@@ -196,6 +196,51 @@ func TestMerge_RepBout_WinnerMemberIDFollowsTheWinnersName(t *testing.T) {
 	})
 }
 
+// The winner's member id is derived state: the merge works it out again from
+// the winner's name and the stored picks after every write, and the client's
+// bout:-1 comparison leaves it out. So a write that names nothing (bulk-score,
+// an older client) and echoes the representative row with the same score but
+// a different or absent winner id has changed nothing: it must not date the
+// bout (which would fence out an older real change) or count as scoring.
+func TestMerge_RepBout_WinnerMemberIDAloneIsAnEcho(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		for _, tc := range []struct{ name, id string }{
+			{"absent", ""},
+			{"the other side's pick", "dana"},
+			{"an id nobody holds", "zzz"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				h := mmTeam(t, knockout)
+				won := repRow("carol", "dana", []string{"M"}, nil)
+				won.Winner = wrTeamA
+				require.NoError(t, h.write(repWrite(h, mmT1, won, repBoutGroup, repPicksName)))
+				seeded := h.load(t)
+				require.Len(t, seeded.SubResults, 1)
+				require.Equal(t, "carol", seeded.SubResults[0].WinnerMemberID, "setup: derived from the winner and the picks")
+				require.Equal(t, mmT1, seeded.GroupStamp(repBoutGroup), "setup: the bout is dated")
+				require.Equal(t, mmT1, seeded.ModifiedAt, "setup: the match is dated")
+
+				// The match-level winner id was backfilled after the seeding
+				// merge, so the echo carries it too: only the bout's winner
+				// member id differs from what is stored.
+				echo := repRow("carol", "dana", []string{"M"}, nil)
+				echo.Winner, echo.WinnerMemberID = wrTeamA, tc.id
+				w := repWrite(h, mmT2, echo)
+				w.Changed = nil
+				w.WriteDoor = DoorBulkScore
+				w.WinnerID = seeded.WinnerID
+				require.NoError(t, h.write(w))
+
+				got := h.load(t)
+				require.Len(t, got.SubResults, 1)
+				assert.Equal(t, mmT1, got.GroupStamp(repBoutGroup), "an id-only difference is an echo: the bout keeps its date")
+				assert.Equal(t, mmT1, got.ModifiedAt, "and so does the match")
+				assert.Equal(t, "carol", got.SubResults[0].WinnerMemberID, "re-derived from the winner and the picks")
+			})
+		}
+	})
+}
+
 // A pick has no bout to land on once the representative bout is removed: it
 // is held, in the history, not applied onto nothing.
 func TestMerge_RepPick_OnARemovedBoutIsHeld(t *testing.T) {

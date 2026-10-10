@@ -113,7 +113,7 @@ export function heldValueText(group, value) {
         case GROUP_REP:
             return v ? `Shiro ${v.repPlayerB || 'not picked'}, Aka ${v.repPlayerA || 'not picked'}` : 'not picked';
         case GROUP_REP_PICKS:
-            // The ids are member ids, not words: say who was picked, not which.
+            // The values are member ids, not names: say whether each side was picked, not who.
             return v ? `Shiro ${v.sideBMemberId ? 'picked' : 'not picked'}, Aka ${v.sideAMemberId ? 'picked' : 'not picked'}` : 'not picked';
         default:
             if (parseBoutGroup(group) === null) return '';

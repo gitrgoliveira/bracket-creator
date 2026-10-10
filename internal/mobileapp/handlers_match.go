@@ -2115,10 +2115,12 @@ var errRepMemberNotInTeam = &selfRunRefusal{
 // (state.GroupRepPicks). A change the write does not name, or one the merge
 // holds because its stamp is strictly older than the stored change's
 // (domain.ApplyByTimestamp: an equal stamp applies), is never written, so it
-// is not judged: the write is answered superseded and kept in the match's
-// history, as any stale write is. Judging it would refuse a stale queued pick
-// the merge was going to hold anyway. An unnamed write (an older client)
-// changes every group its row carries.
+// is not judged: the picks are held and kept in the match's history, as any
+// stale change is. The rest of the write is ordered by its own stamps, so the
+// write is applied and answered with heldGroups ["repPicks"]; it is answered
+// superseded only when every group it changes is held. Judging the picks would
+// refuse a stale queued pick the merge was going to hold anyway. An unnamed
+// write (an older client) changes every group its row carries.
 //
 // The bout's winner id is NOT judged: it belongs to the bout group and the
 // merge keeps it consistent with the representatives that stand

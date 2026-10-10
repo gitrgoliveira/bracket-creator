@@ -716,7 +716,7 @@ function withoutRepPicks(row) {
 // still equals what the server last said (`prior`) has nothing of the operator's in
 // it. `stamps` is { score, a, b }; a part never edited here has none. With no prior
 // row nothing is known to be untouched, so every part stays.
-function repRowTakes(local, served, prior, stamps, modifiedAt) {
+function repRowTakes(local, prior, stamps, modifiedAt) {
   const held = (stamp) => stamp !== undefined && (modifiedAt || 0) < stamp;
   const pick = (side, key) => !held(stamps[side]) && !!prior && (local[key] || "") === (prior[key] || "");
   return {
@@ -3673,7 +3673,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       const dhServed = daihyosenIdx >= 0 ? serverSubs[daihyosenIdx] : null;
       const dhShown = daihyosenIdx >= 0 ? subs[daihyosenIdx] : null;
       const repTakes = dhServed && dhShown
-        ? repRowTakes(dhShown, dhServed, priorByPos.get(DAIHYOSEN_POSITION), {
+        ? repRowTakes(dhShown, priorByPos.get(DAIHYOSEN_POSITION), {
           score: lastRowEditRef.current.get(DAIHYOSEN_POSITION),
           a: lastRepPickEditRef.current.a,
           b: lastRepPickEditRef.current.b,
@@ -4985,7 +4985,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           )}
           <div className="score-nav">
             {prevMatch ? (
-              <button className="btn btn--sm score-nav__prev" onClick={goPrev} disabled={submitting}>← Prev</button>
+              <button className="btn btn--sm score-nav__prev" onClick={goPrev} disabled={submitting || repTyping}>← Prev</button>
             ) : <span />}
             <div className="score-nav__actions">
               {m.status === "scheduled" && !isBarredMatch(m) && (
@@ -5188,7 +5188,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               )}
             </div>
             {nextMatch ? (
-              <button className="btn btn--sm score-nav__next" onClick={goNext} disabled={submitting}>Next →</button>
+              <button className="btn btn--sm score-nav__next" onClick={goNext} disabled={submitting || repTyping}>Next →</button>
             ) : <span />}
           </div>
           </>

@@ -94,10 +94,11 @@ function dhEntryOf(patch) {
   return (patch.subResults || []).find((s) => s.position === -1);
 }
 
-async function mount(match, { selfReport = false, onClose = vi.fn() } = {}) {
+async function mount(match, { selfReport = false, onClose = vi.fn(), prevMatch, nextMatch, onPrev, onNext } = {}) {
   const onSubmit = vi.fn();
   const view = (m) => (
-    <ScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmit} password="" selfReport={selfReport} />
+    <ScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmit} password="" selfReport={selfReport}
+      prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} />
   );
   let utils;
   await act(async () => { utils = render(view(match)); });
@@ -428,6 +429,26 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await act(async () => { answerEve({ id: 'm9', name: 'Eve', index: 3 }); });
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     expect(screen.getByTestId('team-daihyosen-remove').disabled).toBe(false);
+  });
+
+  it('R18b: Prev and Next are disabled, like Close, while a typed representative is still being named, and offered again once it is', async () => {
+    let answerEve;
+    window.API.addTeamMember.mockImplementation(() => new Promise((resolve) => { answerEve = resolve; }));
+    const neighbour = makeMatch();
+    const match = makeMatch({ subResults: [DH_EMPTY] });
+    await mount(match, { prevMatch: neighbour, nextMatch: neighbour, onPrev: vi.fn(), onNext: vi.fn() });
+    const input = dhInput('SHIRO');
+    await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Eve' } }); });
+    const add = await screen.findByText(/Add “Eve”/);
+    await act(async () => { fireEvent.click(add.closest('button')); });
+    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Eve', ''));
+    // leaveEditor does nothing while the member POST is out, so the buttons must not look available.
+    expect(screen.getByText('← Prev').closest('button').disabled).toBe(true);
+    expect(screen.getByText('Next →').closest('button').disabled).toBe(true);
+    await act(async () => { answerEve({ id: 'm9', name: 'Eve', index: 3 }); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(screen.getByText('← Prev').closest('button').disabled).toBe(false);
+    expect(screen.getByText('Next →').closest('button').disabled).toBe(false);
   });
 
   it('R19: a completed match whose side was given another team clears the stored pick, and Close closes at once with no discard prompt', async () => {

@@ -49,10 +49,11 @@ const (
 	// ordered apart from the bout row they sit on (bout:-1), which keeps the
 	// bout's score and result: a point struck on the bout never alters who was
 	// picked, and a pick never alters the score. The row's WinnerMemberID
-	// stays with the bout (it is part of the result), and the merge
-	// re-derives it whenever the two disagree (SubMatchResult.
-	// ReconcileWinnerMemberID). Not to be confused with GroupRep, the pool
-	// daihyosen/tiebreaker players.
+	// moves with the bout (CopyGroup copies the row), but it is derived state:
+	// neither group's comparison includes it, and the merge works it out again
+	// from the winner's name and the stored picks after every write
+	// (SubMatchResult.ReconcileWinnerMemberID). Not to be confused with
+	// GroupRep, the pool daihyosen/tiebreaker players.
 	GroupRepPicks = "repPicks"
 
 	boutGroupPrefix = "bout:"
@@ -335,8 +336,13 @@ func groupProjection(m *MatchResult, group string) any {
 		c := CloneSubResults([]SubMatchResult{*row})[0]
 		c.IpponsA, c.IpponsB = nonNilStrings(c.IpponsA), nonNilStrings(c.IpponsB)
 		if pos == DaihyosenSubPosition {
-			// The representatives are GroupRepPicks', not the bout's.
-			c.SideAMemberID, c.SideBMemberID = "", ""
+			// The representatives are GroupRepPicks', not the bout's. The row's
+			// WinnerMemberID is derived from the winner's name and those picks
+			// after every merge (SubMatchResult.ReconcileWinnerMemberID), and the
+			// client's bout comparison leaves it out, so it is no change of the
+			// bout's: a write that echoes the row with another id (or none) has
+			// changed nothing.
+			c.SideAMemberID, c.SideBMemberID, c.WinnerMemberID = "", "", ""
 		}
 		return &c
 	}

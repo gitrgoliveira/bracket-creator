@@ -49,6 +49,9 @@ const DOOR_WORDS = {
     // moved out of the match because it would have left the finished match
     // without a winner (the entry carries that change's own time).
     'displaced': 'Later change moved to history',
+    // A match that was not reopened but had a side seated again by a correction to an
+    // earlier match (a feeder's winner changed), for a line of its own.
+    'reseat': 'Side given another team by a correction to an earlier match',
 };
 
 export function historyDoorWords(door) {
@@ -95,8 +98,20 @@ function resultText(v) {
     return 'finished with no winner';
 }
 
+// pickText: a representative pick is a member id, which says nothing to the operator by
+// itself. `resolve(side, memberId)` is the editor's (the team editor holds both teams'
+// members; the others pass none): a label for the member, null for an id the side's team
+// does not hold now (a correction seated another team), undefined when the editor has no
+// members to look in. Then the line says only that the side was picked.
+function pickText(memberId, side, resolve) {
+    if (!memberId) return 'not picked';
+    const who = typeof resolve === 'function' ? resolve(side, memberId) : undefined;
+    if (who === null) return 'picked (not on the team now)';
+    return who ? `picked ${who}` : 'picked';
+}
+
 // heldValueText: a short readable form of a change kept in the history.
-export function heldValueText(group, value) {
+export function heldValueText(group, value, resolve) {
     const v = value && typeof value === 'object' ? value : null;
     switch (group) {
         case GROUP_POINTS:
@@ -113,18 +128,19 @@ export function heldValueText(group, value) {
         case GROUP_REP:
             return v ? `Shiro ${v.repPlayerB || 'not picked'}, Aka ${v.repPlayerA || 'not picked'}` : 'not picked';
         case GROUP_REP_PICK_A:
-            // The value is a member id, not a name: say whether the side was picked, not who.
-            return v && v.sideAMemberId ? 'picked' : 'not picked';
+            // A = Aka = the match's side A; the id belongs to that side's team.
+            return pickText(v && v.sideAMemberId, 'a', resolve);
         case GROUP_REP_PICK_B:
-            return v && v.sideBMemberId ? 'picked' : 'not picked';
+            return pickText(v && v.sideBMemberId, 'b', resolve);
         default:
             if (parseBoutGroup(group) === null) return '';
             return v ? `${scorelineText(v)}${foulsText(v)}` : 'no bout';
     }
 }
 
-// historyEntryView: one history entry as the lines the disclosure shows.
-export function historyEntryView(entry) {
+// historyEntryView: one history entry as the lines the disclosure shows. `resolve` is
+// the editor's member resolver for a representative pick (pickText); optional.
+export function historyEntryView(entry, resolve) {
     const changed = (entry.changed || []).map(groupLabel).filter(Boolean);
     // A line per group the server recorded as HELD, and only those: an echo
     // it recorded as unchanged (the value already stored) never shows, even
@@ -136,7 +152,7 @@ export function historyEntryView(entry) {
     const keptWord = moved ? 'Moved to history' : 'Kept in history';
     const held = Object.keys(entry.held || {}).filter((g) => outcomes[g] === 'held').map((g) => ({
         group: g,
-        text: `${keptWord}: ${groupLabel(g)}, ${heldValueText(g, entry.held[g])}`,
+        text: `${keptWord}: ${groupLabel(g)}, ${heldValueText(g, entry.held[g], resolve)}`,
     }));
     const cleared = entry.clearedWithdrawal
         ? `Withdrawal cleared by later scoring: ${resultText(entry.clearedWithdrawal)}`
@@ -155,7 +171,10 @@ export function historyEntryView(entry) {
     };
 }
 
-export function MatchHistoryDisclosure({ match, password, hidden = false }) {
+// `members`, optional: the editor's resolver from (side, memberId) to the representative's
+// name (see pickText). Only the team editor holds the members, so the others pass none
+// and a pick reads as it always did.
+export function MatchHistoryDisclosure({ match, password, hidden = false, members }) {
     const [open, setOpen] = useStateH(false);
     const [state, setState] = useStateH({ key: '', loading: false, error: '', entries: null });
     const mountedRef = useRefH(true);
@@ -208,7 +227,7 @@ export function MatchHistoryDisclosure({ match, password, hidden = false }) {
                     {!error && entries && entries.length > 0 && (
                         <ol className="match-history__list">
                             {entries.map((e, i) => {
-                                const v = historyEntryView(e);
+                                const v = historyEntryView(e, members);
                                 // An entry has no id. The history is append-only and read
                                 // whole, oldest first, so its position is stable; the
                                 // rest only helps React tell a reload's entries apart.

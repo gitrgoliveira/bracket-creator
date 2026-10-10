@@ -48,7 +48,11 @@ func TestSeatBracketSide(t *testing.T) {
 		assert.Equal(t, "pc", c)
 		assert.Equal(t, int64(400), bm.GroupStamp(state.GroupRepPickA))
 		assert.Equal(t, int64(400), bm.GroupStamp(state.GroupRepPickB))
+		assert.Equal(t, int64(400), bm.GroupStamp(state.BoutGroup(state.DaihyosenSubPosition)), "a name write dates nothing")
 		assert.Equal(t, int64(500), bm.ModifiedAt)
+		assert.Equal(t, "Ryu II", bm.SubResults[0].SideA, "the row follows the rename")
+		assert.Equal(t, "Kuma", bm.SubResults[0].SideB, "the other side's name is not touched")
+		assert.Equal(t, "pa", bm.SubResults[0].WinnerMemberID, "a rename keeps the pick and the id that rides on it")
 	})
 
 	t.Run("another team on side A clears that pick only, and the winner id that rode on it", func(t *testing.T) {
@@ -56,6 +60,8 @@ func TestSeatBracketSide(t *testing.T) {
 		seatBracketSide(bm, domain.MatchSideA, "Tora", "b")
 		assert.Equal(t, "Tora", bm.SideA)
 		assert.Equal(t, "b", bm.SideAID)
+		assert.Equal(t, "Tora", bm.SubResults[0].SideA, "the row names the team now seated")
+		assert.Equal(t, "Kuma", bm.SubResults[0].SideB, "the other side's name is not touched")
 		a, c := bm.RepPicks()
 		assert.Empty(t, a)
 		assert.Equal(t, "pc", c, "the other side was not re-seated")
@@ -71,6 +77,8 @@ func TestSeatBracketSide(t *testing.T) {
 	t.Run("another team on side B clears that pick only", func(t *testing.T) {
 		bm := seatFixture()
 		seatBracketSide(bm, domain.MatchSideB, "Tora", "b")
+		assert.Equal(t, "Tora", bm.SubResults[0].SideB, "the row names the team now seated")
+		assert.Equal(t, "Ryu", bm.SubResults[0].SideA, "the other side's name is not touched")
 		a, c := bm.RepPicks()
 		assert.Equal(t, "pa", a)
 		assert.Empty(t, c)
@@ -84,8 +92,20 @@ func TestSeatBracketSide(t *testing.T) {
 		seatBracketSide(bm, domain.MatchSideA, "Winner of r1-m0", "")
 		assert.Equal(t, "Winner of r1-m0", bm.SideA)
 		assert.Empty(t, bm.SideAID)
+		assert.Equal(t, "Winner of r1-m0", bm.SubResults[0].SideA, "the row names whatever the match does, a placeholder included")
 		a, _ := bm.RepPicks()
 		assert.Empty(t, a)
+	})
+
+	t.Run("a slot cleared to nothing empties the row's name too, and clears the pick", func(t *testing.T) {
+		bm := seatFixture()
+		seatBracketSide(bm, domain.MatchSideB, "", "")
+		assert.Empty(t, bm.SideB)
+		assert.Empty(t, bm.SideBID)
+		assert.Empty(t, bm.SubResults[0].SideB, "one rule, no special case for the empty string")
+		_, c := bm.RepPicks()
+		assert.Empty(t, c)
+		assert.Equal(t, "Ryu", bm.SubResults[0].SideA)
 	})
 
 	t.Run("the cleared pick is dated above a stamp ahead of the server clock", func(t *testing.T) {
@@ -136,6 +156,103 @@ func TestSeatBracketSide(t *testing.T) {
 		seatBracketSide(bm, domain.MatchSideA, "Tora", "b")
 		assert.Equal(t, "pa", shared[0].SideAMemberID)
 		assert.Equal(t, "pa", shared[0].WinnerMemberID)
+		assert.Equal(t, "Ryu", shared[0].SideA, "nor is the name the re-seat writes")
+	})
+
+	t.Run("the row another copy of the match shares is not written through by a rename either", func(t *testing.T) {
+		bm := seatFixture()
+		shared := bm.SubResults
+		seatBracketSide(bm, domain.MatchSideA, "Ryu II", "a")
+		assert.Equal(t, "Ryu", shared[0].SideA)
+		assert.Equal(t, "Ryu II", bm.SubResults[0].SideA)
+	})
+
+	t.Run("a name that already matches the row leaves the row's list alone", func(t *testing.T) {
+		bm := seatFixture()
+		before := &bm.SubResults[0]
+		seatBracketSide(bm, domain.MatchSideA, "Ryu", "a")
+		assert.Same(t, before, &bm.SubResults[0], "no copy when there is nothing to write")
+	})
+
+	// "Given another team" is judged by id when both sides have one, by name
+	// otherwise (the client's rule in admin_scoring_team.jsx: another team only
+	// when BOTH the side's lookup key and the resolved team changed). The cases
+	// below are legacy, id-less data; the id comparison alone got both wrong.
+	t.Run("an id-less side re-seated under another name is another team: the pick goes", func(t *testing.T) {
+		bm := seatFixture()
+		bm.SideAID = ""
+		seatBracketSide(bm, domain.MatchSideA, "Tora", "")
+		assert.Equal(t, "Tora", bm.SideA)
+		assert.Empty(t, bm.SideAID)
+		assert.Equal(t, "Tora", bm.SubResults[0].SideA)
+		a, c := bm.RepPicks()
+		assert.Empty(t, a, "the team changed although neither side has an id")
+		assert.Equal(t, "pc", c)
+		assert.Greater(t, bm.GroupStamp(state.GroupRepPickA), int64(400))
+		assert.Equal(t, int64(400), bm.GroupStamp(state.GroupRepPickB))
+	})
+
+	t.Run("an id-less side re-seated under the same name keeps the pick and every stamp", func(t *testing.T) {
+		bm := seatFixture()
+		bm.SideAID = ""
+		seatBracketSide(bm, domain.MatchSideA, "Ryu", "")
+		a, _ := bm.RepPicks()
+		assert.Equal(t, "pa", a)
+		assert.Equal(t, int64(400), bm.GroupStamp(state.GroupRepPickA))
+		assert.Equal(t, int64(500), bm.ModifiedAt)
+	})
+
+	t.Run("a writer that does not know the id, naming the same team, neither clears the pick nor blanks the id", func(t *testing.T) {
+		bm := seatFixture()
+		seatBracketSide(bm, domain.MatchSideA, "Ryu", "")
+		assert.Equal(t, "Ryu", bm.SideA)
+		assert.Equal(t, "a", bm.SideAID, "a resolved id is never thrown away for a writer that did not know it")
+		a, _ := bm.RepPicks()
+		assert.Equal(t, "pa", a)
+		assert.Equal(t, "pa", bm.SubResults[0].WinnerMemberID)
+		assert.Equal(t, int64(400), bm.GroupStamp(state.GroupRepPickA))
+		assert.Equal(t, int64(400), bm.GroupStamp(state.GroupRepPickB))
+		assert.Equal(t, int64(500), bm.ModifiedAt)
+	})
+
+	t.Run("a side that carried only its team's name gaining the team's id is not another team", func(t *testing.T) {
+		bm := seatFixture()
+		bm.SideAID = ""
+		seatBracketSide(bm, domain.MatchSideA, "Ryu", "a")
+		assert.Equal(t, "a", bm.SideAID, "the id is written")
+		a, _ := bm.RepPicks()
+		assert.Equal(t, "pa", a, "the pick stays")
+		assert.Equal(t, int64(400), bm.GroupStamp(state.GroupRepPickA))
+		assert.Equal(t, int64(500), bm.ModifiedAt)
+	})
+
+	t.Run("an id-less placeholder resolved to a team is another team, with nothing to clear", func(t *testing.T) {
+		bm := seatFixture()
+		bm.SideA, bm.SideAID = "Winner of r1-m2", ""
+		bm.SubResults[0].SideA = "Winner of r1-m2"
+		bm.SubResults[0].SideAMemberID, bm.SubResults[0].WinnerMemberID = "", ""
+		seatBracketSide(bm, domain.MatchSideA, "Ryu", "a")
+		assert.Equal(t, "Ryu", bm.SideA)
+		assert.Equal(t, "a", bm.SideAID)
+		assert.Equal(t, "Ryu", bm.SubResults[0].SideA, "the row follows the match from the placeholder to the team")
+		assert.Equal(t, int64(400), bm.GroupStamp(state.GroupRepPickA), "no pick, so nothing is dated")
+		assert.Equal(t, int64(500), bm.ModifiedAt)
+	})
+
+	t.Run("two different ids are another team whatever the names say", func(t *testing.T) {
+		bm := seatFixture()
+		seatBracketSide(bm, domain.MatchSideA, "Ryu", "b")
+		assert.Equal(t, "b", bm.SideAID)
+		a, _ := bm.RepPicks()
+		assert.Empty(t, a)
+	})
+
+	t.Run("a stored id and an empty one under another name is another team: the id goes with the pick", func(t *testing.T) {
+		bm := seatFixture()
+		seatBracketSide(bm, domain.MatchSideA, "Winner of r1-m2", "")
+		assert.Empty(t, bm.SideAID)
+		a, _ := bm.RepPicks()
+		assert.Empty(t, a)
 	})
 }
 
@@ -143,9 +260,10 @@ func TestSeatBracketSide(t *testing.T) {
 // another team, and each loses the pick it held for the team that left it.
 func TestPropagateBracketWinner_ReseatsTheNextAndTheBronzeSidesAndTheirPicks(t *testing.T) {
 	eng, _, _ := setupTestEngine(t)
-	row := func(a, b string) []state.SubMatchResult {
+	row := func(nameA, nameB, a, b string) []state.SubMatchResult {
 		return []state.SubMatchResult{{
-			Position: state.DaihyosenSubPosition, SideAMemberID: a, SideBMemberID: b,
+			Position: state.DaihyosenSubPosition, SideA: nameA, SideB: nameB,
+			SideAMemberID: a, SideBMemberID: b,
 		}}
 	}
 	bracket := &state.Bracket{
@@ -158,12 +276,12 @@ func TestPropagateBracketWinner_ReseatsTheNextAndTheBronzeSidesAndTheirPicks(t *
 			},
 			{
 				{ID: "final", SideA: "Tora", SideAID: "b", SideB: "Kuma", SideBID: "c",
-					Status: state.MatchStatusScheduled, SubResults: row("pb", "pk")},
+					Status: state.MatchStatusScheduled, SubResults: row("Tora", "Kuma", "pb", "pk")},
 			},
 		},
 		ThirdPlaceMatch: &state.BracketMatch{
 			ID: "bronze", SideA: "Ryu", SideAID: "a", SideB: "Hawk", SideBID: "d",
-			Status: state.MatchStatusScheduled, SubResults: row("pa", "ph"),
+			Status: state.MatchStatusScheduled, SubResults: row("Ryu", "Hawk", "pa", "ph"),
 		},
 	}
 
@@ -174,11 +292,15 @@ func TestPropagateBracketWinner_ReseatsTheNextAndTheBronzeSidesAndTheirPicks(t *
 	fa, fb := final.RepPicks()
 	assert.Empty(t, fa, "Tora left the final's side A")
 	assert.Equal(t, "pk", fb, "Kuma did not")
+	assert.Equal(t, final.SideA, final.SubResults[0].SideA, "the final's row names the team now seated")
+	assert.Equal(t, final.SideB, final.SubResults[0].SideB, "and the side that was not re-seated")
 	bronze := bracket.ThirdPlaceMatch
 	assert.Equal(t, "Tora", bronze.SideA)
 	ba, bb := bronze.RepPicks()
 	assert.Empty(t, ba, "Ryu left the bronze match's side A")
 	assert.Equal(t, "ph", bb, "Hawk did not")
+	assert.Equal(t, bronze.SideA, bronze.SubResults[0].SideA, "the bronze match's row names the team now seated")
+	assert.Equal(t, bronze.SideB, bronze.SubResults[0].SideB)
 }
 
 // A reopen retracts the winner it had sent on: the slot goes back to its
@@ -205,6 +327,8 @@ func TestReopenMatch_RetractionTakesThePickOfTheClearedSlot(t *testing.T) {
 		next := rpNext(t, store, compID)
 		assert.Empty(t, next.SideAID, "the slot is a placeholder again")
 		assert.NotEqual(t, wrTeamA, next.SideA)
+		require.GreaterOrEqual(t, state.DaihyosenSubIndex(next.SubResults), 0)
+		assert.Equal(t, next.SideA, next.SubResults[state.DaihyosenSubIndex(next.SubResults)].SideA, "the row names the placeholder the slot went back to")
 		a, c := next.RepPicks()
 		assert.Empty(t, a)
 		assert.Equal(t, rpPickC, c)
@@ -252,7 +376,8 @@ func TestResolveSlots_PaintedSideLosesItsPickAndALockedMatchKeepsIt(t *testing.T
 			Status: status, ModifiedAt: 500,
 			GroupStamps: map[string]int64{state.GroupRepPickA: 400, state.GroupRepPickB: 400, state.BoutGroup(state.DaihyosenSubPosition): 400},
 			SubResults: []state.SubMatchResult{{
-				Position: state.DaihyosenSubPosition, SideAMemberID: "pa", SideBMemberID: "pb",
+				Position: state.DaihyosenSubPosition, SideA: "Ryu", SideB: "Tora",
+				SideAMemberID: "pa", SideBMemberID: "pb",
 			}},
 		}}}}
 	}
@@ -271,6 +396,8 @@ func TestResolveSlots_PaintedSideLosesItsPickAndALockedMatchKeepsIt(t *testing.T
 		a, b := m.RepPicks()
 		assert.Empty(t, a, "side A was given another team")
 		assert.Equal(t, "pb", b, "side B was not")
+		assert.Equal(t, "Kuma", m.SubResults[0].SideA, "the row names the competitor painted over the placeholder")
+		assert.Equal(t, "Tora", m.SubResults[0].SideB)
 		assert.Greater(t, m.GroupStamp(state.GroupRepPickA), int64(400))
 		assert.Equal(t, int64(400), m.GroupStamp(state.GroupRepPickB), "side B's pick keeps its date")
 	})
@@ -281,6 +408,7 @@ func TestResolveSlots_PaintedSideLosesItsPickAndALockedMatchKeepsIt(t *testing.T
 		eng.resolveSlots(bracket, resolver)
 		m := bracket.Rounds[0][0]
 		assert.Equal(t, "Ryu", m.SideA, "a running match keeps its competitor")
+		assert.Equal(t, "Ryu", m.SubResults[0].SideA, "and its row keeps the name")
 		a, b := m.RepPicks()
 		assert.Equal(t, "pa", a)
 		assert.Equal(t, "pb", b)

@@ -35,6 +35,7 @@ const STUBBED_GLOBALS = {
     recordDecision: vi.fn(),
     addTeamMember: vi.fn(),
     renameTeamMember: vi.fn(),
+    fetchMatchHistory: vi.fn().mockResolvedValue([]),
   },
   AdminLineupHelpers: { rosterFor: vi.fn().mockReturnValue([]) },
   compMatches: () => [],
@@ -657,6 +658,45 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     expect(dh.sideBMemberId).toBe('m1b');
     expect(patch.changed).toContain('repPickA');
     expect(patch.changed, 'the side adopted from the server is not a change').not.toContain('repPickB');
+  });
+
+  it('R33: a pick adopted for one side is not named again by a point struck here afterwards', async () => {
+    const { onSubmit, rerenderWith } = await mount(makeMatch({ subResults: [DH_EMPTY] }));
+    // The editor's first write: a point struck on the representative bout.
+    await act(async () => { fireEvent.click(dhIppon('aka', 'M')); });
+    await pastDebounce();
+    expect(lastSubmitted(onSubmit).changed).toEqual(['bout:-1']);
+    // Another device picks Carol for Shiro; the point struck here has not come back yet.
+    await rerenderWith(makeMatch({ modifiedAt: Date.now() + 60000, subResults: [{ ...DH_EMPTY, sideBMemberId: 'm1b' }] }));
+    expect(dhInput('SHIRO').value, 'the pick made elsewhere is shown').toBe('Carol');
+    // A second point struck here: the pick is the other device's, adopted and not changed here, so
+    // the write must not put it back under a newer stamp.
+    await act(async () => { fireEvent.click(dhIppon('shiro', 'K')); });
+    await pastDebounce();
+    const patch = lastSubmitted(onSubmit);
+    expect(dhEntryOf(patch).sideBMemberId, 'the pick rides the row as it is').toBe('m1b');
+    expect(patch.changed).toEqual(['bout:-1']);
+  });
+
+  it('R34: the History names the representatives the sheet holds the members of, and an id the team no longer holds', async () => {
+    const at = Date.now();
+    window.API.fetchMatchHistory.mockResolvedValue([
+      { matchId: 'm-ko-1', door: 'daihyosen-remove', stamp: at, receivedAt: at, changed: ['repPickB'], outcomes: { repPickB: 'held' }, held: { repPickB: { sideBMemberId: 'm1b' } } },
+      { matchId: 'm-ko-1', door: 'displaced', stamp: at, receivedAt: at, changed: ['repPickA'], outcomes: { repPickA: 'held' }, held: { repPickA: { sideAMemberId: 'm1a' } }, reason: 'the representative bout was removed' },
+      // Aka's team never held m1b: Shiro's team did.
+      { matchId: 'm-ko-1', door: 'score', stamp: at, receivedAt: at, changed: ['repPickA'], outcomes: { repPickA: 'held' }, held: { repPickA: { sideAMemberId: 'm1b' } } },
+    ]);
+    await mount(makeMatch({ subResults: [DH_EMPTY] }));
+    // The members are read when the sheet opens.
+    await waitFor(() => expect(window.API.fetchSquads).toHaveBeenCalled());
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    await act(async () => { fireEvent.click(screen.getByTestId('match-history-toggle')); });
+    const lines = (await screen.findAllByTestId('match-history-held')).map((el) => el.textContent);
+    expect(lines).toEqual([
+      "Kept in history: Shiro's pick for the representative bout, picked Carol",
+      "Moved to history: Aka's pick for the representative bout, picked Alice",
+      "Kept in history: Aka's pick for the representative bout, picked (not on the team now)",
+    ]);
   });
 
   it('R29: a pick made here and not yet written is dropped when its side is given another team: nothing is sent for it, and the sheet is not dirty', async () => {

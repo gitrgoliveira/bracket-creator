@@ -25,10 +25,16 @@ import { useDialogFocus } from './dialog_focus.jsx';
 // api_client.jsx does not apply to it — the same move admin_scoring_shared.jsx
 // already makes.
 import {
-    writeDidNotLand, writeKeepsEditorOpen, writeWasSuperseded, writeWasRefusedForClock, CLOCK_SKEW_REASON_TEXT,
+    writeDidNotLand, writeKeepsEditorOpen, writeWasSuperseded, writeWasRefusedForClock,
     attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, OVERRIDE_HELD_NOTICE,
     startWhileCorrectingMessage, startWhileStartingMessage, correctWhileRunningMessage,
 } from './write_result.jsx';
+// What a Start came back with (a clock_skew refusal, a thrown 409) is
+// start_match.jsx's to classify, shared with the Scores tab's own automatic
+// start (admin_schedule_score_editor.jsx). The state wiring stays here:
+// startingRef/pickingRef carry the pick exemption (pickMatch), which that
+// leaf's guard has no word for.
+import { classifyStartOutcome, startFailureMessage } from './start_match.jsx';
 // swissRoundLabel: single owner is pool_ids.jsx (mp-dej2); this file used to
 // carry its own copy. scoreRowMatchName names a match in the refusal notices.
 import { swissRoundLabel, scoreRowMatchName } from './pool_ids.jsx';
@@ -1325,16 +1331,17 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // is not one of the editor call sites). The relearn the refusal
             // triggers means a SECOND tap normally succeeds; the toast tells
             // the operator that, instead of leaving a dead first tap.
-            if (writeWasRefusedForClock(res)) {
-                const msg = "Could not start: " + CLOCK_SKEW_REASON_TEXT + ". The clock has been resynced; try again.";
-                if (mountedRef.current) setStartError(refusalFor(msg));
-                if (showToast) showToast(msg, "error");
+            const outcome = classifyStartOutcome(res);
+            if (!outcome.ok) {
+                if (mountedRef.current) setStartError(refusalFor(outcome.msg));
+                if (showToast) showToast(outcome.msg, "error");
                 return false;
             }
             return true;
         } catch (e) {
-            if (mountedRef.current) setStartError(refusalFor((e && e.message) || "Could not start the match: check eligibility and try again."));
-            if (showToast) showToast((e && e.message) || "Could not start the match", "error");
+            const msg = startFailureMessage(e);
+            if (mountedRef.current) setStartError(refusalFor(msg));
+            if (showToast) showToast(msg, "error");
             return false;
         } finally {
             // Only the start that holds the ref clears it; the state follows the refs.

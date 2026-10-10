@@ -51,7 +51,7 @@ import { isOlderRunningCopy } from './patch.jsx';
 
 import { useDebouncedRunningWrite, SyncStatusPill, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
-import { GROUP_REP_PICK_A, GROUP_REP_PICK_B } from './match_groups.jsx';
+import { GROUP_ENCHO, GROUP_RESULT, GROUP_REP_PICK_A, GROUP_REP_PICK_B, boutGroup } from './match_groups.jsx';
 import { serverNowMs } from './server_clock.jsx';
 import { publishHeight } from './published_height.jsx';
 import { SideLabel, sideWithColour } from './side_cell.jsx';
@@ -709,6 +709,23 @@ function withoutRepPicks(row) {
   return JSON.stringify(rest);
 }
 
+// rowTakenFromServer: does the adopt take the server's copy of a bout row (true), or keep
+// the operator's (false)? The ONE rule, asked both by the updater that rebuilds the board
+// and by the pass that tells useChangedGroups which rows were taken (a row taken is a row
+// the editor then agrees with; a row kept stays the operator's edit), so the two cannot
+// drift. `editedAt` is when the operator last edited the row here and `modifiedAt` the
+// match's stamp, both in the server's clock frame. With no local row there is nothing of
+// the operator's to keep. A snapshot written BEFORE the operator's last edit to the row
+// cannot know that edit, so the row stays theirs whatever it now equals (bc-kclr: striking
+// a point and taking it back returns the row to the value the server showed before the
+// strike, which would otherwise read as untouched). Otherwise a row that still equals what
+// the server last said (`prior`) has nothing of theirs in it.
+function rowTakenFromServer(local, prior, editedAt, modifiedAt) {
+  if (!local) return true;
+  if (editedAt !== undefined && (modifiedAt || 0) < editedAt) return false;
+  return !!prior && JSON.stringify(local) === JSON.stringify(prior);
+}
+
 // repRowTakes: which parts of the representative row the adopt takes from the server
 // (true) and which stay the operator's (false), each by the rule a whole row follows:
 // a snapshot written BEFORE the part's last edit here cannot know that edit (`stamps`,
@@ -1226,7 +1243,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // does (its adopt below).
   useAdoptFromServer({
     signature: initialEnchoPeriods,
-    apply: () => setEnchoPeriodCount(initialEnchoPeriods),
+    apply: () => {
+      setEnchoPeriodCount(initialEnchoPeriods);
+      claimChanged.agree(GROUP_ENCHO);
+      // With a representative bout the count is read off its row and written on it, so
+      // taking the count is agreeing with that row too.
+      agreeRepBoutIfNotHeld();
+    },
     keepLocalEdits: true,
     isDirty: enchoPeriodCount !== initialEnchoPeriods,
   });
@@ -1461,6 +1484,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     apply: () => {
       setDaihyosenHanteiArmed(daihyosenHanteiRecorded);
       setDaihyosenHantei(recordedDaihyosenSide);
+      // The verdict is the Ht mark on the representative bout's row and the winner the
+      // match gets from it, so adopting it is agreeing with both groups.
+      agreeRepBoutIfNotHeld();
+      claimChanged.agree(GROUP_RESULT);
     },
     keepLocalEdits: true,
     isDirty: daihyosenHantei !== recordedDaihyosenSide,
@@ -2214,6 +2241,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // RENDER-SYNCHRONOUS because this very render already indexes subs for the
   // new positions — an effect would run after the crash.
   const subs = reconcileRowsToPositions(subsRaw, serverSubs);
+  // The representative bout's row is one group (bout:-1) for the score, the overtime
+  // count and the Ht verdict. Taking the count or the verdict from the server agrees with
+  // that row, unless this board holds an unsaved edit of the row's score: the row follows
+  // the server per part (repRowTakes), and those adopts take no score. The per-row adopt
+  // below agrees with the row when it takes the score itself. Called from the adopts
+  // declared above, at effect time, when this render's boards are all declared.
+  const agreeRepBoutIfNotHeld = () => {
+    if (daihyosenIdx < 0) return;
+    const shown = subs[daihyosenIdx];
+    const served = serverSubs[daihyosenIdx];
+    if (shown && served && withoutRepPicks(shown) === withoutRepPicks(served)) claimChanged.agree(boutGroup(DAIHYOSEN_POSITION));
+  };
   // Two kinds of write reach `subs`, and one arming rule has to tell them
   // apart: the OPERATOR editing (which disarms Finish/End and closes an open
   // reason prompt, because what they were about to confirm has changed under
@@ -2409,7 +2448,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     match: m,
     enabled: !isKachinuki,
     held: pendingWrite,
-    onUndo: () => { setSubs(serverSubs); setFinishRefused(false); },
+    onUndo: () => {
+      setSubs(serverSubs);
+      setFinishRefused(false);
+      // The whole board is the server's again, so the editor agrees with every row.
+      for (const ss of serverSubs) claimChanged.agree(boutGroup(ss._pos));
+    },
     onReset: () => setFinishRefused(false),
   });
   const withdrawalWinner = rulingShown ? ({ a: "b", b: "a" }[withdrawnKeyOf(m)] || null) : null;
@@ -2908,6 +2952,21 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     const teamNumber = (side === "a" ? m.sideA : m.sideB)?.number || "";
     const member = resolveSquadMember(squad, memberId, name);
     return member ? squadMemberLabel(teamNumber, member.index) : "";
+  };
+
+  // The History disclosure's member resolver (match_history_view.jsx pickText): a
+  // representative pick is stored as a member id, and this sheet holds both teams'
+  // members, so the history can name the representative. The member's name, else its
+  // label (squadMemberLabel, as the rows show); null for an id the side's team does not
+  // hold now (a correction seated another team); undefined while the team's members have
+  // not been read, when the history says only that the side was picked. "a" is AKA,
+  // squadA, m.sideA.
+  const historyMemberLabel = (side, memberId) => {
+    const squad = side === "a" ? squadA : squadB;
+    if (!Array.isArray(squad) || squad.length === 0) return undefined;
+    const member = squad.find(mem => mem && mem.id === memberId);
+    if (!member) return null;
+    return member.name || squadMemberLabel((side === "a" ? m.sideA : m.sideB)?.number || "", member.index);
   };
 
   // slotLabelFor: the fallback label for a NUMBERED fixed-order position
@@ -3698,29 +3757,25 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           const local = localByPos.get(ss._pos);
           if (!local) return ss;
           if (repTakes && ss._pos === DAIHYOSEN_POSITION) return composeRepRow(local, ss, repTakes);
-          // bc-kclr: a snapshot written BEFORE the operator's last edit to
-          // this row cannot know that edit, so the row stays theirs, whatever
-          // it now equals. Striking a point and taking it back returns the
-          // row to the value the server showed BEFORE the strike, so the
-          // untouched test below read it as untouched, and the court feed's
-          // lagging snapshot carrying the autosaved point was adopted over
-          // the clear (and written back). Once a snapshot written after the
-          // edit arrives (this editor's own save of it, or a later change on
-          // another device) the ordinary rule applies. Both stamps are in the
-          // server's clock frame (server_clock.jsx), so no time window.
-          const editedAt = lastRowEditRef.current.get(ss._pos);
-          if (editedAt !== undefined && (m.modifiedAt || 0) < editedAt) return local;
-          const prior = priorByPos.get(ss._pos);
-          // Untouched: the operator's row still equals what the server last
-          // said, so there is nothing of theirs to keep — take the new value.
-          if (prior && JSON.stringify(local) === JSON.stringify(prior)) return ss;
-          return local;
+          // bc-kclr: a snapshot written BEFORE the operator's last edit to this row
+          // cannot know that edit, so the row stays theirs (rowTakenFromServer).
+          return rowTakenFromServer(local, priorByPos.get(ss._pos), lastRowEditRef.current.get(ss._pos), m.modifiedAt) ? ss : local;
         });
       });
-      // A pick taken from the server is one this editor now agrees with, so an edit
-      // that puts it back to what the editor mounted with (clearing a pick another
-      // device made) is still a change of that side's pick and is named. A side kept
-      // is the operator's own edit and stays one, so each side is agreed on its own.
+      // What this editor took from the server it now agrees with, so an edit that puts it
+      // back to what the editor mounted with (clearing a pick or a bout another device
+      // made) is still a change and is named, and an edit of something else does not name
+      // it again. What it kept is the operator's own edit and stays one, so each row, and
+      // each side's pick, is agreed on its own. The same rule as the updater above
+      // (rowTakenFromServer, repRowTakes), asked of THIS render's board here, for the same
+      // reason as repTakes: an updater may run a render later or twice.
+      const shownByPos = new Map(subs.map(s => [s._pos, s]));
+      for (const ss of serverSubs) {
+        const taken = repTakes && ss._pos === DAIHYOSEN_POSITION
+          ? repTakes.score
+          : rowTakenFromServer(shownByPos.get(ss._pos), priorByPos.get(ss._pos), lastRowEditRef.current.get(ss._pos), m.modifiedAt);
+        if (taken) claimChanged.agree(boutGroup(ss._pos));
+      }
       if (repTakes && repTakes.a) claimChanged.agree(GROUP_REP_PICK_A);
       if (repTakes && repTakes.b) claimChanged.agree(GROUP_REP_PICK_B);
       // Keep the correction baseline in step. It snapshots who won the bout
@@ -4984,7 +5039,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           <KeptInHistoryNote note={keptInHistory.note} />
           {/* bc-mrgc: every write that reached this match, kept or applied.
               The organiser's view, so not on a self-run participant's sheet. */}
-          <MatchHistoryDisclosure match={m} password={password} hidden={!!selfReport} />
+          <MatchHistoryDisclosure match={m} password={password} hidden={!!selfReport} members={historyMemberLabel} />
           {/* bc-cse: a barred match cannot be started as scheduled -- the
               server would just refuse it -- so the ONE component that shows
               why and offers the default-win/reinstate resolution

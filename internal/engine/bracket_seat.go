@@ -18,18 +18,47 @@ import (
 // (SubMatchResult.SideAMemberID/SideBMemberID, the state.GroupRepPickA and
 // state.GroupRepPickB groups), so a side given ANOTHER team takes its pick away.
 //
-//   - The id is unchanged (a rename, or a correction that stores the winner
-//     already recorded and so re-propagates the same team): the name is written
-//     and nothing else, the pick stays.
-//   - The id changes (team X to team Y, to "" when the slot goes back to a
-//     placeholder, or from "" when a placeholder is resolved): name and id are
-//     written, and a pick held for THAT side is cleared. The other side's pick
-//     is never touched. The rule is id-based, with no name fallback: an id-less
-//     side cannot carry a pick (the picker's roster and the member mint both
-//     need the team id).
-//   - No pick on that side, or no rep bout row at all: nothing else moves, no
-//     stamp, no ModifiedAt, so the draw-time callers produce exactly the
-//     bracket they always did.
+// INVARIANT: after every call -- a winner propagated, a slot cleared back to
+// "" or a "Winner of ..." placeholder, a pool qualifier painted, a rename
+// re-propagated -- the representative bout row's SideA/SideB for THIS side
+// EQUALS the match's SideA/SideB for that side, whatever the string is (a
+// placeholder or empty included: one rule, no special case). The hantei mark
+// is placed on the winner's side by comparing the winner against that row's
+// names (placeHt), so a row still naming the team that was taken out would
+// attribute the verdict to nobody. The name is written on EVERY call, before
+// anything is judged, so it follows a rename as well as a re-seat; it dates
+// nothing on its own (no group stamp, no ModifiedAt: a name write is not a
+// change of the bout, which is what lets a draw-time caller produce exactly
+// the bracket it always did). A match with no row has nothing to write.
+//
+// Whether the side was given ANOTHER team is judged by id when both the side as
+// stored and the incoming one carry an id, and by name otherwise
+// (seatedAnotherTeam):
+//
+//   - Both ids set: another team exactly when they differ. A rename (the same
+//     id under a new name), or a correction that stores the winner already
+//     recorded and so re-propagates the same team, is not one: the name is
+//     written and the pick stays.
+//   - Either id empty: another team exactly when the names differ. That covers
+//     a slot going back to a placeholder or to "" (the name differs from any
+//     team's), a placeholder resolved to a team, and legacy id-less data,
+//     where the client resolves an id-less side's team by name and so a pick
+//     CAN sit on it. The same name with an id arriving (the side that carried
+//     only its team's name gaining the team's id) is the same team, and so is
+//     a writer that does not know the id (an incoming "" beside the name
+//     already seated): neither clears the pick, and the stored id is never
+//     thrown away for a writer that did not know it.
+//
+// This mirrors the client's rule (admin_scoring_team.jsx: a side is given
+// another team only when BOTH its lookup key and the team it resolves to
+// change; "a side that carried only its team's name gaining that team's id is
+// not one") and the carve-out BracketMatch has in CLAUDE.md (resolve by id when
+// present, fall back to the name only for an empty slot, an unresolved feeder
+// or a legacy row a repair has not reached).
+//
+// When the side was given another team, name and id are written, and a pick
+// held for THAT side is cleared. The other side's pick is never touched. With
+// no pick on that side, or no rep bout row at all, nothing else moves.
 //
 // The cleared pick is dated max(now, its previous stamp + 1, the match's
 // ModifiedAt) through StampGroups, which never lowers, and ONLY that side's
@@ -57,15 +86,22 @@ func seatBracketSide(bm *state.BracketMatch, side domain.MatchSide, name, id str
 		log.Printf("engine: BUG: bracket match %s: seatBracketSide called with side %q; nothing written", bm.ID, side)
 		return
 	}
-	idChanged := *idField != id
+	another := seatedAnotherTeam(*nameField, *idField, name, id)
 	*nameField = name
-	if !idChanged {
-		return
+	// An incoming "" beside the name already seated is a writer that did not
+	// know the id, not a removal: the id a repair resolved stays.
+	if id != "" || another {
+		*idField = id
 	}
-	*idField = id
 
 	row := state.DaihyosenSubIndex(bm.SubResults)
 	if row < 0 {
+		return
+	}
+	// The row's name follows the match's on every call, a rename included, and
+	// dates nothing (the invariant in the doc comment).
+	nameRepBoutRow(bm, row, side, name)
+	if !another {
 		return
 	}
 	pickA, pickB := bm.RepPicks()
@@ -83,6 +119,35 @@ func seatBracketSide(bm *state.BracketMatch, side domain.MatchSide, name, id str
 	log.Printf("engine: bracket match %s: side %s was given another team, so its representative pick %q is cleared", bm.ID, side, held)
 	g := state.RepPickGroup(side)
 	bm.StampGroups(max(serverNowMs(), bm.GroupStamp(g)+1, bm.ModifiedAt), g)
+}
+
+// seatedAnotherTeam reports whether re-seating a side that is stored as
+// (storedName, storedID) to (name, id) gives it another team: by id when both
+// carry one, by name otherwise (the rule in seatBracketSide's doc comment).
+func seatedAnotherTeam(storedName, storedID, name, id string) bool {
+	if storedID != "" && id != "" {
+		return storedID != id
+	}
+	return storedName != name
+}
+
+// nameRepBoutRow writes name as side's name on the rep bout row at index row.
+// The list is replaced, never edited in place, so a row another copy of the
+// match shares is never written through (state.withRepPick does the same for a
+// pick); a name the row already has writes nothing and copies nothing.
+func nameRepBoutRow(bm *state.BracketMatch, row int, side domain.MatchSide, name string) {
+	field := func(r *state.SubMatchResult) *string {
+		if side == domain.MatchSideA {
+			return &r.SideA
+		}
+		return &r.SideB
+	}
+	if *field(&bm.SubResults[row]) == name {
+		return
+	}
+	subs := slices.Clone(bm.SubResults)
+	*field(&subs[row]) = name
+	bm.SubResults = subs
 }
 
 // feedsSide is the side of the next match (and of the 3rd-place match, for a

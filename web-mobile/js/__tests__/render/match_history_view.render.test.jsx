@@ -166,6 +166,93 @@ describe('heldValueText', () => {
   });
 });
 
+// A representative pick is a member id. When the editor holds the team's members the
+// history names the representative instead of saying only that a side was picked; the
+// resolver is the editor's: (side, memberId) => a label, null for an id the team's
+// members do not hold, undefined when it has no members to look in.
+describe('a representative pick names the representative', () => {
+  const MEMBERS = { a: { m1a: 'Alice' }, b: { m1b: 'Bob', m2b: '' } };
+  const resolve = (side, id) => {
+    const list = MEMBERS[side];
+    return id in list ? (list[id] || 'T9.2') : null;
+  };
+
+  it.each([
+    ['repPickA', { sideAMemberId: 'm1a' }, 'picked Alice'],
+    ['repPickB', { sideBMemberId: 'm1b' }, 'picked Bob'],
+    // A member with no name yet reads by its label.
+    ['repPickB', { sideBMemberId: 'm2b' }, 'picked T9.2'],
+    // An id the side's team no longer holds (a correction seated another team).
+    ['repPickA', { sideAMemberId: 'gone' }, 'picked (not on the team now)'],
+    // The id is looked up in its own side's team.
+    ['repPickA', { sideAMemberId: 'm1b' }, 'picked (not on the team now)'],
+    ['repPickA', { sideAMemberId: '' }, 'not picked'],
+    ['repPickB', null, 'not picked'],
+  ])('%s %j reads "%s"', (group, value, words) => {
+    expect(view.heldValueText(group, value, resolve)).toBe(words);
+  });
+
+  it('says only that a side was picked when it has no members to look in', () => {
+    expect(view.heldValueText('repPickA', { sideAMemberId: 'm1a' })).toBe('picked');
+    expect(view.heldValueText('repPickA', { sideAMemberId: 'm1a' }, () => undefined)).toBe('picked');
+  });
+
+  it('a pick moved to the history names the representative', () => {
+    const v = view.historyEntryView({
+      matchId: 'm-ko', door: 'displaced', stamp: at(10, 5, 0), receivedAt: at(10, 6, 0), changed: ['repPickB'],
+      outcomes: { repPickB: 'held' }, held: { repPickB: { sideBMemberId: 'm1b' } },
+      reason: 'the representative bout was removed',
+    }, resolve);
+    expect(v.reason).toBe('Moved to history: the representative bout was removed');
+    expect(v.held.map((h) => h.text)).toEqual(["Moved to history: Shiro's pick for the representative bout, picked Bob"]);
+  });
+
+  it('a removal held for a newer point records the pick it kept, which reads sensibly empty', () => {
+    const v = view.historyEntryView({
+      matchId: 'm-ko', door: 'daihyosen-remove', stamp: at(10, 5, 0), receivedAt: at(10, 6, 0), changed: ['bout:-1', 'repPickA'],
+      outcomes: { 'bout:-1': 'applied', repPickA: 'held' }, held: { repPickA: { sideAMemberId: '' } },
+    }, resolve);
+    expect(v.held.map((h) => h.text)).toEqual(["Kept in history: Aka's pick for the representative bout, not picked"]);
+  });
+
+  it('the disclosure on the team editor lists it with the members the editor holds', async () => {
+    window.API.fetchMatchHistory.mockResolvedValue([{
+      matchId: 'm-ko', door: 'displaced', stamp: at(10, 5, 0), receivedAt: at(10, 6, 0), changed: ['repPickA'],
+      outcomes: { repPickA: 'held' }, held: { repPickA: { sideAMemberId: 'm1a' } },
+      reason: 'the representative bout was removed',
+    }]);
+    await act(async () => {
+      render(<view.MatchHistoryDisclosure match={match()} password="pw" members={resolve} />);
+    });
+    await openHistory();
+    expect(screen.getByTestId('match-history-held').textContent)
+      .toBe("Moved to history: Aka's pick for the representative bout, picked Alice");
+  });
+
+  it('the disclosure on an editor that holds no members keeps today\'s words', async () => {
+    window.API.fetchMatchHistory.mockResolvedValue([{
+      matchId: 'm-ko', door: 'score', stamp: at(10, 5, 0), receivedAt: at(10, 6, 0), changed: ['repPickA'],
+      outcomes: { repPickA: 'held' }, held: { repPickA: { sideAMemberId: 'm1a' } },
+    }]);
+    await act(async () => {
+      render(<view.MatchHistoryDisclosure match={match()} password="pw" />);
+    });
+    await openHistory();
+    expect(screen.getByTestId('match-history-held').textContent)
+      .toBe("Kept in history: Aka's pick for the representative bout, picked");
+  });
+});
+
+describe('historyDoorWords', () => {
+  it('names the door of a side given another team by a correction to an earlier match', () => {
+    expect(view.historyDoorWords('reseat')).toBe('Side given another team by a correction to an earlier match');
+  });
+
+  it('falls back for a door it does not know', () => {
+    expect(view.historyDoorWords('something-new')).toBe('Updated');
+  });
+});
+
 // bc-mrgc phase 3: a write kept whole by one rule (the server's rev guard:
 // an older revision of this board) says why, in the server's own words.
 describe('historyEntryView: the reason a whole write was kept', () => {

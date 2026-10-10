@@ -337,7 +337,7 @@ describe('a finish recorded that moved a later change to the history', () => {
     });
 
     it('a write held in part and one that moved a later change says both', () => {
-        const both = { id: 'm1', status: 'completed', heldGroups: ['encho'], displacedGroups: ['bout:2'] };
+        const both = { id: 'm1', status: 'completed', heldGroups: ['encho'], displacedGroups: ['bout:2'], heldReason: 'needs_winner' };
         expect(keptInHistoryNote(both)).toBe(
             "Kept in the match's history, not applied: overtime. A newer change to the same thing was recorded first. "
             + "Saved. A later change to bout 2 would have left the finished match without a winner, so it was moved to the match's history.");

@@ -49,6 +49,9 @@ const CHECK_MODULES = [
   'admin_scoring_team.jsx',
   'admin_scoring_shared.jsx',
   'admin_scoring_autosave.jsx',
+  // The one owner of how a match start is judged (both the court console and
+  // the Scores tab import it).
+  'start_match.jsx',
   'bracket.jsx',
   'match_scoreboard.jsx',
   'admin_setup.jsx',

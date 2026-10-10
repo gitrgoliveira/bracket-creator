@@ -58,6 +58,7 @@ import { isBarredMatch } from './ineligible_match.jsx';
 
 import { SyncStatusPill, useDebouncedRunningWrite, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
+import { GROUP_POINTS, GROUP_RESULT, GROUP_ENCHO, GROUP_REP } from './match_groups.jsx';
 
 // isKoTieBlocked: import-only, from the team editor's shared module. bc-rawm
 // reuses it here for the SAME tie rule (a knockout match cannot finish with
@@ -172,7 +173,15 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const [hanteiPick, setHanteiPick] = useStateA(recordedHtKey);
   useAdoptFromServer({
     signature: JSON.stringify([hanteiRecorded, recordedHtKey]),
-    apply: () => { setDecidedByHantei(hanteiRecorded); setHanteiPick(recordedHtKey); },
+    apply: () => {
+      setDecidedByHantei(hanteiRecorded);
+      setHanteiPick(recordedHtKey);
+      // The verdict rides in the ippons (the Ht mark on the winner's side) and in the
+      // result (the winner), so adopting it is agreeing with both groups: cancelling
+      // it here must then be named, and the points are not re-sent as they stood.
+      claimChanged.agree(GROUP_POINTS);
+      claimChanged.agree(GROUP_RESULT);
+    },
   });
   // Which side ("a"/"b"/"") holds a RECORDED hantei verdict, for the display
   // chip in the slot grid. Gated on the SERVER's verdict — not the local armed
@@ -240,13 +249,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // the server keeps a name over "", so it would read unsaved forever.
   useAdoptFromServer({
     signature: m.repPlayerA || "",
-    apply: () => setRepPlayerA(m.repPlayerA || ""),
+    apply: () => { setRepPlayerA(m.repPlayerA || ""); claimChanged.agree(GROUP_REP); },
     keepLocalEdits: true,
     isDirty: repPlayerA !== "" && repPlayerA !== (m.repPlayerA || ""),
   });
   useAdoptFromServer({
     signature: m.repPlayerB || "",
-    apply: () => setRepPlayerB(m.repPlayerB || ""),
+    apply: () => { setRepPlayerB(m.repPlayerB || ""); claimChanged.agree(GROUP_REP); },
     keepLocalEdits: true,
     isDirty: repPlayerB !== "" && repPlayerB !== (m.repPlayerB || ""),
   });
@@ -630,6 +639,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     setBFouls(initialBFouls);
     setEnchoPeriodCount(initialEnchoPeriods);
     setIsDrawToggled(initialIsDrawToggled);
+    // The scoreline, the overtime count and the draw (the result's hikiwake) are taken
+    // from the server together, so the editor agrees with all three groups.
+    claimChanged.agree(GROUP_POINTS);
+    claimChanged.agree(GROUP_ENCHO);
+    claimChanged.agree(GROUP_RESULT);
   };
 
   // Arranged as [left, right]: left is always SHIRO (White), right is always AKA (Red).

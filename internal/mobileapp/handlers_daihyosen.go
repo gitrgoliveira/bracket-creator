@@ -123,7 +123,7 @@ func respondIfValidationError(c *gin.Context, err error) bool {
 // variant so the read-modify-write runs under the same per-comp lock the
 // read used (see RegisterDaihyosenHandlers).
 type DaihyosenEngine interface {
-	AddDaihyosen(compID, matchID string, sideA, sideB engine.TeamSummary, isPool bool, sideAEligible, sideBEligible int) (*state.SubMatchResult, error)
+	AddDaihyosen(compID, matchID, nameA, nameB string, sideA, sideB engine.TeamSummary, isPool bool, sideAEligible, sideBEligible int) (*state.SubMatchResult, error)
 	RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, opts ...engine.ForceOptions) (*domain.CompetitorStatus, error)
 	MaybeAutoCompletePoolsAfterWrite(compID string, written ...state.MatchResult) (engine.AutoCompleteOutcome, error)
 }
@@ -424,7 +424,10 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 				return err
 			}
 
-			sub, err := eng.AddDaihyosen(id, mid, sideASummary, sideBSummary, engine.IsPoolMatchID(mid), sideAEligible, sideBEligible)
+			// The row is stored with the match's own team names (nameA/nameB),
+			// for the organiser's add and the participant's alike, so it is
+			// never nameless between this add and the first score write.
+			sub, err := eng.AddDaihyosen(id, mid, match.SideA, match.SideB, sideASummary, sideBSummary, engine.IsPoolMatchID(mid), sideAEligible, sideBEligible)
 			if err != nil {
 				switch {
 				case errors.Is(err, engine.ErrNotTied):

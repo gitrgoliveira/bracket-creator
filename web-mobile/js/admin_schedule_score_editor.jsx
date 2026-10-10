@@ -1,14 +1,15 @@
 // Score editor components extracted from admin_schedule.jsx (mp-d7tl).
-// startPatch, ScoreEditCourtBtn (local), AdminScoreEditor, AdminScoreEditorPage.
+// startPatch (re-exported from start_match.jsx), ScoreEditCourtBtn (local),
+// AdminScoreEditor, AdminScoreEditorPage.
 
-import { writeDidNotLand, writeKeepsEditorOpen } from './write_result.jsx';
+import { writeDidNotLand, writeKeepsEditorOpen, startWhileStartingMessage } from './write_result.jsx';
 import { matchMentions } from './competitor_search.jsx';
 import { SideCell } from './side_cell.jsx';
 import { allMatchesCompleted } from './admin_schedule_utils.jsx';
 import { MatchLineupPanel } from './admin_schedule_lineup.jsx';
 import { boutHansokuMark, teamNameMark } from './match_scoreboard.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
-import { scoreRowMatchLabel } from './pool_ids.jsx';
+import { scoreRowMatchLabel, scoreRowMatchName } from './pool_ids.jsx';
 // NumberedName: single owner of the number-chip-on-the-outer-side rule
 // (bc-dnst); see that file's header for why this stays an ES import.
 import { NumberedName } from './numbered_name.jsx';
@@ -22,7 +23,11 @@ import { isBarredMatch, sideBarredByDecision, involvesCompetitor } from './ineli
 // matters for this file's own render suite.
 import { BarredMatchNotice } from './barred_match_notice.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
-import { GROUP_RESULT } from './match_groups.jsx';
+// PR #463 round 13 (gap C): how a Start is written (startPatch), what its
+// answer means (classifyStartOutcome, startFailureMessage) and the one-start-at-
+// a-time guard are start_match.jsx's, shared with the court console, which had
+// all three while this page swallowed a refused start.
+import { startPatch, classifyStartOutcome, startFailureMessage, createStartGuard } from './start_match.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -49,7 +54,7 @@ const getScoreBtnClass = window.getScoreBtnClass;
 export { scoreRowMatchLabel };
 
 // ---------- Score editor ----------
-export function AdminScoreEditorPage({ tournament, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, password }) {
+export function AdminScoreEditorPage({ tournament, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, password, showToast }) {
   return (
     <div className="app">
       <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
@@ -64,7 +69,7 @@ export function AdminScoreEditorPage({ tournament, onBack, onEditScore, onMoveCo
             <div className="page-head__sub">Update scores or correct past matches across the tournament. Changes propagate through the bracket.</div>
           </div>
         </div>
-        <AdminScoreEditor t={tournament} onEditScore={onEditScore} onMoveCourt={onMoveCourt} password={password} />
+        <AdminScoreEditor t={tournament} onEditScore={onEditScore} onMoveCourt={onMoveCourt} password={password} showToast={showToast} />
       </div>
     </div>
   );
@@ -84,24 +89,12 @@ function ScoreEditCourtBtn({ m, courts, onMoveCourt }) {
   );
 }
 
-// Module-level factory so admin_shiaijo.jsx can consume it via window.startPatch.
-// startOnly (bc-sbq): this write only starts the match, so the server keeps the
-// score the match already holds (a match sent back to the queue keeps one);
-// toBackendMatchResult leaves the empty scoreline below off the wire. The
-// editors' own Start sends their board unflagged, so an operator who cleared
-// every mark still clears it.
-//
-// bc-mrgc: a start changes the status and nothing else, so it names the result
-// group alone (match_groups.jsx): the server keeps every other group of the
-// match as stored, the score a send-back kept included.
-export function startPatch() {
-  return {
-    startOnly: true,
-    changed: [GROUP_RESULT],
-    status: "running", winner: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0,
-    score: { type: "ippon", winnerPts: 0, loserPts: 0, ippons: [], fouls: { a: 0, b: 0 }, live: true, corrected: false },
-  };
-}
+// startPatch now lives in start_match.jsx (the one owner of how a Start is
+// written). Re-exported here, of the LOCAL binding imported above so the module
+// is fetched once, because admin_schedule.jsx imports it from this file to
+// publish `window.startPatch`, which admin_shiaijo.jsx reads, and the tests
+// import it from here too.
+export { startPatch };
 
 export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCompId, password, showToast }) {
   const [filter, setFilter] = useStateA("");
@@ -151,6 +144,86 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
   const scoreKeyOf = (m) => `${m.compId}:${m.id}`;
   const openMatch = openKey ? allMatches.find((m) => scoreKeyOf(m) === openKey) || null : null;
   const lineupMatch = lineupKey ? allMatches.find((m) => scoreKeyOf(m) === lineupKey) || null : null;
+
+  // PR #463 round 13 (gap C, bc-aadv): the automatic start the server REFUSED
+  // (Finish + Start Next, or the start after a decision), kept as
+  // { key, msg, waitingOn } so the refused match's list row can say why for as
+  // long as it is true. The court console keeps the same on its Up next card
+  // (admin_shiaijo.jsx startError); this page has no Up next card, so the ROW is
+  // the persistent surface. It is not the editor: the modal covers the list, and
+  // the editor is the operator's scoring surface, not this page's to put a
+  // start notice into. The toast says it at the moment it happens; the row keeps
+  // saying it after the toast is gone and after the editor is closed.
+  // `waitingOn` is the key of the start that was still out when this one was
+  // refused for it, so the sentence goes when that start lands.
+  const [startRefusal, setStartRefusal] = useStateA(null);
+  // One start at a time (start_match.jsx createStartGuard), created once.
+  const startGuardRef = useRefA(null);
+  if (!startGuardRef.current) startGuardRef.current = createStartGuard();
+  // The notice is read from the LIVE row, never from a snapshot of it: it shows
+  // only while the refused match is still scheduled, so it cannot outlive the
+  // start that finally went through or a result recorded another way.
+  const startRefusalKey = startRefusal ? startRefusal.key : null;
+  const startRefusalRow = startRefusalKey ? allMatches.find((m) => scoreKeyOf(m) === startRefusalKey) : null;
+  const startRefusalStatus = startRefusalRow ? startRefusalRow.status : null;
+  // It is dropped when the refused match leaves `scheduled` (or the data), or
+  // when the operator opens a DIFFERENT match. Closing the editor is neither:
+  // the row behind it is where the notice stays visible. A refusal is about one
+  // match at one moment, so a stale one never revives when that match is later
+  // sent back to the queue.
+  useEffectA(() => {
+    if (!startRefusalKey) return;
+    const openedAnother = openKey != null && openKey !== startRefusalKey;
+    if (openedAnother || startRefusalStatus !== "scheduled") setStartRefusal(null);
+  }, [openKey, startRefusalKey, startRefusalStatus]);
+  const startNoticeFor = (m) => (startRefusal && startRefusal.key === scoreKeyOf(m) && m.status === "scheduled" ? startRefusal.msg : null);
+
+  // A refused start: land the operator on the refused match in pre-match (the
+  // court console does, bc-aadv: they see WHICH match and why), keep the notice
+  // on its row and toast it. openKey is set first so the effect above, which
+  // drops a refusal when ANOTHER match opens, never sees the new refusal against
+  // the old openKey.
+  const refuseStart = (next, msg, waitingOn = null) => {
+    if (mountedRef.current) {
+      setOpenKey(scoreKeyOf(next));
+      setStartRefusal({ key: scoreKeyOf(next), msg, waitingOn });
+    }
+    // Single-slot toast (app.jsx): a thrown refusal, which editMatchScore has
+    // already toasted with the same words, replaces rather than stacks.
+    if (showToast) showToast(msg, "error");
+  };
+
+  // The ONE door both automatic starts go through: (a) refuses while another
+  // start is out, (b) reads the answer, (c) reports a refusal (refuseStart).
+  // Resolves true when the start went ahead (landed or queued), false otherwise;
+  // it never throws. Every start-gating rule is the server's (StartMatchTx), so
+  // a thrown 409 only needs reporting.
+  const startNext = async (next) => {
+    const key = scoreKeyOf(next);
+    const guard = startGuardRef.current;
+    const began = guard.begin(key, next);
+    if (!began.started) {
+      // A repeat for the match already being started is silent: it is on its way.
+      if (!began.repeat) {
+        refuseStart(next, startWhileStartingMessage({ label: scoreRowMatchName(began.blocker.match) }), began.blocker.key);
+      }
+      return false;
+    }
+    if (mountedRef.current) setStartRefusal(null);
+    try {
+      const outcome = classifyStartOutcome(await onEditScore(next.compId, next.id, startPatch(), next));
+      if (outcome.ok) return true;
+      refuseStart(next, outcome.msg);
+      return false;
+    } catch (e) {
+      refuseStart(next, startFailureMessage(e));
+      return false;
+    } finally {
+      guard.end(key);
+      // A "still being started" notice names THIS start; it goes when the start does.
+      if (mountedRef.current) setStartRefusal((prev) => (prev && prev.waitingOn === key ? null : prev));
+    }
+  };
 
   const f = filter.trim().toLowerCase();
   const filtered = allMatches.filter((m) => {
@@ -252,6 +325,8 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
           // boutMiddle placeholder (normally "vs"). Live techniques show once present.
           const seScore = showScore ? window.matchScoreStr(m) : "";
           const matchNo = scoreRowMatchLabel(m);
+          // Why the automatic start of THIS match was refused (startNext), live.
+          const startNotice = startNoticeFor(m);
           return (
             <div key={`${m.compId}:${m.id}`} className={`score-edit-row ${m.status === "running" ? "score-edit-row--running is-running" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
               <div>
@@ -337,6 +412,16 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                   <BarredMatchNotice match={m} password={password} />
                 </div>
               )}
+              {/* PR #463 round 13: a Start the server refused for this match
+                  (Finish + Start Next, or the start after a decision), in the
+                  same full-width slot. role="status", not "alert": the toast is
+                  the assertive signal at the moment it happens; this stays
+                  where the operator can read it again. */}
+              {startNotice && (
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <div className="alert alert--error" role="status" data-testid="start-refusal-notice">{startNotice}</div>
+                </div>
+              )}
             </div>
           );
         })}
@@ -393,13 +478,10 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
           ? sameCourt.slice(openIdx + 1).find(m => m.compId === openMatch.compId && m.status !== 'completed' && !isBarredMatch(m) && !involvesCompetitor(m, withdrawn)) || null
           : null;
         const nextActiveMatch = nextActiveFrom();
-        // Minimal "start" patch (status → running, empty score). Mirrors the
-        // modal's own buildPatch("running") for an unscored match and works for
-        // both individual and team matches (subResults is omitted, which the
-        // serializer treats as "no bouts scored yet"). The server routes this
-        // through eng.StartMatchTx, so all start-gating (eligibility 409,
-        // ≥players checks) still runs: a 409 throws and is caught below.
-        // Defined at module level as window.startPatch for reuse across admin_*.jsx.
+        // The automatic start (startNext, above) writes start_match.jsx's
+        // startPatch: the server routes it through eng.StartMatchTx, so all
+        // start-gating (eligibility 409, ≥players checks) still runs, and a
+        // refusal is reported by startNext.
         return (
           <ScoreEditorModal
             key={openKey}
@@ -475,16 +557,13 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                 // shiaijo in the SAME competition AND actually start it
                 // (honest to the label). If the
                 // next match is already running/completed, just open it. Start
-                // gating runs server-side (StartMatchTx); a 409 throws: we
-                // catch it so the operator still lands on the next match (in
-                // pre-match) to resolve the eligibility issue manually.
+                // gating runs server-side (StartMatchTx): startNext reports a
+                // refusal (a thrown 409, or a clock_skew answer) on that match's
+                // row and by toast, and the operator stays on it in pre-match to
+                // resolve the issue. The live lookup shows a started match:
+                // editMatchScore awaits its refresh.
                 setOpenKey(scoreKeyOf(nextActiveMatch));
-                if (nextActiveMatch.status === "scheduled") {
-                  try {
-                    await onEditScore(nextActiveMatch.compId, nextActiveMatch.id, startPatch(), nextActiveMatch);
-                    /* the live lookup shows the started match: editMatchScore awaits its refresh */
-                  } catch (_startErr) { /* gate rejected the start; stay on the next match in pre-match */ }
-                }
+                if (nextActiveMatch.status === "scheduled") await startNext(nextActiveMatch);
               } catch (_err) { /* keep modal open on error */ }
             } : null}
             onAfterDecision={nextActiveMatch ? async (result) => {
@@ -496,11 +575,12 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
               // no next match does.
               const next = nextActiveFrom(sideBarredByDecision(result, openMatch));
               if (!next) { if (mountedRef.current) setOpenKey(null); return; }
+              // A refused start lands the operator on that match with the
+              // reason, as the court console does (startNext); a start that goes
+              // ahead opens it.
               if (next.status === "scheduled") {
-                try {
-                  await onEditScore(next.compId, next.id, startPatch(), next);
-                  if (mountedRef.current) setOpenKey(scoreKeyOf(next));
-                } catch (_startErr) { /* gate rejected the start; leave the operator where they are */ }
+                const started = await startNext(next);
+                if (started && mountedRef.current) setOpenKey(scoreKeyOf(next));
               }
             } : null}
             password={password}

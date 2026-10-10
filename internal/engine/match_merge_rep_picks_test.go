@@ -396,3 +396,234 @@ func TestMerge_RepPicks_StaleSideHeldWhileTheOtherSideApplies(t *testing.T) {
 		assert.Equal(t, mmT2, got.GroupStamp(repPickBName))
 	})
 }
+
+// repRemoval is the representative bout's removal as the daihyosen DELETE
+// door builds it: the bout, the verdict it carried, overtime and both
+// representatives, and no row.
+func repRemoval(h mmHome, at int64) *state.MatchResult {
+	remove := mmRunning(h, at, repBoutGroup, state.GroupResult, state.GroupEncho, repPickAName, repPickBName)
+	remove.WriteDoor = DoorDaihyosenDel
+	remove.SubResults = []state.SubMatchResult{}
+	return remove
+}
+
+// historyOf is the entries of one door, in the order they were written.
+func historyOf(entries []state.MatchHistoryEntry, door string) []state.MatchHistoryEntry {
+	var out []state.MatchHistoryEntry
+	for _, e := range entries {
+		if e.Door == door {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// J. A removal that is OLDER than a representative picked after it: in stamp
+// order the bout was removed first and the pick came after, onto a bout that
+// no longer existed. Arriving second, the pick is held (the no-row hold, see
+// TestMerge_RepPick_OnARemovedBoutIsHeld). Arriving first, it must end in the
+// same place: no row, the pick kept in the history under its own stamp with its
+// id, and the pick dated by the removal, which is the last thing that happened
+// to the row. Before this the removal held the pick with ITS empty value, the
+// row went with the removal, and the newer pick was recorded nowhere.
+func TestMerge_RepBoutRemove_OlderThanAStoredPick_MovesThePickToTheHistory(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		h := mmTeam(t, knockout)
+		seedPick(t, h)
+		require.NoError(t, h.write(repWrite(h, mmT3, repRow("dana", "", nil, nil), repPickAName)))
+		require.Equal(t, "dana", h.load(t).SubResults[0].SideAMemberID, "setup: the newer pick is stored")
+
+		remove := repRemoval(h, mmT2)
+		require.NoError(t, h.write(remove), "the removal applies: it is newer than the bout")
+
+		got := h.load(t)
+		assert.Empty(t, got.SubResults, "the row is gone")
+		assert.Equal(t, mmT2, got.GroupStamp(repPickAName), "the removal dates the picks, as it does when it comes first")
+		assert.Equal(t, mmT2, got.GroupStamp(repPickBName))
+		assert.Equal(t, mmT2, got.ModifiedAt, "the newest stamp the match still holds")
+
+		rep := remove.Merge
+		require.NotNil(t, rep)
+		assert.Equal(t, []string{repPickAName}, rep.DisplacedGroups(), "the answer names the pick moved to the history")
+		assert.Empty(t, rep.HeldGroups(), "nothing of the removal was held")
+		assert.Empty(t, rep.HeldReason(), "no needs_winner: the pick lost its bout, not its winner")
+		assert.False(t, rep.NeedsWinner)
+
+		entries := h.history(t)
+		own := historyOf(entries, DoorDaihyosenDel)
+		require.Len(t, own, 1)
+		assert.Equal(t, state.HistoryOutcomeApplied, own[0].Outcomes[repPickAName], "the removal's own entry applies the pick's clear")
+		assert.NotContains(t, own[0].Held, repPickAName, "and holds no empty value in its name")
+
+		moved := historyOf(entries, DoorDisplaced)
+		require.Len(t, moved, 1)
+		assert.Equal(t, mmT3, moved[0].Stamp, "at the pick's own stamp")
+		assert.Equal(t, state.HistoryOutcomeHeld, moved[0].Outcomes[repPickAName])
+		assert.JSONEq(t, `{"sideAMemberId":"dana"}`, string(moved[0].Held[repPickAName]), "with its id")
+		assert.Equal(t, HoldReasonRepBoutRemoved, moved[0].Reason)
+	})
+}
+
+// J, both arrival orders: (remove at T2, pick at T3) ends in one stored state
+// and one history content however they arrive.
+func TestMerge_RepBoutRemove_BothArrivalOrdersConverge(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		type outcome struct {
+			Rows      []state.SubMatchResult
+			StampA    int64
+			StampB    int64
+			Modified  int64
+			HeldPicks []string
+		}
+		run := func(removeFirst bool) outcome {
+			h := mmTeam(t, knockout)
+			seedPick(t, h)
+			pick := repWrite(h, mmT3, repRow("dana", "", nil, nil), repPickAName)
+			remove := repRemoval(h, mmT2)
+			if removeFirst {
+				require.NoError(t, h.write(remove))
+				require.ErrorIs(t, h.write(pick), ErrMatchSuperseded, "the pick lands on no bout")
+			} else {
+				require.NoError(t, h.write(pick))
+				require.NoError(t, h.write(remove))
+			}
+			got := h.load(t)
+			out := outcome{
+				Rows: got.SubResults, StampA: got.GroupStamp(repPickAName), StampB: got.GroupStamp(repPickBName),
+				Modified: got.ModifiedAt,
+			}
+			for _, e := range h.history(t) {
+				if v, ok := e.Held[repPickAName]; ok {
+					out.HeldPicks = append(out.HeldPicks, string(v))
+				}
+			}
+			return out
+		}
+		inOrder, reversed := run(true), run(false)
+		assert.Empty(t, inOrder.Rows)
+		assert.Equal(t, []string{`{"sideAMemberId":"dana"}`}, inOrder.HeldPicks, "the pick is in the history")
+		assert.Equal(t, inOrder, reversed, "rows, stamps and the picks kept in the history match")
+	})
+}
+
+// J with both sides: picks stamped alike share one history entry, each at its
+// own stamp otherwise, oldest first; each side is dated by the removal.
+func TestMerge_RepBoutRemove_OlderThanBothPicks_OneEntryPerStamp(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		h := mmTeam(t, knockout)
+		seedPick(t, h)
+		require.NoError(t, h.write(repWrite(h, mmT3, repRow("dana", "gus", nil, nil), repPickAName, repPickBName)))
+		require.NoError(t, h.write(repWrite(h, mmT4, repRow("dana", "hal", nil, nil), repPickBName)))
+
+		remove := repRemoval(h, mmT2)
+		require.NoError(t, h.write(remove))
+
+		assert.Equal(t, []string{repPickAName, repPickBName}, remove.Merge.DisplacedGroups())
+		moved := historyOf(h.history(t), DoorDisplaced)
+		require.Len(t, moved, 2, "side A is the pick at T3, side B the one at T4")
+		assert.Equal(t, mmT3, moved[0].Stamp)
+		assert.JSONEq(t, `{"sideAMemberId":"dana"}`, string(moved[0].Held[repPickAName]))
+		assert.NotContains(t, moved[0].Held, repPickBName, "side B's pick was replaced at T4")
+		assert.Equal(t, mmT4, moved[1].Stamp)
+		assert.JSONEq(t, `{"sideBMemberId":"hal"}`, string(moved[1].Held[repPickBName]))
+		got := h.load(t)
+		assert.Empty(t, got.SubResults)
+		assert.Equal(t, mmT2, got.GroupStamp(repPickAName))
+		assert.Equal(t, mmT2, got.GroupStamp(repPickBName))
+		assert.Equal(t, mmT2, got.ModifiedAt)
+
+		// Both picks made in one write share its stamp: one entry.
+		h2 := mmTeam(t, knockout)
+		seedPick(t, h2)
+		require.NoError(t, h2.write(repWrite(h2, mmT3, repRow("dana", "gus", nil, nil), repPickAName, repPickBName)))
+		require.NoError(t, h2.write(repRemoval(h2, mmT2)))
+		one := historyOf(h2.history(t), DoorDisplaced)
+		require.Len(t, one, 1)
+		assert.Equal(t, mmT3, one[0].Stamp)
+		assert.Equal(t, []string{repPickAName, repPickBName}, one[0].Changed)
+	})
+}
+
+// A removal refused for the BOUT (a point on it, made after the removal, is
+// stored) is refused whole for the representatives: a pick stays on the row that
+// stays. Before this the pick's older stamp let the removal's empty pick apply, so
+// its history entry called the pick cleared and its stamp moved, while the row
+// kept the pick.
+func TestMerge_RepBoutRemove_RefusedForTheBout_HoldsItsPicksWithIt(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		h := mmTeam(t, knockout)
+		seedPick(t, h) // carol at T1
+		require.NoError(t, h.write(repWrite(h, mmT3, repRow("", "", []string{"M"}, nil), repBoutGroup)))
+
+		remove := repRemoval(h, mmT2)
+		err := h.write(remove)
+		require.ErrorIs(t, err, ErrMatchSuperseded, "nothing of the removal applies")
+		assert.Contains(t, HeldGroupsOf(err), repBoutGroup)
+		assert.Contains(t, HeldGroupsOf(err), repPickAName, "the pick is held with the bout")
+
+		got := h.load(t)
+		require.Len(t, got.SubResults, 1, "the row stays")
+		assert.Equal(t, "carol", got.SubResults[0].SideAMemberID, "with its pick")
+		assert.Equal(t, []string{"M"}, got.SubResults[0].IpponsA, "and its point")
+		assert.Equal(t, mmT1, remove.GroupStamps[repPickAName], "the pick keeps its date: the removal did not touch it")
+
+		entries := h.history(t)
+		last := entries[len(entries)-1]
+		assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[repPickAName])
+		assert.JSONEq(t, `{"sideAMemberId":""}`, string(last.Held[repPickAName]), "the clear that was not applied")
+		assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[repBoutGroup])
+	})
+}
+
+// K. A pick whose bout a LATER hold took out of the write has no bout to land
+// on either. A running write made after a knockout's finish names the bout and a
+// pick and ties the scoreline: R4 holds the bout (the stored match has no
+// representative row to put it on), and the pick the row carried must go with
+// it, held with its id, not left "applied" onto nothing with its stamp moved.
+func TestMerge_RepPick_OnARowAHoldTookOut_IsHeldWithItsValue(t *testing.T) {
+	finished := func(t *testing.T) mmHome {
+		h := mmTeam(t, true)
+		done := mmRunning(h, mmT1)
+		done.Changed = nil
+		done.Status = state.MatchStatusCompleted
+		done.IpponsA, done.IpponsB = []string{"M"}, []string{}
+		done.Winner = wrTeamA
+		require.NoError(t, h.write(done))
+		return h
+	}
+	tying := func(h mmHome, changed ...string) *state.MatchResult {
+		w := repWrite(h, mmT2, repRow("eve", "", nil, nil), append([]string{repBoutGroup, repPickAName, state.GroupPoints}, changed...)...)
+		w.IpponsA, w.IpponsB = []string{"M"}, []string{"K"}
+		return w
+	}
+
+	t.Run("the whole write is held", func(t *testing.T) {
+		h := finished(t)
+		late := tying(h)
+		err := h.write(late)
+		require.ErrorIs(t, err, ErrMatchSuperseded)
+		assert.ElementsMatch(t, []string{state.GroupPoints, repBoutGroup, repPickAName}, HeldGroupsOf(err))
+		assert.NotContains(t, late.Merge.Applied, repPickAName, "never applied onto nothing")
+		assert.Equal(t, HoldReasonKnockoutNeedsWinner, late.Merge.HoldReason)
+
+		last := h.history(t)
+		last0 := last[len(last)-1]
+		assert.Equal(t, state.HistoryOutcomeHeld, last0.Outcomes[repPickAName])
+		assert.JSONEq(t, `{"sideAMemberId":"eve"}`, string(last0.Held[repPickAName]), "the pick's id is kept")
+		got := h.load(t)
+		assert.Empty(t, got.SubResults)
+		assert.Zero(t, got.GroupStamps[repPickAName], "and its stamp is the stored one")
+	})
+	t.Run("a write applied in part moves no stamp of the pick", func(t *testing.T) {
+		h := finished(t)
+		late := tying(h, state.GroupEncho)
+		late.Encho = &state.EnchoMetadata{PeriodCount: 1}
+		require.NoError(t, h.write(late), "the overtime applies")
+		assert.NotContains(t, late.Merge.Applied, repPickAName)
+		assert.Contains(t, late.Merge.Held, repPickAName)
+		assert.JSONEq(t, `{"sideAMemberId":"eve"}`, string(late.Merge.HeldValues[repPickAName]))
+		got := h.load(t)
+		assert.Empty(t, got.SubResults)
+		assert.NotContains(t, got.GroupStamps, repPickAName, "the stored match never stamped the pick")
+	})
+}

@@ -24,6 +24,7 @@ const { useState: useStateE, useEffect: useEffectE, useRef: useRefE } = React;
 import { ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer, HeldWriteDiscard, HeldWriteNotice, useClearPendingWhenNothingHeld } from './admin_scoring_shared.jsx';
 import { SyncStatusPill, useDebouncedRunningWrite, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
+import { GROUP_FLAGS } from './match_groups.jsx';
 import { useEscapeToClose, confirmDialog } from './ui.jsx';
 // NumberedName: single owner of the number-chip-on-the-outer-side rule.
 import { NumberedName } from './numbered_name.jsx';
@@ -179,7 +180,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // for as long as the match is open.
   useAdoptFromServer({
     signature: `${initialFlagsA}:${initialFlagsB}`,
-    apply: () => { setFlagsA(initialFlagsA); setFlagsB(initialFlagsB); },
+    apply: () => { setFlagsA(initialFlagsA); setFlagsB(initialFlagsB); claimChanged.agree(GROUP_FLAGS); },
     keepLocalEdits: true,
     isDirty,
   });

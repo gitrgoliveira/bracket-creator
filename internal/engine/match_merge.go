@@ -309,6 +309,10 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 	// What the write said about the representatives, before the loop below
 	// copies stored rows over its own.
 	payloadPickA, payloadPickB := incoming.RepPicks()
+	// A write that names the representative bout and carries no row removes
+	// it: the daihyosen DELETE, or a stale whole-match write that omits it.
+	removalWrite := inChanged[state.BoutGroup(state.DaihyosenSubPosition)] &&
+		state.DaihyosenSubIndex(incoming.SubResults) < 0 && state.DaihyosenSubIndex(stored.SubResults) >= 0
 	rep := &state.MergeReport{Stamp: stamp, Changed: changed, HoldReason: holdReason}
 	storedStamps := state.MaterializedGroupStamps(stored.GroupStamps, stored.ModifiedAt, state.SubPositions(stored.SubResults))
 	stamps := state.CloneGroupStamps(storedStamps)
@@ -324,31 +328,6 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 			reportHeld(rep, g, stored, incoming, nil)
 		}
 		state.CopyGroup(incoming, stored, g)
-	}
-	// A pick has no bout to land on once the representative bout is gone (a
-	// removal's tombstone, or a row the write carried that its stamp could not
-	// bring back): each side's pick is held, in the history, not applied onto
-	// nothing, and that side's stamp goes back to what it was.
-	if state.DaihyosenSubIndex(incoming.SubResults) < 0 {
-		for _, pick := range []struct {
-			side domain.MatchSide
-			id   string
-		}{{domain.MatchSideA, payloadPickA}, {domain.MatchSideB, payloadPickB}} {
-			g := state.RepPickGroup(pick.side)
-			i := slices.Index(rep.Applied, g)
-			if i < 0 || pick.id == "" {
-				continue
-			}
-			rep.Applied = slices.Delete(rep.Applied, i, i+1)
-			ghost := &state.MatchResult{SubResults: []state.SubMatchResult{{Position: state.DaihyosenSubPosition}}}
-			ghost.SetRepPick(pick.side, pick.id)
-			reportHeld(rep, g, stored, ghost, nil)
-			if s, ok := storedStamps[g]; ok {
-				stamps[g] = s
-			} else {
-				delete(stamps, g)
-			}
-		}
 	}
 	resultApplied := inChanged[state.GroupResult] && !hold[state.GroupResult]
 	rep.ResultChanged = resultApplied
@@ -471,6 +450,12 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 				rep.ResultChanged = false
 			}
 		}
+	}
+
+	// The representatives sit on the representative bout's row, so what
+	// became of the row is judged once every hold above has had its say.
+	if mh.settleOrphanPicks(payloadPickA, payloadPickB, removalWrite, stamp) {
+		recomputeModifiedAt = true
 	}
 
 	for _, g := range rep.Applied {
@@ -721,11 +706,7 @@ func (h *mergeHold) holdGroups(reason string, groups ...string) bool {
 		}
 		reportHeld(h.rep, g, h.stored, h.incoming, h.rawValues[g])
 		state.CopyGroup(h.incoming, h.stored, g)
-		if s, ok := h.storedStamps[g]; ok {
-			h.stamps[g] = s
-		} else {
-			delete(h.stamps, g)
-		}
+		h.restoreStamp(g)
 	}
 	if !heldSomething {
 		return false
@@ -780,6 +761,102 @@ func (h *mergeHold) holdDefaultWinScoring(decision string) {
 	h.rep.StandingDecision = decision
 }
 
+// restoreStamp puts group's stamp back to the one the stored match had, or
+// takes it out again when the stored match never stamped it.
+func (h *mergeHold) restoreStamp(group string) {
+	if s, ok := h.storedStamps[group]; ok {
+		h.stamps[group] = s
+	} else {
+		delete(h.stamps, group)
+	}
+}
+
+// settleOrphanPicks is the representatives' rule, asked ONCE after every hold
+// has had its say (a hold can take the representative bout's row out of the
+// write, or put the stored one back): a pick lives on that row, so what became
+// of the row decides what became of each side's pick. payloadA and payloadB are
+// the ids the write carried, captured before the merge copied stored rows over
+// its own, and removalWrite says it named the bout and carried no row.
+//
+//   - The row is gone and the write introduced a pick for a side (a row its
+//     stamp could not bring back, or one a hold took out of the write: R4, a
+//     decision that stands): the pick is held with its id, never applied onto
+//     nothing, and the side keeps the stamp it had.
+//   - The write removed the row and applied, and a pick stamped AFTER the
+//     removal is stored (J): in stamp order the removal came first and the pick
+//     landed on no bout, which is what the line above does when they arrive
+//     that way round. The stored pick is moved to the history under its own
+//     stamp with its id (a DisplacedChange, HoldReasonRepBoutRemoved), and the
+//     side is dated by the removal, the last thing that happened to the row, so
+//     both orders end in one state. It returns true then: the match no longer
+//     holds the newer stamp.
+//   - The write removed the row and a hold kept it (a point made after the
+//     removal is stored): a removal is one action, so its picks stay with the
+//     row that stays, held with the bout instead of clearing a pick the row
+//     still carries.
+func (h *mergeHold) settleOrphanPicks(payloadA, payloadB string, removalWrite bool, stamp int64) bool {
+	hasRow := state.DaihyosenSubIndex(h.incoming.SubResults) >= 0
+	storedRow := state.DaihyosenSubIndex(h.stored.SubResults) >= 0
+	storedA, storedB := h.stored.RepPicks()
+	displaced := map[int64]map[string]json.RawMessage{}
+	for _, side := range []struct {
+		side            domain.MatchSide
+		payload, stored string
+	}{{domain.MatchSideA, payloadA, storedA}, {domain.MatchSideB, payloadB, storedB}} {
+		g := state.RepPickGroup(side.side)
+		applied := slices.Index(h.rep.Applied, g)
+		switch {
+		case hasRow:
+			if !removalWrite || applied < 0 {
+				continue
+			}
+			h.rep.Applied = slices.Delete(h.rep.Applied, applied, applied+1)
+			// What the write said was an empty pick: held if the row still
+			// carries one, an echo if it does not.
+			reportHeld(h.rep, g, h.stored, &state.MatchResult{}, nil)
+			state.CopyGroup(h.incoming, h.stored, g)
+			h.restoreStamp(g)
+		case side.payload != "" && applied >= 0:
+			h.rep.Applied = slices.Delete(h.rep.Applied, applied, applied+1)
+			ghost := &state.MatchResult{SubResults: []state.SubMatchResult{{Position: state.DaihyosenSubPosition}}}
+			ghost.SetRepPick(side.side, side.payload)
+			reportHeld(h.rep, g, h.stored, ghost, nil)
+			h.restoreStamp(g)
+		case storedRow && side.stored != "" && slices.Contains(h.rep.Held, g):
+			at := h.stored.GroupStamp(g)
+			if displaced[at] == nil {
+				displaced[at] = map[string]json.RawMessage{}
+			}
+			displaced[at][g] = state.GroupValue(h.stored, g)
+			// The removal's own (empty) pick now applies, as it does when it
+			// arrives first, and the newer one is the history's.
+			i := slices.Index(h.rep.Held, g)
+			h.rep.Held = slices.Delete(h.rep.Held, i, i+1)
+			delete(h.rep.HeldValues, g)
+			if len(h.rep.HeldValues) == 0 {
+				h.rep.HeldValues = nil
+			}
+			if applied < 0 {
+				h.rep.Applied = append(h.rep.Applied, g)
+			}
+			if stamp > 0 {
+				h.stamps[g] = stamp
+			}
+		}
+	}
+	stamps := make([]int64, 0, len(displaced))
+	for at := range displaced {
+		stamps = append(stamps, at)
+	}
+	slices.Sort(stamps)
+	for _, at := range stamps {
+		h.rep.Displaced = append(h.rep.Displaced, state.DisplacedChange{
+			Stamp: at, Values: displaced[at], Reason: HoldReasonRepBoutRemoved,
+		})
+	}
+	return len(stamps) > 0
+}
+
 // needsWinnerReason is the history reason of a change held because the
 // match would be left with no winner it must have.
 func needsWinnerReason(mc mergeCtx) string {
@@ -823,6 +900,13 @@ func defaultWinStandsReason(decision string) string {
 // declared. Mirrors HoldReasonEngiAtomic; a withdrawal has its own atomicity
 // rule (R2's withdrawalOutranked) and never reaches this one.
 const HoldReasonFinishAtomic = "a finish and the scoreline it stood on are kept together"
+
+// HoldReasonRepBoutRemoved is the history reason of a representative picked
+// after the representative bout was removed (stamp order: the removal first,
+// the pick onto a bout that no longer existed), which a removal arriving
+// second moves out of the match. It is no needs_winner reason: the answer
+// carries displacedGroups for it and no heldReason.
+const HoldReasonRepBoutRemoved = "the representative bout was removed"
 
 // completesMatch reports whether the merged write leaves the match finished
 // (an empty status completes a bracket match, effectiveBracketWriteStatus).

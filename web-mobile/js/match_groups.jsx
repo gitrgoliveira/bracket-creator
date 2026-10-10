@@ -26,7 +26,7 @@
 
 import { IPPON_PLACEHOLDER } from './result_slot.jsx';
 import {
-    NEEDS_WINNER_NOTE, DEFAULT_WIN_STANDS_NOTE, writeNeedsWinner, writeDefaultWinStands, writeHeldDecision,
+    HELD_REASON_NEEDS_WINNER, NEEDS_WINNER_NOTE, DEFAULT_WIN_STANDS_NOTE, writeNeedsWinner, writeDefaultWinStands, writeHeldDecision,
     writePartlyHeld, writeHeldGroups, writeDisplacedGroups,
 } from './write_result.jsx';
 
@@ -118,26 +118,33 @@ export function heldGroupsNote(groups, needsWinner = false, defaultWinStands = f
 }
 
 // displacedGroupsNote: the note for a write that WAS recorded and moved a
-// later change of the match to its history, because that change would have
-// left the finished match without a winner (write_result.jsx
-// writeDisplacedGroups). null when nothing was moved.
-export function displacedGroupsNote(groups) {
+// later change of the match to its history (write_result.jsx
+// writeDisplacedGroups). `needsWinner` when the answer says why with
+// heldReason "needs_winner": the change would have left the finished match
+// without a winner. A change moved for another reason (a representative's pick
+// stamped after the representative bout's removal, which leaves it nothing to
+// stand on) carries no such reason and is worded plainly, never with a winner
+// the match does not lack. null when nothing was moved.
+export function displacedGroupsNote(groups, needsWinner = false) {
     const words = groupsLabel(groups);
     if (!words) return null;
-    return `Saved. A later change to ${words} would have left the finished match without a winner, so it was moved to the match's history.`;
+    return needsWinner
+        ? `Saved. A later change to ${words} would have left the finished match without a winner, so it was moved to the match's history.`
+        : `Saved. A later change to ${words} was moved to the match's history.`;
 }
 
 // keptInHistoryNote: the ONE note a score editor (useKeptInHistoryNote) or
 // its closing host (admin.jsx's toast) shows for what a write's answer kept
 // in the match's history: this write's own groups held (applied in part, or
 // superseded because the finished match needs a winner), and/or later
-// changes it moved there. null when the answer kept nothing.
+// changes it moved there (worded by the reason the answer gives, if any).
+// null when the answer kept nothing.
 export function keptInHistoryNote(res) {
     const parts = [];
     if (writePartlyHeld(res) || writeNeedsWinner(res) || writeDefaultWinStands(res)) {
         parts.push(heldGroupsNote(writeHeldGroups(res), writeNeedsWinner(res), writeDefaultWinStands(res), writeHeldDecision(res)));
     }
-    parts.push(displacedGroupsNote(writeDisplacedGroups(res)));
+    parts.push(displacedGroupsNote(writeDisplacedGroups(res), !!res && res.heldReason === HELD_REASON_NEEDS_WINNER));
     const text = parts.filter(Boolean).join(' ');
     return text || null;
 }
@@ -255,11 +262,12 @@ function groupKey(wire, group, next) {
             // re-derived by the server from the bout's winner side and the stored
             // picks (ReconcileWinnerMemberID), so a pick change moves it with no
             // change to the bout: it is left out too, and the winner's name is what
-            // names the bout. The row's side names are the MATCH's sides, which the
-            // editor restates on it so the hantei mark can be placed on the winner's
-            // side while the server stores none (engine.AddDaihyosen builds the row
-            // with empty sides): they too are never a change of the bout, or a pick
-            // on a bout nobody has scored would name it and stamp its scoreline.
+            // names the bout. The row's side names are the MATCH's sides: the server
+            // stamps the team names on the row at the add and keeps them equal to the
+            // match's on every re-seat, and the editor restates them so the hantei mark
+            // can be placed on the winner's side. They are never a change of the bout
+            // either, or a pick on a bout nobody has scored would name it and stamp its
+            // scoreline.
             // Numbered rows keep the rule above.
             if (pos < 0) {
                 keys.delete('sideAMemberId');

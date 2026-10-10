@@ -383,7 +383,23 @@ That applies one level further down as well. A team bout carries its two fighter
 MEMBER ids beside their names, and the winner's id beside the winner's name. Without them
 a bout between two people who happen to share a display name could not be attributed at
 all, because the name identifies neither of them, and competitors are allowed to share
-one.
+one. The representative bout is the one row whose sides are the TEAM names: it keeps them
+and carries the two representatives' member ids beside them, the members picked for each
+side. Each side's id is a change of its own, ordered apart from the other side's and from
+the bout's score and result: a point struck on the representative bout never alters who was
+picked, a pick never alters the score, and a pick for one side never alters the other side's
+pick. So two captains picking at the same moment both land, and so do two boards doing one
+each. The winner's member id
+stays with the bout, and after a merge it always names one of the two picked members (or is
+empty): when a pick changes under it, it is worked out again from the side that won. A pick
+is a member of the team seated on its side, so when a knockout match is given another team on
+a side (a winner corrected upstream, a slot taken back to its placeholder, a qualifier
+repainted), that side's pick is cleared and dated at that moment, later than the pick had
+been. The write that made the old pick, replayed from a queue, is then kept in the match's
+history instead of seating the old team's member on the new team. A side whose team does not
+change (the same winner stored again, or the team only renamed) keeps its pick. A side taken
+back to its placeholder loses its pick, even when the match that feeds it is finished again
+with the same winner: the pick is picked again.
 
 Those are two different namespaces, and the field names keep them apart on purpose. A
 match side carries a PARTICIPANT id, which names a competitor or a whole team; a bout side
@@ -575,8 +591,9 @@ sequenceDiagram
 
 **Concurrent writes are merged, never dropped.** A match result is split into groups of
 fields that change together: the scoreline, the verdict (status, winner, decision and the
-notes that describe it), the overtime, the engi flags, the representative players, and each
-bout of a team match on its own. A write names the groups it changes, and each group records
+notes that describe it), the overtime, the engi flags, the representative players, each side's
+fighter picked for a representative bout (one group per side), and each bout of a team match on
+its own. A write names the groups it changes, and each group records
 the time of the last change applied to it. A change applies only when it was made no earlier
 than the stored change to the same group, so two operators changing different things (one
 records the overtime while another enters a point, or two bouts of a team match are scored on

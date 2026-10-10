@@ -910,7 +910,7 @@ func TestMerge_FinishIsAtomicWithTheScorelineItStoodOn(t *testing.T) {
 
 		// A verdict-only correction (an operator's hantei call): Tora
 		// actually won. Needs no CorrectionReason here -- that gate is the
-		// handler's (applyCorrectionReasonUnderTx), not the engine's.
+		// handler's (applyCorrectionReason), not the engine's.
 		correction := mmRunning(h, mmT3, state.GroupResult)
 		correction.Status = state.MatchStatusCompleted
 		correction.Winner, correction.WinnerID = wrTeamB, wrTeamBID

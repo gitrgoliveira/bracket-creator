@@ -379,9 +379,12 @@ func ComputeTeamSummary(subResults []state.SubMatchResult, sideAName, sideBName 
 //
 // The returned SubMatchResult has Position = -1 (a sentinel for "this
 // is a daihyosen bout, not a numbered roster position") and
-// Decision = "daihyosen". The handler appends this to the match's
-// SubResults; the operator subsequently records the rep players +
-// ippon via the score modal.
+// Decision = "daihyosen", and its SideA/SideB are nameA/nameB, the
+// match's own team names (the caller passes match.SideA/match.SideB;
+// TeamSummary carries no name). The row is never nameless, not even
+// between the add and the first score write. The handler appends this
+// to the match's SubResults; the operator subsequently records the rep
+// players + ippon via the score modal.
 //
 // CHK026: when a team has exactly 1 eligible competitor, that
 // competitor MUST be the rep, the operator selects them in the score
@@ -391,7 +394,7 @@ func ComputeTeamSummary(subResults []state.SubMatchResult, sideAName, sideBName 
 //
 // FR-046, CHK026, T139.
 func (e *Engine) AddDaihyosen(
-	compID, matchID string,
+	compID, matchID, nameA, nameB string,
 	sideA, sideB TeamSummary,
 	isPool bool,
 	sideAEligible, sideBEligible int,
@@ -407,6 +410,13 @@ func (e *Engine) AddDaihyosen(
 	}
 	return &state.SubMatchResult{
 		Position: -1, // sentinel: daihyosen, not a numbered roster bout
+		// The row names the match's two teams from the moment it exists: the
+		// hantei mark is placed on the winner's side by comparing the winner
+		// against THIS row's sideA/sideB, so a nameless row is one nothing can
+		// attribute. seatBracketSide keeps them equal to the match's from
+		// then on.
+		SideA:    nameA,
+		SideB:    nameB,
 		Decision: string(domain.DecisionDaihyosen),
 	}, nil
 }

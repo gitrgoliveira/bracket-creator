@@ -141,16 +141,60 @@ describe('ShiaijoQueueRow; completed result placement', () => {
   };
 
   beforeEach(async () => {
-    orig.fmt = window.formatIpponsScore; orig.iv = window.teamIVScore;
+    orig.fmt = window.formatIpponsScore;
+    orig.iv = window.teamIVScore;
+    orig.winnerSideLR = window.winnerSideLR;
+    orig.teamMatchMarks = window.teamMatchMarks;
+
     window.formatIpponsScore = () => '·;MK';
     window.teamIVScore = () => null;
+
+    // bc-tmwn: stubs for winner and team marks, based on sameCompetitor from competitor_identity.jsx
+    const competitorKey = (c) => c && (c.id ? c.id : (c.name && c.dojo ? `${c.name}|${c.dojo}` : null));
+    const sameCompetitor = (a, b) => {
+      const ka = competitorKey(a);
+      return !!ka && ka === competitorKey(b);
+    };
+
+    window.winnerSideLR = (m) => {
+      if (!m || !m.winner) return null;
+      if (sameCompetitor(m.winner, m.sideB)) return "left";  // Shiro = left = sideB
+      if (sameCompetitor(m.winner, m.sideA)) return "right"; // Aka = right = sideA
+      return null;
+    };
+
+    window.teamMatchMarks = (m, _isTeam) => {
+      if (!m) return { shiro: "", aka: "" };
+
+      let shiroMark = "", akaMark = "";
+      if (m.decision && m.decision.startsWith("kiken")) {
+        // Kiken: mark the side that withdrew
+        if (m.decisionBy === "shiro" || sameCompetitor(m.decisionBy, m.sideB)) {
+          shiroMark = "Kiken";
+        } else if (m.decisionBy === "aka" || sameCompetitor(m.decisionBy, m.sideA)) {
+          akaMark = "Kiken";
+        }
+      } else if (m.decision === "fusenpai") {
+        // Fusenpai: mark the side that no-showed
+        if (m.decisionBy === "shiro" || sameCompetitor(m.decisionBy, m.sideB)) {
+          shiroMark = "Fus.";
+        } else if (m.decisionBy === "aka" || sameCompetitor(m.decisionBy, m.sideA)) {
+          akaMark = "Fus.";
+        }
+      }
+      return { shiro: shiroMark, aka: akaMark };
+    };
+
     runtime = makeReactive();
     global.React = runtime.React;
     ({ ShiaijoQueueRow } = await import('../admin_shiaijo.jsx'));
   });
   afterEach(() => {
     runtime.unmount(); global.React = realReact;
-    window.formatIpponsScore = orig.fmt; window.teamIVScore = orig.iv;
+    window.formatIpponsScore = orig.fmt;
+    window.teamIVScore = orig.iv;
+    window.winnerSideLR = orig.winnerSideLR;
+    window.teamMatchMarks = orig.teamMatchMarks;
   });
 
   it('puts the score in a centred result line below the names, not the corner', () => {
@@ -179,6 +223,148 @@ describe('ShiaijoQueueRow; completed result placement', () => {
     const tree = runtime.currentTree();
     expect(byClass(tree, 'shiaijo-qrow__result').length).toBe(0);
     expect(byClass(tree, 'shiaijo-qrow__vs').length).toBe(1);
+  });
+
+  // bc-tmwn: tests for winner display on completed rows
+  it('W1: shows winner class and tick for daihyosen-decided team match (sideA winner)', () => {
+    runtime.mount(ShiaijoQueueRow, {
+      m: {
+        id: 'm-dh1', compId: 'c1', status: 'completed', teamSize: 3,
+        compKind: 'team',
+        sideA: { id: 'a1', name: 'Team A' },
+        sideB: { id: 'b1', name: 'Team B' },
+        winner: { id: 'a1', name: 'Team A' },  // sideA won (Aka)
+        score: [],
+        subResults: [
+          { position: 1, sideA: 'M1', sideB: 'M2', winner: 'M1' },
+          { position: 2, sideA: 'M3', sideB: 'M4', winner: 'M4' },
+        ]
+      },
+      scheduled: [], courts: ['A'],
+    });
+    const tree = runtime.currentTree();
+    const sides = byClass(tree, 'shiaijo-qrow__side');
+    expect(sides.length).toBe(2);
+
+    // Find Aka side (sideA, should be second side, but order depends on implementation)
+    // The Aka side should have the winner class and tick
+    const akaSide = sides[1];
+    expect(akaSide.props.className).toContain('shiaijo-qrow__side--aka');
+    expect(akaSide.props.className).toContain('shiaijo-qrow__side--win');
+
+    // The tick is the WinnerTick component (side_cell.jsx). This runtime does not
+    // expand components, so it is found by name and rendered to reach the sr-only
+    // word a screen reader hears.
+    let hasTick = false;
+    walk(akaSide, (n) => {
+      if (n && n.type?.name === 'WinnerTick') {
+        walk(n.type(n.props), (c) => {
+          // The separator is part of the announced text: without it a screen
+          // reader reads the tick run into the name ("WinnerK1 Alice").
+          if (c && c.props?.className === 'sr-only' && text(c) === 'Winner: ') hasTick = true;
+        });
+      }
+    });
+    expect(hasTick).toBe(true);
+
+    // Shiro side should NOT have winner class
+    const shiroSide = sides[0];
+    expect(shiroSide.props.className).not.toContain('shiaijo-qrow__side--win');
+  });
+
+  it('W2: shows team mark and winner cue for kiken-decided team match', () => {
+    runtime.mount(ShiaijoQueueRow, {
+      m: {
+        id: 'm-kiken1', compId: 'c1', status: 'completed', teamSize: 3,
+        compKind: 'team',
+        sideA: { id: 'a1', name: 'Team A' },
+        sideB: { id: 'b1', name: 'Team B' },
+        winner: { id: 'a1', name: 'Team A' },  // sideA won (Aka), sideB withdrew
+        decision: 'kiken-voluntary',
+        decisionBy: 'shiro',  // sideB withdrew (shiro is sideB)
+        score: [],
+        subResults: []
+      },
+      scheduled: [], courts: ['A'],
+    });
+    const tree = runtime.currentTree();
+    const sides = byClass(tree, 'shiaijo-qrow__side');
+    expect(sides.length).toBe(2);
+
+    // Shiro side should have the Kiken mark
+    const shiroSide = sides[0];
+    expect(shiroSide.props.className).toContain('shiaijo-qrow__side--shiro');
+    let kikenMarkFound = false;
+    walk(shiroSide, (n) => {
+      if (n && n.props?.['data-testid'] === 'team-summary-mark-shiro') {
+        kikenMarkFound = true;
+      }
+    });
+    expect(kikenMarkFound).toBe(true);
+
+    // Aka side should have winner cue
+    const akaSide = sides[1];
+    expect(akaSide.props.className).toContain('shiaijo-qrow__side--aka');
+    expect(akaSide.props.className).toContain('shiaijo-qrow__side--win');
+  });
+
+  it('W3: shows winner cue on individual kiken match without team mark', () => {
+    runtime.mount(ShiaijoQueueRow, {
+      m: {
+        id: 'm-ind-kiken', compId: 'c1', status: 'completed', teamSize: 0,
+        sideA: { id: 'p1', name: 'Player A' },
+        sideB: { id: 'p2', name: 'Player B' },
+        winner: { id: 'p1', name: 'Player A' },
+        decision: 'kiken-voluntary',
+        decisionBy: 'p2',
+        score: []
+      },
+      scheduled: [], courts: ['A'],
+    });
+    const tree = runtime.currentTree();
+    const sides = byClass(tree, 'shiaijo-qrow__side');
+
+    // Aka side (sideA) should have winner cue
+    const akaSide = sides[1];
+    expect(akaSide.props.className).toContain('shiaijo-qrow__side--win');
+
+    // Should NOT have team mark (individual match)
+    let hasTeamMark = false;
+    walk(akaSide, (n) => {
+      if (n && n.props?.['data-testid']?.startsWith('team-summary-mark-')) {
+        hasTeamMark = true;
+      }
+    });
+    expect(hasTeamMark).toBe(false);
+  });
+
+  it('W4: shows no winner cue for hikiwake (drawn) match', () => {
+    runtime.mount(ShiaijoQueueRow, {
+      m: {
+        id: 'm-draw', compId: 'c1', status: 'completed', teamSize: 0,
+        sideA: { id: 'p1', name: 'Player A' },
+        sideB: { id: 'p2', name: 'Player B' },
+        winner: null,  // No winner
+        decision: 'hikiwake',
+        score: []
+      },
+      scheduled: [], courts: ['A'],
+    });
+    const tree = runtime.currentTree();
+    const sides = byClass(tree, 'shiaijo-qrow__side');
+
+    // Neither side should have winner class
+    expect(sides[0].props.className).not.toContain('shiaijo-qrow__side--win');
+    expect(sides[1].props.className).not.toContain('shiaijo-qrow__side--win');
+
+    // No tick on either side
+    let tickCount = 0;
+    walk(tree, (n) => {
+      if (n && n.type?.name === 'WinnerTick') {
+        tickCount++;
+      }
+    });
+    expect(tickCount).toBe(0);
   });
 });
 

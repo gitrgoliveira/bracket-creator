@@ -172,6 +172,10 @@ const EliminationMatchTitleFormat = "Round %d - Match %d"
 // SheetKachinukiDetail is opt-in: only emitted when a competition has
 // teamMatchType=kachinuki and a draw with matches in it. See
 // excel_kachinuki.go (T199–T203).
+//
+// SheetRepresentativeBouts is opt-in too: only emitted when a fixed-order team
+// competition's results hold at least one representative bout. It is drawn by
+// the same renderer as the Kachinuki Detail sheet.
 const (
 	SheetData               = "data"
 	SheetTimeEstimator      = "Time Estimator"
@@ -182,4 +186,12 @@ const (
 	SheetTags               = "Tags"
 	SheetTree               = "Tree"
 	SheetKachinukiDetail    = "Kachinuki Detail"
+
+	SheetRepresentativeBouts = "Representative Bouts"
 )
+
+// RepresentativeBoutRowLabel is what a representative bout's row prints where a
+// numbered bout prints its number: the bout is the extra one appended to a
+// tied knockout encounter (position -1), not one of the numbered bouts, so a
+// number would name a bout the team match does not have.
+const RepresentativeBoutRowLabel = "DH"

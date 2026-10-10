@@ -527,3 +527,19 @@ func TestTeamResultFrom_DefaultWinCredit(t *testing.T) {
 		assert.Equal(t, &TeamResultLine{ShiroIV: 1, ShiroPW: 2}, got, "only position 1 counts, credited to TeamB")
 	})
 }
+
+// bc-dhrp: the representative bout names the two TEAMS and carries each side's
+// representative as a member id. The winner is the side the bout was won for,
+// read by the winner's id when one is stamped and by the team name when not.
+func TestSubBoutWinnerSide_RepresentativeBoutWithMemberIDs(t *testing.T) {
+	rep := func(winner, winnerID string) SubMatchResult {
+		return SubMatchResult{
+			Position: -1, SideA: "TeamA", SideB: "TeamB",
+			SideAMemberID: "rep-a", SideBMemberID: "rep-b",
+			Winner: winner, WinnerMemberID: winnerID, Decision: "daihyosen",
+		}
+	}
+	assert.Equal(t, domain.MatchSideB, SubBoutWinnerSide(rep("TeamB", "rep-b"), "TeamA", "TeamB"), "by the winner's id")
+	assert.Equal(t, domain.MatchSideB, SubBoutWinnerSide(rep("TeamB", ""), "TeamA", "TeamB"), "by the team name when no id is stamped")
+	assert.Equal(t, domain.MatchSideA, SubBoutWinnerSide(rep("TeamA", "rep-a"), "TeamA", "TeamB"), "side A by its id")
+}

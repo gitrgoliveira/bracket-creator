@@ -84,7 +84,7 @@ On tree and knockout brackets, the player/team on the top of the bracket is alwa
 ## Building and Running
 
 ### Prerequisites
-- Go 1.27.1+
+- Go 1.27.2+
 - Make
 
 ### Key Commands
@@ -216,3 +216,9 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 - Do not commit or push without clear authority from the active profile or the current user request.
 - If a required sync or push is blocked, stop and report the exact command and error.
 <!-- END BEADS INTEGRATION -->
+
+<!-- Repo-specific, deliberately OUTSIDE the tool-managed BEADS INTEGRATION block above. -->
+
+## Memory (overrides the beads block above)
+
+Do NOT use `bd remember`: it is retired and the bd memory store is empty (2026-10-09). This repo's persistent memory lives in Hindsight (see CLAUDE.md, "One memory store: Hindsight"). Claude Code and Antigravity CLI reach it through the `hindsight-coding-agents` plugin: search with `hindsight_search_knowledge_pages`, save a lesson with `hindsight_ingest_document`. An agent without those tools has no Hindsight integration, so raise a lesson worth keeping with the user instead of storing it.

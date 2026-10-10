@@ -2,8 +2,9 @@
 # PostToolUse reminder for Bash: a bead created with `bd create` must be
 # slotted into the merge order.
 #
-# Merge order in this repo is encoded in beads (bd memory
-# "merge-concurrency-plan"): a `blocks` edge on the bead a new one must
+# Merge order in this repo is encoded in beads (the plan itself is the
+# Hindsight memory "merge-concurrency-plan", seeded from the retired bd
+# memory of that name): a `blocks` edge on the bead a new one must
 # merge after, plus a `serial/<lane>` label when it shares a lane. A bead
 # filed without either silently falls outside that plan. This hook fires
 # ONLY when a command segment is `bd create ...` and that segment carries
@@ -73,7 +74,8 @@ jq -n --arg id "$id" '{
     additionalContext: ("Reminder: " + $id + " was created without --deps, so it sits outside the merge order. " +
       "Decide now and record it: if it edits a lane region (export pipeline, admin_shiaijo.jsx, server core, e2e fixtures, broad JSX text), " +
       "run `bd dep add " + $id + " <bead it must merge after>` and `bd label add " + $id + " serial/<lane>`; " +
-      "otherwise state in the bead that it is independent. Lanes and the rule: `bd memories merge-concurrency-plan`.")
+      "otherwise state in the bead that it is independent. Lanes and the rule, verbatim from Hindsight: " +
+      "`curl -s \"$(jq -r .apiUrl ~/.hindsight/coding-agent.json)/v1/default/banks/bracket-creator/documents/beads%2Fmerge-concurrency-plan\" | jq -r .original_text`.")
   }
 }'
 exit 0

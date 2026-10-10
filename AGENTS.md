@@ -102,3 +102,9 @@ bd close <id>         # Complete work if the PR is merged
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
 <!-- END BEADS INTEGRATION -->
+
+<!-- Repo-specific, deliberately OUTSIDE the tool-managed BEADS INTEGRATION block above. -->
+
+## Memory (overrides the beads block above)
+
+Do NOT use `bd remember`: it is retired and the bd memory store is empty (2026-10-09). This repo's persistent memory lives in Hindsight (see CLAUDE.md, "One memory store: Hindsight"). Claude Code and Antigravity CLI reach it through the `hindsight-coding-agents` plugin: search with `hindsight_search_knowledge_pages`, save a lesson with `hindsight_ingest_document`. An agent without those tools has no Hindsight integration, so raise a lesson worth keeping with the user instead of storing it.

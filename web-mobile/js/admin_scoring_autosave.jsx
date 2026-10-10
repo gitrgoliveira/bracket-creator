@@ -43,7 +43,7 @@ export function useChangedGroups(match) {
   const finished = !!(match && match.status === "completed");
   // The editor moving to another match starts over from that match.
   if (!stateRef.current || stateRef.current.key !== keyOf(match)) {
-    stateRef.current = { key: keyOf(match), seed: matchWire(match), agreed: {}, last: null, finished };
+    stateRef.current = { key: keyOf(match), seed: matchWire(match), agreed: {}, last: {}, finished };
   }
   // A reopen is a write the server makes, not one the editor builds, so no build
   // moves the result the editor agrees with off the finished one. Once the server
@@ -56,19 +56,44 @@ export function useChangedGroups(match) {
   // named no result for it: the server kept the match as it was, with no error.
   if (!finished && stateRef.current.finished) stateRef.current.agreed[GROUP_RESULT] = matchWire(match);
   stateRef.current.finished = finished;
-  return (patch) => {
+  // `agreed[g]` is the server value the editor last AGREED with for g; `last[g]` is
+  // the value it last built or took for g. Both are kept per group: a group a build
+  // did not state says nothing about it, and a group the editor took from the server
+  // is, from then on, the value its next edit is judged against.
+  const claim = (patch) => {
     if (!patch) return patch;
     const m = matchRef.current;
     const st = stateRef.current;
     const next = toBackendMatchResult(patch, m);
     const current = matchWire(m);
-    for (const g of statedGroupsOf(next)) {
+    const stated = statedGroupsOf(next);
+    for (const g of stated) {
       if (groupMatches(g, next, current, next)) st.agreed[g] = current;
     }
-    const changed = changedGroups(next, (g) => st.agreed[g] || st.seed, st.last);
-    st.last = next;
+    const changed = changedGroups(next, (g) => st.agreed[g] || st.seed, (g) => st.last[g]);
+    for (const g of stated) st.last[g] = next;
     return { ...patch, changed };
   };
+  // claim.agree(group): the editor ADOPTED the server's value for `group`, so it
+  // agrees with the match as it now stands and that is the value it last had for the
+  // group. The hook cannot see an adopt, and the baseline moves only at a build where
+  // the editor's own state equals the prop (above), so without this an edit that puts
+  // the group back to the value the editor mounted with was compared against that
+  // mount-time seed and not named (the server kept the other device's value), and an
+  // edit of something else was compared against the value of the group the editor last
+  // BUILT, found it different from the adopted one, and re-sent the adopted value under
+  // a newer stamp. The caller states which group it took, from inside the adopt's
+  // `apply` (a skipped adopt, an editor holding an edit over a newer value, agrees
+  // nothing), and only for the part it took, never from the latest prop alone (an edit
+  // the editor holds over a newer prop must stay a change). The property rides on the
+  // function so the editors that only claim are unchanged.
+  claim.agree = (group) => {
+    const st = stateRef.current;
+    const adopted = matchWire(matchRef.current);
+    st.agreed[group] = adopted;
+    st.last[group] = adopted;
+  };
+  return claim;
 }
 
 // ---------------------------------------------------------------------------

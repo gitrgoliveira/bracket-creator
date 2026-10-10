@@ -92,6 +92,15 @@ func bracketMatchAsResult(bm *state.BracketMatch) *state.MatchResult {
 	}
 }
 
+// BracketMatchAsResult is a bracket match as the pool-shaped record every
+// write and merge reads (bracketMatchAsResult), for callers outside the engine
+// that read a stored bracket match the way they read a pool row (mobileapp's
+// matchSnapshot, before and after a score write). The result shares bm's bout
+// rows: a caller that changes it clones them first.
+func BracketMatchAsResult(bm *state.BracketMatch) *state.MatchResult {
+	return bracketMatchAsResult(bm)
+}
+
 // bracketMatchCourtAndSchedule returns the Court and ScheduledAt a bracket
 // match (a round match or the bronze/3rd-place match) currently holds,
 // bypassing bracketMatchAsResult's projection above, which deliberately

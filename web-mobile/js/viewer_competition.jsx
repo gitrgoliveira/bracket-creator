@@ -151,8 +151,11 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
     // answers the same question from the same rule (mp-jnvl). An unstamped
     // bout still falls back to scheduled time, so a competition whose results
     // predate the stamp reads exactly as it did.
+    // A completed bout with no winner is a hikiwake (drawn match), which is a
+    // result. The membership rule matches the operator's Completed list (status
+    // alone), and the order comes from result_recency.jsx.
     const recent = allMatches
-      .filter((m) => m.status === "completed" && m.winner && hasBothSides(m) && matchInvolvesWatched(m))
+      .filter((m) => m.status === "completed" && hasBothSides(m) && matchInvolvesWatched(m))
       .sort(resultRecencyDesc)
       .slice(0, hasActiveFilter ? 20 : 5);
     return { runningMatches: running, upcomingMatches: upcoming, recentMatches: recent };
@@ -726,7 +729,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
           <div className="vsched">
             {recentMatches.map((m) => (
               <React.Fragment key={m.id}>
-                <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} highlight={isPlayerWatched(m.sideA, highlightPlayers) || isPlayerWatched(m.sideB, highlightPlayers)} />
+                <VSchedItem m={m} tweaks={tweaks} onClick={() => handleMatchClick(m)} highlight={isPlayerWatched(m.sideA, highlightPlayers) || isPlayerWatched(m.sideB, highlightPlayers)} winnerTick={true} />
                 {!isSelfRun && expandedMatchId === m.id && <MatchDetailCard match={m} onClose={() => setExpandedMatchId(null)} />}
               </React.Fragment>
             ))}

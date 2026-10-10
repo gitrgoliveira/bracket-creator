@@ -3,7 +3,7 @@ BIN_NAME := bracket-creator
 GH_REPOSITORY ?= gitrgoliveira/bracket-creator
 IMAGE_NAME := ghcr.io/$(GH_REPOSITORY)
 BIN_PATH := ./bin
-GO_VERSION := 1.27.1
+GO_VERSION := 1.27.2
 GO_SOURCES := $(shell find . -name "*.go" -type f)
 EMBEDDED_ASSETS := $(shell find ./web ./web-mobile -type f 2>/dev/null)
 
@@ -51,8 +51,14 @@ local/deps: hooks/install js/deps ## Install project dependencies
 	# golangci-lint is lower than the targeted Go version"). `go install pkg@ver`
 	# runs outside this module, so it would otherwise use whatever `go` is on
 	# PATH rather than the toolchain go.mod asks for.
-	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1
-	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0
+	# The version also matters on its own: each analyser reads the standard
+	# library's export data through its bundled golang.org/x/tools, and go1.27.2
+	# writes a newer export-data version than x/tools v0.49 can read ("export
+	# data version 5 is greater than maximum supported version 4"). golangci-lint
+	# v2.14.0 bundles x/tools v0.50. No gosec release does yet, so gosec is pinned
+	# to the master commit that does (x/tools v0.51); move it to the next tag.
+	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/securego/gosec/v2/cmd/gosec@v2.29.1-0.20261009120814-7b1b5cebe007
 	GOTOOLCHAIN=go$(GO_VERSION) go install golang.org/x/vuln/cmd/govulncheck@latest
 	python3 -m pip install -r docs/requirements.txt
 

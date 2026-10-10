@@ -4494,6 +4494,9 @@ const API = {
             method: 'DELETE',
             headers: { 'X-Tournament-Password': password }
         });
+        // 404: the announcement is already gone (expired, or another console
+        // withdrew it first), which is the outcome the caller asked for.
+        if (res.status === 404) return;
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || `Failed to delete announcement (Status ${res.status})`);

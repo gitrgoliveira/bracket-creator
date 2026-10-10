@@ -45,7 +45,7 @@ export async function withAdminPage(browser, viewport, fn) {
 }
 
 // NOTE: this file deliberately stops at auth. Driving a score editor lives in
-// the recipe that needs it, because the individual, fixed-order team and
+// the recipe that needs it, because the individual, team and
 // kachinuki editors differ in how they score, finish and name a fighter, and
 // the shared helpers that once lived here were wrong for two of the three: they
 // scoped ippons to the individual board's side wrappers, and located the

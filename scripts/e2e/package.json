@@ -1,0 +1,12 @@
+{
+  "name": "bracket-creator-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Local Playwright journeys for the tournament app. Deliberately separate from web-mobile/package.json so a browser download never lands in js/deps or audit-ci's scope.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}

@@ -1,7 +1,7 @@
 // What every recipe that drives a score editor agrees on: which element the
 // editor IS, how a match is started, and how its Finish commits. Everything else about driving one
 // (how a bout is scored, how a fighter is named) differs between the
-// individual, fixed-order team and kachinuki editors, so it stays in the recipe
+// individual, team and kachinuki editors, so it stays in the recipe
 // that needs it; see the note at the end of lib/ui.mjs.
 
 // The editor dialog. Every overlay editor renders `.modal-backdrop
@@ -9,6 +9,14 @@
 // (admin_scoring_individual.jsx, admin_scoring_team.jsx, admin_scoring_engi.jsx),
 // so the testid names the BACKDROP and the class names the dialog itself.
 export const EDITOR = '.editor-modal';
+
+// The same editor mounted INLINE, as the shiaijo page (/admin/shiaijo/:court)
+// does: admin_scoring_individual.jsx renders `variant="inline"` as
+// `<div class="scoring-panel editor-modal--compact">`, with no backdrop and no
+// `.editor-modal` class, so EDITOR matches nothing there. The e2e journeys
+// pass it as the editor's root (scripts/e2e/fixtures/scoring.mjs); finishMatch
+// and startMatch below drive the overlay only.
+export const INLINE_EDITOR = '.scoring-panel';
 
 // The editors ignore a repeat POINTER tap within their bounce window
 // (TAP_BOUNCE_MS, 400ms, in web-mobile/js/tap_guard.jsx): a second ippon or

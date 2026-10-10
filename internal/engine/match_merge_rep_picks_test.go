@@ -316,35 +316,6 @@ func TestMerge_RepPicks_LegacyStampFallsBackToTheBout(t *testing.T) {
 	assert.Equal(t, mmT2, got.GroupStamp(repPickBName), "and keeps its date")
 }
 
-// A stamp map from this branch's earlier commits dated both picks as one group,
-// "repPicks". It reads as BOTH sides' stamp and is converted, and dropped, by the
-// first write that materializes the map (it errs toward holding a pick, which
-// is kept in the history).
-func TestMerge_RepPicks_DevStampOfBothPicksIsReadForEachSide(t *testing.T) {
-	h := mmTeam(t, true)
-	bracket, err := h.store.LoadBracket(h.compID)
-	require.NoError(t, err)
-	bm := &bracket.Rounds[0][0]
-	bm.SubResults = []state.SubMatchResult{repRow("carol", "gus", nil, nil)}
-	bm.ModifiedAt = mmT3
-	bm.GroupStamps = map[string]int64{repBoutGroup: mmT3, "repPicks": mmT2}
-	require.NoError(t, h.store.SaveBracket(h.compID, bracket))
-
-	require.Equal(t, mmT2, repStamp(t, h, repPickAName))
-	require.Equal(t, mmT2, repStamp(t, h, repPickBName))
-
-	err = h.write(repWrite(h, mmT1, repRow("dana", "gus", nil, nil), repPickAName))
-	require.ErrorIs(t, err, ErrMatchSuperseded)
-	assert.Equal(t, []string{repPickAName}, HeldGroupsOf(err))
-
-	require.NoError(t, h.write(repWrite(h, mmT4, repRow("dana", "gus", nil, nil), repPickAName)))
-	got := h.load(t)
-	assert.Equal(t, "dana", got.SubResults[0].SideAMemberID)
-	assert.Equal(t, mmT4, got.GroupStamp(repPickAName))
-	assert.Equal(t, mmT2, got.GroupStamp(repPickBName), "side B keeps the legacy date")
-	assert.NotContains(t, got.GroupStamps, "repPicks", "converted, not left to linger")
-}
-
 // A legacy match (no stamp map) that holds no representative bout row is not
 // given a pick stamp by an ordinary write: the materialization that runs before
 // the first group is stamped adds the keys only for a match that has the row to

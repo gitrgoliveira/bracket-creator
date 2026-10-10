@@ -261,29 +261,6 @@ func TestRepPicks_LegacyStampFollowsTheBoutOnceThenStandsAlone(t *testing.T) {
 	}
 }
 
-// A stamp map from this branch's earlier commits dated both picks as one group,
-// "repPicks". It reads as BOTH sides' stamp (over the bout row's, which it
-// outranks as the picks' own date), and the first materialization converts it to
-// a key per side and drops it, so it cannot linger in the newest-stamp scans.
-func TestRepPicks_DevStampOfBothPicksIsConvertedPerSide(t *testing.T) {
-	bout := BoutGroup(DaihyosenSubPosition)
-	m := &MatchResult{ModifiedAt: 90, GroupStamps: map[string]int64{"repPicks": 40, bout: 90}}
-	assert.Equal(t, int64(40), m.GroupStamp(GroupRepPickA), "both sides read the legacy stamp")
-	assert.Equal(t, int64(40), m.GroupStamp(GroupRepPickB))
-
-	m.StampGroups(100, GroupRepPickA)
-	assert.Equal(t, int64(100), m.GroupStamps[GroupRepPickA])
-	assert.Equal(t, int64(40), m.GroupStamps[GroupRepPickB], "side B keeps the legacy date")
-	assert.NotContains(t, m.GroupStamps, "repPicks", "converted, not left to linger")
-	assert.Equal(t, int64(90), m.GroupStamps[bout])
-
-	// A side with a key of its own is not overridden by a legacy key beside it.
-	both := &MatchResult{GroupStamps: map[string]int64{"repPicks": 40, GroupRepPickB: 70}}
-	assert.Equal(t, int64(40), both.GroupStamp(GroupRepPickA))
-	assert.Equal(t, int64(70), both.GroupStamp(GroupRepPickB))
-	assert.NotContains(t, MaterializedGroupStamps(both.GroupStamps, 0, nil), "repPicks")
-}
-
 // A legacy (map-less) match is given the pick entries when it materializes only
 // if it holds a representative bout row: the picks live on that row, so a match
 // without one has nothing to date and gains no key it never held.

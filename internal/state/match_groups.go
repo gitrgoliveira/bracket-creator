@@ -62,13 +62,6 @@ const (
 	GroupRepPickA = "repPickA"
 	GroupRepPickB = "repPickB"
 
-	// legacyRepPicksGroup is the one group both picks were dated under before
-	// each side had its own. Nothing is written under it any more; a stamp map
-	// from the commits that introduced the picks may still hold it, and is read
-	// as BOTH sides' stamp until the first materialization converts it
-	// (groupStampOf, MaterializedGroupStamps).
-	legacyRepPicksGroup = "repPicks"
-
 	boutGroupPrefix = "bout:"
 )
 
@@ -437,14 +430,6 @@ func groupStampOf(stamps map[string]int64, modifiedAt int64, group string) int64
 	if v, ok := stamps[group]; ok || !isRepPickGroup(group) {
 		return v
 	}
-	// A side's pick with no stamp of its own yet. A map from the commits that
-	// dated both picks as one group holds that group's stamp, which is BOTH
-	// sides' stamp until the first materialization converts it: it errs toward
-	// holding a pick, the recoverable direction, since a held pick is in the
-	// history.
-	if v, ok := stamps[legacyRepPicksGroup]; ok {
-		return v
-	}
 	// A map written before the representatives had a group of their own dated
 	// them with the bout row they sit on: until they are stamped themselves,
 	// that is their date.
@@ -470,18 +455,12 @@ func MaterializedGroupStamps(stamps map[string]int64, modifiedAt int64, position
 		out := CloneGroupStamps(stamps)
 		// Fix the fallback groupStampOf reads, or a side's pick date would
 		// follow the bout row's every later stamp. A side without a key of its
-		// own takes the legacy group's stamp (both sides', from before each had
-		// its own), else the bout row's; the legacy key is dropped so it cannot
-		// linger in the newest-stamp scans.
-		legacy, hasLegacy := out[legacyRepPicksGroup]
-		delete(out, legacyRepPicksGroup)
+		// own takes the bout row's stamp.
 		for _, g := range []string{GroupRepPickA, GroupRepPickB} {
 			if _, ok := out[g]; ok {
 				continue
 			}
-			if hasLegacy {
-				out[g] = legacy
-			} else if v, ok := out[BoutGroup(DaihyosenSubPosition)]; ok {
+			if v, ok := out[BoutGroup(DaihyosenSubPosition)]; ok {
 				out[g] = v
 			}
 		}

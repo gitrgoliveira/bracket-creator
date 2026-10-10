@@ -396,8 +396,10 @@ is a member of the team seated on its side, so when a knockout match is given an
 a side (a winner corrected upstream, a slot taken back to its placeholder, a qualifier
 repainted), that side's pick is cleared and dated at that moment, later than the pick had
 been. The write that made the old pick, replayed from a queue, is then kept in the match's
-history instead of seating the old team's member on the new team. A side given the same team
-again, or only renamed, keeps its pick.
+history instead of seating the old team's member on the new team. A side whose team does not
+change (the same winner stored again, or the team only renamed) keeps its pick. A side taken
+back to its placeholder loses its pick, even when the match that feeds it is finished again
+with the same winner: the pick is picked again.
 
 Those are two different namespaces, and the field names keep them apart on purpose. A
 match side carries a PARTICIPANT id, which names a competitor or a whole team; a bout side

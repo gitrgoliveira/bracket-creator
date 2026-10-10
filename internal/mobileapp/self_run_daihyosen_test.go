@@ -817,9 +817,9 @@ func TestHoldSelfReportedWriteUnderTx(t *testing.T) {
 			sent := state.CloneSubResults(tc.incoming)
 			result := &state.MatchResult{SubResults: tc.incoming, Winner: tc.winner, WinnerID: tc.winnerID, Status: tc.status}
 
-			err := store.WithTransaction("c1", func(stx state.StoreTx) error {
-				return holdSelfReportedWriteUnderTx(stx, "c1", "B1", result, tc.startOnly)
-			})
+			snap, found, err := matchSnapshotOrErr(store, "c1", "B1", "test")
+			require.NoError(t, err)
+			err = holdSelfReportedWriteUnderTx("c1", "B1", snap, found, result, tc.startOnly)
 			if tc.want != nil {
 				var refusal *selfRunRefusal
 				require.ErrorAs(t, err, &refusal)
@@ -955,6 +955,378 @@ func TestDaihyosenResponses_CarryNoAuditFields(t *testing.T) {
 		}}))
 		requireNoAuditFields(t, f.send(http.MethodDelete, "/api/competitions/c1/matches/Pool%20A-1/daihyosen", "main-pw", map[string]any{"modifiedAt": f.now}))
 	})
+}
+
+// bc-dhrp: a participant's pick of a side's representative names a member of
+// THAT side's team, the same rule a lineup places a member by (400
+// team_member_not_in_team). The organiser's pick is not judged here.
+func TestSelfRun_RepresentativeMembersMustBeOnTheirTeam(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	squads, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+	membersA, membersB := squads[repBoutTeamAID], squads[repBoutTeamBID]
+	require.NotEmpty(t, membersA, "team A is seeded with members")
+	require.NotEmpty(t, membersB, "team B is seeded with members")
+
+	pick := func(sideAID, sideBID string) map[string]any {
+		row := repBoutRow([]string{}, []string{}, "")
+		row["sideAMemberId"] = sideAID
+		row["sideBMemberId"] = sideBID
+		return row
+	}
+
+	w := f.score("", state.MatchStatusRunning, "", f.now+100, pick(membersA[0].ID, membersA[0].ID))
+	requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", "The representative chosen is not on this team. Pick again from the list.")
+	assert.Empty(t, f.storedRepBout(t).SideBMemberID, "a refused pick writes nothing")
+
+	w = f.score("", state.MatchStatusRunning, "", f.now+200, pick(membersA[0].ID, membersB[0].ID))
+	require.Equal(t, http.StatusOK, w.Code, "each side's own member is accepted: %s", w.Body.String())
+	stored := f.storedRepBout(t)
+	assert.Equal(t, membersA[0].ID, stored.SideAMemberID)
+	assert.Equal(t, membersB[0].ID, stored.SideBMemberID)
+
+	// The organiser's pick is judged the same way (organiser_rep_pick_judge_test.go):
+	// another team's member is refused, the side's own is accepted at once.
+	w = f.score("main-pw", state.MatchStatusRunning, "", f.now+300, pick(membersB[0].ID, membersB[0].ID))
+	requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", "The representative chosen is not on this team. Pick again from the list.")
+	w = f.score("main-pw", state.MatchStatusRunning, "", f.now+400, pick(membersA[1].ID, membersB[1].ID))
+	assert.Equal(t, http.StatusOK, w.Code, "the organiser's own-team pick is accepted: %s", w.Body.String())
+}
+
+// The merge holds a pick whose stamp is strictly older than the stored stamp of
+// that side's pick (state.GroupRepPickA here, a change dated apart from the
+// other side's and from the bout row), so such a pick is never written. Judging it would refuse a stale
+// queued write for a pick the merge was going to hold anyway (and keep in the
+// history). An EQUAL stamp applies under the merge (domain.ApplyByTimestamp), so
+// an equal-stamped pick is still judged.
+func TestSelfRun_AStalePickTheMergeHoldsIsNotRefused(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	squads, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+	membersA, membersB := squads[repBoutTeamAID], squads[repBoutTeamBID]
+	require.NotEmpty(t, membersA, "team A is seeded with members")
+	require.NotEmpty(t, membersB, "team B is seeded with members")
+
+	// Team A's own member is picked on side A at f.now: the picks' stamp.
+	valid := repBoutRow([]string{}, []string{}, "")
+	valid["sideAMemberId"] = membersA[0].ID
+	w := f.score("", state.MatchStatusRunning, "", f.now, valid)
+	require.Equal(t, http.StatusOK, w.Code, "a valid pick: %s", w.Body.String())
+	before := *f.storedRepBout(t)
+	require.Equal(t, membersA[0].ID, before.SideAMemberID)
+
+	// Team B's member on side A: another team's, which the row would be refused for.
+	pick := repBoutRow([]string{}, []string{}, "")
+	pick["sideAMemberId"] = membersB[0].ID
+
+	w = f.score("", state.MatchStatusRunning, "", f.now-100, pick)
+	require.Equal(t, http.StatusOK, w.Code, "a write stamped before the stored pick is held, not refused: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), `"superseded"`, "the merge answers the held write as superseded")
+	assert.Equal(t, before, *f.storedRepBout(t), "the held pick is not written")
+
+	w = f.score("", state.MatchStatusRunning, "", f.now, pick)
+	requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", "The representative chosen is not on this team. Pick again from the list.")
+
+	w = f.score("", state.MatchStatusRunning, "", f.now+100, pick)
+	requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", "The representative chosen is not on this team. Pick again from the list.")
+	assert.Equal(t, before, *f.storedRepBout(t), "a refused pick writes nothing")
+}
+
+// A pick is judged against that side's OWN stamp, not the bout row's and not the
+// match's ModifiedAt (the newest stamp of any group). A point struck on the
+// representative bout moves the bout's stamp past the picks' while the picks
+// keep theirs, and a pick stamped between the two applies to the picks under the
+// merge, so it is judged. The write that struck the point names only the bout
+// and so is never judged for picks.
+func TestSelfRun_APickIsJudgedAgainstThePicksOwnStamp(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	squads, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+	membersA, membersB := squads[repBoutTeamAID], squads[repBoutTeamBID]
+	require.NotEmpty(t, membersA, "team A is seeded with members")
+	require.NotEmpty(t, membersB, "team B is seeded with members")
+
+	valid := repBoutRow([]string{}, []string{}, "")
+	valid["sideAMemberId"] = membersA[0].ID
+	w := f.score("", state.MatchStatusRunning, "", f.now, valid)
+	require.Equal(t, http.StatusOK, w.Code, "a valid pick: %s", w.Body.String())
+	pickedMatch := storedB1(t, f.store, "c1")
+	beforeB := pickedMatch.GroupStamp(state.GroupRepPickB)
+
+	// A point on the representative bout from a board that never saw the pick:
+	// it names the bout only, so its row (with no ids, and so no pick of its own)
+	// is not judged for picks, and it leaves the stored pick alone.
+	point := scoreSheet(state.MatchStatusRunning, "", f.now+100, repBoutRow([]string{"M"}, []string{}, ""))
+	point["changed"] = []string{state.BoutGroup(state.DaihyosenSubPosition)}
+	w = f.send(http.MethodPut, repBoutMatchPath+"/score", "", point)
+	require.Equal(t, http.StatusOK, w.Code, "the point: %s", w.Body.String())
+	stored := storedB1(t, f.store, "c1")
+	require.Equal(t, f.now+100, stored.GroupStamp(state.BoutGroup(state.DaihyosenSubPosition)), "the bout moved on")
+	require.Equal(t, f.now, stored.GroupStamp(state.GroupRepPickA), "the pick kept its stamp")
+	require.Equal(t, beforeB, stored.GroupStamp(state.GroupRepPickB), "and the point did not date the other side's either")
+	assert.Equal(t, membersA[0].ID, f.storedRepBout(t).SideAMemberID, "the point did not erase the pick")
+
+	bad := repBoutRow([]string{}, []string{}, "")
+	bad["sideAMemberId"] = membersB[0].ID
+	w = f.score("", state.MatchStatusRunning, "", f.now+50, bad)
+	requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", "The representative chosen is not on this team. Pick again from the list.")
+}
+
+// Each side's pick is judged only when the write names that side's group (and
+// the merge will apply it). A write that names side A's pick while merely
+// echoing an id on side B the stored row does not hold (as a re-seat that has
+// cleared it would leave) is not refused for side B against the team it holds
+// now, and writes nothing for it; naming side B's pick as well judges it.
+func TestSelfRun_ASideTheWriteDoesNotNameIsNotJudged(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	squads, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+	membersA := squads[repBoutTeamAID]
+	require.GreaterOrEqual(t, len(membersA), 2, "team A is seeded with members")
+
+	// Side A's own member; on side B, a member of team A (not team B's).
+	row := repBoutRow([]string{}, []string{}, "")
+	row["sideAMemberId"] = membersA[0].ID
+	row["sideBMemberId"] = membersA[1].ID
+
+	named := scoreSheet(state.MatchStatusRunning, "", f.now+300, row)
+	named["changed"] = []string{state.GroupRepPickA}
+	w := f.send(http.MethodPut, repBoutMatchPath+"/score", "", named)
+	require.Equal(t, http.StatusOK, w.Code, "side B is not named, so it is not judged: %s", w.Body.String())
+	stored := f.storedRepBout(t)
+	assert.Equal(t, membersA[0].ID, stored.SideAMemberID, "the named side applies")
+	assert.Empty(t, stored.SideBMemberID, "and the side it did not name is not written")
+
+	both := scoreSheet(state.MatchStatusRunning, "", f.now+400, row)
+	both["changed"] = []string{state.GroupRepPickA, state.GroupRepPickB}
+	w = f.send(http.MethodPut, repBoutMatchPath+"/score", "", both)
+	requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", "The representative chosen is not on this team. Pick again from the list.")
+	assert.Empty(t, f.storedRepBout(t).SideBMemberID, "a refused pick writes nothing")
+}
+
+// A write that names the bout alone changes no pick, so a foreign id on its row
+// is neither judged nor written: the judge reads which picks the write landed.
+func TestSelfRun_AWriteNamingTheBoutAloneIsNotJudgedForThePick(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	squads, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+	membersB := squads[repBoutTeamBID]
+	require.NotEmpty(t, membersB, "team B is seeded with members")
+
+	row := repBoutRow([]string{"M"}, []string{}, "")
+	row["sideAMemberId"] = membersB[0].ID // side A is team A's
+	sheet := scoreSheet(state.MatchStatusRunning, "", f.now+100, row)
+	sheet["changed"] = []string{state.BoutGroup(state.DaihyosenSubPosition)}
+	w := f.send(http.MethodPut, repBoutMatchPath+"/score", "", sheet)
+	require.Equal(t, http.StatusOK, w.Code, "the bout is not a pick: %s", w.Body.String())
+	stored := f.storedRepBout(t)
+	assert.Equal(t, []string{"M"}, stored.IpponsA, "the bout applies")
+	assert.Empty(t, stored.SideAMemberID, "and the id it carried is no pick")
+}
+
+// A members file that cannot be read refuses a pick that needs it with a
+// refusal the offline queue does not retry (409; a 500 is retried forever),
+// and writes nothing.
+func TestSelfRun_UnreadableTeamMembersRefusesThePickTerminally(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	squads, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+	membersA := squads[repBoutTeamAID]
+	require.NotEmpty(t, membersA, "team A is seeded with members")
+	require.NoError(t, os.WriteFile(
+		filepath.Join(f.store.GetFolder(), "competitions", "c1", "team-members.yaml"),
+		[]byte("not: [valid yaml"), 0o600))
+
+	before := f.storedState(t)
+
+	row := repBoutRow([]string{}, []string{}, "")
+	row["sideAMemberId"] = membersA[0].ID
+	w := f.score("", state.MatchStatusRunning, "", f.now+100, row)
+	requireTeamMembersUnreadable(t, w)
+	assert.Equal(t, before, f.storedState(t), "a refused pick writes nothing, not even its history line")
+}
+
+// Removing the representative bout dates both sides' representatives with the
+// removal (it names state.GroupRepPickA and state.GroupRepPickB beside the
+// bout), so a pick a board made before it, on a sheet that still showed the row,
+// is held and kept in the history rather than applied onto nothing.
+func TestDaihyosenRemove_DatesTheRepresentativesToo(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	squads, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+	membersA := squads[repBoutTeamAID]
+	require.NotEmpty(t, membersA)
+
+	pick := repBoutRow([]string{}, []string{}, "")
+	pick["sideAMemberId"] = membersA[0].ID
+	w := f.score("", state.MatchStatusRunning, "", f.now+10, pick)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	w = f.send(http.MethodDelete, repBoutMatchPath+"/daihyosen", "main-pw", map[string]any{"modifiedAt": f.now + 50})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	stored := storedB1(t, f.store, "c1")
+	require.False(t, carriesDaihyosenRow(stored.SubResults), "the bout is gone")
+	assert.Equal(t, f.now+50, stored.GroupStamp(state.GroupRepPickA), "the removal dates side A's representative")
+	assert.Equal(t, f.now+50, stored.GroupStamp(state.GroupRepPickB), "and side B's")
+
+	// A pick made after the removal on a sheet that still showed the row names
+	// the pick alone: it is newer, but the bout it sits on is gone.
+	sheet := scoreSheet(state.MatchStatusRunning, "", f.now+60, pick)
+	sheet["changed"] = []string{state.GroupRepPickA}
+	late := f.send(http.MethodPut, repBoutMatchPath+"/score", "main-pw", sheet)
+	require.Equal(t, http.StatusOK, late.Code, late.Body.String())
+	assert.Contains(t, late.Body.String(), `"superseded"`, "a pick has no bout to land on: it is held")
+	assert.False(t, carriesDaihyosenRow(storedB1(t, f.store, "c1").SubResults), "nothing is resurrected")
+}
+
+// Adding the representative bout dates both sides' representatives with the add,
+// as the remove does. Without it the new row inherits the stamp of the earlier removal's
+// tombstone, and a pick made on the PREVIOUS representative bout, stamped between
+// the remove and the add, lands on the new bout.
+func TestDaihyosenAdd_DatesTheRepresentativesToo(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	squads, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+	membersA := squads[repBoutTeamAID]
+	require.NotEmpty(t, membersA)
+
+	w := f.send(http.MethodDelete, repBoutMatchPath+"/daihyosen", "main-pw", map[string]any{"modifiedAt": f.now + 100})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	w = f.send(http.MethodPost, repBoutMatchPath+"/daihyosen", "main-pw", map[string]any{"modifiedAt": f.now + 200})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	added := storedB1(t, f.store, "c1")
+	require.Equal(t, f.now+200, added.GroupStamp(state.GroupRepPickA), "the add dates side A's representative")
+	require.Equal(t, f.now+200, added.GroupStamp(state.GroupRepPickB), "and side B's")
+
+	// A pick made on the previous bout, between the remove and the add, arrives late.
+	pick := repBoutRow([]string{}, []string{}, "")
+	pick["sideAMemberId"] = membersA[0].ID
+	sheet := scoreSheet(state.MatchStatusRunning, "", f.now+150, pick)
+	sheet["changed"] = []string{state.GroupRepPickA}
+	late := f.send(http.MethodPut, repBoutMatchPath+"/score", "main-pw", sheet)
+	require.Equal(t, http.StatusOK, late.Code, late.Body.String())
+	assert.Contains(t, late.Body.String(), `"superseded"`, "a pick older than the add is held")
+	assert.Empty(t, f.storedRepBout(t).SideAMemberID, "the old bout's pick is not on the new bout")
+}
+
+// The winner id a participant's write carries is not judged: the merge keeps the
+// pair consistent itself (SubMatchResult.ReconcileWinnerMemberID). Another device
+// changed side A's pick; the participant's winning point (bout:-1, not the picks)
+// still carries the OLD pick's id. The point is the participant's and applies, and
+// the stored winner id ends up naming the stored pick of the winning side, rather
+// than the write being refused and the point lost.
+func TestSelfRun_AWinningPointCarryingAReplacedPicksIdIsAcceptedAndReconciled(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	squads, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+	membersA := squads[repBoutTeamAID]
+	require.GreaterOrEqual(t, len(membersA), 2, "team A is seeded with members")
+	oldPick, newPick := membersA[0].ID, membersA[1].ID
+
+	organiserPick := func(memberID string, at int64) {
+		t.Helper()
+		row := repBoutRow([]string{}, []string{}, "")
+		row["sideAMemberId"] = memberID
+		sheet := scoreSheet(state.MatchStatusRunning, "", at, row)
+		sheet["changed"] = []string{state.GroupRepPickA}
+		w := f.send(http.MethodPut, repBoutMatchPath+"/score", "main-pw", sheet)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	}
+	organiserPick(oldPick, f.now+10)
+	organiserPick(newPick, f.now+100) // the other device's change, T2
+
+	point := repBoutRow([]string{"M"}, []string{}, "TeamA")
+	point["sideAMemberId"] = oldPick
+	point["winnerMemberId"] = oldPick
+	sheet := scoreSheet(state.MatchStatusRunning, "", f.now+200, point)
+	sheet["changed"] = []string{state.BoutGroup(state.DaihyosenSubPosition)}
+	w := f.send(http.MethodPut, repBoutMatchPath+"/score", "", sheet)
+	require.Equal(t, http.StatusOK, w.Code, "the point is not refused for the id of the pick it replaced: %s", w.Body.String())
+
+	stored := f.storedRepBout(t)
+	assert.Equal(t, []string{"M"}, stored.IpponsA, "the winning point applied")
+	assert.Equal(t, newPick, stored.SideAMemberID, "the other device's pick stands")
+	assert.Equal(t, newPick, stored.WinnerMemberID, "the winner id names the stored pick of the winning side")
+}
+
+// A pick the stored row already holds is inherited, not introduced by the write:
+// a correction that seated another team leaves the old team's member on the row,
+// and the participant's echo of it is kept rather than refused against the team
+// now holding that side. A pick the write changes is still judged.
+func TestSelfRun_AStoredRepresentativeIdIsNotJudgedAgainstTheTeamNow(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	squads, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+	membersB := squads[repBoutTeamBID]
+	require.GreaterOrEqual(t, len(membersB), 2, "team B is seeded with members")
+	f.setB1(t, func(bm *state.BracketMatch) {
+		bm.SubResults[state.DaihyosenSubIndex(bm.SubResults)].SideAMemberID = membersB[0].ID
+	})
+
+	echo := repBoutRow([]string{}, []string{}, "")
+	echo["sideAMemberId"] = membersB[0].ID
+	w := f.score("", state.MatchStatusRunning, "", f.now+200, echo)
+	require.Equal(t, http.StatusOK, w.Code, "the echo of the stored pick is kept: %s", w.Body.String())
+	assert.Equal(t, membersB[0].ID, f.storedRepBout(t).SideAMemberID)
+
+	changed := repBoutRow([]string{}, []string{}, "")
+	changed["sideAMemberId"] = membersB[1].ID
+	w = f.score("", state.MatchStatusRunning, "", f.now+300, changed)
+	requireRefusal(t, w, http.StatusBadRequest, "team_member_not_in_team", "The representative chosen is not on this team. Pick again from the list.")
+	assert.Equal(t, membersB[0].ID, f.storedRepBout(t).SideAMemberID, "a refused pick writes nothing")
+}
+
+// A side the stored match carries no participant id for has no team to judge a
+// pick against, so the pick is not refused as "not on this team". An empty team
+// id names no team, so every pick on such a side used to be refused.
+func TestSelfRun_ARepresentativePickOnAnIdlessSideIsNotJudged(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	squads, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+	membersA := squads[repBoutTeamAID]
+	require.NotEmpty(t, membersA, "team A is seeded with members")
+	f.setB1(t, func(bm *state.BracketMatch) { bm.SideAID = "" })
+
+	pick := repBoutRow([]string{}, []string{}, "")
+	pick["sideAMemberId"] = membersA[0].ID
+	w := f.score("", state.MatchStatusRunning, "", f.now+200, pick)
+	require.Equal(t, http.StatusOK, w.Code, "the pick on an id-less side is accepted: %s", w.Body.String())
+	assert.Equal(t, membersA[0].ID, f.storedRepBout(t).SideAMemberID)
+}
+
+// A participant's echo of the organiser's recorded verdict is replaced by the
+// stored row whatever picks it carries, so a foreign pick on it is not refused
+// (the picks are never written).
+func TestSelfRun_RepresentativeMembersAreNotJudgedOnADecidedVerdict(t *testing.T) {
+	f := newRepBoutFixture(t, true)
+	f.addRepBout(t)
+	f.recordHantei(t)
+	squads, err := f.store.LoadSquads("c1")
+	require.NoError(t, err)
+	membersB := squads[repBoutTeamBID]
+	require.NotEmpty(t, membersB, "team B is seeded with members")
+
+	echo := hanteiRow()
+	echo["sideAMemberId"] = membersB[0].ID // team B's member on team A's side
+
+	w := f.score("", state.MatchStatusRunning, "", f.now+200, echo)
+	require.Equal(t, http.StatusOK, w.Code, "the verdict's echo is kept whatever its picks: %s", w.Body.String())
+	assert.NotContains(t, w.Body.String(), "team_member_not_in_team")
+	row := f.storedRepBout(t)
+	assert.Equal(t, []string{domain.HanteiMark}, row.IpponsA, "the verdict stands")
+	assert.Equal(t, "TeamA", row.Winner)
+	assert.Empty(t, row.SideAMemberID, "the stored row keeps its own picks, not the echo's")
 }
 
 // A password sent but wrong is answered 401 before the body is read, so a

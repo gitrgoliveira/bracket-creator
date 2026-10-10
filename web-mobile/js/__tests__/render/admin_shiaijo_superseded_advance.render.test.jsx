@@ -43,7 +43,6 @@ const STUBBED_GLOBALS = {
     updateMatchTime: vi.fn(),
     startMatch: vi.fn(),
   },
-  startPatch: vi.fn(() => ({ status: 'running' })),
   confirmDialog: vi.fn().mockResolvedValue(true),
   PoolsViewer: () => null,
   compMatches: () => [],

@@ -1902,7 +1902,7 @@ describe('normalizeMatch: same-name winner attribution is arbitrary but CONSISTE
 // operator clearing every mark.
 describe('startOnly reaches the wire only from startPatch (bc-sbq)', () => {
   it('startPatch is flagged, and the serializer carries the flag', async () => {
-    const { startPatch } = await import('../admin_schedule_score_editor.jsx');
+    const { startPatch } = await import('../start_match.jsx');
     const patch = startPatch();
     expect(patch.startOnly).toBe(true);
     const wire = toBackendMatchResult(patch, { sideA: 'Alice', sideB: 'Bob' });

@@ -2176,7 +2176,7 @@ func TestReopenKachinukiMatch_ReopenPending(t *testing.T) {
 // reopened without a reason carries ReopenPending, and sending it back to the
 // queue must CLEAR that audit debt. If it didn't, the requeued (now scheduled,
 // empty) match would still owe a correctionReason for a result that no longer
-// exists, and applyCorrectionReasonUnderTx would reject its next honest
+// exists, and the handler's applyCorrectionReason would reject its next honest
 // finalization demanding one. reopenBracketMatch's doc names this mirror
 // obligation on RevertMatchToQueue; the two homes carry the flag separately.
 func TestRevertMatchToQueue_ClearsReopenPending(t *testing.T) {
@@ -2223,7 +2223,7 @@ func TestRevertMatchToQueue_ClearsReopenPending(t *testing.T) {
 
 // TestOverrideBracketWinner_ClearsReopenPending pins the related half of R1:
 // override-winner is a second finalization path that bypasses
-// applyCorrectionReasonUnderTx, so a reopened bracket match closed out via an
+// applyCorrectionReason, so a reopened bracket match closed out via an
 // override must also discharge ReopenPending, or the flag lingers indefinitely.
 func TestOverrideBracketWinner_ClearsReopenPending(t *testing.T) {
 	compID := "override-pending"

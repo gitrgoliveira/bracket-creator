@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -164,13 +165,20 @@ func (e *Engine) ReplaceParticipantInDraw(
 		// apply (matchesParticipant), now extended to bracket.json now that
 		// it carries ids too.
 		bracketChanged := false
-		forEachBracketSideWithID(bracket, func(name, id *string) {
+		forEachBracketSlot(bracket, func(m *state.BracketMatch, slot domain.MatchSide, name, id *string) {
 			if !matchesParticipant(*id, pid) {
 				return
 			}
 			bracketFound = true
-			if *name != newName {
-				*name = newName
+			if slot == domain.MatchSideNone {
+				// The Winner is not a side: written directly.
+				if *name != newName {
+					*name = newName
+					bracketChanged = true
+				}
+				return
+			}
+			if renameBracketSide(m, slot, newName, *id) {
 				bracketChanged = true
 			}
 		})
@@ -207,7 +215,7 @@ func (e *Engine) ReplaceParticipantInDraw(
 		// manual check, while the silent-corruption direction costs someone
 		// else's match history.
 		bracketNames := make(map[string]bool)
-		forEachBracketSideWithID(bracket, func(name, id *string) {
+		forEachBracketSlot(bracket, func(_ *state.BracketMatch, _ domain.MatchSide, name, id *string) {
 			if *id == "" && *name != "" {
 				bracketNames[*name] = true
 			}
@@ -220,7 +228,7 @@ func (e *Engine) ReplaceParticipantInDraw(
 			}
 			bracketNameAmbiguous = amb
 		}
-		forEachBracketSideWithID(bracket, func(name, id *string) {
+		forEachBracketSlot(bracket, func(m *state.BracketMatch, slot domain.MatchSide, name, id *string) {
 			if *id != "" {
 				// Carries an id that is NOT pid's (pass 1 already renamed
 				// every pid match): a different competitor, full stop --
@@ -235,6 +243,13 @@ func (e *Engine) ReplaceParticipantInDraw(
 			if !bracketNameAmbiguous {
 				*name = newName
 				bracketChanged = true
+				// The side keeps its team and only has a new name, so the
+				// representative bout row's name follows it and no pick goes
+				// (seatBracketSide would read an id-less old name to a new
+				// one as another team).
+				if row := state.DaihyosenSubIndex(m.SubResults); row >= 0 && slot != domain.MatchSideNone {
+					nameRepBoutRow(m, row, slot, newName, oldName, false)
+				}
 			}
 		})
 		if bracketNameAmbiguous && bracketFound {
@@ -317,28 +332,55 @@ func matchesParticipant(rowID, pid string) bool {
 	return rowID != "" && pid != "" && rowID == pid
 }
 
-// forEachBracketSideWithID calls fn once for each of a bracket's three
-// (name, id) side pairs -- SideA/SideAID, SideB/SideBID, Winner/WinnerID --
-// across every round, plus the ThirdPlaceMatch sibling's when present. Both
-// pointers ALIAS the stored match (indexed slice access, never a
-// range-copy), so a caller mutating through them edits the bracket in
-// place. Shared by ReplaceParticipantInDraw's id-based rename pass, its
-// id-less name-collection pass, and its name-based fallback rename pass,
-// which would otherwise hand-copy the same enumeration three times
-// (bc-brid; this replaced the pre-bc-brid, name-only forEachBracketSide,
-// whose two callers both needed the id half once bracket.json grew one).
-func forEachBracketSideWithID(b *state.Bracket, fn func(name, id *string)) {
+// renameBracketSide gives side of m, which carries the renamed participant's
+// id, the participant's new name. It goes through seatBracketSide, so the
+// representative bout row's name (and its Winner, when the row or the match named
+// the side by the old name) follows the match's: the same id is the same team, so no pick
+// is cleared. It reports whether anything was out of step, the match's name or
+// the row's, so a bracket already in step is not saved again.
+func renameBracketSide(m *state.BracketMatch, side domain.MatchSide, newName, id string) bool {
+	name, _ := slotFields(m, side)
+	inStep := *name == newName
+	if row := state.DaihyosenSubIndex(m.SubResults); row >= 0 {
+		rowName := m.SubResults[row].SideA
+		if side == domain.MatchSideB {
+			rowName = m.SubResults[row].SideB
+		}
+		inStep = inStep && rowName == newName
+	}
+	if inStep {
+		return false
+	}
+	seatBracketSide(m, side, newName, id)
+	return true
+}
+
+// forEachBracketSlot calls fn once for each of a bracket's three (name, id)
+// slots -- SideA/SideAID, SideB/SideBID, Winner/WinnerID -- across every round,
+// plus the ThirdPlaceMatch sibling's when present, with the slot's match and
+// which of its slots it is: domain.MatchSideA, domain.MatchSideB, or
+// domain.MatchSideNone for the Winner (not a side). Both pointers ALIAS the
+// stored match (indexed slice access, never a range-copy), so a caller mutating
+// through them edits the bracket in place. Shared by ReplaceParticipantInDraw's
+// id-based rename pass, its id-less name-collection pass, and its name-based
+// fallback rename pass, which would otherwise hand-copy the same enumeration
+// three times (bc-brid; this replaced the pre-bc-brid, name-only
+// forEachBracketSide, whose two callers both needed the id half once
+// bracket.json grew one). The passes that write a side through seatBracketSide,
+// or keep the representative bout row in step with one, need the match and the
+// slot; the collection pass ignores both.
+func forEachBracketSlot(b *state.Bracket, fn func(m *state.BracketMatch, slot domain.MatchSide, name, id *string)) {
+	visit := func(m *state.BracketMatch) {
+		fn(m, domain.MatchSideA, &m.SideA, &m.SideAID)
+		fn(m, domain.MatchSideB, &m.SideB, &m.SideBID)
+		fn(m, domain.MatchSideNone, &m.Winner, &m.WinnerID)
+	}
 	for i := range b.Rounds {
 		for j := range b.Rounds[i] {
-			m := &b.Rounds[i][j]
-			fn(&m.SideA, &m.SideAID)
-			fn(&m.SideB, &m.SideBID)
-			fn(&m.Winner, &m.WinnerID)
+			visit(&b.Rounds[i][j])
 		}
 	}
 	if bm := b.ThirdPlaceMatch; bm != nil {
-		fn(&bm.SideA, &bm.SideAID)
-		fn(&bm.SideB, &bm.SideBID)
-		fn(&bm.Winner, &bm.WinnerID)
+		visit(bm)
 	}
 }

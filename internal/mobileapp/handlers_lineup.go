@@ -460,32 +460,45 @@ var errTeamNotInMatch = &selfRunRefusal{
 // memberIDsOutsideTeam refuses a lineup that places a member id the team does
 // not hold (400 team_member_not_in_team): ids are bare UUIDs, so the team's own
 // squad is the only thing that says whose they are, and a lineup naming another
-// team's member would put that member on this team's score sheet.
+// team's member would put that member on this team's score sheet. A members
+// file that cannot be read refuses the save with errTeamMembersUnreadable (409),
+// not a 500 the offline queue retries forever; a save that names no member id
+// (a cleared position) never reads it.
 func memberIDsOutsideTeam(stx state.StoreTx, compID, teamID string, memberIDs map[domain.Position]string) *txResponse {
-	if len(memberIDs) == 0 {
-		return nil
-	}
-	squads, err := stx.LoadSquads(compID)
-	if err != nil {
-		log.Printf("mobileapp: lineup member check for %s: %v", compID, err)
-		return &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
-	}
-	held := make(map[string]bool, len(squads[teamID]))
-	for _, m := range squads[teamID] {
-		held[m.ID] = true
-	}
+	judge := &memberJudge{stx: stx, compID: compID}
 	for pos, id := range memberIDs {
-		if id != "" && !held[id] {
+		if id == "" {
+			continue
+		}
+		held, err := judge.holds(teamID, id)
+		if err != nil {
+			return errTeamMembersUnreadable.response()
+		}
+		if !held {
 			return errLineupMemberNotInTeam(pos).response()
 		}
 	}
 	return nil
 }
 
+// teamMemberIDs is the set of member ids a team holds in squads: the one answer to
+// "is this member the team's" that every member check asks.
+func teamMemberIDs(squads map[string][]domain.TeamMember, teamID string) map[string]bool {
+	held := make(map[string]bool, len(squads[teamID]))
+	for _, m := range squads[teamID] {
+		held[m.ID] = true
+	}
+	return held
+}
+
+// codeTeamMemberNotInTeam is the refusal code for a member id the named team does
+// not hold. The lineup refusal and the representative pick's refusal both answer it.
+const codeTeamMemberNotInTeam = "team_member_not_in_team"
+
 func errLineupMemberNotInTeam(pos domain.Position) *selfRunRefusal {
 	return &selfRunRefusal{
 		status:  http.StatusBadRequest,
-		code:    "team_member_not_in_team",
+		code:    codeTeamMemberNotInTeam,
 		message: "The member chosen for " + string(pos) + " is not on this team. Pick again from the list.",
 	}
 }

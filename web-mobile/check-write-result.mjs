@@ -98,7 +98,7 @@ export const FORBIDDEN = [
     // whole rule exists to prevent. A copy constant read off `window` is worse
     // still: it renders as the literal text "undefined" in an operator banner.
     // Import from write_result.jsx; do not re-add a mirror.
-    re: /window\.(writeDidNotLand|writeWasSuperseded|writeWasRefused|writeWasRefusedForClock|writeRetryable|notLandedBanner|SUPERSEDED_LEAD|SUPERSEDED_REASON|SUPERSEDED_ADVICE|supersededAlertText|writeHeldGroups|writePartlyHeld|CLOCK_SKEW_REASON_TEXT|CLOCK_SKEW_ADVICE|QUEUED_NOTICE|QUEUED_UNSAVED_NOTICE|queuedNotice|queuedWritesNoun|heldWritesText|writeNeedsWinner|writeDisplacedGroups|supersededBanner|displacedAlertText)\b/,
+    re: /window\.(writeDidNotLand|writeWasSuperseded|writeWasRefused|writeWasRefusedForClock|writeRetryable|notLandedBanner|SUPERSEDED_LEAD|SUPERSEDED_REASON|SUPERSEDED_ADVICE|supersededAlertText|writeHeldGroups|writePartlyHeld|CLOCK_SKEW_REASON_TEXT|CLOCK_SKEW_ADVICE|QUEUED_NOTICE|QUEUED_UNSAVED_NOTICE|queuedNotice|queuedWritesNoun|heldWritesText|writeNeedsWinner|writeDisplacedGroups|writeDisplacedForWinner|supersededBanner|displacedAlertText)\b/,
     why: 'reads an owned predicate/copy off window; those mirrors are deleted, import from write_result.jsx instead',
   },
   {

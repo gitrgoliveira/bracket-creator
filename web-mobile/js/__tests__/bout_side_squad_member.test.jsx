@@ -60,11 +60,22 @@ describe('resolveBoutSideMemberId (mirrors resolveBoutSideName priority)', () =>
     })).toBe('mem-recorded');
   });
 
-  it('daihyosen row is lineup-first even in a kachinuki match', () => {
+  it('daihyosen row reads only its own pick, never a lineup position, even in a kachinuki match', () => {
     expect(resolveBoutSideMemberId({
       isKachinuki: true, isDaihyosen: true,
       existingMemberId: 'mem-old', lineupMemberId: 'mem-rep',
-    })).toBe('mem-rep');
+    })).toBe('mem-old');
+    expect(resolveBoutSideMemberId({
+      isKachinuki: false, isDaihyosen: true,
+      existingMemberId: 'mem-pick', lineupMemberId: 'mem-lineup',
+    })).toBe('mem-pick');
+  });
+
+  it('daihyosen row with no pick of its own has no id, though a lineup position holds a member', () => {
+    expect(resolveBoutSideMemberId({
+      isKachinuki: false, isDaihyosen: true,
+      existingMemberId: '', lineupMemberId: 'mem-lineup',
+    })).toBe('');
   });
 
   it('returns "" when neither source has an id', () => {

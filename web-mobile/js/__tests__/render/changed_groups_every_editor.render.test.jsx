@@ -21,7 +21,7 @@ import { installWindowStubs } from '../helpers/stub_globals.js';
 import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
 import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
 import { pointerTap } from '../helpers/tap_events.js';
-import { startPatch } from '../../admin_schedule_score_editor.jsx';
+import { startPatch } from '../../start_match.jsx';
 
 let writes;
 
@@ -394,6 +394,21 @@ describe('a write applied in part', () => {
       "Saved. A later change to points would have left the finished match without a winner, so it was moved to the match's history.");
   });
 
+  // A later change moved for another reason (a representative's pick stamped after the
+  // representative bout's removal) carries no needs_winner reason: the match lacks no
+  // winner, and the note must not say it does.
+  it('a write that moved a later change to the history for no winner reason says only that', async () => {
+    window.API.recordScore.mockImplementation((_c, _m, patch) => {
+      writes.push(patch);
+      return Promise.resolve({ id: 'm-ind', status: 'running', displacedGroups: ['repPickB'] });
+    });
+    await mount(individual());
+    await pointerTap(ipponBtn('aka', 'M'));
+    await settle();
+    expect(note()?.textContent).toBe(
+      "Saved. A later change to Shiro's pick for the representative bout was moved to the match's history.");
+  });
+
   it('a superseded write shows the banner, not the note', async () => {
     window.API.recordScore.mockImplementation((_c, _m, patch) => {
       writes.push(patch);
@@ -403,5 +418,216 @@ describe('a write applied in part', () => {
     await pointerTap(ipponBtn('aka', 'M'));
     await settle();
     expect(note()).toBeNull();
+  });
+});
+
+// A value the editor ADOPTED from the server is the value it agrees with, and it is the
+// last value the editor "sent" for that group, so:
+//   - taking it back here is a change (B): the server keeps the other device's value
+//     unless the write names the group, and the editor's mount-time value is not the
+//     baseline any more;
+//   - an edit of something else never names it (F): it is not a change, and naming it
+//     would put the adopted value back under a newer stamp, over whatever was recorded
+//     meanwhile.
+// A value the editor HELD over a newer server value is neither (the existing tests above).
+describe('an adopted value is agreed, never re-sent', () => {
+  it('individual: a point adopted from another device and then taken back here is named (B)', async () => {
+    const { rerender } = await mount(individual());
+    await act(async () => { rerender(editorFor(individual({ ipponsB: ['K'] }))); });
+    expect(slotWith('Shiro', 'K'), 'the point recorded elsewhere is shown').toBeTruthy();
+    await pointerTap(slotWith('Shiro', 'K'));
+    await settle();
+    expect(lastWrite().ipponsB).toEqual([]);
+    expect(lastWrite().changed, 'the server keeps the other device\'s point unless the write names the points').toContain('points');
+  });
+
+  it('individual: an unrelated edit after a point was adopted does not name the points (F)', async () => {
+    const { rerender } = await mount(individual());
+    await pointerTap(ipponBtn('aka', 'M'));
+    await settle();
+    // Its own write comes back, then another device scores Shiro's point.
+    await act(async () => { rerender(editorFor(individual({ ipponsA: ['M'] }))); });
+    await act(async () => { rerender(editorFor(individual({ ipponsA: ['M'], ipponsB: ['K'] }))); });
+    expect(slotWith('Shiro', 'K'), 'the point recorded elsewhere is shown').toBeTruthy();
+    await startOvertime();
+    await settle();
+    expect(lastWrite().changed).toEqual(['encho']);
+  });
+
+  it('individual: an overtime count adopted and then switched off here is named (B)', async () => {
+    const { rerender } = await mount(individual());
+    await act(async () => { rerender(editorFor(individual({ encho: { periodCount: 1 } }))); });
+    await click(screen.getByTestId('scoring-modal-encho-checkbox'));
+    await settle();
+    expect(lastWrite().encho).toBeUndefined();
+    expect(lastWrite().changed).toContain('encho');
+  });
+
+  it('individual: a hantei verdict adopted from another device and then cancelled here names the points that carried it (B)', async () => {
+    const tied = (over = {}) => individual({ ipponsA: ['M'], ipponsB: ['K'], ...over });
+    const { rerender } = await mount(tied());
+    // Another device records Yamada's win by hantei: the Ht mark rides in Aka's ippons.
+    await act(async () => { rerender(editorFor(tied({ decidedByHantei: true, winner: { id: 'p1', name: 'Yamada' } }))); });
+    await click(screen.getByTestId('scoring-modal-hantei-cancel'));
+    await finish();
+    expect(lastWrite().status).toBe('completed');
+    expect(lastWrite().changed, 'the server keeps the Ht mark unless the write names the points it rides in').toContain('points');
+    expect(lastWrite().changed).toContain('result');
+  });
+
+  // An adopt agrees a change group only for what it took. Agreeing moves BOTH baselines to
+  // the server's value, so a group the adopt did not take whole (a point or a pick of
+  // ours still being saved) would then read as unchanged when it is taken back.
+  describe('an adopt that took only part of a group does not agree the whole', () => {
+    // A recorded verdict whose winner the match cannot place (a legacy row): its points
+    // carry no Ht mark, so the editor's markless running body can equal the baseline.
+    const unplaced = (over = {}) => individual({ decidedByHantei: true, ...over });
+
+    it('a hantei adopted while a point is still being saved: taking the point back is named (B)', async () => {
+      const { rerender } = await mount(individual());
+      await pointerTap(ipponBtn('aka', 'M'));
+      await settle();
+      expect(lastWrite().changed).toEqual(['points']);
+      // Another device's verdict arrives before the write's answer, then the point lands.
+      await act(async () => { rerender(editorFor(unplaced())); });
+      await act(async () => { rerender(editorFor(unplaced({ ipponsA: ['M'] }))); });
+      // The armed verdict locks the slots: cancel it, then take the point back.
+      await click(screen.getByTestId('scoring-modal-hantei-cancel'));
+      await pointerTap(slotWith('Aka', 'M'));
+      await settle();
+      expect(lastWrite().ipponsA).toEqual([]);
+      expect(lastWrite().changed, 'the server keeps the point unless the write names the points').toContain('points');
+    });
+
+    describe('the two picks of a representative bout are one group', () => {
+      const repBout = (over = {}) => individual({
+        id: 'Pool 1-DH-1', sideA: { id: 'team-kyoto', name: 'Kyoto' }, sideB: { id: 'team-osaka', name: 'Osaka' },
+        repIsTeam: true, repRosterA: ['Kato', 'Mori'], repRosterB: ['Sato', 'Ito'], ...over,
+      });
+      const pick = (testId, value) => act(async () => { fireEvent.change(screen.getByTestId(testId), { target: { value } }); });
+
+      it('a pick adopted on one side while the other side\'s pick is still being saved: putting it back is named (B)', async () => {
+        const { rerender } = await mount(repBout({ repPlayerB: 'Sato' }));
+        await pick('rep-shiro-select', 'Ito');
+        await settle();
+        expect(lastWrite().repPlayerB).toBe('Ito');
+        await act(async () => { rerender(editorFor(repBout({ repPlayerA: 'Mori', repPlayerB: 'Sato' }))); });
+        await act(async () => { rerender(editorFor(repBout({ repPlayerA: 'Mori', repPlayerB: 'Ito' }))); });
+        await pick('rep-shiro-select', 'Sato');
+        await settle();
+        expect(lastWrite()).toMatchObject({ repPlayerA: 'Mori', repPlayerB: 'Sato' });
+        expect(lastWrite().changed, 'the server keeps Ito unless the write names the picks').toContain('rep');
+      });
+
+      it('both picks adopted in one update are agreed: an unrelated edit does not name them (F)', async () => {
+        const { rerender } = await mount(repBout({ repPlayerA: 'Kato', repPlayerB: 'Sato' }));
+        await act(async () => { rerender(editorFor(repBout({ repPlayerA: 'Mori', repPlayerB: 'Ito' }))); });
+        expect(screen.getByTestId('rep-aka-select').value).toBe('Mori');
+        expect(screen.getByTestId('rep-shiro-select').value).toBe('Ito');
+        await pointerTap(ipponBtn('aka', 'M'));
+        await settle();
+        expect(lastWrite().changed).toEqual(['points']);
+      });
+    });
+  });
+
+  it('engi: flags adopted from another device and then set back here are named (B)', async () => {
+    const engiMatch = (over = {}) => ({
+      id: 'm-engi', compId: 'comp1', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A',
+      compEngi: true,
+      sideA: { id: 'p1', name: 'Ito - Abe' }, sideB: { id: 'p2', name: 'Ono - Sato' },
+      ...over,
+    });
+    const view = (m) => <EngiScoreEditorModal match={m} onClose={vi.fn()} onSubmit={onSubmit} />;
+    let utils;
+    await act(async () => { utils = render(view(engiMatch())); });
+    await act(async () => { utils.rerender(view(engiMatch({ flagsA: 1 }))); });
+    expect(screen.getByTestId('engi-aka-count').textContent, 'the count recorded elsewhere is shown').toBe('1');
+    await click(screen.getByTestId('engi-aka-dec'));
+    await settle();
+    expect(lastWrite().flagsA).toBe(0);
+    expect(lastWrite().changed).toContain('flags');
+  });
+
+  describe('team', () => {
+    const team = (over = {}) => ({
+      id: 'm-team', compId: 'comp1', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A',
+      compKind: 'team', teamSize: 3,
+      sideA: { id: 'team-kyoto', name: 'Kyoto' }, sideB: { id: 'team-osaka', name: 'Osaka' },
+      ...over,
+    });
+    const bout = (position, over = {}) => ({ position, sideA: '', sideB: '', ipponsA: [], ipponsB: [], winner: '', decision: '', ...over });
+    const kyotoWins = (position) => bout(position, { ipponsA: ['M'], winner: 'Kyoto' });
+    const osakaWins = (position) => bout(position, { ipponsB: ['K'], winner: 'Osaka' });
+    const row = (i) => [...document.querySelectorAll('.team-sub-match')][i];
+    const boutBtn = (i, side, letter) => [...row(i).querySelectorAll(`.team-sub-match__side--${side} button.ipt-btn`)].find((b) => b.textContent === letter);
+    const placed = (i, color) => [...row(i).querySelectorAll(`.tsm-center-pts--${color} button.editor-side__pt`)].map((b) => b.textContent.trim());
+    const markBtn = (i, color, letter) => [...row(i).querySelectorAll(`.tsm-center-pts--${color} button.editor-side__pt`)].find((b) => b.textContent.trim() === letter);
+    const mountTeam = async (match) => {
+      let utils;
+      await act(async () => { utils = render(editorFor(match)); });
+      return (m) => act(async () => { utils.rerender(editorFor(m)); });
+    };
+
+    it('a bout adopted from another device and then cleared here is named (B)', async () => {
+      const rerenderWith = await mountTeam(team());
+      await rerenderWith(team({ subResults: [osakaWins(2)] }));
+      expect(placed(1, 'shiro'), 'the bout recorded elsewhere is shown').toContain('K');
+      await pointerTap(markBtn(1, 'shiro', 'K'));
+      await settle();
+      expect(placed(1, 'shiro')).not.toContain('K');
+      expect(lastWrite().changed, 'the server keeps the other device\'s bout unless the write names it').toContain('bout:2');
+    });
+
+    it('scoring one bout after another was adopted names the scored bout alone (F)', async () => {
+      const rerenderWith = await mountTeam(team());
+      await pointerTap(boutBtn(0, 'shiro', 'K'));
+      await settle();
+      expect(lastWrite().changed).toEqual(['bout:1']);
+      // Its own write comes back, then another device scores bout 2.
+      await rerenderWith(team({ subResults: [osakaWins(1)] }));
+      await rerenderWith(team({ subResults: [osakaWins(1), kyotoWins(2)] }));
+      expect(placed(1, 'aka'), 'the bout recorded elsewhere is shown').toContain('M');
+      await pointerTap(boutBtn(2, 'aka', 'D'));
+      await settle();
+      expect(lastWrite().changed).toEqual(['bout:3']);
+    });
+
+    it('a bout the operator holds is named and a bout adopted beside it is not (held and agreed)', async () => {
+      const rerenderWith = await mountTeam(team());
+      await pointerTap(boutBtn(0, 'shiro', 'K'));
+      await settle();
+      // Another device moves bout 1 (the operator keeps the point struck here) and scores bout 2.
+      await rerenderWith(team({ subResults: [kyotoWins(1), kyotoWins(2)] }));
+      expect(placed(0, 'shiro'), 'the point struck here is still shown').toContain('K');
+      expect(placed(1, 'aka'), 'the bout recorded elsewhere is shown').toContain('M');
+      await startOvertime();
+      await settle();
+      expect(lastWrite().changed).toContain('bout:1');
+      expect(lastWrite().changed, 'bout 2 is the other device\'s, adopted and not changed here').not.toContain('bout:2');
+    });
+
+    it('a bout whose point was struck and taken back here stays the other device\'s (held, not agreed)', async () => {
+      const rerenderWith = await mountTeam(team());
+      await pointerTap(boutBtn(0, 'shiro', 'K'));
+      await settle();
+      await pointerTap(markBtn(0, 'shiro', 'K'));
+      await settle();
+      // Another device scores bout 1 meanwhile: the row stays the operator's, which reads as it was.
+      await rerenderWith(team({ subResults: [kyotoWins(1)] }));
+      expect(placed(0, 'aka'), 'the row is still the operator\'s').not.toContain('M');
+      await startOvertime();
+      await settle();
+      expect(lastWrite().changed, 'an edit held over a newer value is not put back').toEqual(['encho']);
+    });
+
+    it('an overtime count adopted from another device and then switched off here is named (B)', async () => {
+      const rerenderWith = await mountTeam(team());
+      await rerenderWith(team({ encho: { periodCount: 1 } }));
+      await click(screen.getByTestId('scoring-modal-encho-checkbox'));
+      await settle();
+      expect(lastWrite().encho).toBeUndefined();
+      expect(lastWrite().changed).toContain('encho');
+    });
   });
 });

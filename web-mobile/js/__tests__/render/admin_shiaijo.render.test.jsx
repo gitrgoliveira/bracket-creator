@@ -2,8 +2,9 @@ import React from 'react';
 import { render, act, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, startWhileCorrectingMessage, correctWhileRunningMessage } from '../../write_result.jsx';
+import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, startWhileCorrectingMessage, startWhileStartingMessage, correctWhileRunningMessage, CLOCK_SKEW_REASON_TEXT, markToasted, startWasBlockedByStartMessage } from '../../write_result.jsx';
 import { scoreRowMatchName } from '../../pool_ids.jsx';
+import { START_SUPERSEDED_MESSAGE } from '../../start_match.jsx';
 // Window globals required by admin_shiaijo.jsx.
 // MODULE-EVAL-TIME entries (e.g. `const AdminTopbar = window.AdminTopbar;`)
 // must be set before the dynamic import, or the module captures undefined.
@@ -55,7 +56,8 @@ const STUBBED_GLOBALS = {
     recordDecision: vi.fn().mockResolvedValue({ applied: true }),
     reinstateCompetitor: vi.fn().mockResolvedValue({}),
   },
-  startPatch: vi.fn(),
+  // No startPatch: the console imports it from start_match.jsx (a bare vi.fn()
+  // here used to make every console start in this suite send `undefined`).
   confirmDialog: vi.fn().mockResolvedValue(true),
   PoolsViewer: () => null,
   compMatches: () => [],
@@ -98,7 +100,7 @@ function renderPage(tournament, court = 'A', props = {}) {
       onLogout={vi.fn()}
       onViewerMode={vi.fn()}
       password=""
-      showToast={vi.fn()}
+      showToast={props.showToast || vi.fn()}
       tweaks={{}}
       onSwitchCourt={vi.fn()}
     />
@@ -858,9 +860,10 @@ describe('AdminShiaijoPage render-smoke', () => {
   // ("kiken-voluntary at Pool A-2") stayed on screen after the withdrawal was
   // cleared and eligibility restored, and after that match started it sat
   // under the NEXT match. It must go once it may no longer apply (an
-  // eligibility change in its competition, or ANY change of Up next), and
-  // stay while it still does.
-  it('a refused Start is dropped when eligibility changes or Up next moves on, and kept while it still applies', async () => {
+  // eligibility change in its competition, or its match leaving scheduled), and
+  // stay while it still does. A change of Up next by itself no longer drops it:
+  // 'a stored Start refusal is bound to the refused match', below, pins that.
+  it('a refused Start is dropped when eligibility changes or its match leaves scheduled, and kept while it still applies', async () => {
     const side = (id, name) => ({ id, name });
     const m1 = {
       id: 'm1', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
@@ -882,7 +885,7 @@ describe('AdminShiaijoPage render-smoke', () => {
     try {
       let utils;
       await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
-      const refusal = () => utils.container.querySelector('.shiaijo-upnext__error');
+      const refusal = () => utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error');
       // The Up next card's own Start (an Upcoming row carries one too).
       const start = async () => {
         const card = utils.container.querySelector('.shiaijo-upnext__card');
@@ -912,8 +915,8 @@ describe('AdminShiaijoPage render-smoke', () => {
       await send({ type: 'competitor_status_updated', data: { competitionId: 'c1', status: { eligible: true } } });
       expect(refusal()).toBeNull();
 
-      // Refused again, then m1 starts elsewhere: Up next is now m2, and the
-      // refusal must not sit under it.
+      // Refused again, then m1 starts elsewhere: the refusal was about m1, which
+      // has left scheduled, so it must not sit under the match Up next is now.
       await start();
       expect(refusal()).not.toBeNull();
       current = [{ ...m1, status: 'running' }, m2];
@@ -933,11 +936,13 @@ describe('AdminShiaijoPage render-smoke', () => {
   });
 
   // A Start refused for a match picked from further down the queue (here its
-  // competitor is fighting on another court) is kept keyed to that match. It
-  // used to come back when that match later reached Up next, although its
-  // cause was gone by then and nothing else clears it: a finished match sends
-  // no competitor_status_updated. Any change of Up next drops it.
-  it('a refused Start for a match further down the queue does not reappear when it becomes Up next', async () => {
+  // competitor is fighting on another court) is kept keyed to that match, and
+  // belongs to it: it stays on that match's row, and is on the card once the
+  // match reaches Up next, for as long as the match is still scheduled here. It
+  // used to be dropped by any change of Up next, which also took away a notice
+  // whose cause still held. The cost is accepted: a cause that is gone is not
+  // noticed until the operator taps Start again, which asks the server again.
+  it('a refused Start for a match further down the queue is still there when it becomes Up next', async () => {
     const side = (id, name) => ({ id, name });
     const m1 = {
       id: 'm1', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
@@ -958,7 +963,7 @@ describe('AdminShiaijoPage render-smoke', () => {
     try {
       let utils;
       await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
-      const refusal = () => utils.container.querySelector('.shiaijo-upnext__error');
+      const refusal = () => utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error');
       const refresh = async () => { await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); }); };
 
       // Picked from the queue below Up next and refused: not shown under Up
@@ -968,12 +973,102 @@ describe('AdminShiaijoPage render-smoke', () => {
       expect(onEditScore.mock.calls[0][1]).toBe('m2');
       expect(refusal()).toBeNull();
 
-      // m1 starts, so m2 is now Up next. The old refusal must not come back
-      // with it.
+      // m1 starts, so m2 is now Up next. The refusal is about m2, which is still
+      // scheduled here, so it is on the card with it.
       current = [{ ...m1, status: 'running' }, m2];
       await refresh();
       expect(utils.container.querySelector('.shiaijo-upnext__card').textContent).toContain('Sato');
-      expect(refusal()).toBeNull();
+      expect(refusal()?.textContent).toBe('Sato is fighting on shiaijo B');
+    } finally {
+      window.API.fetchCourtMatches = prevFetch;
+      window.API.subscribeToEvents = prevSub;
+    }
+  });
+
+  // The advance's own start (here the one after a decision) refused for the
+  // next match: the refusal stays on the card once a refetch makes that match
+  // Up next. The refetch is the very event a change of Up next used to drop it
+  // on (an effect since removed: the refusal is bound to its match now).
+  it('a refused advance start for the next match stays on Up next once that match becomes Up next', async () => {
+    const side = (id, name) => ({ id, name });
+    const mRun = {
+      id: 'm-run', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+      court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    // Up next before the decision. It involves the withdrawing Yamada, so the
+    // advance passes over it to m3.
+    const m2 = {
+      id: 'm2', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:05', sideA: side('p1', 'Yamada'), sideB: side('p5', 'Endo'),
+    };
+    const m3 = {
+      id: 'm3', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:10', sideA: side('p4', 'Doi'), sideB: side('p6', 'Fujii'),
+    };
+    let current = [mRun, m2, m3];
+    window.tournamentMatches = () => current;
+    window.filterMatchesByCourt = (matches) => matches;
+    const prevFetch = window.API.fetchCourtMatches;
+    const prevSub = window.API.subscribeToEvents;
+    window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve([{ id: 'c1', name: 'Cup' }]));
+    window.API.subscribeToEvents = () => () => {};
+    const onEditScore = vi.fn().mockRejectedValue(new Error('Doi is fighting on shiaijo B'));
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+      expect(probe.props.match?.id).toBe('m-run');
+      await act(async () => {
+        await probe.props.onAfterDecision({
+          id: 'm-run', sideA: 'Yamada', sideB: 'Tanaka', sideAId: 'p1', sideBId: 'p2', winner: 'Tanaka', winnerId: 'p2',
+          status: 'completed', decision: 'kiken-voluntary', decisionBy: 'aka',
+        });
+      });
+      // The advance's start of m3 is refused. Up next is still m2, so the
+      // refusal is not on the card yet.
+      expect(onEditScore).toHaveBeenCalledTimes(1);
+      expect(onEditScore.mock.calls[0][1]).toBe('m3');
+      const upNextCard = () => utils.container.querySelector('.shiaijo-upnext__card');
+      expect(upNextCard().querySelector('.shiaijo-upnext__error')).toBeNull();
+
+      // The refetch: m2 carries the barred stamp the server writes, so Up next
+      // moves onto m3, the match the refused start was for.
+      current = [{ ...mRun, status: 'completed' }, { ...m2, ineligibleSides: { a: 'kiken-voluntary' } }, m3];
+      await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); });
+      expect(upNextCard().textContent).toContain('Doi');
+      expect(upNextCard().querySelector('.shiaijo-upnext__error')?.textContent).toBe('Doi is fighting on shiaijo B');
+    } finally {
+      window.API.fetchCourtMatches = prevFetch;
+      window.API.subscribeToEvents = prevSub;
+    }
+  });
+
+  // A refused Start for a queue row's match (not Up next) shows on that row,
+  // so the operator sees why it did not start where they tapped it.
+  it('a refused Start shows on the queue row of the match it refused, not on Up next', async () => {
+    const side = (id, name) => ({ id, name });
+    const m1 = {
+      id: 'm1', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:00', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    const m2 = {
+      id: 'm2', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:05', sideA: side('p3', 'Sato'), sideB: side('p4', 'Kato'),
+    };
+    window.tournamentMatches = () => [m1, m2];
+    window.filterMatchesByCourt = (matches) => matches;
+    const prevFetch = window.API.fetchCourtMatches;
+    const prevSub = window.API.subscribeToEvents;
+    window.API.fetchCourtMatches = vi.fn().mockImplementation(() => Promise.resolve([{ id: 'c1', name: 'Cup' }]));
+    window.API.subscribeToEvents = () => () => {};
+    const onEditScore = vi.fn().mockRejectedValue(new Error('Kato is fighting on shiaijo B'));
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+      const rowOf = (name) => [...utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes(name));
+      await act(async () => { rowOf('Sato').querySelector('.shiaijo-row__pick').click(); });
+      expect(onEditScore.mock.calls[0][1]).toBe('m2');
+      expect(rowOf('Sato').querySelector('.shiaijo-upnext__error')?.textContent).toBe('Kato is fighting on shiaijo B');
+      expect(utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error')).toBeNull();
     } finally {
       window.API.fetchCourtMatches = prevFetch;
       window.API.subscribeToEvents = prevSub;
@@ -1079,6 +1174,198 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
     expect(onEditScore.mock.calls[0][1]).toBe('m-run');
     expect(onEditScore.mock.calls[1][0]).toBe('c1');
     expect(onEditScore.mock.calls[1][1]).toBe('m-open');
+  });
+
+  // Every host hands the editor back what its write came back with: the finish
+  // write's answer, a partial apply's held groups included, is the return value.
+  it('Finish + Start Next hands the finish write\'s answer back to the editor', async () => {
+    const mRun = {
+      id: 'm-run', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+      court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    window.tournamentMatches = () => [mRun, openMatch];
+    window.filterMatchesByCourt = (m) => m;
+    const answer = { applied: true, heldGroups: ['points'] };
+    const onEditScore = vi.fn()
+      .mockResolvedValueOnce(answer)
+      .mockResolvedValueOnce({ status: 'ok' });
+    await act(async () => { renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+    let ret;
+    await act(async () => { ret = await probe.props.onSubmitAndNext({ status: 'completed', winner: side('p1', 'Yamada') }); });
+    // The start-next write still went out after the finish.
+    expect(onEditScore).toHaveBeenCalledTimes(2);
+    expect(ret).toEqual(answer);
+  });
+
+  // bc-aadv: Finish + Start Next keeps a refused start on the Up next card,
+  // instead of swallowing the error silently.
+  it('Finish + Start Next keeps a refused start on the Up next card', async () => {
+    const mRun = {
+      id: 'm-run', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+      court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    window.tournamentMatches = () => [mRun, openMatch];
+    window.filterMatchesByCourt = (m) => m;
+    const onEditScore = vi.fn()
+      .mockResolvedValueOnce({ status: 'ok' })
+      .mockRejectedValueOnce(new Error('Sato is fighting on Shiaijo B.'));
+    let utils;
+    await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+    expect(probe.props.match?.id).toBe('m-run');
+    await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed', winner: side('p1', 'Yamada') }); });
+    // The finishing write succeeds; the start-next write fails.
+    expect(onEditScore).toHaveBeenCalledTimes(2);
+    // The error is recorded on the Up next card.
+    const errorEl = utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error');
+    expect(errorEl).toBeTruthy();
+    expect(errorEl.textContent).toContain('Sato is fighting on Shiaijo B.');
+  });
+
+  it('onAfterDecision keeps a refused start on the Up next card', async () => {
+    const mRun = {
+      id: 'm-run', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+      court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    window.tournamentMatches = () => [mRun, openMatch];
+    window.filterMatchesByCourt = (m) => m;
+    const onEditScore = vi.fn()
+      .mockRejectedValueOnce(new Error('Could not start the match: check eligibility and try again.'));
+    let utils;
+    await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+    expect(probe.props.match?.id).toBe('m-run');
+    await act(async () => { await probe.props.onAfterDecision({ winner: side('p1', 'Yamada') }); });
+    // The start-next write fails.
+    expect(onEditScore).toHaveBeenCalledTimes(1);
+    // The error is recorded on the Up next card.
+    const errorEl = utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error');
+    expect(errorEl).toBeTruthy();
+    expect(errorEl.textContent).toContain('Could not start the match');
+  });
+
+  it('clock_skew on the auto-start is reported on the Up next card', async () => {
+    const mRun = {
+      id: 'm-run', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+      court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    window.tournamentMatches = () => [mRun, openMatch];
+    window.filterMatchesByCourt = (m) => m;
+    const onEditScore = vi.fn()
+      .mockResolvedValueOnce({ status: 'ok' })
+      .mockResolvedValueOnce({ applied: false, reason: 'clock_skew' });
+    let utils;
+    await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+    expect(probe.props.match?.id).toBe('m-run');
+    await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed', winner: side('p1', 'Yamada') }); });
+    // The finishing write succeeds; the start-next write returns clock_skew.
+    expect(onEditScore).toHaveBeenCalledTimes(2);
+    // The clock-skew error is recorded on the Up next card.
+    const errorEl = utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error');
+    expect(errorEl).toBeTruthy();
+    expect(errorEl.textContent).toContain(CLOCK_SKEW_REASON_TEXT);
+  });
+
+  // A Finish + Start Next that asks for Up next while a start of ANOTHER match
+  // is still out is refused by the one-start guard. That refusal must say so on
+  // Up next, not vanish (bc-aadv).
+  it('Finish + Start Next says why Up next was not started while another match is being started', async () => {
+    const mRun = {
+      id: 'm-run', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+      court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    const mLater = {
+      id: 'm-later', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:15', sideA: side('q1', 'Ito'), sideB: side('q2', 'Ishii'),
+    };
+    window.tournamentMatches = () => [mRun, openMatch, mLater];
+    window.filterMatchesByCourt = (m) => m;
+    const prevRevert = window.API.revertMatchToQueue;
+    window.API.revertMatchToQueue = vi.fn().mockResolvedValue({});
+    // The queued row's start hangs; the finish of the running bout lands.
+    const onEditScore = vi.fn((_compId, matchId) => (matchId === 'm-later' ? new Promise(() => {}) : Promise.resolve({ status: 'ok' })));
+    const showToast = vi.fn();
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore, showToast }); });
+      expect(probe.props.match?.id).toBe('m-run');
+      await act(async () => { utils.container.querySelector('.shiaijo-row__pick').click(); });
+      await act(async () => {});
+      expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-later']);
+      expect(probe.props.match?.id).toBe('m-run');
+      await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed', winner: side('p1', 'Yamada') }); });
+      // The finish landed and no second start went out: Up next was refused.
+      expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-later', 'm-run']);
+      const note = utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error');
+      expect(note).toBeTruthy();
+      expect(note.textContent).toBe(startWhileStartingMessage({ label: scoreRowMatchName(mLater) }));
+      // The refusal is toasted as well as noted, the same as a refused tap.
+      expect(showToast).toHaveBeenCalledWith(startWhileStartingMessage({ label: scoreRowMatchName(mLater) }), 'error');
+    } finally {
+      window.API.revertMatchToQueue = prevRevert;
+    }
+  });
+
+  // The refusal is derived from the start in flight while that start is out, so
+  // the present-tense sentence goes once it lands. The match the operator asked
+  // for was never started, though, and nothing else says so: the refusal is kept
+  // on the refused match in the past tense (bc-aadv).
+  it('the Up next note for a refused advance becomes a past-tense note once the blocking start lands', async () => {
+    const mRun = {
+      id: 'm-run', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+      court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    const mLater = {
+      id: 'm-later', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+      court: 'A', scheduledAt: '09:15', sideA: side('q1', 'Ito'), sideB: side('q2', 'Ishii'),
+    };
+    window.tournamentMatches = () => [mRun, openMatch, mLater];
+    window.filterMatchesByCourt = (m) => m;
+    const prevRevert = window.API.revertMatchToQueue;
+    window.API.revertMatchToQueue = vi.fn().mockResolvedValue({});
+    let landQueued;
+    const queuedStart = new Promise((resolve) => { landQueued = resolve; });
+    const onEditScore = vi.fn((_compId, matchId) => (matchId === 'm-later' ? queuedStart : Promise.resolve({ status: 'ok' })));
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+      await act(async () => { utils.container.querySelector('.shiaijo-row__pick').click(); });
+      await act(async () => {});
+      await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed', winner: side('p1', 'Yamada') }); });
+      const note = () => utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error');
+      expect(note()?.textContent).toBe(startWhileStartingMessage({ label: scoreRowMatchName(mLater) }));
+      await act(async () => { landQueued({ status: 'ok' }); });
+      await act(async () => {});
+      expect(note()?.textContent).toBe(startWasBlockedByStartMessage({ label: scoreRowMatchName(mLater) }));
+    } finally {
+      window.API.revertMatchToQueue = prevRevert;
+    }
+  });
+
+  // The one-start guard stays silent for a repeat advance to the match already
+  // being started: that match is simply on its way.
+  it('a repeat Finish + Start Next to the match already being started stays silent', async () => {
+    const mRun = {
+      id: 'm-run', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+      court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+    };
+    window.tournamentMatches = () => [mRun, openMatch];
+    window.filterMatchesByCourt = (m) => m;
+    const prevRevert = window.API.revertMatchToQueue;
+    window.API.revertMatchToQueue = vi.fn().mockResolvedValue({});
+    // Up next's own start hangs; the finish of the running bout lands.
+    const onEditScore = vi.fn((_compId, matchId) => (matchId === 'm-open' ? new Promise(() => {}) : Promise.resolve({ status: 'ok' })));
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+      const upNextStart = [...utils.container.querySelector('.shiaijo-upnext__card').querySelectorAll('button')].find((b) => /start match/i.test(b.textContent));
+      await act(async () => { upNextStart.click(); });
+      await act(async () => {});
+      expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-open']);
+      await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed', winner: side('p1', 'Yamada') }); });
+      expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-open', 'm-run']);
+      expect(utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error')).toBeNull();
+    } finally {
+      window.API.revertMatchToQueue = prevRevert;
+    }
   });
 
   it('offers Reinstate for a reinstateable (kiken-injury) withdrawal', async () => {
@@ -1724,5 +2011,711 @@ describe('a running match and an open correction never coexist on the console (b
       expect(block.textContent).toContain('Another bout is running on Shiaijo A');
       expect(block.textContent).toContain('Shiro m2 vs Aka m2');
     } finally { c.restore(); }
+  });
+});
+
+// One start at a time (bc-aadv): while a Start is still out, a Start of another
+// match is refused on its own row BEFORE the defer, so the running bout is not
+// sent back to the queue for a start that never happens (the bc-crpn rule,
+// applied to starts). A repeat for the match already being started is silent.
+describe('a Start tapped while another start is still out is refused before anything is sent back (bc-aadv)', () => {
+  const rowOf = (c, text) => [...c.utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes(text));
+  const startButton = (el) => [...el.querySelectorAll('button')].find((b) => /^start/i.test(b.textContent.trim()));
+  // m1 runs on the court; m2 (Up next) and m3 wait. Up next's start is held in
+  // flight until the test calls land().
+  const setup = async () => {
+    let land;
+    const onEditScore = vi.fn((_compId, matchId) => (matchId === 'm2'
+      ? new Promise((r) => { land = r; })
+      : Promise.resolve({ applied: true })));
+    const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled'), courtMatch('m3', 'scheduled')], { onEditScore });
+    await act(async () => { startButton(c.utils.container.querySelector('.shiaijo-upnext__card')).click(); });
+    await act(async () => {});
+    expect(onEditScore.mock.calls.map((x) => x[1])).toEqual(['m2']);
+    // m1 was sent back for m2's start; the assertions below are about what a
+    // later tap does, so the count starts again from here.
+    window.API.revertMatchToQueue.mockClear();
+    return { c, onEditScore, land: (res) => land(res) };
+  };
+
+  it('a) a Start on another row is refused on that row: the running bout is not sent back and no second start goes out', async () => {
+    const { c, onEditScore } = await setup();
+    try {
+      await act(async () => { startButton(rowOf(c, 'Aka m3')).click(); });
+      await act(async () => {});
+      const text = startWhileStartingMessage({ label: scoreRowMatchName(courtMatch('m2', 'scheduled')) });
+      expect(window.API.revertMatchToQueue).not.toHaveBeenCalled();
+      expect(onEditScore).toHaveBeenCalledTimes(1);
+      expect(c.editorMatch()).toBe('m1');
+      expect(rowOf(c, 'Aka m3').querySelector('[role="alert"]').textContent).toBe(text);
+      expect(c.showToast).toHaveBeenCalledWith(text, 'error');
+    } finally { c.restore(); }
+  });
+
+  it('b) the refusal becomes a past-tense notice on that row once the held start lands, and a Start there clears it', async () => {
+    const { c, onEditScore, land } = await setup();
+    try {
+      await act(async () => { startButton(rowOf(c, 'Aka m3')).click(); });
+      await act(async () => {});
+      const label = scoreRowMatchName(courtMatch('m2', 'scheduled'));
+      expect(rowOf(c, 'Aka m3').querySelector('[role="alert"]').textContent).toBe(startWhileStartingMessage({ label }));
+      await act(async () => { land({ applied: true }); });
+      await act(async () => {});
+      // m3 was asked for and never started; the court is not free, so it is not
+      // started on its own, and the row says so.
+      expect(rowOf(c, 'Aka m3').querySelector('[role="alert"]').textContent).toBe(startWasBlockedByStartMessage({ label }));
+      expect(onEditScore.mock.calls.map((x) => x[1])).toEqual(['m2']);
+      // The operator starts it: the sentence goes and the start is sent.
+      await act(async () => { startButton(rowOf(c, 'Aka m3')).click(); });
+      await act(async () => {});
+      expect(onEditScore.mock.calls.map((x) => x[1])).toEqual(['m2', 'm3']);
+      expect(rowOf(c, 'Aka m3').querySelector('[role="alert"]')).toBeNull();
+    } finally { c.restore(); }
+  });
+
+  // The start a refused tap waited for can FAIL instead of landing. Then the court
+  // is free, so "was being started when this match was asked for" would be false,
+  // and the failed start's OWN refusal is the thing the operator needs: it stays on
+  // its card, and the waiting match shows nothing.
+  it('b2) a held start that is refused keeps its own refusal on its card, and the waiting row shows nothing', async () => {
+    const { c, onEditScore, land } = await setup();
+    try {
+      await act(async () => { startButton(rowOf(c, 'Aka m3')).click(); });
+      await act(async () => {});
+      expect(rowOf(c, 'Aka m3').querySelector('[role="alert"]')).toBeTruthy();
+      await act(async () => { land({ applied: false, reason: 'clock_skew' }); });
+      await act(async () => {});
+      expect(c.utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error')?.textContent)
+        .toContain(CLOCK_SKEW_REASON_TEXT);
+      expect(rowOf(c, 'Aka m3').querySelector('[role="alert"]'), 'the court is free: no past-tense notice').toBeNull();
+      expect(onEditScore.mock.calls.map((x) => x[1])).toEqual(['m2']);
+    } finally { c.restore(); }
+  });
+
+  it('c) a repeat Start on the match already being started does nothing: no revert, no notice', async () => {
+    const { c, onEditScore } = await setup();
+    try {
+      // While its start is out, Up next's own button reads "Starting…" and is disabled.
+      const card = c.utils.container.querySelector('.shiaijo-upnext__card');
+      const again = startButton(card);
+      expect(again.disabled).toBe(true);
+      await act(async () => { again.click(); });
+      await act(async () => {});
+      expect(window.API.revertMatchToQueue).not.toHaveBeenCalled();
+      expect(onEditScore).toHaveBeenCalledTimes(1);
+      expect(card.querySelector('[role="alert"]')).toBeNull();
+      expect(c.showToast).not.toHaveBeenCalled();
+    } finally { c.restore(); }
+  });
+
+  // A pick that defers the running bout is a start in flight from the moment
+  // it is made, not from the moment the deferred bout's revert answers: a second
+  // Start on another row during that wait must not send the running bout back
+  // a second time.
+  it('d) a second Start tapped while a pick is still deferring the running bout is refused, and the bout is not reverted twice', async () => {
+    const onEditScore = vi.fn().mockResolvedValue({ applied: true });
+    const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled'), courtMatch('m3', 'scheduled'), courtMatch('m4', 'scheduled')], { onEditScore });
+    let landRevert;
+    window.API.revertMatchToQueue = vi.fn(() => new Promise((r) => { landRevert = r; }));
+    try {
+      // The first pick: a queue row's Start, which reverts m1 and waits on it.
+      await act(async () => { startButton(rowOf(c, 'Aka m3')).click(); });
+      await act(async () => {});
+      expect(window.API.revertMatchToQueue).toHaveBeenCalledTimes(1);
+
+      // A second Start on another row while that wait is out.
+      await act(async () => { startButton(rowOf(c, 'Aka m4')).click(); });
+      await act(async () => {});
+      expect(window.API.revertMatchToQueue).toHaveBeenCalledTimes(1);
+      expect(rowOf(c, 'Aka m4').querySelector('[role="alert"]').textContent)
+        .toBe(startWhileStartingMessage({ label: scoreRowMatchName(courtMatch('m3', 'scheduled')) }));
+
+      // Once the revert answers, the first pick starts and only it.
+      await act(async () => { landRevert(true); });
+      await act(async () => {});
+      expect(onEditScore.mock.calls.map((x) => x[1])).toEqual(['m3']);
+    } finally { c.restore(); }
+  });
+
+  // The past-tense sentence says the blocker WAS being started, so it is written only
+  // for a start that went out. A pick whose deferral of the running bout fails never
+  // starts anything: the court is exactly as it was, and "m3 was being started" would
+  // be false.
+  describe('the past-tense notice follows a start that happened', () => {
+    const pickBlocker = async (onEditScore) => {
+      const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled'), courtMatch('m3', 'scheduled'), courtMatch('m4', 'scheduled')], { onEditScore });
+      let settleRevert;
+      window.API.revertMatchToQueue = vi.fn(() => new Promise((resolve, reject) => { settleRevert = { resolve, reject }; }));
+      // The pick: a queue row's Start, which sends m1 back and waits on it.
+      await act(async () => { startButton(rowOf(c, 'Aka m3')).click(); });
+      await act(async () => {});
+      // A Start on another row while that wait is out is refused as "still being started".
+      await act(async () => { startButton(rowOf(c, 'Aka m4')).click(); });
+      await act(async () => {});
+      expect(rowOf(c, 'Aka m4').querySelector('[role="alert"]').textContent)
+        .toBe(startWhileStartingMessage({ label: scoreRowMatchName(courtMatch('m3', 'scheduled')) }));
+      return { c, settleRevert: () => settleRevert };
+    };
+
+    it('e) a pick whose deferral fails never started, so the refused row gets no past-tense notice', async () => {
+      const onEditScore = vi.fn().mockResolvedValue({ applied: true });
+      const { c, settleRevert } = await pickBlocker(onEditScore);
+      try {
+        await act(async () => { settleRevert().reject(new Error('Could not defer the current bout')); });
+        await act(async () => {});
+        expect(onEditScore, 'the pick was abandoned: nothing was started').not.toHaveBeenCalled();
+        expect(rowOf(c, 'Aka m4').querySelector('[role="alert"]'), 'the court is as it was: no sentence about a start').toBeNull();
+        expect(c.utils.container.textContent).not.toContain('was being started');
+      } finally { c.restore(); }
+    });
+
+    it('f) a pick that does start leaves the past-tense notice on the refused row', async () => {
+      const onEditScore = vi.fn().mockResolvedValue({ applied: true });
+      const { c, settleRevert } = await pickBlocker(onEditScore);
+      try {
+        await act(async () => { settleRevert().resolve(true); });
+        await act(async () => {});
+        expect(onEditScore.mock.calls.map((x) => x[1])).toEqual(['m3']);
+        expect(rowOf(c, 'Aka m4').querySelector('[role="alert"]').textContent)
+          .toBe(startWasBlockedByStartMessage({ label: scoreRowMatchName(courtMatch('m3', 'scheduled')) }));
+      } finally { c.restore(); }
+    });
+
+    // A superseded start that HOLDS its result group is HTTP 200
+    // {applied:false, reason:'superseded', heldGroups:['result']}: a different
+    // result is already stored (a send-back, a correction) and nothing of the start
+    // was written. (Round 19: the same answer WITHOUT heldGroups is an echo of a
+    // start that already landed, a start that went out; see the echo tests below.)
+    // For a PICK that is not "as it was": the running bout was sent back
+    // to the queue before the start, so the court is IDLE (and m3 shows the
+    // superseded refusal like any refused start; see the describe below). "m3 was
+    // being started" would be false, and the pick must not pin the panel on a
+    // match the server did not start.
+    const supersededStartOfM3 = () => vi.fn((_compId, matchId) => Promise.resolve(
+      matchId === 'm3' ? { applied: false, reason: 'superseded', heldGroups: ['result'] } : { applied: true }
+    ));
+
+    it('g) a pick whose start is superseded wrote nothing, so the refused row gets no past-tense notice', async () => {
+      const onEditScore = supersededStartOfM3();
+      const { c, settleRevert } = await pickBlocker(onEditScore);
+      try {
+        await act(async () => { settleRevert().resolve(true); });
+        await act(async () => {});
+        expect(onEditScore.mock.calls.map((x) => x[1]), 'the pick did send its start').toEqual(['m3']);
+        expect(rowOf(c, 'Aka m4').querySelector('[role="alert"]'), 'the start wrote nothing: no sentence about a start').toBeNull();
+        expect(c.utils.container.textContent).not.toContain('was being started');
+      } finally { c.restore(); }
+    });
+
+    it('h) a pick whose start is superseded does not pin the panel on the match the server did not start', async () => {
+      const landedPick = await pickBlocker(vi.fn().mockResolvedValue({ applied: true }));
+      try {
+        await act(async () => { landedPick.settleRevert().resolve(true); });
+        await act(async () => {});
+        expect(landedPick.c.editorMatch(), 'a start that went out pins the panel on the picked match').toBe('m3');
+      } finally { landedPick.c.utils.unmount(); landedPick.c.restore(); }
+
+      const { c, settleRevert } = await pickBlocker(supersededStartOfM3());
+      try {
+        await act(async () => { settleRevert().resolve(true); });
+        await act(async () => {});
+        expect(c.editorMatch(), 'nothing was started: the panel stays where it was').not.toBe('m3');
+      } finally { c.restore(); }
+    });
+
+    // PR #463 round 19 (S1). The same answer WITHOUT heldGroups is an echo-hold:
+    // the stored result already equals the start, so another device's start of m3
+    // landed first and m3 IS running. That start went out, exactly like a landed
+    // one (tests f and the landed half of h): the refused row waiting on it gets
+    // the past-tense notice, and the pick pins the panel on m3.
+    const echoStartOfM3 = () => vi.fn((_compId, matchId) => Promise.resolve(
+      matchId === 'm3' ? { applied: false, reason: 'superseded' } : { applied: true }
+    ));
+
+    it('i) a pick whose start is held as an echo went out, so the refused row gets the past-tense notice', async () => {
+      const onEditScore = echoStartOfM3();
+      const { c, settleRevert } = await pickBlocker(onEditScore);
+      try {
+        await act(async () => { settleRevert().resolve(true); });
+        await act(async () => {});
+        expect(onEditScore.mock.calls.map((x) => x[1])).toEqual(['m3']);
+        expect(rowOf(c, 'Aka m4').querySelector('[role="alert"]').textContent)
+          .toBe(startWasBlockedByStartMessage({ label: scoreRowMatchName(courtMatch('m3', 'scheduled')) }));
+        expect(c.utils.container.textContent).not.toContain(START_SUPERSEDED_MESSAGE);
+      } finally { c.restore(); }
+    });
+
+    it('j) a pick whose start is held as an echo pins the panel on the match, which is running', async () => {
+      const { c, settleRevert } = await pickBlocker(echoStartOfM3());
+      try {
+        await act(async () => { settleRevert().resolve(true); });
+        await act(async () => {});
+        expect(c.editorMatch(), 'a start that went out pins the panel on the picked match').toBe('m3');
+      } finally { c.restore(); }
+    });
+  });
+});
+
+// The one-start guard is judged from the start in flight NOW. An advance awaits
+// its finish write and then starts the next match from the render that began the
+// await, so a guard that reads that render's state sees a start begun meanwhile
+// as absent, and one that has since landed as still out.
+describe('the one-start guard reads the start in flight now, not the render that began an advance', () => {
+  const deferred = () => {
+    let resolve;
+    const promise = new Promise((r) => { resolve = r; });
+    return { promise, resolve };
+  };
+  const side = (id, name) => ({ id, name });
+  const runM = {
+    id: 'm-run', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool', poolName: 'Pool A',
+    court: 'A', sideA: side('p1', 'Yamada'), sideB: side('p2', 'Tanaka'),
+  };
+  const openM = {
+    id: 'm-open', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+    court: 'A', scheduledAt: '09:10', sideA: side('s', 'Sato'), sideB: side('k', 'Kato'),
+  };
+  const laterM = {
+    id: 'm-later', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'pool', poolName: 'Pool A',
+    court: 'A', scheduledAt: '09:15', sideA: side('q1', 'Ito'), sideB: side('q2', 'Ishii'),
+  };
+  const winner = side('p1', 'Yamada');
+  // The queue row's Start button for the match whose side carries `name`.
+  const queueStart = (utils, name) => {
+    const row = [...utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes(name));
+    return [...row.querySelectorAll('button')].find((b) => /^start match$/i.test(b.textContent.trim()));
+  };
+  let prevRevert;
+  beforeEach(() => {
+    prevRevert = window.API.revertMatchToQueue;
+    window.API.revertMatchToQueue = vi.fn().mockResolvedValue({});
+    window.tournamentMatches = () => [runM, openM, laterM];
+    window.filterMatchesByCourt = (m) => m;
+  });
+  afterEach(() => {
+    window.API.revertMatchToQueue = prevRevert;
+  });
+
+  it('a) a finish that answers after a queue start began sends no second start, and says why Up next was not started', async () => {
+    const finish = deferred();
+    // The queue start hangs; the finish of the running bout waits on `finish`.
+    const onEditScore = vi.fn((_compId, matchId) => {
+      if (matchId === 'm-run') return finish.promise;
+      if (matchId === 'm-later') return new Promise(() => {});
+      return Promise.resolve({ applied: true });
+    });
+    let utils;
+    await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+    expect(probe.props.match?.id).toBe('m-run');
+    // The editor holds this closure while its finish is out.
+    const advance = probe.props.onSubmitAndNext;
+    let pending;
+    await act(async () => { pending = advance({ status: 'completed', winner }); });
+    await act(async () => { queueStart(utils, 'Ito').click(); });
+    await act(async () => {});
+    expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-run', 'm-later']);
+    await act(async () => { finish.resolve({ applied: true }); await pending; });
+    // No second start went out: the advance was refused, and the refusal shows.
+    expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-run', 'm-later']);
+    expect(utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error').textContent)
+      .toBe(startWhileStartingMessage({ label: scoreRowMatchName(laterM) }));
+  });
+
+  it('b) a finish that answers after a start that has since landed is not refused as still starting', async () => {
+    const laterStart = deferred();
+    const onEditScore = vi.fn((_compId, matchId) => (matchId === 'm-later' ? laterStart.promise : Promise.resolve({ applied: true })));
+    let utils;
+    await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+    await act(async () => { queueStart(utils, 'Ito').click(); });
+    await act(async () => {});
+    // The editor holds this closure while the queue start is still out.
+    const advance = probe.props.onSubmitAndNext;
+    await act(async () => { laterStart.resolve({ applied: true }); });
+    await act(async () => {});
+    await act(async () => { await advance({ status: 'completed', winner }); });
+    // The next match was started: the start that had landed no longer blocks it.
+    expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-later', 'm-run', 'm-open']);
+    expect(utils.container.querySelector('.shiaijo-upnext__card .shiaijo-upnext__error')).toBeNull();
+  });
+
+  // A Start refused while another start is out names that start. Once that start
+  // has landed the refusal is a past-tense notice on the refused match, and the
+  // next start the operator makes, an advance included, clears it: it never
+  // names the second start of the same match.
+  it('c) the notice made when a start landed goes when that match is started again by an advance, and never names the second start', async () => {
+    const firstStart = deferred();
+    const secondStart = deferred();
+    const openStarts = [firstStart, secondStart];
+    const onEditScore = vi.fn((_compId, matchId) => (matchId === 'm-open'
+      ? openStarts.shift().promise
+      : Promise.resolve({ applied: true })));
+    let utils;
+    await act(async () => { utils = renderPage(makeMinimalTournament(), 'A', { onEditScore }); });
+    // Finishing the running bout advances to m-open, and that start is held.
+    let firstAdvance;
+    await act(async () => { firstAdvance = probe.props.onSubmitAndNext({ status: 'completed', winner }); });
+    await act(async () => {});
+    expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-run', 'm-open']);
+    // A Start of the queue row below is refused while m-open's start is out.
+    const itoRow = () => [...utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes('Ito'));
+    await act(async () => { queueStart(utils, 'Ito').click(); });
+    await act(async () => {});
+    expect(itoRow().querySelector('[role="alert"]')?.textContent).toBe(startWhileStartingMessage({ label: scoreRowMatchName(openM) }));
+    // The start lands: Ito was asked for and never started, so the refusal is
+    // kept, in the past tense, on Ito's row.
+    await act(async () => { firstStart.resolve({ applied: true }); await firstAdvance; });
+    await act(async () => {});
+    expect(itoRow().querySelector('[role="alert"]')?.textContent).toBe(startWasBlockedByStartMessage({ label: scoreRowMatchName(openM) }));
+    // m-open is started again by an advance, and that start is still out.
+    await act(async () => { probe.props.onSubmitAndNext({ status: 'completed', winner }); });
+    await act(async () => {});
+    expect(onEditScore.mock.calls.map((c) => c[1])).toEqual(['m-run', 'm-open', 'm-run', 'm-open']);
+    expect(itoRow().querySelector('[role="alert"]'), 'the old notice must not name the second start').toBeNull();
+  });
+});
+
+// PR #463 batch 14, item 2: the queue row asks winnerSideLR and teamMatchMarks
+// by ES import from the side_marks.jsx leaf, not off window. The old `?.` guard
+// painted NOTHING when the global was missing: no winner cue and no Kiken mark,
+// with no error to say why. This suite never publishes either global, which is
+// the point: the row must not need them.
+describe('a completed queue row marks its winner and the withdrawn team without any window global', () => {
+  const saved = {};
+  beforeEach(() => {
+    saved.winnerSideLR = window.winnerSideLR;
+    saved.teamMatchMarks = window.teamMatchMarks;
+    delete window.winnerSideLR;
+    delete window.teamMatchMarks;
+  });
+  afterEach(() => {
+    if (saved.winnerSideLR) window.winnerSideLR = saved.winnerSideLR;
+    if (saved.teamMatchMarks) window.teamMatchMarks = saved.teamMatchMarks;
+  });
+  const completedRow = (utils, name) => [...utils.container.querySelectorAll('.shiaijo-qrow--complete')]
+    .find((r) => r.textContent.includes(name));
+
+  it('a completed team row carries the winner cue on the winner and Kiken beside the withdrawn team', async () => {
+    const c = await mountCourt([
+      courtMatch('m1', 'completed', {
+        compKind: 'team', teamSize: 3, subResults: [], modifiedAt: 1000,
+        winner: courtSide('m1-a', 'Aka m1'), decision: 'kiken-voluntary', decisionBy: 'shiro',
+      }),
+      courtMatch('m2', 'scheduled'),
+    ]);
+    try {
+      const row = completedRow(c.utils, 'Aka m1');
+      expect(row, 'the completed row is listed').toBeTruthy();
+      expect(row.querySelector('.shiaijo-qrow__side--aka').classList.contains('shiaijo-qrow__side--win')).toBe(true);
+      expect(row.querySelector('.shiaijo-qrow__side--shiro').classList.contains('shiaijo-qrow__side--win')).toBe(false);
+      expect(row.querySelector('[data-testid="team-summary-mark-shiro"]')?.textContent).toBe('Kiken');
+      expect(row.querySelector('[data-testid="team-summary-mark-aka"]')).toBeNull();
+    } finally { c.restore(); }
+  });
+});
+
+// PR #463 batch 14, item 10: a refusal the host's onEditScore already toasted
+// (editMatchScore, admin.jsx, marks every error it toasts) is not toasted a second
+// time by the console's Start, which replaced the single-slot toast and restarted
+// its timer. The card or row still says it. An error nobody marked is the console's
+// to toast (a mocked onEditScore that does not toast, a clock_skew answer).
+describe('the console toasts a thrown Start refusal once', () => {
+  const SENTENCE = 'Kato is fighting on shiaijo B';
+  const startButton = (el) => [...el.querySelectorAll('button')].find((b) => /^start/i.test(b.textContent.trim()));
+  const rowOf = (c, text) => [...c.utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes(text));
+  const mountRefused = (error) => mountCourt(
+    [courtMatch('m1', 'scheduled'), courtMatch('m2', 'scheduled')],
+    { onEditScore: vi.fn().mockRejectedValue(error) },
+  );
+
+  it('the Up next card: a marked refusal toasts nothing here and shows on the card', async () => {
+    const c = await mountRefused(markToasted(new Error(SENTENCE)));
+    try {
+      const card = c.utils.container.querySelector('.shiaijo-upnext__card');
+      await act(async () => { startButton(card).click(); });
+      await act(async () => {});
+      expect(c.showToast).not.toHaveBeenCalled();
+      expect(card.querySelector('.shiaijo-upnext__error')?.textContent).toBe(SENTENCE);
+    } finally { c.restore(); }
+  });
+
+  it('a queue row: a marked refusal toasts nothing here and shows on that row', async () => {
+    const c = await mountRefused(markToasted(new Error(SENTENCE)));
+    try {
+      await act(async () => { startButton(rowOf(c, 'Aka m2')).click(); });
+      await act(async () => {});
+      expect(c.showToast).not.toHaveBeenCalled();
+      expect(rowOf(c, 'Aka m2').querySelector('.shiaijo-upnext__error')?.textContent).toBe(SENTENCE);
+    } finally { c.restore(); }
+  });
+
+  it('an error nobody marked is toasted once by the console, on the card and on a row', async () => {
+    const c = await mountRefused(new Error(SENTENCE));
+    try {
+      await act(async () => { startButton(c.utils.container.querySelector('.shiaijo-upnext__card')).click(); });
+      await act(async () => {});
+      expect(c.showToast.mock.calls).toEqual([[SENTENCE, 'error']]);
+      c.showToast.mockClear();
+      await act(async () => { startButton(rowOf(c, 'Aka m2')).click(); });
+      await act(async () => {});
+      expect(c.showToast.mock.calls).toEqual([[SENTENCE, 'error']]);
+    } finally { c.restore(); }
+  });
+});
+
+// PR #463 round 18: a Start the server answered SUPERSEDED (HTTP 200
+// {applied:false, reason:'superseded'}: a newer change to the match is stored,
+// nothing of the start was written) is a REFUSED start on the console, through
+// the path a thrown or clock_skew refusal takes: the sentence is stored on the
+// refused match (its Up next card or its queue row, shown while it is still
+// scheduled), toasted once, and the panel is not pinned on a match the server
+// did not start. Before this it said nothing at all.
+describe('the console reports a superseded Start that holds its result as a refused one', () => {
+  const startButton = (el) => [...el.querySelectorAll('button')].find((b) => /^start/i.test(b.textContent.trim()));
+  const rowOf = (c, text) => [...c.utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes(text));
+  const mountSuperseded = () => mountCourt(
+    [courtMatch('m1', 'scheduled'), courtMatch('m2', 'scheduled')],
+    { onEditScore: vi.fn().mockResolvedValue({ applied: false, reason: 'superseded', heldGroups: ['result'] }) },
+  );
+
+  it('the Up next card: the superseded sentence on the card, one toast, the panel not pinned', async () => {
+    const c = await mountSuperseded();
+    try {
+      const card = c.utils.container.querySelector('.shiaijo-upnext__card');
+      await act(async () => { startButton(card).click(); });
+      await act(async () => {});
+      expect(card.querySelector('.shiaijo-upnext__error[role="alert"]')?.textContent).toBe(START_SUPERSEDED_MESSAGE);
+      expect(c.showToast.mock.calls).toEqual([[START_SUPERSEDED_MESSAGE, 'error']]);
+      expect(c.editorMatch(), 'nothing was started: the panel is not pinned on m1').toBeNull();
+    } finally { c.restore(); }
+  });
+
+  it('a queue row: the superseded sentence on that row, one toast, the panel not pinned', async () => {
+    const c = await mountSuperseded();
+    try {
+      await act(async () => { startButton(rowOf(c, 'Aka m2')).click(); });
+      await act(async () => {});
+      expect(rowOf(c, 'Aka m2').querySelector('.shiaijo-upnext__error[role="alert"]')?.textContent).toBe(START_SUPERSEDED_MESSAGE);
+      expect(c.showToast.mock.calls).toEqual([[START_SUPERSEDED_MESSAGE, 'error']]);
+      expect(c.editorMatch()).toBeNull();
+    } finally { c.restore(); }
+  });
+
+  // The notice is bound to the match like every stored Start refusal: when the
+  // other device's change that superseded the start leaves the match running (it
+  // started there), the notice drops (startRefusalStands) and the toast was the
+  // only thing the operator saw.
+  it('the notice goes when the match is no longer scheduled in the live data', async () => {
+    const c = await mountSuperseded();
+    try {
+      const card = c.utils.container.querySelector('.shiaijo-upnext__card');
+      await act(async () => { startButton(card).click(); });
+      await act(async () => {});
+      expect(c.utils.container.textContent).toContain(START_SUPERSEDED_MESSAGE);
+      c.feed.current = [courtMatch('m1', 'running'), courtMatch('m2', 'scheduled')];
+      await c.refresh();
+      await act(async () => {});
+      expect(c.utils.container.textContent).not.toContain(START_SUPERSEDED_MESSAGE);
+    } finally { c.restore(); }
+  });
+
+  // PR #463 round 19 (S1). A superseded start WITHOUT heldGroups is an echo-hold:
+  // another device's start of this match landed first with a later stamp, so the
+  // match IS running. It is a start that went out, like a landed one: no sentence,
+  // no toast, and the panel pins on the match. (A PICK's echo is tests i and j in
+  // the past-tense describe above.)
+  describe('an echo-held superseded Start (no heldGroups) is a start that went out', () => {
+    const mountEcho = () => mountCourt(
+      [courtMatch('m1', 'scheduled'), courtMatch('m2', 'scheduled')],
+      { onEditScore: vi.fn().mockResolvedValue({ applied: false, reason: 'superseded' }) },
+    );
+
+    it('the Up next card: no sentence, no toast, the panel pinned on the match', async () => {
+      const c = await mountEcho();
+      try {
+        const card = c.utils.container.querySelector('.shiaijo-upnext__card');
+        await act(async () => { startButton(card).click(); });
+        await act(async () => {});
+        expect(card.querySelector('.shiaijo-upnext__error'), 'no refusal sentence on the card').toBeNull();
+        expect(c.utils.container.textContent).not.toContain('Not started');
+        expect(c.showToast, 'no toast').not.toHaveBeenCalled();
+        expect(c.editorMatch(), 'the start went out: the panel is pinned on m1').toBe('m1');
+      } finally { c.restore(); }
+    });
+
+    it('a queue row: no sentence, no toast, the panel pinned on the match', async () => {
+      const c = await mountEcho();
+      try {
+        await act(async () => { startButton(rowOf(c, 'Aka m2')).click(); });
+        await act(async () => {});
+        expect(rowOf(c, 'Aka m2').querySelector('.shiaijo-upnext__error'), 'no refusal sentence on the row').toBeNull();
+        expect(c.utils.container.textContent).not.toContain('Not started');
+        expect(c.showToast, 'no toast').not.toHaveBeenCalled();
+        expect(c.editorMatch(), 'the start went out: the panel is pinned on m2').toBe('m2');
+      } finally { c.restore(); }
+    });
+  });
+});
+
+// PR #463 batch 14, item 4 (bc-aadv): a stored Start refusal belongs to the match
+// it was refused for. It stays on that match's card or queue row for as long as
+// the match is still scheduled on this court, and goes when the match leaves
+// scheduled, when a NON-EMPTY court list no longer holds it, when eligibility
+// moves in its competition (the adapted test above) or when the operator starts
+// another match. Up next changing by itself no longer drops it, and a Finish +
+// Start Next refusal is no different from a tap's.
+describe('a stored Start refusal is bound to the refused match', () => {
+  const REFUSAL = 'Kato is fighting on shiaijo B';
+  const refusing = () => vi.fn().mockRejectedValue(new Error(REFUSAL));
+  const three = () => [courtMatch('m1', 'scheduled'), courtMatch('m2', 'scheduled'), courtMatch('m3', 'scheduled')];
+  const rowOf = (c, text) => [...c.utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes(text));
+  const card = (c) => c.utils.container.querySelector('.shiaijo-upnext__card');
+  const startIn = (el) => [...el.querySelectorAll('button')].find((b) => /^start/i.test(b.textContent.trim()));
+  const noteIn = (el) => el?.querySelector('.shiaijo-upnext__error')?.textContent ?? null;
+  const refuseOnRow = async (c, text) => {
+    await act(async () => { startIn(rowOf(c, text)).click(); });
+    await act(async () => {});
+  };
+
+  it('stays on its queue row when Up next moves on to another match while it is still scheduled', async () => {
+    const c = await mountCourt(three(), { onEditScore: refusing() });
+    try {
+      await refuseOnRow(c, 'Aka m3');
+      expect(noteIn(rowOf(c, 'Aka m3'))).toBe(REFUSAL);
+      // m1 starts elsewhere: Up next is now m2, and m3 is still waiting here.
+      c.feed.current = [courtMatch('m1', 'running'), courtMatch('m2', 'scheduled'), courtMatch('m3', 'scheduled')];
+      await c.refresh();
+      expect(card(c).textContent).toContain('Aka m2');
+      expect(noteIn(card(c)), 'the refusal is about m3, not about Up next').toBeNull();
+      expect(noteIn(rowOf(c, 'Aka m3'))).toBe(REFUSAL);
+    } finally { c.restore(); }
+  });
+
+  it('goes when the refused match leaves scheduled, and does not come back when it is sent back to the queue', async () => {
+    const c = await mountCourt(three(), { onEditScore: refusing() });
+    try {
+      await refuseOnRow(c, 'Aka m3');
+      expect(noteIn(rowOf(c, 'Aka m3'))).toBe(REFUSAL);
+      c.feed.current = [courtMatch('m1', 'scheduled'), courtMatch('m2', 'scheduled'), courtMatch('m3', 'running')];
+      await c.refresh();
+      c.feed.current = three();
+      await c.refresh();
+      expect(rowOf(c, 'Aka m3'), 'm3 is back in the queue').toBeTruthy();
+      expect(noteIn(rowOf(c, 'Aka m3')), 'a stale refusal never revives').toBeNull();
+    } finally { c.restore(); }
+  });
+
+  it('goes when a non-empty court list no longer holds the match (moved), and does not come back', async () => {
+    const c = await mountCourt(three(), { onEditScore: refusing() });
+    try {
+      await refuseOnRow(c, 'Aka m3');
+      c.feed.current = [courtMatch('m1', 'scheduled'), courtMatch('m2', 'scheduled')];
+      await c.refresh();
+      c.feed.current = three();
+      await c.refresh();
+      expect(noteIn(rowOf(c, 'Aka m3')), 'moved away and back is a new situation').toBeNull();
+    } finally { c.restore(); }
+  });
+
+  it('stays across a refetch that answers an empty list and then the same list again', async () => {
+    const c = await mountCourt(three(), { onEditScore: refusing() });
+    try {
+      await refuseOnRow(c, 'Aka m3');
+      // The list is empty while a feed loads; a transient empty answer says
+      // nothing about the match, so the refusal is left where it is.
+      c.feed.current = [];
+      await c.refresh();
+      c.feed.current = three();
+      await c.refresh();
+      expect(noteIn(rowOf(c, 'Aka m3'))).toBe(REFUSAL);
+    } finally { c.restore(); }
+  });
+
+  it('is bound the same way when it is a Finish + Start Next that was refused', async () => {
+    // m2 is Up next after m1 finishes, and its start is refused. No `advance`
+    // option is left to pass: the refusal outlives a change of Up next exactly
+    // as a tap's does, while m2 is still scheduled.
+    const onEditScore = vi.fn(async (_c, id) => { if (id === 'm2') throw new Error(REFUSAL); return { applied: true }; });
+    const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled'), courtMatch('m3', 'scheduled')], { onEditScore });
+    try {
+      await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed', winner: courtSide('m1-a', 'Aka m1') }); });
+      expect(noteIn(card(c))).toBe(REFUSAL);
+      // The refetch: m1 done, and m3 is now scheduled ahead of m2.
+      c.feed.current = [courtMatch('m1', 'completed'), courtMatch('m2', 'scheduled', { scheduledAt: '09:09' }), courtMatch('m3', 'scheduled')];
+      await c.refresh();
+      expect(card(c).textContent).toContain('Aka m3');
+      expect(noteIn(card(c))).toBeNull();
+      expect(noteIn(rowOf(c, 'Aka m2'))).toBe(REFUSAL);
+      // And it goes with the match, as a tap's does.
+      c.feed.current = [courtMatch('m1', 'completed'), courtMatch('m2', 'running'), courtMatch('m3', 'scheduled')];
+      await c.refresh();
+      c.feed.current = [courtMatch('m1', 'completed'), courtMatch('m2', 'scheduled', { scheduledAt: '09:09' }), courtMatch('m3', 'scheduled')];
+      await c.refresh();
+      expect(noteIn(rowOf(c, 'Aka m2'))).toBeNull();
+    } finally { c.restore(); }
+  });
+
+  // (ii) An advance refused because another start was still out says so while
+  // that start is out. When it lands, the court has a running bout, so the
+  // refused match is NOT started on its own (one start at a time), and nothing
+  // else would tell the operator it was asked for and never started: the refusal
+  // is kept, in the past tense, on the refused match.
+  it('an advance refused for a start still out keeps a past-tense notice on the refused match once that start lands', async () => {
+    let landLater;
+    const onEditScore = vi.fn((_c, id) => (id === 'm3'
+      ? new Promise((r) => { landLater = r; })
+      : Promise.resolve({ applied: true })));
+    const c = await mountCourt([courtMatch('m1', 'running'), courtMatch('m2', 'scheduled'), courtMatch('m3', 'scheduled')], { onEditScore });
+    try {
+      // The editor holds this closure while its finish is out; m3's start is
+      // begun from the queue meanwhile and hangs.
+      const advance = probe.props.onSubmitAndNext;
+      await act(async () => { startIn(rowOf(c, 'Aka m3')).click(); });
+      await act(async () => {});
+      expect(onEditScore.mock.calls.map((x) => x[1])).toEqual(['m3']);
+      await act(async () => { await advance({ status: 'completed', winner: courtSide('m1-a', 'Aka m1') }); });
+      // m2 is Up next and was asked for while m3's start was out: refused, present tense.
+      const label = scoreRowMatchName(courtMatch('m3', 'scheduled'));
+      expect(noteIn(card(c))).toBe(startWhileStartingMessage({ label }));
+      expect(onEditScore.mock.calls.map((x) => x[1])).not.toContain('m2');
+
+      await act(async () => { landLater({ applied: true }); });
+      await act(async () => {});
+      expect(noteIn(card(c)), 'the refusal does not vanish when the start lands').toBe(startWasBlockedByStartMessage({ label }));
+      expect(onEditScore.mock.calls.map((x) => x[1]), 'and m2 was not started on its own').not.toContain('m2');
+
+      // A Start on it clears the sentence and sends the start.
+      await act(async () => { startIn(card(c)).click(); });
+      await act(async () => {});
+      expect(onEditScore.mock.calls.map((x) => x[1])).toContain('m2');
+      expect(noteIn(card(c))).toBeNull();
+    } finally { c.restore(); }
+  });
+});
+
+// PR #463 batch 14, item 11: the console imports startPatch from start_match.jsx
+// (the one owner of how a Start is written) instead of wrapping window.startPatch,
+// which threw "admin_schedule.jsx not loaded" when the global was absent. This
+// suite publishes none (it used to publish a bare vi.fn()); the test removes any
+// another file left behind, so the console cannot be reading it.
+describe('the console writes a Start without any window.startPatch', () => {
+  it('Start on the Up next card sends the real start patch', async () => {
+    const saved = window.startPatch;
+    delete window.startPatch;
+    const onEditScore = vi.fn().mockResolvedValue({ applied: true });
+    const c = await mountCourt([courtMatch('m1', 'scheduled')], { onEditScore });
+    try {
+      const start = [...c.utils.container.querySelector('.shiaijo-upnext__card').querySelectorAll('button')]
+        .find((b) => /^start/i.test(b.textContent.trim()));
+      await act(async () => { start.click(); });
+      await act(async () => {});
+      expect(onEditScore).toHaveBeenCalledTimes(1);
+      const patch = onEditScore.mock.calls[0][2];
+      expect(patch?.status).toBe('running');
+      expect(patch?.startOnly).toBe(true);
+      expect(c.showToast, 'no "factory unavailable" toast').not.toHaveBeenCalled();
+    } finally {
+      c.restore();
+      if (saved) window.startPatch = saved;
+    }
   });
 });

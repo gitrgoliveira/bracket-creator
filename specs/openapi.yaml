@@ -51,7 +51,30 @@ info:
     not have (a sheet a moment behind a remove made elsewhere) is dropped from the
     write and the rest is written as usual, unless the write finishes the match,
     which may take its winner from that row and is refused with 409 `no_daihyosen`; a write listing
-    two is refused with 400 `duplicate_daihyosen`. Nor does it remove one: a write listing
+    two is refused with 400 `duplicate_daihyosen`, a representative pick that names a member the
+    side's team does not hold is refused with 400 `team_member_not_in_team` (the organiser's
+    picks are judged the same way, see `PUT .../score`). The row's winner member id
+    is not judged: the merge keeps it naming one of the two stored representatives. A numbered
+    bout row is judged for what the write introduces against the stored row at the same position:
+    a fighter whose member id the side's team does not hold is refused with 400
+    `team_member_not_in_team`, and a `winnerMemberId` that is not one of the row's two fighters
+    is refused with 400 `winner_member_not_in_bout`; an id the stored row already holds is never
+    judged, and the organiser's numbered rows are not judged at all. A member a write would seat
+    (a participant's numbered row fighter or winner, a representative pick from anyone) is judged
+    on what the write LANDS, after the merge, in the same transaction: the match is read back as
+    stored, and a refused write lands nothing (no change to the match, no history entry). A stale
+    change the merge holds is therefore not judged: a pick or a row the write names (in `changed`,
+    or by default every group its row carries) and stamps before the stored one is kept in the
+    match's history and answered in `heldGroups`, e.g. `["bout:1"]`, never refused, while one the
+    write does not name (and the engine does not rewrite, as it does a kachinuki write's bout log)
+    is copied from the stored match, neither written nor reported: it is in neither `heldGroups`
+    nor the history. When the competition's `team-members.yaml` cannot be read,
+    a write that needs it to judge a choice (a pick, a numbered row's fighter, or the lineup
+    save) is refused with 409 `team_members_unreadable` and nothing is written, so the offline
+    queue does not retry it; a write that introduces no member id never reads the file. The rest of the write is
+    ordered by its own stamps, so it is applied and answered with `heldGroups` naming the held
+    side's group, e.g. `["repPickA"]`; it is answered as superseded only when every group it
+    changes is held. Nor does it remove one: a write listing
     the bouts without the representative bout the match has (a sheet a moment behind an
     add made elsewhere) keeps the stored row, scored or not, unless it finishes the match,
     which is refused with 409 `daihyosen_added`. It carries only what the competitors saw: a match
@@ -934,7 +957,10 @@ paths:
         Sends a transient text announcement to all connected viewer screens via SSE.
         The announcement is stored in-memory only (not persisted to disk); a server
         restart clears it. Late-connecting viewers can retrieve the active announcement
-        via `GET /api/tournament/announcement`.
+        via `GET /api/tournament/announcement`. A message identical to one still active
+        replaces it (new id, fresh duration) rather than adding a second entry.
+        The replaced id stays valid for `DELETE /api/announcements/{id}` while the
+        announcement that replaced it is active: it takes that announcement down.
 
         **Validation:**
         - `message` must be non-empty after trimming whitespace.
@@ -972,6 +998,72 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '401':
+          description: Missing or invalid X-Tournament-Password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/tournament/announcements:
+    get:
+      tags: [tournament]
+      summary: List active announcements
+      description: |
+        Returns every announcement still active, oldest first (`[]` when none).
+        No authentication required.
+      responses:
+        '200':
+          description: Active announcements.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Announcement'
+
+  /api/announcements/{id}:
+    delete:
+      tags: [tournament]
+      summary: Withdraw one announcement
+      description: |
+        Takes one announcement down and pushes the remaining list to viewers
+        over SSE. An id that an identical announcement replaced stays valid
+        while the replacing announcement is active, and takes that one down.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Announcement withdrawn.
+        '401':
+          description: Missing or invalid X-Tournament-Password.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No active announcement has this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/announcements:
+    delete:
+      tags: [tournament]
+      summary: Withdraw every announcement
+      description: Clears all announcements and pushes the empty list to viewers over SSE.
+      security:
+        - TournamentPassword: []
+      responses:
+        '204':
+          description: All announcements withdrawn.
         '401':
           description: Missing or invalid X-Tournament-Password.
           content:
@@ -2397,8 +2489,15 @@ paths:
           tie, an engi count that is not valid), the finish is applied on its
           own scoreline, as in stamp order, and that newer scoring is moved to
           the match's history as held; the answer names it in
-          `displacedGroups`, with the same `heldReason`. A finish that carries
-          no scoreline of its own is held instead. A points change whose write does not apply
+          `displacedGroups`, with `heldReason: needs_winner`. A finish that carries
+          no scoreline of its own is held instead. A write that removes the
+          representative bout (a write that names it and carries no row, such
+          as the daihyosen DELETE) likewise moves a representative pick
+          (`repPickA`, `repPickB`) stamped AFTER the removal to the history,
+          since in stamp order the pick landed on a bout that no longer
+          existed; the answer names it in `displacedGroups` with NO
+          `heldReason` (it is no question of the winner), and the history
+          keeps it with the reason "the representative bout was removed". A points change whose write does not apply
           `result` keeps a recorded judges' decision (hantei mark). A scoring change made on a
           running board after a recorded kiken, fusenpai, or fusensho clears
           it (points scored mean the withdrawal was a mistake), and the competitor
@@ -2423,7 +2522,11 @@ paths:
             An applied finish that moved stored, NEWER scoring into the
             match's history (it would have left the match without a winner,
             and in stamp order came after this finish) carries
-            `displacedGroups` naming those groups, with the same `heldReason`.
+            `displacedGroups` naming those groups, with `heldReason:
+            needs_winner`. An applied removal of the representative bout that
+            moved a representative pick stamped after it into the history
+            carries `displacedGroups` naming the pick's group (`repPickA` or
+            `repPickB`) with no `heldReason`.
             A running write the rev-guard finds older than one the same client
             session already sent (a lower rev, e.g. an out-of-order reconnect
             flush) is not applied and not dropped: the whole write is kept in
@@ -2476,6 +2579,61 @@ paths:
             participant: "A team match has one representative bout, and this
             score lists more than one. Check the scores and try again."
 
+            A request whose representative bout (position `-1`) names a member
+            the side's team does not hold (a pick the stored row does not
+            already hold) is refused with `error: team_member_not_in_team`, with
+            a `message` to show, whoever sends it: a participant (an empty
+            password) or the organiser, so the two never disagree about which
+            pick is valid. The `message` is "The representative chosen is not
+            on this team. Pick again from the list." The organiser is judged on
+            that pick and on nothing else of the row: the match's status is not
+            asked (a pick on a finished match is judged, never refused for the
+            finish, and the organiser can pick again at once), a start
+            (`startOnly`) is not judged, and a match with no representative bout
+            is judged against an empty row, since the organiser's write can
+            create it. The row's winner member id is not judged: the
+            merge keeps it naming one of the two stored representatives, or empty.
+            A pick is judged on what the write LANDS, after the merge, in the same
+            transaction: the match is read back as stored, and a pick it now holds
+            that the stored row did not is refused when its side's team does not
+            hold the member. A refused write lands nothing: no change to the
+            match and no history entry. A pick the merge holds is not judged: one
+            the write names (in `changed`, or by default every group its row
+            carries) and stamps strictly before the stored representative, or one
+            carried by a finish the merge holds whole (stamped before the stored
+            verdict and naming another winner), is kept in the match's history and
+            answered in `heldGroups`, never refused (an equal stamp applies, so it
+            is judged). A pick the write does not name in `changed` is copied from
+            the stored match, neither written nor reported: it is in neither
+            `heldGroups` nor the history.
+            The rest of the write is ordered by its own stamps,
+            so it is applied and answered with `heldGroups` naming the held side's
+            group, e.g. `["repPickA"]`; it is answered as superseded, with nothing
+            written, only when every group it changes is held.
+
+            A request with an empty password (self-run) is also judged on every
+            numbered bout row (position 1 and up) for what it introduces against
+            the stored row at the same position. A `sideAMemberId` or
+            `sideBMemberId` the side's team does not hold is refused with
+            `error: team_member_not_in_team` and the `message` "The fighter chosen
+            is not on this team. Pick again from the list." A `winnerMemberId`
+            that is neither empty nor one of the row's two fighters (the row's own
+            ids, or the stored row's for a side the row is silent about) is refused
+            with `error: winner_member_not_in_bout` and the `message` "The winner
+            recorded is not one of the two fighters in this bout." An id the
+            stored row already holds is never judged. A row is judged as it
+            LANDS (see the pick above), not as its payload reads: the engine
+            rewrites a kachinuki write before its merge (it merges the bout log by
+            position and fills in member ids), so a row the payload does not name
+            in `changed` can still land, and is judged then; a refused write lands
+            nothing. A row the merge holds (named in `changed`, or by default, and
+            stamped before the stored one) is not judged: it is kept in the
+            match's history, and the rest of the write is applied and answered
+            with `heldGroups`, e.g. `["bout:1"]`. A row the write does not name
+            and the engine does not rewrite is copied from the stored match,
+            neither written nor reported. The organiser's numbered rows are not
+            judged.
+
             A `completed` write whose `decision` is empty or `hikiwake` on a
             match whose stored result is a completed withdrawal (kiken or
             fusenpai) is a score sheet's correction, which cannot state a
@@ -2504,7 +2662,19 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: >
+                      The reason the payload was refused, or for the refusals that
+                      carry a `message` the machine-readable code
+                      (`duplicate_daihyosen`, `team_member_not_in_team`,
+                      `winner_member_not_in_bout`).
+                  message:
+                    type: string
+                    description: The sentence the page shows as it is, for those refusals.
         '401':
           description: >
             `invalid tournament password`: the password is missing or wrong in an
@@ -2516,7 +2686,7 @@ paths:
                 $ref: '#/components/schemas/Error'
         '409':
           description: |
-            Conflict; one of nine codes returned in the `error` field:
+            Conflict; one of eleven codes returned in the `error` field:
             - `court_busy`: court already has a running match in this or another competition.
               Extra fields: `court`, `matchId`, `compId`, `label`, `message`.
             - `ineligible_competitor`: a participant is ineligible (kiken/fusenpai in a prior match, or barred by
@@ -2558,6 +2728,13 @@ paths:
               the stored row and is written as usual. Extra fields: `message`, "A
               representative bout was added to this match on another device. Check the
               scores and finish again."
+            - `team_members_unreadable`: the competition's `team-members.yaml` cannot be
+              read, and the write introduces a member id to judge against it (a
+              representative pick, or a numbered bout row's fighter). Nothing is
+              written, and unlike a 500 the offline queue does not retry it. A write that
+              introduces no member id never reads the file. Extra fields: `message`, "The
+              team members could not be read, so this choice cannot be checked. The
+              organiser needs to check team-members.yaml in the tournament data."
             - `side_mismatch`: the submitted winner does not match either side of the match.
               Extra fields: `message`.
             - `downstream_knockout_played`: the write would change who a
@@ -2595,6 +2772,7 @@ paths:
                       - hantei_organiser_only
                       - no_daihyosen
                       - daihyosen_added
+                      - team_members_unreadable
                       - side_mismatch
                       - downstream_knockout_played
                       - downstream_knockout_running
@@ -2616,7 +2794,7 @@ paths:
                       `engine.OperatorMatchLabel`.
                   message:
                     type: string
-                    description: Human-readable detail (court_busy, result_finalized, hantei_organiser_only, no_daihyosen, daihyosen_added, side_mismatch, downstream_knockout_played, downstream_knockout_running); for the self-run codes, the sentence the public page shows as it is.
+                    description: Human-readable detail (court_busy, result_finalized, hantei_organiser_only, no_daihyosen, daihyosen_added, team_members_unreadable, side_mismatch, downstream_knockout_played, downstream_knockout_running); for the self-run codes, the sentence the public page shows as it is.
                   playerId:
                     type: string
                     description: Ineligible participant ID (ineligible_competitor / already_ineligible).
@@ -3338,6 +3516,14 @@ paths:
         "Bout 5 (Taisho) has no result. Record a score, a Tie, or a Fusensho before finishing."
         Nothing is written for that entry, and other entries are unaffected.
 
+        An entry is written in its own transaction and its representative bout (position `-1`)
+        is judged on what it lands, as on PUT /score: a pick the stored row did not hold that
+        names a member the side's team does not hold is refused, reported in `errors` with
+        `reason: team_member_not_in_team` and the page's sentence in `error`. When the
+        competition's `team-members.yaml` cannot be read, an entry that needs it is refused with
+        `reason: team_members_unreadable`. Nothing is written for a refused entry, its history
+        entry included, and other entries are unaffected. Numbered bout rows are not judged.
+
 
         Stays main-password-gated in self-run mode (401 without it): it writes results
         without PUT /score's self-run checks.
@@ -3380,7 +3566,7 @@ paths:
                             classes `reason` names below.
                         reason:
                           type: string
-                          enum: [superseded, clock_skew, corrupt_overrides, downstream_knockout_played, downstream_knockout_running]
+                          enum: [superseded, clock_skew, corrupt_overrides, downstream_knockout_played, downstream_knockout_running, team_member_not_in_team, team_members_unreadable]
                           description: >
                             Machine-readable discriminator, present only for the
                             classes named here and omitted for every other failure, so
@@ -3409,7 +3595,12 @@ paths:
                             fought now, or a knockout correction whose new winner would
                             change a side of a later knockout match being fought now;
                             `forceDownstreamReopen` does not get past it; finish or
-                            requeue that match, then retry. In
+                            requeue that match, then retry.
+                            `team_member_not_in_team`: the entry's representative pick
+                            names a member the side's team does not hold; `error` carries
+                            the sentence to show. `team_members_unreadable`: the
+                            competition's team-members.yaml could not be read, so the
+                            pick could not be judged. In
                             every case the entry is excluded from `succeeded` and never
                             broadcast. Other entries in the batch are unaffected.
                         heldGroups:
@@ -3707,6 +3898,11 @@ paths:
         with no id (an unresolved feeder or a bye) has nothing to bar it.
 
 
+        The new representative-bout row is stored with the match's team names
+        as `sideA` and `sideB`, so it is never nameless between the add and the
+        first score write.
+
+
         The add competes on timestamps like a score write when it carries
         `modifiedAt`: the match it writes takes that stamp, so a copy of the
         match read before the add is older than the one it returns.
@@ -3858,7 +4054,9 @@ paths:
             `clock_skew`); nothing is applied to the match and no SSE event is
             emitted. A superseded remove carries `heldGroups` and is kept in
             the match's history. The removed bout keeps its stamp, so an older
-            write still carrying it cannot bring it back.
+            write still carrying it cannot bring it back. An applied remove may
+            carry `displacedGroups` with no `heldReason`: a representative pick
+            made after the removal was moved to the match's history.
           content:
             application/json:
               schema:
@@ -3876,6 +4074,14 @@ paths:
                           Present when the remove applied in part: the groups
                           held and kept in the match's history. As
                           RefusedWrite.heldGroups.
+                      displacedGroups:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/MergeGroup'
+                        description: >
+                          Present when a representative pick stamped after the
+                          removal was moved to the match's history, with no
+                          `heldReason`. As MatchResult.displacedGroups.
                       heldReason:
                         type: string
                         enum: [needs_winner, default_win_stands]
@@ -4181,9 +4387,12 @@ paths:
         bout's fighter (bc-dhas). Such a request is refused for a match that
         does not exist (404), for a team the match does not hold by id (404
         `team_not_in_match`), for a member id the team does not hold among the
-        positions the save writes (400 `team_member_not_in_team`), or for a match
+        positions the save writes (400 `team_member_not_in_team`), for a match
         that has finished (409 `result_finalized`, the score endpoint's own
-        refusal); the organiser, sending the password, keeps the always-editable
+        refusal), or when the competition's `team-members.yaml` cannot be read and
+        the save names a member id to check (409 `team_members_unreadable`, which
+        the offline queue does not retry; a save that names no member id never
+        reads the file); the organiser, sending the password, keeps the always-editable
         rule above, and a password that is sent but wrong gets 401 before the
         body is read.
       security:
@@ -4237,7 +4446,9 @@ paths:
         '409':
           description: |
             Self-run, an empty password: the match has finished
-            (`error: result_finalized`, with a `message` to show).
+            (`error: result_finalized`, with a `message` to show), or the
+            team members could not be read to check a member id
+            (`error: team_members_unreadable`, with a `message` to show).
           content:
             application/json:
               schema:
@@ -4245,7 +4456,7 @@ paths:
                 properties:
                   error:
                     type: string
-                    enum: [result_finalized]
+                    enum: [result_finalized, team_members_unreadable]
                   message:
                     type: string
         '500':
@@ -5299,9 +5510,12 @@ components:
         door:
           type: string
           description: >
-            What made the write (`displaced`: a stored change a finish made
-            before it moved to the history, see MatchResult.displacedGroups):
-            score, bulk-score, quick-score, decision,
+            What made the write (`displaced`: a stored change that a finish or
+            a removal of the representative bout, arriving after it but stamped
+            earlier, moved to the history, see MatchResult.displacedGroups;
+            `reseat`: a side of the match was given another team by a
+            correction to an earlier match, and the side's representative pick
+            went with it): score, bulk-score, quick-score, decision,
             daihyosen-add, daihyosen-remove, reopen, requeue, override-winner,
             engi, kachinuki-advance, kachinuki-remove-bout, downstream-reopen,
             or engine for a write the server made itself.
@@ -5350,9 +5564,11 @@ components:
             for a match one of those decisions already closed; the answer
             carries `heldReason: default_win_stands` and `heldDecision`), "a
             knockout match needs a winner" (a change that would leave a
-            finished knockout match tied), or "an engi result needs a valid
+            finished knockout match tied), "an engi result needs a valid
             flag count" (a recount that would leave a finished engi match with
-            none). Absent when each group was judged by its own stamp.
+            none), or "the representative bout was removed" (a representative
+            pick stamped after the bout's removal, moved here by the removal).
+            Absent when each group was judged by its own stamp.
         clearedWithdrawal:
           type: object
           description: The kiken, fusenpai, or fusensho a later scoring change cleared (the result group as it was), when one was.
@@ -5367,11 +5583,18 @@ components:
         decision, decisionBy, decisionReason, and the correctionReason and
         resultSource that describe it); `encho` the match-level overtime;
         `flags` the engi flag counts; `rep` the pool representative players;
-        and `bout:<position>` one bout row (1..n, or -1 for the representative
-        bout). The sides, court, schedule and round are not groups. A write
+        `repPickA` and `repPickB` the two representatives of a team match's
+        representative bout (the member ids `sideAMemberId` and `sideBMemberId`
+        on its `-1` row), one group per side: each is a change of its own,
+        dated apart from the other side's, that a point struck on the bout
+        never alters and that never alters the bout's score; and `bout:<position>`
+        one bout row (1..n, or -1 for the representative bout, without the
+        two representatives or the winner's member id, which the server
+        derives). The sides, court, schedule and round are not
+        groups. A write
         names the groups it changes in `changed`; the match records the stamp
         of the last applied change to each in `groupStamps`.
-      pattern: '^(points|result|encho|flags|rep|bout:-?[0-9]+)$'
+      pattern: '^(points|result|encho|flags|rep|repPickA|repPickB|bout:-?[0-9]+)$'
 
     DaihyosenWriteStamp:
       type: object
@@ -6242,6 +6465,9 @@ components:
             needs, or because a decision (a kiken or a fusenpai of this
             match, or a fusensho awarded for a bar recorded on a DIFFERENT
             match) already closed the match (see RefusedWrite.heldReason).
+            Absent when the groups were held by their stamps alone, and
+            absent beside a `displacedGroups` that names a representative
+            pick moved by a removal of the representative bout.
         heldDecision:
           type: string
           readOnly: true
@@ -6253,11 +6479,16 @@ components:
             $ref: '#/components/schemas/MergeGroup'
           description: >
             On a write's response only: groups whose STORED values this
-            (applied) finish moved to the match's history, held. They were
-            changed after the finish was made and would have left the match
-            without the winner it needs, so in stamp order they could not
-            apply after it. The history keeps them, at their own stamp, with
-            door `displaced`.
+            (applied) write moved to the match's history, held. The history
+            keeps them, at their own stamp, with door `displaced`. Two cases.
+            A finish moves scoring changed after the finish was made that
+            would have left the match without the winner it needs, so in
+            stamp order it could not apply after it; the answer then carries
+            `heldReason: needs_winner`. A removal of the representative bout
+            moves a representative pick (`repPickA`, `repPickB`) stamped after
+            the removal, since in stamp order the pick landed on a bout that
+            no longer existed; the answer then carries NO `heldReason`, and
+            the history reason is "the representative bout was removed".
         sideA:
           type: string
           maxLength: 100

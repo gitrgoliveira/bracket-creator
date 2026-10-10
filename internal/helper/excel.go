@@ -2176,9 +2176,10 @@ func ProtectSheets(f *excelize.File, sheetNames []string) {
 func ProtectAllSheets(f *excelize.File) {
 	for _, name := range f.GetSheetList() {
 		// Data, Time Estimator, and Pool Draw remain fully editable, and so
-		// does Kachinuki Detail: it holds no formula to protect, and its
-		// empty bout rows are there to be filled in.
-		if name == SheetData || name == SheetTimeEstimator || name == SheetPoolDraw || name == SheetKachinukiDetail {
+		// do Kachinuki Detail and Representative Bouts: they hold no formula
+		// to protect, and the empty bout rows of the first are there to be
+		// filled in.
+		if name == SheetData || name == SheetTimeEstimator || name == SheetPoolDraw || name == SheetKachinukiDetail || name == SheetRepresentativeBouts {
 			continue
 		}
 		ProtectSheets(f, []string{name})

@@ -1326,7 +1326,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     //
     // A start that did NOT land leaves the court free, so the past-tense sentence
     // would be false, and that start's own refusal (a thrown 409, a clock_skew
-    // or superseded answer) is what the operator needs. It is stored for the
+    // answer or a superseded one that held its result group) is what the
+    // operator needs. It is stored for the
     // blocker before this runs (startMatch's refusal branch or its catch, ahead
     // of its finally), and startMatch clears
     // startError when a start passes the guard, so any value present when the
@@ -1353,7 +1354,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // Returns true when the start went out (landed, or was queued offline), false
     // otherwise: pickMatch relies on this so it only pins pickedKey for a match that
     // actually started (a blocked-by-eligibility start, a clock_skew refusal or a
-    // superseded answer must not steal the panel).
+    // superseded answer that held the result group must not steal the panel; a
+    // superseded answer that held nothing is an echo of a start that landed and
+    // does pin it).
     // `pick` is the pickingRef entry pickMatch made for THIS start, if it is one:
     // that pick is the start itself, not a start in flight against it.
     const startMatch = async (m, { pick = null } = {}) => {
@@ -1378,18 +1381,21 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // Starting makes the match running; the scoring panel shows
             // running[0], so it picks the match up on the next refetch.
             const res = await onEditScore(m.compId, m.id, startPatch(), m);
-            // A clock_skew or a superseded answer means the server stored
-            // NOTHING of the start and, unlike a queued start, nothing will land
-            // later, so returning true here would pin the panel on a match that
-            // never started while the tap looked like it worked. Found in
-            // browser verification: this card button is a start path none of the
-            // review sweeps enumerated (it is not one of the editor call sites).
+            // A clock_skew answer, or a superseded one that held the result
+            // group, means the server stored NOTHING of the start and, unlike a
+            // queued start, nothing will land later, so returning true here would
+            // pin the panel on a match that never started while the tap looked
+            // like it worked. Found in browser verification: this card button is
+            // a start path none of the review sweeps enumerated (it is not one of
+            // the editor call sites). (A superseded answer that held NOTHING is an
+            // echo of a start that already landed: classifyStartOutcome answers
+            // ok for it and it takes the landed path below.)
             // Both are a REFUSED start (start_match.jsx classifyStartOutcome): the
             // sentence is stored on the refused match and toasted once, and
             // `landed` stays unset, so a refusal that waited on this start is not
             // worded as "was being started". The sentences differ in their advice
             // (after a clock refusal a SECOND tap normally succeeds; after a
-            // superseded one the operator checks the match first), which is why
+            // held-group superseded one the operator checks the match first), which is why
             // the toast and the card carry the sentence and not a bare failure.
             //
             // For a PICK the court is not "as it was": the running bout was

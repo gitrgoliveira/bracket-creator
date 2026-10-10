@@ -6,7 +6,7 @@
 // second start while one was out.
 
 import { describe, it, expect } from 'vitest';
-import { CLOCK_SKEW_REASON_TEXT } from '../write_result.jsx';
+import { CLOCK_SKEW_REASON_TEXT, SUPERSEDED_REASON, SUPERSEDED_ADVICE, notSavedText } from '../write_result.jsx';
 import {
     classifyStartOutcome, startFailureMessage, createStartGuard, startPatch, startRefusalStands,
     START_CLOCK_SKEW_MESSAGE, START_FAILED_MESSAGE, START_SUPERSEDED_MESSAGE,
@@ -31,26 +31,39 @@ describe('classifyStartOutcome', () => {
         expect(classifyStartOutcome(null)).toEqual({ ok: true });
     });
 
-    it('a superseded start is a refused start, in its own words: nothing was written and nothing will land later', () => {
-        // A newer change to the match's result is already stored. The start is
-        // refused like a clock_skew one (a stored notice and a toast on both
-        // hosts), not waved through: a host that took it for a start that went
-        // out would pin a panel on a match the server did not start, say nothing
-        // to the operator, and word a past-tense "was being started" for a start
-        // that wrote nothing (PR #463 round 18).
-        const out = classifyStartOutcome({ applied: false, reason: 'superseded' });
+    // PR #463 round 19 (S1). A start names the `result` group alone, and the server
+    // lists a held group in `heldGroups` only when its incoming value DIFFERS from
+    // the stored one (reportHeld: an equal one is a HeldEcho, neither listed nor
+    // kept), and omits `heldGroups` from the answer when it would be empty
+    // (respondSuperseded). So a superseded start with NO heldGroups is an echo-hold:
+    // the stored result already equals the start, which is another device's start of
+    // this same match having landed first with a later stamp. The match IS running.
+    it('a superseded start that holds no group is an echo-hold: the start went out', () => {
+        expect(classifyStartOutcome({ applied: false, reason: 'superseded' })).toEqual({ ok: true });
+        expect(classifyStartOutcome({ applied: false, reason: 'superseded', heldGroups: [] })).toEqual({ ok: true });
+    });
+
+    // PIN (green by design since round 18): a superseded start that DID hold its
+    // result group means a different result is stored (a send-back, a correction),
+    // so nothing of the start was written and the match is not running.
+    it('PIN: a superseded start that holds the result group is a refused start, in its own words', () => {
+        const out = classifyStartOutcome({ applied: false, reason: 'superseded', heldGroups: ['result'] });
         expect(out.ok).toBe(false);
         expect(out.msg).toBe(START_SUPERSEDED_MESSAGE);
-        expect(out.msg).toBe('Not started: a newer change to this match was recorded first. Check the match before starting it.');
     });
 
-    it('a superseded answer that also holds groups (heldGroups) is the same refusal', () => {
-        expect(classifyStartOutcome({ applied: false, reason: 'superseded', heldGroups: ['result'] }))
-            .toEqual({ ok: false, msg: START_SUPERSEDED_MESSAGE });
+    // S2: the refusal's words are write_result.jsx's (SUPERSEDED_REASON and
+    // SUPERSEDED_ADVICE, composed by notSavedText as the clock sentence composes
+    // CLOCK_SKEW_REASON_TEXT), under the start sentences' own "Not started" lead.
+    it('the superseded sentence is composed from the write_result.jsx owner, with the start lead', () => {
+        expect(START_SUPERSEDED_MESSAGE).toBe(notSavedText({ lead: 'Not started', reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE }));
+        expect(START_SUPERSEDED_MESSAGE).toBe(
+            'Not started: a newer change to the same thing was recorded first, so this one was kept in the match\'s history and nothing is lost. '
+            + 'Check the match and its history before entering anything again: entering it again would replace the newer change.');
     });
 
-    it('only a superseded or clock_skew answer is a refusal: landed, queued and body-less starts did go out', () => {
-        for (const res of [{ applied: true }, { queued: true }, { status: 'ok' }, undefined, null]) {
+    it('only a clock_skew or a held-group superseded answer is a refusal: landed, queued, echo-held and body-less starts did go out', () => {
+        for (const res of [{ applied: true }, { queued: true }, { status: 'ok' }, { applied: false, reason: 'superseded' }, undefined, null]) {
             expect(classifyStartOutcome(res).ok, JSON.stringify(res)).toBe(true);
         }
     });

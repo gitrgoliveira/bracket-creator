@@ -22,12 +22,16 @@
 // Scores tab's startRefusal) and its own surface for the sentence. This leaf
 // holds no state of its own beyond the guard object a host creates.
 //
-// A leaf: write_result.jsx (the answer predicates and the clock-skew words) and
+// A leaf: write_result.jsx (the answer predicates and the clock-skew and
+// superseded words) and
 // match_groups.jsx (the group name startPatch writes, itself a near leaf over
 // write_result.jsx and result_slot.jsx). Neither host's module is imported
 // here, and both import this one directly.
 
-import { writeWasRefusedForClock, writeWasSuperseded, CLOCK_SKEW_REASON_TEXT } from './write_result.jsx';
+import {
+    writeWasRefusedForClock, writeWasSuperseded, writeHeldGroups, notSavedText,
+    CLOCK_SKEW_REASON_TEXT, SUPERSEDED_REASON, SUPERSEDED_ADVICE,
+} from './write_result.jsx';
 import { GROUP_RESULT } from './match_groups.jsx';
 
 // Minimal "start" patch (status -> running, empty score). Mirrors the editors'
@@ -65,15 +69,21 @@ export function startPatch() {
 // tap.
 export const START_CLOCK_SKEW_MESSAGE = "Could not start: " + CLOCK_SKEW_REASON_TEXT + ". The clock has been resynced; try again.";
 
-// The sentence for a start the server held as superseded (HTTP 200 applied:false,
-// reason superseded): a newer change to this match is already stored, so nothing
-// of the start was written. Unlike the clock sentence above it never says "try
-// again": the opposite is true, the operator must look at the match first, since
-// starting it again blind is exactly what that newer change may have made wrong.
-// It is the same sentence whether the newer change was a held write or another
-// device's start that landed first (the row then reads running after the refetch,
-// the stored notice drops, startRefusalStands, and only the toast is seen).
-export const START_SUPERSEDED_MESSAGE = "Not started: a newer change to this match was recorded first. Check the match before starting it.";
+// The sentence for a start the server held as superseded WITH a held group (HTTP
+// 200 applied:false, reason superseded, heldGroups ['result']): a different
+// result is already stored (a send-back, a correction), so nothing of the start
+// was written and the match is not running. Unlike the clock sentence above it
+// never says "try again": the opposite is true, the operator must look at the
+// match first, since starting it again blind is exactly what that newer change
+// may have made wrong. Its words are write_result.jsx's (SUPERSEDED_REASON and
+// SUPERSEDED_ADVICE, composed by notSavedText as for every superseded write),
+// under this file's own "Not started" lead; they read, via notSavedText:
+// "Not started: a newer change to the same thing was recorded first, so this one
+// was kept in the match's history and nothing is lost. Check the match and its
+// history before entering anything again: entering it again would replace the
+// newer change." A superseded start with NO held group is not this sentence at
+// all: see classifyStartOutcome.
+export const START_SUPERSEDED_MESSAGE = notSavedText({ lead: 'Not started', reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE });
 
 // The sentence for a thrown start that carries none of its own.
 export const START_FAILED_MESSAGE = "Could not start the match: check eligibility and try again.";
@@ -81,7 +91,8 @@ export const START_FAILED_MESSAGE = "Could not start the match: check eligibilit
 // classifyStartOutcome: what did a start write come back with?
 //   { ok: true }          the start landed, or was QUEUED (a queued start lands
 //                         on reconnect, so the host treats it as started), or
-//                         came back without a body.
+//                         came back without a body, or was held as an ECHO of a
+//                         start that already landed (below).
 //   { ok: false, msg }    the start was REFUSED and nothing will land later: a
 //                         host that called it started would pin a panel on a
 //                         match that never started while the tap looked like it
@@ -90,23 +101,42 @@ export const START_FAILED_MESSAGE = "Could not start the match: check eligibilit
 //                           - clock_skew: the device's clock was out of step;
 //                             the relearn it triggers means a second tap
 //                             normally succeeds (START_CLOCK_SKEW_MESSAGE).
-//                           - superseded: a newer change to the match is already
-//                             stored, so nothing of the start was written
-//                             (START_SUPERSEDED_MESSAGE). The sentence never
-//                             invites a retry, since the operator must look at
-//                             the match first. Held as the same refusal whether
-//                             or not groups were held (an echo-hold has empty
-//                             heldGroups): when another device's start landed
-//                             first the row reads running after the refetch, the
-//                             stored notice drops (startRefusalStands) and only
-//                             the toast is seen, which is still true.
+//                           - superseded WITH a held group: a newer change to
+//                             the match's result is already stored, so nothing
+//                             of the start was written (START_SUPERSEDED_MESSAGE).
+//                             The sentence never invites a retry, since the
+//                             operator must look at the match first.
 // Both hosts take a refusal the same way (store it on the refused match, toast
 // it once, return not-started), so a superseded start needs no branch of its own.
 // A start that THROWS (a 409) is not an answer at all; startFailureMessage
 // words it.
+//
+// Why a superseded answer is two cases (PR #463 round 19). A start names the
+// `result` group alone (startOnly, startPatch's `changed`), and the server lists
+// a held group in `heldGroups` only when its incoming value DIFFERS from the
+// stored one: an equal one is a HeldEcho, neither listed nor kept (reportHeld,
+// match_merge.go), and respondSuperseded omits `heldGroups` when it would be
+// empty. A start does carry rev/revSession like every running payload
+// (api_client.jsx stamps them), and the rev guard (holdOlderRevision ->
+// holdWriteTx, holdAll) holds through reportHeld too, so an echo is an echo-hold
+// there as well. So:
+//   - NO heldGroups: the stored result already equals the start. Another
+//     device's start of this same match landed first with a later stamp, i.e. the
+//     match IS running. The start went out, as far as this device is concerned:
+//     a refusal would say "Not started" about a live match, a pick would not pin
+//     the panel on it, and the Scores tab would clear a waiting refusal ("was
+//     being started") that was accurate.
+//   - heldGroups ['result']: a different result is stored, so the match is not
+//     running and the start is refused.
+// Residual, not fixed: the `result` group's projection also holds
+// CorrectionReason and ResultSource, so a start over a match that is running under
+// a different source or reason answers heldGroups ['result'] and shows the refused
+// sentence while the match is running. The stored notice drops once the live data
+// shows it running (startRefusalStands); only the toast is left, and it is
+// wrong for that one case.
 export function classifyStartOutcome(res) {
     if (writeWasRefusedForClock(res)) return { ok: false, msg: START_CLOCK_SKEW_MESSAGE };
-    if (writeWasSuperseded(res)) return { ok: false, msg: START_SUPERSEDED_MESSAGE };
+    if (writeWasSuperseded(res) && writeHeldGroups(res).length > 0) return { ok: false, msg: START_SUPERSEDED_MESSAGE };
     return { ok: true };
 }
 

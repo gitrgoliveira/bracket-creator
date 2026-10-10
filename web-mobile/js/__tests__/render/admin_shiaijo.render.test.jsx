@@ -2181,15 +2181,18 @@ describe('a Start tapped while another start is still out is refused before anyt
       } finally { c.restore(); }
     });
 
-    // A superseded start is HTTP 200 {applied:false, reason:'superseded'}: a newer
-    // change to the match's result is already stored and nothing of the start was
-    // written. For a PICK that is not "as it was": the running bout was sent back
+    // A superseded start that HOLDS its result group is HTTP 200
+    // {applied:false, reason:'superseded', heldGroups:['result']}: a different
+    // result is already stored (a send-back, a correction) and nothing of the start
+    // was written. (Round 19: the same answer WITHOUT heldGroups is an echo of a
+    // start that already landed, a start that went out; see the echo tests below.)
+    // For a PICK that is not "as it was": the running bout was sent back
     // to the queue before the start, so the court is IDLE (and m3 shows the
     // superseded refusal like any refused start; see the describe below). "m3 was
     // being started" would be false, and the pick must not pin the panel on a
     // match the server did not start.
     const supersededStartOfM3 = () => vi.fn((_compId, matchId) => Promise.resolve(
-      matchId === 'm3' ? { applied: false, reason: 'superseded' } : { applied: true }
+      matchId === 'm3' ? { applied: false, reason: 'superseded', heldGroups: ['result'] } : { applied: true }
     ));
 
     it('g) a pick whose start is superseded wrote nothing, so the refused row gets no past-tense notice', async () => {
@@ -2199,7 +2202,7 @@ describe('a Start tapped while another start is still out is refused before anyt
         await act(async () => { settleRevert().resolve(true); });
         await act(async () => {});
         expect(onEditScore.mock.calls.map((x) => x[1]), 'the pick did send its start').toEqual(['m3']);
-        expect(rowOf(c, 'Aka m4').querySelector('[role="alert"]'), 'the court is as it was: no sentence about a start').toBeNull();
+        expect(rowOf(c, 'Aka m4').querySelector('[role="alert"]'), 'the start wrote nothing: no sentence about a start').toBeNull();
         expect(c.utils.container.textContent).not.toContain('was being started');
       } finally { c.restore(); }
     });
@@ -2217,6 +2220,37 @@ describe('a Start tapped while another start is still out is refused before anyt
         await act(async () => { settleRevert().resolve(true); });
         await act(async () => {});
         expect(c.editorMatch(), 'nothing was started: the panel stays where it was').not.toBe('m3');
+      } finally { c.restore(); }
+    });
+
+    // PR #463 round 19 (S1). The same answer WITHOUT heldGroups is an echo-hold:
+    // the stored result already equals the start, so another device's start of m3
+    // landed first and m3 IS running. That start went out, exactly like a landed
+    // one (tests f and the landed half of h): the refused row waiting on it gets
+    // the past-tense notice, and the pick pins the panel on m3.
+    const echoStartOfM3 = () => vi.fn((_compId, matchId) => Promise.resolve(
+      matchId === 'm3' ? { applied: false, reason: 'superseded' } : { applied: true }
+    ));
+
+    it('i) a pick whose start is held as an echo went out, so the refused row gets the past-tense notice', async () => {
+      const onEditScore = echoStartOfM3();
+      const { c, settleRevert } = await pickBlocker(onEditScore);
+      try {
+        await act(async () => { settleRevert().resolve(true); });
+        await act(async () => {});
+        expect(onEditScore.mock.calls.map((x) => x[1])).toEqual(['m3']);
+        expect(rowOf(c, 'Aka m4').querySelector('[role="alert"]').textContent)
+          .toBe(startWasBlockedByStartMessage({ label: scoreRowMatchName(courtMatch('m3', 'scheduled')) }));
+        expect(c.utils.container.textContent).not.toContain(START_SUPERSEDED_MESSAGE);
+      } finally { c.restore(); }
+    });
+
+    it('j) a pick whose start is held as an echo pins the panel on the match, which is running', async () => {
+      const { c, settleRevert } = await pickBlocker(echoStartOfM3());
+      try {
+        await act(async () => { settleRevert().resolve(true); });
+        await act(async () => {});
+        expect(c.editorMatch(), 'a start that went out pins the panel on the picked match').toBe('m3');
       } finally { c.restore(); }
     });
   });
@@ -2435,12 +2469,12 @@ describe('the console toasts a thrown Start refusal once', () => {
 // refused match (its Up next card or its queue row, shown while it is still
 // scheduled), toasted once, and the panel is not pinned on a match the server
 // did not start. Before this it said nothing at all.
-describe('the console reports a superseded Start as a refused one', () => {
+describe('the console reports a superseded Start that holds its result as a refused one', () => {
   const startButton = (el) => [...el.querySelectorAll('button')].find((b) => /^start/i.test(b.textContent.trim()));
   const rowOf = (c, text) => [...c.utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes(text));
   const mountSuperseded = () => mountCourt(
     [courtMatch('m1', 'scheduled'), courtMatch('m2', 'scheduled')],
-    { onEditScore: vi.fn().mockResolvedValue({ applied: false, reason: 'superseded' }) },
+    { onEditScore: vi.fn().mockResolvedValue({ applied: false, reason: 'superseded', heldGroups: ['result'] }) },
   );
 
   it('the Up next card: the superseded sentence on the card, one toast, the panel not pinned', async () => {
@@ -2482,6 +2516,43 @@ describe('the console reports a superseded Start as a refused one', () => {
       await act(async () => {});
       expect(c.utils.container.textContent).not.toContain(START_SUPERSEDED_MESSAGE);
     } finally { c.restore(); }
+  });
+
+  // PR #463 round 19 (S1). A superseded start WITHOUT heldGroups is an echo-hold:
+  // another device's start of this match landed first with a later stamp, so the
+  // match IS running. It is a start that went out, like a landed one: no sentence,
+  // no toast, and the panel pins on the match. (A PICK's echo is tests i and j in
+  // the past-tense describe above.)
+  describe('an echo-held superseded Start (no heldGroups) is a start that went out', () => {
+    const mountEcho = () => mountCourt(
+      [courtMatch('m1', 'scheduled'), courtMatch('m2', 'scheduled')],
+      { onEditScore: vi.fn().mockResolvedValue({ applied: false, reason: 'superseded' }) },
+    );
+
+    it('the Up next card: no sentence, no toast, the panel pinned on the match', async () => {
+      const c = await mountEcho();
+      try {
+        const card = c.utils.container.querySelector('.shiaijo-upnext__card');
+        await act(async () => { startButton(card).click(); });
+        await act(async () => {});
+        expect(card.querySelector('.shiaijo-upnext__error'), 'no refusal sentence on the card').toBeNull();
+        expect(c.utils.container.textContent).not.toContain('Not started');
+        expect(c.showToast, 'no toast').not.toHaveBeenCalled();
+        expect(c.editorMatch(), 'the start went out: the panel is pinned on m1').toBe('m1');
+      } finally { c.restore(); }
+    });
+
+    it('a queue row: no sentence, no toast, the panel pinned on the match', async () => {
+      const c = await mountEcho();
+      try {
+        await act(async () => { startButton(rowOf(c, 'Aka m2')).click(); });
+        await act(async () => {});
+        expect(rowOf(c, 'Aka m2').querySelector('.shiaijo-upnext__error'), 'no refusal sentence on the row').toBeNull();
+        expect(c.utils.container.textContent).not.toContain('Not started');
+        expect(c.showToast, 'no toast').not.toHaveBeenCalled();
+        expect(c.editorMatch(), 'the start went out: the panel is pinned on m2').toBe('m2');
+      } finally { c.restore(); }
+    });
   });
 });
 

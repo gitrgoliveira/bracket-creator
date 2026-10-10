@@ -74,7 +74,8 @@ import (
 // It runs inside UpdateBracket callbacks, which hold no store handle, so it
 // writes the match in place and records no history line of its own (a played
 // downstream match gets one for its reopen, which names the group
-// (markRepPicksCleared); a scheduled one is logged here).
+// (markRepPicksCleared, from the door's snapshot diff in bracket_seat_audit.go);
+// a scheduled one is logged here).
 func seatBracketSide(bm *state.BracketMatch, side domain.MatchSide, name, id string) {
 	var nameField, idField *string
 	switch side {
@@ -158,61 +159,4 @@ func feedsSide(mIdx int) domain.MatchSide {
 		return domain.MatchSideA
 	}
 	return domain.MatchSideB
-}
-
-// downstreamRepPicks is the representatives held, when it was taken, by each
-// match a winner feeds that holds any (the next match past any byes, and the
-// 3rd-place match), by match id.
-type downstreamRepPicks map[string][2]string
-
-// snapshotDownstreamRepPicks takes it for the matches the winner of
-// bracket.Rounds[rIdx][mIdx] is propagated into. A write that propagates takes
-// it BEFORE propagateBracketWinner, so forceReopenDownstreamChain can tell
-// which of the matches it reopens lost a pick to the re-seat.
-func snapshotDownstreamRepPicks(bracket *state.Bracket, rIdx, mIdx int) downstreamRepPicks {
-	d := propagatedDownstreamOf(bracket, rIdx, mIdx)
-	out := downstreamRepPicks{}
-	for _, m := range []*state.BracketMatch{d.next, d.bronze} {
-		if m == nil {
-			continue
-		}
-		if a, b := m.RepPicks(); a != "" || b != "" {
-			out[m.ID] = [2]string{a, b}
-		}
-	}
-	return out
-}
-
-// markRepPicksCleared records, on every reopened match that no longer holds a
-// pick it held when its prior picks were captured (at its reopen, or from a
-// snapshotDownstreamRepPicks taken before the re-seat), the group of each side
-// whose pick went (RepPicksCleared). Call it once the callback's re-seats are
-// done: the only writer of a pick inside these callbacks is seatBracketSide,
-// which only clears.
-func markRepPicksCleared(bracket *state.Bracket, reopened []ReopenedMatch) {
-	for i := range reopened {
-		m := bracket.MatchByID(reopened[i].ID)
-		if m == nil {
-			continue
-		}
-		a, b := m.RepPicks()
-		r := &reopened[i]
-		if r.priorPickA != "" && a != r.priorPickA {
-			r.RepPicksCleared = appendUnique(r.RepPicksCleared, state.RepPickGroup(domain.MatchSideA))
-		}
-		if r.priorPickB != "" && b != r.priorPickB {
-			r.RepPicksCleared = appendUnique(r.RepPicksCleared, state.RepPickGroup(domain.MatchSideB))
-		}
-	}
-}
-
-// appendUnique appends s to list unless it is already there. markRepPicksCleared
-// can judge the same reopened match twice (the reopen door marks the chain
-// forceReopenDownstreamChain already marked, after its retraction), and a group
-// must be named once.
-func appendUnique(list []string, s string) []string {
-	if slices.Contains(list, s) {
-		return list
-	}
-	return append(list, s)
 }

@@ -1155,15 +1155,16 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 				if fo.Force {
 					// No propagation precedes this reopen: the retraction
 					// below is what re-seats the slot, so the picks the
-					// reopened match held are judged after it.
-					reopenedDownstream = forceReopenDownstreamChain(h.BracketRoot, h.RIdx, h.MIdx, matchID, nil)
+					// reopened match held are judged after it, against the
+					// snapshot above.
+					reopenedDownstream = forceReopenDownstreamChain(h.BracketRoot, h.RIdx, h.MIdx, matchID)
 				}
 				if derr := retractPropagatedWinner(h.BracketRoot, h.RIdx, h.MIdx); derr != nil {
 					opErr = derr
 					return nil
 				}
-				markRepPicksCleared(h.BracketRoot, reopenedDownstream)
 				clears = repPickClears(before, h.BracketRoot)
+				markRepPicksCleared(reopenedDownstream, clears)
 			}
 			prior := h.Bracket.Decision
 			reopenBracketMatchKeepingTheFight(h.Bracket, reason, targetStatus)

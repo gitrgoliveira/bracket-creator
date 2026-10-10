@@ -22,13 +22,17 @@ import (
 // nothing in the match's history to say when or why.
 //
 // The mechanism needs no change to the re-seating functions and so covers every
-// route to a re-seat, the byes a winner passes through included: a door takes a
-// snapshot of the bracket's picks before it mutates the bracket
-// (repPickSnapshot), diffs it afterwards (repPickClears) while it still holds the
-// bracket, and records the difference beside the place that already records its
-// reopen lines (recordRepPickClears), in the same transaction. Only clears are
-// diffed: nothing a door does inside its bracket callback sets a pick, and one a
-// writer sets is that write's own change, which the merge's history line names.
+// route to a re-seat, the byes a winner passes through included: a door takes
+// ONE snapshot of the bracket's picks before it mutates the bracket
+// (repPickSnapshot) and diffs it afterwards (repPickClears) while it still holds
+// the bracket. That diff is the only account of what a door took from a pick: a
+// reopen captures none of its own. markRepPicksCleared copies it onto the reopen
+// line of each match the same write reopened (ReopenedMatch.RepPicksCleared), and
+// recordRepPickClears records the rest beside the place that already records the
+// reopen lines, in the same transaction. Only clears are diffed: nothing a door
+// does inside its bracket callback sets a pick, and one a writer sets is that
+// write's own change, which the merge's history line names. A pick replaced by
+// another is not a clear.
 
 // clearedPick is one side's representative pick that a door's mutation took
 // out, with the stamp seatBracketSide gave the group when it did.
@@ -110,6 +114,26 @@ func repPickClears(before map[string][2]string, b *state.Bracket) []repPickClear
 		diff(b.ThirdPlaceMatch)
 	}
 	return out
+}
+
+// markRepPicksCleared records, on every reopened match the diff names, the pick
+// group of each side whose representative the door's re-seats took
+// (ReopenedMatch.RepPicksCleared, side A before side B, as repPickClears lists
+// them). A door calls it once, right after taking clears, so its reopened
+// matches and its reseat lines are both judged from the one snapshot; a match
+// the diff does not name keeps a nil list. recordRepPickClears then leaves out
+// the groups a reopen line names.
+func markRepPicksCleared(reopened []ReopenedMatch, clears []repPickClear) {
+	for i := range reopened {
+		for _, c := range clears {
+			if c.MatchID != reopened[i].ID {
+				continue
+			}
+			for _, p := range c.Cleared {
+				reopened[i].RepPicksCleared = append(reopened[i].RepPicksCleared, p.Group)
+			}
+		}
+	}
 }
 
 // recordRepPickClears appends, for each match in clears, one history line with

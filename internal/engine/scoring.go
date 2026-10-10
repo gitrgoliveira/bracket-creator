@@ -646,12 +646,9 @@ type ReopenedMatch struct {
 	// the same write that reopened the match gave another team, which took
 	// that side's representative with it (seatBracketSide); nil when none
 	// went. Its reopen history line then names those groups beside the
-	// verdict's, and only those.
+	// verdict's, and only those. markRepPicksCleared fills it from the diff the
+	// door takes (repPickClears), so no second copy of the picks rides here.
 	RepPicksCleared []string
-	// priorPickA and priorPickB are the representatives the match held when it
-	// was reopened (or, for a downstream match a winner is re-propagated into,
-	// before that write began), for markRepPicksCleared to compare.
-	priorPickA, priorPickB string
 }
 
 // bracketMatchRef is the ONE way a bracket match becomes a ReopenedMatch, so
@@ -2708,15 +2705,13 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 			// cleared the next round for a write that stored the same winner --
 			// including one confirmed for an unrelated reason.
 			priorWinner, priorWinnerID := propagatedWinnerOf(bracket, rIdx, mIdx, bm)
-			// And the representatives the matches it feeds hold before the
-			// propagation below can re-seat a side and take one away, so the
-			// reopen of a played one can say its pick went too.
-			priorPicks := snapshotDownstreamRepPicks(bracket, rIdx, mIdx)
-			// The same, for every match the write leaves alone but re-seats
-			// (bracket_seat_audit.go): a downstream match it does not reopen
-			// has no reopen line to say its pick went, so the door records
-			// one. A restore (the K3 rollback replaying a prior) is not a door
-			// and records nothing, so it takes no snapshot.
+			// The representatives every other match holds before the
+			// propagation below can re-seat a side and take one away
+			// (bracket_seat_audit.go): a played downstream match the write
+			// reopens names its lost pick on its own reopen line, one it
+			// leaves alone but re-seats has the door record a reseat line. A
+			// restore (the K3 rollback replaying a prior) is not a door and
+			// records nothing, so it takes no snapshot.
 			var before map[string][2]string
 			if policy == matchWriteForward {
 				before = repPickSnapshot(bracket, matchID)
@@ -2736,10 +2731,12 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 				e.propagateBracketWinner(bracket, rIdx, mIdx)
 				if force && policy == matchWriteForward &&
 					winnerActuallyChanged(priorWinner, priorWinnerID, bm) {
-					reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx, bm.ID, priorPicks)
+					reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx, bm.ID)
 				}
 			}
-			return reopened, inherited, repPickClears(before, bracket), nil
+			clears := repPickClears(before, bracket)
+			markRepPicksCleared(reopened, clears)
+			return reopened, inherited, clears, nil
 		}
 	}
 	// The bronze (3rd-place) knockout lives in Bracket.ThirdPlaceMatch, NOT in
@@ -2875,22 +2872,15 @@ func winnerActuallyChanged(priorWinner, priorWinnerID string, bm *state.BracketM
 // matches were already played"). It carries its own audit note rather than
 // owing one -- see downstreamReopenReason.
 //
-// before is what snapshotDownstreamRepPicks took ahead of the propagation that
-// preceded this call (the score, override and engi doors); the reopen door,
-// which retracts afterwards, passes nil and judges the picks itself. Each
-// reopened match whose representative went with a re-seated side comes back
-// with RepPicksCleared naming that side's group.
-func forceReopenDownstreamChain(bracket *state.Bracket, rIdx, mIdx int, correctedID string, before downstreamRepPicks) []ReopenedMatch {
+// It leaves the representatives alone and names none as cleared: the caller,
+// which holds the door's snapshot (repPickSnapshot), marks the reopened
+// matches from the diff once every re-seat of the write is done
+// (markRepPicksCleared).
+func forceReopenDownstreamChain(bracket *state.Bracket, rIdx, mIdx int, correctedID string) []ReopenedMatch {
 	d := propagatedDownstreamOf(bracket, rIdx, mIdx)
 	var reopened []ReopenedMatch
 	for _, m := range d.played() {
 		ref := reopenDisplacedBracketMatch(m, downstreamReopenReason(correctedID))
-		// A caller that propagated before this reopen (the score, override
-		// and engi doors) took the picks the match held before the re-seat;
-		// the picks it holds now are the ones left after it.
-		if p, ok := before[m.ID]; ok {
-			ref.priorPickA, ref.priorPickB = p[0], p[1]
-		}
 		reopened = append(reopened, ref)
 		// The reopened next-round match no longer has a winner, so what it
 		// had propagated comes back out of a round nobody has touched, the
@@ -2900,7 +2890,6 @@ func forceReopenDownstreamChain(bracket *state.Bracket, rIdx, mIdx int, correcte
 			retractIntoUntouched(bracket, d.feed.R+1, d.feed.M/2)
 		}
 	}
-	markRepPicksCleared(bracket, reopened)
 	return reopened
 }
 
@@ -2953,8 +2942,8 @@ func reopenDisplacedBracketMatch(m *state.BracketMatch, reason string) ReopenedM
 	ref := bracketMatchRef(m)
 	ref.PriorDecision = priorDecision
 	// The reopen leaves the picks as they were; what the re-seat of a side
-	// does to them is judged by markRepPicksCleared against these.
-	ref.priorPickA, ref.priorPickB = m.RepPicks()
+	// does to them is judged by the door's repPickClears diff, which
+	// markRepPicksCleared copies onto the reopen line.
 	return ref
 }
 
@@ -3508,7 +3497,6 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 						// that names the winner already recorded must not requeue
 						// the next round.
 						priorWinner, priorWinnerID := propagatedWinnerOf(bracket, rIdx, mIdx, m)
-						priorPicks := snapshotDownstreamRepPicks(bracket, rIdx, mIdx)
 						before := repPickSnapshot(bracket, matchId)
 						setBracketOverrideWinner(m, winnerName)
 						m.IsOverridden = true
@@ -3525,9 +3513,10 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 						// nothing downstream to unwind. displacedWinner is this
 						// match's winner as it stood before setBracketOverrideWinner.
 						if fo.Force && winnerActuallyChanged(priorWinner, priorWinnerID, m) {
-							reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx, m.ID, priorPicks)
+							reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx, m.ID)
 						}
 						clears = repPickClears(before, bracket)
+						markRepPicksCleared(reopened, clears)
 						return nil
 					}
 				}

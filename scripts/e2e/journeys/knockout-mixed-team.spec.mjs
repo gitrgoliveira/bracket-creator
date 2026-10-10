@@ -1082,8 +1082,10 @@ test.describe('knockout-mixed-team', () => {
         const bracketText = (await phone.locator('.viewer__body').innerText()).replace(/\s+/g, ' ');
         record({ step: 'every surface', action: 'viewer Bracket tab after the correction', variant: 'correct', bracket: bracketText.slice(0, 400),
           htOnBracket: /\bHt\b/.test(bracketText) });
-        // The winner's check sits beside the corrected winner, Aka.
-        expect(bracketText).toMatch(new RegExp(`✓\\s*\\S*\\s*${pair.aka}`));
+        // The winner's check sits beside the corrected winner, Aka. The tick
+        // carries a screen-reader "Winner:" label (side_cell.jsx), which
+        // innerText includes.
+        expect(bracketText).toMatch(new RegExp(`✓\\s*(?:Winner:\\s*)?\\S*\\s*${pair.aka}`));
       });
     } finally {
       await head.close();
@@ -1216,7 +1218,7 @@ test.describe('knockout-mixed-team', () => {
     await expect(page.locator('tr').filter({ hasText: pair.shiro }).first()).toContainText(/0\s*0\s*0\s*0\s*0\s*0\s*0\s*0\s*$/);
   });
 
-  test.fixme('bc-dhrp: the daihyosen row offers no way to pick each team\'s representative', async ({ page }) => {
+  test('bc-dhrp: the daihyosen row lets each team pick its representative', async ({ page }) => {
     await T.enterAdmin(page);
     await seedF4(page, { name: 'B6 KO', court: 'F', prefix: 'R', teams: [['B6 Ume', 'Kita Dojo'], ['B6 Sakura', 'Minami Dojo']] });
     await openShiaijo(page, 'F');

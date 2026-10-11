@@ -1641,8 +1641,16 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 			// (a completed match always carries a scored bout, so it never
 			// empties) but not here, where bout 1 could be unscored, or two
 			// "Add next bout manually" pairings could be appended and one tap
-			// must not strip both.
-			if len(subs) <= 1 {
+			// must not strip both. The floor counts NUMBERED bouts only: a
+			// -1 row is never removable, so a [bout 1, -1] log has no
+			// trailing bout to take.
+			numbered := 0
+			for _, s := range subs {
+				if s.Position > 0 {
+					numbered++
+				}
+			}
+			if numbered <= 1 {
 				return nil, "", ErrNoRemovableBout
 			}
 			i := lastNumberedBout(subs)
@@ -2675,22 +2683,6 @@ func preserveKachinukiMemberIDs(storedByPos map[int]state.SubMatchResult, in *st
 	if in.SideBMemberID == "" && prior.SideBMemberID != "" && in.SideB == prior.SideB {
 		in.SideBMemberID = prior.SideBMemberID
 	}
-}
-
-// enchoPeriodsRise reports whether a bout row's overtime period count rises
-// from stored to incoming: overtime started (from none) or extended. A write
-// that raises it on a recorded bout takes the bout's recorded mark off
-// (mergeHold.unrecordReopenedBouts): the bout is being fought again, so both its
-// fighters are on, e.g. a knockout tie recorded when both teams had nobody
-// left, then fought on in encho.
-func enchoPeriodsRise(stored, incoming *state.EnchoMetadata) bool {
-	periods := func(e *state.EnchoMetadata) int {
-		if e == nil {
-			return 0
-		}
-		return e.PeriodCount
-	}
-	return periods(incoming) > periods(stored)
 }
 
 // boutAppendedByRecordBout reports whether the match's history shows that the

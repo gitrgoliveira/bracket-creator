@@ -941,28 +941,28 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // derived from. NOTE: the labeller is DISPLAY only; the queue is still split
     // by isPendingBracketMatch / hasBothSides on the RAW sides above, so a
     // relabelled row stays non-actionable exactly as before.
-    const slotLabelFor = useMemoSh(() => {
+    //
+    // The 3rd-place match's empty sides have no slot value to label, so a
+    // "Later" bronze row names them after the semi-finals that will fill them
+    // ("Loser of M1"), through the same slot-text owner (bracket.jsx). Both
+    // labellers read the numbers of ONE display model per competition, built
+    // here, so a slot and a bronze side can never name different numbers.
+    const bracketLabelsFor = useMemoSh(() => {
         const cache = new Map();
         return (compId) => {
             if (!cache.has(compId)) {
                 const rounds = roundsFor(compId);
-                cache.set(compId, window.bracketSlotLabeller ? window.bracketSlotLabeller(rounds) : (n) => n);
+                const nums = window.buildDisplayModel ? window.buildDisplayModel(rounds).matchNumById : undefined;
+                cache.set(compId, {
+                    slot: window.makeSlotLabeller ? window.makeSlotLabeller(rounds, nums) : (n) => n,
+                    bronze: window.bronzeSlotLabels ? window.bronzeSlotLabels(rounds, nums) : undefined,
+                });
             }
             return cache.get(compId);
         };
     }, [roundsFor]);
-    // The 3rd-place match's empty sides have no slot value to label, so a
-    // "Later" bronze row names them after the semi-finals that will fill them
-    // ("Loser of M1"), through the same slot-text owner (bracket.jsx).
-    const bronzeLabelsFor = useMemoSh(() => {
-        const cache = new Map();
-        return (compId) => {
-            if (!cache.has(compId)) {
-                cache.set(compId, window.bronzeSlotLabels ? window.bronzeSlotLabels(roundsFor(compId)) : undefined);
-            }
-            return cache.get(compId);
-        };
-    }, [roundsFor]);
+    const slotLabelFor = useCallbackSh((compId) => bracketLabelsFor(compId).slot, [bracketLabelsFor]);
+    const bronzeLabelsFor = useCallbackSh((compId) => bracketLabelsFor(compId).bronze, [bracketLabelsFor]);
     const { sorted, running, scheduled, completed } = useMemoSh(
         () => partitionShiaijoMatches(allMatches),
         [allMatches]

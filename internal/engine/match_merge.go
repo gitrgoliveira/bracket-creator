@@ -826,6 +826,22 @@ func (h *mergeHold) unrecordReopenedBouts(stamp int64) {
 	h.stamps[state.GroupRecorded] = stamp
 }
 
+// enchoPeriodsRise reports whether a bout row's overtime period count rises
+// from stored to incoming: overtime started (from none) or extended. A write
+// that raises it on a recorded bout takes the bout's recorded mark off
+// (mergeHold.unrecordReopenedBouts): the bout is being fought again, so both its
+// fighters are on, e.g. a knockout tie recorded when both teams had nobody
+// left, then fought on in encho.
+func enchoPeriodsRise(stored, incoming *state.EnchoMetadata) bool {
+	periods := func(e *state.EnchoMetadata) int {
+		if e == nil {
+			return 0
+		}
+		return e.PeriodCount
+	}
+	return periods(incoming) > periods(stored)
+}
+
 // boutResultChanged reports whether row says a different result for its bout
 // than stored: the side its winner names (state.SubBoutWinnerSide, ids first,
 // read against the match's sides sideA/sideB) or its decision, every draw

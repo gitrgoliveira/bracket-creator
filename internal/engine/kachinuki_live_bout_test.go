@@ -100,6 +100,30 @@ func TestRemoveTrailingKachinukiBout_AScoredLiveBoutStoredFirstIsRefused(t *test
 	}
 }
 
+// The floor counts numbered bouts only: a legacy log holding one unscored
+// numbered bout beside a -1 row has no bout to remove, so the encounter is
+// never left without a numbered bout.
+func TestRemoveTrailingKachinukiBout_ARepRowDoesNotCountTowardTheFloor(t *testing.T) {
+	for _, bracket := range []bool{false, true} {
+		name := branchName(bracket)
+		t.Run(name, func(t *testing.T) {
+			eng, store, comp := setupKachinukiComp(t, "kachinuki-remove-floor-rep-row-"+name, 3,
+				func(c *state.Competition) { c.Format = state.CompFormatMixed })
+			rt := seedRosterTeams(t, store, comp.ID, 3,
+				[]string{"A1", "A2", "A3"}, []string{"B1", "B2", "B3"}, true, true)
+			a, b := rt.a, rt.b
+			matchID := saveRosterMatch(t, store, comp.ID, rt, []state.SubMatchResult{
+				rosterBout(1, a[0], b[0], nil, false),
+				{Position: -1},
+			}, bracket)
+
+			_, err := eng.RemoveTrailingKachinukiBout(comp.ID, matchID)
+			require.ErrorIs(t, err, ErrNoRemovableBout)
+			assert.Len(t, storedSubs(t, store, comp.ID, matchID, bracket), 2, "nothing is removed")
+		})
+	}
+}
+
 // An UNSTAMPED write cannot be ordered after the Record bout that set a mark,
 // so it never takes the mark off, even when it raises the bout's overtime.
 func TestKachinukiRecorded_AnUnstampedWriteNeverClearsIt(t *testing.T) {

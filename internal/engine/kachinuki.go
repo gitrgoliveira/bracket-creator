@@ -428,7 +428,7 @@ func IsMemberRetired(f kachinukiFighter, retired RetiredMemberSet, ambiguousName
 // Helper for callers building AdvanceKachinukiInput.{SideA,SideB} from a
 // roster; they filter the initial roster by IsMemberRetired against the
 // returned sets to derive the remaining un-retired queue. BOTH branches of
-// kachinukiRemainingRoster do that through filterRemainingFighters -- the
+// the advance's queues (kachinukiRosterQueues) do that through filterRemainingFighters -- the
 // lineup-resolved one and the bout-log-only heuristic alike -- because the
 // name tier needs the whole roster as context and cannot judge one fighter
 // at a time. The heuristic branch simply supplies fighters whose MemberID
@@ -497,7 +497,7 @@ func RetiredPlayersFromBoutLog(boutLog []state.SubMatchResult, teamAName, teamBN
 
 // filterRemainingFighters filters a slice of kachinukiFighter (name plus a
 // possible member id) via IsMemberRetired, preserving order. It is the ONE
-// filter kachinukiRemainingRoster uses, on both branches: the
+// filter the advance's queues (kachinukiRosterQueues) use, on both branches: the
 // lineup-resolved one passes fighters carrying member ids, the bout-log-only
 // heuristic passes fighters whose MemberID is empty and lets the name tier
 // decide. Routing the heuristic through here too is deliberate and is the
@@ -2851,39 +2851,6 @@ func bracketMatchToTeamResult(bm state.BracketMatch) *state.MatchResult {
 	}
 }
 
-// kachinukiRemainingRoster derives the remaining un-retired roster per side
-// for a team match. Returns (sideA, sideB, foundA, foundB): found is per
-// side, true when that side's roster was resolved from a saved TeamLineup and
-// false when it fell back to the bout-log-only heuristic. The advance logs
-// foundA || foundB. The queues come from kachinukiRosterQueues, which the
-// advisory read (KachinukiRoster) builds from too.
-//
-// A lineup in force that fields nobody (a match's own empty lineup,
-// positions: {}) is FOUND here and yields an empty queue, so the advance reads
-// that side as exhausted and appends nothing; the advisory read instead
-// reports such a side as having no lineup (see KachinukiRosterSide).
-//
-// Priority per side (GAP 1 / GAP 2a):
-//  1. The lineup in force for the side's team at this match (see
-//     lineup_in_force.go: the match's own lineup, else the one the team
-//     carries from its previous match or round), matched by the side's
-//     participant id; a side with no id has none.
-//  2. Bout-log-only heuristic (anyone who appeared in a bout, minus retired).
-//
-// The full ordered roster (from lineup.OrderedMembers, bc-tmid pass 2) is
-// filtered by IsMemberRetired against RetiredPlayersFromBoutLog's sets to
-// produce the remaining queue, so a lineup-resolved fighter's member id
-// (when the slot has one) rather than their possibly-stale name decides
-// whether they have retired -- falling back to the name only where the
-// retiring bout row carried no id to match against and the name belongs to
-// one member of this roster alone. See IsMemberRetired for why both tiers
-// are needed and what the gate protects.
-func kachinukiRemainingRoster(comp *state.Competition, parent *state.MatchResult, rule *lineupRule) (remainingA, remainingB []kachinukiFighter, foundA, foundB bool) {
-	queueA, queueB := kachinukiRosterQueues(comp, parent, rule)
-	retiredA, retiredB := RetiredPlayersFromBoutLog(parent.SubResults, parent.SideA, parent.SideB)
-	return queueA.remaining(retiredA), queueB.remaining(retiredB), queueA.found, queueB.found
-}
-
 // kachinukiSideQueue is one side's queue BEFORE retirements are taken out:
 // the lineup in force's fielded members in order when found, else the
 // fighters the bout log has seen, in first-appearance order.
@@ -2906,7 +2873,7 @@ func (q kachinukiSideQueue) fromLineup() bool {
 }
 
 // kachinukiRosterQueues builds both sides' queues (see kachinukiSideQueue).
-// It is the ONE queue source of the advance (kachinukiRemainingRoster) and of
+// It is the ONE queue source of the advance (decideKachinukiAdvance) and of
 // the advisory roster read (KachinukiRoster, kachinuki_roster.go), which then
 // take retirements out through the same filter, so the two can never disagree
 // about who is next.

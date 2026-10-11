@@ -6935,7 +6935,7 @@ components:
             server has not recorded does not set it, and a write that names
             the `recorded` group in `changed` is refused with 400. Absent
             (false) on every other bout,
-            including the bout being fought: the kachinuki roster
+            including a last bout Record bout has not recorded yet: the kachinuki roster
             (`GET .../kachinuki-roster`) reads the last bout's result only
             once it is recorded.
 

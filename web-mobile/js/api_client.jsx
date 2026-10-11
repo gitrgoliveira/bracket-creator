@@ -4254,6 +4254,26 @@ const API = {
     async fetchLineupInForce(compID, teamId, matchId) {
         return _readLineup(`/api/competitions/${compID}/teams/${teamId}/lineup-in-force/${matchId}`);
     },
+    // bc-kfnl: a kachinuki encounter's fighters each side has left, for the
+    // advisory line above the live bout (kachinuki_advisory.jsx). The server
+    // reads it through the same call that appends the next pairing. Public,
+    // bounded like every read (_fetchJson). It NEVER throws: the line is a
+    // guide only, so any failure, a timeout, a non-OK answer (400 not
+    // kachinuki, 404 unknown match) or an answer without both sides reads as
+    // null, and the editor then shows no line. recordedThrough (optional) is
+    // the highest bout position the sheet saw recorded, so a bout recorded
+    // with nothing appended reads as over (engine.KachinukiRoster).
+    async fetchKachinukiRoster(compID, matchID, recordedThrough = 0) {
+        try {
+            const recorded = Number(recordedThrough) > 0 ? `?recordedThrough=${Math.floor(Number(recordedThrough))}` : "";
+            const { res, body } = await _fetchJson(
+                `/api/competitions/${encodeURIComponent(compID)}/matches/${encodeURIComponent(matchID)}/kachinuki-roster${recorded}`, {});
+            if (!res.ok || !body || !body.sideA || !body.sideB) return null;
+            return body;
+        } catch (_e) {
+            return null;
+        }
+    },
     // memberIds (bc-pnum gap closure) is optional and keyed by the same
     // position as positions, exactly like putTeamLineup's own memberIds
     // above: the squad member id half of a lineup, sent alongside the name

@@ -24,20 +24,21 @@ const OVERVIEW_ID = 'up-to-2nd-dan';
 const DRAW_ID = 'third-dan-and-above';
 const KACHINUKI_ID = 'kachinuki-teams';
 
-// The create-competition form and the settings screen both render this
-// field via competition_fields.jsx's PillGroup/`.field` markup
-// (web-mobile/js/admin_setup.jsx:1176-1227), so a field is found by its
-// visible label rather than a CSS hook the markup doesn't expose one for.
+// Every field on the create-competition form is tied to its visible label
+// (htmlFor/id, admin_setup.jsx's AdminCreateCompetition and
+// competition_fields.jsx), so a field is found by the label a person reads.
 async function fillFieldByLabel(page, label, value) {
-  const field = page.locator('.field').filter({ has: page.locator('.field__label', { hasText: label }) }).first();
-  await field.locator('input').first().fill(value);
+  await page.getByLabel(label, { exact: true }).fill(value);
 }
 
-// PillGroup renders each option as a `.radio-pill` button carrying its
-// label verbatim (web-mobile/js/competition_fields.jsx:68-86), used for
-// both the Format and Competition-type groups on the create form.
-async function clickPill(page, label) {
-  await page.locator('.radio-pill', { hasText: label }).first().click();
+// PillGroup renders each option row as a role="group" named by its label,
+// and each option as a button carrying aria-pressed
+// (competition_fields.jsx's PillGroup and PillButton), so a pill is found
+// inside the group it belongs to and the click is checked through aria-pressed.
+async function clickPill(page, group, label) {
+  const pill = page.getByRole('group', { name: group }).getByRole('button', { name: label, exact: true });
+  await pill.click();
+  await pill.and(page.locator('[aria-pressed="true"]')).waitFor();
 }
 
 // Seed-rank input: aria-label is `Seed rank for ${p.name}`
@@ -168,7 +169,7 @@ export const recipes = [
       // Default format is Knockout only (COMPETITION_DEFAULTS.format,
       // competition_shape.jsx:1202); the committed shot has "Pools +
       // Knockout" selected.
-      await clickPill(page, 'Pools + Knockout');
+      await clickPill(page, 'Format', 'Pools + Knockout');
     },
   },
 

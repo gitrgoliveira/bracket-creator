@@ -803,6 +803,10 @@ func TestPublicLineupInForceGET_BadParamsStay400(t *testing.T) {
 // failingLineupEngine is a LineupEngine whose read fails.
 type failingLineupEngine struct{}
 
+func (failingLineupEngine) KachinukiRoster(string, string, int) (engine.KachinukiRoster, error) {
+	return engine.KachinukiRoster{}, errors.New("disk on fire")
+}
+
 func (failingLineupEngine) LineupInForce(string, string, string) (engine.InForceLineup, error) {
 	return engine.InForceLineup{}, errors.New("read lineups.yaml: input/output error")
 }

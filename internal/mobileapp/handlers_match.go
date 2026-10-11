@@ -2055,7 +2055,7 @@ var errRepBoutAdded = &selfRunRefusal{
 // Fails closed: the caller's read of the snapshot rejects the request on a load
 // error rather than allowing the write (matchSnapshotOrErr). A match in neither
 // store (found false) passes on purpose: the write that follows under the same
-// lock refuses it (errMatchNotFound), so nothing can land on it.
+// lock refuses it (ErrMatchNotFound), so nothing can land on it.
 func holdSelfReportedWriteUnderTx(compID, matchID string, snap matchSnapshot, found bool, result *state.MatchResult, startOnly bool) error {
 	if !found {
 		return nil
@@ -2559,7 +2559,7 @@ func repBoutOf(subs []state.SubMatchResult) *state.SubMatchResult {
 // open editor.
 //
 // found=false means the ID is in neither store; callers treat an unknown
-// match as "nothing recorded yet" (the engine rejects it via errMatchNotFound
+// match as "nothing recorded yet" (the engine rejects it via ErrMatchNotFound
 // on the actual score write, so there is nothing to fail here). err is the
 // FIRST load failure seen, and the walk continues past it so a best-effort
 // caller can still find a bracket match when the pool CSV is unreadable.

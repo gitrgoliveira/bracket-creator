@@ -28,7 +28,7 @@ import {
     writeDidNotLand, writeKeepsEditorOpen, writeWasSuperseded, writeWasRefusedForClock,
     attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, OVERRIDE_HELD_NOTICE,
     startWhileCorrectingMessage, startWhileStartingMessage, startWasBlockedByStartMessage,
-    correctWhileRunningMessage, wasToasted,
+    correctWhileRunningMessage, wasToasted, BRONZE_MATCH_ID,
 } from './write_result.jsx';
 // What a Start came back with (a clock_skew refusal, a thrown 409) is
 // start_match.jsx's to classify, shared with the Scores tab's own automatic
@@ -39,7 +39,7 @@ import {
 import { startPatch, classifyStartOutcome, startFailureMessage, startRefusalStands } from './start_match.jsx';
 // swissRoundLabel: single owner is pool_ids.jsx (mp-dej2); this file used to
 // carry its own copy. scoreRowMatchName names a match in the refusal notices.
-import { swissRoundLabel, scoreRowMatchName } from './pool_ids.jsx';
+import { swissRoundLabel, scoreRowMatchName, scoreRowMatchLabel } from './pool_ids.jsx';
 // NumberedName: single owner of the number-chip-on-the-outer-side rule
 // (bc-dnst); see that file's header for why this stays an ES import.
 import { NumberedName } from './numbered_name.jsx';
@@ -300,6 +300,21 @@ export const isTeamMatch = (m) => !!m && (m.compKind === "team" || m.teamSize > 
 // (addMinuteHHMM and deferTimeFor removed: queue reordering now works by
 // swapping scheduledAt between adjacent rows via moveMatch, which calls
 // updateMatchTime for both the moved match and its neighbour.)
+
+// shiaijoMatchNo: the match's identity on the Up next card and a queue row,
+// after the time and the competition. A pool bout keeps the console's own
+// "Match N of M". A knockout match is named by the owner the Scores list and
+// the refusal dialogs use (scoreRowMatchLabel -> matchLabel), so the 3rd-place
+// match, which has no number, reads "the 3rd-place match" (bc-bzlb, operator
+// decision 2026-10-11) rather than nothing.
+function shiaijoMatchNo(m) {
+    if (m.phase === "pool") {
+        return m.poolPosition > 0 && m.poolCount > 0 ? ` · Match ${m.poolPosition} of ${m.poolCount}` : "";
+    }
+    if (m.phase !== "bracket") return "";
+    const label = scoreRowMatchLabel(m);
+    return label ? ` · ${label}` : "";
+}
 
 // shiaijoScoreCell: decide what the queue row's middle score column shows.
 // Exported so the team-vs-individual routing is unit-testable. A team
@@ -907,9 +922,17 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // button: a placeholder side has no participant to call to the court. They
     // are rendered as non-actionable "later" rows so a court whose only remaining
     // bout is a downstream final does not show a falsely-empty Upcoming list.
+    // Each competition's bracket rounds, by id: the 3rd-place match is pending
+    // only while a semi-final that feeds an empty side is unplayed, so the
+    // pending split and the slot labels below both read them.
+    const roundsFor = useMemoSh(() => {
+        const byComp = new Map();
+        for (const c of courtCompetitions) byComp.set(c.id, (c.bracket && c.bracket.rounds) || []);
+        return (compId) => byComp.get(compId) || [];
+    }, [courtCompetitions]);
     const pendingPlaceholder = useMemoSh(
-        () => courtMatchesRaw.filter(window.isPendingBracketMatch),
-        [courtMatchesRaw]
+        () => courtMatchesRaw.filter((m) => window.isPendingBracketMatch(m, roundsFor(m.compId))),
+        [courtMatchesRaw, roundsFor]
     );
     // A "Later" row shows the placeholder sides of a bout whose feeders are not
     // in yet, so its names go through the shared slot rule (bracket.jsx) and read
@@ -922,13 +945,22 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const cache = new Map();
         return (compId) => {
             if (!cache.has(compId)) {
-                const c = courtCompetitions.find((x) => x.id === compId);
-                const rounds = (c && c.bracket && c.bracket.rounds) || [];
+                const rounds = roundsFor(compId);
                 cache.set(compId, window.bracketSlotLabeller ? window.bracketSlotLabeller(rounds) : (n) => n);
             }
             return cache.get(compId);
         };
-    }, [courtCompetitions]);
+    }, [roundsFor]);
+    // The 3rd-place match's empty sides have no slot value to label, so a
+    // "Later" bronze row names them after the semi-finals that will fill them
+    // ("Loser of M1"), through the same slot-text owner (bracket.jsx).
+    const bronzeLabelsFor = useMemoSh(() => {
+        const cache = new Map();
+        return (compId) => {
+            if (!cache.has(compId)) cache.set(compId, window.bronzeSlotLabels(roundsFor(compId)));
+            return cache.get(compId);
+        };
+    }, [roundsFor]);
     const { sorted, running, scheduled, completed } = useMemoSh(
         () => partitionShiaijoMatches(allMatches),
         [allMatches]
@@ -1896,11 +1928,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     <div className={`shiaijo-upnext__card ${calledKey === matchKey(upNext) ? "is-called" : ""}`}>
                                         <div className="shiaijo-upnext__time">
                                             {upNext.scheduledAt || "-"} · {upNext.compName}
-                                            {upNext.phase === "pool" && upNext.poolPosition > 0 && upNext.poolCount > 0
-                                                ? ` · Match ${upNext.poolPosition} of ${upNext.poolCount}`
-                                                : upNext.phase === "bracket" && upNext.matchNumber > 0
-                                                ? ` · Match ${upNext.matchNumber}`
-                                                : ""}
+                                            {shiaijoMatchNo(upNext)}
                                             {/* DH-only label: a tiebreaker ("-TB-") is also a rep bout
                                                 (isSupplementaryBout), but it is NOT a daihyosen, so the "DH"
                                                 tag gates on isPoolDaihyosenBout. Routing still uses
@@ -1987,9 +2015,19 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         {filteredPending.length === 1 ? "This bout starts" : "These bouts start"} once the earlier matches that feed {filteredPending.length === 1 ? "it" : "them"} are scored.
                                     </div>
                                     <div className="score-editor__list">
-                                        {filteredPending.map((m) => (
-                                            <ShiaijoQueueRow key={matchKey(m)} m={m} pending onResolve={setResolveMatch} slotLabel={slotLabelFor(m.compId)} />
-                                        ))}
+                                        {/* No "Run now" on the 3rd-place match: its sides wait on
+                                            the semi-finals' LOSERS, which the resolve-feeders modal
+                                            ("Winner of" slots only) cannot record. The final's own
+                                            Run now records both semi-final winners, which seats them. */}
+                                        {filteredPending.map((m) => {
+                                            const bronze = m.id === BRONZE_MATCH_ID;
+                                            return (
+                                                <ShiaijoQueueRow key={matchKey(m)} m={m} pending
+                                                    onResolve={bronze ? undefined : setResolveMatch}
+                                                    slotLabel={slotLabelFor(m.compId)}
+                                                    emptyNames={bronze ? bronzeLabelsFor(m.compId) : undefined} />
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             )}
@@ -2418,7 +2456,7 @@ function ShiaijoQueueGroup({ label, matches, subGroup, scheduled, courts, onMove
     );
 }
 
-export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, onCall, callingKey, calledKey, startingKey, pending, onResolve, slotLabel, password, notice }) {
+export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onEnterLineup, onPick, onCorrect, onCall, callingKey, calledKey, startingKey, pending, onResolve, slotLabel, emptyNames, password, notice }) {
     const isComplete = m.status === "completed";
     // bc-cse: a scheduled match a competitor is barred from. `pending`
     // placeholder finals are excluded on purpose: their sides are still
@@ -2429,8 +2467,10 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
     // changes the `pending` "Later" rows; the fallbacks keep any other caller
     // from printing a raw "Winner of rX-mY" if it ever does.
     const slotName = slotLabel || window.slotDisplayName || ((n) => n);
-    const aName = slotName(m.sideA?.name || "", (m.feeders || [])[0]);
-    const bName = slotName(m.sideB?.name || "", (m.feeders || [])[1]);
+    // `emptyNames` ({a, b}) names an EMPTY side: only the 3rd-place match's
+    // "Later" row passes it (bronzeSlotLabels), since its sides have no slot value.
+    const aName = slotName(m.sideA?.name || "", (m.feeders || [])[0]) || (emptyNames ? emptyNames.a : "");
+    const bName = slotName(m.sideB?.name || "", (m.feeders || [])[1]) || (emptyNames ? emptyNames.b : "");
     const scoreCell = shiaijoScoreCell(m);
     // bc-tmwn: for completed rows, determine which side won and get team marks.
     const winnerSide = isComplete ? winnerSideLR(m) : null;
@@ -2457,11 +2497,7 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
             <div className="shiaijo-qrow__top">
                 <span className="shiaijo-qrow__time">
                     {m.scheduledAt || "-"} · {m.compName}
-                    {m.phase === "pool" && m.poolPosition > 0 && m.poolCount > 0
-                        ? ` · Match ${m.poolPosition} of ${m.poolCount}`
-                        : m.phase === "bracket" && m.matchNumber > 0
-                        ? ` · Match ${m.matchNumber}`
-                        : ""}
+                    {shiaijoMatchNo(m)}
                     {/* DH-only label (not "-TB-"): see the Up Next card note above. */}
                     {window.isPoolDaihyosenBout && window.isPoolDaihyosenBout(m.id) && (
                         <span className="tag-badge" style={{ marginLeft: 4 }}>

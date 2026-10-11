@@ -627,7 +627,10 @@ export function noAnswerSentence(notDone) {
 // composing it here from the number would be a second copy of it. The number
 // arm below stays for a caller naming a match it built itself (the scores
 // list's own rows).
-const BRONZE_MATCH_ID = 'm-bronze';
+//
+// BRONZE_MATCH_ID is the one JS spelling of the 3rd-place match's id
+// (state.BronzeMatchID); every client check for the bronze imports it.
+export const BRONZE_MATCH_ID = 'm-bronze';
 
 export function matchLabel(m) {
     if (!m) return '';

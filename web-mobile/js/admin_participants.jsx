@@ -8,6 +8,7 @@ import { seededRanks } from './admin_helpers.jsx';
 import { NO_ID_HINT } from './data_integrity.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
+import { PillButton } from './competition_fields.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -981,9 +982,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
           )}
           {allSources.length > 0 && (
             <div style={{ padding: "0 16px 10px", display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <button type="button" aria-pressed={!sourceFilter} className={`radio-pill ${!sourceFilter ? "is-active" : ""}`} onClick={() => setSourceFilter(null)}>All</button>
+              <PillButton active={!sourceFilter} onClick={() => setSourceFilter(null)}>All</PillButton>
               {allSources.map(t => (
-                <button type="button" key={t} aria-pressed={sourceFilter === t} className={`radio-pill ${sourceFilter === t ? "is-active" : ""}`} onClick={() => setSourceFilter(sourceFilter === t ? null : t)}>{t}</button>
+                <PillButton key={t} active={sourceFilter === t} onClick={() => setSourceFilter(sourceFilter === t ? null : t)}>{t}</PillButton>
               ))}
             </div>
           )}
@@ -994,22 +995,22 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               ) : (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
                   <div>
-                    <div className="field__label" style={{ fontSize: 11 }}>{c.engi ? "Pair (Name 1 - Name 2) *" : "Name *"}</div>
-                    <input className="input" style={{ width: 160 }} value={addName} onChange={e => setAddName(e.target.value)} placeholder={c.engi ? "Member 1 - Member 2" : "Full name"} />
+                    <div className="field__label" id="participant-add-name-label" style={{ fontSize: 11 }}>{c.engi ? "Pair (Name 1 - Name 2) *" : "Name *"}</div>
+                    <input className="input" aria-labelledby="participant-add-name-label" style={{ width: 160 }} value={addName} onChange={e => setAddName(e.target.value)} placeholder={c.engi ? "Member 1 - Member 2" : "Full name"} />
                   </div>
                   {withZekken && (
                     <div>
-                      <div className="field__label" style={{ fontSize: 11 }}>Zekken</div>
-                      <input className="input" style={{ width: 120 }} value={addZekken} onChange={e => setAddZekken(e.target.value)} placeholder="Auto if blank" />
+                      <div className="field__label" id="participant-add-zekken-label" style={{ fontSize: 11 }}>Zekken</div>
+                      <input className="input" aria-labelledby="participant-add-zekken-label" style={{ width: 120 }} value={addZekken} onChange={e => setAddZekken(e.target.value)} placeholder="Auto if blank" />
                     </div>
                   )}
                   <div>
-                    <div className="field__label" style={{ fontSize: 11 }}>Dojo *</div>
-                    <input className="input" style={{ width: 140 }} value={addDojo} onChange={e => setAddDojo(e.target.value)} placeholder="Dojo" />
+                    <div className="field__label" id="participant-add-dojo-label" style={{ fontSize: 11 }}>Dojo *</div>
+                    <input className="input" aria-labelledby="participant-add-dojo-label" style={{ width: 140 }} value={addDojo} onChange={e => setAddDojo(e.target.value)} placeholder="Dojo" />
                   </div>
                   <div>
-                    <div className="field__label" style={{ fontSize: 11 }}>Dan grade</div>
-                    <input className="input" style={{ width: 100 }} value={addDanGrade} onChange={e => setAddDanGrade(e.target.value)} placeholder="Optional" />
+                    <div className="field__label" id="participant-add-dan-label" style={{ fontSize: 11 }}>Dan grade</div>
+                    <input className="input" aria-labelledby="participant-add-dan-label" style={{ width: 100 }} value={addDanGrade} onChange={e => setAddDanGrade(e.target.value)} placeholder="Optional" />
                   </div>
                   <button type="button" className="btn btn--sm btn--primary" disabled={addLoading || !addName.trim() || !addDojo.trim()} onClick={handleAddParticipant}>
                     {addLoading ? "Adding…" : "Add"}
@@ -1026,22 +1027,22 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                 <div className="card__head"><div id="edit-modal-title" className="card__title">Edit {replaceTarget.name}</div></div>
                 <div className="card__body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                   <div>
-                    <div className="field__label">Name *</div>
-                    <input className="input" value={replaceName} onChange={e => setReplaceName(e.target.value)} placeholder="Replacement name" />
+                    <div className="field__label" id="participant-replace-name-label">Name *</div>
+                    <input className="input" aria-labelledby="participant-replace-name-label" value={replaceName} onChange={e => setReplaceName(e.target.value)} placeholder="Replacement name" />
                   </div>
                   {withZekken && (
                     <div>
-                      <div className="field__label">Zekken</div>
-                      <input className="input" value={replaceZekken} onChange={e => setReplaceZekken(e.target.value)} placeholder="Auto-derived if blank" />
+                      <div className="field__label" id="participant-replace-zekken-label">Zekken</div>
+                      <input className="input" aria-labelledby="participant-replace-zekken-label" value={replaceZekken} onChange={e => setReplaceZekken(e.target.value)} placeholder="Auto-derived if blank" />
                     </div>
                   )}
                   <div>
-                    <div className="field__label">Dojo *</div>
-                    <input className="input" value={replaceDojo} onChange={e => setReplaceDojo(e.target.value)} placeholder="Dojo" />
+                    <div className="field__label" id="participant-replace-dojo-label">Dojo *</div>
+                    <input className="input" aria-labelledby="participant-replace-dojo-label" value={replaceDojo} onChange={e => setReplaceDojo(e.target.value)} placeholder="Dojo" />
                   </div>
                   <div>
-                    <div className="field__label">Dan grade</div>
-                    <input className="input" value={replaceDanGrade} onChange={e => setReplaceDanGrade(e.target.value)} placeholder="Optional" />
+                    <div className="field__label" id="participant-replace-dan-label">Dan grade</div>
+                    <input className="input" aria-labelledby="participant-replace-dan-label" value={replaceDanGrade} onChange={e => setReplaceDanGrade(e.target.value)} placeholder="Optional" />
                   </div>
                   {replaceTarget.id ? (
                     <div className="field__hint">ID, seed, and check-in state are preserved. Seed rankings are updated to match the new name automatically.</div>

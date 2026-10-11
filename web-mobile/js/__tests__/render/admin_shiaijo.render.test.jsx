@@ -271,6 +271,68 @@ describe('AdminShiaijoPage render-smoke', () => {
     expect(queryByText('Start match')).toBeNull();
   });
 
+  // bc-bzlb (operator decision 2026-10-11): the 3rd-place match has no match
+  // number, so the console names it with the owner's words, the ones the Scores
+  // list and the refusal dialogs use, rather than with nothing.
+  it('names the 3rd-place match on the Up next card', () => {
+    const bronze = {
+      id: 'm-bronze', compId: 'c1', compName: 'Cup', status: 'scheduled',
+      phase: 'bracket', matchNumber: 0, court: 'A', scheduledAt: '10:55',
+      sideA: { id: 'p1', name: 'Yamada' }, sideB: { id: 'p2', name: 'Tanaka' },
+    };
+    window.tournamentMatches = () => [bronze];
+    window.filterMatchesByCourt = (matches) => matches;
+    const { container } = renderPage(makeMinimalTournament());
+    expect(container.querySelector('.shiaijo-upnext__time').textContent).toBe('10:55 · Cup · the 3rd-place match');
+  });
+
+  // bc-bzlb: before the semi-finals, the 3rd-place match's sides are EMPTY (no
+  // "Winner of" slot), so it used to be missing from the queue altogether. It is
+  // listed under Later, its sides named after the semi-finals that fill them,
+  // and it offers no "Run now" (that modal records WINNERS, not losers).
+  it('lists the 3rd-place match under Later with "Loser of M<n>" before the semi-finals, without Run now', async () => {
+    // The real slot-text owner, imported without leaving bracket.jsx's window
+    // globals behind (other tests here rely on bracketSlotLabeller being absent).
+    const before = new Map(Object.keys(window).map((k) => [k, window[k]]));
+    const { bronzeSlotLabels } = await import('../../bracket.jsx');
+    for (const k of Object.keys(window)) {
+      if (!before.has(k)) delete window[k];
+      else if (window[k] !== before.get(k)) window[k] = before.get(k);
+    }
+    const rounds = [
+      [
+        { id: 'm-r1-0', status: 'scheduled', matchNumber: 1, sideA: { id: 'a', name: 'Alice' }, sideB: { id: 'b', name: 'Bob' } },
+        { id: 'm-r1-1', status: 'scheduled', matchNumber: 2, sideA: { id: 'c', name: 'Carol' }, sideB: { id: 'd', name: 'Dan' } },
+      ],
+      [
+        { id: 'm-r2-0', status: 'scheduled', matchNumber: 3, sideA: { id: '', name: 'Winner of r2-m0' }, sideB: { id: '', name: 'Winner of r2-m1' } },
+      ],
+    ];
+    const bronze = {
+      id: 'm-bronze', compId: 'c1', compName: 'Cup', status: 'scheduled',
+      phase: 'bracket', matchNumber: 0, court: 'A',
+      sideA: { id: '', name: '' }, sideB: { id: '', name: '' },
+    };
+    window.bronzeSlotLabels = bronzeSlotLabels;
+    window.tournamentMatches = () => [bronze];
+    window.filterMatchesByCourt = (matches) => matches;
+    try {
+      let utils;
+      await act(async () => {
+        utils = renderPage(makeMinimalTournament({ competitions: [{ id: 'c1', name: 'Cup', bracket: { rounds } }] }));
+      });
+      const later = utils.container.querySelector('.shiaijo-pending');
+      expect(later).toBeTruthy();
+      expect(within(later).getByText('Loser of M1')).toBeTruthy();
+      expect(within(later).getByText('Loser of M2')).toBeTruthy();
+      expect(later.textContent).toContain('the 3rd-place match');
+      expect(utils.queryByRole('button', { name: /run now/i })).toBeNull();
+      expect(utils.queryByText('Start match')).toBeNull();
+    } finally {
+      delete window.bronzeSlotLabels;
+    }
+  });
+
   // A court back online refetches its feed when the stream reopens, with no
   // manual Refresh. app.jsx reopens the stream on 'online' by closing it, which
   // fires no error, so the reopen reads as a bare 'open' (the stale court seen

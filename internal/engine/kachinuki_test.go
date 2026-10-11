@@ -933,7 +933,8 @@ func TestKachinukiRemainingRoster_MatchesALineupByTheSidesParticipantID(t *testi
 	t.Run("a lineup stored under the id is the side's, though one under its name sits beside it", func(t *testing.T) {
 		parent := &state.MatchResult{ID: "P1-0", SideA: "Ryu", SideAID: "red-id", SideB: "Tora", SideBID: "white-id", SubResults: bouts}
 
-		remainingA, remainingB, ok := kachinukiRemainingRoster(comp, parent, ruleOver(lineups, nil, nil))
+		remainingA, remainingB, foundA, foundB := kachinukiRemainingRoster(comp, parent, ruleOver(lineups, nil, nil))
+		ok := foundA || foundB
 
 		require.True(t, ok, "Red's lineup resolves")
 		assert.Equal(t, fighters("R-1", "R-2", "R-3"), remainingA)
@@ -943,7 +944,8 @@ func TestKachinukiRemainingRoster_MatchesALineupByTheSidesParticipantID(t *testi
 	t.Run("a side with no id has no lineup, whatever is stored", func(t *testing.T) {
 		parent := &state.MatchResult{ID: "P1-0", SideA: "Ryu", SideB: "Tora", SubResults: bouts}
 
-		_, _, ok := kachinukiRemainingRoster(comp, parent, ruleOver(lineups, nil, nil))
+		_, _, foundA, foundB := kachinukiRemainingRoster(comp, parent, ruleOver(lineups, nil, nil))
+		ok := foundA || foundB
 
 		assert.False(t, ok, "no side carries an id, so no lineup resolves")
 	})
@@ -3970,7 +3972,7 @@ func TestKachinukiRemainingRoster_BoutLogBranchKeepsANamesakeWithADistinctID(t *
 
 	// The third return is "a lineup resolved it", which is false here by
 	// construction; the roster itself is what this pins.
-	remainingA, _, _ := kachinukiRemainingRoster(comp, parent, &lineupRule{})
+	remainingA, _, _, _ := kachinukiRemainingRoster(comp, parent, &lineupRule{})
 
 	ids := make([]string, 0, len(remainingA))
 	for _, f := range remainingA {
@@ -3995,7 +3997,8 @@ func TestKachinukiRemainingRoster_BoutLogBranchTakesEachSidesOwnColumn(t *testin
 		},
 	}
 
-	remainingA, remainingB, ok := kachinukiRemainingRoster(comp, parent, &lineupRule{})
+	remainingA, remainingB, foundA, foundB := kachinukiRemainingRoster(comp, parent, &lineupRule{})
+	ok := foundA || foundB
 
 	assert.False(t, ok, "no lineup resolved it")
 	assert.Equal(t, fighters("A-1"), remainingA)

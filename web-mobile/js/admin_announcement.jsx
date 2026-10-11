@@ -4,6 +4,8 @@
 // admin dashboard (mp-djc). Endpoint is unchanged: POST /api/tournament/announce
 // (handlers_announcement.go), driven through window.API.sendAnnouncement.
 
+import { useStableId } from './stable_id.jsx';
+
 const { useState: useStateAn, useEffect: useEffectAn, useCallback: useCallbackAn } = React;
 
 // Pure helpers for the announcement-broadcast controls.
@@ -26,6 +28,10 @@ function AnnouncementComposer({ password, showToast }) {
   const [announcementDuration, setAnnouncementDuration] = useStateAn(5);
   const [announcementInFlight, setAnnouncementInFlight] = useStateAn(false);
   const [activeAnnouncements, setActiveAnnouncements] = useStateAn([]);
+  // The composer is reachable from two places (Edit details and the
+  // dashboard's Announce modal), so its label ids are minted, not fixed.
+  const messageId = useStableId('announce-message');
+  const durationLabelId = useStableId('announce-duration');
 
   const refreshAnnouncements = useCallbackAn(async () => {
     try {
@@ -97,8 +103,9 @@ function AnnouncementComposer({ password, showToast }) {
         </div>
       )}
       <div className="field">
-        <label className="field__label">Message</label>
+        <label className="field__label" htmlFor={messageId}>Message</label>
         <textarea
+          id={messageId}
           className="input"
           style={{ width: "100%", height: 80, boxSizing: "border-box", padding: "8px 12px", resize: "vertical" }}
           maxLength={200}
@@ -112,8 +119,8 @@ function AnnouncementComposer({ password, showToast }) {
         </div>
       </div>
       <div className="field">
-        <label className="field__label">Duration</label>
-        <div style={{ display: "flex", gap: 16, marginTop: 8 }}>
+        <label className="field__label" id={durationLabelId}>Duration</label>
+        <div role="radiogroup" aria-labelledby={durationLabelId} style={{ display: "flex", gap: 16, marginTop: 8 }}>
           {[5, 10, 15, 30].map((m) => (
             <label key={m} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontWeight: 500 }}>
               <input

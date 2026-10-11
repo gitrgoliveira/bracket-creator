@@ -218,11 +218,14 @@ type TeamLineupStore interface {
 }
 
 // LineupEngine is the consumer-boundary view of engine.Engine used by the
-// public lineup-in-force read in handlers_lineup.go: which lineup a team
-// fields at a match, and where it was saved. Mirrors
-// engine.Engine.LineupInForce, which owns the rule.
+// public lineup reads in handlers_lineup.go: which lineup a team fields at a
+// match, and where it was saved (engine.Engine.LineupInForce, which owns the
+// rule); and a kachinuki encounter's two queues of fighters not yet retired
+// (engine.Engine.KachinukiRoster, read through the same call the advance
+// appends the next pairing from).
 type LineupEngine interface {
 	LineupInForce(compID, teamID, matchID string) (engine.InForceLineup, error)
+	KachinukiRoster(compID, matchID string, recordedThrough int) (engine.KachinukiRoster, error)
 }
 
 // SquadStore is the consumer-boundary view of state.Store used by

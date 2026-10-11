@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { slotDisplayName, makeSlotLabeller, bracketSlotLabeller } from '../bracket.jsx';
+import { slotDisplayName, makeSlotLabeller, bracketSlotLabeller, bronzeSlotLabels, buildDisplayModel } from '../bracket.jsx';
 import { hasBothSides, isPendingBracketMatch, bracketFullyComplete, compMatchStats } from '../admin_helpers.jsx';
 
 // The engine writes an unresolved bracket feeder as "Winner of r<depth>-m<idx>"
@@ -117,6 +117,38 @@ describe('makeSlotLabeller: resolves a slot to the number the bracket prints', (
 // admin_helpers.BRACKET_PLACEHOLDER_RE and display_helpers.DISPLAY_PLACEHOLDER_RE
 // all decide playability/schedulability from it. Relabelling is DISPLAY-ONLY, so
 // every one of those classifications must be untouched.
+// bc-bzlb: the 3rd-place match's sides are EMPTY until a semi-final's loser is
+// seated there by position (semi 0 -> sideA, semi 1 -> sideB, Go
+// propagateBracketWinner), so they are named after the semi-final cards.
+describe('bronzeSlotLabels: the 3rd-place match names the semi-finals that fill it', () => {
+  it('reads "Loser of M<n>" for numbered semi-finals, by position', () => {
+    const rounds = [
+      [{ id: 'm-r1-0', matchNumber: 1 }, { id: 'm-r1-1', matchNumber: 2 }, { id: 'm-r1-2', matchNumber: 3 }, { id: 'm-r1-3', matchNumber: 4 }],
+      [{ id: 'm-r2-0', matchNumber: 5 }, { id: 'm-r2-1', matchNumber: 6 }],
+      [{ id: 'm-r3-0', matchNumber: 7 }],
+    ];
+    expect(bronzeSlotLabels(rounds)).toEqual({ a: 'Loser of M5', b: 'Loser of M6' });
+  });
+
+  it('degrades a hidden bye semi-final (no number) to TBD on that side only', () => {
+    // fivePlayerRounds: m-r2-0 is the latent-bye semi-final, m-r2-1 is M3.
+    expect(bronzeSlotLabels(fivePlayerRounds())).toEqual({ a: 'TBD', b: 'Loser of M3' });
+  });
+
+  it('reads TBD on both sides when there is no semi-final round', () => {
+    expect(bronzeSlotLabels([[{ id: 'm-r1-0', matchNumber: 1 }]])).toEqual({ a: 'TBD', b: 'TBD' });
+    expect(bronzeSlotLabels(undefined)).toEqual({ a: 'TBD', b: 'TBD' });
+  });
+
+  it('reads the numbers from a display model the caller already holds', () => {
+    const rounds = fivePlayerRounds();
+    const numbers = buildDisplayModel(rounds).matchNumById;
+    expect(bronzeSlotLabels(rounds, numbers)).toEqual(bronzeSlotLabels(rounds));
+    // The numbers handed in are the ones used, not rebuilt from the rounds.
+    expect(bronzeSlotLabels(rounds, { 'm-r2-1': 9 })).toEqual({ a: 'TBD', b: 'Loser of M9' });
+  });
+});
+
 describe('placeholder filtering is unchanged by the display label', () => {
   const feederMatch = () => ({
     id: 'm-r2-1',

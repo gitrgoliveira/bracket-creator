@@ -189,6 +189,12 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
     () => (derivedBracket && window.bracketSlotLabeller ? window.bracketSlotLabeller(derivedBracket.rounds) : null),
     [derivedBracket]
   );
+  // The 3rd-place card's empty sides ("Loser of M<n>"), memoised over the
+  // rounds so MatchCard's memo holds across renders.
+  const bronzeEmptyLabels = useMemo(
+    () => (derivedBracket && window.bronzeSlotLabels ? window.bronzeSlotLabels(derivedBracket.rounds) : undefined),
+    [derivedBracket]
+  );
 
   // draw-ready is NOT pre-start for the purposes of showing pool/bracket
   // structure: the draw has been generated and the payload already includes
@@ -435,6 +441,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                           showDojo={tweaks.showDojo ?? true}
                           highlighted={currentMatch?.id === bm.id}
                           highlightPlayers={highlightPlayers}
+                          emptyLabels={bronzeEmptyLabels}
                           onClick={() => openMatch(bm, { phase: "bracket", round: "3rd Place", phaseName: "3rd Place", compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, compEngi: isEngi, teamMatchType: teamMatchTypeFor(c) })}
                         />
                       </div>

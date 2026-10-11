@@ -189,12 +189,24 @@ func (r *lineupRule) inForce(teamID, matchID string) InForceLineup {
 // no lineup, so the roster falls back to the bout log and no position is
 // labelled.
 func (e *Engine) lineupRuleOrNone(caller, compID string, knockout bool, poolMatches []state.MatchResult, bracket *state.Bracket) *lineupRule {
-	lineups, err := e.store.LoadTeamLineups(compID)
+	rule, err := e.lineupRuleOver(compID, knockout, poolMatches, bracket)
 	if err != nil {
 		log.Printf("%s compId=%s: lineups.yaml load error: %v; resolving no lineup", caller, compID, err)
 		return &lineupRule{}
 	}
-	return newLineupRuleFrom(lineups, poolMatches, bracket, knockout)
+	return rule
+}
+
+// lineupRuleOver builds the rule like lineupRuleOrNone, but hands back a
+// lineups.yaml that cannot be read as an error. The kachinuki roster read
+// (KachinukiRoster) uses it: a read that answered "no lineup" over a file it
+// could not read would tell the operator a side has no lineup when it may.
+func (e *Engine) lineupRuleOver(compID string, knockout bool, poolMatches []state.MatchResult, bracket *state.Bracket) (*lineupRule, error) {
+	lineups, err := e.store.LoadTeamLineups(compID)
+	if err != nil {
+		return nil, err
+	}
+	return newLineupRuleFrom(lineups, poolMatches, bracket, knockout), nil
 }
 
 // LineupInForce returns the lineup the team with participant id teamID fields

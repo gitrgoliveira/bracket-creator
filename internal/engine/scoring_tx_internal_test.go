@@ -323,7 +323,7 @@ func TestCheckConcurrentIneligibilityTx_EmptyLoser(t *testing.T) {
 }
 
 // TestWithPoolMatchTx_NotFound confirms the not-found path returns
-// errMatchNotFound (caller falls through to bracket).
+// ErrMatchNotFound (caller falls through to bracket).
 func TestWithPoolMatchTx_NotFound(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "wpmtx-nf"
@@ -338,7 +338,7 @@ func TestWithPoolMatchTx_NotFound(t *testing.T) {
 		return nil
 	})
 	require.Error(t, txErr)
-	assert.ErrorIs(t, txErr, errMatchNotFound)
+	assert.ErrorIs(t, txErr, ErrMatchNotFound)
 }
 
 // TestRecordMatchResultWithIneligibilityTx_BracketPath confirms the

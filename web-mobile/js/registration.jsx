@@ -193,8 +193,9 @@ function RegistrationForm({ compId, onBack }) {
         )}
         <form onSubmit={submit}>
           <div className="field">
-            <label className="field__label">Full name <span style={{ color: "var(--red)" }}>*</span></label>
+            <label className="field__label" htmlFor="register-name">Full name <span style={{ color: "var(--red)" }}>*</span></label>
             <input
+              id="register-name"
               autoFocus
               className="input"
               type="text"
@@ -206,8 +207,9 @@ function RegistrationForm({ compId, onBack }) {
             />
           </div>
           <div className="field">
-            <label className="field__label">Dojo <span style={{ color: "var(--red)" }}>*</span></label>
+            <label className="field__label" htmlFor="register-dojo">Dojo <span style={{ color: "var(--red)" }}>*</span></label>
             <input
+              id="register-dojo"
               className="input"
               type="text"
               value={dojo}
@@ -219,8 +221,9 @@ function RegistrationForm({ compId, onBack }) {
           </div>
           {meta && meta.withZekkenName && (
             <div className="field">
-              <label className="field__label">Display name (zekken)</label>
+              <label className="field__label" htmlFor="register-zekken">Display name (zekken)</label>
               <input
+                id="register-zekken"
                 className="input"
                 type="text"
                 value={displayName}
@@ -232,8 +235,9 @@ function RegistrationForm({ compId, onBack }) {
             </div>
           )}
           <div className="field">
-            <label className="field__label">Dan grade (optional)</label>
+            <label className="field__label" htmlFor="register-dan-grade">Dan grade (optional)</label>
             <input
+              id="register-dan-grade"
               className="input"
               type="text"
               value={danGrade}

@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
-  SCALAR_GROUPS, boutGroup, parseBoutGroup, isValidGroup,
+  SCALAR_GROUPS, SERVER_GROUPS, GROUP_RECORDED, boutGroup, parseBoutGroup, isValidGroup,
   changedGroups, unionChanged, groupLabel, groupsLabel,
 } from '../match_groups.jsx';
 import { toBackendMatchResult, matchWire } from '../api_serializers.jsx';
@@ -22,6 +22,7 @@ const table = JSON.parse(readFileSync(
 describe('the shared group table', () => {
   it('is not empty', () => {
     expect(table.scalarGroups.length).toBeGreaterThan(0);
+    expect(table.serverGroups.length).toBeGreaterThan(0);
     expect(table.bouts.length).toBeGreaterThan(0);
     expect(table.invalid.length).toBeGreaterThan(0);
   });
@@ -29,6 +30,15 @@ describe('the shared group table', () => {
   it('names the scalar groups in the server\'s order', () => {
     expect(SCALAR_GROUPS).toEqual(table.scalarGroups);
     for (const g of table.scalarGroups) expect(isValidGroup(g)).toBe(true);
+  });
+
+  it('names the server\'s own groups, which no client write states', () => {
+    expect(SERVER_GROUPS).toEqual(table.serverGroups);
+    for (const g of table.serverGroups) {
+      expect(isValidGroup(g)).toBe(true);
+      expect(SCALAR_GROUPS).not.toContain(g);
+    }
+    expect(groupLabel(GROUP_RECORDED)).toBe('the recorded bouts');
   });
 
   it.each(table.bouts)('bout $position is "$group"', ({ position, group }) => {
@@ -87,6 +97,17 @@ describe('changedGroups', () => {
     const stored = { ...base, subResults: [{ position: -1, sideA: 'A', sideB: 'B', ipponsA: ['Ht'], ipponsB: [], winner: 'A', decision: 'daihyosen' }] };
     const silent = { ...base, subResults: [{ position: -1, sideA: 'A', sideB: 'B', winner: 'A', decision: 'daihyosen' }] };
     expect(changedGroups(silent, stored)).toEqual([]);
+  });
+
+  it('a kachinuki bout\'s recorded mark is never a change of the bout', () => {
+    // Only the server writes it (Record bout): the sheet echoes it, and a
+    // baseline agreed before the mark arrived must not name the bout (bc-kfnl).
+    const row = { position: 1, sideA: 'Kudo', sideB: 'Taki', ipponsA: ['M'], ipponsB: [], hansokuA: 0, hansokuB: 0, winner: 'Kudo', decision: 'fought' };
+    const agreed = { ...base, subResults: [row] };
+    expect(changedGroups({ ...base, subResults: [{ ...row, recorded: true }] }, agreed)).toEqual([]);
+    expect(changedGroups({ ...base, subResults: [row] }, { ...base, subResults: [{ ...row, recorded: true }] })).toEqual([]);
+    // A real change on the same row still names it.
+    expect(changedGroups({ ...base, subResults: [{ ...row, recorded: true, ipponsA: ['M', 'K'] }] }, agreed)).toEqual(['bout:1']);
   });
 
   it('a baseline may be a function of the group', () => {

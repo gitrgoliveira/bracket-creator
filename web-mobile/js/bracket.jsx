@@ -27,6 +27,7 @@ import { NumberedName } from './numbered_name.jsx';
 import { WinnerTick } from './side_cell.jsx';
 import { creditedBoutSide, isTeamDefaultWinDecision } from './team_default_credit.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
+import { bronzeFeederSemis } from './bronze_feeders.jsx';
 
 // TermBC: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and this module doesn't matter.
@@ -120,7 +121,23 @@ const FEEDER_SLOT_RE = /^Winner of r(\d+)-m(\d+)$/;
 // internal index), so relabelling them would lose real information.
 function slotDisplayName(name, feederMatchNum) {
   if (typeof name !== "string" || !FEEDER_SLOT_RE.test(name)) return name;
-  return feederMatchNum > 0 ? `Winner of M${feederMatchNum}` : "TBD";
+  return feederRefLabel("Winner", feederMatchNum);
+}
+
+// feederRefLabel: "<outcome> of M<n>" naming the numbered match that fills a
+// slot, or "TBD" when that match has no number (num 0). The one wording both
+// the winner slots (slotDisplayName) and the bronze's loser slots
+// (bronzeSlotLabels) use.
+function feederRefLabel(outcome, num) {
+  return num > 0 ? `${outcome} of M${num}` : "TBD";
+}
+
+// feederMatchNumOf: the number bracket match m is printed with, from the
+// display model's matchNumById when the caller holds one, else the server's
+// own matchNumber; 0 for no match or no number. Shared by makeSlotLabeller and
+// bronzeSlotLabels so a slot and the card it names read the same number.
+function feederMatchNumOf(m, matchNumById) {
+  return m ? ((matchNumById && matchNumById[m.id]) || m.matchNumber || 0) : 0;
 }
 
 // makeSlotLabeller binds slotDisplayName to ONE bracket: it returns
@@ -148,7 +165,7 @@ function slotDisplayName(name, feederMatchNum) {
 // slotDisplayName degrades it to "TBD".
 function makeSlotLabeller(rounds, matchNumById) {
   const rs = Array.isArray(rounds) ? rounds : [];
-  const numOf = (m) => (m ? ((matchNumById && matchNumById[m.id]) || m.matchNumber || 0) : 0);
+  const numOf = (m) => feederMatchNumOf(m, matchNumById);
   const byId = (id) => {
     for (const round of rs) {
       const hit = (round || []).find((m) => m && m.id === id);
@@ -172,6 +189,32 @@ function makeSlotLabeller(rounds, matchNumById) {
 // the model it already computed instead of calling this (same result, one pass).
 function bracketSlotLabeller(rounds) {
   return makeSlotLabeller(rounds, buildDisplayModel(rounds).matchNumById);
+}
+
+// bronzeSlotLabels: the text for the 3rd-place match's EMPTY sides, {a, b}.
+// The bronze has no slot value to label: its sides stay empty until a
+// semi-final's loser is seated there, by POSITION (bronzeFeederSemis, the one
+// owner of which semi-final feeds which side), the same way makeSlotLabeller's path 2 mirrors Go
+// parseWinnerOf. So each side reads "Loser of M<n>", numbered through the same
+// display model the cards are stamped from; a semi-final with no number (a
+// hidden bye, or a bracket drawn before numbering) degrades to "TBD", as
+// slotDisplayName does. A side whose semi-final has completed (a bye semi, or
+// the bronze already played) gets "" and keeps its plain empty rendering.
+// Callers use a label only for a side that is empty;
+// a seated competitor is shown as themself. matchNumById is optional: a caller
+// that already holds the display model passes its numbers rather than having
+// the model built again. Callers memoise the result over the rounds, since a
+// new object every render defeats MatchCard's memo.
+function bronzeSlotLabels(rounds, matchNumById) {
+  const rs = Array.isArray(rounds) ? rounds : [];
+  const feeders = bronzeFeederSemis(rs);
+  const nums = matchNumById || buildDisplayModel(rs).matchNumById;
+  // Only a side still WAITING on its semi-final is labelled: the condition
+  // isPendingBracketMatch (admin_helpers.jsx) asks, a feeding semi that has
+  // not completed. A completed semi seats its loser (or, a bye semi, never
+  // gives one), so an empty side then keeps its plain rendering ("").
+  const label = (m) => (m && m.status !== "completed" ? feederRefLabel("Loser", feederMatchNumOf(m, nums)) : "");
+  return { a: label(feeders.a), b: label(feeders.b) };
 }
 
 // sideA = top = Aka (Red), sideB = bottom = Shiro (White)
@@ -399,11 +442,14 @@ function teamIVPWScore(m) {
   return iv == null ? null : `IV ${iv}`;
 }
 
-const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD, isEngi, slotLabel, feederId, barred }) => {
-  if (!player || isTBD) {
+// emptyLabel: what an EMPTY side reads instead of "-". Only the 3rd-place
+// card passes one (bronzeSlotLabels), so every other card is unchanged. A
+// normalized empty side is {id: "", name: ""}, truthy, so the test is the name.
+const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD, isEngi, slotLabel, feederId, barred, emptyLabel }) => {
+  if (!player || isTBD || (emptyLabel && !player.name)) {
     return (
       <div className={`bc-side bc-side--empty bc-side--${side}`}>
-        <span className="bc-name bc-name--tbd">{isTBD ? "TBD" : "-"}</span>
+        <span className="bc-name bc-name--tbd">{isTBD ? "TBD" : (emptyLabel || "-")}</span>
       </div>
     );
   }
@@ -446,7 +492,7 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD,
 });
 PlayerLine.displayName = "PlayerLine";
 
-const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, highlightPlayers, matchNum, isEngi, slotLabel }) => {
+const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, highlightPlayers, matchNum, isEngi, slotLabel, emptyLabels }) => {
   // bc-pnum: sameCompetitor, never a bare `winner.id === side.id` -- with
   // both sides id-less (buildPlayerMap keeps id "" for an id-less
   // participant), the naked equality compared two empty strings and lit
@@ -531,9 +577,9 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
       </div>
       {/* feeders is [A, B]: hand each side ITS feeder so an unresolved slot can
           be named after the match that will actually fill it (see makeSlotLabeller). */}
-      <PlayerLine player={match.sideA} isWinner={aWin} side="a" showDojo={showDojo} score={aScore} isTBD={aTBD} isEngi={isEngi} slotLabel={slotLabel} feederId={(match.feeders || [])[0]} barred={!!barredA} />
+      <PlayerLine player={match.sideA} isWinner={aWin} side="a" showDojo={showDojo} score={aScore} isTBD={aTBD} isEngi={isEngi} slotLabel={slotLabel} feederId={(match.feeders || [])[0]} barred={!!barredA} emptyLabel={emptyLabels && emptyLabels.a} />
       <div className="bc-divider"></div>
-      <PlayerLine player={match.sideB} isWinner={bWin} side="b" showDojo={showDojo} score={bScore} isTBD={bTBD} isEngi={isEngi} slotLabel={slotLabel} feederId={(match.feeders || [])[1]} barred={!!barredB} />
+      <PlayerLine player={match.sideB} isWinner={bWin} side="b" showDojo={showDojo} score={bScore} isTBD={bTBD} isEngi={isEngi} slotLabel={slotLabel} feederId={(match.feeders || [])[1]} barred={!!barredB} emptyLabel={emptyLabels && emptyLabels.b} />
     </button>
   );
 });
@@ -1394,6 +1440,8 @@ window.buildDisplayModel = buildDisplayModel;
 // bracketSlotLabeller resolves the slot to the card number the tree prints.
 window.slotDisplayName = slotDisplayName;
 window.bracketSlotLabeller = bracketSlotLabeller;
+window.makeSlotLabeller = makeSlotLabeller;
+window.bronzeSlotLabels = bronzeSlotLabels;
 window.formatIpponsScore = formatIpponsScore;
 window.teamIVScore = teamIVScore;
 window.teamIVPWScore = teamIVPWScore;
@@ -1418,4 +1466,4 @@ window.sideMarks = sideMarks;
 window.placeMarks = placeMarks;
 window.teamMatchMarks = teamMatchMarks;
 
-export { formatIpponsScore, enchoLabel, boutMiddle, defaultWinMaru, matchMiddleMark, sideMarks, placeMarks, teamMatchMarks, winnerSideLR, sideLabel, roundLabel, bracketRoundLabel, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, bracketColumnCount, PlayerLine, slotDisplayName, makeSlotLabeller, bracketSlotLabeller, MatchCard, BracketTree, elbowXFor, connectorPath, connectorTargetY };
+export { formatIpponsScore, enchoLabel, boutMiddle, defaultWinMaru, matchMiddleMark, sideMarks, placeMarks, teamMatchMarks, winnerSideLR, sideLabel, roundLabel, bracketRoundLabel, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, bracketColumnCount, PlayerLine, slotDisplayName, makeSlotLabeller, bracketSlotLabeller, bronzeSlotLabels, MatchCard, BracketTree, elbowXFor, connectorPath, connectorTargetY };

@@ -148,7 +148,7 @@ import {
   LABEL_CHECK_IN, HINT_CHECK_IN,
   LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX, cutNumberPrefix, LABEL_COURTS,
 } from './competition_shape.jsx';
-import { PillGroup, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
+import { PillGroup, PillButton, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
 import { DurationInput } from './duration.jsx';
 
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
@@ -422,24 +422,25 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
         <div className="edit-stack">
         <div className="card card--pad-lg">
           <div className="card__head"><div className="card__title">Tournament details</div></div>
-          <div className="field"><label className="field__label">Name</label><input ref={nameRef} className="input" value={name} onChange={(e) => { setName(e.target.value); setError(""); }} />{errorField === "name" && error && <div className="field__error" role="alert">{error}</div>}</div>
+          <div className="field"><label className="field__label" htmlFor="edit-name">Name</label><input id="edit-name" ref={nameRef} className="input" value={name} onChange={(e) => { setName(e.target.value); setError(""); }} />{errorField === "name" && error && <div className="field__error" role="alert">{error}</div>}</div>
           <div className="row">
             <div className="field">
-              <label className="field__label">Start date (Day 1)</label>
+              <label className="field__label" htmlFor="edit-date">Start date (Day 1)</label>
               {/* Picker bounds mirror AdminSettings's date input in */}
               {/* admin_competition.jsx and the MIN_YEAR/MAX_YEAR range */}
               {/* that validateAndNormalizeDate enforces at handleSave: */}
               {/* keeps the picker from offering years the validator */}
               {/* will then reject on submit. */}
-              <input ref={dateRef} className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(date)} onChange={(e) => { setDate(isoToDmy(e.target.value)); setError(""); }} />
+              <input id="edit-date" ref={dateRef} className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(date)} onChange={(e) => { setDate(isoToDmy(e.target.value)); setError(""); }} />
               <div className="field__hint">Pick the first day of the tournament.</div>
               {errorField === "date" && error && <div className="field__error" role="alert">{error}</div>}
             </div>
             <div className="field">
-              <label className="field__label">Number of days</label>
+              <label className="field__label" htmlFor="edit-days">Number of days</label>
               {/* decideNumericUpdate stores NaN for cleared input so render */}
               {/* side can use Number.isFinite check (same pattern as courts). */}
               <input
+                id="edit-days"
                 ref={daysRef}
                 className="input"
                 type="number"
@@ -455,9 +456,9 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             </div>
           </div>
           <div className="row">
-            <div className="field"><label className="field__label">Venue</label><input className="input" value={venue} onChange={(e) => { setVenue(e.target.value); setError(""); }} /></div>
+            <div className="field"><label className="field__label" htmlFor="edit-venue">Venue</label><input id="edit-venue" className="input" value={venue} onChange={(e) => { setVenue(e.target.value); setError(""); }} /></div>
             <div className="field">
-              <label className="field__label">Number of Shiaijo (courts)</label>
+              <label className="field__label" htmlFor="edit-courts">Number of Shiaijo (courts)</label>
               {/* decideNumericUpdate stores NaN for an empty input; render */}
               {/* NaN as "" so React doesn't warn ("Received NaN for the value */}
               {/* attribute") and the cleared input stays visually empty. */}
@@ -466,6 +467,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               {/* click can't push an invalid value to onSave. MAX_COURTS */}
               {/* mirrors helper.MaxCourts (admin_helpers.jsx). */}
               <input
+                id="edit-courts"
                 ref={courtsRef}
                 className="input"
                 type="number"
@@ -514,18 +516,18 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
           </div>
           <div className="row-3" style={{ marginBottom: 0 }}>
             <div className="field" style={{ marginBottom: 0 }}>
-              <label className="field__label">Opening ceremony <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
-              <input className="input" value={openingBlock} onChange={(e) => setOpeningBlock(e.target.value)} placeholder="e.g. 30m" />
+              <label className="field__label" htmlFor="edit-opening-block">Opening ceremony <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
+              <input id="edit-opening-block" className="input" value={openingBlock} onChange={(e) => setOpeningBlock(e.target.value)} placeholder="e.g. 30m" />
               <div className="field__hint">Duration of the opening ceremony block (e.g. "30m", "1h").</div>
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
-              <label className="field__label">Lunch break <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
-              <input className="input" value={lunchBlock} onChange={(e) => setLunchBlock(e.target.value)} placeholder="e.g. 1h" />
+              <label className="field__label" htmlFor="edit-lunch-block">Lunch break <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
+              <input id="edit-lunch-block" className="input" value={lunchBlock} onChange={(e) => setLunchBlock(e.target.value)} placeholder="e.g. 1h" />
               <div className="field__hint">Duration of the lunch break block (e.g. "1h", "45m").</div>
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
-              <label className="field__label">Closing ceremony <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
-              <input className="input" value={closingBlock} onChange={(e) => setClosingBlock(e.target.value)} placeholder="e.g. 30m" />
+              <label className="field__label" htmlFor="edit-closing-block">Closing ceremony <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(duration)</span></label>
+              <input id="edit-closing-block" className="input" value={closingBlock} onChange={(e) => setClosingBlock(e.target.value)} placeholder="e.g. 30m" />
               <div className="field__hint">Duration of the closing ceremony block.</div>
             </div>
           </div>
@@ -550,8 +552,9 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
           <div style={{ marginTop: 16 }}>
             {/* mp-s1gl: Public URL: single source of truth for externally-shareable links */}
             <div className="field">
-              <label className="field__label">Public URL</label>
+              <label className="field__label" htmlFor="edit-public-url">Public URL</label>
               <input
+                id="edit-public-url"
                 className="input"
                 value={publicURL}
                 onChange={(e) => setPublicURL(e.target.value)}
@@ -582,47 +585,49 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
               )}
             </div>
             <div className="field">
-              <label className="field__label">Venue address</label>
-              <input className="input" value={venueAddress} onChange={(e) => setVenueAddress(e.target.value)} placeholder="123 Sport Centre Dr, City" />
+              <label className="field__label" htmlFor="edit-venue-address">Venue address</label>
+              <input id="edit-venue-address" className="input" value={venueAddress} onChange={(e) => setVenueAddress(e.target.value)} placeholder="123 Sport Centre Dr, City" />
             </div>
             <div className="field">
-              <label className="field__label">Map link</label>
-              <input className="input" value={venueMapURL} onChange={(e) => setVenueMapURL(e.target.value)} placeholder="https://maps.google.com/..." />
+              <label className="field__label" htmlFor="edit-map-link">Map link</label>
+              <input id="edit-map-link" className="input" value={venueMapURL} onChange={(e) => setVenueMapURL(e.target.value)} placeholder="https://maps.google.com/..." />
               <div className="field__hint">Link to venue on Google Maps or similar.</div>
             </div>
             <div className="row">
               <div className="field">
-                <label className="field__label">Opening time</label>
-                <input className="input" type="time" value={openingTime} onChange={(e) => setOpeningTime(e.target.value)} />
+                <label className="field__label" htmlFor="edit-opening-time">Opening time</label>
+                <input id="edit-opening-time" className="input" type="time" value={openingTime} onChange={(e) => setOpeningTime(e.target.value)} />
                 <div className="field__hint">Doors open / spectator arrival time.</div>
               </div>
               <div className="field">
-                <label className="field__label">Closing time</label>
-                <input className="input" type="time" value={closingTime} onChange={(e) => setClosingTime(e.target.value)} />
+                <label className="field__label" htmlFor="edit-closing-time">Closing time</label>
+                <input id="edit-closing-time" className="input" type="time" value={closingTime} onChange={(e) => setClosingTime(e.target.value)} />
                 <div className="field__hint">Expected end time for the day.</div>
               </div>
             </div>
             <div className="field">
-              <label className="field__label">Website link</label>
-              <input className="input" value={websiteURL} onChange={(e) => setWebsiteURL(e.target.value)} placeholder="https://..." />
+              <label className="field__label" htmlFor="edit-website-link">Website link</label>
+              <input id="edit-website-link" className="input" value={websiteURL} onChange={(e) => setWebsiteURL(e.target.value)} placeholder="https://..." />
               <div className="field__hint">Link to the tournament website.</div>
             </div>
             <div className="field">
-              <label className="field__label">Awards</label>
-              <textarea className="input" rows={2} value={awardsNote} onChange={(e) => setAwardsNote(e.target.value)} placeholder="Gold, Silver, Bronze per competition" />
+              <label className="field__label" htmlFor="edit-awards">Awards</label>
+              <textarea id="edit-awards" className="input" rows={2} value={awardsNote} onChange={(e) => setAwardsNote(e.target.value)} placeholder="Gold, Silver, Bronze per competition" />
             </div>
             <div className="field">
-              <label className="field__label">Notes</label>
-              <textarea className="input" rows={3} value={infoNotes} onChange={(e) => setInfoNotes(e.target.value)} placeholder="General information for attendees" />
+              <label className="field__label" htmlFor="edit-notes">Notes</label>
+              <textarea id="edit-notes" className="input" rows={3} value={infoNotes} onChange={(e) => setInfoNotes(e.target.value)} placeholder="General information for attendees" />
             </div>
             <div className="field">
               <label className="field__label">Contacts</label>
               <div className="field__hint" style={{ marginBottom: 8 }}>Add contact methods for attendees (max 10).</div>
+              {/* The list has one label for many inputs, so each input and its
+                  remove button carry their own name, numbered by row. */}
               {contacts.map((ct, i) => (
                 <div key={ct._key} style={{ display: "flex", gap: 8, marginBottom: 6 }}>
-                  <input className="input" style={{ flex: "0 0 120px" }} value={ct.label} onChange={(e) => { const next = [...contacts]; next[i] = { ...next[i], label: e.target.value }; setContacts(next); }} placeholder="Label" />
-                  <input className="input" style={{ flex: 1 }} value={ct.value} onChange={(e) => { const next = [...contacts]; next[i] = { ...next[i], value: e.target.value }; setContacts(next); }} placeholder="Value (email, phone, URL, etc.)" />
-                  <button type="button" className="btn" style={{ padding: "4px 10px" }} onClick={() => setContacts(contacts.filter((_, j) => j !== i))}>✕</button>
+                  <input className="input" aria-label={`Contact ${i + 1} label`} style={{ flex: "0 0 120px" }} value={ct.label} onChange={(e) => { const next = [...contacts]; next[i] = { ...next[i], label: e.target.value }; setContacts(next); }} placeholder="Label" />
+                  <input className="input" aria-label={`Contact ${i + 1} value`} style={{ flex: 1 }} value={ct.value} onChange={(e) => { const next = [...contacts]; next[i] = { ...next[i], value: e.target.value }; setContacts(next); }} placeholder="Value (email, phone, URL, etc.)" />
+                  <button type="button" className="btn" aria-label={`Remove contact ${i + 1}`} style={{ padding: "4px 10px" }} onClick={() => setContacts(contacts.filter((_, j) => j !== i))}>✕</button>
                 </div>
               ))}
               {contacts.length < 10 && (
@@ -643,8 +648,8 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             </div>
           ) : (
             <div className="field">
-              <label className="field__label">Admin password</label>
-              <input className="input" type="password" value={pass} onChange={(e) => { setPass(e.target.value); setError(""); }} placeholder="••••••••" autoComplete="new-password" />
+              <label className="field__label" htmlFor="edit-password">Admin password</label>
+              <input id="edit-password" className="input" type="password" value={pass} onChange={(e) => { setPass(e.target.value); setError(""); }} placeholder="••••••••" autoComplete="new-password" />
               <div className="field__hint">Enter a new password to change it. Leave blank to keep the current one.</div>
             </div>
           )}
@@ -658,12 +663,14 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             </div>
           ) : (
             <div className="field" style={{ marginBottom: 0 }}>
-              <label className="field__label">Destructive-ops password {elevatedConfigured ? "(set)" : "(not set)"}</label>
+              <label className="field__label" htmlFor="edit-admin-password">Destructive-ops password {elevatedConfigured ? "(set)" : "(not set)"}</label>
+              {/* The label names the new password; the current one, shown
+                  only for a rotation, is named by its own words. */}
               {elevatedConfigured && (
-                <input className="input" type="password" value={adminCurrent} onChange={(e) => setAdminCurrent(e.target.value)} placeholder="Current destructive-ops password" autoComplete="off" style={{ marginBottom: 8 }} />
+                <input className="input" aria-label="Current destructive-ops password" type="password" value={adminCurrent} onChange={(e) => setAdminCurrent(e.target.value)} placeholder="Current destructive-ops password" autoComplete="off" style={{ marginBottom: 8 }} />
               )}
               <div style={{ display: "flex", gap: 8 }}>
-                <input className="input" type="password" value={adminNew} onChange={(e) => setAdminNew(e.target.value)} placeholder={elevatedConfigured ? "New destructive-ops password" : "Set destructive-ops password"} autoComplete="new-password" />
+                <input id="edit-admin-password" className="input" type="password" value={adminNew} onChange={(e) => setAdminNew(e.target.value)} placeholder={elevatedConfigured ? "New destructive-ops password" : "Set destructive-ops password"} autoComplete="new-password" />
                 <button type="button" className="btn" disabled={adminSaving} onClick={handleSetAdminPassword}>
                   {adminSaving ? "Saving…" : (elevatedConfigured ? "Update" : "Set")}
                 </button>
@@ -1188,7 +1195,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
               alongside `.row`, so this needs no new CSS. */}
           <div className="row-3">
             <div className="field">
-              <label className="field__label">Display name</label>
+              <label className="field__label" htmlFor="create-display-name">Display name</label>
               {/* Placeholder shows the REAL default (deriveCompetitionName("", kind)), not
                   an example, and tracks the live `kind` toggle so it flips
                   Individual/Teams as the operator picks. A blank name is a
@@ -1201,11 +1208,11 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                   "Individual" already exists...` - naming a value the operator
                   never typed, with the field still visibly empty. The naming
                   example moved to the hint below so this slot can tell the truth. */}
-              <input className="input" placeholder={deriveCompetitionName("", kind)} value={name} onChange={(e) => { setName(e.target.value); setError(""); }} />
+              <input id="create-display-name" className="input" placeholder={deriveCompetitionName("", kind)} value={name} onChange={(e) => { setName(e.target.value); setError(""); }} />
               <div className="field__hint">Example: Men's Individual</div>
             </div>
             <div className="field">
-              <label className="field__label">Day</label>
+              <label className="field__label" htmlFor="create-day">Day</label>
               {/* When the tournament has a start date and durationDays, offer */}
               {/* a select over the derived day list so the competition date */}
               {/* is always within the tournament's range. For a single-day */}
@@ -1216,6 +1223,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                 if (days.length > 0) {
                   return (
                     <select
+                      id="create-day"
                       className="input"
                       value={date}
                       onChange={(e) => setDate(e.target.value)}
@@ -1228,14 +1236,14 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                 }
                 // Fallback: tournament has no date yet: free date picker.
                 return (
-                  <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(date)} onChange={(e) => setDate(isoToDmy(e.target.value))} />
+                  <input id="create-day" className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(date)} onChange={(e) => setDate(isoToDmy(e.target.value))} />
                 );
               })()}
               <div className="field__hint">For multi-day tournaments, specify which day this competition takes place.</div>
             </div>
             <div className="field">
-              <label className="field__label">Start time</label>
-              <input className="input" type="time" value={startTime} onChange={(e) => { startTimeEditedRef.current = true; setStartTime(e.target.value); }} />
+              <label className="field__label" htmlFor="create-start-time">Start time</label>
+              <input id="create-start-time" className="input" type="time" value={startTime} onChange={(e) => { startTimeEditedRef.current = true; setStartTime(e.target.value); }} />
             </div>
           </div>
 
@@ -1319,23 +1327,20 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                   operator ruling: no federation names anywhere in this UI. */}
               {extraQualifiersRadioVisible(format, poolMode) && (
                 <div className="field">
-                  <label className="field__label">{LABEL_EXTRA_QUALIFIERS}</label>
-                  <div className="radio-group">
-                    <button
-                      className={`radio-pill ${extraQualifiers === EXTRA_QUALIFIERS_STANDARD ? "is-active" : ""}`}
-                      type="button"
+                  <label className="field__label" id="create-extra-qualifiers-label">{LABEL_EXTRA_QUALIFIERS}</label>
+                  <div className="radio-group" role="group" aria-labelledby="create-extra-qualifiers-label">
+                    <PillButton
+                      active={extraQualifiers === EXTRA_QUALIFIERS_STANDARD}
                       onClick={() => setExtraQualifiers(EXTRA_QUALIFIERS_STANDARD)}
-                    >{extraQualifiersLabel(EXTRA_QUALIFIERS_STANDARD)}</button>
-                    <button
-                      className={`radio-pill ${extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS ? "is-active" : ""}`}
-                      type="button"
+                    >{extraQualifiersLabel(EXTRA_QUALIFIERS_STANDARD)}</PillButton>
+                    <PillButton
+                      active={extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS}
                       onClick={() => { setExtraQualifiers(EXTRA_QUALIFIERS_LARGER_POOLS); setWinners((w) => winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_LARGER_POOLS, w)); }}
-                    >{extraQualifiersLabel(EXTRA_QUALIFIERS_LARGER_POOLS)}</button>
-                    <button
-                      className={`radio-pill ${extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET ? "is-active" : ""}`}
-                      type="button"
+                    >{extraQualifiersLabel(EXTRA_QUALIFIERS_LARGER_POOLS)}</PillButton>
+                    <PillButton
+                      active={extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET}
                       onClick={() => { setExtraQualifiers(EXTRA_QUALIFIERS_FILL_BRACKET); setWinners((w) => winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_FILL_BRACKET, w)); }}
-                    >{extraQualifiersLabel(EXTRA_QUALIFIERS_FILL_BRACKET)}</button>
+                    >{extraQualifiersLabel(EXTRA_QUALIFIERS_FILL_BRACKET)}</PillButton>
                   </div>
                   <div className="field__hint">
                     {extraQualifiersHint(extraQualifiers, poolSize)}
@@ -1390,10 +1395,10 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           )}
 
           <div className="field">
-            <label className="field__label">{LABEL_COURTS}</label>
-            <div className="radio-group">
+            <label className="field__label" id="create-courts-label">{LABEL_COURTS}</label>
+            <div className="radio-group" role="group" aria-labelledby="create-courts-label">
               {safeCourts.map((cc) => (
-                <button key={cc} className={`radio-pill ${selectedCourts.includes(cc) ? "is-active" : ""}`} type="button" onClick={() => toggleCourt(cc)}>Shiaijo (court) {cc}</button>
+                <PillButton key={cc} active={selectedCourts.includes(cc)} onClick={() => toggleCourt(cc)}>Shiaijo (court) {cc}</PillButton>
               ))}
             </div>
             {/* Same component the competition Settings screen renders, so the

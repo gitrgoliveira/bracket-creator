@@ -197,6 +197,19 @@ func (e *Engine) lineupRuleOrNone(caller, compID string, knockout bool, poolMatc
 	return newLineupRuleFrom(lineups, poolMatches, bracket, knockout)
 }
 
+// readLineupRule calls read with the rule built like lineupRuleOrNone's, over
+// the stored lineups where they are cached (ReadTeamLineups, no copy), and
+// hands back a lineups.yaml that cannot be read as an error. read must not
+// modify a lineup the rule holds, nor keep the rule after it returns. The
+// kachinuki roster read (KachinukiRoster) uses it: a read that answered "no
+// lineup" over a file it could not read would tell the operator a side has no
+// lineup when it may.
+func (e *Engine) readLineupRule(compID string, knockout bool, poolMatches []state.MatchResult, bracket *state.Bracket, read func(rule *lineupRule)) error {
+	return e.store.ReadTeamLineups(compID, func(lineups map[string]domain.TeamLineup) {
+		read(newLineupRuleFrom(lineups, poolMatches, bracket, knockout))
+	})
+}
+
 // LineupInForce returns the lineup the team with participant id teamID fields
 // at match matchID, and where it was saved. Found is false when the team has
 // no saved lineup that applies. The lineup is a copy of the stored one.

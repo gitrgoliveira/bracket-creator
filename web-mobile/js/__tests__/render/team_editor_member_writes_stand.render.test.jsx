@@ -176,6 +176,25 @@ describe('team editor: a members read that predates the sheet\'s own write does 
     expect(notices(container)[0].textContent).toBe('Ito is already at Senpo.');
   });
 
+  // A team whose positions have no FIK names words the refusal as the at-court panel
+  // and the Lineups page do ("Position N", lineupPositionLabel), never by the bare key,
+  // and names the position the member holds, here the LATER one, not the row typed into.
+  it('on a three-person team, names the position the member holds as "Position N"', async () => {
+    const before = teams(blank('b'));
+    const { container } = await mountWithSecondReadOut(before, teamMatch({ teamSize: 3 }));
+
+    await typeName(bout(container, 1, 'shiro'), 'Ito');
+    expect(window.API.renameTeamMember).toHaveBeenCalledWith('comp1', 'team-B', 'b2', 'Ito', '');
+    await act(async () => { memberReads[1](before); });
+    await flush();
+    await typeName(bout(container, 0, 'shiro'), 'Ito');
+
+    expect(window.API.addTeamMember).not.toHaveBeenCalled();
+    expect(window.API.renameTeamMember).toHaveBeenCalledTimes(1);
+    expect(notices(container)).toHaveLength(1);
+    expect(notices(container)[0].textContent).toBe('Ito is already at Position 2.');
+  });
+
   it('keeps the member the sheet added, with its number', async () => {
     const before = teams(SHIRO_NAMED);
     const { container } = await mountWithSecondReadOut(before);

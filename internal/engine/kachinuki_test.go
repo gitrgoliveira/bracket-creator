@@ -409,6 +409,7 @@ func TestAdvanceKachinukiUnrecognizedOutcome(t *testing.T) {
 	})
 	assert.Nil(t, res.Next)
 	assert.False(t, res.MatchEnded)
+	assert.True(t, res.OutcomeUnread)
 }
 
 // TestDescribeKachinukiResult smoke-tests the stringer (used by handler logs).
@@ -933,7 +934,8 @@ func TestKachinukiRemainingRoster_MatchesALineupByTheSidesParticipantID(t *testi
 	t.Run("a lineup stored under the id is the side's, though one under its name sits beside it", func(t *testing.T) {
 		parent := &state.MatchResult{ID: "P1-0", SideA: "Ryu", SideAID: "red-id", SideB: "Tora", SideBID: "white-id", SubResults: bouts}
 
-		remainingA, remainingB, ok := kachinukiRemainingRoster(comp, parent, ruleOver(lineups, nil, nil))
+		remainingA, remainingB, foundA, foundB := kachinukiRemainingRoster(comp, parent, ruleOver(lineups, nil, nil))
+		ok := foundA || foundB
 
 		require.True(t, ok, "Red's lineup resolves")
 		assert.Equal(t, fighters("R-1", "R-2", "R-3"), remainingA)
@@ -943,7 +945,8 @@ func TestKachinukiRemainingRoster_MatchesALineupByTheSidesParticipantID(t *testi
 	t.Run("a side with no id has no lineup, whatever is stored", func(t *testing.T) {
 		parent := &state.MatchResult{ID: "P1-0", SideA: "Ryu", SideB: "Tora", SubResults: bouts}
 
-		_, _, ok := kachinukiRemainingRoster(comp, parent, ruleOver(lineups, nil, nil))
+		_, _, foundA, foundB := kachinukiRemainingRoster(comp, parent, ruleOver(lineups, nil, nil))
+		ok := foundA || foundB
 
 		assert.False(t, ok, "no side carries an id, so no lineup resolves")
 	})
@@ -3968,9 +3971,10 @@ func TestKachinukiRemainingRoster_BoutLogBranchKeepsANamesakeWithADistinctID(t *
 		},
 	}
 
-	// The third return is "a lineup resolved it", which is false here by
-	// construction; the roster itself is what this pins.
-	remainingA, _, _ := kachinukiRemainingRoster(comp, parent, &lineupRule{})
+	// The third and fourth returns say whether a lineup resolved side A and
+	// side B, both false here by construction; the roster itself is what
+	// this pins.
+	remainingA, _, _, _ := kachinukiRemainingRoster(comp, parent, &lineupRule{})
 
 	ids := make([]string, 0, len(remainingA))
 	for _, f := range remainingA {
@@ -3995,7 +3999,8 @@ func TestKachinukiRemainingRoster_BoutLogBranchTakesEachSidesOwnColumn(t *testin
 		},
 	}
 
-	remainingA, remainingB, ok := kachinukiRemainingRoster(comp, parent, &lineupRule{})
+	remainingA, remainingB, foundA, foundB := kachinukiRemainingRoster(comp, parent, &lineupRule{})
+	ok := foundA || foundB
 
 	assert.False(t, ok, "no lineup resolved it")
 	assert.Equal(t, fighters("A-1"), remainingA)
@@ -4086,4 +4091,40 @@ func TestMaybeAdvanceKachinuki_AdvancesOffABoutFoughtEntirelyByNumber(t *testing
 	// which is the failure winner-stays-on exists to prevent.
 	assert.Equal(t, "red-1", post.BoutLog[1].SideAMemberID, "the winner stays on, by id")
 	assert.Equal(t, "white-2", post.BoutLog[1].SideBMemberID, "the next White member comes in, by id")
+}
+
+// kachinukiRemainingRoster is a TEST helper: it composes the advance's own
+// queues (kachinukiRosterQueues) with RetiredPlayersFromBoutLog the way the
+// advance does, so the tests below pin that composition. It derives the
+// remaining un-retired roster per side
+// for a team match. Returns (sideA, sideB, foundA, foundB): found is per
+// side, true when that side's roster was resolved from a saved TeamLineup and
+// false when it fell back to the bout-log-only heuristic. The advance logs
+// foundA || foundB. The queues come from kachinukiRosterQueues, which the
+// advisory read (KachinukiRoster) builds from too.
+//
+// A lineup in force that fields nobody (a match's own empty lineup,
+// positions: {}) is FOUND here and yields an empty queue, so the advance reads
+// that side as exhausted and appends nothing; the advisory read instead
+// reports such a side as having no lineup (see KachinukiRosterSide).
+//
+// Priority per side (GAP 1 / GAP 2a):
+//  1. The lineup in force for the side's team at this match (see
+//     lineup_in_force.go: the match's own lineup, else the one the team
+//     carries from its previous match or round), matched by the side's
+//     participant id; a side with no id has none.
+//  2. Bout-log-only heuristic (anyone who appeared in a bout, minus retired).
+//
+// The full ordered roster (from lineup.OrderedMembers, bc-tmid pass 2) is
+// filtered by IsMemberRetired against RetiredPlayersFromBoutLog's sets to
+// produce the remaining queue, so a lineup-resolved fighter's member id
+// (when the slot has one) rather than their possibly-stale name decides
+// whether they have retired -- falling back to the name only where the
+// retiring bout row carried no id to match against and the name belongs to
+// one member of this roster alone. See IsMemberRetired for why both tiers
+// are needed and what the gate protects.
+func kachinukiRemainingRoster(comp *state.Competition, parent *state.MatchResult, rule *lineupRule) (remainingA, remainingB []kachinukiFighter, foundA, foundB bool) {
+	queueA, queueB := kachinukiRosterQueues(comp, parent, rule)
+	retiredA, retiredB := RetiredPlayersFromBoutLog(parent.SubResults, parent.SideA, parent.SideB)
+	return queueA.remaining(retiredA), queueB.remaining(retiredB), queueA.found, queueB.found
 }

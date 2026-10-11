@@ -298,11 +298,11 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
             {(tournament.competitions || []).map((cc) => <option key={cc.id} value={cc.id}>{cc.name}</option>)}
           </select>
         )}
-        <div className="seg">
-          <button type="button" className={statusFilter === "all" ? "is-active" : ""} onClick={() => setStatusFilter("all")}>All</button>
-          <button type="button" className={statusFilter === "running" ? "is-active" : ""} onClick={() => setStatusFilter("running")}>Now</button>
-          <button type="button" className={statusFilter === "scheduled" ? "is-active" : ""} onClick={() => setStatusFilter("scheduled")}>Scheduled</button>
-          <button type="button" className={statusFilter === "complete" ? "is-active" : ""} onClick={() => setStatusFilter("complete")}>Completed</button>
+        <div className="seg" role="group" aria-label="Match status">
+          <button type="button" aria-pressed={statusFilter === "all"} className={statusFilter === "all" ? "is-active" : ""} onClick={() => setStatusFilter("all")}>All</button>
+          <button type="button" aria-pressed={statusFilter === "running"} className={statusFilter === "running" ? "is-active" : ""} onClick={() => setStatusFilter("running")}>Now</button>
+          <button type="button" aria-pressed={statusFilter === "scheduled"} className={statusFilter === "scheduled" ? "is-active" : ""} onClick={() => setStatusFilter("scheduled")}>Scheduled</button>
+          <button type="button" aria-pressed={statusFilter === "complete"} className={statusFilter === "complete" ? "is-active" : ""} onClick={() => setStatusFilter("complete")}>Completed</button>
         </div>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--ink-3)" }}>{pluralize(filtered.length, "match", "matches")}</span>
       </div>

@@ -11,27 +11,10 @@
 // learn the term via the tooltip; /glossary is the deep-context page.
 
 import { GLOSSARY, lookupTerm } from './glossary_data.js';
+// Stable per-component ID for aria-describedby: stable_id.jsx owns it.
+import { useStableId } from './stable_id.jsx';
 
-const { useState: useStateT, useEffect: useEffectT, useId: useIdT, useRef: useRefT } = React;
-
-// Stable per-component ID for aria-describedby. useId is React 18+;
-// preact/compat aliases it to a deterministic-per-mount counter so the
-// ARIA wiring stays valid across re-renders without depending on the
-// child text. Falls back to a Math.random suffix for the very old
-// preact/compat build that pre-dates useId (defensive: current
-// vendored build has it).
-function useStableId(prefix) {
-  if (typeof useIdT === 'function') {
-    const id = useIdT();
-    return `${prefix}-${id}`;
-  }
-  // Fallback path: deterministic per first render only.
-  const ref = useRefT(null);
-  if (!ref.current) {
-    ref.current = `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
-  }
-  return ref.current;
-}
+const { useState: useStateT, useEffect: useEffectT, useRef: useRefT } = React;
 
 // Parse a tooltip string into [text|term-ref] tokens, then render each
 // term reference as a nested <Term>. We use the term's SeeAlso list to

@@ -25,6 +25,7 @@ func TestMatchGroups_SharedTable(t *testing.T) {
 
 	var table struct {
 		ScalarGroups []string `json:"scalarGroups"`
+		ServerGroups []string `json:"serverGroups"`
 		Bouts        []struct {
 			Position int    `json:"position"`
 			Group    string `json:"group"`
@@ -33,12 +34,19 @@ func TestMatchGroups_SharedTable(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(raw, &table))
 	require.NotEmpty(t, table.ScalarGroups, "table parsed to no scalar groups: it would assert nothing")
+	require.NotEmpty(t, table.ServerGroups, "table parsed to no server groups: it would assert nothing")
 	require.NotEmpty(t, table.Bouts, "table parsed to no bout groups: it would assert nothing")
 	require.NotEmpty(t, table.Invalid, "table parsed to no invalid names: it would assert nothing")
 
 	assert.Equal(t, table.ScalarGroups, ScalarGroups, "the scalar groups and their order")
 	for _, g := range table.ScalarGroups {
 		assert.True(t, ValidGroup(g), "%q is a group", g)
+		assert.False(t, IsServerGroup(g), "%q is a client's group", g)
+	}
+	assert.Equal(t, table.ServerGroups, ServerGroups, "the server groups and their order")
+	for _, g := range table.ServerGroups {
+		assert.True(t, ValidGroup(g), "%q is a group", g)
+		assert.True(t, IsServerGroup(g), "%q is the server's alone", g)
 	}
 	for _, b := range table.Bouts {
 		assert.Equal(t, b.Group, BoutGroup(b.Position))

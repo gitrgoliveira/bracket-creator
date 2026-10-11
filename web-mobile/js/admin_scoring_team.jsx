@@ -159,6 +159,7 @@ import { sideLookupKey } from './competitor_identity.jsx';
 // bc-pnum: the ONE primitive that composes a squad member's visible label
 // ("T10.1"); see its header for why this is never restated inline.
 import { squadMemberLabel } from './squad_member_label.jsx';
+import { kachinukiAdvisoryModel, kachinukiNoPairingText, kachinukiRecordedBoutCloses, kachinukiRosterKey, lastNumberedBout, storedBoutRecorded } from './kachinuki_advisory.jsx';
 
 // Shared inline style for the squad member label riding beside a bout row's
 // fighter name (squadLabelFor, TeamScoreEditorModal below). A muted, small
@@ -331,8 +332,10 @@ export function canReopenKachinukiMatch({ isKachinuki, isComplete, recordedWithd
 // the row the End-match strip (stripTrailingUnscoredKachinukiBouts) would drop,
 // so the button just makes the implicit strip explicit and reversible on the
 // spot. mp-gmcg.
-export function isKachinukiBoutRemovable({ boutMode, currentBoutPlayed, lastScoredIdx }) {
-  return !!boutMode && !currentBoutPlayed && lastScoredIdx >= 0;
+export function isKachinukiBoutRemovable({ boutMode, currentBoutPlayed, lastScoredIdx, hasLiveBout = true }) {
+  // bc-kbrc: with no live bout (the last one recorded, no pairing appended)
+  // there is no empty bout to remove.
+  return !!boutMode && hasLiveBout && !currentBoutPlayed && lastScoredIdx >= 0;
 }
 
 // boutWinnerSide: THE single home for "which side won this sub-bout".
@@ -582,7 +585,7 @@ export function kachinukiBandModel({ subs, daihyosenIdx, isComplete, matchWinner
 // the operator has not scored yet (isPlayedAt on its canonical index in
 // `positions`), else the last one. Completed (correction): every server
 // bout so any of them can be edited.
-export function kachinukiVisiblePositions({ positions, daihyosenIdx, subResults, isComplete, isPlayedAt }) {
+export function kachinukiVisiblePositions({ positions, daihyosenIdx, subResults, isComplete, isPlayedAt, closeRecordedLast = false }) {
   const subs = subResults || [];
   let slots = positions.filter((_, i) => i !== daihyosenIdx && subs.some(sr => sr.position === i + 1));
   if (slots.length === 0 && positions.length > 0 && daihyosenIdx !== 0) {
@@ -590,9 +593,23 @@ export function kachinukiVisiblePositions({ positions, daihyosenIdx, subResults,
   }
   const daihyosenSlot = daihyosenIdx >= 0 ? [positions[daihyosenIdx]] : [];
   if (isComplete) return [...slots, ...daihyosenSlot];
-  let cur = slots.length - 1;
+  let cur = -1;
   for (let i = 0; i < slots.length; i++) {
     if (!isPlayedAt(positions.indexOf(slots[i]))) { cur = i; break; }
+  }
+  if (cur < 0) {
+    // Every bout is played. bc-kbrc: when Record bout has recorded the last
+    // one as a WIN (the server's stored mark) and appended no pairing, there
+    // is no live bout: the recorded one renders read-only with the others. A
+    // recorded DRAW never closes it (kachinukiRecordedBoutCloses: Encho on that
+    // bout is the operator's call in any phase). A bout added by hand is a
+    // placeholder with no mark, so it is the live bout again.
+    const last = lastNumberedBout(subs);
+    if (closeRecordedLast && last && slots.includes(positions[last.position - 1])
+      && kachinukiRecordedBoutCloses(subs)) {
+      return daihyosenSlot;
+    }
+    cur = slots.length - 1;
   }
   return [...slots.slice(cur, cur + 1), ...daihyosenSlot];
 }
@@ -979,8 +996,22 @@ const NO_LINEUPS = { a: null, b: null };
 // side, whenever it answers. The side then reads as never read, so a pick on it
 // is refused when the new team's read fails, never checked against or shown on
 // the old team's lineup.
+const NO_SERVED_LINEUPS = { a: "", b: "" };
+// A lineup as the stored-lineup readers compare it: the positions and their member ids.
+const servedLineupKey = (lineup) => JSON.stringify([lineup?.positions || null, lineup?.memberIds || null]);
+
 function useMatchLineups(compId, matchId) {
   const [lineups, setLineups] = useStateA(NO_LINEUPS);
+  // Whether the first read of both sides has settled (landed, read nothing, or
+  // failed), for a reader that should wait for the lineups rather than read
+  // once without them and again with them (the kachinuki advisory line). A
+  // side given another team clears it until the new team's read has settled.
+  const [settled, setSettled] = useStateA(false);
+  // Each side's lineup as the SERVER last answered it (a read, or a save that
+  // landed), as a comparable string: what a reader of the stored lineups (the
+  // kachinuki advisory line) keys on. A save that only reached the outbox does
+  // not move it; the read made once that save lands and is announced does.
+  const [served, setServed] = useStateA(NO_SERVED_LINEUPS);
   const syncRef = useRefA(null);
 
   useEffectA(() => {
@@ -994,16 +1025,29 @@ function useMatchLineups(compId, matchId) {
       writing: { a: 0, b: 0 },
       announced: { a: false, b: false },
       held: { a: null, b: null },
+      // The newest server answer taken into `served`, per side (a read's or a write's seq).
+      servedSeq: { a: 0, b: 0 },
+      // Raised by every start and every drop: only the latest start settles the reads.
+      startGen: 0,
     };
     syncRef.current = sync;
     setLineups(NO_LINEUPS);
+    setServed(NO_SERVED_LINEUPS);
+    setSettled(false);
 
     const isRead = (side) => sync.landed[side] > 0;
+    const serve = (side, seq, lineup) => {
+      if (seq < sync.servedSeq[side]) return;
+      sync.servedSeq[side] = seq;
+      const key = servedLineupKey(lineup);
+      setServed(prev => (prev[side] === key ? prev : { ...prev, [side]: key }));
+    };
     // Rejects when the lineup cannot be read: each caller decides what that means.
     const read = async (side, teamId) => {
       const seq = ++sync.began[side];
       const epoch = sync.epoch[side];
       const lineup = await resolveMatchLineup(compId, teamId, matchId, window.API, { throwOnError: true });
+      if (sync.alive && epoch === sync.epoch[side]) serve(side, seq, lineup);
       const keepsHeld = isRead(side) && matchLineupSaveQueued(compId, teamId, matchId);
       if (sync.alive && epoch === sync.epoch[side] && seq >= sync.landed[side] && !keepsHeld) {
         sync.landed[side] = seq;
@@ -1018,18 +1062,24 @@ function useMatchLineups(compId, matchId) {
     );
     sync.start = (teamIds) => {
       sync.teamIds = teamIds;
-      return Promise.all(LINEUP_SIDES.map(side => refresh(side)));
+      const gen = ++sync.startGen;
+      // refresh never rejects, so this settles once both first reads have.
+      return Promise.all(LINEUP_SIDES.map(side => refresh(side))).then(() => {
+        if (sync.alive && gen === sync.startGen) setSettled(true);
+      });
     };
     // The side is given another team: nothing of the old team's lineup stays on it, and
     // no read or write still out for the old team lands, whenever it answers. No team
     // is read for the side until start names the new one, and until its lineup lands
-    // the side reads as never read.
+    // the side reads as never read, and the reads are not settled.
     sync.drop = (side) => {
       sync.epoch[side] += 1;
       sync.landed[side] = 0;
       sync.held[side] = null;
       sync.teamIds[side] = "";
+      sync.startGen += 1;
       setLineups(prev => ({ ...prev, [side]: null }));
+      setSettled(false);
     };
     // Asks whether the side was given another team since now: the one counter that says
     // so, which a pick (or a rename) that waits on the server checks when it answers.
@@ -1045,11 +1095,14 @@ function useMatchLineups(compId, matchId) {
         isRead: () => isRead(side),
         read: (teamId) => read(side, teamId),
         held: () => sync.held[side],
-        set: (lineup) => {
+        // fromServer: the lineup is the server's answer to a save that landed,
+        // not the pick shown on the lineup held while the save is queued.
+        set: (lineup, { fromServer = false } = {}) => {
           if (!sync.alive || epoch !== sync.epoch[side]) return;
           // A read still out began before this write: it must not put the old lineup back.
           sync.landed[side] = ++sync.began[side];
           sync.held[side] = lineup;
+          if (fromServer) serve(side, sync.landed[side], lineup);
           setLineups(prev => ({ ...prev, [side]: lineup }));
         },
         end: () => {
@@ -1091,6 +1144,10 @@ function useMatchLineups(compId, matchId) {
   return {
     lineupA: lineups.a,
     lineupB: lineups.b,
+    // Both sides' first reads have settled (see settled above).
+    lineupsSettled: settled,
+    // Both sides' lineups as the server last answered them (see served above).
+    servedLineupsKey: `${served.a}#${served.b}`,
     // Reads both sides at once, once the competition has said which teams they are.
     startLineupReads: (teamIds) => syncRef.current.start(teamIds),
     beginLineupWrite: (side) => syncRef.current.beginWrite(side),
@@ -1313,7 +1370,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // T131: lineup data so each bout cell can show the assigned player
   // name + canonical position label. Falls back gracefully when the
   // lineup hasn't been submitted yet (saved: false -> null, bc-k404).
-  const { lineupA, lineupB, startLineupReads, beginLineupWrite, watchLineupSide, dropLineup } = useMatchLineups(m.compId, m.id);
+  const { lineupA, lineupB, lineupsSettled, servedLineupsKey, startLineupReads, beginLineupWrite, watchLineupSide, dropLineup } = useMatchLineups(m.compId, m.id);
   // bc-pnum gap closure: each side's squad, so the inline lineup picker
   // below (submitInlineLineup / buildInlineLineupWrite) can resolve a
   // name typed or picked in THIS modal to its squad member id -- this is
@@ -2068,7 +2125,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // A write that landed answers the whole lineup the server holds now, shown as
       // it is. One that only reached the outbox answers none: the pick is shown on
       // the lineup held, until the server's own announcement is read.
-      write.set(answer && answer.queued ? { ...current, positions: shown, memberIds: shownIds } : answer);
+      write.set(
+        answer && answer.queued ? { ...current, positions: shown, memberIds: shownIds } : answer,
+        { fromServer: !(answer && answer.queued) },
+      );
       // A lineup that only reached the outbox is held on this device, not saved: say
       // so in the row, the way every held write is worded (queuedNotice also tells
       // when the browser could not store it), and leave out the warning below, which
@@ -2564,8 +2624,106 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // always-visible daihyosen slot); fixed-format matches keep all positions.
   // Computed once here and shared by the Record-bout guard below and the
   // render body.
+  // bc-kfnl (operator ruling 2026-09-24): the advisory line above the live bout,
+  // each side's fighter on, fighters left and who is next. The queue is read from
+  // the server (engine.KachinukiRoster, the same call that appends the next
+  // pairing, which also picks out each side's fighter on) and keyed on a VALUE,
+  // never on `m`, which every broadcast re-creates: the match id, the bout
+  // log's fighters and recorded marks, and the result of every bout the server
+  // reads one from, i.e. not the live bout's until Record bout records it
+  // (kachinukiRosterKey: the server keeps both fighters of the bout being
+  // fought on whatever its score, so a live point reads nothing, and Record
+  // bout, which marks the bout recorded even when a side has nobody left and
+  // nothing is appended, re-reads once), and the two lineups AS THE SERVER LAST
+  // ANSWERED THEM (servedLineupsKey: the roster is read from the stored
+  // lineups, so a save that only reached the outbox reads nothing until it
+  // lands, and then once). The first read waits until both lineup reads have
+  // settled (lineupsSettled, which a side given another team clears until its
+  // new team's lineup is read), so a mount reads once rather than once before
+  // and once after its lineups land. A roster read for another key is not shown, so the
+  // line never lags a recorded bout. A failed read is null
+  // (fetchKachinukiRoster never throws) and shows no line; it keeps the last
+  // answer for the closing below. It feeds no verdict
+  // and does not arm End match. Its one other reader is the closing of a
+  // recorded last bout (bc-kbrc, coordinator decision 2026-10-11): only when
+  // this read says a side's lineup has nobody left does the bout Record bout
+  // recorded turn read-only, with the line naming that side; with no lineup,
+  // or before the read lands, the bout stays live exactly as before.
+  const kachinukiRosterReadKey = kachinukiBoutMode && m.compId && m.id && lineupsSettled
+    ? `${kachinukiRosterKey(m.id, m.subResults)}#${servedLineupsKey}`
+    : "";
+  // The stored log's last numbered bout when Record bout has recorded it, as
+  // `${matchId}|${position}`, else "": the bout a kept roster answer may close.
+  const kachinukiRecordedLastKey = (() => {
+    const last = lastNumberedBout(m.subResults);
+    return last && last.recorded === true ? `${m.compId || ""}|${m.id || ""}|${last.position}` : "";
+  })();
+  const [kachinukiRoster, setKachinukiRoster] = useStateA(null);
+  useEffectA(() => {
+    const api = window.API;
+    // No read to make (not in bout mode, the lineups not settled): the last
+    // answer is kept, it is only shown for the key it was read for and only
+    // closes a bout of the match it was read for (below).
+    if (!kachinukiRosterReadKey || !api || typeof api.fetchKachinukiRoster !== "function") {
+      return undefined;
+    }
+    let live = true;
+    const key = kachinukiRosterReadKey;
+    const closesKey = kachinukiRecordedLastKey;
+    Promise.resolve()
+      .then(() => api.fetchKachinukiRoster(m.compId, m.id))
+      .then(
+        // A failed read (null, or a rejection) keeps the previous answer.
+        (roster) => { if (live && roster) setKachinukiRoster({ key, closesKey, roster }); },
+        () => {},
+      );
+    return () => { live = false; };
+  }, [kachinukiRosterReadKey, m.compId]);
+  // The roster read for the bout log on screen, or null (none, failed, or a
+  // read for another key still out). The advisory line shows only this one, so
+  // it never lags a recorded bout.
+  const kachinukiRosterShown = kachinukiRoster && kachinukiRoster.key === kachinukiRosterReadKey
+    ? kachinukiRoster.roster : null;
+  // bc-kbrc, review round 3: what closes a recorded last bout is the last
+  // answer that LANDED for that same recorded bout of this match, kept while a
+  // newer read is out or after one fails (stale-while-revalidate), so a lineup
+  // re-read never reopens the bout under the operator's finger. Only a read
+  // that lands with another answer changes it. The stored log decides first,
+  // at once: an answer is kept only for the recorded last bout it was read
+  // for, so a bout un-recorded or removed, another match, or a new live row is
+  // decided from the stored data whatever the kept answer said.
+  const kachinukiRosterForClose = kachinukiRosterShown
+    || (kachinukiRoster && kachinukiRecordedLastKey && kachinukiRoster.closesKey === kachinukiRecordedLastKey
+      ? kachinukiRoster.roster : null);
+  // bc-kbrc: the words of the no-pairing line, or null when the roster does not
+  // say a side's lineup has nobody left.
+  const kachinukiNoPairing = kachinukiNoPairingText(kachinukiRosterForClose);
+  //
+  // mp-gmcg: [End match] outcome, derived from LOCAL bout state so an
+  // unsaved just-scored bout counts (the operator scores the final bout and
+  // taps End without a Record in between). buildKachinukiEndEntries keeps
+  // exactly the bouts subBoutHasBeenPlayed admits, so End derivation, the
+  // wire filter, and the encho target below all agree on which bout is the
+  // last one. Computed before the rows because a recorded last bout closes
+  // only while End can finish the encounter (bc-kbrc, below).
+  const kachinukiEndOutcome = kachinukiBoutMode
+    ? deriveKachinukiEndOutcome({
+        subResults: buildKachinukiEndEntries(subs, daihyosenIdx),
+        isKnockoutPhase,
+      })
+    : null;
   const visiblePositions = isKachinuki
     ? kachinukiVisiblePositions({
+        // bc-kbrc: Record bout recorded the last bout as a WIN and appended no
+        // pairing, and the roster read says a side's lineup has nobody left:
+        // that bout renders read-only like every other recorded bout. Not
+        // without that read (no lineup, or the read not landed yet: the bout
+        // stays live as it always did, so nothing closes and reopens under the
+        // operator's finger), never on a recorded draw, in any phase (Encho on
+        // that bout is the operator's call; kachinukiVisiblePositions asks
+        // kachinukiRecordedBoutCloses), and not when End match cannot finish
+        // the encounter.
+        closeRecordedLast: kachinukiEndOutcome?.kind !== "blocked" && !!kachinukiNoPairing,
         positions, daihyosenIdx,
         // Client-added manual bouts (mp-gmcg) are not in the server log yet;
         // fold them in as placeholder entries so the new row renders.
@@ -2593,6 +2751,28 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // Tie button swallows taps, and that chain used to end in a silent 200).
   // Disable the button until the CURRENT visible bout carries operator
   // input (points, fouls, fusensho, or an explicit draw).
+  // bc-kbrc: no live bout. Record bout recorded the last bout and no pairing
+  // followed (kachinukiVisiblePositions), so every bout renders read-only, the
+  // footer names who has nobody left and that End match finishes the
+  // encounter, Record bout stays disabled (it would record the same bout
+  // again) and "+ Add next bout manually" is open.
+  const kachinukiNoLiveBout = kachinukiBoutMode && kachinukiCurBoutIdx < 0;
+  // Review rounds 8 and 9: the live bout is stored as recorded and the
+  // server's own Record bout decision says no pairing would follow it
+  // (roster `nextPairing` false: a tie recorded with both sides out stays live,
+  // Encho offered, and so does a recorded win over a side with no lineup).
+  // Record bout would write nothing, so it is disabled until a change of the
+  // bout's result or an encho takes the mark off (the server's merge,
+  // mergeHold.unrecordReopenedBouts), or a lineup saved since makes a pairing
+  // possible. Review round 10: only an answer read for the CURRENT key
+  // (kachinukiRosterShown) disables it. The closing above keeps a stale answer
+  // while a newer read is out or after it fails (stale-while-revalidate); the
+  // disabling must not, or a lineup saved since, whose re-read failed, would
+  // leave Record bout disabled on a `nextPairing: false` read before that save.
+  // Without a current read it stays enabled.
+  const kachinukiCurBoutRecorded = kachinukiBoutMode && kachinukiCurBoutIdx >= 0
+    && storedBoutRecorded(m, Number(positions[kachinukiCurBoutIdx]))
+    && !!kachinukiRosterShown && kachinukiRosterShown.nextPairing === false;
   const kachinukiCurrentBoutPlayed = kachinukiBoutMode
     ? kachinukiCurBoutIdx >= 0 && subBoutHasBeenPlayed(subs[kachinukiCurBoutIdx])
     : true;
@@ -2644,13 +2824,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // exactly the bouts subBoutHasBeenPlayed admits, so End derivation, the
   // wire filter, and the encho target below all agree on which bout is the
   // last one.
+  // (kachinukiEndOutcome itself is computed above visiblePositions, which
+  // reads it.)
   const { armed: endArmed, setArmed: setEndArmed, confirm: confirmEnd } = useArmedConfirm();
-  const kachinukiEndOutcome = kachinukiBoutMode
-    ? deriveKachinukiEndOutcome({
-        subResults: buildKachinukiEndEntries(subs, daihyosenIdx),
-        isKnockoutPhase,
-      })
-    : null;
   // Last LOCALLY-played numbered bout: the encho target (the tied final
   // pairing keeps fighting on that same bout). Same subBoutHasBeenPlayed
   // primitive as the End derivation above, so Encho always lands on the
@@ -2672,6 +2848,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const kachinukiEnchoOffered = kachinukiBoutMode
     && kachinukiEnchoAvailable(kachinukiEndOutcome)
     && kachinukiLastScoredIdx === kachinukiCurBoutIdx;
+  // bc-ktih: the footer's End hint is worked out from the bout End would judge,
+  // the last SCORED bout, so it may speak about that bout only while it IS the
+  // live one. Once Record bout has appended the next pairing, the live bout is
+  // unscored and the footer is about scoring it, whatever the bout before it
+  // ended as: a recorded tie must never make the fresh pairing read "Tied bout".
+  // With nothing scored at all (no-bouts) the End hint keeps its own sentence.
+  const kachinukiLiveBoutAwaitsScore = kachinukiBoutMode
+    && kachinukiCurBoutIdx >= 0
+    && !kachinukiCurrentBoutPlayed
+    && (kachinukiEndOutcome?.kind === "win" || kachinukiEnchoAvailable(kachinukiEndOutcome));
   // Encho on the tied current kachinuki bout: bump THAT bout's overtime count
   // only, then clear the tied outcome so the SAME pair keeps scoring that
   // bout. The encounter is not in overtime (operator ruling 2026-09-24,
@@ -2746,6 +2932,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     boutMode: kachinukiBoutMode,
     currentBoutPlayed: kachinukiCurrentBoutPlayed,
     lastScoredIdx: kachinukiLastScoredIdx,
+    hasLiveBout: !kachinukiNoLiveBout,
   });
   // Position of the current (trailing) visible bout, the removal target
   // (derived from kachinukiCurBoutIdx; only read when kachinukiBoutRemovable,
@@ -3086,6 +3273,40 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     </div>
   ) : null);
 
+  // bc-kfnl: the advisory line (see kachinukiRosterReadKey above), placed after
+  // the read-only fought rows and immediately before the live bout. The fighters
+  // on and the queues behind them are the server's split (KachinukiRoster), and
+  // every fighter is named with their team-member number as the rows name them
+  // (kachinuki_advisory.jsx). Muted text, no warning colour: it is a guide.
+  const renderKachinukiAdvisory = () => {
+    if (!kachinukiBoutMode) return null;
+    const roster = kachinukiRosterShown;
+    // bc-kbrc: no live bout, so the line stands in its place: who has nobody
+    // left and that End match finishes the encounter. A guide, like the
+    // advisory, in the same muted style. There is no live bout only when the
+    // roster named such a side, so the words are always there.
+    if (kachinukiNoLiveBout) {
+      return kachinukiNoPairing ? (
+        <div key="kachinuki-no-pairing" className="kachinuki-advisory" data-testid="kachinuki-no-pairing">
+          {kachinukiNoPairing}
+        </div>
+      ) : null;
+    }
+    if (!roster) return null;
+    const model = kachinukiAdvisoryModel({
+      roster,
+      squadA, squadB,
+      teamNumberA: m.sideA?.number || "",
+      teamNumberB: m.sideB?.number || "",
+    });
+    if (!model) return null;
+    return (
+      <div key="kachinuki-advisory" className="kachinuki-advisory" data-testid="kachinuki-advisory">
+        {model.text}
+      </div>
+    );
+  };
+
   // mp-gmcg: read-only display of a fought kachinuki bout — the SAME
   // team-sub-match layout as the editable bout row (position, Shiro/Aka names,
   // centred ippon-mark slots, winner) minus the controls. Reuses the
@@ -3344,6 +3565,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       if (sideAMemberId) entry.sideAMemberId = sideAMemberId;
       if (sideBMemberId) entry.sideBMemberId = sideBMemberId;
       if (winnerMemberId) entry.winnerMemberId = winnerMemberId;
+      // bc-kfnl: a row never carries the kachinuki `recorded` mark. The server
+      // is its only writer (the "recorded" merge group, which no client write
+      // names) and ignores it on the wire, so the sheet does not send it.
       // mp-4pc: encho + hantei are valid ONLY on the daihyosen
       // (validation.go validateSubBout). daihyosenEnchoFields emits the two
       // independently: encho is optional for a hantei decision.
@@ -4110,6 +4334,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 ? [positions[idx], renderCorrectionWarning(idx)]
                 : [renderReadOnlyBout(idx)]
             )),
+            // bc-kfnl: fighters left and who is next, a guide only.
+            renderKachinukiAdvisory(),
             ...visiblePositions,
           ].filter(Boolean).map((pos, _displayIdx) => {
             // Kachinuki returns a banner element as the first item; pass
@@ -4656,8 +4882,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     className="btn btn--ghost btn--sm"
                     data-testid="kachinuki-add-bout-button"
                     onClick={addManualBout}
-                    disabled={submitting || !kachinukiCurrentBoutPlayed || kachinukiNextManualPos > kachinukiMaxBouts}
-                    title={!kachinukiCurrentBoutPlayed
+                    disabled={submitting || (!kachinukiCurrentBoutPlayed && !kachinukiNoLiveBout) || kachinukiNextManualPos > kachinukiMaxBouts}
+                    title={!kachinukiCurrentBoutPlayed && !kachinukiNoLiveBout
                       ? "Score the current bout first"
                       : kachinukiNextManualPos > kachinukiMaxBouts
                       ? "Bout limit reached"
@@ -4980,7 +5206,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               This replaces the koTieBlocked gating for kachinuki: the
               correction-mode Finish buttons below never see a running
               kachinuki match, so there are no competing hints. */}
-          {kachinukiBoutMode && (kachinukiEndOutcome?.kind === "blocked" || kachinukiEndOutcome?.kind === "draw") && (
+          {kachinukiBoutMode && (kachinukiEndOutcome?.kind === "blocked" || kachinukiEndOutcome?.kind === "draw")
+            && !kachinukiLiveBoutAwaitsScore && !kachinukiNoLiveBout && (
             <div data-testid="kachinuki-end-hint" style={{ fontSize: 12, color: "var(--ink-2)" }}>
               {!kachinukiEnchoAvailable(kachinukiEndOutcome) ? (
                 <span>Nothing recorded yet: score a bout before ending the match.</span>
@@ -5007,9 +5234,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               unreachable on a tablet (critique P2). Shown only in the common
               "winner stays, next bout pending" state the blocked/draw hints
               above do not cover; it clears the moment the bout is scored. */}
-          {kachinukiBoutMode && !kachinukiCurrentBoutPlayed && kachinukiEndOutcome?.kind === "win" && (
+          {kachinukiLiveBoutAwaitsScore && (
             <div data-testid="kachinuki-record-hint" style={{ fontSize: 12, color: "var(--ink-2)" }}>
-              <span>Score this bout to enable <strong>Record bout</strong>, or <strong>End match</strong> to finish on the last scored bout.</span>
+              {kachinukiEndOutcome?.kind === "blocked" ? (
+                <span>Score this bout to enable <strong>Record bout</strong>. No draws in a knockout: <strong>End match</strong> needs a bout with a point.</span>
+              ) : (
+                <span>Score this bout to enable <strong>Record bout</strong>, or <strong>End match</strong> to finish on the last scored bout.</span>
+              )}
             </div>
           )}
           {/* mp-gmcg: a reopen's outcome: its notice, its error, and the
@@ -5169,8 +5400,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     // banner for a queued write; returning nothing hid it.
                     return res;
                   });
-                }} disabled={submitting || !kachinukiCurrentBoutPlayed}
-                  title={!kachinukiCurrentBoutPlayed ? "Nothing recorded for this bout yet" : undefined}>
+                }} disabled={submitting || !kachinukiCurrentBoutPlayed || kachinukiCurBoutRecorded}
+                  title={kachinukiNoLiveBout ? "Bout recorded: no next pairing"
+                    : kachinukiCurBoutRecorded ? "Bout recorded"
+                    : !kachinukiCurrentBoutPlayed ? "Nothing recorded for this bout yet" : undefined}>
                   {submitting ? "Saving…" : "Record bout"}
                 </button>
                 {/* Encho sits BESIDE End match (critique P2): it is End's

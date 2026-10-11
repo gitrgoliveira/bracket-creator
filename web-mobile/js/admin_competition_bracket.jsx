@@ -238,6 +238,12 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
     () => (bracket?.rounds && window.buildDisplayModel ? window.buildDisplayModel(bracket.rounds) : { hasMeta: false, matchNumById: null }),
     [bracket]
   );
+  // The 3rd-place card's empty sides ("Loser of M<n>"), numbered from the same
+  // display model and memoised with it, so MatchCard's memo holds across renders.
+  const bronzeEmptyLabels = React.useMemo(
+    () => (bracket?.rounds && window.bronzeSlotLabels ? window.bronzeSlotLabels(bracket.rounds, displayModel.matchNumById) : undefined),
+    [bracket, displayModel]
+  );
   const matchMeta = (matchId) => {
     if (!matchId || !bracket?.rounds) return { matchNum: null, roundName: null };
     const cols = displayModel.hasMeta ? displayModel.columns : bracket.rounds;
@@ -373,6 +379,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
                       showDojo={tweaks.showDojo}
                       highlighted={isHighlighted}
                       onClick={isReady ? () => select(bm, -1, 0) : undefined}
+                      emptyLabels={bronzeEmptyLabels}
                     />
                   </div>
                 </div>

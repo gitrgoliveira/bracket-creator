@@ -57,7 +57,7 @@ describe('ViewerCompetition bronze / 3rd-place match rendering (mp-gy6g)', () =>
     'BracketTree', 'MatchCard', 'buildBracket', 'roundLabel', 'bracketRoundLabel', 'formatIpponsScore',
     'isHikiwake', 'hasBothSides', 'compareDmy',
     'queueLabel', 'queueLabelCompact', 'teamIVScore', 'matchScoreStr',
-    'EmptyState', 'bronzeUnderFinalStyle',
+    'EmptyState', 'bronzeUnderFinalStyle', 'bronzeSlotLabels',
   ];
 
   const mkComp = (overrides = {}) => ({
@@ -141,6 +141,8 @@ describe('ViewerCompetition bronze / 3rd-place match rendering (mp-gy6g)', () =>
     // bronzeUnderFinalStyle returns the inline size/offset style for the bronze
     // section (real impl in bracket.jsx); a no-op object is enough for render.
     global.window.bronzeUnderFinalStyle = () => ({});
+    // bronzeSlotLabels names the bronze's empty sides (real impl in bracket.jsx).
+    global.window.bronzeSlotLabels = () => ({ a: 'TBD', b: 'TBD' });
 
     vi.resetModules();
     ({ ViewerCompetition } = await import('../viewer.jsx'));

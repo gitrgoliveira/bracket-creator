@@ -69,6 +69,8 @@ A correction made while offline never carries a confirmation with it. If it reac
 
 A knockout final cannot be called until the earlier bouts that feed it are scored. While it is still waiting, it appears under a **Later** heading with a **Waiting** tag. Its competitors read "Winner of …" until the feeding bouts are known.
 
+The 3rd-place match waits there too until both semi-finals are scored. A side still waiting reads "Loser of" and the semi-final's match number (for example, `Loser of M5`); once both semi-finals are scored, it moves to your queue as the 3rd-place match. It has no **Run now**: its competitors are the semi-finals' losers, so use the final's **Run now** (refer to [Run a match before results have synced](#run-a-match-before-results-have-synced)), on the court where the final is scheduled, to record both semi-final winners, which also places their losers here.
+
 You cannot start a match that has no confirmed competitors. The Later heading lets you see that more play is scheduled for your court, so the queue never appears empty when further matches are still pending.
 
 ## Refresh the court view
@@ -120,10 +122,10 @@ On a tied bout you also decide what the tie means, according to the [kachinuki m
 
 - **Record bout** retires both fighters. Under the taisho rule a Taisho who draws stays on, and **Record bout** pairs them with the next opponent automatically.
 - **Encho** keeps the same pair fighting when the pairing must produce a result. It is available in any stage.
-- **End match** records a drawn encounter in pools or leagues. In a knockout a tied last bout cannot end the match, so continue with **Record bout** or **Encho**.
+- **End match** records a drawn encounter in pools or leagues. In a knockout a tied last bout cannot end the match, so continue with **Record bout** or **Encho**. When both teams have nobody left, **Record bout** adds no pairing: use **Encho**, or **Add next bout manually** if a team has another fighter.
 
 If you finish too early, open the completed match and use **Reopen match** to carry on. Reopening takes a single tap, and ending the match again asks for no reason. The bouts you have already fought stay on screen as read-only rows above the current bout. The encounter reads like a regular team sheet, and you can check the winner-stays-on order at a glance. **× Remove this bout** takes back an unscored pairing the app added by mistake without ending the encounter.
 
 To fix a bout you have already recorded, tap its row: it reopens in place with the scoring controls. If your change flips who won, the app flags the later bouts for you to check. Refer to [Scoring a kachinuki encounter](../organisers/team-tournaments.md#scoring-a-kachinuki-encounter) for the full flow.
 
-![The kachinuki score editor: the one-line Kachinuki (winner stays on) note above the bout list, the bouts already fought shown as read-only rows above the current bout (which carries the ippon buttons for each side), the × Remove this bout undo, and the Record bout and End match footer actions.](../../screenshots/kachinuki-scoring-buttons.png)
+![The kachinuki score editor: the one-line Kachinuki (winner stays on) note above the bout list, the bouts already fought shown as read-only rows above the current bout (which carries the ippon buttons for each side), a muted line just above the current bout naming each team's fighter on and the fighters left, the × Remove this bout undo, and the Record bout and End match footer actions.](../../screenshots/kachinuki-scoring-buttons.png)

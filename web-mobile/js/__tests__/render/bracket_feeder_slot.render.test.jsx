@@ -105,3 +105,24 @@ describe('MatchCard without a bracket context still cannot leak the id', () => {
     expect(screen.getByText('Pool B-2nd')).toBeTruthy();
   });
 });
+
+// bc-bzlb: the 3rd-place card's sides are EMPTY until the semi-finals seat
+// their losers, so its callers pass bronzeSlotLabels and an empty side names
+// the semi-final card that fills it instead of reading blank.
+describe('the 3rd-place card names the semi-finals that fill it', () => {
+  const bronze = (sideA, sideB) => ({ id: 'm-bronze', court: 'A', status: 'scheduled', sideA, sideB });
+
+  it('reads "Loser of M<n>" on an empty side, and TBD for a bye semi-final', () => {
+    // fivePlayerRounds: semi-final 0 is the latent bye (unnumbered), semi-final 1 is M3.
+    render(<MatchCard match={bronze(side(''), side(''))} variant="1" emptyLabels={window.bronzeSlotLabels(fivePlayerRounds())} />);
+    expect(screen.getByText('TBD')).toBeTruthy();
+    expect(screen.getByText('Loser of M3')).toBeTruthy();
+  });
+
+  it('shows a seated competitor as themself, labelling only the empty side', () => {
+    render(<MatchCard match={bronze(side('Alice'), side(''))} variant="1" emptyLabels={{ a: 'Loser of M1', b: 'Loser of M2' }} />);
+    expect(screen.getByText('Alice')).toBeTruthy();
+    expect(screen.queryByText('Loser of M1')).toBeNull();
+    expect(screen.getByText('Loser of M2')).toBeTruthy();
+  });
+});

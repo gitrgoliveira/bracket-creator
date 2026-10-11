@@ -192,6 +192,37 @@ describe('isPendingBracketMatch', () => {
     expect(isPendingBracketMatch({ status: "scheduled", sideA: "Alice", sideB: "" })).toBe(false);
     expect(isPendingBracketMatch(null)).toBe(false);
   });
+
+  // bc-bzlb: the 3rd-place match has no "Winner of" slot; its sides stay empty
+  // until the semi-finals (the round before the final) seat their losers, semi 0
+  // into sideA and semi 1 into sideB. It waits while an empty side's semi-final
+  // is unplayed, so it needs the competition's rounds.
+  describe('the 3rd-place match', () => {
+    const empty = { id: "", name: "" };
+    const bronze = (sideA, sideB) => ({ id: "m-bronze", status: "scheduled", sideA, sideB });
+    const rounds = (s0, s1) => [
+      [{ id: "m-r1-0", status: s0 }, { id: "m-r1-1", status: s1 }],
+      [{ id: "m-r2-0", status: "scheduled" }],
+    ];
+
+    it('is pending while its sides are empty and the semi-finals are unplayed', () => {
+      expect(isPendingBracketMatch(bronze(empty, empty), rounds("scheduled", "scheduled"))).toBe(true);
+      // One semi-final done: its loser is seated, the other side still waits.
+      expect(isPendingBracketMatch(bronze({ id: "p1", name: "Alice" }, empty), rounds("completed", "running"))).toBe(true);
+    });
+
+    it('is not pending once both sides are seated', () => {
+      expect(isPendingBracketMatch(bronze({ id: "p1", name: "Alice" }, { id: "p2", name: "Bob" }), rounds("completed", "completed"))).toBe(false);
+    });
+
+    it('is not pending when an empty side\'s semi-final is completed (a bye semi-final has no loser)', () => {
+      expect(isPendingBracketMatch(bronze({ id: "p1", name: "Alice" }, empty), rounds("completed", "completed"))).toBe(false);
+    });
+
+    it('is not pending without the rounds', () => {
+      expect(isPendingBracketMatch(bronze(empty, empty))).toBe(false);
+    });
+  });
 });
 
 describe('compMatchStats', () => {

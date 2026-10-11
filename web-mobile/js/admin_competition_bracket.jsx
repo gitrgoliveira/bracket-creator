@@ -373,6 +373,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
                       showDojo={tweaks.showDojo}
                       highlighted={isHighlighted}
                       onClick={isReady ? () => select(bm, -1, 0) : undefined}
+                      emptyLabels={window.bronzeSlotLabels(bracket.rounds)}
                     />
                   </div>
                 </div>

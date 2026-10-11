@@ -69,6 +69,8 @@ A correction made while offline never carries a confirmation with it. If it reac
 
 A knockout final cannot be called until the earlier bouts that feed it are scored. While it is still waiting, it appears under a **Later** heading with a **Waiting** tag. Its competitors read "Winner of …" until the feeding bouts are known.
 
+The 3rd-place match waits there too until both semi-finals are scored. Its competitors read "Loser of" and the semi-final's match number (for example, `Loser of M5`), and once both are known it is listed as the 3rd-place match.
+
 You cannot start a match that has no confirmed competitors. The Later heading lets you see that more play is scheduled for your court, so the queue never appears empty when further matches are still pending.
 
 ## Refresh the court view

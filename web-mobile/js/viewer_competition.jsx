@@ -435,6 +435,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
                           showDojo={tweaks.showDojo ?? true}
                           highlighted={currentMatch?.id === bm.id}
                           highlightPlayers={highlightPlayers}
+                          emptyLabels={window.bronzeSlotLabels(derivedBracket.rounds)}
                           onClick={() => openMatch(bm, { phase: "bracket", round: "3rd Place", phaseName: "3rd Place", compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, compEngi: isEngi, teamMatchType: teamMatchTypeFor(c) })}
                         />
                       </div>

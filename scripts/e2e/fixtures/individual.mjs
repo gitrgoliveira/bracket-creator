@@ -1,14 +1,15 @@
 // Helpers for the INDIVIDUAL operator journeys (knockout-mixed-individual
 // spec): the rosters, a deterministic winner rule, and the few surfaces the
-// shared fixtures do not own (the overlay editor's identity line, the
-// decision panel, playing and correcting a bout on the shiaijo page). The
-// audit log (fixtures/audit.mjs), tap-target measurement (fixtures/pointer.mjs)
-// and the hasty confirms (fixtures/clumsy.mjs) are shared with the other
-// journeys.
+// shared fixtures do not own (the decision panel, playing and correcting a
+// bout on the shiaijo page). Which match an editor holds is read by
+// fixtures/shiaijo.mjs editorIdentity. The audit log (fixtures/audit.mjs),
+// tap-target measurement (fixtures/pointer.mjs) and the hasty confirms
+// (fixtures/clumsy.mjs) are shared with the other journeys.
 import { expect } from '@playwright/test';
-import { EDITOR, INLINE_EDITOR } from './scoring.mjs';
-import { settled } from './pace.mjs';
-import { completedRowFor } from './shiaijo.mjs';
+import { INLINE_EDITOR, awardIppon, finishMatch } from './scoring.mjs';
+import {
+  UP_NEXT, WAITING_ROWS, completedRowFor, courtDone, courtIdle, inlineEditor, upNextCard,
+} from './shiaijo.mjs';
 import { hastyShiaijoConfirm } from './clumsy.mjs';
 
 // Twelve entrants for F1 (pools of 3, two through): six dojos, two members
@@ -49,23 +50,6 @@ export const ROSTER_4_JOINT = [
 // so a pool's standings come out strict and no tie-break bout is added.
 export const winnerOf = ({ shiro, aka }) => (shiro.localeCompare(aka) <= 0 ? 'shiro' : 'aka');
 
-// The overlay editor's identity: its eyebrow (competition, pool/round) and its
-// title line ("Shiaijo B · 10:20"), which is what says which court it is on.
-export async function overlayIdentity(page) {
-  const ed = page.locator(EDITOR).first();
-  const eyebrow = ((await ed.locator('.editor-modal__eyebrow').allInnerTexts())[0] || '').trim();
-  const title = ((await ed.locator('.editor-modal__title').allInnerTexts())[0] || '').trim();
-  return { eyebrow, title, court: (title.match(/Shiaijo\s+(\S+)/) || [])[1] || null };
-}
-
-// The same for the inline editor (shiaijo page, Bracket tab panel).
-export async function inlineIdentity(page) {
-  const ed = page.locator(INLINE_EDITOR).first();
-  const eyebrow = ((await ed.locator('.editor-modal__eyebrow').allInnerTexts())[0] || '').trim();
-  const title = ((await ed.locator('.editor-modal__title').allInnerTexts())[0] || '').trim();
-  return { eyebrow, title, court: (title.match(/Shiaijo\s+(\S+)/) || [])[1] || null };
-}
-
 // The two names an editor shows, Shiro first.
 export async function editorSides(page, root = INLINE_EDITOR) {
   const ed = page.locator(root).first();
@@ -74,13 +58,16 @@ export async function editorSides(page, root = INLINE_EDITOR) {
   return { shiro, aka };
 }
 
-// The slot marks a side holds, in slot order ("M", "Ht", ...).
+// The slot marks a side holds, in slot order ("M", "Ht", ...). A slot reads
+// "<Side> slot <n>: remove M" (a point), ": Ht" (the judges' decision),
+// ": M, kiken" (a point a decision has locked) or ": empty"
+// (fixtures/scoring.mjs filledSlots).
 export async function slotMarks(page, side, root = INLINE_EDITOR) {
   const name = side === 'shiro' ? 'Shiro' : 'Aka';
   const labels = await page.locator(root).first().locator(`[aria-label^="${name} slot "]`).evaluateAll(
     (els) => els.map((e) => e.getAttribute('aria-label')),
   );
-  return labels.map((l) => (l.match(/: (?:remove )?(\S+)$/) || [])[1]).filter((v) => v && v !== 'empty');
+  return labels.map((l) => (l.match(/: (?:remove )?([^,\s]+)(?:, .+)?$/) || [])[1]).filter((v) => v && v !== 'empty');
 }
 
 // The decision panel (DecisionPrompt, admin_scoring_shared.jsx) is inline in
@@ -115,56 +102,60 @@ export async function recordDecision(page, kind, { side, reason, root = INLINE_E
 
 // Is the inline editor holding a RUNNING bout (no PRE-MATCH / CORRECTION pill)?
 export async function inlineRunning(page) {
-  const ed = page.locator(INLINE_EDITOR).first();
+  const ed = inlineEditor(page).first();
   if (!(await ed.isVisible().catch(() => false))) return false;
   const pill = ed.locator('.editor-head-pill');
   return (await pill.count()) === 0;
 }
 
-// Make sure the shiaijo page has a running bout in its editor: when the court
-// is idle ("Ready when you are"), start the Up next card's match. Returns the
-// pairing, or null when the court has nothing left to start.
-export async function ensureRunning(page) {
-  const deadline = Date.now() + 15_000;
-  while (Date.now() < deadline) {
-    if (await inlineRunning(page)) return editorSides(page);
-    const card = page.locator('.shiaijo-upnext__card');
-    const idle = await page.locator('.shiaijo__placeholder').isVisible().catch(() => false);
-    if (idle && await card.isVisible().catch(() => false)) {
-      const start = card.getByRole('button', { name: 'Start match' });
-      // The card can leave while this runs (Finish + Start Next has just started
-      // the match it shows): a tap that finds it gone is not a failure, the loop
-      // looks again.
-      if (await start.isEnabled().catch(() => false)) await start.tap({ timeout: 2_000 }).catch(() => {});
+// Make sure the shiaijo page has a running bout in its editor, and return its
+// pairing. When the court is idle ("Ready when you are") the Up next card's
+// Start match is tapped, once. Returns null only when the court has nothing to
+// start: idle with no startable Up next card (none, or one whose Start is off,
+// e.g. a barred match), or done, held for a moment so a court between two
+// renders is not taken for one with nothing left. Throws when Start was tapped
+// and no bout runs by the deadline, or the console never settles.
+const NOTHING_HELD_MS = 1_500;
+export async function ensureRunning(page, { timeout = 15_000 } = {}) {
+  const start = upNextCard(page).getByRole('button', { name: 'Start match' });
+  let tappedAt = null;
+  let nothingSince = null;
+  let outcome = null;
+  await expect(async () => {
+    if (await inlineRunning(page)) { outcome = 'running'; return; }
+    const idle = await courtIdle(page).isVisible().catch(() => false);
+    const done = !idle && await courtDone(page).isVisible().catch(() => false);
+    const startable = idle && (await start.count()) > 0 && await start.isEnabled({ timeout: 1_000 }).catch(() => false);
+    if (tappedAt === null && startable) {
+      // The card can leave under the tap (Finish + Start Next has just started
+      // the match it shows): a tap that finds it gone did not happen, and the
+      // next look reads the editor.
+      if (await start.tap({ timeout: 2_000 }).then(() => true, () => false)) tappedAt = Date.now();
+      throw new Error('Start match tapped on the Up next card; waiting for the bout to run');
     }
-    await page.waitForTimeout(250);
-  }
-  return null;
+    if (tappedAt !== null) throw new Error(`Start match was tapped ${Date.now() - tappedAt} ms ago and no bout is running`);
+    if (done || idle) {
+      nothingSince ??= Date.now();
+      if (Date.now() - nothingSince >= NOTHING_HELD_MS) { outcome = 'nothing'; return; }
+      throw new Error('the court shows nothing to start; checking it stays so');
+    }
+    nothingSince = null;
+    throw new Error('the court console shows neither a running bout, the idle placeholder nor the done state');
+  }).toPass({ timeout, intervals: [250] });
+  return outcome === 'running' ? editorSides(page) : null;
 }
 
 // Score the running bout on the shiaijo page for the deterministic winner (one
-// men) and Finish (+ Start Next) through the two-tap guard. Returns the pairing.
+// men) and Finish (+ Start Next) through the two-tap guard, which returns once
+// the write has landed and the editor has let the bout go. Returns the
+// pairing.
 export async function playRunningBout(page, { waza = 'M' } = {}) {
   const pair = await ensureRunning(page);
   if (!pair) throw new Error('playRunningBout: nothing running or startable on this court');
   const side = winnerOf(pair);
-  const ed = page.locator(INLINE_EDITOR).first();
-  await ed.locator(`.sb-side--${side} .ipt-btn`, { hasText: new RegExp(`^${waza}$`) }).first().tap();
-  await expect(ed.locator('.sync-pill__label').first()).toHaveText('Synced');
-  const finish = ed.locator('button').filter({ hasText: /^Finish( \+ Start Next|$)/ }).first();
-  await finish.tap();
-  const armed = ed.locator('button').filter({ hasText: /^Tap again to finish/ }).first();
-  // The second tap counts once the arming tap's bounce window has passed.
-  await settled(armed);
-  await armed.tap();
+  await awardIppon(page, side, waza);
+  await finishMatch(page);
   await expect(completedRowFor(page, pair)).toBeVisible();
-  // Wait for the editor to let go of the finished bout (it moves on to the
-  // next one, or the court goes idle), so the caller never reads it as live.
-  await expect.poll(async () => {
-    if (!(await inlineRunning(page))) return 'moved';
-    const now = await editorSides(page).catch(() => null);
-    return now && now.shiro === pair.shiro && now.aka === pair.aka ? 'same' : 'moved';
-  }, { timeout: 10_000 }).toBe('moved');
   return { ...pair, winner: side };
 }
 
@@ -193,7 +184,7 @@ export async function correctCompleted(page, pair) {
     await expect.poll(() => inlineRunning(page), { timeout: 10_000 }).toBe(false);
     await done.getByRole('button', { name: 'Correct' }).tap();
   }
-  await expect(page.locator(INLINE_EDITOR).first().locator('.editor-head-pill')).toHaveText('CORRECTION');
+  await expect(inlineEditor(page).first().locator('.editor-head-pill')).toHaveText('CORRECTION');
   return { live, refusal };
 }
 
@@ -201,7 +192,6 @@ export async function correctCompleted(page, pair) {
 // the Upcoming rows; not Later, not Completed). A pool bout reads
 // "Match n of m" in its header, a knockout bout "Match n".
 export async function queuedPoolBouts(page) {
-  const texts = await page.locator('.shiaijo-upnext__card, .shiaijo__queue .shiaijo-group:not(.shiaijo-pending) .shiaijo-qrow:not(.shiaijo-qrow--complete)')
-    .allInnerTexts();
+  const texts = await page.locator(`${UP_NEXT}, ${WAITING_ROWS}`).allInnerTexts();
   return texts.filter((t) => /Match \d+ of \d+/.test(t)).length;
 }

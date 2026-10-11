@@ -22,15 +22,27 @@ stamp outlives it; run `npx playwright install chromium` here.
 ## Layout
 
     playwright.config.mjs   projects, timeouts, output
-    fixtures/test.mjs       the `test` every journey imports (server, baseURL, page)
+    fixtures/test.mjs       the `test` every journey imports (server, baseURL,
+                            page) and the console policy (below)
     fixtures/devices.mjs    the operator iPad and the spectator phone
     fixtures/setup.mjs      first-run tournament form, sign in, sign out
     fixtures/pace.mjs       the dwell the app's tap-bounce guard needs (below)
     fixtures/wizard.mjs     the create-competition wizard
     fixtures/competition.mjs  roster paste box, Generate / Discard draw, Start
-    fixtures/shiaijo.mjs    /admin/shiaijo/:court (queue and inline editor)
+    fixtures/shiaijo.mjs    /admin/shiaijo/:court (queue, inline editor, which
+                            match an editor holds)
     fixtures/scores.mjs     the Scores tab and its overlay editor
-    fixtures/scoring.mjs    scoring an individual bout on either editor
+    fixtures/scoring.mjs    scoring an individual bout on either editor, and
+                            the Finish check every editor shares
+    fixtures/individual.mjs individual rosters, the decision panel, playing and
+                            correcting a bout on the court console
+    fixtures/team.mjs       team members, the three lineup entry points (the
+                            Lineups page, the lineup panel, the score sheet
+                            row) and the team score sheet's bout rows
+    fixtures/kachinuki.mjs  the kachinuki sheet: bouts, Record bout, Encho, End
+                            match, the correction doors
+    fixtures/shared-court.mjs  two competitions on one shiaijo and a moved
+                            match: seeding, the competition picker, the nudges
     fixtures/public.mjs     the public viewer and the TV board
     fixtures/clumsy.mjs     the clumsy operator (below)
     fixtures/pointer.mjs    the coarse pointer: check, restore, tap-target size
@@ -83,8 +95,15 @@ about one screen, not the path to it) and its `api.mjs`, `seed.mjs` and the
 `authAdmin` sign-in shortcut are not used here.
 
 Scoring goes through the score editors too. `scripts/screenshots/lib/editor.mjs`
-owns the editor selector and the two-tap Finish; `fixtures/scoring.mjs`
-re-exports them beside the ippon helpers.
+owns the editor selectors and Start, which `fixtures/scoring.mjs` re-exports
+beside the ippon helpers. Finish is `fixtures/scoring.mjs`'s own: a journey
+taps it, on the inline editor as well as the overlay, and `finishMatch` (and
+`finishTeam`, through the same check) returns only once the write landed. It
+fails at once when the server does not answer the completing write within the
+expect timeout, answers it with an error status, or answers `applied: false`
+(the refusal a disarmed Finish follows). It then waits for the editor to let
+the match go, and fails if the editor shows its not-saved banner or a new
+error alert.
 
 ## The clumsy operator
 
@@ -112,14 +131,46 @@ edge, which is what the app's listeners read.
 
 The app ignores a pointer tap that lands within 400ms of the layer it opened (a
 confirm, the sign-in dialog) or of the tap that armed a two-tap commit (Finish,
-End match), and a second tap on the same ippon button inside that window
-(`web-mobile/js/tap_guard.jsx`). Playwright's second tap is always inside it, so
-`fixtures/pace.mjs` holds the dwell (`TAP_DWELL_MS`) and every helper that taps
-into a fresh layer or confirms an arm waits it out: `login`, `hastyConfirm`,
-`hastyShiaijoConfirm`, `answerDialog`, `finishMatch`, `finishTeam`, `endMatch`, `awardBoutIppon`. A
-journey that taps such a thing by hand does the same. `doubleTap` is the one
-helper that deliberately does not: it is the bounce, and the app is meant to
-ignore the second tap.
+End match), and a second ippon or foul tap on the same SIDE of a bout inside
+that window, whichever button it lands on (`web-mobile/js/tap_guard.jsx`; a
+tap on the other side counts at once). Playwright's second tap is always
+inside it, so `fixtures/pace.mjs` holds the dwell (the screenshot harness's
+`TAP_DWELL_MS`) and every helper that taps into a fresh layer, confirms an arm
+or strikes for a side waits it out: `login`, `hastyConfirm`,
+`hastyShiaijoConfirm`, `lineupsNameSlot`, `finishMatch`, `finishTeam`,
+`endMatch`, `awardIppon`, `boutIppon`, `awardBoutIppon` (`tapOnSide` keeps the
+time of the last tap on each side). A journey that taps such a thing by hand
+does the same. `doubleTap` is the one helper that deliberately does not: it is
+the bounce, and the app is meant to ignore the second tap.
+
+## The console policy
+
+`fixtures/test.mjs` listens to every page of every browser context a test
+opens: the default page, and every context a spec opens itself with
+`browser.newContext` (in the test or in a `beforeAll` hook; the `browser`
+fixture is wrapped so none is missed). When the test ends:
+
+- a console **error** or an uncaught page error FAILS the test, unless it
+  matches `CONSOLE_ALLOWLIST` in that file;
+- a console **warning** never fails: it is added to the spec's audit as a row
+  with `journey: "console"` when the spec keeps one, and printed as a
+  `CONSOLE {json}` line otherwise, and is listed on the test as a
+  `console-warning` annotation.
+
+Everything a test's pages logged is attached to it as `console.json`, with the
+page it came from, whether the device was offline at the time, and, for a
+failed request, the status and body of the `/api` answer. What a `beforeAll`
+hook's pages log is checked with the first test of the file and marked as
+such; what an `afterAll` hook's log is checked when the worker stops.
+
+The allowlist holds only noise a journey's scenario makes: requests the
+browser could not send while a journey has the device offline, and the 409s of
+a start or reopen the app sends through the server's gate and shows refused
+(the court or the competitor busy, or the knockout match it feeds being
+fought).
+Each entry matches as narrowly as it can (the message, the URL, the refusal
+code, offline only) and says why in one line. An error that looks like the
+app's own fault does not go on it: the test stays red until a person decides.
 
 ## Output
 

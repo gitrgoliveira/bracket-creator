@@ -7,12 +7,16 @@
 // Selectors follow admin_scoring_team.jsx and admin_schedule_lineup.jsx. The
 // individual board's helpers (fixtures/scoring.mjs) do not fit here: a team
 // bout's sides are `.team-sub-match__side--<colour>`, not `.sb-side--<colour>`.
-// Every tap goes through Locator.tap(), so the coarse-pointer hit test decides
-// what is hit, as it does for a thumb.
+// The bout row's controls and the lineup panel are the team sheet's
+// (fixtures/team.mjs owns their selectors); this file adds what is kachinuki's
+// own and names those for the current bout. Every tap goes through
+// Locator.tap(), so the coarse-pointer hit test decides what is hit, as it
+// does for a thumb.
 import { expect } from '@playwright/test';
-import { INLINE_EDITOR } from '../../screenshots/lib/editor.mjs';
 import { dwell, settled } from './pace.mjs';
 import { isCoarse, restoreCoarse } from './pointer.mjs';
+import { inlineEditor } from './shiaijo.mjs';
+import * as T from './team.mjs';
 
 // Does the page still match (pointer: coarse)? If an interruption or a
 // fullPage screenshot lost it, every tap-floor rule in styles.css would be off
@@ -25,34 +29,23 @@ export async function ensureCoarse(page) {
   return { coarseLost: true, restoredBy: 'CDP Emulation.setTouchEmulationEnabled (in place)' };
 }
 
-export const editor = (page) => page.locator(INLINE_EDITOR).filter({ has: page.locator('.team-bouts-scroll') }).first();
+export const editor = (page) => inlineEditor(page).filter({ has: page.locator('.team-bouts-scroll') }).first();
 
 // ---------------------------------------------------------------- lineup --
 
-// The per-match lineup panel (MatchLineupPanel, the "Enter lineup" button on
-// the Up next card). It is a fixed overlay with no dialog role, found by its
-// heading.
-export const lineupPanel = (page) => page.locator('div').filter({
-  has: page.getByRole('heading', { name: 'Lineup for this match' }),
-}).filter({ has: page.getByRole('button', { name: /Close|Done/ }) }).last();
-
-// Open the lineup panel from the Up next card.
-export async function openLineupFromUpNext(page) {
-  await page.locator('.shiaijo-upnext__card').getByRole('button', { name: 'Enter lineup' }).tap();
-  await expect(page.getByRole('heading', { name: 'Lineup for this match' })).toBeVisible();
-}
+// The per-match lineup panel (fixtures/team.mjs): opened from the Up next
+// card, a side found by the team name it shows, where its lineup comes from,
+// and Close.
+export const openLineupFromUpNext = T.openPanelFromUpNext;
+export const lineupSide = T.panelSideOf;
+export const lineupSource = T.sideSource;
+export const closeLineupPanel = T.closePanel;
 
 // Name every position of ONE team's lineup by typing (a typed name over a
 // blank numbered slot names that slot's member, bc-dnst), then Save lineup.
 // `teamName` picks the side editor by its heading text. Returns once the
-// save has landed (the button leaves "Saving…"). `save: false` types the
-// names and leaves the side unsaved.
-export const lineupSide = (page, teamName) => page.locator('[data-testid^="match-lineup-side-"]').filter({ hasText: teamName }).first();
-
-// Where the lineup a side shows comes from: "Lineup for this match", "Same as
-// <match>" or "Starting lineup" (LineupSourceLine, lineup_draft.jsx).
-export const lineupSource = (side) => side.locator('[data-testid^="match-lineup-source-"]');
-
+// save has landed (the side reads its lineup as this match's own). `save:
+// false` types the names and leaves the side unsaved.
 export async function typeLineup(page, teamName, names, { save: doSave = true } = {}) {
   const side = lineupSide(page, teamName);
   await expect(side).toBeVisible();
@@ -74,11 +67,6 @@ export async function typeLineup(page, teamName, names, { save: doSave = true } 
   return side;
 }
 
-export async function closeLineupPanel(page) {
-  await page.getByRole('button', { name: /^(✕ Close|Done)$/ }).first().tap();
-  await expect(page.getByRole('heading', { name: 'Lineup for this match' })).toHaveCount(0);
-}
-
 // ----------------------------------------------------------------- bouts --
 
 // Fought bouts, collapsed to read-only rows above the current one.
@@ -90,15 +78,12 @@ export const currentBout = (page) => editor(page)
 // A fought bout opened for correction.
 export const correctingBout = (page) => editor(page).locator('.team-sub-match--correcting').first();
 
-// An ippon button on a bout row. `side` is 'shiro' (left, the match's sideB)
-// or 'aka' (right, sideA).
-export const boutIpponButton = (row, side, waza = 'M') => row
-  .locator(`.team-sub-match__side--${side} .ipt-btn`, { hasText: new RegExp(`^${waza}$`) }).first();
-
-// The filled centre slots of one side of a bout row.
-export const boutFilled = (row, side) => row.locator(`.tsm-center-pts--${side} .editor-side__pt--filled`);
-
-export const tieButton = (row) => row.getByTestId('scoring-modal-tie-button');
+// A bout row's controls, the team sheet's (fixtures/team.mjs): an ippon
+// button (`side` is 'shiro', left, the match's sideB, or 'aka', right,
+// sideA), the filled centre slots of one side, and Tie.
+export const boutIpponButton = T.rowIppon;
+export const boutFilled = T.rowSlots;
+export const tieButton = T.rowTie;
 export const recordBoutButton = (page) => editor(page).getByRole('button', { name: /^(Record bout|Saving…)$/ }).first();
 export const endMatchButton = (page) => editor(page).getByTestId('kachinuki-end-match-button');
 export const enchoButton = (page) => editor(page).getByTestId('kachinuki-encho-button');
@@ -106,7 +91,7 @@ export const enchoButton = (page) => editor(page).getByTestId('kachinuki-encho-b
 export const enchoUndoButton = (page) => editor(page).getByTestId('kachinuki-encho-undo-button');
 export const removeBoutButton = (page) => editor(page).getByTestId('kachinuki-remove-bout-button');
 export const reopenButton = (page) => page.getByTestId('kachinuki-reopen-button');
-export const syncPill = (page) => editor(page).locator('.sync-pill__label').first();
+export const syncPill = (page) => T.syncPill(editor(page));
 
 // The two fighters on a bout row. The live row carries a name box per side;
 // a fought row carries static text. The box shows the name as its value
@@ -139,7 +124,7 @@ export async function doneRowWinner(row) {
 }
 
 // The centre mark of a row (vs / X / (E)).
-export const boutMiddle = async (row) => (await row.locator('.team-sub-match__score').first().innerText()).trim();
+export const boutMiddle = async (row) => (await T.rowMiddle(row).first().innerText()).trim();
 
 // Award one ippon on the current bout and wait for the board to show it. A second
 // ippon on the same side only counts once the first one's bounce window has

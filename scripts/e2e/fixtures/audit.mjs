@@ -9,7 +9,19 @@
 // that fails part way still leaves the rows it recorded.
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { journeyDir } from './shots.mjs';
+
+// spec file -> the audits it made, so the console policy (fixtures/test.mjs)
+// can add its warning rows to the audit of the test's own file. The file is
+// read off the call stack: auditLog is always called while a spec file loads.
+const bySpec = new Map();
+function callingSpec() {
+  const m = (new Error().stack || '').match(/((?:file:\/\/)?\/[^\s():]+\.spec\.mjs)/);
+  if (!m) return null;
+  return m[1].startsWith('file://') ? fileURLToPath(m[1]) : m[1];
+}
+export const auditsFor = (specFile) => bySpec.get(specFile) || [];
 
 export function auditLog(journey) {
   const file = path.join(journeyDir(journey), 'audit.json');
@@ -28,5 +40,8 @@ export function auditLog(journey) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify([...kept, ...rows], null, 2));
   };
-  return { record, flush, rows, file };
+  const audit = { record, flush, rows, file };
+  const spec = callingSpec();
+  if (spec) bySpec.set(spec, [...auditsFor(spec), audit]);
+  return audit;
 }

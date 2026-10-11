@@ -11,11 +11,16 @@
 //
 // The shared scoring helpers (fixtures/scoring.mjs) scope to the INDIVIDUAL
 // board's `.sb-side--*` wrappers, which the team sheet does not have, so the
-// team sheet's own selectors live here. Every helper performs a real tap on a
-// real control; none of them asserts app behaviour beyond "the tap landed".
+// team sheet's own selectors live here, for the kachinuki sheet as well
+// (fixtures/kachinuki.mjs reads its bout rows through them), and so does the
+// lineup panel. Every helper performs a real tap on a real control; none of
+// them asserts app behaviour beyond "the tap landed", except Finish, which
+// checks the write landed (fixtures/scoring.mjs finishLanded).
 import { expect } from '@playwright/test';
 import { createTournament, login } from './setup.mjs';
-import { settled } from './pace.mjs';
+import { settled, tapOnSide } from './pace.mjs';
+import { beforeFinish, finishLanded } from './scoring.mjs';
+import { inlineEditor, upNextCard } from './shiaijo.mjs';
 
 // FIK position names for a five-person team, in order; any other size uses
 // bare numbers (admin_lineup.jsx positionsForSize).
@@ -101,7 +106,7 @@ export async function lineupsStartAdd(page, label, name) {
 // Answer the open confirm dialog with its named button. The wait is on the
 // dialog that was answered (its element handle), not on a re-resolving
 // locator, which a second dialog opened by the answer would satisfy.
-export async function answerDialog(page, label) {
+async function answerDialog(page, label) {
   const dialog = page.locator('.modal[role="dialog"]').filter({ has: page.locator('.modal__foot') }).last();
   // A confirm ignores a tap inside the bounce window of its opening.
   await settled(dialog);
@@ -132,19 +137,27 @@ export const lineupsSelected = async (page, label) => (await lineupsSelect(page,
 
 // ---------------------------------------------------------------- match panel
 
-// One side of the panel: 0 = Shiro (left), 1 = Aka (right).
-export const panelSide = (page, i) => page.locator('[data-testid^="match-lineup-side-"]').nth(i);
+// The per-match lineup panel (MatchLineupPanel, admin_schedule_lineup.jsx), a
+// dialog named "Lineup for this match", opened by "Enter lineup" on the
+// shiaijo page's Up next card or the Scores tab. Its sides are found by index
+// (0 = Shiro, left; 1 = Aka, right) or by the team name they show.
+const lineupPanel = (page) => page.getByRole('dialog', { name: 'Lineup for this match' });
+const panelSides = (page) => lineupPanel(page).locator('[data-testid^="match-lineup-side-"]');
+export const panelSide = (page, i) => panelSides(page).nth(i);
+export const panelSideOf = (page, teamName) => panelSides(page).filter({ hasText: teamName }).first();
 export const panelInput = (page, i, label) => panelSide(page, i).getByRole('textbox', { name: `${label} player`, exact: true });
 // Where the lineup a side shows comes from: "Lineup for this match", "Same as
 // <match>" or "Starting lineup" (LineupSourceLine, lineup_draft.jsx).
-export const panelSource = (page, i) => panelSide(page, i).locator('[data-testid^="match-lineup-source-"]');
+export const sideSource = (side) => side.locator('[data-testid^="match-lineup-source-"]');
+export const panelSource = (page, i) => sideSource(panelSide(page, i));
 // The side's Save lineup, which stays disabled until the operator changes
 // something on that side and reads "Saving…" while the write is out.
 export const panelSaveButton = (page, i) => panelSide(page, i).getByRole('button', { name: /^(Save lineup|Saving…)$/ });
 
 // Open the Up next card's "Enter lineup".
 export async function openPanelFromUpNext(page) {
-  await page.locator('.shiaijo-upnext__card').getByRole('button', { name: 'Enter lineup' }).tap();
+  await upNextCard(page).getByRole('button', { name: 'Enter lineup' }).tap();
+  await expect(lineupPanel(page)).toBeVisible();
   await expect(panelSide(page, 1)).toBeVisible();
 }
 
@@ -159,10 +172,13 @@ export async function pickFromNameBox(input, text) {
 }
 
 // A name list left open (by the operator, or by a tap that landed on a name
-// box). Close it the way a thumb does, with a tap on the empty page margin:
-// Escape leaves the box focused, and a focused box does not reopen its list
-// on the next tap, which a touch operator never meets. Returns whether one was
-// open. Any LineupNameInput: the panel, the team sheet, the kachinuki sheet.
+// box). Close it the way a thumb does, with a tap on the empty page margin. A
+// box left focused that way still reopens its list on the next tap (bc-flst),
+// so Escape would do as well while the list is open, but it is not what a
+// touch operator does, and an Escape that arrives just after the list closed
+// closes the layer behind it instead (the panel, or the editor). Returns
+// whether one was open. Any LineupNameInput: the panel, the team sheet, the
+// kachinuki sheet.
 export async function closeNameList(page) {
   const options = page.locator('.pmf__option');
   const wasOpen = (await options.count()) > 0;
@@ -189,8 +205,8 @@ export async function panelSave(page, i) {
 }
 
 export async function closePanel(page) {
-  await page.getByRole('button', { name: /✕ Close|Done/ }).first().tap();
-  await expect(page.locator('[data-testid^="match-lineup-side-"]')).toHaveCount(0);
+  await lineupPanel(page).getByRole('button', { name: /^(✕ Close|Done)$/ }).tap();
+  await expect(lineupPanel(page)).toHaveCount(0);
 }
 
 // ---------------------------------------------------------------- team sheet
@@ -200,7 +216,7 @@ export const boutRow = (root, n) => root.locator('.team-sub-match').filter({
   has: root.page().locator('.team-sub-match__pos-num', { hasText: new RegExp(`^${n}$`) }),
 }).first();
 
-export const rowSide = (row, side) => row.locator(`.team-sub-match__side--${side}`);
+const rowSide = (row, side) => row.locator(`.team-sub-match__side--${side}`);
 export const rowIppon = (row, side, waza = 'M') => rowSide(row, side).locator('.ipt-btn', { hasText: new RegExp(`^${waza}$`) }).first();
 export const rowFusensho = (row, side) => rowSide(row, side).getByTestId('scoring-modal-fusensho-button');
 export const rowTie = (row) => row.getByTestId('scoring-modal-tie-button');
@@ -249,18 +265,20 @@ export async function sheetState(root, bouts = 5) {
 // the sheet shows its autosave pill only once the start has landed (before
 // that it reads PRE-MATCH, and a strike tapped then is not saved).
 export async function startUpNextTeam(page) {
-  await page.locator('.shiaijo-upnext__card').getByRole('button', { name: 'Start match' }).tap();
-  const ed = page.locator('.scoring-panel');
+  await upNextCard(page).getByRole('button', { name: 'Start match' }).tap();
+  const ed = inlineEditor(page);
   await expect(boutRow(ed, 1)).toBeVisible();
   await expect(syncPill(ed)).toBeVisible();
   return ed;
 }
 
-// Award one strike on a bout row and wait for the autosave to land.
+// Award one strike on a bout row and wait for the autosave to land. A second
+// strike for the same side of the same bout waits out the bounce window of the
+// first (fixtures/pace.mjs).
 export async function boutIppon(root, n, side, waza = 'M') {
   const row = boutRow(root, n);
   const before = await rowSlots(row, side).count();
-  await rowIppon(row, side, waza).tap();
+  await tapOnSide(root.page(), `bout ${n} ${side}`, rowIppon(row, side, waza));
   await expect(rowSlots(row, side)).toHaveCount(before + 1);
   await expect(syncPill(root)).toHaveText('Synced');
 }
@@ -268,14 +286,18 @@ export async function boutIppon(root, n, side, waza = 'M') {
 // The primary footer button in whatever state it is in.
 export const finishBtn = (root) => root.locator('.score-nav__actions button.btn--primary').first();
 
-// Finish in two taps and wait for the write to land.
+// Finish in two taps and return once the write has landed, failing if it did
+// not (fixtures/scoring.mjs finishLanded, which reads the same signs on the
+// team sheet as on the individual board).
 export async function finishTeam(root) {
+  const ed = root.first();
   const btn = finishBtn(root);
   await expect(btn).toHaveText(/^Finish( \+ Start Next →)?$/);
   await btn.tap();
   await expect(btn).toHaveText(/^Tap again to finish/);
   // The second tap counts once the arming tap's bounce window has passed.
   await settled(btn);
+  const before = await beforeFinish(ed);
   await btn.tap();
-  await expect(root.locator('button', { hasText: /^(Tap again to finish|Saving…)/ })).toHaveCount(0, { timeout: 15000 });
+  return finishLanded(ed, before);
 }

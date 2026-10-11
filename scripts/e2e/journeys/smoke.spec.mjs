@@ -104,13 +104,13 @@ test.describe('smoke', () => {
       const backAfterReload = await inlineEditor(page).waitFor({ state: 'visible', timeout: 15_000 })
         .then(() => true, () => false);
       record({ variant: 'V3 interrupt', action: 'running bout', ...reload, editorBack: backAfterReload,
-        sameMatch: backAfterReload && (await editorIdentity(page)) === identity });
+        sameMatch: backAfterReload && (await editorIdentity(page)).key === identity.key });
 
       await awardIppon(page, 'shiro', 'M');
 
       const hidden = await interrupt(page, 'hidden');
       record({ variant: 'V3 interrupt', action: 'bout with one ippon', ...hidden,
-        sameMatch: (await editorIdentity(page)) === identity });
+        sameMatch: (await editorIdentity(page)).key === identity.key });
 
       const back = await interrupt(page, 'back');
       const backAfterBack = await inlineEditor(page).waitFor({ state: 'visible', timeout: 15_000 })
@@ -118,7 +118,7 @@ test.describe('smoke', () => {
       const shiroPoints = backAfterBack
         ? await inlineEditor(page).locator('[aria-label^="Shiro slot "][aria-label*=": remove "]').count() : null;
       record({ variant: 'V3 interrupt', action: 'bout with one ippon', ...back, editorBack: backAfterBack,
-        sameMatch: backAfterBack && (await editorIdentity(page)) === identity, shiroPointsKept: shiroPoints });
+        sameMatch: backAfterBack && (await editorIdentity(page)).key === identity.key, shiroPointsKept: shiroPoints });
       await shot(page, 'bout-1-scored');
 
       await finishMatch(page, INLINE_EDITOR);
@@ -165,7 +165,7 @@ test.describe('smoke', () => {
       await startMatch(page);
       await awardIppon(page, 'aka', 'K', EDITOR);
       await shot(page, 'overlay-editor-B');
-      await finishMatch(page);
+      await finishMatch(page, EDITOR);
     });
 
     await test.step('a spectator phone sees bout 1 on the viewer and the TV board', async () => {

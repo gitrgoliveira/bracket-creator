@@ -113,6 +113,10 @@ export async function retapWhileSaving(locator, { holdWritesMs = 1200, savingTex
   const hold = async (route) => {
     if (route.request().method() === 'GET') return route.continue();
     await new Promise((r) => setTimeout(r, holdWritesMs));
+    // While the write was held the page may have navigated or closed (a
+    // Finish + Start Next re-renders, a journey moves on), which cancels the
+    // request: continuing a route whose request is gone throws, and there is
+    // nothing left to let through.
     return route.continue().catch(() => {});
   };
   await page.route('**/api/**', hold);

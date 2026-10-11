@@ -7,7 +7,8 @@ import { EDITOR } from '../../screenshots/lib/editor.mjs';
 
 export const scoreRows = (page) => page.locator('.score-edit-row');
 
-// The first SCHEDULED match on `court`, opened in the overlay editor.
+// The first match on `court` whose row offers Score (a scheduled or running
+// one; a finished match's row offers Correct), opened in the overlay editor.
 // Returns the row it opened, e.g. for reading the pairing.
 export async function openScoreEditor(page, id, { court } = {}) {
   await page.goto(`/admin/competition/${encodeURIComponent(id)}/scores`);

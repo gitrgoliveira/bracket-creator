@@ -3,14 +3,12 @@
 import { expect } from '@playwright/test';
 import { dwell } from './pace.mjs';
 
-export const PASSWORD = 'e2e-operator';
+const PASSWORD = 'e2e-operator';
 
-// A form row found by its visible label. These forms render
-// `<div class="field"><label class="field__label">Name</label><input></div>`
-// with no htmlFor, so the label names nothing and getByLabel cannot see it.
-const field = (page, label) => page.locator('.field')
-  .filter({ has: page.locator('.field__label', { hasText: label }) })
-  .first();
+// A form field by its visible label (each label is tied to its input with
+// htmlFor, app.jsx). Anchored at the start: "Number of Shiaijo (courts)" and a
+// locked server's "Admin Password (from ...)" carry more than the words.
+const field = (page, label) => page.getByLabel(new RegExp(`^${label}`));
 
 // The first-run "Welcome to Bracket Creator" form (app.jsx), shown on a
 // server with no tournament yet. Creating one signs this page in, so a
@@ -20,11 +18,11 @@ export async function createTournament(page, {
 } = {}) {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Welcome to Bracket Creator' })).toBeVisible();
-  await field(page, 'Tournament Name').locator('input').fill(name);
-  await field(page, 'Venue').locator('input').fill(venue);
-  await field(page, 'Number of Shiaijo').locator('input').fill(String(courts));
+  await field(page, 'Tournament Name').fill(name);
+  await field(page, 'Venue').fill(venue);
+  await field(page, 'Number of Shiaijo').fill(String(courts));
   await page.getByRole('group', { name: 'Tournament type' }).getByRole('button', { name: mode }).tap();
-  await field(page, 'Admin Password').locator('input').fill(password);
+  await field(page, 'Admin Password').fill(password);
   await page.getByRole('button', { name: 'Create Tournament' }).tap();
   await expect(page).toHaveURL(/\/admin$/);
   await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();

@@ -16,29 +16,27 @@ const FORMAT = {
 const TEAM_MATCH_TYPE = { fixed: 'Regular', kachinuki: 'Kachinuki (winner stays on)' };
 const POOL_SIZE_MODE = { maximum: 'maximum', minimum: 'minimum' };
 
-// A form row by its visible label. PillGroup, NumberField and TextField all
-// render `.field > label.field__label` with no htmlFor (competition_fields.jsx),
-// so getByLabel cannot reach them. Anchored, because "Pool match duration"
-// and "Knockout match duration" share words with other labels.
-const field = (page, label) => page.locator('.field')
-  .filter({ has: page.locator('.field__label', { hasText: new RegExp(`^${label}`) }) })
-  .first();
-
-// A pill in a group. The pills carry their state as the `is-active` class
-// only (no aria-pressed), so that is what is read back.
-const pill = (group, label) => group.locator('.radio-pill', { hasText: new RegExp(`^${escape(label)}$`) });
+// The wizard's controls by their accessible names (competition_fields.jsx): a
+// NumberField or TextField input is named by its label through htmlFor, and a
+// PillGroup's row is a role="group" named by its label (aria-labelledby), each
+// pill a button whose aria-pressed says whether it is chosen. Labels are
+// matched from the start, because an optional field's label carries an
+// "(optional)" suffix and "Format" is also the end of "Team match format".
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const input = (page, label) => page.getByLabel(new RegExp(`^${escape(label)}`));
+const group = (page, label) => page.getByRole('group', { name: new RegExp(`^${escape(label)}`) });
+const pill = (grp, label) => grp.getByRole('button', { name: label, exact: true });
 
 async function choose(page, groupLabel, optionLabel) {
-  const btn = pill(field(page, groupLabel), optionLabel);
+  const btn = pill(group(page, groupLabel), optionLabel);
   await btn.tap();
-  await expect(btn).toHaveClass(/\bis-active\b/);
+  await expect(btn).toHaveAttribute('aria-pressed', 'true');
 }
 
 async function setNumber(page, label, value) {
-  const input = field(page, label).locator('input');
-  await input.fill(String(value));
-  await expect(input).toHaveValue(String(value));
+  const box = input(page, label);
+  await box.fill(String(value));
+  await expect(box).toHaveValue(String(value));
 }
 
 // Create one competition and return its id (read from the URL the wizard
@@ -64,7 +62,7 @@ export async function createCompetition(page, opts = {}) {
   await page.goto('/admin/create-competition');
   await expect(page.getByRole('heading', { level: 1, name: 'Add competition' })).toBeVisible();
 
-  if (name !== undefined) await field(page, 'Display name').locator('input').fill(name);
+  if (name !== undefined) await input(page, 'Display name').fill(name);
   if (kind) await choose(page, 'Competition type', KIND[kind]);
   if (format) await choose(page, 'Format', FORMAT[format]);
   if (teamSize !== undefined) await setNumber(page, 'Team size', teamSize);
@@ -76,24 +74,24 @@ export async function createCompetition(page, opts = {}) {
     await page.getByRole('checkbox', { name: 'Award two joint 3rd places' }).setChecked(twoThirdPlaces);
   }
   if (courts) {
-    const group = field(page, 'Assigned shiaijo');
-    const pills = group.locator('.radio-pill');
+    const grp = group(page, 'Assigned shiaijo');
+    const pills = grp.getByRole('button');
     // Select the wanted ones first, then drop the rest, so the selection is
     // never empty on the way (the wizard refuses an empty or uneven count).
     for (const want of [true, false]) {
       for (let i = 0; i < await pills.count(); i += 1) {
         const p = pills.nth(i);
         const court = (await p.textContent()).trim().split(' ').pop();
-        const active = /\bis-active\b/.test(await p.getAttribute('class'));
+        const active = (await p.getAttribute('aria-pressed')) === 'true';
         if (courts.includes(court) === want && active !== want) await p.tap();
       }
     }
     for (const court of courts) {
-      await expect(pill(group, `Shiaijo (court) ${court}`)).toHaveClass(/\bis-active\b/);
+      await expect(pill(grp, `Shiaijo (court) ${court}`)).toHaveAttribute('aria-pressed', 'true');
     }
   }
   if (numberPrefix !== undefined) {
-    await field(page, 'Player number prefix').locator('input').fill(numberPrefix);
+    await input(page, 'Player number prefix').fill(numberPrefix);
   }
 
   await page.getByRole('button', { name: /^Create & continue/ }).tap();

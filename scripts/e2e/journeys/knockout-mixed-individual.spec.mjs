@@ -23,6 +23,7 @@ import { createCompetition } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
 import {
   openShiaijo, upNextCard, inlineEditor, sides, completedRows, completedRowFor, lastCompleted,
+  editorIdentity, UP_NEXT,
 } from '../fixtures/shiaijo.mjs';
 import {
   INLINE_EDITOR, EDITOR, ipponButton, syncState, filledSlots, finishButton, armedFinishButton, armFinish, finishMatch,
@@ -33,7 +34,7 @@ import {
 import { auditLog } from '../fixtures/audit.mjs';
 import { tapSize } from '../fixtures/pointer.mjs';
 import {
-  ROSTER_12, ROSTER_6, ROSTER_4_BRONZE, ROSTER_4_JOINT, ROSTER_6B, rosterOf, inlineIdentity, overlayIdentity,
+  ROSTER_12, ROSTER_6, ROSTER_4_BRONZE, ROSTER_4_JOINT, ROSTER_6B, rosterOf,
   editorSides, slotMarks, winnerOf, inlineRunning, ensureRunning, playRunningBout,
   decisionButton, decisionPrompt, recordDecision, queuedPoolBouts, correctCompleted,
 } from '../fixtures/individual.mjs';
@@ -103,7 +104,7 @@ test.describe('knockout-mixed-individual', () => {
       shot: await shot(page, 'start-double-tapped') });
     expect(running1).toEqual(firstPair);
 
-    const id1 = await inlineIdentity(page);
+    const id1 = await editorIdentity(page);
     const w1 = winnerOf(running1);
     const other = w1 === 'shiro' ? 'aka' : 'shiro';
 
@@ -170,7 +171,7 @@ test.describe('knockout-mixed-individual', () => {
     for (const kind of ['reload', 'hidden', 'back', 'offline']) {
       const r = await interrupt(page, kind);
       const back = await expect.poll(() => inlineRunning(page), { timeout: 15_000 }).toBe(true).then(() => true, () => false);
-      const id = back ? await inlineIdentity(page) : null;
+      const id = back ? await editorIdentity(page) : null;
       const marks = back ? await slotMarks(page, w1) : null;
       row({ step: 'running bout, one ippon', action: 'interruption', variant: `V3 interrupt ${kind}`, ...r,
         editorBack: back, sameMatch: !!id && id.eyebrow === id1.eyebrow && id.court === 'A', marksKept: marks,
@@ -197,7 +198,7 @@ test.describe('knockout-mixed-individual', () => {
 
     // Finish + Start Next started the next bout on THIS court.
     await expect.poll(() => inlineRunning(page), { timeout: 15_000 }).toBe(true);
-    const id2 = await inlineIdentity(page);
+    const id2 = await editorIdentity(page);
     const running2 = await editorSides(page);
     expect(id2.court).toBe('A');
     expect(running2).not.toEqual(running1);
@@ -216,7 +217,7 @@ test.describe('knockout-mixed-individual', () => {
     await page.waitForTimeout(500);
     row({ step: 'finish', action: 'armed Finish', variant: 'V1 tapNeighbour left', hit: nbFinish.hit ? nbFinish.hit.label : null,
       note: nbFinish.note, stillArmed: await armedFinishButton(page).isVisible().catch(() => false),
-      editorCourt: (await inlineIdentity(page)).court, shot: await shot(page, 'finish-neighbour-tapped') });
+      editorCourt: (await editorIdentity(page)).court, shot: await shot(page, 'finish-neighbour-tapped') });
     if (!(await armedFinishButton(page).isVisible().catch(() => false))) await armFinish(page);
     const retap = await retapWhileSaving(armedFinishButton(page));
     await expect(completedRowFor(page, running2)).toBeVisible();
@@ -224,9 +225,9 @@ test.describe('knockout-mixed-individual', () => {
     const running3 = await editorSides(page);
     const completedCount = await completedRows(page).count();
     row({ step: 'finish', action: 'armed Finish', variant: 'V2 retapWhileSaving', ...retap,
-      completedRows: completedCount, nextRunning: running3, court: (await inlineIdentity(page)).court,
+      completedRows: completedCount, nextRunning: running3, court: (await editorIdentity(page)).court,
       shot: await shot(page, 'finish-retapped-while-saving') });
-    expect((await inlineIdentity(page)).court).toBe('A');
+    expect((await editorIdentity(page)).court).toBe('A');
 
     // Bout 3: an ippon, then "Send back to queue" answered hastily.
     await ipponButton(page, winnerOf(running3), 'M').tap();
@@ -246,6 +247,7 @@ test.describe('knockout-mixed-individual', () => {
       shot: await shot(page, 'send-back-hasty') });
     // It is back in the queue; start it again and play it.
     const again = await ensureRunning(page);
+    expect(again, 'the sent-back bout is Up next and starts again').not.toBeNull();
     row({ step: 'send back', action: 'restart the sent-back bout', variant: 'recovery',
       restarted: again, sameAsSentBack: !!again && again.shiro === running3.shiro && again.aka === running3.aka,
       marksAfterRestart: again ? await slotMarks(page, winnerOf(again)) : null });
@@ -253,7 +255,7 @@ test.describe('knockout-mixed-individual', () => {
     // Play out court A's pool bouts but the last one.
     for (let i = 0; i < 8 && (await queuedPoolBouts(page)) > 0; i += 1) await playRunningBout(page);
     await expect.poll(() => inlineRunning(page), { timeout: 15_000 }).toBe(true);
-    expect((await inlineIdentity(page)).eyebrow).toMatch(/POOL/);
+    expect((await editorIdentity(page)).eyebrow).toMatch(/POOL/);
     await shot(page, 'court-A-last-pool-bout-running');
 
     // Correct a completed bout while the last pool bout runs. The console
@@ -269,7 +271,7 @@ test.describe('knockout-mixed-individual', () => {
     row({ step: 'correct', action: 'Correct while the last pool bout runs', variant: 'correct path (refused, bc-crpn)',
       liveBout: refusedFor, ...refusal, shot: await shot(page, 'correct-refused-then-sent-back') });
     expect(refusedFor).toEqual(lastPoolLive);
-    const corrId = await inlineIdentity(page);
+    const corrId = await editorIdentity(page);
     await shot(page, 'correcting-bout-1');
     await ipponButton(page, w1, 'K').tap();
     await inlineEditor(page).getByRole('button', { name: 'Save correction' }).tap();
@@ -286,6 +288,7 @@ test.describe('knockout-mixed-individual', () => {
     if (stillCorrecting) await backToCourt.tap();
     // Start the sent-back bout again: it is Up next, with the point it had.
     const lastPoolA = await ensureRunning(page);
+    expect(lastPoolA, 'the bout sent back for the correction starts again').not.toBeNull();
     const marksAfterRestart = await slotMarks(page, winnerOf(lastPoolA));
     row({ step: 'correct', action: 'restart the bout sent back for the correction', variant: 'recovery',
       restarted: lastPoolA, marksBefore: lastPoolMarks, marksAfterRestart, shot: await shot(page, 'back-to-live-bout') });
@@ -298,7 +301,7 @@ test.describe('knockout-mixed-individual', () => {
     const bOrder = [];
     for (let i = 0; i < 12; i += 1) {
       const running = await inlineRunning(page);
-      const eyebrow = running ? (await inlineIdentity(page)).eyebrow : '';
+      const eyebrow = running ? (await editorIdentity(page)).eyebrow : '';
       if ((await queuedPoolBouts(page)) === 0 && !/POOL/.test(eyebrow)) break;
       const played = await playRunningBout(page);
       bOrder.push({ ...played, eyebrow: eyebrow || '(started from Up next)' });
@@ -340,7 +343,7 @@ test.describe('knockout-mixed-individual', () => {
     for (let i = 0; i < 2; i += 1) {
       const p = await ensureRunning(page);
       expect(p).not.toBeNull();
-      const idk = await inlineIdentity(page);
+      const idk = await editorIdentity(page);
       expect(idk.court).toBe('A');
       await playRunningBout(page);
       row({ step: `knockout bout ${i + 1}`, action: 'Finish + Start Next', variant: 'correct path', pair: p, eyebrow: idk.eyebrow,
@@ -350,20 +353,21 @@ test.describe('knockout-mixed-individual', () => {
 
     // Docs (Score a match): on a laptop, Left / Right move to the previous or
     // next match on the court and Esc closes the editor. Tried on the console.
+    // A third knockout bout is running or Up next on A: the draw and the
+    // winner rule are fixed, so the court always has one here.
     const liveK = await ensureRunning(page);
-    if (liveK) {
-      const before = await inlineIdentity(page);
-      await inlineEditor(page).locator('.editor-modal__title').click();
-      const seenK = [];
-      for (const key of ['ArrowRight', 'ArrowLeft', 'Escape']) {
-        await page.keyboard.press(key);
-        await page.waitForTimeout(300);
-        seenK.push({ key, eyebrow: (await inlineIdentity(page).catch(() => ({ eyebrow: null }))).eyebrow,
-          editor: await inlineEditor(page).isVisible().catch(() => false) });
-      }
-      row({ step: 'console keys', action: 'ArrowRight / ArrowLeft / Esc on the court console', variant: 'correct path (docs: laptop keys)',
-        before: before.eyebrow, after: seenK, shot: await shot(page, 'console-keys') });
+    expect(liveK, 'the next knockout bout on court A starts').not.toBeNull();
+    const before = await editorIdentity(page);
+    await inlineEditor(page).locator('.editor-modal__title').click();
+    const seenK = [];
+    for (const key of ['ArrowRight', 'ArrowLeft', 'Escape']) {
+      await page.keyboard.press(key);
+      await page.waitForTimeout(300);
+      seenK.push({ key, eyebrow: (await editorIdentity(page).catch(() => ({ eyebrow: null }))).eyebrow,
+        editor: await inlineEditor(page).isVisible().catch(() => false) });
     }
+    row({ step: 'console keys', action: 'ArrowRight / ArrowLeft / Esc on the court console', variant: 'correct path (docs: laptop keys)',
+      before: before.eyebrow, after: seenK, shot: await shot(page, 'console-keys') });
 
     // Scores tab overlay: Prev / Next and the arrow keys stay on the court.
     await page.goto(`/admin/competition/${comps.F1}/scores`);
@@ -371,19 +375,19 @@ test.describe('knockout-mixed-individual', () => {
       .filter({ has: page.getByRole('button', { name: /^Score$/ }) }).first();
     await rowB.getByRole('button', { name: /^Score$/ }).tap();
     await expect(page.locator(EDITOR)).toBeVisible();
-    const seen = [await overlayIdentity(page)];
+    const seen = [await editorIdentity(page, EDITOR)];
     await shot(page, 'scores-overlay-B');
     const next = page.locator(EDITOR).locator('.score-nav__next');
     const prev = page.locator(EDITOR).locator('.score-nav__prev');
     row({ step: 'scores tab nav', action: 'Prev / Next', variant: 'size', next: await tapSize(next).catch(() => null), prev: await tapSize(prev).catch(() => null) });
     for (let i = 0; i < 3 && await next.isVisible().catch(() => false); i += 1) {
       await next.tap();
-      seen.push(await overlayIdentity(page));
+      seen.push(await editorIdentity(page, EDITOR));
     }
     for (const key of ['ArrowLeft', 'ArrowRight', 'ArrowLeft']) {
       await page.keyboard.press(key);
       await page.waitForTimeout(200);
-      seen.push(await overlayIdentity(page));
+      seen.push(await editorIdentity(page, EDITOR));
     }
     row({ step: 'scores tab nav', action: 'Next x3, ArrowLeft/Right', variant: 'correct path', courts: seen.map((s) => s.court), eyebrows: seen.map((s) => s.eyebrow),
       shot: await shot(page, 'scores-overlay-after-nav') });
@@ -407,7 +411,8 @@ test.describe('knockout-mixed-individual', () => {
 
     // Pool A's first bout. The competitor who withdraws is AKA.
     const b1 = await ensureRunning(page);
-    const id1 = await inlineIdentity(page);
+    expect(b1, 'a pool bout starts on this court').not.toBeNull();
+    const id1 = await editorIdentity(page);
     expect(id1.eyebrow).toMatch(/POOL A/);
     for (const kind of ['kiken-voluntary', 'kiken-injury', 'fusenpai']) {
       row({ step: 'decision controls', action: kind, variant: 'size', ...(await tapSize(decisionButton(page, kind))) });
@@ -486,7 +491,7 @@ test.describe('knockout-mixed-individual', () => {
     // The withdrawn competitor's next bout is still in this court's queue,
     // now carrying the barred-match notice (bc-tmfn): Start match is gone
     // from that row, replaced by the notice's own one-tap resolution.
-    const nextOfWithdrawn = page.locator('.shiaijo-upnext__card, .shiaijo__queue .shiaijo-qrow:not(.shiaijo-qrow--complete)')
+    const nextOfWithdrawn = page.locator(`${UP_NEXT}, .shiaijo__queue .shiaijo-qrow:not(.shiaijo-qrow--complete)`)
       .filter({ hasText: withdrawnName }).first();
     await expect(nextOfWithdrawn).toBeVisible();
     const pairW = await sides(nextOfWithdrawn);
@@ -521,6 +526,7 @@ test.describe('knockout-mixed-individual', () => {
     // (Up next started), then the operator realises Aka withdrew, not Shiro.
     await openShiaijo(page, 'E');
     const moved = await ensureRunning(page);
+    expect(moved, 'the court moves on to the Up next bout').not.toBeNull();
     row({ step: 'kiken undo', action: 'court moves on: Up next started', variant: 'correct path', running: moved,
       involvesRealWithdrawer: !!moved && (moved.shiro === b1.aka || moved.aka === b1.aka) });
     // Correct is refused while that bout runs (bc-crpn): send it back first.
@@ -569,13 +575,13 @@ test.describe('knockout-mixed-individual', () => {
         await hastyShiaijoConfirm(page);
       }
     }
-    const poolBCard = page.locator('.shiaijo-upnext__card, .shiaijo__queue .shiaijo-qrow:not(.shiaijo-qrow--complete)')
+    const poolBCard = page.locator(`${UP_NEXT}, .shiaijo__queue .shiaijo-qrow:not(.shiaijo-qrow--complete)`)
       .filter({ hasText: /Match 1 of 3/ }).filter({ hasNotText: withdrawnName }).last();
     const b2 = await sides(poolBCard);
     await poolBCard.getByRole('button', { name: 'Start match' }).tap();
     await expect.poll(() => inlineRunning(page), { timeout: 15_000 }).toBe(true);
     expect(await editorSides(page)).toEqual(b2);
-    const id2 = await inlineIdentity(page);
+    const id2 = await editorIdentity(page);
     await decisionButton(page, 'fusenpai').tap();
     await expect(decisionPrompt(page)).toBeVisible();
     await decisionPrompt(page).locator('input[name="decision-side"][value="aka"]').check();
@@ -591,7 +597,7 @@ test.describe('knockout-mixed-individual', () => {
     await expect(fusRow).toBeVisible();
     const fusResult = (await fusRow.locator('.shiaijo-qrow__result').innerText()).trim();
     const advanced = await expect.poll(() => inlineRunning(page), { timeout: 8000 }).toBe(true).then(() => true, () => false);
-    const id3 = advanced ? await inlineIdentity(page) : null;
+    const id3 = advanced ? await editorIdentity(page) : null;
     row({ step: 'fusenpai', action: 'Record (fusenpai, Aka did not show)', variant: 'V2 doubleTap', ...dblRecord,
       from: id2.eyebrow, result: fusResult, dialogAfterDoubleTap: dialogAfterDbl, dialog: dblDialog,
       advancedTo: id3 && id3.eyebrow, court: id3 && id3.court, shot: await shot(page, 'fusenpai-recorded') });
@@ -603,7 +609,8 @@ test.describe('knockout-mixed-individual', () => {
     // Knockout (F2, court C): a tied 1-1 semi-final, encho, hantei.
     await openShiaijo(page, 'C');
     const semi = await ensureRunning(page);
-    expect((await inlineIdentity(page)).eyebrow).toMatch(/SEMIFINAL/);
+    expect(semi, 'a semi-final starts on C').not.toBeNull();
+    expect((await editorIdentity(page)).eyebrow).toMatch(/SEMIFINAL/);
     await ipponButton(page, 'shiro', 'M').tap();
     await ipponButton(page, 'aka', 'K').tap();
     await settle(page);
@@ -736,7 +743,7 @@ test.describe('knockout-mixed-individual', () => {
     // Semi-final 1 (M1) online first unless J2 already played it.
     await expect.poll(async () => (await inlineRunning(page)) || (await upNextCard(page).isVisible().catch(() => false)), { timeout: 15_000 }).toBe(true);
     let played = null;
-    const liveNow = (await inlineRunning(page)) ? (await inlineIdentity(page)).eyebrow : '';
+    const liveNow = (await inlineRunning(page)) ? (await editorIdentity(page)).eyebrow : '';
     const upNow = ((await page.locator('.shiaijo-upnext__time').allInnerTexts())[0] || '');
     if (/MATCH 1\b/.test(liveNow) || (!liveNow && /Match 1\b/.test(upNow))) played = await playRunningBout(page);
     // Start the remaining semi-final from Up next unless it is already live.
@@ -756,7 +763,7 @@ test.describe('knockout-mixed-individual', () => {
         .toBe(JSON.stringify(semi));
     }
     row({ step: 'finish offline', action: 'the last semi-final is running', variant: 'correct path', semi });
-    expect((await inlineIdentity(page)).eyebrow).toMatch(/SEMIFINAL/);
+    expect((await editorIdentity(page)).eyebrow).toMatch(/SEMIFINAL/);
     const w = winnerOf(semi);
     const winnerName = semi[w];
     const loserName = semi[w === 'shiro' ? 'aka' : 'shiro'];
@@ -779,9 +786,9 @@ test.describe('knockout-mixed-individual', () => {
     const banner = inlineEditor(page).locator('.pending-write-banner');
     const bannerText = (await banner.allInnerTexts()).join(' | ');
     const editorStill = await inlineEditor(page).isVisible().catch(() => false);
-    const editorId = editorStill ? await inlineIdentity(page) : null;
+    const editorId = editorStill ? await editorIdentity(page) : null;
     const pill = editorStill ? ((await syncState(page).allInnerTexts())[0] || '').trim() : null;
-    const finalRow = page.locator('.shiaijo__queue').getByText(/Veterans Knockout · Match 3\b/).locator('xpath=ancestor::*[contains(@class,"shiaijo-qrow") or contains(@class,"shiaijo-upnext__card")][1]');
+    const finalRow = page.locator('.shiaijo__queue').getByText(/Veterans Knockout · Match 3\b/).locator(`xpath=ancestor::*[contains(@class,"shiaijo-qrow") or contains(@class,"${UP_NEXT.slice(1)}")][1]`);
     const finalText = (await finalRow.allInnerTexts()).join(' ').replace(/\s+/g, ' ');
     const queueText = (await page.locator('.shiaijo__queue').innerText()).replace(/\s+/g, ' ');
     row({ step: 'finish offline', action: 'Finish (two taps) with the network down', variant: 'V3 interrupt offline',
@@ -865,7 +872,7 @@ test.describe('knockout-mixed-individual', () => {
     await firstRow.tap();
     await expect(page.locator(EDITOR)).toBeVisible();
     const pair = await editorSides(page, EDITOR);
-    const idP = await overlayIdentity(page);
+    const idP = await editorIdentity(page, EDITOR);
     await shot(page, 'pools-tab-editor-open');
     const start = page.locator(EDITOR).getByRole('button', { name: 'Start match' });
     const startOffered = await start.isVisible().catch(() => false);
@@ -986,19 +993,18 @@ test.describe('knockout-mixed-individual', () => {
     // the J2 attempt ran into a withdrawn competitor's unstartable bout.
     await openShiaijo(page, 'F');
     const fb = await ensureRunning(page);
-    if (fb) {
-      await recordDecision(page, 'fusenpai', { side: 'aka' });
-      await expect(completedRowFor(page, fb)).toBeVisible();
-      const advanced = await expect.poll(async () => {
-        if (!(await inlineRunning(page))) return 'idle';
-        const now = await editorSides(page);
-        return now.shiro === fb.shiro && now.aka === fb.aka ? 'same' : 'moved';
-      }, { timeout: 10_000 }).toBe('moved').then(() => true, () => false);
-      row({ step: 'fusenpai (court F)', action: 'Record fusenpai on the console', variant: 'correct path (auto-advance)',
-        from: fb, advanced, court: advanced ? (await inlineIdentity(page)).court : null,
-        shot: await shot(page, 'fusenpai-auto-advance-F') });
-      if (advanced) expect((await inlineIdentity(page)).court).toBe('F');
-    }
+    expect(fb, 'court F has a bout to start').not.toBeNull();
+    await recordDecision(page, 'fusenpai', { side: 'aka' });
+    await expect(completedRowFor(page, fb)).toBeVisible();
+    const advanced = await expect.poll(async () => {
+      if (!(await inlineRunning(page))) return 'idle';
+      const now = await editorSides(page);
+      return now.shiro === fb.shiro && now.aka === fb.aka ? 'same' : 'moved';
+    }, { timeout: 10_000 }).toBe('moved').then(() => true, () => false);
+    row({ step: 'fusenpai (court F)', action: 'Record fusenpai on the console', variant: 'correct path (auto-advance)',
+      from: fb, advanced, court: advanced ? (await editorIdentity(page)).court : null,
+      shot: await shot(page, 'fusenpai-auto-advance-F') });
+    if (advanced) expect((await editorIdentity(page)).court).toBe('F');
   });
   // Functional defects found by the journeys above, each now fixed and named
   // by its bead. Each seeds its own competition on its own shiaijo, so it runs
@@ -1016,6 +1022,7 @@ test.describe('knockout-mixed-individual', () => {
     const id = await seedOwn(page, { name: 'Finding A2', format: 'mixed', poolSize: 3, poolWinners: 2, courts: ['H'], numberPrefix: 'FB' }, rosterOf('Atwo', 6));
     await openShiaijo(page, 'H');
     const first = await ensureRunning(page);
+    expect(first, 'the first bout on H starts').not.toBeNull();
     await recordDecision(page, 'kiken-voluntary', { side: 'aka' });
     await expect(completedRowFor(page, first)).toBeVisible();
     // The withdrawn competitor's next bout, from the Scores tab.
@@ -1034,7 +1041,7 @@ test.describe('knockout-mixed-individual', () => {
     await login(page);
     await seedOwn(page, { name: 'Finding A3', format: 'knockout', courts: ['I'], numberPrefix: 'FC' }, rosterOf('Athree', 4));
     await openShiaijo(page, 'I');
-    await ensureRunning(page);
+    expect(await ensureRunning(page), 'a semi-final starts on I').not.toBeNull();
     await inlineEditor(page).getByTestId('scoring-modal-encho-pill').tap();
     await expect(inlineEditor(page).getByTestId('scoring-modal-encho-checkbox')).toBeVisible();
   });
@@ -1044,6 +1051,7 @@ test.describe('knockout-mixed-individual', () => {
     await seedOwn(page, { name: 'Finding A4', format: 'knockout', courts: ['J'], numberPrefix: 'FD' }, rosterOf('Afour', 4));
     await openShiaijo(page, 'J');
     const semi = await ensureRunning(page);
+    expect(semi, 'a semi-final starts on J').not.toBeNull();
     await ipponButton(page, 'shiro', 'M').tap();
     await ipponButton(page, 'aka', 'K').tap();
     await settle(page);
@@ -1089,6 +1097,7 @@ test.describe('knockout-mixed-individual', () => {
     await seedOwn(page, { name: 'Finding A6', format: 'mixed', poolSize: 3, poolWinners: 2, courts: ['L'], numberPrefix: 'FF' }, rosterOf('Asix', 6));
     await openShiaijo(page, 'L');
     const pair = await ensureRunning(page);
+    expect(pair, 'a bout starts on this court').not.toBeNull();
     // Venue wifi: the court's refresh after the autosave is slow to arrive.
     // The score is on the board (and saved) all the same.
     const slowReads = async (route) => {
@@ -1130,6 +1139,7 @@ test.describe('knockout-mixed-individual', () => {
     await seedOwn(page, { name: 'Finding A8', format: 'knockout', courts: ['N'], numberPrefix: 'FH' }, rosterOf('Aeight', 4));
     await openShiaijo(page, 'N');
     const semi = await ensureRunning(page);
+    expect(semi, 'a semi-final starts on this court').not.toBeNull();
     await ipponButton(page, winnerOf(semi), 'M').tap();
     await settle(page);
     await context.setOffline(true);

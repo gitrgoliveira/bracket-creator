@@ -76,19 +76,21 @@ export function kachinukiAdvisoryModel({ roster, squadA, squadB, teamNumberA, te
 
 // bc-kbrc: the one line the team sheet shows in place of the live bout once
 // Record bout has recorded the last bout and appended no pairing. It names
-// the side or sides the roster says have nobody left (a lineup found, no
-// fighter on, nobody behind); with no such roster (none read yet, the read
-// failed, or no lineup) it says only that there is no next pairing.
+// the side or sides the roster says have nobody left: a lineup found, no
+// fighter on (the recorded bout retired them) and nobody behind. null when
+// the roster names no such side (no roster read, the read failed, or no
+// lineup): the sheet then keeps the bout live, as it always did, and shows
+// no line (coordinator decision 2026-10-11).
 export function kachinukiNoPairingText(roster) {
   const out = (side) => !!side && !!side.lineupFound
     && !(side.on && (side.on.memberId || side.on.name))
     && !(Array.isArray(side.remaining) && side.remaining.length > 0);
   const shiro = out(roster && roster.sideB);
   const aka = out(roster && roster.sideA);
+  if (!shiro && !aka) return null;
   const who = shiro && aka ? "Shiro and Aka have no fighters left."
     : shiro ? "Shiro has no fighters left."
-    : aka ? "Aka has no fighters left."
-    : "No next pairing.";
+    : "Aka has no fighters left.";
   return `${who} End match finishes the encounter.`;
 }
 

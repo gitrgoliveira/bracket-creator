@@ -2622,6 +2622,57 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // always-visible daihyosen slot); fixed-format matches keep all positions.
   // Computed once here and shared by the Record-bout guard below and the
   // render body.
+  // bc-kfnl (operator ruling 2026-09-24): the advisory line above the live bout,
+  // each side's fighter on, fighters left and who is next. The queue is read from
+  // the server (engine.KachinukiRoster, the same call that appends the next
+  // pairing, which also picks out each side's fighter on) and keyed on a VALUE,
+  // never on `m`, which every broadcast re-creates: the match id, the bout
+  // log's fighters and recorded marks, and the result of every bout the server
+  // reads one from, i.e. not the live bout's until Record bout records it
+  // (kachinukiRosterKey: the server keeps both fighters of the bout being
+  // fought on whatever its score, so a live point reads nothing, and Record
+  // bout, which marks the bout recorded even when a side has nobody left and
+  // nothing is appended, re-reads once), and the two lineups AS THE SERVER LAST
+  // ANSWERED THEM (servedLineupsKey: the roster is read from the stored
+  // lineups, so a save that only reached the outbox reads nothing until it
+  // lands, and then once). The first read waits until both lineup reads have
+  // settled (lineupsSettled, which a side given another team clears until its
+  // new team's lineup is read), so a mount reads once rather than once before
+  // and once after its lineups land. A roster read for another key is not shown, so the
+  // line never lags a recorded bout. A failed read is null
+  // (fetchKachinukiRoster never throws) and shows no line. It feeds no verdict
+  // and does not arm End match. Its one other reader is the closing of a
+  // recorded last bout (bc-kbrc, coordinator decision 2026-10-11): only when
+  // this read says a side's lineup has nobody left does the bout Record bout
+  // recorded turn read-only, with the line naming that side; with no lineup,
+  // or before the read lands, the bout stays live exactly as before.
+  const kachinukiRosterReadKey = kachinukiBoutMode && m.compId && m.id && lineupsSettled
+    ? `${kachinukiRosterKey(m.id, m.subResults)}#${servedLineupsKey}`
+    : "";
+  const [kachinukiRoster, setKachinukiRoster] = useStateA(null);
+  useEffectA(() => {
+    const api = window.API;
+    if (!kachinukiRosterReadKey || !api || typeof api.fetchKachinukiRoster !== "function") {
+      setKachinukiRoster(null);
+      return undefined;
+    }
+    let live = true;
+    const key = kachinukiRosterReadKey;
+    Promise.resolve()
+      .then(() => api.fetchKachinukiRoster(m.compId, m.id))
+      .then(
+        (roster) => { if (live) setKachinukiRoster(roster ? { key, roster } : null); },
+        () => { if (live) setKachinukiRoster(null); },
+      );
+    return () => { live = false; };
+  }, [kachinukiRosterReadKey, m.compId]);
+  // The roster read for the bout log on screen, or null (none, failed, or a
+  // read for another key still out).
+  const kachinukiRosterShown = kachinukiRoster && kachinukiRoster.key === kachinukiRosterReadKey
+    ? kachinukiRoster.roster : null;
+  // bc-kbrc: the words of the no-pairing line, or null when the roster does not
+  // say a side's lineup has nobody left.
+  const kachinukiNoPairing = kachinukiNoPairingText(kachinukiRosterShown);
   //
   // mp-gmcg: [End match] outcome, derived from LOCAL bout state so an
   // unsaved just-scored bout counts (the operator scores the final bout and
@@ -2638,11 +2689,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     : null;
   const visiblePositions = isKachinuki
     ? kachinukiVisiblePositions({
-        // bc-kbrc: Record bout recorded the last bout and appended no pairing
-        // (a side has nobody left): that bout renders read-only like every
-        // other recorded bout, unless End match cannot finish the encounter
-        // (a knockout tie), where Encho on that bout is the way on.
-        closeRecordedLast: kachinukiEndOutcome?.kind !== "blocked",
+        // bc-kbrc: Record bout recorded the last bout and appended no pairing,
+        // and the roster read says a side's lineup has nobody left: that bout
+        // renders read-only like every other recorded bout. Not without that
+        // read (no lineup, or the read not landed yet: the bout stays live as
+        // it always did, so nothing closes and reopens under the operator's
+        // finger), and not when End match cannot finish the encounter (a
+        // knockout tie), where Encho on that bout is the way on.
+        closeRecordedLast: kachinukiEndOutcome?.kind !== "blocked" && !!kachinukiNoPairing,
         positions, daihyosenIdx,
         // Client-added manual bouts (mp-gmcg) are not in the server log yet;
         // fold them in as placeholder entries so the new row renders.
@@ -2687,48 +2741,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const kachinukiDoneBoutIdxs = kachinukiBoutMode
     ? positions.map((_, i) => i).filter(i => i !== daihyosenIdx && i !== kachinukiCurBoutIdx && subBoutHasBeenPlayed(subs[i]))
     : [];
-  // bc-kfnl (operator ruling 2026-09-24): the advisory line above the live bout,
-  // each side's fighter on, fighters left and who is next. The queue is read from
-  // the server (engine.KachinukiRoster, the same call that appends the next
-  // pairing, which also picks out each side's fighter on) and keyed on a VALUE,
-  // never on `m`, which every broadcast re-creates: the match id, the bout
-  // log's fighters and recorded marks, and the result of every bout the server
-  // reads one from, i.e. not the live bout's until Record bout records it
-  // (kachinukiRosterKey: the server keeps both fighters of the bout being
-  // fought on whatever its score, so a live point reads nothing, and Record
-  // bout, which marks the bout recorded even when a side has nobody left and
-  // nothing is appended, re-reads once), and the two lineups AS THE SERVER LAST
-  // ANSWERED THEM (servedLineupsKey: the roster is read from the stored
-  // lineups, so a save that only reached the outbox reads nothing until it
-  // lands, and then once). The first read waits until both lineup reads have
-  // settled (lineupsSettled, which a side given another team clears until its
-  // new team's lineup is read), so a mount reads once rather than once before
-  // and once after its lineups land. A roster read for another key is not shown, so the
-  // line never lags a recorded bout. A failed read is null
-  // (fetchKachinukiRoster never throws) and shows no line. ADVISORY ONLY:
-  // nothing reads it but renderKachinukiAdvisory (the advisory line, and the
-  // words of the no-pairing line, bc-kbrc); it feeds no verdict, does
-  // not arm End match and holds back neither Record bout nor Encho.
-  const kachinukiRosterReadKey = kachinukiBoutMode && m.compId && m.id && lineupsSettled
-    ? `${kachinukiRosterKey(m.id, m.subResults)}#${servedLineupsKey}`
-    : "";
-  const [kachinukiRoster, setKachinukiRoster] = useStateA(null);
-  useEffectA(() => {
-    const api = window.API;
-    if (!kachinukiRosterReadKey || !api || typeof api.fetchKachinukiRoster !== "function") {
-      setKachinukiRoster(null);
-      return undefined;
-    }
-    let live = true;
-    const key = kachinukiRosterReadKey;
-    Promise.resolve()
-      .then(() => api.fetchKachinukiRoster(m.compId, m.id))
-      .then(
-        (roster) => { if (live) setKachinukiRoster(roster ? { key, roster } : null); },
-        () => { if (live) setKachinukiRoster(null); },
-      );
-    return () => { live = false; };
-  }, [kachinukiRosterReadKey, m.compId]);
   // Does any bout carry a mark the operator could TAP AWAY? Read off subTotals
   // rather than re-filtering the rows, so the hint and the score agree by
   // construction. Counted through realIppons like everything else, which drops
@@ -3225,17 +3237,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // (kachinuki_advisory.jsx). Muted text, no warning colour: it is a guide.
   const renderKachinukiAdvisory = () => {
     if (!kachinukiBoutMode) return null;
-    const roster = kachinukiRoster && kachinukiRoster.key === kachinukiRosterReadKey
-      ? kachinukiRoster.roster : null;
+    const roster = kachinukiRosterShown;
     // bc-kbrc: no live bout, so the line stands in its place: who has nobody
     // left and that End match finishes the encounter. A guide, like the
-    // advisory, in the same muted style.
+    // advisory, in the same muted style. There is no live bout only when the
+    // roster named such a side, so the words are always there.
     if (kachinukiNoLiveBout) {
-      return (
+      return kachinukiNoPairing ? (
         <div key="kachinuki-no-pairing" className="kachinuki-advisory" data-testid="kachinuki-no-pairing">
-          {kachinukiNoPairingText(roster)}
+          {kachinukiNoPairing}
         </div>
-      );
+      ) : null;
     }
     if (!roster) return null;
     const model = kachinukiAdvisoryModel({

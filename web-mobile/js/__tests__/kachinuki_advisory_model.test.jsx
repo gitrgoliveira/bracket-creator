@@ -199,10 +199,10 @@ describe('kachinukiNoPairingText', () => {
     expect(kachinukiNoPairingText({ sideA: out, sideB: out }))
       .toBe('Shiro and Aka have no fighters left. End match finishes the encounter.');
   });
-  it('claims nobody without a lineup or a roster', () => {
+  it('is null without a lineup, a roster, or a side with nobody left', () => {
     const noLineup = { lineupFound: false, on: null, remaining: [] };
-    expect(kachinukiNoPairingText({ sideA: noLineup, sideB: noLineup }))
-      .toBe('No next pairing. End match finishes the encounter.');
-    expect(kachinukiNoPairingText(null)).toBe('No next pairing. End match finishes the encounter.');
+    expect(kachinukiNoPairingText({ sideA: noLineup, sideB: noLineup })).toBeNull();
+    expect(kachinukiNoPairingText(null)).toBeNull();
+    expect(kachinukiNoPairingText({ sideA: on, sideB: on })).toBeNull();
   });
 });

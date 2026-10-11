@@ -1335,11 +1335,12 @@ type SubMatchResult struct {
 	// (operator decision 2026-10-11, bc-kfnl). Only the server writes it:
 	// engine.advanceKachinukiOnce sets it on the bout Record bout closes, in the
 	// same locked write as the next pairing (or alone, when no pairing is
-	// appended), and engine.carryRecordedBouts gives every incoming row the
-	// stored row's value, so a write that omits it keeps it and a client cannot
-	// set it (a write that starts or extends that bout's encho clears it, the
-	// bout being fought again). It takes no stamp: setting or clearing it never
-	// moves the bout group's stamp. It tells a recorded bout from the one being fought, which the
+	// appended). It is its own merge group, GroupRecorded (match_groups.go), a
+	// server group no client write names: the merge copies the stored marks over
+	// whatever a client's rows say, takes one off when a write raises that bout's
+	// encho (the bout being fought again), and RemoveTrailingKachinukiBout takes
+	// it off the bout whose appended pairing it removes; each stamps the group,
+	// never the bout's. It tells a recorded bout from the one being fought, which the
 	// row's result cannot: the running autosave writes a winner at a one-point
 	// lead and a hikiwake at 1-1. engine.KachinukiRoster reads the last numbered
 	// bout's result only when it is set. omitempty: absent on every row written

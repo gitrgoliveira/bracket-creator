@@ -678,7 +678,6 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 	if out.Next == nil && !markRecorded {
 		return false, nil, nil
 	}
-	recordedGroup := state.BoutGroup(last.Position)
 
 	// post captures the FULL bout log AFTER the append and the stamps the
 	// advance left, so the caller can echo them without re-reading the match
@@ -691,19 +690,18 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 	// the write this advance answers later than the server's now, and the
 	// bout it appends must not read as made before the save that recorded the
 	// one it follows), and the advance is recorded in the match's history, so
-	// a write made before it is ordered against it (bc-mrgc).
-	stamp := max(serverNowMs(), parent.ModifiedAt)
-	// The groups this write changes, for its history line (groups), and the
-	// ones it stamps (stamped). The recorded mark is the one change that takes
-	// NO stamp: carryRecordedBouts keeps it on every write whatever the stamps
-	// say, so it needs none, and stamping the closed bout's group at the
-	// server's time would hold a change to that bout made before Record bout
-	// (another device, or this one's debounced or queued autosave) that
-	// arrives after it. The appended pairing and the verdict it clears are
-	// stamped as every server-built write is.
-	var groups, stamped []string
+	// a write made before it is ordered against it (bc-mrgc). Strictly newer
+	// than the match, so ModifiedAt moves and every device orders the copy this
+	// write leaves after the one before it (keepNewerMatches replaces a copy on
+	// an equal stamp).
+	stamp := max(serverNowMs(), parent.ModifiedAt+1)
+	// The groups this write changes and stamps: the recorded marks
+	// (GroupRecorded, never the closed bout's own group, so a change to that
+	// bout made before Record bout and arriving after it still applies), and the
+	// appended pairing with the verdict it clears.
+	var stamped []string
 	if markRecorded {
-		groups = append(groups, recordedGroup)
+		stamped = append(stamped, state.GroupRecorded)
 	}
 	door := doorKachinukiRecord
 	if out.Next != nil {
@@ -738,13 +736,11 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 					return errKachinukiAdvanceStale
 				}
 				// The re-check holds the log equal to the snapshot, so lastIdx
-				// still names the bout Record bout closed. The mark takes no
-				// stamp (see stamped above).
+				// still names the bout Record bout closed.
 				bm.SubResults[lastIdx].Recorded = true
 				if out.Next != nil {
 					appendNextKachinukiBout(bm, *out.Next)
-					stamped = []string{state.BoutGroup(bm.SubResults[len(bm.SubResults)-1].Position), state.GroupResult}
-					groups = append(groups, stamped...)
+					stamped = append(stamped, state.BoutGroup(bm.SubResults[len(bm.SubResults)-1].Position), state.GroupResult)
 				}
 				bm.StampGroups(stamp, stamped...)
 				post = &KachinukiAdvance{
@@ -756,7 +752,7 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 			}); uerr != nil {
 				return uerr
 			}
-			e.recordDirectHistory(tx, compID, matchID, door, stamp, groups...)
+			e.recordDirectHistory(tx, compID, matchID, door, stamp, stamped...)
 			return nil
 		})
 		if err != nil {
@@ -772,7 +768,7 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 			if !kachinukiAdvanceStillHolds(snapshot, parent.Status, parent.ModifiedAt, parent.SubResults) {
 				return errKachinukiAdvanceStale
 			}
-			parent.SubResults[lastIdx].Recorded = true // no stamp (see stamped above)
+			parent.SubResults[lastIdx].Recorded = true
 			if out.Next != nil {
 				// Append the next bout. Appending means the encounter continues: the
 				// parent match must stay running with no match-level winner/decision.
@@ -782,8 +778,7 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 				parent.Winner = ""
 				parent.WinnerID = "" // bc-brid: the verdict's id half, cleared with the name.
 				parent.Decision = ""
-				stamped = []string{state.BoutGroup(out.Next.Position), state.GroupResult}
-				groups = append(groups, stamped...)
+				stamped = append(stamped, state.BoutGroup(out.Next.Position), state.GroupResult)
 			}
 			parent.StampGroups(stamp, stamped...)
 			post = &KachinukiAdvance{
@@ -799,7 +794,7 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 		if !found {
 			return nil
 		}
-		e.recordDirectHistory(tx, compID, matchID, door, stamp, groups...)
+		e.recordDirectHistory(tx, compID, matchID, door, stamp, stamped...)
 		return nil
 	})
 	if err != nil {
@@ -1590,15 +1585,17 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 		}
 		// The removed bout keeps its stamp as a tombstone (bc-mrgc), so a
 		// write made before the removal that still carries it cannot bring
-		// it back; one made after it can.
-		stamp := serverNowMs()
+		// it back; one made after it can. Strictly newer than the match (read
+		// in findMatchHome below), as the advance's stamp is, so the copy this
+		// leaves is ordered after the one before it on every device.
+		now := serverNowMs()
 		// unrecord takes the recorded mark off the bout before the removed one
 		// only when the removal undoes the Record bout that appended it: the
 		// history shows the removed row was put there by Record bout's advance
 		// (boutAppendedByRecordBout). A bout added by hand after a side had
 		// nobody left leaves that bout recorded, whatever the lineups say now.
-		// Its group goes in the history line only: the mark takes no stamp
-		// (carryRecordedBouts).
+		// Taking the mark off is a change of GroupRecorded, stamped and named
+		// in the history line with the removed bout.
 		//
 		// The match's history, read through the transaction (it sees its own
 		// staged lines), is read only when the bout left last IS recorded:
@@ -1630,7 +1627,8 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 				}
 				removedGroup := state.BoutGroup(h.Pool.SubResults[len(h.Pool.SubResults)-1].Position)
 				removed := append([]string{removedGroup}, unrecord(removedGroup, stripped)...)
-				h.Pool.StampGroups(stamp, removedGroup)
+				stamp := max(now, h.Pool.ModifiedAt+1)
+				h.Pool.StampGroups(stamp, removed...)
 				h.Pool.SubResults = stripped
 				if werr := h.Save(); werr != nil {
 					return werr
@@ -1647,7 +1645,8 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 			}
 			removedGroup := state.BoutGroup(h.Bracket.SubResults[len(h.Bracket.SubResults)-1].Position)
 			removed := append([]string{removedGroup}, unrecord(removedGroup, stripped)...)
-			h.Bracket.StampGroups(stamp, removedGroup)
+			stamp := max(now, h.Bracket.ModifiedAt+1)
+			h.Bracket.StampGroups(stamp, removed...)
 			h.Bracket.SubResults = stripped
 			if werr := h.Save(); werr != nil {
 				return werr
@@ -2607,48 +2606,12 @@ func preserveKachinukiMemberIDs(storedByPos map[int]state.SubMatchResult, in *st
 	}
 }
 
-// carryRecordedBouts is the ONE owner of SubMatchResult.Recorded on a write a
-// writer sent (bc-kfnl, operator decision 2026-10-11: Record bout stamps the
-// bout as recorded on the server). Every incoming row takes the value the
-// stored row at its position holds: a write that leaves the flag out (the
-// running autosave, an older client, a queued replay) keeps it, and a row a
-// client marks recorded that the server never recorded is not. The server
-// is its only writer (advanceKachinukiOnce sets it, RemoveTrailingKachinukiBout
-// clears it on the bout an undone Record bout closed, and this function on a
-// bout fought on in overtime, below).
-//
-// The mark takes no stamp, by exception to every other server-built change
-// (bc-mrgc): this function keeps it whatever the stamps say, so a stamp would
-// order nothing about the mark and would only hold a change to the bout made
-// before Record bout that arrives after it. Setting or clearing it never
-// moves the bout group's stamp.
-//
-// One write clears it: a write that starts or extends overtime on a recorded
-// bout (its encho period count rises against the stored row). The bout is
-// being fought again, so it is no longer recorded and both its fighters are
-// on, e.g. a knockout tie recorded when both teams had nobody left, then
-// fought on in encho. If the merge holds that bout's group, the stored row,
-// still recorded, is copied back with it (CopyGroup).
-//
-// One call site: mergeMatchWrite runs it on every forward write (both
-// branches, every door), before the merge compares a group. It runs AFTER
-// noteServerBoutChanges, which diffs the writer's rows against the rows the
-// server changed on its behalf: both of those are still uncarried there, so
-// a row that only left the flag out never reads as a server change of that
-// bout (pinned by TestScoreHandler_KachinukiRecordBoutAtExhaustionMarksTheBout).
-func carryRecordedBouts(prior *state.MatchResult, rows []state.SubMatchResult) {
-	var storedRows []state.SubMatchResult
-	if prior != nil {
-		storedRows = prior.SubResults
-	}
-	for i := range rows {
-		stored := state.SubResultAt(storedRows, rows[i].Position)
-		rows[i].Recorded = stored.Recorded && !enchoPeriodsRise(stored.Encho, rows[i].Encho)
-	}
-}
-
 // enchoPeriodsRise reports whether a bout row's overtime period count rises
-// from stored to incoming: overtime started (from none) or extended.
+// from stored to incoming: overtime started (from none) or extended. A write
+// that raises it on a recorded bout takes the bout's recorded mark off
+// (mergeHold.unrecordRaisedEncho): the bout is being fought again, so both its
+// fighters are on, e.g. a knockout tie recorded when both teams had nobody
+// left, then fought on in encho.
 func enchoPeriodsRise(stored, incoming *state.EnchoMetadata) bool {
 	periods := func(e *state.EnchoMetadata) int {
 		if e == nil {
@@ -2660,8 +2623,8 @@ func enchoPeriodsRise(stored, incoming *state.EnchoMetadata) bool {
 }
 
 // unrecordLastBout takes the recorded mark off the last numbered bout of
-// subs and returns its group when it did (nil otherwise), for the history
-// line: the mark itself takes no stamp (carryRecordedBouts). Removing the
+// subs and returns GroupRecorded when it did (nil otherwise), for the caller to
+// stamp and name in the history line. Removing the
 // pairing a Record bout appended is the undo of that Record bout: the bout it
 // closed is the one being fought again, so its fighters are both on until it
 // is recorded again (bc-kfnl). RemoveTrailingKachinukiBout is its only caller,
@@ -2673,7 +2636,7 @@ func unrecordLastBout(subs []state.SubMatchResult) []string {
 		return nil
 	}
 	subs[i].Recorded = false
-	return []string{state.BoutGroup(subs[i].Position)}
+	return []string{state.GroupRecorded}
 }
 
 // boutAppendedByRecordBout reports whether the match's history shows that the

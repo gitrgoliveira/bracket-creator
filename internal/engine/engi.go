@@ -285,7 +285,7 @@ func (e *Engine) recordEngiMatch(
 		}
 		return out, nil
 	}
-	if err != ErrMatchNotFound {
+	if err != errMatchNotFound {
 		return nil, err
 	}
 

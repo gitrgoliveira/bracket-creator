@@ -61,12 +61,32 @@ const (
 	// group of a side.
 	GroupRepPickA = "repPickA"
 	GroupRepPickB = "repPickB"
+	// GroupRecorded holds which numbered kachinuki bouts Record bout closed
+	// (SubMatchResult.Recorded on every row with a position > 0), as the sorted
+	// list of their positions. It is the SERVER's (ServerGroups): the advance
+	// sets it, RemoveTrailingKachinukiBout takes it off the bout whose pairing it
+	// removes, and the merge takes it off a recorded bout whose overtime a write
+	// raises. Each stamps it like any group, so a copy holding the mark is ordered
+	// after one without it on every device. A bout row's group (bout:N) does not
+	// hold the mark, so a point on bout N and Record bout never fence each other.
+	GroupRecorded = "recorded"
 
 	boutGroupPrefix = "bout:"
 )
 
-// ScalarGroups lists the scalar groups in their fixed order.
+// ScalarGroups lists the scalar groups a client write names, in their fixed
+// order.
 var ScalarGroups = []string{GroupPoints, GroupResult, GroupEncho, GroupFlags, GroupRep, GroupRepPickA, GroupRepPickB}
+
+// ServerGroups lists the groups only the server writes. No client write names
+// one: the score handler refuses it in `changed`, and the merge copies the
+// stored value over whatever a client's rows say.
+var ServerGroups = []string{GroupRecorded}
+
+// IsServerGroup reports whether group is one only the server writes.
+func IsServerGroup(group string) bool {
+	return slices.Contains(ServerGroups, group)
+}
 
 // RepPickGroup names the group of side's representative pick, "" for a value
 // that is neither side.
@@ -105,13 +125,12 @@ func ParseBoutGroup(group string) (int, bool) {
 	return pos, true
 }
 
-// ValidGroup reports whether group names a scalar group or a bout row. The
-// score handler refuses a `changed` entry that is neither.
+// ValidGroup reports whether group names a scalar group, a server group or a
+// bout row. The score handler refuses a `changed` entry that is not one, or
+// that is a server group (IsServerGroup).
 func ValidGroup(group string) bool {
-	for _, g := range ScalarGroups {
-		if g == group {
-			return true
-		}
+	if slices.Contains(ScalarGroups, group) || IsServerGroup(group) {
+		return true
 	}
 	_, ok := ParseBoutGroup(group)
 	return ok
@@ -282,9 +301,19 @@ func CopyGroup(dst, src *MatchResult, group string) {
 	case GroupRepPickB:
 		_, b := src.RepPicks()
 		dst.SetRepPick(domain.MatchSideB, b)
+	case GroupRecorded:
+		setRecordedPositions(dst.SubResults, RecordedPositions(src.SubResults))
 	default:
 		if pos, ok := ParseBoutGroup(group); ok {
 			row := subAt(src.SubResults, pos)
+			// The recorded mark is GroupRecorded's, not the bout's: a copy of
+			// the bout keeps the mark the destination row already holds, and a
+			// row the destination lacks brings the source's.
+			if dstRow := subAt(dst.SubResults, pos); row != nil && dstRow != nil && row.Recorded != dstRow.Recorded {
+				kept := *row
+				kept.Recorded = dstRow.Recorded
+				row = &kept
+			}
 			// The representatives are not the bout's: a copy of the bout keeps the
 			// picks the destination row already holds (GroupRepPickA and
 			// GroupRepPickB move them), so the copies give the same result in
@@ -348,6 +377,36 @@ type repPickBGroup struct {
 	SideBMemberID string `json:"sideBMemberId"`
 }
 
+// recordedGroup is GroupRecorded's value: the positions of the numbered bouts
+// Record bout closed, sorted, never nil (so an empty set compares and
+// serializes as one value).
+type recordedGroup struct {
+	Positions []int `json:"positions"`
+}
+
+// RecordedPositions lists, sorted, the positions of the numbered rows (position
+// > 0) marked recorded: GroupRecorded's value.
+func RecordedPositions(subs []SubMatchResult) []int {
+	out := []int{}
+	for i := range subs {
+		if subs[i].Position > 0 && subs[i].Recorded {
+			out = append(out, subs[i].Position)
+		}
+	}
+	sort.Ints(out)
+	return out
+}
+
+// setRecordedPositions marks each numbered row recorded exactly when its
+// position is in positions. A position with no row marks nothing.
+func setRecordedPositions(subs []SubMatchResult, positions []int) {
+	for i := range subs {
+		if subs[i].Position > 0 {
+			subs[i].Recorded = slices.Contains(positions, subs[i].Position)
+		}
+	}
+}
+
 type repGroup struct {
 	RepPlayerA string `json:"repPlayerA"`
 	RepPlayerB string `json:"repPlayerB"`
@@ -380,6 +439,8 @@ func groupProjection(m *MatchResult, group string) any {
 	case GroupRepPickB:
 		_, b := m.RepPicks()
 		return repPickBGroup{SideBMemberID: b}
+	case GroupRecorded:
+		return recordedGroup{Positions: RecordedPositions(m.SubResults)}
 	}
 	if pos, ok := ParseBoutGroup(group); ok {
 		row := subAt(m.SubResults, pos)
@@ -388,6 +449,8 @@ func groupProjection(m *MatchResult, group string) any {
 		}
 		c := CloneSubResults([]SubMatchResult{*row})[0]
 		c.IpponsA, c.IpponsB = nonNilStrings(c.IpponsA), nonNilStrings(c.IpponsB)
+		// The recorded mark is GroupRecorded's.
+		c.Recorded = false
 		if pos == DaihyosenSubPosition {
 			// The representatives are GroupRepPickA's and GroupRepPickB's, not
 			// the bout's. The row's WinnerMemberID is derived from the winner's

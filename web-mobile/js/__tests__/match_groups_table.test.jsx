@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
-  SCALAR_GROUPS, boutGroup, parseBoutGroup, isValidGroup,
+  SCALAR_GROUPS, SERVER_GROUPS, GROUP_RECORDED, boutGroup, parseBoutGroup, isValidGroup,
   changedGroups, unionChanged, groupLabel, groupsLabel,
 } from '../match_groups.jsx';
 import { toBackendMatchResult, matchWire } from '../api_serializers.jsx';
@@ -22,6 +22,7 @@ const table = JSON.parse(readFileSync(
 describe('the shared group table', () => {
   it('is not empty', () => {
     expect(table.scalarGroups.length).toBeGreaterThan(0);
+    expect(table.serverGroups.length).toBeGreaterThan(0);
     expect(table.bouts.length).toBeGreaterThan(0);
     expect(table.invalid.length).toBeGreaterThan(0);
   });
@@ -29,6 +30,15 @@ describe('the shared group table', () => {
   it('names the scalar groups in the server\'s order', () => {
     expect(SCALAR_GROUPS).toEqual(table.scalarGroups);
     for (const g of table.scalarGroups) expect(isValidGroup(g)).toBe(true);
+  });
+
+  it('names the server\'s own groups, which no client write states', () => {
+    expect(SERVER_GROUPS).toEqual(table.serverGroups);
+    for (const g of table.serverGroups) {
+      expect(isValidGroup(g)).toBe(true);
+      expect(SCALAR_GROUPS).not.toContain(g);
+    }
+    expect(groupLabel(GROUP_RECORDED)).toBe('the recorded bouts');
   });
 
   it.each(table.bouts)('bout $position is "$group"', ({ position, group }) => {

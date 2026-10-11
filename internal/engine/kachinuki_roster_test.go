@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -228,6 +229,10 @@ func TestKachinukiRoster_RecordBoutAtExhaustionTakesTheLoserOff(t *testing.T) {
 				rosterBout(2, a[0], b[1], &a[0], false),
 			}, bracket)
 
+			before, err := eng.findTeamMatch(comp.ID, matchID)
+			require.NoError(t, err)
+			require.NotNil(t, before)
+
 			// Record bout: nobody left on B, so nothing is appended, but the
 			// bout is marked recorded in a write of its own.
 			appended, post, err := eng.MaybeAdvanceKachinuki(comp.ID, matchID)
@@ -237,6 +242,13 @@ func TestKachinukiRoster_RecordBoutAtExhaustionTakesTheLoserOff(t *testing.T) {
 			require.Len(t, post.BoutLog, 2)
 			assert.True(t, post.BoutLog[1].Recorded, "the bout Record bout closed is recorded")
 			assert.False(t, post.BoutLog[0].Recorded, "an earlier bout is not touched")
+			// Review round 6: the mark is GroupRecorded, stamped strictly after
+			// the match it was made on, so every device orders the marked copy
+			// after the unmarked one; the bout's own group keeps its stamp.
+			assert.Greater(t, post.ModifiedAt, before.Result.ModifiedAt, "the mark moves ModifiedAt")
+			assert.Equal(t, post.ModifiedAt, post.GroupStamps[state.GroupRecorded], "the mark is stamped as its own group")
+			assert.Equal(t, before.Result.GroupStamp(state.BoutGroup(2)), post.GroupStamps[state.BoutGroup(2)],
+				"the closed bout's own group is not stamped")
 
 			got, err := eng.KachinukiRoster(comp.ID, matchID)
 			require.NoError(t, err)
@@ -251,7 +263,7 @@ func TestKachinukiRoster_RecordBoutAtExhaustionTakesTheLoserOff(t *testing.T) {
 			require.NotEmpty(t, history)
 			lastEntry := history[len(history)-1]
 			assert.Equal(t, doorKachinukiRecord, lastEntry.Door)
-			assert.Equal(t, []string{state.BoutGroup(2)}, lastEntry.Changed)
+			assert.Equal(t, []string{state.GroupRecorded}, lastEntry.Changed, "the history line names the recorded group")
 
 			// A second Record bout on the recorded bout writes nothing.
 			again, post2, err := eng.MaybeAdvanceKachinuki(comp.ID, matchID)
@@ -361,7 +373,14 @@ func TestKachinukiRoster_RemovingTheAppendedPairingUnrecordsTheBout(t *testing.T
 			require.NoError(t, err)
 			lastEntry := history[len(history)-1]
 			assert.Equal(t, doorKachinukiRemove, lastEntry.Door)
-			assert.ElementsMatch(t, []string{state.BoutGroup(2), state.BoutGroup(1)}, lastEntry.Changed)
+			assert.ElementsMatch(t, []string{state.BoutGroup(2), state.GroupRecorded}, lastEntry.Changed)
+			// The un-record is stamped with the removal, strictly after the
+			// copy Record bout left, so every device orders it after that one.
+			recordedStamp := storedGroupStamp(t, store, comp.ID, matchID, bracket, state.GroupRecorded)
+			assert.Greater(t, recordedStamp, post.ModifiedAt, "taking the mark off is stamped after Record bout")
+			assert.Equal(t, recordedStamp, storedGroupStamp(t, store, comp.ID, matchID, bracket, state.BoutGroup(2)),
+				"one stamp for the removal and the un-record")
+			assert.Equal(t, recordedStamp, updated.ModifiedAt, "the removal moves ModifiedAt")
 		})
 	}
 }
@@ -383,8 +402,12 @@ func TestKachinukiRecorded_AWriteNeitherClearsNorSetsIt(t *testing.T) {
 			live := rosterBout(2, a[0], b[1], nil, false)
 			matchID := saveRosterMatch(t, store, comp.ID, rt, []state.SubMatchResult{first, live}, bracket)
 
+			recordedBefore := storedGroupStamp(t, store, comp.ID, matchID, bracket, state.GroupRecorded)
+
 			// The running autosave: bout 1 echoed WITHOUT its mark, and bout 2
-			// (a point) claiming a mark the server never gave it.
+			// (a point) claiming a mark the server never gave it. It even names
+			// the recorded group, which no client write may change: the merge
+			// drops the name (the handler refuses it with a 400 before that).
 			sentFirst := first
 			sentFirst.Recorded = false
 			sentLive := live
@@ -392,9 +415,9 @@ func TestKachinukiRecorded_AWriteNeitherClearsNorSetsIt(t *testing.T) {
 			sentLive.Recorded = true
 			require.NoError(t, eng.RecordMatchResult(comp.ID, matchID, &state.MatchResult{
 				ID: matchID, SideA: "Ryu", SideAID: rt.aID, SideB: "Tora", SideBID: rt.bID,
-				Status: state.MatchStatusRunning, ModifiedAt: serverNowMs(),
+				Status: state.MatchStatusRunning, ModifiedAt: serverNowMs() + 1000,
 				SubResults: []state.SubMatchResult{sentFirst, sentLive},
-				Changed:    []string{state.BoutGroup(2)}, WriteDoor: DoorScore,
+				Changed:    []string{state.BoutGroup(2), state.GroupRecorded}, WriteDoor: DoorScore,
 			}))
 
 			subs := storedSubs(t, store, comp.ID, matchID, bracket)
@@ -407,7 +430,9 @@ func TestKachinukiRecorded_AWriteNeitherClearsNorSetsIt(t *testing.T) {
 			require.NoError(t, err)
 			require.NotEmpty(t, history)
 			assert.Equal(t, []string{state.BoutGroup(2)}, history[len(history)-1].Changed,
-				"leaving the mark out is not a change of bout 1")
+				"leaving the mark out is not a change of bout 1, and a client never changes the recorded group")
+			assert.Equal(t, recordedBefore, storedGroupStamp(t, store, comp.ID, matchID, bracket, state.GroupRecorded),
+				"the recorded group keeps its stamp")
 		})
 	}
 }
@@ -755,6 +780,8 @@ func TestKachinukiRecordBout_AnEarlierChangeToTheClosedBoutStillApplies(t *testi
 				require.True(t, post.BoutLog[tc.closed-1].Recorded)
 				assert.Equal(t, t0, storedGroupStamp(t, store, comp.ID, matchID, bracket, group),
 					"the recorded mark does not move the closed bout's stamp")
+				recordedStamp := storedGroupStamp(t, store, comp.ID, matchID, bracket, state.GroupRecorded)
+				assert.Greater(t, recordedStamp, t0+1_000, "the mark is stamped as its own group, after the point below")
 
 				// A second point on the closed bout, made before Record bout.
 				sent := append([]state.SubMatchResult(nil), post.BoutLog...)
@@ -770,6 +797,13 @@ func TestKachinukiRecordBout_AnEarlierChangeToTheClosedBoutStillApplies(t *testi
 				subs := storedSubs(t, store, comp.ID, matchID, bracket)
 				assert.Equal(t, []string{"M", "K"}, subs[tc.closed-1].IpponsA, "the earlier change applied")
 				assert.True(t, subs[tc.closed-1].Recorded, "and the bout stays recorded")
+				assert.Equal(t, recordedStamp, storedGroupStamp(t, store, comp.ID, matchID, bracket, state.GroupRecorded),
+					"the recorded group keeps its stamp")
+				history, err := store.LoadMatchHistory(comp.ID, matchID)
+				require.NoError(t, err)
+				last := history[len(history)-1]
+				assert.Equal(t, []string{group}, last.Changed, "the point names its bout only")
+				assert.Equal(t, state.HistoryOutcomeApplied, last.Outcomes[group])
 			})
 		}
 	}
@@ -808,26 +842,45 @@ func TestKachinukiRecorded_EnchoOnARecordedTieClearsIt(t *testing.T) {
 			assert.Equal(t, a[1].ID, onID(got.SideA), "a recorded draw as the last bout keeps A2 on")
 			assert.Equal(t, b[1].ID, onID(got.SideB), "and B2")
 
-			write := func(encho *state.EnchoMetadata) {
+			write := func(encho *state.EnchoMetadata, stamp int64) {
 				sent := append([]state.SubMatchResult(nil), post.BoutLog...)
 				sent[2].Decision = ""
 				sent[2].Encho = encho
 				require.NoError(t, eng.RecordMatchResult(comp.ID, matchID, &state.MatchResult{
 					ID: matchID, SideA: "Ryu", SideAID: rt.aID, SideB: "Tora", SideBID: rt.bID,
-					Status: state.MatchStatusRunning, ModifiedAt: serverNowMs(),
+					Status: state.MatchStatusRunning, ModifiedAt: stamp,
 					SubResults: sent,
 					Changed:    []string{state.BoutGroup(3)}, WriteDoor: DoorScore,
 				}))
 			}
+			recordedStamp := storedGroupStamp(t, store, comp.ID, matchID, bracket, state.GroupRecorded)
+			// An Encho tap made BEFORE Record bout and arriving after it: in
+			// stamp order the bout was recorded after that overtime, so the
+			// mark stays while the overtime itself, the bout's own change, lands.
+			write(&state.EnchoMetadata{PeriodCount: 1}, recordedStamp-1)
+			older := storedSubs(t, store, comp.ID, matchID, bracket)[2]
+			require.True(t, older.Recorded, "an overtime older than the mark does not take it off")
+			require.True(t, older.Encho.On(), "the overtime itself lands")
+			assert.Equal(t, recordedStamp, storedGroupStamp(t, store, comp.ID, matchID, bracket, state.GroupRecorded))
+
 			// A write that changes the bout without raising its encho keeps it.
-			write(nil)
+			write(nil, recordedStamp+1_000)
 			require.True(t, storedSubs(t, store, comp.ID, matchID, bracket)[2].Recorded)
 
 			// The Encho tap: the bout is fought again.
-			write(&state.EnchoMetadata{PeriodCount: 1})
+			enchoStamp := recordedStamp + 2_000
+			write(&state.EnchoMetadata{PeriodCount: 1}, enchoStamp)
 			subs := storedSubs(t, store, comp.ID, matchID, bracket)
 			assert.False(t, subs[2].Recorded, "starting encho on the recorded bout takes the mark off")
 			assert.True(t, subs[2].Encho.On())
+			assert.Equal(t, enchoStamp, storedGroupStamp(t, store, comp.ID, matchID, bracket, state.GroupRecorded),
+				"taking the mark off is a change of the recorded group at the write's stamp")
+			history, err := store.LoadMatchHistory(comp.ID, matchID)
+			require.NoError(t, err)
+			last := history[len(history)-1]
+			assert.ElementsMatch(t, []string{state.BoutGroup(3), state.GroupRecorded}, last.Changed,
+				"the history line names the recorded group")
+			assert.Equal(t, state.HistoryOutcomeApplied, last.Outcomes[state.GroupRecorded])
 
 			got, err = eng.KachinukiRoster(comp.ID, matchID)
 			require.NoError(t, err)
@@ -931,7 +984,9 @@ func TestKachinukiRoster_Refusals(t *testing.T) {
 	t.Run("unknown match", func(t *testing.T) {
 		eng, _, comp := setupKachinukiComp(t, "kachinuki-roster-unknown", 3)
 		_, err := eng.KachinukiRoster(comp.ID, "Pool Z-9")
-		assert.ErrorIs(t, err, ErrMatchNotFound)
+		var notFound *NotFoundError
+		require.ErrorAs(t, err, &notFound)
+		assert.Equal(t, "match Pool Z-9 not found", notFound.Error(), "named as a match, not a competition")
 	})
 	t.Run("unknown competition", func(t *testing.T) {
 		eng, _, _ := setupTestEngine(t)
@@ -953,7 +1008,8 @@ func TestKachinukiRoster_Refusals(t *testing.T) {
 		require.NoError(t, os.Mkdir(filepath.Join(dir, "competitions", comp.ID, "lineups.yaml"), 0o755))
 		_, err := eng.KachinukiRoster(comp.ID, "Pool A-0")
 		assert.Error(t, err)
-		assert.NotErrorIs(t, err, ErrMatchNotFound)
+		var notFound *NotFoundError
+		assert.False(t, errors.As(err, &notFound), "an unreadable file is no not-found")
 	})
 }
 

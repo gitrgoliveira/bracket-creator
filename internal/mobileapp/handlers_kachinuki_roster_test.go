@@ -142,10 +142,12 @@ func TestKachinukiRosterGET(t *testing.T) {
 	t.Run("404 for an unknown match", func(t *testing.T) {
 		w := getRoster(r, "/api/competitions/k1/matches/nope/kachinuki-roster")
 		assert.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), "match nope not found", "the answer names the match, not the competition")
 	})
 	t.Run("404 for an unknown competition", func(t *testing.T) {
 		w := getRoster(r, "/api/competitions/missing/matches/Pool%20A-0/kachinuki-roster")
 		assert.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), "competition missing not found")
 	})
 	t.Run("400 for a competition that is not kachinuki", func(t *testing.T) {
 		w := getRoster(r, "/api/competitions/fixed/matches/Pool%20A-0/kachinuki-roster")

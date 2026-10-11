@@ -12,6 +12,7 @@ import React from 'react';
 import { render, act, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { keepNewerMatches, keepNewerCompetitions } from '../../patch.jsx';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -311,40 +312,46 @@ describe('a recorded knockout tie fought on in encho', () => {
   });
 });
 
-// Review round 5, finding 1: a Record bout that appends no pairing only marks
-// its bout recorded, which moves no stamp, so a refetch that read the match
-// before the mark answers with the SAME stamp after it (keepNewerMatches takes
-// an equal stamp). The sheet holds the answer's mark until the match carries a
-// strictly newer stamp.
-describe('the Record-bout answer\'s recorded mark against a stale copy', () => {
+// Review rounds 5 and 6: a Record bout that appends no pairing only marks its
+// bout recorded. The mark is a merge group of its own (GroupRecorded), stamped
+// strictly after the match it was made on, so the copy carrying it is NEWER
+// than every copy read before it, and each host's keepNewerMatches (patch.jsx)
+// keeps it over a refetch that read the match before the mark and answers
+// after it. No hold in the editor: the props here go through the host's own
+// rule, as on every device.
+describe('the recorded mark against a stale copy', () => {
   const { recorded: _r, ...UNRECORDED_2 } = BOUT_2;
   const stamped = (subResults, modifiedAt) => ({ ...kachinukiMatch(subResults), modifiedAt });
 
-  async function recordLastBout() {
+  // host keeps the detail a host holds and renders the editor from it, every
+  // copy delivered through keepNewerMatches as a refetch is.
+  function host(view, props) {
+    let held = null;
+    return async (match) => {
+      held = keepNewerMatches(held, { poolMatches: [match] });
+      await act(async () => { view.rerender(<ScoreEditorModal match={held.poolMatches[0]} {...props} />); });
+      await settle();
+    };
+  }
+
+  it('this device: a stale unmarked copy arriving after the marked one does not reopen the bout', async () => {
     stubApi(SHIRO_OUT);
-    const onSubmit = vi.fn().mockResolvedValue({ subResults: [BOUT_1, BOUT_2], modifiedAt: 100 });
+    // The server's answer: the mark's stamp is strictly after the match's.
+    const onSubmit = vi.fn().mockResolvedValue({ subResults: [BOUT_1, BOUT_2], modifiedAt: 101 });
     const props = { onClose: vi.fn(), onSubmit, password: 'secret' };
     let view;
     await act(async () => {
       view = render(<ScoreEditorModal match={stamped([BOUT_1, UNRECORDED_2], 100)} {...props} />);
     });
     await settle();
+    const show = host(view, props);
+    await show(stamped([BOUT_1, UNRECORDED_2], 100));
     expect(liveRows(view.container).length).toBe(1);
     await act(async () => { fireEvent.click(recordButton()); });
     await settle();
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    const show = async (match) => {
-      await act(async () => { view.rerender(<ScoreEditorModal match={match} {...props} />); });
-      await settle();
-    };
-    return { view, show };
-  }
-
-  it('an equal-stamp unmarked copy arriving after the answer does not reopen the bout', async () => {
-    const { view, show } = await recordLastBout();
-    expect(liveRows(view.container).length).toBe(0);
     // The push that brings the mark, then the refetch read before it.
-    await show(stamped([BOUT_1, BOUT_2], 100));
+    await show(stamped([BOUT_1, BOUT_2], 101));
     expect(liveRows(view.container).length).toBe(0);
     await show(stamped([BOUT_1, UNRECORDED_2], 100));
     expect(liveRows(view.container).length).toBe(0);
@@ -352,10 +359,37 @@ describe('the Record-bout answer\'s recorded mark against a stale copy', () => {
     expect(screen.getByTestId('kachinuki-no-pairing')).toBeTruthy();
   });
 
-  it('a strictly newer unmarked copy does reopen it', async () => {
-    const { view, show } = await recordLastBout();
+  it('a second device: a list refetch read before the mark keeps the marked copy', async () => {
+    stubApi(SHIRO_OUT);
+    const props = { onClose: vi.fn(), onSubmit: vi.fn(), password: 'secret' };
+    const unmarked = stamped([BOUT_1, UNRECORDED_2], 100);
+    let view;
+    await act(async () => { view = render(<ScoreEditorModal match={unmarked} {...props} />); });
+    await settle();
+    expect(liveRows(view.container).length).toBe(1);
+    // The tournament's competitions, as the Scores tab and the console hold
+    // them (keepNewerCompetitions): the push with the mark, then a list
+    // refetch that read the match before it.
+    let list = keepNewerCompetitions(null, [{ id: 'comp1', poolMatches: [unmarked] }]);
+    const deliver = async (fetched) => {
+      list = keepNewerCompetitions(list, fetched);
+      await act(async () => { view.rerender(<ScoreEditorModal match={list[0].poolMatches[0]} {...props} />); });
+      await settle();
+    };
+    await deliver([{ id: 'comp1', poolMatches: [stamped([BOUT_1, BOUT_2], 101)] }]);
     expect(liveRows(view.container).length).toBe(0);
-    await show(stamped([BOUT_1, UNRECORDED_2], 101));
+    await deliver([{ id: 'comp1', poolMatches: [unmarked] }]);
+    expect(liveRows(view.container).length).toBe(0);
+    expect(screen.getByTestId('kachinuki-no-pairing')).toBeTruthy();
+  });
+
+  it('a strictly newer unmarked copy does reopen it', async () => {
+    stubApi(SHIRO_OUT);
+    const view = await mount(stamped([BOUT_1, BOUT_2], 101));
+    expect(liveRows(view.container).length).toBe(0);
+    const show = host(view, { onClose: vi.fn(), onSubmit: vi.fn(), password: 'secret' });
+    await show(stamped([BOUT_1, BOUT_2], 101));
+    await show(stamped([BOUT_1, UNRECORDED_2], 102));
     expect(liveRows(view.container).length).toBe(1);
     expect(screen.queryByTestId('kachinuki-no-pairing')).toBeNull();
   });

@@ -138,8 +138,9 @@ export function kachinukiRecordedBoutCloses(subResults) {
 // show the same line.
 export function kachinukiRosterKey(matchId, subResults) {
   const rows = (Array.isArray(subResults) ? subResults : [])
-    .filter(s => s && s.position !== -1)
-    .slice()
+    // The numbered rows, by lastNumberedBout's own rule (position > 0); filter
+    // already made a new array, so the sort touches no caller's.
+    .filter(s => s && s.position > 0)
     .sort((x, y) => (x.position || 0) - (y.position || 0));
   const live = lastNumberedBout(rows);
   const parts = rows.map((s) => {

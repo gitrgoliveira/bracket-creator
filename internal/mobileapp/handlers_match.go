@@ -3180,6 +3180,12 @@ func changedGroupsError(changed []string) error {
 		if !state.ValidGroup(g) {
 			return fmt.Errorf("changed: %q is not a match group (points, result, encho, flags, rep, bout:<position>)", g)
 		}
+		// A server group (the kachinuki recorded marks) is never a client's to
+		// change: refused rather than ignored, so a client that names one is
+		// told rather than silently written around.
+		if state.IsServerGroup(g) {
+			return fmt.Errorf("changed: %q is written by the server alone and cannot be named in a write", g)
+		}
 	}
 	return nil
 }

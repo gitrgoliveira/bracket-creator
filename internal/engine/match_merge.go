@@ -144,7 +144,9 @@ func effectiveChangedGroups(stored, incoming *state.MatchResult, nilSubsClear bo
 		changed = defaultChangedGroups(stored, incoming, nilSubsClear)
 	} else {
 		for _, g := range incoming.Changed {
-			if state.ValidGroup(g) && !slices.Contains(changed, g) {
+			// A server group (the recorded marks) is never a write's to name:
+			// the merge alone changes it, below (mergeHold.unrecordRaisedEncho).
+			if state.ValidGroup(g) && !state.IsServerGroup(g) && !slices.Contains(changed, g) {
 				changed = append(changed, g)
 			}
 		}
@@ -210,9 +212,6 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 		incoming.Merge = nil
 		return nil
 	}
-	// A bout's recorded mark is the server's: every forward write, on either
-	// branch and through every door, keeps the stored value (bc-kfnl).
-	carryRecordedBouts(stored, incoming.SubResults)
 	// An unstamped write the server itself orders (a completing write, or one
 	// a server door built) takes the server's time here, so it leaves a fence
 	// a later stale replay is ordered against (writeStamp).
@@ -293,6 +292,9 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 	// Every group either side holds, plus a changed bout neither holds (a
 	// removal over a tombstone).
 	groups := append([]string(nil), state.ScalarGroups...)
+	// The server's groups come before the bouts: a bout copied after them
+	// keeps the mark they set (CopyGroup), whatever the order.
+	groups = append(groups, state.ServerGroups...)
 	groups = append(groups, storedBoutGroups(stored)...)
 	for _, p := range state.SubPositions(incoming.SubResults) {
 		if g := state.BoutGroup(p); !slices.Contains(groups, g) {
@@ -460,6 +462,10 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 	if mh.settleOrphanPicks(payloadPickA, payloadPickB, removalWrite, stamp) {
 		recomputeModifiedAt = true
 	}
+	// Last, once every hold above has had its say (a hold copies the stored
+	// row, mark and all, back over the write): a recorded bout whose overtime
+	// this write raises is being fought again.
+	mh.unrecordRaisedEncho(stamp)
 
 	for _, g := range rep.Applied {
 		if !state.GroupDiffers(stored, incoming, g) {
@@ -762,6 +768,41 @@ func (h *mergeHold) holdDefaultWinScoring(decision string) {
 	// HTTP layer name the decision on the wire (heldDecision).
 	h.rep.DefaultWinStands = true
 	h.rep.StandingDecision = decision
+}
+
+// unrecordRaisedEncho takes the recorded mark off every numbered bout this
+// write raises the overtime of (bc-kfnl: the bout is being fought again, so it
+// is no longer the one Record bout closed), as a change of GroupRecorded at the
+// write's stamp, named in its history line. Only a bout whose own group
+// applied counts: a held bout raised nothing. And only when the write is not
+// older than the stored marks (a Record bout stamped after this overtime keeps
+// its mark, as it would arriving second): the stamp decides, as for any group.
+func (h *mergeHold) unrecordRaisedEncho(stamp int64) {
+	var raised []int
+	for _, g := range h.rep.Applied {
+		pos, ok := state.ParseBoutGroup(g)
+		if !ok || pos <= 0 {
+			continue
+		}
+		storedRow := state.SubResultAt(h.stored.SubResults, pos)
+		row := state.SubResultAt(h.incoming.SubResults, pos)
+		if storedRow.Recorded && enchoPeriodsRise(storedRow.Encho, row.Encho) {
+			raised = append(raised, pos)
+		}
+	}
+	if len(raised) == 0 || !domain.ApplyByTimestamp(stamp, h.stored.GroupStamp(state.GroupRecorded)) {
+		return
+	}
+	for i := range h.incoming.SubResults {
+		if slices.Contains(raised, h.incoming.SubResults[i].Position) {
+			h.incoming.SubResults[i].Recorded = false
+		}
+	}
+	h.rep.Changed = append(slices.Clone(h.rep.Changed), state.GroupRecorded)
+	h.rep.Applied = append(h.rep.Applied, state.GroupRecorded)
+	if stamp > 0 {
+		h.stamps[state.GroupRecorded] = stamp
+	}
 }
 
 // restoreStamp puts group's stamp back to the one the stored match had, or

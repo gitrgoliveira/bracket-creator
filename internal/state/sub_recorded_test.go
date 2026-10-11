@@ -52,10 +52,57 @@ func TestSubMatchResultRecordedRoundTrips(t *testing.T) {
 	_, has := raw[1]["recorded"]
 	assert.False(t, has, "omitempty: an unrecorded row carries no key")
 
-	// A bout group holds the mark: a change of it is a change of that bout.
-	a := &MatchResult{SubResults: CloneSubResults(subs)}
-	c := &MatchResult{SubResults: CloneSubResults(subs)}
+}
+
+// TestRecordedGroup pins the recorded mark as a group of its own (review round
+// 6): a bout's group never holds it, GroupRecorded holds exactly the numbered
+// rows' marks, and each copy moves only its own half in either order.
+func TestRecordedGroup(t *testing.T) {
+	subs := func() []SubMatchResult {
+		return []SubMatchResult{
+			{Position: 1, SideA: "A1", SideB: "B1", Winner: "A1", Recorded: true},
+			{Position: 2, SideA: "A1", SideB: "B2", IpponsA: []string{"M"}},
+			{Position: DaihyosenSubPosition, SideA: "Ryu", SideB: "Tora", Recorded: true},
+		}
+	}
+	a := &MatchResult{SubResults: subs()}
+	c := &MatchResult{SubResults: subs()}
 	c.SubResults[0].Recorded = false
-	assert.True(t, GroupDiffers(a, c, BoutGroup(1)))
-	assert.False(t, GroupDiffers(a, c, BoutGroup(2)))
+
+	// Projection: only GroupRecorded sees the mark; the -1 row is no kachinuki
+	// bout and never counts.
+	assert.False(t, GroupDiffers(a, c, BoutGroup(1)), "the bout's group does not hold the mark")
+	assert.True(t, GroupDiffers(a, c, GroupRecorded))
+	assert.Equal(t, []int{1}, RecordedPositions(a.SubResults))
+	assert.JSONEq(t, `{"positions":[1]}`, string(GroupValue(a, GroupRecorded)))
+	assert.JSONEq(t, `{"positions":[]}`, string(GroupValue(c, GroupRecorded)))
+
+	// A server group: valid in the history, never a client's.
+	assert.True(t, ValidGroup(GroupRecorded))
+	assert.True(t, IsServerGroup(GroupRecorded))
+	assert.False(t, IsServerGroup(GroupPoints))
+	assert.NotContains(t, ScalarGroups, GroupRecorded)
+
+	// Copying a bout keeps the destination's mark; copying the group moves the
+	// marks and nothing else.
+	dst := &MatchResult{SubResults: subs()}
+	dst.SubResults[0].Recorded = false
+	src := &MatchResult{SubResults: subs()}
+	src.SubResults[0].Winner = "B1"
+	CopyGroup(dst, src, BoutGroup(1))
+	assert.Equal(t, "B1", dst.SubResults[0].Winner)
+	assert.False(t, dst.SubResults[0].Recorded, "a bout copy keeps the destination's mark")
+	CopyGroup(dst, src, GroupRecorded)
+	assert.True(t, dst.SubResults[0].Recorded)
+	assert.Equal(t, []string{"M"}, dst.SubResults[1].IpponsA, "a recorded copy moves no score")
+
+	// Either order gives the same rows.
+	one := &MatchResult{SubResults: subs()[1:2]}
+	two := &MatchResult{SubResults: subs()[1:2]}
+	CopyGroup(one, a, GroupRecorded)
+	CopyGroup(one, a, BoutGroup(1))
+	CopyGroup(two, a, BoutGroup(1))
+	CopyGroup(two, a, GroupRecorded)
+	assert.Equal(t, one.SubResults, two.SubResults)
+	assert.Equal(t, []int{1}, RecordedPositions(one.SubResults))
 }

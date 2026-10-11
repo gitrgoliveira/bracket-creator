@@ -3404,8 +3404,12 @@ paths:
         The last numbered bout is the one being fought, and both its fighters
         are `on` whatever its score (the running autosave already writes a
         lead's winner and a 1-1's draw on it) until Record bout records it
-        (`SubMatchResult.recorded`): then its loser is no longer `on` and a
-        draw takes both off.
+        (`SubMatchResult.recorded`): then its loser is no longer `on`. A
+        recorded draw that is still the last bout keeps both its fighters
+        `on` (Record bout appended nothing after it, so both sides have
+        nobody behind them, and whether that pair fights on in encho is the
+        operator's call); an earlier recorded draw, with a bout after it,
+        has retired both.
         `remaining` is in queue order and never holds the fighter on: its
         first entry is the fighter the server pairs next if the fighter on
         loses. A side whose team has no lineup in force, or one that fields
@@ -5652,11 +5656,17 @@ components:
         never alters and that never alters the bout's score; and `bout:<position>`
         one bout row (1..n, or -1 for the representative bout, without the
         two representatives or the winner's member id, which the server
-        derives). The sides, court, schedule and round are not
-        groups. A write
+        derives, and without a kachinuki bout's `recorded` mark). `recorded`
+        is the kachinuki bouts Record bout closed (each numbered row's
+        `recorded` mark): the server's alone, set by Record bout, taken off
+        by removing the pairing Record bout appended and by a write that
+        raises that bout's overtime, each stamped like any group; it appears
+        in the history and in `groupStamps`, and a write that names it in
+        `changed` is refused with 400. The sides, court, schedule and round
+        are not groups. A write
         names the groups it changes in `changed`; the match records the stamp
         of the last applied change to each in `groupStamps`.
-      pattern: '^(points|result|encho|flags|rep|repPickA|repPickB|bout:-?[0-9]+)$'
+      pattern: '^(points|result|encho|flags|rep|repPickA|repPickB|recorded|bout:-?[0-9]+)$'
 
     DaihyosenWriteStamp:
       type: object
@@ -6872,13 +6882,19 @@ components:
           description: >
             Kachinuki only: true on a numbered bout the operator closed with
             Record bout (`kachinukiBoutFinal`). The server is its only
-            writer: it sets it in the same write as the next pairing, or on
-            its own when no pairing is appended because a side has nobody
-            left, and clears it when the pairing that Record bout appended is
-            removed (`DELETE .../kachinuki-bout`). A write keeps the stored
-            value whatever it sends: a row that leaves the field out keeps
-            it, and a row that sends `true` for a bout the server has not
-            recorded does not set it. Absent (false) on every other bout,
+            writer, and the marks are a merge group of their own
+            (`recorded`, see MergeGroup), stamped on every change: Record
+            bout sets it, in the same write as the next pairing or on its
+            own when no pairing is appended because a side has nobody left;
+            removing the pairing that Record bout appended
+            (`DELETE .../kachinuki-bout`) clears it; and a score write that
+            raises that bout's overtime (`encho.periodCount` up, the bout
+            being fought again) clears it, unless the write is older than
+            the mark. A client cannot set or clear it: a row that leaves the
+            field out keeps it, a row that sends `true` for a bout the
+            server has not recorded does not set it, and a write that names
+            the `recorded` group in `changed` is refused with 400. Absent
+            (false) on every other bout,
             including the bout being fought: the kachinuki roster
             (`GET .../kachinuki-roster`) reads the last bout's result only
             once it is recorded.

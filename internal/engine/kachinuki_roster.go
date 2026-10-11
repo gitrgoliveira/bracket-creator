@@ -98,14 +98,17 @@ func (e *Engine) KachinukiRoster(compID, matchID string) (KachinukiRoster, error
 		return KachinukiRoster{}, err
 	}
 	if located == nil || located.Result == nil {
-		return KachinukiRoster{}, ErrMatchNotFound
-	}
-	rule, err := e.lineupRuleOver(compID, comp.IsKnockoutEnabled(), located.PoolMatches, located.Bracket)
-	if err != nil {
-		return KachinukiRoster{}, err
+		return KachinukiRoster{}, notFoundErrorf("match %s not found", matchID)
 	}
 	parent := located.Result
-	queueA, queueB := kachinukiRosterQueues(comp, parent, rule)
+	// The queues are built inside the read, and hold their own copies of the
+	// names and ids they take from the lineups.
+	var queueA, queueB kachinukiSideQueue
+	if err := e.readLineupRule(compID, comp.IsKnockoutEnabled(), located.PoolMatches, located.Bracket, func(rule *lineupRule) {
+		queueA, queueB = kachinukiRosterQueues(comp, parent, rule)
+	}); err != nil {
+		return KachinukiRoster{}, err
+	}
 	retiredA, retiredB := RetiredPlayersFromBoutLog(parent.SubResults, parent.SideA, parent.SideB)
 
 	// The last numbered bout. Its fighters are on while it is being fought,
@@ -129,7 +132,7 @@ func (e *Engine) KachinukiRoster(compID, matchID string) (KachinukiRoster, error
 		// side empty appends the pairing that keeps that side's fighter,
 		// advanceAfterHikiwake). Whether that pair fights on in encho is the
 		// operator's call on any bout in any phase, and an encho tap clears
-		// the mark (carryRecordedBouts); End match decides the rest (a drawn
+		// the mark (mergeHold.unrecordRaisedEncho); End match decides the rest (a drawn
 		// encounter in a pool or league, blocked in a knockout). So the line
 		// never reads "no fighters left" while that bout can still be fought
 		// on. Only a recorded WIN takes a fighter off here.

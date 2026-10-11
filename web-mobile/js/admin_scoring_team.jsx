@@ -2,7 +2,7 @@
 // Private to the scoring module; ScoreEditorModal routes here for team matches.
 // Extracted from admin_scoring_modal.jsx (mp-zac3).
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useLayoutEffect: useLayoutEffectA, useMemo: useMemoA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useLayoutEffect: useLayoutEffectA } = React;
 
 import {
   MAX_IPPONS_PER_SIDE,
@@ -935,33 +935,6 @@ function predatesAnswer(match, override) {
   return override.at > 0 && !!match && isOlderRunningCopy(match, override.match.status, override.at);
 }
 
-// recordedHoldStands: whether a Record-bout answer that only marked its bout
-// recorded (no pairing appended; the override's `recordedPos`) still holds
-// against `match`, the prop. That write moves no stamp (engine
-// carryRecordedBouts owns the mark, so the advance stamps nothing for it), so a
-// refetch that read the match before the mark and answers after it carries the
-// SAME stamp, which keepNewerMatches takes over the marked copy. The hold
-// stands, whatever the prop's log reads, until the prop carries a strictly
-// newer stamp (any later write, this device's included, is stamped after it),
-// the match changes, or the bout is gone; a Remove replaces the override
-// (adoptServerSubs). It deliberately does not end when the prop first holds the
-// mark: a refetch read before the mark can still answer after the push that
-// brought it.
-function recordedHoldStands(match, override) {
-  if (!override || override.recordedPos == null || !match || match.id !== override.match.id) return false;
-  if ((Number(match.modifiedAt) || 0) > override.at) return false;
-  return Array.isArray(match.subResults) && match.subResults.some(s => s && s.position === override.recordedPos);
-}
-
-// withRecordedMark: `match` with its bout at `position` marked recorded, or
-// `match` itself when that bout already is (or is absent), so a prop that holds
-// the mark keeps its identity.
-function withRecordedMark(match, position) {
-  const subs = match && Array.isArray(match.subResults) ? match.subResults : [];
-  if (!subs.some(s => s && s.position === position && s.recorded !== true)) return match;
-  return { ...match, subResults: subs.map(s => (s && s.position === position ? { ...s, recorded: true } : s)) };
-}
-
 // What a pick is answered with when its side's lineup was never read and the
 // pick's own read fails: with no lineup held, the pick could be neither checked
 // (one member at one position) nor shown on the row.
@@ -1221,8 +1194,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // remove committed, whose log the next autosave would otherwise write back.
   const matchSubsKey = subsKey(match?.subResults);
   useEffectA(() => {
-    setMatchOverride(prev => (prev && prev.match.id === match?.id
-      && (predatesAnswer(match, prev) || recordedHoldStands(match, prev)) ? prev : null));
+    setMatchOverride(prev => (prev && prev.match.id === match?.id && predatesAnswer(match, prev) ? prev : null));
   }, [match?.id, matchSubsKey]);
   // A stamped answer's override also goes once the prop is at least as new as
   // that answer, whatever its log reads. The log can read as it did before the
@@ -1233,13 +1205,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // carries the stamp the match had before it.
   const matchModifiedAt = Number(match?.modifiedAt) || 0;
   useEffectA(() => {
-    // A recorded-mark hold is answered at the match's own stamp, so an equal
-    // stamp is the case it guards: it goes only on a strictly newer one.
-    setMatchOverride(prev => {
-      if (!prev) return prev;
-      if (prev.recordedPos != null) return recordedHoldStands(match, prev) ? prev : null;
-      return holdsAnswer(matchModifiedAt, prev.at) ? null : prev;
-    });
+    setMatchOverride(prev => (prev && holdsAnswer(matchModifiedAt, prev.at) ? null : prev));
   }, [matchModifiedAt]);
   // And once the prop's status moves while its log is already the answer's
   // own. A send-back, requeue or reopen keeps the bout log and is stamped by
@@ -1255,10 +1221,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // and the winner is an object rebuilt on every refetch.
   const matchStatus = match?.status;
   useEffectA(() => {
-    // A recorded-mark hold renders the prop itself (see `m` below), so a status
-    // move already shows through it and is no reason to drop it.
-    setMatchOverride(prev => (prev && !recordedHoldStands(match, prev) && prev.match.id === match?.id
-      && subsKey(prev.match.subResults) === matchSubsKey && !predatesAnswer(match, prev) ? null : prev));
+    setMatchOverride(prev => (prev && prev.match.id === match?.id && subsKey(prev.match.subResults) === matchSubsKey
+      && !predatesAnswer(match, prev) ? null : prev));
   }, [matchStatus]);
   // mp-gmcg: never carry an open past-bout correction across a match SWITCH,
   // but DO survive a same-match reload. Autosave persists each correction as a
@@ -1271,17 +1235,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // the latest render rather than of the one that created its closure.
   const matchRef = useRefA(match);
   matchRef.current = match;
-  // A recorded-mark hold (Record bout that appended no pairing, see
-  // recordedHoldStands) shows the LIVE prop with the answer's mark on that bout,
-  // or the answer itself while the prop is a running copy older than it; every
-  // other override shows its own match.
-  const m = useMemoA(() => {
-    if (matchOverride && matchOverride.recordedPos != null) {
-      const base = predatesAnswer(match, matchOverride) ? matchOverride.match : match;
-      return withRecordedMark(base, matchOverride.recordedPos);
-    }
-    return matchOverride?.match || match;
-  }, [match, matchOverride]);
+  const m = matchOverride?.match || match;
   // bc-mrgc: names the groups each write changes, against the match this
   // editor renders from (see useChangedGroups).
   const claimChanged = useChangedGroups(m);
@@ -3598,7 +3552,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // bc-kfnl: a kachinuki bout Record bout closed carries the server's
       // recorded mark, echoed as the match holds it so the row this write
       // sends reads as the stored one. The server is the mark's only writer:
-      // it keeps the stored value whatever a write says (carryRecordedBouts).
+      // it keeps the stored value whatever a write says (the "recorded" merge
+      // group, which no client write names).
       if (isKachinuki && !isDaihyo && storedBoutRecorded(m, entry.position)) entry.recorded = true;
       // mp-4pc: encho + hantei are valid ONLY on the daihyosen
       // (validation.go validateSubBout). daihyosenEnchoFields emits the two
@@ -5412,27 +5367,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                       if (stamp > 0) {
                         _recordBoutAnswerStampRef.current = Math.max(_recordBoutAnswerStampRef.current, stamp);
                       }
-                      // Review round 5, finding 1: a Record bout that appended
-                      // no pairing only marked its bout recorded, which moves
-                      // no stamp, so a refetch read before the mark answers
-                      // at the same stamp and would reopen the bout. Hold the
-                      // mark until the prop carries a newer stamp
-                      // (recordedHoldStands), over the latest prop.
-                      const lastRow = lastNumberedBout(res.subResults);
-                      const latest = matchRef.current;
-                      const holdAt = stamp || Number(latest?.modifiedAt) || 0;
-                      if (lastRow && lastRow.recorded === true && holdAt > 0 && latest) {
-                        setMatchOverride({
-                          match: { ...latest, subResults: res.subResults, modifiedAt: holdAt },
-                          at: holdAt,
-                          recordedPos: lastRow.position,
-                        });
-                      } else {
-                        setMatchOverride(prev => prev ? {
-                          ...prev,
-                          match: { ...prev.match, subResults: res.subResults, ...(stamp > 0 ? { modifiedAt: stamp } : {}) },
-                        } : prev);
-                      }
+                      setMatchOverride(prev => prev ? {
+                        ...prev,
+                        match: { ...prev.match, subResults: res.subResults, ...(stamp > 0 ? { modifiedAt: stamp } : {}) },
+                      } : prev);
                     }
                     // F5: same reasoning as Start match above -- Record bout
                     // also submits status:"running" and is also an explicit

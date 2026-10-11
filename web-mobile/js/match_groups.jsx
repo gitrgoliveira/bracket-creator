@@ -3,7 +3,8 @@
 // events must be ordered.").
 //
 // The server merges a score write group by group (internal/state/
-// match_groups.go): points, result, encho, flags, rep, repPickA, repPickB, and one group
+// match_groups.go): points, result, encho, flags, rep, repPickA, repPickB, the server's
+// own recorded, and one group
 // per bout row, "bout:<position>". A write names the groups it changes in `changed`;
 // each named group applies only when the write is not older than that group's
 // stored change, a group the write does not name is never overwritten, and a
@@ -45,6 +46,13 @@ export const GROUP_REP_PICK_B = 'repPickB';
 // The scalar groups in the server's fixed order (state.ScalarGroups).
 export const SCALAR_GROUPS = [GROUP_POINTS, GROUP_RESULT, GROUP_ENCHO, GROUP_FLAGS, GROUP_REP, GROUP_REP_PICK_A, GROUP_REP_PICK_B];
 
+// The kachinuki bouts Record bout closed (each row's `recorded` mark). The
+// server's alone (state.ServerGroups): no client write names it (the server
+// refuses it in `changed`), and changedGroups never does, since no write states
+// it. It appears only in the match's history.
+export const GROUP_RECORDED = 'recorded';
+export const SERVER_GROUPS = [GROUP_RECORDED];
+
 const BOUT_PREFIX = 'bout:';
 
 // boutGroup names the group of the bout row at position (1..n, or -1 for the
@@ -61,9 +69,9 @@ export function parseBoutGroup(group) {
     return Number(rest);
 }
 
-// isValidGroup: a scalar group or a bout row (state.ValidGroup).
+// isValidGroup: a scalar group, a server group or a bout row (state.ValidGroup).
 export function isValidGroup(group) {
-    return SCALAR_GROUPS.includes(group) || parseBoutGroup(group) !== null;
+    return SCALAR_GROUPS.includes(group) || SERVER_GROUPS.includes(group) || parseBoutGroup(group) !== null;
 }
 
 // unionChanged: the groups a write that replaces another queued write for the
@@ -89,6 +97,7 @@ export function groupLabel(group) {
         case GROUP_REP: return 'the representative players';
         case GROUP_REP_PICK_A: return 'Aka\'s pick for the representative bout';
         case GROUP_REP_PICK_B: return 'Shiro\'s pick for the representative bout';
+        case GROUP_RECORDED: return 'the recorded bouts';
         default: {
             const pos = parseBoutGroup(group);
             if (pos === null) return String(group || '');
@@ -269,9 +278,9 @@ function groupKey(wire, group, next) {
             // either, or a pick on a bout nobody has scored would name it and stamp its
             // scoreline.
             // Numbered rows keep the rule above.
-            // A kachinuki bout's recorded mark is the server's alone (Record
-            // bout sets it, carryRecordedBouts keeps the stored value over any
-            // write), so a write that echoes it is never a change of the bout:
+            // A kachinuki bout's recorded mark is GROUP_RECORDED's, the server's
+            // alone, never the bout's (the server's bout comparison leaves it
+            // out too), so a write that echoes it is never a change of the bout:
             // without this the first save after Record bout named the bout,
             // whose baseline was agreed before the mark arrived (bc-kfnl).
             keys.delete('recorded');

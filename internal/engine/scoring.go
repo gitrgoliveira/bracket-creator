@@ -12,10 +12,9 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// ErrMatchNotFound is returned by withPoolMatch / withBracketMatch when no
-// match with the given ID exists in the respective data store, and by
-// KachinukiRoster for a match id the competition's draw does not hold.
-var ErrMatchNotFound = errors.New("match not found")
+// errMatchNotFound is returned by withPoolMatch / withBracketMatch when no
+// match with the given ID exists in the respective data store.
+var errMatchNotFound = errors.New("match not found")
 
 // errPoolWriteDropped aborts withPoolMatch's mutate when applyPoolWrite has
 // decided the incoming write contributes nothing — a last-write-wins supersede
@@ -24,7 +23,7 @@ var ErrMatchNotFound = errors.New("match not found")
 // only to tell the store "do not persist this slice", which is the one thing a
 // mutate closure otherwise cannot say.
 //
-// Distinct from ErrMatchNotFound ON PURPOSE. Both mean "no write happened", but
+// Distinct from errMatchNotFound ON PURPOSE. Both mean "no write happened", but
 // not-found means look in the bracket, and routing a dropped POOL write into the
 // bracket branch would hunt for a match that is not there.
 var errPoolWriteDropped = errors.New("pool write dropped")
@@ -174,7 +173,7 @@ func adoptCurrentSideName(result *state.MatchResult, side *string, sideID, store
 }
 
 // withPoolMatch atomically loads pool matches, calls mutate on the one
-// matching matchId, and saves the updated slice. Returns ErrMatchNotFound
+// matching matchId, and saves the updated slice. Returns errMatchNotFound
 // (unwrapped) when the ID is not present so callers can fall through to
 // the bracket store.
 //
@@ -190,7 +189,7 @@ func adoptCurrentSideName(result *state.MatchResult, side *string, sideID, store
 // mutate may ABORT by returning an error, which skips the save and propagates
 // the error here — the same contract withBracketMatch's store primitive has, so
 // a write that decides it contributes nothing leaves no footprint on either
-// branch. The error is returned VERBATIM (not wrapped in ErrMatchNotFound), so a
+// branch. The error is returned VERBATIM (not wrapped in errMatchNotFound), so a
 // caller can pass its own sentinel through and recognise it on the way out.
 func (e *Engine) withPoolMatch(h state.StoreTx, compId, matchId string, mutate func(*state.MatchResult) error) error {
 	found, err := h.UpdatePoolMatchByID(compId, matchId, mutate)
@@ -198,13 +197,13 @@ func (e *Engine) withPoolMatch(h state.StoreTx, compId, matchId string, mutate f
 		return err
 	}
 	if !found {
-		return ErrMatchNotFound
+		return errMatchNotFound
 	}
 	return nil
 }
 
 // withBracketMatch atomically loads the bracket, calls mutate on the
-// match matching matchId, and saves. Returns ErrMatchNotFound when not
+// match matching matchId, and saves. Returns errMatchNotFound when not
 // present (so RecordMatchResult callers fall through cleanly when neither
 // pool-match nor bracket-match has that ID).
 //
@@ -228,7 +227,7 @@ func (e *Engine) withBracketMatch(h state.StoreTx, compId, matchId string, mutat
 		return err
 	}
 	if !found {
-		return ErrMatchNotFound
+		return errMatchNotFound
 	}
 	return nil
 }
@@ -727,7 +726,7 @@ func firstForceOptions(opts []ForceOptions) ForceOptions {
 //
 // A match id resolves to a pool/league match or a knockout one only at run
 // time, so every score write has to try the pool store and fall through to the
-// bracket on ErrMatchNotFound. That fall-through was hand-copied at four sites
+// bracket on errMatchNotFound. That fall-through was hand-copied at four sites
 // (both non-tx writers and both tx twins), each threading `policy` into two
 // separate calls. matchWritePolicy exists precisely because a policy reaching
 // only one branch silently reverts to forward semantics for the matches that
@@ -796,7 +795,7 @@ func (e *Engine) writeToPoolOrBracket(h state.StoreTx, compId, matchId string, r
 		}
 		return mismatch, nil, inherited && !mismatch, nil
 	}
-	if !errors.Is(perr, ErrMatchNotFound) {
+	if !errors.Is(perr, errMatchNotFound) {
 		return false, nil, false, perr
 	}
 	// The SAME policy the pool branch would have used.
@@ -3368,7 +3367,7 @@ func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string
 	if err == nil {
 		return nil
 	}
-	if !errors.Is(err, ErrMatchNotFound) {
+	if !errors.Is(err, errMatchNotFound) {
 		return err
 	}
 	return e.withBracketMatch(e.store, compId, matchId, func(m *state.BracketMatch) {
@@ -3597,7 +3596,7 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 // knockout competition, moves that court's knockout matches past it when it
 // now runs into them (moveKnockoutPastPools), in one transaction (bc-kosc).
 // The move picks no time on the new court, so the app keeps that court's
-// pools before its knockout. Returns ErrMatchNotFound, with nothing written,
+// pools before its knockout. Returns errMatchNotFound, with nothing written,
 // when matchId is not a pool match.
 func (e *Engine) updatePoolMatchCourt(compId, matchId, newCourt string) error {
 	// Read before the transaction: the tournament has its own lock.
@@ -3645,7 +3644,7 @@ func (e *Engine) UpdateMatchTime(compId string, matchId string, scheduledAt stri
 	if err == nil {
 		return nil
 	}
-	if !errors.Is(err, ErrMatchNotFound) {
+	if !errors.Is(err, errMatchNotFound) {
 		return err
 	}
 	return e.withBracketMatch(e.store, compId, matchId, func(m *state.BracketMatch) {
@@ -3730,12 +3729,12 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 			}
 			return nil
 		}
-		if !errors.Is(perr, ErrMatchNotFound) {
+		if !errors.Is(perr, errMatchNotFound) {
 			return perr
 		}
 
 		// Pool match not found; try the elimination bracket. alreadyCompleted is
-		// still false here (the pool closure never ran on the ErrMatchNotFound path).
+		// still false here (the pool closure never ran on the errMatchNotFound path).
 		berr := e.withBracketMatch(tx, compId, matchId, func(m *state.BracketMatch) {
 			if m.Status == state.MatchStatusCompleted {
 				alreadyCompleted = true
@@ -3752,7 +3751,7 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 			// surface a typed NotFoundError (a fabricated match id is a client
 			// error, not a server fault) without that error being misread as a
 			// transaction failure.
-			if errors.Is(berr, ErrMatchNotFound) {
+			if errors.Is(berr, errMatchNotFound) {
 				notFound = true
 				return nil
 			}

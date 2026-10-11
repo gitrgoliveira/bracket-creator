@@ -116,6 +116,18 @@ func TestScoreHandler_AnswersWhatTheMergeHeld(t *testing.T) {
 		w := serveJSON(r, "PUT", "/api/competitions/"+compID+"/matches/Pool A-0/score", body)
 		assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 	})
+
+	// The kachinuki recorded marks are the server's alone (review round 6):
+	// a client naming that group is refused, on the score write and on each
+	// bulk entry, rather than silently written around.
+	t.Run("a server group is refused", func(t *testing.T) {
+		body := map[string]any{"sideA": mgAlice, "sideB": mgBob, "status": "running", "changed": []string{state.GroupRecorded}}
+		w := serveJSON(r, "PUT", "/api/competitions/"+compID+"/matches/Pool A-0/score", body)
+		assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), "written by the server alone")
+		assert.Error(t, changedGroupsError([]string{state.BoutGroup(1), state.GroupRecorded}))
+		assert.NoError(t, changedGroupsError([]string{state.BoutGroup(1), state.GroupPoints}))
+	})
 }
 
 // R3 through the door: a correction typed on a board after the match

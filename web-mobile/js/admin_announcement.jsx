@@ -125,7 +125,7 @@ function AnnouncementComposer({ password, showToast }) {
             <label key={m} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontWeight: 500 }}>
               <input
                 type="radio"
-                name="duration"
+                name={durationLabelId}
                 value={m}
                 checked={announcementDuration === m}
                 onChange={() => setAnnouncementDuration(m)}

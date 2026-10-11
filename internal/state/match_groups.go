@@ -401,9 +401,10 @@ func RecordedPositions(subs []SubMatchResult) []int {
 // position is in positions. A position with no row marks nothing.
 func setRecordedPositions(subs []SubMatchResult, positions []int) {
 	for i := range subs {
-		if subs[i].Position > 0 {
-			subs[i].Recorded = slices.Contains(positions, subs[i].Position)
-		}
+		// Only a numbered bout can be recorded: a mark on any other row (the
+		// representative bout, -1) can only have come from a client, which may
+		// never write the mark, so it is cleared rather than kept.
+		subs[i].Recorded = subs[i].Position > 0 && slices.Contains(positions, subs[i].Position)
 	}
 }
 

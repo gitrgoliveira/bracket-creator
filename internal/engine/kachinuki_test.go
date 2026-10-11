@@ -3971,8 +3971,9 @@ func TestKachinukiRemainingRoster_BoutLogBranchKeepsANamesakeWithADistinctID(t *
 		},
 	}
 
-	// The third return is "a lineup resolved it", which is false here by
-	// construction; the roster itself is what this pins.
+	// The third and fourth returns say whether a lineup resolved side A and
+	// side B, both false here by construction; the roster itself is what
+	// this pins.
 	remainingA, _, _, _ := kachinukiRemainingRoster(comp, parent, &lineupRule{})
 
 	ids := make([]string, 0, len(remainingA))

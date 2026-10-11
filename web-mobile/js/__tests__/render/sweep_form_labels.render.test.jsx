@@ -133,5 +133,11 @@ describe('the announcement composer', () => {
     expect(a.tagName).toBe('TEXTAREA');
     expect(a.id).not.toBe(b.id);
     expect(one.getByRole('radiogroup', { name: 'Duration' })).toBeInTheDocument();
+    // A browser groups radios by name across the whole document, so the two
+    // composers' duration choices must not share one.
+    const nameOne = one.getAllByRole('radio')[0].name;
+    const nameTwo = two.getAllByRole('radio')[0].name;
+    expect(nameOne).not.toBe('');
+    expect(nameOne).not.toBe(nameTwo);
   });
 });

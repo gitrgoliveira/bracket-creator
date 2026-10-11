@@ -95,6 +95,9 @@ func TestRecordedGroup(t *testing.T) {
 	CopyGroup(dst, src, GroupRecorded)
 	assert.True(t, dst.SubResults[0].Recorded)
 	assert.Equal(t, []string{"M"}, dst.SubResults[1].IpponsA, "a recorded copy moves no score")
+	// Only a numbered bout can carry the mark: copying the group clears one a
+	// client put on the representative bout, which no server writer marks.
+	assert.False(t, dst.SubResults[2].Recorded, "the -1 row never keeps a mark")
 
 	// Either order gives the same rows.
 	one := &MatchResult{SubResults: subs()[1:2]}

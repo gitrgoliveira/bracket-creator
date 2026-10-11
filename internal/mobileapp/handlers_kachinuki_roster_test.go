@@ -65,31 +65,69 @@ func TestKachinukiRosterGET(t *testing.T) {
 	a1, a2 := seedKachinukiRosterComp(t, store)
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "fixed", Kind: "team", TeamSize: 3}))
 
-	t.Run("200 with each side's queue", func(t *testing.T) {
+	type fighter struct {
+		Name     string `json:"name"`
+		MemberID string `json:"memberId"`
+	}
+	type side struct {
+		LineupFound bool      `json:"lineupFound"`
+		On          *fighter  `json:"on"`
+		Remaining   []fighter `json:"remaining"`
+	}
+	type rosterBody struct {
+		SideA side `json:"sideA"`
+		SideB side `json:"sideB"`
+	}
+
+	t.Run("200 with each side's fighter on and queue", func(t *testing.T) {
 		w := getRoster(r, "/api/competitions/k1/matches/Pool%20A-0/kachinuki-roster")
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-		var body struct {
-			SideA struct {
-				LineupFound bool `json:"lineupFound"`
-				Remaining   []struct {
-					Name     string `json:"name"`
-					MemberID string `json:"memberId"`
-				} `json:"remaining"`
-			} `json:"sideA"`
-			SideB struct {
-				LineupFound bool              `json:"lineupFound"`
-				Remaining   []json.RawMessage `json:"remaining"`
-			} `json:"sideB"`
-		}
+		var body rosterBody
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 		assert.True(t, body.SideA.LineupFound)
-		require.Len(t, body.SideA.Remaining, 2)
-		assert.Equal(t, a1.ID, body.SideA.Remaining[0].MemberID, "A1 won and stays on")
-		assert.Equal(t, "A2", body.SideA.Remaining[1].Name)
-		assert.Equal(t, a2.ID, body.SideA.Remaining[1].MemberID)
+		require.NotNil(t, body.SideA.On)
+		assert.Equal(t, a1.ID, body.SideA.On.MemberID, "A1 won bout 1 and is on in bout 2")
+		require.Len(t, body.SideA.Remaining, 1, "the fighter on is not in the queue")
+		assert.Equal(t, "A2", body.SideA.Remaining[0].Name)
+		assert.Equal(t, a2.ID, body.SideA.Remaining[0].MemberID)
 		assert.False(t, body.SideB.LineupFound, "team B has no lineup")
+		require.NotNil(t, body.SideB.On)
+		assert.Equal(t, "B2", body.SideB.On.Name)
 		assert.Empty(t, body.SideB.Remaining)
 		assert.Contains(t, w.Body.String(), `"remaining":[]`, "an empty queue is [] on the wire, never null")
+	})
+	t.Run("recordedThrough takes a recorded bout's loser off", func(t *testing.T) {
+		w := getRoster(r, "/api/competitions/k1/matches/Pool%20A-0/kachinuki-roster?recordedThrough=1")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var body rosterBody
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		require.NotNil(t, body.SideA.On, "bout 2 is live: recording bout 1 changes nothing")
+
+		// A1 beats B2 in bout 1 of a second encounter, recorded with nothing
+		// appended. Added beside Pool A-0, which the other subtests read.
+		matches, err := store.LoadPoolMatches("k1")
+		require.NoError(t, err)
+		matches = append(matches, state.MatchResult{
+			ID: "Pool A-1", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning,
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "A1", SideAMemberID: a1.ID, SideB: "B2", Winner: "A1", WinnerMemberID: a1.ID, Decision: "fought"},
+			},
+		})
+		require.NoError(t, store.SavePoolMatches("k1", matches))
+		w = getRoster(r, "/api/competitions/k1/matches/Pool%20A-1/kachinuki-roster?recordedThrough=1")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		body = rosterBody{}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		assert.Nil(t, body.SideB.On, "the recorded bout retired B2")
+		assert.Contains(t, w.Body.String(), `"on":null`, "nobody on is null on the wire")
+		require.NotNil(t, body.SideA.On)
+		assert.Equal(t, a1.ID, body.SideA.On.MemberID, "the winner stays on")
+	})
+	t.Run("400 for a recordedThrough that is not a whole number", func(t *testing.T) {
+		for _, q := range []string{"x", "-1", "1.5"} {
+			w := getRoster(r, "/api/competitions/k1/matches/Pool%20A-0/kachinuki-roster?recordedThrough="+q)
+			assert.Equal(t, http.StatusBadRequest, w.Code, q)
+		}
 	})
 	t.Run("404 for an unknown match", func(t *testing.T) {
 		w := getRoster(r, "/api/competitions/k1/matches/nope/kachinuki-roster")

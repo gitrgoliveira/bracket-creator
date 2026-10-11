@@ -594,13 +594,7 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 	// operator adds a daihyosen, and mergeKachinukiSubResults orders that row
 	// last, so keying off the final slice element would advance off the rep
 	// bout. Scan from the end past any daihyosen placeholder to the real bout.
-	lastIdx := -1
-	for i := len(parent.SubResults) - 1; i >= 0; i-- {
-		if parent.SubResults[i].Position != state.DaihyosenSubPosition {
-			lastIdx = i
-			break
-		}
-	}
+	lastIdx := lastNumberedBout(parent.SubResults)
 	if lastIdx < 0 {
 		// Only the daihyosen placeholder is present: nothing to advance off.
 		return false, nil, nil
@@ -631,9 +625,11 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 	// degrades to the bout-log-only heuristic so existing competitions
 	// without lineups continue to work.
 	// The advisory roster read (Engine.KachinukiRoster, kachinuki_roster.go)
-	// asks this SAME call, so the fighter it names as next is the one
-	// appended here.
-	remainingA, remainingB, foundA, foundB := e.kachinukiRemainingRosterOf("engine.MaybeAdvanceKachinuki", compID, comp, located)
+	// builds its queues through the SAME kachinukiRosterQueues and takes
+	// retirements out through the same filter, so the fighter it names as
+	// next is the one appended here.
+	rule := e.lineupRuleOrNone("engine.MaybeAdvanceKachinuki", compID, comp.IsKnockoutEnabled(), located.PoolMatches, located.Bracket)
+	remainingA, remainingB, foundA, foundB := kachinukiRemainingRoster(comp, parent, rule)
 	rosterAvailable := foundA || foundB
 
 	out := AdvanceKachinuki(AdvanceKachinukiInput{
@@ -2619,9 +2615,13 @@ func bracketMatchToTeamResult(bm state.BracketMatch) *state.MatchResult {
 // for a team match. Returns (sideA, sideB, foundA, foundB): found is per
 // side, true when that side's roster was resolved from a saved TeamLineup and
 // false when it fell back to the bout-log-only heuristic. The advance logs
-// foundA || foundB; the advisory read (KachinukiRoster) needs each side's
-// answer, since a bout-log roster only knows the fighters already seen and so
-// cannot say how many are left.
+// foundA || foundB. The queues come from kachinukiRosterQueues, which the
+// advisory read (KachinukiRoster) builds from too.
+//
+// A lineup in force that fields nobody (a match's own empty lineup,
+// positions: {}) is FOUND here and yields an empty queue, so the advance reads
+// that side as exhausted and appends nothing; the advisory read instead
+// reports such a side as having no lineup (see KachinukiRosterSide).
 //
 // Priority per side (GAP 1 / GAP 2a):
 //  1. The lineup in force for the side's team at this match (see
@@ -2639,19 +2639,42 @@ func bracketMatchToTeamResult(bm state.BracketMatch) *state.MatchResult {
 // one member of this roster alone. See IsMemberRetired for why both tiers
 // are needed and what the gate protects.
 func kachinukiRemainingRoster(comp *state.Competition, parent *state.MatchResult, rule *lineupRule) (remainingA, remainingB []kachinukiFighter, foundA, foundB bool) {
+	queueA, queueB := kachinukiRosterQueues(comp, parent, rule)
 	retiredA, retiredB := RetiredPlayersFromBoutLog(parent.SubResults, parent.SideA, parent.SideB)
+	return queueA.remaining(retiredA), queueB.remaining(retiredB), queueA.found, queueB.found
+}
 
-	// resolveRoster builds one side's remaining roster. teamID is the side's
+// kachinukiSideQueue is one side's queue BEFORE retirements are taken out:
+// the lineup in force's fielded members in order when found, else the
+// fighters the bout log has seen, in first-appearance order.
+type kachinukiSideQueue struct {
+	fighters []kachinukiFighter
+	found    bool
+}
+
+// remaining is the queue with every fighter `retired` holds taken out,
+// through filterRemainingFighters (IsMemberRetired, the one identity rule).
+func (q kachinukiSideQueue) remaining(retired RetiredMemberSet) []kachinukiFighter {
+	return filterRemainingFighters(q.fighters, retired)
+}
+
+// kachinukiRosterQueues builds both sides' queues (see kachinukiSideQueue).
+// It is the ONE queue source of the advance (kachinukiRemainingRoster) and of
+// the advisory roster read (KachinukiRoster, kachinuki_roster.go), which then
+// take retirements out through the same filter, so the two can never disagree
+// about who is next.
+func kachinukiRosterQueues(comp *state.Competition, parent *state.MatchResult, rule *lineupRule) (queueA, queueB kachinukiSideQueue) {
+	// resolveQueue builds one side's queue. teamID is the side's
 	// participant id, which is what its lineup is matched by; sideA says which
 	// column of the bout log the side is, so nothing here compares team names.
-	resolveRoster := func(teamID string, sideA bool, retired RetiredMemberSet) ([]kachinukiFighter, bool) {
+	resolveQueue := func(teamID string, sideA bool) kachinukiSideQueue {
 		if in := rule.inForce(teamID, parent.ID); in.Found {
 			full := in.Lineup.OrderedMembers(comp.TeamSize)
 			fighters := make([]kachinukiFighter, len(full))
 			for i, slot := range full {
 				fighters[i] = kachinukiFighter{Name: slot.Name, MemberID: slot.MemberID}
 			}
-			return filterRemainingFighters(fighters, retired), true
+			return kachinukiSideQueue{fighters: fighters, found: true}
 		}
 		// Preserve first-appearance order from the bout log: AdvanceKachinuki
 		// treats this slice as an ordered queue (index 0 is the next fighter
@@ -2662,6 +2685,15 @@ func kachinukiRemainingRoster(comp *state.Competition, parent *state.MatchResult
 		// has an id and no name, bc-dnst) and by name otherwise, so a
 		// nameless pick is still a queue entry and IsMemberRetired settles
 		// each by the same id-then-name order the lineup branch uses.
+		//
+		// Retirements are taken out by the caller, through the SHARED helper,
+		// in a second pass, for the reason its own doc gives: the queue IS the
+		// context the name tier needs, so it cannot be judged one fighter at a
+		// time while the queue is still being built. Filtering inline passed a
+		// nil ambiguity set, which let the name tier fire for a fighter whose
+		// OWN member id proves they have not retired: two teammates sharing a
+		// display name (grandfathered pre-uniqueness data) meant one losing
+		// retired the other, who was then never fielded.
 		seen := map[string]struct{}{}
 		out := make([]kachinukiFighter, 0)
 		for _, b := range parent.SubResults {
@@ -2685,29 +2717,22 @@ func kachinukiRemainingRoster(comp *state.Competition, parent *state.MatchResult
 			seen[key] = struct{}{}
 			out = append(out, f)
 		}
-		// Filtered through the SHARED helper, in a second pass, for the reason
-		// its own doc gives: the roster IS the context the name tier needs, so
-		// it cannot be judged one fighter at a time while the roster is still
-		// being built. Filtering inline passed a nil ambiguity set, which let
-		// the name tier fire for a fighter whose OWN member id proves they have
-		// not retired: two teammates sharing a display name (grandfathered
-		// pre-uniqueness data) meant one losing retired the other, who was then
-		// never fielded. The lineup branch above has always used this helper.
-		return filterRemainingFighters(out, retired), false
+		return kachinukiSideQueue{fighters: out}
 	}
 
-	remainingA, foundA = resolveRoster(parent.SideAID, true, retiredA)
-	remainingB, foundB = resolveRoster(parent.SideBID, false, retiredB)
-	return remainingA, remainingB, foundA, foundB
+	return resolveQueue(parent.SideAID, true), resolveQueue(parent.SideBID, false)
 }
 
-// kachinukiRemainingRosterOf is the ONE call shape both readers of a kachinuki
-// queue use: the advance (advanceKachinukiOnce, which appends the next
-// pairing from it) and the advisory read (KachinukiRoster, which the score
-// sheet shows above the live bout). It resolves the lineups in force over the
-// draw the match was found in, then derives each side's remaining roster, so
-// the two can never disagree about who is next.
-func (e *Engine) kachinukiRemainingRosterOf(caller, compID string, comp *state.Competition, located *teamMatch) (remainingA, remainingB []kachinukiFighter, foundA, foundB bool) {
-	rule := e.lineupRuleOrNone(caller, compID, comp.IsKnockoutEnabled(), located.PoolMatches, located.Bracket)
-	return kachinukiRemainingRoster(comp, located.Result, rule)
+// lastNumberedBout returns the index of the last NUMBERED bout row, the live
+// one while the encounter runs, or -1 when there is none. A daihyosen row
+// (Position == DaihyosenSubPosition) is not a kachinuki bout, and
+// mergeKachinukiSubResults orders it last, so the scan runs from the end past
+// it. The advance and the roster read both ask it.
+func lastNumberedBout(subs []state.SubMatchResult) int {
+	for i := len(subs) - 1; i >= 0; i-- {
+		if subs[i].Position != state.DaihyosenSubPosition {
+			return i
+		}
+	}
+	return -1
 }

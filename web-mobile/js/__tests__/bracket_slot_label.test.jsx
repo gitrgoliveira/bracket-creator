@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { slotDisplayName, makeSlotLabeller, bracketSlotLabeller, bronzeSlotLabels } from '../bracket.jsx';
+import { slotDisplayName, makeSlotLabeller, bracketSlotLabeller, bronzeSlotLabels, buildDisplayModel } from '../bracket.jsx';
 import { hasBothSides, isPendingBracketMatch, bracketFullyComplete, compMatchStats } from '../admin_helpers.jsx';
 
 // The engine writes an unresolved bracket feeder as "Winner of r<depth>-m<idx>"
@@ -138,6 +138,14 @@ describe('bronzeSlotLabels: the 3rd-place match names the semi-finals that fill 
   it('reads TBD on both sides when there is no semi-final round', () => {
     expect(bronzeSlotLabels([[{ id: 'm-r1-0', matchNumber: 1 }]])).toEqual({ a: 'TBD', b: 'TBD' });
     expect(bronzeSlotLabels(undefined)).toEqual({ a: 'TBD', b: 'TBD' });
+  });
+
+  it('reads the numbers from a display model the caller already holds', () => {
+    const rounds = fivePlayerRounds();
+    const numbers = buildDisplayModel(rounds).matchNumById;
+    expect(bronzeSlotLabels(rounds, numbers)).toEqual(bronzeSlotLabels(rounds));
+    // The numbers handed in are the ones used, not rebuilt from the rounds.
+    expect(bronzeSlotLabels(rounds, { 'm-r2-1': 9 })).toEqual({ a: 'TBD', b: 'Loser of M9' });
   });
 });
 

@@ -240,8 +240,10 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 	// fighters who have not retired, read through the same engine call that
 	// appends the next pairing, for the advisory line the score sheet shows
 	// above the live bout. Read-only and advisory: nothing is decided on it.
-	// 200 with each side's {lineupFound, remaining}; 404 for an unknown
-	// competition or match; 400 for a competition that is not kachinuki.
+	// 200 with each side's {lineupFound, on, remaining}; 404 for an unknown
+	// competition or match; 400 for a competition that is not kachinuki or a
+	// recordedThrough that is not a non-negative whole number; 500 when the
+	// lineups cannot be read.
 	r.GET("/competitions/:id/matches/:mid/kachinuki-roster", func(c *gin.Context) {
 		compID, ok := requireValidCompID(c)
 		if !ok {
@@ -252,14 +254,26 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 			c.JSON(http.StatusBadRequest, gin.H{"error": "match ID is required"})
 			return
 		}
+		// recordedThrough: the highest bout position this sheet saw recorded
+		// (Record bout), so a bout that ended the encounter without an append
+		// reads as over (engine.KachinukiRoster).
+		recordedThrough := 0
+		if raw := c.Query("recordedThrough"); raw != "" {
+			n, err := strconv.Atoi(raw)
+			if err != nil || n < 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "recordedThrough must be a non-negative whole number"})
+				return
+			}
+			recordedThrough = n
+		}
 		if !requireExistingCompetition(c, comps, compID) {
 			return
 		}
-		roster, err := eng.KachinukiRoster(compID, matchID)
+		roster, err := eng.KachinukiRoster(compID, matchID, recordedThrough)
 		switch {
 		case errors.Is(err, engine.ErrNotKachinuki):
 			c.JSON(http.StatusBadRequest, gin.H{"error": "this competition's team matches are not kachinuki"})
-		case errors.Is(err, engine.ErrTeamMatchNotFound):
+		case errors.Is(err, engine.ErrMatchNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"error": "match not found"})
 		case err != nil:
 			internalError(c, err)

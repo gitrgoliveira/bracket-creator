@@ -515,7 +515,7 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 	var clears []repPickClear
 	mutate := func(bracket *state.Bracket) error {
 		if bracket == nil || len(bracket.Rounds) == 0 {
-			return errMatchNotFound // nothing to resolve; signal no-save
+			return ErrMatchNotFound // nothing to resolve; signal no-save
 		}
 		// Pre-Phase-4 bracket: no slot remembers its draw-time label. Rebuild
 		// them ONCE from the frozen v1 draw and write them in, so from here on
@@ -546,7 +546,7 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 
 		allResolved = !bracketHasPoolPlaceholders(bracket)
 		if n == 0 && !backfilled {
-			return errMatchNotFound // no effective change → skip the rewrite
+			return ErrMatchNotFound // no effective change → skip the rewrite
 		}
 		resolvedNow = n
 		if n > 0 {
@@ -564,7 +564,7 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 		e.recordRepPickClears(tx, compID, clears, nil)
 		return nil
 	})
-	if uerr != nil && !errors.Is(uerr, errMatchNotFound) {
+	if uerr != nil && !errors.Is(uerr, ErrMatchNotFound) {
 		return 0, false, uerr
 	}
 	return resolvedNow, allResolved, nil

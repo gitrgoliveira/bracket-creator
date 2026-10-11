@@ -3396,21 +3396,34 @@ paths:
       tags: [matches]
       summary: The fighters each side of a kachinuki encounter has left
       description: >
-        For a kachinuki (winner stays on) team match: each side's fighters who
-        have not retired, read from the lineup in force for the side's team at
-        this match and the bouts recorded so far. A fighter retires on losing a
-        bout, and both fighters retire on a drawn bout. The list is in queue
-        order, so the first entry is the fighter on the court now or the next
-        one in, and it is the same list the server pairs the next bout from.
-        A side whose team has no lineup in force answers `lineupFound: false`
-        and an empty `remaining`, because the bouts alone do not say how many
-        fighters a team has. The answer is a guide only: the server never ends
-        an encounter on it. A public read, in a self-run tournament too, since
-        the public score sheet shows it.
+        For a kachinuki (winner stays on) team match: each side's fighter on
+        the court (`on`, from the last numbered bout) and the fighters behind
+        them who have not retired (`remaining`), read from the lineup in force
+        for the side's team at this match and the bouts so far. A fighter
+        retires on losing a bout, and both fighters retire on a drawn bout.
+        `remaining` is in queue order and never holds the fighter on: its
+        first entry is the fighter the server pairs next if the fighter on
+        loses. A side whose team has no lineup in force, or one that fields
+        nobody, answers `lineupFound: false` and an empty `remaining`, because
+        the bouts alone do not say how many fighters a team has. The answer is
+        a guide only: the server never ends an encounter on it. A public read,
+        in a self-run tournament too, since the public score sheet shows it.
       security: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
         - $ref: '#/components/parameters/MatchId'
+        - name: recordedThrough
+          in: query
+          required: false
+          description: >
+            The highest bout position the caller saw recorded (Record bout).
+            The stored bouts cannot tell a recorded bout from one still being
+            fought, and recording a bout appends nothing when a side has
+            nobody left, so when this reaches the last numbered bout, a fighter
+            that bout's outcome retired is no longer `on`. Default 0.
+          schema:
+            type: integer
+            minimum: 0
       responses:
         '200':
           description: Each side's fighters left.
@@ -3426,8 +3439,9 @@ paths:
                     $ref: '#/components/schemas/KachinukiRosterSide'
         '400':
           description: >
-            An invalid competition id, or a competition whose team matches are
-            not kachinuki.
+            An invalid competition id, a competition whose team matches are
+            not kachinuki, or a `recordedThrough` that is not a non-negative
+            whole number.
           content:
             application/json:
               schema:
@@ -3435,7 +3449,14 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
-          $ref: '#/components/responses/InternalError'
+          description: >
+            The match or the competition's lineups could not be read. A
+            lineups file that cannot be read is an error here, never an answer
+            of no lineup.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/competitions/{id}/matches/{mid}/override-winner:
     put:
@@ -5668,27 +5689,41 @@ components:
 
     KachinukiRosterSide:
       type: object
-      required: [lineupFound, remaining]
+      required: [lineupFound, on, remaining]
       properties:
         lineupFound:
           type: boolean
-          description: Whether a lineup is in force for the side's team at this match.
+          description: >
+            Whether a lineup that fields at least one fighter is in force for
+            the side's team at this match.
+        on:
+          description: >
+            The side's fighter in the last numbered bout, as that bout names
+            them; null when there is no bout yet, the bout names nobody for
+            the side, or the bout was recorded (`recordedThrough`) and retired
+            them. Given whether or not `lineupFound`.
+          oneOf:
+            - $ref: '#/components/schemas/KachinukiRosterFighter'
+            - type: 'null'
         remaining:
           type: array
           description: >
-            The side's fighters who have not retired, in queue order (the
-            first is on the court or next in). Empty when `lineupFound` is
-            false.
+            The side's fighters behind the fighter on who have not retired, in
+            queue order: the first is next in if the fighter on loses. Never
+            holds the fighter on. Empty when `lineupFound` is false.
           items:
-            type: object
-            required: [name]
-            properties:
-              name:
-                type: string
-                description: The name the lineup holds; empty for a team member not named yet.
-              memberId:
-                type: string
-                description: The team member's id, when the lineup position carries one.
+            $ref: '#/components/schemas/KachinukiRosterFighter'
+
+    KachinukiRosterFighter:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: The name the lineup or bout holds; empty for a team member not named yet.
+        memberId:
+          type: string
+          description: The team member's id, when the lineup position or bout carries one.
 
     DownstreamKnockoutPlayedError:
       type: object

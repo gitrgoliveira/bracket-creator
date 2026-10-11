@@ -297,7 +297,7 @@ func (e *Engine) applyRequalification(tx state.StoreTx, compID, reason string, p
 	var clears []repPickClear
 	err := tx.UpdateBracket(compID, func(b *state.Bracket) error {
 		if b == nil {
-			return errMatchNotFound
+			return ErrMatchNotFound
 		}
 		reopened, clears = nil, nil
 		before := repPickSnapshot(b, "")

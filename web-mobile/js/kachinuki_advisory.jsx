@@ -10,10 +10,12 @@
 // resolveSquadMember, then the member's current name by id through
 // resolveBoutSideDisplayName); a member with no name reads by number alone.
 //
-// The queue is the SERVER's (GET .../kachinuki-roster, engine.KachinukiRoster),
-// read through the same call that appends the next pairing, so the line never
-// names a different next fighter from the one the app then appends. This file
-// only shapes that answer for display.
+// The split is the SERVER's (GET .../kachinuki-roster, engine.KachinukiRoster):
+// each side's fighter on, and the queue behind them, built and filtered the way
+// the advance appends the next pairing, so the line never names a different
+// next fighter from the one the app then appends. Which queue entry is the
+// fighter on is decided there, by the engine's identity rule, never here: this
+// file only shapes that answer for display.
 //
 // ADVISORY ONLY: kachinuki is operator-led and the roster is advisory (team
 // sizes are unregulated, a vacancy is legitimate). Nothing here ends the
@@ -36,27 +38,20 @@ export function kachinukiFighterLabel({ squad, teamNumber, memberId, name }) {
   return [number, shown].filter(Boolean).join(" ");
 }
 
-// sameFighter: by member id when both carry one, else by a non-empty name.
-function sameFighter(f, on) {
-  if (!f || !on) return false;
-  if (f.memberId && on.memberId) return f.memberId === on.memberId;
-  if (f.memberId || on.memberId) return false;
-  return !!f.name && f.name === on.name;
-}
-
-// kachinukiAdvisorySide shapes one side: the fighter on, and with a lineup the
-// fighters left behind them (the server's queue minus the fighter on). Returns
-// null when there is nothing to say for the side.
-export function kachinukiAdvisorySide({ side, on, squad, teamNumber }) {
-  const onKnown = !!(on && (on.memberId || on.name));
-  const onLabel = onKnown ? kachinukiFighterLabel({ squad, teamNumber, memberId: on.memberId, name: on.name }) : "";
-  if (!side || !side.lineupFound) {
+// kachinukiAdvisorySide shapes one side of the server's answer: the fighter on
+// (side.on, which the SERVER picked out of the queue by the engine's identity
+// rule) and, with a lineup, the fighters left behind them (side.remaining,
+// which never holds the fighter on; the first is next). Returns null when
+// there is nothing to say for the side.
+export function kachinukiAdvisorySide({ side, squad, teamNumber }) {
+  if (!side) return null;
+  const on = side.on && (side.on.memberId || side.on.name) ? side.on : null;
+  const onLabel = on ? kachinukiFighterLabel({ squad, teamNumber, memberId: on.memberId, name: on.name }) : "";
+  if (!side.lineupFound) {
     return onLabel ? { on: onLabel, left: null, text: `${onLabel} on` } : null;
   }
   const remaining = Array.isArray(side.remaining) ? side.remaining : [];
-  const left = remaining
-    .filter(f => !(onKnown && sameFighter(f, on)))
-    .map(f => kachinukiFighterLabel({ squad, teamNumber, memberId: f.memberId, name: f.name }) || "-");
+  const left = remaining.map(f => kachinukiFighterLabel({ squad, teamNumber, memberId: f.memberId, name: f.name }) || "-");
   const head = onLabel ? `${onLabel} on` : "";
   let tail;
   if (left.length === 0) tail = onLabel ? "last fighter" : "0 left";
@@ -64,38 +59,47 @@ export function kachinukiAdvisorySide({ side, on, squad, teamNumber }) {
   return { on: onLabel, left, text: head ? `${head}, ${tail}` : tail };
 }
 
-// kachinukiAdvisoryModel builds the whole line from the server's roster and
-// the live bout's two fighters. roster.sideA is Aka (the match's side A, squadA),
-// roster.sideB is Shiro; the line reads Shiro first, then Aka (left to right,
-// as the sheet). Returns null when the roster is missing or neither side has a
-// lineup: then there is no line at all.
-export function kachinukiAdvisoryModel({ roster, onA, onB, squadA, squadB, teamNumberA, teamNumberB }) {
+// kachinukiAdvisoryModel builds the whole line from the server's roster.
+// roster.sideA is Aka (the match's side A, squadA), roster.sideB is Shiro; the
+// line reads Shiro first, then Aka (left to right, as the sheet). Returns null
+// when the roster is missing or neither side has a lineup: then there is no
+// line at all.
+export function kachinukiAdvisoryModel({ roster, squadA, squadB, teamNumberA, teamNumberB }) {
   if (!roster || !roster.sideA || !roster.sideB) return null;
   if (!roster.sideA.lineupFound && !roster.sideB.lineupFound) return null;
-  const shiro = kachinukiAdvisorySide({ side: roster.sideB, on: onB, squad: squadB, teamNumber: teamNumberB });
-  const aka = kachinukiAdvisorySide({ side: roster.sideA, on: onA, squad: squadA, teamNumber: teamNumberA });
+  const shiro = kachinukiAdvisorySide({ side: roster.sideB, squad: squadB, teamNumber: teamNumberB });
+  const aka = kachinukiAdvisorySide({ side: roster.sideA, squad: squadA, teamNumber: teamNumberA });
   const parts = [shiro && `Shiro: ${shiro.text}`, aka && `Aka: ${aka.text}`].filter(Boolean);
   if (parts.length === 0) return null;
   return { shiro, aka, text: parts.join(ADVISORY_SEPARATOR) };
 }
 
 // kachinukiRosterKey is the VALUE the roster read is keyed on (never the match
-// object, which every broadcast re-creates): the match id and every numbered
-// bout's fighters and outcome, leaving out the outcome of the last numbered
-// bout, the live one, so a point scored on it does not re-read. Who has retired
-// changes only when a bout's outcome is recorded, which appends the next bout
-// and so changes the key.
-export function kachinukiRosterKey(matchId, subResults) {
+// object, which every broadcast re-creates): the match id, every numbered
+// bout's fighters, and the outcome of every bout but the live one (the last
+// numbered bout), so a point scored on the live bout does not re-read.
+//
+// recordedThrough is the highest bout position this sheet saw RECORDED (Record
+// bout). Recording usually appends the next bout, which changes the key, but
+// when a side has nobody left it appends nothing; so once the live bout is
+// recorded the key carries that fact and the live bout's outcome, and the read
+// is made again (with recordedThrough, see API.fetchKachinukiRoster) to take
+// its loser off. Returns { key, recordedThrough }: the recorded position the
+// key stands for, 0 while the live bout is still being fought.
+export function kachinukiRosterKey(matchId, subResults, recordedThrough = 0) {
   const rows = (Array.isArray(subResults) ? subResults : [])
     .filter(s => s && s.position !== -1)
     .slice()
     .sort((x, y) => (x.position || 0) - (y.position || 0));
   const lastIdx = rows.length - 1;
+  const livePos = lastIdx >= 0 ? (rows[lastIdx].position || 0) : 0;
+  const liveRecorded = lastIdx >= 0 && recordedThrough > 0 && recordedThrough >= livePos;
   const parts = rows.map((s, i) => {
     const who = [s.position, s.sideAMemberId || "", s.sideA || "", s.sideBMemberId || "", s.sideB || ""];
     const winner = s.winner && typeof s.winner === "object" ? JSON.stringify(s.winner) : (s.winner || "");
-    const outcome = i === lastIdx ? [] : [winner, s.winnerMemberId || "", s.decision || ""];
+    const outcome = i === lastIdx && !liveRecorded ? [] : [winner, s.winnerMemberId || "", s.decision || ""];
     return [...who, ...outcome].join("~");
   });
-  return `${matchId || ""}|${parts.join("/")}`;
+  const recorded = liveRecorded ? livePos : 0;
+  return { key: `${matchId || ""}|${parts.join("/")}|${recorded}`, recordedThrough: recorded };
 }

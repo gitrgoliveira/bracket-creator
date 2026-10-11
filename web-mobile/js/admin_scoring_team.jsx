@@ -982,6 +982,10 @@ const NO_LINEUPS = { a: null, b: null };
 // the old team's lineup.
 function useMatchLineups(compId, matchId) {
   const [lineups, setLineups] = useStateA(NO_LINEUPS);
+  // Whether the first read of both sides has settled (landed, read nothing, or
+  // failed), for a reader that should wait for the lineups rather than read
+  // once without them and again with them (the kachinuki advisory line).
+  const [settled, setSettled] = useStateA(false);
   const syncRef = useRefA(null);
 
   useEffectA(() => {
@@ -998,6 +1002,7 @@ function useMatchLineups(compId, matchId) {
     };
     syncRef.current = sync;
     setLineups(NO_LINEUPS);
+    setSettled(false);
 
     const isRead = (side) => sync.landed[side] > 0;
     // Rejects when the lineup cannot be read: each caller decides what that means.
@@ -1019,7 +1024,10 @@ function useMatchLineups(compId, matchId) {
     );
     sync.start = (teamIds) => {
       sync.teamIds = teamIds;
-      return Promise.all(LINEUP_SIDES.map(side => refresh(side)));
+      // refresh never rejects, so this settles once both first reads have.
+      return Promise.all(LINEUP_SIDES.map(side => refresh(side))).then(() => {
+        if (sync.alive) setSettled(true);
+      });
     };
     // The side is given another team: nothing of the old team's lineup stays on it, and
     // no read or write still out for the old team lands, whenever it answers. No team
@@ -1092,6 +1100,8 @@ function useMatchLineups(compId, matchId) {
   return {
     lineupA: lineups.a,
     lineupB: lineups.b,
+    // Both sides' first reads have settled (see settled above).
+    lineupsSettled: settled,
     // Reads both sides at once, once the competition has said which teams they are.
     startLineupReads: (teamIds) => syncRef.current.start(teamIds),
     beginLineupWrite: (side) => syncRef.current.beginWrite(side),
@@ -1314,7 +1324,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // T131: lineup data so each bout cell can show the assigned player
   // name + canonical position label. Falls back gracefully when the
   // lineup hasn't been submitted yet (saved: false -> null, bc-k404).
-  const { lineupA, lineupB, startLineupReads, beginLineupWrite, watchLineupSide, dropLineup } = useMatchLineups(m.compId, m.id);
+  const { lineupA, lineupB, lineupsSettled, startLineupReads, beginLineupWrite, watchLineupSide, dropLineup } = useMatchLineups(m.compId, m.id);
   // bc-pnum gap closure: each side's squad, so the inline lineup picker
   // below (submitInlineLineup / buildInlineLineupWrite) can resolve a
   // name typed or picked in THIS modal to its squad member id -- this is
@@ -2608,19 +2618,30 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // bc-kfnl (operator ruling 2026-09-24): the advisory line above the live bout,
   // each side's fighter on, fighters left and who is next. The queue is read from
   // the server (engine.KachinukiRoster, the same call that appends the next
-  // pairing) and keyed on a VALUE, never on `m`, which every broadcast
-  // re-creates: the match id, the bout log's fighters and recorded outcomes
-  // (kachinukiRosterKey) and the two lineups in force. A roster read for another
-  // key is not shown, so the line never lags a recorded bout. A failed read is
-  // null (fetchKachinukiRoster never throws) and shows no line. ADVISORY ONLY:
-  // nothing reads it but renderKachinukiAdvisory; it feeds no verdict, does not
-  // arm End match and holds back neither Record bout nor Encho.
-  const kachinukiRosterReadKey = kachinukiBoutMode && m.compId && m.id
-    ? `${kachinukiRosterKey(m.id, m.subResults)}#${JSON.stringify([
+  // pairing, which also picks out each side's fighter on) and keyed on a VALUE,
+  // never on `m`, which every broadcast re-creates: the match id, the bout
+  // log's fighters and the outcomes of the bouts before the live one
+  // (kachinukiRosterKey), whether this sheet saw the live bout RECORDED
+  // (kachinukiRecorded: Record bout appends nothing when a side has nobody
+  // left, so only this sheet knows the bout is over), and the two lineups in
+  // force. The first read waits until both lineup reads have settled
+  // (lineupsSettled), so a mount reads once rather than once before and once
+  // after its lineups land. A roster read for another key is not shown, so the
+  // line never lags a recorded bout. A failed read is null
+  // (fetchKachinukiRoster never throws) and shows no line. ADVISORY ONLY:
+  // nothing reads it but renderKachinukiAdvisory; it feeds no verdict, does
+  // not arm End match and holds back neither Record bout nor Encho.
+  const [kachinukiRecorded, setKachinukiRecorded] = useStateA({ matchId: "", pos: 0 });
+  const kachinukiRosterRead = kachinukiBoutMode && m.compId && m.id
+    ? kachinukiRosterKey(m.id, m.subResults, kachinukiRecorded.matchId === m.id ? kachinukiRecorded.pos : 0)
+    : null;
+  const kachinukiRosterReadKey = kachinukiRosterRead && lineupsSettled
+    ? `${kachinukiRosterRead.key}#${JSON.stringify([
         lineupA?.positions || null, lineupA?.memberIds || null,
         lineupB?.positions || null, lineupB?.memberIds || null,
       ])}`
     : "";
+  const kachinukiRosterRecordedThrough = kachinukiRosterRead ? kachinukiRosterRead.recordedThrough : 0;
   const [kachinukiRoster, setKachinukiRoster] = useStateA(null);
   useEffectA(() => {
     const api = window.API;
@@ -2631,7 +2652,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     let live = true;
     const key = kachinukiRosterReadKey;
     Promise.resolve()
-      .then(() => api.fetchKachinukiRoster(m.compId, m.id))
+      .then(() => api.fetchKachinukiRoster(m.compId, m.id, kachinukiRosterRecordedThrough))
       .then(
         (roster) => { if (live) setKachinukiRoster(roster ? { key, roster } : null); },
         () => { if (live) setKachinukiRoster(null); },
@@ -3122,17 +3143,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
   // bc-kfnl: the advisory line (see kachinukiRosterReadKey above), placed after
   // the read-only fought rows and immediately before the live bout. The fighters
-  // on are the live bout's, as its row resolves them (playerNamesForBout), and
+  // on and the queues behind them are the server's split (KachinukiRoster), and
   // every fighter is named with their team-member number as the rows name them
   // (kachinuki_advisory.jsx). Muted text, no warning colour: it is a guide.
   const renderKachinukiAdvisory = () => {
     if (!kachinukiBoutMode || kachinukiCurBoutIdx < 0) return null;
     if (!kachinukiRoster || kachinukiRoster.key !== kachinukiRosterReadKey) return null;
-    const on = playerNamesForBout(kachinukiCurBoutIdx);
     const model = kachinukiAdvisoryModel({
       roster: kachinukiRoster.roster,
-      onA: { name: on.aName, memberId: on.aMemberId },
-      onB: { name: on.bName, memberId: on.bMemberId },
       squadA, squadB,
       teamNumberA: m.sideA?.number || "",
       teamNumberB: m.sideB?.number || "",
@@ -5186,7 +5204,27 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   // and terminal.
                   setEndArmed(false);
                   doSubmit(async () => {
+                    // The live bout's position as the roster key reads it (the
+                    // last numbered row of the log), else the bout being shown.
+                    const lastNumberedPos = (subResults) => (Array.isArray(subResults) ? subResults : [])
+                      .filter(s => s && s.position !== -1)
+                      .reduce((mx, s) => Math.max(mx, s.position || 0), 0);
+                    const recordedPos = lastNumberedPos(m.subResults) || kachinukiCurBoutPos;
+                    const recordedMatchId = m.id;
                     const res = await onSubmit(buildPatch("running", { kachinukiBoutFinal: true }));
+                    // bc-kfnl: the bout is recorded. The advisory line re-reads
+                    // with it (kachinukiRecorded), which matters when the advance
+                    // appended nothing because a side has nobody left: the bout
+                    // log then does not change, and only this tells the line its
+                    // loser is off. A write that did not land answers with no bout
+                    // log, and records nothing; nor does an answer whose log grew
+                    // past the recorded bout (the advance appended the next
+                    // pairing, which re-keys the read on its own: marking it too
+                    // would read once with the bout over and again on the append).
+                    if (mountedRef.current && res && Array.isArray(res.subResults) && recordedPos > 0
+                        && lastNumberedPos(res.subResults) <= recordedPos) {
+                      setKachinukiRecorded({ matchId: recordedMatchId, pos: recordedPos });
+                    }
                     // mp-gmcg review C1: if a prior [Remove this bout] left
                     // matchOverride shadowing the `match` prop, adopt THIS
                     // write's own fresh subResults into the override directly

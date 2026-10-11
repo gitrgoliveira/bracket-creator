@@ -225,7 +225,7 @@ type TeamLineupStore interface {
 // appends the next pairing from).
 type LineupEngine interface {
 	LineupInForce(compID, teamID, matchID string) (engine.InForceLineup, error)
-	KachinukiRoster(compID, matchID string) (engine.KachinukiRoster, error)
+	KachinukiRoster(compID, matchID string, recordedThrough int) (engine.KachinukiRoster, error)
 }
 
 // SquadStore is the consumer-boundary view of state.Store used by

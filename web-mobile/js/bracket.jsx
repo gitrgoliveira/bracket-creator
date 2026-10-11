@@ -183,11 +183,14 @@ function bracketSlotLabeller(rounds) {
 // display model the cards are stamped from; a semi-final with no number (a
 // hidden bye, or a bracket drawn before numbering) degrades to "TBD", as
 // slotDisplayName does. Callers use a label only for a side that is empty;
-// a seated competitor is shown as themself.
-function bronzeSlotLabels(rounds) {
+// a seated competitor is shown as themself. matchNumById is optional: a caller
+// that already holds the display model passes its numbers rather than having
+// the model built again. Callers memoise the result over the rounds, since a
+// new object every render defeats MatchCard's memo.
+function bronzeSlotLabels(rounds, matchNumById) {
   const rs = Array.isArray(rounds) ? rounds : [];
   const semis = rs.length >= 2 ? (rs[rs.length - 2] || []) : [];
-  const nums = buildDisplayModel(rs).matchNumById;
+  const nums = matchNumById || buildDisplayModel(rs).matchNumById;
   const label = (m) => {
     const n = m ? ((nums && nums[m.id]) || m.matchNumber || 0) : 0;
     return n > 0 ? `Loser of M${n}` : "TBD";

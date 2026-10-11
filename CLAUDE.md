@@ -30,8 +30,10 @@ The built-in tool descriptions in your context say things like "use Read for a k
 | Rename a symbol | `rename_symbol` |
 | Delete a symbol | `safe_delete_symbol` |
 | Compiler/linter errors for a file | `get_diagnostics_for_file` |
+| Compiler/linter errors for one symbol | `get_diagnostics_for_symbol` |
+| Language server gone stale (after a rebase, a branch switch, a large generated change) | `restart_language_server`, only after asking the user |
 
-Only the 13 tools in this table are exposed, plus `initial_instructions` (Serena's manual) and `open_dashboard` (the `claude-code` context; memory tools are disabled because beads owns that). Serena's wider tool set is NOT available: there is no `inline_symbol`, `type_hierarchy`, `move_symbol`, `delete_lines` or `replace_lines` — do not call them.
+Only the 15 tools in this table are exposed, plus `initial_instructions` (Serena's manual) and `open_dashboard` (the `claude-code` context; memory tools are disabled because Hindsight owns memory). The last two rows are Serena's optional tools, switched on in the user's `~/.serena/serena_config.yml` (`included_optional_tools`), so a session started before that file changed does not have them. Serena's wider tool set is NOT available: there is no `inline_symbol`, `type_hierarchy`, `move_symbol`, `delete_lines` or `replace_lines` — do not call them. Serena's `editing` mode tells you not to re-run the build or tests after a successful `rename_symbol` or `safe_delete_symbol`; this file's test rules win (see **Gate cadence**).
 
 Built-in Read/Edit/Glob/Grep are permitted on code files ONLY when: the file's language is not in `language_servers` (see above — no Serena call is owed on those); Serena was tried on the target and failed; the file is not parseable as code; you need a regex search across many files that the symbolic tools cannot express (Grep is fine as a discovery step, but follow-up reads/edits on matched served files still go through Serena); you need a few lines and a symbolic read would be overkill; or you genuinely must read the whole file. They are always fine for non-code files: markdown, JSON, YAML, TOML, config, lockfiles, plain text, images.
 

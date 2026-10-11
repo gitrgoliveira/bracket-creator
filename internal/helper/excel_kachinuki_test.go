@@ -687,3 +687,123 @@ func TestBlankKachinukiSections(t *testing.T) {
 		}, got)
 	})
 }
+
+// representativeTestMatch is one match's Representative Bouts section: Red
+// (SideA, Aka) won it through a representative bout, hantei, both
+// representatives picked.
+func representativeTestMatch() KachinukiMatchDetail {
+	return KachinukiMatchDetail{
+		Label:     "Round 1 - Match 2",
+		SideATeam: "Kodokan",
+		SideBTeam: "Mumeishi",
+		Bouts: []KachinukiBout{{
+			Position:  -1,
+			SideAName: "Akagi", SideALabel: "T1.3", MarkA: "Ht",
+			SideBName: "Shirai", SideBLabel: "T2.2",
+			Middle: "(DH)",
+		}},
+	}
+}
+
+// TestWriteRepresentativeBoutsSheet_TitleAndRowLabel pins the sheet's three
+// differences from the Kachinuki Detail sheet that draws it: its name, its
+// section title ("<label> (Representative bout)"), and the bout's number cell
+// reading DH where a numbered bout reads its number, never the stored -1. The
+// centre carries the closed-set (DH) mark, and the result mark rides beside the
+// side it names, Shiro left and Aka right as on every sheet.
+func TestWriteRepresentativeBoutsSheet_TitleAndRowLabel(t *testing.T) {
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+
+	require.NoError(t, WriteRepresentativeBoutsSheet(f, []KachinukiMatchDetail{representativeTestMatch()}))
+
+	cell := func(ref string) string {
+		t.Helper()
+		v, err := f.GetCellValue(SheetRepresentativeBouts, ref)
+		require.NoError(t, err)
+		return v
+	}
+	cols := buildMatchColumnNames(1)
+
+	assert.Equal(t, "Round 1 - Match 2 (Representative bout)", cell(cols.startColName+"1"), "the section is titled by its match")
+	assert.Equal(t, "Mumeishi", cell(cols.startColName+"3"), "Shiro's team on the left")
+	assert.Equal(t, "Kodokan", cell(cols.endColName+"3"), "Aka's team on the right")
+
+	const boutRow = "4"
+	assert.Equal(t, RepresentativeBoutRowLabel+" T2.2 Shirai", cell(cols.startColName+boutRow), "Shiro's representative after the DH label")
+	assert.Equal(t, RepresentativeBoutRowLabel+" T1.3 Akagi", cell(cols.endColName+boutRow), "Aka's representative after the DH label")
+	assert.Equal(t, "(DH)", cell(cols.middleColName+boutRow), "the centre is the representative-bout mark")
+	assert.Equal(t, "Ht", cell(cols.rightVictoriesColName+boutRow), "Aka's hantei mark beside Aka's score cell")
+	assert.Empty(t, cell(cols.leftVictoriesColName+boutRow), "Shiro's cell carries nothing")
+
+	rows, err := f.GetRows(SheetRepresentativeBouts)
+	require.NoError(t, err)
+	for r, row := range rows {
+		for c, v := range row {
+			assert.NotContainsf(t, v, "-1", "row %d col %d (%q) must not print the stored position", r+1, c+1, v)
+			assert.NotContainsf(t, v, "Kachinuki", "row %d col %d (%q): this is not the Kachinuki Detail sheet", r+1, c+1, v)
+		}
+	}
+
+	idx, err := f.GetSheetIndex(SheetKachinukiDetail)
+	require.NoError(t, err)
+	assert.Equal(t, -1, idx, "writing the Representative Bouts sheet creates no Kachinuki Detail sheet")
+}
+
+// A side that picked no representative prints the bout label alone, never a
+// name or a "-1".
+func TestWriteRepresentativeBoutsSheet_UnpickedSidePrintsTheLabelAlone(t *testing.T) {
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+
+	match := representativeTestMatch()
+	match.Bouts[0].SideBName, match.Bouts[0].SideBLabel = "", ""
+	require.NoError(t, WriteRepresentativeBoutsSheet(f, []KachinukiMatchDetail{match}))
+
+	cols := buildMatchColumnNames(1)
+	shiro, err := f.GetCellValue(SheetRepresentativeBouts, cols.startColName+"4")
+	require.NoError(t, err)
+	assert.Equal(t, RepresentativeBoutRowLabel, shiro)
+	aka, err := f.GetCellValue(SheetRepresentativeBouts, cols.endColName+"4")
+	require.NoError(t, err)
+	assert.Equal(t, RepresentativeBoutRowLabel+" T1.3 Akagi", aka)
+}
+
+// No section to list, no sheet; one section, a portrait page one wide, as the
+// Kachinuki Detail sheet it shares its renderer with.
+func TestWriteRepresentativeBoutsSheet_NoSheetForEmptyInputAndPageLayout(t *testing.T) {
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+
+	require.NoError(t, WriteRepresentativeBoutsSheet(f, nil))
+	require.NoError(t, WriteRepresentativeBoutsSheet(f, []KachinukiMatchDetail{{Label: "Round 1 - Match 1", SideATeam: "A", SideBTeam: "B"}}))
+	idx, err := f.GetSheetIndex(SheetRepresentativeBouts)
+	require.NoError(t, err)
+	assert.Equal(t, -1, idx, "nothing to list creates no sheet")
+
+	require.NoError(t, WriteRepresentativeBoutsSheet(f, []KachinukiMatchDetail{representativeTestMatch()}))
+	layout, err := f.GetPageLayout(SheetRepresentativeBouts)
+	require.NoError(t, err)
+	require.NotNil(t, layout.Orientation)
+	assert.Equal(t, "portrait", *layout.Orientation)
+	require.NotNil(t, layout.FitToWidth)
+	assert.Equal(t, 1, *layout.FitToWidth)
+}
+
+// Like Kachinuki Detail, the sheet holds no formula to protect.
+func TestProtectAllSheets_LeavesTheRepresentativeBoutsSheetEditable(t *testing.T) {
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+
+	require.NoError(t, WriteRepresentativeBoutsSheet(f, []KachinukiMatchDetail{representativeTestMatch()}))
+	_, err := f.NewSheet(SheetPoolMatches)
+	require.NoError(t, err)
+	ProtectAllSheets(f)
+
+	bouts, err := f.GetSheetProtection(SheetRepresentativeBouts)
+	require.NoError(t, err)
+	assert.Equal(t, excelize.SheetProtectionOptions{}, bouts, "the Representative Bouts sheet is left editable")
+	pool, err := f.GetSheetProtection(SheetPoolMatches)
+	require.NoError(t, err)
+	assert.NotEqual(t, excelize.SheetProtectionOptions{}, pool, "the control: a score-entry sheet is protected")
+}

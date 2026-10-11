@@ -67,6 +67,8 @@ A tie that does not affect advancement is left as a shared rank with no extra bo
 
 The bout is a single-point ippon-shobu with no time limit, between one representative from each tied team. Because it runs until someone scores, a daihyosen has no encho. The score editor lets you pick each team's representative from its roster. On the court console, the bout appears with a **(DH)** mark in the centre of the score. In pool and league standings, the team that won its daihyosen carries a **DH** badge.
 
+When a knockout team encounter is settled by a representative bout, the results workbook (**Export & print**, then **Download results (.xlsx)**) lists it on a **Representative Bouts** sheet, one section for each such encounter. A section is titled as that encounter is on the **Elimination Matches** sheet, followed by (Representative bout), with White (Shiro) on the left and Red (Aka) on the right. The bout's row shows **DH** where a numbered bout shows its number, then each team's representative with their number and name, the score, **(DH)** in the centre column, and the result mark (Ht, Kiken or Fus.) beside the side it names. A side whose representative was not picked shows no name. The sheet appears only when at least one encounter had a representative bout. The tie-break daihyosen of a team pool or league is not on it.
+
 ## Chusen (drawing lots)
 
 Chusen is the last resort when two or more tied teams have played a round of daihyosen and the bouts still do not produce a strict order. Examples are a cycle where each team beats another, an all-drawn round, or two teams finishing level on daihyosen wins.

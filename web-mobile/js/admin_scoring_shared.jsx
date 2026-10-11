@@ -1024,7 +1024,7 @@ function lineupListPlacement({ pin, foot, clip }, bar) {
   return { up, maxHeight };
 }
 
-function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLabel, color, clearable, inputId }) {
+function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLabel, color, clearable, inputId, placeholder = "Add player…" }) {
   const [query, setQuery] = useStateA("");
   const [open, setOpen] = useStateA(false);
   const [active, setActive] = useStateA(-1); // -1 = no explicit selection yet
@@ -1184,7 +1184,7 @@ function LineupNameInput({ value, roster, onSelect, onListPick, disabled, ariaLa
         <input
           id={inputId}
           className="pmf__input"
-          placeholder={value || "Add player…"}
+          placeholder={value || placeholder}
           aria-label={ariaLabel}
           disabled={disabled}
           value={open ? query : (value || "")}

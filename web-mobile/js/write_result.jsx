@@ -120,15 +120,22 @@ export function supersededAlertText(n, one, needsWinner = false, defaultWinStand
 // one choice of banner for a superseded write, asked by notLandedBanner and by
 // api_client.jsx's not-applied broadcast.
 //
-// The same reason rides on a second, APPLIED answer (writeDisplacedGroups): a
-// finish that arrived after a newer scoring change which, applied after it,
+// The same reason can ride on a second, APPLIED answer (writeDisplacedGroups):
+// a finish that arrived after a newer scoring change which, applied after it,
 // would have left the match without a winner. The finish is recorded and that
 // later change is MOVED to the history (`displacedGroups`, no heldGroups).
 // writeNeedsWinner is therefore true only for a write whose OWN change was
-// held for the reason; a displaced answer is not one, and says "Saved". An
-// answer that both held groups and moved a later change carries the one
-// reason for both, and the client reads it as the move's: telling the
-// operator to correct a result that IS recorded would be the worse error.
+// held for the reason; a displaced answer is not one, and says "Saved".
+//
+// A change can also be moved for another reason and then carries NO
+// heldReason: a representative's pick stamped after the representative bout's
+// removal has nothing left to stand on. writeDisplacedForWinner is the one
+// question "was the move for a winner": true for heldReason needs_winner only,
+// never for "a reason is present", because the reason is per ANSWER and a
+// decision that stands (default_win_stands) can ride beside displacedGroups
+// too. An answer that both held groups and moved a later change carries the
+// one reason and is worded by it, which is the move's: telling the operator to
+// correct a result that IS recorded would be the worse error.
 export const HELD_REASON_NEEDS_WINNER = 'needs_winner';
 export function writeDisplacedGroups(res) {
     return res && Array.isArray(res.displacedGroups) ? res.displacedGroups.filter((g) => typeof g === 'string') : [];
@@ -138,12 +145,27 @@ export function writeNeedsWinner(res) {
         && writeDisplacedGroups(res).length === 0
         && (writeWasSuperseded(res) || writeHeldGroups(res).length > 0);
 }
+export function writeDisplacedForWinner(res) {
+    return !!res && res.heldReason === HELD_REASON_NEEDS_WINNER && writeDisplacedGroups(res).length > 0;
+}
 // displacedAlertText: the queue alert for queued finishes that landed and
 // moved a later change of the same match to its history (writeDisplacedGroups).
-export function displacedAlertText(n, one) {
-    return one
-        ? "A held result was saved. A later change to that match would have left it without a winner, so the change was moved to the match's history."
-        : `${n} held results were saved. Later changes to those matches would have left them without a winner, so the changes were moved to each match's history.`;
+// `forWinner` is how many of the n answers moved their change for a winner
+// (writeDisplacedForWinner): all of them keeps the winner sentence, none says
+// plainly that the change was moved, and a mix says both. An alert that
+// carries no such count reads as none.
+export function displacedAlertText(n, one, forWinner = 0) {
+    const f = Number(forWinner) || 0;
+    if (one) {
+        return f > 0
+            ? "A held result was saved. A later change to that match would have left it without a winner, so the change was moved to the match's history."
+            : "A held result was saved. A later change to that match was moved to the match's history.";
+    }
+    if (f >= n) {
+        return `${n} held results were saved. Later changes to those matches would have left them without a winner, so the changes were moved to each match's history.`;
+    }
+    const moved = `${n} held results were saved. Later changes to those matches were moved to each match's history.`;
+    return f > 0 ? `${moved} ${f} of those changes would have left a match without a winner.` : moved;
 }
 export const NEEDS_WINNER_REASON = "this change would leave the finished match without a winner, and it needs one, so it was kept in the match's history and nothing is lost";
 export const NEEDS_WINNER_ADVICE = 'Correct the result with a winner.';
@@ -839,6 +861,23 @@ export function startWhileCorrectingMessage({ label }) {
     return `Save the correction of ${label}, or leave it with Back to court, then start this match.`;
 }
 
+// A second Start while another match's start is still out (bc-aadv, one start at a time).
+export function startWhileStartingMessage({ label }) {
+    return `${label} is still being started on this court. Start this match once it has.`;
+}
+
+// The same refusal once the start it named has LANDED (bc-aadv, item 4). While
+// that start was out the sentence above was true and was derived from it. When it
+// lands the court has a running bout, the refused match is NOT started on its own
+// (one start at a time; a second automatic start would draw court_busy or put two
+// bouts on the court unasked), and nothing else would say that the match was asked
+// for and never started. So the refusal is kept, in the past tense, on the refused
+// match until that match leaves scheduled or the operator starts one. The court
+// console and the Scores tab both word it from here.
+export function startWasBlockedByStartMessage({ label }) {
+    return `Not started: ${label} was being started when this match was asked for. Start it when the court is free.`;
+}
+
 export function correctWhileRunningMessage({ court, label }) {
     return `${courtBusyMessage({ court, label })} Then correct this match.`;
 }
@@ -981,4 +1020,27 @@ export async function attemptScoreWrite({ recordScore, confirmDialog, compId, ma
         e.downstreamKnockoutPlayedCancelled = true;
         throw e;
     }
+}
+
+// A thrown refusal is toasted ONCE. editMatchScore (admin.jsx), the chokepoint
+// every score write goes through, toasts the error it is about to throw; a host
+// that catches that same error to show it on a card or a row (the court console's
+// startMatch, the Scores tab's startNext) used to toast the same sentence again,
+// which replaced the single-slot toast and restarted its timer. editMatchScore
+// marks every error it toasted (markToasted) and a host asks before it toasts
+// (wasToasted); the card or row notice is set either way. A refusal only the host
+// sees (a clock_skew answer is a RETURN, not a throw; a local "still being
+// started" refusal never reaches onEditScore) carries no mark and is toasted
+// there, once.
+//
+// The mark rides on the error object, the way downstreamKnockoutPlayedCancelled
+// does, so nothing is threaded through a signature. `toasted` is the field name
+// (check-write-result.mjs polices `.applied`/`.persisted`, never this).
+export function markToasted(err) {
+    if (err && typeof err === 'object') err.toasted = true;
+    return err;
+}
+
+export function wasToasted(err) {
+    return !!err && typeof err === 'object' && err.toasted === true;
 }

@@ -10,6 +10,7 @@ import {
   attemptScoreWrite,
   downstreamKnockoutReopenedNotice,
   writeKeepsEditorOpen,
+  markToasted,
 } from './write_result.jsx';
 import { keptInHistoryNote } from './match_groups.jsx';
 
@@ -17,8 +18,8 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 // closingHistoryToast (bc-mrgc): the toast editMatchScore shows for a write
 // that landed but kept something in the match's history (part of it held, or
-// a later change it moved there because that change would have left the
-// finished match without a winner), worded by keptInHistoryNote. Only when
+// a later change it moved there, worded by the reason the answer gives, if
+// any), through keptInHistoryNote. Only when
 // the write closes the editor: an editor that stays open says so itself
 // (useKeptInHistoryNote). A write that did not land keeps its editor open
 // too (writeKeepsEditorOpen), where its own banner reports it. null when
@@ -298,14 +299,17 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   //      real outcome.
   //   2. Post-mutation refresh: best-effort via refreshCompsBestEffort.
   //      A refresh failure cannot make the mutation "look failed."
+  // Resolves true when the move landed and false when it failed (the failure is
+  // toasted here), so a caller can tell the two apart.
   const moveMatchCourt = async (compId, matchId, newCourt) => {
     try {
       await window.API.moveMatchCourt(compId, matchId, newCourt, password);
     } catch (e) {
       showToast(e.message, "error");
-      return;
+      return false;
     }
     await refreshCompsBestEffort("Move");
+    return true;
   };
 
   // bc-kcdg: THE single chokepoint every score-editor host (the bracket
@@ -323,14 +327,17 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         compId, matchId, result, password, match,
       });
     } catch (e) {
+      // Every error toasted here is marked, so a host that catches it to show
+      // the same sentence on a card or a row does not toast it a second time
+      // (markToasted, write_result.jsx).
       if (e.downstreamKnockoutPlayedCancelled) {
         // Declining the override leaves everything as it was: neither this
         // match nor the later one it depends on was written.
         showToast(DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED);
-        throw e;
+        throw markToasted(e);
       }
       showToast(e.message, "error");
-      throw e;
+      throw markToasted(e);
     }
     // bc-kcdg: say what the confirmation actually did. The operator agreed to
     // reopen specific later matches; without this the only evidence is the
@@ -771,6 +778,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       onLogout={onLogout}
       onViewerMode={onViewerMode}
       password={password}
+      showToast={showToast}
     />;
   }
 

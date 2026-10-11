@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
@@ -228,6 +229,28 @@ func qualifierLabelPool(label string) string {
 	return label
 }
 
+// slotFields returns the name and id fields of the bracket slot that side
+// names: side A's pair, side B's pair, or the Winner pair for
+// domain.MatchSideNone. paint compares, logs and writes through it, so a slot's
+// fields cannot disagree with its side. It only names the fields. A side write
+// still goes through seatBracketSide, which also takes away the representative
+// the leaving team held; the Winner is not a side, so it is written directly and
+// never through seatBracketSide. Any other side value is a BUG: it logs, and it
+// hands back scratch fields, so nothing on the match is compared or written.
+func slotFields(m *state.BracketMatch, side domain.MatchSide) (name, id *string) {
+	switch side {
+	case domain.MatchSideA:
+		return &m.SideA, &m.SideAID
+	case domain.MatchSideB:
+		return &m.SideB, &m.SideBID
+	case domain.MatchSideNone:
+		return &m.Winner, &m.WinnerID
+	}
+	log.Printf("engine: BUG: bracket match %s: slotFields called with side %q; nothing is compared or written", m.ID, side)
+	var scratchName, scratchID string
+	return &scratchName, &scratchID
+}
+
 // resolveSlots writes resolver's finishers into every bracket slot whose
 // draw-time label (PlaceholderA/B/Winner) is a resolver key, then completes and
 // propagates any bye that leaves. It does no I/O, so it serves both the
@@ -304,9 +327,28 @@ func (e *Engine) resolveSlots(bracket *state.Bracket, resolver map[string]resolv
 		// re-run is a no-op, and so a bracket resolved once BEFORE bc-brid
 		// (name only, id still "") gets its id backfilled the next time its
 		// pool's placeholder is looked at.
-		paint := func(label string, name, id *string) {
+		//
+		// paint writes the slot labelled label, which takes the competitor of side
+		// (domain.MatchSideA or B) or the Winner (domain.MatchSideNone). Its fields
+		// come from slotFields, so the compare, the log line and the write name the
+		// same ones. A side is written through seatBracketSide, which takes away the
+		// representative the team that leaves the slot held; the Winner is not a side
+		// and is written directly.
+		paint := func(label string, side domain.MatchSide) {
+			name, id := slotFields(m, side)
 			rf, ok := resolver[label]
-			if !ok || (*name == rf.Name && *id == rf.ID) {
+			if !ok {
+				return
+			}
+			// A slot whose resolver entry has no id (a standings player of
+			// legacy data) keeps the id it holds, as seatBracketSide keeps it
+			// for an incoming "" and the Winner (a bye passes its competitor
+			// through with the id the side holds) must: it is already seated,
+			// and repainting it would count a change on every pool write that
+			// never converges, and wipe the Winner's id each time. Only that
+			// direction: a slot with no id against an entry that has one is
+			// still painted, which is the id backfill above.
+			if *name == rf.Name && (*id == rf.ID || rf.ID == "") {
 				return
 			}
 			if frozen[qualifierLabelPool(label)] != "" {
@@ -316,13 +358,17 @@ func (e *Engine) resolveSlots(bracket *state.Bracket, resolver map[string]resolv
 				log.Printf("engine: bracket match %s (%s) keeps %q in its %s slot: it is running or has its own result, so the new occupant %q is not written over it", m.ID, m.Status, *name, label, rf.Name)
 				return
 			}
-			*name, *id = rf.Name, rf.ID
+			if side == domain.MatchSideNone {
+				*name, *id = rf.Name, rf.ID
+			} else {
+				seatBracketSide(m, side, rf.Name, rf.ID)
+			}
 			n++
 		}
-		paint(m.PlaceholderA, &m.SideA, &m.SideAID)
-		paint(m.PlaceholderB, &m.SideB, &m.SideBID)
+		paint(m.PlaceholderA, domain.MatchSideA)
+		paint(m.PlaceholderB, domain.MatchSideB)
 		// Winner-only changes count too, so a bye-propagated Winner fix is persisted.
-		paint(m.PlaceholderWinner, &m.Winner, &m.WinnerID)
+		paint(m.PlaceholderWinner, domain.MatchSideNone)
 	}
 	for ri := range bracket.Rounds {
 		for mi := range bracket.Rounds[ri] {
@@ -461,7 +507,13 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 	resolvedNow := 0
 	allResolved := false
 	backfilled := false
-	uerr := e.store.UpdateBracket(compID, func(bracket *state.Bracket) error {
+	// The picks the repaint takes from a re-seated match, for its history lines
+	// (bracket_seat_audit.go). This resolver repaints a slot whose pool moved
+	// outside the requalification planner (DELETE .../overrides writes the
+	// overrides alone), so it owns the record of what its re-seat took, written
+	// in the transaction that writes the bracket.
+	var clears []repPickClear
+	mutate := func(bracket *state.Bracket) error {
 		if bracket == nil || len(bracket.Rounds) == 0 {
 			return errMatchNotFound // nothing to resolve; signal no-save
 		}
@@ -486,7 +538,11 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 			// pools-times-winners layout this backfill reconstructs.
 			backfilled = backfillDrawPlaceholdersV1(bracket, poolNames, poolWinners)
 		}
+		before := repPickSnapshot(bracket, "")
 		n := e.resolveSlots(bracket, resolver)
+		// The repaint may have given a side another team and taken its pick
+		// with it. No reopen names it here: a locked match is never repainted.
+		clears = repPickClears(before, bracket)
 
 		allResolved = !bracketHasPoolPlaceholders(bracket)
 		if n == 0 && !backfilled {
@@ -499,6 +555,13 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 			// call resolved nothing, so it must not flip this.
 			bracket.Preview = false
 		}
+		return nil
+	}
+	uerr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+		if err := tx.UpdateBracket(compID, mutate); err != nil {
+			return err
+		}
+		e.recordRepPickClears(tx, compID, clears, nil)
 		return nil
 	})
 	if uerr != nil && !errors.Is(uerr, errMatchNotFound) {

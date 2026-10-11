@@ -45,7 +45,7 @@ func TestApplyCorrectionReasonUnderTx_FailsClosedOnLoadError(t *testing.T) {
 	var gotErr error
 	txErr := store.WithTransaction("c1", func(stx state.StoreTx) error {
 		r := &state.MatchResult{ID: "m1", Status: state.MatchStatusCompleted}
-		_, gotErr = applyCorrectionReasonUnderTx(stx, "c1", "m1", r)
+		_, _, gotErr = applyCorrectionReasonUnderTx(stx, "c1", "m1", r)
 		return nil
 	})
 	require.NoError(t, txErr)
@@ -3774,7 +3774,7 @@ func seedKcdgBracket(t *testing.T, store *state.Store, compID string) {
 // against: {"error":"downstream_knockout_played","matchId":...,
 // "blockingMatchId":...,"displaced":...,"message":...}. A correctionReason is
 // required first (a completed->completed write is a correction, gated by
-// applyCorrectionReasonUnderTx) so the payload includes one throughout.
+// applyCorrectionReason) so the payload includes one throughout.
 func TestScoreHandler_DownstreamKnockoutPlayed_409Shape(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)

@@ -33,7 +33,7 @@ var engineOnlySheets = []string{helper.SheetTags}
 
 // TestExportPipelineSheetParity guards the two workbook builders that both
 // walk the "data / Pool Draw / Pool Matches / Elimination Matches / Tree N /
-// Names to Print X / Kachinuki Detail / ..." sheet pipeline for one
+// Names to Print X / Kachinuki Detail / Representative Bouts / ..." sheet pipeline for one
 // competition: Engine.ExportCompetitionXlsx (internal/engine/export.go, the
 // stored-draw export) and BuildResultsWorkbook (internal/export/builder.go,
 // the results export). Before mp-yuy8 the two functions were hand-maintained
@@ -162,6 +162,22 @@ func TestExportPipelineSheetParity(t *testing.T) {
 				}))
 			},
 			mustAppearInBoth: []string{helper.SheetKachinukiDetail},
+		},
+		{
+			// The Representative Bouts sheet's twin of the case above: a
+			// fixed-order team knockout whose match was settled by a
+			// representative bout. Engine.collectRepresentativeBouts (the
+			// stored-draw export) and Engine.RepresentativeBoutMatches (the
+			// results export) are two reads feeding one renderer, and a
+			// sheet one of them forgot is the R8 bug again. The fixture is
+			// builder_test.go's saveFixedTeamBracket, a hand-crafted bracket
+			// on the same Knockout-with-no-pools footing as the case above.
+			name: "fixed_team_bracket_representative_bout",
+			configure: func(t *testing.T, store *state.Store, eng *engine.Engine, compID string) {
+				t.Helper()
+				saveFixedTeamBracket(t, store, compID, true)
+			},
+			mustAppearInBoth: []string{helper.SheetRepresentativeBouts},
 		},
 		{
 			// A pure knockout competition (no pools) drives a different

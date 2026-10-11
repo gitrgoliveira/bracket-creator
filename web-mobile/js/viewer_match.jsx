@@ -13,7 +13,7 @@
 // unchanged.
 
 import { writeKeepsEditorOpen } from './write_result.jsx';
-import { SideLabel } from './side_cell.jsx';
+import { SideLabel, WinnerTick } from './side_cell.jsx';
 import { useTeamLineups, TeamScoreboard, IndividualScore, numberedParts, teamNameMark } from './match_scoreboard.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { TermV, poolLabel } from './viewer_utils.jsx';
@@ -195,7 +195,7 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
 // VSchedItem
 // ---------------------------------------------------------------------------
 
-export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight }) => {
+export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight, winnerTick }) => {
   // bc-pnum: sameCompetitor, never a bare `winner.id === side.id` (see
   // bracket.jsx's MatchCard for why the naked equality lights both sides
   // once both are id-less). No presence guard: sameCompetitor(null, x) is
@@ -291,7 +291,10 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
               above, so without it a long name clipped that mark away (or, on
               Aka, pushed its leading mark past the visible width) exactly as
               the bare number once did. */}
-          <span className="n msb-name--labelled">{barredNameMark(m, "shiro", teamNameMark("shiro", teamShiroMark, <NumberedName side="shiro" clip {...numberedParts(m.sideB, undefined)} />))}</span>
+          {/* The winner tick (Recent results only) rides INSIDE the `.n` flex
+              row, at the side's outer edge: first on Shiro, last on Aka. As a
+              sibling of `.n` it took a line of its own above the name. */}
+          <span className="n msb-name--labelled">{winnerTick && bWin && <WinnerTick />}{barredNameMark(m, "shiro", teamNameMark("shiro", teamShiroMark, <NumberedName side="shiro" clip {...numberedParts(m.sideB, undefined)} />))}</span>
           {tweaks.showDojo && m.sideB?.dojo ? <span className="d">{m.sideB.dojo}</span> : null}
         </div>
         {/* No score string (pending, or completed with no recorded cells) →
@@ -319,7 +322,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
         )}
         <div className={`vsched-item__side vsched-item__side--aka ${aWin ? "vsched-item__side--w" : ""}`}>
           <SideLabel side="aka" />
-          <span className="n msb-name--labelled">{barredNameMark(m, "aka", teamNameMark("aka", teamAkaMark, <NumberedName side="aka" clip {...numberedParts(m.sideA, undefined)} />))}</span>
+          <span className="n msb-name--labelled">{barredNameMark(m, "aka", teamNameMark("aka", teamAkaMark, <NumberedName side="aka" clip {...numberedParts(m.sideA, undefined)} />))}{winnerTick && aWin && <WinnerTick trailing />}</span>
           {tweaks.showDojo && m.sideA?.dojo ? <span className="d">{m.sideA.dojo}</span> : null}
         </div>
       </div>

@@ -1401,8 +1401,9 @@ func TestReopenHandler_ReEndKeepsAReasonSent(t *testing.T) {
 }
 
 // TestReopenHandler_BulkScoreEndsAReopenWithoutReason pins the same rule on the
-// bulk-score path, which shares applyCorrectionReasonUnderTx with the single
-// score path: a reopened match is ended there without a reason too.
+// bulk-score path, which shares applyCorrectionReason with the single score
+// path (through applyCorrectionReasonUnderTx): a reopened match is ended there
+// without a reason too.
 func TestReopenHandler_BulkScoreEndsAReopenWithoutReason(t *testing.T) {
 	compID := "kachinuki-reopen-bulk"
 	r, store := setupKachinukiScoreServer(t, compID)

@@ -55,6 +55,21 @@ export function SideLabel({ side }) {
   return <span className="sr-only">{sideWord(side)}: </span>;
 }
 
+// The winner's tick beside the winning side's name. The glyph is decorative and
+// hidden from assistive technology; the sr-only word carries the fact, for the
+// same reason SideLabel is a span rather than an aria-label. The words follow
+// the tick's place in the row: "Winner: " before the name, ", winner" when the
+// tick sits after it (`trailing`, Aka on Recent results), so the row is spoken
+// "Aka: Tanaka, winner" and not "Aka: Tanaka Winner:".
+export function WinnerTick({ trailing = false }) {
+  return (
+    <span className="bc-winner-tick" title="Winner">
+      <span aria-hidden="true">✓</span>
+      <span className="sr-only">{trailing ? ", winner" : "Winner: "}</span>
+    </span>
+  );
+}
+
 // A tinted side cell.
 //
 //   side       "shiro" | "aka". The one place the surface states it.

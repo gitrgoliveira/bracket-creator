@@ -91,7 +91,7 @@ func TestDaihyosenAddableOnlyWhenTied(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			sub, err := eng.AddDaihyosen(compID, matchID, tc.sideA, tc.sideB, tc.isPool, tc.sideAEligible, tc.sideBEligible)
+			sub, err := eng.AddDaihyosen(compID, matchID, "Alpha", "Bravo", tc.sideA, tc.sideB, tc.isPool, tc.sideAEligible, tc.sideBEligible)
 			if tc.wantErr != nil {
 				require.Error(t, err)
 				assert.Truef(t, errors.Is(err, tc.wantErr), "want errors.Is == %v, got %v", tc.wantErr, err)
@@ -103,6 +103,8 @@ func TestDaihyosenAddableOnlyWhenTied(t *testing.T) {
 			if tc.wantSub {
 				assert.Equal(t, -1, sub.Position, "daihyosen sentinel position must be -1")
 				assert.Equal(t, string(domain.DecisionDaihyosen), sub.Decision)
+				assert.Equal(t, "Alpha", sub.SideA, "the row names the match's side A from the moment it exists")
+				assert.Equal(t, "Bravo", sub.SideB, "the row names the match's side B from the moment it exists")
 			}
 		})
 	}

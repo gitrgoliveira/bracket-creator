@@ -58,12 +58,18 @@ import { isBarredMatch } from './ineligible_match.jsx';
 
 import { SyncStatusPill, useDebouncedRunningWrite, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
+import { GROUP_POINTS, GROUP_RESULT, GROUP_ENCHO, GROUP_REP } from './match_groups.jsx';
 
 // isKoTieBlocked: import-only, from the team editor's shared module. bc-rawm
 // reuses it here for the SAME tie rule (a knockout match cannot finish with
 // no winner), never a re-derivation of it; see canFinish below.
 import { TeamScoreEditorModal, isKoTieBlocked } from './admin_scoring_team.jsx';
 import { EngiScoreEditorModal } from './admin_scoring_engi.jsx';
+
+// A representative pick the operator made that the server does not hold (yet). An empty
+// pick never counts: the server keeps a stored name over "", so it would read unsaved
+// forever. The pick adopts below and the claimed change group both ask this.
+const repPickHeld = (pick, served) => pick !== "" && pick !== (served || "");
 
 export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, onAfterDecision, started = false, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true }) {
   // bc-strt: a match whose start has landed is RUNNING, even while the host's
@@ -145,6 +151,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const [aFouls, setAFouls] = useStateA(initialAFouls);
   const [bFouls, setBFouls] = useStateA(initialBFouls);
   const [enchoPeriodCount, setEnchoPeriodCount] = useStateA(initialEnchoPeriods);
+  // The points group (the ippons and the outstanding fouls) as this editor holds it
+  // against as the server does. An adopt that does not take the points agrees them
+  // only while this is false (see the hantei adopt below).
+  const pointsEdited = !window.arraysEqual(aPts, initialAPts) ||
+    !window.arraysEqual(bPts, initialBPts) ||
+    aFouls !== initialAFouls ||
+    bFouls !== initialBFouls;
   // The verdict the SERVER holds right now. A match has ONE result and every
   // surface asking for it must show the same one, and this editor is such a
   // surface: while it is open, the viewer card, the bracket, the TV board and
@@ -172,7 +185,19 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const [hanteiPick, setHanteiPick] = useStateA(recordedHtKey);
   useAdoptFromServer({
     signature: JSON.stringify([hanteiRecorded, recordedHtKey]),
-    apply: () => { setDecidedByHantei(hanteiRecorded); setHanteiPick(recordedHtKey); },
+    apply: () => {
+      setDecidedByHantei(hanteiRecorded);
+      setHanteiPick(recordedHtKey);
+      // The verdict rides in the ippons (the Ht mark on the winner's side) and in the
+      // result (the winner), so adopting it is agreeing with both groups: cancelling
+      // it here must then be named, and the points are not re-sent as they stood. The
+      // adopt takes the verdict and not the points, so it agrees the points only while
+      // the editor holds the server's: with a point of ours still being saved, agreeing
+      // would put both baselines on a scoreline without it, and taking it back after
+      // its save landed would read as unchanged.
+      if (!pointsEdited) claimChanged.agree(GROUP_POINTS);
+      claimChanged.agree(GROUP_RESULT);
+    },
   });
   // Which side ("a"/"b"/"") holds a RECORDED hantei verdict, for the display
   // chip in the slot grid. Gated on the SERVER's verdict — not the local armed
@@ -222,6 +247,20 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // = Aka (sideA), repPlayerB = Shiro (sideB). Only rendered when m.repIsTeam.
   const [repPlayerA, setRepPlayerA] = useStateA(m.repPlayerA || "");
   const [repPlayerB, setRepPlayerB] = useStateA(m.repPlayerB || "");
+  // The two picks are ONE change group (GROUP_REP), and claim.agree moves both
+  // baselines to the server's value, so a side's adopt agrees the group only when BOTH
+  // sides then hold what the server holds: a pick of ours still being saved on the
+  // other side must stay a change, or its save landing would make putting it back look
+  // unchanged and the server would keep the other value. `repAfter` is each side's
+  // pick as this commit's adopts leave it: the render's own picks (refreshed by the
+  // effect below, which runs before the adopts), then the served pick of each side
+  // whose adopt has run, so the second adopt of one update sees the first.
+  const repAfter = useRefA({ a: "", b: "" });
+  useEffectA(() => { repAfter.current = { a: repPlayerA, b: repPlayerB }; });
+  const adoptRepPick = (side, served) => {
+    repAfter.current[side] = served;
+    if (!repPickHeld(repAfter.current.a, m.repPlayerA) && !repPickHeld(repAfter.current.b, m.repPlayerB)) claimChanged.agree(GROUP_REP);
+  };
   // Follow a pick made on another device, same rule as every other channel.
   //
   // The narrow reading first, because it bounds what this is worth: an UNSET
@@ -240,15 +279,15 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // the server keeps a name over "", so it would read unsaved forever.
   useAdoptFromServer({
     signature: m.repPlayerA || "",
-    apply: () => setRepPlayerA(m.repPlayerA || ""),
+    apply: () => { setRepPlayerA(m.repPlayerA || ""); adoptRepPick("a", m.repPlayerA || ""); },
     keepLocalEdits: true,
-    isDirty: repPlayerA !== "" && repPlayerA !== (m.repPlayerA || ""),
+    isDirty: repPickHeld(repPlayerA, m.repPlayerA),
   });
   useAdoptFromServer({
     signature: m.repPlayerB || "",
-    apply: () => setRepPlayerB(m.repPlayerB || ""),
+    apply: () => { setRepPlayerB(m.repPlayerB || ""); adoptRepPick("b", m.repPlayerB || ""); },
     keepLocalEdits: true,
-    isDirty: repPlayerB !== "" && repPlayerB !== (m.repPlayerB || ""),
+    isDirty: repPickHeld(repPlayerB, m.repPlayerB),
   });
   // doSubmit's setSubmitting(false) in finally fires post-await; if the
   // parent unmounts the modal during the in-flight save (e.g.
@@ -630,6 +669,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     setBFouls(initialBFouls);
     setEnchoPeriodCount(initialEnchoPeriods);
     setIsDrawToggled(initialIsDrawToggled);
+    // The scoreline, the overtime count and the draw (the result's hikiwake) are taken
+    // from the server together, so the editor agrees with all three groups.
+    claimChanged.agree(GROUP_POINTS);
+    claimChanged.agree(GROUP_ENCHO);
+    claimChanged.agree(GROUP_RESULT);
   };
 
   // Arranged as [left, right]: left is always SHIRO (White), right is always AKA (Red).
@@ -793,10 +837,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // changes?" on an editor nobody touched trains operators to dismiss the one
   // prompt that protects real work.
   const isDirty =
-    !window.arraysEqual(aPts, initialAPts) ||
-    !window.arraysEqual(bPts, initialBPts) ||
-    aFouls !== initialAFouls ||
-    bFouls !== initialBFouls ||
+    pointsEdited ||
     isDrawToggled !== initialIsDrawToggled ||
     enchoPeriodCount !== initialEnchoPeriods ||
     decidedByHantei !== hanteiRecorded ||

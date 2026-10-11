@@ -21,7 +21,7 @@ import {
 } from './admin_schedule_pacing.jsx';
 import { MatchLineupPanel } from './admin_schedule_lineup.jsx';
 import { AdminExport } from './admin_schedule_export.jsx';
-import { startPatch, AdminScoreEditor, AdminScoreEditorPage } from './admin_schedule_score_editor.jsx';
+import { AdminScoreEditor, AdminScoreEditorPage } from './admin_schedule_score_editor.jsx';
 import { AdminSchedulePage } from './admin_schedule_page.jsx';
 
 // ES surface for the vitest suite: every symbol the unit tests import is
@@ -39,7 +39,6 @@ window.AdminScoreEditorPage = AdminScoreEditorPage;
 window.AdminScoreEditor = AdminScoreEditor;
 window.AdminExport = AdminExport;
 window.filterMatchesByCourt = filterMatchesByCourt;
-window.startPatch = startPatch;
 // Reused by the shiaijo operator console so team-match lineups can be set
 // without leaving that page (mp-c2yr).
 window.MatchLineupPanel = MatchLineupPanel;

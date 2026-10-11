@@ -149,9 +149,10 @@ func refuseUnfinishedTeamFinishForComp(comp *state.Competition, matchID string, 
 // correction to the bouts of a match a default-win ruling already ended, and
 // it keeps the ruling (operator ruling 2026-09-24: "Save correction should
 // just save what the operator enters"), so the bouts nobody fought after it
-// are not a finish it has to answer for. check is the snapshot
-// applyCorrectionReasonUnderTx read under the same lock the write holds, so
-// the stored decision this exemption reads is the one the engine will see.
+// are not a finish it has to answer for. check is the verdict
+// applyCorrectionReason drew from the snapshot read under the same lock the
+// write holds, so the stored decision this exemption reads is the one the
+// engine will see.
 func teamFinishRefusalUnderTx(refusal *ValidationError, check correctionCheck, req *state.MatchResult) *ValidationError {
 	if refusal == nil || engine.KeepsWithdrawalRuling(check.StoredStatus, check.StoredDecision, req) {
 		return nil

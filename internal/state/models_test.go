@@ -220,6 +220,64 @@ func TestSubMatchResult_ResolveMemberWinnerID(t *testing.T) {
 	})
 }
 
+// TestSubMatchResult_ReconcileWinnerMemberID pins the representative-bout rule
+// (bc-mrgc, GroupRepPickA and GroupRepPickB): after a merge, WinnerMemberID is EXACTLY the stored
+// pick of the side the Winner NAME names, or empty. It is derived from the name
+// alone and never decided through the stored id (SubBoutWinnerSide and
+// Attribution read WinnerMemberID first, so a stale id would decide its own
+// verdict): an id that names the LOSING side's pick is as wrong as one naming
+// nobody, and id-first attribution would credit the wrong side.
+func TestSubMatchResult_ReconcileWinnerMemberID(t *testing.T) {
+	row := func(winner, winnerID string) SubMatchResult {
+		return SubMatchResult{
+			Position: DaihyosenSubPosition, SideA: "Kyoto", SideB: "Osaka",
+			SideAMemberID: "pick-a", SideBMemberID: "pick-b",
+			Winner: winner, WinnerMemberID: winnerID,
+		}
+	}
+	cases := []struct {
+		name      string
+		sub       SubMatchResult
+		want      string
+		wantMoved bool
+	}{
+		{"an id naming the winning side's pick stands", row("Kyoto", "pick-a"), "pick-a", false},
+		{"an id naming the LOSING side's pick is replaced by the winning side's", row("Kyoto", "pick-b"), "pick-a", true},
+		{"an id naming the losing side's pick, side B winning", row("Osaka", "pick-a"), "pick-b", true},
+		{"an id naming nobody is replaced by the winning side's pick", row("Osaka", "gone"), "pick-b", true},
+		{"no id is derived from the winning side's pick", row("Kyoto", ""), "pick-a", true},
+		{"no winner: a stored id is cleared", row("", "pick-a"), "", true},
+		{"no winner and no id: nothing to do", row("", ""), "", false},
+		{"a winner naming neither side: the id is cleared", row("Nagoya", "pick-a"), "", true},
+		{"the winning side has no pick: the other side's id is cleared, not kept", func() SubMatchResult {
+			s := row("Kyoto", "pick-b")
+			s.SideAMemberID = ""
+			return s
+		}(), "", true},
+		{"the winning side has no pick and no id: still empty", func() SubMatchResult {
+			s := row("Kyoto", "")
+			s.SideAMemberID = ""
+			return s
+		}(), "", false},
+		// Two same-named teams are forbidden by rule (team names are unique,
+		// helper.DuplicateNamesWithKeys), so this is legacy data: the name
+		// cannot say which side won, and the id is left empty rather than
+		// guessed, with no special case here.
+		{"same-named sides cannot be told apart: the id is cleared", func() SubMatchResult {
+			s := row("Kyoto", "pick-b")
+			s.SideB = "Kyoto"
+			return s
+		}(), "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sub := tc.sub
+			assert.Equal(t, tc.wantMoved, sub.ReconcileWinnerMemberID())
+			assert.Equal(t, tc.want, sub.WinnerMemberID)
+		})
+	}
+}
+
 // TestSubMatchResult_HanteiRoundTrip pins the wire/storage contract for the
 // per-bout hantei flag the viewer reads (mp-8sw). The flag is TRI-STATE
 // (*bool): true and explicit false both serialize (a withdrawal must reach

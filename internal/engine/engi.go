@@ -252,6 +252,9 @@ func (e *Engine) recordEngiMatch(
 	fo := firstForceOptions(opts)
 	force := fo.Force
 	var reopened []ReopenedMatch
+	// The picks the propagation takes from matches it re-seats without
+	// reopening, for their own history lines (bracket_seat_audit.go).
+	var clears []repPickClear
 	if !engiValidTotal(flagsA, flagsB) {
 		return nil, validationErrorf(
 			"engi: flag total %d+%d=%d is invalid; total must be odd and in {1,3,5} (3- or 5-referee panel, no draw possible)",
@@ -319,12 +322,15 @@ func (e *Engine) recordEngiMatch(
 					return err
 				}
 				priorWinner, priorWinnerID := propagatedWinnerOf(b, rIdx, mIdx, bm)
+				before := repPickSnapshot(b, matchID)
 				result = applyEngiToBracketMatch(bm, flagsA, flagsB, winnerSide, correctionReason)
 				stampEngiChanges(bm, stamp, groupStamps)
 				e.propagateBracketWinner(b, rIdx, mIdx)
 				if force && winnerActuallyChanged(priorWinner, priorWinnerID, bm) {
 					reopened = forceReopenDownstreamChain(b, rIdx, mIdx, bm.ID)
 				}
+				clears = repPickClears(before, b)
+				markRepPicksCleared(reopened, clears)
 				return nil
 			}
 		}
@@ -348,6 +354,7 @@ func (e *Engine) recordEngiMatch(
 		e.recordDirectHistory(h, compID, matchID, doorEngi, stamp, engiChangedGroups...)
 	}
 	e.restoreForceReopened(h, compID, reopened)
+	e.recordRepPickClears(h, compID, clears, reopened)
 	if fo.Reopened != nil {
 		*fo.Reopened = append(*fo.Reopened, reopened...)
 	}

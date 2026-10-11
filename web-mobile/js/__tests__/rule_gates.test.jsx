@@ -127,6 +127,7 @@ describe('the write-result rule is importable without running the gate', () => {
     // the history are told apart by the owner alone.
     expect(trips('window.writeNeedsWinner(res)')).toBe(true);
     expect(trips('window.writeDisplacedGroups(res)')).toBe(true);
+    expect(trips('window.writeDisplacedForWinner(res)')).toBe(true);
     expect(trips('<span>{QUEUED_NOTICE}</span>')).toBe(false);
     expect(trips('if (writeDidNotLand(res)) return;')).toBe(false);
   });

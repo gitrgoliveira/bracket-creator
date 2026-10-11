@@ -64,9 +64,28 @@ describe('queueAlertMessage', () => {
     // A held finish landed and moved a later change of its match to the
     // history: recorded, so information, not an error.
     it('a held finish that moved a later change aside: saved, as information', () => {
-        const alert = { kind: 'displaced', count: 1, terminalCount: 1 };
+        const alert = { kind: 'displaced', count: 1, terminalCount: 1, forWinner: 1 };
         expect(queueAlertMessage(alert)).toMatch(/^A held result was saved\./);
         expect(queueAlertToastType(alert)).toBe('info');
+    });
+
+    // The reason is per replayed answer: the alert says "without a winner"
+    // only for the changes the server moved for one (forWinner), and plainly
+    // otherwise (a representative's pick stamped after the bout's removal).
+    it('names a winner only when the moved change was moved for one', () => {
+        const none = queueAlertMessage({ kind: 'displaced', count: 1, terminalCount: 1, forWinner: 0 });
+        expect(none).toMatch(/^A held result was saved\./);
+        expect(none).not.toMatch(/without a winner/);
+        expect(queueAlertMessage({ kind: 'displaced', count: 1, terminalCount: 1, forWinner: 1 })).toMatch(/without a winner/);
+        // An alert without the count reads as none for a winner.
+        expect(queueAlertMessage({ kind: 'displaced', count: 1, terminalCount: 1 })).not.toMatch(/without a winner/);
+        const manyNone = queueAlertMessage({ kind: 'displaced', count: 2, terminalCount: 2, forWinner: 0 });
+        expect(manyNone).toMatch(/^2 held results were saved\./);
+        expect(manyNone).not.toMatch(/without a winner/);
+        expect(queueAlertMessage({ kind: 'displaced', count: 2, terminalCount: 2, forWinner: 2 })).toMatch(/^2 held results were saved\. .*without a winner/);
+        expect(queueAlertMessage({ kind: 'displaced', count: 2, terminalCount: 2, forWinner: 1 })).toBe(
+            "2 held results were saved. Later changes to those matches were moved to each match's history. 1 of those changes would have left a match without a winner.");
+        expect(queueAlertToastType({ kind: 'displaced', count: 2, terminalCount: 2, forWinner: 0 })).toBe('info');
     });
 
     it('returns null for an unknown kind, so nothing is toasted', () => {

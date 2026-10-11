@@ -41,7 +41,8 @@ import (
 //  6. Names to Print sheet, one per shiaijo (helper.CreateNamesWithPoolToPrint,
 //     or helper.CreateNamesToPrint over namesToPrintPlayers -- same branch as
 //     step 1)
-//  7. Kachinuki Detail sheet (helper.WriteKachinukiDetailSheet)
+//  7. Kachinuki Detail sheet (helper.WriteKachinukiDetailSheet) and
+//     Representative Bouts sheet (helper.WriteRepresentativeBoutsSheet)
 //
 // Every caller-specific extra rides OUTSIDE this function, called by the
 // caller before or after: the stored-draw export's Tags sheet (needs the
@@ -51,8 +52,8 @@ import (
 // Elimination Matches sheets, and it is safe for them to run AFTER this
 // function returns rather than interleaved where they used to sit: nothing
 // this function does past PrintPoolMatches (step 3) and
-// PrintEliminationWithBronze (step 4) touches either sheet again. Steps 5-7 write to the Tree, Names to Print and
-// Kachinuki Detail sheets, none of which any overlay reads or writes.
+// PrintEliminationWithBronze (step 4) touches either sheet again. Steps 5-7 write to the Tree, Names to Print,
+// Kachinuki Detail and Representative Bouts sheets, none of which any overlay reads or writes.
 //
 // Parameters are explicit values, not a *state.Store: every strict/best-
 // effort load already happened in the caller (mp-yuy8 criterion 6) and must
@@ -73,6 +74,12 @@ import (
 //     prints a knockout-only competition's skeleton, there is no stored
 //     bracket for that read to list, and the sections come from the rounds
 //     step 4 printed instead (helper.BlankKachinukiSections).
+//   - representativeBouts is the caller's own read of the representative bouts
+//     (collectRepresentativeBouts; RepresentativeBoutMatches takes only the
+//     id), for the same reason: step 7 writes them, whichever way they were
+//     read. It is empty for every competition but a fixed-order team one whose
+//     matches hold such a bout, and the blank template /create draws has no
+//     stored match to hold one, so its sheets are unchanged.
 //
 // courts is the caller's own CompetitionCourts(comp, tourn) result rather
 // than a tournament parameter this function would resolve itself, because
@@ -92,8 +99,8 @@ import (
 // pools) -- bc-pnum A8's single guarded branch for a knockout-only
 // competition (never has a pools.csv, so nothing above would otherwise
 // populate the Data / Names-to-Print sheets at all): non-nil only for that
-// one shape, nil for every other competition. Unlike draw and
-// kachinukiMatches (see above), both callers derived this identically from
+// one shape, nil for every other competition. Unlike draw,
+// kachinukiMatches and representativeBouts (see above), both callers derived this identically from
 // arguments this function already takes (comp, pools), so there was nothing
 // caller-specific left to preserve by keeping it a parameter -- deriving it
 // here instead is what makes it impossible for the two callers' Data /
@@ -121,6 +128,7 @@ func (e *Engine) RenderCompetitionWorkbook(
 	courtOfPool map[string]string,
 	draw *helper.KnockoutDraw,
 	kachinukiMatches []helper.KachinukiMatchDetail,
+	representativeBouts []helper.KachinukiMatchDetail,
 ) ([][]int, []helper.Player, error) {
 	namesToPrintPlayers, err := e.KnockoutNamesToPrint(comp, pools, bracket)
 	if err != nil {
@@ -284,12 +292,17 @@ func (e *Engine) RenderCompetitionWorkbook(
 		helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), courts, courtOfPool, playerCoords, comp.EffectiveNumberPrefix())
 	}
 
-	// 7. Kachinuki Detail sheet (T195-T203, CHK037). Opt-in: only emitted
-	//    when the competition runs the kachinuki team-match format and its
-	//    draw has matches, or before the draw the skeleton step 4 printed.
-	//    The renderer is a no-op for empty input, so this is safe for every
-	//    other team format.
+	// 7. Kachinuki Detail sheet (T195-T203, CHK037) and Representative Bouts
+	//    sheet. Opt-in: the first is only emitted when the competition runs
+	//    the kachinuki team-match format and its draw has matches, or before
+	//    the draw the skeleton step 4 printed; the second only when a
+	//    fixed-order team competition's draw holds a representative bout.
+	//    Each renderer is a no-op for empty input, so this is safe for every
+	//    other competition.
 	if err := helper.WriteKachinukiDetailSheet(f, kachinukiMatches); err != nil {
+		return nil, nil, err
+	}
+	if err := helper.WriteRepresentativeBoutsSheet(f, representativeBouts); err != nil {
 		return nil, nil, err
 	}
 

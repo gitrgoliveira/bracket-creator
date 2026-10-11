@@ -22,7 +22,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.27.1"
+          go-version: "1.27.2"
 
       - name: Init project
         run: |
@@ -62,7 +62,7 @@ jobs:
           # (the Makefile's pin, used by `make go/lint` locally) did not.
           # Keep this in lockstep with the `go install` version in
           # Makefile's go/lint target so a local green run predicts CI.
-          version: v2.13.1
+          version: v2.14.0
 
       #   ____             _
       #  |  _ \  ___   ___| | _____ _ __
@@ -111,7 +111,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.27.1"
+          go-version: "1.27.2"
           cache: true
 
       - name: Init project
@@ -193,7 +193,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.27.1"
+          go-version: "1.27.2"
           cache: true
 
       - name: Install LibreOffice headless

@@ -56,7 +56,6 @@ const WINDOW_NAMES = [
   'AdminScoreEditor',
   'AdminExport',
   'filterMatchesByCourt',
-  'startPatch',
   'MatchLineupPanel',
 ];
 

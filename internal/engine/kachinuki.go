@@ -1146,14 +1146,25 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 			// documented check-before-mutate contract (a no-op here), unwinds
 			// the byes and does the retraction.
 			var reopenedDownstream []ReopenedMatch
+			// The picks the retraction takes from the matches it re-seats
+			// without reopening, for their own history lines
+			// (bracket_seat_audit.go); the target is this door's own write.
+			var clears []repPickClear
 			if !h.Bronze {
+				before := repPickSnapshot(h.BracketRoot, matchID)
 				if fo.Force {
+					// No propagation precedes this reopen: the retraction
+					// below is what re-seats the slot, so the picks the
+					// reopened match held are judged after it, against the
+					// snapshot above.
 					reopenedDownstream = forceReopenDownstreamChain(h.BracketRoot, h.RIdx, h.MIdx, matchID)
 				}
 				if derr := retractPropagatedWinner(h.BracketRoot, h.RIdx, h.MIdx); derr != nil {
 					opErr = derr
 					return nil
 				}
+				clears = repPickClears(before, h.BracketRoot)
+				markRepPicksCleared(reopenedDownstream, clears)
 			}
 			prior := h.Bracket.Decision
 			reopenBracketMatchKeepingTheFight(h.Bracket, reason, targetStatus)
@@ -1162,6 +1173,7 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 			}
 			e.recordDirectHistory(tx, compID, matchID, doorReopen, h.Bracket.GroupStamp(state.GroupResult), reopenedBracketGroups...)
 			e.restoreForceReopened(tx, compID, reopenedDownstream)
+			e.recordRepPickClears(tx, compID, clears, reopenedDownstream)
 			if fo.Reopened != nil {
 				*fo.Reopened = reopenedDownstream
 			}
@@ -1974,7 +1986,7 @@ type bracketPos struct{ R, M int }
 // unresolveBye can take it back exactly.
 func resolvedByByeFrom(bm *state.BracketMatch, feedM int) bool {
 	fed, other := bm.SideB, bm.SideA
-	if feedM%2 == 0 {
+	if feedsSide(feedM) == domain.MatchSideA {
 		fed, other = bm.SideA, bm.SideB
 	}
 	return bm.Status == state.MatchStatusCompleted &&
@@ -2209,14 +2221,10 @@ func clearPropagatedSlots(bracket *state.Bracket, rIdx, mIdx int, bronze, next *
 		// alongside the name (bc-brid): propagateBracketWinner set both
 		// together, so undoing it must clear both together too, or the
 		// bronze slot would keep a stale id pointing at a name it no longer
-		// carries.
-		if mIdx%2 == 0 {
-			bronze.SideA = ""
-			bronze.SideAID = ""
-		} else {
-			bronze.SideB = ""
-			bronze.SideBID = ""
-		}
+		// carries. Through seatBracketSide, which also takes away the
+		// representative a team match's rep bout held for the team that left
+		// the slot.
+		seatBracketSide(bronze, feedsSide(mIdx), "", "")
 	}
 	if next != nil {
 		// winnerOfPlaceholder (bracket.go) is the ONE producer this now shares
@@ -2225,14 +2233,9 @@ func clearPropagatedSlots(bracket *state.Bracket, rIdx, mIdx int, bronze, next *
 		placeholder := winnerOfPlaceholder(len(bracket.Rounds)-rIdx, mIdx)
 		// Same id-follows-name rule as the bronze clear above: a "Winner of
 		// ..." placeholder is not a resolved competitor, so its slot must
-		// carry no id (bc-brid).
-		if mIdx%2 == 0 {
-			next.SideA = placeholder
-			next.SideAID = ""
-		} else {
-			next.SideB = placeholder
-			next.SideBID = ""
-		}
+		// carry no id (bc-brid), and no pick: seatBracketSide clears the
+		// representative the team that left the slot held.
+		seatBracketSide(next, feedsSide(mIdx), placeholder, "")
 	}
 }
 

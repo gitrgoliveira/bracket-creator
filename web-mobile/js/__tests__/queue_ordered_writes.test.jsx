@@ -710,6 +710,28 @@ describe('a queued finish that moved a later change to the history', () => {
         unsubAlert();
         expect(failed).toEqual([]);
         expect(alerts.map((a) => a.kind)).toEqual(['sent', 'displaced']);
+        expect(alerts.find((a) => a.kind === 'displaced')).toEqual(expect.objectContaining({ count: 1, forWinner: 1 }));
+        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+    });
+
+    // A change can also be moved for another reason (a representative's pick
+    // stamped after the representative bout's removal): the answer carries no
+    // heldReason, and the alert counts it as moved, not as moved for a winner.
+    it('a change moved with no reason is told as moved, not as moved for a winner', async () => {
+        const s = server({ answer: () => ({ id: 'm1', status: 'completed', displacedGroups: ['repPickB'] }) });
+        await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A', ipponsA: ['M'] }, 'pw', null);
+        await settleOfflinePass();
+        const failed = [];
+        const alerts = [];
+        const unsubFail = mod.subscribeTerminalWriteFailed((i) => failed.push(i));
+        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
+        s.online();
+        await tick(50);
+        unsubFail();
+        unsubAlert();
+        expect(failed).toEqual([]);
+        expect(alerts.map((a) => a.kind)).toEqual(['sent', 'displaced']);
+        expect(alerts.find((a) => a.kind === 'displaced')).toEqual(expect.objectContaining({ count: 1, forWinner: 0 }));
         expect(localStorage.getItem('bc_write_queue')).toBeNull();
     });
 });

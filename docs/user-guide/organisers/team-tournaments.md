@@ -102,7 +102,7 @@ Individual bouts are scored first. Once all bouts are done, the encounter result
 
 1. The team with the highest number of individual wins (victories) wins the encounter.
 2. If wins are equal, the team with the highest points scored wins.
-3. If both wins and points are equal, the encounter is a draw in pools or league. In a knockout stage, the encounter goes to a representative bout (daihyosen). Refer to [Recording decisions](../court-operators/recording-decisions.md) for how daihyosen is handled.
+3. If both wins and points are equal, the encounter is a draw in pools or league. In a knockout stage, the encounter goes to a representative bout (daihyosen). Refer to [Recording decisions](../court-operators/recording-decisions.md) for how daihyosen is handled. The results workbook lists each representative bout on its own sheet, described under [Daihyosen](../court-operators/recording-decisions.md#daihyosen).
 
 When the encounter itself ends on a kiken, fusenpai, or fusensho, every bout that has no result yet is also credited to the other team, 2-0 each: one individual victory and two points, on top of whatever was already fought before the withdrawal. This feeds straight into the criteria above and into [Team standings and tie-breaks](#team-standings-and-tie-breaks). Refer to [Fusenpai and fusensho](../court-operators/recording-decisions.md#fusenpai-and-fusensho) for the full rule.
 

@@ -76,7 +76,6 @@ const STUBBED_GLOBALS = {
   filterMatchesByCourt: (matches) => matches,
   tournamentMatches: () => [],
   compMatches: () => [],
-  startPatch: () => ({ status: 'running', winner: null }),
   confirmDialog: vi.fn().mockResolvedValue(true),
   PoolsViewer: () => null, // per-test override drives pools open
   LeagueStandingsViewer: () => null,

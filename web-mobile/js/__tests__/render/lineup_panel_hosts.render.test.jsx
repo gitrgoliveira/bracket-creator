@@ -41,7 +41,6 @@ const STUBS = {
   filterMatchesByCourt: (all) => all,
   tournamentMatches: () => matches,
   compMatches: () => matches,
-  startPatch: () => ({ status: 'running', winner: null }),
   confirmDialog: vi.fn().mockResolvedValue(true),
   pluralize: (n, s, p) => `${n} ${n === 1 ? s : (p || `${s}s`)}`,
   API: {

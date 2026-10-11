@@ -84,7 +84,7 @@ On tree and knockout brackets, the player/team on the top of the bracket is alwa
 ## Building and Running
 
 ### Prerequisites
-- Go 1.27.1+
+- Go 1.27.2+
 - Make
 
 ### Key Commands

@@ -135,6 +135,14 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		return nil, fmt.Errorf("export: collect kachinuki detail: %w", err)
 	}
 
+	// Representative Bouts sheet's bouts: the same opt-in as the stored-draw
+	// export's, a fixed-order team competition's representative bouts, which
+	// no other sheet of this workbook lists.
+	representativeBouts, err := eng.RepresentativeBoutMatches(compID)
+	if err != nil {
+		return nil, fmt.Errorf("export: collect representative bouts: %w", err)
+	}
+
 	f, err := excel.NewFileFromScratch()
 	if err != nil {
 		return nil, fmt.Errorf("export: create workbook: %w", err)
@@ -144,7 +152,8 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	}()
 
 	// The shared sheet pipeline (mp-yuy8): Data, Pool Draw, Pool Matches,
-	// knockout, Tree cleanup, Names to Print, Kachinuki Detail -- identical
+	// knockout, Tree cleanup, Names to Print, Kachinuki Detail, Representative
+	// Bouts -- identical
 	// steps and order to Engine.ExportCompetitionXlsx. poolsByCourt is the one
 	// artifact the overlays below need (PrintPoolMatches's pool-index grouping
 	// per shiaijo band); everything else PrintPoolMatches/AddPoolDataToSheet
@@ -161,7 +170,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// The second return value (the knockout-only numbered roster) is the
 	// stored-draw export's own extra (its Tags sheet); this results
 	// export has no such extra and discards it.
-	poolsByCourt, _, err := eng.RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches)
+	poolsByCourt, _, err := eng.RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches, representativeBouts)
 	if err != nil {
 		return nil, fmt.Errorf("export: %w", err)
 	}

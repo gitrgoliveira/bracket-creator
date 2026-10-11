@@ -3,8 +3,8 @@
 // events must be ordered.").
 //
 // The server merges a score write group by group (internal/state/
-// match_groups.go): points, result, encho, flags, rep, and one group per bout
-// row, "bout:<position>". A write names the groups it changes in `changed`;
+// match_groups.go): points, result, encho, flags, rep, repPickA, repPickB, and one group
+// per bout row, "bout:<position>". A write names the groups it changes in `changed`;
 // each named group applies only when the write is not older than that group's
 // stored change, a group the write does not name is never overwritten, and a
 // change that is not applied is kept in the match's history. So a client write
@@ -27,7 +27,7 @@
 import { IPPON_PLACEHOLDER } from './result_slot.jsx';
 import {
     NEEDS_WINNER_NOTE, DEFAULT_WIN_STANDS_NOTE, writeNeedsWinner, writeDefaultWinStands, writeHeldDecision,
-    writePartlyHeld, writeHeldGroups, writeDisplacedGroups,
+    writePartlyHeld, writeHeldGroups, writeDisplacedGroups, writeDisplacedForWinner,
 } from './write_result.jsx';
 
 export const GROUP_POINTS = 'points';
@@ -35,9 +35,15 @@ export const GROUP_RESULT = 'result';
 export const GROUP_ENCHO = 'encho';
 export const GROUP_FLAGS = 'flags';
 export const GROUP_REP = 'rep';
+// The two representatives of the representative bout (the member ids on its -1
+// row), one group per side: each is a change of its own, dated apart from the
+// other side's and from "bout:-1", which keeps the bout's score and result. Not
+// to be confused with GROUP_REP, the pool daihyosen/tiebreaker players.
+export const GROUP_REP_PICK_A = 'repPickA';
+export const GROUP_REP_PICK_B = 'repPickB';
 
 // The scalar groups in the server's fixed order (state.ScalarGroups).
-export const SCALAR_GROUPS = [GROUP_POINTS, GROUP_RESULT, GROUP_ENCHO, GROUP_FLAGS, GROUP_REP];
+export const SCALAR_GROUPS = [GROUP_POINTS, GROUP_RESULT, GROUP_ENCHO, GROUP_FLAGS, GROUP_REP, GROUP_REP_PICK_A, GROUP_REP_PICK_B];
 
 const BOUT_PREFIX = 'bout:';
 
@@ -81,6 +87,8 @@ export function groupLabel(group) {
         case GROUP_ENCHO: return 'overtime';
         case GROUP_FLAGS: return 'flags';
         case GROUP_REP: return 'the representative players';
+        case GROUP_REP_PICK_A: return 'Aka\'s pick for the representative bout';
+        case GROUP_REP_PICK_B: return 'Shiro\'s pick for the representative bout';
         default: {
             const pos = parseBoutGroup(group);
             if (pos === null) return String(group || '');
@@ -110,26 +118,33 @@ export function heldGroupsNote(groups, needsWinner = false, defaultWinStands = f
 }
 
 // displacedGroupsNote: the note for a write that WAS recorded and moved a
-// later change of the match to its history, because that change would have
-// left the finished match without a winner (write_result.jsx
-// writeDisplacedGroups). null when nothing was moved.
-export function displacedGroupsNote(groups) {
+// later change of the match to its history (write_result.jsx
+// writeDisplacedGroups). `needsWinner` (writeDisplacedForWinner) when the
+// answer says why with heldReason "needs_winner": the change would have left
+// the finished match without a winner. A change moved for another reason (a representative's pick
+// stamped after the representative bout's removal, which leaves it nothing to
+// stand on) carries no such reason and is worded plainly, never with a winner
+// the match does not lack. null when nothing was moved.
+export function displacedGroupsNote(groups, needsWinner = false) {
     const words = groupsLabel(groups);
     if (!words) return null;
-    return `Saved. A later change to ${words} would have left the finished match without a winner, so it was moved to the match's history.`;
+    return needsWinner
+        ? `Saved. A later change to ${words} would have left the finished match without a winner, so it was moved to the match's history.`
+        : `Saved. A later change to ${words} was moved to the match's history.`;
 }
 
 // keptInHistoryNote: the ONE note a score editor (useKeptInHistoryNote) or
 // its closing host (admin.jsx's toast) shows for what a write's answer kept
 // in the match's history: this write's own groups held (applied in part, or
 // superseded because the finished match needs a winner), and/or later
-// changes it moved there. null when the answer kept nothing.
+// changes it moved there (worded by the reason the answer gives, if any).
+// null when the answer kept nothing.
 export function keptInHistoryNote(res) {
     const parts = [];
     if (writePartlyHeld(res) || writeNeedsWinner(res) || writeDefaultWinStands(res)) {
         parts.push(heldGroupsNote(writeHeldGroups(res), writeNeedsWinner(res), writeDefaultWinStands(res), writeHeldDecision(res)));
     }
-    parts.push(displacedGroupsNote(writeDisplacedGroups(res)));
+    parts.push(displacedGroupsNote(writeDisplacedGroups(res), writeDisplacedForWinner(res)));
     const text = parts.filter(Boolean).join(' ');
     return text || null;
 }
@@ -184,6 +199,10 @@ function statedGroups(next) {
     out.push(GROUP_ENCHO);
     if (has(next, 'flagsA') || has(next, 'flagsB')) out.push(GROUP_FLAGS);
     if (has(next, 'repPlayerA') || has(next, 'repPlayerB')) out.push(GROUP_REP);
+    // The representatives sit on the representative bout's row: a write that
+    // carries that row states both sides' picks (an id left off the row is that
+    // side's pick cleared).
+    if (rowAt(next, -1)) out.push(GROUP_REP_PICK_A, GROUP_REP_PICK_B);
     if (Array.isArray(next.subResults)) {
         for (const s of next.subResults) {
             const g = s ? boutGroup(num(s.position)) : null;
@@ -220,12 +239,43 @@ function groupKey(wire, group, next) {
                 has(next, 'repPlayerA') ? str(w.repPlayerA) : null,
                 has(next, 'repPlayerB') ? str(w.repPlayerB) : null,
             ]);
+        case GROUP_REP_PICK_A: {
+            // Each side's pick is a change of its own, so its value is that side's
+            // id alone. An absent id reads as empty: a pick cleared leaves its key
+            // out, and must still be named.
+            const row = rowAt(w, -1) || {};
+            return str(row.sideAMemberId);
+        }
+        case GROUP_REP_PICK_B: {
+            const row = rowAt(w, -1) || {};
+            return str(row.sideBMemberId);
+        }
         default: {
             const pos = parseBoutGroup(group);
             const own = rowAt(next, pos);
             const keys = new Set(Object.keys(own || {}).filter((k) => own[k] !== undefined));
             keys.add('encho');
             keys.add('position');
+            // On the representative bout the two picks are GROUP_REP_PICK_A's and
+            // GROUP_REP_PICK_B's (the server copies the bout without them), so a
+            // pick never reads as a change of the bout. The winner's member id is
+            // re-derived by the server from the bout's winner side and the stored
+            // picks (ReconcileWinnerMemberID), so a pick change moves it with no
+            // change to the bout: it is left out too, and the winner's name is what
+            // names the bout. The row's side names are the MATCH's sides: the server
+            // stamps the team names on the row at the add and keeps them equal to the
+            // match's on every re-seat, and the editor restates them so the hantei mark
+            // can be placed on the winner's side. They are never a change of the bout
+            // either, or a pick on a bout nobody has scored would name it and stamp its
+            // scoreline.
+            // Numbered rows keep the rule above.
+            if (pos < 0) {
+                keys.delete('sideAMemberId');
+                keys.delete('sideBMemberId');
+                keys.delete('winnerMemberId');
+                keys.delete('sideA');
+                keys.delete('sideB');
+            }
             // A row the baseline does not hold reads as an empty one, so an
             // untouched blank bout is not a change.
             return JSON.stringify(rowProjection(rowAt(w, pos) || { position: pos }, [...keys].sort()));

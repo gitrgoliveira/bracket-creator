@@ -123,7 +123,7 @@ func respondIfValidationError(c *gin.Context, err error) bool {
 // variant so the read-modify-write runs under the same per-comp lock the
 // read used (see RegisterDaihyosenHandlers).
 type DaihyosenEngine interface {
-	AddDaihyosen(compID, matchID string, sideA, sideB engine.TeamSummary, isPool bool, sideAEligible, sideBEligible int) (*state.SubMatchResult, error)
+	AddDaihyosen(compID, matchID, nameA, nameB string, sideA, sideB engine.TeamSummary, isPool bool, sideAEligible, sideBEligible int) (*state.SubMatchResult, error)
 	RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, opts ...engine.ForceOptions) (*domain.CompetitorStatus, error)
 	MaybeAutoCompletePoolsAfterWrite(compID string, written ...state.MatchResult) (engine.AutoCompleteOutcome, error)
 }
@@ -267,9 +267,12 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			u.Encho = nil
 			// What the remove changes (bc-mrgc): the representative bout (its
 			// stamp stays as a tombstone, so an older write still carrying the
-			// row cannot bring it back), the verdict, the overtime, and the
-			// scoreline when clearing the verdict took a hantei mark out of it.
-			u.Changed = daihyosenChangedGroups(match, &u, state.GroupResult, state.GroupEncho)
+			// row cannot bring it back), its representatives (they go with the
+			// row, and each side's stamp dates the removal so a pick made before
+			// it is held, not applied onto nothing), the verdict, the overtime,
+			// and the scoreline when clearing the verdict took a hantei mark out
+			// of it.
+			u.Changed = daihyosenChangedGroups(match, &u, state.GroupResult, state.GroupEncho, state.GroupRepPickA, state.GroupRepPickB)
 			u.WriteDoor = engine.DoorDaihyosenDel
 			if _, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, &u); err != nil {
 				if errors.Is(err, engine.ErrMatchSuperseded) {
@@ -421,7 +424,10 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 				return err
 			}
 
-			sub, err := eng.AddDaihyosen(id, mid, sideASummary, sideBSummary, engine.IsPoolMatchID(mid), sideAEligible, sideBEligible)
+			// The row is stored with the match's own team names (nameA/nameB),
+			// for the organiser's add and the participant's alike, so it is
+			// never nameless between this add and the first score write.
+			sub, err := eng.AddDaihyosen(id, mid, match.SideA, match.SideB, sideASummary, sideBSummary, engine.IsPoolMatchID(mid), sideAEligible, sideBEligible)
 			if err != nil {
 				switch {
 				case errors.Is(err, engine.ErrNotTied):
@@ -471,8 +477,14 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			u.Status = state.MatchStatusRunning // daihyosen bout in progress
 			// What the add changes (bc-mrgc): the new representative bout and
 			// the verdict, and the scoreline when clearing the verdict took a
-			// hantei mark out of it.
-			u.Changed = daihyosenChangedGroups(match, &u, state.GroupResult)
+			// hantei mark out of it. The new row is built with no
+			// representatives, and the add names both side groups
+			// (state.GroupRepPickA, state.GroupRepPickB) all the same, as the
+			// remove does: it dates the (empty) picks of THIS bout, so a pick
+			// made on the previous representative bout, stamped between the
+			// remove and the add, is older than the add and is held rather than
+			// landing on the new bout through the remove's tombstone stamp.
+			u.Changed = daihyosenChangedGroups(match, &u, state.GroupResult, state.GroupRepPickA, state.GroupRepPickB)
 			u.WriteDoor = engine.DoorDaihyosenAdd
 			if _, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, &u); err != nil {
 				if errors.Is(err, engine.ErrMatchSuperseded) {

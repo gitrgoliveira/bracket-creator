@@ -127,8 +127,17 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		return nil, err
 	}
 
+	// Representative Bouts sheet's bouts. Opt-in the same way: only a
+	// fixed-order team competition whose draw holds a representative bout has
+	// any.
+	representativeBouts, err := e.collectRepresentativeBouts(id, comp)
+	if err != nil {
+		return nil, err
+	}
+
 	// The shared sheet pipeline (mp-yuy8): Data, Pool Draw, Pool Matches,
-	// knockout, Tree cleanup, Names to Print, Kachinuki Detail -- identical
+	// knockout, Tree cleanup, Names to Print, Kachinuki Detail, Representative
+	// Bouts -- identical
 	// steps and order to internal/export.BuildResultsWorkbook.
 	// RenderCompetitionWorkbook derives namesToPrintPlayers via
 	// KnockoutNamesToPrint (numbering.go, bc-pnum A8: a
@@ -137,7 +146,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// no-ops) -- internal/export.BuildResultsWorkbook resolves through the
 	// SAME derivation, so the two exports of one competition agree on
 	// whether that sheet exists at all.
-	_, namesToPrintPlayers, err := e.RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches)
+	_, namesToPrintPlayers, err := e.RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches, representativeBouts)
 	if err != nil {
 		return nil, err
 	}

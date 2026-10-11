@@ -72,17 +72,24 @@ import (
 // T156.
 //
 // opts (bc-kcdg) is variadic ForceOptions purely to keep every pre-existing
-// call site source-compatible; see ForceOptions' doc comment. Known gap: a
-// forced write that force-reopens downstream matches and is THEN rolled back
-// by the K3 AlreadyIneligibleError path below only restores the corrected
-// match itself (rollbackMatchResultTx replays `prior` through this same
-// match id) -- the downstream matches forceReopenDownstreamChain reopened
-// stay reopened. The same holds for the knockout matches a forced POOL
-// correction reopens (requalifyAfterPoolWrite): the rollback restores the
-// pool match, not the bracket. Reaching either requires force=true on a
-// decision write whose loser turns out to already be ineligible from a
-// different match, a narrow intersection not covered by this bead's test
-// list; recorded here rather than silently left undiscoverable.
+// call site source-compatible; see ForceOptions' doc comment.
+//
+// K3 runs in two halves. The pre-write half (refuseConcurrentWithdrawal)
+// resolves the loser from the stored pairing exactly as the post-write half
+// (recordIneligibilityFromDecision) does, so a withdrawal the post-write check
+// would refuse is refused BEFORE anything is written: no downstream match is
+// reopened or re-seated and no history line is recorded. The post-write arm and
+// its rollback stay as a backstop, reached only if the two halves ever
+// disagree (a merge that works the winner out again differently from the
+// payload). That rollback (rollbackMatchResultTx replays `prior` through this
+// same match id) restores the corrected match ONLY: the downstream matches
+// forceReopenDownstreamChain reopened or propagateBracketWinner re-seated stay
+// as written, and so do the knockout matches a forced POOL correction reopens
+// (requalifyAfterPoolWrite; the rollback restores the pool match, not the
+// bracket). A whole-bracket restore is deliberately not attempted: the
+// eligibility restores those reopens made (restoreForceReopened) are
+// competitor-status writes made before K3, and a bracket-only restore would put
+// a downstream match back to a verdict whose competitor stays restored.
 func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, opts ...ForceOptions) (*domain.CompetitorStatus, error) {
 	fo := firstForceOptions(opts)
 	result.ID = matchID
@@ -430,16 +437,32 @@ func keepQueuedScore(prior, result *state.MatchResult) {
 // AlreadyIneligibleError when a different match has already made them
 // ineligible and the decision is a kiken (checkConcurrentIneligibility, the
 // check recordDecisionTx makes before its own write; a fusenpai there chains
-// onto the existing bar instead, alreadyBarredRefusal). The loser is read off a scratch copy with the stored
-// identity folded in by backfillMatchIdentity, the same fold the write
-// applies, so it is the loser the post-write check would name. A payload that
-// fold rejects, or whose losing side cannot be attributed, is left to the
-// write and the post-write check, which answer it as before.
+// onto the existing bar instead, alreadyBarredRefusal). The loser is read off a
+// scratch copy with the stored pairing folded in the way the write folds it, so
+// it is the loser the post-write check would name: the sides' NAMES first (what
+// reconcileSides gives an empty payload name inside the write), then the ids
+// (backfillMatchIdentity). Both matter. A hand-built /score or bulk payload
+// that names a winner but no sides, no winnerSide and no winnerId carries the
+// loser only as "the side the winner is not", which resolveWinnerIDFromSides can
+// read only against side names; a probe with the names still empty found no
+// loser here, so the write went on, re-seated the next round's side (its
+// representative pick cleared, its stamp moved), and the post-write check then
+// refused it with a rollback that restores the written match row alone (the
+// SPA's /decision sets winnerSide and its /score sends the sides, so only a
+// payload built by hand reaches this). A payload that fold rejects, or whose
+// losing side cannot be attributed, is left to the write and the post-write
+// check, which answer it as before.
 func (e *Engine) refuseConcurrentWithdrawal(tx state.StoreTx, compID, matchID string, result, prior *state.MatchResult) error {
 	if prior == nil || !domain.IsWithdrawalDecisionStr(result.Decision) {
 		return nil
 	}
 	probe := *result
+	if probe.SideA == "" {
+		probe.SideA = prior.SideA
+	}
+	if probe.SideB == "" {
+		probe.SideB = prior.SideB
+	}
 	if err := backfillMatchIdentity(&probe, prior, matchWriteForward); err != nil {
 		return nil
 	}

@@ -1431,6 +1431,35 @@ func (s *SubMatchResult) ResolveMemberWinnerID() bool {
 	return false
 }
 
+// ReconcileWinnerMemberID keeps a representative-bout row's WinnerMemberID
+// consistent with the two representatives it names: WinnerMemberID belongs to
+// the bout's result and each representative to its own change
+// (GroupRepPickA, GroupRepPickB), so a merge can leave a winner id that
+// disagrees with them.
+// The id is always cleared and derived again by ResolveMemberWinnerID, from
+// the winner's NAME alone and the side's stored pick, so afterwards it is
+// exactly the pick of the side the Winner name names, or empty. It is empty
+// when there is no Winner, when the Winner names neither side, when the
+// winning side has no pick, and when the two side names are equal (two
+// same-named teams are forbidden by rule, so that row is legacy data and the
+// name cannot say who won; there is no special case for it).
+//
+// A stored id is never consulted to decide the winning side: SubBoutWinnerSide
+// and Attribution read WinnerMemberID first, so a stale id would decide its own
+// verdict, and an id naming the LOSING side's pick, which a test of "is it one
+// of the two picks" accepts, would credit the wrong side id-first. It reports
+// whether the id changed.
+//
+// The rule is the representative bout's only. The numbered and kachinuki rows
+// are not reconciled here: their winner id is the editor's (a same-name fighter
+// pair cannot be told apart by name, see ResolveMemberWinnerID).
+func (s *SubMatchResult) ReconcileWinnerMemberID() bool {
+	before := s.WinnerMemberID
+	s.WinnerMemberID = ""
+	s.ResolveMemberWinnerID()
+	return s.WinnerMemberID != before
+}
+
 // IneligibleSidesAnnotation names which side(s) of a SCHEDULED match are
 // currently barred by a withdrawal recorded on a DIFFERENT match (bc-cse).
 // Both fields are optional and independent: either, both, or neither may be
@@ -1627,9 +1656,8 @@ type MatchResult struct {
 	//
 	// SERVER-OWNED. MatchResult binds straight from the score request body, so
 	// a client could otherwise plant or clear the flag; the handler overwrites
-	// it from the STORED value on every write (see
-	// applyCorrectionReasonUnderTx in mobileapp/handlers_match.go) and is the
-	// only thing that moves it.
+	// it from the STORED value on every write (see applyCorrectionReason in
+	// mobileapp/handlers_match.go) and is the only thing that moves it.
 	//
 	// Append-only CSV column (rec index 24, after FlagsB at 22/23); older files
 	// with the column absent load as false. Bracket matches mirror it on

@@ -12,22 +12,17 @@
 import { expect } from '@playwright/test';
 import { INLINE_EDITOR } from '../../screenshots/lib/editor.mjs';
 import { dwell, settled } from './pace.mjs';
+import { isCoarse, restoreCoarse } from './pointer.mjs';
 
-// Does the page still match (pointer: coarse)? Measured on this journey: after
-// a fullPage screenshot (fixtures/shots.mjs with { fullPage: true }) the
-// operator page no longer matches, so every tap-floor rule in styles.css
-// silently switches off for the rest of the test. Put it back the way
-// fixtures/test.mjs does (CDP touch emulation, which takes effect on the next
-// document, hence the reload) and report whether it had been lost, so the
-// audit can say which pointer a measurement was made at.
+// Does the page still match (pointer: coarse)? If an interruption or a
+// fullPage screenshot lost it, every tap-floor rule in styles.css would be off
+// for the rest of the test, so put it back in place (fixtures/pointer.mjs, no
+// reload, so the bout is not interrupted a second time) and report whether it
+// had been lost, so the audit can say which pointer a measurement was made at.
 export async function ensureCoarse(page) {
-  const coarse = () => page.evaluate(() => matchMedia('(pointer: coarse)').matches);
-  if (await coarse()) return { coarseLost: false };
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
-  await page.reload();
-  if (!(await coarse())) throw new Error('page is not (pointer: coarse) even with CDP touch emulation');
-  return { coarseLost: true, restoredBy: 'CDP Emulation.setTouchEmulationEnabled + reload' };
+  if (await isCoarse(page)) return { coarseLost: false };
+  await restoreCoarse(page);
+  return { coarseLost: true, restoredBy: 'CDP Emulation.setTouchEmulationEnabled (in place)' };
 }
 
 export const editor = (page) => page.locator(INLINE_EDITOR).filter({ has: page.locator('.team-bouts-scroll') }).first();
@@ -141,19 +136,6 @@ export async function doneRowWinner(row) {
   if (await row.locator('.team-sub-match__side--shiro .tsm-name__static--win').count()) return 'shiro';
   if (await row.locator('.team-sub-match__side--aka .tsm-name__static--win').count()) return 'aka';
   return '';
-}
-
-// A fighter name list left open on a bout row, by a tap that landed on a name
-// box. Close it the way a thumb does, with a tap on the empty page margin (Escape
-// would leave the box focused). Returns whether one was open.
-export async function closeFighterList(page) {
-  const options = editor(page).locator('.pmf__option');
-  const wasOpen = (await options.count()) > 0;
-  if (wasOpen) {
-    await page.touchscreen.tap(6, 500);
-    await expect(options).toHaveCount(0);
-  }
-  return wasOpen;
 }
 
 // The centre mark of a row (vs / X / (E)).

@@ -1,14 +1,15 @@
 // Helpers for the INDIVIDUAL operator journeys (knockout-mixed-individual
-// spec): the rosters, a deterministic winner rule, the audit log, tap-target
-// measurement, and the few surfaces the shared fixtures do not own (the
-// overlay editor's identity line, the shiaijo page's own confirm dialogs, the
-// decision panel). Owned by reviewer A; the shared fixtures stay untouched.
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+// spec): the rosters, a deterministic winner rule, and the few surfaces the
+// shared fixtures do not own (the overlay editor's identity line, the
+// decision panel, playing and correcting a bout on the shiaijo page). The
+// audit log (fixtures/audit.mjs), tap-target measurement (fixtures/pointer.mjs)
+// and the hasty confirms (fixtures/clumsy.mjs) are shared with the other
+// journeys.
 import { expect } from '@playwright/test';
 import { EDITOR, INLINE_EDITOR } from './scoring.mjs';
-import { dwell, settled } from './pace.mjs';
+import { settled } from './pace.mjs';
+import { completedRowFor } from './shiaijo.mjs';
+import { hastyShiaijoConfirm } from './clumsy.mjs';
 
 // Twelve entrants for F1 (pools of 3, two through): six dojos, two members
 // each, (name, dojo) unique. Names start with distinct letters so the
@@ -48,39 +49,6 @@ export const ROSTER_4_JOINT = [
 // so a pool's standings come out strict and no tie-break bout is added.
 export const winnerOf = ({ shiro, aka }) => (shiro.localeCompare(aka) <= 0 ? 'shiro' : 'aka');
 
-// Audit rows. Every row is printed (so the run log carries the table) and kept
-// for afterAll, which writes them to AUDIT_JSON, beside the journey's
-// screenshots in the gitignored output folder, for the person writing up the
-// review. Nothing here judges a row: judgement is by eye.
-export const AUDIT_JSON = path.resolve(fileURLToPath(new URL('../output/knockout-mixed-individual/audit.json', import.meta.url)));
-export function auditLog() {
-  const rows = [];
-  const record = (row) => {
-    rows.push(row);
-    console.log(`AUDIT ${JSON.stringify(row)}`);
-  };
-  const flush = () => {
-    let prior = [];
-    try { prior = JSON.parse(fs.readFileSync(AUDIT_JSON, 'utf8')); } catch { prior = []; }
-    // A journey re-run replaces its own earlier rows and keeps the others.
-    const journeys = new Set(rows.map((r) => r.journey));
-    const kept = prior.filter((r) => !journeys.has(r.journey));
-    fs.mkdirSync(path.dirname(AUDIT_JSON), { recursive: true });
-    fs.writeFileSync(AUDIT_JSON, JSON.stringify([...kept, ...rows], null, 2));
-  };
-  return { record, flush, rows };
-}
-
-// A control's rendered size, for the 44px coarse-pointer floor.
-// The page must still match (pointer: coarse) at the moment of measuring, or
-// the 44px floor rules are off and the size reads low.
-export async function tapSize(locator) {
-  expect(await locator.page().evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
-  const box = await locator.boundingBox();
-  if (!box) return null;
-  return { w: Math.round(box.width), h: Math.round(box.height), meets44: box.width >= 44 && box.height >= 44 };
-}
-
 // The overlay editor's identity: its eyebrow (competition, pool/round) and its
 // title line ("Shiaijo B · 10:20"), which is what says which court it is on.
 export async function overlayIdentity(page) {
@@ -113,33 +81,6 @@ export async function slotMarks(page, side, root = INLINE_EDITOR) {
     (els) => els.map((e) => e.getAttribute('aria-label')),
   );
   return labels.map((l) => (l.match(/: (?:remove )?(\S+)$/) || [])[1]).filter((v) => v && v !== 'empty');
-}
-
-// The shiaijo page's own confirm dialogs (Send back to queue, Move court) are
-// not the shared confirmDialog, so clumsy.hastyConfirm cannot see them. Same
-// rule here: tap the most prominent button, and say what it was.
-export async function hastyShiaijoConfirm(page) {
-  const dialog = page.locator('.shiaijo-move-confirm[role="dialog"]').last();
-  await dialog.waitFor({ state: 'visible' });
-  const shown = Date.now();
-  const buttons = dialog.locator('.shiaijo-move-confirm__actions button');
-  let best = null;
-  const labels = [];
-  for (let i = 0; i < await buttons.count(); i += 1) {
-    const b = buttons.nth(i);
-    const cls = (await b.getAttribute('class')) || '';
-    const label = (await b.innerText()).trim();
-    labels.push(label);
-    const rank = /\bbtn--danger\b/.test(cls) ? 3 : /\bbtn--primary\b/.test(cls) ? 2 : /\bbtn--ghost\b/.test(cls) ? 0 : 1;
-    if (!best || rank > best.rank) best = { b, label, rank };
-  }
-  const title = ((await dialog.locator('h3').allInnerTexts())[0] || '').trim();
-  const message = ((await dialog.locator('p').allInnerTexts())[0] || '').trim();
-  // The confirm ignores a tap inside the bounce window of its opening (fixtures/pace.mjs).
-  await dwell(page, shown);
-  await best.b.tap();
-  await dialog.waitFor({ state: 'hidden' });
-  return { label: best.label, prominence: ['ghost', 'plain', 'primary', 'danger'][best.rank], otherLabels: labels.filter((l) => l !== best.label), title, message };
 }
 
 // The decision panel (DecisionPrompt, admin_scoring_shared.jsx) is inline in
@@ -263,9 +204,4 @@ export async function queuedPoolBouts(page) {
   const texts = await page.locator('.shiaijo-upnext__card, .shiaijo__queue .shiaijo-group:not(.shiaijo-pending) .shiaijo-qrow:not(.shiaijo-qrow--complete)')
     .allInnerTexts();
   return texts.filter((t) => /Match \d+ of \d+/.test(t)).length;
-}
-
-// The newest Completed row on the shiaijo page whose names match a pairing.
-export function completedRowFor(page, { shiro, aka }) {
-  return page.locator('.shiaijo-completed .shiaijo-qrow').filter({ hasText: shiro }).filter({ hasText: aka }).last();
 }

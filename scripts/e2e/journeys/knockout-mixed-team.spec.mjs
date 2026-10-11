@@ -6,25 +6,28 @@
 //   F4  team, 5 per team, knockout only (daihyosen is knockout-only)
 //
 // The clumsy operator's variants (fixtures/clumsy.mjs) are PERFORMED here and
-// recorded as AUDIT lines (and audit.json per test); whether an outcome is
-// acceptable is judged from the screenshots, never asserted. Only what the docs
-// promise is asserted (docs/user-guide/court-operators/scoring-a-match.md,
-// recording-decisions.md, organisers/team-tournaments.md). A step that
-// exposes a functional defect is kept as its own self-contained
-// test.fixme('<bead-id>: ...') below the journeys, so this file stays green
-// and the step guards the fix once the fixme is removed.
+// recorded as AUDIT lines (and an audit.json in each journey's folder,
+// fixtures/audit.mjs); whether an outcome is acceptable is judged from the
+// screenshots, never asserted. Only what the docs promise is asserted
+// (docs/user-guide/court-operators/scoring-a-match.md, recording-decisions.md,
+// organisers/team-tournaments.md). A step that exposed a functional defect is
+// kept as its own self-contained '<bead-id>: ...' test below the journeys,
+// first as test.fixme so this file stayed green, and, once fixed, as a plain
+// test that guards the fix.
 import { test, expect } from '../fixtures/test.mjs';
 import { OPERATOR_DEVICE, PUBLIC_DEVICE } from '../fixtures/devices.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
 import { login } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
-import { inlineEditor, openShiaijo, sides, upNextCard, completedRows } from '../fixtures/shiaijo.mjs';
+import { inlineEditor, openShiaijo, sides, upNextCard, completedRows, completedRowFor } from '../fixtures/shiaijo.mjs';
 import { EDITOR } from '../fixtures/scoring.mjs';
 import { openScoreEditor } from '../fixtures/scores.mjs';
 import { openTvBoard, openViewer, tvBoard } from '../fixtures/public.mjs';
 import { doubleTap, hastyConfirm, interrupt, retapWhileSaving, tapNeighbour } from '../fixtures/clumsy.mjs';
 import { settled } from '../fixtures/pace.mjs';
+import { auditLog } from '../fixtures/audit.mjs';
+import { tapSize } from '../fixtures/pointer.mjs';
 import * as T from '../fixtures/team.mjs';
 
 const SIX_TEAMS = [
@@ -37,15 +40,14 @@ const FOUR_TEAMS = (tag) => [
 ];
 
 // A recorder per test: every audit observation is printed as an AUDIT line and
-// attached as audit.json, the raw material for the audit table.
-function recorder(journey) {
-  const rows = [];
-  const record = (row) => {
-    const r = { journey, ...row };
-    rows.push(r);
-    console.log(`AUDIT ${JSON.stringify(r)}`);
-  };
-  return { rows, record };
+// written, by the afterAll below, to the audit.json in the journey's own folder
+// (`folder`, the one its screenshots go to), the raw material for the audit
+// table.
+const audits = [];
+function recorder(journey, folder) {
+  const log = auditLog(folder);
+  audits.push(log);
+  return { record: (row) => log.record({ journey, ...row }) };
 }
 
 // F3: teams of three, pools then knockout, on shiaijo A and B.
@@ -81,11 +83,15 @@ async function nameStartingLineup(page, id, team, names, teamSize) {
 test.describe.configure({ mode: 'serial' });
 
 test.describe('knockout-mixed-team', () => {
+  test.afterAll(() => {
+    for (const log of audits) log.flush();
+  });
+
   // ------------------------------------------------------------------- J3
-  test('J3 lineup entry from the three entry points, on F3 and F4', async ({ page }, testInfo) => {
+  test('J3 lineup entry from the three entry points, on F3 and F4', async ({ page }) => {
     test.setTimeout(600_000);
     const shot = journeyShots('J3-lineups');
-    const { rows, record } = recorder('J3');
+    const { record } = recorder('J3', 'J3-lineups');
     await T.enterAdmin(page);
 
     let f3;
@@ -108,7 +114,7 @@ test.describe('knockout-mixed-team', () => {
       await T.lineupsSelect(page, '1').selectOption('__add__');
       await T.lineupsForm(page).getByRole('textbox', { name: 'New member name for 1' }).fill('Aoki');
       const addBtn = T.lineupsForm(page).getByRole('button', { name: /^Add$/ });
-      const addBox = await T.tapBox(addBtn);
+      const addBox = await tapSize(addBtn);
       const dbl = await doubleTap(addBtn);
       await page.waitForTimeout(400);
       const dialogs = await page.locator('.modal[role="dialog"]').count();
@@ -173,7 +179,7 @@ test.describe('knockout-mixed-team', () => {
       const saveBtn = T.lineupsForm(page).getByRole('button', { name: /Save lineup|Saving…/ });
       const re = await retapWhileSaving(saveBtn);
       await expect(page.getByText('Lineup saved').first()).toBeVisible();
-      record({ step: 'EP1 save', action: 'Save lineup', variant: 'V2 retapWhileSaving', ...re, saveTapBox: await T.tapBox(saveBtn) });
+      record({ step: 'EP1 save', action: 'Save lineup', variant: 'V2 retapWhileSaving', ...re, saveTapBox: await tapSize(saveBtn) });
       await page.reload();
       await T.openLineups(page, f3, { team: pair3.shiro });
       expect(await T.lineupsSelected(page, '1')).toContain('Aoki');
@@ -199,7 +205,7 @@ test.describe('knockout-mixed-team', () => {
       // Is a placed member offered again at another position? Open box 2.
       await T.panelInput(page, 1, '2').tap();
       const box2Options = await T.panelSide(page, 1).locator('.pmf__option').allInnerTexts();
-      await T.dismissNameBox(page);
+      await T.closeNameList(page);
       await shot(page, 'f3-panel-aka-typed');
       // V1: the thumb lands left of Aka's Save lineup. What sits there depends on
       // how many rows each side has (there is no "Copy from previous match" any
@@ -215,7 +221,7 @@ test.describe('knockout-mixed-team', () => {
       const shiroState = (await T.panelSide(page, 0).innerText()).replace(/\s+/g, ' ');
       await shot(page, 'f3-panel-v1-neighbour-of-aka-save');
       record({ step: 'EP2 save Aka', action: 'Save lineup (Aka)', variant: 'V1 tapNeighbour left', ...nb, shiroSideAfter: shiroState.slice(0, 200),
-        akaSaveTapBox: await T.tapBox(akaSave), box2OfferedWhileDaiAt1: box2Options });
+        akaSaveTapBox: await tapSize(akaSave), box2OfferedWhileDaiAt1: box2Options });
       // Then the intended tap.
       await T.panelSave(page, 1);
       await expect(T.panelSource(page, 1)).toHaveText('Lineup for this match');
@@ -223,7 +229,7 @@ test.describe('knockout-mixed-team', () => {
       await expect(T.panelSaveButton(page, 1)).toBeDisabled();
       await shot(page, 'f3-panel-aka-saved');
       const rename = T.panelSide(page, 1).getByRole('button', { name: 'Rename 1 player' });
-      record({ step: 'EP2 Rename', action: 'Rename control on the panel', variant: 'tap target', renameTapBox: await T.tapBox(rename) });
+      record({ step: 'EP2 Rename', action: 'Rename control on the panel', variant: 'tap target', renameTapBox: await tapSize(rename) });
 
       // One member at two positions: type Dai (at 1) into 2 and save.
       await T.typeIntoNameBox(T.panelInput(page, 1, '2'), 'Dai');
@@ -286,14 +292,14 @@ test.describe('knockout-mixed-team', () => {
       const ed = inlineEditor(page);
       const row1 = T.boutRow(ed, 1);
       const box = T.rowNameBox(row1, 'shiro');
-      const boxTap = await T.tapBox(row1.locator('.team-sub-match__side--shiro .lineup-name__bar'));
+      const boxTap = await tapSize(row1.locator('.team-sub-match__side--shiro .lineup-name__bar'));
       // Row 1 already names Aoki (the starting lineup's fighter); open its list
       // as the operator would to confirm or change it.
       await box.tap();
       await row1.locator('.pmf__option').first().waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
       const offered = await row1.locator('.pmf__option').allInnerTexts();
       await shot(page, 'f3-sheet-row1-list');
-      await T.dismissNameBox(page);
+      await T.closeNameList(page);
       record({ step: 'EP3 open row 1 list', action: 'tap row 1 Shiro name box', variant: 'correct', offered });
       // Name row 1 Aoki: from the list when it offers her, else by typing.
       if (offered.some((o) => o.includes('Aoki'))) await T.pickFromNameBox(box, 'Aoki');
@@ -443,7 +449,7 @@ test.describe('knockout-mixed-team', () => {
       const panelAfterSlip = await panel.isVisible().catch(() => false);
       await shot(page, 'f3-kiken-after-neighbour-tap');
       record({ step: 'pool kiken chain', action: `Kiken – Voluntary, Shiro (${pair.shiro}) withdraws`, variant: 'correct', panelShown: shown,
-        panelText: panelText.slice(0, 300), awardButtons: awards, awardTapBox: awards ? await T.tapBox(award.first()).catch(() => null) : null });
+        panelText: panelText.slice(0, 300), awardButtons: awards, awardTapBox: awards ? await tapSize(award.first()).catch(() => null) : null });
       record({ step: 'pool kiken chain', action: 'Award the remaining match to the opponent', variant: 'V1 tapNeighbour up', ...(nb || {}), panelStillOpen: panelAfterSlip });
       let awarded = 0;
       if (panelAfterSlip) {
@@ -530,13 +536,12 @@ test.describe('knockout-mixed-team', () => {
       await shot(page, 'f4-lineups-aka-member-named-from-sheet', { fullPage: true });
     });
 
-    await testInfo.attach('audit.json', { body: JSON.stringify(rows, null, 2), contentType: 'application/json' });
   });
   // ------------------------------------------------------------------- J4
-  test('J4 team scoring at the court (F4)', async ({ page }, testInfo) => {
+  test('J4 team scoring at the court (F4)', async ({ page }) => {
     test.setTimeout(600_000);
     const shot = journeyShots('J4-team-scoring');
-    const { rows, record } = recorder('J4');
+    const { record } = recorder('J4', 'J4-team-scoring');
     await T.enterAdmin(page);
     const id = await seedF4(page, { name: 'Team KO J4', court: 'D', prefix: 'S', teams: FOUR_TEAMS('J4') });
     await openShiaijo(page, 'D');
@@ -546,7 +551,7 @@ test.describe('knockout-mixed-team', () => {
     await test.step('start the first semifinal from Up next (double tap on Start match)', async () => {
       sf1 = await sides(upNextCard(page));
       const start = upNextCard(page).getByRole('button', { name: 'Start match' });
-      const startBox = await T.tapBox(start);
+      const startBox = await tapSize(start);
       const dbl = await doubleTap(start);
       await expect(T.boutRow(ed, 1)).toBeVisible();
       await page.waitForTimeout(800);
@@ -562,7 +567,7 @@ test.describe('knockout-mixed-team', () => {
       const row = T.boutRow(ed, 1);
       await T.boutIppon(ed, 1, 'shiro', 'M');
       const k = T.rowIppon(row, 'shiro', 'K');
-      const ipponBox = await T.tapBox(k);
+      const ipponBox = await tapSize(k);
       const dbl = await doubleTap(k);
       await expect(T.syncPill(ed)).toHaveText('Synced');
       const slotsAfter = await T.rowSlots(row, 'shiro').allInnerTexts();
@@ -575,7 +580,7 @@ test.describe('knockout-mixed-team', () => {
       await expect(T.rowSlots(row, 'shiro')).toHaveCount(1);
       await expect(T.syncPill(ed)).toHaveText('Synced');
       record({ step: 'bout 1', action: 'Shiro kote', variant: 'V2 doubleTap', ...dbl, slotsAfter, hint, tapsToRecover: extraCount, ipponTapBox: ipponBox,
-        slotTapBox: await T.tapBox(T.rowSlots(row, 'shiro').first()) });
+        slotTapBox: await tapSize(T.rowSlots(row, 'shiro').first()) });
       expect(await T.rowSlots(row, 'shiro').allInnerTexts()).toEqual(['M']);
     });
 
@@ -627,7 +632,7 @@ test.describe('knockout-mixed-team', () => {
       await expect(T.syncPill(ed)).toHaveText('Synced');
       const restored = await T.rowSlots(row, 'shiro').allInnerTexts();
       record({ step: 'bout 3', action: 'Fusensho Aka, then untoggle', variant: 'correct', fusenshoMarks: onAka, shiroAfterUntoggle: restored,
-        fusenshoTapBox: await T.tapBox(T.rowFusensho(row, 'aka')) });
+        fusenshoTapBox: await tapSize(T.rowFusensho(row, 'aka')) });
       expect(restored).toEqual(['K']);
       await expect(T.rowSlots(row, 'aka')).toHaveCount(0);
 
@@ -734,7 +739,7 @@ test.describe('knockout-mixed-team', () => {
 
     await test.step('add the representative bout (daihyosen)', async () => {
       const add = ed.getByTestId('scoring-modal-daihyosen-button');
-      const addBox = await T.tapBox(add);
+      const addBox = await tapSize(add);
       await add.tap();
       const appeared = await T.boutRow(ed, 'DH').waitFor({ state: 'visible', timeout: 8000 }).then(() => true, () => false);
       await shot(page, 'daihyosen-added');
@@ -771,7 +776,7 @@ test.describe('knockout-mixed-team', () => {
       await expect(ed.getByTestId('team-daihyosen-ht-aka')).toHaveCount(0);
       await shot(page, 'hantei-shiro');
       record({ step: 'hantei', action: 'SHIRO wins', variant: 'V1 tapNeighbour right', ...nb, akaHtShown: akaHt, tapsToRecover: 1,
-        hanteiTapBox: await T.tapBox(shiroWins),
+        hanteiTapBox: await tapSize(shiroWins),
         verdict: (await ed.locator('.team-summary__verdict').first().innerText()).trim(),
         dhMiddle: (await T.rowMiddle(T.boutRow(ed, 'DH')).innerText()).trim() });
       // The centre never carries Ht: it stays (DH).
@@ -819,7 +824,7 @@ test.describe('knockout-mixed-team', () => {
       await shot(page, 'sf2-kiken-neighbour');
       await prompt.getByRole('button', { name: 'Cancel' }).tap();
       record({ step: 'SF2 kiken', action: 'Kiken - Voluntary', variant: 'V1 tapNeighbour right', ...nb, promptOpened: openedTitle, tapsToRecover: 1,
-        kikenTapBox: await T.tapBox(vol) });
+        kikenTapBox: await tapSize(vol) });
       // The intended withdrawal is AKA's. The operator does not read the
       // prompt and taps its loudest button.
       if (!(await vol.isVisible())) await summary.tap();
@@ -831,7 +836,7 @@ test.describe('knockout-mixed-team', () => {
       const hint = (await prompt.getByTestId('decision-prompt-hint').innerText()).trim();
       await shot(page, 'sf2-kiken-prompt');
       const pill = (side) => prompt.locator('label.decision-prompt__side', { has: page.locator(`input[value="${side}"]`) });
-      const radioBox = await T.tapBox(pill('shiro'));
+      const radioBox = await tapSize(pill('shiro'));
       const loud = prompt.locator('button.btn--primary');
       const loudLabel = (await loud.innerText()).trim();
       const loudDisabled = await loud.isDisabled();
@@ -878,7 +883,7 @@ test.describe('knockout-mixed-team', () => {
       await shot(page, 'final-started-with-wrong-team');
       record({ step: 'SF2 kiken recovery', action: 'final started before the mistake is noticed', variant: 'V5 lost place', finalPair: finalBefore });
       // Correct on the finished semifinal, while the final runs on the court.
-      const row = completedRows(page).filter({ hasText: sf2.shiro }).filter({ hasText: sf2.aka }).last();
+      const row = completedRowFor(page, sf2);
       const result = (await row.locator('.shiaijo-qrow__result').innerText().catch(() => '')).trim();
       await row.getByRole('button', { name: /Correct/ }).tap();
       // bc-crpn: Correct is refused while a bout is live on the court; the row
@@ -960,13 +965,12 @@ test.describe('knockout-mixed-team', () => {
       await expect(page.getByText('Fus.', { exact: true }).first()).toBeVisible();
     });
 
-    await testInfo.attach('audit.json', { body: JSON.stringify(rows, null, 2), contentType: 'application/json' });
   });
   // ------------------------------------------------------------------- J7
-  test('J7 one result on every surface: operator, head table, viewer, TV board', async ({ page, browser, baseURL }, testInfo) => {
+  test('J7 one result on every surface: operator, head table, viewer, TV board', async ({ page, browser, baseURL }) => {
     test.setTimeout(600_000);
     const shot = journeyShots('J7-one-result');
-    const { rows, record } = recorder('J7');
+    const { record } = recorder('J7', 'J7-one-result');
     await T.enterAdmin(page);
     const id = await seedF4(page, { name: 'Team KO J7', court: 'E', prefix: 'F', teams: [['J7 Asahi', 'Kita Dojo'], ['J7 Yuhi', 'Minami Dojo']] });
     await openShiaijo(page, 'E');
@@ -1092,12 +1096,11 @@ test.describe('knockout-mixed-team', () => {
       await phoneCtx.close();
       await tvCtx.close();
     }
-    await testInfo.attach('audit.json', { body: JSON.stringify(rows, null, 2), contentType: 'application/json' });
   });
   // ------------------------------------------------------------ findings
-  // Each <bead-id> below is a functional defect a journey step exposed,
-  // kept as a self-contained test so the fix can remove the fixme and keep
-  // the step as its guard. Each seeds its own competition on its own shiaijo.
+  // Each <bead-id> below is a functional defect a journey step exposed, now
+  // fixed: its fixme went with the fix, and the self-contained test guards it.
+  // Each seeds its own competition on its own shiaijo.
 
   // The panel used to read "Inheriting round default" over empty boxes while the
   // score sheet named that default's fighters. A team now carries the lineup of
@@ -1128,7 +1131,9 @@ test.describe('knockout-mixed-team', () => {
     for (const [i, name] of names.entries()) await expect(T.rowNameBox(T.boutRow(ed, i + 1), 'shiro')).toHaveValue(name);
   });
 
-  test('bc-lprf: the match lineup panel\'s "already at" refusal names the wrong position', async ({ page }) => {
+  // The refusal used to name the position being typed (Jiho), not the one the
+  // member holds; this guards the fix.
+  test('bc-lprf: the match lineup panel\'s "already at" refusal names the position the member holds', async ({ page }) => {
     await T.enterAdmin(page);
     await seedF4(page, { name: 'B2 KO', court: 'I', prefix: 'I', teams: FOUR_TEAMS('B2') });
     await openShiaijo(page, 'I');
@@ -1144,7 +1149,9 @@ test.describe('knockout-mixed-team', () => {
     await expect(T.panelSide(page, 1).locator('.alert--error')).toHaveText('Dai is already at Senpo.');
   });
 
-  test('bc-unfx: a bout not yet fought reads as a draw (X, "✓ Tie") on the sheet and the TV board', async ({ page, browser, baseURL }) => {
+  // A bout not yet fought used to read as a draw (X, "✓ Tie"); this guards
+  // the fix on the sheet and on the TV board.
+  test('bc-unfx: a bout not yet fought reads "vs" with Tie off, on the sheet and the TV board', async ({ page, browser, baseURL }) => {
     await T.enterAdmin(page);
     await seedF4(page, { name: 'B3 KO', court: 'J', prefix: 'J', teams: [['B3 Ume', 'Kita Dojo'], ['B3 Sakura', 'Minami Dojo']] });
     await openShiaijo(page, 'J');
@@ -1169,7 +1176,9 @@ test.describe('knockout-mixed-team', () => {
     }
   });
 
-  test('bc-fsnp: a fusensho wipes the points the other side already scored, so its undo cannot bring them back after a reload', async ({ page }) => {
+  // A fusensho used to wipe the points the other side had already scored, so
+  // its undo could not bring them back after a reload; this guards the fix.
+  test('bc-fsnp: a fusensho keeps the points the other side already scored, and its undo after a reload brings the score back', async ({ page }) => {
     await T.enterAdmin(page);
     await seedF4(page, { name: 'B4 KO', court: 'K', prefix: 'L', teams: [['B4 Ume', 'Kita Dojo'], ['B4 Sakura', 'Minami Dojo']] });
     await openShiaijo(page, 'K');
@@ -1233,13 +1242,16 @@ test.describe('knockout-mixed-team', () => {
     await expect(T.rowNameBox(dh, 'aka')).toBeVisible();
   });
 
-  test('bc-dhas: a representative bout added right after the last Tie is erased by that Tie\'s pending autosave', async ({ page }) => {
+  // A representative bout added right after the last Tie used to be erased by
+  // that Tie's pending autosave; this guards the fix.
+  test('bc-dhas: a representative bout added right after the last Tie survives that Tie\'s autosave and a reload', async ({ page }) => {
     await T.enterAdmin(page);
     await seedF4(page, { name: 'B9 KO', court: 'L', prefix: 'T', teams: [['B9 Ume', 'Kita Dojo'], ['B9 Sakura', 'Minami Dojo']] });
     await openShiaijo(page, 'L');
     const ed = await T.startUpNextTeam(page);
     for (const n of [1, 2, 3, 4, 5]) await T.ensureTie(ed, n);
-    // The pill already reads Synced; the operator goes straight on.
+    // ensureTie saw the last Tie's write land (the pill back at Synced); the
+    // operator goes straight on.
     await ed.getByTestId('scoring-modal-daihyosen-button').tap();
     await expect(T.boutRow(ed, 'DH')).toBeVisible();
     await page.waitForTimeout(1500);

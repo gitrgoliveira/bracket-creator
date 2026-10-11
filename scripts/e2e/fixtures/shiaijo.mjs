@@ -39,8 +39,13 @@ export async function startUpNext(page) {
   return pair;
 }
 
-// The newest completed match (the Completed list is oldest first, so the
-// newest is its tail) with its score string, e.g. "M vs –".
+// The newest Completed row whose names match a pairing (the Completed list is
+// oldest first, so the newest is its tail).
+export function completedRowFor(page, { shiro, aka }) {
+  return completedRows(page).filter({ hasText: shiro }).filter({ hasText: aka }).last();
+}
+
+// The newest completed match with its score string, e.g. "M vs –".
 export async function lastCompleted(page) {
   const row = completedRows(page).last();
   await expect(row).toBeVisible();

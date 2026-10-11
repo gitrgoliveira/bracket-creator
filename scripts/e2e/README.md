@@ -33,7 +33,9 @@ stamp outlives it; run `npx playwright install chromium` here.
     fixtures/scoring.mjs    scoring an individual bout on either editor
     fixtures/public.mjs     the public viewer and the TV board
     fixtures/clumsy.mjs     the clumsy operator (below)
-    fixtures/shots.mjs      per-step screenshots
+    fixtures/pointer.mjs    the coarse pointer: check, restore, tap-target size
+    fixtures/shots.mjs      per-step screenshots, and each journey's folder
+    fixtures/audit.mjs      audit rows (AUDIT lines and audit.json)
     journeys/*.spec.mjs     the journeys
 
 Each fixture module owns the selectors for one surface, so a UI change breaks
@@ -55,14 +57,18 @@ An operator journey that checks a public surface on the side (the viewer
 showing a result the operator just entered) opens a second context with
 `PUBLIC_DEVICE` from `fixtures/devices.mjs`.
 
-## One server per worker
+## One server per spec file
 
-`fixtures/test.mjs` starts one `mobile-app` per Playwright worker, on a free
-port and a throwaway data folder, through `scripts/screenshots/lib/server.mjs`,
-and stops it by PID when the worker ends. Tests in one worker share that
-server, so a spec file that seeds once and then walks several tests declares
-`test.describe.configure({ mode: 'serial' })`. Journeys navigate by path
-(`page.goto('/admin')`); the host is the worker's server.
+`fixtures/test.mjs` starts one `mobile-app` per spec file, on a free port and
+a throwaway data folder, through `scripts/screenshots/lib/server.mjs`, and
+stops it by PID when the file is done. Playwright runs several files one after
+another in one worker when there are more files than workers (`--workers=1`
+runs them all in one), and each file starts with a fresh server, never the
+previous file's tournament. Tests in one file share its server, so a spec file
+that seeds once and then walks several tests declares
+`test.describe.configure({ mode: 'serial' })`. A `beforeAll` hook asks for it
+with `serverForFile(testInfo.file)`. Journeys navigate by path
+(`page.goto('/admin')`); the host is the file's server.
 
 ## Seeding goes through the interface
 
@@ -93,6 +99,7 @@ variants as real input:
 | `retapWhileSaving(locator)` | a second tap while the button reads "Saving…" (writes are held briefly so the state is observable) |
 | `interrupt(page, kind)` | `reload`, `back` (then forward), `hidden` (tab to background and back), `offline` (network down and back) |
 | `hastyConfirm(page)` | answers the open confirm dialog with its most prominent button and returns its label |
+| `hastyShiaijoConfirm(page)` | the same for the shiaijo page's own confirms (Send back to queue, Move court) |
 
 Each returns what happened. A journey records that as an audit row; whether the
 outcome is acceptable is judged by a person from the screenshots, never
@@ -109,21 +116,26 @@ End match), and a second tap on the same ippon button inside that window
 (`web-mobile/js/tap_guard.jsx`). Playwright's second tap is always inside it, so
 `fixtures/pace.mjs` holds the dwell (`TAP_DWELL_MS`) and every helper that taps
 into a fresh layer or confirms an arm waits it out: `login`, `hastyConfirm`,
-`answerDialog`, `finishMatch`, `finishTeam`, `endMatch`, `awardBoutIppon`. A
+`hastyShiaijoConfirm`, `answerDialog`, `finishMatch`, `finishTeam`, `endMatch`, `awardBoutIppon`. A
 journey that taps such a thing by hand does the same. `doubleTap` is the one
 helper that deliberately does not: it is the bounce, and the app is meant to
 ignore the second tap.
 
 ## Output
 
-Per-step screenshots land in `output/<journey>/`, numbered in the order they
-were taken, and are replaced on the next run. Playwright's own traces and
-failure screenshots land in `output/test-results/`. Both are gitignored.
-There are no pixel comparisons: a screenshot is for a person to look at.
+Each journey has a folder, `output/<journey>/`. Its per-step screenshots land
+there, numbered in the order they were taken, beside its `audit.json` (the
+audit rows, also printed to the run log as `AUDIT {json}` lines), and are
+replaced on the next run. Playwright's own traces and failure screenshots land
+in `output/test-results/`. All of it is gitignored. There are no pixel
+comparisons: a screenshot is for a person to look at.
 
 Every run empties `output/test-results/` when it starts. Two runs at the same
 time in one checkout would delete each other's traces mid-test, so give the
 second one its own folder: `E2E_RESULTS_DIR=output/test-results-2 make e2e ...`.
+With `E2E_RESULTS_DIR` set, the journey folders move inside it too
+(`<E2E_RESULTS_DIR>/journeys/<journey>/`), so neither run empties the other's.
+A relative `E2E_RESULTS_DIR` is relative to this directory.
 
 ## When a journey finds a bug
 

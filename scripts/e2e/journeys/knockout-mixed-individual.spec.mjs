@@ -1,7 +1,7 @@
 // Operator review journeys for INDIVIDUAL competitions (mp-yqxn.2, reviewer A).
 //
 // Every fixture is built through the interface in beforeAll (first-run form,
-// wizard, roster paste box, Generate draw, Start), one server per worker:
+// wizard, roster paste box, Generate draw, Start), on this file's own server:
 //   F1  pools + knockout, 12 entrants, shiaijo A and B      (J1)
 //   F1b pools + knockout, 6 entrants, shiaijo E             (J2 decisions)
 //   F2  knockout only, joint 3rd UNTICKED (bronze), shiaijo C (J2 hantei, J6)
@@ -9,12 +9,12 @@
 //   F1c pools + knockout, 6 entrants, shiaijo F             (J8 Pools tab)
 // Each journey performs the correct path and the clumsy-operator variants
 // (fixtures/clumsy.mjs, plus fixtures/individual.mjs), records one AUDIT row
-// per action x variant (written to output/knockout-mixed-individual/audit.json),
-// and asserts only what the docs promise. Judgement (friction, legibility) is
-// formed from the screenshots in output/knockout-mixed-individual/, never
-// asserted here. The <bead-id> tests at the end are functional defects
-// the journeys found; each seeds its own competition so it runs alone once
-// its bead fixes the defect and the fixme is removed.
+// per action x variant (written to the journey folder's audit.json,
+// fixtures/audit.mjs), and asserts only what the docs promise. Judgement
+// (friction, legibility) is formed from the screenshots in the same folder
+// (fixtures/shots.mjs), never asserted here. The <bead-id> tests at the end
+// are functional defects the journeys found, now fixed: each seeds its own
+// competition, runs alone, and guards its fix.
 import { test, expect, isCoarse } from '../fixtures/test.mjs';
 import { OPERATOR_DEVICE } from '../fixtures/devices.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
@@ -22,33 +22,39 @@ import { createTournament, login } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
 import {
-  openShiaijo, upNextCard, inlineEditor, sides, completedRows, lastCompleted,
+  openShiaijo, upNextCard, inlineEditor, sides, completedRows, completedRowFor, lastCompleted,
 } from '../fixtures/shiaijo.mjs';
 import {
   INLINE_EDITOR, EDITOR, ipponButton, syncState, filledSlots, finishButton, armedFinishButton, armFinish, finishMatch,
 } from '../fixtures/scoring.mjs';
-import { doubleTap, hastyConfirm, interrupt, retapWhileSaving, tapNeighbour } from '../fixtures/clumsy.mjs';
 import {
-  ROSTER_12, ROSTER_6, ROSTER_4_BRONZE, ROSTER_4_JOINT, ROSTER_6B, rosterOf, auditLog, tapSize, inlineIdentity, overlayIdentity,
-  editorSides, slotMarks, winnerOf, inlineRunning, ensureRunning, playRunningBout, completedRowFor,
-  hastyShiaijoConfirm, decisionButton, decisionPrompt, recordDecision, queuedPoolBouts, correctCompleted,
+  doubleTap, hastyConfirm, hastyShiaijoConfirm, interrupt, retapWhileSaving, tapNeighbour,
+} from '../fixtures/clumsy.mjs';
+import { auditLog } from '../fixtures/audit.mjs';
+import { tapSize } from '../fixtures/pointer.mjs';
+import {
+  ROSTER_12, ROSTER_6, ROSTER_4_BRONZE, ROSTER_4_JOINT, ROSTER_6B, rosterOf, inlineIdentity, overlayIdentity,
+  editorSides, slotMarks, winnerOf, inlineRunning, ensureRunning, playRunningBout,
+  decisionButton, decisionPrompt, recordDecision, queuedPoolBouts, correctCompleted,
 } from '../fixtures/individual.mjs';
 
 test.describe.configure({ mode: 'serial' });
 
 const comps = {};
-const audit = auditLog();
+const audit = auditLog('knockout-mixed-individual');
 
-// Let the running bout's autosave land: the pill reads "Synced" during the
-// 300ms debounce as well, so the pill alone does not prove the write went out.
+// Let the running bout's autosave land. The pill reads "Syncing…" from the tap
+// until the write has landed (bc-sync: the tap's handler registers the edit
+// with API.notePendingEdit, and the pill has re-rendered by the time tap()
+// returns), so "Synced" after a tap means the write went out and came back.
 async function settle(page, root = INLINE_EDITOR) {
-  await page.waitForTimeout(700);
   await expect(syncState(page, root)).toHaveText('Synced');
 }
 
 test.describe('knockout-mixed-individual', () => {
-  test.beforeAll(async ({ browser, server }) => {
+  test.beforeAll(async ({ browser, serverForFile }, testInfo) => {
     test.setTimeout(240_000);
+    const server = await serverForFile(testInfo.file);
     const ctx = await browser.newContext({ ...OPERATOR_DEVICE, baseURL: server.base });
     const page = await ctx.newPage();
     await createTournament(page, { name: 'Individual Review Cup', courts: 15 });
@@ -138,7 +144,8 @@ test.describe('knockout-mixed-individual', () => {
     await settle(page);
 
     // V3 edge: a reload INSIDE the 300ms autosave debounce, right after a tap.
-    // The pill already reads "Synced" at that moment.
+    // The pill reads "Syncing…" from the tap (pillAtTap records what it shows),
+    // and the page-hide flush writes the pending edit before the page goes.
     await ipponButton(page, other, 'K').tap();
     const pillAtTap = (await syncState(page).innerText()).trim();
     await interrupt(page, 'reload');
@@ -993,8 +1000,9 @@ test.describe('knockout-mixed-individual', () => {
       if (advanced) expect((await inlineIdentity(page)).court).toBe('F');
     }
   });
-  // Functional defects found by the journeys above. Each seeds its own
-  // competition on its own shiaijo so it can run alone once fixed.
+  // Functional defects found by the journeys above, each now fixed and named
+  // by its bead. Each seeds its own competition on its own shiaijo, so it runs
+  // alone, and guards its fix.
   const seedOwn = async (page, opts, roster) => {
     const id = await createCompetition(page, { kind: 'individual', ...opts });
     await pasteRoster(page, id, roster);

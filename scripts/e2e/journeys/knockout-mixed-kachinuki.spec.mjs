@@ -17,11 +17,11 @@
 // allow, with the taisho drawing, staying on, and then being defeated. The
 // final is played out and a spectator's phone sees the finished knockout.
 //
-// Functional defects found here are test.fixme('<bead-id>: ...') blocks,
-// each a self-contained reproduction placed where the fixture supports it.
-// Each was run once as a plain test() and failed at its own assertion. The
-// tests after one tolerate what it leaves behind, so removing a fixme once
-// its bead is fixed does not disturb them. Judgement findings, and behaviour
+// Functional defects found here were filed as beads and kept as tests named
+// after them ('<bead-id>: ...'), each a self-contained reproduction placed
+// where the fixture supports it: first as test.fixme, and, once the bead was
+// fixed, as plain tests that guard the fix. The tests after one tolerate what
+// it leaves behind. Judgement findings, and behaviour
 // the docs do not rule on (Send back to queue under a REOPENED encounter
 // wiping its bout log: the docs promise the log survives a reopen, and that
 // Send back to queue clears a running match's score), are recorded as audit
@@ -30,27 +30,32 @@
 // Asserted: only the functional outcomes the docs promise (who stays on, the
 // recorded result, the bracket advancing). The clumsy variants are PERFORMED
 // through fixtures/clumsy.mjs and RECORDED as audit rows (AUDIT lines in the
-// log, audit.json attached); whether an outcome is acceptable is judged from
-// the screenshots in output/knockout-mixed-kachinuki/, never asserted.
+// log, and the journey folder's audit.json, fixtures/audit.mjs); whether an
+// outcome is acceptable is judged from the screenshots in the same folder
+// (fixtures/shots.mjs), never asserted.
 import { test, expect } from '../fixtures/test.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
+import { auditLog } from '../fixtures/audit.mjs';
 import { createTournament, login } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
-import { openShiaijo, sides, upNextCard } from '../fixtures/shiaijo.mjs';
+import { completedRowFor, openShiaijo, sides, upNextCard } from '../fixtures/shiaijo.mjs';
 import { PUBLIC_DEVICE } from '../fixtures/devices.mjs';
 import { openViewer } from '../fixtures/public.mjs';
 import { scoreRows } from '../fixtures/scores.mjs';
 import { EDITOR } from '../../screenshots/lib/editor.mjs';
 import { dwell, settled } from '../fixtures/pace.mjs';
-// clumsy.hastyConfirm answers confirmDialog (ui.jsx) only. The other confirms
-// on this journey are the shiaijo page's own `.shiaijo-move-confirm`, the
-// inline reason prompt and the inline court-busy panel, which it cannot see;
-// the local helpers at the end of this file answer those the same way.
-import { doubleTap, hastyConfirm, interrupt, retapWhileSaving, tapNeighbour } from '../fixtures/clumsy.mjs';
+// clumsy.hastyConfirm answers confirmDialog (ui.jsx) and hastyShiaijoConfirm
+// the shiaijo page's own `.shiaijo-move-confirm`. The inline reason prompt and
+// the inline court-busy panel are neither; the local helpers at the end of
+// this file answer those by the same ranking (clumsy.loudestButton).
+import {
+  doubleTap, hastyConfirm, hastyShiaijoConfirm, interrupt, loudestButton, retapWhileSaving, tapNeighbour,
+} from '../fixtures/clumsy.mjs';
+import { closeNameList } from '../fixtures/team.mjs';
 import {
   awardBoutIppon, boutFilled, ensureCoarse, boutIpponButton, boutMiddle, boutNames, closeLineupPanel, correctingBout,
-  closeFighterList, currentBout, doneRowWinner, doneRows, editor, enchoButton, enchoUndoButton, endMatch, endMatchButton, lineupSide, lineupSource,
+  currentBout, doneRowWinner, doneRows, editor, enchoButton, enchoUndoButton, endMatch, endMatchButton, lineupSide, lineupSource,
   openLineupFromUpNext, recordBout, recordBoutButton, removeBoutButton, reopenButton, syncPill, tieButton,
   typeLineup, winBout,
 } from '../fixtures/kachinuki.mjs';
@@ -78,13 +83,10 @@ test.describe.configure({ mode: 'serial' });
 test.describe('J5 kachinuki from the court console', () => {
   let shot;
   let compId;
-  const audit = [];
   // One audit row: step | action | variant | what happened (observed facts).
   // The judgement columns are formed from the screenshots, not here.
-  const record = (row) => {
-    audit.push(row);
-    console.log(`AUDIT ${JSON.stringify(row)}`);
-  };
+  const audit = auditLog(JOURNEY);
+  const { record } = audit;
   // Pairings as the draw put them (read back, never assumed).
   let m1; // { shiro, aka } team names on M1 (court A)
   let m2; // on M2 (court B)
@@ -94,9 +96,7 @@ test.describe('J5 kachinuki from the court console', () => {
     shot = journeyShots(JOURNEY);
   });
 
-  test.afterAll(async ({}, testInfo) => {
-    await testInfo.attach('audit.json', { body: JSON.stringify(audit, null, 2), contentType: 'application/json' });
-  });
+  test.afterAll(() => audit.flush());
 
   test('F5: seed a kachinuki knockout and name every team member at the court', async ({ page }) => {
     await createTournament(page, { name: 'Kachinuki Cup', courts: 2 });
@@ -200,7 +200,7 @@ test.describe('J5 kachinuki from the court console', () => {
       const v2Shot = await shot(page, 'v2-ippon-double-tap');
       // Recover: close a fighter list the second tap opened, then tap the second
       // mark if there is one (the editor's "Tap a scored mark to clear it").
-      const fighterListOpened = await closeFighterList(page);
+      const fighterListOpened = await closeNameList(page);
       let recoverTaps = 0;
       while ((await boutFilled(currentBout(page), 'shiro').count()) > 1) {
         await boutFilled(currentBout(page), 'shiro').last().tap();
@@ -355,10 +355,11 @@ test.describe('J5 kachinuki from the court console', () => {
       await recordBout(page);
       await expectPairing(7, S[3], A[4]);
       await shot(page, 'bout-7-open-seven-deep');
-      // Harness defect, measured here: a fullPage screenshot leaves the page at
-      // a FINE pointer afterwards, so the coarse tap floors switch off. This
-      // journey takes fullPage shots only where a reload is harmless (or one
-      // follows anyway) and restores the coarse pointer straight after.
+      // Measured here: a fullPage screenshot leaves the page at a FINE pointer
+      // afterwards, which would switch the coarse tap floors off. The camera
+      // (fixtures/shots.mjs) puts the coarse pointer back in place, with no
+      // reload; this row records the pointer before and after the shot, and
+      // whether ensureCoarse still found it lost.
       const coarseBeforeFull = await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
       await shot(page, 'bout-7-open-seven-deep-full', { fullPage: true });
       const coarseAfterFull = await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
@@ -545,8 +546,7 @@ test.describe('J5 kachinuki from the court console', () => {
       const end = endMatchButton(page);
       const endBox = await end.boundingBox();
       const v2end = await doubleTap(end);
-      const completed = await page.locator('.shiaijo-completed .shiaijo-qrow')
-        .filter({ hasText: m1.shiro }).filter({ hasText: m1.aka }).first()
+      const completed = await completedRowFor(page, m1)
         .waitFor({ state: 'visible', timeout: 8000 }).then(() => true, () => false);
       const endLabelAfter = completed ? null : (await end.innerText().catch(() => null));
       record({ step: 'M1 end', action: 'End match (two-tap guard)', variant: 'V2 doubleTap', ...v2end, endBox,
@@ -554,7 +554,7 @@ test.describe('J5 kachinuki from the court console', () => {
       if (!completed) {
         if (/^Tap again/.test(endLabelAfter || '')) await end.tap(); else await endMatch(page);
       }
-      const row = completedRow(page, m1);
+      const row = completedRowFor(page, m1);
       await expect(row).toBeVisible();
       // Shiro won bouts 1, 5, 6 and 8 (the walkover's two maru), Aka 2 and 4:
       // IV 4-2, PW 7-3 (bout 5's double tap scores one M since bc-dtip; before
@@ -568,7 +568,7 @@ test.describe('J5 kachinuki from the court console', () => {
       await page.waitForTimeout(1500);
       record({ step: 'M1 end', action: 'Completed row after End match', variant: 'result', expected: 'IV 4–2 PW 7–3',
         shownFor6s: shownAtFirst, settledWithoutRefresh: settled,
-        afterRefresh: (await completedRow(page, m1).locator('.shiaijo-qrow__result').innerText()).replace(/\s+/g, ' '),
+        afterRefresh: (await completedRowFor(page, m1).locator('.shiaijo-qrow__result').innerText()).replace(/\s+/g, ' '),
         screenshot: staleShot });
       // The bracket advanced: the final on A now names M1's winner (Shiro).
       await expect(page.locator('.shiaijo-pending, .shiaijo-upnext').first()).toContainText(m1.shiro);
@@ -584,13 +584,13 @@ test.describe('J5 kachinuki from the court console', () => {
 
     await test.step('Correct on the completed row opens the finished encounter', async () => {
       // V1: is there anything beside Correct for the thumb to land on?
-      const v1 = await tapNeighbour(completedRow(page, m1).locator('.shiaijo-row__correct'), 'left')
+      const v1 = await tapNeighbour(completedRowFor(page, m1).locator('.shiaijo-row__correct'), 'left')
         .catch((e) => ({ none: e.message.split('\n')[0] }));
       await page.waitForTimeout(300);
-      const cb = await completedRow(page, m1).locator('.shiaijo-row__correct').boundingBox();
+      const cb = await completedRowFor(page, m1).locator('.shiaijo-row__correct').boundingBox();
       record({ step: 'M1 reopen', action: 'Correct (Completed row)', variant: 'V1 tapNeighbour left', ...v1,
         correctBox: cb && `${Math.round(cb.width)}x${Math.round(cb.height)}`, screenshot: await shot(page, 'v1-correct-neighbour') });
-      await completedRow(page, m1).locator('.shiaijo-row__correct').tap();
+      await completedRowFor(page, m1).locator('.shiaijo-row__correct').tap();
       await expect(reopenButton(page)).toBeVisible();
       const rows = editor(page).locator('.team-sub-match');
       record({ step: 'M1 reopen', action: 'Correct (Completed row)', variant: 'correct path',
@@ -678,7 +678,7 @@ test.describe('J5 kachinuki from the court console', () => {
       const reload = await interruptC(page, 'reload');
       await expect(editor(page)).toBeVisible();
       const stillRunning = await recordBoutButton(page).isVisible();
-      const endedByReload = await completedRow(page, m1).isVisible();
+      const endedByReload = await completedRowFor(page, m1).isVisible();
       record({ step: 'M1 reopen', action: 'End match armed', variant: 'V3 interrupt reload', ...reload, armedLabel,
         stillRunning, endedByReload,
         bout8: await boutNames(currentBout(page)), bout8Marks: await boutFilled(currentBout(page), 'shiro').allInnerTexts(),
@@ -692,14 +692,14 @@ test.describe('J5 kachinuki from the court console', () => {
       // End for real, clumsily: two taps inside 300ms on the two-tap guard
       // (the same clumsy variant M1's first ending used above).
       const v2end = await doubleTap(endMatchButton(page));
-      const completed = await completedRow(page, m1).waitFor({ state: 'visible', timeout: 8000 }).then(() => true, () => false);
+      const completed = await completedRowFor(page, m1).waitFor({ state: 'visible', timeout: 8000 }).then(() => true, () => false);
       const endLabelAfter = completed ? null : (await endMatchButton(page).innerText().catch(() => null));
       record({ step: 'M1 reopen', action: 'End match (two-tap guard)', variant: 'V2 doubleTap', ...v2end,
         completedByDoubleTap: completed, endLabelAfter, screenshot: await shot(page, 'v2-end-match-double-tap-reopen') });
       if (!completed) {
         if (/^Tap again/.test(endLabelAfter || '')) await endMatchButton(page).tap(); else await endMatch(page);
       }
-      const row = completedRow(page, m1);
+      const row = completedRowFor(page, m1);
       await expect(row).toBeVisible();
       await expect(row.locator('.shiaijo-qrow__result')).toContainText('IV');
       const immediately = (await row.locator('.shiaijo-qrow__result').innerText()).replace(/\s+/g, ' ');
@@ -992,12 +992,12 @@ test.describe('J5 kachinuki from the court console', () => {
       // The second tap counts once the arming tap's bounce window has passed.
       await settled(endMatchButton(page));
       await endMatchButton(page).tap();
-      await expect(completedRow(page, m2)).toBeVisible();
+      await expect(completedRowFor(page, m2)).toBeVisible();
       await shot(page, 'm2-completed');
     });
 
     await test.step('the hurried operator reopens M2 and taps Send back to queue to get out', async () => {
-      await completedRow(page, m2).locator('.shiaijo-row__correct').tap();
+      await completedRowFor(page, m2).locator('.shiaijo-row__correct').tap();
       await reopenButton(page).tap();
       await expect(recordBoutButton(page)).toBeVisible({ timeout: 15_000 });
       const boutsBefore = await doneRows(page).count();
@@ -1040,7 +1040,7 @@ test.describe('J5 kachinuki from the court console', () => {
         await settled(endMatchButton(page));
         await endMatchButton(page).tap();
       }
-      await expect(completedRow(page, m2)).toBeVisible();
+      await expect(completedRowFor(page, m2)).toBeVisible();
       await shot(page, 'm2-completed-again');
     });
   });
@@ -1053,7 +1053,7 @@ test.describe('J5 kachinuki from the court console', () => {
     await login(page);
     await openShiaijo(page, 'A');
     const next = await sides(upNextCard(page));
-    await completedRow(page, m1).locator('.shiaijo-row__correct').tap();
+    await completedRowFor(page, m1).locator('.shiaijo-row__correct').tap();
     await expect(reopenButton(page)).toBeVisible();
     const start = upNextCard(page).getByRole('button', { name: 'Start match' });
     await start.tap();
@@ -1136,9 +1136,9 @@ test.describe('J5 kachinuki from the court console', () => {
     });
   });
 
-  // bc-emsl: a tap on an EMPTY mark slot (the "·" beside the scored
-  // marks) is not a no-op: it clears the bout's Tie.
-  test('bc-emsl: tapping an empty mark slot clears the bout\'s Tie', async ({ page }) => {
+  // bc-emsl (fixed): a tap on an EMPTY mark slot (the "·" beside the scored
+  // marks) used to clear the bout's Tie. It is a no-op now; this guards it.
+  test('bc-emsl: tapping an empty mark slot leaves the bout\'s Tie on', async ({ page }) => {
     await login(page);
     await openShiaijo(page, 'A');
     const row = currentBout(page);
@@ -1154,9 +1154,10 @@ test.describe('J5 kachinuki from the court console', () => {
     await awardBoutIppon(page, 'shiro', 'M');
   });
 
-  // bc-kheb: Encho on ONE kachinuki bout sets the encounter's overtime
-  // count, so the header keeps reading "(E) OVERTIME" on every later bout.
-  test('bc-kheb: after one bout goes to encho, the header claims overtime on every later bout', async ({ page }) => {
+  // bc-kheb (fixed): Encho on ONE kachinuki bout used to set the encounter's
+  // overtime count, so the header kept reading "(E) OVERTIME" on every later
+  // bout. The (E) now lives on that bout's row only; this guards it.
+  test('bc-kheb: after one bout goes to encho, the next bout\'s header does not claim overtime', async ({ page }) => {
     await login(page);
     await openShiaijo(page, 'A');
     const row = currentBout(page);
@@ -1169,18 +1170,41 @@ test.describe('J5 kachinuki from the court console', () => {
     await expect(editor(page).locator('.editor-modal__eyebrow').first()).not.toContainText(/overtime/i);
   });
 
-  // bc-sync: for the autosave's debounce window after a tap, the sync pill
-  // already reads "Synced" although nothing has been sent; a reload in that
-  // window loses the point with no warning (audit row "final bout 4").
-  test('bc-sync: the sync pill reads "Synced" while a tapped point is still unsaved', async ({ page }) => {
+  // bc-sync (fixed): the sync pill used to read "Synced" through the
+  // autosave's debounce window after a tap, although nothing had been sent,
+  // so a reload there lost the point with no warning (audit row "final bout
+  // 4"). It reads "Syncing…" from the tap until the write lands; this guards
+  // it. The score write is held, so the pill is read while the point is
+  // provably still unsaved, whatever this machine's timing.
+  test('bc-sync: the sync pill reads "Syncing…" while a tapped point is still unsaved', async ({ page }) => {
     await login(page);
     await openShiaijo(page, 'A');
     const live = currentBout(page);
-    await boutIpponButton(live, 'aka', 'D').tap();
-    await page.waitForTimeout(150);
-    await expect(syncPill(page)).not.toHaveText('Synced', { timeout: 100 });
-    // Leave the bout as it was: take the point back.
+    const isScoreWrite = (url) => /\/api\/competitions\/[^/]+\/matches\/[^/]+\/score$/.test(url.pathname);
+    let release;
+    const released = new Promise((r) => { release = r; });
+    const hold = async (route) => {
+      if (route.request().method() !== 'PUT') return route.continue();
+      await released;
+      return route.continue().catch(() => {});
+    };
+    await page.route(isScoreWrite, hold);
+    try {
+      const sent = page.waitForRequest((r) => r.method() === 'PUT' && isScoreWrite(new URL(r.url())));
+      // A test that fails before the write goes out must not leave this rejecting unheard.
+      sent.catch(() => {});
+      await boutIpponButton(live, 'aka', 'D').tap();
+      // From the tap: the edit waits out the debounce (nothing sent yet)...
+      await expect(syncPill(page)).toHaveText('Syncing…');
+      // ...then its write is out, and held: still unsaved.
+      await sent;
+      await expect(syncPill(page)).toHaveText('Syncing…');
+    } finally {
+      release();
+      await page.unroute(isScoreWrite, hold);
+    }
     await expect(syncPill(page)).toHaveText('Synced');
+    // Leave the bout as it was: take the point back.
     await boutFilled(currentBout(page), 'aka').last().tap();
     await expect(boutFilled(currentBout(page), 'aka')).toHaveCount(0);
   });
@@ -1238,8 +1262,7 @@ test.describe('J5 kachinuki from the court console', () => {
     }
     expect((await boutNames(currentBout(page))).shiro).toBe(S[0]);
     await endMatch(page);
-    const done = page.locator('.shiaijo-completed .shiaijo-qrow').filter({ hasText: finalPair.shiro }).filter({ hasText: finalPair.aka });
-    await expect(done).toBeVisible();
+    await expect(completedRowFor(page, finalPair)).toBeVisible();
     await shot(page, 'final-completed', { fullPage: true });
 
     // A spectator's phone: the finished knockout on the public viewer.
@@ -1259,11 +1282,6 @@ const m2State = {};
 const pickState = {};
 const correctionState = {};
 
-// A completed-list row naming both teams of a pairing.
-function completedRow(page, pair) {
-  return page.locator('.shiaijo-completed .shiaijo-qrow').filter({ hasText: pair.shiro }).filter({ hasText: pair.aka }).first();
-}
-
 // Waits until the server lists `pair` as completed on `court`, read by a page
 // loaded afresh in the same context (so already signed in): the console on the
 // page that tapped End match shows the result at once, before the server has
@@ -1273,7 +1291,7 @@ async function completedOnServer(page, pair, court = 'A') {
   try {
     await expect.poll(async () => {
       await openShiaijo(fresh, court);
-      return completedRow(fresh, pair).locator('.shiaijo-qrow__result').count();
+      return completedRowFor(fresh, pair).locator('.shiaijo-qrow__result').count();
     }, { timeout: 15_000, message: `${pair.shiro} v ${pair.aka} is completed on the server` }).toBeGreaterThan(0);
   } finally {
     await fresh.close();
@@ -1284,8 +1302,8 @@ async function completedOnServer(page, pair, court = 'A') {
 // refused (bc-crpn). The notice sits at the row, the same sentence as the
 // toast; no correction opens and the live bout keeps the panel.
 async function correctRefusedAtConsole(page, pair, running, court = 'A') {
-  await completedRow(page, pair).locator('.shiaijo-row__correct').tap();
-  const notice = completedRow(page, pair).locator('.shiaijo-upnext__error');
+  await completedRowFor(page, pair).locator('.shiaijo-row__correct').tap();
+  const notice = completedRowFor(page, pair).locator('.shiaijo-upnext__error');
   await expect(notice).toHaveText(new RegExp(`^Shiaijo ${court} is running .*${running.shiro} vs ${running.aka}\\. `
     + 'Finish it or send it back to the queue first\\. Then correct this match\\.$'));
   const toast = (await page.locator('.toast').allInnerTexts().catch(() => [])).join(' | ');
@@ -1305,63 +1323,21 @@ async function openScoresCorrection(page, id, pair) {
   await expect(reopenButton(page)).toBeVisible();
 }
 
-// V4 for the shiaijo page's own confirms (`.shiaijo-move-confirm`: Send back
-// to queue, Move to Shiaijo X). They are not confirmDialog (ui.jsx), so
-// clumsy.hastyConfirm cannot see them; same rule: tap the loudest button.
-async function hastyShiaijoConfirm(page) {
-  const dialog = page.locator('.shiaijo-move-confirm');
-  await dialog.waitFor({ state: 'visible' });
-  const shown = Date.now();
-  const r = await loudestIn(dialog.locator('.shiaijo-move-confirm__actions'));
-  const title = (await dialog.locator('.shiaijo-move-confirm__title').innerText()).trim();
-  const message = (await dialog.locator('.shiaijo-move-confirm__body').innerText()).trim();
-  // The confirm ignores a tap inside the bounce window of its opening (fixtures/pace.mjs).
-  await dwell(page, shown);
-  await r.tap();
-  await dialog.waitFor({ state: 'hidden', timeout: 15_000 });
-  return { label: r.label, prominence: r.prominence, otherLabels: r.others, title, message };
-}
-
 // V4 for the inline reason prompt (ReasonPrompt): its loudest button, with
 // whatever preset it offered by default.
 async function hastyReasonPrompt(page) {
   const prompt = page.locator('.reason-prompt');
   await prompt.waitFor({ state: 'visible' });
   const preset = await prompt.locator('select').first().inputValue().catch(() => '');
-  const r = await loudestIn(prompt);
-  await r.tap();
+  const { button, ...loud } = await loudestButton(prompt);
+  await button.tap();
   await prompt.waitFor({ state: 'hidden', timeout: 15_000 });
-  return { label: r.label, prominence: r.prominence, otherLabels: r.others, defaultReason: preset };
+  return { ...loud, defaultReason: preset };
 }
 
 // V4 for an inline panel (the court-busy conflict): its loudest button.
 async function hastyPanel(panel) {
-  const r = await loudestIn(panel);
-  await r.tap();
-  return { label: r.label, prominence: r.prominence, otherLabels: r.others };
-}
-
-// The most prominent button in `scope`: danger over primary over plain over
-// ghost, the larger breaking a tie (the same ranking as clumsy.hastyConfirm).
-async function loudestIn(scope) {
-  const buttons = scope.locator('button');
-  const rank = (cls) => (/\bbtn--danger\b/.test(cls) ? 3 : /\bbtn--primary\b/.test(cls) ? 2 : /\bbtn--ghost\b/.test(cls) ? 0 : 1);
-  const PROMINENCE = ['ghost', 'plain', 'primary', 'danger'];
-  let best = null;
-  const labels = [];
-  for (let i = 0; i < await buttons.count(); i += 1) {
-    const b = buttons.nth(i);
-    if (!(await b.isVisible())) continue;
-    const cls = (await b.getAttribute('class')) || '';
-    const box = await b.boundingBox();
-    const label = (await b.innerText()).trim();
-    labels.push(label);
-    const score = [rank(cls), box ? box.width * box.height : 0];
-    if (!best || score[0] > best.score[0] || (score[0] === best.score[0] && score[1] > best.score[1])) best = { b, label, score };
-  }
-  if (!best) throw new Error('no visible button to answer hastily');
-  return {
-    label: best.label, prominence: PROMINENCE[best.score[0]], others: labels.filter((l) => l !== best.label),
-    tap: () => best.b.tap(),
-  };
+  const { button, ...loud } = await loudestButton(panel);
+  await button.tap();
+  return loud;
 }

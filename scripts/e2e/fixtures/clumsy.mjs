@@ -6,6 +6,8 @@
 //      retapWhileSaving a second tap while the button still reads "Saving…"
 //   V3 interrupt        reload / back / tab hidden / offline, then return
 //   V4 hastyConfirm     a confirm dialog answered by its loudest button
+//      hastyShiaijoConfirm  the same for the shiaijo page's own confirms
+//      loudestButton    the ranking both use, for any other panel
 //
 // Every helper performs a real input on a real control and RETURNS what
 // happened (which element was hit, how far apart the taps were, what the
@@ -168,11 +170,15 @@ export async function interrupt(page, kind, { awayMs = 600, during } = {}) {
       return { kind, before, after: page.url() };
     }
     case 'back': {
-      const back = await page.goBack();
+      // Whether Back went anywhere is read from the URL, not from goBack()'s
+      // response: the SPA routes with history.pushState (router.jsx), and a
+      // same-document step answers null although it did go back.
+      await page.goBack();
       const landedOn = page.url();
+      const wentBack = landedOn !== before;
       await away();
-      if (back) await page.goForward();
-      return { kind, before, landedOn, hadHistory: !!back, after: page.url() };
+      if (wentBack) await page.goForward();
+      return { kind, before, landedOn, hadHistory: wentBack, after: page.url() };
     }
     case 'hidden': {
       const setHidden = (hidden) => page.evaluate((h) => {
@@ -207,47 +213,90 @@ export async function interrupt(page, kind, { awayMs = 600, during } = {}) {
   }
 }
 
-// V4. Answer the open confirm dialog (confirmDialog in ui.jsx) the way an
-// operator who does not read does: tap the most prominent button. Prominence
-// is read from the rendered classes: danger over primary over a plain button
-// over a ghost one, the larger button breaking a tie. Returns { label,
-// prominence, title, message, cancelLabel }, so the audit row can say whether
-// the loud button was the safe one.
-export async function hastyConfirm(page) {
-  const dialog = page.locator('.modal[role="dialog"]').filter({ has: page.locator('.modal__foot') }).last();
-  await dialog.waitFor({ state: 'visible' });
-  const shown = Date.now();
-  const buttons = dialog.locator('.modal__foot button');
-  const rank = (cls) => (/\bbtn--danger\b/.test(cls) ? 3 : /\bbtn--primary\b/.test(cls) ? 2 : /\bbtn--ghost\b/.test(cls) ? 0 : 1);
-  const PROMINENCE = ['ghost', 'plain', 'primary', 'danger'];
+// V4's ranking: the most prominent visible button inside `scope` (a Locator),
+// the one an operator who does not read taps. Prominence is read from the
+// rendered classes: danger over primary over a plain button over a ghost one,
+// the larger button breaking a tie. Returns { button, label, prominence,
+// otherLabels }, the last being the other visible buttons' labels. Throws when
+// `scope` shows no button.
+const PROMINENCE = ['ghost', 'plain', 'primary', 'danger'];
+const prominenceRank = (cls) => (/\bbtn--danger\b/.test(cls) ? 3 : /\bbtn--primary\b/.test(cls) ? 2 : /\bbtn--ghost\b/.test(cls) ? 0 : 1);
+
+export async function loudestButton(scope) {
+  const buttons = scope.locator('button');
   let best = null;
   const labels = [];
   for (let i = 0; i < await buttons.count(); i += 1) {
     const b = buttons.nth(i);
+    if (!(await b.isVisible())) continue;
     const cls = (await b.getAttribute('class')) || '';
     const box = await b.boundingBox();
     const label = (await b.innerText()).trim();
     labels.push(label);
-    const score = [rank(cls), box ? box.width * box.height : 0];
+    const score = [prominenceRank(cls), box ? box.width * box.height : 0];
     if (!best || score[0] > best.score[0] || (score[0] === best.score[0] && score[1] > best.score[1])) {
       best = { b, label, score };
     }
   }
-  if (!best) throw new Error('clumsy.hastyConfirm: the dialog has no buttons');
+  if (!best) throw new Error(`clumsy.loudestButton: no visible button in ${scope}`);
+  return {
+    button: best.b,
+    label: best.label,
+    prominence: PROMINENCE[best.score[0]],
+    otherLabels: labels.filter((l) => l !== best.label),
+  };
+}
+
+// Wait until the dialog `handle` was pinned to has gone (hidden or detached),
+// then let the handle go. A locator would re-resolve, so a second dialog the
+// answer opens would be waited on instead of the one that was answered.
+async function waitAnswered(handle) {
+  try {
+    await handle.waitForElementState('hidden', { timeout: 15_000 });
+  } finally {
+    await handle.dispose();
+  }
+}
+
+// V4. Answer the open confirm dialog (confirmDialog in ui.jsx) the way an
+// operator who does not read does: tap its loudest button (loudestButton).
+// Returns { label, prominence, otherLabels, title, message }, so the audit row
+// can say whether the loud button was the safe one.
+export async function hastyConfirm(page) {
+  const dialog = page.locator('.modal[role="dialog"]').filter({ has: page.locator('.modal__foot') }).last();
+  await dialog.waitFor({ state: 'visible' });
+  const shown = Date.now();
+  const handle = await dialog.elementHandle();
+  const loud = await loudestButton(dialog.locator('.modal__foot'));
   const title = (await dialog.getAttribute('aria-label')) || '';
   const message = ((await dialog.locator('.dialog-msg').allInnerTexts())[0] || '').trim();
-  const { x, y } = await centreOf(best.b);
+  const { x, y } = await centreOf(loud.button);
   // A confirm ignores every tap inside the bounce window of its opening, so
   // "hasty" here is a hurried operator, never a tap before the guard lets one in.
   await dwell(page, shown);
   await page.touchscreen.tap(x, y);
-  await dialog.waitFor({ state: 'hidden' });
-  return {
-    label: best.label,
-    prominence: PROMINENCE[best.score[0]],
-    otherLabels: labels.filter((l) => l !== best.label),
-    title,
-    message,
-  };
+  await waitAnswered(handle);
+  const { button, ...row } = loud;
+  return { ...row, title, message };
+}
+
+// V4 for the shiaijo page's own confirms (`.shiaijo-move-confirm` in
+// admin_shiaijo.jsx: Send back to queue, Move to Shiaijo X). They are not
+// confirmDialog, so hastyConfirm cannot see them; the same rule answers them.
+// Returns the same fields as hastyConfirm.
+export async function hastyShiaijoConfirm(page) {
+  const dialog = page.locator('.shiaijo-move-confirm[role="dialog"]').last();
+  await dialog.waitFor({ state: 'visible' });
+  const shown = Date.now();
+  const handle = await dialog.elementHandle();
+  const loud = await loudestButton(dialog.locator('.shiaijo-move-confirm__actions'));
+  const title = ((await dialog.locator('.shiaijo-move-confirm__title').allInnerTexts())[0] || '').trim();
+  const message = ((await dialog.locator('.shiaijo-move-confirm__body').allInnerTexts())[0] || '').trim();
+  // The confirm ignores a tap inside the bounce window of its opening (fixtures/pace.mjs).
+  await dwell(page, shown);
+  await loud.button.tap();
+  await waitAnswered(handle);
+  const { button, ...row } = loud;
+  return { ...row, title, message };
 }
 

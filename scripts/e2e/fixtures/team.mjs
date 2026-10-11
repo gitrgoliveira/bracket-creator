@@ -22,10 +22,6 @@ import { settled } from './pace.mjs';
 export const FIK5 = ['Senpo', 'Jiho', 'Chuken', 'Fukusho', 'Taisho'];
 export const positionLabels = (teamSize) => (teamSize === 5 ? FIK5 : Array.from({ length: teamSize }, (_, i) => String(i + 1)));
 
-// The team sheet's per-row position name, used in its aria-labels
-// (admin_scoring_team.jsx positionLabelFor): FIK names at five, else "Match N".
-export const sheetPositionLabel = (teamSize, idx) => (teamSize === 5 ? FIK5[idx] : `Match ${idx + 1}`);
-
 // Sign in, creating the tournament first if this server has none yet. Every
 // test in a serial file can call it, whichever runs first.
 export async function enterAdmin(page, { courts = 16 } = {}) {
@@ -102,13 +98,20 @@ export async function lineupsStartAdd(page, label, name) {
   return { dialog: await dialog.isVisible(), alert: (await alert.isVisible()) ? (await alert.innerText()).trim() : '' };
 }
 
-// Answer the open confirm dialog with its named button.
+// Answer the open confirm dialog with its named button. The wait is on the
+// dialog that was answered (its element handle), not on a re-resolving
+// locator, which a second dialog opened by the answer would satisfy.
 export async function answerDialog(page, label) {
   const dialog = page.locator('.modal[role="dialog"]').filter({ has: page.locator('.modal__foot') }).last();
   // A confirm ignores a tap inside the bounce window of its opening.
   await settled(dialog);
-  await dialog.getByRole('button', { name: label }).tap();
-  await dialog.waitFor({ state: 'hidden' });
+  const handle = await dialog.elementHandle();
+  try {
+    await dialog.getByRole('button', { name: label }).tap();
+    await handle.waitForElementState('hidden', { timeout: 15_000 });
+  } finally {
+    await handle.dispose();
+  }
 }
 
 // Name a position's blank seeded slot through "+ Add new member…" and the
@@ -155,11 +158,19 @@ export async function pickFromNameBox(input, text) {
   await option.tap();
 }
 
-// Close an open name list the way a thumb does: a tap on empty page margin.
-// (Escape leaves the box focused, and a focused box does not reopen its list
-// on the next tap, which a touch operator never meets.)
-export async function dismissNameBox(page) {
-  await page.touchscreen.tap(6, 500);
+// A name list left open (by the operator, or by a tap that landed on a name
+// box). Close it the way a thumb does, with a tap on the empty page margin:
+// Escape leaves the box focused, and a focused box does not reopen its list
+// on the next tap, which a touch operator never meets. Returns whether one was
+// open. Any LineupNameInput: the panel, the team sheet, the kachinuki sheet.
+export async function closeNameList(page) {
+  const options = page.locator('.pmf__option');
+  const wasOpen = (await options.count()) > 0;
+  if (wasOpen) {
+    await page.touchscreen.tap(6, 500);
+    await expect(options).toHaveCount(0);
+  }
+  return wasOpen;
 }
 
 // Type a name into a LineupNameInput and commit it with Enter.
@@ -267,14 +278,4 @@ export async function finishTeam(root) {
   await settled(btn);
   await btn.tap();
   await expect(root.locator('button', { hasText: /^(Tap again to finish|Saving…)/ })).toHaveCount(0, { timeout: 15000 });
-}
-
-// Tap-target size of a control, for the audit's >= 44px rule.
-// Measured only under (pointer: coarse), where the 44px tap-floor rules apply:
-// the measurement asserts it first.
-export async function tapBox(locator) {
-  const coarse = await locator.page().evaluate(() => matchMedia('(pointer: coarse)').matches);
-  expect(coarse, 'tap targets are measured under (pointer: coarse)').toBe(true);
-  const b = await locator.boundingBox();
-  return b ? { w: Math.round(b.width), h: Math.round(b.height), ok: b.width >= 44 && b.height >= 44 } : null;
 }

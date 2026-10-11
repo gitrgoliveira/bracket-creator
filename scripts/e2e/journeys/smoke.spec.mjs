@@ -6,12 +6,14 @@
 // the result. Everything is seeded through the interface.
 //
 // The clumsy variants are PERFORMED and RECORDED here (printed as AUDIT lines
-// and attached as audit.json), never asserted: this spec only asserts what the
-// seeding path and the one cross-surface result need. The knockout-mixed
-// journey is where variants get judged.
+// and written to the journey folder's audit.json, fixtures/audit.mjs), never
+// asserted: this spec only asserts what the seeding path and the one
+// cross-surface result need. The knockout-mixed journeys are where variants
+// get judged.
 import { test, expect, isCoarse } from '../fixtures/test.mjs';
 import { PUBLIC_DEVICE } from '../fixtures/devices.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
+import { auditLog } from '../fixtures/audit.mjs';
 import { createTournament, login, signOut } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, requestDiscardDraw, startCompetition } from '../fixtures/competition.mjs';
@@ -36,16 +38,15 @@ test.describe.configure({ mode: 'serial' });
 
 test.describe('smoke', () => {
   let shot;
+  const audit = auditLog('smoke');
+  const { record } = audit;
   test.beforeAll(() => {
     shot = journeyShots('smoke');
   });
 
-  test('seed through the UI, score on a shiaijo, see it on a public phone', async ({ page, browser, baseURL }, testInfo) => {
-    const audit = [];
-    const record = (row) => {
-      audit.push(row);
-      console.log(`AUDIT ${JSON.stringify(row)}`);
-    };
+  test.afterAll(() => audit.flush());
+
+  test('seed through the UI, score on a shiaijo, see it on a public phone', async ({ page, browser, baseURL }) => {
     let compId;
     let bout1;
 
@@ -181,7 +182,5 @@ test.describe('smoke', () => {
         await spectator.close();
       }
     });
-
-    await testInfo.attach('audit.json', { body: JSON.stringify(audit, null, 2), contentType: 'application/json' });
   });
 });

@@ -253,11 +253,13 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 			c.JSON(http.StatusBadRequest, gin.H{"error": "match ID is required"})
 			return
 		}
-		if !requireExistingCompetition(c, comps, compID) {
-			return
-		}
+		// The engine reads config.md once and answers an unknown competition
+		// with a NotFoundError, so the handler reads nothing of its own.
 		roster, err := eng.KachinukiRoster(compID, matchID)
+		var notFound *engine.NotFoundError
 		switch {
+		case errors.As(err, &notFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})
 		case errors.Is(err, engine.ErrNotKachinuki):
 			c.JSON(http.StatusBadRequest, gin.H{"error": "this competition's team matches are not kachinuki"})
 		case errors.Is(err, engine.ErrMatchNotFound):

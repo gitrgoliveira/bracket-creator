@@ -2640,7 +2640,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // new team's lineup is read), so a mount reads once rather than once before
   // and once after its lineups land. A roster read for another key is not shown, so the
   // line never lags a recorded bout. A failed read is null
-  // (fetchKachinukiRoster never throws) and shows no line. It feeds no verdict
+  // (fetchKachinukiRoster never throws) and shows no line; it keeps the last
+  // answer for the closing below. It feeds no verdict
   // and does not arm End match. Its one other reader is the closing of a
   // recorded last bout (bc-kbrc, coordinator decision 2026-10-11): only when
   // this read says a side's lineup has nobody left does the bout Record bout
@@ -2649,30 +2650,54 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const kachinukiRosterReadKey = kachinukiBoutMode && m.compId && m.id && lineupsSettled
     ? `${kachinukiRosterKey(m.id, m.subResults)}#${servedLineupsKey}`
     : "";
+  // The stored log's last numbered bout when Record bout has recorded it, as
+  // `${matchId}|${position}`, else "": the bout a kept roster answer may close.
+  const kachinukiRecordedLastKey = (() => {
+    const rows = (Array.isArray(m.subResults) ? m.subResults : []).filter(s => s && s.position > 0);
+    if (rows.length === 0) return "";
+    const last = rows.reduce((x, y) => (y.position > x.position ? y : x));
+    return last.recorded === true ? `${m.compId || ""}|${m.id || ""}|${last.position}` : "";
+  })();
   const [kachinukiRoster, setKachinukiRoster] = useStateA(null);
   useEffectA(() => {
     const api = window.API;
+    // No read to make (not in bout mode, the lineups not settled): the last
+    // answer is kept, it is only shown for the key it was read for and only
+    // closes a bout of the match it was read for (below).
     if (!kachinukiRosterReadKey || !api || typeof api.fetchKachinukiRoster !== "function") {
-      setKachinukiRoster(null);
       return undefined;
     }
     let live = true;
     const key = kachinukiRosterReadKey;
+    const closesKey = kachinukiRecordedLastKey;
     Promise.resolve()
       .then(() => api.fetchKachinukiRoster(m.compId, m.id))
       .then(
-        (roster) => { if (live) setKachinukiRoster(roster ? { key, roster } : null); },
-        () => { if (live) setKachinukiRoster(null); },
+        // A failed read (null, or a rejection) keeps the previous answer.
+        (roster) => { if (live && roster) setKachinukiRoster({ key, closesKey, roster }); },
+        () => {},
       );
     return () => { live = false; };
   }, [kachinukiRosterReadKey, m.compId]);
   // The roster read for the bout log on screen, or null (none, failed, or a
-  // read for another key still out).
+  // read for another key still out). The advisory line shows only this one, so
+  // it never lags a recorded bout.
   const kachinukiRosterShown = kachinukiRoster && kachinukiRoster.key === kachinukiRosterReadKey
     ? kachinukiRoster.roster : null;
+  // bc-kbrc, review round 3: what closes a recorded last bout is the last
+  // answer that LANDED for that same recorded bout of this match, kept while a
+  // newer read is out or after one fails (stale-while-revalidate), so a lineup
+  // re-read never reopens the bout under the operator's finger. Only a read
+  // that lands with another answer changes it. The stored log decides first,
+  // at once: an answer is kept only for the recorded last bout it was read
+  // for, so a bout un-recorded or removed, another match, or a new live row is
+  // decided from the stored data whatever the kept answer said.
+  const kachinukiRosterForClose = kachinukiRosterShown
+    || (kachinukiRoster && kachinukiRecordedLastKey && kachinukiRoster.closesKey === kachinukiRecordedLastKey
+      ? kachinukiRoster.roster : null);
   // bc-kbrc: the words of the no-pairing line, or null when the roster does not
   // say a side's lineup has nobody left.
-  const kachinukiNoPairing = kachinukiNoPairingText(kachinukiRosterShown);
+  const kachinukiNoPairing = kachinukiNoPairingText(kachinukiRosterForClose);
   //
   // mp-gmcg: [End match] outcome, derived from LOCAL bout state so an
   // unsaved just-scored bout counts (the operator scores the final bout and

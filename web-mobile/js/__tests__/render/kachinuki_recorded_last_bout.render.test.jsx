@@ -223,3 +223,107 @@ describe('a recorded last kachinuki bout with no pairing after it', () => {
     expect(recordButton().disabled).toBe(false);
   });
 });
+
+// Review round 3, finding 2: the closed state keeps the last roster answer that
+// landed for the same recorded bout while a newer read is out or after one
+// fails, and the stored log decides first, at once.
+describe('a closed recorded last bout and a roster re-read', () => {
+  const announce = async (teamId) => {
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('lineup-updated', { detail: { competitionId: 'comp1', teamId } }));
+    });
+    await settle();
+  };
+  // A lineup the server now holds for Aka that differs from the one read.
+  const changedLineupA = { positions: { '1': 'Kudo', '2': 'Mori', '3': '' }, memberIds: { '1': 'a1', '2': 'a2' }, matchId: 'm1' };
+  const rerender = async (view, match) => {
+    await act(async () => {
+      view.rerender(<ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={vi.fn()} password="secret" />);
+    });
+    await settle();
+  };
+  const expectClosed = () => {
+    expect(screen.getByTestId('kachinuki-no-pairing').textContent)
+      .toBe('Shiro has no fighters left. End match finishes the encounter.');
+  };
+
+  it('does not reopen while a lineup-updated re-read is in flight', async () => {
+    stubApi(SHIRO_OUT);
+    const { container } = await mount(kachinukiMatch([BOUT_1, BOUT_2]));
+    expect(liveRows(container).length).toBe(0);
+    window.API.fetchKachinukiRoster = vi.fn(() => new Promise(() => {}));
+    window.API.fetchLineupInForce.mockImplementation((_c, teamId) => Promise.resolve(teamId === 'team-A' ? changedLineupA : LINEUPS[teamId]));
+    await announce('team-A');
+    expect(window.API.fetchKachinukiRoster).toHaveBeenCalledTimes(1);
+    expect(liveRows(container).length).toBe(0);
+    expectClosed();
+  });
+
+  it('does not reopen when the re-read fails', async () => {
+    stubApi(SHIRO_OUT);
+    const { container } = await mount(kachinukiMatch([BOUT_1, BOUT_2]));
+    expect(liveRows(container).length).toBe(0);
+    // fetchKachinukiRoster answers a failed read with null.
+    window.API.fetchKachinukiRoster = vi.fn().mockResolvedValue(null);
+    window.API.fetchLineupInForce.mockImplementation((_c, teamId) => Promise.resolve(teamId === 'team-A' ? changedLineupA : LINEUPS[teamId]));
+    await announce('team-A');
+    expect(window.API.fetchKachinukiRoster).toHaveBeenCalledTimes(1);
+    expect(liveRows(container).length).toBe(0);
+    expectClosed();
+  });
+
+  it('reopens at once when the bout is un-recorded, before any re-read lands', async () => {
+    stubApi(SHIRO_OUT);
+    const view = await mount(kachinukiMatch([BOUT_1, BOUT_2]));
+    expect(liveRows(view.container).length).toBe(0);
+    window.API.fetchKachinukiRoster = vi.fn(() => new Promise(() => {}));
+    const { recorded: _r, ...unrecorded } = BOUT_2;
+    await rerender(view, kachinukiMatch([BOUT_1, unrecorded]));
+    expect(liveRows(view.container).length).toBe(1);
+    expect(screen.queryByTestId('kachinuki-no-pairing')).toBeNull();
+  });
+});
+
+// Review round 3, finding 4: a knockout tie recorded when both teams had nobody
+// left is fought on in encho on that bout. The server keeps both fighters on
+// for it (engine.KachinukiRoster), and the write that starts the encho takes
+// the recorded mark off, so the line names both on before and during encho.
+describe('a recorded knockout tie fought on in encho', () => {
+  const BOTH_ON = {
+    sideA: { lineupFound: true, on: { name: 'Mori', memberId: 'a2' }, remaining: [] },
+    sideB: { lineupFound: true, on: { name: 'Ueda', memberId: 'b2' }, remaining: [] },
+  };
+  const T1 = {
+    position: 1, sideA: 'Kudo', sideAMemberId: 'a1', sideB: 'Taki', sideBMemberId: 'b1',
+    winner: 'Taki', winnerMemberId: 'b1', decision: 'fought', ipponsA: [], ipponsB: ['M'], recorded: true,
+  };
+  const T2 = {
+    position: 2, sideA: 'Mori', sideAMemberId: 'a2', sideB: 'Taki', sideBMemberId: 'b1',
+    winner: 'Mori', winnerMemberId: 'a2', decision: 'fought', ipponsA: ['K'], ipponsB: [], recorded: true,
+  };
+  const TIE = {
+    position: 3, sideA: 'Mori', sideAMemberId: 'a2', sideB: 'Ueda', sideBMemberId: 'b2',
+    winner: '', winnerMemberId: '', decision: 'hikiwake', ipponsA: ['M'], ipponsB: ['K'], recorded: true,
+  };
+
+  it('names both fighters on after the recorded tie and in encho, the bout live', async () => {
+    stubApi(BOTH_ON);
+    const view = await mount(kachinukiMatch([T1, T2, TIE], 'bracket'));
+    expect(liveRows(view.container).length).toBe(1);
+    expect(screen.queryByTestId('kachinuki-no-pairing')).toBeNull();
+    const line = () => screen.getByTestId('kachinuki-advisory').textContent;
+    expect(line()).toContain('Ueda on');
+    expect(line()).toContain('Mori on');
+    expect(line()).not.toContain('no fighters left');
+
+    // The Encho tap lands: the stored row is no longer recorded.
+    const { recorded: _r, ...inEncho } = { ...TIE, decision: '', encho: { periodCount: 1 } };
+    await act(async () => {
+      view.rerender(<ScoreEditorModal match={kachinukiMatch([T1, T2, inEncho], 'bracket')} onClose={vi.fn()} onSubmit={vi.fn()} password="secret" />);
+    });
+    await settle();
+    expect(liveRows(view.container).length).toBe(1);
+    expect(line()).toContain('Ueda on');
+    expect(line()).toContain('Mori on');
+  });
+});

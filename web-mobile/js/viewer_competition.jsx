@@ -185,15 +185,22 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // needs it explicitly: BracketTree builds the same labeller internally from
   // the rounds it is handed. Without it the modal would still never leak the
   // raw id, but it would say "TBD" where the card behind it says "Winner of M1".
-  const bracketSlotLabel = useMemo(
-    () => (derivedBracket && window.bracketSlotLabeller ? window.bracketSlotLabeller(derivedBracket.rounds) : null),
+  // The display model's match numbers, built once over the rounds and shared
+  // by the slot labeller and the 3rd-place card's labels below (as the admin
+  // bracket does).
+  const bracketMatchNums = useMemo(
+    () => (derivedBracket && window.buildDisplayModel ? window.buildDisplayModel(derivedBracket.rounds).matchNumById : null),
     [derivedBracket]
+  );
+  const bracketSlotLabel = useMemo(
+    () => (derivedBracket && window.makeSlotLabeller ? window.makeSlotLabeller(derivedBracket.rounds, bracketMatchNums) : null),
+    [derivedBracket, bracketMatchNums]
   );
   // The 3rd-place card's empty sides ("Loser of M<n>"), memoised over the
   // rounds so MatchCard's memo holds across renders.
   const bronzeEmptyLabels = useMemo(
-    () => (derivedBracket && window.bronzeSlotLabels ? window.bronzeSlotLabels(derivedBracket.rounds) : undefined),
-    [derivedBracket]
+    () => (derivedBracket && window.bronzeSlotLabels ? window.bronzeSlotLabels(derivedBracket.rounds, bracketMatchNums) : undefined),
+    [derivedBracket, bracketMatchNums]
   );
 
   // draw-ready is NOT pre-start for the purposes of showing pool/bracket

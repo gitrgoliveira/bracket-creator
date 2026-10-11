@@ -1421,6 +1421,7 @@ window.buildDisplayModel = buildDisplayModel;
 // bracketSlotLabeller resolves the slot to the card number the tree prints.
 window.slotDisplayName = slotDisplayName;
 window.bracketSlotLabeller = bracketSlotLabeller;
+window.makeSlotLabeller = makeSlotLabeller;
 window.bronzeSlotLabels = bronzeSlotLabels;
 window.formatIpponsScore = formatIpponsScore;
 window.teamIVScore = teamIVScore;

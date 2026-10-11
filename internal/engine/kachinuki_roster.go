@@ -2,6 +2,8 @@ package engine
 
 import (
 	"errors"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 // ErrNotKachinuki is returned by KachinukiRoster for a competition whose team
@@ -68,6 +70,9 @@ type KachinukiRoster struct {
 // sheet, a second device and the public sheet read the same line. When a draw
 // leaves one side with nobody, the advance appends a pairing that keeps that
 // side's fighter (advanceAfterHikiwake), which is then the last bout and on.
+// In a knockout match a recorded draw that is still the last bout keeps both
+// its fighters on: the bracket needs a winner, so that bout is fought on in
+// encho (bc-kfnl), and a write that starts the encho takes the mark off.
 //
 // The queues come from kachinukiRosterQueues and the retirements from
 // RetiredPlayersFromBoutLog, as the advance (MaybeAdvanceKachinuki) takes
@@ -79,6 +84,9 @@ func (e *Engine) KachinukiRoster(compID, matchID string) (KachinukiRoster, error
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
 		return KachinukiRoster{}, err
+	}
+	if comp == nil {
+		return KachinukiRoster{}, notFoundErrorf("competition %s not found", compID)
 	}
 	if !comp.IsKachinuki() {
 		return KachinukiRoster{}, ErrNotKachinuki
@@ -113,7 +121,14 @@ func (e *Engine) KachinukiRoster(compID, matchID string) (KachinukiRoster, error
 		live := parent.SubResults[i]
 		onA = kachinukiFighter{Name: live.SideA, MemberID: live.SideAMemberID}
 		onB = kachinukiFighter{Name: live.SideB, MemberID: live.SideBMemberID}
-		if live.Recorded {
+		// A recorded DRAW that is still the last bout of a KNOCKOUT match is a
+		// tie the bracket cannot keep: the advance appended nothing after it
+		// (both sides had nobody left, or it would have), and the operator
+		// fights it on in encho on that same bout, which then clears the mark
+		// (carryRecordedBouts). Its fighters stay on, so the line never reads
+		// "no fighters left" for both while the bout is still the way on.
+		knockoutTie := located.IsBracket && state.IsDraw(live.Decision)
+		if live.Recorded && !knockoutTie {
 			liveRetiredA, liveRetiredB = RetiredPlayersFromBoutLog(parent.SubResults[i:i+1], parent.SideA, parent.SideB)
 		}
 	}

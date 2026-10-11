@@ -10,10 +10,10 @@ import { describe, it, expect } from 'vitest';
 import {
   kachinukiAdvisoryModel,
   kachinukiAdvisorySide,
+  kachinukiFighterKnown,
   kachinukiFighterLabel,
   kachinukiNoPairingText,
   kachinukiRecordedBoutCloses,
-  kachinukiRosterHasNoNext,
   kachinukiRosterKey,
   lastNumberedBout,
   storedBoutRecorded,
@@ -219,42 +219,37 @@ describe('storedBoutRecorded', () => {
   });
 });
 
-// bc-kbrc: the line in place of the live bout once the last bout is recorded
-// and no pairing follows.
+// bc-kbrc, review round 9: the line in place of the live bout once the last
+// bout is recorded and no pairing follows. It reads the SERVER's verdict
+// (nextPairing, exhausted), never re-derives it from the queues.
 describe('kachinukiNoPairingText', () => {
-  const out = { lineupFound: true, on: null, remaining: [] };
-  const on = { lineupFound: true, on: { name: 'Kudo', memberId: 'a1' }, remaining: [] };
-  it('names the side the roster says has nobody left', () => {
-    expect(kachinukiNoPairingText({ sideA: on, sideB: out }))
+  const side = (exhausted) => ({ lineupFound: true, on: null, remaining: [], exhausted });
+  it('names the side the server says has nobody left', () => {
+    expect(kachinukiNoPairingText({ nextPairing: false, sideA: side(false), sideB: side(true) }))
       .toBe('Shiro has no fighters left. End match finishes the encounter.');
-    expect(kachinukiNoPairingText({ sideA: out, sideB: on }))
+    expect(kachinukiNoPairingText({ nextPairing: false, sideA: side(true), sideB: side(false) }))
       .toBe('Aka has no fighters left. End match finishes the encounter.');
   });
-  it('names both sides when neither has anybody left', () => {
-    expect(kachinukiNoPairingText({ sideA: out, sideB: out }))
-      .toBe('Shiro and Aka have no fighters left. End match finishes the encounter.');
+  it('is null when a pairing would follow, or the verdict is absent', () => {
+    expect(kachinukiNoPairingText({ nextPairing: true, sideA: side(true), sideB: side(false) })).toBeNull();
+    expect(kachinukiNoPairingText({ sideA: side(true), sideB: side(false) })).toBeNull();
   });
-  it('is null without a lineup, a roster, or a side with nobody left', () => {
-    const noLineup = { lineupFound: false, on: null, remaining: [] };
-    expect(kachinukiNoPairingText({ sideA: noLineup, sideB: noLineup })).toBeNull();
+  it('is null without a roster or an exhausted side, whatever the queues say', () => {
     expect(kachinukiNoPairingText(null)).toBeNull();
-    expect(kachinukiNoPairingText({ sideA: on, sideB: on })).toBeNull();
+    // Both queues empty, nobody on: a recorded draw, or no lineup's knowledge.
+    // Only the server's exhausted flag names a side.
+    expect(kachinukiNoPairingText({ nextPairing: false, sideA: side(false), sideB: side(false) })).toBeNull();
   });
 });
 
-// Review round 8: Record bout has nothing left to do only when the read says
-// both sides' lineups have nobody behind the fighter on.
-describe('kachinukiRosterHasNoNext', () => {
-  const side = (remaining, lineupFound = true) => ({ lineupFound, on: { name: 'X', memberId: 'x' }, remaining });
-  it('is true when both lineups have nobody behind the fighter on', () => {
-    expect(kachinukiRosterHasNoNext({ sideA: side([]), sideB: side([]) })).toBe(true);
+// Review round 9, finding 7: the one "the roster names a fighter" test.
+describe('kachinukiFighterKnown', () => {
+  it('is true for a member id or a name', () => {
+    expect(kachinukiFighterKnown({ memberId: 'm1', name: '' })).toBe(true);
+    expect(kachinukiFighterKnown({ name: 'Kudo' })).toBe(true);
   });
-  it('is false when either side has someone behind', () => {
-    expect(kachinukiRosterHasNoNext({ sideA: side([{ name: 'Y' }]), sideB: side([]) })).toBe(false);
-    expect(kachinukiRosterHasNoNext({ sideA: side([]), sideB: side([{ name: 'Y' }]) })).toBe(false);
-  });
-  it('is false without a read or with a lineup not found', () => {
-    expect(kachinukiRosterHasNoNext(null)).toBe(false);
-    expect(kachinukiRosterHasNoNext({ sideA: side([], false), sideB: side([]) })).toBe(false);
+  it('is false for nothing', () => {
+    expect(kachinukiFighterKnown(null)).toBe(false);
+    expect(kachinukiFighterKnown({ name: '', memberId: '' })).toBe(false);
   });
 });

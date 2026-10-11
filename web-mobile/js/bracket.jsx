@@ -198,7 +198,9 @@ function bracketSlotLabeller(rounds) {
 // parseWinnerOf. So each side reads "Loser of M<n>", numbered through the same
 // display model the cards are stamped from; a semi-final with no number (a
 // hidden bye, or a bracket drawn before numbering) degrades to "TBD", as
-// slotDisplayName does. Callers use a label only for a side that is empty;
+// slotDisplayName does. A side whose semi-final has completed (a bye semi, or
+// the bronze already played) gets "" and keeps its plain empty rendering.
+// Callers use a label only for a side that is empty;
 // a seated competitor is shown as themself. matchNumById is optional: a caller
 // that already holds the display model passes its numbers rather than having
 // the model built again. Callers memoise the result over the rounds, since a
@@ -207,7 +209,11 @@ function bronzeSlotLabels(rounds, matchNumById) {
   const rs = Array.isArray(rounds) ? rounds : [];
   const feeders = bronzeFeederSemis(rs);
   const nums = matchNumById || buildDisplayModel(rs).matchNumById;
-  const label = (m) => feederRefLabel("Loser", feederMatchNumOf(m, nums));
+  // Only a side still WAITING on its semi-final is labelled: the condition
+  // isPendingBracketMatch (admin_helpers.jsx) asks, a feeding semi that has
+  // not completed. A completed semi seats its loser (or, a bye semi, never
+  // gives one), so an empty side then keeps its plain rendering ("").
+  const label = (m) => (m && m.status !== "completed" ? feederRefLabel("Loser", feederMatchNumOf(m, nums)) : "");
   return { a: label(feeders.a), b: label(feeders.b) };
 }
 

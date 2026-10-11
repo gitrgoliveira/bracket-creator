@@ -39,25 +39,51 @@ type KachinukiRosterFighter struct {
 // positions: {}, shows none). Remaining is then EMPTY, because the only other
 // source, the bout log, knows only the fighters already seen and any count
 // taken from it would be false; On is still given.
+//
+// Exhausted is the advance's own verdict that the side has nobody left: the
+// last numbered bout is RECORDED, it was a win (the advance's MatchEnded:
+// the loser's queue is empty, so Record bout appended nothing after it),
+// this side lost it, and this side's queue came from a lineup (LineupFound).
+// Without a lineup the advance's queue is the bout log's, which knows only
+// the fighters already seen and so empties after any loss: Exhausted is then
+// false, and the bout stays live as it always did. A recorded draw exhausts
+// nobody (both fighters stay on; the advance reports BothExhausted, never
+// MatchEnded), and an unrecorded last bout is no result, so it exhausts
+// nobody either. At most one side is exhausted.
 type KachinukiRosterSide struct {
 	LineupFound bool                     `json:"lineupFound"`
 	On          *KachinukiRosterFighter  `json:"on"`
 	Remaining   []KachinukiRosterFighter `json:"remaining"`
+	Exhausted   bool                     `json:"exhausted"`
 }
 
 // KachinukiRoster is the advisory read of a kachinuki encounter's two queues.
 // SideA and SideB are the match's sides as stored (SideA is Aka on the sheet).
+//
+// NextPairing is whether Record bout, tapped now on the match as stored,
+// would append a pairing: the very decision MaybeAdvanceKachinuki makes
+// (decideKachinukiAdvance), asked without writing. On a RECORDED last bout it
+// says whether a second tap could append anything (false: Record bout writes
+// nothing, a lineup saved since may make it true). On an unrecorded last bout
+// it reads the row's stored outcome as Record bout would (the running
+// autosave's winner at a one-point lead counts), so it is current only as of
+// the read. False for a completed match, a log with no numbered bout, a last
+// bout with no outcome or no fighter, and an outcome the advance cannot read.
 type KachinukiRoster struct {
-	SideA KachinukiRosterSide `json:"sideA"`
-	SideB KachinukiRosterSide `json:"sideB"`
+	SideA       KachinukiRosterSide `json:"sideA"`
+	SideB       KachinukiRosterSide `json:"sideB"`
+	NextPairing bool                `json:"nextPairing"`
 }
 
 // KachinukiRoster answers, for a kachinuki team match, who each side has on
 // the court and who it has left. It is ADVISORY ONLY (operator ruling
 // 2026-09-24): kachinuki is operator-led, team sizes are unregulated, and a
 // side that reads as exhausted may still field fighters the app has never
-// seen, so nothing ends the encounter, arms End match or holds a button back
-// on this answer.
+// seen, so nothing ends the encounter or arms End match on this answer. The
+// sheet reads two verdicts from it, both the advance's own: NextPairing (Record
+// bout on a recorded bout would write nothing, so the button is disabled) and
+// Exhausted (a recorded win left that side's lineup with nobody, so the bout
+// is shown closed).
 //
 // Every numbered bout before the last retires by its result, as the advance
 // reads it (RetiredPlayersFromBoutLog: the attribution owners, id first, and
@@ -104,8 +130,13 @@ func (e *Engine) KachinukiRoster(compID, matchID string) (KachinukiRoster, error
 	// The queues are built inside the read, and hold their own copies of the
 	// names and ids they take from the lineups.
 	var queueA, queueB kachinukiSideQueue
+	// The advance's own decision, asked quietly (no breadcrumb: nothing is
+	// tapped), on the same rule: the read's verdict is what Record bout does.
+	var verdict kachinukiAdvanceVerdict
+	var decided bool
 	if err := e.readLineupRule(compID, comp.IsKnockoutEnabled(), located.PoolMatches, located.Bracket, func(rule *lineupRule) {
 		queueA, queueB = kachinukiRosterQueues(comp, parent, rule)
+		verdict, decided = decideKachinukiAdvance(comp, parent, rule, true)
 	}); err != nil {
 		return KachinukiRoster{}, err
 	}
@@ -140,10 +171,22 @@ func (e *Engine) KachinukiRoster(compID, matchID string) (KachinukiRoster, error
 			liveRetiredA, liveRetiredB = RetiredPlayersFromBoutLog(parent.SubResults[i:i+1], parent.SideA, parent.SideB)
 		}
 	}
-	return KachinukiRoster{
-		SideA: kachinukiRosterSide(queueA, retiredA, onA, liveRetiredA),
-		SideB: kachinukiRosterSide(queueB, retiredB, onB, liveRetiredB),
-	}, nil
+	out := KachinukiRoster{
+		SideA:       kachinukiRosterSide(queueA, retiredA, onA, liveRetiredA),
+		SideB:       kachinukiRosterSide(queueB, retiredB, onB, liveRetiredB),
+		NextPairing: decided && verdict.out.Next != nil,
+	}
+	// Exhausted: a recorded win whose loser the advance found with nobody
+	// left (MatchEnded), on a lineup's queue only (see KachinukiRosterSide).
+	if decided && verdict.last.Recorded && verdict.out.MatchEnded {
+		switch verdict.out.WinningSide {
+		case "A":
+			out.SideB.Exhausted = verdict.lineupB
+		case "B":
+			out.SideA.Exhausted = verdict.lineupA
+		}
+	}
+	return out, nil
 }
 
 // kachinukiRosterSide shapes one side's answer (see KachinukiRosterSide). on
@@ -152,10 +195,10 @@ func (e *Engine) KachinukiRoster(compID, matchID string) (KachinukiRoster, error
 // is never nil, so the wire carries [] rather than null.
 func kachinukiRosterSide(queue kachinukiSideQueue, retired RetiredMemberSet, on kachinukiFighter, liveRetired RetiredMemberSet) KachinukiRosterSide {
 	out := KachinukiRosterSide{
-		LineupFound: queue.found && len(queue.fighters) > 0,
+		LineupFound: queue.fromLineup(),
 		Remaining:   []KachinukiRosterFighter{},
 	}
-	onKnown := on.Name != "" || on.MemberID != ""
+	onKnown := kachinukiFighterKnown(on)
 	if onKnown && !IsMemberRetired(on, liveRetired, nil) {
 		f := KachinukiRosterFighter(on)
 		out.On = &f

@@ -159,7 +159,7 @@ import { sideLookupKey } from './competitor_identity.jsx';
 // bc-pnum: the ONE primitive that composes a squad member's visible label
 // ("T10.1"); see its header for why this is never restated inline.
 import { squadMemberLabel } from './squad_member_label.jsx';
-import { kachinukiAdvisoryModel, kachinukiNoPairingText, kachinukiRecordedBoutCloses, kachinukiRosterHasNoNext, kachinukiRosterKey, lastNumberedBout, storedBoutRecorded } from './kachinuki_advisory.jsx';
+import { kachinukiAdvisoryModel, kachinukiNoPairingText, kachinukiRecordedBoutCloses, kachinukiRosterKey, lastNumberedBout, storedBoutRecorded } from './kachinuki_advisory.jsx';
 
 // Shared inline style for the squad member label riding beside a bout row's
 // fighter name (squadLabelFor, TeamScoreEditorModal below). A muted, small
@@ -2757,15 +2757,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // encounter, Record bout stays disabled (it would record the same bout
   // again) and "+ Add next bout manually" is open.
   const kachinukiNoLiveBout = kachinukiBoutMode && kachinukiCurBoutIdx < 0;
-  // Review round 8: the live bout is stored as recorded and the roster read
-  // says nothing can follow it (a tie Record bout recorded with both sides out
-  // stays live, Encho offered). Record bout would write nothing, so it is
-  // disabled until a change of the bout's result or an encho takes the mark off
-  // (the server's merge, mergeHold.unrecordReopenedBouts). Without such a read
-  // it stays enabled: the advance may still append a pairing.
+  // Review rounds 8 and 9: the live bout is stored as recorded and the
+  // server's own Record bout decision says no pairing would follow it
+  // (roster `nextPairing` false: a tie recorded with both sides out stays live,
+  // Encho offered, and so does a recorded win over a side with no lineup).
+  // Record bout would write nothing, so it is disabled until a change of the
+  // bout's result or an encho takes the mark off (the server's merge,
+  // mergeHold.unrecordReopenedBouts), or a lineup saved since makes a pairing
+  // possible. Without a read it stays enabled.
   const kachinukiCurBoutRecorded = kachinukiBoutMode && kachinukiCurBoutIdx >= 0
     && storedBoutRecorded(m, Number(positions[kachinukiCurBoutIdx]))
-    && kachinukiRosterHasNoNext(kachinukiRosterForClose);
+    && !!kachinukiRosterForClose && kachinukiRosterForClose.nextPairing === false;
   const kachinukiCurrentBoutPlayed = kachinukiBoutMode
     ? kachinukiCurBoutIdx >= 0 && subBoutHasBeenPlayed(subs[kachinukiCurBoutIdx])
     : true;
@@ -3558,12 +3560,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       if (sideAMemberId) entry.sideAMemberId = sideAMemberId;
       if (sideBMemberId) entry.sideBMemberId = sideBMemberId;
       if (winnerMemberId) entry.winnerMemberId = winnerMemberId;
-      // bc-kfnl: a kachinuki bout Record bout closed carries the server's
-      // recorded mark, echoed as the match holds it so the row this write
-      // sends reads as the stored one. The server is the mark's only writer:
-      // it keeps the stored value whatever a write says (the "recorded" merge
-      // group, which no client write names).
-      if (isKachinuki && !isDaihyo && storedBoutRecorded(m, entry.position)) entry.recorded = true;
+      // bc-kfnl: a row never carries the kachinuki `recorded` mark. The server
+      // is its only writer (the "recorded" merge group, which no client write
+      // names) and ignores it on the wire, so the sheet does not send it.
       // mp-4pc: encho + hantei are valid ONLY on the daihyosen
       // (validation.go validateSubBout). daihyosenEnchoFields emits the two
       // independently: encho is optional for a hantei decision.

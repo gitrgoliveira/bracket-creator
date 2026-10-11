@@ -77,13 +77,20 @@ const BOUT_2 = {
   position: 2, sideA: 'Kudo', sideAMemberId: 'a1', sideB: 'Ueda', sideBMemberId: 'b2',
   winner: 'Kudo', winnerMemberId: 'a1', decision: 'fought', ipponsA: ['M'], ipponsB: [], recorded: true,
 };
+// The server's Record bout verdict (engine.KachinukiRoster): no pairing
+// follows, and the loser's lineup has nobody left.
 const SHIRO_OUT = {
-  sideA: { lineupFound: true, on: { name: 'Kudo', memberId: 'a1' }, remaining: [{ name: 'Mori', memberId: 'a2' }] },
-  sideB: { lineupFound: true, on: null, remaining: [] },
+  nextPairing: false,
+  sideA: { lineupFound: true, on: { name: 'Kudo', memberId: 'a1' }, remaining: [{ name: 'Mori', memberId: 'a2' }], exhausted: false },
+  sideB: { lineupFound: true, on: null, remaining: [], exhausted: true },
 };
+// A forged answer the server never gives (it exhausts at most one side, and
+// never after a draw): the sheet's own draw rule must still keep a recorded
+// draw live.
 const BOTH_OUT = {
-  sideA: { lineupFound: true, on: null, remaining: [] },
-  sideB: { lineupFound: true, on: null, remaining: [] },
+  nextPairing: false,
+  sideA: { lineupFound: true, on: null, remaining: [], exhausted: true },
+  sideB: { lineupFound: true, on: null, remaining: [], exhausted: true },
 };
 
 function kachinukiMatch(subResults, phase = 'pool') {
@@ -153,20 +160,38 @@ describe('a recorded last kachinuki bout with no pairing after it', () => {
   });
 
   it('stays live, as before, when no lineup says a side has nobody left', async () => {
-    // No roster read (no lineups), and a roster whose lineups were not found.
-    for (const roster of [null, {
-      sideA: { lineupFound: false, on: { name: 'Kudo', memberId: 'a1' }, remaining: [] },
-      sideB: { lineupFound: false, on: null, remaining: [] },
-    }]) {
+    // No roster read, and the server's answer for a loser with no lineup: no
+    // pairing follows, but no side is exhausted (the bouts alone cannot say).
+    // Review round 9, finding 2: with that answer Record bout would write
+    // nothing, so it is disabled; with no read it stays enabled.
+    for (const [roster, recordDisabled] of [[null, false], [{
+      nextPairing: false,
+      sideA: { lineupFound: true, on: { name: 'Kudo', memberId: 'a1' }, remaining: [], exhausted: false },
+      sideB: { lineupFound: false, on: null, remaining: [], exhausted: false },
+    }, true]]) {
       stubApi(roster);
       const view = await mount(JSON.parse(JSON.stringify(kachinukiMatch([BOUT_1, BOUT_2]))));
       expect(liveRows(view.container).length).toBe(1);
       expect(screen.getByTestId('kachinuki-done-bout-0')).toBeTruthy();
       expect(screen.queryByTestId('kachinuki-done-bout-1')).toBeNull();
       expect(screen.queryByTestId('kachinuki-no-pairing')).toBeNull();
-      expect(recordButton().disabled).toBe(false);
+      expect(recordButton().disabled).toBe(recordDisabled);
       view.unmount();
     }
+  });
+
+  it('keeps Record bout open on a recorded bout when the server says a pairing would follow', async () => {
+    // A lineup saved after the bout was recorded gives the loser's side a
+    // fighter: a tap now appends, so the button stays open and nothing closes.
+    stubApi({
+      nextPairing: true,
+      sideA: { lineupFound: true, on: { name: 'Kudo', memberId: 'a1' }, remaining: [], exhausted: false },
+      sideB: { lineupFound: true, on: null, remaining: [{ name: 'Sato', memberId: 'b3' }], exhausted: false },
+    });
+    const { container } = await mount(kachinukiMatch([BOUT_1, BOUT_2]));
+    expect(liveRows(container).length).toBe(1);
+    expect(screen.queryByTestId('kachinuki-no-pairing')).toBeNull();
+    expect(recordButton().disabled).toBe(false);
   });
 
   it('a fresh mount keeps the bout live until the roster read lands, then closes it', async () => {
@@ -274,8 +299,9 @@ describe('a closed recorded last bout and a roster re-read', () => {
 // the recorded mark off, so the line names both on before and during encho.
 describe('a recorded knockout tie fought on in encho', () => {
   const BOTH_ON = {
-    sideA: { lineupFound: true, on: { name: 'Mori', memberId: 'a2' }, remaining: [] },
-    sideB: { lineupFound: true, on: { name: 'Ueda', memberId: 'b2' }, remaining: [] },
+    nextPairing: false,
+    sideA: { lineupFound: true, on: { name: 'Mori', memberId: 'a2' }, remaining: [], exhausted: false },
+    sideB: { lineupFound: true, on: { name: 'Ueda', memberId: 'b2' }, remaining: [], exhausted: false },
   };
   const T1 = {
     position: 1, sideA: 'Kudo', sideAMemberId: 'a1', sideB: 'Taki', sideBMemberId: 'b1',

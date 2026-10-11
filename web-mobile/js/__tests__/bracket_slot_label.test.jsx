@@ -136,9 +136,36 @@ describe('bronzeSlotLabels: the 3rd-place match names the semi-finals that fill 
     expect(bronzeSlotLabels(fivePlayerRounds())).toEqual({ a: 'TBD', b: 'Loser of M3' });
   });
 
-  it('reads TBD on both sides when there is no semi-final round', () => {
-    expect(bronzeSlotLabels([[{ id: 'm-r1-0', matchNumber: 1 }]])).toEqual({ a: 'TBD', b: 'TBD' });
-    expect(bronzeSlotLabels(undefined)).toEqual({ a: 'TBD', b: 'TBD' });
+  it('labels nothing when there is no semi-final round', () => {
+    // No semi-final to wait on: an empty side keeps its plain rendering.
+    expect(bronzeSlotLabels([[{ id: 'm-r1-0', matchNumber: 1 }]])).toEqual({ a: '', b: '' });
+    expect(bronzeSlotLabels(undefined)).toEqual({ a: '', b: '' });
+  });
+
+  // Review round 9, finding 4: a side is labelled only while its semi-final
+  // is still to finish (isPendingBracketMatch's condition). A completed semi
+  // seated its loser, or (a bye semi) never gives one, and once the bronze is
+  // played both semis are long done.
+  it('labels only a side still waiting on its semi-final', () => {
+    const rounds = (statusA, statusB) => [
+      [{ id: 'm-r1-0', matchNumber: 1 }, { id: 'm-r1-1', matchNumber: 2 }, { id: 'm-r1-2', matchNumber: 3 }, { id: 'm-r1-3', matchNumber: 4 }],
+      [{ id: 'm-r2-0', matchNumber: 5, status: statusA }, { id: 'm-r2-1', matchNumber: 6, status: statusB }],
+      [{ id: 'm-r3-0', matchNumber: 7 }],
+    ];
+    expect(bronzeSlotLabels(rounds('completed', 'scheduled'))).toEqual({ a: '', b: 'Loser of M6' });
+    expect(bronzeSlotLabels(rounds('running', 'completed'))).toEqual({ a: 'Loser of M5', b: '' });
+    expect(bronzeSlotLabels(rounds('completed', 'completed'))).toEqual({ a: '', b: '' });
+    // The same condition the pending-bracket filter asks of the bronze.
+    const bronze = { id: 'm-bronze', status: 'scheduled', sideA: { name: '' }, sideB: { name: '' } };
+    const r = rounds('completed', 'scheduled');
+    expect(isPendingBracketMatch(bronze, r)).toBe(true);
+    expect(isPendingBracketMatch(bronze, rounds('completed', 'completed'))).toBe(false);
+  });
+
+  it('labels nothing for a completed bye semi-final', () => {
+    const rounds = fivePlayerRounds();
+    rounds[1][0] = { ...rounds[1][0], status: 'completed' };
+    expect(bronzeSlotLabels(rounds)).toEqual({ a: '', b: 'Loser of M3' });
   });
 
   it('reads the numbers from a display model the caller already holds', () => {

@@ -107,9 +107,23 @@ describe('the shared competition fields name their controls', () => {
     render(<PillButton active={false} onClick={noop} data-testid="orphan-court-D" style={{ color: 'red' }}>Shiaijo (court) D</PillButton>);
     const pill = screen.getByTestId('orphan-court-D');
     expect(pill.getAttribute('type')).toBe('button');
-    expect(pill.className).toBe('radio-pill ');
+    expect(pill.className).toBe('radio-pill');
     expect(pill.getAttribute('aria-pressed')).toBe('false');
     expect(pill.style.color).toBe('red');
+  });
+
+  // Review round 9, finding 8: a caller's className joins the pill's classes
+  // rather than being dropped, and the component keeps type and aria-pressed.
+  it('PillButton: merges a caller className and owns type and aria-pressed', () => {
+    render(
+      <PillButton active onClick={noop} className="orphan-court" type="submit" aria-pressed="false" data-testid="pill">
+        Court D
+      </PillButton>
+    );
+    const pill = screen.getByTestId('pill');
+    expect(pill.className.split(' ')).toEqual(['radio-pill', 'is-active', 'orphan-court']);
+    expect(pill.getAttribute('type')).toBe('button');
+    expect(pill.getAttribute('aria-pressed')).toBe('true');
   });
 });
 

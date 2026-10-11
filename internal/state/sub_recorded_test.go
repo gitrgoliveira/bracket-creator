@@ -99,13 +99,13 @@ func TestRecordedGroup(t *testing.T) {
 	// client put on the representative bout, which no server writer marks.
 	assert.False(t, dst.SubResults[2].Recorded, "the -1 row never keeps a mark")
 
-	// Either order gives the same rows.
+	// A row the destination lacks arrives unmarked, whatever the source's
+	// mark: a bout copy never moves one, so a row a client's payload brings
+	// in cannot carry it. GroupRecorded alone marks the row afterwards.
 	one := &MatchResult{SubResults: subs()[1:2]}
-	two := &MatchResult{SubResults: subs()[1:2]}
-	CopyGroup(one, a, GroupRecorded)
 	CopyGroup(one, a, BoutGroup(1))
-	CopyGroup(two, a, BoutGroup(1))
-	CopyGroup(two, a, GroupRecorded)
-	assert.Equal(t, one.SubResults, two.SubResults)
+	assert.Empty(t, RecordedPositions(one.SubResults), "a copied-in row arrives unmarked")
+	assert.Equal(t, "A1", SubResultAt(one.SubResults, 1).Winner, "the bout itself is copied")
+	CopyGroup(one, a, GroupRecorded)
 	assert.Equal(t, []int{1}, RecordedPositions(one.SubResults))
 }

@@ -234,9 +234,12 @@ describe('the kachinuki advisory line', () => {
       sideA: FULL_ROSTER.sideA,
       sideB: { lineupFound: true, on: { name: 'Ueda', memberId: 'b2' }, remaining: [] },
     };
+    // The server's Record bout verdict once the bout is recorded: no pairing
+    // follows and Shiro's lineup has nobody left.
     const exhausted = {
-      sideA: FULL_ROSTER.sideA,
-      sideB: { lineupFound: true, on: null, remaining: [] },
+      nextPairing: false,
+      sideA: { ...FULL_ROSTER.sideA, exhausted: false },
+      sideB: { lineupFound: true, on: null, remaining: [], exhausted: true },
     };
     stubApi(vi.fn().mockResolvedValue(uedaLast));
     // Record bout appends nothing (Shiro has nobody left) but the answer
@@ -255,9 +258,10 @@ describe('the kachinuki advisory line', () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
     const sent = onSubmit.mock.calls[0][0];
     expect(sent.kachinukiBoutFinal).toBe(true);
-    // The wire carries each bout as the match holds it: the recorded bout 1
-    // with its mark, the live bout 2 without one (only the server sets it).
-    expect(sent.subResults.find(s => s.position === 1).recorded).toBe(true);
+    // Review round 9, finding 6: no row carries the recorded mark on the
+    // wire, not even the recorded bout 1 (only the server writes it, and it
+    // ignores what a write says).
+    expect(sent.subResults.find(s => s.position === 1).recorded).toBeUndefined();
     expect(sent.subResults.find(s => s.position === 2).recorded).toBeUndefined();
 
     // The sheet shows the answer's recorded bout at once (review round 5,

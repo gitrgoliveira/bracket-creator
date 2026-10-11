@@ -308,10 +308,15 @@ func CopyGroup(dst, src *MatchResult, group string) {
 			row := subAt(src.SubResults, pos)
 			// The recorded mark is GroupRecorded's, not the bout's: a copy of
 			// the bout keeps the mark the destination row already holds, and a
-			// row the destination lacks brings the source's.
-			if dstRow := subAt(dst.SubResults, pos); row != nil && dstRow != nil && row.Recorded != dstRow.Recorded {
+			// row the destination lacks arrives unmarked. A bout copy never
+			// moves a mark, so a row copied from a client's payload cannot
+			// bring one; only GroupRecorded does.
+			if row != nil {
 				kept := *row
-				kept.Recorded = dstRow.Recorded
+				kept.Recorded = false
+				if dstRow := subAt(dst.SubResults, pos); dstRow != nil {
+					kept.Recorded = dstRow.Recorded
+				}
 				row = &kept
 			}
 			// The representatives are not the bout's: a copy of the bout keeps the

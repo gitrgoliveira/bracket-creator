@@ -47,9 +47,16 @@ export function kachinukiFighterLabel({ squad, teamNumber, memberId, name }) {
 // rule) and, with a lineup, the fighters left behind them (side.remaining,
 // which never holds the fighter on; the first is next). Returns null when
 // there is nothing to say for the side.
+// kachinukiFighterKnown is the ONE client test of "the roster names a fighter
+// here": a member id or a name (a member picked by number and not named yet
+// carries only the id), the twin of engine.kachinukiFighterKnown.
+export function kachinukiFighterKnown(f) {
+  return !!f && !!(f.memberId || f.name);
+}
+
 export function kachinukiAdvisorySide({ side, squad, teamNumber }) {
   if (!side) return null;
-  const on = side.on && (side.on.memberId || side.on.name) ? side.on : null;
+  const on = kachinukiFighterKnown(side.on) ? side.on : null;
   const onLabel = on ? kachinukiFighterLabel({ squad, teamNumber, memberId: on.memberId, name: on.name }) : "";
   if (!side.lineupFound) {
     return onLabel ? { on: onLabel, left: null, text: `${onLabel} on` } : null;
@@ -79,36 +86,20 @@ export function kachinukiAdvisoryModel({ roster, squadA, squadB, teamNumberA, te
 }
 
 // bc-kbrc: the one line the team sheet shows in place of the live bout once
-// Record bout has recorded the last bout and appended no pairing. It names
-// the side or sides the roster says have nobody left: a lineup found, no
-// fighter on (the recorded bout retired them) and nobody behind. null when
-// the roster names no such side (no roster read, the read failed, or no
-// lineup): the sheet then keeps the bout live, as it always did, and shows
-// no line (coordinator decision 2026-10-11).
+// Record bout has recorded the last bout as a win and appended no pairing. It
+// names the side the SERVER's Record bout decision says has nobody left
+// (engine.KachinukiRoster: `nextPairing` false and that side `exhausted`, which
+// the server sets only for the loser of a recorded win whose lineup has nobody
+// behind them, at most one side). null otherwise (no roster read, the read
+// failed, a pairing would follow, or no lineup says so): the sheet then keeps
+// the bout live, as it always did, and shows no line (coordinator decision
+// 2026-10-11).
 export function kachinukiNoPairingText(roster) {
-  const out = (side) => !!side && !!side.lineupFound
-    && !(side.on && (side.on.memberId || side.on.name))
-    && !(Array.isArray(side.remaining) && side.remaining.length > 0);
-  const shiro = out(roster && roster.sideB);
-  const aka = out(roster && roster.sideA);
+  if (!roster || roster.nextPairing !== false) return null;
+  const shiro = !!(roster.sideB && roster.sideB.exhausted);
+  const aka = !!(roster.sideA && roster.sideA.exhausted);
   if (!shiro && !aka) return null;
-  const who = shiro && aka ? "Shiro and Aka have no fighters left."
-    : shiro ? "Shiro has no fighters left."
-    : "Aka has no fighters left.";
-  return `${who} End match finishes the encounter.`;
-}
-
-// kachinukiRosterHasNoNext reports whether the roster read says Record bout
-// could append nothing after the bout it read: both sides' lineups were found
-// and neither has anyone behind the fighter on (remaining is the advance's own
-// list with the fighter on retired). A tie recorded then stays live (Encho on it
-// is the operator's call) while Record bout has nothing left to do (review
-// round 8). false without a read, or with a side whose lineup was not found:
-// the advance then reads the bout log alone and may still append.
-export function kachinukiRosterHasNoNext(roster) {
-  const empty = (side) => !!side && !!side.lineupFound
-    && !(Array.isArray(side.remaining) && side.remaining.length > 0);
-  return !!roster && empty(roster.sideA) && empty(roster.sideB);
+  return `${shiro ? "Shiro" : "Aka"} has no fighters left. End match finishes the encounter.`;
 }
 
 // lastNumberedBout is the bout log's last numbered bout, the row the server
@@ -146,7 +137,10 @@ export function kachinukiRecordedBoutCloses(subResults) {
 // server keeps both of them on whatever its score (the running autosave
 // writes a one-point lead's winner and a 1-1's hikiwake there, and neither is
 // a result), so a live tap reads nothing, and Record bout, which marks the
-// bout recorded with or without a next pairing, reads once. Every reader keys
+// bout recorded with or without a next pairing, reads once. The roster's
+// verdicts (`nextPairing`, `exhausted`) are asked of a RECORDED last bout
+// only, whose result this key carries, so leaving the live score out never
+// lets a stale verdict decide anything. Every reader keys
 // the same way on the same stored log, so a fresh sheet and a second device
 // show the same line.
 export function kachinukiRosterKey(matchId, subResults) {
@@ -167,8 +161,8 @@ export function kachinukiRosterKey(matchId, subResults) {
 
 // storedBoutRecorded reports whether the match holds the numbered bout at
 // position as recorded (SubMatchResult.recorded, which only the server
-// writes: Record bout sets it). The team sheet echoes it on the row it sends,
-// so the wire carries the bout as stored.
+// writes: Record bout sets it). The team sheet asks it to disable Record bout
+// on a recorded bout; it never sends the mark back.
 export function storedBoutRecorded(match, position) {
   const subs = match && Array.isArray(match.subResults) ? match.subResults : [];
   return subs.some(s => s && s.position === position && s.recorded === true);

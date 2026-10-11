@@ -63,11 +63,14 @@ import { useStableId } from './stable_id.jsx';
 // every pill through it, and so do the hand-written pill rows the parity test
 // sanctions (Knockout qualifiers, Assigned shiaijo) and the rest of the app's
 // pill toggles. Extra props (style, data-testid, aria-label) pass through.
-export function PillButton({ active, onClick, disabled, children, ...rest }) {
+export function PillButton({ active, onClick, disabled, children, className, ...rest }) {
+  // A caller's className joins the pill's own classes; type and aria-pressed
+  // stay the component's, whatever a caller passes.
+  const classes = ["radio-pill", active && "is-active", className].filter(Boolean).join(" ");
   return (
     <button
       {...rest}
-      className={`radio-pill ${active ? "is-active" : ""}`}
+      className={classes}
       type="button"
       aria-pressed={!!active}
       onClick={onClick}

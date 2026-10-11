@@ -3417,6 +3417,11 @@ paths:
         the bouts alone do not say how many fighters a team has. The answer is
         a guide only: the server never ends an encounter on it. A public read,
         in a self-run tournament too, since the public score sheet shows it.
+        `nextPairing` and each side's `exhausted` are the server's own Record
+        bout decision on the match as stored, read without writing: the
+        sheet disables Record bout on a recorded bout when `nextPairing` is
+        false, and shows a recorded win's bout closed when a side is
+        `exhausted`.
       security: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
@@ -3428,12 +3433,25 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [sideA, sideB]
+                required: [sideA, sideB, nextPairing]
                 properties:
                   sideA:
                     $ref: '#/components/schemas/KachinukiRosterSide'
                   sideB:
                     $ref: '#/components/schemas/KachinukiRosterSide'
+                  nextPairing:
+                    type: boolean
+                    description: >
+                      Whether Record bout, tapped now on the match as stored,
+                      would append a pairing: the decision the server makes
+                      when it is tapped, asked without writing. On a recorded
+                      last bout, false means a further tap writes nothing (a
+                      lineup saved since may make it true). On an unrecorded
+                      last bout it reads that bout's stored outcome as Record
+                      bout would, so it is current only as of the read. False
+                      for a completed match, a match with no numbered bout, and
+                      a last bout with no outcome, no fighter, or a winner the
+                      server cannot place on either side.
         '400':
           description: >
             An invalid competition id, or a competition whose team matches
@@ -5662,11 +5680,19 @@ components:
         by removing the pairing Record bout appended and by a write that
         raises that bout's overtime, each stamped like any group; it appears
         in the history and in `groupStamps`, and a write that names it in
-        `changed` is refused with 400. The sides, court, schedule and round
+        `changed` is refused with 400 (a write names only a
+        WritableMergeGroup). The sides, court, schedule and round
         are not groups. A write
         names the groups it changes in `changed`; the match records the stamp
         of the last applied change to each in `groupStamps`.
       pattern: '^(points|result|encho|flags|rep|repPickA|repPickB|recorded|bout:-?[0-9]+)$'
+
+    WritableMergeGroup:
+      type: string
+      description: >
+        A MergeGroup a write may name in `changed`: every group but
+        `recorded`, which the server alone writes.
+      pattern: '^(points|result|encho|flags|rep|repPickA|repPickB|bout:-?[0-9]+)$'
 
     DaihyosenWriteStamp:
       type: object
@@ -5693,8 +5719,18 @@ components:
 
     KachinukiRosterSide:
       type: object
-      required: [lineupFound, on, remaining]
+      required: [lineupFound, on, remaining, exhausted]
       properties:
+        exhausted:
+          type: boolean
+          description: >
+            Whether the side has nobody left, as the server's Record bout
+            decision reads it: the last numbered bout is recorded, it was a
+            win, this side lost it, and the lineup in force (`lineupFound`)
+            has nobody behind the loser, so Record bout appended nothing.
+            False without a lineup (the bouts alone know only the fighters
+            already seen), after a recorded draw (both fighters stay on), and
+            while the last bout is not recorded. At most one side is exhausted.
         lineupFound:
           type: boolean
           description: >
@@ -6536,7 +6572,7 @@ components:
           type: array
           writeOnly: true
           items:
-            $ref: '#/components/schemas/MergeGroup'
+            $ref: '#/components/schemas/WritableMergeGroup'
           description: >
             The groups this write changes (PUT /score and each /bulk-score
             entry). The server applies each one only if the write's

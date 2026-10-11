@@ -73,6 +73,17 @@ type AdvanceKachinukiInput struct {
 	LastBout state.SubMatchResult
 	SideA    []kachinukiFighter
 	SideB    []kachinukiFighter
+	// Quiet drops the advance's breadcrumb lines: the roster read
+	// (KachinukiRoster) asks the same decision without making it, and a read
+	// must not log as if Record bout had been tapped.
+	Quiet bool
+}
+
+// logf is the advance's breadcrumb, silent for a Quiet input.
+func (in AdvanceKachinukiInput) logf(format string, args ...any) {
+	if !in.Quiet {
+		log.Printf(format, args...)
+	}
 }
 
 // AdvanceKachinukiResult is the engine's verdict. Under the operator-led
@@ -195,7 +206,7 @@ func AdvanceKachinuki(in AdvanceKachinukiInput) AdvanceKachinukiResult {
 		// side by id or by name. Treat as a no-op (no advancement) so
 		// callers fall back to manual scheduling instead of silently
 		// producing a wrong pairing.
-		log.Printf("engine.AdvanceKachinuki: unrecognized bout outcome, winner=%q sideA=%q sideB=%q decision=%q; no advancement",
+		in.logf("engine.AdvanceKachinuki: unrecognized bout outcome, winner=%q sideA=%q sideB=%q decision=%q; no advancement",
 			last.Winner, last.SideA, last.SideB, last.Decision)
 		return AdvanceKachinukiResult{OutcomeUnread: true}
 	}
@@ -255,7 +266,7 @@ func advanceAfterHikiwake(in AdvanceKachinukiInput) AdvanceKachinukiResult {
 		// BothExhausted and append nothing. The operator ends the encounter:
 		// drawn in pools/league, continued (next bout or encho) in a
 		// knockout. See MaybeAdvanceKachinuki.
-		log.Printf("engine.AdvanceKachinuki: hikiwake exhausted both teams simultaneously at position %d (advisory); operator ends the encounter",
+		in.logf("engine.AdvanceKachinuki: hikiwake exhausted both teams simultaneously at position %d (advisory); operator ends the encounter",
 			in.LastBout.Position)
 		return AdvanceKachinukiResult{BothExhausted: true}
 	case len(in.SideA) == 0:
@@ -269,7 +280,7 @@ func advanceAfterHikiwake(in AdvanceKachinukiInput) AdvanceKachinukiResult {
 		// and Ends on that point (the walkover); under the taisho rule the
 		// pairing is fought as-is. An abandoned trailing unscored slot is
 		// stripped on the completed write.
-		log.Printf("engine.AdvanceKachinuki: hikiwake left side A without a replacement at position %d (advisory); pairing %s against %s",
+		in.logf("engine.AdvanceKachinuki: hikiwake left side A without a replacement at position %d (advisory); pairing %s against %s",
 			in.LastBout.Position, in.LastBout.SideA, in.SideB[0].Name)
 		return AdvanceKachinukiResult{
 			Next: &state.SubMatchResult{
@@ -281,7 +292,7 @@ func advanceAfterHikiwake(in AdvanceKachinukiInput) AdvanceKachinukiResult {
 			},
 		}
 	case len(in.SideB) == 0:
-		log.Printf("engine.AdvanceKachinuki: hikiwake left side B without a replacement at position %d (advisory); pairing %s against %s",
+		in.logf("engine.AdvanceKachinuki: hikiwake left side B without a replacement at position %d (advisory); pairing %s against %s",
 			in.LastBout.Position, in.SideA[0].Name, in.LastBout.SideB)
 		return AdvanceKachinukiResult{
 			Next: &state.SubMatchResult{
@@ -568,6 +579,94 @@ func appendNextKachinukiBout(bm *state.BracketMatch, next state.SubMatchResult) 
 // try again.
 //
 // FR-044, T135, T137.
+// kachinukiAdvanceVerdict is what Record bout decides on a stored kachinuki
+// encounter (decideKachinukiAdvance): the last numbered bout it closes, its
+// index in the log, the advance's verdict on it, and whether a lineup fed
+// each side's queue.
+type kachinukiAdvanceVerdict struct {
+	lastIdx         int
+	last            state.SubMatchResult
+	out             AdvanceKachinukiResult
+	lineupA         bool
+	lineupB         bool
+	rosterAvailable bool
+}
+
+// decideKachinukiAdvance is the ONE decision Record bout makes on a stored
+// kachinuki encounter, asked by the advance (advanceKachinukiOnce, which then
+// writes it) and by the roster read (KachinukiRoster, which only reports it,
+// quiet). decided is false when there is nothing to advance off: a completed
+// match, no numbered bout, a last bout with no outcome yet, or one that names
+// no fighter. lineupA/lineupB say a side's queue came from a lineup fielding
+// someone (the roster's LineupFound), never from the bout-log heuristic.
+func decideKachinukiAdvance(comp *state.Competition, parent *state.MatchResult, rule *lineupRule, quiet bool) (kachinukiAdvanceVerdict, bool) {
+	// A completed match is final: corrections re-submit the bout log of a
+	// finished match and must never re-run advancement (which would append
+	// a phantom next bout onto the completed result). Defense in depth on
+	// top of the handler's kachinukiBoutFinal gating.
+	if parent == nil || parent.Status == state.MatchStatusCompleted {
+		return kachinukiAdvanceVerdict{}, false
+	}
+	// Advancement is driven by the last NUMBERED bout. A daihyosen sub-result
+	// (Position == DaihyosenSubPosition) is not a kachinuki bout: a bracket
+	// encounter that reaches simultaneous exhaustion stays open until the
+	// operator adds a daihyosen, and mergeKachinukiSubResults orders that row
+	// last, so keying off the final slice element would advance off the rep
+	// bout. Scan from the end past any daihyosen placeholder to the real bout.
+	lastIdx := lastNumberedBout(parent.SubResults)
+	if lastIdx < 0 {
+		return kachinukiAdvanceVerdict{}, false
+	}
+	last := parent.SubResults[lastIdx]
+	// Only act when the last bout has a final outcome. A bout written
+	// with no Winner AND no Decision is still being scored; bail.
+	if last.Winner == "" && last.Decision == "" {
+		return kachinukiAdvanceVerdict{}, false
+	}
+	// Identity guard: retirement math needs to know WHO fought. A bout
+	// carrying an outcome but no side identity at all (e.g. a client that
+	// could not resolve the lineup submitted a nameless hikiwake) retires
+	// nobody, and advancing off it would append a wrong pairing and shift
+	// the whole sequence by one. Refuse loudly and leave the match
+	// untouched so the operator can correct the bout. A side is identified
+	// by its name OR its member id: a fighter picked by squad number and
+	// not yet named (bc-dnst) carries only the id, and that is enough.
+	if !kachinukiFighterKnown(kachinukiFighter{Name: last.SideA, MemberID: last.SideAMemberID}) &&
+		!kachinukiFighterKnown(kachinukiFighter{Name: last.SideB, MemberID: last.SideBMemberID}) {
+		if !quiet {
+			log.Printf("engine.MaybeAdvanceKachinuki compId=%s matchId=%s: last bout (position %d) has an outcome but no side names; skipping advancement", comp.ID, parent.ID, last.Position)
+		}
+		return kachinukiAdvanceVerdict{}, false
+	}
+
+	// Build remaining-roster snapshot. When a TeamLineup has been saved
+	// for the team, use the full ordered roster filtered by bout-log
+	// retirements (A2, GAP 1 / GAP 2a). Without a lineup the function
+	// degrades to the bout-log-only heuristic so existing competitions
+	// without lineups continue to work.
+	queueA, queueB := kachinukiRosterQueues(comp, parent, rule)
+	retiredA, retiredB := RetiredPlayersFromBoutLog(parent.SubResults, parent.SideA, parent.SideB)
+	out := AdvanceKachinuki(AdvanceKachinukiInput{
+		LastBout: last,
+		SideA:    queueA.remaining(retiredA),
+		SideB:    queueB.remaining(retiredB),
+		Quiet:    quiet,
+	})
+	return kachinukiAdvanceVerdict{
+		lastIdx: lastIdx, last: last, out: out,
+		lineupA:         queueA.fromLineup(),
+		lineupB:         queueB.fromLineup(),
+		rosterAvailable: queueA.found || queueB.found,
+	}, true
+}
+
+// kachinukiFighterKnown is the ONE test of "this side names a fighter": a
+// name or a member id (a fighter picked by number and not named yet carries
+// only the id).
+func kachinukiFighterKnown(f kachinukiFighter) bool {
+	return f.Name != "" || f.MemberID != ""
+}
+
 func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiAdvance, error) {
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
@@ -589,65 +688,14 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 		return false, nil, nil
 	}
 	parent, isBracket := located.Result, located.IsBracket
-	// A completed match is final: corrections re-submit the bout log of a
-	// finished match and must never re-run advancement (which would append
-	// a phantom next bout onto the completed result). Defense in depth on
-	// top of the handler's kachinukiBoutFinal gating.
-	if parent.Status == state.MatchStatusCompleted {
-		return false, nil, nil
-	}
-
-	// Advancement is driven by the last NUMBERED bout. A daihyosen sub-result
-	// (Position == DaihyosenSubPosition) is not a kachinuki bout: a bracket
-	// encounter that reaches simultaneous exhaustion stays open until the
-	// operator adds a daihyosen, and mergeKachinukiSubResults orders that row
-	// last, so keying off the final slice element would advance off the rep
-	// bout. Scan from the end past any daihyosen placeholder to the real bout.
-	lastIdx := lastNumberedBout(parent.SubResults)
-	if lastIdx < 0 {
-		// Only the daihyosen placeholder is present: nothing to advance off.
-		return false, nil, nil
-	}
-	last := parent.SubResults[lastIdx]
-	// Only act when the last bout has a final outcome. A bout written
-	// with no Winner AND no Decision is still being scored; bail.
-	hasOutcome := last.Winner != "" || last.Decision != ""
-	if !hasOutcome {
-		return false, nil, nil
-	}
-	// Identity guard: retirement math needs to know WHO fought. A bout
-	// carrying an outcome but no side identity at all (e.g. a client that
-	// could not resolve the lineup submitted a nameless hikiwake) retires
-	// nobody, and advancing off it would append a wrong pairing and shift
-	// the whole sequence by one. Refuse loudly and leave the match
-	// untouched so the operator can correct the bout. A side is identified
-	// by its name OR its member id: a fighter picked by squad number and
-	// not yet named (bc-dnst) carries only the id, and that is enough.
-	if last.SideA == "" && last.SideAMemberID == "" && last.SideB == "" && last.SideBMemberID == "" {
-		log.Printf("engine.MaybeAdvanceKachinuki compId=%s matchId=%s: last bout (position %d) has an outcome but no side names; skipping advancement", compID, matchID, last.Position)
-		return false, nil, nil
-	}
-
-	// Build remaining-roster snapshot. When a TeamLineup has been saved
-	// for the team, use the full ordered roster filtered by bout-log
-	// retirements (A2, GAP 1 / GAP 2a). Without a lineup the function
-	// degrades to the bout-log-only heuristic so existing competitions
-	// without lineups continue to work.
-	// The advisory roster read (Engine.KachinukiRoster, kachinuki_roster.go)
-	// builds its queues through the SAME kachinukiRosterQueues and takes
-	// retirements out through the same filter, so the fighter it names as
-	// next is the one appended here.
 	rule := e.lineupRuleOrNone("engine.MaybeAdvanceKachinuki", compID, comp.IsKnockoutEnabled(), located.PoolMatches, located.Bracket)
-	remainingA, remainingB, foundA, foundB := kachinukiRemainingRoster(comp, parent, rule)
-	rosterAvailable := foundA || foundB
-
-	out := AdvanceKachinuki(AdvanceKachinukiInput{
-		LastBout: last,
-		SideA:    remainingA,
-		SideB:    remainingB,
-	})
+	verdict, decided := decideKachinukiAdvance(comp, parent, rule, false)
+	if !decided {
+		return false, nil, nil
+	}
+	lastIdx, last, out := verdict.lastIdx, verdict.last, verdict.out
 	log.Printf("engine.MaybeAdvanceKachinuki compId=%s matchId=%s rosterAvailable=%t result=%s",
-		compID, matchID, rosterAvailable, describeKachinukiResult(out))
+		compID, matchID, verdict.rosterAvailable, describeKachinukiResult(out))
 
 	// Operator-led completion (mp-gmcg): the engine NEVER auto-finalizes a
 	// kachinuki encounter. Team sizes are unregulated and lineup vacancies
@@ -2848,6 +2896,13 @@ type kachinukiSideQueue struct {
 // through filterRemainingFighters (IsMemberRetired, the one identity rule).
 func (q kachinukiSideQueue) remaining(retired RetiredMemberSet) []kachinukiFighter {
 	return filterRemainingFighters(q.fighters, retired)
+}
+
+// fromLineup reports whether the queue came from a lineup in force that
+// fields someone (KachinukiRosterSide.LineupFound), never from the bout-log
+// heuristic, which knows only the fighters already seen.
+func (q kachinukiSideQueue) fromLineup() bool {
+	return q.found && len(q.fighters) > 0
 }
 
 // kachinukiRosterQueues builds both sides' queues (see kachinukiSideQueue).

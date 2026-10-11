@@ -292,8 +292,9 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 	// Every group either side holds, plus a changed bout neither holds (a
 	// removal over a tombstone).
 	groups := append([]string(nil), state.ScalarGroups...)
-	// The server's groups come before the bouts: a bout copied after them
-	// keeps the mark they set (CopyGroup), whatever the order.
+	// The server's groups are copied from the stored match here, and again
+	// once every row is in place (below), since a bout copy never moves a
+	// mark (CopyGroup).
 	groups = append(groups, state.ServerGroups...)
 	groups = append(groups, storedBoutGroups(stored)...)
 	for _, p := range state.SubPositions(incoming.SubResults) {
@@ -462,9 +463,14 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 	if mh.settleOrphanPicks(payloadPickA, payloadPickB, removalWrite, stamp) {
 		recomputeModifiedAt = true
 	}
-	// Last, once every hold above has had its say (a hold copies the stored
-	// row, mark and all, back over the write): a recorded bout whose overtime
-	// this write raises, or whose result it changes, is being fought again.
+	// The recorded marks are the server's (ServerGroups): no write names
+	// them, so once every hold and displacement above has put its rows in
+	// place, every row takes the stored match's marks, whichever copy (the
+	// stored match's or the write's own) the row came from. A mark the
+	// payload carried can never land.
+	state.CopyGroup(incoming, stored, state.GroupRecorded)
+	// Last: a recorded bout whose overtime this write raises, or whose
+	// result it changes, is being fought again.
 	mh.unrecordReopenedBouts(stamp)
 
 	for _, g := range rep.Applied {

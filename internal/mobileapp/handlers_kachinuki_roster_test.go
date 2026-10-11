@@ -95,6 +95,35 @@ func TestKachinukiRosterGET(t *testing.T) {
 		assert.Equal(t, "B2", body.SideB.On.Name)
 		assert.Empty(t, body.SideB.Remaining)
 		assert.Contains(t, w.Body.String(), `"remaining":[]`, "an empty queue is [] on the wire, never null")
+		// Bout 2 has no outcome yet: Record bout would append nothing, and an
+		// unrecorded bout exhausts nobody.
+		assert.Contains(t, w.Body.String(), `"nextPairing":false`)
+		assert.Contains(t, w.Body.String(), `"exhausted":false`)
+	})
+	t.Run("nextPairing says Record bout would append", func(t *testing.T) {
+		// B1 leads A1 in bout 1: Record bout keeps B1 on against A2, the next
+		// fighter of Ryu's lineup.
+		matches, err := store.LoadPoolMatches("k1")
+		require.NoError(t, err)
+		aID, bID := matches[0].SideAID, matches[0].SideBID
+		matches = append(matches, state.MatchResult{
+			ID: "Pool A-3", SideA: "Ryu", SideAID: aID, SideB: "Tora", SideBID: bID, Status: state.MatchStatusRunning,
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "A1", SideAMemberID: a1.ID, SideB: "B1", Winner: "B1"},
+			},
+		})
+		require.NoError(t, store.SavePoolMatches("k1", matches))
+		w := getRoster(r, "/api/competitions/k1/matches/Pool%20A-3/kachinuki-roster")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var body struct {
+			NextPairing bool `json:"nextPairing"`
+			SideA       struct {
+				Exhausted bool `json:"exhausted"`
+			} `json:"sideA"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		assert.True(t, body.NextPairing)
+		assert.False(t, body.SideA.Exhausted, "the bout is not recorded")
 	})
 	t.Run("a last bout carrying a lead keeps both fighters on", func(t *testing.T) {
 		// The running autosave writes a 1-0 lead's winner on the bout being

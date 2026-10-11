@@ -258,13 +258,16 @@ describe('the kachinuki advisory line', () => {
     expect(sent.subResults.find(s => s.position === 1).recorded).toBe(true);
     expect(sent.subResults.find(s => s.position === 2).recorded).toBeUndefined();
 
-    // The host shows the recorded bout: the line reads once more, Ueda off.
+    // The host shows the recorded bout: the roster reads once more, Ueda off.
+    // No pairing follows, so the recorded bout renders read-only and the
+    // no-pairing line stands in the advisory's place (bc-kbrc).
     window.API.fetchKachinukiRoster.mockResolvedValue(exhausted);
     await remount(view, recorded);
     await settle();
     expect(window.API.fetchKachinukiRoster).toHaveBeenCalledTimes(2);
-    const line = `Shiro: no fighters left · ${aka}`;
-    expect(advisory().textContent).toBe(line);
+    const line = 'Shiro has no fighters left. End match finishes the encounter.';
+    expect(advisory()).toBeNull();
+    expect(screen.getByTestId('kachinuki-no-pairing').textContent).toBe(line);
 
     // Reopening the sheet (a reload, another device) reads the same line.
     view.unmount();
@@ -272,7 +275,7 @@ describe('the kachinuki advisory line', () => {
     await mount(JSON.parse(JSON.stringify(recorded)));
     expect(window.API.fetchKachinukiRoster).toHaveBeenCalledTimes(1);
     expect(window.API.fetchKachinukiRoster).toHaveBeenCalledWith('comp1', 'm1');
-    expect(advisory().textContent).toBe(line);
+    expect(screen.getByTestId('kachinuki-no-pairing').textContent).toBe(line);
   });
 
   it('reads nothing for a point, a lead or a 1-1 on the live bout, and once when Record bout records it', async () => {

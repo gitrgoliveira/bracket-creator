@@ -138,6 +138,9 @@ describe('isKachinukiBoutRemovable', () => {
   it('is false outside bout mode (correction / non-kachinuki / completed)', () => {
     expect(isKachinukiBoutRemovable({ boutMode: false, currentBoutPlayed: false, lastScoredIdx: 0 })).toBe(false);
   });
+  it('is false with no live bout (the last bout recorded, no pairing, bc-kbrc)', () => {
+    expect(isKachinukiBoutRemovable({ boutMode: true, currentBoutPlayed: false, lastScoredIdx: 1, hasLiveBout: false })).toBe(false);
+  });
 });
 
 // The single played-bout primitive (operator input determines the bout

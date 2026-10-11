@@ -11,6 +11,7 @@ import {
   kachinukiAdvisoryModel,
   kachinukiAdvisorySide,
   kachinukiFighterLabel,
+  kachinukiNoPairingText,
   kachinukiRosterKey,
   storedBoutRecorded,
 } from '../kachinuki_advisory.jsx';
@@ -180,5 +181,28 @@ describe('storedBoutRecorded', () => {
     expect(storedBoutRecorded(m, 3)).toBe(false);
     expect(storedBoutRecorded({}, 1)).toBe(false);
     expect(storedBoutRecorded(null, 1)).toBe(false);
+  });
+});
+
+// bc-kbrc: the line in place of the live bout once the last bout is recorded
+// and no pairing follows.
+describe('kachinukiNoPairingText', () => {
+  const out = { lineupFound: true, on: null, remaining: [] };
+  const on = { lineupFound: true, on: { name: 'Kudo', memberId: 'a1' }, remaining: [] };
+  it('names the side the roster says has nobody left', () => {
+    expect(kachinukiNoPairingText({ sideA: on, sideB: out }))
+      .toBe('Shiro has no fighters left. End match finishes the encounter.');
+    expect(kachinukiNoPairingText({ sideA: out, sideB: on }))
+      .toBe('Aka has no fighters left. End match finishes the encounter.');
+  });
+  it('names both sides when neither has anybody left', () => {
+    expect(kachinukiNoPairingText({ sideA: out, sideB: out }))
+      .toBe('Shiro and Aka have no fighters left. End match finishes the encounter.');
+  });
+  it('claims nobody without a lineup or a roster', () => {
+    const noLineup = { lineupFound: false, on: null, remaining: [] };
+    expect(kachinukiNoPairingText({ sideA: noLineup, sideB: noLineup }))
+      .toBe('No next pairing. End match finishes the encounter.');
+    expect(kachinukiNoPairingText(null)).toBe('No next pairing. End match finishes the encounter.');
   });
 });

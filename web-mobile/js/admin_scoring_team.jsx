@@ -159,6 +159,7 @@ import { sideLookupKey } from './competitor_identity.jsx';
 // bc-pnum: the ONE primitive that composes a squad member's visible label
 // ("T10.1"); see its header for why this is never restated inline.
 import { squadMemberLabel } from './squad_member_label.jsx';
+import { kachinukiAdvisoryModel, kachinukiRosterKey } from './kachinuki_advisory.jsx';
 
 // Shared inline style for the squad member label riding beside a bout row's
 // fighter name (squadLabelFor, TeamScoreEditorModal below). A muted, small
@@ -2604,6 +2605,39 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const kachinukiDoneBoutIdxs = kachinukiBoutMode
     ? positions.map((_, i) => i).filter(i => i !== daihyosenIdx && i !== kachinukiCurBoutIdx && subBoutHasBeenPlayed(subs[i]))
     : [];
+  // bc-kfnl (operator ruling 2026-09-24): the advisory line above the live bout,
+  // each side's fighter on, fighters left and who is next. The queue is read from
+  // the server (engine.KachinukiRoster, the same call that appends the next
+  // pairing) and keyed on a VALUE, never on `m`, which every broadcast
+  // re-creates: the match id, the bout log's fighters and recorded outcomes
+  // (kachinukiRosterKey) and the two lineups in force. A roster read for another
+  // key is not shown, so the line never lags a recorded bout. A failed read is
+  // null (fetchKachinukiRoster never throws) and shows no line. ADVISORY ONLY:
+  // nothing reads it but renderKachinukiAdvisory; it feeds no verdict, does not
+  // arm End match and holds back neither Record bout nor Encho.
+  const kachinukiRosterReadKey = kachinukiBoutMode && m.compId && m.id
+    ? `${kachinukiRosterKey(m.id, m.subResults)}#${JSON.stringify([
+        lineupA?.positions || null, lineupA?.memberIds || null,
+        lineupB?.positions || null, lineupB?.memberIds || null,
+      ])}`
+    : "";
+  const [kachinukiRoster, setKachinukiRoster] = useStateA(null);
+  useEffectA(() => {
+    const api = window.API;
+    if (!kachinukiRosterReadKey || !api || typeof api.fetchKachinukiRoster !== "function") {
+      setKachinukiRoster(null);
+      return undefined;
+    }
+    let live = true;
+    const key = kachinukiRosterReadKey;
+    Promise.resolve()
+      .then(() => api.fetchKachinukiRoster(m.compId, m.id))
+      .then(
+        (roster) => { if (live) setKachinukiRoster(roster ? { key, roster } : null); },
+        () => { if (live) setKachinukiRoster(null); },
+      );
+    return () => { live = false; };
+  }, [kachinukiRosterReadKey, m.compId]);
   // Does any bout carry a mark the operator could TAP AWAY? Read off subTotals
   // rather than re-filtering the rows, so the hint and the score agree by
   // construction. Counted through realIppons like everything else, which drops
@@ -3085,6 +3119,31 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       {lineupNotice.text}
     </div>
   ) : null);
+
+  // bc-kfnl: the advisory line (see kachinukiRosterReadKey above), placed after
+  // the read-only fought rows and immediately before the live bout. The fighters
+  // on are the live bout's, as its row resolves them (playerNamesForBout), and
+  // every fighter is named with their team-member number as the rows name them
+  // (kachinuki_advisory.jsx). Muted text, no warning colour: it is a guide.
+  const renderKachinukiAdvisory = () => {
+    if (!kachinukiBoutMode || kachinukiCurBoutIdx < 0) return null;
+    if (!kachinukiRoster || kachinukiRoster.key !== kachinukiRosterReadKey) return null;
+    const on = playerNamesForBout(kachinukiCurBoutIdx);
+    const model = kachinukiAdvisoryModel({
+      roster: kachinukiRoster.roster,
+      onA: { name: on.aName, memberId: on.aMemberId },
+      onB: { name: on.bName, memberId: on.bMemberId },
+      squadA, squadB,
+      teamNumberA: m.sideA?.number || "",
+      teamNumberB: m.sideB?.number || "",
+    });
+    if (!model) return null;
+    return (
+      <div key="kachinuki-advisory" className="kachinuki-advisory" data-testid="kachinuki-advisory">
+        {model.text}
+      </div>
+    );
+  };
 
   // mp-gmcg: read-only display of a fought kachinuki bout — the SAME
   // team-sub-match layout as the editable bout row (position, Shiro/Aka names,
@@ -4110,6 +4169,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 ? [positions[idx], renderCorrectionWarning(idx)]
                 : [renderReadOnlyBout(idx)]
             )),
+            // bc-kfnl: fighters left and who is next, a guide only.
+            renderKachinukiAdvisory(),
             ...visiblePositions,
           ].filter(Boolean).map((pos, _displayIdx) => {
             // Kachinuki returns a banner element as the first item; pass

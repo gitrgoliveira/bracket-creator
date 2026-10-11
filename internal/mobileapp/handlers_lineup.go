@@ -9,7 +9,8 @@
 // name the positions it changed (LineupRequest.Changed) and then lands only
 // those on the lineup stored when it arrives (lineupSave.base). A third public GET,
 // .../lineup-in-force/:matchId, answers which lineup the team fields at a match
-// (see lineupInForceRead).
+// (see lineupInForceRead), and a fourth, .../matches/:mid/kachinuki-roster, a
+// kachinuki encounter's fighters not yet retired (engine.KachinukiRoster).
 //
 // All store I/O goes through the TeamLineupStore + CompetitionStore
 // interfaces (deps.go) rather than the concrete *state.Store
@@ -23,6 +24,7 @@
 package mobileapp
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -155,7 +157,8 @@ func validLineupRequest(c *gin.Context, req LineupRequest) bool {
 // RegisterPublicLineupHandlers wires the read-only GET
 // /competitions/:id/teams/:tid/lineups/:round,
 // /competitions/:id/teams/:tid/match-lineups/:matchId and
-// /competitions/:id/teams/:tid/lineup-in-force/:matchId endpoints on an
+// /competitions/:id/teams/:tid/lineup-in-force/:matchId endpoints, and the
+// kachinuki queue read /competitions/:id/matches/:mid/kachinuki-roster, on an
 // unauthenticated router group. Lineup data (position assignments) is not
 // sensitive, coaches and viewers can see who plays where, and the
 // AdminLineup form needs to load the current lineup without holding
@@ -164,7 +167,8 @@ func validLineupRequest(c *gin.Context, req LineupRequest) bool {
 //
 // The first two GETs answer with a teamLineupRead and the third with a
 // lineupInForceRead (see their docs); a 404 means the competition does not
-// exist.
+// exist. The kachinuki roster read is public for the same reason, and because
+// the self-run public score sheet mounts the same team editor that shows it.
 //
 // Slice 7.B / T127.
 func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore, eng LineupEngine) {
@@ -230,6 +234,38 @@ func RegisterPublicLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, com
 			return
 		}
 		c.JSON(http.StatusOK, newLineupInForceRead(compID, teamID, matchID, in))
+	})
+
+	// The kachinuki queue (bc-kfnl, operator ruling 2026-09-24): each side's
+	// fighters who have not retired, read through the same engine call that
+	// appends the next pairing, for the advisory line the score sheet shows
+	// above the live bout. Read-only and advisory: nothing is decided on it.
+	// 200 with each side's {lineupFound, remaining}; 404 for an unknown
+	// competition or match; 400 for a competition that is not kachinuki.
+	r.GET("/competitions/:id/matches/:mid/kachinuki-roster", func(c *gin.Context) {
+		compID, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		matchID := c.Param("mid")
+		if matchID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "match ID is required"})
+			return
+		}
+		if !requireExistingCompetition(c, comps, compID) {
+			return
+		}
+		roster, err := eng.KachinukiRoster(compID, matchID)
+		switch {
+		case errors.Is(err, engine.ErrNotKachinuki):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "this competition's team matches are not kachinuki"})
+		case errors.Is(err, engine.ErrTeamMatchNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "match not found"})
+		case err != nil:
+			internalError(c, err)
+		default:
+			c.JSON(http.StatusOK, roster)
+		}
 	})
 }
 

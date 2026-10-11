@@ -8424,6 +8424,15 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   color: var(--ink-1);
 }
 
+/* bc-kfnl: the advisory line above the live kachinuki bout (fighters on, left,
+   next). A guide, not a warning: muted ink, no tint, no motion. */
+.kachinuki-advisory {
+  margin: 4px 0 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-2);
+}
+
 /* bc-dnst: the bout list's two secondary actions share one row, each with a
    short visible hint beside it. An error takes the full width so it reads as
    its own line. */

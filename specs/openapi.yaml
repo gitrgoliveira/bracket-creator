@@ -5677,8 +5677,10 @@ components:
         derives, and without a kachinuki bout's `recorded` mark). `recorded`
         is the kachinuki bouts Record bout closed (each numbered row's
         `recorded` mark): the server's alone, set by Record bout, taken off
-        by removing the pairing Record bout appended and by a write that
-        raises that bout's overtime, each stamped like any group; it appears
+        by removing the pairing Record bout appended, and by a write not
+        older than the mark that raises that bout's overtime or changes its
+        result (the side its winner names, or its decision), each stamped
+        like any group; it appears
         in the history and in `groupStamps`, and a write that names it in
         `changed` is refused with 400 (a write names only a
         WritableMergeGroup). The sides, court, schedule and round

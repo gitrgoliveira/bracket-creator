@@ -310,6 +310,35 @@ describe('a recorded knockout tie fought on in encho', () => {
     expect(line()).toContain('Ueda on');
     expect(line()).toContain('Mori on');
   });
+
+  // Review round 8, finding 4: the recorded tie stays live, but Record bout
+  // would write nothing on it, so it is disabled and says why.
+  it('disables Record bout while the live bout is stored as recorded', async () => {
+    stubApi(BOTH_ON);
+    await mount(kachinukiMatch([T1, T2, TIE]));
+    expect(recordButton().disabled).toBe(true);
+    expect(recordButton().getAttribute('title')).toBe('Bout recorded');
+  });
+
+  // Review round 8, finding 2: a point scored on the recorded tie changes the
+  // bout's result, and the server's merge takes the mark off. The bout scored
+  // to 1-0 stays live with both fighters on, nothing closes, and Record bout
+  // is open again.
+  it('a recorded tie scored to 1-0 does not close, and Record bout comes back', async () => {
+    stubApi(BOTH_ON);
+    const view = await mount(kachinukiMatch([T1, T2, TIE]));
+    const { recorded: _r, ...scored } = { ...TIE, ipponsA: ['M', 'D'], winner: 'Mori', winnerMemberId: 'a2', decision: '' };
+    await act(async () => {
+      view.rerender(<ScoreEditorModal match={kachinukiMatch([T1, T2, scored])} onClose={vi.fn()} onSubmit={vi.fn()} password="secret" />);
+    });
+    await settle();
+    expect(liveRows(view.container).length).toBe(1);
+    expect(screen.queryByTestId('kachinuki-no-pairing')).toBeNull();
+    const line = screen.getByTestId('kachinuki-advisory').textContent;
+    expect(line).toContain('Ueda on');
+    expect(line).toContain('Mori on');
+    expect(recordButton().disabled).toBe(false);
+  });
 });
 
 // Review rounds 5 and 6: a Record bout that appends no pairing only marks its

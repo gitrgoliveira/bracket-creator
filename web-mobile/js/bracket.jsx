@@ -121,7 +121,23 @@ const FEEDER_SLOT_RE = /^Winner of r(\d+)-m(\d+)$/;
 // internal index), so relabelling them would lose real information.
 function slotDisplayName(name, feederMatchNum) {
   if (typeof name !== "string" || !FEEDER_SLOT_RE.test(name)) return name;
-  return feederMatchNum > 0 ? `Winner of M${feederMatchNum}` : "TBD";
+  return feederRefLabel("Winner", feederMatchNum);
+}
+
+// feederRefLabel: "<outcome> of M<n>" naming the numbered match that fills a
+// slot, or "TBD" when that match has no number (num 0). The one wording both
+// the winner slots (slotDisplayName) and the bronze's loser slots
+// (bronzeSlotLabels) use.
+function feederRefLabel(outcome, num) {
+  return num > 0 ? `${outcome} of M${num}` : "TBD";
+}
+
+// feederMatchNumOf: the number bracket match m is printed with, from the
+// display model's matchNumById when the caller holds one, else the server's
+// own matchNumber; 0 for no match or no number. Shared by makeSlotLabeller and
+// bronzeSlotLabels so a slot and the card it names read the same number.
+function feederMatchNumOf(m, matchNumById) {
+  return m ? ((matchNumById && matchNumById[m.id]) || m.matchNumber || 0) : 0;
 }
 
 // makeSlotLabeller binds slotDisplayName to ONE bracket: it returns
@@ -149,7 +165,7 @@ function slotDisplayName(name, feederMatchNum) {
 // slotDisplayName degrades it to "TBD".
 function makeSlotLabeller(rounds, matchNumById) {
   const rs = Array.isArray(rounds) ? rounds : [];
-  const numOf = (m) => (m ? ((matchNumById && matchNumById[m.id]) || m.matchNumber || 0) : 0);
+  const numOf = (m) => feederMatchNumOf(m, matchNumById);
   const byId = (id) => {
     for (const round of rs) {
       const hit = (round || []).find((m) => m && m.id === id);
@@ -191,10 +207,7 @@ function bronzeSlotLabels(rounds, matchNumById) {
   const rs = Array.isArray(rounds) ? rounds : [];
   const feeders = bronzeFeederSemis(rs);
   const nums = matchNumById || buildDisplayModel(rs).matchNumById;
-  const label = (m) => {
-    const n = m ? ((nums && nums[m.id]) || m.matchNumber || 0) : 0;
-    return n > 0 ? `Loser of M${n}` : "TBD";
-  };
+  const label = (m) => feederRefLabel("Loser", feederMatchNumOf(m, nums));
   return { a: label(feeders.a), b: label(feeders.b) };
 }
 

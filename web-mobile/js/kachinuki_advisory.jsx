@@ -98,6 +98,19 @@ export function kachinukiNoPairingText(roster) {
   return `${who} End match finishes the encounter.`;
 }
 
+// kachinukiRosterHasNoNext reports whether the roster read says Record bout
+// could append nothing after the bout it read: both sides' lineups were found
+// and neither has anyone behind the fighter on (remaining is the advance's own
+// list with the fighter on retired). A tie recorded then stays live (Encho on it
+// is the operator's call) while Record bout has nothing left to do (review
+// round 8). false without a read, or with a side whose lineup was not found:
+// the advance then reads the bout log alone and may still append.
+export function kachinukiRosterHasNoNext(roster) {
+  const empty = (side) => !!side && !!side.lineupFound
+    && !(Array.isArray(side.remaining) && side.remaining.length > 0);
+  return !!roster && empty(roster.sideA) && empty(roster.sideB);
+}
+
 // lastNumberedBout is the bout log's last numbered bout, the row the server
 // reads as the live bout (the JS twin of engine.lastNumberedBout): numbered
 // means position > 0 (the representative bout, -1, is not one), and last means

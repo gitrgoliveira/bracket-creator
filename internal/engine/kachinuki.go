@@ -2609,7 +2609,7 @@ func preserveKachinukiMemberIDs(storedByPos map[int]state.SubMatchResult, in *st
 // enchoPeriodsRise reports whether a bout row's overtime period count rises
 // from stored to incoming: overtime started (from none) or extended. A write
 // that raises it on a recorded bout takes the bout's recorded mark off
-// (mergeHold.unrecordRaisedEncho): the bout is being fought again, so both its
+// (mergeHold.unrecordReopenedBouts): the bout is being fought again, so both its
 // fighters are on, e.g. a knockout tie recorded when both teams had nobody
 // left, then fought on in encho.
 func enchoPeriodsRise(stored, incoming *state.EnchoMetadata) bool {
@@ -2657,14 +2657,24 @@ func unrecordLastBout(subs []state.SubMatchResult) []string {
 // from completed and the finishing write strips a trailing unscored pairing.
 // The row's creator is then the door of the first later line that APPLIED the
 // group (a held or unchanged outcome wrote nothing), except that an advance
-// line creates only its trailing bout group, the pairing it appended: the bout
-// it closes, named on the same line for its recorded mark, existed before it.
+// line creates only its trailing bout group, the pairing it appended: a bout
+// group it names that is not its trailing one existed before it.
+//
+// And only an advance that SET the mark counts: its line applied
+// GroupRecorded. An advance that appended a pairing after a bout already
+// recorded (recorded with nobody left, a lineup then given a fighter, Record
+// bout tapped again) did not record that bout, so removing what it appended
+// leaves the mark the earlier Record bout set (advanceWithoutMark).
 //
 // Fallback: no history (a match written before the history existed, an append
 // that failed, a history that cannot be read) or no creator in it answers
 // false, so the bout Record bout closed stays recorded. That is the safe side:
 // the closed state stands and the operator can still correct the bout.
 func boutAppendedByRecordBout(history []state.MatchHistoryEntry, group string) bool {
+	// advanceWithoutMark names, as a creator, an advance line that appended the
+	// row without applying GroupRecorded: it is not the Record bout whose mark a
+	// removal undoes.
+	const advanceWithoutMark = "kachinuki-advance-without-mark"
 	creator := ""
 	for _, h := range history {
 		trailing := trailingBoutGroup(h.Changed) == group
@@ -2684,6 +2694,9 @@ func boutAppendedByRecordBout(history []state.MatchHistoryEntry, group string) b
 		}
 		if creator == "" && slices.Contains(h.Changed, group) && h.Outcomes[group] == state.HistoryOutcomeApplied {
 			creator = h.Door
+			if h.Door == doorKachinukiAdvance && h.Outcomes[state.GroupRecorded] != state.HistoryOutcomeApplied {
+				creator = advanceWithoutMark
+			}
 		}
 	}
 	return creator == doorKachinukiAdvance

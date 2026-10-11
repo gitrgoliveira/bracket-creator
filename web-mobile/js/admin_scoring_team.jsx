@@ -159,7 +159,7 @@ import { sideLookupKey } from './competitor_identity.jsx';
 // bc-pnum: the ONE primitive that composes a squad member's visible label
 // ("T10.1"); see its header for why this is never restated inline.
 import { squadMemberLabel } from './squad_member_label.jsx';
-import { kachinukiAdvisoryModel, kachinukiNoPairingText, kachinukiRecordedBoutCloses, kachinukiRosterKey, lastNumberedBout, storedBoutRecorded } from './kachinuki_advisory.jsx';
+import { kachinukiAdvisoryModel, kachinukiNoPairingText, kachinukiRecordedBoutCloses, kachinukiRosterHasNoNext, kachinukiRosterKey, lastNumberedBout, storedBoutRecorded } from './kachinuki_advisory.jsx';
 
 // Shared inline style for the squad member label riding beside a bout row's
 // fighter name (squadLabelFor, TeamScoreEditorModal below). A muted, small
@@ -2757,6 +2757,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // encounter, Record bout stays disabled (it would record the same bout
   // again) and "+ Add next bout manually" is open.
   const kachinukiNoLiveBout = kachinukiBoutMode && kachinukiCurBoutIdx < 0;
+  // Review round 8: the live bout is stored as recorded and the roster read
+  // says nothing can follow it (a tie Record bout recorded with both sides out
+  // stays live, Encho offered). Record bout would write nothing, so it is
+  // disabled until a change of the bout's result or an encho takes the mark off
+  // (the server's merge, mergeHold.unrecordReopenedBouts). Without such a read
+  // it stays enabled: the advance may still append a pairing.
+  const kachinukiCurBoutRecorded = kachinukiBoutMode && kachinukiCurBoutIdx >= 0
+    && storedBoutRecorded(m, Number(positions[kachinukiCurBoutIdx]))
+    && kachinukiRosterHasNoNext(kachinukiRosterForClose);
   const kachinukiCurrentBoutPlayed = kachinukiBoutMode
     ? kachinukiCurBoutIdx >= 0 && subBoutHasBeenPlayed(subs[kachinukiCurBoutIdx])
     : true;
@@ -5387,8 +5396,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     // banner for a queued write; returning nothing hid it.
                     return res;
                   });
-                }} disabled={submitting || !kachinukiCurrentBoutPlayed}
+                }} disabled={submitting || !kachinukiCurrentBoutPlayed || kachinukiCurBoutRecorded}
                   title={kachinukiNoLiveBout ? "Bout recorded: no next pairing"
+                    : kachinukiCurBoutRecorded ? "Bout recorded"
                     : !kachinukiCurrentBoutPlayed ? "Nothing recorded for this bout yet" : undefined}>
                   {submitting ? "Saving…" : "Record bout"}
                 </button>

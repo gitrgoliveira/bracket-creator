@@ -13,6 +13,7 @@ import {
   kachinukiFighterLabel,
   kachinukiNoPairingText,
   kachinukiRecordedBoutCloses,
+  kachinukiRosterHasNoNext,
   kachinukiRosterKey,
   lastNumberedBout,
   storedBoutRecorded,
@@ -238,5 +239,22 @@ describe('kachinukiNoPairingText', () => {
     expect(kachinukiNoPairingText({ sideA: noLineup, sideB: noLineup })).toBeNull();
     expect(kachinukiNoPairingText(null)).toBeNull();
     expect(kachinukiNoPairingText({ sideA: on, sideB: on })).toBeNull();
+  });
+});
+
+// Review round 8: Record bout has nothing left to do only when the read says
+// both sides' lineups have nobody behind the fighter on.
+describe('kachinukiRosterHasNoNext', () => {
+  const side = (remaining, lineupFound = true) => ({ lineupFound, on: { name: 'X', memberId: 'x' }, remaining });
+  it('is true when both lineups have nobody behind the fighter on', () => {
+    expect(kachinukiRosterHasNoNext({ sideA: side([]), sideB: side([]) })).toBe(true);
+  });
+  it('is false when either side has someone behind', () => {
+    expect(kachinukiRosterHasNoNext({ sideA: side([{ name: 'Y' }]), sideB: side([]) })).toBe(false);
+    expect(kachinukiRosterHasNoNext({ sideA: side([]), sideB: side([{ name: 'Y' }]) })).toBe(false);
+  });
+  it('is false without a read or with a lineup not found', () => {
+    expect(kachinukiRosterHasNoNext(null)).toBe(false);
+    expect(kachinukiRosterHasNoNext({ sideA: side([], false), sideB: side([]) })).toBe(false);
   });
 });

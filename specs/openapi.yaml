@@ -6889,8 +6889,10 @@ components:
             removing the pairing that Record bout appended
             (`DELETE .../kachinuki-bout`) clears it; and a score write that
             raises that bout's overtime (`encho.periodCount` up, the bout
-            being fought again) clears it, unless the write is older than
-            the mark. A client cannot set or clear it: a row that leaves the
+            being fought again) or changes its result (the side its winner
+            names, or its decision) clears it, unless the write is older
+            than the mark; a correction that keeps the result (another waza
+            letter for the same winner) keeps it. A client cannot set or clear it: a row that leaves the
             field out keeps it, a row that sends `true` for a bout the
             server has not recorded does not set it, and a write that names
             the `recorded` group in `changed` is refused with 400. Absent

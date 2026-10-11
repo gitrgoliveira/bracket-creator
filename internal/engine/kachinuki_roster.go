@@ -132,7 +132,7 @@ func (e *Engine) KachinukiRoster(compID, matchID string) (KachinukiRoster, error
 		// side empty appends the pairing that keeps that side's fighter,
 		// advanceAfterHikiwake). Whether that pair fights on in encho is the
 		// operator's call on any bout in any phase, and an encho tap clears
-		// the mark (mergeHold.unrecordRaisedEncho); End match decides the rest (a drawn
+		// the mark (mergeHold.unrecordReopenedBouts); End match decides the rest (a drawn
 		// encounter in a pool or league, blocked in a knockout). So the line
 		// never reads "no fighters left" while that bout can still be fought
 		// on. Only a recorded WIN takes a fighter off here.

@@ -145,7 +145,7 @@ func effectiveChangedGroups(stored, incoming *state.MatchResult, nilSubsClear bo
 	} else {
 		for _, g := range incoming.Changed {
 			// A server group (the recorded marks) is never a write's to name:
-			// the merge alone changes it, below (mergeHold.unrecordRaisedEncho).
+			// the merge alone changes it, below (mergeHold.unrecordReopenedBouts).
 			if state.ValidGroup(g) && !state.IsServerGroup(g) && !slices.Contains(changed, g) {
 				changed = append(changed, g)
 			}
@@ -464,8 +464,8 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 	}
 	// Last, once every hold above has had its say (a hold copies the stored
 	// row, mark and all, back over the write): a recorded bout whose overtime
-	// this write raises is being fought again.
-	mh.unrecordRaisedEncho(stamp)
+	// this write raises, or whose result it changes, is being fought again.
+	mh.unrecordReopenedBouts(stamp)
 
 	for _, g := range rep.Applied {
 		if !state.GroupDiffers(stored, incoming, g) {
@@ -770,14 +770,23 @@ func (h *mergeHold) holdDefaultWinScoring(decision string) {
 	h.rep.StandingDecision = decision
 }
 
-// unrecordRaisedEncho takes the recorded mark off every numbered bout this
-// write raises the overtime of (bc-kfnl: the bout is being fought again, so it
-// is no longer the one Record bout closed), as a change of GroupRecorded at the
-// write's stamp, named in its history line. Only a bout whose own group
-// applied counts: a held bout raised nothing. And only when the write is not
-// older than the stored marks (a Record bout stamped after this overtime keeps
-// its mark, as it would arriving second): the stamp decides, as for any group.
-func (h *mergeHold) unrecordRaisedEncho(stamp int64) {
+// unrecordReopenedBouts takes the recorded mark off every numbered bout this
+// write reopens, as a change of GroupRecorded at the write's stamp, named in
+// its history line. A recorded bout is reopened when the write either
+//
+//   - raises its overtime (bc-kfnl: the bout is being fought again), or
+//   - changes its RESULT (boutResultChanged: the side its winner names, or its
+//     decision, a draw read as a draw), e.g. a point scored on a tie recorded
+//     with both sides out: the bout Record bout closed is no longer the one
+//     on the row, so the operator records it again (review round 8). A
+//     correction that keeps the result (another waza letter, the same winner)
+//     keeps the mark.
+//
+// Only a bout whose own group applied counts: a held bout changed nothing. And
+// only when the write is not older than the stored marks (a Record bout
+// stamped after this change keeps its mark, as it would arriving second): the
+// stamp decides, as for any group.
+func (h *mergeHold) unrecordReopenedBouts(stamp int64) {
 	var raised []int
 	for _, g := range h.rep.Applied {
 		pos, ok := state.ParseBoutGroup(g)
@@ -786,7 +795,10 @@ func (h *mergeHold) unrecordRaisedEncho(stamp int64) {
 		}
 		storedRow := state.SubResultAt(h.stored.SubResults, pos)
 		row := state.SubResultAt(h.incoming.SubResults, pos)
-		if storedRow.Recorded && enchoPeriodsRise(storedRow.Encho, row.Encho) {
+		if !storedRow.Recorded || row.Position != pos {
+			continue
+		}
+		if enchoPeriodsRise(storedRow.Encho, row.Encho) || boutResultChanged(storedRow, row, h.stored.SideA, h.stored.SideB) {
 			raised = append(raised, pos)
 		}
 	}
@@ -803,6 +815,25 @@ func (h *mergeHold) unrecordRaisedEncho(stamp int64) {
 	if stamp > 0 {
 		h.stamps[state.GroupRecorded] = stamp
 	}
+}
+
+// boutResultChanged reports whether row says a different result for its bout
+// than stored: the side its winner names (state.SubBoutWinnerSide, ids first,
+// read against the match's sides sideA/sideB) or its decision, every draw
+// decision read as one draw and "fought" as no decision. A different waza
+// letter for the same winner is not a different result.
+func boutResultChanged(stored, row state.SubMatchResult, sideA, sideB string) bool {
+	decision := func(sub state.SubMatchResult) string {
+		switch {
+		case state.IsDraw(sub.Decision):
+			return string(domain.DecisionHikiwake)
+		case sub.Decision == string(domain.DecisionFought):
+			return ""
+		}
+		return sub.Decision
+	}
+	return state.SubBoutWinnerSide(stored, sideA, sideB) != state.SubBoutWinnerSide(row, sideA, sideB) ||
+		decision(stored) != decision(row)
 }
 
 // restoreStamp puts group's stamp back to the one the stored match had, or

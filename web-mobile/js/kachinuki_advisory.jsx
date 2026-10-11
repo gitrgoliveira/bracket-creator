@@ -94,6 +94,31 @@ export function kachinukiNoPairingText(roster) {
   return `${who} End match finishes the encounter.`;
 }
 
+// lastNumberedBout is the bout log's last numbered bout, the row the server
+// reads as the live bout (the JS twin of engine.lastNumberedBout): numbered
+// means position > 0 (the representative bout, -1, is not one), and last means
+// the highest position, whatever the array's order. null when there is none.
+// The ONE client owner of "the stored last numbered bout": the roster key, the
+// recorded-last key and the closing of a recorded last bout all ask it.
+export function lastNumberedBout(subResults) {
+  let last = null;
+  for (const s of Array.isArray(subResults) ? subResults : []) {
+    if (s && s.position > 0 && (!last || s.position > last.position)) last = s;
+  }
+  return last;
+}
+
+// kachinukiRecordedBoutCloses reports whether the last numbered bout is one
+// Record bout recorded as a WIN, the only recorded bout that may close the
+// live row (bc-kbrc). A recorded DRAW still last keeps both fighters on, in
+// every phase (engine.KachinukiRoster): nothing followed it because both sides
+// had nobody left, and whether the pair fights on in encho is the operator's
+// call, so the bout stays live with Encho offered. End match decides the rest.
+export function kachinukiRecordedBoutCloses(subResults) {
+  const last = lastNumberedBout(subResults);
+  return !!last && last.recorded === true && last.decision !== "hikiwake";
+}
+
 // kachinukiRosterKey is the VALUE the roster read is keyed on (never the match
 // object, which every broadcast re-creates): the match id, every numbered
 // bout's fighters and recorded mark, and the RESULT (winner, winner member id,
@@ -111,9 +136,10 @@ export function kachinukiRosterKey(matchId, subResults) {
     .filter(s => s && s.position !== -1)
     .slice()
     .sort((x, y) => (x.position || 0) - (y.position || 0));
-  const parts = rows.map((s, i) => {
+  const live = lastNumberedBout(rows);
+  const parts = rows.map((s) => {
     const fighters = [s.position, s.sideAMemberId || "", s.sideA || "", s.sideBMemberId || "", s.sideB || "", s.recorded ? "R" : ""];
-    if (i === rows.length - 1 && !s.recorded) return fighters.join("~");
+    if (s === live && !s.recorded) return fighters.join("~");
     const winner = s.winner && typeof s.winner === "object" ? JSON.stringify(s.winner) : (s.winner || "");
     return [...fighters, winner, s.winnerMemberId || "", s.decision || ""].join("~");
   });

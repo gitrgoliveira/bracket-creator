@@ -409,6 +409,7 @@ func TestAdvanceKachinukiUnrecognizedOutcome(t *testing.T) {
 	})
 	assert.Nil(t, res.Next)
 	assert.False(t, res.MatchEnded)
+	assert.True(t, res.OutcomeUnread)
 }
 
 // TestDescribeKachinukiResult smoke-tests the stringer (used by handler logs).

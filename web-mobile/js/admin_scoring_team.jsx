@@ -159,7 +159,7 @@ import { sideLookupKey } from './competitor_identity.jsx';
 // bc-pnum: the ONE primitive that composes a squad member's visible label
 // ("T10.1"); see its header for why this is never restated inline.
 import { squadMemberLabel } from './squad_member_label.jsx';
-import { kachinukiAdvisoryModel, kachinukiNoPairingText, kachinukiRosterKey, storedBoutRecorded } from './kachinuki_advisory.jsx';
+import { kachinukiAdvisoryModel, kachinukiNoPairingText, kachinukiRecordedBoutCloses, kachinukiRosterKey, lastNumberedBout, storedBoutRecorded } from './kachinuki_advisory.jsx';
 
 // Shared inline style for the squad member label riding beside a bout row's
 // fighter name (squadLabelFor, TeamScoreEditorModal below). A muted, small
@@ -599,12 +599,14 @@ export function kachinukiVisiblePositions({ positions, daihyosenIdx, subResults,
   }
   if (cur < 0) {
     // Every bout is played. bc-kbrc: when Record bout has recorded the last
-    // one (the server's stored mark) and appended no pairing, there is no live
-    // bout: the recorded one renders read-only with the others. A bout added
-    // by hand is a placeholder with no mark, so it is the live bout again.
-    const lastPos = positions.indexOf(slots[slots.length - 1]) + 1;
-    if (closeRecordedLast && slots.length > 0
-      && subs.some(sr => sr && sr.position === lastPos && sr.recorded === true)) {
+    // one as a WIN (the server's stored mark) and appended no pairing, there
+    // is no live bout: the recorded one renders read-only with the others. A
+    // recorded DRAW never closes it (kachinukiRecordedBoutCloses: Encho on that
+    // bout is the operator's call in any phase). A bout added by hand is a
+    // placeholder with no mark, so it is the live bout again.
+    const last = lastNumberedBout(subs);
+    if (closeRecordedLast && last && slots.includes(positions[last.position - 1])
+      && kachinukiRecordedBoutCloses(subs)) {
       return daihyosenSlot;
     }
     cur = slots.length - 1;
@@ -2653,10 +2655,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // The stored log's last numbered bout when Record bout has recorded it, as
   // `${matchId}|${position}`, else "": the bout a kept roster answer may close.
   const kachinukiRecordedLastKey = (() => {
-    const rows = (Array.isArray(m.subResults) ? m.subResults : []).filter(s => s && s.position > 0);
-    if (rows.length === 0) return "";
-    const last = rows.reduce((x, y) => (y.position > x.position ? y : x));
-    return last.recorded === true ? `${m.compId || ""}|${m.id || ""}|${last.position}` : "";
+    const last = lastNumberedBout(m.subResults);
+    return last && last.recorded === true ? `${m.compId || ""}|${m.id || ""}|${last.position}` : "";
   })();
   const [kachinukiRoster, setKachinukiRoster] = useStateA(null);
   useEffectA(() => {
@@ -2714,13 +2714,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     : null;
   const visiblePositions = isKachinuki
     ? kachinukiVisiblePositions({
-        // bc-kbrc: Record bout recorded the last bout and appended no pairing,
-        // and the roster read says a side's lineup has nobody left: that bout
-        // renders read-only like every other recorded bout. Not without that
-        // read (no lineup, or the read not landed yet: the bout stays live as
-        // it always did, so nothing closes and reopens under the operator's
-        // finger), and not when End match cannot finish the encounter (a
-        // knockout tie), where Encho on that bout is the way on.
+        // bc-kbrc: Record bout recorded the last bout as a WIN and appended no
+        // pairing, and the roster read says a side's lineup has nobody left:
+        // that bout renders read-only like every other recorded bout. Not
+        // without that read (no lineup, or the read not landed yet: the bout
+        // stays live as it always did, so nothing closes and reopens under the
+        // operator's finger), never on a recorded draw, in any phase (Encho on
+        // that bout is the operator's call; kachinukiVisiblePositions asks
+        // kachinukiRecordedBoutCloses), and not when End match cannot finish
+        // the encounter.
         closeRecordedLast: kachinukiEndOutcome?.kind !== "blocked" && !!kachinukiNoPairing,
         positions, daihyosenIdx,
         // Client-added manual bouts (mp-gmcg) are not in the server log yet;

@@ -34,6 +34,7 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -113,6 +114,13 @@ type AdvanceKachinukiResult struct {
 	// (drawn in pools/league, continued via next bout or encho in a
 	// knockout).
 	BothExhausted bool
+
+	// OutcomeUnread is true when the last bout carries a winner the advance
+	// could not attribute to either side (by member id or by name): it cannot
+	// say who stayed on, so it appends nothing, and MaybeAdvanceKachinuki
+	// writes nothing either, not even the recorded mark (the bout is not
+	// recorded on an outcome nobody could read).
+	OutcomeUnread bool
 }
 
 // AdvanceKachinuki computes the post-bout transition.
@@ -189,7 +197,7 @@ func AdvanceKachinuki(in AdvanceKachinukiInput) AdvanceKachinukiResult {
 		// producing a wrong pairing.
 		log.Printf("engine.AdvanceKachinuki: unrecognized bout outcome, winner=%q sideA=%q sideB=%q decision=%q; no advancement",
 			last.Winner, last.SideA, last.SideB, last.Decision)
-		return AdvanceKachinukiResult{}
+		return AdvanceKachinukiResult{OutcomeUnread: true}
 	}
 }
 
@@ -658,6 +666,13 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 	// running autosave writes a winner at a one-point lead and a hikiwake at
 	// 1-1. A bout already recorded with nothing to append writes nothing, so a
 	// replayed Record bout adds no stamp and no history line.
+	// An outcome the advance could not attribute (a winner naming neither
+	// side) is not a result Record bout can close: nothing is marked and no
+	// history line is written, so the bout stays the one being fought and the
+	// operator corrects it.
+	if out.OutcomeUnread {
+		return false, nil, nil
+	}
 	markRecorded := !last.Recorded
 	if out.Next == nil && !markRecorded {
 		return false, nil, nil
@@ -1576,32 +1591,25 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 		// write made before the removal that still carries it cannot bring
 		// it back; one made after it can.
 		stamp := serverNowMs()
-		// The advance's lineup rule, read under the lock this transaction
-		// holds (the store's own read would wait on it), for
-		// recordBoutWouldAppend. A lineups.yaml that cannot be read resolves
-		// no lineup, as the advance does (lineupRuleOrNone): the removal never
-		// fails on it.
-		lineups, lerr := tx.LoadTeamLineups(compID)
-		if lerr != nil {
-			log.Printf("engine.RemoveTrailingKachinukiBout compId=%s: lineups.yaml load error: %v; resolving no lineup", compID, lerr)
+		// The match's history, read through the transaction (it sees its own
+		// staged lines), says how the removed row got there. A history that
+		// cannot be read decides nothing: the recorded bout stays recorded
+		// (boutAppendedByRecordBout's fallback), and the removal never fails
+		// on it.
+		history, herr := tx.LoadMatchHistory(compID, matchID)
+		if herr != nil {
+			log.Printf("engine.RemoveTrailingKachinukiBout compId=%s matchId=%s: history read error: %v; keeping the recorded bout recorded", compID, matchID, herr)
+			history = nil
 		}
 		// unrecord takes the recorded mark off the bout before the removed one
-		// only when the removal undoes the Record bout that appended it (the
-		// advance, asked of the log without the removed row, appends a
-		// pairing). A bout added by hand after a side had nobody left leaves
-		// that bout recorded. Its group goes in the history line only: the
-		// mark takes no stamp (carryRecordedBouts).
-		unrecord := func(parent *state.MatchResult, h matchHome, stripped []state.SubMatchResult) []string {
-			if i := lastNumberedBout(stripped); i < 0 || !stripped[i].Recorded {
-				return nil
-			}
-			probe := *parent
-			probe.SubResults = stripped
-			rule := &lineupRule{}
-			if lerr == nil {
-				rule = newLineupRuleFrom(lineups, h.PoolMatches, h.BracketRoot, comp.IsKnockoutEnabled())
-			}
-			if !recordBoutWouldAppend(comp, &probe, rule) {
+		// only when the removal undoes the Record bout that appended it: the
+		// history shows the removed row was put there by Record bout's advance
+		// (boutAppendedByRecordBout). A bout added by hand after a side had
+		// nobody left leaves that bout recorded, whatever the lineups say now.
+		// Its group goes in the history line only: the mark takes no stamp
+		// (carryRecordedBouts).
+		unrecord := func(removedGroup string, stripped []state.SubMatchResult) []string {
+			if !boutAppendedByRecordBout(history, removedGroup) {
 				return nil
 			}
 			return unrecordLastBout(stripped)
@@ -1615,7 +1623,7 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 					return nil
 				}
 				removedGroup := state.BoutGroup(h.Pool.SubResults[len(h.Pool.SubResults)-1].Position)
-				removed := append([]string{removedGroup}, unrecord(h.Pool, h, stripped)...)
+				removed := append([]string{removedGroup}, unrecord(removedGroup, stripped)...)
 				h.Pool.StampGroups(stamp, removedGroup)
 				h.Pool.SubResults = stripped
 				if werr := h.Save(); werr != nil {
@@ -1632,7 +1640,7 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 				return nil
 			}
 			removedGroup := state.BoutGroup(h.Bracket.SubResults[len(h.Bracket.SubResults)-1].Position)
-			removed := append([]string{removedGroup}, unrecord(bracketMatchToTeamResult(*h.Bracket), h, stripped)...)
+			removed := append([]string{removedGroup}, unrecord(removedGroup, stripped)...)
 			h.Bracket.StampGroups(stamp, removedGroup)
 			h.Bracket.SubResults = stripped
 			if werr := h.Save(); werr != nil {
@@ -2651,7 +2659,7 @@ func enchoPeriodsRise(stored, incoming *state.EnchoMetadata) bool {
 // pairing a Record bout appended is the undo of that Record bout: the bout it
 // closed is the one being fought again, so its fighters are both on until it
 // is recorded again (bc-kfnl). RemoveTrailingKachinukiBout is its only caller,
-// and calls it only when recordBoutWouldAppend says the removed bout is the
+// and calls it only when boutAppendedByRecordBout says the removed bout is the
 // pairing that Record bout appended.
 func unrecordLastBout(subs []state.SubMatchResult) []string {
 	i := lastNumberedBout(subs)
@@ -2662,26 +2670,66 @@ func unrecordLastBout(subs []state.SubMatchResult) []string {
 	return []string{state.BoutGroup(subs[i].Position)}
 }
 
-// recordBoutWouldAppend reports whether Record bout, run on parent's bout log
-// as it stands, appends a pairing: the advance's own decision (the queues of
-// kachinukiRemainingRoster, then AdvanceKachinuki), asked the way
-// advanceKachinukiOnce asks it. RemoveTrailingKachinukiBout asks it of the log
-// WITHOUT the bout it removes: only when the advance would have appended that
-// pairing is the removal the undo of a Record bout. A bout added by hand after
-// a side had nobody left (the advance appends nothing there) leaves the bout
-// Record bout closed recorded (bc-kfnl).
-func recordBoutWouldAppend(comp *state.Competition, parent *state.MatchResult, rule *lineupRule) bool {
-	i := lastNumberedBout(parent.SubResults)
-	if i < 0 {
-		return false
+// boutAppendedByRecordBout reports whether the match's history shows that the
+// bout row of group (a "bout:N" group) as it stands now was put there by
+// Record bout's advance (doorKachinukiAdvance), i.e. whether removing it undoes
+// that Record bout (bc-kfnl). It reads the stored fact rather than asking the
+// advance again, so a lineup edited between Record bout and Remove changes
+// nothing.
+//
+// The history is walked in the order the store appended it (LoadMatchHistory's
+// order), never in stamp order: an advance is stamped no older than the match,
+// so after a write from a device whose clock runs ahead it carries a stamp
+// later than a Remove made after it. Positions are reused, so
+// what counts is the row's current life: a kachinuki-remove-bout line whose
+// trailing bout group is this one (the row it removed; the bout it un-records,
+// one position lower, is named too and is not removed) ends it, and so does any
+// reopen (doorReopen, doorDownstreamReopen), since a match is reopened only
+// from completed and the finishing write strips a trailing unscored pairing.
+// The row's creator is then the door of the first later line that APPLIED the
+// group (a held or unchanged outcome wrote nothing), except that an advance
+// line creates only its trailing bout group, the pairing it appended: the bout
+// it closes, named on the same line for its recorded mark, existed before it.
+//
+// Fallback: no history (a match written before the history existed, an append
+// that failed, a history that cannot be read) or no creator in it answers
+// false, so the bout Record bout closed stays recorded. That is the safe side:
+// the closed state stands and the operator can still correct the bout.
+func boutAppendedByRecordBout(history []state.MatchHistoryEntry, group string) bool {
+	creator := ""
+	for _, h := range history {
+		trailing := trailingBoutGroup(h.Changed) == group
+		switch h.Door {
+		case doorKachinukiRemove:
+			if trailing {
+				creator = ""
+			}
+			continue
+		case doorReopen, doorDownstreamReopen:
+			creator = ""
+			continue
+		case doorKachinukiAdvance:
+			if !trailing {
+				continue
+			}
+		}
+		if creator == "" && slices.Contains(h.Changed, group) && h.Outcomes[group] == state.HistoryOutcomeApplied {
+			creator = h.Door
+		}
 	}
-	remainingA, remainingB, _, _ := kachinukiRemainingRoster(comp, parent, rule)
-	out := AdvanceKachinuki(AdvanceKachinukiInput{
-		LastBout: parent.SubResults[i],
-		SideA:    remainingA,
-		SideB:    remainingB,
-	})
-	return out.Next != nil
+	return creator == doorKachinukiAdvance
+}
+
+// trailingBoutGroup is the numbered bout group with the highest position among
+// groups, "" when there is none.
+func trailingBoutGroup(groups []string) string {
+	best, bestPos := "", 0
+	for _, g := range groups {
+		if pos, ok := state.ParseBoutGroup(g); ok && pos > bestPos {
+			best, bestPos = g, pos
+		}
+	}
+	return best
 }
 
 // teamMatch is a team match located by findTeamMatch, with the draw it was found

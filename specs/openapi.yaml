@@ -5692,8 +5692,11 @@ components:
           description: >
             The side's fighter in the last numbered bout, as that bout names
             them; null when there is no bout yet, the bout names nobody for
-            the side, or Record bout has recorded the bout and its result
-            retires them (they lost it, or it was drawn). Given whether or not
+            the side, or Record bout has recorded the bout as a win and they
+            lost it. A recorded draw that is still the last numbered bout keeps
+            both of its fighters on, in every phase: nothing followed it
+            because both sides had nobody left, and whether that pair fights on
+            in encho is the operator's call. Given whether or not
             `lineupFound`.
           oneOf:
             - $ref: '#/components/schemas/KachinukiRosterFighter'

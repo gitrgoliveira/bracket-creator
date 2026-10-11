@@ -5,8 +5,9 @@
 // End match finishes the encounter. It comes from the server's stored mark
 // (subResults[].recorded), so a reload and a second device show the same.
 // Record bout cannot record it again; "+ Add next bout manually" brings a
-// live bout back. A knockout tie keeps its bout live (Encho is the way on
-// there), and a bout scored but not recorded stays live as before.
+// live bout back. A recorded draw keeps its bout live in every phase (Encho on
+// it is the operator's call), and a bout scored but not recorded stays live as
+// before.
 import React from 'react';
 import { render, act, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
@@ -182,33 +183,15 @@ describe('a recorded last kachinuki bout with no pairing after it', () => {
       .toBe('Shiro has no fighters left. End match finishes the encounter.');
   });
 
-  it('names both sides after a recorded draw that left nobody, and never reads "Tied bout"', async () => {
+  // Review round 4, finding 1: a recorded draw that is still the last bout
+  // (both sides had nobody left) stays live in every phase, Encho offered: the
+  // operator decides whether the pair fights on, End match decides the rest.
+  // The roster read stubbed here says both sides are out (an answer the server
+  // no longer gives for it), so the sheet's own rule is what keeps it live.
+  it.each(['pool', 'bracket'])('keeps a recorded draw live in a %s match, Encho offered', async (phase) => {
     stubApi(BOTH_OUT);
     const draw = { ...BOUT_2, winner: '', winnerMemberId: '', decision: 'hikiwake', ipponsA: ['M'], ipponsB: ['K'] };
-    const { container } = await mount(kachinukiMatch([BOUT_1, draw]));
-    expect(liveRows(container).length).toBe(0);
-    expect(screen.getByTestId('kachinuki-no-pairing').textContent)
-      .toBe('Shiro and Aka have no fighters left. End match finishes the encounter.');
-    expect(screen.queryByTestId('kachinuki-end-hint')).toBeNull();
-  });
-
-  it('shows the same on the self-run public score sheet', async () => {
-    stubApi(SHIRO_OUT);
-    // The props MatchViewerModal (viewer_match.jsx) hands the editor on the
-    // public page: no password, selfReport, and the team members from the
-    // viewer payload. ScoreEditorModal forwards all three to the team editor.
-    const { container } = await mount(kachinukiMatch([BOUT_1, BOUT_2]), { selfReport: true, password: '', teamMembers: SQUADS });
-    expect(window.API.fetchSquads).not.toHaveBeenCalled();
-    expect(window.API.fetchKachinukiRoster).toHaveBeenCalledWith('comp1', 'm1');
-    expect(liveRows(container).length).toBe(0);
-    expect(screen.getByTestId('kachinuki-no-pairing').textContent)
-      .toBe('Shiro has no fighters left. End match finishes the encounter.');
-  });
-
-  it('keeps a recorded knockout tie live, where Encho is the way on', async () => {
-    stubApi(BOTH_OUT);
-    const draw = { ...BOUT_2, winner: '', winnerMemberId: '', decision: 'hikiwake', ipponsA: ['M'], ipponsB: ['K'] };
-    const { container } = await mount(kachinukiMatch([BOUT_1, draw], 'bracket'));
+    const { container } = await mount(kachinukiMatch([BOUT_1, draw], phase));
     expect(liveRows(container).length).toBe(1);
     expect(screen.queryByTestId('kachinuki-no-pairing')).toBeNull();
     expect(screen.getByTestId('kachinuki-encho-button')).toBeTruthy();

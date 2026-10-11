@@ -12,9 +12,33 @@ import {
   kachinukiAdvisorySide,
   kachinukiFighterLabel,
   kachinukiNoPairingText,
+  kachinukiRecordedBoutCloses,
   kachinukiRosterKey,
+  lastNumberedBout,
   storedBoutRecorded,
 } from '../kachinuki_advisory.jsx';
+
+// Review round 4, finding 8: the one client owner of "the stored last numbered
+// bout", the twin of engine.lastNumberedBout.
+describe('lastNumberedBout', () => {
+  it('is the highest positive position, whatever the order, never the representative bout', () => {
+    const rows = [{ position: 2 }, { position: -1 }, { position: 3 }, { position: 1 }];
+    expect(lastNumberedBout(rows)).toBe(rows[2]);
+    expect(lastNumberedBout([{ position: -1 }])).toBeNull();
+    expect(lastNumberedBout(undefined)).toBeNull();
+  });
+});
+
+// Review round 4, finding 1: only a recorded WIN may close the last bout.
+describe('kachinukiRecordedBoutCloses', () => {
+  it('a recorded win closes, a recorded draw or an unrecorded bout does not', () => {
+    expect(kachinukiRecordedBoutCloses([{ position: 1, recorded: true, decision: 'fought' }])).toBe(true);
+    expect(kachinukiRecordedBoutCloses([{ position: 1, recorded: true, decision: 'hikiwake' }])).toBe(false);
+    expect(kachinukiRecordedBoutCloses([{ position: 1, decision: 'fought' }])).toBe(false);
+    expect(kachinukiRecordedBoutCloses([{ position: 1, recorded: true }, { position: 2 }])).toBe(false);
+    expect(kachinukiRecordedBoutCloses([])).toBe(false);
+  });
+});
 
 const squadA = [
   { id: 'a1', index: 1, name: 'Kudo' },

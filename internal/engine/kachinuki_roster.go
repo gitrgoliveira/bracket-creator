@@ -25,8 +25,9 @@ type KachinukiRosterFighter struct {
 //
 // On is the side's fighter in the live bout (the last numbered bout row), as
 // that row names them; nil when the row names nobody for the side, when there
-// is no bout row yet, or when Record bout has recorded that row and its result
-// retires this fighter (see KachinukiRoster).
+// is no bout row yet, or when Record bout has recorded that row as a WIN that
+// retires this fighter (see KachinukiRoster). A recorded draw that is still
+// the last bout keeps both its fighters on, in every phase.
 //
 // Remaining is the queue the advance takes this side's next fighter from if
 // the fighter on loses: every fighter of the lineup in force who has not
@@ -66,13 +67,14 @@ type KachinukiRoster struct {
 // result (bc-kfnl, operator decision 2026-10-11). Only once Record bout has
 // marked it recorded (state.SubMatchResult.Recorded, which the server alone
 // writes) is its result read the same way: the loser is no longer on, the
-// winner stays on, a draw takes both off. The mark is stored, so a fresh
+// winner stays on. The mark is stored, so a fresh
 // sheet, a second device and the public sheet read the same line. When a draw
 // leaves one side with nobody, the advance appends a pairing that keeps that
 // side's fighter (advanceAfterHikiwake), which is then the last bout and on.
-// In a knockout match a recorded draw that is still the last bout keeps both
-// its fighters on: the bracket needs a winner, so that bout is fought on in
-// encho (bc-kfnl), and a write that starts the encho takes the mark off.
+// A recorded draw that is still the last bout keeps both its fighters on, in
+// every phase: nothing followed it because both sides had nobody left, and
+// whether that pair fights on in encho is the operator's call (a write that
+// starts the encho takes the mark off); End match decides how it ends.
 //
 // The queues come from kachinukiRosterQueues and the retirements from
 // RetiredPlayersFromBoutLog, as the advance (MaybeAdvanceKachinuki) takes
@@ -121,14 +123,17 @@ func (e *Engine) KachinukiRoster(compID, matchID string) (KachinukiRoster, error
 		live := parent.SubResults[i]
 		onA = kachinukiFighter{Name: live.SideA, MemberID: live.SideAMemberID}
 		onB = kachinukiFighter{Name: live.SideB, MemberID: live.SideBMemberID}
-		// A recorded DRAW that is still the last bout of a KNOCKOUT match is a
-		// tie the bracket cannot keep: the advance appended nothing after it
-		// (both sides had nobody left, or it would have), and the operator
-		// fights it on in encho on that same bout, which then clears the mark
-		// (carryRecordedBouts). Its fighters stay on, so the line never reads
-		// "no fighters left" for both while the bout is still the way on.
-		knockoutTie := located.IsBracket && state.IsDraw(live.Decision)
-		if live.Recorded && !knockoutTie {
+		// A recorded DRAW that is still the last bout keeps both its fighters
+		// on, in every phase: the advance appended nothing after it, which
+		// after a draw means both sides had nobody left (a draw leaving one
+		// side empty appends the pairing that keeps that side's fighter,
+		// advanceAfterHikiwake). Whether that pair fights on in encho is the
+		// operator's call on any bout in any phase, and an encho tap clears
+		// the mark (carryRecordedBouts); End match decides the rest (a drawn
+		// encounter in a pool or league, blocked in a knockout). So the line
+		// never reads "no fighters left" while that bout can still be fought
+		// on. Only a recorded WIN takes a fighter off here.
+		if live.Recorded && !state.IsDraw(live.Decision) {
 			liveRetiredA, liveRetiredB = RetiredPlayersFromBoutLog(parent.SubResults[i:i+1], parent.SideA, parent.SideB)
 		}
 	}

@@ -47,6 +47,12 @@ Built-in Read/Edit/Glob/Grep are permitted on code files ONLY when: the file's l
 
 When asked to *plan*, *verify*, or *record a plan on a bead*: do NOT write code. Produce the plan, write it to the bead, and stop. Never discard uncommitted work (a stash, a checkout over a dirty tree, a reset) without explicit approval; capture a diff first if work must be set aside.
 
+### Keep the orchestrating session small
+
+Every model call re-reads the session's whole context, this file included (about 60k tokens on its own), so a session's cost grows with its length. One session that ran a multi-bead PR and its review loops made 209 calls at an average of about 360k tokens of context, and never compacted (2026-10-11).
+- **Delegate review rounds, investigations, history lookups and verification sweeps to subagents, and keep only their short summary** (findings, decisions, `file:line`) in the main session: ask the subagent for a summary in a set number of lines, not its full report (operator feedback 2026-09-13: "Make better usage of sub agents").
+- **Start a new session for each PR.** Once a PR merges, begin the next bead's work in a fresh session; the bead and the PR carry the state.
+
 ## Governance
 
 Before implementing features or making architectural decisions, read the project constitution:
@@ -481,7 +487,6 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, source]
 - **Test plan is a gate, not a formality.** Before requesting review on a PR, check off EVERY item in the PR description's test plan. Do not mark a PR ready while any checkbox is unverified. Manual/browser steps are not optional; execute them, then check them.
 - **Keep the bead `in_progress` until the PR actually merges.** A green review is not a merge. Only `bd close <id>` after the merge lands, with a reason referencing the merge commit/PR.
 - **After a merge, run the full `/cleanup` sequence** (close bead → fast-forward main → remove worktree → delete local + remote branch → prune). Don't wait to be asked for each step. See the `/cleanup` skill.
-- **Verify the worktree/branch before any edit.** This repo uses a git worktree per PR; edits applied to the wrong worktree (or directly to the `main` checkout) force patch-and-revert recovery. When there is any ambiguity, confirm with `pwd` and `git branch --show-current` before the first Edit/Write. Never edit the main checkout directly; always work inside a worktree.
 
 ## Code Review
 
@@ -505,8 +510,7 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, source]
 - **Verify in the browser; never substitute API/curl calls.** Manual test-plan items and UAT must be executed through the actual UI.
 - **Test self-run / public features from the PUBLIC page, not the admin UI**: the public flow is what users hit. Admin-side scoring proves nothing about it.
 - **File gap/UX issues incrementally as you find them**, not batched at the end of a UAT pass.
-- Frontend changes under `web-mobile/` require a rebuild to take effect (`//go:embed`); use `make run-mobile` or rebuild + restart.
-- **Diagnose failures from evidence, never fabricate a cause.** When a test, build, or CI step fails (Codecov, GPG, lint, etc.), read the actual logs before explaining it. Do not invent "known bugs", version-specific regressions, or other rationalizations to justify a workaround. If the root cause isn't established, say so and keep investigating.
+- **Diagnose failures from evidence, never fabricate a cause.** When a test, build, or CI step fails (Codecov, GPG, lint, etc.), read the actual logs before explaining it. Do not invent "known bugs", version-specific regressions, or other rationalizations to justify a workaround (e.g. a fabricated "known bug in Codecov v6.0.x" masking a transient GPG keyserver failure). If the root cause isn't established, say so and keep investigating.
 - **Test coverage gate: every package that has test files must maintain ≥85% statement coverage.** Verify before any PR with:
   ```bash
   go test -race -cover . ./cmd/... ./internal/... ./tests/...
@@ -523,18 +527,14 @@ Never state that something is fixed, rendered, counted, or passing based on grep
 When rebasing or resolving conflicts, watch for these recurring breakages:
 - Duplicate declarations introduced by the rebase (same symbol defined twice after a merge).
 - UUID-vs-name-string mismatches in player/entity maps: match on id OR name, and use participant UUIDs (not display names) for bracket-highlight IDs.
-- Missed call sites when removing or renaming a symbol: `grep -r` the name across **all** packages **including `_test.go` files** before committing. A refactor that compiles can still leave stale test references or skip-test code pointing at dead paths.
+- Missed call sites when removing or renaming a symbol (see **Refactoring Rules**).
 - Re-run `make go/test` after every rebase; a clean rebase that compiles must not be semantically broken.
 
 ## Refactoring Rules
 
-- **Search ALL call sites, including test files, before removing code or parameters.** Run `grep -r` (or `grep -rn 'SYMBOL' . --include='*.go' --include='*.jsx'`) to find every reference, not just production code. A removal that compiles can still leave stale test references or skip-test code pointing at dead paths.
+- **Search ALL call sites, including test files, before removing or renaming code or parameters.** Run `grep -r` (or `grep -rn 'SYMBOL' . --include='*.go' --include='*.jsx'`) to find every reference, not just production code. A removal that compiles can still leave stale test references or skip-test code pointing at dead paths.
 - **Verify that guards and defensive code are intentional before removing them.** If a reviewer flags a removal, assume the guard was intentional unless you can prove otherwise from git blame or comments. Aggressive removal of guards (e.g. `sourceCompID` checks, `defer os.RemoveAll`) has had to be reverted.
 - **Boy Scout rule: leave code better than you found it, even outside the diff.** When a review or task surfaces a worthwhile adjacent fix (a literal duplicated in sibling files, a comment contradicting the code, a swallowed error in a handler you touched), apply it rather than skipping it as "outside the reviewed diff". Precedent: the shared singleflight response tail was hoisted and the ZIP-magic literal deduplicated across untouched test files precisely because a review flagged them. Two limits keep this from scope creep: don't apply adjacent fixes that change intended behavior (surface those as findings for a decision), and don't let a small PR grow into a refactor: fix what you touched or verified, and raise the rest with the user rather than filing a follow-up bead unasked.
-
-## Debugging Principles
-
-- **Never fabricate explanations for tool/infrastructure failures.** If you don't know the root cause of a CI failure, say so and investigate. Do not invent "known bugs", version-specific regressions, or other rationalizations to justify a workaround (e.g. a fabricated "known bug in Codecov v6.0.x" masking a transient GPG keyserver failure). Read the actual logs first.
 
 ## Shell Discipline
 

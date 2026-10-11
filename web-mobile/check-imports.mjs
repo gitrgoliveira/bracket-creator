@@ -93,6 +93,10 @@ const CHECK_MODULES = [
   // and side_marks.jsx; a typo'd or renamed export in any of them would fail
   // only in a native browser.
   'admin_schedule_score_editor.jsx',
+  // bc-lbla: the shared competition-config controls import useStableId from
+  // the stable_id.jsx leaf, which the glossary's <Term> imports too.
+  'competition_fields.jsx',
+  'glossary.jsx',
 ];
 
 // ---------------------------------------------------------------------------

@@ -148,7 +148,7 @@ import {
   LABEL_CHECK_IN, HINT_CHECK_IN,
   LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX, cutNumberPrefix, LABEL_COURTS,
 } from './competition_shape.jsx';
-import { PillGroup, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
+import { PillGroup, PillButton, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
 import { DurationInput } from './duration.jsx';
 
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
@@ -1188,7 +1188,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
               alongside `.row`, so this needs no new CSS. */}
           <div className="row-3">
             <div className="field">
-              <label className="field__label">Display name</label>
+              <label className="field__label" htmlFor="create-display-name">Display name</label>
               {/* Placeholder shows the REAL default (deriveCompetitionName("", kind)), not
                   an example, and tracks the live `kind` toggle so it flips
                   Individual/Teams as the operator picks. A blank name is a
@@ -1201,11 +1201,11 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                   "Individual" already exists...` - naming a value the operator
                   never typed, with the field still visibly empty. The naming
                   example moved to the hint below so this slot can tell the truth. */}
-              <input className="input" placeholder={deriveCompetitionName("", kind)} value={name} onChange={(e) => { setName(e.target.value); setError(""); }} />
+              <input id="create-display-name" className="input" placeholder={deriveCompetitionName("", kind)} value={name} onChange={(e) => { setName(e.target.value); setError(""); }} />
               <div className="field__hint">Example: Men's Individual</div>
             </div>
             <div className="field">
-              <label className="field__label">Day</label>
+              <label className="field__label" htmlFor="create-day">Day</label>
               {/* When the tournament has a start date and durationDays, offer */}
               {/* a select over the derived day list so the competition date */}
               {/* is always within the tournament's range. For a single-day */}
@@ -1216,6 +1216,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                 if (days.length > 0) {
                   return (
                     <select
+                      id="create-day"
                       className="input"
                       value={date}
                       onChange={(e) => setDate(e.target.value)}
@@ -1228,14 +1229,14 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                 }
                 // Fallback: tournament has no date yet: free date picker.
                 return (
-                  <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(date)} onChange={(e) => setDate(isoToDmy(e.target.value))} />
+                  <input id="create-day" className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(date)} onChange={(e) => setDate(isoToDmy(e.target.value))} />
                 );
               })()}
               <div className="field__hint">For multi-day tournaments, specify which day this competition takes place.</div>
             </div>
             <div className="field">
-              <label className="field__label">Start time</label>
-              <input className="input" type="time" value={startTime} onChange={(e) => { startTimeEditedRef.current = true; setStartTime(e.target.value); }} />
+              <label className="field__label" htmlFor="create-start-time">Start time</label>
+              <input id="create-start-time" className="input" type="time" value={startTime} onChange={(e) => { startTimeEditedRef.current = true; setStartTime(e.target.value); }} />
             </div>
           </div>
 
@@ -1319,23 +1320,20 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                   operator ruling: no federation names anywhere in this UI. */}
               {extraQualifiersRadioVisible(format, poolMode) && (
                 <div className="field">
-                  <label className="field__label">{LABEL_EXTRA_QUALIFIERS}</label>
-                  <div className="radio-group">
-                    <button
-                      className={`radio-pill ${extraQualifiers === EXTRA_QUALIFIERS_STANDARD ? "is-active" : ""}`}
-                      type="button"
+                  <label className="field__label" id="create-extra-qualifiers-label">{LABEL_EXTRA_QUALIFIERS}</label>
+                  <div className="radio-group" role="group" aria-labelledby="create-extra-qualifiers-label">
+                    <PillButton
+                      active={extraQualifiers === EXTRA_QUALIFIERS_STANDARD}
                       onClick={() => setExtraQualifiers(EXTRA_QUALIFIERS_STANDARD)}
-                    >{extraQualifiersLabel(EXTRA_QUALIFIERS_STANDARD)}</button>
-                    <button
-                      className={`radio-pill ${extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS ? "is-active" : ""}`}
-                      type="button"
+                    >{extraQualifiersLabel(EXTRA_QUALIFIERS_STANDARD)}</PillButton>
+                    <PillButton
+                      active={extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS}
                       onClick={() => { setExtraQualifiers(EXTRA_QUALIFIERS_LARGER_POOLS); setWinners((w) => winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_LARGER_POOLS, w)); }}
-                    >{extraQualifiersLabel(EXTRA_QUALIFIERS_LARGER_POOLS)}</button>
-                    <button
-                      className={`radio-pill ${extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET ? "is-active" : ""}`}
-                      type="button"
+                    >{extraQualifiersLabel(EXTRA_QUALIFIERS_LARGER_POOLS)}</PillButton>
+                    <PillButton
+                      active={extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET}
                       onClick={() => { setExtraQualifiers(EXTRA_QUALIFIERS_FILL_BRACKET); setWinners((w) => winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_FILL_BRACKET, w)); }}
-                    >{extraQualifiersLabel(EXTRA_QUALIFIERS_FILL_BRACKET)}</button>
+                    >{extraQualifiersLabel(EXTRA_QUALIFIERS_FILL_BRACKET)}</PillButton>
                   </div>
                   <div className="field__hint">
                     {extraQualifiersHint(extraQualifiers, poolSize)}
@@ -1390,10 +1388,10 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           )}
 
           <div className="field">
-            <label className="field__label">{LABEL_COURTS}</label>
-            <div className="radio-group">
+            <label className="field__label" id="create-courts-label">{LABEL_COURTS}</label>
+            <div className="radio-group" role="group" aria-labelledby="create-courts-label">
               {safeCourts.map((cc) => (
-                <button key={cc} className={`radio-pill ${selectedCourts.includes(cc) ? "is-active" : ""}`} type="button" onClick={() => toggleCourt(cc)}>Shiaijo (court) {cc}</button>
+                <PillButton key={cc} active={selectedCourts.includes(cc)} onClick={() => toggleCourt(cc)}>Shiaijo (court) {cc}</PillButton>
               ))}
             </div>
             {/* Same component the competition Settings screen renders, so the

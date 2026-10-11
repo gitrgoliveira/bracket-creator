@@ -2,7 +2,7 @@
 // surfaces share -- admin_setup.jsx's create form and
 // admin_competition_settings.jsx's settings tab.
 //
-// competition_shape.jsx (this module's only project import) owns the RULES:
+// competition_shape.jsx (which the two screens import beside this one) owns the RULES:
 // option lists, copy, visibility predicates, normalizers. It is a pure leaf
 // with no React, deliberately, so it can be imported anywhere including
 // tests. This module is the other half of the same job: the MARKUP those
@@ -47,6 +47,34 @@
 // ONE module instance (see the double-module-eval trap in
 // web-mobile/js/README-style notes on the viewer split). `React` is the
 // global the surrounding admin bundle already relies on.
+//
+// Every control here is tied to its visible label (bc-lbla): a text or number
+// input through htmlFor and an id from useStableId, a pill row through
+// role="group" + aria-labelledby, and each pill announces whether it is the
+// chosen one through aria-pressed (PillButton). The ids come from
+// useStableId, not from the label text, because both screens can render the
+// same field and a page may hold more than one form.
+
+import { useStableId } from './stable_id.jsx';
+
+// PillButton: one radio pill. The ONE owner of "a pill says whether it is
+// chosen": the is-active class for the eye and aria-pressed for assistive tech
+// read the same `active` value, so they cannot disagree. PillGroup renders
+// every pill through it, and so do the hand-written pill rows the parity test
+// sanctions (Knockout qualifiers, Assigned shiaijo) and the rest of the app's
+// pill toggles. Extra props (style, data-testid, aria-label) pass through.
+export function PillButton({ active, onClick, disabled, children, ...rest }) {
+  return (
+    <button
+      {...rest}
+      className={`radio-pill ${active ? "is-active" : ""}`}
+      type="button"
+      aria-pressed={!!active}
+      onClick={onClick}
+      disabled={!!disabled}
+    >{children}</button>
+  );
+}
 
 // PillGroup: label + radio-pill row + optional hint, the shape every
 // option-list control on both screens uses.
@@ -65,20 +93,26 @@
 // `<div className="field__hint">` in the tree, which carries the class's own
 // top margin and pushed the next control down by a few pixels on whichever
 // screen rendered it unconditionally.
+//
+// The label stays a `<label className="field__label">` (tests and the capture
+// harness select it by that class) and names the row through aria-labelledby,
+// which works on any element. Each pill's aria-pressed reads the SAME `active`
+// predicate as its class, never plain equality, so the team-match-format row's
+// stored "" still announces Regular as pressed.
 export function PillGroup({ label, options, value, isActive, onChange, disabled, hint }) {
   const active = isActive || ((v) => v === value);
+  const labelId = useStableId('pill-group');
   return (
     <div className="field">
-      <label className="field__label">{label}</label>
-      <div className="radio-group">
+      <label className="field__label" id={labelId}>{label}</label>
+      <div className="radio-group" role="group" aria-labelledby={labelId}>
         {options.map((o) => (
-          <button
+          <PillButton
             key={o.value}
-            className={`radio-pill ${active(o.value) ? "is-active" : ""}`}
-            type="button"
+            active={active(o.value)}
             onClick={() => onChange(o.value)}
-            disabled={!!disabled}
-          >{o.label}</button>
+            disabled={disabled}
+          >{o.label}</PillButton>
         ))}
       </div>
       {hint ? <div className="field__hint">{hint}</div> : null}
@@ -117,10 +151,10 @@ export function CheckboxField({ label, checked, onChange, disabled, hint }) {
 // FieldLabel: the `<label className="field__label">` both screens render,
 // including the greyed "(optional)" suffix that was two identical inline
 // `<span style={{ fontWeight: 400, color: "var(--ink-3)" }}>` copies -- one
-// per screen, on the same field.
-function FieldLabel({ children, optional }) {
+// per screen, on the same field. `htmlFor` ties it to its control.
+function FieldLabel({ children, optional, htmlFor }) {
   return (
-    <label className="field__label">
+    <label className="field__label" htmlFor={htmlFor}>
       {children}
       {optional ? <span className="field__label-optional"> (optional)</span> : null}
     </label>
@@ -148,10 +182,12 @@ export function NumberField({
   label, optional, value, onChange, min, max, step = "1",
   disabled, hint, error, width,
 }) {
+  const id = useStableId('field');
   return (
     <div className="field">
-      <FieldLabel optional={optional}>{label}</FieldLabel>
+      <FieldLabel optional={optional} htmlFor={id}>{label}</FieldLabel>
       <input
+        id={id}
         className="input"
         type="number"
         min={min}
@@ -174,10 +210,12 @@ export function NumberField({
 export function TextField({
   label, optional, value, onChange, placeholder, maxLength, disabled, hint, width,
 }) {
+  const id = useStableId('field');
   return (
     <div className="field">
-      <FieldLabel optional={optional}>{label}</FieldLabel>
+      <FieldLabel optional={optional} htmlFor={id}>{label}</FieldLabel>
       <input
+        id={id}
         className="input"
         placeholder={placeholder}
         maxLength={maxLength}

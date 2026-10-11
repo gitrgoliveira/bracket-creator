@@ -2757,6 +2757,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const kachinukiEnchoOffered = kachinukiBoutMode
     && kachinukiEnchoAvailable(kachinukiEndOutcome)
     && kachinukiLastScoredIdx === kachinukiCurBoutIdx;
+  // bc-ktih: the footer's End hint is worked out from the bout End would judge,
+  // the last SCORED bout, so it may speak about that bout only while it IS the
+  // live one. Once Record bout has appended the next pairing, the live bout is
+  // unscored and the footer is about scoring it, whatever the bout before it
+  // ended as: a recorded tie must never make the fresh pairing read "Tied bout".
+  // With nothing scored at all (no-bouts) the End hint keeps its own sentence.
+  const kachinukiLiveBoutAwaitsScore = kachinukiBoutMode
+    && kachinukiCurBoutIdx >= 0
+    && !kachinukiCurrentBoutPlayed
+    && (kachinukiEndOutcome?.kind === "win" || kachinukiEnchoAvailable(kachinukiEndOutcome));
   // Encho on the tied current kachinuki bout: bump THAT bout's overtime count
   // only, then clear the tied outcome so the SAME pair keeps scoring that
   // bout. The encounter is not in overtime (operator ruling 2026-09-24,
@@ -5094,7 +5104,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               This replaces the koTieBlocked gating for kachinuki: the
               correction-mode Finish buttons below never see a running
               kachinuki match, so there are no competing hints. */}
-          {kachinukiBoutMode && (kachinukiEndOutcome?.kind === "blocked" || kachinukiEndOutcome?.kind === "draw") && (
+          {kachinukiBoutMode && (kachinukiEndOutcome?.kind === "blocked" || kachinukiEndOutcome?.kind === "draw")
+            && !kachinukiLiveBoutAwaitsScore && (
             <div data-testid="kachinuki-end-hint" style={{ fontSize: 12, color: "var(--ink-2)" }}>
               {!kachinukiEnchoAvailable(kachinukiEndOutcome) ? (
                 <span>Nothing recorded yet: score a bout before ending the match.</span>
@@ -5121,9 +5132,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               unreachable on a tablet (critique P2). Shown only in the common
               "winner stays, next bout pending" state the blocked/draw hints
               above do not cover; it clears the moment the bout is scored. */}
-          {kachinukiBoutMode && !kachinukiCurrentBoutPlayed && kachinukiEndOutcome?.kind === "win" && (
+          {kachinukiLiveBoutAwaitsScore && (
             <div data-testid="kachinuki-record-hint" style={{ fontSize: 12, color: "var(--ink-2)" }}>
-              <span>Score this bout to enable <strong>Record bout</strong>, or <strong>End match</strong> to finish on the last scored bout.</span>
+              {kachinukiEndOutcome?.kind === "blocked" ? (
+                <span>Score this bout to enable <strong>Record bout</strong>. No draws in a knockout: <strong>End match</strong> needs a bout with a point.</span>
+              ) : (
+                <span>Score this bout to enable <strong>Record bout</strong>, or <strong>End match</strong> to finish on the last scored bout.</span>
+              )}
             </div>
           )}
           {/* mp-gmcg: a reopen's outcome: its notice, its error, and the

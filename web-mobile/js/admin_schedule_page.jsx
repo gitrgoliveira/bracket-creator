@@ -320,14 +320,14 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
         <div className="card card--pad-lg" style={{ marginBottom: 16 }}>
           <div className="row" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
             <div className="field" style={{ minWidth: 180 }}>
-              <label className="field__label">Competition</label>
-              <select className="input" value={autoComp} onChange={e => { setAutoComp(e.target.value); const c = (tournament.competitions || []).find(x => x.id === e.target.value); if (c?.startTime) setAutoStart(c.startTime); }}>
+              <label className="field__label" htmlFor="auto-schedule-competition">Competition</label>
+              <select id="auto-schedule-competition" className="input" value={autoComp} onChange={e => { setAutoComp(e.target.value); const c = (tournament.competitions || []).find(x => x.id === e.target.value); if (c?.startTime) setAutoStart(c.startTime); }}>
                 {(tournament.competitions || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div className="field">
-              <label className="field__label">Start time</label>
-              <window.StableInput className="input" type="time" value={autoStart} onChange={val => setAutoStart(val)} style={{ width: 120 }} />
+              <label className="field__label" htmlFor="auto-schedule-start">Start time</label>
+              <window.StableInput id="auto-schedule-start" className="input" type="time" value={autoStart} onChange={val => setAutoStart(val)} style={{ width: 120 }} />
             </div>
             <div className="field">
               <label className="field__label" htmlFor="auto-match-duration">Time per match</label>

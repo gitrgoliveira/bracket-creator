@@ -136,23 +136,23 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
       </div>
       <div>
         <div className="field">
-          <label className="field__label">Browser tab / window title</label>
-          <input type="text" value={windowTitle} maxLength={100} placeholder="Bracket Creator Mobile"
+          <label className="field__label" htmlFor="branding-window-title">Browser tab / window title</label>
+          <input id="branding-window-title" type="text" value={windowTitle} maxLength={100} placeholder="Bracket Creator Mobile"
             onChange={(e) => handleWindowTitleChange(e.target.value)}
             style={{ width: "100%", boxSizing: "border-box" }} />
           <div className="field__hint">Shown in the browser tab and title bar on all pages. Defaults to "Bracket Creator Mobile" when blank.</div>
         </div>
         <div className="branding__colors">
           <div className="field">
-            <label className="field__label">Primary accent color</label>
-            <input type="color" value={primaryColor}
+            <label className="field__label" htmlFor="branding-primary-color">Primary accent color</label>
+            <input id="branding-primary-color" type="color" value={primaryColor}
               onChange={(e) => handleColorChange("primaryColor", e.target.value)}
               style={{ width: "100%", height: 36, cursor: "pointer", border: "1px solid var(--line)", borderRadius: 6 }} />
             <div className="field__hint">Used for buttons, headers, and highlights. Default: #1d3557.</div>
           </div>
           <div className="field">
-            <label className="field__label">Soft accent (background tint)</label>
-            <input type="color" value={accentSoftColor}
+            <label className="field__label" htmlFor="branding-accent-soft-color">Soft accent (background tint)</label>
+            <input id="branding-accent-soft-color" type="color" value={accentSoftColor}
               onChange={(e) => handleColorChange("accentSoftColor", e.target.value)}
               style={{ width: "100%", height: 36, cursor: "pointer", border: "1px solid var(--line)", borderRadius: 6 }} />
             <div className="field__hint">Used for row highlights and badges. Default: #e7eaf3.</div>
@@ -170,8 +170,8 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
           )}
           <form onSubmit={handleLogoUpload} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div className="field">
-              <label className="field__label">{hasLogo ? "Replace logo" : "Upload logo"} (PNG or JPEG, ≤1 MB)</label>
-              <input ref={fileRef} type="file" accept="image/png,image/jpeg" />
+              <label className="field__label" htmlFor="branding-logo-file">{hasLogo ? "Replace logo" : "Upload logo"} (PNG or JPEG, ≤1 MB)</label>
+              <input id="branding-logo-file" ref={fileRef} type="file" accept="image/png,image/jpeg" />
               <div className="field__hint">Square image recommended: non-square images will be cropped to fit the top bar icon.</div>
             </div>
             <div className="branding__logo-actions">

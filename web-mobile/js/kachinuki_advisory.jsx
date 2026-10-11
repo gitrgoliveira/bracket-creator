@@ -54,7 +54,7 @@ export function kachinukiAdvisorySide({ side, squad, teamNumber }) {
   const left = remaining.map(f => kachinukiFighterLabel({ squad, teamNumber, memberId: f.memberId, name: f.name }) || "-");
   const head = onLabel ? `${onLabel} on` : "";
   let tail;
-  if (left.length === 0) tail = onLabel ? "last fighter" : "0 left";
+  if (left.length === 0) tail = onLabel ? "last fighter" : "no fighters left";
   else tail = `${left.length} left (${left.join(", ")})`;
   return { on: onLabel, left, text: head ? `${head}, ${tail}` : tail };
 }

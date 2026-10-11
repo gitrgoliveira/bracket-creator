@@ -250,7 +250,7 @@ describe('the kachinuki advisory line', () => {
     expect(onSubmit.mock.calls[0][0].kachinukiBoutFinal).toBe(true);
     expect(window.API.fetchKachinukiRoster).toHaveBeenCalledTimes(2);
     expect(window.API.fetchKachinukiRoster).toHaveBeenLastCalledWith('comp1', 'm1', 2);
-    expect(advisory().textContent).toBe('Shiro: 0 left · Aka: T2.1 Kudo on, 2 left (T2.2 Mori, T2.3)');
+    expect(advisory().textContent).toBe('Shiro: no fighters left · Aka: T2.1 Kudo on, 2 left (T2.2 Mori, T2.3)');
   });
 
   it('reads once more, not twice, when Record bout appends the next pairing', async () => {

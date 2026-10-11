@@ -63,9 +63,9 @@ describe('kachinukiAdvisorySide', () => {
     });
     expect(out.text).toBe('T2.1 Kudo on, last fighter');
   });
-  it('reads "0 left" once a recorded bout has taken the side\'s last fighter off', () => {
+  it('reads "no fighters left" once a recorded bout has taken the side\'s last fighter off', () => {
     const out = kachinukiAdvisorySide({ side: { ...side(true), on: null }, squad: squadA, teamNumber: 'T2' });
-    expect(out.text).toBe('0 left');
+    expect(out.text).toBe('no fighters left');
   });
   it('shows only the fighter on, with no count, for a side with no lineup', () => {
     const out = kachinukiAdvisorySide({

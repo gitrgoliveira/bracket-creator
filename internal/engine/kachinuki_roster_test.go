@@ -671,6 +671,20 @@ func TestBoutAppendedByRecordBout(t *testing.T) {
 	assert.True(t, boutAppendedByRecordBout([]state.MatchHistoryEntry{held, advance}, g), "a held line wrote nothing")
 }
 
+// Review round 5, finding 8: the live bout is the highest numbered position,
+// whatever the slice's order, the same rule as the client's lastNumberedBout
+// (kachinuki_advisory_model.test.jsx), so an out-of-order log reads the same
+// row on both sides.
+func TestLastNumberedBout_OutOfOrderLog(t *testing.T) {
+	rows := []state.SubMatchResult{{Position: 1}, {Position: 3}, {Position: 2}, {Position: state.DaihyosenSubPosition}}
+	assert.Equal(t, 1, lastNumberedBout(rows), "position 3 is the live bout, not the array tail")
+	dup := []state.SubMatchResult{{Position: 2, SideA: "first"}, {Position: 2, SideA: "second"}, {Position: 0}}
+	assert.Equal(t, 0, lastNumberedBout(dup), "the first of two rows sharing a position, as the client picks")
+	assert.Equal(t, -1, lastNumberedBout([]state.SubMatchResult{{Position: 0}}), "position 0 is not a numbered bout")
+	assert.Equal(t, -1, lastNumberedBout([]state.SubMatchResult{{Position: state.DaihyosenSubPosition}}))
+	assert.Equal(t, -1, lastNumberedBout(nil))
+}
+
 // A Record bout whose winner names neither side records nothing: the advance
 // could not read the outcome, so the bout is not marked and no history line is
 // written (review round 4, finding 4).

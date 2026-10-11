@@ -310,3 +310,53 @@ describe('a recorded knockout tie fought on in encho', () => {
     expect(line()).toContain('Mori on');
   });
 });
+
+// Review round 5, finding 1: a Record bout that appends no pairing only marks
+// its bout recorded, which moves no stamp, so a refetch that read the match
+// before the mark answers with the SAME stamp after it (keepNewerMatches takes
+// an equal stamp). The sheet holds the answer's mark until the match carries a
+// strictly newer stamp.
+describe('the Record-bout answer\'s recorded mark against a stale copy', () => {
+  const { recorded: _r, ...UNRECORDED_2 } = BOUT_2;
+  const stamped = (subResults, modifiedAt) => ({ ...kachinukiMatch(subResults), modifiedAt });
+
+  async function recordLastBout() {
+    stubApi(SHIRO_OUT);
+    const onSubmit = vi.fn().mockResolvedValue({ subResults: [BOUT_1, BOUT_2], modifiedAt: 100 });
+    const props = { onClose: vi.fn(), onSubmit, password: 'secret' };
+    let view;
+    await act(async () => {
+      view = render(<ScoreEditorModal match={stamped([BOUT_1, UNRECORDED_2], 100)} {...props} />);
+    });
+    await settle();
+    expect(liveRows(view.container).length).toBe(1);
+    await act(async () => { fireEvent.click(recordButton()); });
+    await settle();
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    const show = async (match) => {
+      await act(async () => { view.rerender(<ScoreEditorModal match={match} {...props} />); });
+      await settle();
+    };
+    return { view, show };
+  }
+
+  it('an equal-stamp unmarked copy arriving after the answer does not reopen the bout', async () => {
+    const { view, show } = await recordLastBout();
+    expect(liveRows(view.container).length).toBe(0);
+    // The push that brings the mark, then the refetch read before it.
+    await show(stamped([BOUT_1, BOUT_2], 100));
+    expect(liveRows(view.container).length).toBe(0);
+    await show(stamped([BOUT_1, UNRECORDED_2], 100));
+    expect(liveRows(view.container).length).toBe(0);
+    expect(screen.getByTestId('kachinuki-done-bout-1')).toBeTruthy();
+    expect(screen.getByTestId('kachinuki-no-pairing')).toBeTruthy();
+  });
+
+  it('a strictly newer unmarked copy does reopen it', async () => {
+    const { view, show } = await recordLastBout();
+    expect(liveRows(view.container).length).toBe(0);
+    await show(stamped([BOUT_1, UNRECORDED_2], 101));
+    expect(liveRows(view.container).length).toBe(1);
+    expect(screen.queryByTestId('kachinuki-no-pairing')).toBeNull();
+  });
+});

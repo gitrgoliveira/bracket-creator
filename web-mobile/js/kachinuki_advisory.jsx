@@ -24,6 +24,10 @@
 // fighter on alone, and with no lineup on either side there is no line.
 import { squadMemberLabel } from './squad_member_label.jsx';
 import { resolveSquadMember, resolveBoutSideDisplayName } from './lineup_resolver.jsx';
+// The client's one draw test (the twin of state.IsDraw). The team editor
+// already loads api_serializers.jsx through admin_scoring_autosave.jsx, so this
+// adds no module to its graph.
+import { isHikiwake } from './api_serializers.jsx';
 
 // The separator between the two sides of the line.
 export const ADVISORY_SEPARATOR = " · ";
@@ -97,7 +101,8 @@ export function kachinukiNoPairingText(roster) {
 // lastNumberedBout is the bout log's last numbered bout, the row the server
 // reads as the live bout (the JS twin of engine.lastNumberedBout): numbered
 // means position > 0 (the representative bout, -1, is not one), and last means
-// the highest position, whatever the array's order. null when there is none.
+// the highest position, whatever the array's order (the first of two rows
+// sharing it), exactly as the Go function decides. null when there is none.
 // The ONE client owner of "the stored last numbered bout": the roster key, the
 // recorded-last key and the closing of a recorded last bout all ask it.
 export function lastNumberedBout(subResults) {
@@ -116,7 +121,7 @@ export function lastNumberedBout(subResults) {
 // call, so the bout stays live with Encho offered. End match decides the rest.
 export function kachinukiRecordedBoutCloses(subResults) {
   const last = lastNumberedBout(subResults);
-  return !!last && last.recorded === true && last.decision !== "hikiwake";
+  return !!last && last.recorded === true && !isHikiwake(last.decision);
 }
 
 // kachinukiRosterKey is the VALUE the roster read is keyed on (never the match

@@ -555,11 +555,12 @@ func appendNextKachinukiBout(bm *state.BracketMatch, next state.SubMatchResult) 
 //     may be incomplete); the operator ends the encounter with an explicit
 //     completed score write from the score editor.
 //
-// Reports (advanced, post, err): `advanced` is whether SubResults or the
-// parent match was mutated (the handler uses it to decide whether to emit an
-// extra match-updated SSE event), and `post` (KachinukiAdvance) is the FULL
-// bout log AFTER the append plus the stamps the advance left, when advanced
-// is true (nil otherwise). Returning them lets the caller echo the appended
+// Reports (advanced, post, err): `advanced` is whether a next pairing was
+// appended, and `post` (KachinukiAdvance) is the FULL bout
+// log AFTER the write plus the stamps the advance left, whenever the advance
+// wrote anything: a pairing appended, or only the closed bout marked
+// recorded (a side has nobody left), which mutates SubResults and returns
+// (false, non-nil post). post is nil when nothing was written. Returning them lets the caller echo the appended
 // pairing to the open editor without re-reading the match from the store;
 // the read this replaced was ~the 9th store read on a request already doing
 // several, once per advancing bout, during play (mp-gmcg review E1).
@@ -1591,16 +1592,6 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 		// write made before the removal that still carries it cannot bring
 		// it back; one made after it can.
 		stamp := serverNowMs()
-		// The match's history, read through the transaction (it sees its own
-		// staged lines), says how the removed row got there. A history that
-		// cannot be read decides nothing: the recorded bout stays recorded
-		// (boutAppendedByRecordBout's fallback), and the removal never fails
-		// on it.
-		history, herr := tx.LoadMatchHistory(compID, matchID)
-		if herr != nil {
-			log.Printf("engine.RemoveTrailingKachinukiBout compId=%s matchId=%s: history read error: %v; keeping the recorded bout recorded", compID, matchID, herr)
-			history = nil
-		}
 		// unrecord takes the recorded mark off the bout before the removed one
 		// only when the removal undoes the Record bout that appended it: the
 		// history shows the removed row was put there by Record bout's advance
@@ -1608,7 +1599,22 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 		// nobody left leaves that bout recorded, whatever the lineups say now.
 		// Its group goes in the history line only: the mark takes no stamp
 		// (carryRecordedBouts).
+		//
+		// The match's history, read through the transaction (it sees its own
+		// staged lines), is read only when the bout left last IS recorded:
+		// otherwise there is no mark to take off and nothing for it to decide.
+		// A history that cannot be read decides nothing: the recorded bout
+		// stays recorded (boutAppendedByRecordBout's fallback), and the
+		// removal never fails on it.
 		unrecord := func(removedGroup string, stripped []state.SubMatchResult) []string {
+			if i := lastNumberedBout(stripped); i < 0 || !stripped[i].Recorded {
+				return nil
+			}
+			history, herr := tx.LoadMatchHistory(compID, matchID)
+			if herr != nil {
+				log.Printf("engine.RemoveTrailingKachinukiBout compId=%s matchId=%s: history read error: %v; keeping the recorded bout recorded", compID, matchID, herr)
+				history = nil
+			}
 			if !boutAppendedByRecordBout(history, removedGroup) {
 				return nil
 			}
@@ -2934,15 +2940,22 @@ func kachinukiRosterQueues(comp *state.Competition, parent *state.MatchResult, r
 }
 
 // lastNumberedBout returns the index of the last NUMBERED bout row, the live
-// one while the encounter runs, or -1 when there is none. A daihyosen row
-// (Position == DaihyosenSubPosition) is not a kachinuki bout, and
-// mergeKachinukiSubResults orders it last, so the scan runs from the end past
-// it. The advance and the roster read both ask it.
+// one while the encounter runs, or -1 when there is none. Numbered means
+// Position > 0 (a daihyosen row, DaihyosenSubPosition, is not a kachinuki
+// bout), and last means the HIGHEST position, whatever the slice's order: a
+// bout's position is its number (the advance numbers the next pairing after
+// it, the merge orders rows by it), while the slice's order is only how the
+// rows were written, which a hand-edited file can get wrong. The same rule as
+// the client's lastNumberedBout (kachinuki_advisory.jsx), so the server and
+// the sheet always read the same row as the live bout; the first of two rows
+// sharing a position wins in both. The advance, the roster read and the
+// removal's unrecord all ask it.
 func lastNumberedBout(subs []state.SubMatchResult) int {
-	for i := len(subs) - 1; i >= 0; i-- {
-		if subs[i].Position != state.DaihyosenSubPosition {
-			return i
+	last, lastPos := -1, 0
+	for i, s := range subs {
+		if s.Position > lastPos {
+			last, lastPos = i, s.Position
 		}
 	}
-	return -1
+	return last
 }

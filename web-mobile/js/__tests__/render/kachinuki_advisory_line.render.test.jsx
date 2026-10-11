@@ -247,6 +247,8 @@ describe('the kachinuki advisory line', () => {
     expect(advisory().textContent).toBe(`Shiro: T1.2 Ueda on, last fighter · ${aka}`);
     expect(window.API.fetchKachinukiRoster).toHaveBeenCalledTimes(1);
 
+    // Once Record bout has recorded the bout, the server's roster has Ueda off.
+    window.API.fetchKachinukiRoster.mockResolvedValue(exhausted);
     const record = screen.getAllByRole('button').find(b => b.textContent === 'Record bout');
     await act(async () => { fireEvent.click(record); });
     await settle();
@@ -258,10 +260,11 @@ describe('the kachinuki advisory line', () => {
     expect(sent.subResults.find(s => s.position === 1).recorded).toBe(true);
     expect(sent.subResults.find(s => s.position === 2).recorded).toBeUndefined();
 
-    // The host shows the recorded bout: the roster reads once more, Ueda off.
-    // No pairing follows, so the recorded bout renders read-only and the
-    // no-pairing line stands in the advisory's place (bc-kbrc).
-    window.API.fetchKachinukiRoster.mockResolvedValue(exhausted);
+    // The sheet shows the answer's recorded bout at once (review round 5,
+    // finding 1: it holds the mark until a newer stamp), and again once the
+    // host passes it: the roster reads once more, Ueda off. No pairing
+    // follows, so the recorded bout renders read-only and the no-pairing line
+    // stands in the advisory's place (bc-kbrc).
     await remount(view, recorded);
     await settle();
     expect(window.API.fetchKachinukiRoster).toHaveBeenCalledTimes(2);

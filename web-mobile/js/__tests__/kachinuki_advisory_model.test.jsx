@@ -27,6 +27,16 @@ describe('lastNumberedBout', () => {
     expect(lastNumberedBout([{ position: -1 }])).toBeNull();
     expect(lastNumberedBout(undefined)).toBeNull();
   });
+  // Review round 5, finding 8: the same rule as engine.lastNumberedBout
+  // (TestLastNumberedBout_OutOfOrderLog), so an out-of-order log reads the
+  // same live bout on both sides.
+  it('reads an out-of-order log by position, not by the array tail, as the server does', () => {
+    const rows = [{ position: 1 }, { position: 3 }, { position: 2 }, { position: -1 }];
+    expect(lastNumberedBout(rows)).toBe(rows[1]);
+    const dup = [{ position: 2, tag: 'first' }, { position: 2, tag: 'second' }, { position: 0 }];
+    expect(lastNumberedBout(dup)).toBe(dup[0]);
+    expect(lastNumberedBout([{ position: 0 }])).toBeNull();
+  });
 });
 
 // Review round 4, finding 1: only a recorded WIN may close the last bout.

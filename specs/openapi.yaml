@@ -5577,7 +5577,9 @@ components:
             correction to an earlier match, and the side's representative pick
             went with it): score, bulk-score, quick-score, decision,
             daihyosen-add, daihyosen-remove, reopen, requeue, override-winner,
-            engi, kachinuki-advance, kachinuki-remove-bout, downstream-reopen,
+            engi, kachinuki-advance (Record bout appending the next pairing),
+            kachinuki-record (Record bout appending none, only marking the bout
+            it closes recorded), kachinuki-remove-bout, downstream-reopen,
             or engine for a write the server made itself.
           example: score
         stamp:

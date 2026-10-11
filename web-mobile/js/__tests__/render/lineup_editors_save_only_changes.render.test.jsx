@@ -838,6 +838,37 @@ describe('the Lineups page', () => {
     expect(saveButton(utils).disabled, 'the operator can still fix it and save').toBe(false);
   });
 
+  // A five-person team's positions have FIK names, and the page's refusal uses them as
+  // the at-court panel and the score sheet do (lineupPositionLabel), on both of its
+  // paths: the Save and the add row.
+  it('on a five-person team, names the position by its FIK name when a Save would field one member twice', async () => {
+    startingHolds({
+      positions: { senpo: 'Mori', jiho: 'Mori', chuken: 'Ito' }, memberIds: { senpo: 'mem-4', jiho: 'mem-4', chuken: 'mem-3' },
+    });
+    const utils = await mountPage({ ...COMP, teamSize: 5 });
+    await pick(utils, 'chuken', 'mem-1');
+
+    await click(saveButton(utils));
+
+    expect(utils.getByText('Mori is already at Senpo.')).toBeTruthy();
+    expect(api.putTeamLineup).not.toHaveBeenCalled();
+  });
+
+  it('on a five-person team, names the position the member holds, not the one the operator typed into, when the add row names him', async () => {
+    startingHolds({
+      positions: { senpo: 'Sato', jiho: 'Mori', chuken: 'Ito' }, memberIds: { senpo: 'mem-2', jiho: 'mem-4', chuken: 'mem-3' },
+    });
+    const utils = await mountPage({ ...COMP, teamSize: 5 });
+    await pick(utils, 'senpo', '__add__');
+    await act(async () => { fireEvent.change(utils.getByLabelText('New member name for Senpo'), { target: { value: 'Mori' } }); });
+    await click(utils.getByRole('button', { name: 'Add' }));
+
+    expect(utils.getByText('Mori is already at Jiho.')).toBeTruthy();
+    expect(api.addTeamMember).not.toHaveBeenCalled();
+    expect(api.renameTeamMember).not.toHaveBeenCalled();
+    expect(api.putTeamLineup).not.toHaveBeenCalled();
+  });
+
   it('keeps a member it added while a read of the team\'s members begun before the add is out: that read answers without them', async () => {
     const utils = await mountPage();
     // Another device saves a lineup: the page reads the lineup and the team's members again.

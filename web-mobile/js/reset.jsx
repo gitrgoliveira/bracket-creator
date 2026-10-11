@@ -120,8 +120,9 @@ function ResetPasswordForm({ authConfig, onBack, onSuccess, originatorId }) {
         </p>
         <form onSubmit={submit}>
           <div className="field">
-            <label className="field__label">New password</label>
+            <label className="field__label" htmlFor="reset-password">New password</label>
             <input
+              id="reset-password"
               autoFocus
               className="input"
               type="password"
@@ -133,8 +134,9 @@ function ResetPasswordForm({ authConfig, onBack, onSuccess, originatorId }) {
             />
           </div>
           <div className="field">
-            <label className="field__label">Confirm new password</label>
+            <label className="field__label" htmlFor="reset-password-confirm">Confirm new password</label>
             <input
+              id="reset-password-confirm"
               className="input"
               type="password"
               value={confirm}

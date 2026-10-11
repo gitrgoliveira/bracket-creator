@@ -51,7 +51,7 @@ import {
   LABEL_CHECK_IN, HINT_CHECK_IN,
   LABEL_NUMBER_PREFIX, cutNumberPrefix, numberPrefixHint, LABEL_COURTS,
 } from './competition_shape.jsx';
-import { PillGroup, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
+import { PillGroup, PillButton, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
 import { seededRanks } from './admin_helpers.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
@@ -1040,9 +1040,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           beside an empty cell. Kept identical to admin_setup.jsx so the two
           screens lay the group out the same way, not just order it the same. */}
       <div className="row-3">
-        <div className="field"><label className="field__label">Display name</label><input className="input" value={local.name} onChange={(e) => update("name", e.target.value)} /></div>
+        <div className="field"><label className="field__label" htmlFor="settings-display-name">Display name</label><input id="settings-display-name" className="input" value={local.name} onChange={(e) => update("name", e.target.value)} /></div>
         <div className="field">
-          <label className="field__label">Day</label>
+          <label className="field__label" htmlFor="settings-day">Day</label>
           {/* When the tournament has a start date + durationDays, constrain */}
           {/* the competition date to the tournament's day list via a select. */}
           {/* Falls back to a free date picker when the tournament has no date. */}
@@ -1066,6 +1066,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               const outOfRange = local.date && !days.includes(local.date);
               return (
                 <select
+                  id="settings-day"
                   className="input"
                   value={local.date}
                   onChange={(e) => update("date", e.target.value)}
@@ -1083,12 +1084,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               );
             }
             return (
-              <input className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(local.date)} onChange={(e) => update("date", isoToDmy(e.target.value))} />
+              <input id="settings-day" className="input" type="date" min={`${MIN_YEAR}-01-01`} max={`${MAX_YEAR}-12-31`} value={dmyToIso(local.date)} onChange={(e) => update("date", isoToDmy(e.target.value))} />
             );
           })()}
           <div className="field__hint">Pick the competition day.</div>
         </div>
-        <div className="field"><label className="field__label">Start time</label><input className="input" type="time" value={local.startTime} onChange={(e) => update("startTime", e.target.value)} /></div>
+        <div className="field"><label className="field__label" htmlFor="settings-start-time">Start time</label><input id="settings-start-time" className="input" type="time" value={local.startTime} onChange={(e) => update("startTime", e.target.value)} /></div>
       </div>
       {/* Roster lock (kindLockReason above), NOT just isDrawReady/isStarted:
           a kind flip invalidates the roster itself, which exists long
@@ -1300,32 +1301,29 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             const previewLine = formatQualifierPreviewLine(activeShape);
             return (
               <div className="field">
-                <label className="field__label">{LABEL_EXTRA_QUALIFIERS}</label>
-                <div className="radio-group">
-                  <button
-                    className={`radio-pill ${!local.extraQualifiers ? "is-active" : ""}`}
-                    type="button"
+                <label className="field__label" id="settings-extra-qualifiers-label">{LABEL_EXTRA_QUALIFIERS}</label>
+                <div className="radio-group" role="group" aria-labelledby="settings-extra-qualifiers-label">
+                  <PillButton
+                    active={!local.extraQualifiers}
                     onClick={() => update("extraQualifiers", EXTRA_QUALIFIERS_STANDARD)}
                     disabled={isDrawReady}
-                  >{extraQualifiersLabel(EXTRA_QUALIFIERS_STANDARD)}</button>
-                  <button
-                    className={`radio-pill ${local.extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS ? "is-active" : ""}`}
-                    type="button"
+                  >{extraQualifiersLabel(EXTRA_QUALIFIERS_STANDARD)}</PillButton>
+                  <PillButton
+                    active={local.extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS}
                     onClick={() => {
                       update("extraQualifiers", EXTRA_QUALIFIERS_LARGER_POOLS);
                       update("poolWinners", winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_LARGER_POOLS, local.poolWinners));
                     }}
                     disabled={isDrawReady}
-                  >{extraQualifiersLabel(EXTRA_QUALIFIERS_LARGER_POOLS)}</button>
-                  <button
-                    className={`radio-pill ${local.extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET ? "is-active" : ""}`}
-                    type="button"
+                  >{extraQualifiersLabel(EXTRA_QUALIFIERS_LARGER_POOLS)}</PillButton>
+                  <PillButton
+                    active={local.extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET}
                     onClick={() => {
                       update("extraQualifiers", EXTRA_QUALIFIERS_FILL_BRACKET);
                       update("poolWinners", winnersForExtraQualifiersChange(EXTRA_QUALIFIERS_FILL_BRACKET, local.poolWinners));
                     }}
                     disabled={isDrawReady}
-                  >{extraQualifiersLabel(EXTRA_QUALIFIERS_FILL_BRACKET)}</button>
+                  >{extraQualifiersLabel(EXTRA_QUALIFIERS_FILL_BRACKET)}</PillButton>
                 </div>
                 <div className="field__hint">
                   {extraQualifiersHint(local.extraQualifiers, local.poolSize)}
@@ -1376,7 +1374,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         </div>
       )}
       <div className="field">
-        <label className="field__label">{LABEL_COURTS}</label>
+        <label className="field__label" id="settings-courts-label">{LABEL_COURTS}</label>
         {/* draw-ready lock: courts is output-affecting. Discard the draw to reassign. */}
         {isDrawReady && (
           <div className="field__hint" style={{ marginBottom: 6, color: "var(--ink-2)", fontWeight: 500 }}>
@@ -1389,17 +1387,16 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             own flagged pill instead of vanishing from the screen while
             staying on disk. Deselecting it is the fix, so the pill stays
             clickable. */}
-        <div className="radio-group">
+        <div className="radio-group" role="group" aria-labelledby="settings-courts-label">
           {courtOptions.map(({ court: cc, selected, inTournament }) => (
-            <button
+            <PillButton
               key={cc}
-              className={`radio-pill ${selected ? "is-active" : ""}`}
-              type="button"
+              active={selected}
               onClick={() => toggleCourt(cc)}
               disabled={isDrawReady}
               style={inTournament ? undefined : { borderColor: "var(--red)", color: selected ? undefined : "var(--red)" }}
               data-testid={inTournament ? undefined : `orphan-court-${cc}`}
-            >Shiaijo (court) {cc}{inTournament ? "" : " (not in tournament)"}</button>
+            >Shiaijo (court) {cc}{inTournament ? "" : " (not in tournament)"}</PillButton>
           ))}
         </div>
         <window.FieldError testId="orphan-shiaijo-hint">{orphanedCourtsErr}</window.FieldError>

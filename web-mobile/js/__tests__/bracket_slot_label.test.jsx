@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { slotDisplayName, makeSlotLabeller, bracketSlotLabeller } from '../bracket.jsx';
+import { slotDisplayName, makeSlotLabeller, bracketSlotLabeller, bronzeSlotLabels, buildDisplayModel } from '../bracket.jsx';
 import { hasBothSides, isPendingBracketMatch, bracketFullyComplete, compMatchStats } from '../admin_helpers.jsx';
+import { bronzeFeederSemis } from '../bronze_feeders.jsx';
 
 // The engine writes an unresolved bracket feeder as "Winner of r<depth>-m<idx>"
 // (engine.winnerOfPlaceholder). That is a WIRE value: an internal round/index
@@ -117,6 +118,65 @@ describe('makeSlotLabeller: resolves a slot to the number the bracket prints', (
 // admin_helpers.BRACKET_PLACEHOLDER_RE and display_helpers.DISPLAY_PLACEHOLDER_RE
 // all decide playability/schedulability from it. Relabelling is DISPLAY-ONLY, so
 // every one of those classifications must be untouched.
+// bc-bzlb: the 3rd-place match's sides are EMPTY until a semi-final's loser is
+// seated there by position (semi 0 -> sideA, semi 1 -> sideB, Go
+// propagateBracketWinner), so they are named after the semi-final cards.
+describe('bronzeSlotLabels: the 3rd-place match names the semi-finals that fill it', () => {
+  it('reads "Loser of M<n>" for numbered semi-finals, by position', () => {
+    const rounds = [
+      [{ id: 'm-r1-0', matchNumber: 1 }, { id: 'm-r1-1', matchNumber: 2 }, { id: 'm-r1-2', matchNumber: 3 }, { id: 'm-r1-3', matchNumber: 4 }],
+      [{ id: 'm-r2-0', matchNumber: 5 }, { id: 'm-r2-1', matchNumber: 6 }],
+      [{ id: 'm-r3-0', matchNumber: 7 }],
+    ];
+    expect(bronzeSlotLabels(rounds)).toEqual({ a: 'Loser of M5', b: 'Loser of M6' });
+  });
+
+  it('degrades a hidden bye semi-final (no number) to TBD on that side only', () => {
+    // fivePlayerRounds: m-r2-0 is the latent-bye semi-final, m-r2-1 is M3.
+    expect(bronzeSlotLabels(fivePlayerRounds())).toEqual({ a: 'TBD', b: 'Loser of M3' });
+  });
+
+  it('labels nothing when there is no semi-final round', () => {
+    // No semi-final to wait on: an empty side keeps its plain rendering.
+    expect(bronzeSlotLabels([[{ id: 'm-r1-0', matchNumber: 1 }]])).toEqual({ a: '', b: '' });
+    expect(bronzeSlotLabels(undefined)).toEqual({ a: '', b: '' });
+  });
+
+  // Review round 9, finding 4: a side is labelled only while its semi-final
+  // is still to finish (isPendingBracketMatch's condition). A completed semi
+  // seated its loser, or (a bye semi) never gives one, and once the bronze is
+  // played both semis are long done.
+  it('labels only a side still waiting on its semi-final', () => {
+    const rounds = (statusA, statusB) => [
+      [{ id: 'm-r1-0', matchNumber: 1 }, { id: 'm-r1-1', matchNumber: 2 }, { id: 'm-r1-2', matchNumber: 3 }, { id: 'm-r1-3', matchNumber: 4 }],
+      [{ id: 'm-r2-0', matchNumber: 5, status: statusA }, { id: 'm-r2-1', matchNumber: 6, status: statusB }],
+      [{ id: 'm-r3-0', matchNumber: 7 }],
+    ];
+    expect(bronzeSlotLabels(rounds('completed', 'scheduled'))).toEqual({ a: '', b: 'Loser of M6' });
+    expect(bronzeSlotLabels(rounds('running', 'completed'))).toEqual({ a: 'Loser of M5', b: '' });
+    expect(bronzeSlotLabels(rounds('completed', 'completed'))).toEqual({ a: '', b: '' });
+    // The same condition the pending-bracket filter asks of the bronze.
+    const bronze = { id: 'm-bronze', status: 'scheduled', sideA: { name: '' }, sideB: { name: '' } };
+    const r = rounds('completed', 'scheduled');
+    expect(isPendingBracketMatch(bronze, r)).toBe(true);
+    expect(isPendingBracketMatch(bronze, rounds('completed', 'completed'))).toBe(false);
+  });
+
+  it('labels nothing for a completed bye semi-final', () => {
+    const rounds = fivePlayerRounds();
+    rounds[1][0] = { ...rounds[1][0], status: 'completed' };
+    expect(bronzeSlotLabels(rounds)).toEqual({ a: '', b: 'Loser of M3' });
+  });
+
+  it('reads the numbers from a display model the caller already holds', () => {
+    const rounds = fivePlayerRounds();
+    const numbers = buildDisplayModel(rounds).matchNumById;
+    expect(bronzeSlotLabels(rounds, numbers)).toEqual(bronzeSlotLabels(rounds));
+    // The numbers handed in are the ones used, not rebuilt from the rounds.
+    expect(bronzeSlotLabels(rounds, { 'm-r2-1': 9 })).toEqual({ a: 'TBD', b: 'Loser of M9' });
+  });
+});
+
 describe('placeholder filtering is unchanged by the display label', () => {
   const feederMatch = () => ({
     id: 'm-r2-1',
@@ -151,5 +211,23 @@ describe('placeholder filtering is unchanged by the display label', () => {
     // real competitor, which is exactly why nothing writes it back into a side.
     const relabelled = { id: 'x', status: 'scheduled', sideA: { name: 'Carol' }, sideB: { name: 'Winner of M1' } };
     expect(hasBothSides(relabelled)).toBe(true);
+  });
+});
+
+// The one owner of which semi-final feeds which bronze side: index 0 feeds
+// side A, index 1 side B (Go propagateBracketWinner). The pending-row test and
+// the empty-side labels both ask it.
+describe('bronzeFeederSemis', () => {
+  const r0 = [{ id: 'r0-m0' }, { id: 'r0-m1' }, { id: 'r0-m2' }, { id: 'r0-m3' }];
+  const semis = [{ id: 'r1-m0' }, { id: 'r1-m1' }];
+  const final = [{ id: 'r2-m0' }];
+  it('pairs the first semi-final with side A and the second with side B', () => {
+    expect(bronzeFeederSemis([r0, semis, final])).toEqual({ a: semis[0], b: semis[1] });
+    expect(bronzeFeederSemis([semis, final])).toEqual({ a: semis[0], b: semis[1] });
+  });
+  it('is null on each side when there is no round before the final', () => {
+    expect(bronzeFeederSemis([final])).toEqual({ a: null, b: null });
+    expect(bronzeFeederSemis(undefined)).toEqual({ a: null, b: null });
+    expect(bronzeFeederSemis([[semis[0]], final])).toEqual({ a: semis[0], b: null });
   });
 });

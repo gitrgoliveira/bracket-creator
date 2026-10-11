@@ -144,7 +144,9 @@ func effectiveChangedGroups(stored, incoming *state.MatchResult, nilSubsClear bo
 		changed = defaultChangedGroups(stored, incoming, nilSubsClear)
 	} else {
 		for _, g := range incoming.Changed {
-			if state.ValidGroup(g) && !slices.Contains(changed, g) {
+			// A server group (the recorded marks) is never a write's to name:
+			// the merge alone changes it, below (mergeHold.unrecordReopenedBouts).
+			if state.ValidGroup(g) && !state.IsServerGroup(g) && !slices.Contains(changed, g) {
 				changed = append(changed, g)
 			}
 		}
@@ -290,6 +292,10 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 	// Every group either side holds, plus a changed bout neither holds (a
 	// removal over a tombstone).
 	groups := append([]string(nil), state.ScalarGroups...)
+	// The server's groups are copied from the stored match here, and again
+	// once every row is in place (below), since a bout copy never moves a
+	// mark (CopyGroup).
+	groups = append(groups, state.ServerGroups...)
 	groups = append(groups, storedBoutGroups(stored)...)
 	for _, p := range state.SubPositions(incoming.SubResults) {
 		if g := state.BoutGroup(p); !slices.Contains(groups, g) {
@@ -457,6 +463,15 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 	if mh.settleOrphanPicks(payloadPickA, payloadPickB, removalWrite, stamp) {
 		recomputeModifiedAt = true
 	}
+	// The recorded marks are the server's (ServerGroups): no write names
+	// them, so once every hold and displacement above has put its rows in
+	// place, every row takes the stored match's marks, whichever copy (the
+	// stored match's or the write's own) the row came from. A mark the
+	// payload carried can never land.
+	state.CopyGroup(incoming, stored, state.GroupRecorded)
+	// Last: a recorded bout whose overtime this write raises, or whose
+	// result it changes, is being fought again.
+	mh.unrecordReopenedBouts(stamp)
 
 	for _, g := range rep.Applied {
 		if !state.GroupDiffers(stored, incoming, g) {
@@ -759,6 +774,91 @@ func (h *mergeHold) holdDefaultWinScoring(decision string) {
 	// HTTP layer name the decision on the wire (heldDecision).
 	h.rep.DefaultWinStands = true
 	h.rep.StandingDecision = decision
+}
+
+// unrecordReopenedBouts takes the recorded mark off every numbered bout this
+// write reopens, as a change of GroupRecorded at the write's stamp, named in
+// its history line. A recorded bout is reopened when the write either
+//
+//   - raises its overtime (bc-kfnl: the bout is being fought again), or
+//   - changes its RESULT (boutResultChanged: the side its winner names, or its
+//     decision, a draw read as a draw), e.g. a point scored on a tie recorded
+//     with both sides out: the bout Record bout closed is no longer the one
+//     on the row, so the operator records it again (review round 8). A
+//     correction that keeps the result (another waza letter, the same winner)
+//     keeps the mark.
+//
+// Only a bout whose own group applied counts: a held bout changed nothing. And
+// only when the write is not older than the stored marks (a Record bout
+// stamped after this change keeps its mark, as it would arriving second): the
+// stamp decides, as for any group. An UNSTAMPED write (stamp 0, which
+// ApplyByTimestamp applies over anything) never clears a mark: it cannot be
+// ordered after the Record bout that set it.
+func (h *mergeHold) unrecordReopenedBouts(stamp int64) {
+	if stamp <= 0 {
+		return
+	}
+	var raised []int
+	for _, g := range h.rep.Applied {
+		pos, ok := state.ParseBoutGroup(g)
+		if !ok || pos <= 0 {
+			continue
+		}
+		storedRow := state.SubResultAt(h.stored.SubResults, pos)
+		row := state.SubResultAt(h.incoming.SubResults, pos)
+		if !storedRow.Recorded || row.Position != pos {
+			continue
+		}
+		if enchoPeriodsRise(storedRow.Encho, row.Encho) || boutResultChanged(storedRow, row, h.stored.SideA, h.stored.SideB) {
+			raised = append(raised, pos)
+		}
+	}
+	if len(raised) == 0 || !domain.ApplyByTimestamp(stamp, h.stored.GroupStamp(state.GroupRecorded)) {
+		return
+	}
+	for i := range h.incoming.SubResults {
+		if slices.Contains(raised, h.incoming.SubResults[i].Position) {
+			h.incoming.SubResults[i].Recorded = false
+		}
+	}
+	h.rep.Changed = append(slices.Clone(h.rep.Changed), state.GroupRecorded)
+	h.rep.Applied = append(h.rep.Applied, state.GroupRecorded)
+	h.stamps[state.GroupRecorded] = stamp
+}
+
+// enchoPeriodsRise reports whether a bout row's overtime period count rises
+// from stored to incoming: overtime started (from none) or extended. A write
+// that raises it on a recorded bout takes the bout's recorded mark off
+// (mergeHold.unrecordReopenedBouts): the bout is being fought again, so both its
+// fighters are on, e.g. a knockout tie recorded when both teams had nobody
+// left, then fought on in encho.
+func enchoPeriodsRise(stored, incoming *state.EnchoMetadata) bool {
+	periods := func(e *state.EnchoMetadata) int {
+		if e == nil {
+			return 0
+		}
+		return e.PeriodCount
+	}
+	return periods(incoming) > periods(stored)
+}
+
+// boutResultChanged reports whether row says a different result for its bout
+// than stored: the side its winner names (state.SubBoutWinnerSide, ids first,
+// read against the match's sides sideA/sideB) or its decision, every draw
+// decision read as one draw and "fought" as no decision. A different waza
+// letter for the same winner is not a different result.
+func boutResultChanged(stored, row state.SubMatchResult, sideA, sideB string) bool {
+	decision := func(sub state.SubMatchResult) string {
+		switch {
+		case state.IsDraw(sub.Decision):
+			return string(domain.DecisionHikiwake)
+		case sub.Decision == string(domain.DecisionFought):
+			return ""
+		}
+		return sub.Decision
+	}
+	return state.SubBoutWinnerSide(stored, sideA, sideB) != state.SubBoutWinnerSide(row, sideA, sideB) ||
+		decision(stored) != decision(row)
 }
 
 // restoreStamp puts group's stamp back to the one the stored match had, or

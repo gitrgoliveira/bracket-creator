@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, act, fireEvent, waitFor } from '@testing-library/react';
+import { render, act, fireEvent, waitFor, screen, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 // Pure helper (no fetch, no DOM, no globals), imported directly so the
@@ -1174,5 +1174,43 @@ describe('AdminCompetition page-head subtitle (bc-shfu)', () => {
   it('adds no extra separator when there is neither', async () => {
     expect(await subtitle({ date: '', startTime: '' }))
       .toBe('Individual · 2 players · A');
+  });
+});
+
+// bc-lbla: the settings twin of the create form's hand-written fields is
+// reachable by label, and its two hand-written pill rows are named groups
+// whose pills say which are chosen (aria-pressed through PillButton).
+describe('AdminSettings names its hand-written fields (bc-lbla)', () => {
+  const pressed = (group) => within(group).getAllByRole('button')
+    .filter((b) => b.getAttribute('aria-pressed') === 'true')
+    .map((b) => b.textContent.trim());
+
+  it('Display name, Day and Start time are reachable by their labels', async () => {
+    await mountSection('settings');
+    expect(screen.getByLabelText('Display name').value).toBe('Mudansha');
+    expect(screen.getByLabelText('Day').type).toBe('date');
+    expect(screen.getByLabelText('Start time').value).toBe('09:00');
+  });
+
+  it('Day is the day select when the tournament has days', async () => {
+    await mountSection('settings', { tournament: { date: '10-08-2026', durationDays: 2 } });
+    expect(screen.getByLabelText('Day').tagName).toBe('SELECT');
+  });
+
+  it('Assigned shiaijo is a named group, the orphan pill included', async () => {
+    const comp = makeCompetition({ courts: ['A', 'D'], format: 'knockout' });
+    await mountSection('settings', { comp, tournament: { courts: ['A', 'B', 'C'] } });
+    const group = screen.getByRole('group', { name: 'Assigned shiaijo (courts)' });
+    expect(pressed(group)).toEqual(['Shiaijo (court) A', 'Shiaijo (court) D (not in tournament)']);
+    expect(within(group).getByRole('button', { name: 'Shiaijo (court) B' }).getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('Knockout qualifiers is a named group; a stored "" announces Standard', async () => {
+    const comp = makeCompetition({ format: 'mixed', poolSizeMode: 'min', extraQualifiers: '' });
+    await mountSection('settings', { comp });
+    const group = screen.getByRole('group', { name: 'Knockout qualifiers' });
+    expect(within(group).getAllByRole('button')).toHaveLength(3);
+    expect(pressed(group)).toHaveLength(1);
+    expect(within(group).getAllByRole('button')[0].getAttribute('aria-pressed')).toBe('true');
   });
 });

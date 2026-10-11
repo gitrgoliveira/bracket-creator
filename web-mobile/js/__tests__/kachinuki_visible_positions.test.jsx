@@ -28,6 +28,49 @@ describe('kachinukiVisiblePositions', () => {
     })).toEqual(['1']);
   });
 
+  // bc-kbrc: Record bout recorded the last bout and appended no pairing.
+  it('shows no live bout when the last bout is recorded and may close', () => {
+    const subResults = [{ position: 1, recorded: true }, { position: 2, recorded: true }];
+    expect(kachinukiVisiblePositions({
+      positions: POSITIONS, daihyosenIdx: -1, subResults,
+      isComplete: false, isPlayedAt: playedAt([true, true]), closeRecordedLast: true,
+    })).toEqual([]);
+  });
+
+  // Review round 4, finding 1: a recorded DRAW still last never closes, in any
+  // phase (Encho on it is the operator's call).
+  it('keeps a recorded draw as the last bout live even when it may close', () => {
+    const subResults = [{ position: 1, recorded: true }, { position: 2, recorded: true, decision: 'hikiwake' }];
+    expect(kachinukiVisiblePositions({
+      positions: POSITIONS, daihyosenIdx: -1, subResults,
+      isComplete: false, isPlayedAt: playedAt([true, true]), closeRecordedLast: true,
+    })).toEqual(['2']);
+  });
+
+  it('reads the last bout by position, whatever the array order', () => {
+    const subResults = [{ position: 2, recorded: true }, { position: 1, recorded: true }];
+    expect(kachinukiVisiblePositions({
+      positions: POSITIONS, daihyosenIdx: -1, subResults,
+      isComplete: false, isPlayedAt: playedAt([true, true]), closeRecordedLast: true,
+    })).toEqual([]);
+  });
+
+  it('keeps a recorded last bout live when it may not close (a knockout tie)', () => {
+    const subResults = [{ position: 1, recorded: true }, { position: 2, recorded: true }];
+    expect(kachinukiVisiblePositions({
+      positions: POSITIONS, daihyosenIdx: -1, subResults,
+      isComplete: false, isPlayedAt: playedAt([true, true]), closeRecordedLast: false,
+    })).toEqual(['2']);
+  });
+
+  it('a bout added by hand after a recorded last bout is the live bout', () => {
+    const subResults = [{ position: 1, recorded: true }, { position: 2, recorded: true }, { position: 3 }];
+    expect(kachinukiVisiblePositions({
+      positions: POSITIONS, daihyosenIdx: -1, subResults,
+      isComplete: false, isPlayedAt: playedAt([true, true, false]), closeRecordedLast: true,
+    })).toEqual(['3']);
+  });
+
   it('shows the last bout when every server bout is already scored', () => {
     const subResults = [{ position: 1 }, { position: 2 }, { position: 3 }];
     expect(kachinukiVisiblePositions({

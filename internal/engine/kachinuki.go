@@ -34,6 +34,7 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -72,6 +73,17 @@ type AdvanceKachinukiInput struct {
 	LastBout state.SubMatchResult
 	SideA    []kachinukiFighter
 	SideB    []kachinukiFighter
+	// Quiet drops the advance's breadcrumb lines: the roster read
+	// (KachinukiRoster) asks the same decision without making it, and a read
+	// must not log as if Record bout had been tapped.
+	Quiet bool
+}
+
+// logf is the advance's breadcrumb, silent for a Quiet input.
+func (in AdvanceKachinukiInput) logf(format string, args ...any) {
+	if !in.Quiet {
+		log.Printf(format, args...)
+	}
 }
 
 // AdvanceKachinukiResult is the engine's verdict. Under the operator-led
@@ -113,6 +125,13 @@ type AdvanceKachinukiResult struct {
 	// (drawn in pools/league, continued via next bout or encho in a
 	// knockout).
 	BothExhausted bool
+
+	// OutcomeUnread is true when the last bout carries a winner the advance
+	// could not attribute to either side (by member id or by name): it cannot
+	// say who stayed on, so it appends nothing, and MaybeAdvanceKachinuki
+	// writes nothing either, not even the recorded mark (the bout is not
+	// recorded on an outcome nobody could read).
+	OutcomeUnread bool
 }
 
 // AdvanceKachinuki computes the post-bout transition.
@@ -187,9 +206,9 @@ func AdvanceKachinuki(in AdvanceKachinukiInput) AdvanceKachinukiResult {
 		// side by id or by name. Treat as a no-op (no advancement) so
 		// callers fall back to manual scheduling instead of silently
 		// producing a wrong pairing.
-		log.Printf("engine.AdvanceKachinuki: unrecognized bout outcome, winner=%q sideA=%q sideB=%q decision=%q; no advancement",
+		in.logf("engine.AdvanceKachinuki: unrecognized bout outcome, winner=%q sideA=%q sideB=%q decision=%q; no advancement",
 			last.Winner, last.SideA, last.SideB, last.Decision)
-		return AdvanceKachinukiResult{}
+		return AdvanceKachinukiResult{OutcomeUnread: true}
 	}
 }
 
@@ -247,7 +266,7 @@ func advanceAfterHikiwake(in AdvanceKachinukiInput) AdvanceKachinukiResult {
 		// BothExhausted and append nothing. The operator ends the encounter:
 		// drawn in pools/league, continued (next bout or encho) in a
 		// knockout. See MaybeAdvanceKachinuki.
-		log.Printf("engine.AdvanceKachinuki: hikiwake exhausted both teams simultaneously at position %d (advisory); operator ends the encounter",
+		in.logf("engine.AdvanceKachinuki: hikiwake exhausted both teams simultaneously at position %d (advisory); operator ends the encounter",
 			in.LastBout.Position)
 		return AdvanceKachinukiResult{BothExhausted: true}
 	case len(in.SideA) == 0:
@@ -261,7 +280,7 @@ func advanceAfterHikiwake(in AdvanceKachinukiInput) AdvanceKachinukiResult {
 		// and Ends on that point (the walkover); under the taisho rule the
 		// pairing is fought as-is. An abandoned trailing unscored slot is
 		// stripped on the completed write.
-		log.Printf("engine.AdvanceKachinuki: hikiwake left side A without a replacement at position %d (advisory); pairing %s against %s",
+		in.logf("engine.AdvanceKachinuki: hikiwake left side A without a replacement at position %d (advisory); pairing %s against %s",
 			in.LastBout.Position, in.LastBout.SideA, in.SideB[0].Name)
 		return AdvanceKachinukiResult{
 			Next: &state.SubMatchResult{
@@ -273,7 +292,7 @@ func advanceAfterHikiwake(in AdvanceKachinukiInput) AdvanceKachinukiResult {
 			},
 		}
 	case len(in.SideB) == 0:
-		log.Printf("engine.AdvanceKachinuki: hikiwake left side B without a replacement at position %d (advisory); pairing %s against %s",
+		in.logf("engine.AdvanceKachinuki: hikiwake left side B without a replacement at position %d (advisory); pairing %s against %s",
 			in.LastBout.Position, in.SideA[0].Name, in.LastBout.SideB)
 		return AdvanceKachinukiResult{
 			Next: &state.SubMatchResult{
@@ -409,7 +428,7 @@ func IsMemberRetired(f kachinukiFighter, retired RetiredMemberSet, ambiguousName
 // Helper for callers building AdvanceKachinukiInput.{SideA,SideB} from a
 // roster; they filter the initial roster by IsMemberRetired against the
 // returned sets to derive the remaining un-retired queue. BOTH branches of
-// kachinukiRemainingRoster do that through filterRemainingFighters -- the
+// the advance's queues (kachinukiRosterQueues) do that through filterRemainingFighters -- the
 // lineup-resolved one and the bout-log-only heuristic alike -- because the
 // name tier needs the whole roster as context and cannot judge one fighter
 // at a time. The heuristic branch simply supplies fighters whose MemberID
@@ -478,7 +497,7 @@ func RetiredPlayersFromBoutLog(boutLog []state.SubMatchResult, teamAName, teamBN
 
 // filterRemainingFighters filters a slice of kachinukiFighter (name plus a
 // possible member id) via IsMemberRetired, preserving order. It is the ONE
-// filter kachinukiRemainingRoster uses, on both branches: the
+// filter the advance's queues (kachinukiRosterQueues) use, on both branches: the
 // lineup-resolved one passes fighters carrying member ids, the bout-log-only
 // heuristic passes fighters whose MemberID is empty and lets the name tier
 // decide. Routing the heuristic through here too is deliberate and is the
@@ -516,7 +535,7 @@ func describeKachinukiResult(r AdvanceKachinukiResult) string {
 // encounter stays running with no match-level winner or decision.
 // Shared by the rounds loop and the bronze (3rd-place) branch.
 func appendNextKachinukiBout(bm *state.BracketMatch, next state.SubMatchResult) {
-	next.Position = len(bm.SubResults) + 1
+	next.Position = nextKachinukiBoutPosition(bm.SubResults)
 	bm.SubResults = append(bm.SubResults, next)
 	bm.Status = state.MatchStatusRunning
 	bm.Winner = ""
@@ -547,11 +566,12 @@ func appendNextKachinukiBout(bm *state.BracketMatch, next state.SubMatchResult) 
 //     may be incomplete); the operator ends the encounter with an explicit
 //     completed score write from the score editor.
 //
-// Reports (advanced, post, err): `advanced` is whether SubResults or the
-// parent match was mutated (the handler uses it to decide whether to emit an
-// extra match-updated SSE event), and `post` (KachinukiAdvance) is the FULL
-// bout log AFTER the append plus the stamps the advance left, when advanced
-// is true (nil otherwise). Returning them lets the caller echo the appended
+// Reports (advanced, post, err): `advanced` is whether a next pairing was
+// appended, and `post` (KachinukiAdvance) is the FULL bout
+// log AFTER the write plus the stamps the advance left, whenever the advance
+// wrote anything: a pairing appended, or only the closed bout marked
+// recorded (a side has nobody left), which mutates SubResults and returns
+// (false, non-nil post). post is nil when nothing was written. Returning them lets the caller echo the appended
 // pairing to the open editor without re-reading the match from the store;
 // the read this replaced was ~the 9th store read on a request already doing
 // several, once per advancing bout, during play (mp-gmcg review E1).
@@ -559,6 +579,108 @@ func appendNextKachinukiBout(bm *state.BracketMatch, next state.SubMatchResult) 
 // try again.
 //
 // FR-044, T135, T137.
+// kachinukiAdvanceVerdict is what Record bout decides on a stored kachinuki
+// encounter (decideKachinukiAdvance): the last numbered bout it closes, its
+// index in the log, the advance's verdict on it, and whether a lineup fed
+// each side's queue.
+type kachinukiAdvanceVerdict struct {
+	lastIdx         int
+	last            state.SubMatchResult
+	out             AdvanceKachinukiResult
+	lineupA         bool
+	lineupB         bool
+	rosterAvailable bool
+}
+
+// kachinukiQueues is ONE reading of a kachinuki encounter's roster: each
+// side's queue (kachinukiRosterQueues: a saved lineup's full ordered roster,
+// A2 / GAP 1 / GAP 2a, else the bout log's first-appearance order) and the
+// fighters the bout log retires. The advance (decideKachinukiAdvance) and the
+// roster read (KachinukiRoster) both take it from readKachinukiQueues, so
+// the line the operator reads and the pairing Record bout appends share one
+// computation by construction.
+type kachinukiQueues struct {
+	queueA, queueB     kachinukiSideQueue
+	retiredA, retiredB RetiredMemberSet
+}
+
+// readKachinukiQueues builds the kachinukiQueues of parent under rule.
+func readKachinukiQueues(comp *state.Competition, parent *state.MatchResult, rule *lineupRule) kachinukiQueues {
+	queueA, queueB := kachinukiRosterQueues(comp, parent, rule)
+	retiredA, retiredB := RetiredPlayersFromBoutLog(parent.SubResults, parent.SideA, parent.SideB)
+	return kachinukiQueues{queueA: queueA, queueB: queueB, retiredA: retiredA, retiredB: retiredB}
+}
+
+// decideKachinukiAdvance is the ONE decision Record bout makes on a stored
+// kachinuki encounter, asked by the advance (advanceKachinukiOnce, which then
+// writes it) and by the roster read (KachinukiRoster, which only reports it,
+// quiet). decided is false when there is nothing to advance off: a completed
+// match, no numbered bout, a last bout with no outcome yet, or one that names
+// no fighter. lineupA/lineupB say a side's queue came from a lineup fielding
+// someone (the roster's LineupFound), never from the bout-log heuristic.
+func decideKachinukiAdvance(comp *state.Competition, parent *state.MatchResult, q kachinukiQueues, quiet bool) (kachinukiAdvanceVerdict, bool) {
+	// A completed match is final: corrections re-submit the bout log of a
+	// finished match and must never re-run advancement (which would append
+	// a phantom next bout onto the completed result). Defense in depth on
+	// top of the handler's kachinukiBoutFinal gating.
+	if parent == nil || parent.Status == state.MatchStatusCompleted {
+		return kachinukiAdvanceVerdict{}, false
+	}
+	// Advancement is driven by the last NUMBERED bout. A daihyosen sub-result
+	// (Position == DaihyosenSubPosition) is not a kachinuki bout: a bracket
+	// encounter that reaches simultaneous exhaustion stays open until the
+	// operator adds a daihyosen, and mergeKachinukiSubResults orders that row
+	// last, so keying off the final slice element would advance off the rep
+	// bout. Scan from the end past any daihyosen placeholder to the real bout.
+	lastIdx := lastNumberedBout(parent.SubResults)
+	if lastIdx < 0 {
+		return kachinukiAdvanceVerdict{}, false
+	}
+	last := parent.SubResults[lastIdx]
+	// Only act when the last bout has a final outcome. A bout written
+	// with no Winner AND no Decision is still being scored; bail.
+	if last.Winner == "" && last.Decision == "" {
+		return kachinukiAdvanceVerdict{}, false
+	}
+	// Identity guard: retirement math needs to know WHO fought. A bout
+	// carrying an outcome but no side identity at all (e.g. a client that
+	// could not resolve the lineup submitted a nameless hikiwake) retires
+	// nobody, and advancing off it would append a wrong pairing and shift
+	// the whole sequence by one. Refuse loudly and leave the match
+	// untouched so the operator can correct the bout. A side is identified
+	// by its name OR its member id: a fighter picked by squad number and
+	// not yet named (bc-dnst) carries only the id, and that is enough.
+	if !kachinukiFighterKnown(kachinukiFighter{Name: last.SideA, MemberID: last.SideAMemberID}) &&
+		!kachinukiFighterKnown(kachinukiFighter{Name: last.SideB, MemberID: last.SideBMemberID}) {
+		if !quiet {
+			log.Printf("engine.MaybeAdvanceKachinuki compId=%s matchId=%s: last bout (position %d) has an outcome but no side names; skipping advancement", comp.ID, parent.ID, last.Position)
+		}
+		return kachinukiAdvanceVerdict{}, false
+	}
+
+	// The remaining-roster snapshot comes from q (readKachinukiQueues), the
+	// one reading the roster read shows as well.
+	out := AdvanceKachinuki(AdvanceKachinukiInput{
+		LastBout: last,
+		SideA:    q.queueA.remaining(q.retiredA),
+		SideB:    q.queueB.remaining(q.retiredB),
+		Quiet:    quiet,
+	})
+	return kachinukiAdvanceVerdict{
+		lastIdx: lastIdx, last: last, out: out,
+		lineupA:         q.queueA.fromLineup(),
+		lineupB:         q.queueB.fromLineup(),
+		rosterAvailable: q.queueA.found || q.queueB.found,
+	}, true
+}
+
+// kachinukiFighterKnown is the ONE test of "this side names a fighter": a
+// name or a member id (a fighter picked by number and not named yet carries
+// only the id).
+func kachinukiFighterKnown(f kachinukiFighter) bool {
+	return f.Name != "" || f.MemberID != ""
+}
+
 func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiAdvance, error) {
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
@@ -580,66 +702,14 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 		return false, nil, nil
 	}
 	parent, isBracket := located.Result, located.IsBracket
-	// A completed match is final: corrections re-submit the bout log of a
-	// finished match and must never re-run advancement (which would append
-	// a phantom next bout onto the completed result). Defense in depth on
-	// top of the handler's kachinukiBoutFinal gating.
-	if parent.Status == state.MatchStatusCompleted {
-		return false, nil, nil
-	}
-
-	// Advancement is driven by the last NUMBERED bout. A daihyosen sub-result
-	// (Position == DaihyosenSubPosition) is not a kachinuki bout: a bracket
-	// encounter that reaches simultaneous exhaustion stays open until the
-	// operator adds a daihyosen, and mergeKachinukiSubResults orders that row
-	// last, so keying off the final slice element would advance off the rep
-	// bout. Scan from the end past any daihyosen placeholder to the real bout.
-	lastIdx := -1
-	for i := len(parent.SubResults) - 1; i >= 0; i-- {
-		if parent.SubResults[i].Position != state.DaihyosenSubPosition {
-			lastIdx = i
-			break
-		}
-	}
-	if lastIdx < 0 {
-		// Only the daihyosen placeholder is present: nothing to advance off.
-		return false, nil, nil
-	}
-	last := parent.SubResults[lastIdx]
-	// Only act when the last bout has a final outcome. A bout written
-	// with no Winner AND no Decision is still being scored; bail.
-	hasOutcome := last.Winner != "" || last.Decision != ""
-	if !hasOutcome {
-		return false, nil, nil
-	}
-	// Identity guard: retirement math needs to know WHO fought. A bout
-	// carrying an outcome but no side identity at all (e.g. a client that
-	// could not resolve the lineup submitted a nameless hikiwake) retires
-	// nobody, and advancing off it would append a wrong pairing and shift
-	// the whole sequence by one. Refuse loudly and leave the match
-	// untouched so the operator can correct the bout. A side is identified
-	// by its name OR its member id: a fighter picked by squad number and
-	// not yet named (bc-dnst) carries only the id, and that is enough.
-	if last.SideA == "" && last.SideAMemberID == "" && last.SideB == "" && last.SideBMemberID == "" {
-		log.Printf("engine.MaybeAdvanceKachinuki compId=%s matchId=%s: last bout (position %d) has an outcome but no side names; skipping advancement", compID, matchID, last.Position)
-		return false, nil, nil
-	}
-
-	// Build remaining-roster snapshot. When a TeamLineup has been saved
-	// for the team, use the full ordered roster filtered by bout-log
-	// retirements (A2, GAP 1 / GAP 2a). Without a lineup the function
-	// degrades to the bout-log-only heuristic so existing competitions
-	// without lineups continue to work.
 	rule := e.lineupRuleOrNone("engine.MaybeAdvanceKachinuki", compID, comp.IsKnockoutEnabled(), located.PoolMatches, located.Bracket)
-	remainingA, remainingB, rosterAvailable := kachinukiRemainingRoster(comp, parent, rule)
-
-	out := AdvanceKachinuki(AdvanceKachinukiInput{
-		LastBout: last,
-		SideA:    remainingA,
-		SideB:    remainingB,
-	})
+	verdict, decided := decideKachinukiAdvance(comp, parent, readKachinukiQueues(comp, parent, rule), false)
+	if !decided {
+		return false, nil, nil
+	}
+	lastIdx, last, out := verdict.lastIdx, verdict.last, verdict.out
 	log.Printf("engine.MaybeAdvanceKachinuki compId=%s matchId=%s rosterAvailable=%t result=%s",
-		compID, matchID, rosterAvailable, describeKachinukiResult(out))
+		compID, matchID, verdict.rosterAvailable, describeKachinukiResult(out))
 
 	// Operator-led completion (mp-gmcg): the engine NEVER auto-finalizes a
 	// kachinuki encounter. Team sizes are unregulated and lineup vacancies
@@ -651,7 +721,23 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 	// (winner from the last decisive bout, covering both win rules -- full
 	// exhaustion AND taisho-defeated -- or hikiwake in pools/league; a
 	// knockout tie is resolved by encho on the final bout, never a draw).
-	if out.Next == nil {
+	//
+	// Record bout also marks the bout it closes as RECORDED (bc-kfnl, operator
+	// decision 2026-10-11), in the same locked write as the pairing it appends,
+	// or alone when it appends none (a side has nobody left). Nothing else in
+	// the stored row tells a recorded bout from the one being fought: the
+	// running autosave writes a winner at a one-point lead and a hikiwake at
+	// 1-1. A bout already recorded with nothing to append writes nothing, so a
+	// replayed Record bout adds no stamp and no history line.
+	// An outcome the advance could not attribute (a winner naming neither
+	// side) is not a result Record bout can close: nothing is marked and no
+	// history line is written, so the bout stays the one being fought and the
+	// operator corrects it.
+	if out.OutcomeUnread {
+		return false, nil, nil
+	}
+	markRecorded := !last.Recorded
+	if out.Next == nil && !markRecorded {
 		return false, nil, nil
 	}
 
@@ -666,9 +752,23 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 	// the write this advance answers later than the server's now, and the
 	// bout it appends must not read as made before the save that recorded the
 	// one it follows), and the advance is recorded in the match's history, so
-	// a write made before it is ordered against it (bc-mrgc).
-	stamp := max(serverNowMs(), parent.ModifiedAt)
-	var appendedGroup string
+	// a write made before it is ordered against it (bc-mrgc). Strictly newer
+	// than the match, so ModifiedAt moves and every device orders the copy this
+	// write leaves after the one before it (keepNewerMatches replaces a copy on
+	// an equal stamp).
+	stamp := max(serverNowMs(), parent.ModifiedAt+1)
+	// The groups this write changes and stamps: the recorded marks
+	// (GroupRecorded, never the closed bout's own group, so a change to that
+	// bout made before Record bout and arriving after it still applies), and the
+	// appended pairing with the verdict it clears.
+	var stamped []string
+	if markRecorded {
+		stamped = append(stamped, state.GroupRecorded)
+	}
+	door := doorKachinukiRecord
+	if out.Next != nil {
+		door = doorKachinukiAdvance
+	}
 
 	// The read above ran without the lock; the write below re-checks, under
 	// it, that the match is still the one the pairing was worked out from
@@ -697,9 +797,14 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 				if !kachinukiAdvanceStillHolds(snapshot, bm.Status, bm.ModifiedAt, bm.SubResults) {
 					return errKachinukiAdvanceStale
 				}
-				appendNextKachinukiBout(bm, *out.Next)
-				appendedGroup = state.BoutGroup(bm.SubResults[len(bm.SubResults)-1].Position)
-				bm.StampGroups(stamp, appendedGroup, state.GroupResult)
+				// The re-check holds the log equal to the snapshot, so lastIdx
+				// still names the bout Record bout closed.
+				bm.SubResults[lastIdx].Recorded = true
+				if out.Next != nil {
+					appendNextKachinukiBout(bm, *out.Next)
+					stamped = append(stamped, state.BoutGroup(bm.SubResults[lastNumberedBout(bm.SubResults)].Position), state.GroupResult)
+				}
+				bm.StampGroups(stamp, stamped...)
 				post = &KachinukiAdvance{
 					BoutLog:     append([]state.SubMatchResult(nil), bm.SubResults...),
 					ModifiedAt:  bm.ModifiedAt,
@@ -709,13 +814,13 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 			}); uerr != nil {
 				return uerr
 			}
-			e.recordDirectHistory(tx, compID, matchID, doorKachinukiAdvance, stamp, appendedGroup, state.GroupResult)
+			e.recordDirectHistory(tx, compID, matchID, door, stamp, stamped...)
 			return nil
 		})
 		if err != nil {
 			return false, nil, err
 		}
-		return true, post, nil
+		return out.Next != nil, post, nil
 	}
 
 	var found bool
@@ -725,16 +830,19 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 			if !kachinukiAdvanceStillHolds(snapshot, parent.Status, parent.ModifiedAt, parent.SubResults) {
 				return errKachinukiAdvanceStale
 			}
-			// Append the next bout. Appending means the encounter continues: the
-			// parent match must stay running with no match-level winner/decision.
-			out.Next.Position = len(parent.SubResults) + 1
-			parent.SubResults = append(parent.SubResults, *out.Next)
-			parent.Status = state.MatchStatusRunning
-			parent.Winner = ""
-			parent.WinnerID = "" // bc-brid: the verdict's id half, cleared with the name.
-			parent.Decision = ""
-			appendedGroup = state.BoutGroup(out.Next.Position)
-			parent.StampGroups(stamp, appendedGroup, state.GroupResult)
+			parent.SubResults[lastIdx].Recorded = true
+			if out.Next != nil {
+				// Append the next bout. Appending means the encounter continues: the
+				// parent match must stay running with no match-level winner/decision.
+				out.Next.Position = nextKachinukiBoutPosition(parent.SubResults)
+				parent.SubResults = append(parent.SubResults, *out.Next)
+				parent.Status = state.MatchStatusRunning
+				parent.Winner = ""
+				parent.WinnerID = "" // bc-brid: the verdict's id half, cleared with the name.
+				parent.Decision = ""
+				stamped = append(stamped, state.BoutGroup(out.Next.Position), state.GroupResult)
+			}
+			parent.StampGroups(stamp, stamped...)
 			post = &KachinukiAdvance{
 				BoutLog:     append([]state.SubMatchResult(nil), parent.SubResults...),
 				ModifiedAt:  parent.ModifiedAt,
@@ -748,7 +856,7 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 		if !found {
 			return nil
 		}
-		e.recordDirectHistory(tx, compID, matchID, doorKachinukiAdvance, stamp, appendedGroup, state.GroupResult)
+		e.recordDirectHistory(tx, compID, matchID, door, stamp, stamped...)
 		return nil
 	})
 	if err != nil {
@@ -757,11 +865,14 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 	if !found {
 		return false, nil, nil
 	}
-	return true, post, nil
+	return out.Next != nil, post, nil
 }
 
-// KachinukiAdvance is what MaybeAdvanceKachinuki hands back when it appended a
-// bout: the FULL bout log after the append, and the match's stamps as the
+// KachinukiAdvance is what MaybeAdvanceKachinuki hands back when it wrote: it
+// appended a bout, or marked the bout Record bout closed as recorded (the
+// bool it returns beside it says whether a pairing was appended; a recorded
+// mark alone, at a side's exhaustion, returns false with a non-nil
+// KachinukiAdvance). It holds the FULL bout log after the write, and the match's stamps as the
 // advance left them. The handler echoes all of it on the Record-bout answer,
 // so the open editor renders the appended pairing at once without a store
 // re-read (mp-gmcg review E1) and shows the stamp the advance gave the match,
@@ -1511,9 +1622,16 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 		// the encounter must be RUNNING and must carry a trailing unscored bout.
 		// One closure so pool/round/bronze cannot drift (same reasoning as
 		// reopenResultPreconditionTx, the reopen's single result-precondition helper).
-		strip := func(status state.MatchStatus, subs []state.SubMatchResult) ([]state.SubMatchResult, error) {
+		//
+		// The removed bout is the LIVE one, the highest-position numbered row
+		// (lastNumberedBout), not the slice's last row: the advance appends
+		// one past it, the unrecord below and the roster read name it, so a
+		// log stored out of position order removes the same bout every one of
+		// them calls the trailing pairing. A -1 row is never it. strip
+		// returns the removed bout's group with the stripped log.
+		strip := func(status state.MatchStatus, subs []state.SubMatchResult) ([]state.SubMatchResult, string, error) {
 			if status != state.MatchStatusRunning {
-				return nil, ErrRemoveBoutNotRunning
+				return nil, "", ErrRemoveBoutNotRunning
 			}
 			// Remove ONLY the single trailing bout, and never the last remaining
 			// one: the operator's "× Remove this bout" is singular, and a RUNNING
@@ -1523,52 +1641,96 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 			// (a completed match always carries a scored bout, so it never
 			// empties) but not here, where bout 1 could be unscored, or two
 			// "Add next bout manually" pairings could be appended and one tap
-			// must not strip both.
-			n := len(subs)
-			if n <= 1 {
-				return nil, ErrNoRemovableBout
+			// must not strip both. The floor counts NUMBERED bouts only: a
+			// -1 row is never removable, so a [bout 1, -1] log has no
+			// trailing bout to take.
+			numbered := 0
+			for _, s := range subs {
+				if s.Position > 0 {
+					numbered++
+				}
 			}
-			last := subs[n-1]
-			if last.Position <= 0 || !isUnscoredKachinukiBout(last) {
-				return nil, ErrNoRemovableBout
+			if numbered <= 1 {
+				return nil, "", ErrNoRemovableBout
 			}
-			return subs[:n-1], nil
+			i := lastNumberedBout(subs)
+			if i < 0 || !isUnscoredKachinukiBout(subs[i]) {
+				return nil, "", ErrNoRemovableBout
+			}
+			stripped := make([]state.SubMatchResult, 0, len(subs)-1)
+			stripped = append(stripped, subs[:i]...)
+			stripped = append(stripped, subs[i+1:]...)
+			return stripped, state.BoutGroup(subs[i].Position), nil
 		}
 		// The removed bout keeps its stamp as a tombstone (bc-mrgc), so a
 		// write made before the removal that still carries it cannot bring
-		// it back; one made after it can.
-		stamp := serverNowMs()
+		// it back; one made after it can. Strictly newer than the match (read
+		// in findMatchHome below), as the advance's stamp is, so the copy this
+		// leaves is ordered after the one before it on every device.
+		now := serverNowMs()
+		// unrecord takes the recorded mark off the bout before the removed one
+		// only when the removal undoes the Record bout that appended it: the
+		// history shows the removed row was put there by Record bout's advance
+		// (boutAppendedByRecordBout). A bout added by hand after a side had
+		// nobody left leaves that bout recorded, whatever the lineups say now.
+		// Taking the mark off is a change of GroupRecorded, stamped and named
+		// in the history line with the removed bout.
+		//
+		// The match's history, read through the transaction (it sees its own
+		// staged lines), is read only when the bout left last IS recorded:
+		// otherwise there is no mark to take off and nothing for it to decide.
+		// A history that cannot be read decides nothing: the recorded bout
+		// stays recorded (boutAppendedByRecordBout's fallback), and the
+		// removal never fails on it.
+		unrecord := func(removedGroup string, stripped []state.SubMatchResult) []string {
+			i := lastNumberedBout(stripped)
+			if i < 0 || !stripped[i].Recorded {
+				return nil
+			}
+			history, herr := tx.LoadMatchHistory(compID, matchID)
+			if herr != nil {
+				log.Printf("engine.RemoveTrailingKachinukiBout compId=%s matchId=%s: history read error: %v; keeping the recorded bout recorded", compID, matchID, herr)
+				history = nil
+			}
+			if !boutAppendedByRecordBout(history, removedGroup) {
+				return nil
+			}
+			stripped[i].Recorded = false
+			return []string{state.GroupRecorded}
+		}
 
 		found, ferr := findMatchHome(tx, compID, matchID, func(h matchHome) error {
 			if h.Pool != nil {
-				stripped, serr := strip(h.Pool.Status, h.Pool.SubResults)
+				stripped, removedGroup, serr := strip(h.Pool.Status, h.Pool.SubResults)
 				if serr != nil {
 					opErr = serr
 					return nil
 				}
-				removed := state.BoutGroup(h.Pool.SubResults[len(h.Pool.SubResults)-1].Position)
-				h.Pool.StampGroups(stamp, removed)
+				removed := append([]string{removedGroup}, unrecord(removedGroup, stripped)...)
+				stamp := max(now, h.Pool.ModifiedAt+1)
+				h.Pool.StampGroups(stamp, removed...)
 				h.Pool.SubResults = stripped
 				if werr := h.Save(); werr != nil {
 					return werr
 				}
-				e.recordDirectHistory(tx, compID, matchID, doorKachinukiRemove, stamp, removed)
+				e.recordDirectHistory(tx, compID, matchID, doorKachinukiRemove, stamp, removed...)
 				u := *h.Pool
 				updated = &u
 				return nil
 			}
-			stripped, serr := strip(h.Bracket.Status, h.Bracket.SubResults)
+			stripped, removedGroup, serr := strip(h.Bracket.Status, h.Bracket.SubResults)
 			if serr != nil {
 				opErr = serr
 				return nil
 			}
-			removed := state.BoutGroup(h.Bracket.SubResults[len(h.Bracket.SubResults)-1].Position)
-			h.Bracket.StampGroups(stamp, removed)
+			removed := append([]string{removedGroup}, unrecord(removedGroup, stripped)...)
+			stamp := max(now, h.Bracket.ModifiedAt+1)
+			h.Bracket.StampGroups(stamp, removed...)
 			h.Bracket.SubResults = stripped
 			if werr := h.Save(); werr != nil {
 				return werr
 			}
-			e.recordDirectHistory(tx, compID, matchID, doorKachinukiRemove, stamp, removed)
+			e.recordDirectHistory(tx, compID, matchID, doorKachinukiRemove, stamp, removed...)
 			updated = bracketMatchToTeamResult(*h.Bracket)
 			return nil
 		})
@@ -2523,6 +2685,81 @@ func preserveKachinukiMemberIDs(storedByPos map[int]state.SubMatchResult, in *st
 	}
 }
 
+// boutAppendedByRecordBout reports whether the match's history shows that the
+// bout row of group (a "bout:N" group) as it stands now was put there by
+// Record bout's advance (doorKachinukiAdvance), i.e. whether removing it undoes
+// that Record bout (bc-kfnl). It reads the stored fact rather than asking the
+// advance again, so a lineup edited between Record bout and Remove changes
+// nothing.
+//
+// The history is walked in the order the store appended it (LoadMatchHistory's
+// order), never in stamp order: an advance is stamped no older than the match,
+// so after a write from a device whose clock runs ahead it carries a stamp
+// later than a Remove made after it. Positions are reused, so
+// what counts is the row's current life: a kachinuki-remove-bout line whose
+// trailing bout group is this one (the row it removed; the bout it un-records,
+// one position lower, is named too and is not removed) ends it, and so does any
+// reopen (doorReopen, doorDownstreamReopen), since a match is reopened only
+// from completed and the finishing write strips a trailing unscored pairing.
+// The row's creator is then the door of the first later line that APPLIED the
+// group (a held or unchanged outcome wrote nothing), except that an advance
+// line creates only its trailing bout group, the pairing it appended: a bout
+// group it names that is not its trailing one existed before it.
+//
+// And only an advance that SET the mark counts: its line applied
+// GroupRecorded. An advance that appended a pairing after a bout already
+// recorded (recorded with nobody left, a lineup then given a fighter, Record
+// bout tapped again) did not record that bout, so removing what it appended
+// leaves the mark the earlier Record bout set (advanceWithoutMark).
+//
+// Fallback: no history (a match written before the history existed, an append
+// that failed, a history that cannot be read) or no creator in it answers
+// false, so the bout Record bout closed stays recorded. That is the safe side:
+// the closed state stands and the operator can still correct the bout.
+func boutAppendedByRecordBout(history []state.MatchHistoryEntry, group string) bool {
+	// advanceWithoutMark names, as a creator, an advance line that appended the
+	// row without applying GroupRecorded: it is not the Record bout whose mark a
+	// removal undoes.
+	const advanceWithoutMark = "kachinuki-advance-without-mark"
+	creator := ""
+	for _, h := range history {
+		trailing := trailingBoutGroup(h.Changed) == group
+		switch h.Door {
+		case doorKachinukiRemove:
+			if trailing {
+				creator = ""
+			}
+			continue
+		case doorReopen, doorDownstreamReopen:
+			creator = ""
+			continue
+		case doorKachinukiAdvance:
+			if !trailing {
+				continue
+			}
+		}
+		if creator == "" && slices.Contains(h.Changed, group) && h.Outcomes[group] == state.HistoryOutcomeApplied {
+			creator = h.Door
+			if h.Door == doorKachinukiAdvance && h.Outcomes[state.GroupRecorded] != state.HistoryOutcomeApplied {
+				creator = advanceWithoutMark
+			}
+		}
+	}
+	return creator == doorKachinukiAdvance
+}
+
+// trailingBoutGroup is the numbered bout group with the highest position among
+// groups, "" when there is none.
+func trailingBoutGroup(groups []string) string {
+	best, bestPos := "", 0
+	for _, g := range groups {
+		if pos, ok := state.ParseBoutGroup(g); ok && pos > bestPos {
+			best, bestPos = g, pos
+		}
+	}
+	return best
+}
+
 // teamMatch is a team match located by findTeamMatch, with the draw it was found
 // in.
 type teamMatch struct {
@@ -2612,40 +2849,44 @@ func bracketMatchToTeamResult(bm state.BracketMatch) *state.MatchResult {
 	}
 }
 
-// kachinukiRemainingRoster derives the remaining un-retired roster per side
-// for a team match. Returns (sideA, sideB, rosterAvailable). rosterAvailable
-// is true when at least one side's roster was resolved from a saved TeamLineup;
-// false means both sides fell back to the bout-log-only heuristic.
-//
-// Priority per side (GAP 1 / GAP 2a):
-//  1. The lineup in force for the side's team at this match (see
-//     lineup_in_force.go: the match's own lineup, else the one the team
-//     carries from its previous match or round), matched by the side's
-//     participant id; a side with no id has none.
-//  2. Bout-log-only heuristic (anyone who appeared in a bout, minus retired).
-//
-// The full ordered roster (from lineup.OrderedMembers, bc-tmid pass 2) is
-// filtered by IsMemberRetired against RetiredPlayersFromBoutLog's sets to
-// produce the remaining queue, so a lineup-resolved fighter's member id
-// (when the slot has one) rather than their possibly-stale name decides
-// whether they have retired -- falling back to the name only where the
-// retiring bout row carried no id to match against and the name belongs to
-// one member of this roster alone. See IsMemberRetired for why both tiers
-// are needed and what the gate protects.
-func kachinukiRemainingRoster(comp *state.Competition, parent *state.MatchResult, rule *lineupRule) ([]kachinukiFighter, []kachinukiFighter, bool) {
-	retiredA, retiredB := RetiredPlayersFromBoutLog(parent.SubResults, parent.SideA, parent.SideB)
+// kachinukiSideQueue is one side's queue BEFORE retirements are taken out:
+// the lineup in force's fielded members in order when found, else the
+// fighters the bout log has seen, in first-appearance order.
+type kachinukiSideQueue struct {
+	fighters []kachinukiFighter
+	found    bool
+}
 
-	// resolveRoster builds one side's remaining roster. teamID is the side's
+// remaining is the queue with every fighter `retired` holds taken out,
+// through filterRemainingFighters (IsMemberRetired, the one identity rule).
+func (q kachinukiSideQueue) remaining(retired RetiredMemberSet) []kachinukiFighter {
+	return filterRemainingFighters(q.fighters, retired)
+}
+
+// fromLineup reports whether the queue came from a lineup in force that
+// fields someone (KachinukiRosterSide.LineupFound), never from the bout-log
+// heuristic, which knows only the fighters already seen.
+func (q kachinukiSideQueue) fromLineup() bool {
+	return q.found && len(q.fighters) > 0
+}
+
+// kachinukiRosterQueues builds both sides' queues (see kachinukiSideQueue).
+// It is the ONE queue source of the advance (decideKachinukiAdvance) and of
+// the advisory roster read (KachinukiRoster, kachinuki_roster.go), which then
+// take retirements out through the same filter, so the two can never disagree
+// about who is next.
+func kachinukiRosterQueues(comp *state.Competition, parent *state.MatchResult, rule *lineupRule) (queueA, queueB kachinukiSideQueue) {
+	// resolveQueue builds one side's queue. teamID is the side's
 	// participant id, which is what its lineup is matched by; sideA says which
 	// column of the bout log the side is, so nothing here compares team names.
-	resolveRoster := func(teamID string, sideA bool, retired RetiredMemberSet) ([]kachinukiFighter, bool) {
+	resolveQueue := func(teamID string, sideA bool) kachinukiSideQueue {
 		if in := rule.inForce(teamID, parent.ID); in.Found {
 			full := in.Lineup.OrderedMembers(comp.TeamSize)
 			fighters := make([]kachinukiFighter, len(full))
 			for i, slot := range full {
 				fighters[i] = kachinukiFighter{Name: slot.Name, MemberID: slot.MemberID}
 			}
-			return filterRemainingFighters(fighters, retired), true
+			return kachinukiSideQueue{fighters: fighters, found: true}
 		}
 		// Preserve first-appearance order from the bout log: AdvanceKachinuki
 		// treats this slice as an ordered queue (index 0 is the next fighter
@@ -2656,6 +2897,15 @@ func kachinukiRemainingRoster(comp *state.Competition, parent *state.MatchResult
 		// has an id and no name, bc-dnst) and by name otherwise, so a
 		// nameless pick is still a queue entry and IsMemberRetired settles
 		// each by the same id-then-name order the lineup branch uses.
+		//
+		// Retirements are taken out by the caller, through the SHARED helper,
+		// in a second pass, for the reason its own doc gives: the queue IS the
+		// context the name tier needs, so it cannot be judged one fighter at a
+		// time while the queue is still being built. Filtering inline passed a
+		// nil ambiguity set, which let the name tier fire for a fighter whose
+		// OWN member id proves they have not retired: two teammates sharing a
+		// display name (grandfathered pre-uniqueness data) meant one losing
+		// retired the other, who was then never fielded.
 		seen := map[string]struct{}{}
 		out := make([]kachinukiFighter, 0)
 		for _, b := range parent.SubResults {
@@ -2679,18 +2929,40 @@ func kachinukiRemainingRoster(comp *state.Competition, parent *state.MatchResult
 			seen[key] = struct{}{}
 			out = append(out, f)
 		}
-		// Filtered through the SHARED helper, in a second pass, for the reason
-		// its own doc gives: the roster IS the context the name tier needs, so
-		// it cannot be judged one fighter at a time while the roster is still
-		// being built. Filtering inline passed a nil ambiguity set, which let
-		// the name tier fire for a fighter whose OWN member id proves they have
-		// not retired: two teammates sharing a display name (grandfathered
-		// pre-uniqueness data) meant one losing retired the other, who was then
-		// never fielded. The lineup branch above has always used this helper.
-		return filterRemainingFighters(out, retired), false
+		return kachinukiSideQueue{fighters: out}
 	}
 
-	remainingA, foundA := resolveRoster(parent.SideAID, true, retiredA)
-	remainingB, foundB := resolveRoster(parent.SideBID, false, retiredB)
-	return remainingA, remainingB, foundA || foundB
+	return resolveQueue(parent.SideAID, true), resolveQueue(parent.SideBID, false)
+}
+
+// lastNumberedBout returns the index of the last NUMBERED bout row, the live
+// one while the encounter runs, or -1 when there is none. Numbered means
+// Position > 0 (a daihyosen row, DaihyosenSubPosition, is not a kachinuki
+// bout), and last means the HIGHEST position, whatever the slice's order: a
+// bout's position is its number (the advance numbers the next pairing after
+// it, the merge orders rows by it), while the slice's order is only how the
+// rows were written, which a hand-edited file can get wrong. The same rule as
+// the client's lastNumberedBout (kachinuki_advisory.jsx), so the server and
+// the sheet always read the same row as the live bout; the first of two rows
+// sharing a position wins in both. The advance, the roster read and the
+// removal's unrecord all ask it.
+func lastNumberedBout(subs []state.SubMatchResult) int {
+	last, lastPos := -1, 0
+	for i, s := range subs {
+		if s.Position > lastPos {
+			last, lastPos = i, s.Position
+		}
+	}
+	return last
+}
+
+// nextKachinukiBoutPosition is the position a pairing appended to this bout
+// log takes: one past the live bout (lastNumberedBout), never the row count,
+// so a log with a gap ([1, 3]) appends 4 and the appended row becomes the
+// live bout that remove, unrecord, the advance and the roster read all name.
+func nextKachinukiBoutPosition(subs []state.SubMatchResult) int {
+	if i := lastNumberedBout(subs); i >= 0 {
+		return subs[i].Position + 1
+	}
+	return 1
 }

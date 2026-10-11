@@ -14,6 +14,7 @@ const STUBBED_GLOBALS = {
   BracketTree: () => null, // per-test override drives the pick
   MatchCard: ({ match }) => <div data-testid={`card-${match.id}`} className="bc-match" />,
   bracketColumnCount: () => 3,
+  bronzeSlotLabels: () => ({ a: 'TBD', b: 'TBD' }),
   CourtPicker: () => null,
   API: {
     fetchCompetitionDetails: vi.fn().mockResolvedValue(null),

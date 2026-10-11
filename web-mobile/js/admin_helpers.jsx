@@ -1,6 +1,10 @@
 // Pure helpers shared across the admin layer.
 // No JSX, no React deps. See web-mobile/admin_split_plan.md.
 
+// write_result.jsx is a leaf with no imports, so this cannot form a cycle.
+import { BRONZE_MATCH_ID } from './write_result.jsx';
+import { bronzeFeederSemis } from './bronze_feeders.jsx';
+
 // sideA/sideB can be a string (raw backend shape), an object with .name
 // (normalizeMatch output, which substitutes {id:"",name:""} for missing sides),
 // or null. Return the participant's display name, or "" when no real side is
@@ -72,10 +76,25 @@ function hasPoolOriginPlaceholder(m) {
 //   - NEVER pool-origin ("Pool A-1st") placeholders: those belong to the
 //     mixed-comp knockout-seeding flow and are surfaced by the separate
 //     "Knockout filling in" banner, not the queue.
-function isPendingBracketMatch(m) {
+//
+// The 3rd-place match is the one exception to the placeholder rule (bc-bzlb):
+// its sides carry no slot value at all, they stay EMPTY until a semi-final's
+// loser is seated there by position (bronzeFeederSemis, the one owner of which
+// semi-final feeds which side). So it is pending while an empty
+// side's semi-final is not completed yet, which needs the competition's
+// `rounds`. A side whose semi-final is completed and still left it empty (a
+// bye semi-final has no loser) is waiting on nothing, so that bronze is not
+// pending. Without `rounds` the bronze is never pending.
+function isPendingBracketMatch(m, rounds) {
   if (!m || m.status !== "scheduled") return false;
   if (hasBothSides(m)) return false; // resolved → normal actionable row
   if (hasPoolOriginPlaceholder(m)) return false; // mixed-comp seeding path, not ours
+  if (m.id === BRONZE_MATCH_ID) {
+    if (!Array.isArray(rounds) || rounds.length < 2) return false;
+    const feeders = bronzeFeederSemis(rounds);
+    const waits = (side, semi) => !sideName(side) && !!semi && semi.status !== "completed";
+    return waits(m.sideA, feeders.a) || waits(m.sideB, feeders.b);
+  }
   const a = sideName(m.sideA);
   const b = sideName(m.sideB);
   return BRACKET_PLACEHOLDER_RE.test(a) || BRACKET_PLACEHOLDER_RE.test(b);

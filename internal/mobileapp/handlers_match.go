@@ -2055,7 +2055,7 @@ var errRepBoutAdded = &selfRunRefusal{
 // Fails closed: the caller's read of the snapshot rejects the request on a load
 // error rather than allowing the write (matchSnapshotOrErr). A match in neither
 // store (found false) passes on purpose: the write that follows under the same
-// lock refuses it (errMatchNotFound), so nothing can land on it.
+// lock refuses it (the engine's errMatchNotFound), so nothing can land on it.
 func holdSelfReportedWriteUnderTx(compID, matchID string, snap matchSnapshot, found bool, result *state.MatchResult, startOnly bool) error {
 	if !found {
 		return nil
@@ -3178,7 +3178,13 @@ type scoreRequestBody struct {
 func changedGroupsError(changed []string) error {
 	for _, g := range changed {
 		if !state.ValidGroup(g) {
-			return fmt.Errorf("changed: %q is not a match group (points, result, encho, flags, rep, bout:<position>)", g)
+			return fmt.Errorf("changed: %q is not a match group (%s, bout:<position>)", g, strings.Join(state.ScalarGroups, ", "))
+		}
+		// A server group (the kachinuki recorded marks) is never a client's to
+		// change: refused rather than ignored, so a client that names one is
+		// told rather than silently written around.
+		if state.IsServerGroup(g) {
+			return fmt.Errorf("changed: %q is written by the server alone and cannot be named in a write", g)
 		}
 	}
 	return nil
@@ -3891,9 +3897,13 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// to retry and double-record. Mirrors the recordIneligibility
 		// non-fatal pattern.
 		if body.KachinukiBoutFinal {
-			if advanced, post, kerr := eng.MaybeAdvanceKachinuki(id, mid); kerr != nil {
+			// The advance also marks the bout Record bout closed as recorded
+			// (bc-kfnl), appending a pairing or not: post is non-nil whenever
+			// it wrote, so the answer and the broadcast carry the mark at a
+			// side's exhaustion too, where nothing is appended.
+			if _, post, kerr := eng.MaybeAdvanceKachinuki(id, mid); kerr != nil {
 				log.Printf("engine.MaybeAdvanceKachinuki(%s, %s): %v", id, mid, kerr)
-			} else if advanced {
+			} else if post != nil {
 				// Echo the POST-advance bout log so the open score editor can
 				// render the appended pairing immediately (Record bout →
 				// next bout appears, mp-gmcg): the `result` echoed below
@@ -3903,11 +3913,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// (mp-gmcg review E1), and the stamps the advance left, so
 				// the editor's next tap on the new bout is floored by them
 				// (bc-hlck) rather than by the pre-advance stamp.
-				if post != nil {
-					result.SubResults = post.BoutLog
-					result.ModifiedAt = post.ModifiedAt
-					result.GroupStamps = post.GroupStamps
-				}
+				result.SubResults = post.BoutLog
+				result.ModifiedAt = post.ModifiedAt
+				result.GroupStamps = post.GroupStamps
 				hub.Broadcast(EventMatchUpdated, gin.H{
 					"competitionId": id,
 					"matchId":       mid,

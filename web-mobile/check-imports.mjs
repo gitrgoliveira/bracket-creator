@@ -93,6 +93,18 @@ const CHECK_MODULES = [
   // and side_marks.jsx; a typo'd or renamed export in any of them would fail
   // only in a native browser.
   'admin_schedule_score_editor.jsx',
+  // bc-lbla: the shared competition-config controls import useStableId from
+  // the stable_id.jsx leaf, which the glossary's <Term> imports too.
+  'competition_fields.jsx',
+  'glossary.jsx',
+  // PR #467: the announcement form imports useStableId too; the bracket
+  // helpers import BRONZE_MATCH_ID from write_result.jsx and bronzeFeederSemis
+  // from the bronze_feeders.jsx leaf; the kachinuki advisory line imports the
+  // squad-member label and the lineup resolver (and the draw test from
+  // api_serializers.jsx).
+  'admin_announcement.jsx',
+  'admin_helpers.jsx',
+  'kachinuki_advisory.jsx',
 ];
 
 // ---------------------------------------------------------------------------

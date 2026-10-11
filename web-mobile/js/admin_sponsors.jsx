@@ -121,8 +121,9 @@ function SponsorsManager({ tournament, password, showToast, maxSponsors }) {
       ) : (
         <form onSubmit={handleUpload} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div className="field">
-            <label className="field__label">Sponsor name</label>
+            <label className="field__label" htmlFor="sponsor-name">Sponsor name</label>
             <input
+              id="sponsor-name"
               className="input"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -131,8 +132,9 @@ function SponsorsManager({ tournament, password, showToast, maxSponsors }) {
             />
           </div>
           <div className="field">
-            <label className="field__label">Link (optional)</label>
+            <label className="field__label" htmlFor="sponsor-link">Link (optional)</label>
             <input
+              id="sponsor-link"
               className="input"
               value={link}
               onChange={(e) => setLink(e.target.value)}
@@ -142,8 +144,9 @@ function SponsorsManager({ tournament, password, showToast, maxSponsors }) {
             <div className="field__hint">Opens in a new tab on the viewer surface.</div>
           </div>
           <div className="field">
-            <label className="field__label">Logo (PNG or JPEG, ≤1 MB)</label>
+            <label className="field__label" htmlFor="sponsor-logo">Logo (PNG or JPEG, ≤1 MB)</label>
             <input
+              id="sponsor-logo"
               ref={fileRef}
               type="file"
               accept="image/png,image/jpeg"

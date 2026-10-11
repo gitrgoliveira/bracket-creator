@@ -1740,7 +1740,7 @@ function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled, reauth 
         </div>
         <form onSubmit={submit}>
           <div className="field">
-            <label className="field__label">Password</label>
+            <label className="field__label" htmlFor="admin-password">Password</label>
             <input
               autoFocus
               className="input"
@@ -1937,23 +1937,24 @@ function CreateTournament({ onCreated, authConfig }) {
         <p style={{ color: "var(--ink-3)", marginBottom: 24 }}>Set up your new tournament to get started.</p>
         <form onSubmit={submit} noValidate>
           <div className="field">
-            <label className="field__label">Tournament Name</label>
+            <label className="field__label" htmlFor="first-run-name">Tournament Name</label>
             {/* The form is noValidate (inline banner reports errors instead of
                 native tooltips); `required` stays for assistive-tech semantics. */}
-            <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. London Cup 2026" required />
+            <input id="first-run-name" className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. London Cup 2026" required />
           </div>
           <div className="row">
-            <div className="field"><label className="field__label">Date</label>
+            <div className="field"><label className="field__label" htmlFor="first-run-date">Date</label>
               {/* Picker bounds mirror admin_setup.jsx + admin_competition.jsx. */}
               {/* validateAndNormalizeDate enforces MIN_YEAR–MAX_YEAR; without */}
               {/* these bounds the user could pick 1850 and only learn on submit. */}
-              <input className="input" type="date" min={`${window.MIN_YEAR}-01-01`} max={`${window.MAX_YEAR}-12-31`} value={window.dmyToIso(date)} onChange={(e) => setDate(window.isoToDmy(e.target.value))} required />
+              <input id="first-run-date" className="input" type="date" min={`${window.MIN_YEAR}-01-01`} max={`${window.MAX_YEAR}-12-31`} value={window.dmyToIso(date)} onChange={(e) => setDate(window.isoToDmy(e.target.value))} required />
             </div>
-            <div className="field"><label className="field__label">Venue</label><input className="input" value={venue} onChange={(e) => setVenue(e.target.value)} /></div>
+            <div className="field"><label className="field__label" htmlFor="first-run-venue">Venue</label><input id="first-run-venue" className="input" value={venue} onChange={(e) => setVenue(e.target.value)} /></div>
           </div>
           <div className="field">
-            <label className="field__label">Number of Shiaijo (courts)</label>
+            <label className="field__label" htmlFor="first-run-courts">Number of Shiaijo (courts)</label>
             <input
+              id="first-run-courts"
               className="input"
               type="number"
               min="1"
@@ -1973,8 +1974,8 @@ function CreateTournament({ onCreated, authConfig }) {
           {/* Tournament mode selector (mp-7h7). Chosen once at creation;
               immutable after that. Default is officiated (existing behaviour). */}
           <div className="field">
-            <label className="field__label">Tournament type</label>
-            <div role="group" aria-label="Tournament type" style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <label className="field__label" id="first-run-mode-label">Tournament type</label>
+            <div role="group" aria-labelledby="first-run-mode-label" style={{ display: "flex", gap: 8, marginTop: 4 }}>
               <button
                 type="button"
                 className={`btn${mode === "officiated" ? " btn--primary" : ""}`}
@@ -2001,8 +2002,9 @@ function CreateTournament({ onCreated, authConfig }) {
             </div>
           </div>
           <div className="field">
-            <label className="field__label">{locked ? "Admin Password (from TOURNAMENT_PASSWORD_HASH)" : "Admin Password"}</label>
+            <label className="field__label" htmlFor="first-run-password">{locked ? "Admin Password (from TOURNAMENT_PASSWORD_HASH)" : "Admin Password"}</label>
             <input
+              id="first-run-password"
               className="input"
               type="password"
               value={pass}
@@ -2025,8 +2027,9 @@ function CreateTournament({ onCreated, authConfig }) {
               Locked mode uses TOURNAMENT_ADMIN_PASSWORD_HASH (no UI input). */}
           {isSelfRun && !locked && (
             <div className="field">
-              <label className="field__label">Destructive-ops password (required for self-run)</label>
+              <label className="field__label" htmlFor="first-run-admin-password">Destructive-ops password (required for self-run)</label>
               <input
+                id="first-run-admin-password"
                 className="input"
                 type="password"
                 value={adminPass}

@@ -1331,6 +1331,18 @@ type SubMatchResult struct {
 	SideAMemberID  string `json:"sideAMemberId,omitempty" yaml:"side_a_member_id,omitempty"`
 	SideBMemberID  string `json:"sideBMemberId,omitempty" yaml:"side_b_member_id,omitempty"`
 	WinnerMemberID string `json:"winnerMemberId,omitempty" yaml:"winner_member_id,omitempty"`
+	// Recorded marks a kachinuki bout the operator closed with Record bout
+	// (operator decision 2026-10-11, bc-kfnl). Only the server writes it:
+	// engine.advanceKachinukiOnce sets it on the bout Record bout closes, in the
+	// same locked write as the next pairing (or alone, when no pairing is
+	// appended), and engine.carryKachinukiBoutState gives every incoming row the
+	// stored row's value, so a write that omits it keeps it and a client cannot
+	// set it. It tells a recorded bout from the one being fought, which the
+	// row's result cannot: the running autosave writes a winner at a one-point
+	// lead and a hikiwake at 1-1. engine.KachinukiRoster reads the last numbered
+	// bout's result only when it is set. omitempty: absent on every row written
+	// before it, which reads as not recorded, so old data needs no migration.
+	Recorded bool `json:"recorded,omitempty" yaml:"recorded,omitempty"`
 }
 
 // HanteiDecided reports whether a hantei verdict stands on this sub-bout:

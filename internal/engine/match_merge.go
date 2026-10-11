@@ -210,6 +210,9 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 		incoming.Merge = nil
 		return nil
 	}
+	// A bout's recorded mark is the server's: every forward write, on either
+	// branch and through every door, keeps the stored value (bc-kfnl).
+	carryRecordedBouts(stored, incoming.SubResults)
 	// An unstamped write the server itself orders (a completing write, or one
 	// a server door built) takes the server's time here, so it leaves a fence
 	// a later stale replay is ordered against (writeStamp).

@@ -75,26 +75,36 @@ export function kachinukiAdvisoryModel({ roster, squadA, squadB, teamNumberA, te
 }
 
 // kachinukiRosterKey is the VALUE the roster read is keyed on (never the match
-// object, which every broadcast re-creates): the match id, and every numbered
-// bout's fighters and RESULT (winner, winner member id, decision), the live
-// bout's (the last numbered bout's) included. The server reads a result on the
-// live bout as the advance does (engine.KachinukiRoster): its loser is off, a
-// draw takes both off. So the read is made again when a bout is recorded, a
-// result is entered or changed, or the next pairing is appended, and a point
-// scored that leaves the bout's result as it was reads nothing. Every reader
-// keys the same way on the same stored log, so a fresh sheet and a second
-// device show the same line.
+// object, which every broadcast re-creates): the match id, every numbered
+// bout's fighters and recorded mark, and the RESULT (winner, winner member id,
+// decision) of every bout the server reads one from (engine.KachinukiRoster):
+// each bout before the last, and the last once Record bout has recorded it.
+// The last bout while it is being fought keys on its fighters alone: the
+// server keeps both of them on whatever its score (the running autosave
+// writes a one-point lead's winner and a 1-1's hikiwake there, and neither is
+// a result), so a live tap reads nothing, and Record bout, which marks the
+// bout recorded with or without a next pairing, reads once. Every reader keys
+// the same way on the same stored log, so a fresh sheet and a second device
+// show the same line.
 export function kachinukiRosterKey(matchId, subResults) {
   const rows = (Array.isArray(subResults) ? subResults : [])
     .filter(s => s && s.position !== -1)
     .slice()
     .sort((x, y) => (x.position || 0) - (y.position || 0));
-  const parts = rows.map((s) => {
+  const parts = rows.map((s, i) => {
+    const fighters = [s.position, s.sideAMemberId || "", s.sideA || "", s.sideBMemberId || "", s.sideB || "", s.recorded ? "R" : ""];
+    if (i === rows.length - 1 && !s.recorded) return fighters.join("~");
     const winner = s.winner && typeof s.winner === "object" ? JSON.stringify(s.winner) : (s.winner || "");
-    return [
-      s.position, s.sideAMemberId || "", s.sideA || "", s.sideBMemberId || "", s.sideB || "",
-      winner, s.winnerMemberId || "", s.decision || "",
-    ].join("~");
+    return [...fighters, winner, s.winnerMemberId || "", s.decision || ""].join("~");
   });
   return `${matchId || ""}|${parts.join("/")}`;
+}
+
+// storedBoutRecorded reports whether the match holds the numbered bout at
+// position as recorded (SubMatchResult.recorded, which only the server
+// writes: Record bout sets it). The team sheet echoes it on the row it sends,
+// so the wire carries the bout as stored.
+export function storedBoutRecorded(match, position) {
+  const subs = match && Array.isArray(match.subResults) ? match.subResults : [];
+  return subs.some(s => s && s.position === position && s.recorded === true);
 }

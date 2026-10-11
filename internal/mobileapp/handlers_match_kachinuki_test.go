@@ -204,6 +204,9 @@ func TestScoreHandler_KachinukiBoutFinalAppendsNextBout(t *testing.T) {
 	require.Len(t, echoed.SubResults, 2, "response must carry the appended bout")
 	assert.Equal(t, "R-1", echoed.SubResults[1].SideA)
 	assert.Equal(t, "W-2", echoed.SubResults[1].SideB)
+	assert.True(t, echoed.SubResults[0].Recorded, "the answer marks the bout Record bout closed (bc-kfnl)")
+	assert.False(t, echoed.SubResults[1].Recorded)
+	assert.Contains(t, w.Body.String(), `"recorded":true`)
 
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
@@ -220,6 +223,70 @@ func TestScoreHandler_KachinukiBoutFinalAppendsNextBout(t *testing.T) {
 	assert.Equal(t, state.MatchStatusRunning, matches[0].Status, "match must stay running")
 	assert.Empty(t, matches[0].Winner, "no match-level winner while bouts remain")
 	assert.Empty(t, matches[0].Decision, "no match-level decision while bouts remain")
+}
+
+// TestScoreHandler_KachinukiRecordBoutAtExhaustionMarksTheBout pins bc-kfnl
+// (operator decision 2026-10-11) through the wire: Record bout on a bout that
+// leaves a side with nobody appends nothing, but still marks the bout
+// recorded, and the answer carries the mark, so the open sheet's advisory
+// line (engine.KachinukiRoster) reads that side as having no fighters left. A later autosave that
+// leaves the mark out keeps it, and a write marking an unrecorded bout does
+// not set it.
+func TestScoreHandler_KachinukiRecordBoutAtExhaustionMarksTheBout(t *testing.T) {
+	compID := "kachinuki-record-exhausted"
+	r, store := setupKachinukiScoreServer(t, compID)
+	// R-1 has beaten W-1 and W-2; bout 3 against W-3, Tora's last fighter.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{{
+		ID: "P1-0", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning,
+		SubResults: []state.SubMatchResult{
+			{Position: 1, SideA: "R-1", SideB: "W-1", IpponsA: []string{"M"}, IpponsB: []string{}, Winner: "R-1", Decision: "fought", Recorded: true},
+			{Position: 2, SideA: "R-1", SideB: "W-2", IpponsA: []string{"K"}, IpponsB: []string{}, Winner: "R-1", Decision: "fought", Recorded: true},
+			{Position: 3, SideA: "R-1", SideB: "W-3"},
+		},
+	}}))
+	rows := func(third map[string]any) []map[string]any {
+		return []map[string]any{
+			kachinukiSub(1, "R-1", "W-1", []string{"M"}, "R-1", "fought"),
+			kachinukiSub(2, "R-1", "W-2", []string{"K"}, "R-1", "fought"),
+			third,
+		}
+	}
+
+	// The autosave at a 1-0 lead, claiming the bout is recorded: not set.
+	lead := kachinukiSub(3, "R-1", "W-3", []string{"M"}, "R-1", "")
+	lead["recorded"] = true
+	w := putScore(t, r, compID, "P1-0", map[string]any{
+		"sideA": "Ryu", "sideB": "Tora", "status": "running", "subResults": rows(lead),
+		"changed": []string{state.BoutGroup(3)},
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches[0].SubResults, 3)
+	assert.True(t, matches[0].SubResults[0].Recorded, "an autosave that leaves the mark out keeps it")
+	assert.False(t, matches[0].SubResults[2].Recorded, "a client cannot mark a bout recorded")
+	// Bouts 1 and 2 were sent without their mark: that is no change of
+	// theirs, so the write names bout 3 alone (noteServerBoutChanges).
+	history, err := store.LoadMatchHistory(compID, "P1-0")
+	require.NoError(t, err)
+	require.NotEmpty(t, history)
+	assert.Equal(t, []string{state.BoutGroup(3)}, history[len(history)-1].Changed)
+
+	// Record bout: nobody left on Tora, nothing appended, the bout recorded.
+	w = putScore(t, r, compID, "P1-0", map[string]any{
+		"sideA": "Ryu", "sideB": "Tora", "status": "running", "kachinukiBoutFinal": true,
+		"subResults": rows(kachinukiSub(3, "R-1", "W-3", []string{"M"}, "R-1", "fought")),
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var echoed state.MatchResult
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &echoed))
+	require.Len(t, echoed.SubResults, 3, "nothing is appended")
+	assert.True(t, echoed.SubResults[2].Recorded, "the answer carries the recorded mark")
+	matches, err = store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches[0].SubResults, 3)
+	assert.True(t, matches[0].SubResults[2].Recorded)
+	assert.Equal(t, matches[0].ModifiedAt, echoed.ModifiedAt, "the echo carries the stamp the mark left")
 }
 
 // TestScoreHandler_KachinukiHikiwakeAppendsWalkoverSlot pins spec 006

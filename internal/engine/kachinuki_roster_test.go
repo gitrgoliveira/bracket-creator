@@ -158,10 +158,13 @@ func TestKachinukiRoster_SameNameIsSettledByMemberID(t *testing.T) {
 	rt := seedRosterTeams(t, store, comp.ID, 2,
 		[]string{"Yamada", "Ito"}, []string{"Yamada", "Kudo"}, true, true)
 	a, b := rt.a, rt.b
-	// Shiro's (side B's) Yamada wins: Aka's Yamada retires, and only he does.
+	// Shiro's (side B's) Yamada wins the recorded bout: Aka's Yamada retires,
+	// and only he does.
+	recorded := rosterBout(1, a[0], b[0], &b[0], false)
+	recorded.Recorded = true
 	require.NoError(t, store.SavePoolMatches(comp.ID, []state.MatchResult{{
 		ID: "Pool A-0", SideA: "Ryu", SideAID: rt.aID, SideB: "Tora", SideBID: rt.bID, Status: state.MatchStatusRunning,
-		SubResults: []state.SubMatchResult{rosterBout(1, a[0], b[0], &b[0], false)},
+		SubResults: []state.SubMatchResult{recorded},
 	}}))
 
 	got, err := eng.KachinukiRoster(comp.ID, "Pool A-0")
@@ -176,50 +179,249 @@ func TestKachinukiRoster_SameNameIsSettledByMemberID(t *testing.T) {
 // winner takes the loser off (a bout recorded when a side has nobody left
 // appends nothing, so this is how the line learns it is over), a hikiwake
 // takes both off, and a row with no result keeps both on.
-func TestKachinukiRoster_ALastBoutWithAResultTakesItsLoserOff(t *testing.T) {
-	eng, store, comp := setupKachinukiComp(t, "kachinuki-roster-result", 2,
+func TestKachinukiRoster_TheBoutBeingFoughtKeepsBothFightersOn(t *testing.T) {
+	eng, store, comp := setupKachinukiComp(t, "kachinuki-roster-live", 2,
 		func(c *state.Competition) { c.Format = state.CompFormatMixed })
 	rt := seedRosterTeams(t, store, comp.ID, 2,
 		[]string{"A1", "A2"}, []string{"B1", "B2"}, true, true)
 	a, b := rt.a, rt.b
-	save := func(last state.SubMatchResult) {
+	read := func(last state.SubMatchResult) KachinukiRoster {
 		t.Helper()
-		require.NoError(t, store.SavePoolMatches(comp.ID, []state.MatchResult{{
-			ID: "Pool A-0", SideA: "Ryu", SideAID: rt.aID, SideB: "Tora", SideBID: rt.bID, Status: state.MatchStatusRunning,
-			SubResults: []state.SubMatchResult{rosterBout(1, a[0], b[0], &a[0], false), last},
-		}}))
+		saveRosterMatch(t, store, comp.ID, rt, []state.SubMatchResult{rosterBout(1, a[0], b[0], &a[0], false), last}, false)
+		got, err := eng.KachinukiRoster(comp.ID, "Pool A-0")
+		require.NoError(t, err)
+		return got
 	}
 
-	// No result on the last row yet: both fighters are on.
-	save(rosterBout(2, a[0], b[1], nil, false))
-	live, err := eng.KachinukiRoster(comp.ID, "Pool A-0")
-	require.NoError(t, err)
-	assert.Equal(t, a[0].ID, onID(live.SideA))
-	assert.Equal(t, b[1].ID, onID(live.SideB), "bout 2 has no result: B2 is still on")
+	// The running autosave writes a 1-0 lead's winner and a 1-1's hikiwake on
+	// the live row. Neither is a result until Record bout records the bout.
+	for name, last := range map[string]state.SubMatchResult{
+		"no score":   rosterBout(2, a[0], b[1], nil, false),
+		"a 1-0 lead": rosterBout(2, a[0], b[1], &a[0], false),
+		"1-1":        rosterBout(2, a[0], b[1], nil, true),
+	} {
+		got := read(last)
+		assert.Equal(t, a[0].ID, onID(got.SideA), "%s: A1 is on", name)
+		assert.Equal(t, b[1].ID, onID(got.SideB), "%s: B2 is on", name)
+		assert.Equal(t, memberIDs(a[1]), rosterIDs(got.SideA), "%s", name)
+		assert.Empty(t, got.SideB.Remaining, "%s: B2 is B's last fighter", name)
+		assert.True(t, got.SideB.LineupFound, "%s", name)
+	}
+}
 
-	// A winner on the last row (recorded, with nobody left on B to append, or
-	// a lead the running autosave wrote): the loser is off, the winner stays.
-	save(rosterBout(2, a[0], b[1], &a[0], false))
-	won, err := eng.KachinukiRoster(comp.ID, "Pool A-0")
-	require.NoError(t, err)
-	assert.Nil(t, won.SideB.On, "bout 2 carries A1's win: B2 is off")
-	assert.Empty(t, won.SideB.Remaining)
-	assert.True(t, won.SideB.LineupFound)
-	assert.Equal(t, a[0].ID, onID(won.SideA), "the winner stays on")
-	assert.Equal(t, memberIDs(a[1]), rosterIDs(won.SideA))
-	// The advance agrees: with nobody left on B it appends nothing.
-	changed, _, err := eng.MaybeAdvanceKachinuki(comp.ID, "Pool A-0")
-	require.NoError(t, err)
-	assert.False(t, changed)
+func TestKachinukiRoster_RecordBoutAtExhaustionTakesTheLoserOff(t *testing.T) {
+	for _, bracket := range []bool{false, true} {
+		name := "pool"
+		if bracket {
+			name = "bracket"
+		}
+		t.Run(name, func(t *testing.T) {
+			eng, store, comp := setupKachinukiComp(t, "kachinuki-roster-exhausted-"+name, 2,
+				func(c *state.Competition) { c.Format = state.CompFormatMixed })
+			rt := seedRosterTeams(t, store, comp.ID, 2,
+				[]string{"A1", "A2"}, []string{"B1", "B2"}, true, true)
+			a, b := rt.a, rt.b
+			// A1 beat B1, and wins bout 2 against B2, B's last fighter.
+			matchID := saveRosterMatch(t, store, comp.ID, rt, []state.SubMatchResult{
+				rosterBout(1, a[0], b[0], &a[0], false),
+				rosterBout(2, a[0], b[1], &a[0], false),
+			}, bracket)
 
-	// A hikiwake takes both off.
-	save(rosterBout(2, a[0], b[1], nil, true))
-	drawn, err := eng.KachinukiRoster(comp.ID, "Pool A-0")
+			// Record bout: nobody left on B, so nothing is appended, but the
+			// bout is marked recorded in a write of its own.
+			appended, post, err := eng.MaybeAdvanceKachinuki(comp.ID, matchID)
+			require.NoError(t, err)
+			assert.False(t, appended, "nobody left on B: nothing is appended")
+			require.NotNil(t, post, "the recorded mark is a write the answer carries")
+			require.Len(t, post.BoutLog, 2)
+			assert.True(t, post.BoutLog[1].Recorded, "the bout Record bout closed is recorded")
+			assert.False(t, post.BoutLog[0].Recorded, "an earlier bout is not touched")
+
+			got, err := eng.KachinukiRoster(comp.ID, matchID)
+			require.NoError(t, err)
+			assert.Nil(t, got.SideB.On, "B2 lost the recorded bout and is off")
+			assert.Empty(t, got.SideB.Remaining, "no fighters left on B")
+			assert.True(t, got.SideB.LineupFound)
+			assert.Equal(t, a[0].ID, onID(got.SideA), "the winner stays on")
+			assert.Equal(t, memberIDs(a[1]), rosterIDs(got.SideA))
+
+			history, err := store.LoadMatchHistory(comp.ID, matchID)
+			require.NoError(t, err)
+			require.NotEmpty(t, history)
+			lastEntry := history[len(history)-1]
+			assert.Equal(t, doorKachinukiRecord, lastEntry.Door)
+			assert.Equal(t, []string{state.BoutGroup(2)}, lastEntry.Changed)
+
+			// A second Record bout on the recorded bout writes nothing.
+			again, post2, err := eng.MaybeAdvanceKachinuki(comp.ID, matchID)
+			require.NoError(t, err)
+			assert.False(t, again)
+			assert.Nil(t, post2, "a replayed Record bout adds no stamp and no history line")
+			history2, err := store.LoadMatchHistory(comp.ID, matchID)
+			require.NoError(t, err)
+			assert.Len(t, history2, len(history))
+		})
+	}
+}
+
+func TestKachinukiRoster_ARecordedDrawTakesBothOff(t *testing.T) {
+	eng, store, comp := setupKachinukiComp(t, "kachinuki-roster-recorded-draw", 2,
+		func(c *state.Competition) { c.Format = state.CompFormatMixed })
+	rt := seedRosterTeams(t, store, comp.ID, 2,
+		[]string{"A1", "A2"}, []string{"B1", "B2"}, true, true)
+	a, b := rt.a, rt.b
+	// B1 beat A1, A2 beat B1, then A2 and B2 draw: both teams are out.
+	saveRosterMatch(t, store, comp.ID, rt, []state.SubMatchResult{
+		rosterBout(1, a[0], b[0], &b[0], false),
+		rosterBout(2, a[1], b[0], &a[1], false),
+		rosterBout(3, a[1], b[1], nil, true),
+	}, false)
+	appended, post, err := eng.MaybeAdvanceKachinuki(comp.ID, "Pool A-0")
 	require.NoError(t, err)
-	assert.Nil(t, drawn.SideA.On, "a draw takes A1 off")
-	assert.Nil(t, drawn.SideB.On, "a draw takes B2 off")
-	assert.Equal(t, memberIDs(a[1]), rosterIDs(drawn.SideA))
-	assert.Empty(t, drawn.SideB.Remaining)
+	assert.False(t, appended, "both teams are out: nothing is appended")
+	require.NotNil(t, post)
+	assert.True(t, post.BoutLog[2].Recorded)
+
+	got, err := eng.KachinukiRoster(comp.ID, "Pool A-0")
+	require.NoError(t, err)
+	assert.Nil(t, got.SideA.On, "a recorded draw takes A2 off")
+	assert.Nil(t, got.SideB.On, "a recorded draw takes B2 off")
+	assert.Empty(t, got.SideA.Remaining)
+	assert.Empty(t, got.SideB.Remaining)
+}
+
+func TestKachinukiRoster_ARecordedDrawKeepsTheLastFighterOfAnExhaustedSide(t *testing.T) {
+	eng, store, comp := setupKachinukiComp(t, "kachinuki-roster-taisho", 2,
+		func(c *state.Competition) { c.Format = state.CompFormatMixed })
+	rt := seedRosterTeams(t, store, comp.ID, 2,
+		[]string{"A1", "A2"}, []string{"B1", "B2"}, true, true)
+	a, b := rt.a, rt.b
+	// A1 beat B1, then A1 and B2 draw: B has nobody left, A has A2. The advance
+	// keeps B2 on against A2 (advanceAfterHikiwake), and the line reads it so.
+	saveRosterMatch(t, store, comp.ID, rt, []state.SubMatchResult{
+		rosterBout(1, a[0], b[0], &a[0], false),
+		rosterBout(2, a[0], b[1], nil, true),
+	}, false)
+	appended, post, err := eng.MaybeAdvanceKachinuki(comp.ID, "Pool A-0")
+	require.NoError(t, err)
+	require.True(t, appended)
+	require.Len(t, post.BoutLog, 3)
+	assert.True(t, post.BoutLog[1].Recorded, "the drawn bout is recorded")
+	assert.False(t, post.BoutLog[2].Recorded, "the appended pairing is the bout being fought")
+	assert.Equal(t, b[1].ID, post.BoutLog[2].SideBMemberID, "B2 stays on")
+
+	got, err := eng.KachinukiRoster(comp.ID, "Pool A-0")
+	require.NoError(t, err)
+	assert.Equal(t, a[1].ID, onID(got.SideA))
+	assert.Equal(t, b[1].ID, onID(got.SideB), "B's last fighter stays on after the draw")
+	assert.Empty(t, got.SideB.Remaining)
+	assert.Empty(t, got.SideA.Remaining)
+}
+
+func TestKachinukiRoster_RemovingTheAppendedPairingUnrecordsTheBout(t *testing.T) {
+	for _, bracket := range []bool{false, true} {
+		name := "pool"
+		if bracket {
+			name = "bracket"
+		}
+		t.Run(name, func(t *testing.T) {
+			eng, store, comp := setupKachinukiComp(t, "kachinuki-roster-undo-"+name, 3,
+				func(c *state.Competition) { c.Format = state.CompFormatMixed })
+			rt := seedRosterTeams(t, store, comp.ID, 3,
+				[]string{"A1", "A2", "A3"}, []string{"B1", "B2", "B3"}, true, true)
+			a, b := rt.a, rt.b
+			matchID := saveRosterMatch(t, store, comp.ID, rt, []state.SubMatchResult{
+				rosterBout(1, a[0], b[0], &a[0], false),
+			}, bracket)
+			appended, post, err := eng.MaybeAdvanceKachinuki(comp.ID, matchID)
+			require.NoError(t, err)
+			require.True(t, appended)
+			require.True(t, post.BoutLog[0].Recorded)
+
+			// Removing the appended pairing undoes the Record bout: bout 1 is
+			// the bout being fought again, both its fighters on.
+			updated, err := eng.RemoveTrailingKachinukiBout(comp.ID, matchID)
+			require.NoError(t, err)
+			require.Len(t, updated.SubResults, 1)
+			assert.False(t, updated.SubResults[0].Recorded)
+			got, err := eng.KachinukiRoster(comp.ID, matchID)
+			require.NoError(t, err)
+			assert.Equal(t, a[0].ID, onID(got.SideA))
+			assert.Equal(t, b[0].ID, onID(got.SideB), "B1 is on again")
+
+			history, err := store.LoadMatchHistory(comp.ID, matchID)
+			require.NoError(t, err)
+			lastEntry := history[len(history)-1]
+			assert.Equal(t, doorKachinukiRemove, lastEntry.Door)
+			assert.ElementsMatch(t, []string{state.BoutGroup(2), state.BoutGroup(1)}, lastEntry.Changed)
+		})
+	}
+}
+
+func TestKachinukiRecorded_AWriteNeitherClearsNorSetsIt(t *testing.T) {
+	for _, bracket := range []bool{false, true} {
+		name := "pool"
+		if bracket {
+			name = "bracket"
+		}
+		t.Run(name, func(t *testing.T) {
+			eng, store, comp := setupKachinukiComp(t, "kachinuki-recorded-carry-"+name, 3,
+				func(c *state.Competition) { c.Format = state.CompFormatMixed })
+			rt := seedRosterTeams(t, store, comp.ID, 3,
+				[]string{"A1", "A2", "A3"}, []string{"B1", "B2", "B3"}, true, true)
+			a, b := rt.a, rt.b
+			first := rosterBout(1, a[0], b[0], &a[0], false)
+			first.Recorded = true
+			live := rosterBout(2, a[0], b[1], nil, false)
+			matchID := saveRosterMatch(t, store, comp.ID, rt, []state.SubMatchResult{first, live}, bracket)
+
+			// The running autosave: bout 1 echoed WITHOUT its mark, and bout 2
+			// (a point) claiming a mark the server never gave it.
+			sentFirst := first
+			sentFirst.Recorded = false
+			sentLive := live
+			sentLive.IpponsA = []string{"M"}
+			sentLive.Recorded = true
+			require.NoError(t, eng.RecordMatchResult(comp.ID, matchID, &state.MatchResult{
+				ID: matchID, SideA: "Ryu", SideAID: rt.aID, SideB: "Tora", SideBID: rt.bID,
+				Status: state.MatchStatusRunning, ModifiedAt: serverNowMs(),
+				SubResults: []state.SubMatchResult{sentFirst, sentLive},
+				Changed:    []string{state.BoutGroup(2)}, WriteDoor: DoorScore,
+			}))
+
+			subs := storedSubs(t, store, comp.ID, matchID, bracket)
+			require.Len(t, subs, 2)
+			assert.True(t, subs[0].Recorded, "a write that leaves the mark out keeps it")
+			assert.False(t, subs[1].Recorded, "a client cannot mark a bout recorded")
+			assert.Equal(t, []string{"M"}, subs[1].IpponsA, "the point itself landed")
+
+			history, err := store.LoadMatchHistory(comp.ID, matchID)
+			require.NoError(t, err)
+			require.NotEmpty(t, history)
+			assert.Equal(t, []string{state.BoutGroup(2)}, history[len(history)-1].Changed,
+				"leaving the mark out is not a change of bout 1")
+		})
+	}
+}
+
+// storedSubs reads a match's bout log back from whichever store holds it.
+func storedSubs(t *testing.T, store *state.Store, compID, matchID string, bracket bool) []state.SubMatchResult {
+	t.Helper()
+	if !bracket {
+		pms, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		for _, m := range pms {
+			if m.ID == matchID {
+				return m.SubResults
+			}
+		}
+		t.Fatalf("pool match %s not found", matchID)
+	}
+	br, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	bm := br.MatchByID(matchID)
+	require.NotNil(t, bm)
+	return bm.SubResults
 }
 
 // A side with no lineup in force reads no fighters at all: the bout log knows
@@ -353,20 +555,23 @@ func TestKachinukiRoster_NamesTheFighterTheAdvanceAppends(t *testing.T) {
 			assert.Equal(t, rt.a[0].ID, onID(before.SideA))
 			assert.Equal(t, rt.b[1].ID, onID(before.SideB))
 
-			// B2 wins bout 2: the row carries the result before the advance
-			// runs, and the read already takes A1 off and keeps the same next.
+			// B2 leads bout 2: the row carries a winner before Record bout, but
+			// the bout is not recorded, so both fighters are still on and the
+			// same fighter is next.
 			bouts[1] = rosterBout(2, rt.a[0], rt.b[1], &rt.b[1], false)
 			matchID = saveRosterMatch(t, store, comp.ID, rt, bouts, p.bracket)
 			decided, err := eng.KachinukiRoster(comp.ID, matchID)
 			require.NoError(t, err)
-			assert.Nil(t, decided.SideA.On, "A1 lost bout 2 and is off")
-			assert.Equal(t, rt.b[1].ID, onID(decided.SideB), "B2 stays on")
+			assert.Equal(t, rt.a[0].ID, onID(decided.SideA), "bout 2 is not recorded: A1 is still on")
+			assert.Equal(t, rt.b[1].ID, onID(decided.SideB), "B2 is on")
 			require.NotEmpty(t, decided.SideA.Remaining)
 			assert.Equal(t, nextA, decided.SideA.Remaining[0].MemberID)
 			changed, post, err := eng.MaybeAdvanceKachinuki(comp.ID, matchID)
 			require.NoError(t, err)
 			require.True(t, changed)
+			assert.True(t, post.BoutLog[1].Recorded, "Record bout recorded bout 2 in the write that appended bout 3")
 			appended := post.BoutLog[len(post.BoutLog)-1]
+			assert.False(t, appended.Recorded)
 			assert.Equal(t, nextA, appended.SideAMemberID, "the read named the fighter the advance sent in")
 			assert.Equal(t, rt.a[1].ID, appended.SideAMemberID)
 

@@ -23,8 +23,8 @@ type KachinukiRosterFighter struct {
 //
 // On is the side's fighter in the live bout (the last numbered bout row), as
 // that row names them; nil when the row names nobody for the side, when there
-// is no bout row yet, or when the row already carries a result that retires
-// this fighter (see KachinukiRoster).
+// is no bout row yet, or when Record bout has recorded that row and its result
+// retires this fighter (see KachinukiRoster).
 //
 // Remaining is the queue the advance takes this side's next fighter from if
 // the fighter on loses: every fighter of the lineup in force who has not
@@ -56,16 +56,18 @@ type KachinukiRoster struct {
 // seen, so nothing ends the encounter, arms End match or holds a button back
 // on this answer.
 //
-// The last numbered bout row is the live bout. When it already carries a
-// result (a winner, a hikiwake, any recorded decision), the result is read as
-// the advance reads it (RetiredPlayersFromBoutLog over that row: the
-// attribution owners, id first, and state.IsDraw): the loser is no longer on,
-// the winner stays on, a draw takes both off. The stored row cannot tell a
-// bout recorded with Record bout from one still being fought (the running
-// autosave already writes a 1-0 lead's winner and a 1-1's hikiwake on the
-// live row), and Record bout appends nothing when a side has nobody left, so
-// this is the one rule every reader can share: a fresh sheet, a second device
-// and the public sheet read the same line.
+// Every numbered bout before the last retires by its result, as the advance
+// reads it (RetiredPlayersFromBoutLog: the attribution owners, id first, and
+// state.IsDraw). The last numbered bout is the one being fought: both its
+// fighters are on whatever its score, because the running autosave writes a
+// one-point lead's winner and a 1-1's hikiwake on that row and neither is a
+// result (bc-kfnl, operator decision 2026-10-11). Only once Record bout has
+// marked it recorded (state.SubMatchResult.Recorded, which the server alone
+// writes) is its result read the same way: the loser is no longer on, the
+// winner stays on, a draw takes both off. The mark is stored, so a fresh
+// sheet, a second device and the public sheet read the same line. When a draw
+// leaves one side with nobody, the advance appends a pairing that keeps that
+// side's fighter (advanceAfterHikiwake), which is then the last bout and on.
 //
 // The queues come from kachinukiRosterQueues and the retirements from
 // RetiredPlayersFromBoutLog, as the advance (MaybeAdvanceKachinuki) takes
@@ -96,15 +98,24 @@ func (e *Engine) KachinukiRoster(compID, matchID string) (KachinukiRoster, error
 	queueA, queueB := kachinukiRosterQueues(comp, parent, rule)
 	retiredA, retiredB := RetiredPlayersFromBoutLog(parent.SubResults, parent.SideA, parent.SideB)
 
-	// The live bout: a result it already carries says who is no longer on
-	// (liveRetiredA/B, from that row alone; none when it has no result yet).
+	// The last numbered bout. Its fighters are on while it is being fought,
+	// whatever its score: the running autosave writes a winner at a one-point
+	// lead and a hikiwake at 1-1, and neither is a result (bc-kfnl, operator
+	// decision 2026-10-11). Once Record bout has marked it recorded
+	// (SubMatchResult.Recorded) its result says who is no longer on
+	// (liveRetiredA/B, from that row alone), as the advance reads it. Every
+	// bout before it retires by its result in retiredA/B; the last row's own
+	// retirement there changes nothing below, because the fighter on is taken
+	// out of the queue either way (retired.with(on)).
 	var onA, onB kachinukiFighter
 	liveRetiredA, liveRetiredB := newRetiredMemberSet(), newRetiredMemberSet()
 	if i := lastNumberedBout(parent.SubResults); i >= 0 {
 		live := parent.SubResults[i]
 		onA = kachinukiFighter{Name: live.SideA, MemberID: live.SideAMemberID}
 		onB = kachinukiFighter{Name: live.SideB, MemberID: live.SideBMemberID}
-		liveRetiredA, liveRetiredB = RetiredPlayersFromBoutLog(parent.SubResults[i:i+1], parent.SideA, parent.SideB)
+		if live.Recorded {
+			liveRetiredA, liveRetiredB = RetiredPlayersFromBoutLog(parent.SubResults[i:i+1], parent.SideA, parent.SideB)
+		}
 	}
 	return KachinukiRoster{
 		SideA: kachinukiRosterSide(queueA, retiredA, onA, liveRetiredA),

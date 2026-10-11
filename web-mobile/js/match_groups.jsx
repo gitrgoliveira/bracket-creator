@@ -269,6 +269,12 @@ function groupKey(wire, group, next) {
             // either, or a pick on a bout nobody has scored would name it and stamp its
             // scoreline.
             // Numbered rows keep the rule above.
+            // A kachinuki bout's recorded mark is the server's alone (Record
+            // bout sets it, carryRecordedBouts keeps the stored value over any
+            // write), so a write that echoes it is never a change of the bout:
+            // without this the first save after Record bout named the bout,
+            // whose baseline was agreed before the mark arrived (bc-kfnl).
+            keys.delete('recorded');
             if (pos < 0) {
                 keys.delete('sideAMemberId');
                 keys.delete('sideBMemberId');

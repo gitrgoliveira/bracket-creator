@@ -43,6 +43,7 @@ const DOOR_WORDS = {
     'override-winner': 'Winner set by hand',
     'engi': 'Engi result recorded',
     'kachinuki-advance': 'Next kachinuki bout added',
+    'kachinuki-record': 'Kachinuki bout recorded',
     'kachinuki-remove-bout': 'Kachinuki bout removed',
     'downstream-reopen': 'Reopened by a correction to an earlier match',
     // A change already recorded that a write arriving later moved out of the

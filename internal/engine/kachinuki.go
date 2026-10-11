@@ -650,9 +650,19 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 	// (winner from the last decisive bout, covering both win rules -- full
 	// exhaustion AND taisho-defeated -- or hikiwake in pools/league; a
 	// knockout tie is resolved by encho on the final bout, never a draw).
-	if out.Next == nil {
+	//
+	// Record bout also marks the bout it closes as RECORDED (bc-kfnl, operator
+	// decision 2026-10-11), in the same locked write as the pairing it appends,
+	// or alone when it appends none (a side has nobody left). Nothing else in
+	// the stored row tells a recorded bout from the one being fought: the
+	// running autosave writes a winner at a one-point lead and a hikiwake at
+	// 1-1. A bout already recorded with nothing to append writes nothing, so a
+	// replayed Record bout adds no stamp and no history line.
+	markRecorded := !last.Recorded
+	if out.Next == nil && !markRecorded {
 		return false, nil, nil
 	}
+	recordedGroup := state.BoutGroup(last.Position)
 
 	// post captures the FULL bout log AFTER the append and the stamps the
 	// advance left, so the caller can echo them without re-reading the match
@@ -667,7 +677,15 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 	// one it follows), and the advance is recorded in the match's history, so
 	// a write made before it is ordered against it (bc-mrgc).
 	stamp := max(serverNowMs(), parent.ModifiedAt)
-	var appendedGroup string
+	// The groups this write changes, for its stamps and its history line.
+	var groups []string
+	if markRecorded {
+		groups = append(groups, recordedGroup)
+	}
+	door := doorKachinukiRecord
+	if out.Next != nil {
+		door = doorKachinukiAdvance
+	}
 
 	// The read above ran without the lock; the write below re-checks, under
 	// it, that the match is still the one the pairing was worked out from
@@ -696,9 +714,14 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 				if !kachinukiAdvanceStillHolds(snapshot, bm.Status, bm.ModifiedAt, bm.SubResults) {
 					return errKachinukiAdvanceStale
 				}
-				appendNextKachinukiBout(bm, *out.Next)
-				appendedGroup = state.BoutGroup(bm.SubResults[len(bm.SubResults)-1].Position)
-				bm.StampGroups(stamp, appendedGroup, state.GroupResult)
+				// The re-check holds the log equal to the snapshot, so lastIdx
+				// still names the bout Record bout closed.
+				bm.SubResults[lastIdx].Recorded = true
+				if out.Next != nil {
+					appendNextKachinukiBout(bm, *out.Next)
+					groups = append(groups, state.BoutGroup(bm.SubResults[len(bm.SubResults)-1].Position), state.GroupResult)
+				}
+				bm.StampGroups(stamp, groups...)
 				post = &KachinukiAdvance{
 					BoutLog:     append([]state.SubMatchResult(nil), bm.SubResults...),
 					ModifiedAt:  bm.ModifiedAt,
@@ -708,13 +731,13 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 			}); uerr != nil {
 				return uerr
 			}
-			e.recordDirectHistory(tx, compID, matchID, doorKachinukiAdvance, stamp, appendedGroup, state.GroupResult)
+			e.recordDirectHistory(tx, compID, matchID, door, stamp, groups...)
 			return nil
 		})
 		if err != nil {
 			return false, nil, err
 		}
-		return true, post, nil
+		return out.Next != nil, post, nil
 	}
 
 	var found bool
@@ -724,16 +747,19 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 			if !kachinukiAdvanceStillHolds(snapshot, parent.Status, parent.ModifiedAt, parent.SubResults) {
 				return errKachinukiAdvanceStale
 			}
-			// Append the next bout. Appending means the encounter continues: the
-			// parent match must stay running with no match-level winner/decision.
-			out.Next.Position = len(parent.SubResults) + 1
-			parent.SubResults = append(parent.SubResults, *out.Next)
-			parent.Status = state.MatchStatusRunning
-			parent.Winner = ""
-			parent.WinnerID = "" // bc-brid: the verdict's id half, cleared with the name.
-			parent.Decision = ""
-			appendedGroup = state.BoutGroup(out.Next.Position)
-			parent.StampGroups(stamp, appendedGroup, state.GroupResult)
+			parent.SubResults[lastIdx].Recorded = true
+			if out.Next != nil {
+				// Append the next bout. Appending means the encounter continues: the
+				// parent match must stay running with no match-level winner/decision.
+				out.Next.Position = len(parent.SubResults) + 1
+				parent.SubResults = append(parent.SubResults, *out.Next)
+				parent.Status = state.MatchStatusRunning
+				parent.Winner = ""
+				parent.WinnerID = "" // bc-brid: the verdict's id half, cleared with the name.
+				parent.Decision = ""
+				groups = append(groups, state.BoutGroup(out.Next.Position), state.GroupResult)
+			}
+			parent.StampGroups(stamp, groups...)
 			post = &KachinukiAdvance{
 				BoutLog:     append([]state.SubMatchResult(nil), parent.SubResults...),
 				ModifiedAt:  parent.ModifiedAt,
@@ -747,7 +773,7 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 		if !found {
 			return nil
 		}
-		e.recordDirectHistory(tx, compID, matchID, doorKachinukiAdvance, stamp, appendedGroup, state.GroupResult)
+		e.recordDirectHistory(tx, compID, matchID, door, stamp, groups...)
 		return nil
 	})
 	if err != nil {
@@ -756,11 +782,14 @@ func (e *Engine) advanceKachinukiOnce(compID, matchID string) (bool, *KachinukiA
 	if !found {
 		return false, nil, nil
 	}
-	return true, post, nil
+	return out.Next != nil, post, nil
 }
 
-// KachinukiAdvance is what MaybeAdvanceKachinuki hands back when it appended a
-// bout: the FULL bout log after the append, and the match's stamps as the
+// KachinukiAdvance is what MaybeAdvanceKachinuki hands back when it wrote: it
+// appended a bout, or marked the bout Record bout closed as recorded (the
+// bool it returns beside it says whether a pairing was appended; a recorded
+// mark alone, at a side's exhaustion, returns false with a non-nil
+// KachinukiAdvance). It holds the FULL bout log after the write, and the match's stamps as the
 // advance left them. The handler echoes all of it on the Record-bout answer,
 // so the open editor renders the appended pairing at once without a store
 // re-read (mp-gmcg review E1) and shows the stamp the advance gave the match,
@@ -1545,13 +1574,14 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 					opErr = serr
 					return nil
 				}
-				removed := state.BoutGroup(h.Pool.SubResults[len(h.Pool.SubResults)-1].Position)
-				h.Pool.StampGroups(stamp, removed)
+				removed := []string{state.BoutGroup(h.Pool.SubResults[len(h.Pool.SubResults)-1].Position)}
+				removed = append(removed, unrecordLastBout(stripped)...)
+				h.Pool.StampGroups(stamp, removed...)
 				h.Pool.SubResults = stripped
 				if werr := h.Save(); werr != nil {
 					return werr
 				}
-				e.recordDirectHistory(tx, compID, matchID, doorKachinukiRemove, stamp, removed)
+				e.recordDirectHistory(tx, compID, matchID, doorKachinukiRemove, stamp, removed...)
 				u := *h.Pool
 				updated = &u
 				return nil
@@ -1561,13 +1591,14 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 				opErr = serr
 				return nil
 			}
-			removed := state.BoutGroup(h.Bracket.SubResults[len(h.Bracket.SubResults)-1].Position)
-			h.Bracket.StampGroups(stamp, removed)
+			removed := []string{state.BoutGroup(h.Bracket.SubResults[len(h.Bracket.SubResults)-1].Position)}
+			removed = append(removed, unrecordLastBout(stripped)...)
+			h.Bracket.StampGroups(stamp, removed...)
 			h.Bracket.SubResults = stripped
 			if werr := h.Save(); werr != nil {
 				return werr
 			}
-			e.recordDirectHistory(tx, compID, matchID, doorKachinukiRemove, stamp, removed)
+			e.recordDirectHistory(tx, compID, matchID, doorKachinukiRemove, stamp, removed...)
 			updated = bracketMatchToTeamResult(*h.Bracket)
 			return nil
 		})
@@ -2520,6 +2551,49 @@ func preserveKachinukiMemberIDs(storedByPos map[int]state.SubMatchResult, in *st
 	if in.SideBMemberID == "" && prior.SideBMemberID != "" && in.SideB == prior.SideB {
 		in.SideBMemberID = prior.SideBMemberID
 	}
+}
+
+// carryRecordedBouts is the ONE owner of SubMatchResult.Recorded on a write a
+// writer sent (bc-kfnl, operator decision 2026-10-11: Record bout stamps the
+// bout as recorded on the server). Every incoming row takes the value the
+// stored row at its position holds: a write that leaves the flag out (the
+// running autosave, an older client, a queued replay) keeps it, and a row a
+// client marks recorded that the server never recorded is not. The server
+// is its only writer (advanceKachinukiOnce sets it, RemoveTrailingKachinukiBout
+// clears it on the bout an undone Record bout closed).
+//
+// One call site: mergeMatchWrite runs it on every forward write (both
+// branches, every door), before the merge compares a group. It runs AFTER
+// noteServerBoutChanges, which diffs the writer's rows against the rows the
+// server changed on its behalf: both of those are still uncarried there, so
+// a row that only left the flag out never reads as a server change of that
+// bout (pinned by TestScoreHandler_KachinukiRecordBoutAtExhaustionMarksTheBout).
+func carryRecordedBouts(prior *state.MatchResult, rows []state.SubMatchResult) {
+	recorded := map[int]bool{}
+	if prior != nil {
+		for _, s := range prior.SubResults {
+			if s.Recorded {
+				recorded[s.Position] = true
+			}
+		}
+	}
+	for i := range rows {
+		rows[i].Recorded = recorded[rows[i].Position]
+	}
+}
+
+// unrecordLastBout takes the recorded mark off the last numbered bout of
+// subs and returns its group when it did (nil otherwise). Removing the
+// pairing a Record bout appended is the undo of that Record bout: the bout it
+// closed is the one being fought again, so its fighters are both on until it
+// is recorded again (bc-kfnl). RemoveTrailingKachinukiBout is its only caller.
+func unrecordLastBout(subs []state.SubMatchResult) []string {
+	i := lastNumberedBout(subs)
+	if i < 0 || !subs[i].Recorded {
+		return nil
+	}
+	subs[i].Recorded = false
+	return []string{state.BoutGroup(subs[i].Position)}
 }
 
 // teamMatch is a team match located by findTeamMatch, with the draw it was found

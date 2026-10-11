@@ -96,16 +96,37 @@ func TestKachinukiRosterGET(t *testing.T) {
 		assert.Empty(t, body.SideB.Remaining)
 		assert.Contains(t, w.Body.String(), `"remaining":[]`, "an empty queue is [] on the wire, never null")
 	})
-	t.Run("a last bout carrying a result takes its loser off", func(t *testing.T) {
-		// A1 beats B2 in bout 1 of a second encounter, with nothing appended
-		// (as Record bout leaves it when a side has nobody left). Added beside
-		// Pool A-0, which the other subtests read.
+	t.Run("a last bout carrying a lead keeps both fighters on", func(t *testing.T) {
+		// The running autosave writes a 1-0 lead's winner on the bout being
+		// fought: it is not a result until Record bout records the bout
+		// (bc-kfnl). Added beside Pool A-0, which the other subtests read.
+		matches, err := store.LoadPoolMatches("k1")
+		require.NoError(t, err)
+		matches = append(matches, state.MatchResult{
+			ID: "Pool A-2", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning,
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "A1", SideAMemberID: a1.ID, SideB: "B2", Winner: "A1", WinnerMemberID: a1.ID},
+			},
+		})
+		require.NoError(t, store.SavePoolMatches("k1", matches))
+		w := getRoster(r, "/api/competitions/k1/matches/Pool%20A-2/kachinuki-roster")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var body rosterBody
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		require.NotNil(t, body.SideB.On, "B2 is still on")
+		assert.Equal(t, "B2", body.SideB.On.Name)
+		require.NotNil(t, body.SideA.On)
+		assert.Equal(t, a1.ID, body.SideA.On.MemberID)
+	})
+	t.Run("a recorded last bout takes its loser off", func(t *testing.T) {
+		// A1 beats B2 in bout 1 of a second encounter and Record bout records
+		// it, with nothing appended (Tora has nobody left).
 		matches, err := store.LoadPoolMatches("k1")
 		require.NoError(t, err)
 		matches = append(matches, state.MatchResult{
 			ID: "Pool A-1", SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning,
 			SubResults: []state.SubMatchResult{
-				{Position: 1, SideA: "A1", SideAMemberID: a1.ID, SideB: "B2", Winner: "A1", WinnerMemberID: a1.ID, Decision: "fought"},
+				{Position: 1, SideA: "A1", SideAMemberID: a1.ID, SideB: "B2", Winner: "A1", WinnerMemberID: a1.ID, Decision: "fought", Recorded: true},
 			},
 		})
 		require.NoError(t, store.SavePoolMatches("k1", matches))
@@ -113,7 +134,7 @@ func TestKachinukiRosterGET(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		var body rosterBody
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-		assert.Nil(t, body.SideB.On, "the bout's result retired B2")
+		assert.Nil(t, body.SideB.On, "the recorded bout's result retired B2")
 		assert.Contains(t, w.Body.String(), `"on":null`, "nobody on is null on the wire")
 		require.NotNil(t, body.SideA.On)
 		assert.Equal(t, a1.ID, body.SideA.On.MemberID, "the winner stays on")

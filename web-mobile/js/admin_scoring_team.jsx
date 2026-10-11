@@ -159,7 +159,7 @@ import { sideLookupKey } from './competitor_identity.jsx';
 // bc-pnum: the ONE primitive that composes a squad member's visible label
 // ("T10.1"); see its header for why this is never restated inline.
 import { squadMemberLabel } from './squad_member_label.jsx';
-import { kachinukiAdvisoryModel, kachinukiRosterKey } from './kachinuki_advisory.jsx';
+import { kachinukiAdvisoryModel, kachinukiRosterKey, storedBoutRecorded } from './kachinuki_advisory.jsx';
 
 // Shared inline style for the squad member label riding beside a bout row's
 // fighter name (squadLabelFor, TeamScoreEditorModal below). A muted, small
@@ -2653,10 +2653,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // the server (engine.KachinukiRoster, the same call that appends the next
   // pairing, which also picks out each side's fighter on) and keyed on a VALUE,
   // never on `m`, which every broadcast re-creates: the match id, the bout
-  // log's fighters and every bout's result, the live bout's included
-  // (kachinukiRosterKey: the server takes a live bout's loser off once the row
-  // carries a result, so a bout recorded when a side has nobody left, which
-  // appends nothing, still re-reads), and the two lineups AS THE SERVER LAST
+  // log's fighters and recorded marks, and the result of every bout the server
+  // reads one from, i.e. not the live bout's until Record bout records it
+  // (kachinukiRosterKey: the server keeps both fighters of the bout being
+  // fought on whatever its score, so a live point reads nothing, and Record
+  // bout, which marks the bout recorded even when a side has nobody left and
+  // nothing is appended, re-reads once), and the two lineups AS THE SERVER LAST
   // ANSWERED THEM (servedLineupsKey: the roster is read from the stored
   // lineups, so a save that only reached the outbox reads nothing until it
   // lands, and then once). The first read waits until both lineup reads have
@@ -3449,6 +3451,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       if (sideAMemberId) entry.sideAMemberId = sideAMemberId;
       if (sideBMemberId) entry.sideBMemberId = sideBMemberId;
       if (winnerMemberId) entry.winnerMemberId = winnerMemberId;
+      // bc-kfnl: a kachinuki bout Record bout closed carries the server's
+      // recorded mark, echoed as the match holds it so the row this write
+      // sends reads as the stored one. The server is the mark's only writer:
+      // it keeps the stored value whatever a write says (carryRecordedBouts).
+      if (isKachinuki && !isDaihyo && storedBoutRecorded(m, entry.position)) entry.recorded = true;
       // mp-4pc: encho + hantei are valid ONLY on the daihyosen
       // (validation.go validateSubBout). daihyosenEnchoFields emits the two
       // independently: encho is optional for a hantei decision.

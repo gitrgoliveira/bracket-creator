@@ -31,6 +31,10 @@ const (
 	doorOverride         = "override-winner"
 	doorEngi             = "engi"
 	doorKachinukiAdvance = "kachinuki-advance"
+	// doorKachinukiRecord names Record bout when it appends no next pairing
+	// (a side has nobody left): the write marks the bout recorded and nothing
+	// else (bc-kfnl). An appending Record bout stays doorKachinukiAdvance.
+	doorKachinukiRecord  = "kachinuki-record"
 	doorKachinukiRemove  = "kachinuki-remove-bout"
 	doorDownstreamReopen = "downstream-reopen"
 	// doorReseat names the line a match gets when a bracket door gave one of

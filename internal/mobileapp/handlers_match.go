@@ -3891,9 +3891,13 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// to retry and double-record. Mirrors the recordIneligibility
 		// non-fatal pattern.
 		if body.KachinukiBoutFinal {
-			if advanced, post, kerr := eng.MaybeAdvanceKachinuki(id, mid); kerr != nil {
+			// The advance also marks the bout Record bout closed as recorded
+			// (bc-kfnl), appending a pairing or not: post is non-nil whenever
+			// it wrote, so the answer and the broadcast carry the mark at a
+			// side's exhaustion too, where nothing is appended.
+			if _, post, kerr := eng.MaybeAdvanceKachinuki(id, mid); kerr != nil {
 				log.Printf("engine.MaybeAdvanceKachinuki(%s, %s): %v", id, mid, kerr)
-			} else if advanced {
+			} else if post != nil {
 				// Echo the POST-advance bout log so the open score editor can
 				// render the appended pairing immediately (Record bout →
 				// next bout appears, mp-gmcg): the `result` echoed below
@@ -3903,11 +3907,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// (mp-gmcg review E1), and the stamps the advance left, so
 				// the editor's next tap on the new bout is floored by them
 				// (bc-hlck) rather than by the pre-advance stamp.
-				if post != nil {
-					result.SubResults = post.BoutLog
-					result.ModifiedAt = post.ModifiedAt
-					result.GroupStamps = post.GroupStamps
-				}
+				result.SubResults = post.BoutLog
+				result.ModifiedAt = post.ModifiedAt
+				result.GroupStamps = post.GroupStamps
 				hub.Broadcast(EventMatchUpdated, gin.H{
 					"competitionId": id,
 					"matchId":       mid,

@@ -12,6 +12,7 @@ import {
   kachinukiAdvisorySide,
   kachinukiFighterLabel,
   kachinukiRosterKey,
+  storedBoutRecorded,
 } from '../kachinuki_advisory.jsx';
 
 const squadA = [
@@ -131,23 +132,35 @@ describe('kachinukiRosterKey', () => {
   it('is the same for an equal bout log in a new object', () => {
     expect(key('m1', log)).toBe(key('m1', JSON.parse(JSON.stringify(log))));
   });
-  it('follows the live bout\'s result, not its points', () => {
-    // A point that leaves the live bout's result as it was reads nothing.
+  it('reads nothing while the live bout is being fought, whatever its score', () => {
+    // The running autosave writes a 1-0 lead's winner and a 1-1's hikiwake on
+    // the live row: neither is a result until Record bout records the bout,
+    // and the server keeps both fighters on meanwhile (bc-kfnl).
     const pointed = log.map((s, i) => (i === 1 ? { ...s, ipponsA: ['M'] } : s));
     expect(key('m1', pointed)).toBe(key('m1', log));
-    // A result on the live bout (recorded with nothing appended, or a lead the
-    // running autosave wrote) reads again: the server takes its loser off.
+    const lead = log.map((s, i) => (i === 1 ? { ...s, ipponsA: ['M'], winner: 'Kudo', winnerMemberId: 'a1' } : s));
+    expect(key('m1', lead)).toBe(key('m1', log));
+    const tied = log.map((s, i) => (i === 1 ? { ...s, ipponsA: ['M'], ipponsB: ['K'], decision: 'hikiwake' } : s));
+    expect(key('m1', tied)).toBe(key('m1', log));
+  });
+  it('reads again when Record bout records the live bout, and follows its result after', () => {
     const won = log.map((s, i) => (i === 1 ? { ...s, winner: 'Kudo', winnerMemberId: 'a1', decision: 'fought' } : s));
-    expect(key('m1', won)).not.toBe(key('m1', log));
-    // More points that keep the same winner read nothing.
-    const more = won.map((s, i) => (i === 1 ? { ...s, ipponsA: ['M', 'K'] } : s));
-    expect(key('m1', more)).toBe(key('m1', won));
-    // A draw, or a correction to the other side, reads again.
-    const drawn = log.map((s, i) => (i === 1 ? { ...s, decision: 'hikiwake' } : s));
-    expect(key('m1', drawn)).not.toBe(key('m1', log));
-    expect(key('m1', drawn)).not.toBe(key('m1', won));
-    const corrected = won.map((s, i) => (i === 1 ? { ...s, winner: 'Ueda', winnerMemberId: 'b2' } : s));
-    expect(key('m1', corrected)).not.toBe(key('m1', won));
+    const recorded = won.map((s, i) => (i === 1 ? { ...s, recorded: true } : s));
+    expect(key('m1', recorded)).not.toBe(key('m1', won));
+    // More points on a recorded bout that keep its result read nothing.
+    const more = recorded.map((s, i) => (i === 1 ? { ...s, ipponsA: ['M', 'K'] } : s));
+    expect(key('m1', more)).toBe(key('m1', recorded));
+    // A correction of a recorded bout's result reads again.
+    const corrected = recorded.map((s, i) => (i === 1 ? { ...s, winner: 'Ueda', winnerMemberId: 'b2' } : s));
+    expect(key('m1', corrected)).not.toBe(key('m1', recorded));
+    const drawn = recorded.map((s, i) => (i === 1 ? { ...s, winner: '', winnerMemberId: '', decision: 'hikiwake' } : s));
+    expect(key('m1', drawn)).not.toBe(key('m1', recorded));
+  });
+  it('follows the result of every bout before the last, recorded or not', () => {
+    // A bout before the last retires by its result on the server, a row
+    // written before the recorded mark existed included.
+    const corrected = log.map((s, i) => (i === 0 ? { ...s, winner: 'Taki', decision: 'fought' } : s));
+    expect(key('m1', corrected)).not.toBe(key('m1', log));
   });
   it('follows an appended bout', () => {
     const appended = [...log, { position: 3, sideA: 'Mori', sideAMemberId: 'a3', sideB: 'Ueda', sideBMemberId: 'b2' }];
@@ -156,5 +169,16 @@ describe('kachinukiRosterKey', () => {
   it('differs by match and leaves the representative bout out', () => {
     expect(key('m2', log)).not.toBe(key('m1', log));
     expect(key('m1', [...log, { position: -1, sideA: 'R', sideB: 'T' }])).toBe(key('m1', log));
+  });
+});
+
+describe('storedBoutRecorded', () => {
+  it('reads the server\'s recorded mark on the bout at a position', () => {
+    const m = { subResults: [{ position: 1, recorded: true }, { position: 2 }, { position: -1, recorded: true }] };
+    expect(storedBoutRecorded(m, 1)).toBe(true);
+    expect(storedBoutRecorded(m, 2)).toBe(false);
+    expect(storedBoutRecorded(m, 3)).toBe(false);
+    expect(storedBoutRecorded({}, 1)).toBe(false);
+    expect(storedBoutRecorded(null, 1)).toBe(false);
   });
 });

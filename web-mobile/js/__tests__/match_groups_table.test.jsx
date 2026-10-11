@@ -89,6 +89,17 @@ describe('changedGroups', () => {
     expect(changedGroups(silent, stored)).toEqual([]);
   });
 
+  it('a kachinuki bout\'s recorded mark is never a change of the bout', () => {
+    // Only the server writes it (Record bout): the sheet echoes it, and a
+    // baseline agreed before the mark arrived must not name the bout (bc-kfnl).
+    const row = { position: 1, sideA: 'Kudo', sideB: 'Taki', ipponsA: ['M'], ipponsB: [], hansokuA: 0, hansokuB: 0, winner: 'Kudo', decision: 'fought' };
+    const agreed = { ...base, subResults: [row] };
+    expect(changedGroups({ ...base, subResults: [{ ...row, recorded: true }] }, agreed)).toEqual([]);
+    expect(changedGroups({ ...base, subResults: [row] }, { ...base, subResults: [{ ...row, recorded: true }] })).toEqual([]);
+    // A real change on the same row still names it.
+    expect(changedGroups({ ...base, subResults: [{ ...row, recorded: true, ipponsA: ['M', 'K'] }] }, agreed)).toEqual(['bout:1']);
+  });
+
   it('a baseline may be a function of the group', () => {
     const next = { ...base, ipponsB: ['K'], encho: { periodCount: 1 } };
     const perGroup = (g) => (g === 'encho' ? { encho: { periodCount: 1 } } : base);

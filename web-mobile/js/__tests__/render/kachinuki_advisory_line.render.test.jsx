@@ -2,9 +2,10 @@
 // sheet shows one advisory line after the fought bouts and immediately before
 // the live bout: each side's fighter on, fighters left and who is next, every
 // fighter with their team-member number. The queue is the server's, read with
-// API.fetchKachinukiRoster and keyed on a VALUE (the bout log with every
-// bout's result, and the lineups as the server last answered them), never on
-// the match object a broadcast re-creates.
+// API.fetchKachinukiRoster and keyed on a VALUE (the bout log's fighters and
+// recorded marks, the result of every bout but the live one until Record bout
+// records it, and the lineups as the server last answered them), never on the
+// match object a broadcast re-creates.
 //
 // NEGATIVE PINS: the line is advisory only. A roster that says a side has
 // nobody left must not arm End match, change its label, or hold back Record
@@ -222,55 +223,77 @@ describe('the kachinuki advisory line', () => {
     expect(withLine.endLabel).toBe('End match');
   });
 
-  it('takes the beaten fighter off from the stored result, on every mount, and Record bout reads nothing more', async () => {
-    // Bout 2 carries Kudo's win over Ueda, Shiro's last fighter, and nothing was
-    // appended (Record bout appends nothing when a side has nobody left). The
-    // server reads the stored result: Ueda is off.
-    const decided = kachinukiMatch({
-      subResults: [BOUT_1, { ...BOUT_2, winner: 'Kudo', winnerMemberId: 'a1', decision: 'fought', ipponsA: ['M', 'K'] }],
-    });
+  it('Record bout at exhaustion reads once and takes the beaten fighter off, on every mount', async () => {
+    // Bout 2: Kudo leads Ueda, Shiro's last fighter. The lead is not a result
+    // (bc-kfnl): the server keeps Ueda on until Record bout records the bout.
+    const BOUT_1_RECORDED = { ...BOUT_1, recorded: true };
+    const leading = { ...BOUT_2, winner: 'Kudo', winnerMemberId: 'a1', decision: 'fought', ipponsA: ['M', 'K'] };
+    const live = kachinukiMatch({ subResults: [BOUT_1_RECORDED, leading] });
+    const recorded = kachinukiMatch({ subResults: [BOUT_1_RECORDED, { ...leading, recorded: true }] });
+    const uedaLast = {
+      sideA: FULL_ROSTER.sideA,
+      sideB: { lineupFound: true, on: { name: 'Ueda', memberId: 'b2' }, remaining: [] },
+    };
     const exhausted = {
       sideA: FULL_ROSTER.sideA,
       sideB: { lineupFound: true, on: null, remaining: [] },
     };
-    stubApi(vi.fn().mockResolvedValue(exhausted));
-    const onSubmit = vi.fn(async (patch) => ({ ...decided, ...patch, subResults: decided.subResults, modifiedAt: 1234 }));
-    const view = await mount(decided, onSubmit);
-    const line = 'Shiro: no fighters left · Aka: T2.1 Kudo on, 2 left (T2.2 Mori, T2.3)';
-    expect(advisory().textContent).toBe(line);
+    stubApi(vi.fn().mockResolvedValue(uedaLast));
+    // Record bout appends nothing (Shiro has nobody left) but the answer
+    // carries the bout as recorded.
+    const onSubmit = vi.fn(async (patch) => ({ ...recorded, ...patch, subResults: recorded.subResults, modifiedAt: 1234 }));
+    const view = await mount(live, onSubmit);
+    const aka = 'Aka: T2.1 Kudo on, 2 left (T2.2 Mori, T2.3)';
+    expect(advisory().textContent).toBe(`Shiro: T1.2 Ueda on, last fighter · ${aka}`);
     expect(window.API.fetchKachinukiRoster).toHaveBeenCalledTimes(1);
 
-    // Record bout answers the same log: the key is the same, nothing is read.
     const record = screen.getAllByRole('button').find(b => b.textContent === 'Record bout');
     await act(async () => { fireEvent.click(record); });
     await settle();
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit.mock.calls[0][0].kachinukiBoutFinal).toBe(true);
-    expect(window.API.fetchKachinukiRoster).toHaveBeenCalledTimes(1);
+    const sent = onSubmit.mock.calls[0][0];
+    expect(sent.kachinukiBoutFinal).toBe(true);
+    // The wire carries each bout as the match holds it: the recorded bout 1
+    // with its mark, the live bout 2 without one (only the server sets it).
+    expect(sent.subResults.find(s => s.position === 1).recorded).toBe(true);
+    expect(sent.subResults.find(s => s.position === 2).recorded).toBeUndefined();
+
+    // The host shows the recorded bout: the line reads once more, Ueda off.
+    window.API.fetchKachinukiRoster.mockResolvedValue(exhausted);
+    await remount(view, recorded);
+    await settle();
+    expect(window.API.fetchKachinukiRoster).toHaveBeenCalledTimes(2);
+    const line = `Shiro: no fighters left · ${aka}`;
     expect(advisory().textContent).toBe(line);
 
     // Reopening the sheet (a reload, another device) reads the same line.
     view.unmount();
     stubApi(vi.fn().mockResolvedValue(exhausted));
-    await mount(JSON.parse(JSON.stringify(decided)));
+    await mount(JSON.parse(JSON.stringify(recorded)));
     expect(window.API.fetchKachinukiRoster).toHaveBeenCalledTimes(1);
     expect(window.API.fetchKachinukiRoster).toHaveBeenCalledWith('comp1', 'm1');
     expect(advisory().textContent).toBe(line);
   });
 
-  it('reads again when the live bout\'s result changes, not for a point that keeps it', async () => {
+  it('reads nothing for a point, a lead or a 1-1 on the live bout, and once when Record bout records it', async () => {
     const view = await mount(kachinukiMatch());
     expect(window.API.fetchKachinukiRoster).toHaveBeenCalledTimes(1);
-    // A point with no result yet (as the server stores it) reads nothing.
-    await remount(view, kachinukiMatch({ subResults: [BOUT_1, { ...BOUT_2, ipponsA: [] , ipponsB: [] }] }));
+    // A point on the live bout reads nothing.
+    await remount(view, kachinukiMatch({ subResults: [BOUT_1, { ...BOUT_2, ipponsA: ['M'], ipponsB: [] }] }));
+    await settle();
     expect(window.API.fetchKachinukiRoster).toHaveBeenCalledTimes(1);
-    // A result on the live bout reads again.
+    // Nor does the winner the running autosave writes at a 1-0 lead, or the
+    // hikiwake it writes at 1-1: neither is a result until the bout is
+    // recorded (bc-kfnl).
     const won = { ...BOUT_2, winner: 'Kudo', winnerMemberId: 'a1', decision: 'fought', ipponsA: ['M'] };
     await remount(view, kachinukiMatch({ subResults: [BOUT_1, won] }));
     await settle();
-    expect(window.API.fetchKachinukiRoster).toHaveBeenCalledTimes(2);
-    // A second point that keeps the same winner does not.
-    await remount(view, kachinukiMatch({ subResults: [BOUT_1, { ...won, ipponsA: ['M', 'K'] }] }));
+    expect(window.API.fetchKachinukiRoster).toHaveBeenCalledTimes(1);
+    await remount(view, kachinukiMatch({ subResults: [BOUT_1, { ...BOUT_2, decision: 'hikiwake', ipponsA: ['M'], ipponsB: ['K'] }] }));
+    await settle();
+    expect(window.API.fetchKachinukiRoster).toHaveBeenCalledTimes(1);
+    // Record bout recording the bout reads once.
+    await remount(view, kachinukiMatch({ subResults: [BOUT_1, { ...won, recorded: true }] }));
     await settle();
     expect(window.API.fetchKachinukiRoster).toHaveBeenCalledTimes(2);
   });

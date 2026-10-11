@@ -3401,10 +3401,11 @@ paths:
         them who have not retired (`remaining`), read from the lineup in force
         for the side's team at this match and the bouts so far. A fighter
         retires on losing a bout, and both fighters retire on a drawn bout.
-        When the last numbered bout already carries a result (a winner, a
-        drawn bout, any recorded decision), its loser is no longer `on` and a
-        draw takes both off; the stored bout cannot tell a recorded bout from
-        one still being scored (a lead already sets the bout's winner).
+        The last numbered bout is the one being fought, and both its fighters
+        are `on` whatever its score (the running autosave already writes a
+        lead's winner and a 1-1's draw on it) until Record bout records it
+        (`SubMatchResult.recorded`): then its loser is no longer `on` and a
+        draw takes both off.
         `remaining` is in queue order and never holds the fighter on: its
         first entry is the fighter the server pairs next if the fighter on
         loses. A side whose team has no lineup in force, or one that fields
@@ -5691,8 +5692,8 @@ components:
           description: >
             The side's fighter in the last numbered bout, as that bout names
             them; null when there is no bout yet, the bout names nobody for
-            the side, or the bout already carries a result that retires them
-            (they lost it, or it was drawn). Given whether or not
+            the side, or Record bout has recorded the bout and its result
+            retires them (they lost it, or it was drawn). Given whether or not
             `lineupFound`.
           oneOf:
             - $ref: '#/components/schemas/KachinukiRosterFighter'
@@ -6860,6 +6861,22 @@ components:
             rejects a non-zero `periodCount` on any numbered bout (fixed
             regulation time, no overtime). Hantei is NOT relaxed for
             kachinuki: it remains daihyosen-only.
+        recorded:
+          type: boolean
+          readOnly: true
+          description: >
+            Kachinuki only: true on a numbered bout the operator closed with
+            Record bout (`kachinukiBoutFinal`). The server is its only
+            writer: it sets it in the same write as the next pairing, or on
+            its own when no pairing is appended because a side has nobody
+            left, and clears it when the pairing that Record bout appended is
+            removed (`DELETE .../kachinuki-bout`). A write keeps the stored
+            value whatever it sends: a row that leaves the field out keeps
+            it, and a row that sends `true` for a bout the server has not
+            recorded does not set it. Absent (false) on every other bout,
+            including the bout being fought: the kachinuki roster
+            (`GET .../kachinuki-roster`) reads the last bout's result only
+            once it is recorded.
 
     BracketMatch:
       type: object

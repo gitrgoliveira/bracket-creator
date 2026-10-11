@@ -128,19 +128,17 @@ func (e *Engine) KachinukiRoster(compID, matchID string) (KachinukiRoster, error
 	}
 	parent := located.Result
 	// The queues are built inside the read, and hold their own copies of the
-	// names and ids they take from the lineups.
-	var queueA, queueB kachinukiSideQueue
-	// The advance's own decision, asked quietly (no breadcrumb: nothing is
-	// tapped), on the same rule: the read's verdict is what Record bout does.
-	var verdict kachinukiAdvanceVerdict
-	var decided bool
+	// names and ids they take from the lineups. The advance's own decision is
+	// asked quietly (no breadcrumb: nothing is tapped) on that SAME reading
+	// (readKachinukiQueues), so the read's verdict is what Record bout does.
+	var q kachinukiQueues
 	if err := e.readLineupRule(compID, comp.IsKnockoutEnabled(), located.PoolMatches, located.Bracket, func(rule *lineupRule) {
-		queueA, queueB = kachinukiRosterQueues(comp, parent, rule)
-		verdict, decided = decideKachinukiAdvance(comp, parent, rule, true)
+		q = readKachinukiQueues(comp, parent, rule)
 	}); err != nil {
 		return KachinukiRoster{}, err
 	}
-	retiredA, retiredB := RetiredPlayersFromBoutLog(parent.SubResults, parent.SideA, parent.SideB)
+	verdict, decided := decideKachinukiAdvance(comp, parent, q, true)
+	queueA, queueB, retiredA, retiredB := q.queueA, q.queueB, q.retiredA, q.retiredB
 
 	// The last numbered bout. Its fighters are on while it is being fought,
 	// whatever its score: the running autosave writes a winner at a one-point

@@ -346,6 +346,26 @@ describe('a recorded knockout tie fought on in encho', () => {
     expect(recordButton().getAttribute('title')).toBe('Bout recorded');
   });
 
+
+  // Review round 10, finding 3: a lineup saved since may make a pairing
+  // possible. When the roster re-read that save causes fails, the answer read
+  // before it is stale and must not keep Record bout disabled.
+  it('a lineup save whose roster re-read fails re-enables Record bout', async () => {
+    stubApi(BOTH_ON);
+    await mount(kachinukiMatch([T1, T2, TIE]));
+    expect(recordButton().disabled).toBe(true);
+    // fetchKachinukiRoster answers a failed read with null.
+    window.API.fetchKachinukiRoster = vi.fn().mockResolvedValue(null);
+    const savedA = { positions: { '1': 'Kudo', '2': 'Mori', '3': 'Sato' }, memberIds: { '1': 'a1', '2': 'a2' }, matchId: 'm1' };
+    window.API.fetchLineupInForce.mockImplementation((_c, teamId) => Promise.resolve(teamId === 'team-A' ? savedA : LINEUPS[teamId]));
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('lineup-updated', { detail: { competitionId: 'comp1', teamId: 'team-A' } }));
+    });
+    await settle();
+    expect(window.API.fetchKachinukiRoster).toHaveBeenCalledTimes(1);
+    expect(recordButton().disabled).toBe(false);
+  });
+
   // Review round 8, finding 2: a point scored on the recorded tie changes the
   // bout's result, and the server's merge takes the mark off. The bout scored
   // to 1-0 stays live with both fighters on, nothing closes, and Record bout

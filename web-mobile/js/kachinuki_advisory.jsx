@@ -42,11 +42,6 @@ export function kachinukiFighterLabel({ squad, teamNumber, memberId, name }) {
   return [number, shown].filter(Boolean).join(" ");
 }
 
-// kachinukiAdvisorySide shapes one side of the server's answer: the fighter on
-// (side.on, which the SERVER picked out of the queue by the engine's identity
-// rule) and, with a lineup, the fighters left behind them (side.remaining,
-// which never holds the fighter on; the first is next). Returns null when
-// there is nothing to say for the side.
 // kachinukiFighterKnown is the ONE client test of "the roster names a fighter
 // here": a member id or a name (a member picked by number and not named yet
 // carries only the id), the twin of engine.kachinukiFighterKnown.
@@ -54,6 +49,11 @@ export function kachinukiFighterKnown(f) {
   return !!f && !!(f.memberId || f.name);
 }
 
+// kachinukiAdvisorySide shapes one side of the server's answer: the fighter on
+// (side.on, which the SERVER picked out of the queue by the engine's identity
+// rule) and, with a lineup, the fighters left behind them (side.remaining,
+// which never holds the fighter on; the first is next). Returns null when
+// there is nothing to say for the side.
 export function kachinukiAdvisorySide({ side, squad, teamNumber }) {
   if (!side) return null;
   const on = kachinukiFighterKnown(side.on) ? side.on : null;

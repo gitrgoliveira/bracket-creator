@@ -791,8 +791,13 @@ func (h *mergeHold) holdDefaultWinScoring(decision string) {
 // Only a bout whose own group applied counts: a held bout changed nothing. And
 // only when the write is not older than the stored marks (a Record bout
 // stamped after this change keeps its mark, as it would arriving second): the
-// stamp decides, as for any group.
+// stamp decides, as for any group. An UNSTAMPED write (stamp 0, which
+// ApplyByTimestamp applies over anything) never clears a mark: it cannot be
+// ordered after the Record bout that set it.
 func (h *mergeHold) unrecordReopenedBouts(stamp int64) {
+	if stamp <= 0 {
+		return
+	}
 	var raised []int
 	for _, g := range h.rep.Applied {
 		pos, ok := state.ParseBoutGroup(g)
@@ -818,9 +823,7 @@ func (h *mergeHold) unrecordReopenedBouts(stamp int64) {
 	}
 	h.rep.Changed = append(slices.Clone(h.rep.Changed), state.GroupRecorded)
 	h.rep.Applied = append(h.rep.Applied, state.GroupRecorded)
-	if stamp > 0 {
-		h.stamps[state.GroupRecorded] = stamp
-	}
+	h.stamps[state.GroupRecorded] = stamp
 }
 
 // boutResultChanged reports whether row says a different result for its bout

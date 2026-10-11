@@ -2764,10 +2764,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // Record bout would write nothing, so it is disabled until a change of the
   // bout's result or an encho takes the mark off (the server's merge,
   // mergeHold.unrecordReopenedBouts), or a lineup saved since makes a pairing
-  // possible. Without a read it stays enabled.
+  // possible. Review round 10: only an answer read for the CURRENT key
+  // (kachinukiRosterShown) disables it. The closing above keeps a stale answer
+  // while a newer read is out or after it fails (stale-while-revalidate); the
+  // disabling must not, or a lineup saved since, whose re-read failed, would
+  // leave Record bout disabled on a `nextPairing: false` read before that save.
+  // Without a current read it stays enabled.
   const kachinukiCurBoutRecorded = kachinukiBoutMode && kachinukiCurBoutIdx >= 0
     && storedBoutRecorded(m, Number(positions[kachinukiCurBoutIdx]))
-    && !!kachinukiRosterForClose && kachinukiRosterForClose.nextPairing === false;
+    && !!kachinukiRosterShown && kachinukiRosterShown.nextPairing === false;
   const kachinukiCurrentBoutPlayed = kachinukiBoutMode
     ? kachinukiCurBoutIdx >= 0 && subBoutHasBeenPlayed(subs[kachinukiCurBoutIdx])
     : true;

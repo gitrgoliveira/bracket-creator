@@ -3401,6 +3401,10 @@ paths:
         them who have not retired (`remaining`), read from the lineup in force
         for the side's team at this match and the bouts so far. A fighter
         retires on losing a bout, and both fighters retire on a drawn bout.
+        When the last numbered bout already carries a result (a winner, a
+        drawn bout, any recorded decision), its loser is no longer `on` and a
+        draw takes both off; the stored bout cannot tell a recorded bout from
+        one still being scored (a lead already sets the bout's winner).
         `remaining` is in queue order and never holds the fighter on: its
         first entry is the fighter the server pairs next if the fighter on
         loses. A side whose team has no lineup in force, or one that fields
@@ -3412,18 +3416,6 @@ paths:
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
         - $ref: '#/components/parameters/MatchId'
-        - name: recordedThrough
-          in: query
-          required: false
-          description: >
-            The highest bout position the caller saw recorded (Record bout).
-            The stored bouts cannot tell a recorded bout from one still being
-            fought, and recording a bout appends nothing when a side has
-            nobody left, so when this reaches the last numbered bout, a fighter
-            that bout's outcome retired is no longer `on`. Default 0.
-          schema:
-            type: integer
-            minimum: 0
       responses:
         '200':
           description: Each side's fighters left.
@@ -3439,9 +3431,8 @@ paths:
                     $ref: '#/components/schemas/KachinukiRosterSide'
         '400':
           description: >
-            An invalid competition id, a competition whose team matches are
-            not kachinuki, or a `recordedThrough` that is not a non-negative
-            whole number.
+            An invalid competition id, or a competition whose team matches
+            are not kachinuki.
           content:
             application/json:
               schema:
@@ -5700,8 +5691,9 @@ components:
           description: >
             The side's fighter in the last numbered bout, as that bout names
             them; null when there is no bout yet, the bout names nobody for
-            the side, or the bout was recorded (`recordedThrough`) and retired
-            them. Given whether or not `lineupFound`.
+            the side, or the bout already carries a result that retires them
+            (they lost it, or it was drawn). Given whether or not
+            `lineupFound`.
           oneOf:
             - $ref: '#/components/schemas/KachinukiRosterFighter'
             - type: 'null'

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { slotDisplayName, makeSlotLabeller, bracketSlotLabeller, bronzeSlotLabels, buildDisplayModel } from '../bracket.jsx';
 import { hasBothSides, isPendingBracketMatch, bracketFullyComplete, compMatchStats } from '../admin_helpers.jsx';
+import { bronzeFeederSemis } from '../bronze_feeders.jsx';
 
 // The engine writes an unresolved bracket feeder as "Winner of r<depth>-m<idx>"
 // (engine.winnerOfPlaceholder). That is a WIRE value: an internal round/index
@@ -183,5 +184,23 @@ describe('placeholder filtering is unchanged by the display label', () => {
     // real competitor, which is exactly why nothing writes it back into a side.
     const relabelled = { id: 'x', status: 'scheduled', sideA: { name: 'Carol' }, sideB: { name: 'Winner of M1' } };
     expect(hasBothSides(relabelled)).toBe(true);
+  });
+});
+
+// The one owner of which semi-final feeds which bronze side: index 0 feeds
+// side A, index 1 side B (Go propagateBracketWinner). The pending-row test and
+// the empty-side labels both ask it.
+describe('bronzeFeederSemis', () => {
+  const r0 = [{ id: 'r0-m0' }, { id: 'r0-m1' }, { id: 'r0-m2' }, { id: 'r0-m3' }];
+  const semis = [{ id: 'r1-m0' }, { id: 'r1-m1' }];
+  const final = [{ id: 'r2-m0' }];
+  it('pairs the first semi-final with side A and the second with side B', () => {
+    expect(bronzeFeederSemis([r0, semis, final])).toEqual({ a: semis[0], b: semis[1] });
+    expect(bronzeFeederSemis([semis, final])).toEqual({ a: semis[0], b: semis[1] });
+  });
+  it('is null on each side when there is no round before the final', () => {
+    expect(bronzeFeederSemis([final])).toEqual({ a: null, b: null });
+    expect(bronzeFeederSemis(undefined)).toEqual({ a: null, b: null });
+    expect(bronzeFeederSemis([[semis[0]], final])).toEqual({ a: semis[0], b: null });
   });
 });

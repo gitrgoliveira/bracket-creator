@@ -23,8 +23,8 @@ type KachinukiRosterFighter struct {
 //
 // On is the side's fighter in the live bout (the last numbered bout row), as
 // that row names them; nil when the row names nobody for the side, when there
-// is no bout row yet, or when the live bout was RECORDED (KachinukiRoster's
-// recordedThrough) and its outcome retired this fighter.
+// is no bout row yet, or when the row already carries a result that retires
+// this fighter (see KachinukiRoster).
 //
 // Remaining is the queue the advance takes this side's next fighter from if
 // the fighter on loses: every fighter of the lineup in force who has not
@@ -56,12 +56,16 @@ type KachinukiRoster struct {
 // seen, so nothing ends the encounter, arms End match or holds a button back
 // on this answer.
 //
-// recordedThrough is the highest bout position the caller knows was RECORDED
-// (Record bout), 0 for none. The stored data cannot tell a recorded bout from
-// one still being fought (a 1-0 lead already sets the bout's winner), and
-// Record bout appends nothing when a side has nobody left, so only the caller
-// can say the live bout is over; then a fighter its outcome retired is no
-// longer on.
+// The last numbered bout row is the live bout. When it already carries a
+// result (a winner, a hikiwake, any recorded decision), the result is read as
+// the advance reads it (RetiredPlayersFromBoutLog over that row: the
+// attribution owners, id first, and state.IsDraw): the loser is no longer on,
+// the winner stays on, a draw takes both off. The stored row cannot tell a
+// bout recorded with Record bout from one still being fought (the running
+// autosave already writes a 1-0 lead's winner and a 1-1's hikiwake on the
+// live row), and Record bout appends nothing when a side has nobody left, so
+// this is the one rule every reader can share: a fresh sheet, a second device
+// and the public sheet read the same line.
 //
 // The queues come from kachinukiRosterQueues and the retirements from
 // RetiredPlayersFromBoutLog, as the advance (MaybeAdvanceKachinuki) takes
@@ -69,7 +73,7 @@ type KachinukiRoster struct {
 // retired too: the fighter it names as next is the one the advance appends
 // when the fighter on loses. It writes nothing. A lineups.yaml that cannot be
 // read is an error here (the advance logs it and reads no lineup).
-func (e *Engine) KachinukiRoster(compID, matchID string, recordedThrough int) (KachinukiRoster, error) {
+func (e *Engine) KachinukiRoster(compID, matchID string) (KachinukiRoster, error) {
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
 		return KachinukiRoster{}, err
@@ -92,17 +96,15 @@ func (e *Engine) KachinukiRoster(compID, matchID string, recordedThrough int) (K
 	queueA, queueB := kachinukiRosterQueues(comp, parent, rule)
 	retiredA, retiredB := RetiredPlayersFromBoutLog(parent.SubResults, parent.SideA, parent.SideB)
 
-	// The live bout, and whether the caller saw it recorded: then its own
-	// outcome says who is no longer on (liveRetiredA/B, from that row alone).
+	// The live bout: a result it already carries says who is no longer on
+	// (liveRetiredA/B, from that row alone; none when it has no result yet).
 	var onA, onB kachinukiFighter
 	liveRetiredA, liveRetiredB := newRetiredMemberSet(), newRetiredMemberSet()
 	if i := lastNumberedBout(parent.SubResults); i >= 0 {
 		live := parent.SubResults[i]
 		onA = kachinukiFighter{Name: live.SideA, MemberID: live.SideAMemberID}
 		onB = kachinukiFighter{Name: live.SideB, MemberID: live.SideBMemberID}
-		if recordedThrough > 0 && recordedThrough >= live.Position {
-			liveRetiredA, liveRetiredB = RetiredPlayersFromBoutLog(parent.SubResults[i:i+1], parent.SideA, parent.SideB)
-		}
+		liveRetiredA, liveRetiredB = RetiredPlayersFromBoutLog(parent.SubResults[i:i+1], parent.SideA, parent.SideB)
 	}
 	return KachinukiRoster{
 		SideA: kachinukiRosterSide(queueA, retiredA, onA, liveRetiredA),

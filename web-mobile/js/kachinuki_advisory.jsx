@@ -75,31 +75,26 @@ export function kachinukiAdvisoryModel({ roster, squadA, squadB, teamNumberA, te
 }
 
 // kachinukiRosterKey is the VALUE the roster read is keyed on (never the match
-// object, which every broadcast re-creates): the match id, every numbered
-// bout's fighters, and the outcome of every bout but the live one (the last
-// numbered bout), so a point scored on the live bout does not re-read.
-//
-// recordedThrough is the highest bout position this sheet saw RECORDED (Record
-// bout). Recording usually appends the next bout, which changes the key, but
-// when a side has nobody left it appends nothing; so once the live bout is
-// recorded the key carries that fact and the live bout's outcome, and the read
-// is made again (with recordedThrough, see API.fetchKachinukiRoster) to take
-// its loser off. Returns { key, recordedThrough }: the recorded position the
-// key stands for, 0 while the live bout is still being fought.
-export function kachinukiRosterKey(matchId, subResults, recordedThrough = 0) {
+// object, which every broadcast re-creates): the match id, and every numbered
+// bout's fighters and RESULT (winner, winner member id, decision), the live
+// bout's (the last numbered bout's) included. The server reads a result on the
+// live bout as the advance does (engine.KachinukiRoster): its loser is off, a
+// draw takes both off. So the read is made again when a bout is recorded, a
+// result is entered or changed, or the next pairing is appended, and a point
+// scored that leaves the bout's result as it was reads nothing. Every reader
+// keys the same way on the same stored log, so a fresh sheet and a second
+// device show the same line.
+export function kachinukiRosterKey(matchId, subResults) {
   const rows = (Array.isArray(subResults) ? subResults : [])
     .filter(s => s && s.position !== -1)
     .slice()
     .sort((x, y) => (x.position || 0) - (y.position || 0));
-  const lastIdx = rows.length - 1;
-  const livePos = lastIdx >= 0 ? (rows[lastIdx].position || 0) : 0;
-  const liveRecorded = lastIdx >= 0 && recordedThrough > 0 && recordedThrough >= livePos;
-  const parts = rows.map((s, i) => {
-    const who = [s.position, s.sideAMemberId || "", s.sideA || "", s.sideBMemberId || "", s.sideB || ""];
+  const parts = rows.map((s) => {
     const winner = s.winner && typeof s.winner === "object" ? JSON.stringify(s.winner) : (s.winner || "");
-    const outcome = i === lastIdx && !liveRecorded ? [] : [winner, s.winnerMemberId || "", s.decision || ""];
-    return [...who, ...outcome].join("~");
+    return [
+      s.position, s.sideAMemberId || "", s.sideA || "", s.sideBMemberId || "", s.sideB || "",
+      winner, s.winnerMemberId || "", s.decision || "",
+    ].join("~");
   });
-  const recorded = liveRecorded ? livePos : 0;
-  return { key: `${matchId || ""}|${parts.join("/")}|${recorded}`, recordedThrough: recorded };
+  return `${matchId || ""}|${parts.join("/")}`;
 }

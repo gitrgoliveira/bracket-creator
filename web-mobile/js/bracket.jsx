@@ -27,6 +27,7 @@ import { NumberedName } from './numbered_name.jsx';
 import { WinnerTick } from './side_cell.jsx';
 import { creditedBoutSide, isTeamDefaultWinDecision } from './team_default_credit.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
+import { bronzeFeederSemis } from './bronze_feeders.jsx';
 
 // TermBC: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and this module doesn't matter.
@@ -176,9 +177,8 @@ function bracketSlotLabeller(rounds) {
 
 // bronzeSlotLabels: the text for the 3rd-place match's EMPTY sides, {a, b}.
 // The bronze has no slot value to label: its sides stay empty until a
-// semi-final's loser is seated there, by POSITION (Go propagateBracketWinner:
-// the semi-final at index 0 of the round feeding the final fills sideA, the one
-// at index 1 fills sideB), the same way makeSlotLabeller's path 2 mirrors Go
+// semi-final's loser is seated there, by POSITION (bronzeFeederSemis, the one
+// owner of which semi-final feeds which side), the same way makeSlotLabeller's path 2 mirrors Go
 // parseWinnerOf. So each side reads "Loser of M<n>", numbered through the same
 // display model the cards are stamped from; a semi-final with no number (a
 // hidden bye, or a bracket drawn before numbering) degrades to "TBD", as
@@ -189,13 +189,13 @@ function bracketSlotLabeller(rounds) {
 // new object every render defeats MatchCard's memo.
 function bronzeSlotLabels(rounds, matchNumById) {
   const rs = Array.isArray(rounds) ? rounds : [];
-  const semis = rs.length >= 2 ? (rs[rs.length - 2] || []) : [];
+  const feeders = bronzeFeederSemis(rs);
   const nums = matchNumById || buildDisplayModel(rs).matchNumById;
   const label = (m) => {
     const n = m ? ((nums && nums[m.id]) || m.matchNumber || 0) : 0;
     return n > 0 ? `Loser of M${n}` : "TBD";
   };
-  return { a: label(semis[0]), b: label(semis[1]) };
+  return { a: label(feeders.a), b: label(feeders.b) };
 }
 
 // sideA = top = Aka (Red), sideB = bottom = Shiro (White)

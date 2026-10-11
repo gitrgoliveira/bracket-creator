@@ -333,6 +333,34 @@ describe('AdminShiaijoPage render-smoke', () => {
     }
   });
 
+  // The bronze labels are read through the bracket module's window global, as
+  // its sibling slot labeller is: guarded the same way, so a console without
+  // the bracket module still lists the 3rd-place match (its sides unnamed).
+  it('lists the 3rd-place match under Later without the bracket module loaded', async () => {
+    const rounds = [
+      [
+        { id: 'm-r1-0', status: 'scheduled', matchNumber: 1, sideA: { id: 'a', name: 'Alice' }, sideB: { id: 'b', name: 'Bob' } },
+        { id: 'm-r1-1', status: 'scheduled', matchNumber: 2, sideA: { id: 'c', name: 'Carol' }, sideB: { id: 'd', name: 'Dan' } },
+      ],
+      [{ id: 'm-r2-0', status: 'scheduled', matchNumber: 3, sideA: { id: '', name: 'Winner of r2-m0' }, sideB: { id: '', name: 'Winner of r2-m1' } }],
+    ];
+    const bronze = {
+      id: 'm-bronze', compId: 'c1', compName: 'Cup', status: 'scheduled',
+      phase: 'bracket', matchNumber: 0, court: 'A',
+      sideA: { id: '', name: '' }, sideB: { id: '', name: '' },
+    };
+    expect(window.bronzeSlotLabels).toBeUndefined();
+    window.tournamentMatches = () => [bronze];
+    window.filterMatchesByCourt = (matches) => matches;
+    let utils;
+    await act(async () => {
+      utils = renderPage(makeMinimalTournament({ competitions: [{ id: 'c1', name: 'Cup', bracket: { rounds } }] }));
+    });
+    const later = utils.container.querySelector('.shiaijo-pending');
+    expect(later).toBeTruthy();
+    expect(later.textContent).toContain('the 3rd-place match');
+  });
+
   // A court back online refetches its feed when the stream reopens, with no
   // manual Refresh. app.jsx reopens the stream on 'online' by closing it, which
   // fires no error, so the reopen reads as a bare 'open' (the stale court seen

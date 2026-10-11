@@ -127,29 +127,31 @@ describe('kachinukiRosterKey', () => {
     { position: 1, sideA: 'Kudo', sideAMemberId: 'a1', sideB: 'Taki', sideBMemberId: 'b1', winner: 'Kudo', decision: 'fought' },
     { position: 2, sideA: 'Kudo', sideAMemberId: 'a1', sideB: 'Ueda', sideBMemberId: 'b2' },
   ];
-  const key = (...args) => kachinukiRosterKey(...args).key;
+  const key = kachinukiRosterKey;
   it('is the same for an equal bout log in a new object', () => {
     expect(key('m1', log)).toBe(key('m1', JSON.parse(JSON.stringify(log))));
   });
-  it('ignores the live bout outcome but follows an appended bout', () => {
-    const live = log.map((s, i) => (i === 1 ? { ...s, winner: 'Ueda' } : s));
-    expect(key('m1', live)).toBe(key('m1', log));
-    const appended = [...live, { position: 3, sideA: 'Mori', sideAMemberId: 'a3', sideB: 'Ueda', sideBMemberId: 'b2' }];
-    expect(key('m1', appended)).not.toBe(key('m1', log));
+  it('follows the live bout\'s result, not its points', () => {
+    // A point that leaves the live bout's result as it was reads nothing.
+    const pointed = log.map((s, i) => (i === 1 ? { ...s, ipponsA: ['M'] } : s));
+    expect(key('m1', pointed)).toBe(key('m1', log));
+    // A result on the live bout (recorded with nothing appended, or a lead the
+    // running autosave wrote) reads again: the server takes its loser off.
+    const won = log.map((s, i) => (i === 1 ? { ...s, winner: 'Kudo', winnerMemberId: 'a1', decision: 'fought' } : s));
+    expect(key('m1', won)).not.toBe(key('m1', log));
+    // More points that keep the same winner read nothing.
+    const more = won.map((s, i) => (i === 1 ? { ...s, ipponsA: ['M', 'K'] } : s));
+    expect(key('m1', more)).toBe(key('m1', won));
+    // A draw, or a correction to the other side, reads again.
+    const drawn = log.map((s, i) => (i === 1 ? { ...s, decision: 'hikiwake' } : s));
+    expect(key('m1', drawn)).not.toBe(key('m1', log));
+    expect(key('m1', drawn)).not.toBe(key('m1', won));
+    const corrected = won.map((s, i) => (i === 1 ? { ...s, winner: 'Ueda', winnerMemberId: 'b2' } : s));
+    expect(key('m1', corrected)).not.toBe(key('m1', won));
   });
-  it('follows the live bout once it is recorded, with nothing appended', () => {
-    const won = log.map((s, i) => (i === 1 ? { ...s, winner: 'Kudo', decision: 'fought' } : s));
-    // A point on the live bout reads nothing.
-    expect(key('m1', won)).toBe(key('m1', log));
-    const recorded = kachinukiRosterKey('m1', won, 2);
-    expect(recorded.key).not.toBe(key('m1', won));
-    expect(recorded.recordedThrough).toBe(2);
-    // An earlier recorded position says nothing about the live bout.
-    expect(kachinukiRosterKey('m1', won, 1)).toEqual(kachinukiRosterKey('m1', won));
-    expect(kachinukiRosterKey('m1', won, 1).recordedThrough).toBe(0);
-    // A correction of the recorded bout's outcome reads again.
-    const corrected = won.map((s, i) => (i === 1 ? { ...s, winner: 'Ueda' } : s));
-    expect(kachinukiRosterKey('m1', corrected, 2).key).not.toBe(recorded.key);
+  it('follows an appended bout', () => {
+    const appended = [...log, { position: 3, sideA: 'Mori', sideAMemberId: 'a3', sideB: 'Ueda', sideBMemberId: 'b2' }];
+    expect(key('m1', appended)).not.toBe(key('m1', log));
   });
   it('differs by match and leaves the representative bout out', () => {
     expect(key('m2', log)).not.toBe(key('m1', log));

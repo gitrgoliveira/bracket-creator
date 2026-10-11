@@ -4260,14 +4260,11 @@ const API = {
     // bounded like every read (_fetchJson). It NEVER throws: the line is a
     // guide only, so any failure, a timeout, a non-OK answer (400 not
     // kachinuki, 404 unknown match) or an answer without both sides reads as
-    // null, and the editor then shows no line. recordedThrough (optional) is
-    // the highest bout position the sheet saw recorded, so a bout recorded
-    // with nothing appended reads as over (engine.KachinukiRoster).
-    async fetchKachinukiRoster(compID, matchID, recordedThrough = 0) {
+    // null, and the editor then shows no line.
+    async fetchKachinukiRoster(compID, matchID) {
         try {
-            const recorded = Number(recordedThrough) > 0 ? `?recordedThrough=${Math.floor(Number(recordedThrough))}` : "";
             const { res, body } = await _fetchJson(
-                `/api/competitions/${encodeURIComponent(compID)}/matches/${encodeURIComponent(matchID)}/kachinuki-roster${recorded}`, {});
+                `/api/competitions/${encodeURIComponent(compID)}/matches/${encodeURIComponent(matchID)}/kachinuki-roster`, {});
             if (!res.ok || !body || !body.sideA || !body.sideB) return null;
             return body;
         } catch (_e) {

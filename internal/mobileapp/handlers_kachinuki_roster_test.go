@@ -96,15 +96,10 @@ func TestKachinukiRosterGET(t *testing.T) {
 		assert.Empty(t, body.SideB.Remaining)
 		assert.Contains(t, w.Body.String(), `"remaining":[]`, "an empty queue is [] on the wire, never null")
 	})
-	t.Run("recordedThrough takes a recorded bout's loser off", func(t *testing.T) {
-		w := getRoster(r, "/api/competitions/k1/matches/Pool%20A-0/kachinuki-roster?recordedThrough=1")
-		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-		var body rosterBody
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-		require.NotNil(t, body.SideA.On, "bout 2 is live: recording bout 1 changes nothing")
-
-		// A1 beats B2 in bout 1 of a second encounter, recorded with nothing
-		// appended. Added beside Pool A-0, which the other subtests read.
+	t.Run("a last bout carrying a result takes its loser off", func(t *testing.T) {
+		// A1 beats B2 in bout 1 of a second encounter, with nothing appended
+		// (as Record bout leaves it when a side has nobody left). Added beside
+		// Pool A-0, which the other subtests read.
 		matches, err := store.LoadPoolMatches("k1")
 		require.NoError(t, err)
 		matches = append(matches, state.MatchResult{
@@ -114,20 +109,14 @@ func TestKachinukiRosterGET(t *testing.T) {
 			},
 		})
 		require.NoError(t, store.SavePoolMatches("k1", matches))
-		w = getRoster(r, "/api/competitions/k1/matches/Pool%20A-1/kachinuki-roster?recordedThrough=1")
+		w := getRoster(r, "/api/competitions/k1/matches/Pool%20A-1/kachinuki-roster")
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-		body = rosterBody{}
+		var body rosterBody
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-		assert.Nil(t, body.SideB.On, "the recorded bout retired B2")
+		assert.Nil(t, body.SideB.On, "the bout's result retired B2")
 		assert.Contains(t, w.Body.String(), `"on":null`, "nobody on is null on the wire")
 		require.NotNil(t, body.SideA.On)
 		assert.Equal(t, a1.ID, body.SideA.On.MemberID, "the winner stays on")
-	})
-	t.Run("400 for a recordedThrough that is not a whole number", func(t *testing.T) {
-		for _, q := range []string{"x", "-1", "1.5"} {
-			w := getRoster(r, "/api/competitions/k1/matches/Pool%20A-0/kachinuki-roster?recordedThrough="+q)
-			assert.Equal(t, http.StatusBadRequest, w.Code, q)
-		}
 	})
 	t.Run("404 for an unknown match", func(t *testing.T) {
 		w := getRoster(r, "/api/competitions/k1/matches/nope/kachinuki-roster")

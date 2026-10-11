@@ -3,6 +3,7 @@
 
 // write_result.jsx is a leaf with no imports, so this cannot form a cycle.
 import { BRONZE_MATCH_ID } from './write_result.jsx';
+import { bronzeFeederSemis } from './bronze_feeders.jsx';
 
 // sideA/sideB can be a string (raw backend shape), an object with .name
 // (normalizeMatch output, which substitutes {id:"",name:""} for missing sides),
@@ -78,8 +79,8 @@ function hasPoolOriginPlaceholder(m) {
 //
 // The 3rd-place match is the one exception to the placeholder rule (bc-bzlb):
 // its sides carry no slot value at all, they stay EMPTY until a semi-final's
-// loser is seated there by position (Go propagateBracketWinner: the semi at
-// index 0 fills sideA, index 1 fills sideB). So it is pending while an empty
+// loser is seated there by position (bronzeFeederSemis, the one owner of which
+// semi-final feeds which side). So it is pending while an empty
 // side's semi-final is not completed yet, which needs the competition's
 // `rounds`. A side whose semi-final is completed and still left it empty (a
 // bye semi-final has no loser) is waiting on nothing, so that bronze is not
@@ -90,9 +91,9 @@ function isPendingBracketMatch(m, rounds) {
   if (hasPoolOriginPlaceholder(m)) return false; // mixed-comp seeding path, not ours
   if (m.id === BRONZE_MATCH_ID) {
     if (!Array.isArray(rounds) || rounds.length < 2) return false;
-    const semis = rounds[rounds.length - 2] || [];
+    const feeders = bronzeFeederSemis(rounds);
     const waits = (side, semi) => !sideName(side) && !!semi && semi.status !== "completed";
-    return waits(m.sideA, semis[0]) || waits(m.sideB, semis[1]);
+    return waits(m.sideA, feeders.a) || waits(m.sideB, feeders.b);
   }
   const a = sideName(m.sideA);
   const b = sideName(m.sideB);

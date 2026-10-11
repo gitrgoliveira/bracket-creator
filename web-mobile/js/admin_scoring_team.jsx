@@ -980,12 +980,22 @@ const NO_LINEUPS = { a: null, b: null };
 // side, whenever it answers. The side then reads as never read, so a pick on it
 // is refused when the new team's read fails, never checked against or shown on
 // the old team's lineup.
+const NO_SERVED_LINEUPS = { a: "", b: "" };
+// A lineup as the stored-lineup readers compare it: the positions and their member ids.
+const servedLineupKey = (lineup) => JSON.stringify([lineup?.positions || null, lineup?.memberIds || null]);
+
 function useMatchLineups(compId, matchId) {
   const [lineups, setLineups] = useStateA(NO_LINEUPS);
   // Whether the first read of both sides has settled (landed, read nothing, or
   // failed), for a reader that should wait for the lineups rather than read
-  // once without them and again with them (the kachinuki advisory line).
+  // once without them and again with them (the kachinuki advisory line). A
+  // side given another team clears it until the new team's read has settled.
   const [settled, setSettled] = useStateA(false);
+  // Each side's lineup as the SERVER last answered it (a read, or a save that
+  // landed), as a comparable string: what a reader of the stored lineups (the
+  // kachinuki advisory line) keys on. A save that only reached the outbox does
+  // not move it; the read made once that save lands and is announced does.
+  const [served, setServed] = useStateA(NO_SERVED_LINEUPS);
   const syncRef = useRefA(null);
 
   useEffectA(() => {
@@ -999,17 +1009,29 @@ function useMatchLineups(compId, matchId) {
       writing: { a: 0, b: 0 },
       announced: { a: false, b: false },
       held: { a: null, b: null },
+      // The newest server answer taken into `served`, per side (a read's or a write's seq).
+      servedSeq: { a: 0, b: 0 },
+      // Raised by every start and every drop: only the latest start settles the reads.
+      startGen: 0,
     };
     syncRef.current = sync;
     setLineups(NO_LINEUPS);
+    setServed(NO_SERVED_LINEUPS);
     setSettled(false);
 
     const isRead = (side) => sync.landed[side] > 0;
+    const serve = (side, seq, lineup) => {
+      if (seq < sync.servedSeq[side]) return;
+      sync.servedSeq[side] = seq;
+      const key = servedLineupKey(lineup);
+      setServed(prev => (prev[side] === key ? prev : { ...prev, [side]: key }));
+    };
     // Rejects when the lineup cannot be read: each caller decides what that means.
     const read = async (side, teamId) => {
       const seq = ++sync.began[side];
       const epoch = sync.epoch[side];
       const lineup = await resolveMatchLineup(compId, teamId, matchId, window.API, { throwOnError: true });
+      if (sync.alive && epoch === sync.epoch[side]) serve(side, seq, lineup);
       const keepsHeld = isRead(side) && matchLineupSaveQueued(compId, teamId, matchId);
       if (sync.alive && epoch === sync.epoch[side] && seq >= sync.landed[side] && !keepsHeld) {
         sync.landed[side] = seq;
@@ -1024,21 +1046,24 @@ function useMatchLineups(compId, matchId) {
     );
     sync.start = (teamIds) => {
       sync.teamIds = teamIds;
+      const gen = ++sync.startGen;
       // refresh never rejects, so this settles once both first reads have.
       return Promise.all(LINEUP_SIDES.map(side => refresh(side))).then(() => {
-        if (sync.alive) setSettled(true);
+        if (sync.alive && gen === sync.startGen) setSettled(true);
       });
     };
     // The side is given another team: nothing of the old team's lineup stays on it, and
     // no read or write still out for the old team lands, whenever it answers. No team
     // is read for the side until start names the new one, and until its lineup lands
-    // the side reads as never read.
+    // the side reads as never read, and the reads are not settled.
     sync.drop = (side) => {
       sync.epoch[side] += 1;
       sync.landed[side] = 0;
       sync.held[side] = null;
       sync.teamIds[side] = "";
+      sync.startGen += 1;
       setLineups(prev => ({ ...prev, [side]: null }));
+      setSettled(false);
     };
     // Asks whether the side was given another team since now: the one counter that says
     // so, which a pick (or a rename) that waits on the server checks when it answers.
@@ -1054,11 +1079,14 @@ function useMatchLineups(compId, matchId) {
         isRead: () => isRead(side),
         read: (teamId) => read(side, teamId),
         held: () => sync.held[side],
-        set: (lineup) => {
+        // fromServer: the lineup is the server's answer to a save that landed,
+        // not the pick shown on the lineup held while the save is queued.
+        set: (lineup, { fromServer = false } = {}) => {
           if (!sync.alive || epoch !== sync.epoch[side]) return;
           // A read still out began before this write: it must not put the old lineup back.
           sync.landed[side] = ++sync.began[side];
           sync.held[side] = lineup;
+          if (fromServer) serve(side, sync.landed[side], lineup);
           setLineups(prev => ({ ...prev, [side]: lineup }));
         },
         end: () => {
@@ -1102,6 +1130,8 @@ function useMatchLineups(compId, matchId) {
     lineupB: lineups.b,
     // Both sides' first reads have settled (see settled above).
     lineupsSettled: settled,
+    // Both sides' lineups as the server last answered them (see served above).
+    servedLineupsKey: `${served.a}#${served.b}`,
     // Reads both sides at once, once the competition has said which teams they are.
     startLineupReads: (teamIds) => syncRef.current.start(teamIds),
     beginLineupWrite: (side) => syncRef.current.beginWrite(side),
@@ -1324,7 +1354,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // T131: lineup data so each bout cell can show the assigned player
   // name + canonical position label. Falls back gracefully when the
   // lineup hasn't been submitted yet (saved: false -> null, bc-k404).
-  const { lineupA, lineupB, lineupsSettled, startLineupReads, beginLineupWrite, watchLineupSide, dropLineup } = useMatchLineups(m.compId, m.id);
+  const { lineupA, lineupB, lineupsSettled, servedLineupsKey, startLineupReads, beginLineupWrite, watchLineupSide, dropLineup } = useMatchLineups(m.compId, m.id);
   // bc-pnum gap closure: each side's squad, so the inline lineup picker
   // below (submitInlineLineup / buildInlineLineupWrite) can resolve a
   // name typed or picked in THIS modal to its squad member id -- this is
@@ -2079,7 +2109,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // A write that landed answers the whole lineup the server holds now, shown as
       // it is. One that only reached the outbox answers none: the pick is shown on
       // the lineup held, until the server's own announcement is read.
-      write.set(answer && answer.queued ? { ...current, positions: shown, memberIds: shownIds } : answer);
+      write.set(
+        answer && answer.queued ? { ...current, positions: shown, memberIds: shownIds } : answer,
+        { fromServer: !(answer && answer.queued) },
+      );
       // A lineup that only reached the outbox is held on this device, not saved: say
       // so in the row, the way every held write is worded (queuedNotice also tells
       // when the browser could not store it), and leave out the warning below, which
@@ -2620,28 +2653,23 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // the server (engine.KachinukiRoster, the same call that appends the next
   // pairing, which also picks out each side's fighter on) and keyed on a VALUE,
   // never on `m`, which every broadcast re-creates: the match id, the bout
-  // log's fighters and the outcomes of the bouts before the live one
-  // (kachinukiRosterKey), whether this sheet saw the live bout RECORDED
-  // (kachinukiRecorded: Record bout appends nothing when a side has nobody
-  // left, so only this sheet knows the bout is over), and the two lineups in
-  // force. The first read waits until both lineup reads have settled
-  // (lineupsSettled), so a mount reads once rather than once before and once
-  // after its lineups land. A roster read for another key is not shown, so the
+  // log's fighters and every bout's result, the live bout's included
+  // (kachinukiRosterKey: the server takes a live bout's loser off once the row
+  // carries a result, so a bout recorded when a side has nobody left, which
+  // appends nothing, still re-reads), and the two lineups AS THE SERVER LAST
+  // ANSWERED THEM (servedLineupsKey: the roster is read from the stored
+  // lineups, so a save that only reached the outbox reads nothing until it
+  // lands, and then once). The first read waits until both lineup reads have
+  // settled (lineupsSettled, which a side given another team clears until its
+  // new team's lineup is read), so a mount reads once rather than once before
+  // and once after its lineups land. A roster read for another key is not shown, so the
   // line never lags a recorded bout. A failed read is null
   // (fetchKachinukiRoster never throws) and shows no line. ADVISORY ONLY:
   // nothing reads it but renderKachinukiAdvisory; it feeds no verdict, does
   // not arm End match and holds back neither Record bout nor Encho.
-  const [kachinukiRecorded, setKachinukiRecorded] = useStateA({ matchId: "", pos: 0 });
-  const kachinukiRosterRead = kachinukiBoutMode && m.compId && m.id
-    ? kachinukiRosterKey(m.id, m.subResults, kachinukiRecorded.matchId === m.id ? kachinukiRecorded.pos : 0)
-    : null;
-  const kachinukiRosterReadKey = kachinukiRosterRead && lineupsSettled
-    ? `${kachinukiRosterRead.key}#${JSON.stringify([
-        lineupA?.positions || null, lineupA?.memberIds || null,
-        lineupB?.positions || null, lineupB?.memberIds || null,
-      ])}`
+  const kachinukiRosterReadKey = kachinukiBoutMode && m.compId && m.id && lineupsSettled
+    ? `${kachinukiRosterKey(m.id, m.subResults)}#${servedLineupsKey}`
     : "";
-  const kachinukiRosterRecordedThrough = kachinukiRosterRead ? kachinukiRosterRead.recordedThrough : 0;
   const [kachinukiRoster, setKachinukiRoster] = useStateA(null);
   useEffectA(() => {
     const api = window.API;
@@ -2652,7 +2680,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     let live = true;
     const key = kachinukiRosterReadKey;
     Promise.resolve()
-      .then(() => api.fetchKachinukiRoster(m.compId, m.id, kachinukiRosterRecordedThrough))
+      .then(() => api.fetchKachinukiRoster(m.compId, m.id))
       .then(
         (roster) => { if (live) setKachinukiRoster(roster ? { key, roster } : null); },
         () => { if (live) setKachinukiRoster(null); },
@@ -5204,27 +5232,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   // and terminal.
                   setEndArmed(false);
                   doSubmit(async () => {
-                    // The live bout's position as the roster key reads it (the
-                    // last numbered row of the log), else the bout being shown.
-                    const lastNumberedPos = (subResults) => (Array.isArray(subResults) ? subResults : [])
-                      .filter(s => s && s.position !== -1)
-                      .reduce((mx, s) => Math.max(mx, s.position || 0), 0);
-                    const recordedPos = lastNumberedPos(m.subResults) || kachinukiCurBoutPos;
-                    const recordedMatchId = m.id;
                     const res = await onSubmit(buildPatch("running", { kachinukiBoutFinal: true }));
-                    // bc-kfnl: the bout is recorded. The advisory line re-reads
-                    // with it (kachinukiRecorded), which matters when the advance
-                    // appended nothing because a side has nobody left: the bout
-                    // log then does not change, and only this tells the line its
-                    // loser is off. A write that did not land answers with no bout
-                    // log, and records nothing; nor does an answer whose log grew
-                    // past the recorded bout (the advance appended the next
-                    // pairing, which re-keys the read on its own: marking it too
-                    // would read once with the bout over and again on the append).
-                    if (mountedRef.current && res && Array.isArray(res.subResults) && recordedPos > 0
-                        && lastNumberedPos(res.subResults) <= recordedPos) {
-                      setKachinukiRecorded({ matchId: recordedMatchId, pos: recordedPos });
-                    }
                     // mp-gmcg review C1: if a prior [Remove this bout] left
                     // matchOverride shadowing the `match` prop, adopt THIS
                     // write's own fresh subResults into the override directly

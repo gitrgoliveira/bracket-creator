@@ -957,7 +957,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const bronzeLabelsFor = useMemoSh(() => {
         const cache = new Map();
         return (compId) => {
-            if (!cache.has(compId)) cache.set(compId, window.bronzeSlotLabels(roundsFor(compId)));
+            if (!cache.has(compId)) {
+                cache.set(compId, window.bronzeSlotLabels ? window.bronzeSlotLabels(roundsFor(compId)) : undefined);
+            }
             return cache.get(compId);
         };
     }, [roundsFor]);

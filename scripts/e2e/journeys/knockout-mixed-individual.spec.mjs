@@ -124,6 +124,7 @@ test.describe('knockout-mixed-individual', () => {
     await wrongSlot.tap();
     await expect(filledSlots(page, w1)).toHaveCount(0);
     row({ step: 'award ippon', action: 'clear a wrong mark (tap the mark)', variant: 'recovery', taps: 1, slotSize, hintVisible });
+    await settle(page); // the removal lands before the next strike (see the reset below)
 
     const dblIppon = await doubleTap(ipponButton(page, w1, 'M'));
     await expect(syncState(page)).toHaveText('Synced');
@@ -140,7 +141,10 @@ test.describe('knockout-mixed-individual', () => {
       marksBefore: afterDbl, marksAfter: afterDblClear, shot: await shot(page, 'mark-double-tapped') });
     // Put the bout back to one men for the winner.
     while ((await filledSlots(page, w1).count()) > 1) await filledSlots(page, w1).first().tap();
-    if ((await filledSlots(page, w1).count()) === 0) await ipponButton(page, w1, 'M').tap();
+    if ((await filledSlots(page, w1).count()) === 0) {
+      await settle(page); // the same reset race as below: let a removal land first
+      await ipponButton(page, w1, 'M').tap();
+    }
     await expect(filledSlots(page, w1)).toHaveCount(1);
     await settle(page);
 
@@ -162,6 +166,11 @@ test.describe('knockout-mixed-individual', () => {
         await page.waitForTimeout(150);
       }
     }
+    // Let the removals land before the M: a tap that puts back the mark the
+    // server still shows, while the removal's write is out, is lost when that
+    // write's echo arrives (found by a fresh-clone run, 2026-10-12). This step
+    // only resets the bout; it is not the place to test that.
+    await settle(page);
     await ipponButton(page, w1, 'M').tap();
     await expect(filledSlots(page, w1)).toHaveCount(1);
     await expect(filledSlots(page, other)).toHaveCount(0);

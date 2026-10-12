@@ -15,6 +15,13 @@ once per worktree), then runs `playwright test` here with `E2E_ARGS` passed
 through unchanged. It is not part of `make go/test` and does not run in CI. Run
 it before opening a PR that changes `web-mobile/`: the PR template asks.
 
+It needs Go (for the build), Node.js with npm, and a network connection on the
+first run: `make e2e/deps` (or the first `make e2e`) downloads the npm packages
+and Chromium, and the build fetches the vendored frontend libraries. After that
+it runs offline. "Green" means no test failed: the `test.fixme` steps of open
+beads (refer to [When a journey finds a bug](#when-a-journey-finds-a-bug)) are
+reported as skipped.
+
 Playwright is pinned to the same release as `scripts/screenshots`, so the two
 share one Chromium under `~/.cache/ms-playwright`. If that cache is removed the
 stamp outlives it; run `npx playwright install chromium` here.
@@ -65,9 +72,11 @@ Two projects, both Chromium:
 - `public`: a phone in portrait (390x844), for journeys about a public surface
   alone (`*.public.spec.mjs`).
 
-An operator journey that checks a public surface on the side (the viewer
-showing a result the operator just entered) opens a second context with
-`PUBLIC_DEVICE` from `fixtures/devices.mjs`.
+An operator journey that needs a second device opens another context with one
+of the two devices from `fixtures/devices.mjs`: `PUBLIC_DEVICE` for a public
+surface on the side (the viewer showing a result the operator just entered),
+`OPERATOR_DEVICE` for a second operator (the head table, or the console of
+another court).
 
 ## One server per spec file
 
@@ -120,9 +129,11 @@ variants as real input:
 | `hastyConfirm(page)` | answers the open confirm dialog with its most prominent button and returns its label |
 | `hastyShiaijoConfirm(page)` | the same for the shiaijo page's own confirms (Send back to queue, Move court) |
 
-Each returns what happened. A journey records that as an audit row; whether the
-outcome is acceptable is judged by a person from the screenshots, never
-asserted. `hidden` needs a note: headless Chromium never changes page
+Each returns what happened, and a journey records that as an audit row. Where
+the docs or an operator ruling say what must happen (a double tap on an ippon
+button lands one mark, an interruption leaves the operator on the same court), the journey
+also asserts it, so a regression fails the suite; the rest is judged by a person
+from the screenshots. `hidden` needs a note: headless Chromium never changes page
 visibility on its own, so the helper overrides `document.hidden` and
 `document.visibilityState` and dispatches a real `visibilitychange` for each
 edge, which is what the app's listeners read.
@@ -166,8 +177,8 @@ such; what an `afterAll` hook's log is checked when the worker stops.
 The allowlist holds only noise a journey's scenario makes: requests the
 browser could not send while a journey has the device offline, and the 409s of
 a start or reopen the app sends through the server's gate and shows refused
-(the court or the competitor busy, or the knockout match it feeds being
-fought).
+(the court busy, a competitor fighting elsewhere or barred by a withdrawal, or
+the knockout match it feeds being fought).
 Each entry matches as narrowly as it can (the message, the URL, the refusal
 code, offline only) and says why in one line. An error that looks like the
 app's own fault does not go on it: the test stays red until a person decides.

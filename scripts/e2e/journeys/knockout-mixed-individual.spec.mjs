@@ -1,7 +1,8 @@
 // Operator review journeys for INDIVIDUAL competitions (mp-yqxn.2, reviewer A).
 //
-// Every fixture is built through the interface in beforeAll (first-run form,
-// wizard, roster paste box, Generate draw, Start), on this file's own server:
+// Every fixture is built through the interface (first-run form, wizard,
+// roster paste box, Generate draw, Start), on this file's own server, in the
+// journeys' beforeAll:
 //   F1  pools + knockout, 12 entrants, shiaijo A and B      (J1)
 //   F1b pools + knockout, 6 entrants, shiaijo E             (J2 decisions)
 //   F2  knockout only, joint 3rd UNTICKED (bronze), shiaijo C (J2 hantei, J6)
@@ -12,9 +13,15 @@
 // per action x variant (written to the journey folder's audit.json,
 // fixtures/audit.mjs), and asserts only what the docs promise. Judgement
 // (friction, legibility) is formed from the screenshots in the same folder
-// (fixtures/shots.mjs), never asserted here. The <bead-id> tests at the end
-// are functional defects the journeys found, now fixed: each seeds its own
-// competition, runs alone, and guards its fix.
+// (fixtures/shots.mjs), never asserted here. The journeys run in order and
+// share their fixtures, so a failing journey skips the ones after it.
+//
+// The <bead-id> tests at the end are functional defects the journeys found,
+// now fixed: each seeds its own competition on its own shiaijo and guards its
+// fix. They sit in a describe of their own that is NOT serial, so a failing
+// journey skips none of them: Playwright then runs them in a fresh worker,
+// which gets a fresh server (fixtures/test.mjs serverForFile), and the
+// file-level beforeAll below creates the tournament again there.
 import { test, expect, isCoarse } from '../fixtures/test.mjs';
 import { OPERATOR_DEVICE } from '../fixtures/devices.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
@@ -39,10 +46,22 @@ import {
   decisionButton, decisionPrompt, recordDecision, queuedPoolBouts, correctCompleted,
 } from '../fixtures/individual.mjs';
 
-test.describe.configure({ mode: 'serial' });
-
 const comps = {};
 const audit = auditLog('knockout-mixed-individual');
+
+// The tournament, once per worker. A worker runs this file on one server; a
+// worker started after a failure gets a fresh, empty one, so this runs again
+// there (see the header).
+test.beforeAll(async ({ browser, serverForFile }, testInfo) => {
+  const server = await serverForFile(testInfo.file);
+  const ctx = await browser.newContext({ ...OPERATOR_DEVICE, baseURL: server.base });
+  await createTournament(await ctx.newPage(), { name: 'Individual Review Cup', courts: 15 });
+  await ctx.close();
+});
+
+// File level, so the bead guards' rows (the console policy's warnings) are
+// written as well.
+test.afterAll(() => audit.flush());
 
 // Let the running bout's autosave land. The pill reads "Syncing…" from the tap
 // until the write has landed (bc-sync: the tap's handler registers the edit
@@ -52,13 +71,27 @@ async function settle(page, root = INLINE_EDITOR) {
   await expect(syncState(page, root)).toHaveText('Synced');
 }
 
+// Which side's cell of a score string carries the Ht mark: 'shiro', 'aka' or
+// null. A score string reads [Shiro cell] [middle] [Aka cell], the middle one
+// of vs, X, (E), (DH), and Ht rides beside the winner, never in the middle
+// ("M Ht (E) K" is Shiro's hantei, "M (E) K Ht" Aka's).
+function htSide(score) {
+  const m = /^(.*?)(?:^|\s)(vs|X|\(E\)|\(DH\))(?:\s|$)(.*)$/.exec(score.trim());
+  if (!m) return null;
+  if (/\bHt\b/.test(m[1])) return 'shiro';
+  if (/\bHt\b/.test(m[3])) return 'aka';
+  return null;
+}
+
 test.describe('knockout-mixed-individual', () => {
+  test.describe.configure({ mode: 'serial' });
+
   test.beforeAll(async ({ browser, serverForFile }, testInfo) => {
     test.setTimeout(240_000);
     const server = await serverForFile(testInfo.file);
     const ctx = await browser.newContext({ ...OPERATOR_DEVICE, baseURL: server.base });
     const page = await ctx.newPage();
-    await createTournament(page, { name: 'Individual Review Cup', courts: 15 });
+    await login(page); // the file-level beforeAll created the tournament, in its own context
     const seed = async (key, opts, roster) => {
       comps[key] = await createCompetition(page, opts);
       await pasteRoster(page, comps[key], roster);
@@ -72,8 +105,6 @@ test.describe('knockout-mixed-individual', () => {
     await seed('F1c', { name: 'Cadets Individual', kind: 'individual', format: 'mixed', poolSize: 3, poolWinners: 2, courts: ['F'], numberPrefix: 'C' }, ROSTER_6B);
     await ctx.close();
   });
-
-  test.afterAll(() => audit.flush());
 
   // J1. Individual pools -> knockout on /admin/shiaijo/A (F1). Every bout is
   // chained with Finish + Start Next, which must never leave shiaijo A, and
@@ -388,10 +419,17 @@ test.describe('knockout-mixed-individual', () => {
     const next = page.locator(EDITOR).locator('.score-nav__next');
     const prev = page.locator(EDITOR).locator('.score-nav__prev');
     row({ step: 'scores tab nav', action: 'Prev / Next', variant: 'size', next: await tapSize(next).catch(() => null), prev: await tapSize(prev).catch(() => null) });
+    // Court B holds more matches than the first, so Next is offered (it is
+    // rendered only while there is a next match). Each tap must move the
+    // editor to another match before the reading is taken.
+    await expect(next).toBeVisible();
     for (let i = 0; i < 3 && await next.isVisible().catch(() => false); i += 1) {
+      const was = seen[seen.length - 1].key;
       await next.tap();
+      await expect.poll(async () => (await editorIdentity(page, EDITOR)).key, { message: 'Next moves the editor' }).not.toBe(was);
       seen.push(await editorIdentity(page, EDITOR));
     }
+    expect(new Set(seen.map((s) => s.key)).size, 'Next showed at least two matches').toBeGreaterThanOrEqual(2);
     for (const key of ['ArrowLeft', 'ArrowRight', 'ArrowLeft']) {
       await page.keyboard.press(key);
       await page.waitForTimeout(200);
@@ -604,15 +642,32 @@ test.describe('knockout-mixed-individual', () => {
     const fusRow = completedRowFor(page, b2);
     await expect(fusRow).toBeVisible();
     const fusResult = (await fusRow.locator('.shiaijo-qrow__result').innerText()).trim();
-    const advanced = await expect.poll(() => inlineRunning(page), { timeout: 8000 }).toBe(true).then(() => true, () => false);
-    const id3 = advanced ? await editorIdentity(page) : null;
+    // Recording it starts the court's next bout in the same competition, and
+    // skips every bout with a barred side. Two of the bouts left on E have
+    // one: the real withdrawer's (b1.aka) remaining pool A bout and the
+    // no-show's (b2.aka) other pool B bout. That leaves exactly one to start,
+    // pool B's bout between the side that was present and the third member.
+    const barred = [b1.aka, b2.aka];
+    let advancedTo = null;
+    const advance = await expect.poll(async () => {
+      if (!(await inlineRunning(page))) return 'idle';
+      const now = await editorSides(page);
+      if (now.shiro === b2.shiro && now.aka === b2.aka) return 'same';
+      advancedTo = now;
+      return 'moved';
+    }, { timeout: 8000 }).toBe('moved').then(() => null, (e) => e);
+    const id3 = advancedTo ? await editorIdentity(page) : null;
     row({ step: 'fusenpai', action: 'Record (fusenpai, Aka did not show)', variant: 'V2 doubleTap', ...dblRecord,
       from: id2.eyebrow, result: fusResult, dialogAfterDoubleTap: dialogAfterDbl, dialog: dblDialog,
       advancedTo: id3 && id3.eyebrow, court: id3 && id3.court, shot: await shot(page, 'fusenpai-recorded') });
     // Docs: the winner shows two circles and Fus. sits beside the no-show.
     expect(fusResult).toMatch(/○/);
     expect(fusResult).toMatch(/Fus\./);
-    if (advanced) expect(id3.court).toBe('E');
+    if (advance) throw advance;
+    expect(id3.court).toBe('E');
+    expect(id3.eyebrow).toMatch(/POOL B/);
+    expect(barred, 'the bout started has no barred side').not.toContain(advancedTo.shiro);
+    expect(barred).not.toContain(advancedTo.aka);
 
     // Knockout (F2, court C): a tied 1-1 semi-final, encho, hantei.
     await openShiaijo(page, 'C');
@@ -710,8 +765,8 @@ test.describe('knockout-mixed-individual', () => {
     row({ step: 'hantei', action: 'Finish (two taps) on the neighbour\'s pick', variant: 'V4 hasty (did not read the pick)',
       picked, committed, result: wrongResult });
     // The recorded result reads as the docs describe: the winner's points,
-    // Ht beside the winner, (E) in the centre.
-    expect(wrongResult).toMatch(/Ht/);
+    // Ht beside the winner (the side the neighbour tap picked), (E) in the centre.
+    expect(htSide(wrongResult)).toBe(picked.aka === 'true' ? 'aka' : 'shiro');
     expect(wrongResult).toMatch(/\(E\)/);
 
     // Recovery: Correct the semi-final and give hantei to Shiro. Finish +
@@ -728,15 +783,17 @@ test.describe('knockout-mixed-individual', () => {
     const reasonPrompt = inlineEditor(page).locator('.reason-prompt');
     const reasonAsked = await reasonPrompt.waitFor({ state: 'visible', timeout: 4000 }).then(() => true, () => false);
     if (reasonAsked) await reasonPrompt.locator('button.btn--primary').tap();
-    await expect.poll(async () => (await semiRow.locator('.shiaijo-qrow__result').innerText()).trim(), { timeout: 10_000 })
-      .not.toBe(wrongResult);
+    // The verdict moved to Shiro: Ht now sits in Shiro's cell, still with (E).
+    await expect.poll(async () => htSide((await semiRow.locator('.shiaijo-qrow__result').innerText()).trim()), { timeout: 10_000 })
+      .toBe('shiro');
     // The refusal's own toast may still be up; only a toast the save raised counts.
     const toast = (await page.locator('.toast').allInnerTexts().catch(() => []))
       .filter((t) => t !== htOpen.refusal?.toast).join(' | ');
     const fixed = (await semiRow.locator('.shiaijo-qrow__result').innerText()).trim();
     row({ step: 'hantei', action: 'Correct -> SHIRO wins -> Save correction', variant: 'recovery', reasonAsked, toast, result: fixed,
       shot: await shot(page, 'hantei-corrected') });
-    expect(fixed).toMatch(/Ht/);
+    expect(htSide(fixed)).toBe('shiro');
+    expect(fixed).toMatch(/\(E\)/);
   });
   // J6. Confirm + advance OFFLINE (F2, court C): the second semi-final is
   // finished with the network down. The write is queued, the local bracket
@@ -997,26 +1054,33 @@ test.describe('knockout-mixed-individual', () => {
       bronzeMatchShown: /3RD PLACE MATCH/i.test(bracketText), shot: await shot(page, 'bracket-tab-semis-done', { fullPage: true }) });
     expect(bracketText).not.toMatch(/3RD PLACE MATCH/i);
 
-    // Fusenpai auto-advance on a court where nothing is stuck (court F, F1c):
-    // the J2 attempt ran into a withdrawn competitor's unstartable bout.
+    // Fusenpai auto-advance on the court console of a court where nothing is
+    // barred yet (court F, F1c): recording it starts the court's next bout in
+    // the same competition, on the same court.
     await openShiaijo(page, 'F');
     const fb = await ensureRunning(page);
     expect(fb, 'court F has a bout to start').not.toBeNull();
     await recordDecision(page, 'fusenpai', { side: 'aka' });
     await expect(completedRowFor(page, fb)).toBeVisible();
-    const advanced = await expect.poll(async () => {
+    const advance = await expect.poll(async () => {
       if (!(await inlineRunning(page))) return 'idle';
       const now = await editorSides(page);
       return now.shiro === fb.shiro && now.aka === fb.aka ? 'same' : 'moved';
-    }, { timeout: 10_000 }).toBe('moved').then(() => true, () => false);
+    }, { timeout: 10_000 }).toBe('moved').then(() => null, (e) => e);
+    const idF = advance ? null : await editorIdentity(page);
     row({ step: 'fusenpai (court F)', action: 'Record fusenpai on the console', variant: 'correct path (auto-advance)',
-      from: fb, advanced, court: advanced ? (await editorIdentity(page)).court : null,
-      shot: await shot(page, 'fusenpai-auto-advance-F') });
-    if (advanced) expect((await editorIdentity(page)).court).toBe('F');
+      from: fb, advanced: !advance, court: idF && idF.court, shot: await shot(page, 'fusenpai-auto-advance-F') });
+    if (advance) throw advance;
+    expect(idF.court).toBe('F');
+    expect(idF.eyebrow).toMatch(/^CADETS INDIVIDUAL/);
   });
-  // Functional defects found by the journeys above, each now fixed and named
-  // by its bead. Each seeds its own competition on its own shiaijo, so it runs
-  // alone, and guards its fix.
+});
+
+// Functional defects found by the journeys above, each now fixed and named by
+// its bead. Each seeds its own competition on its own shiaijo and reads
+// nothing the journeys left, so it runs alone and guards its fix. Not serial:
+// a failure here, or in a journey, skips none of the others (see the header).
+test.describe('knockout-mixed-individual bead guards', () => {
   const seedOwn = async (page, opts, roster) => {
     const id = await createCompetition(page, { kind: 'individual', ...opts });
     await pasteRoster(page, id, roster);
@@ -1041,7 +1105,7 @@ test.describe('knockout-mixed-individual', () => {
     await expect(page.locator(EDITOR)).toBeVisible();
     const s = await editorSides(page, EDITOR);
     await recordDecision(page, 'fusenpai', { side: s.shiro === first.aka ? 'shiro' : 'aka', root: EDITOR });
-    await expect(page.locator(EDITOR).getByText('already_ineligible')).toHaveCount(0);
+    // The fusenpai landed: the row reads Fus. (a refusal would leave it unrecorded).
     await expect(page.locator('.score-edit-row').filter({ hasText: first.aka }).filter({ hasText: /Fus\./ })).toHaveCount(1);
   });
 
@@ -1070,7 +1134,8 @@ test.describe('knockout-mixed-individual', () => {
     const done = completedRowFor(page, semi);
     await expect(done).toBeVisible();
     await expect(done.locator('.shiaijo-qrow__result')).toContainText('Ht');
-    const before = (await done.locator('.shiaijo-qrow__result').innerText()).trim();
+    // Recorded for Aka: Ht in Aka's cell ("M vs K Ht").
+    expect(htSide((await done.locator('.shiaijo-qrow__result').innerText()).trim())).toBe('aka');
     // Finish + Start Next started the other semi-final: send it back, then correct (bc-crpn).
     await correctCompleted(page, semi);
     const arm = inlineEditor(page).getByTestId('scoring-modal-hantei-arm');
@@ -1080,9 +1145,9 @@ test.describe('knockout-mixed-individual', () => {
     // Docs: a correction asks for a short reason, then applies.
     const reason = inlineEditor(page).locator('.reason-prompt');
     if (await reason.isVisible().catch(() => false)) await reason.locator('button.btn--primary').tap();
-    await page.waitForTimeout(2000);
-    await expect(page.getByText(/correctionReason/)).toHaveCount(0);
-    await expect.poll(async () => (await done.locator('.shiaijo-qrow__result').innerText()).trim(), { timeout: 10_000 }).not.toBe(before);
+    // The verdict moved to Shiro: Ht now in Shiro's cell ("M Ht vs K").
+    await expect.poll(async () => htSide((await done.locator('.shiaijo-qrow__result').innerText()).trim()), { timeout: 10_000 })
+      .toBe('shiro');
   });
 
   test('bc-plcl: the Pools-tab score editor stays open through Start match and an ippon', async ({ page }) => {

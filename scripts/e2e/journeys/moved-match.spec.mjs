@@ -220,8 +220,11 @@ test.describe('moved-match', () => {
     await expect(T.boutRow(hed, 1)).toBeVisible();
     for (const n of [2, 3]) await T.boutIppon(hed, n, 'shiro', 'M');
     const headFinishLabel = (await T.finishBtn(hed).innerText()).trim();
+    const completedOnB = (await courtState(B)).completed;
     await T.finishTeam(hed);
-    await H.waitForTimeout(1500);
+    // Court B has seen the finish (its Completed list holds it) before it is
+    // asked whether it stayed on Teams: read earlier, it would prove nothing.
+    await expect.poll(async () => (await courtState(B)).completed, { timeout: 15_000 }).toBeGreaterThan(completedOnB);
     const bHeld = await courtState(B);
     row({ step: '6 finish elsewhere', action: 'head table finishes the Teams semi-final', variant: 'two devices', headFinishLabel,
       courtB: bHeld, shot: await shot(B, 'court-B-after-head-table-finish') });

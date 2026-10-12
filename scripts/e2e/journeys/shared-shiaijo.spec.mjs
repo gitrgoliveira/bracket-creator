@@ -334,6 +334,7 @@ test.describe('shared-shiaijo', () => {
     const armedAfter = await armedFinishButton(C).isVisible().catch(() => false);
     r({ step: 'S2 advance', action: finLabel, variant: 'V2 doubleTap', ...dbl, committedByDouble, stillArmed: armedAfter,
       shot: await shot(C, 's2-finish-double-tapped') });
+    expect(dbl.withinWindow, `harness too slow: the two taps were ${dbl.gapMs} ms apart, not a double tap, so this row did not test the bounce guard`).toBe(true);
     expect(finLabel).toBe('Finish + Start Next →');
     expect(committedByDouble).toBe(false);
     expect(armedAfter).toBe(true);
@@ -348,8 +349,12 @@ test.describe('shared-shiaijo', () => {
     expect(same(bouts.b2, pairOf(siA[1]))).toBe(true);
 
     // S4a: Correct the first bout while SI's next bout runs: refused (bc-crpn),
-    // the live bout sent back, the correction opened, then Back to court.
+    // the live bout sent back, the correction opened, then Back to court. The
+    // live bout has a point first, so the send-back is seen to keep a score.
+    await ipponButton(C, winnerOf(bouts.b2), 'M').tap();
+    await settleOn(C);
     const marksB2 = await slotMarks(C, winnerOf(bouts.b2));
+    expect(marksB2).toEqual(['M']);
     const corr = await correctCompleted(C, bouts.b1);
     r({ step: 'S4a correct', action: "Correct an SI bout while SI's next bout runs", variant: 'correct path (refused, bc-crpn)',
       liveBout: corr.live, ...corr.refusal, shot: await shot(C, 's4a-correction-open') });
@@ -542,7 +547,15 @@ test.describe('shared-shiaijo', () => {
     // start in SI here, so nothing starts: ST's waiting semi-final stays queued.
     const fus2 = await recordDecision(C, 'fusenpai', { side: 'aka' });
     await expect(completedRowFor(C, bouts.b5)).toBeVisible();
-    await C.waitForTimeout(3000);
+    // Nothing starts across the whole window, not only at its end: a start
+    // landing late would pass a single read. The editor may still hold b5,
+    // just closed, for a moment.
+    const quietUntil = Date.now() + 3000;
+    while (Date.now() < quietUntil) {
+      const l = await liveOnConsole();
+      expect(l === null || same(l, bouts.b5), `a start landed after the fusenpai: ${JSON.stringify(l)}`).toBe(true);
+      await C.waitForTimeout(250);
+    }
     const after = await courtState(C);
     const onAnone = await runningOnCourt(H, 'A');
     r({ step: 'S2b advance', action: "Fusenpai on SI's last startable bout on A", variant: 'correct path (nothing to start)', ...fus2,

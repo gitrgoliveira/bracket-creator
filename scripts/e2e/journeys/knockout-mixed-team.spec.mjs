@@ -1222,11 +1222,20 @@ test.describe('knockout-mixed-team', () => {
     const pair = await sides(ed);
     await T.boutIppon(ed, 1, 'shiro', 'M');
     await T.ensureTie(ed, 2);
-    // Bout 3 is never scored: Finish must not commit the encounter.
-    await page.waitForTimeout(1200);
+    // Bout 3 is never scored: Finish must not commit the encounter. The
+    // refusal comes on the first tap, before any arming, and says why.
     const finish = T.finishBtn(ed);
-    await finish.tap().catch(() => {});
-    await finish.tap().catch(() => {});
+    const refusal = ed.getByTestId('team-finish-unfinished-bouts');
+    const unfinished = 'Bout 3 has no result. Record a score, a Tie, or a Fusensho before finishing.';
+    await settled(finish);
+    await finish.tap();
+    await expect(refusal).toHaveText(unfinished);
+    await expect(finish).toHaveText(/^Finish( \+ Start Next →)?$/);
+    // A second tap, past the bounce window of the first, is refused the same way.
+    await settled(finish);
+    await finish.tap();
+    await expect(refusal).toHaveText(unfinished);
+    await expect(finish).toHaveText(/^Finish( \+ Start Next →)?$/);
     await page.goto(`/admin/competition/${id}/pools`);
     // The encounter is still unfinished, so no team has played a match yet.
     await expect(page.locator('tr').filter({ hasText: pair.shiro }).first()).toContainText(/0\s*0\s*0\s*0\s*0\s*0\s*0\s*0\s*$/);

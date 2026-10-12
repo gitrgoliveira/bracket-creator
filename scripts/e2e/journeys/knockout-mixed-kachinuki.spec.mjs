@@ -39,7 +39,7 @@ import { createCompetition } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
 import { completedRowFor, openShiaijo, sides, upNextCard } from '../fixtures/shiaijo.mjs';
 import { PUBLIC_DEVICE } from '../fixtures/devices.mjs';
-import { openViewer } from '../fixtures/public.mjs';
+import { openViewer, recentResult } from '../fixtures/public.mjs';
 import { scoreRows } from '../fixtures/scores.mjs';
 import { EDITOR } from '../../screenshots/lib/editor.mjs';
 import { dwell, settled } from '../fixtures/pace.mjs';
@@ -217,7 +217,11 @@ test.describe('J5 kachinuki from the court console', () => {
       while ((await boutFilled(currentBout(page), 'shiro').count()) > 1) await boutFilled(currentBout(page), 'shiro').last().tap();
       if ((await boutFilled(currentBout(page), 'shiro').count()) === 0) await awardBoutIppon(page, 'shiro', 'M');
       await awardBoutIppon(page, 'shiro', 'K');
-      // V3: the iPad reloads the tab before Record bout was tapped.
+      // V3: the iPad reloads the tab before Record bout was tapped. The wait
+      // only gives the autosave its moment and is not asserted: whether the
+      // marks survive the reload is the variant under audit (marksKept), and a
+      // lost mark fails the asserts after Record bout below (expectPairing,
+      // doneRowWinner).
       await expect(syncPill(page)).toHaveText('Synced').catch(() => {});
       const reload = await interruptC(page, 'reload');
       await expect(editor(page)).toBeVisible();
@@ -1261,14 +1265,22 @@ test.describe('J5 kachinuki from the court console', () => {
     expect((await boutNames(currentBout(page))).shiro).toBe(S[0]);
     await endMatch(page);
     await expect(completedRowFor(page, finalPair)).toBeVisible();
+    // The console shows the result before the server has answered.
+    await completedOnServer(page, finalPair, 'A');
     await shot(page, 'final-completed', { fullPage: true });
 
-    // A spectator's phone: the finished knockout on the public viewer.
+    // A spectator's phone: the finished knockout on the public viewer. The
+    // final is in its Recent results, a result only a completed match gets,
+    // with Shiro's team marked as the winner (viewer_match.jsx, the side's
+    // `--w` class beside the "Winner:" text a screen reader hears).
     const spectator = await browser.newContext({ ...PUBLIC_DEVICE, baseURL });
     try {
       const phone = await spectator.newPage();
       await openViewer(phone, compId);
-      await expect(phone.locator('.viewer__body')).toContainText(finalPair.shiro);
+      const finalResult = recentResult(phone, finalPair);
+      await expect(finalResult).toContainText('Final');
+      await expect(finalResult.locator('.vsched-item__side--w')).toHaveCount(1);
+      await expect(finalResult.locator('.vsched-item__side--shiro.vsched-item__side--w')).toContainText(finalPair.shiro);
       await shot(phone, 'viewer-knockout-complete', { fullPage: true });
     } finally {
       await spectator.close();

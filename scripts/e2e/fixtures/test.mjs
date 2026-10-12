@@ -43,7 +43,7 @@ const CONSOLE_ALLOWLIST = [
     whileOffline: true,
   },
   {
-    reason: 'A start or reopen the app sends through the server\'s gate and shows refused (toast, row notice, court-busy panel, reopen error): the shiaijo is running another bout, the competitor is fighting elsewhere, or the knockout match it feeds is being fought.',
+    reason: 'A start or reopen the app sends through the server\'s gate and shows refused (toast, row notice, court-busy panel, reopen error): the shiaijo is running another bout, a competitor is fighting elsewhere or barred by a withdrawal, or the knockout match it feeds is being fought.',
     text: /^Failed to load resource: the server responded with a status of 409 \(Conflict\)$/,
     url: /\/api\/competitions\/[^/]+\/matches\/[^/]+\/(score|reopen)$/,
     code: /^(court_busy|ineligible_competitor|downstream_knockout_running)$/,

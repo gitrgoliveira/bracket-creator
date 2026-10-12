@@ -31,9 +31,12 @@ export const positionLabels = (teamSize) => (teamSize === 5 ? FIK5 : Array.from(
 // test in a serial file can call it, whichever runs first.
 export async function enterAdmin(page, { courts = 16 } = {}) {
   await page.goto('/');
+  // The first-run form, or the public home of a tournament that exists:
+  // whichever the first paint shows, however long it takes.
   const welcome = page.getByRole('heading', { name: 'Welcome to Bracket Creator' });
-  const first = await welcome.waitFor({ state: 'visible', timeout: 5000 }).then(() => true, () => false);
-  if (first) {
+  const home = page.locator('.viewer__body');
+  await welcome.or(home).first().waitFor({ state: 'visible' });
+  if (await welcome.isVisible()) {
     await createTournament(page, { name: 'Team Cup', courts });
     return;
   }

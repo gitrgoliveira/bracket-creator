@@ -166,10 +166,9 @@ test.describe('knockout-mixed-individual', () => {
         await page.waitForTimeout(150);
       }
     }
-    // Let the removals land before the M: a tap that puts back the mark the
-    // server still shows, while the removal's write is out, is lost when that
-    // write's echo arrives (found by a fresh-clone run, 2026-10-12). This step
-    // only resets the bout; it is not the place to test that.
+    // Let the removals land before the M. A fresh-clone run lost this tap to
+    // the removal's echo (bc-ltap, fixed in the same PR and guarded by its own
+    // test below); this step only resets the bout, so it does not race.
     await settle(page);
     await ipponButton(page, w1, 'M').tap();
     await expect(filledSlots(page, w1)).toHaveCount(1);
@@ -1159,5 +1158,62 @@ test.describe('knockout-mixed-individual', () => {
     } finally {
       await context.setOffline(false);
     }
+  });
+
+  // bc-ltap (found by a fresh-clone run, 2026-10-12; operator: "This should be
+  // two events"): a mark taken off and tapped back while the removal's save is
+  // still out stays on the board and is sent, and so does the reverse. On
+  // localhost the removal's echo arrives within milliseconds of the save going
+  // out, so the save is held 150 ms, as a slow uplink would hold it.
+  test('bc-ltap: a mark tapped back while its removal is saving stays, and is saved', async ({ page }) => {
+    const shot = journeyShots('knockout-mixed-individual/bc-ltap');
+    await login(page);
+    await seedOwn(page, { name: 'Finding A9', format: 'knockout', courts: ['O'], numberPrefix: 'FI' }, rosterOf('Anine', 4));
+    await openShiaijo(page, 'O');
+    expect(await ensureRunning(page), 'a semi-final starts on O').not.toBeNull();
+    let holdNext = false;
+    await page.route('**/api/competitions/*/matches/*/score', async (route) => {
+      if (route.request().method() === 'PUT' && holdNext) {
+        holdNext = false;
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      await route.continue();
+    });
+    const scoreSent = () => page.waitForRequest((r) => r.method() === 'PUT' && /\/score$/.test(r.url()));
+    const akaMark = () => inlineEditor(page).locator('[aria-label^="Aka slot "][aria-label*=": remove "]').first();
+    const marksAfterReload = async () => {
+      await page.reload();
+      await expect.poll(() => inlineRunning(page), { timeout: 15_000 }).toBe(true);
+      return filledSlots(page, 'aka').count();
+    };
+
+    await ipponButton(page, 'aka', 'M').tap();
+    await settle(page);
+    // Remove, then the same mark back while the removal is out.
+    holdNext = true;
+    let sent = scoreSent();
+    await akaMark().tap();
+    await sent;
+    await ipponButton(page, 'aka', 'M').tap();
+    await settle(page);
+    await page.waitForTimeout(1000);
+    await expect(filledSlots(page, 'aka'), 'the tapped-back mark stays').toHaveCount(1);
+    await shot(page, 'tapped-back-mark-kept');
+    expect(await marksAfterReload(), 'and the server holds it').toBe(1);
+    await shot(page, 'tapped-back-mark-after-reload');
+
+    // The reverse: take it off, add it, and take it off again while the add is out.
+    await akaMark().tap();
+    await settle(page);
+    holdNext = true;
+    sent = scoreSent();
+    await ipponButton(page, 'aka', 'M').tap();
+    await sent;
+    await akaMark().tap();
+    await settle(page);
+    await page.waitForTimeout(1000);
+    await expect(filledSlots(page, 'aka'), 'the removal stays').toHaveCount(0);
+    expect(await marksAfterReload(), 'and the server holds no mark').toBe(0);
+    await page.unroute('**/api/competitions/*/matches/*/score');
   });
 });

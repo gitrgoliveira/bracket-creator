@@ -5,6 +5,10 @@
 Before implementing features or making architectural decisions, read the project constitution:
 **`.specify/memory/constitution.md`**: defines the core principles (YAGNI, DRY, TDD, DDD, evidence-based decisions, bracket integrity, and live-tournament constraints) that all changes must comply with.
 
+## Domain rules
+
+Detailed domain rulings (match results and marks, match writes and the offline queue, teams and lineups, eligibility, the store, workbooks, the draw) live in `.claude/rules/`, one file per area; each file's `paths` header lists the code it governs. Read the matching file before changing code in that area: nothing loads it for you outside Claude Code.
+
 ## Project Overview
 
 `bracket-creator` is a specialized CLI and Web application designed to generate tournament brackets for Kendo competitions. It supports both straight knockout and round-robin (Pools) formats, accommodating both individual and team matches.

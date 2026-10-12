@@ -2943,10 +2943,16 @@ func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult) correctionC
 		// (HoldReasonFinishAtomic, bc-mrgc Finding 4) -- its scoreline never
 		// lands beside a verdict it never declared -- and keeps it in the
 		// match's history. Demanding a reason here refused it before it got
-		// there, and it was lost (bc-mrgc review). An equal stamp is an
-		// exact replay, which applies, so it is still a correction to
-		// justify.
+		// there, and it was lost (bc-mrgc review).
 		if r.ModifiedAt > 0 && r.ModifiedAt < snap.ResultStamp {
+			return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision}
+		}
+		// An equal stamp with nothing it changes differing from what is
+		// stored is the finish already recorded, sent again because its
+		// answer was lost: the engine answers it as recorded and writes
+		// nothing (engine.ExactScoreReplay, bc-xrpl). A same-stamp write
+		// that differs is a correction, and still needs its reason.
+		if engine.ExactScoreReplay(snap.Stored, r, !snap.InBracket) {
 			return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision}
 		}
 		if r.CorrectionReason == "" {

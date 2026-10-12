@@ -1523,6 +1523,18 @@ async function _flushQueue() {
                 // open: that fetch lands it or queues it anew, so sending the copy
                 // too would send the write twice.
                 if (_heldByOpenFetch(key, descriptor)) continue;
+                // Out of the queue AND out of storage at once, not at the end of
+                // the pass: a page that goes away while a later entry is still
+                // out (a reload, the tab closed) would leave this one stored, and
+                // the next load would send it again. A Finish sent twice is
+                // refused the second time (an equal stamp over a finished match
+                // asks for a correction reason), so the operator would be told a
+                // recorded result was not.
+                const leaveQueue = () => {
+                    if (!_dequeue(key, descriptor)) return false;
+                    _persistQueue();
+                    return true;
+                };
                 const { compID, matchID, payload, password, terminal, kind, method, url } = descriptor;
                 // Running score writes (terminal=false) don't store method/url and
                 // always PUT to the score endpoint. Terminal entries carry their own
@@ -1541,7 +1553,7 @@ async function _flushQueue() {
                         // channel above only reaches an operator who happens to have
                         // this exact match open.
                         _notifyQueueAlert({ kind: 'unreadable', count: 1, terminalCount: 1, compID, matchID });
-                        _dequeue(key, descriptor);
+                        leaveQueue();
                         continue;
                     }
                     effectiveMethod = method;
@@ -1608,7 +1620,7 @@ async function _flushQueue() {
                                     // the server state is right), here it is a failure
                                     // AND the local bracket is wrong.
                                     if (kind === 'override') _notifyBracketResync({ compID, matchID, reason: CLOCK_SKEW_REASON });
-                                    _dequeue(key, descriptor);
+                                    leaveQueue();
                                     continue;
                                 }
                                 await _restampQueuedEntryForSkew(descriptor);
@@ -1725,7 +1737,7 @@ async function _flushQueue() {
                             noteDefaultWinStands(body);
                             lastSupersededMatch = { compID, matchID };
                         }
-                        if (_dequeue(key, descriptor)) {
+                        if (leaveQueue()) {
                             // A result kept in the match's history did not land
                             // (announced above). writeWasSuperseded is every
                             // applied:false answer, a clock-skew refusal included
@@ -1837,7 +1849,7 @@ async function _flushQueue() {
                             detail: refusal.reason,
                             ...(refusal.sentence ? { sentence: true } : {}),
                         });
-                        _dequeue(key, descriptor);
+                        leaveQueue();
                     } else {
                         // Non-retryable response: 400 validation, 413, generic 409
                         // conflict, etc. NOTE neither auth-ish status reaches here any
@@ -1878,7 +1890,7 @@ async function _flushQueue() {
                             detail: refusal.reason,
                             ...(refusal.sentence ? { sentence: true } : {}),
                         });
-                        _dequeue(key, descriptor);
+                        leaveQueue();
                     }
                 } catch (_) {
                     // fetch rejected (network down), or the request or its body

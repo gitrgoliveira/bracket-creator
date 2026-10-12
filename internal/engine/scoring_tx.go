@@ -109,6 +109,12 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	if fo.HoldReason != "" {
 		return nil, e.holdWriteTx(tx, compID, matchID, result, comp, fo.HoldReason)
 	}
+	// An exact resend of a finish already recorded (a queued write whose
+	// first send landed but whose answer was lost) answers as recorded and
+	// writes nothing, before anything else judges it (bc-xrpl).
+	if replayed, err := e.answerExactScoreReplay(tx, compID, matchID, result, comp); err != nil || replayed {
+		return nil, err
+	}
 	// Only a COMPLETING write goes through the engi recorder. Engi's flag-total
 	// rule (odd, in {1,3,5}: a 3- or 5-referee panel cannot draw) can only be
 	// satisfied by a real result, so routing every engi write through it
@@ -1218,6 +1224,110 @@ func exactDecisionReplay(prior *state.MatchResult, decision, decisionBy string, 
 		prior.Decision == decision &&
 		prior.DecisionBy == decisionBy &&
 		prior.GroupStamp(state.GroupResult) == stamp
+}
+
+// ExactScoreReplay reports whether incoming is a completing score write the
+// stored match has already recorded: the score counterpart of
+// exactDecisionReplay (bc-xrpl). A Finish whose first send landed but whose
+// answer was lost (the page went away, the connection dropped, the fetch
+// timed out) is sent again by the offline queue with the stamp it was sent
+// with; that resend is the same write, so it answers as recorded, with no
+// correction reason asked and nothing written. Exact means: both the stored
+// match and the write are completed, the write is stamped, its stamp is the
+// stored result group's, and no group it changes (its own list, or the
+// default, effectiveChangedGroups) differs from the stored value once the
+// write is read the way the write path would land it (the hansoku award,
+// the stored side names and ids, the winner id, the stored correction
+// reason). A same-stamp write that differs anywhere it changes is a
+// correction and still needs its reason. nilSubsClear is the branch's
+// (true for a pool match, false for a knockout one, see mergeCtx).
+func ExactScoreReplay(stored, incoming *state.MatchResult, nilSubsClear bool) bool {
+	_, ok := exactScoreReplayProbe(stored, incoming, nilSubsClear)
+	return ok
+}
+
+// exactScoreReplayProbe is ExactScoreReplay's judgement, handing back the
+// write as the write path would land it (a copy: incoming is not changed),
+// which the replay's history entry is merged from.
+func exactScoreReplayProbe(stored, incoming *state.MatchResult, nilSubsClear bool) (*state.MatchResult, bool) {
+	if stored == nil || incoming == nil || incoming.ModifiedAt <= 0 ||
+		incoming.Status != state.MatchStatusCompleted ||
+		stored.Status != state.MatchStatusCompleted ||
+		incoming.ModifiedAt != stored.GroupStamp(state.GroupResult) {
+		return nil, false
+	}
+	probe := *incoming
+	// Copies that keep nil apart from empty (a nil list is a writer with
+	// nothing to say, an empty one says zero).
+	if incoming.IpponsA != nil {
+		probe.IpponsA = append(make([]string, 0, len(incoming.IpponsA)), incoming.IpponsA...)
+	}
+	if incoming.IpponsB != nil {
+		probe.IpponsB = append(make([]string, 0, len(incoming.IpponsB)), incoming.IpponsB...)
+	}
+	probe.SubResults = state.CloneSubResults(incoming.SubResults)
+	probe.GroupStamps = state.CloneGroupStamps(incoming.GroupStamps)
+	if applyHansokuIppons(&probe) != nil {
+		return nil, false
+	}
+	if reconcileSides(&probe, storedSides{A: stored.SideA, B: stored.SideB, AID: stored.SideAID, BID: stored.SideBID}) {
+		return nil, false
+	}
+	if backfillMatchIdentity(&probe, stored, matchWriteForward) != nil {
+		return nil, false
+	}
+	if probe.CorrectionReason == "" {
+		probe.CorrectionReason = stored.CorrectionReason
+	}
+	for _, g := range effectiveChangedGroups(stored, &probe, nilSubsClear) {
+		if state.GroupDiffers(stored, &probe, g) {
+			return nil, false
+		}
+	}
+	return &probe, true
+}
+
+// answerExactScoreReplay answers an exact resend of a recorded finish
+// (ExactScoreReplay) as recorded: result becomes the stored match, exactly
+// as a landed write leaves it, and nothing is written to the match file. Its
+// history entry says the write arrived and changed nothing, as an exact
+// decision replay's does. It runs before anything else judges the write, as
+// the decision replay runs before the decision's refusals: a downstream or
+// eligibility refusal would only misreport a result already recorded as one
+// to resolve and send again. false, with result untouched, for any other
+// write.
+func (e *Engine) answerExactScoreReplay(tx state.StoreTx, compID, matchID string, result *state.MatchResult, comp *state.Competition) (bool, error) {
+	if result.Status != state.MatchStatusCompleted || result.ModifiedAt <= 0 {
+		return false, nil
+	}
+	prior, inPool, err := e.lookupExistingResultIn(tx, compID, matchID)
+	if err != nil {
+		return false, err
+	}
+	probe, ok := exactScoreReplayProbe(prior, result, inPool)
+	if !ok {
+		return false, nil
+	}
+	result.Merge = mergeMatchWrite(prior, probe, matchWriteForward, mergeCtx{comp: comp, knockout: !inPool, nilSubsClear: inPool})
+	e.recordWriteHistory(tx, compID, matchID, result)
+	// A bracket match's prior came through bracketMatchAsResult, which omits
+	// the court and the schedule a landed write echoes (the decision
+	// replay's fill, bc-cse finding 5).
+	if !inPool && (prior.Court == "" || prior.ScheduledAt == "") {
+		if bracket, berr := tx.LoadBracket(compID); berr == nil {
+			if court, scheduledAt, found := bracketMatchCourtAndSchedule(bracket, matchID); found {
+				if prior.Court == "" {
+					prior.Court = court
+				}
+				if prior.ScheduledAt == "" {
+					prior.ScheduledAt = scheduledAt
+				}
+			}
+		}
+	}
+	*result = *prior
+	result.ClearRequestFields()
+	return true, nil
 }
 
 // holdWriteTx keeps a write whole in the match's history without applying any

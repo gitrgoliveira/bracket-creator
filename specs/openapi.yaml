@@ -2562,7 +2562,13 @@ paths:
             is NOT refused for one when it is completed again: a match can be
             reopened without any reason, and nothing is gated on that. The
             completion clears `reopenPending` and keeps a `correctionReason`
-            if one is sent.
+            if one is sent. An exact resend of the finish already recorded
+            (`completed`, the stored result's own `modifiedAt`, and nothing it
+            changes differing from what is stored: a queued send whose first
+            answer was lost) is not a correction either: it is answered as
+            recorded, with the stored MatchResult, and writes nothing. A
+            same-stamp write that differs from what is stored is a correction
+            and needs its reason.
 
             A `completed` write on a team match (not kachinuki) is also
             refused while a numbered bout (1..teamSize) has no result in
@@ -6724,7 +6730,10 @@ components:
           description: >
             Audit justification for rewriting a result the operator had already
             declared final. Required when the write completes a match that is
-            already `completed` (a correction). Kept, but not required, when
+            already `completed` (a correction). Not required for an exact
+            resend of the finish already recorded (same `modifiedAt` as the
+            stored result, nothing it changes differing), which is answered as
+            recorded. Kept, but not required, when
             the write completes a match that carries `reopenPending`.
             Otherwise it is dropped, so the field always means "this rewrote
             a finalized result". A stored reason is carried forward across

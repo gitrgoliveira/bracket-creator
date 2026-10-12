@@ -51,7 +51,7 @@ When asked to *plan*, *verify*, or *record a plan on a bead*: do NOT write code.
 
 Every model call re-reads the session's whole context, this file included (about 17k tokens on its own since the domain rules moved to `.claude/rules/`), so a session's cost grows with its length. One session that ran a multi-bead PR and its review loops made 209 calls at an average of about 360k tokens of context, and never compacted (2026-10-11).
 - **Delegate review rounds, investigations, history lookups and verification sweeps to subagents, and keep only their short summary** (findings, decisions, `file:line`) in the main session: ask the subagent for a summary in a set number of lines, not its full report (operator feedback 2026-09-13: "Make better usage of sub agents").
-- **Subagents run on Sonnet unless you say otherwise** (`CLAUDE_CODE_SUBAGENT_MODEL=sonnet` in the user settings, 2026-10-12). That suits searches, history lookups, reference sweeps and verification. Pass `model: "opus"` for an implementer and for the final review round; the pr-review-toolkit's `code-reviewer` and `code-simplifier` pin Opus themselves.
+- **Subagents run on Sonnet unless you say otherwise** (`CLAUDE_CODE_SUBAGENT_MODEL=sonnet` in the user settings, 2026-10-12). That suits searches, history lookups, reference sweeps and verification. Pass `model: "opus"` for an implementer and for the final review round; the pr-review-toolkit agents are unaffected, since each names its own model (`opus`, or `inherit` for the session's). The ones that drop to Sonnet are `general-purpose`, `Explore`, `claude` and `beads:task-agent`.
 - **Start a new session for each PR.** Once a PR merges, begin the next bead's work in a fresh session; the bead and the PR carry the state.
 
 ## Governance

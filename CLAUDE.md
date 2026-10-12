@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This project uses Serena, an MCP server exposing semantic, symbol-aware tools. **Serena's tools are the PRIMARY tools for code work here.** The built-in Read, Glob, Grep and Edit are SECONDARY and must not be used on code files when a Serena equivalent exists.
 
-**Serena only serves the languages `.serena/project.yml` lists**, so check that file rather than assuming coverage. It IS tracked in git as of PR #439 (`.gitignore` ignores `.serena/*` and re-includes that one file) and carries `language_servers: [go, typescript, scss]`. Tracking was the only available fix: Serena generates the file per project DIRECTORY (`project_serena_folder_location: "$projectDir/.serena"`) and this repo uses a worktree per PR, so before #439 every new worktree auto-detected `[go]` alone, and editing the main checkout's copy propagated to nothing. **But the active set is bound when a session activates the project, not when the file appears**, so a worktree predating #439 stays Go-only until a session starts with the file — measured here, where a mid-session fast-forward brought the file in and `get_symbols_overview` on a `.jsx` still failed with `Active language servers: ['go']`. When it matters, ask Serena rather than the file: the error names the active set. For any source that set does not cover there is no language server, the symbol tools below cannot work, and you should use the built-in Read/Edit/Glob/Grep on it directly instead of spending a Serena call that cannot succeed. On `.jsx` the JS server reads and edits symbols correctly, and `web-mobile/jsconfig.json` gives it a project, so `find_referencing_symbols` follows ES `import`s across modules, tests included. Without that file it saw only the symbol's own file (`resultSlot` missed its real importer, `match_scoreboard.jsx`), so a reference search from a checkout that lacks it proves nothing. It still cannot follow wiring that has no import to follow: about a third of the top-level `js/*.jsx` modules carry no ES `import` at all, cross-module wiring leans on `window.*` globals (`window.API` alone has over 200 references outside the tests), and Preact is a vendored UMD global rather than an npm dependency. Treat a reference search there as a lower bound and grep as well for anything reachable through `window.*`. Keep that jsconfig to the options it has: esbuild reads it too, and the Makefile passes only `--jsx-factory`/`--jsx-fragment`, so an option those flags do not override changes the shipped bundle (`"jsx": "react-jsx"` there makes the compiled JSX import `react/jsx-runtime`, which the page does not load).
+**Serena only serves the languages `.serena/project.yml` lists**, so check that file rather than assuming coverage. It IS tracked in git as of PR #439 (`.gitignore` ignores `.serena/*` and re-includes that one file) and carries `language_servers: [go, typescript, scss, terraform, yaml]`. Tracking was the only available fix: Serena generates the file per project DIRECTORY (`project_serena_folder_location: "$projectDir/.serena"`) and this repo uses a worktree per PR, so before #439 every new worktree auto-detected `[go]` alone, and editing the main checkout's copy propagated to nothing. **But the active set is bound when a session activates the project, not when the file appears**, so a worktree predating #439 stays Go-only until a session starts with the file — measured here, where a mid-session fast-forward brought the file in and `get_symbols_overview` on a `.jsx` still failed with `Active language servers: ['go']`. When it matters, ask Serena rather than the file: the error names the active set. For any source that set does not cover there is no language server, the symbol tools below cannot work, and you should use the built-in Read/Edit/Glob/Grep on it directly instead of spending a Serena call that cannot succeed. On `.jsx` the JS server reads and edits symbols correctly, and `web-mobile/jsconfig.json` gives it a project, so `find_referencing_symbols` follows ES `import`s across modules, tests included. Without that file it saw only the symbol's own file (`resultSlot` missed its real importer, `match_scoreboard.jsx`), so a reference search from a checkout that lacks it proves nothing. It still cannot follow wiring that has no import to follow: about a third of the top-level `js/*.jsx` modules carry no ES `import` at all, cross-module wiring leans on `window.*` globals (`window.API` alone has over 200 references outside the tests), and Preact is a vendored UMD global rather than an npm dependency. Treat a reference search there as a lower bound and grep as well for anything reachable through `window.*`. Keep that jsconfig to the options it has: esbuild reads it too, and the Makefile passes only `--jsx-factory`/`--jsx-fragment`, so an option those flags do not override changes the shipped bundle (`"jsx": "react-jsx"` there makes the compiled JSX import `react/jsx-runtime`, which the page does not load).
 
 The built-in tool descriptions in your context say things like "use Read for a known path" and "prefer dedicated tools (Read, Edit, Write, Glob, Grep)". Those are written for projects without Serena and are SUPERSEDED here; when they conflict with this section, this section wins. Do not rationalize the built-in tools with "the file is small", "I already know what I need", "this is one call versus three", or "the path is known" — those rationalizations have produced incorrect behaviour before and are explicitly disallowed.
 
@@ -124,26 +124,7 @@ go test -cover ./internal/helper/...
 
 Layered with no upward or circular dependencies: presentation (`cmd/`, `mobileapp/`, `web/`, `web-mobile/`) → business logic (`engine/`, `helper/`, `service/`) → persistence (`state/`, `excel/`) → domain models (`domain/`, the dependency leaf with zero internal deps). `mobileapp` → `engine` (via `deps.go` interfaces) and `state` (direct reads for viewer endpoints); `engine` → `helper` + `excel` + `state`.
 
-Live-tournament state is file-backed under `tournament-data/` (owned by `internal/state/`). The tree below is ORIENTATION ONLY, one label per file: `docs/architecture/data-model.md` owns the model (field lists, which records carry ids, what each file's columns mean), so add a fact there rather than growing a label here into a second copy of it.
-
-```
-tournament-data/
-├── tournament.md                  YAML front-matter: name, date, venue, courts, password
-├── .wal/                          Pending multi-file transactions (replayed on startup)
-├── branding/  sponsors/           Uploaded logo + sponsor images for display surfaces
-└── competitions/<id>/
-    ├── config.md                  YAML front-matter: format, pool size, courts
-    ├── participants.csv           One participant per line (UUID-prefixed)
-    ├── seeds.csv                  Seed rank to player mapping
-    ├── pools.csv                  Pool assignments after start
-    ├── pool-matches.csv           Pool phase match results
-    ├── bracket.json               Elimination bracket structure + results
-    ├── competitor-status.yaml     Eligibility records (kiken/fusenpai)
-    ├── lineups.yaml               Team lineups, starting and per match
-    ├── team-members.yaml          A team's members, keyed by the team's participant id
-    ├── overrides.json             Manual ranking overrides
-    └── history/                   One append-only .jsonl per match: every write, applied or held
-```
+Live-tournament state is file-backed under `tournament-data/` (owned by `internal/state/`). `docs/architecture/data-model.md` owns the model (the file layout, field lists, which records carry ids, what each file's columns mean), so add a fact there rather than growing a second copy here. The root holds `tournament.md`, `.wal/` (pending multi-file transactions, replayed on startup), `branding/` and `sponsors/`, and `competitions/<id>/`, whose `history/` keeps one append-only `.jsonl` per match.
 
 ### Key Algorithms
 
@@ -384,19 +365,7 @@ The workbook is built entirely from code in `internal/excel/template.go` (`NewFi
 
 ### Mobile-app runtime defaults
 
-Production-hardening defaults applied in the `mobile-app` command. Constants live in [cmd/mobile_app.go](cmd/mobile_app.go) and [internal/mobileapp/middleware.go](internal/mobileapp/middleware.go) / [hub.go](internal/mobileapp/hub.go):
-
-| Concern | Default | Override | Rationale |
-|---|---|---|---|
-| `ReadHeaderTimeout` | 10s | (none) | Slowloris-header defense |
-| `ReadTimeout` | 30s | (none) | Slow-body defense (still permits multi-MB CSV import) |
-| `IdleTimeout` | 120s | (none) | Bounds fd commitment per idle keep-alive client |
-| `WriteTimeout` | **0** (unbounded) | (none) | SSE streams are infinite; per-request cancellation runs via `Request.Context().Done()` |
-| `MaxHeaderBytes` | 1 MB | (none) | Header-bomb defense |
-| Body cap (admin JSON) | 1 MB | `DefaultMaxBodyBytes` const | `c.BindJSON` payloads are tiny in practice; cap is enforced by `MaxBodyBytes` middleware (returns 413); a DELETE that carries a body (the daihyosen and league tie-break removals) is capped like a POST, a bodyless one is not wrapped |
-| Body cap (`/tournament/import`) | 64 MB | `MaxImportBodyBytes` const | Matches `ParseMultipartForm` already in the handler |
-| SSE subscribers | 5000 | `SSE_MAX_CLIENTS` env var | Bounds fan-out cost + per-client goroutine/channel allocation (~4–10 KB resident per client); sized for large-scale events (1000+ viewers); real hardware load test still required |
-| Graceful shutdown | 30s | `httpShutdownTimeout` const | `Hub.Close` is wired via `srv.RegisterOnShutdown` so SSE goroutines exit before the deadline |
+Production-hardening defaults (header, read and idle timeouts, body caps, SSE subscriber cap, graceful shutdown) are applied in the `mobile-app` command; the constants live in [cmd/mobile_app.go](cmd/mobile_app.go) and [internal/mobileapp/middleware.go](internal/mobileapp/middleware.go) / [hub.go](internal/mobileapp/hub.go). `WriteTimeout` is deliberately **0** (unbounded): SSE streams are infinite, so per-request cancellation runs via `Request.Context().Done()`. The `/tournament/import` body cap is 64 MB (`MaxImportBodyBytes`) to match the handler's `ParseMultipartForm`, and `SSE_MAX_CLIENTS` overrides the subscriber cap.
 
 **`safeGo` convention.** Any goroutine spawned inside a request handler MUST use the `safeGo` helper in [internal/mobileapp/safego.go](internal/mobileapp/safego.go). Gin's Recovery middleware only catches panics on the request goroutine; a panic in a spawned goroutine crashes the entire process. The helper guarantees `wg.Done()` on panic and captures the recovered value into a shared `atomic.Pointer[recoveredPanic]` so the handler can return a single HTTP 500 without leaking internals. Pattern:
 
@@ -415,22 +384,9 @@ See `handlers_viewer.go` for the canonical use sites (mp-663 Phase 1).
 
 ### Architectural observations (areas to watch)
 
-In-progress migrations and tech debt to keep in mind (re-derive package sizes with `gocloc` when you need numbers):
+In-progress migration to keep in mind (the other tech-debt notes, such as which packages have grown large, are derivable with `gocloc`):
 
-- **`mobileapp/` is the largest package** after the decision/eligibility/lineup/daihyosen/Swiss/display/league/registration/announcement/branding/sponsors/print handler families plus supporting infra (rate limiting, broadcast coalescer, viewer single-flight). Grouping into subpackages may be warranted.
-- **`engine/` has grown rapidly**: scoring, eligibility, kachinuki, daihyosen, Swiss, scheduling, league tie-breaks, participant replacement, PDF export. Sub-splitting may be warranted.
-- **`helper/` mixes concerns**: tree algorithms, CSV parsing, Excel rendering, seeding, utilities. The `helper/{bracket,csv,seeding}/` subpackages are an in-progress extraction; `helper/` proper has not shrunk yet.
-- **`excel/` has minimal direct test coverage** (roughly 0.3x source) despite Excel being the primary CLI deliverable; most Excel coverage lives in `helper/*_test.go`.
-- **`domain/` adoption is partial**: much business logic still uses `helper.Player` directly rather than domain types; the migration is incomplete.
 - **No top-level interfaces** for `state.Store` or `engine.Engine`: interface adoption is incremental via `mobileapp/deps.go`. One exception: the engine's match-write and decision primitives take `state.StoreTx` as a store handle (`*state.Store` satisfies it), so `writeToPoolOrBracket`, `recordBracketMatchResult`, `RecordDecisionTx`, `lookupMatchSides` and `checkConcurrentIneligibility` each exist ONCE, with `RecordMatchResultWithIneligibility` and `RecordDecision` as `WithTransaction` shims (the eligibility restore on a rescore is keyed on the competitor-status record's own `MatchID`, never on a re-derived identity). Other engine-to-state and helper-to-engine calls still use concrete types. Extend the handle pattern; never add tx/non-tx twin bodies.
-
-## Testing Conventions
-
-- **Table-driven tests** with `t.Run()` subtests throughout (see `seed_test.go`, `tree_test.go`)
-- **Package naming**: `_test` suffix for external tests of `domain`; same package (`package helper`, `package cmd`) for `helper` and `cmd` tests
-- **Test helpers**: `internal/test/helpers.go` has factories (`CreateTestPlayers`, `CreateTestPools`, `CreateTestTournament`)
-- **Assertions**: `testify/assert` for non-fatal, `require` for fatal
-- **Cleanup**: Always use `defer` for temp files, servers, and env vars
 
 ## Participant CSV Schema (canonical)
 

@@ -21,11 +21,9 @@
 // after them ('<bead-id>: ...'), each a self-contained reproduction placed
 // where the fixture supports it: first as test.fixme, and, once the bead was
 // fixed, as plain tests that guard the fix. The tests after one tolerate what
-// it leaves behind. Judgement findings, and behaviour
-// the docs do not rule on (Send back to queue under a REOPENED encounter
-// wiping its bout log: the docs promise the log survives a reopen, and that
-// Send back to queue clears a running match's score), are recorded as audit
-// rows and never asserted.
+// it leaves behind. Judgement findings, and Send back to queue under a
+// REOPENED encounter (since ruled by bc-sbq: it keeps the bout log and the
+// score), are recorded as audit rows and never asserted.
 //
 // Asserted: only the functional outcomes the docs promise (who stays on, the
 // recorded result, the bracket advancing). The clumsy variants are PERFORMED

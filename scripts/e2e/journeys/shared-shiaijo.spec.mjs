@@ -36,12 +36,12 @@ import {
   openShiaijo, upNextCard, sides, startUpNext, completedRowFor, inlineEditor, editorIdentity,
 } from '../fixtures/shiaijo.mjs';
 import {
-  EDITOR, INLINE_EDITOR, ipponButton, syncState, finishButton, armedFinishButton, armFinish, finishMatch,
+  EDITOR, INLINE_EDITOR, ipponButton, syncState, filledSlots, finishButton, armedFinishButton, armFinish, finishMatch,
 } from '../fixtures/scoring.mjs';
 import {
   doubleTap, hastyShiaijoConfirm, interrupt, loudestButton, retapWhileSaving, tapNeighbour,
 } from '../fixtures/clumsy.mjs';
-import { dwell } from '../fixtures/pace.mjs';
+import { dwell, settled } from '../fixtures/pace.mjs';
 import { tapSize } from '../fixtures/pointer.mjs';
 import { openTvBoard, tvBoard } from '../fixtures/public.mjs';
 import {
@@ -52,7 +52,7 @@ import * as T from '../fixtures/team.mjs';
 import {
   enterTournament, seedCompetitions, readScoresTab, bracketSlots, operatorDevice, publicDevice,
   competitionPicker, officiatingName, pickCompetition, nudges, nudgeLines, courtState, runningOnCourt,
-  playTeamMatch, liveBout, correctAcross,
+  playTeamMatch, liveBout, correctAcross, chooseCourt,
 } from '../fixtures/shared-court.mjs';
 
 test.describe.configure({ mode: 'serial' });
@@ -86,6 +86,14 @@ const compOfEyebrow = (eyebrow) => {
   if (e.startsWith(ST.toUpperCase())) return ST;
   return `unknown: ${eyebrow}`;
 };
+// A court's column on the public schedule (/schedule) and on the Tournament
+// schedule page (/admin/schedule): both title it "SHIAIJO <court>".
+const scheduleColumn = (page, court) => page.locator('.tw-court')
+  .filter({ has: page.locator('.tw-court__title', { hasText: new RegExp(`^SHIAIJO ${court}$`) }) });
+// The clock times a text shows (HH:MM) other than `planned`.
+const timesOtherThan = (text, planned) => (text.match(/\b\d{1,2}:\d{2}\b/g) || []).filter((t) => t !== planned);
+// The labels the editors' autosave pill takes (admin_scoring_autosave.jsx).
+const SYNC_PILL = /^(Synced|Syncing…|Offline|Not saving)$/;
 
 // The bout running in the console's editor (individual or team), with its
 // competition and court.
@@ -170,6 +178,29 @@ test.describe('shared-shiaijo', () => {
     for (const p of [C, H, Bc, P, TV]) if (p) await p.context().close();
   });
 
+  // bc-seqc (operator ruling 2026-10-12, bc-shcr D3: "By default, competitions
+  // should be one after the other and the start-time will need to be adjusted
+  // depending on how the day is going"). ST was created after SI and shares
+  // Shiaijo A with it, so by default every ST match on A comes after SI's last
+  // match there. First in the file because S1 re-times ST with Auto-schedule,
+  // after which the defaults can no longer be read; it only reads the Scores
+  // and Bracket tabs, so S1 starts from the same state. The wizard hint's new
+  // wording is the fix's to write: it is recorded here, not asserted.
+  test.fixme('bc-seqc: a competition sharing a shiaijo with an earlier one is scheduled after it by default', async () => {
+    const clock = (t) => /^\d\d:\d\d$/.test(t);
+    const siOnA = [
+      ...(await readScoresTab(H, ids.SI)).filter((m) => m.court === 'A').map((m) => m.time),
+      ...(await bracketSlots(H, ids.SI)).filter((m) => m.court === 'A').map((m) => m.time),
+    ].filter(clock).sort();
+    const stOnA = (await bracketSlots(H, ids.ST)).filter((m) => m.court === 'A').map((m) => m.time).filter(clock).sort();
+    row('bc-seqc', { step: 'S8 slots', action: 'default slots on Shiaijo A', variant: 'fixme', siOnA, stOnA,
+      hint: draw.defaults.ST.sharedCourtHint, startTimes: { si: draw.defaults.SI.startTime, st: draw.defaults.ST.startTime } });
+    expect(siOnA.length).toBeGreaterThan(0);
+    expect(stOnA.length).toBeGreaterThan(0);
+    const siLast = siOnA[siOnA.length - 1];
+    expect(stOnA[0] > siLast, `${ST}'s first match on A (${stOnA[0]}) comes after ${SI}'s last there (${siLast})`).toBe(true);
+  });
+
   // S1 the picker, S8 the slot times (P6), S7 the public queue before play.
   test('S1 S8 S7: the shared court before the first bout', async () => {
     test.setTimeout(300_000);
@@ -249,6 +280,34 @@ test.describe('shared-shiaijo', () => {
       tv: (await tvBoard(TV).innerText()).replace(/\s+/g, ' ').slice(0, 500),
       schedule: (await P.locator('body').innerText()).replace(/\s+/g, ' ').slice(0, 900),
       tvShot: await shot(TV, 's7-tv-A-before-play'), scheduleShot: await shot(P, 's7-public-schedule-before-play', { fullPage: true }) });
+  });
+
+  // bc-pubq (operator ruling 2026-10-12, bc-shcr D2: "The view should follow
+  // the queue the scoring operator has"). Before play, with ST re-timed between
+  // SI's pool bouts, the TV board for A names the match the court A console
+  // will start next and nothing of the competition the console is not
+  // running, and the public schedule shows ONE "Next up" on Shiaijo A, on that
+  // match. Relies on the state S1 leaves (nothing played, ST re-timed). It
+  // only navigates C, TV and P, and leaves P on /schedule and TV on A's board,
+  // as S2 expects. Today the schedule's second "Next up" (ST's semi-final) is
+  // what fails here; the TV naming ST's semi-final as NEXT was seen while SI
+  // ran (S7 inside S2), so in this state its check guards a regression.
+  test.fixme('bc-pubq: the TV board and the public schedule follow the court console\'s queue on a shared shiaijo', async () => {
+    await openShiaijo(C, 'A');
+    const s = await courtState(C);
+    expect(s.upNext, 'the court A console has an Up next').not.toBeNull();
+    const [shiro, aka] = s.upNext.names;
+    const otherNames = s.officiating === SI ? TEAMS.map((t) => t[0]) : ROSTER_12.map((p) => p[0]);
+    await openTvBoard(TV, 'A');
+    await expect(tvBoard(TV)).toContainText(shiro);
+    await expect(tvBoard(TV)).toContainText(aka);
+    for (const name of otherNames) await expect(tvBoard(TV)).not.toContainText(name);
+    await P.goto('/schedule');
+    const nextUp = scheduleColumn(P, 'A').locator('.tw-match')
+      .filter({ has: P.locator('.tw-match__queue', { hasText: /^Next up$/ }) });
+    await expect(nextUp).toHaveCount(1);
+    await expect(nextUp).toContainText(shiro);
+    await expect(nextUp).toContainText(aka);
   });
 
   // S2 / S2b the automatic advance; S4a Correct while SI's own bout runs; S9
@@ -638,6 +697,92 @@ test.describe('shared-shiaijo', () => {
       upNext: (await courtState(C)).upNext, shot: await shot(C, 's5-switched-by-tap') });
   });
 
+  // bc-rnrm (operator ruling 2026-10-11 on PR #442 finding 5: "Run now - This
+  // seems to be the wrong button", read on 2026-10-12 as remove it). Relies on
+  // the state S4b-S5 leaves: SI's final waits on M6, running on B, so it is a
+  // Later row on A, the row that offered Run now; ST's final waits on its
+  // second semi-final the same way. Only switches the picker, and leaves the
+  // console on ST, as S6a expects.
+  test.fixme('bc-rnrm: no court console row offers Run now', async () => {
+    if (!/\/admin\/shiaijo\/A$/.test(C.url())) await openShiaijo(C, 'A');
+    await pickCompetition(C, SI);
+    await expect(C.locator('.shiaijo-pending .shiaijo-qrow').first()).toBeVisible();
+    await expect(C.getByRole('button', { name: 'Run now' })).toHaveCount(0);
+    await pickCompetition(C, ST);
+    await expect(C.getByRole('button', { name: 'Run now' })).toHaveCount(0);
+  });
+
+  // bc-pace (operator ruling 2026-10-12, bc-shcr D2: "The schedule also needs
+  // to adapt if the courts are running late or fast"). How the projection is
+  // computed and shown is planned on the bead before code, so this pins only
+  // the observable its acceptance names: once court A has played matches
+  // (SI's pools, quarter-finals and semi-final, all far off the plan's clock
+  // in a test run),
+  // its next match, ST's second semi-final, shows a time other than its
+  // stored one on the court console, the public schedule and the TV board
+  // (which shows no time at all today), while the Scores tab still shows the
+  // plan. Rewrite the time reads to the planned presentation when the bead is
+  // planned. Relies on the state S4b-S5 leaves (nothing running on A, ST's
+  // semi-final waiting there); it only reads, and leaves the console on ST.
+  test.fixme('bc-pace: court A\'s next match shows a time projected from the court\'s pace, the plan unchanged', async () => {
+    const planned = (draw.st.find((m) => same(pairOf(m), bouts.sf2)) || {}).time;
+    expect(planned, `${ST}'s second semi-final has a planned time`).toMatch(/^\d\d:\d\d$/);
+    const stored = ((await readScoresTab(H, ids.ST)).find((m) => same(pairOf(m), bouts.sf2)) || {}).time;
+    expect(stored, 'the Scores tab still shows the plan').toBe(planned);
+    if (!/\/admin\/shiaijo\/A$/.test(C.url())) await openShiaijo(C, 'A');
+    if ((await officiatingName(C)) !== ST) await pickCompetition(C, ST);
+    expect(same(await sides(upNextCard(C)), bouts.sf2)).toBe(true);
+    expect(timesOtherThan(await upNextCard(C).innerText(), planned), 'a projected time on the console Up next card').not.toEqual([]);
+    await P.goto('/schedule');
+    const sfRow = scheduleColumn(P, 'A').locator('.tw-match').filter({ hasText: bouts.sf2.shiro }).filter({ hasText: bouts.sf2.aka }).first();
+    await expect(sfRow).toBeVisible();
+    expect(timesOtherThan(await sfRow.innerText(), planned), 'a projected time on the public schedule row').not.toEqual([]);
+    await openTvBoard(TV, 'A');
+    await expect(tvBoard(TV)).toContainText(bouts.sf2.shiro);
+    expect(timesOtherThan(await tvBoard(TV).innerText(), planned), 'a projected time on the TV board').not.toEqual([]);
+  });
+
+  // bc-sypl (operator ruling 2026-10-12: "You do not need the word/pill saying
+  // Synced because you have the Connected pill and it shows the queue of
+  // events"). No score editor shows the autosave pill, inline or overlay; a
+  // change not sent yet shows in the header alone, as the held-writes count
+  // beside the Connected pill, and goes once it is sent. Relies on the state
+  // S4b-S5 leaves: court B's console runs SI's semi-final M6, Shiro or Aka
+  // ahead by a men. It adds a kote for the other side while offline, which S6a
+  // and bc-mvrq do not depend on. Flipping it needs the harness to stop
+  // waiting on the pill in the same change (scoring.mjs syncState and
+  // awardIppon, team.mjs syncPill and boutIppon, this file's settleOn), as the
+  // bead says.
+  test.fixme('bc-sypl: score editors show no sync pill; the header shows what is not sent yet', async () => {
+    if (!/\/admin\/shiaijo\/B$/.test(Bc.url())) await openShiaijo(Bc, 'B');
+    await expect.poll(async () => same(await liveBout(Bc), bouts.m6), { timeout: 15_000 }).toBe(true);
+    const ed = inlineEditor(Bc);
+    await expect(ed.getByText(SYNC_PILL)).toHaveCount(0);
+    const conn = Bc.locator('.topbar').getByRole('status').filter({ hasText: 'Connected' });
+    const held = Bc.getByTestId('topbar-held');
+    await expect(conn).toBeVisible();
+    await expect(held).toHaveCount(0);
+    const other = winnerOf(bouts.m6) === 'shiro' ? 'aka' : 'shiro';
+    const before = await filledSlots(Bc, other).count();
+    await Bc.context().setOffline(true);
+    try {
+      await ipponButton(Bc, other, 'K').tap();
+      await expect(filledSlots(Bc, other)).toHaveCount(before + 1);
+      await expect(held).toBeVisible();
+      await expect(ed.getByText(SYNC_PILL)).toHaveCount(0);
+    } finally {
+      await Bc.context().setOffline(false);
+    }
+    await expect(held).toHaveCount(0, { timeout: 20_000 });
+    await expect(conn).toBeVisible();
+    // The overlay editor, on the head table, holds the same match.
+    await H.goto(`/admin/competition/${ids.SI}/scores`);
+    await H.locator('.score-edit-row.score-edit-row--running').filter({ hasText: bouts.m6.shiro }).getByRole('button', { name: /^Score$/ }).tap();
+    await expect(H.locator(EDITOR)).toBeVisible();
+    await expect(H.locator(EDITOR).getByText(SYNC_PILL)).toHaveCount(0);
+    await H.locator(EDITOR).getByRole('button', { name: /✕ Close/ }).tap();
+  });
+
   // S6a / P5: a RUNNING match moved onto a shiaijo where another bout runs.
   test('S6a: a running match moved onto the busy shared court (P5)', async () => {
     test.setTimeout(300_000);
@@ -700,5 +845,61 @@ test.describe('shared-shiaijo', () => {
         bout2ShiroOnBoardBefore: pointTried.after, bout2ShiroStored: stored, shot: await shot(H, 's6a-refused-point-read-back') });
       await hed.getByRole('button', { name: /✕ Close/ }).tap().catch(() => {});
     }
+  });
+
+  // bc-mvrq (operator ruling 2026-10-12: "warn about the move; the match then
+  // goes into the other shiaijo's queue as its NEXT match (it does not keep
+  // running there)"). S6a's shape again: ST's semi-final running on A, SI's
+  // M6 running on B, and the head table moves M6 onto A from the Tournament
+  // schedule page. Fixed: a confirm names the match and the court first; once
+  // confirmed M6 stops running, keeps its score (the Send back to queue rule)
+  // and is next in A's queue, and only ST's bout runs on A. The other doors
+  // (the schedule page's drag, the Scores row picker, the Bracket tab's panel
+  // picker) are pinned by the fix's own tests. Last in the file: S6a's send
+  // back leaves either M6 or ST's semi-final running on A, so this first puts
+  // the courts back into S6a's starting shape through the UI (the fix changes
+  // S6a as well, which records the move as it is today).
+  test.fixme('bc-mvrq: moving a running match to another shiaijo asks first, then queues it next there', async () => {
+    test.setTimeout(300_000);
+    if (!/\/admin\/shiaijo\/A$/.test(C.url())) await openShiaijo(C, 'A');
+    // ST's semi-final runs on A; starting it sends a running M6 back to A's queue.
+    await pickCompetition(C, ST);
+    if (((await liveOnConsole()) || {}).comp !== ST) await T.startUpNextTeam(C);
+    await expect.poll(async () => ((await liveOnConsole()) || {}).comp, { timeout: 15_000 }).toBe(ST);
+    const stLive = await liveOnConsole();
+    // M6, waiting on A, moves to B (a waiting move asks nothing) and starts there.
+    const m6ScoresRow = () => H.locator('.score-edit-row').filter({ hasText: bouts.m6.shiro }).filter({ hasText: bouts.m6.aka }).first();
+    await H.goto(`/admin/competition/${ids.SI}/scores`);
+    await chooseCourt(m6ScoresRow(), 'B');
+    await openShiaijo(Bc, 'B');
+    await expect.poll(async () => same(await sides(upNextCard(Bc)).catch(() => null), bouts.m6), { timeout: 15_000 }).toBe(true);
+    expect(same(await ensureRunning(Bc), bouts.m6)).toBe(true);
+    const marks = { shiro: await slotMarks(Bc, 'shiro'), aka: await slotMarks(Bc, 'aka') };
+    // The move: the running M6, from B's column of the schedule page onto A.
+    await H.goto('/admin/schedule');
+    const m6Row = scheduleColumn(H, 'B').locator('.tw-match.tw-match--running').filter({ hasText: bouts.m6.shiro }).first();
+    await expect(m6Row).toBeVisible();
+    await m6Row.locator('button[aria-haspopup="listbox"]').tap();
+    await H.getByRole('listbox', { name: 'Choose shiaijo' }).getByRole('option', { name: 'A', exact: true }).tap();
+    const confirm = H.getByRole('dialog').filter({ hasText: 'Shiaijo A' });
+    await settled(confirm);
+    await expect(confirm).toContainText(bouts.m6.shiro);
+    await expect(confirm).toContainText(bouts.m6.aka);
+    await confirm.getByRole('button', { name: /Move/ }).tap();
+    await expect(confirm).toBeHidden();
+    // One bout runs on A, ST's; none on B; the console shows no second bout.
+    const onA = await runningOnCourt(H, 'A');
+    expect(onA).toHaveLength(1);
+    expect(onA[0]).toMatchObject({ comp: ST, shiro: stLive.shiro, aka: stLive.aka });
+    expect(await runningOnCourt(H, 'B')).toHaveLength(0);
+    await expect(C.locator('.shiaijo-also-running')).toHaveCount(0);
+    // M6 is SI's next match on A, with the score it had.
+    await pickCompetition(C, SI);
+    await expect.poll(async () => same(await sides(upNextCard(C)).catch(() => null), bouts.m6), { timeout: 15_000 }).toBe(true);
+    await H.goto(`/admin/competition/${ids.SI}/scores`);
+    await m6ScoresRow().getByRole('button', { name: /^Score$/ }).tap();
+    await expect(H.locator(EDITOR)).toBeVisible();
+    expect({ shiro: await slotMarks(H, 'shiro', EDITOR), aka: await slotMarks(H, 'aka', EDITOR) }).toEqual(marks);
+    await H.locator(EDITOR).getByRole('button', { name: /✕ Close/ }).tap();
   });
 });

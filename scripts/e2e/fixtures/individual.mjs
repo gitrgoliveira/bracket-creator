@@ -32,8 +32,8 @@ export const ROSTER_6B = [
   ['Bo Grant', 'Gyokusen'], ['Cy Novak', 'Thames'], ['Di Weller', 'Musashi'],
   ['Ed Frost', 'Seishinkan'], ['Flo Adler', 'Mumeishi'], ['Gil Varga', 'Hizen'],
 ];
-// Small rosters for the FINDING tests, which seed their own competitions so
-// each can run alone once its defect is fixed.
+// Small rosters for the '<bead-id>: ...' tests, which seed their own
+// competitions so each runs alone.
 export const rosterOf = (prefix, n) => Array.from({ length: n }, (_, i) => [
   `${prefix} ${['Aki', 'Bea', 'Cal', 'Dee', 'Eli', 'Fay'][i]}`, ['Gyokusen', 'Thames', 'Musashi', 'Seishinkan', 'Mumeishi', 'Hizen'][i],
 ]);

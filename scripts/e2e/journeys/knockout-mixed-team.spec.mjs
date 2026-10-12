@@ -428,6 +428,10 @@ test.describe('knockout-mixed-team', () => {
       const prompt = ed.locator('form.decision-prompt');
       await prompt.locator('input[value="shiro"]').check();
       await prompt.locator('button.btn--primary').tap();
+      // The post-kiken Remaining matches panel was removed by the operator's
+      // "do not cascade" ruling (2026-09-26; bc-kpnl closed with it): `shown`
+      // records false and the award loop below taps nothing. Each remaining
+      // match is closed from its own notice when it comes up (the Start below).
       const panel = ed.locator('.remaining-matches');
       const shown = await panel.waitFor({ state: 'visible', timeout: 8000 }).then(() => true, () => false);
       const panelText = shown ? (await panel.innerText({ timeout: 2000 }).catch(() => '')).replace(/\s+/g, ' ') : '';
@@ -468,7 +472,7 @@ test.describe('knockout-mixed-team', () => {
       const matchesText = (await page.locator('body').innerText()).replace(/\s+/g, ' ');
       const i = matchesText.indexOf('Pool A');
       record({ step: 'pool kiken chain', action: 'Pools tab after the chain', variant: 'consistency', awardsTapped: awarded,
-        poolA: matchesText.slice(i, i + 700), note: 'bc-kpnl when the panel vanished and the match is still scheduled' });
+        poolA: matchesText.slice(i, i + 700), note: 'the remaining match stays scheduled: the Remaining matches panel is gone ("do not cascade"), and the match is closed from its own notice' });
       // The operator carries on at the court: Up next now holds the
       // withdrawn team's remaining match.
       await openShiaijo(page, 'A');
@@ -874,6 +878,7 @@ test.describe('knockout-mixed-team', () => {
     });
 
     await test.step('SF2 after the wrong-side kiken: the final starts, then the operator notices and corrects', async () => {
+      // A leftover from the removed Remaining matches panel: matches nothing now.
       const close = ed.locator('.remaining-matches button', { hasText: '✕' });
       if (await close.count()) await close.first().tap();
       // Not noticing, the operator starts the next match: the final.

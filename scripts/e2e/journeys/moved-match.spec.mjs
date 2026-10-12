@@ -29,16 +29,16 @@ import { journeyShots } from '../fixtures/shots.mjs';
 import { auditLog } from '../fixtures/audit.mjs';
 import { login } from '../fixtures/setup.mjs';
 import { openShiaijo, upNextCard, sides, startUpNext } from '../fixtures/shiaijo.mjs';
-import { EDITOR } from '../fixtures/scoring.mjs';
+import { EDITOR, awardIppon, finishButton, finishMatch } from '../fixtures/scoring.mjs';
 import { hastyShiaijoConfirm } from '../fixtures/clumsy.mjs';
 import { settled } from '../fixtures/pace.mjs';
 import { tapSize } from '../fixtures/pointer.mjs';
-import { ROSTER_6 } from '../fixtures/individual.mjs';
+import { ROSTER_6, recordDecision, slotMarks } from '../fixtures/individual.mjs';
 import * as T from '../fixtures/team.mjs';
 import {
   enterTournament, seedCompetitions, readScoresTab, operatorDevice, markPage, pageMark,
   competitionPicker, officiatingName, pickCompetition, nudges, nudgeLines, courtState,
-  upcomingRow, chooseCourt, runningOnCourt, playTeamMatch,
+  upcomingRow, chooseCourt, runningOnCourt, playTeamMatch, liveBout,
 } from '../fixtures/shared-court.mjs';
 
 test.describe.configure({ mode: 'serial' });
@@ -63,6 +63,10 @@ async function bStillOpen() {
 
 const queueNames = (s) => [s.upNext, ...s.upcoming].filter(Boolean).map((r) => r.names.join(' vs '));
 const pairText = (p) => `${p.shiro} vs ${p.aka}`;
+const samePair = (a, b) => !!a && !!b && a.shiro === b.shiro && a.aka === b.aka;
+// A pairing's Start, on the Up next card or its Upcoming row, whichever holds it.
+const startButton = (page, pair) => upNextCard(page).filter({ hasText: pair.shiro }).filter({ hasText: pair.aka })
+  .or(upcomingRow(page, pair)).first().getByRole('button', { name: 'Start match' });
 
 test.describe('moved-match', () => {
   test.beforeAll(async ({ browser, serverForFile }, testInfo) => {
@@ -295,7 +299,7 @@ test.describe('moved-match', () => {
     // then taps Start on the second, whose competitor is still fighting on A.
     // The console sends the running bout back to the queue BEFORE the server
     // answers the start (pickMatch's defer), and the start is refused for the
-    // competitor, not the court.
+    // competitor, not the court (bc-stpf; its fixme below asserts the fix).
     // The pairing's Start, on the Up next card or its Upcoming row, whichever
     // holds it when the tap lands: a start just made moves the next pairing
     // from its row onto the card while a hurried tap is on its way.
@@ -324,5 +328,112 @@ test.describe('moved-match', () => {
     row({ step: '8 competitor busy', action: `Start match on ${pairText(secondPair)} (one of them fights on A) while ${pairText(moved)} runs on B`,
       variant: 'V5 lost place (the moved match\'s competitor is elsewhere)', notice: await notice(), courtB: await courtState(B),
       runningOnB: await runningOnCourt(H, 'B'), shot: await shot(B, 'court-B-start-refused-competitor-busy') });
+  });
+
+  // bc-stpf (operator ruling 2026-10-12, option A: check that the start would
+  // be accepted before sending the running bout back; if it would be refused,
+  // nothing moves and the reason shows). Step 8's shape: the moved match runs
+  // on court B with a point, and the operator taps Start on a match one of
+  // whose competitors is still fighting on A. Fixed: the refusal shows and the
+  // moved match keeps running with its point. Then, with that competitor free
+  // (A's bout sent back), the same Start is accepted and sends the moved match
+  // back first (step 5b asserts a bout sent back this way keeps its score).
+  // Relies on what the main test leaves: A's first Individual bout still
+  // running, and step 7's match, which names one of its competitors, waiting
+  // on B.
+  test.fixme('bc-stpf: a Start the server would refuse leaves the running bout running and shows why', async () => {
+    const onA = await runningOnCourt(H, 'A');
+    expect(onA, "court A's first Individual bout is still running").toHaveLength(1);
+    const busy = [onA[0].shiro, onA[0].aka];
+    await openShiaijo(B, 'B');
+    if ((await competitionPicker(B).count()) && (await officiatingName(B)) !== 'Individual') await pickCompetition(B, 'Individual');
+    const runs = async (pair) => samePair(await liveBout(B), pair);
+    if (!(await runs(moved))) {
+      await startButton(B, moved).tap();
+      await expect.poll(() => runs(moved), { timeout: 15_000 }).toBe(true);
+    }
+    await awardIppon(B, 'shiro', 'M');
+    const marks = await slotMarks(B, 'shiro');
+    // The waiting match whose competitor fights on A.
+    let blocked = null;
+    await expect.poll(async () => {
+      const s = await courtState(B);
+      const r = [s.upNext, ...s.upcoming].filter(Boolean).find((x) => x.names.some((n) => busy.includes(n)));
+      blocked = r ? { shiro: r.names[0], aka: r.names[1] } : null;
+      return !!blocked;
+    }, { timeout: 15_000 }).toBe(true);
+    await startButton(B, blocked).tap();
+    const refusal = B.locator('[role="alert"], .toast').filter({ hasText: /is fighting now in .+ on Shiaijo A\. Finish that match first\./ }).first();
+    await expect(refusal).toBeVisible({ timeout: 10_000 });
+    await B.waitForTimeout(1500);
+    expect(await runs(moved), 'the moved match is still running on B').toBe(true);
+    expect(await slotMarks(B, 'shiro')).toEqual(marks);
+    const onB = await runningOnCourt(H, 'B');
+    expect(onB).toHaveLength(1);
+    expect(onB[0]).toMatchObject({ shiro: moved.shiro, aka: moved.aka });
+    // Accepted: A's bout goes back to the queue, so its competitors are free.
+    await openShiaijo(A, 'A');
+    await A.getByRole('button', { name: 'Send back to queue' }).tap();
+    await hastyShiaijoConfirm(A);
+    await expect.poll(() => liveBout(A), { timeout: 10_000 }).toBeNull();
+    await startButton(B, blocked).tap();
+    await expect.poll(() => runs(blocked), { timeout: 15_000 }).toBe(true);
+    const onBafter = await runningOnCourt(H, 'B');
+    expect(onBafter).toHaveLength(1);
+    expect(onBafter[0]).toMatchObject({ shiro: blocked.shiro, aka: blocked.aka });
+  });
+
+  // bc-adna (operator ruling 2026-10-12: "The operator's view is where scoring
+  // is done and has a queue. In Admin view, changes are not tied/blocked by
+  // the court status, there's no queue or advancing"). On the competition's
+  // Scores tab, with other Individual matches waiting on A: Finish reads plain
+  // Finish and finishing starts nothing, and a fusenpai recorded there starts
+  // nothing either, so no court_busy refusal follows it. The other half of the
+  // acceptance (an admin write is never refused for court status) is not
+  // exercised: reaching it needs a second bout running on the court, which
+  // bc-mvrq's fix rules out, and what an admin Start on a busy court then does
+  // is for the bead's plan to settle. The same fix retires shared-shiaijo's S9
+  // assertions ("Finish + Start Next →" and the start after a fusenpai on the
+  // Scores page) and the Scores tab refusal in step 5a above. Runs after
+  // bc-stpf, but takes court A as it finds it: the running Individual bout
+  // there, or else one it starts from the Scores tab whose competitors are not
+  // fighting on B.
+  test.fixme('bc-adna: the Scores tab never starts a match by itself', async () => {
+    const onB = (await runningOnCourt(H, 'B')).flatMap((m) => [m.shiro, m.aka]);
+    const rows = await readScoresTab(H, ids.IND);
+    const waitingOnA = rows.filter((m) => m.court === 'A' && m.status === 'scheduled' && !onB.includes(m.shiro) && !onB.includes(m.aka));
+    let first = rows.find((m) => m.court === 'A' && m.status === 'running');
+    const startsHere = !first;
+    if (startsHere) first = waitingOnA.shift();
+    expect(first, 'an Individual match on A to score').toBeTruthy();
+    expect(waitingOnA.length, 'two more Individual matches wait on A after it').toBeGreaterThan(1);
+    const ed = H.locator(EDITOR);
+    const open = async (m) => {
+      await H.goto(`/admin/competition/${ids.IND}/scores`);
+      await H.locator('.score-edit-row').filter({ hasText: m.shiro }).filter({ hasText: m.aka }).first().getByRole('button', { name: /^Score$/ }).tap();
+      await expect(ed).toBeVisible();
+    };
+    const start = async () => {
+      const btn = ed.getByRole('button', { name: 'Start match' });
+      await settled(btn);
+      await btn.tap();
+      await expect(finishButton(H, EDITOR)).toBeVisible();
+    };
+    await open(first);
+    if (startsHere) await start();
+    await expect(finishButton(H, EDITOR)).toHaveText('Finish');
+    await awardIppon(H, 'shiro', 'M', EDITOR);
+    await finishMatch(H, EDITOR);
+    await H.waitForTimeout(1500);
+    expect(await runningOnCourt(H, 'A'), 'nothing started on A after Finish').toHaveLength(0);
+    // A fusenpai on the next one, started by the operator.
+    const second = waitingOnA.find((m) => !samePair(m, first));
+    await open(second);
+    await start();
+    await recordDecision(H, 'fusenpai', { side: 'aka', root: EDITOR });
+    await H.waitForTimeout(2000);
+    await expect(H.locator('.toast').filter({ hasText: /is running/ })).toHaveCount(0);
+    await expect.poll(async () => ((await readScoresTab(H, ids.IND)).find((m) => samePair(m, second)) || {}).status, { timeout: 10_000 }).toBe('completed');
+    expect(await runningOnCourt(H, 'A'), 'nothing started on A after the fusenpai').toHaveLength(0);
   });
 });

@@ -780,6 +780,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // set). startMatch is handed its own pick, which is exempt from the guard.
     const pickingRef = useRefSh(null);
     const callTapRef = useRefSh(null);
+    // bc-sdtp: one bounce guard for every Start match on this console (Up next
+    // and the queue rows), keyless, because the bounce lands on a DIFFERENT
+    // button: the first start can land inside the bounce window, the card then
+    // shows the next match, and a per-match key would let the bounce start it
+    // and send the match just started back to the queue.
+    const startTapRef = useRefSh(null);
     // The newest court call this console made per match, keyed by matchKey, as
     // { id, msg }: the announcement id (a promise of it, null if the send failed)
     // and the text sent, so the call can be withdrawn once its match leaves
@@ -1507,6 +1513,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         }
     };
 
+    // A Start match tap: the bounce of the previous Start tap is ignored
+    // (startTapRef, bc-sdtp), anything else goes to pickMatch.
+    const tapStart = (m, ev) => {
+        if (!acceptTap(startTapRef, ev)) return;
+        pickMatch(m);
+    };
+
     // The defer of the running bout and the start of the picked one, after
     // pickMatch's guards and its pickingRef entry (see pickMatch).
     const deferAndStart = async (m, pick) => {
@@ -1949,7 +1962,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                                 and a running bout is sent back to the queue first,
                                                 keeping its score (bc-sbq). With neither, it simply
                                                 starts this one. */}
-                                            <button type="button" className="btn btn--primary" disabled={startingKey === matchKey(upNext)} onClick={() => pickMatch(upNext)}>
+                                            <button type="button" className="btn btn--primary" disabled={startingKey === matchKey(upNext)} onClick={(ev) => tapStart(upNext, ev)}>
                                                 {startingKey === matchKey(upNext) ? "Starting…" : "Start match"}
                                             </button>
                                             {isTeamMatch(upNext) && (
@@ -1994,7 +2007,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     label="Upcoming" subGroup matches={upcomingQueueMatches}
                                     courts={courts} onMoveCourt={requestMoveCourt}
                                     onMove={moveMatch} onEnterLineup={(m) => setLineupKey(matchKey(m))}
-                                    onPick={pickMatch} noticeFor={(m) => startNoticeFor(matchKey(m))}
+                                    onPick={tapStart} noticeFor={(m) => startNoticeFor(matchKey(m))}
                                     onCall={callToCourt} callingKey={callingKey} calledKey={calledKey} startingKey={startingKey}
                                     scheduled={filteredScheduled}
                                     password={password}
@@ -2608,7 +2621,7 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                         queue keeping its score (bc-sbq), then this match starts for scoring.
                         bc-cse: never offered on a barred row -- BarredMatchNotice above owns its
                         one-tap resolution instead, since the server would just refuse a Start. */}
-                    {onPick && !barred && <button type="button" className="btn btn--primary btn--sm shiaijo-row__pick" disabled={startingKey === matchKey(m)} onClick={() => onPick(m)} title="Start this match now and begin scoring">{startingKey === matchKey(m) ? "Starting…" : "Start match"}</button>}
+                    {onPick && !barred && <button type="button" className="btn btn--primary btn--sm shiaijo-row__pick" disabled={startingKey === matchKey(m)} onClick={(ev) => onPick(m, ev)} title="Start this match now and begin scoring">{startingKey === matchKey(m) ? "Starting…" : "Start match"}</button>}
                 </div>
             )}
             {notice && !isComplete && <div className="shiaijo-upnext__error" role="alert">{notice}</div>}

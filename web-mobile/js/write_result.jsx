@@ -305,6 +305,12 @@ export function writeWasSuperseded(res) {
 //   - applied:false: superseded or clock_skew (writeWasSuperseded).
 // A QUEUED write is not refused: it lands on reconnect.
 //
+// Callers that must tell the two refusals apart ask writeWasRefusedForClock first:
+// landedAutosave (admin_scoring_autosave.jsx) treats a clock_skew answer as neither
+// landed nor refused, because recordScore keeps a running one silent and leaves the
+// tap on the board for the next save to carry with a corrected stamp, while a
+// superseded one is final and the editor takes the server's copy.
+//
 // The editors ask it to DISARM a two-tap commit (Finish, Finish + Start Next,
 // End match, the engi Save) whose write was refused: left armed, one more tap
 // re-sent the very write just refused, and for a superseded one that tap

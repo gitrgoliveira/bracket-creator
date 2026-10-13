@@ -349,7 +349,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const landedBoardSave = (submit) => landedAutosave(submit, boardEditSeqRef, (seq) => {
     if (boardEditSeqRef.current === seq) boardEditedAtRef.current = undefined;
   }, (seq) => {
-    if (boardEditSeqRef.current === seq && applyServerScoreRef.current) applyServerScoreRef.current();
+    // The stamp must still be set: the seq counts only RUNNING edits, so a correction tapped
+    // after the match finished elsewhere (the status effect cleared the stamp, the seq did
+    // not move) would otherwise be wiped by a refusal that arrives late.
+    if (boardEditSeqRef.current === seq && boardEditedAtRef.current !== undefined && applyServerScoreRef.current) applyServerScoreRef.current();
   });
   // The match left running (finished, or sent back to the queue, elsewhere) inside the
   // debounce: the write is dropped with no callback, so no landed save clears the stamp.

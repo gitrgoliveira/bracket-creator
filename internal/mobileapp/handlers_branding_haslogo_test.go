@@ -73,16 +73,38 @@ func TestPutTournament_HasLogoOnTheWireIsIgnored(t *testing.T) {
 		h.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	}
-	put(`{"name":"Branding Test Cup","password":"secret","courts":["A"],"theme":{"primaryColor":"#112233","hasLogo":true}}`)
+	getTheme := func() map[string]any {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
+		req.Header.Set("X-Tournament-Password", "secret")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		theme, _ := body["theme"].(map[string]any)
+		return theme
+	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/tournament", nil)
+	// No logo stored: a client cannot set one by sending hasLogo.
+	put(`{"name":"Branding Test Cup","password":"secret","courts":["A"],"theme":{"primaryColor":"#112233","hasLogo":true}}`)
+	theme := getTheme()
+	assert.Equal(t, "#112233", theme["primaryColor"])
+	assert.NotContains(t, theme, "hasLogo", "hasLogo is derived from the stored logo, never set by a client")
+
+	// A logo stored: a client cannot lose it by sending hasLogo false, or by omitting it.
+	body, ct := buildBrandingUpload(t, "logo.png", tinyPNG)
+	req := httptest.NewRequest(http.MethodPost, "/api/branding/logo", body)
+	req.Header.Set("Content-Type", ct)
 	req.Header.Set("X-Tournament-Password", "secret")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code)
-	var body map[string]any
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-	theme, _ := body["theme"].(map[string]any)
-	assert.Equal(t, "#112233", theme["primaryColor"])
-	assert.NotContains(t, theme, "hasLogo", "hasLogo is derived from the stored logo, never set by a client")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, true, getTheme()["hasLogo"], "precondition: the uploaded logo is reported")
+
+	put(`{"name":"Branding Test Cup","password":"secret","courts":["A"],"theme":{"primaryColor":"#112233","hasLogo":false}}`)
+	assert.Equal(t, true, getTheme()["hasLogo"], "a PUT carrying hasLogo false does not lose the logo")
+
+	put(`{"name":"Branding Test Cup","password":"secret","courts":["A"],"theme":{"primaryColor":"#112233"}}`)
+	assert.Equal(t, true, getTheme()["hasLogo"], "a PUT that omits hasLogo does not lose the logo")
 }

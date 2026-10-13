@@ -162,7 +162,10 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   autosaveOnSubmitRef.current = landedAutosave(onSubmit, flagsEditSeqRef, (seq) => {
     if (flagsEditSeqRef.current === seq) flagsEditedAtRef.current = undefined;
   }, (seq) => {
-    if (flagsEditSeqRef.current === seq && takeServerFlagsRef.current) takeServerFlagsRef.current();
+    // The stamp must still be set: the seq counts only RUNNING edits, so a correction tapped
+    // after the match finished elsewhere (the status effect cleared the stamp, the seq did
+    // not move) would otherwise be wiped by a refusal that arrives late.
+    if (flagsEditSeqRef.current === seq && flagsEditedAtRef.current !== undefined && takeServerFlagsRef.current) takeServerFlagsRef.current();
   });
   // The match left running (finished, or sent back to the queue, elsewhere) inside the
   // debounce: the write is dropped with no callback, so no landed save clears the stamp.

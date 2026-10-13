@@ -138,14 +138,6 @@ func extractSeeds(players []domain.Player) []domain.SeedAssignment {
 	return out
 }
 
-// validateCompetitionDateInTournament checks that the competition's Date
-// falls within the tournament's day range [Day 1 .. Day N]. When:
-//   - comp.Date is empty (optional field) → skip, return nil.
-//   - tourn is nil or tourn.Date is empty → skip (can't derive day list yet).
-//   - comp.Date is in the derived day list → return nil.
-//   - comp.Date is NOT in the derived day list → return a descriptive error.
-//
-// errcheck: no bare ignored returns, always propagated by callers.
 // defaultCompetitionDate gives a competition that states no date the
 // tournament's Day 1, the one rule every door that creates a competition
 // shares (POST /competitions and the folder import). It leaves an explicit
@@ -159,6 +151,14 @@ func defaultCompetitionDate(comp *state.Competition, tourn *state.Tournament) bo
 	return comp.Date != ""
 }
 
+// validateCompetitionDateInTournament checks that the competition's Date
+// falls within the tournament's day range [Day 1 .. Day N]. When:
+//   - comp.Date is empty (optional field) → skip, return nil.
+//   - tourn is nil or tourn.Date is empty → skip (can't derive day list yet).
+//   - comp.Date is in the derived day list → return nil.
+//   - comp.Date is NOT in the derived day list → return a descriptive error.
+//
+// errcheck: no bare ignored returns, always propagated by callers.
 func validateCompetitionDateInTournament(comp *state.Competition, tourn *state.Tournament) error {
 	if comp.Date == "" || tourn == nil || tourn.Date == "" {
 		return nil

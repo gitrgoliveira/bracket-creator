@@ -4,7 +4,7 @@
 
 import { toBackendMatchResult, matchWire } from './api_serializers.jsx';
 import { changedGroups, statedGroupsOf, groupMatches, keptInHistoryNote, GROUP_RESULT } from './match_groups.jsx';
-import { writeDidNotLand, writeWasRefused } from './write_result.jsx';
+import { writeDidNotLand, writeWasRefused, writeWasRefusedForClock } from './write_result.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -152,13 +152,17 @@ export function useKeptInHistoryNote() {
 // server and every other surface show the server's. The callback is for the editor to
 // compare `seq` with its counter (an edit made since is still owed and keeps its stamp),
 // then drop the stamp and take the server's CURRENT copy. A QUEUED answer calls neither:
-// that write will land, so the stamp stays.
+// that write will land, so the stamp stays. So does a clock_skew refusal
+// (writeWasRefusedForClock): recordScore keeps a running one silent on purpose, relearns the
+// clock and leaves the tap on the board for the NEXT save to carry with a corrected stamp, so
+// taking the server's copy here would wipe a tap that is still owed.
 export function landedAutosave(submit, seqRef, onLanded, onRefused) {
   return (patch) => {
     const seq = seqRef.current;
     const p = submit(patch);
     if (p && typeof p.then === "function") {
       p.then((res) => {
+        if (writeWasRefusedForClock(res)) return;
         if (writeWasRefused(res)) { if (onRefused) onRefused(seq); }
         else if (!writeDidNotLand(res)) onLanded(seq);
       }, () => {});

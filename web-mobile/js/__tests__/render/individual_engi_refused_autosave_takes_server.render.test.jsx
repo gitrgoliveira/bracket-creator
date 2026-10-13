@@ -49,6 +49,9 @@ afterEach(() => { vi.useRealTimers(); });
 
 const REFUSED = { applied: false, reason: 'superseded' };
 const QUEUED = { queued: true };
+// recordScore answers a running clock_skew refusal silently: it relearns the clock and the
+// tap stays on the board for the NEXT save to carry with a corrected stamp.
+const CLOCK_SKEW = { applied: false, reason: 'clock_skew' };
 
 const tap = async (node) => { await act(async () => { fireEvent.click(node); }); };
 const wait = async (ms) => { await act(async () => { vi.advanceTimersByTime(ms); }); };
@@ -116,6 +119,35 @@ describe('individual editor: a refused autosave takes the server\'s copy', () =>
     await settle();
     expect(marks(r.container).filter((l) => l.startsWith('Aka')), 'the newer edit is still owed').not.toHaveLength(0);
   });
+
+  it('a clock_skew answer keeps the board: the tap is owed to the next save, not wiped', async () => {
+    const r = await tapThenAnswer(CLOCK_SKEW);
+    expect(marks(r.container).map((l) => l.split(' ')[0])).toEqual(['Aka']);
+  });
+
+  it('a late refusal does not wipe a correction tapped after the match finished elsewhere', async () => {
+    let settleFirst;
+    const onSubmit = vi.fn().mockImplementationOnce(() => new Promise((res) => { settleFirst = res; }))
+      .mockResolvedValue({ id: 'm1', status: 'completed' });
+    let r;
+    await act(async () => { r = render(el(bout(), onSubmit)); });
+    await tap(menButton(r.container.querySelector('.sb-side--aka')));
+    await wait(350); // the autosave is out and unanswered
+    expect(onSubmit, 'precondition: the autosave went out').toHaveBeenCalledTimes(1);
+    // Another device finishes the match: Shiro won by M, stamped after the tap.
+    await act(async () => {
+      r.rerender(el(bout({
+        status: 'completed', ipponsB: ['M'], winner: { id: 'p2', name: 'Tanaka' }, modifiedAt: NOW + 100,
+      }), onSubmit));
+    });
+    vi.setSystemTime(NOW + 600);
+    await tap(menButton(r.container.querySelector('.sb-side--aka'))); // a correction on the finished match
+    const before = marks(r.container).map((l) => l.split(' ')[0]);
+    expect(before, 'precondition: the correction shows').toContain('Aka');
+    await act(async () => { settleFirst(REFUSED); }); // the autosave is refused late
+    await settle();
+    expect(marks(r.container).map((l) => l.split(' ')[0]), 'the correction stays').toEqual(before);
+  });
 });
 
 describe('engi editor: a refused autosave takes the server\'s copy', () => {
@@ -175,5 +207,34 @@ describe('engi editor: a refused autosave takes the server\'s copy', () => {
     await act(async () => { settleFirst(REFUSED); });
     await settle();
     expect(count(r, 'aka'), 'the newer edit is still owed').toBe('2');
+  });
+
+  it('a clock_skew answer keeps the board: the tap is owed to the next save, not wiped', async () => {
+    const r = await tapThenAnswer(CLOCK_SKEW);
+    expect([count(r, 'aka'), count(r, 'shiro')]).toEqual(['1', '0']);
+  });
+
+  it('a late refusal does not wipe a correction tapped after the match finished elsewhere', async () => {
+    let settleFirst;
+    const onSubmit = vi.fn().mockImplementationOnce(() => new Promise((res) => { settleFirst = res; }))
+      .mockResolvedValue({ id: 'm1', status: 'completed' });
+    let r;
+    await act(async () => { r = render(el(engi(), onSubmit)); });
+    await tap(r.getByTestId('engi-aka-inc'));
+    await wait(350); // the autosave is out and unanswered
+    expect(onSubmit, 'precondition: the autosave went out').toHaveBeenCalledTimes(1);
+    // Another device finishes the match: Shiro 1 flag, stamped after the tap.
+    await act(async () => {
+      r.rerender(el(engi({
+        status: 'completed', flagsB: 1, winner: { id: 'p-shiro', name: 'Shiro Pair 1 - Shiro Pair 2' }, modifiedAt: NOW + 100,
+      }), onSubmit));
+    });
+    vi.setSystemTime(NOW + 600);
+    await tap(r.getByTestId('engi-aka-inc')); // a correction on the finished match
+    const before = [count(r, 'aka'), count(r, 'shiro')];
+    await act(async () => { settleFirst(REFUSED); }); // the autosave is refused late
+    await settle();
+    expect([count(r, 'aka'), count(r, 'shiro')], 'the correction stays').toEqual(before);
+    expect(Number(before[0]), 'precondition: the correction was taken').toBeGreaterThan(0);
   });
 });

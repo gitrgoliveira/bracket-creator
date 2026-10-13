@@ -150,6 +150,12 @@ describe('a refused autosave takes the server\'s copy of the rows it carried', (
     expect([filled('aka'), filled('shiro')]).toEqual([1, 0]);
   });
 
+  it('a clock_skew answer keeps the sheet: the tap is owed to the next save, not wiped', async () => {
+    // recordScore keeps a running clock_skew refusal silent and relearns the clock.
+    await strikeThenAnswer({ applied: false, reason: 'clock_skew' });
+    expect([filled('aka'), filled('shiro')]).toEqual([1, 0]);
+  });
+
   it('a strike made after the refused save was built is kept', async () => {
     let settleFirst;
     const onSubmit = vi.fn().mockImplementationOnce(() => new Promise((res) => { settleFirst = res; }))

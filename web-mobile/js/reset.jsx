@@ -3,7 +3,8 @@
 // old one (since they don't know it). The backing endpoint is
 // POST /api/tournament/reset (handlers_reset.go); it is unauthenticated
 // by design but answers only a browser on the machine running the server
-// (403 reset_local_only otherwise), and the operator hardens production
+// (loopback peer and loopback Host, opened as http://localhost:<port>/reset;
+// 403 reset_local_only otherwise), and the operator hardens production
 // deployments by passing
 // --lock-password (mobile-app CLI) which 404s the reset endpoint AND
 // switches auth to a bcrypt env-var hash.

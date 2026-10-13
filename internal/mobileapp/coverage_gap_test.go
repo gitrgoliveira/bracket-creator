@@ -619,6 +619,7 @@ func TestReset_BadJSON(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/api/tournament/reset", bytes.NewBufferString("{invalid"))
 	req.RemoteAddr = loopbackPeer
+	req.Host = "localhost:8080"
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)

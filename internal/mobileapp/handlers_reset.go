@@ -84,18 +84,12 @@ var errResetPasswordRequired = errors.New("password is required")
 //     /reset page still renders a disabled-state message) and rotate
 //     credentials via env-var hash; the recovery endpoint is designed
 //     for direct same-host operator access.
-//   - DNS rebinding: a malicious page can rebind its domain to the
-//     tournament server's IP so that both Origin.Host and c.Request.Host
-//     equal the attacker's domain, passing the Origin == Host check even
-//     though the request reaches this server. This endpoint is intended
-//     for trusted networks (local / private LAN); for any
-//     internet-exposed deployment use --lock-password instead, which
-//     disables this endpoint entirely.
+//   - DNS rebinding: a malicious page opened in a browser on the server
+//     machine can rebind its domain to 127.0.0.1, so that the peer is
+//     loopback and both Origin.Host and c.Request.Host equal the
+//     attacker's domain. isLoopbackHost closes this: the Host must be a
+//     loopback name, which the attacker's domain is not.
 //
-// We deliberately do NOT restrict to loopback-only: the recovery path
-// must be reachable from any browser tab on the same network so
-// operators at a scoring table on the far side of the venue can reset
-// without SSH access to the server.
 // resetLocalOnlyCode and resetLocalOnlySentence are the refusal of a reset
 // that does not come from the machine running the server. The SPA shows the
 // sentence when it sees the code.
@@ -115,8 +109,30 @@ func isLoopbackPeer(r *http.Request) bool {
 	if err != nil {
 		return false
 	}
+	return isLoopbackIP(host)
+}
+
+// isLoopbackIP reports whether host is a loopback IP literal (127.0.0.0/8, ::1,
+// or an IPv4-mapped 127/8). A name or an address that does not parse is not.
+func isLoopbackIP(host string) bool {
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// isLoopbackHost reports whether the request was addressed to the machine
+// running the server by a loopback name: "localhost" (any case), a loopback IPv4
+// or a bracketed loopback IPv6, each with or without a port. A page whose
+// hostname was rebound to 127.0.0.1 (DNS rebinding) reaches this server from a
+// loopback peer but carries its own name as Host, so the peer test alone cannot
+// tell it from the operator's browser.
+func isLoopbackHost(r *http.Request) bool {
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	} else if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		host = host[1 : len(host)-1]
+	}
+	return strings.EqualFold(host, "localhost") || isLoopbackIP(host)
 }
 
 func isSameOriginReset(c *gin.Context) bool {
@@ -168,8 +184,9 @@ func RegisterResetHandlers(r *gin.RouterGroup, store *state.Store, verifier Pass
 		}
 
 		// File mode answers only the machine running the server, judged on
-		// the TCP peer address (see isLoopbackPeer).
-		if !isLoopbackPeer(c.Request) {
+		// the TCP peer address (see isLoopbackPeer) and on a loopback Host
+		// (see isLoopbackHost), one refusal for both.
+		if !isLoopbackPeer(c.Request) || !isLoopbackHost(c.Request) {
 			c.JSON(http.StatusForbidden, gin.H{
 				"error":   resetLocalOnlySentence,
 				"code":    resetLocalOnlyCode,

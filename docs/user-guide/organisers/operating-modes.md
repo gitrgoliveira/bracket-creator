@@ -36,7 +36,7 @@ Authentication mode controls how the admin password is stored and verified. Ther
 
 In file mode, the admin password is stored in plain text in the `tournament.md` data file. You set it during tournament creation, or you can edit the file directly.
 
-If you forget the password, browse to `http://localhost:<port>/reset` in a browser on the machine running the server and choose a new one. No old password is required. In file mode the password can be reset only from that machine: a request from any other machine is refused with "Reset the password on the machine running the server." When the server runs in a Docker container started with `-p`, a browser on the host reaches it through the container network, not loopback, so the reset is refused there too; edit `tournament.md` in the mounted data folder instead.
+If you forget the password, browse to `http://localhost:<port>/reset` in a browser on the machine running the server and choose a new one. No old password is required. In file mode the password can be reset only from that machine: a request from any other machine, or one addressed by a name other than `localhost`, `127.0.0.1` or `[::1]`, is refused with "Reset the password on the machine running the server." When the server runs in a Docker container started with `-p`, a browser on the host reaches it through the container network, not loopback, so the reset is refused there too; edit `tournament.md` in the mounted data folder instead.
 
 !!! note
     Switching from file mode to locked mode does not erase the on-disk password. The app ignores it while locked mode is active. Switching back re-enables the stored value.

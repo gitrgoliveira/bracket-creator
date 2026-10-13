@@ -2779,7 +2779,9 @@ const API = {
     },
     // Reset the tournament password. Unauthenticated by design: the
     // server enforces "is this endpoint enabled" via the verifier's
-    // ResetEnabled() (locked mode returns 404). Throws on non-2xx so
+    // ResetEnabled() (locked mode returns 404). In file mode it answers
+    // only a request made on the server machine (loopback peer and
+    // loopback Host), else 403 reset_local_only. Throws on non-2xx so
     // the caller can surface the server's error message (including the
     // 404 "reset disabled" case if the SPA's cached authConfig was
     // stale).

@@ -534,8 +534,10 @@ paths:
 
         The endpoint answers only a request from the machine running the server: the
         TCP peer address must be a loopback address (127.0.0.0/8, `::1`, or an
-        IPv4-mapped 127/8). `X-Forwarded-For`, `X-Real-IP` and `Forwarded` are never
-        consulted. Any other peer receives `403` with the code `reset_local_only`.
+        IPv4-mapped 127/8), and the request's `Host` must be a loopback name
+        (`localhost`, a 127/8 IPv4 or a bracketed `[::1]`, with or without a port).
+        `X-Forwarded-For`, `X-Real-IP` and `Forwarded` are never consulted. Any
+        other peer or Host receives `403` with the code `reset_local_only`.
         A server in a Docker container started with `-p` sees a browser on the host
         as a non-loopback peer, so the reset is refused there too.
 
@@ -577,7 +579,8 @@ paths:
           description: |
             Refused, in one of two ways.
 
-            The request did not come from the machine running the server. The body is
+            The request did not come from the machine running the server, or its `Host`
+            is not a loopback name. The body is
             `{"error": "Reset the password on the machine running the server.", "code":
             "reset_local_only", "message": "<the same sentence>"}`.
 

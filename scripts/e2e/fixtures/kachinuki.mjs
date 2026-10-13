@@ -17,7 +17,7 @@ import { dwell, settled } from './pace.mjs';
 import { EXPECT_TIMEOUT_MS } from './devices.mjs';
 import { clearMarks } from './scoring.mjs';
 import { isCoarse, restoreCoarse } from './pointer.mjs';
-import { inlineEditor } from './shiaijo.mjs';
+import { inlineEditor, sides, upNextCard } from './shiaijo.mjs';
 import * as T from './team.mjs';
 
 // Does the page still match (pointer: coarse)? If an interruption or a
@@ -171,3 +171,27 @@ export async function endMatch(page) {
   await btn.tap();
   return armed;
 }
+
+// ------------------------------------------------------------ pool play --
+
+// Start the Up next kachinuki encounter from its card and return the pairing
+// (Shiro, Aka team names) once the sheet is running. The individual board's
+// startUpNext (fixtures/shiaijo.mjs) waits for `.sb-side--*`, which this sheet
+// does not have.
+export async function startUpNextKachinuki(page) {
+  const pair = await sides(upNextCard(page));
+  await upNextCard(page).getByRole('button', { name: 'Start match' }).tap();
+  await expect(recordBoutButton(page)).toBeVisible();
+  return pair;
+}
+
+// The line that stands where the current bout was once Record bout took a
+// team's last fighter off ("Aka has no fighters left. End match finishes the
+// encounter.").
+export const noPairingLine = (page) => editor(page).getByTestId('kachinuki-no-pairing');
+
+// The representative bout (daihyosen) offer. A kachinuki sheet never carries
+// it (admin_scoring_team.jsx hides the add affordance under isKachinuki), so a
+// journey asserts both are absent.
+export const daihyosenOffer = (page) => editor(page).getByTestId('scoring-modal-daihyosen-button');
+export const daihyosenControls = (page) => editor(page).locator('.daihyosen-controls');

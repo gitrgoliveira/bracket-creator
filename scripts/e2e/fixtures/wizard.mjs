@@ -56,10 +56,11 @@ async function setNumber(page, label, value) {
 //   numberPrefix   up to 3 characters
 //   twoThirdPlaces boolean: "Award two joint 3rd places" (on by default;
 //                  untick it for a bronze match)
+//   checkIn        boolean: "Check-in tracking" (officiated tournaments only)
 export async function createCompetition(page, opts = {}) {
   const {
     name, kind, format, teamSize, teamMatchType, poolSizeMode, poolSize, poolWinners,
-    courts, numberPrefix, twoThirdPlaces, engi,
+    courts, numberPrefix, twoThirdPlaces, engi, checkIn,
   } = opts;
   await page.goto('/admin/create-competition');
   await expect(page.getByRole('heading', { level: 1, name: 'Add competition' })).toBeVisible();
@@ -76,6 +77,7 @@ export async function createCompetition(page, opts = {}) {
   if (twoThirdPlaces !== undefined) {
     await page.getByRole('checkbox', { name: 'Award two joint 3rd places' }).setChecked(twoThirdPlaces);
   }
+  if (checkIn !== undefined) await page.getByRole('checkbox', { name: /^Check-in tracking/ }).setChecked(checkIn);
   if (courts) {
     const grp = group(page, 'Assigned shiaijo');
     const pills = grp.getByRole('button');

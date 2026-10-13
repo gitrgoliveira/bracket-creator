@@ -58,6 +58,13 @@ const CONSOLE_ALLOWLIST = [
     codeUnreadable: true,
     request: (r) => !!r && (/\/reopen$/.test(r.url) || writeStatus(r.postData) === 'running'),
   },
+  {
+    reason: 'The organiser edits a competitor to the same name AND dojo as another one on the roster (organiser-roster journey): the server refuses the participant PUT and the Edit dialog shows its message. Same name in another dojo is not refused.',
+    text: /^Failed to load resource: the server responded with a status of 409 \(Conflict\)$/,
+    url: /\/api\/competitions\/[^/]+\/participants\/[^/]+$/,
+    code: /^a participant with the same name and dojo already exists$/,
+    request: (r) => !!r && r.method === 'PUT',
+  },
 ];
 
 // The `error` field of a refusal body; read with a pattern, since the body is

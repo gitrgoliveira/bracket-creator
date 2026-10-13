@@ -39,17 +39,17 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
   const [primaryColor, setPrimaryColor] = useStateBr(theme.primaryColor || "#1d3557");
   const [accentSoftColor, setAccentSoftColor] = useStateBr(theme.accentSoftColor || "#e7eaf3");
   const [windowTitle, setWindowTitle] = useStateBr(theme.windowTitle || "");
-  const [hasLogo, setHasLogo] = useStateBr(false);
+  // Whether a custom logo is set comes with the tournament (theme.hasLogo), so
+  // the page never probes /api/branding/logo and meets a 404 while none is set
+  // (bc-lgnf). Upload and Remove below set it at once; the effect follows the
+  // tournament when it changes (an SSE reload, another organiser's upload).
+  const tournamentHasLogo = !!theme.hasLogo;
+  const [hasLogo, setHasLogo] = useStateBr(tournamentHasLogo);
   const [logoKey, setLogoKey] = useStateBr(0); // bump to force img reload
   const [busy, setBusy] = useStateBr(false);
   const fileRef = useRefBr(null);
 
-  // Probe whether a logo exists on mount.
-  useEffectBr(() => {
-    fetch('/api/branding/logo', { method: 'HEAD' })
-      .then(r => setHasLogo(r.ok))
-      .catch(() => setHasLogo(false));
-  }, [logoKey]);
+  useEffectBr(() => { setHasLogo(tournamentHasLogo); }, [tournamentHasLogo]);
 
   // Sync incoming theme changes (e.g. after a tournament SSE reload).
   // Always update pickers/inputs, but only propagate to the parent when

@@ -65,12 +65,6 @@ const CONSOLE_ALLOWLIST = [
     code: /^a participant with the same name and dojo already exists$/,
     request: (r) => !!r && r.method === 'PUT',
   },
-  {
-    reason: 'Edit tournament details probes for a custom logo with HEAD /api/branding/logo, which answers 404 on purpose while none is uploaded (handlers_branding.go: "must keep returning 404 when none is set"); the browser logs it once per page load of a tournament without a logo.',
-    text: /^Failed to load resource: the server responded with a status of 404 \(Not Found\)$/,
-    url: /\/api\/branding\/logo$/,
-    request: (r) => !!r && r.method === 'HEAD',
-  },
 ];
 
 // The `error` field of a refusal body; read with a pattern, since the body is

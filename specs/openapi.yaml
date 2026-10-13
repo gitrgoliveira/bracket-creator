@@ -6035,6 +6035,30 @@ components:
             `password`, which is redacted in locked mode). Defaults to `officiated` when
             omitted on POST (backward-compatible with pre-mp-7h7 tournaments whose
             `tournament.md` lacks the field).
+        theme:
+          type: object
+          description: >
+            Optional branding. Absent when nothing is set (a theme holding
+            only a logo is returned as `{"hasLogo": true}`).
+          properties:
+            primaryColor:
+              type: string
+              description: Accent colour as `#rrggbb`.
+            accentSoftColor:
+              type: string
+              description: Soft accent (background tint) as `#rrggbb`.
+            windowTitle:
+              type: string
+              maxLength: 100
+              description: Browser tab / window title.
+            hasLogo:
+              type: boolean
+              readOnly: true
+              description: >
+                True when a custom logo has been uploaded; absent otherwise.
+                Derived by the server, so a value sent on PUT is ignored. A
+                client reads it instead of probing `HEAD /api/branding/logo`,
+                which answers 404 while no logo is set.
     TournamentWithCompetitions:
       description: >
         The response shape for POST and PUT /api/tournament: every Tournament

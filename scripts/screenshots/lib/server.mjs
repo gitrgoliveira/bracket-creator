@@ -71,8 +71,13 @@ function disarmSignals() {
   signalHandlers.clear();
 }
 
-// start("mobile" | "web") -> { base, dataDir, stop() }
-export async function start(kind) {
+// start("mobile" | "web", { args, env }?) -> { base, dataDir, stop() }
+// `args` (extra command-line arguments after the command) and `env` (extra
+// environment, applied last) are optional and default to none, so a caller
+// that passes neither starts exactly the server it always did. The e2e harness
+// uses them to start a locked-mode server (--lock-password and
+// TOURNAMENT_PASSWORD_HASH).
+export async function start(kind, { args = [], env = {} } = {}) {
   if (!fs.existsSync(BIN)) {
     throw new Error(`missing ${BIN} - run "make go/build" first`);
   }
@@ -86,8 +91,8 @@ export async function start(kind) {
   // var alone is enough and works for both commands. `serve` keeps no state.
   const command = kind === 'web' ? 'serve' : 'mobile-app';
 
-  const child = spawn(BIN, [command], {
-    env: { ...process.env, PORT: String(port), TOURNAMENT_DATA_DIR: dataDir },
+  const child = spawn(BIN, [command, ...args], {
+    env: { ...process.env, PORT: String(port), TOURNAMENT_DATA_DIR: dataDir, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   // Only the startup failure path reads this, so keep a bounded tail rather

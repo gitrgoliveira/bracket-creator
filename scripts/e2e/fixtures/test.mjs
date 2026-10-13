@@ -65,6 +65,12 @@ const CONSOLE_ALLOWLIST = [
     code: /^a participant with the same name and dojo already exists$/,
     request: (r) => !!r && r.method === 'PUT',
   },
+  {
+    reason: 'Edit tournament details probes for a custom logo with HEAD /api/branding/logo, which answers 404 on purpose while none is uploaded (handlers_branding.go: "must keep returning 404 when none is set"); the browser logs it once per page load of a tournament without a logo.',
+    text: /^Failed to load resource: the server responded with a status of 404 \(Not Found\)$/,
+    url: /\/api\/branding\/logo$/,
+    request: (r) => !!r && r.method === 'HEAD',
+  },
 ];
 
 // The `error` field of a refusal body; read with a pattern, since the body is
@@ -210,6 +216,15 @@ async function settleLate(c) {
   }
 }
 
+// A spec file whose server needs extra command-line arguments or environment
+// (the locked-mode spec) declares them once, at load, for its own file:
+// `serverOptionsFor(fileURLToPath(import.meta.url), () => ({ args, env }))`.
+// A function is called when the file's server is started, so what it needs (a
+// hash made by the built binary) is made then and not while the suite loads.
+// A file that declares nothing starts the server it always did.
+const fileServerOptions = new Map();
+export const serverOptionsFor = (file, options) => { fileServerOptions.set(file, options); };
+
 export const test = base.extend({
   // One mobile-app server per SPEC FILE, on a free port and a throwaway
   // TOURNAMENT_DATA_DIR, started and stopped by scripts/screenshots'
@@ -235,7 +250,8 @@ export const test = base.extend({
       c.file = file;
       let server;
       try {
-        server = await start('mobile');
+        const declared = fileServerOptions.get(file);
+        server = await start('mobile', typeof declared === 'function' ? declared() : declared);
       } catch (err) {
         throw new Error(`${err.message}${fs.existsSync(BIN) ? '' : '\n(make e2e builds the binary before it runs the suite)'}`);
       }

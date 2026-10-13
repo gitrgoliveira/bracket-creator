@@ -42,6 +42,113 @@ func setupResetTest(t *testing.T, verifier PasswordVerifier) (*state.Store, *gin
 	return store, r, hub
 }
 
+// loopbackPeer is the TCP peer address of a browser on the machine running
+// the server. httptest.NewRequest defaults RemoteAddr to 192.0.2.1:1234, which
+// reset treats as another machine, so every test that reaches the reset body
+// sets this.
+const loopbackPeer = "127.0.0.1:54321"
+
+// setupFileModeReset is setupResetTest in file mode over a tournament whose
+// password is "old".
+func setupFileModeReset(t *testing.T) (*state.Store, *gin.Engine) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "old"}))
+	r := gin.New()
+	RegisterResetHandlers(r.Group("/api"), store, NewFileVerifier(store), NewHub())
+	return store, r
+}
+
+// postReset sends a reset POST from the given TCP peer address and returns the
+// recorder, so each local-only case states only the peer and the extra headers.
+func postReset(r *gin.Engine, remoteAddr string, headers map[string]string) *httptest.ResponseRecorder {
+	body, _ := json.Marshal(map[string]string{"password": "new-password"})
+	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.RemoteAddr = remoteAddr
+	req.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func TestReset_FileMode_LoopbackPeers_Succeed(t *testing.T) {
+	for _, peer := range []string{
+		"127.0.0.1:54321",
+		"[::1]:54321",
+		"127.8.9.10:54321",
+		"[::ffff:127.0.0.1]:54321",
+	} {
+		t.Run(peer, func(t *testing.T) {
+			store, r := setupFileModeReset(t)
+
+			w := postReset(r, peer, nil)
+
+			assert.Equal(t, http.StatusNoContent, w.Code)
+			loaded, err := store.LoadTournament()
+			require.NoError(t, err)
+			assert.Equal(t, "new-password", loaded.Password)
+		})
+	}
+}
+
+func TestReset_FileMode_NonLoopbackPeer_Refused(t *testing.T) {
+	for _, peer := range []string{
+		"192.0.2.1:1234",
+		"10.0.0.5:4000",
+		"[2001:db8::1]:4000",
+		"not-an-address",
+	} {
+		t.Run(peer, func(t *testing.T) {
+			store, r := setupFileModeReset(t)
+
+			w := postReset(r, peer, nil)
+
+			assert.Equal(t, http.StatusForbidden, w.Code)
+			assert.Contains(t, w.Body.String(), "reset_local_only")
+			assert.Contains(t, w.Body.String(), "Reset the password on the machine running the server.")
+			loaded, err := store.LoadTournament()
+			require.NoError(t, err)
+			assert.Equal(t, "old", loaded.Password, "a refused reset must leave the password alone")
+		})
+	}
+}
+
+// A forged forwarding header must not turn a remote peer into a local one:
+// the judgement is on the TCP peer address alone.
+func TestReset_FileMode_ForgedForwardingHeaders_StillRefused(t *testing.T) {
+	store, r := setupFileModeReset(t)
+
+	w := postReset(r, "192.0.2.1:1234", map[string]string{
+		"X-Forwarded-For": "127.0.0.1",
+		"X-Real-IP":       "127.0.0.1",
+		"Forwarded":       "for=127.0.0.1",
+	})
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Contains(t, w.Body.String(), "reset_local_only")
+	loaded, err := store.LoadTournament()
+	require.NoError(t, err)
+	assert.Equal(t, "old", loaded.Password)
+}
+
+func TestReset_LockedMode_NonLoopbackPeer_Still404(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("envpass"), bcrypt.MinCost)
+	require.NoError(t, err)
+	bcryptV, err := NewBcryptVerifier(string(hash))
+	require.NoError(t, err)
+	_, r, _ := setupResetTest(t, bcryptV)
+
+	w := postReset(r, "192.0.2.1:1234", nil)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Contains(t, w.Body.String(), "reset disabled")
+}
+
 func TestReset_FileMode_Success(t *testing.T) {
 	dir, err := os.MkdirTemp("", "reset-test-*")
 	require.NoError(t, err)
@@ -60,6 +167,7 @@ func TestReset_FileMode_Success(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"password": "new-password"})
 	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.RemoteAddr = loopbackPeer
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -90,6 +198,7 @@ func TestReset_LockedMode_Returns404(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"password": "new-password"})
 	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.RemoteAddr = loopbackPeer
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -112,6 +221,7 @@ func TestReset_NoTournament_Returns409(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"password": "new-password"})
 	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.RemoteAddr = loopbackPeer
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -141,6 +251,7 @@ func TestReset_NamedNewTournamentWithPassword_AllowsReset(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"password": "fresh"})
 	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.RemoteAddr = loopbackPeer
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -169,6 +280,7 @@ func TestReset_CrossOriginPost_Rejected(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"password": "attacker-set"})
 	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.RemoteAddr = loopbackPeer
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", "https://evil.example")
 	req.Host = "tournament.local:8080"
@@ -199,6 +311,7 @@ func TestReset_SameOriginPost_Accepted(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"password": "newpw"})
 	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.RemoteAddr = loopbackPeer
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", "http://tournament.local:8080")
 	req.Host = "tournament.local:8080"
@@ -225,6 +338,7 @@ func TestReset_LanIPSameOrigin_Accepted(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"password": "newpw"})
 	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.RemoteAddr = loopbackPeer
 	req.Header.Set("Content-Type", "application/json")
 	// LAN IP, Origin matches Host, so same-origin check passes.
 	req.Header.Set("Origin", "http://192.168.1.100:8080")
@@ -254,6 +368,7 @@ func TestReset_SchemeMismatch_Rejected(t *testing.T) {
 	// Origin says HTTPS; server is HTTP (req.TLS == nil → expectedScheme = "http").
 	body, _ := json.Marshal(map[string]string{"password": "attacker"})
 	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.RemoteAddr = loopbackPeer
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", "https://tournament.local:8080")
 	req.Host = "tournament.local:8080"
@@ -285,6 +400,7 @@ func TestReset_OriginNull_Rejected(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"password": "attacker"})
 	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.RemoteAddr = loopbackPeer
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", "null")
 	w := httptest.NewRecorder()
@@ -321,6 +437,7 @@ func TestReset_OriginMalformed_Rejected(t *testing.T) {
 		t.Run(origin, func(t *testing.T) {
 			body, _ := json.Marshal(map[string]string{"password": "attacker"})
 			req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+			req.RemoteAddr = loopbackPeer
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Origin", origin)
 			w := httptest.NewRecorder()
@@ -348,6 +465,7 @@ func TestReset_NoOriginHeader_Accepted(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"password": "newpw"})
 	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.RemoteAddr = loopbackPeer
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -383,6 +501,7 @@ func TestReset_BroadcastsPasswordResetEvent(t *testing.T) {
 		"originatorId": "client-abc-123",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.RemoteAddr = loopbackPeer
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -435,6 +554,7 @@ func TestReset_OriginatorIDOversized_Returns400(t *testing.T) {
 		"originatorId": strings.Repeat("x", MaxLenOriginatorID+1),
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.RemoteAddr = loopbackPeer
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -456,6 +576,7 @@ func TestReset_EmptyPassword_Returns400(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"password": ""})
 	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.RemoteAddr = loopbackPeer
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -478,6 +599,7 @@ func TestReset_OversizedPassword_Returns400(t *testing.T) {
 	huge := strings.Repeat("x", MaxLenTournamentPassword+1)
 	body, _ := json.Marshal(map[string]string{"password": huge})
 	req := httptest.NewRequest(http.MethodPost, "/api/tournament/reset", bytes.NewReader(body))
+	req.RemoteAddr = loopbackPeer
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)

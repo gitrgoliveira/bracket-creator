@@ -113,7 +113,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// An exact resend of a finish already recorded (a queued write whose
 	// first send landed but whose answer was lost) answers as recorded and
 	// writes nothing, before anything else judges it (bc-xrpl).
-	if replayed, err := e.answerExactScoreReplay(tx, compID, matchID, result, comp); err != nil || replayed {
+	if replayed, err := e.answerExactScoreReplay(tx, compID, matchID, result, comp, fo.NoReplayHistory); err != nil || replayed {
 		return nil, err
 	}
 	// Only a COMPLETING write goes through the engi recorder. Engi's flag-total
@@ -1339,7 +1339,7 @@ func exactScoreReplayProbe(stored, incoming *state.MatchResult, comp *state.Comp
 // eligibility refusal would only misreport a result already recorded as one
 // to resolve and send again. false, with result untouched, for any other
 // write.
-func (e *Engine) answerExactScoreReplay(tx state.StoreTx, compID, matchID string, result *state.MatchResult, comp *state.Competition) (bool, error) {
+func (e *Engine) answerExactScoreReplay(tx state.StoreTx, compID, matchID string, result *state.MatchResult, comp *state.Competition, noHistory bool) (bool, error) {
 	if result.Status != state.MatchStatusCompleted || result.ModifiedAt <= 0 {
 		return false, nil
 	}
@@ -1354,7 +1354,9 @@ func (e *Engine) answerExactScoreReplay(tx state.StoreTx, compID, matchID string
 	// The probe's merge is the history entry's: what of the resend would
 	// land (echoes) and what would be held (groups changed since).
 	result.Merge = probe.Merge
-	e.recordWriteHistory(tx, compID, matchID, result)
+	if !noHistory {
+		e.recordWriteHistory(tx, compID, matchID, result)
+	}
 	// A bracket match's prior came through bracketMatchAsResult, which omits
 	// the court and the schedule a landed write echoes (the decision
 	// replay's fill, bc-cse finding 5).

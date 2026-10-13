@@ -66,4 +66,11 @@ describe('the first-run tournament form', () => {
     expect(document.body.textContent).not.toContain('scoring and check-in');
     expect(document.body.textContent).not.toContain('roster changes');
   });
+
+  it('names the admin password, never the tournament password, in the self-run description', () => {
+    expect(document.body.textContent).toContain('Scoring is public, and so are starting and completing a competition.');
+    expect(document.body.textContent).toContain('need the admin password');
+    expect(document.body.textContent).toContain('deleting a competition asks for it again');
+    expect(document.body.textContent).not.toContain('tournament password');
+  });
 });

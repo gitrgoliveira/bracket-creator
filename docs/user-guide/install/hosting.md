@@ -24,7 +24,7 @@ The Docker baseline is the reusable core: the GCP and Oracle Terraform modules r
 
 ## Security
 
-Any deployment reachable over the internet should run in locked mode rather than the default file mode. Locked mode reads a bcrypt hash from an environment variable and disables the public password-reset endpoint. Refer to [Admin authentication](../organisers/operating-modes.md#admin-authentication-mode) for the setup steps.
+Any deployment reachable over the internet should run in locked mode rather than the default file mode. Locked mode reads a bcrypt hash from an environment variable and turns the password-reset endpoint off (in file mode it answers only the machine running the server). Refer to [Admin authentication](../organisers/operating-modes.md#admin-authentication-mode) for the setup steps.
 
 ## What still needs printing
 

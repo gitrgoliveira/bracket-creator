@@ -178,7 +178,8 @@ flowchart TD
 ```
 
 - **File mode** (default): plaintext compare against `tournament.md`. `POST /api/tournament/reset`
-  is available (for a forgotten admin password).
+  (for a forgotten admin password) answers only a caller on the machine running the server,
+  judged on the TCP peer address; any other caller gets 403 `reset_local_only`.
 - **Locked mode** (`--lock-password` / `LOCK_PASSWORD=true` + `TOURNAMENT_PASSWORD_HASH`): bcrypt
   compare; reset endpoint returns 404. `GET /api/auth-config` reports the mode to the SPA.
 

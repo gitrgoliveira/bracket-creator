@@ -2801,6 +2801,9 @@ const API = {
             const err = await res.json().catch(() => ({}));
             const e = new Error(err.error || `Failed to reset password (Status ${res.status})`);
             e.status = res.status;
+            // The refusal code (reset_local_only) lets the form word the
+            // case; absent on a bare error.
+            if (err.code) e.code = err.code;
             throw e;
         }
         // Backend returns 204 No Content: calling .json() on an empty

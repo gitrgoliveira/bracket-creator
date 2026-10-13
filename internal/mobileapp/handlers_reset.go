@@ -2,6 +2,7 @@ package mobileapp
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -18,7 +19,9 @@ import (
 //
 // Operators who want to deny this endpoint should enable locked mode
 // (--lock-password) which 404s the route. In file mode the endpoint is
-// the documented recovery path for a forgotten admin password.
+// the documented recovery path for a forgotten admin password, and it
+// answers only a caller on the machine running the server (403
+// reset_local_only otherwise).
 type resetPasswordRequest struct {
 	Password string `json:"password"`
 	// OriginatorID is an opaque per-tab identifier the SPA generates
@@ -93,6 +96,29 @@ var errResetPasswordRequired = errors.New("password is required")
 // must be reachable from any browser tab on the same network so
 // operators at a scoring table on the far side of the venue can reset
 // without SSH access to the server.
+// resetLocalOnlyCode and resetLocalOnlySentence are the refusal of a reset
+// that does not come from the machine running the server. The SPA shows the
+// sentence when it sees the code.
+const (
+	resetLocalOnlyCode     = "reset_local_only"
+	resetLocalOnlySentence = "Reset the password on the machine running the server."
+)
+
+// isLoopbackPeer reports whether the request arrived over TCP from the machine
+// running the server: the peer address is a loopback address (127.0.0.0/8, ::1,
+// or an IPv4-mapped 127/8). It reads r.RemoteAddr alone. X-Forwarded-For,
+// X-Real-IP, Forwarded and gin's c.ClientIP() are client-controlled (ClientIP
+// trusts them by default), so a request from another machine could claim to be
+// local through any of them. An address that does not parse is not loopback.
+func isLoopbackPeer(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func isSameOriginReset(c *gin.Context) bool {
 	origin := strings.TrimSpace(c.GetHeader("Origin"))
 	if origin == "" {
@@ -138,6 +164,17 @@ func RegisterResetHandlers(r *gin.RouterGroup, store *state.Store, verifier Pass
 			// build that doesn't register this route. The SPA discovers
 			// the locked state via GET /api/auth-config.
 			c.JSON(http.StatusNotFound, gin.H{"error": "reset disabled"})
+			return
+		}
+
+		// File mode answers only the machine running the server, judged on
+		// the TCP peer address (see isLoopbackPeer).
+		if !isLoopbackPeer(c.Request) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error":   resetLocalOnlySentence,
+				"code":    resetLocalOnlyCode,
+				"message": resetLocalOnlySentence,
+			})
 			return
 		}
 

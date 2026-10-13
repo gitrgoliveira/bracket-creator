@@ -14,8 +14,10 @@ info:
     - **`GET /api/events`**: SSE stream; always public so viewers and spectator screens
       can receive real-time updates without an admin credential.
     - **`GET /api/auth-config`**: always public; carries no secret material.
-    - **`POST /api/tournament/reset`**: public in file mode (the recovery path for a
-      forgotten password); returns `404` in locked mode (`--lock-password`).
+    - **`POST /api/tournament/reset`**: needs no password in file mode (the recovery path
+      for a forgotten password) but answers only a caller on the machine running the
+      server (`403` `reset_local_only` otherwise); returns `404` in locked mode
+      (`--lock-password`).
     - **`GET /api/schedule/estimate`**: stateless schedule calculator; always public.
     - **`GET /api/competitions/{id}/competitor-status`**: public read; the `POST` write is protected.
     - **`GET /api/competitions/{id}/teams/{tid}/lineups/{round}`**: public read; `PUT`/`DELETE` are protected.
@@ -31,8 +33,9 @@ info:
     an organiser at a table. Self-run mode has no check-in: the three check-in operations
     answer 409 `check_in_not_in_self_run` for every caller, and the draw includes every
     participant whatever a competition's `checkInEnabled` says. Destructive routes (delete competition, invalidate, discard
-    draw, result overrides, roster mutations, import) and organiser-owned setup
-    (tournament/competition config) stay gated. In the default `officiated` mode every
+    draw, result overrides, import) and organiser-owned setup
+    (tournament/competition config) stay gated. Adding and editing participants
+    (`POST .../participants`, `PUT .../participants/{pid}`) is open to anyone. In the default `officiated` mode every
     `/api/` route keeps requiring `X-Tournament-Password` as described above.
     The team writes the public score sheet makes when a competitor names a bout's
     fighter are open in self-run mode too: `PUT .../teams/{tid}/match-lineups/{matchId}`,
@@ -360,7 +363,7 @@ paths:
           auto-complete check that runs after it).
         - `password_reset`: the admin password was changed. Emitted
           from three sources (file mode only; never emitted in locked mode):
-          1. `POST /api/tournament/reset`; the public recovery endpoint.
+          1. `POST /api/tournament/reset`; the recovery endpoint.
              Payload includes `originatorId` so the submitting tab can
              suppress its own broadcast: `data: { originatorId: "<opaque>" }`.
           2. `PUT /api/tournament`; when an admin changes the password
@@ -526,9 +529,15 @@ paths:
       tags: [tournament]
       summary: Reset the admin password (file mode only)
       description: |
-        Replaces the stored admin password with the supplied value. Unauthenticated by
-        design; this is the documented recovery path for a forgotten admin password
-        on local / private deployments.
+        Replaces the stored admin password with the supplied value. Needs no password;
+        this is the documented recovery path for a forgotten admin password.
+
+        The endpoint answers only a request from the machine running the server: the
+        TCP peer address must be a loopback address (127.0.0.0/8, `::1`, or an
+        IPv4-mapped 127/8). `X-Forwarded-For`, `X-Real-IP` and `Forwarded` are never
+        consulted. Any other peer receives `403` with the code `reset_local_only`.
+        A server in a Docker container started with `-p` sees a browser on the host
+        as a non-loopback peer, so the reset is refused there too.
 
         The endpoint is disabled in **locked mode** (`--lock-password` CLI flag, with
         `TOURNAMENT_PASSWORD_HASH` env var supplying a bcrypt hash). In locked mode the
@@ -566,11 +575,17 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '403':
           description: |
-            Cross-origin POST rejected. The handler requires both the Origin scheme and
-            host:port to match the server's effective scheme (http vs https) and `Host`
-            header (RFC 6454 §3.2). Rejected cases: scheme mismatch (e.g. HTTPS Origin
-            to a plain-HTTP server), host or port mismatch, malformed Origin URL, and
-            `Origin: null` (sandboxed iframes, file://, data: URLs).
+            Refused, in one of two ways.
+
+            The request did not come from the machine running the server. The body is
+            `{"error": "Reset the password on the machine running the server.", "code":
+            "reset_local_only", "message": "<the same sentence>"}`.
+
+            Or a cross-origin POST was rejected. The handler requires both the Origin
+            scheme and host:port to match the server's effective scheme (http vs https)
+            and `Host` header (RFC 6454 §3.2). Rejected cases: scheme mismatch (e.g.
+            HTTPS Origin to a plain-HTTP server), host or port mismatch, malformed
+            Origin URL, and `Origin: null` (sandboxed iframes, file://, data: URLs).
         '404':
           description: Reset disabled (locked mode active).
         '409':
@@ -631,8 +646,7 @@ paths:
         - `team_size` must be stated (and be >= 2) whenever `kind` is
           `"team"`. An omitted key decodes to 0, which is refused with
           `teamSize: team competitions require teamSize >= 2` -- the same
-          answer the create endpoint gives. A row that omitted it was
-          accepted by earlier versions; it now fails that row while the
+          answer the create endpoint gives. Such a row fails while the
           rest of the import proceeds.
 
         `pool_size` and `pool_size_mode`, by contrast, ARE defaulted when
@@ -1283,7 +1297,7 @@ paths:
         (`/start`, `/complete`, `/invalidate`) to change status.
 
         The ROSTER-save path (non-null `players`) rewrites `participants.csv`
-        and, like every other route here, needs only `X-Tournament-Password`.
+        and needs only `X-Tournament-Password`.
 
         In self-run mode this is an organiser action: it needs
         `X-Tournament-Password`.
@@ -1647,7 +1661,10 @@ paths:
         Transitions a competition from `pools` or `knockout` status to `completed`.
         Irreversible. Returns 400 if the competition is not in a completable state,
         or if its bracket still has a match to play (every bracket match, the
-        3rd-place match included, must be completed).
+        3rd-place match included, must be completed). A competition with no
+        knockout rounds (a league, a pools-only or a Swiss one) is held to its
+        own matches instead: every match must be completed, and a Swiss one must
+        have drawn all its configured rounds.
 
         In officiated mode it needs `X-Tournament-Password`, like starting a
         competition; in self-run mode it is public, like starting one.
@@ -2021,8 +2038,8 @@ paths:
       description: |
         Replaces the current participants list for the competition with the provided JSON.
 
-        In self-run mode this is an organiser action: it needs
-        `X-Tournament-Password`.
+        In self-run mode this is public, like starting a competition: anyone can
+        add participants while the competition is in setup.
       security:
         - TournamentPassword: []
       parameters:
@@ -2108,8 +2125,7 @@ paths:
         Returns the updated player. When the cascade detects dojo conflicts,
         a `warnings` array is included alongside the player fields.
 
-        In self-run mode this is an organiser action: it needs
-        `X-Tournament-Password`.
+        In self-run mode this is public: anyone can edit participants.
       security:
         - TournamentPassword: []
       requestBody:
@@ -5287,8 +5303,9 @@ components:
       name: X-Tournament-Password
       description: |
         Tournament admin password. Required for all `/api/` routes
-        except `/api/viewer/`, `/api/events`, the unauthenticated
-        recovery endpoints `/api/auth-config` and `/api/tournament/reset`,
+        except `/api/viewer/`, `/api/events`, the recovery endpoints
+        `/api/auth-config` and `/api/tournament/reset` (which answers only the
+        machine running the server),
         the public read endpoints `GET /api/schedule/estimate`,
         `GET /api/competitions/{id}/competitor-status`,
         `GET /api/competitions/{id}/teams/{tid}/lineups/{round}`,
@@ -5305,8 +5322,8 @@ components:
         against the `password` field stored in `tournament.md`
         (no trimming on either side). Set during the initial bootstrap
         via `POST /api/tournament`, rotated via `PUT /api/tournament`
-        with a non-empty `password`, or via the public
-        `POST /api/tournament/reset` recovery endpoint.
+        with a non-empty `password`, or via the `POST /api/tournament/reset`
+        recovery endpoint (from the machine running the server).
 
         Bootstrap exception: when no tournament is configured yet,
         `POST/PUT /api/tournament` is allowed without the header so
@@ -5999,10 +6016,10 @@ components:
               (scoring, start, complete, swiss round generation) are public; no
               password required. There is no check-in. Organiser-setup mutations (tournament/competition config,
               seeds, override edits (set/change result), announcements, court
-              assignment, export, participant roster mutations,
-              fighting-spirit awards, the tournament logo and sponsor images) and
-              destructive actions (delete or invalidate a competition, discard a draw,
-              reset overrides, import) remain behind the main password.
+              assignment, export, fighting-spirit awards, the tournament logo and
+              sponsor images) and destructive actions (delete or invalidate a
+              competition, discard a draw, reset overrides, import) remain behind
+              the main password. Anyone can add and edit participants.
 
             Always returned in GET/POST/PUT responses regardless of auth mode (unlike
             `password`, which is redacted in locked mode). Defaults to `officiated` when

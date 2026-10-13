@@ -3684,6 +3684,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 					Force:     body.ForceDownstreamReopen,
 					Reopened:  &reopenedDownstream,
 					StartOnly: body.StartOnly,
+					// A participant's exact resend of a finish changes nothing,
+					// so it leaves no history line to loop.
+					NoReplayHistory: selfReported,
 				})
 				// engErr is a normal application-level signal (AlreadyIneligible
 				// → 409, validation/not-found → other codes); we surface it

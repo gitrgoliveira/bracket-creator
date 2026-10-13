@@ -1,6 +1,7 @@
 package mobileapp
 
 import (
+	"crypto/subtle"
 	"errors"
 	"fmt"
 
@@ -100,7 +101,7 @@ func (v *filePasswordVerifier) Verify(presented string) (bool, error) {
 	if t == nil {
 		return false, nil
 	}
-	return presented == t.Password, nil
+	return subtle.ConstantTimeCompare([]byte(presented), []byte(t.Password)) == 1, nil
 }
 
 func (v *filePasswordVerifier) Mode() string                  { return "file" }

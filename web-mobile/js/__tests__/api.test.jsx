@@ -1538,6 +1538,24 @@ describe('API Utils', () => {
         }
       });
 
+      it('carries the server refusal code on the thrown Error', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 403,
+          json: async () => ({
+            error: 'Reset the password on the machine running the server.',
+            code: 'reset_local_only',
+          }),
+        });
+        try {
+          await API.resetPassword('whatever');
+          throw new Error('should have rejected');
+        } catch (e) {
+          expect(e.status).toBe(403);
+          expect(e.code).toBe('reset_local_only');
+        }
+      });
+
       it('throws with default message if response json parse fails', async () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: false,

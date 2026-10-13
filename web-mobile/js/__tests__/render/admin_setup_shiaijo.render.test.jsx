@@ -95,8 +95,11 @@ describe('Tournament type line (self-run has no check-in)', () => {
     const { container } = await mountEdit(makeTournament({ mode: 'self-run' }));
     const text = typeHint(container);
     expect(text).toContain('Self-run');
-    expect(text).toContain('Scoring and starting and completing a competition are public.');
+    expect(text).toContain('Scoring is public, and so are starting and completing a competition.');
     expect(text).toContain('Self-run mode has no check-in.');
+    expect(text).toContain('need the admin password');
+    expect(text).toContain('deleting a competition asks for it again');
+    expect(text).not.toContain('tournament password');
     expect(text).not.toContain('roster changes');
   });
 

@@ -192,10 +192,7 @@ func TestScoreHandler_SelfRunExactResendOfAFinishIsAnsweredAsRecorded(t *testing
 
 			history, err := store.LoadMatchHistory(compID, mid)
 			require.NoError(t, err)
-			require.Len(t, history, 2, "the resend has its own history line, as the organiser's does")
-			for group, outcome := range history[1].Outcomes {
-				assert.Equal(t, state.HistoryOutcomeUnchanged, outcome, "group %s", group)
-			}
+			assert.Len(t, history, 1, "a participant's resend records no history line, so looping it cannot grow the file")
 
 			// The same stamp with another scoreline is no resend.
 			differs := exactReplayFinish(at)
@@ -210,7 +207,7 @@ func TestScoreHandler_SelfRunExactResendOfAFinishIsAnsweredAsRecorded(t *testing
 			assert.Equal(t, versionBefore, store.FileVersion(compID, file), "a refused resend writes nothing")
 			history, err = store.LoadMatchHistory(compID, mid)
 			require.NoError(t, err)
-			assert.Len(t, history, 2, "a refused resend leaves no history line")
+			assert.Len(t, history, 1, "a refused resend leaves no history line")
 		})
 	}
 }

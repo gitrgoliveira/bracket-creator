@@ -10,7 +10,7 @@ import (
 // is deleted. Deleting a competition is the one action that asks for the
 // password again (operator ruling 2026-10-12); every other organiser write is
 // authorised by the sign-in alone.
-const ConfirmPasswordHeader = "X-Confirm-Password"
+const ConfirmPasswordHeader = "X-Confirm-Password" // #nosec G101 -- a header name, not a credential
 
 // Codes of the two refusals; both carry confirmPasswordSentence.
 const (

@@ -469,8 +469,8 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             <div className="field__hint" style={{ marginTop: 4 }}>
               <strong>{tournamentMode === "self-run" ? "Self-run" : "Officiated"}</strong>
               {tournamentMode === "self-run"
-                ? `: Scoring and starting and completing a competition are public. Anyone can add and edit participants. ${SELF_RUN_NO_CHECK_IN} Organiser actions such as setup, deleting and importing still need the tournament password.`
-                : ": All admin actions require the tournament password."}
+                ? `: Scoring is public, and so are starting and completing a competition. Anyone can add and edit participants. ${SELF_RUN_NO_CHECK_IN} Organiser setup, corrections and destructive actions such as deleting and importing need the admin password, and deleting a competition asks for it again.`
+                : ": All admin actions require the admin password."}
               {" "}This setting was fixed at creation and cannot be changed.
             </div>
           </div>

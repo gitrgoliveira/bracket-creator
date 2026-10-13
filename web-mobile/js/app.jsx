@@ -1957,8 +1957,8 @@ function CreateTournament({ onCreated, authConfig }) {
             </div>
             <div className="field__hint" style={{ marginTop: 6 }}>
               {mode === "officiated"
-                ? "An operator manages scoring and bracket progression. All admin actions require the tournament password. This is the standard setup."
-                : `No dedicated operator. Participants self-report scores; scoring and starting and completing a competition are public. Anyone can add and edit participants. ${SELF_RUN_NO_CHECK_IN} Organiser actions such as setup, deleting and importing still need the tournament password. Cannot be changed after creation.`}
+                ? "An operator manages scoring and bracket progression. All admin actions require the admin password. This is the standard setup."
+                : `No dedicated operator. Participants self-report scores. Scoring is public, and so are starting and completing a competition. Anyone can add and edit participants. ${SELF_RUN_NO_CHECK_IN} Organiser setup, corrections and destructive actions such as deleting and importing need the admin password, and deleting a competition asks for it again. Cannot be changed after creation.`}
             </div>
           </div>
           <div className="field">

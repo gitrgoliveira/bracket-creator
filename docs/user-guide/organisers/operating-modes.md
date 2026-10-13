@@ -14,7 +14,7 @@ Officiated mode is the default. Every action (scoring, check-in, starting, and c
 
 In self-run mode, scoring and starting a competition are open to anyone without a password, so competitors or table helpers can run and score their own matches. Completing a competition needs no password either: in self-run mode the server accepts it from anyone. The **Complete competition** button is on the organiser's competition page, which you reach by signing in. A public self-registration page also becomes available for competitors to sign themselves up, for individual competitions only and only while the competition is still in setup, before the draw is generated.
 
-Organiser actions stay behind the admin password in self-run mode: creating and editing competitions, tournament settings, the tournament logo and sponsor images, seeds, scheduling, the **Lineups** page, match decisions such as kiken, league tie-breaker decisions (adding or removing tie-breaker matches, and accepting shared ranks), exports, fighting-spirit awards, and every action that destroys data (deleting or invalidating a competition, discarding a draw, resetting manual overrides, and importing competitions).
+Organiser actions stay behind the admin password in self-run mode: creating and editing competitions, tournament settings, the tournament logo and sponsor images, seeds, scheduling, the **Lineups** page, match decisions such as kiken, result corrections (reopening a match, setting a winner by hand, overriding a pool rank), announcements, league tie-breaker decisions (adding or removing tie-breaker matches, and accepting shared ranks), exports, fighting-spirit awards, and every action that destroys data (deleting or invalidating a competition, discarding a draw, resetting manual overrides, and importing competitions).
 
 The roster is open to anyone in self-run mode: anyone can add and edit a competition's participants, without the password, before the competition starts.
 
@@ -36,7 +36,7 @@ Authentication mode controls how the admin password is stored and verified. Ther
 
 In file mode, the admin password is stored in plain text in the `tournament.md` data file. You set it during tournament creation, or you can edit the file directly.
 
-If you forget the password, browse to `http://<host>/reset` from the same network and choose a new one. No old password is required. The reset path is intentionally unauthenticated, which is acceptable on a trusted private network but is a security risk on the public internet.
+If you forget the password, browse to `http://localhost:<port>/reset` in a browser on the machine running the server and choose a new one. No old password is required. In file mode the password can be reset only from that machine: a request from any other machine is refused with "Reset the password on the machine running the server." When the server runs in a Docker container started with `-p`, a browser on the host reaches it through the container network, not loopback, so the reset is refused there too; edit `tournament.md` in the mounted data folder instead.
 
 !!! note
     Switching from file mode to locked mode does not erase the on-disk password. The app ignores it while locked mode is active. Switching back re-enables the stored value.
@@ -78,7 +78,7 @@ For a real security boundary:
 
 - Run the server behind TLS. Refer to [Hosting](../install/hosting.md) for guidance.
 - Use locked mode for any deployment reachable from the internet.
-- In file mode, the password reset is unauthenticated: anyone who can reach the server can set a new admin password without knowing the current one, which locks out the operator or takes over the tournament. Locked mode disables reset entirely, so any internet-exposed deployment should use locked mode.
+- In file mode, the password reset needs no current password but is limited to the machine running the server, so someone who can open a browser on that machine can set a new admin password. Behind a reverse proxy on the same machine, requests arrive from the proxy's own address, so block `/reset` at the proxy. Locked mode turns reset off, so any internet-exposed deployment should use locked mode.
 
 ### Upgrading from an earlier release
 

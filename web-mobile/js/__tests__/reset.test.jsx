@@ -227,6 +227,22 @@ describe('ResetPasswordForm', () => {
       expect(mockStorage.setItem).not.toHaveBeenCalledWith('bc_password', expect.anything());
     });
 
+    it('shows the local-only sentence when the server refuses a reset from another machine', async () => {
+      const err403 = new Error('refused');
+      err403.status = 403;
+      err403.code = 'reset_local_only';
+      window.API.resetPassword = vi.fn(async () => { throw err403; });
+      const onSuccess = vi.fn();
+      const { typeInto, submit } = setupForm({ onSuccess });
+      typeInto(0, 'newpw');
+      typeInto(1, 'newpw');
+      await submit();
+
+      expect(collectText(runtime.currentTree())).toContain('Reset the password on the machine running the server.');
+      expect(onSuccess).not.toHaveBeenCalled();
+      expect(mockStorage.setItem).not.toHaveBeenCalledWith('bc_password', expect.anything());
+    });
+
     it('surfaces a generic error from the server on non-404 failures', async () => {
       window.API.resetPassword = vi.fn(async () => { throw new Error('store unavailable'); });
       const { typeInto, submit } = setupForm();

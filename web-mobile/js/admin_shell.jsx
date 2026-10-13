@@ -8,6 +8,7 @@
 import { heldWritesText, heldWriteLine, heldWriteDiscardConfirm, matchLabel, heldLineupLabel, HELD_WRITES_TITLE, HELD_WRITES_EMPTY, HELD_WRITE_DISCARD_ONE_LABEL } from './write_result.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
 import { publishHeight } from './published_height.jsx';
+import { tournamentHasCheckIn } from './competition_shape.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA, useLayoutEffect: useLayoutEffectA } = React;
 
@@ -647,7 +648,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
         </div>
 
         <div className="row" style={{ marginBottom: 24 }}>
-          {onOpenRegistration && (
+          {onOpenRegistration && tournamentHasCheckIn(t) && (
             <button type="button" className="card" style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--line)" }} onClick={onOpenRegistration}>
               <div className="card__title" style={{ marginBottom: 6, display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="clipboard-check" size={18} />Registration desk →</div>
               <div className="card__sub">Check competitors in as they arrive, across every competition.</div>

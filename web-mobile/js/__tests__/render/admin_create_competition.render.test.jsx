@@ -243,6 +243,23 @@ describe('AdminCreateCompetition standing shiaijo hint (spec 007 R9)', () => {
   });
 });
 
+// Operator ruling 2026-10-13: "Self run mode has no check-in." The create form
+// offers no check-in toggle there; the stored default (off) is still sent.
+describe('AdminCreateCompetition check-in toggle', () => {
+  const checkInLabel = (container) => Array.from(container.querySelectorAll('label.checkbox'))
+    .find((l) => l.textContent.includes('Check-in tracking'));
+
+  it('is offered in an officiated tournament', async () => {
+    const { container } = await mountForm({ tournament: makeTournament({ mode: 'officiated' }) });
+    expect(checkInLabel(container)).toBeTruthy();
+  });
+
+  it('is not offered in a self-run tournament', async () => {
+    const { container } = await mountForm({ tournament: makeTournament({ mode: 'self-run' }) });
+    expect(checkInLabel(container)).toBeFalsy();
+  });
+});
+
 describe('AdminCreateCompetition server-error surfacing (bc-draw R9 gap 2)', () => {
   const errorBanner = (container) => container.querySelector('.alert--error');
 

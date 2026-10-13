@@ -81,6 +81,21 @@ An explicit `--folder`, `--port`, or `--bind` flag still overrides the env var.
 
 Editing these frontend sources and refreshing the browser does **not** pick up changes. The browser still gets the embedded bundle from the last binary build.
 
+### Run the end-to-end journeys
+
+The end-to-end journeys drive the tournament app in a real browser, the way a court operator and a spectator use it: an iPad-sized touch screen for the operator and a phone for the public pages. Run them before you open a pull request that changes `web-mobile/`; the pull request template asks for it.
+
+```sh
+make e2e                                              # every journey
+make e2e E2E_ARGS='journeys/smoke.spec.mjs'           # one journey file
+make e2e E2E_ARGS='--grep "score on a shiaijo"'       # one test by title
+make e2e E2E_ARGS='journeys/smoke.spec.mjs --headed'  # watch it run
+```
+
+`make e2e` builds the binary, then runs each journey file against its own server on a free port with an empty data folder. You need Go, `node` with `npm`, and a network connection: the first run installs the harness's packages and its Chromium, and every build downloads the frontend libraries. The journeys are not part of `make go/test` and do not run in CI.
+
+The harness's own guide, [`scripts/e2e/README.md`](https://github.com/gitrgoliveira/bracket-creator/blob/main/scripts/e2e/README.md), covers the rest: the devices, the console policy that fails a journey on a browser error, where screenshots and traces are written, how to add a journey, and what to do when a journey finds a bug.
+
 ## Regenerate the documentation screenshots
 
 Every screenshot and video under `docs/screenshots/` and `docs/videos/` is captured from the running application by a script, so a picture cannot quietly drift from the product it shows. If your change alters anything a user sees, recapture what it reaches with `make docs/media SINCE=main` before you open the pull request.

@@ -12,10 +12,7 @@
 // sends, and fixture.mjs's assertLineupIds re-reads it before a capture.
 export const PASSWORD = 'testpassword';
 
-// `headers` lets a caller add one: a self-run tournament gates roster and draw
-// mutations behind a second X-Admin-Password header (middleware.go's
-// RequireElevatedPassword), and the recipe that needs it configures this
-// client rather than re-implementing the call.
+// `headers` lets a caller add a request header without re-implementing the call.
 export function client(base, headers = {}) {
   const call = async (method, p, body, auth = true) => {
     const res = await fetch(base + p, {

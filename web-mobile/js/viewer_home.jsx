@@ -127,7 +127,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   // single "followed player" is migrated into the list once (see useWatchlist).
   const [watchlist, setWatchlist] = useWatchlist();
   const [primaryKey, setPrimaryKey] = usePrimaryWatch();
-  const roster = useMemo(() => buildRoster(t.competitions), [t.competitions]);
+  const roster = useMemo(() => buildRoster(t.competitions, t), [t]);
   // Derived beside the roster because it qualifies it: a non-empty roster does
   // not mean every competition's participants loaded, and only the panel's
   // "not in this tournament" claim depends on the difference.

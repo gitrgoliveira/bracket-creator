@@ -888,7 +888,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				// calls it over its own snapshot) so the two cannot drift; only
 				// the error SHAPE differs here (partial-success entries carry a
 				// plain message).
-				check, snap, snapErr := applyCorrectionReasonUnderTx(stx, id, results[i].ID, &results[i].MatchResult)
+				check, snap, snapErr := applyCorrectionReasonUnderTx(stx, id, results[i].ID, &results[i].MatchResult, comp)
 				if snapErr != nil {
 					return snapErr
 				}
@@ -2013,7 +2013,9 @@ var errRepBoutAdded = &selfRunRefusal{
 // stored. In order:
 //
 //   - A match that has finished is the organiser's to correct
-//     (errResultFinalized).
+//     (errResultFinalized), except that an exact resend of the finish already
+//     recorded (engine.ExactScoreReplay) passes: the engine answers it as
+//     recorded and writes nothing to the match (bc-xrpl).
 //   - An encounter has one representative bout: a write listing two is
 //     refused (errDuplicateRepBout). A participant's write never creates one
 //     (only the add route does, with its tie, pool, kachinuki, engi and
@@ -2056,11 +2058,23 @@ var errRepBoutAdded = &selfRunRefusal{
 // error rather than allowing the write (matchSnapshotOrErr). A match in neither
 // store (found false) passes on purpose: the write that follows under the same
 // lock refuses it (the engine's errMatchNotFound), so nothing can land on it.
-func holdSelfReportedWriteUnderTx(compID, matchID string, snap matchSnapshot, found bool, result *state.MatchResult, startOnly bool) error {
+func holdSelfReportedWriteUnderTx(compID, matchID string, snap matchSnapshot, found bool, result *state.MatchResult, comp *state.Competition, startOnly bool) error {
 	if !found {
 		return nil
 	}
 	if isMatchFinalized(snap.Status) {
+		// The participant's own finish sent again because its answer was
+		// lost (the offline queue replays it with the stamp it was sent
+		// with) is no change to a finished match: the engine answers it as
+		// recorded and writes nothing (engine.ExactScoreReplay, the same
+		// probe over the same stored match, under this same lock, runs first
+		// in RecordMatchResultWithIneligibilityTx). The rewrites below shape
+		// a write that will land, so they have nothing to do here. Any
+		// resend that differs where it would land is no such replay and is
+		// refused as before.
+		if engine.ExactScoreReplay(snap.Stored, result, comp, !snap.InBracket) {
+			return nil
+		}
 		return errResultFinalized
 	}
 	var subs []state.SubMatchResult
@@ -2934,7 +2948,7 @@ type correctionCheck struct {
 // reads the snapshot ONCE for every guard of the write (the self-run judge or
 // the pick judge, then this), and the start gate after it reads the returned
 // status instead.
-func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult) correctionCheck {
+func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult, comp *state.Competition) correctionCheck {
 	r.ReopenPending = snap.ReopenPending
 	if r.Status == state.MatchStatusCompleted && snap.Status == state.MatchStatusCompleted {
 		// A finish made BEFORE the stored result (a queued Finish replayed
@@ -2943,10 +2957,20 @@ func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult) correctionC
 		// (HoldReasonFinishAtomic, bc-mrgc Finding 4) -- its scoreline never
 		// lands beside a verdict it never declared -- and keeps it in the
 		// match's history. Demanding a reason here refused it before it got
-		// there, and it was lost (bc-mrgc review). An equal stamp is an
-		// exact replay, which applies, so it is still a correction to
-		// justify.
+		// there, and it was lost (bc-mrgc review).
 		if r.ModifiedAt > 0 && r.ModifiedAt < snap.ResultStamp {
+			return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision}
+		}
+		// An equal stamp with nothing it changes differing from what is
+		// stored is the finish already recorded, sent again because its
+		// answer was lost: the engine answers it as recorded and writes
+		// nothing (engine.ExactScoreReplay, bc-xrpl). A group changed since
+		// (a later point from another board, R3/S2) is held by the merge and
+		// lands nothing, so it is not the resend's to differ in. A same-stamp
+		// write that differs where it would land is a correction, and still
+		// needs its reason. comp tells the probe a kachinuki or engi write,
+		// which the write path shapes before the merge.
+		if engine.ExactScoreReplay(snap.Stored, r, comp, !snap.InBracket) {
 			return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision}
 		}
 		if r.CorrectionReason == "" {
@@ -2984,7 +3008,7 @@ func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult) correctionC
 // bulk-score, one read per entry, whose later guard (the landed picks'
 // judge) compares the match against it. The score handler reads the snapshot
 // once for all its guards and asks applyCorrectionReason directly.
-func applyCorrectionReasonUnderTx(stx state.StoreTx, compID, matchID string, r *state.MatchResult) (correctionCheck, matchSnapshot, error) {
+func applyCorrectionReasonUnderTx(stx state.StoreTx, compID, matchID string, r *state.MatchResult, comp *state.Competition) (correctionCheck, matchSnapshot, error) {
 	// matchSnapshotOrErr fails CLOSED on a load error: the correction-reason
 	// gate must not pass on an assumed-running status, silently overwriting a
 	// finalized result without the mandatory reason.
@@ -2992,7 +3016,7 @@ func applyCorrectionReasonUnderTx(stx state.StoreTx, compID, matchID string, r *
 	if err != nil {
 		return correctionCheck{}, matchSnapshot{}, err
 	}
-	return applyCorrectionReason(snap, r), snap, nil
+	return applyCorrectionReason(snap, r, comp), snap, nil
 }
 
 // missingCorrectionReasonError is the refusal for overwriting a completed
@@ -3583,12 +3607,19 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				if snapErr != nil {
 					return snapErr
 				}
+				// The competition tells the exact-replay probe (the self-run
+				// judge's and applyCorrectionReason's) a kachinuki or engi
+				// write (bc-xrpl).
+				comp, compErr := stx.LoadCompetition(id)
+				if compErr != nil {
+					return compErr
+				}
 				// mp-ba3, bc-dhas: the self-run judge runs under the per-comp
 				// lock, so concurrent anonymous submissions cannot race it. It
 				// may rewrite result's representative bout before the write.
 				selfReported := resultSource == "self-reported"
 				if selfReported {
-					if err := holdSelfReportedWriteUnderTx(id, mid, snap, found, result, body.StartOnly); err != nil {
+					if err := holdSelfReportedWriteUnderTx(id, mid, snap, found, result, comp, body.StartOnly); err != nil {
 						engErr = err
 						return nil
 					}
@@ -3609,7 +3640,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// runs inside the tx so the is-completed read is race-free (same
 				// lock), over the snapshot read above, and the status it returns
 				// is reused by the start gate below.
-				check := applyCorrectionReason(snap, result)
+				check := applyCorrectionReason(snap, result, comp)
 				existingStatus := check.StoredStatus
 				if check.Reject != nil {
 					engErr = check.Reject
@@ -3653,6 +3684,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 					Force:     body.ForceDownstreamReopen,
 					Reopened:  &reopenedDownstream,
 					StartOnly: body.StartOnly,
+					// A participant's exact resend of a finish changes nothing,
+					// so it leaves no history line to loop.
+					NoReplayHistory: selfReported,
 				})
 				// engErr is a normal application-level signal (AlreadyIneligible
 				// → 409, validation/not-found → other codes); we surface it

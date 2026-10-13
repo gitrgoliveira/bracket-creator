@@ -1,7 +1,22 @@
 # Spec 004: Elevated (second) password for destructive operations
 
+> **Superseded (2026-10-12).** The operator ruled that no action re-prompts
+> for a password, with one exception: "Admin password, because it's at the admin level it's ok. But
+> not re enter admin password to change something. For self managed, no admin
+> password necessary." The exception, ruled the same day: "To delete a
+> competition you need to re enter the password." `DELETE /api/competitions/{id}`
+> needs the sign-in password typed again in `X-Confirm-Password`, checked by the
+> same `PasswordVerifier` as the sign-in (401 `confirm_password_required` or
+> `confirm_password_wrong`). Every other admin-level action needs only `X-Tournament-Password`;
+> in self-run mode the routes this spec gated are organiser-only
+> (`isSelfRunMainGatedConfigRoute`), except completing a competition and adding
+> or editing participants, which are public (ruling 2026-10-12); a self-run
+> tournament has no check-in, so the check-in toggles below are refused there
+> for every caller (ruling 2026-10-13, `check_in_not_in_self_run`). A stored `admin_password` and `TOURNAMENT_ADMIN_PASSWORD_HASH` are
+> ignored. The text below records the design this spec describes.
+
 **Issue:** mp-e21
-**Status:** Draft: awaiting approval before implementation
+**Status:** Superseded (operator ruling 2026-10-12, bc-cmpw)
 **Author:** Claude (Opus 4.8) with Ricardo Oliveira
 **Date:** 2026-05-29
 
@@ -265,7 +280,7 @@ into a handler whose other fields only need the main password.
 ## 7. UI ([web-mobile/](../../web-mobile/))
 
 - **Settings page**: new "Admin / destructive-ops password" control next to the
-  existing tournament password input. The current value is **never displayed**
+  existing admin password input. The current value is **never displayed**
   (write-only, §6): the field is an empty "set / change" input, like any
   change-password form.
   - file mode → editable; saved via the **dedicated** `PUT /api/auth/admin-password`

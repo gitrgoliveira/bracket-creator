@@ -3,12 +3,12 @@
 
 import { applyPatch as patchCompetitionData, checkSeqGap, keepNewerDetail, keepNewerTournament } from './patch.jsx';
 import { createTimerPool } from './timer_pool.jsx';
-import { setCachedAuthConfig } from './admin_helpers.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, applyPatchToTree, mergeSnapshotIntoTree, deriveLinkState, freshnessMs } from './court_bridge.jsx';
 import { BRANDING_DEFAULTS } from './admin_branding.jsx';
 import { queuedWritesNoun, supersededAlertText, displacedAlertText } from './write_result.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
+import { SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
 
 const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC } = React;
 
@@ -386,7 +386,7 @@ export function queueAlertMessage(alert) {
     case "storage_full":
       return "Browser storage is full, so unsaved results can no longer be kept safely. Let them sync before reloading this tab.";
     case "discarded":
-      return `${n} unsaved ${noun} ${one ? "was" : "were"} discarded because the tournament password changed.`;
+      return `${n} unsaved ${noun} ${one ? "was" : "were"} discarded because the admin password changed.`;
     case "sent":
       return `${n} ${noun} sent.`;
     // Held finishes that landed and moved a later change of their match to
@@ -1007,11 +1007,6 @@ function App() {
       setAuthConfig(fileDefault);
     });
   }, []);
-
-  // Mirror authConfig into the admin_helpers cache so promptAdminPassword()
-  // (spec 004) can read the elevated-password bits at destructive call sites
-  // without prop-drilling authConfig through every admin component.
-  useE(() => { setCachedAuthConfig(authConfig); }, [authConfig]);
 
   useE(() => {
     // Track every pending jittered timer so the cleanup can cancel them when
@@ -1735,8 +1730,8 @@ function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled, reauth 
         <div className="auth__title">{reauth ? "Sign in to save" : "Admin sign in"}</div>
         <div className="auth__sub">
           {reauth
-            ? "Results saved on this device have not reached the server because the tournament password changed. Enter the current password to save them."
-            : "Enter the tournament password to manage brackets, schedules and results."}
+            ? "Results saved on this device have not reached the server because the admin password changed. Enter the current password to save them."
+            : "Enter the admin password to manage brackets, schedules and results."}
         </div>
         <form onSubmit={submit}>
           <div className="field">
@@ -1766,7 +1761,7 @@ function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled, reauth 
                 // re-authenticated): see resetPassword's tournament
                 // broadcast. Cheaper to ask twice than to surprise an
                 // operator who clicked the wrong link.
-                if (await window.confirmDialog({ message: "Reset the tournament password? This will sign out all other admins.", confirmLabel: "Reset password", danger: true })) {
+                if (await window.confirmDialog({ message: "Reset the admin password? This will sign out all other admins.", confirmLabel: "Reset password", danger: true })) {
                   onForgotPassword();
                 }
               }}
@@ -1784,15 +1779,12 @@ function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled, reauth 
 // validateCreateTournament: pure validation for the CreateTournament form.
 // Returns "" when all fields are valid, or the first error message string.
 // Extracted so it can be unit-tested without mounting the full component.
-export function validateCreateTournament({ name, pass, date, courts, isSelfRun, locked, adminPass, maxCourts }) {
+export function validateCreateTournament({ name, pass, date, courts, maxCourts }) {
   const trimmedName = typeof name === "string" ? name.trim() : "";
   if (!trimmedName) return "Tournament Name is required.";
   if (!pass) return "Admin Password is required.";
   if (!date || (typeof window.dmyToIso === "function" && !window.dmyToIso(date))) {
     return "Date is required.";
-  }
-  if (isSelfRun && !locked && !adminPass) {
-    return "Self-run tournaments require a Destructive-ops password to protect delete and import actions.";
   }
   if (!Number.isInteger(courts) || courts < 1 || courts > (maxCourts || window.MAX_COURTS)) {
     return `Number of courts must be a whole number between 1 and ${maxCourts || window.MAX_COURTS}.`;
@@ -1834,11 +1826,6 @@ function CreateTournament({ onCreated, authConfig }) {
   // Chosen once at creation; read-only after that. Default officiated
   // means existing deployments are unaffected.
   const [mode, setMode] = useS("officiated");
-  // Destructive-ops (admin) password: required when creating a
-  // self-run tournament in file mode: the main auth gate is skipped in
-  // self-run, so destructive actions must fall back to this credential.
-  // Not shown in locked mode (the env-var hash is the credential).
-  const [adminPass, setAdminPass] = useS("");
   const [saving, setSaving] = useS(false);
   const [error, setError] = useS("");
   // submit's catch sets setSaving(false) post-await; on success the
@@ -1863,8 +1850,8 @@ function CreateTournament({ onCreated, authConfig }) {
     const trimmedVenue = venue.trim();
     // Explicit validation now that noValidate disables native HTML5
     // browser blocking. validateCreateTournament covers name, password,
-    // self-run adminPass, and courts range in one pass.
-    const validationErr = validateCreateTournament({ name, pass, date, courts, isSelfRun, locked, adminPass, maxCourts: window.MAX_COURTS });
+    // date and courts range in one pass.
+    const validationErr = validateCreateTournament({ name, pass, date, courts, maxCourts: window.MAX_COURTS });
     if (validationErr) {
       setError(validationErr);
       return;
@@ -1877,39 +1864,12 @@ function CreateTournament({ onCreated, authConfig }) {
         courts: Array.from({ length: courts }, (_, i) => String.fromCharCode(65 + i)),
         mode,
       };
-      // Self-run in file mode: send the destructive-ops password as a
-      // transient `adminPassword` field on the SAME POST. The server reads
-      // it via a second body bind (Tournament.AdminPassword is json:"-" so
-      // it can't be bound directly) and persists it atomically with the
-      // tournament: so the self-run fail-open guard never sees a self-run
-      // tournament without an admin credential. In locked mode the server
-      // ignores this field (the env-var bcrypt hash is authoritative).
-      if (isSelfRun && !locked && adminPass) {
-        config.adminPassword = adminPass;
-      }
       // In locked mode, the typed password IS the env-var admin
       // credential: pass it as authPassword so api_client sends
       // X-Tournament-Password. In file mode authPassword is undefined
       // and the header is omitted (the bootstrap branch in middleware
       // lets it through unauthenticated).
       const t = await window.API.createTournament(config, locked ? pass : undefined);
-      if (!mountedRef.current) return;
-      // Refresh the elevated-password auth config so promptAdminPassword()
-      // reads the correct gate state before the admin view mounts (mp-7h7).
-      // For a self-run tournament the admin password is set atomically in the
-      // same POST, so the /api/auth-config response changes: elevatedRequired
-      // flips from false to true. Without this refresh, the stale cached value
-      // would cause promptAdminPassword() to return "" and destructive actions
-      // would 401 without ever prompting the operator.
-      try {
-        const freshCfg = await window.API.fetchAuthConfig();
-        if (mountedRef.current && freshCfg && typeof freshCfg === "object") {
-          setCachedAuthConfig(freshCfg);
-        }
-      } catch (_) {
-        // Non-fatal: the cache update is best-effort; the operator can still
-        // retry destructive actions which will re-prompt after a 401.
-      }
       if (!mountedRef.current) return;
       onCreated(t, pass);
     } catch (err) {
@@ -1997,8 +1957,8 @@ function CreateTournament({ onCreated, authConfig }) {
             </div>
             <div className="field__hint" style={{ marginTop: 6 }}>
               {mode === "officiated"
-                ? "An operator manages scoring and bracket progression. All admin actions require the tournament password. This is the standard setup."
-                : "No dedicated operator. Participants self-report scores; all constructive actions (scoring, check-in) are public. Destructive actions (delete competition, discard draw, import roster) still require a separate admin password. Cannot be changed after creation."}
+                ? "An operator manages scoring and bracket progression. All admin actions require the admin password. This is the standard setup."
+                : `No dedicated operator. Participants self-report scores. Scoring is public, and so are starting and completing a competition. Anyone can add and edit participants. ${SELF_RUN_NO_CHECK_IN} Organiser setup, corrections and destructive actions such as deleting and importing need the admin password, and deleting a competition asks for it again. Cannot be changed after creation.`}
             </div>
           </div>
           <div className="field">
@@ -2014,34 +1974,14 @@ function CreateTournament({ onCreated, authConfig }) {
             />
             <div className="field__hint">
               {locked && isSelfRun
-                ? "This server is in locked mode. Enter the password whose bcrypt hash is in TOURNAMENT_PASSWORD_HASH: it authorises this bootstrap and organiser-setup mutations. Destructive actions (delete competition, discard draw, import) require the separate TOURNAMENT_ADMIN_PASSWORD_HASH credential."
+                ? "This server is in locked mode. Enter the password whose bcrypt hash is in TOURNAMENT_PASSWORD_HASH: it authorises this bootstrap and every organiser action afterwards."
                 : locked
                   ? "This server is running in locked mode. Enter the password whose bcrypt hash is in TOURNAMENT_PASSWORD_HASH: it's used both to authorize this bootstrap and as your admin credential afterwards."
                   : isSelfRun
-                    ? "Used to authorise tournament setup. In self-run mode, scoring and check-in are public so participants don't need this."
+                    ? "Used to authorise tournament setup. In self-run mode, scoring is public so participants don't need this."
                     : "This password will be required to manage the tournament."}
             </div>
           </div>
-          {/* In self-run + file mode, require a destructive-ops password at
-              creation so delete/invalidate/import can't be called anonymously.
-              Locked mode uses TOURNAMENT_ADMIN_PASSWORD_HASH (no UI input). */}
-          {isSelfRun && !locked && (
-            <div className="field">
-              <label className="field__label" htmlFor="first-run-admin-password">Destructive-ops password (required for self-run)</label>
-              <input
-                id="first-run-admin-password"
-                className="input"
-                type="password"
-                value={adminPass}
-                onChange={(e) => setAdminPass(e.target.value)}
-                placeholder="Password to protect delete / import actions"
-                required
-              />
-              <div className="field__hint">
-                A separate password required for destructive actions (delete competition, discard draw, roster add/edit, import). Since this tournament is self-run, scoring is public: this password is the only thing protecting irreversible actions.
-              </div>
-            </div>
-          )}
           {error && (
             <div
               data-testid="create-tournament-error"

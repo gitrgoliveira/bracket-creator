@@ -1523,6 +1523,18 @@ async function _flushQueue() {
                 // open: that fetch lands it or queues it anew, so sending the copy
                 // too would send the write twice.
                 if (_heldByOpenFetch(key, descriptor)) continue;
+                // Out of the queue AND out of storage at once, not at the end of
+                // the pass: a page that goes away while a later entry is still
+                // out (a reload, the tab closed) would leave this one stored, and
+                // the next load would send it again. A Finish sent twice is
+                // refused the second time (an equal stamp over a finished match
+                // asks for a correction reason), so the operator would be told a
+                // recorded result was not.
+                const leaveQueue = () => {
+                    if (!_dequeue(key, descriptor)) return false;
+                    _persistQueue();
+                    return true;
+                };
                 const { compID, matchID, payload, password, terminal, kind, method, url } = descriptor;
                 // Running score writes (terminal=false) don't store method/url and
                 // always PUT to the score endpoint. Terminal entries carry their own
@@ -1541,7 +1553,7 @@ async function _flushQueue() {
                         // channel above only reaches an operator who happens to have
                         // this exact match open.
                         _notifyQueueAlert({ kind: 'unreadable', count: 1, terminalCount: 1, compID, matchID });
-                        _dequeue(key, descriptor);
+                        leaveQueue();
                         continue;
                     }
                     effectiveMethod = method;
@@ -1608,7 +1620,7 @@ async function _flushQueue() {
                                     // the server state is right), here it is a failure
                                     // AND the local bracket is wrong.
                                     if (kind === 'override') _notifyBracketResync({ compID, matchID, reason: CLOCK_SKEW_REASON });
-                                    _dequeue(key, descriptor);
+                                    leaveQueue();
                                     continue;
                                 }
                                 await _restampQueuedEntryForSkew(descriptor);
@@ -1725,7 +1737,7 @@ async function _flushQueue() {
                             noteDefaultWinStands(body);
                             lastSupersededMatch = { compID, matchID };
                         }
-                        if (_dequeue(key, descriptor)) {
+                        if (leaveQueue()) {
                             // A result kept in the match's history did not land
                             // (announced above). writeWasSuperseded is every
                             // applied:false answer, a clock-skew refusal included
@@ -1788,7 +1800,7 @@ async function _flushQueue() {
                         anyFailed = true;
                     } else if (res.status === 401) {
                         // bc-qttl: an auth failure PARKS the write, it does not drop it.
-                        // 401 is precisely "invalid tournament password", the one 4xx
+                        // 401 is precisely "invalid admin password", the one 4xx
                         // where a later retry can genuinely succeed: the tournament
                         // password can be rotated mid-event, or the operator can simply
                         // sign in again. Discarding here would throw away a finished
@@ -1837,7 +1849,7 @@ async function _flushQueue() {
                             detail: refusal.reason,
                             ...(refusal.sentence ? { sentence: true } : {}),
                         });
-                        _dequeue(key, descriptor);
+                        leaveQueue();
                     } else {
                         // Non-retryable response: 400 validation, 413, generic 409
                         // conflict, etc. NOTE neither auth-ish status reaches here any
@@ -1878,7 +1890,7 @@ async function _flushQueue() {
                             detail: refusal.reason,
                             ...(refusal.sentence ? { sentence: true } : {}),
                         });
-                        _dequeue(key, descriptor);
+                        leaveQueue();
                     }
                 } catch (_) {
                     // fetch rejected (network down), or the request or its body
@@ -2539,16 +2551,6 @@ function _ensureConnected() {
     };
 }
 
-// adminHdr returns the X-Admin-Password header object for the elevated
-// (destructive-ops) password (spec 004 / mp-e21), or an empty object when no
-// admin password is supplied. Destructive methods spread it into their
-// headers so a request can carry BOTH X-Tournament-Password (main) and
-// X-Admin-Password (elevated). When the gate is inactive on the server
-// (file mode, no admin pw set) callers pass "" and the header is omitted.
-function adminHdr(adminPassword) {
-    return adminPassword ? { 'X-Admin-Password': adminPassword } : {};
-}
-
 // parseSkippedCompetitionsHeader parses the server's X-Skipped-Competitions
 // header value into [{id, reason}, ...]. The wire format is
 // "<id>: <reason> | <id>: <reason>" (internal/mobileapp/handlers_print.go,
@@ -2775,9 +2777,11 @@ const API = {
             return null;
         }
     },
-    // Reset the tournament password. Unauthenticated by design: the
+    // Reset the admin password. Unauthenticated by design: the
     // server enforces "is this endpoint enabled" via the verifier's
-    // ResetEnabled() (locked mode returns 404). Throws on non-2xx so
+    // ResetEnabled() (locked mode returns 404). In file mode it answers
+    // only a request made on the server machine (loopback peer and
+    // loopback Host), else 403 reset_local_only. Throws on non-2xx so
     // the caller can surface the server's error message (including the
     // 404 "reset disabled" case if the SPA's cached authConfig was
     // stale).
@@ -2799,35 +2803,15 @@ const API = {
             const err = await res.json().catch(() => ({}));
             const e = new Error(err.error || `Failed to reset password (Status ${res.status})`);
             e.status = res.status;
+            // The refusal code (reset_local_only) lets the form word the
+            // case; absent on a bare error.
+            if (err.code) e.code = err.code;
             throw e;
         }
         // Backend returns 204 No Content: calling .json() on an empty
         // body throws SyntaxError per the Fetch spec (same pattern as
         // overridePoolRanks etc. above).
         return true;
-    },
-    // Set or rotate the elevated (destructive-ops) admin password (spec 004
-    // / mp-e21). File mode only: locked mode 404s (credential is the
-    // TOURNAMENT_ADMIN_PASSWORD_HASH env var). `password` is the MAIN
-    // tournament password (gates the endpoint via AuthMiddleware).
-    // `currentAdminPassword` is required only when an admin password is
-    // already set (rotation); on first-time set (TOFU) the server ignores it.
-    // The endpoint never echoes any password back.
-    async setAdminPassword(newPassword, currentAdminPassword, password) {
-        const body = { newPassword };
-        if (currentAdminPassword) body.currentPassword = currentAdminPassword;
-        const res = await fetch('/api/auth/admin-password', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
-            body: JSON.stringify(body)
-        });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            const e = new Error(err.error || `Failed to set admin password (Status ${res.status})`);
-            e.status = res.status;
-            throw e;
-        }
-        return res.json();
     },
     // `bounded` gives up after FETCH_TIMEOUT_MS, the body read included
     // (_fetchJson), instead of waiting on a connection that never answers.
@@ -2920,7 +2904,7 @@ const API = {
         }
         return res.json();
     },
-    async updateCompetition(id, config, password, adminPassword) {
+    async updateCompetition(id, config, password) {
         // Go's domain.Player uses json:"metadata" (array); the JS layer uses the
         // friendlier danGrade string. Convert before encoding so the backend can
         // unmarshal the dan grade into Player.Metadata.
@@ -2944,11 +2928,7 @@ const API = {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
-                'X-Tournament-Password': password,
-                // Roster-bearing updates (non-null players) hit the server's
-                // elevated-password gate (spec 004); the caller threads the
-                // admin password for those. Settings-only saves omit it.
-                ...adminHdr(adminPassword)
+                'X-Tournament-Password': password
             },
             body: JSON.stringify(body)
         });
@@ -3062,10 +3042,10 @@ const API = {
             return [];
         }
     },
-    async discardDraw(id, password, adminPassword) {
+    async discardDraw(id, password) {
         const res = await fetch(`/api/competitions/${id}/draw`, {
             method: 'DELETE',
-            headers: { 'X-Tournament-Password': password, ...adminHdr(adminPassword) }
+            headers: { 'X-Tournament-Password': password }
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -3083,12 +3063,11 @@ const API = {
     // (league, Swiss). 400 when the bracket reads fine, and 400 with a reason
     // for any competition that draws its bracket DIRECTLY, where the file is the
     // only record of the draw and rebuilding would invent different pairings
-    // rather than restore these. Elevated-gated like discardDraw: it discards
-    // recorded results.
-    async quarantineBracket(id, password, adminPassword) {
+    // rather than restore these.
+    async quarantineBracket(id, password) {
         const res = await fetch(`/api/competitions/${id}/bracket/quarantine`, {
             method: 'POST',
-            headers: { 'X-Tournament-Password': password, ...adminHdr(adminPassword) }
+            headers: { 'X-Tournament-Password': password }
         });
         const body = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -3104,12 +3083,11 @@ const API = {
     // on status === "completed") never becomes reachable. 400 when the
     // competition isn't in "pools" or "knockout" status (already completed, or
     // not started yet), or a naginata 3rd-place match is still unscored; 404
-    // when the competition doesn't exist. Elevated-gated (irreversible), so it
-    // takes the admin password like discardDraw.
-    async completeCompetition(id, password, adminPassword) {
+    // when the competition doesn't exist.
+    async completeCompetition(id, password) {
         const res = await fetch(`/api/competitions/${id}/complete`, {
             method: 'POST',
-            headers: { 'X-Tournament-Password': password, ...adminHdr(adminPassword) }
+            headers: { 'X-Tournament-Password': password }
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -3841,10 +3819,10 @@ const API = {
             ...(Array.isArray(verdict.heldGroups) ? { heldGroups: verdict.heldGroups } : {}),
         };
     },
-    async resetOverrides(compID, password, adminPassword) {
+    async resetOverrides(compID, password) {
         const res = await fetch(`/api/competitions/${compID}/overrides`, {
             method: 'DELETE',
-            headers: { 'X-Tournament-Password': password, ...adminHdr(adminPassword) }
+            headers: { 'X-Tournament-Password': password }
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -4046,10 +4024,10 @@ const API = {
         const body = await res.json().catch(() => ({}));
         return body.result ?? body;
     },
-    async importCompetitions(formData, password, adminPassword) {
+    async importCompetitions(formData, password) {
         const res = await fetch('/api/tournament/import', {
             method: 'POST',
-            headers: { 'X-Tournament-Password': password, ...adminHdr(adminPassword) },
+            headers: { 'X-Tournament-Password': password },
             body: formData
         });
         if (!res.ok) {
@@ -4058,24 +4036,29 @@ const API = {
         }
         return res.json();
     },
-    async deleteCompetition(id, password, adminPassword) {
+    // Deleting a competition asks for the password again: `confirmPassword` is
+    // what the operator typed in that moment, sent beside the sign-in password.
+    // A refusal of it is a 401 that carries a `confirm_password_*` code; it is
+    // thrown as an Error with that `code` and nothing else (no queue, no parking,
+    // no sign-out), so the dialog that asked can show the sentence and ask again.
+    async deleteCompetition(id, password, confirmPassword) {
         const res = await fetch(`/api/competitions/${id}`, {
             method: 'DELETE',
-            headers: { 'X-Tournament-Password': password, ...adminHdr(adminPassword) }
+            headers: { 'X-Tournament-Password': password, 'X-Confirm-Password': confirmPassword ?? '' }
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to delete competition");
+            throw Object.assign(new Error(err.error || "Failed to delete competition"), { code: err.code });
         }
         return true;
     },
     // Returns the updated competition JSON (including the new `status`) so
     // callers can apply it to local state immediately instead of waiting for
     // the SSE refresh / tournament refetch to land.
-    async invalidateCompetition(id, password, adminPassword) {
+    async invalidateCompetition(id, password) {
         const res = await fetch(`/api/competitions/${id}/invalidate`, {
             method: 'POST',
-            headers: { 'X-Tournament-Password': password, ...adminHdr(adminPassword) }
+            headers: { 'X-Tournament-Password': password }
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -4085,16 +4068,12 @@ const API = {
     },
     // Replace the full fighting-spirit awards list for a competition.
     // awards: array of { title, recipientName, recipientDojo? }.
-    // Requires X-Admin-Password only when the elevated gate is active
-    // (locked mode); in file mode the gate is optional. adminPassword is
-    // sent when provided and ignored server-side when the gate is off.
-    async updateCompetitionAwards(id, awards, password, adminPassword) {
+    async updateCompetitionAwards(id, awards, password) {
         const res = await fetch(`/api/competitions/${id}/awards`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
-                'X-Tournament-Password': password,
-                ...adminHdr(adminPassword)
+                'X-Tournament-Password': password
             },
             body: JSON.stringify({ fightingSpiritAwards: awards })
         });
@@ -4435,7 +4414,7 @@ const API = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || `Failed to ${checkedIn ? 'check in' : 'undo check-in'} participant`);
+            throw new Error(err.message || err.error || `Failed to ${checkedIn ? 'check in' : 'undo check-in'} participant`);
         }
         return res.json();
     },
@@ -4455,14 +4434,14 @@ const API = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || 'Failed to check in participants');
+            throw new Error(err.message || err.error || 'Failed to check in participants');
         }
         return res.json();
     },
-    async addParticipant(compID, payload, password, adminPassword) {
+    async addParticipant(compID, payload, password) {
         const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/participants`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password, ...adminHdr(adminPassword) },
+            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
             body: JSON.stringify(payload)
         });
         if (!res.ok) {
@@ -4471,10 +4450,10 @@ const API = {
         }
         return res.json();
     },
-    async replaceParticipant(compID, pid, payload, password, adminPassword) {
+    async replaceParticipant(compID, pid, payload, password) {
         const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/participants/${encodeURIComponent(pid)}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password, ...adminHdr(adminPassword) },
+            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
             body: JSON.stringify(payload)
         });
         if (!res.ok) {
@@ -4602,7 +4581,7 @@ const API = {
     // resolves each by chusen (drawing lots), recorded via overridePoolRanks.
     async chusenCandidates(compID, password) {
         // Lives in the admin-gated competition router, so it needs the
-        // tournament password header (unlike the public league candidates GET).
+        // admin password header (unlike the public league candidates GET).
         const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/chusen-candidates`, {
             headers: { 'X-Tournament-Password': password || '' }
         });

@@ -164,7 +164,7 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
   // the app already names for the operator (helper.MissingParticipantIDsMessage
   // tells them to save the roster once), and one bogus row standing in for
   // every id-less competitor was not a better answer than none.
-  const roster = useMemo(() => buildRoster(tournament.competitions), [tournament]);
+  const roster = useMemo(() => buildRoster(tournament.competitions, tournament), [tournament]);
 
   const q = query.trim().toLowerCase();
   // Memoised on the two things it reads, which saves the roster scan on the
@@ -408,7 +408,7 @@ export function ScheduleViewer({ tournament, tweaks }) {
   // fight the user's edits).
   const [watchlist] = useWatchlist();
   const [primaryKey, setPrimaryKey] = usePrimaryWatch();
-  const schedRoster = useMemo(() => buildRoster(tournament.competitions), [tournament]);
+  const schedRoster = useMemo(() => buildRoster(tournament.competitions, tournament), [tournament]);
   const initialPicked = useMemo(() => {
     return resolveWatchedPlayers(watchlist, schedRoster).map((p) => ({ id: p.id, name: p.name || "", dojo: p.dojo || "" }));
   }, [watchlist, schedRoster]);

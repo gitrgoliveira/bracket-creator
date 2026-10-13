@@ -10,6 +10,7 @@ import { EstimateHeadline } from './admin_schedule_utils.jsx';
 // settings preview so this stat, the checklist and the preview cannot
 // disagree about what counts as seeded.
 import { seededRanks } from './admin_helpers.jsx';
+import { checkInApplies } from './competition_shape.jsx';
 // One owner for what the operator is told when a file on disk does not say what
 // the app expects; shared with the pool surfaces so the wording cannot drift.
 import {
@@ -249,11 +250,9 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
       danger: true,
     });
     if (!ok) return;
-    const admin = await window.promptAdminPassword();
-    if (admin === null) return;
     setQuarantining(true);
     try {
-      const res = await window.API.quarantineBracket(c.id, password, admin);
+      const res = await window.API.quarantineBracket(c.id, password);
       // res.rebuilt is the SERVER's answer, not the kind we predicted above: it
       // is what actually happened, and a toast that guessed would one day tell
       // an operator a stage was rebuilt when nothing was.
@@ -333,9 +332,9 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     // Tournament ceremony/timing fields mirror AdminSettings' estimate effect deps.
   }, [c.id, c.format, c.kind, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.courts,
     c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat,
-    c.swissRounds, c.checkInEnabled, password,
+    c.swissRounds, checkInApplies(tournament, c.checkInEnabled), password,
     (c.players || []).length,
-    c.checkInEnabled ? (c.players || []).filter(p => p && p.checkedIn).length : 0,
+    checkInApplies(tournament, c.checkInEnabled) ? (c.players || []).filter(p => p && p.checkedIn).length : 0,
     tournament?.openingBlock, tournament?.lunchBlock, tournament?.closingBlock,
     tournament?.clockToElapsedMultiplier, tournament?.slowestCourtBufferPct]);
 
@@ -776,7 +775,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
 // FightingSpiritAwardsEditor: free-text form for adding/removing/saving
 // optional fighting-spirit (敢闘賞) awards for a competition. Each award has
 // a title, recipient name, and optional dojo. Save calls
-// API.updateCompetitionAwards (elevated-gated PUT /api/competitions/:id/awards).
+// API.updateCompetitionAwards (PUT /api/competitions/:id/awards).
 // v1 = free-text only; no competitor picker (deferred).
 function FightingSpiritAwardsEditor({ c, password, showToast }) {
   // Each row carries a stable client-only `_key` so React keys survive
@@ -812,13 +811,11 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   const updateField = (idx, field, val) => { setDirty(true); setAwards(prev => prev.map((a, i) => i === idx ? { ...a, [field]: val } : a)); };
 
   const save = async () => {
-    const admin = await window.promptAdminPassword();
-    if (admin === null) return;
     setSaving(true);
     try {
       // Strip the client-only `_key` before sending to the API.
       const payload = awards.map(({ _key, ...rest }) => rest);
-      await window.API.updateCompetitionAwards(c.id, payload, password, admin);
+      await window.API.updateCompetitionAwards(c.id, payload, password);
       // Edits are now persisted; clear dirty so the next prop refresh
       // (the save triggers an SSE refetch) re-syncs to the saved state.
       if (mountedRef.current) { setDirty(false); showToast("Fighting Spirit awards saved.", "success"); }

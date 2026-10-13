@@ -579,8 +579,6 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     // in the name field ("Name 1 - Name 2"), see participantFormError.
     const formErr = participantFormError({ name, dojo, engi: c.engi });
     if (formErr) { showToast(formErr, "error"); return; }
-    const admin = await window.promptAdminPassword();
-    if (admin === null) return;
     setAddLoading(true);
     try {
       // displayName is only forwarded for zekken-enabled competitions; for
@@ -589,7 +587,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       // poison the slot with a stale value (see TestReplaceDoesNotInherit…).
       const payload = { name, dojo, danGrade: danGrade || undefined };
       if (withZekken && zekken) payload.displayName = zekken;
-      await window.API.addParticipant(c.id, payload, password, admin);
+      await window.API.addParticipant(c.id, payload, password);
       if (!mountedRef.current) return;
       setAddName(""); setAddDojo(""); setAddDanGrade(""); setAddZekken(""); setShowAddForm(false);
       showToast(`${name} added`);
@@ -614,8 +612,6 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     const oldName = replaceTarget.name;
     const targetPid = window.checkinApiPid(replaceTarget);
     const targetSource = replaceTarget.source || "";
-    const admin = await window.promptAdminPassword();
-    if (admin === null) return;
     setReplaceLoading(true);
     try {
       // Build metadata from danGrade so the edited grade actually persists:
@@ -631,7 +627,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       const metadata = window.buildPlayerMetadata(danGrade, replaceTarget.metadata);
       const payload = { name, dojo, displayName: withZekken ? zekken : "", source: targetSource };
       if (metadata !== undefined) payload.metadata = metadata;
-      const updated = await window.API.replaceParticipant(c.id, targetPid, payload, password, admin);
+      const updated = await window.API.replaceParticipant(c.id, targetPid, payload, password);
       if (!mountedRef.current) return;
       setReplaceTarget(null);
       showToast(oldName === updated.name ? `Saved changes for ${updated.name}` : `Renamed ${oldName} → ${updated.name}`);
@@ -762,10 +758,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       // this component's local state.
       if (!mountedRef.current) return;
 
-      // updateCompetition returns undefined when it short-circuited without
-      // saving (e.g. the elevated-password prompt was cancelled). Don't show
-      // a "Saved" toast for a PUT that never happened. A real save returns the
-      // warnings array (possibly empty).
+      // A real save returns the warnings array (possibly empty), as
+      // AdminApp's updateCompetition always does. An onUpdate that returns
+      // nothing reported no save, so don't show a "Saved" toast for it.
       if (warnings === undefined) return;
 
       let msg = `Saved ${pluralize(np.length, kindLabel)}`;

@@ -201,7 +201,7 @@ describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)
     'StatusBadge', 'formatDate', 'competitionKindLabel', 'Breadcrumbs',
     'AdminTopbar', 'AdminParticipants', 'AdminSettings', 'AdminExport',
     'AdminScoreEditor', 'AdminPools', 'AdminCompOverview', 'AdminTeamLineupsList',
-    'AdminSwissRounds', 'RunningMatchPanel', 'BracketTree', 'promptAdminPassword',
+    'AdminSwissRounds', 'RunningMatchPanel', 'BracketTree',
     'isValidDate', 'roundLabel', 'bracketRoundLabel', 'hasBothSides',
     'AdminCompetition',
   ];
@@ -257,7 +257,6 @@ describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)
     global.window.AdminSwissRounds = function AdminSwissRounds() { return null; };
     global.window.RunningMatchPanel = function RunningMatchPanel() { return null; };
     global.window.BracketTree = function BracketTree() { return null; };
-    global.window.promptAdminPassword = () => 'admin';
     global.window.isValidDate = () => true;
     global.window.roundLabel = (i) => `Round ${i + 1}`;
     global.window.bracketRoundLabel = (_m, i, n) => global.window.roundLabel(i, n);
@@ -423,7 +422,7 @@ describe('AdminBracket: per-match playability (mp-turx)', () => {
     'StatusBadge', 'formatDate', 'competitionKindLabel', 'Breadcrumbs',
     'AdminTopbar', 'AdminParticipants', 'AdminSettings', 'AdminExport',
     'AdminScoreEditor', 'AdminPools', 'AdminCompOverview', 'AdminTeamLineupsList',
-    'AdminSwissRounds', 'RunningMatchPanel', 'BracketTree', 'promptAdminPassword',
+    'AdminSwissRounds', 'RunningMatchPanel', 'BracketTree',
     'isValidDate', 'roundLabel', 'bracketRoundLabel', 'hasBothSides',
     'AdminCompetition',
   ];
@@ -502,7 +501,6 @@ describe('AdminBracket: per-match playability (mp-turx)', () => {
     global.window.AdminSwissRounds = function AdminSwissRounds() { return null; };
     global.window.RunningMatchPanel = function RunningMatchPanel() { return null; };
     global.window.BracketTree = function BracketTree() { return null; };
-    global.window.promptAdminPassword = () => 'admin';
     global.window.isValidDate = () => true;
     global.window.roundLabel = (i) => `Round ${i + 1}`;
     global.window.bracketRoundLabel = (_m, i, n) => global.window.roundLabel(i, n);

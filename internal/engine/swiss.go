@@ -169,6 +169,12 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 		return nil, validationErrorf("round %d exceeds configured swissRounds %d", roundNumber, comp.SwissRounds)
 	}
 
+	// Loaded first: whether check-in applies depends on the tournament's mode.
+	tournament, err := e.store.LoadTournament()
+	if err != nil {
+		return nil, err
+	}
+
 	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
 		return nil, err
@@ -197,9 +203,10 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 	// Determine the Swiss field for this round (mp-w7x; PR #199 review).
 	//
 	// Round 1 (the initial draw): exclude participants who have not checked
-	// in, but ONLY when check-in tracking is enabled (comp.CheckInEnabled),
-	// otherwise a stale/imported checked_in marker would shrink the field even
-	// though the competition doesn't use check-in (PR #199 review). When
+	// in, but ONLY when check-in applies (comp.CheckInApplies: the setting is on
+	// and the tournament is not self-run), otherwise a stale/imported
+	// checked_in marker would shrink the field even though the competition
+	// doesn't use check-in (PR #199 review). When
 	// enabled, opt-in semantics still apply (see filterCheckedIn).
 	//
 	// Round N > 1: the field is FROZEN to whoever was part of the initial
@@ -209,7 +216,7 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 	// player into a later round nor silently drop one. Withdrawals are handled
 	// separately by the eligibility (kiken/fusenpai) filter below.
 	if roundNumber == 1 {
-		if comp.CheckInEnabled {
+		if comp.CheckInApplies(tournament) {
 			participants = filterCheckedIn(participants)
 		}
 	} else {
@@ -302,11 +309,8 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 	matches := buildSwissMatches(pairings, byeKey, roundNumber, comp.Courts, keyToPlayer)
 
 	// Schedule slot assignment (same per-court cursor logic as pool
-	// matches). Reload tournament for ceremony / multiplier tuning.
-	tournament, err := e.store.LoadTournament()
-	if err != nil {
-		return nil, err
-	}
+	// matches). The tournament loaded above also supplies the ceremony /
+	// multiplier tuning.
 	// Apply the team-size default (same guard as competition.go StartCompetition).
 	// GenerateSwissRound reloads comp from disk; if TeamSize was 0 in the stored
 	// config, the default must be applied here so assignPoolMatchSlots uses the
@@ -936,7 +940,7 @@ func (e *Engine) AdvanceSwissRound(compID string) ([]state.MatchResult, int, err
 	if comp.Format != state.CompFormatSwiss {
 		return nil, 0, validationErrorf("competition %s is not swiss format", compID)
 	}
-	if comp.SwissRounds > 0 && comp.SwissCurrentRound >= comp.SwissRounds {
+	if comp.SwissRounds > 0 && SwissRoundsToDraw(comp) == 0 {
 		return nil, 0, validationErrorf("all %d swiss rounds already completed", comp.SwissRounds)
 	}
 	completed, err := e.CurrentSwissRoundCompleted(compID)

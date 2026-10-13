@@ -3,7 +3,7 @@
 // A typed name, a pick from the list and "+ Add" save the match lineup and
 // name or add the team member, with no organiser password: the public page
 // sends an empty one, and the server lets these writes through in self-run.
-// Before, each of them was refused with "invalid tournament password".
+// Before, each of them was refused with "invalid admin password".
 //
 // Mounted through the real door, MatchViewerModal and "Report result", with
 // the real lineup helpers (admin_lineup.jsx) the public page loads too.

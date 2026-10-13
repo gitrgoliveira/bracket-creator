@@ -17,6 +17,7 @@ import { sameCompetitor } from './competitor_identity.jsx';
 // is import-only so it can be reached directly (see its header).
 import { notLandedBanner, terminalFailureBanner, notSavedText, writeWasRefused, writeRetryable, decisionWord } from './write_result.jsx';
 import { useArmedConfirm, useOpenedTapGuard, acceptTap, clearTap } from './tap_guard.jsx';
+import { serverNowMs } from './server_clock.jsx';
 
 import {
   MAX_IPPONS_PER_SIDE,
@@ -56,7 +57,7 @@ import {
 // one owner of that question.
 import { isBarredMatch } from './ineligible_match.jsx';
 
-import { SyncStatusPill, useDebouncedRunningWrite, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
+import { SyncStatusPill, useDebouncedRunningWrite, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote, landedAutosave } from './admin_scoring_autosave.jsx';
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
 import { GROUP_POINTS, GROUP_RESULT, GROUP_ENCHO, GROUP_REP } from './match_groups.jsx';
 
@@ -272,7 +273,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // put its stale name back. That is the case this closes.
   //
   // A pick the operator made stands until the server holds it. Each pick is
-  // saved as it is made (markScoringDirty in the pickers), so the save of one
+  // saved as it is made (markRunningWrite in the pickers), so the save of one
   // pick coming back must not undo a second pick made before it arrived. One
   // adopt per side, so a pick still being saved on one side does not stop the
   // other side following the server. An empty pick never counts as unsaved:
@@ -306,12 +307,39 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const _autosaveSeenStampRef = useRefA(0);
   // bc-mrgc: what a write applied only in part kept in the match's history.
   const keptInHistory = useKeptInHistoryNote();
-  const { markDirty: markScoringDirty, cancelDebounce: cancelScoringDebounce } = useDebouncedRunningWrite({
+  const { markDirty: markRunningWrite, cancelDebounce: cancelScoringDebounce } = useDebouncedRunningWrite({
     isRunningRef: _autosaveIsRunningRef,
     buildPatchRef: _autosaveBuildPatchRef,
     onSubmitRef: _autosaveOnSubmitRef,
     onWriteResult: keptInHistory.noteFromWrite,
     seenStampRef: _autosaveSeenStampRef,
+  });
+  // When the operator last edited the board here (the points, the fouls, the
+  // overtime count, the draw: what applyServerScore re-seeds), in the server's
+  // clock frame; undefined once the board holds the server's copy again. A
+  // server copy stamped before it cannot know that edit, so the adopt below
+  // keeps the board (adoptServerScore), the rule the team sheet's rows follow
+  // (rowTakenFromServer, bc-kclr). Comparing values alone is not enough: taking
+  // a mark off and tapping it back while the removal is still saving returns the
+  // board to the value the server still shows, which reads as untouched, and the
+  // removal's echo then wiped the tap (bc-ltap).
+  // The stamp stands only while an edit is unsent: the write's own stamp is
+  // worked out at send, less the edit's age (api_client.jsx), so its echo can
+  // read a millisecond before the tap, and taps that net to nothing change
+  // nothing on the server at all. Once an autosave built after the latest
+  // board edit has landed, the board holds nothing the server lacks, so the
+  // stamp is cleared (landedBoardSave) and every later server copy is followed.
+  const boardEditedAtRef = useRefA(undefined);
+  const boardEditSeqRef = useRefA(0);
+  const markScoringDirty = () => {
+    boardEditedAtRef.current = serverNowMs();
+    boardEditSeqRef.current += 1;
+    markRunningWrite();
+  };
+  // The autosave's submit: the host's onSubmit, and on a landed answer the
+  // board stamp cleared when no board edit was made since this save was built.
+  const landedBoardSave = (submit) => landedAutosave(submit, boardEditSeqRef, (seq) => {
+    if (boardEditSeqRef.current === seq) boardEditedAtRef.current = undefined;
   });
 
   useEffectA(() => {
@@ -540,7 +568,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   _autosaveIsRunningRef.current = m.status === "running";
   _autosaveSeenStampRef.current = m.modifiedAt || 0;
   _autosaveBuildPatchRef.current = buildPatch;
-  _autosaveOnSubmitRef.current = onSubmit;
+  _autosaveOnSubmitRef.current = landedBoardSave(onSubmit);
 
   const doSubmit = async (fn) => {
     cancelScoringDebounce(); // C1: cancel any pending autosave before explicit submit
@@ -663,6 +691,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     initialEnchoPeriods, initialIsDrawToggled,
   ]);
   const applyServerScore = () => {
+    boardEditedAtRef.current = undefined;
     setAPts(initialAPts);
     setBPts(initialBPts);
     setAFouls(initialAFouls);
@@ -848,9 +877,14 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // isDirty: it reads the value from the render BEFORE the server change (see
   // useAdoptFromServer). It self-corrects: a re-seed makes the next render's
   // isDirty false again.
+  const adoptServerScore = () => {
+    const editedAt = boardEditedAtRef.current;
+    if (editedAt !== undefined && (m.modifiedAt || 0) < editedAt) return;
+    applyServerScore();
+  };
   useAdoptFromServer({
     signature: serverScoreSig,
-    apply: applyServerScore,
+    apply: adoptServerScore,
     keepLocalEdits: true,
     isDirty,
   });
@@ -1071,7 +1105,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   className="input"
                   value={repPlayerB}
                   disabled={submitting}
-                  onChange={(e) => { setRepPlayerB(e.target.value); markScoringDirty(); }}
+                  onChange={(e) => { setRepPlayerB(e.target.value); markRunningWrite(); }}
                   style={{ padding: "6px 8px", fontSize: 14 }}
                 >
                   <option value="">Select player</option>
@@ -1085,7 +1119,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   className="input"
                   value={repPlayerA}
                   disabled={submitting}
-                  onChange={(e) => { setRepPlayerA(e.target.value); markScoringDirty(); }}
+                  onChange={(e) => { setRepPlayerA(e.target.value); markRunningWrite(); }}
                   style={{ padding: "6px 8px", fontSize: 14 }}
                 >
                   <option value="">Select player</option>

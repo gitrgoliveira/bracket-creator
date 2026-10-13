@@ -18,15 +18,15 @@ When the tournament is self-run, a public self-registration page is open for ind
 
 If the form says someone with your name is already registered, your name and dojo are already on the list and you are done. A namesake from another dojo registers normally. If you are a different person with the same name at the same dojo, ask the organiser to add you.
 
-## Check in on the day
+## Check-in
 
-If the competition uses check-in, mark yourself present before the organiser generates the draw. Check-in happens at the **Registration desk**, which you open from the dashboard: it gathers the competitors of every competition that uses check-in, so find your name there and mark yourself present. Self-run mode does not require a password for this. Competitors who have not checked in are excluded from the draw.
+Self-run mode has no check-in. There is nothing to mark on the day: the draw includes everyone on the roster, so make sure your name is on it before the organiser generates the draw.
 
 ## Report your own score
 
 You can record your match result directly from the public viewer, without the admin password. A result you enter is tagged as self-reported; a result entered by an operator is tagged as admin.
 
-Only everyday match outcomes are available to self-reporters. Decisions that require an official ruling remain with the operator, and so do destructive actions such as editing the roster. For a full list of outcomes and what they mean, refer to [Recording decisions](../court-operators/recording-decisions.md).
+Only everyday match outcomes are available to self-reporters. Decisions that require an official ruling remain with the operator, and so do destructive actions such as deleting a competition or discarding a draw. For a full list of outcomes and what they mean, refer to [Recording decisions](../court-operators/recording-decisions.md).
 
 When a knockout team match finishes level, you can add the representative bout ([daihyosen](../court-operators/recording-decisions.md#daihyosen)) from the score sheet, score it like any other bout, and finish the match on the winner it decides. A kachinuki match has no representative bout: a tied pairing that must produce a result is settled by encho on that same bout (refer to [Scoring a kachinuki encounter](../organisers/team-tournaments.md#scoring-a-kachinuki-encounter)). A representative bout added by mistake can be removed while it is still unscored, until the match finishes; after that, only the organiser can add or remove one. The score sheet does not offer a judges' decision (hantei): that stays with the organiser, on the representative bout as on every other bout. When the organiser records one, the score sheet shows the representative bout as decided and you cannot change it, but you can still finish the match on that decision.
 

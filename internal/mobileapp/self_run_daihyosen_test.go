@@ -48,7 +48,7 @@ func newRepBoutFixture(t *testing.T, selfRun bool) *repBoutFixture {
 	t.Helper()
 	store := newTempStore(t)
 	if selfRun {
-		seedSelfRunTournament(t, store, "admin-pw")
+		seedSelfRunTournament(t, store)
 	} else {
 		seedOfficiatedTournament(t, store)
 	}
@@ -819,7 +819,7 @@ func TestHoldSelfReportedWriteUnderTx(t *testing.T) {
 
 			snap, found, err := matchSnapshotOrErr(store, "c1", "B1", "test")
 			require.NoError(t, err)
-			err = holdSelfReportedWriteUnderTx("c1", "B1", snap, found, result, tc.startOnly)
+			err = holdSelfReportedWriteUnderTx("c1", "B1", snap, found, result, nil, tc.startOnly)
 			if tc.want != nil {
 				var refusal *selfRunRefusal
 				require.ErrorAs(t, err, &refusal)

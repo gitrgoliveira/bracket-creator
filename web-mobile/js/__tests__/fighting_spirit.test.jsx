@@ -198,7 +198,7 @@ describe('API.updateCompetitionAwards', () => {
       json: async () => ({ id: 'c1', fightingSpiritAwards: [] }),
     });
     const awards = [{ title: 'Fighting Spirit', recipientName: 'Alice', recipientDojo: 'Tokyo' }];
-    await API.updateCompetitionAwards('c1', awards, 'mainpw', 'adminpw');
+    await API.updateCompetitionAwards('c1', awards, 'mainpw');
 
     expect(global.fetch).toHaveBeenCalledWith(
       '/api/competitions/c1/awards',
@@ -207,7 +207,6 @@ describe('API.updateCompetitionAwards', () => {
         headers: expect.objectContaining({
           'Content-Type': 'application/json',
           'X-Tournament-Password': 'mainpw',
-          'X-Admin-Password': 'adminpw',
         }),
       })
     );
@@ -215,9 +214,9 @@ describe('API.updateCompetitionAwards', () => {
     expect(body).toEqual({ fightingSpiritAwards: awards });
   });
 
-  it('omits X-Admin-Password when adminPassword is empty', async () => {
+  it('never sends X-Admin-Password (bc-cmpw: no separate admin password)', async () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
-    await API.updateCompetitionAwards('c1', [], 'mainpw', '');
+    await API.updateCompetitionAwards('c1', [], 'mainpw');
     const headers = global.fetch.mock.calls[0][1].headers;
     expect(headers).not.toHaveProperty('X-Admin-Password');
   });
@@ -228,13 +227,13 @@ describe('API.updateCompetitionAwards', () => {
       status: 400,
       json: async () => ({ error: 'title is required' }),
     });
-    await expect(API.updateCompetitionAwards('c1', [{}], 'pw', 'adm')).rejects.toThrow('title is required');
+    await expect(API.updateCompetitionAwards('c1', [{}], 'pw')).rejects.toThrow('title is required');
   });
 
   it('returns parsed competition JSON on success', async () => {
     const comp = { id: 'c1', fightingSpiritAwards: [{ title: 'Spirit', recipientName: 'Bob' }] };
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => comp });
-    const result = await API.updateCompetitionAwards('c1', comp.fightingSpiritAwards, 'pw', 'adm');
+    const result = await API.updateCompetitionAwards('c1', comp.fightingSpiritAwards, 'pw');
     expect(result.fightingSpiritAwards[0].recipientName).toBe('Bob');
   });
 });

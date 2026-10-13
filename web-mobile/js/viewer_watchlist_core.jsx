@@ -21,6 +21,7 @@ import { competitorKey } from './competitor_identity.jsx';
 import { resultRecencyDesc } from './result_recency.jsx';
 import { parseWatchlistTokens, resolveFreshTokens, WATCHLIST_PARAM } from './watchlist_link.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
+import { checkInApplies } from './competition_shape.jsx';
 
 const { useState } = React;
 
@@ -622,12 +623,14 @@ export function rosterFullyLoaded(competitions) {
 }
 
 // checkedIn=true wins if any check-in-enabled competition has the player checked in.
-export function buildRoster(competitions) {
+// `tournament` (optional) is asked whether check-in applies at all: a self-run
+// tournament has none, so nobody in its roster is ever checked in.
+export function buildRoster(competitions, tournament) {
   const map = new Map();
   (competitions || []).forEach((c) => {
     (c.players || []).forEach((p) => {
       if (!p || !p.id) return;
-      const checkedIn = !!c.checkInEnabled && !!p.checkedIn;
+      const checkedIn = checkInApplies(tournament, c.checkInEnabled) && !!p.checkedIn;
       const existing = map.get(p.id);
       if (!existing) {
         // `comps` is the competition names this record covers, for the

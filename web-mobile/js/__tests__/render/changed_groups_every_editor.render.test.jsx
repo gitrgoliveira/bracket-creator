@@ -445,9 +445,11 @@ describe('an adopted value is agreed, never re-sent', () => {
     const { rerender } = await mount(individual());
     await pointerTap(ipponBtn('aka', 'M'));
     await settle();
-    // Its own write comes back, then another device scores Shiro's point.
-    await act(async () => { rerender(editorFor(individual({ ipponsA: ['M'] }))); });
-    await act(async () => { rerender(editorFor(individual({ ipponsA: ['M'], ipponsB: ['K'] }))); });
+    // Its own write comes back, then another device scores Shiro's point; both
+    // copies are stamped after the tap, as the server's are (bc-ltap: a copy
+    // stamped before the operator's last edit never replaces the board).
+    await act(async () => { rerender(editorFor(individual({ ipponsA: ['M'], modifiedAt: Date.now() }))); });
+    await act(async () => { rerender(editorFor(individual({ ipponsA: ['M'], ipponsB: ['K'], modifiedAt: Date.now() + 1 }))); });
     expect(slotWith('Shiro', 'K'), 'the point recorded elsewhere is shown').toBeTruthy();
     await startOvertime();
     await settle();

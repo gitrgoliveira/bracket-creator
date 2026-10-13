@@ -50,9 +50,9 @@ func setupTestRouter(t testing.TB) (*gin.Engine, *state.Store, *engine.Engine, *
 	// Admin API
 	admin := r.Group("/api")
 	RegisterTournamentHandlers(admin, store, hub, NewFileVerifier(store))
-	RegisterImportHandlers(admin, store, eng, hub, NewFileElevatedVerifier(store))
-	RegisterCompetitionHandlers(admin, store, eng, hub, NewFileElevatedVerifier(store))
-	RegisterParticipantHandlers(admin, store, eng, hub, NewFileElevatedVerifier(store))
+	RegisterImportHandlers(admin, store, eng, hub)
+	RegisterCompetitionHandlers(admin, store, eng, hub)
+	RegisterParticipantHandlers(admin, store, eng, hub)
 	RegisterMatchHandlers(admin, eng, store, store, hub, NewFileVerifier(store), store)
 	RegisterDecisionHandlers(admin, eng, store, store, hub)
 	RegisterEligibilityHandlers(admin, store, hub)
@@ -269,7 +269,7 @@ func TestTournamentHandlers(t *testing.T) {
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code,
 			"POST /api/tournament with empty Password must return 400")
-		assert.Contains(t, w.Body.String(), "tournament password is required",
+		assert.Contains(t, w.Body.String(), "admin password is required",
 			"rejection should explain the empty-password reason")
 		// Confirm it didn't land on disk.
 		stored, _ := store.LoadTournament()
@@ -346,7 +346,7 @@ func TestTournamentHandlers(t *testing.T) {
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code,
 			"PUT with empty Password against legacy empty-password tournament must reject")
-		assert.Contains(t, w.Body.String(), "tournament password is required")
+		assert.Contains(t, w.Body.String(), "admin password is required")
 	}
 
 	// mp-ef3 Copilot round 2: public info field trimming, contacts-count
@@ -837,7 +837,7 @@ func TestTournamentHandlers_FileMode_POSTOverwriteWithNewPassword_BroadcastsRese
 		}
 	}
 	assert.True(t, seen["tournament_updated"], "tournament_updated event missing")
-	assert.True(t, seen["password_reset"], "password_reset event missing, overwriting an existing tournament's password must clear other admins' cached credentials")
+	assert.True(t, seen["password_reset"], "password_reset event missing, overwriting an existing admin password must clear other admins' cached credentials")
 }
 
 // TestTournamentHandlers_ModeSwitchPreservesStoredPassword walks the

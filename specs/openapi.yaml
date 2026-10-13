@@ -14,8 +14,10 @@ info:
     - **`GET /api/events`**: SSE stream; always public so viewers and spectator screens
       can receive real-time updates without an admin credential.
     - **`GET /api/auth-config`**: always public; carries no secret material.
-    - **`POST /api/tournament/reset`**: public in file mode (the recovery path for a
-      forgotten password); returns `404` in locked mode (`--lock-password`).
+    - **`POST /api/tournament/reset`**: needs no password in file mode (the recovery path
+      for a forgotten password) but answers only a caller on the machine running the
+      server (`403` `reset_local_only` otherwise); returns `404` in locked mode
+      (`--lock-password`).
     - **`GET /api/schedule/estimate`**: stateless schedule calculator; always public.
     - **`GET /api/competitions/{id}/competitor-status`**: public read; the `POST` write is protected.
     - **`GET /api/competitions/{id}/teams/{tid}/lineups/{round}`**: public read; `PUT`/`DELETE` are protected.
@@ -26,11 +28,14 @@ info:
     - **`GET /api/tournament/announcement`**: public read; returns the currently active admin broadcast announcement (204 when none/expired).
 
     **Self-run mode.** When the tournament is created with `mode: self-run`, the
-    main-password gate is bypassed for the operational play surface (scoring, check-in,
+    main-password gate is bypassed for the operational play surface (scoring,
     start/complete, generate-draw, etc.) so participants can drive their own flow without
-    an organiser at a table. Destructive routes (delete competition, invalidate, discard
-    draw, result overrides, roster mutations, import) and organiser-owned setup
-    (tournament/competition config) stay gated. In the default `officiated` mode every
+    an organiser at a table. Self-run mode has no check-in: the three check-in operations
+    answer 409 `check_in_not_in_self_run` for every caller, and the draw includes every
+    participant whatever a competition's `checkInEnabled` says. Destructive routes (delete competition, invalidate, discard
+    draw, result overrides, import) and organiser-owned setup
+    (tournament/competition config) stay gated. Adding and editing participants
+    (`POST .../participants`, `PUT .../participants/{pid}`) is open to anyone. In the default `officiated` mode every
     `/api/` route keeps requiring `X-Tournament-Password` as described above.
     The team writes the public score sheet makes when a competitor names a bout's
     fighter are open in self-run mode too: `PUT .../teams/{tid}/match-lineups/{matchId}`,
@@ -92,7 +97,7 @@ info:
     the recorded ones. One that would record, move or clear the decision (dropping
     the row included), or name a match winner other than the side it decided, is
     refused with 409 `hantei_organiser_only`. On these public writes a password that
-    is sent but wrong is answered 401 (`invalid tournament password`), as on a gated
+    is sent but wrong is answered 401 (`invalid admin password`), as on a gated
     route: only an empty one is a participant. `POST .../matches/bulk-score` and
     `PUT .../matches/{mid}/quick-score` stay gated: they write results without these
     checks.
@@ -358,7 +363,7 @@ paths:
           auto-complete check that runs after it).
         - `password_reset`: the admin password was changed. Emitted
           from three sources (file mode only; never emitted in locked mode):
-          1. `POST /api/tournament/reset`; the public recovery endpoint.
+          1. `POST /api/tournament/reset`; the recovery endpoint.
              Payload includes `originatorId` so the submitting tab can
              suppress its own broadcast: `data: { originatorId: "<opaque>" }`.
           2. `PUT /api/tournament`; when an admin changes the password
@@ -410,7 +415,7 @@ paths:
         **File mode (default)**: allowed without the
         `X-Tournament-Password` header when no tournament has been
         configured yet (bootstrap). `password` must be non-empty
-        (`tournament password is required`); an empty Password on
+        (`admin password is required`); an empty Password on
         disk would let AuthMiddleware's `password != t.Password`
         check vacuously pass for any client sending an empty header.
         Once a tournament with a password exists, auth is required.
@@ -485,7 +490,7 @@ paths:
         to keep current"). If after the preserve step the password is
         STILL empty (operator manually edited `tournament.md`, or a
         fresh PUT against a never-initialized tournament), the
-        request is rejected with 400 (`tournament password is
+        request is rejected with 400 (`admin password is
         required`). Successful rotations broadcast
         `EventPasswordReset` over SSE so other logged-in admins clear
         their stale localStorage credential and re-prompt; name-only
@@ -524,9 +529,17 @@ paths:
       tags: [tournament]
       summary: Reset the admin password (file mode only)
       description: |
-        Replaces the stored admin password with the supplied value. Unauthenticated by
-        design; this is the documented recovery path for a forgotten admin password
-        on local / private deployments.
+        Replaces the stored admin password with the supplied value. Needs no password;
+        this is the documented recovery path for a forgotten admin password.
+
+        The endpoint answers only a request from the machine running the server: the
+        TCP peer address must be a loopback address (127.0.0.0/8, `::1`, or an
+        IPv4-mapped 127/8), and the request's `Host` must be a loopback name
+        (`localhost`, a 127/8 IPv4 or a bracketed `[::1]`, with or without a port).
+        `X-Forwarded-For`, `X-Real-IP` and `Forwarded` are never consulted. Any
+        other peer or Host receives `403` with the code `reset_local_only`.
+        A server in a Docker container started with `-p` sees a browser on the host
+        as a non-loopback peer, so the reset is refused there too.
 
         The endpoint is disabled in **locked mode** (`--lock-password` CLI flag, with
         `TOURNAMENT_PASSWORD_HASH` env var supplying a bcrypt hash). In locked mode the
@@ -564,11 +577,18 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '403':
           description: |
-            Cross-origin POST rejected. The handler requires both the Origin scheme and
-            host:port to match the server's effective scheme (http vs https) and `Host`
-            header (RFC 6454 §3.2). Rejected cases: scheme mismatch (e.g. HTTPS Origin
-            to a plain-HTTP server), host or port mismatch, malformed Origin URL, and
-            `Origin: null` (sandboxed iframes, file://, data: URLs).
+            Refused, in one of two ways.
+
+            The request did not come from the machine running the server, or its `Host`
+            is not a loopback name. The body is
+            `{"error": "Reset the password on the machine running the server.", "code":
+            "reset_local_only", "message": "<the same sentence>"}`.
+
+            Or a cross-origin POST was rejected. The handler requires both the Origin
+            scheme and host:port to match the server's effective scheme (http vs https)
+            and `Host` header (RFC 6454 §3.2). Rejected cases: scheme mismatch (e.g.
+            HTTPS Origin to a plain-HTTP server), host or port mismatch, malformed
+            Origin URL, and `Origin: null` (sandboxed iframes, file://, data: URLs).
         '404':
           description: Reset disabled (locked mode active).
         '409':
@@ -602,25 +622,6 @@ paths:
                   resetEnabled:
                     type: boolean
                     description: Whether POST /api/tournament/reset is honored.
-                  elevatedRequired:
-                    type: boolean
-                    description: |
-                      Whether the destructive-ops password gate is active. File mode:
-                      true once an admin password has been set. Locked mode: always true.
-                      When false, destructive endpoints require only the main password.
-                  elevatedConfigured:
-                    type: boolean
-                    description: |
-                      Whether a destructive-ops credential exists. File mode: an admin
-                      password is set. Locked mode: TOURNAMENT_ADMIN_PASSWORD_HASH is a
-                      valid bcrypt hash. When required but not configured, gated
-                      endpoints return 503.
-                  elevatedEditable:
-                    type: boolean
-                    description: |
-                      Whether the destructive-ops password can be set via
-                      PUT /api/auth/admin-password. True in file mode; false in locked
-                      mode (the credential is the TOURNAMENT_ADMIN_PASSWORD_HASH env var).
                   scheduleEnabled:
                     type: boolean
                     description: |
@@ -628,65 +629,6 @@ paths:
                       by the ENABLE_TOURNAMENT_SCHEDULE env var on the mobile-app server
                       (default false). When false, the SPA hides the dashboard's
                       "Tournament schedule" entry.
-
-  /api/auth/admin-password:
-    put:
-      tags: [tournament]
-      summary: Set or rotate the destructive-ops (elevated) password
-      description: |
-        Sets or rotates the file-mode destructive-ops password (spec 004 /
-        mp-e21). Gated by the MAIN password (`X-Tournament-Password`) via the
-        admin middleware.
-
-          * First-time set (no admin password yet); trust-on-first-use: the
-            main password authorizes it; `currentPassword` is ignored.
-          * Rotation (admin password already set); `currentPassword` must
-            equal the stored value, else 401. This prevents a main-password
-            holder from silently re-setting the elevated credential.
-
-        Locked mode returns 404; the credential is the
-        `TOURNAMENT_ADMIN_PASSWORD_HASH` env var and is not settable via the
-        API. The response never echoes any password (write-only).
-      security:
-        - TournamentPassword: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [newPassword]
-              properties:
-                newPassword:
-                  type: string
-                  maxLength: 256
-                  description: The destructive-ops password to store (non-empty).
-                currentPassword:
-                  type: string
-                  maxLength: 256
-                  description: Required only when an admin password is already set (rotation).
-      responses:
-        '200':
-          description: Admin password set or rotated.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    example: ok
-                  elevatedConfigured:
-                    type: boolean
-                    example: true
-        '400':
-          description: Empty newPassword or over-length field.
-        '401':
-          description: Wrong currentPassword on rotation (or missing/invalid main password).
-        '404':
-          description: Locked mode; not settable via the API.
-        '409':
-          description: No tournament configured yet.
 
   /api/tournament/import:
     post:
@@ -698,10 +640,6 @@ paths:
         One of the uploaded files must be named `manifest.yaml` (or `.yml`); it declares
         which competitions to create and which participant/seed CSV files to associate with each.
 
-        Also requires `X-Admin-Password` when the destructive-ops gate is active
-        (see the AdminPassword security scheme); returns 503 when locked mode is
-        active but `TOURNAMENT_ADMIN_PASSWORD_HASH` is unset.
-
         Each competition row is validated against the same rules
         `POST /api/competitions` applies, and two manifest keys are worth
         calling out because their absence is not neutral:
@@ -711,15 +649,16 @@ paths:
         - `team_size` must be stated (and be >= 2) whenever `kind` is
           `"team"`. An omitted key decodes to 0, which is refused with
           `teamSize: team competitions require teamSize >= 2` -- the same
-          answer the create endpoint gives. A row that omitted it was
-          accepted by earlier versions; it now fails that row while the
+          answer the create endpoint gives. Such a row fails while the
           rest of the import proceeds.
 
         `pool_size` and `pool_size_mode`, by contrast, ARE defaulted when
         omitted (to 4 and `"max"`).
+
+        In self-run mode this is an organiser action: it needs
+        `X-Tournament-Password`.
       security:
         - TournamentPassword: []
-          AdminPassword: []
       requestBody:
         required: true
         content:
@@ -886,7 +825,7 @@ paths:
         '400':
           description: Validation error (name missing/too long, link invalid, cap reached).
         '401':
-          description: Missing or incorrect tournament password.
+          description: Missing or incorrect admin password.
         '413':
           description: Logo file exceeds 1 MB.
         '415':
@@ -924,7 +863,7 @@ paths:
         '400':
           description: Invalid index (negative or non-integer).
         '401':
-          description: Missing or incorrect tournament password.
+          description: Missing or incorrect admin password.
         '404':
           description: Index out of range or tournament not initialized.
 
@@ -1360,18 +1299,13 @@ paths:
         IGNORED in the body. Use the dedicated transition endpoints
         (`/start`, `/complete`, `/invalidate`) to change status.
 
-        **Elevated password (spec 004 / mp-e21):** the ROSTER-save path
-        (non-null `players`) additionally requires `X-Admin-Password`
-        when the destructive-ops gate is active; it rewrites
-        `participants.csv`, the same protected operation as the dedicated
-        participant endpoints. Returns 503 if locked mode is active without
-        `TOURNAMENT_ADMIN_PASSWORD_HASH`. The SETTINGS-only path
-        (`players` omitted) is NOT gated and needs only the main password.
-        The gate runs inside the handler (after body binding), so the
-        security requirement below is conditional on the body shape.
+        The ROSTER-save path (non-null `players`) rewrites `participants.csv`
+        and needs only `X-Tournament-Password`.
+
+        In self-run mode this is an organiser action: it needs
+        `X-Tournament-Password`.
       security:
         - TournamentPassword: []
-          AdminPassword: []
       requestBody:
         required: true
         content:
@@ -1435,12 +1369,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-        '503':
-          description: |
-            The ROSTER-save path (non-null `players`) requires
-            `X-Admin-Password` when the destructive-ops gate is active (see
-            the "Elevated password" note above); returned when locked mode
-            is active without `TOURNAMENT_ADMIN_PASSWORD_HASH` configured.
     delete:
       tags: [competitions]
       summary: Delete competition
@@ -1450,17 +1378,48 @@ paths:
         `invalid`, or unset). In-progress competitions (`pools`/`knockout`)
         must first be invalidated via `POST /api/competitions/{id}/invalidate`.
 
-        Also requires `X-Admin-Password` when the destructive-ops gate is active
-        (see the AdminPassword security scheme); 503 if locked mode is active
-        without `TOURNAMENT_ADMIN_PASSWORD_HASH`.
+        In self-run mode this is an organiser action: it needs
+        `X-Tournament-Password`.
+
+        This is the one route that asks for the password again. The request
+        must also carry `X-Confirm-Password`: the admin password typed at the
+        moment of the delete, verified by the same verifier as the sign-in
+        (plaintext in file mode, bcrypt in locked mode). The check runs after
+        `X-Tournament-Password` is accepted and before anything is deleted,
+        for an unknown competition too. A missing or wrong value is a 401 whose
+        `error` and `message` read "Wrong password. The competition was not
+        deleted." and whose `code` is `confirm_password_required` or
+        `confirm_password_wrong`. That 401 does not mean the sign-in was
+        refused (the sign-in's own 401 has no `code`).
       security:
         - TournamentPassword: []
-          AdminPassword: []
+      parameters:
+        - name: X-Confirm-Password
+          in: header
+          required: true
+          description: The admin password, typed again for this delete.
+          schema:
+            type: string
       responses:
         '204':
           description: Competition deleted (or did not exist).
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          description: >-
+            `X-Confirm-Password` missing or wrong
+            (`code: confirm_password_required` or `confirm_password_wrong`), or
+            the sign-in refused (no `code`).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: {type: string}
+                  message: {type: string}
+                  code:
+                    type: string
+                    enum: [confirm_password_required, confirm_password_wrong]
         '409':
           description: Competition is in progress and must be invalidated first.
           content:
@@ -1480,12 +1439,10 @@ paths:
         competition. Returns 400 if the competition is not in an in-progress
         state.
 
-        Also requires `X-Admin-Password` when the destructive-ops gate is active
-        (see the AdminPassword security scheme); 503 if locked mode is active
-        without `TOURNAMENT_ADMIN_PASSWORD_HASH`.
+        In self-run mode this is an organiser action: it needs
+        `X-Tournament-Password`.
       security:
         - TournamentPassword: []
-          AdminPassword: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
       responses:
@@ -1614,12 +1571,10 @@ paths:
         competition to `setup`. Returns 400 if the competition is not in `draw-ready`
         state.
 
-        Also requires `X-Admin-Password` when the destructive-ops gate is active
-        (see the AdminPassword security scheme); 503 if locked mode is active
-        without `TOURNAMENT_ADMIN_PASSWORD_HASH`.
+        In self-run mode this is an organiser action: it needs
+        `X-Tournament-Password`.
       security:
         - TournamentPassword: []
-          AdminPassword: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
       responses:
@@ -1707,7 +1662,15 @@ paths:
       summary: Complete competition
       description: |
         Transitions a competition from `pools` or `knockout` status to `completed`.
-        Returns 400 if the competition is not in a completable state.
+        Irreversible. Returns 400 if the competition is not in a completable state,
+        or if its bracket still has a match to play (every bracket match, the
+        3rd-place match included, must be completed). A competition with no
+        knockout rounds (a league, a pools-only or a Swiss one) is held to its
+        own matches instead: every match must be completed, and a Swiss one must
+        have drawn all its configured rounds.
+
+        In officiated mode it needs `X-Tournament-Password`, like starting a
+        competition; in self-run mode it is public, like starting one.
       security:
         - TournamentPassword: []
       parameters:
@@ -1762,12 +1725,10 @@ paths:
         fresh empty overrides file WITHOUT first parsing the corrupt one, so
         it always succeeds regardless of what the file currently contains.
 
-        Also requires `X-Admin-Password` when the destructive-ops gate is active
-        (see the AdminPassword security scheme); 503 if locked mode is active
-        without `TOURNAMENT_ADMIN_PASSWORD_HASH`.
+        In self-run mode this is an organiser action: it needs
+        `X-Tournament-Password`.
       security:
         - TournamentPassword: []
-          AdminPassword: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
       responses:
@@ -1784,12 +1745,10 @@ paths:
         Awards are independent of the auto-derived placement podium and may be set at
         any competition status. Passing an empty array clears all awards.
 
-        Also requires `X-Admin-Password` when the destructive-ops gate is active
-        (see the AdminPassword security scheme); 503 if locked mode is active
-        without `TOURNAMENT_ADMIN_PASSWORD_HASH`.
+        In self-run mode this is an organiser action: it needs
+        `X-Tournament-Password`.
       security:
         - TournamentPassword: []
-          AdminPassword: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
       requestBody:
@@ -2082,12 +2041,10 @@ paths:
       description: |
         Replaces the current participants list for the competition with the provided JSON.
 
-        Also requires `X-Admin-Password` when the destructive-ops gate is active
-        (see the AdminPassword security scheme); 503 if locked mode is active
-        without `TOURNAMENT_ADMIN_PASSWORD_HASH`.
+        In self-run mode this is public, like starting a competition: anyone can
+        add participants while the competition is in setup.
       security:
         - TournamentPassword: []
-          AdminPassword: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
       requestBody:
@@ -2171,10 +2128,9 @@ paths:
         Returns the updated player. When the cascade detects dojo conflicts,
         a `warnings` array is included alongside the player fields.
 
-        Also requires `X-Admin-Password` when the destructive-ops gate is active.
+        In self-run mode this is public: anyone can edit participants.
       security:
         - TournamentPassword: []
-          AdminPassword: []
       requestBody:
         required: true
         content:
@@ -2267,7 +2223,9 @@ paths:
     put:
       tags: [participants]
       summary: Check in a single participant
-      description: Sets checked-in status to true for the participant.
+      description: >
+        Sets checked-in status to true for the participant. Answers 409
+        `check_in_not_in_self_run` in a self-run tournament, for every caller.
       security:
         - TournamentPassword: []
       responses:
@@ -2281,12 +2239,17 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/CheckInNotInSelfRun'
         '500':
           $ref: '#/components/responses/InternalError'
     delete:
       tags: [participants]
       summary: Undo check-in for a single participant
-      description: Resets checked-in status to false for the participant.
+      description: >
+        Resets checked-in status to false for the participant. Answers 409
+        `check_in_not_in_self_run` in a self-run tournament, for the organiser
+        (an anonymous caller is refused 401 first, as this route stays organiser-only).
       security:
         - TournamentPassword: []
       responses:
@@ -2300,6 +2263,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/CheckInNotInSelfRun'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -2309,7 +2274,9 @@ paths:
     post:
       tags: [participants]
       summary: Bulk check-in participants
-      description: Atomically checks in multiple participants at once.
+      description: >
+        Atomically checks in multiple participants at once. Answers 409
+        `check_in_not_in_self_run` in a self-run tournament, for every caller.
       security:
         - TournamentPassword: []
       requestBody:
@@ -2344,6 +2311,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/CheckInNotInSelfRun'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -2562,7 +2531,15 @@ paths:
             is NOT refused for one when it is completed again: a match can be
             reopened without any reason, and nothing is gated on that. The
             completion clears `reopenPending` and keeps a `correctionReason`
-            if one is sent.
+            if one is sent. An exact resend of the finish already recorded
+            (`completed`, a `modifiedAt` equal to the stored result's own
+            stamp, i.e. the `result` group's stamp, and nothing it changes
+            differing from what is stored: a queued send whose first answer
+            was lost) is not a correction either: it is answered as recorded,
+            with the stored MatchResult. Nothing is written to the match; the
+            match's history gains a line saying the write arrived and changed
+            nothing. A same-stamp write that differs from what is stored is a
+            correction and needs its reason.
 
             A `completed` write on a team match (not kachinuki) is also
             refused while a numbered bout (1..teamSize) has no result in
@@ -2678,7 +2655,7 @@ paths:
                     description: The sentence the page shows as it is, for those refusals.
         '401':
           description: >
-            `invalid tournament password`: the password is missing or wrong in an
+            `invalid admin password`: the password is missing or wrong in an
             officiated tournament, or, in a self-run one, sent but wrong. An empty
             password is a participant there, never a 401.
           content:
@@ -3029,7 +3006,7 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: >
-            Missing or invalid tournament password. Applies in every mode:
+            Missing or invalid admin password. Applies in every mode:
             in self-run mode this route is one of the main-gated organiser
             corrections, not participant-driven play.
           content:
@@ -3196,7 +3173,7 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: >
-            Missing or invalid tournament password. In self-run mode this route
+            Missing or invalid admin password. In self-run mode this route
             is a main-gated organiser correction, not participant-driven play.
           content:
             application/json:
@@ -3385,7 +3362,7 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
-          description: Missing or incorrect tournament password.
+          description: Missing or incorrect admin password.
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -4059,7 +4036,7 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: >
-            `invalid tournament password`: missing or wrong in an officiated
+            `invalid admin password`: missing or wrong in an officiated
             tournament, or sent but wrong in a self-run one, where an empty
             password is a participant. Answered before the body is read, so a
             wrong password is never told about its stamp.
@@ -4185,7 +4162,7 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: >
-            `invalid tournament password`: missing or wrong in an officiated
+            `invalid admin password`: missing or wrong in an officiated
             tournament, or sent but wrong in a self-run one, where an empty
             password is a participant. Answered before the body is read, so a
             wrong password is never told about its stamp.
@@ -4508,7 +4485,7 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: >
-            `invalid tournament password`: missing or wrong in an officiated
+            `invalid admin password`: missing or wrong in an officiated
             tournament, or sent but wrong in a self-run one, where an empty
             password is a participant.
           content:
@@ -4671,7 +4648,7 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: >
-            `invalid tournament password`: missing or wrong in an officiated
+            `invalid admin password`: missing or wrong in an officiated
             tournament, or sent but wrong in a self-run one, where an empty
             password is a participant.
           content:
@@ -4758,7 +4735,7 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: >
-            `invalid tournament password`: missing or wrong in an officiated
+            `invalid admin password`: missing or wrong in an officiated
             tournament, or sent but wrong in a self-run one, where an empty
             password is a participant.
           content:
@@ -4810,7 +4787,7 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
-          description: '`invalid tournament password`: missing or wrong.'
+          description: '`invalid admin password`: missing or wrong.'
           content:
             application/json:
               schema:
@@ -5329,8 +5306,9 @@ components:
       name: X-Tournament-Password
       description: |
         Tournament admin password. Required for all `/api/` routes
-        except `/api/viewer/`, `/api/events`, the unauthenticated
-        recovery endpoints `/api/auth-config` and `/api/tournament/reset`,
+        except `/api/viewer/`, `/api/events`, the recovery endpoints
+        `/api/auth-config` and `/api/tournament/reset` (which answers only the
+        machine running the server),
         the public read endpoints `GET /api/schedule/estimate`,
         `GET /api/competitions/{id}/competitor-status`,
         `GET /api/competitions/{id}/teams/{tid}/lineups/{round}`,
@@ -5347,14 +5325,14 @@ components:
         against the `password` field stored in `tournament.md`
         (no trimming on either side). Set during the initial bootstrap
         via `POST /api/tournament`, rotated via `PUT /api/tournament`
-        with a non-empty `password`, or via the public
-        `POST /api/tournament/reset` recovery endpoint.
+        with a non-empty `password`, or via the `POST /api/tournament/reset`
+        recovery endpoint (from the machine running the server).
 
         Bootstrap exception: when no tournament is configured yet,
         `POST/PUT /api/tournament` is allowed without the header so
         the SPA's CreateTournament flow can pick the admin password.
 
-        Defense-in-depth: if the stored tournament password is somehow
+        Defense-in-depth: if the stored admin password is somehow
         empty (e.g. operator manually edited `tournament.md` to land
         an empty `password:` field), AuthMiddleware returns 403
         (`tournament misconfigured: password is not set`) for ALL
@@ -5380,38 +5358,6 @@ components:
         The active mode is exposed via the public
         `GET /api/auth-config` endpoint so clients can branch their
         UI without authenticating.
-
-    AdminPassword:
-      type: apiKey
-      in: header
-      name: X-Admin-Password
-      description: |
-        Elevated (destructive-ops) password; spec 004 / mp-e21. Required
-        IN ADDITION to `X-Tournament-Password` on destructive endpoints:
-        `DELETE /api/competitions/{id}`, `POST /api/competitions/{id}/invalidate`,
-        `DELETE /api/competitions/{id}/draw`, `DELETE /api/competitions/{id}/overrides`,
-        `POST /api/competitions/{id}/participants`,
-        `PUT /api/competitions/{id}/participants/{pid}`,
-        `POST /api/tournament/import`, and
-        `PUT /api/competitions/{id}` **when the body carries a non-null
-        `players` field** (the roster-save path; settings-only PUTs are not
-        gated).
-
-        Gate behavior:
-          * File mode; verified exact-string against the write-only
-            `admin_password` in `tournament.md`. While unset the gate is
-            INACTIVE (the header is not required; the main password alone
-            authorizes the action), so existing file deployments are
-            unaffected until an admin password is set.
-          * Locked mode; verified via bcrypt against
-            `TOURNAMENT_ADMIN_PASSWORD_HASH`. The gate is always active
-            (fail-closed): if the env var is unset/malformed the gated
-            endpoints return 503 "admin password not configured".
-
-        On a missing/incorrect header (when the gate is active and
-        configured) the endpoint returns 401. Set or rotate the file-mode
-        value via `PUT /api/auth/admin-password`. There is no session; the
-        header is required on each gated request.
 
   parameters:
     CompetitionId:
@@ -5459,6 +5405,22 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    CheckInNotInSelfRun:
+      description: >
+        Self-run mode has no check-in. Every check-in write is refused, the
+        organiser's included.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error, message]
+            properties:
+              error:
+                type: string
+                enum: [check_in_not_in_self_run]
+              message:
+                type: string
+                description: The sentence the page shows as it is, "Self-run mode has no check-in."
     InternalError:
       description: Server error.
       content:
@@ -6054,33 +6016,18 @@ components:
               Constructive actions (scoring, check-in, start) and organiser-setup mutations
               all require the main password.
             - **self-run**: there is no dedicated table operator. Operational actions
-              (scoring, check-in, start, complete, swiss round generation) are public; no
-              password required. Organiser-setup mutations (tournament/competition config,
+              (scoring, start, complete, swiss round generation) are public; no
+              password required. There is no check-in. Organiser-setup mutations (tournament/competition config,
               seeds, override edits (set/change result), announcements, court
-              assignment, export) remain behind the main password. Destructive actions
-              (delete competition, discard draw, delete/discard overrides, import, participant
-              roster mutations) require the separate `X-Admin-Password` elevated credential.
+              assignment, export, fighting-spirit awards, the tournament logo and
+              sponsor images) and destructive actions (delete or invalidate a
+              competition, discard a draw, reset overrides, import) remain behind
+              the main password. Anyone can add and edit participants.
 
             Always returned in GET/POST/PUT responses regardless of auth mode (unlike
             `password`, which is redacted in locked mode). Defaults to `officiated` when
             omitted on POST (backward-compatible with pre-mp-7h7 tournaments whose
             `tournament.md` lacks the field).
-        adminPassword:
-          type: string
-          writeOnly: true
-          maxLength: 256
-          description: >
-            **Creation-only, file mode, self-run tournaments only.** Sets the elevated
-            (destructive-ops) credential atomically in the same POST that creates the
-            tournament. Required when `mode` is `"self-run"` in file mode; without it the
-            main gate is skipped and destructive routes would be unauthenticated.
-
-            This field is **write-only at the API boundary**: it is never returned in any
-            response (`json:"-"` on the server struct) and is ignored by PUT /tournament
-            (rotation is done via `PUT /api/auth/admin-password`). In locked mode this
-            field is accepted but silently ignored; the `TOURNAMENT_ADMIN_PASSWORD_HASH`
-            env var is the authoritative elevated credential.
-
     TournamentWithCompetitions:
       description: >
         The response shape for POST and PUT /api/tournament: every Tournament
@@ -6311,6 +6258,9 @@ components:
             (unchecked no-shows are excluded, and their seed assignments pruned);
             if nobody has checked in, everyone is included. When this flag is
             false, check-in markers are ignored and never shrink the field.
+            A self-run tournament has no check-in: the flag is ignored there (the
+            draw includes every participant), the apps do not offer it, and the
+            stored value is kept.
         fightingSpiritAwards:
           type: array
           description: >
@@ -6724,21 +6674,21 @@ components:
           description: >
             Audit justification for rewriting a result the operator had already
             declared final. Required when the write completes a match that is
-            already `completed` (a correction). Kept, but not required, when
+            already `completed` (a correction). Not required for an exact
+            resend of the finish already recorded (same `modifiedAt` as the
+            stored result, nothing it changes differing), which is answered as
+            recorded. Kept, but not required, when
             the write completes a match that carries `reopenPending`.
             Otherwise it is dropped, so the field always means "this rewrote
             a finalized result". A stored reason is carried forward across
             subsequent writes.
 
             A correction does NOT exempt the write from the timestamp
-            last-write-wins guard. It used to: the exemption existed because a
-            dropped write reported success, so exempting corrections was the
-            only way to stop a deliberate edit being silently eaten. That is
-            fixed (see the RefusedWrite schema), and the exemption could not
-            tell a live correction from one an offline client replayed hours
-            later, which silently overwrote newer results. A correction stamped
-            older than the stored result is therefore refused like any other
-            stale write, and answers with RefusedWrite.
+            ordering: the server cannot tell a live correction from one an
+            offline client replays hours later, and an exemption would let that
+            replay overwrite newer results. A correction stamped older than the
+            stored result is therefore refused like any other stale write, and
+            answers with RefusedWrite.
         reopenPending:
           type: boolean
           readOnly: true

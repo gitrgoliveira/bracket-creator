@@ -2,7 +2,10 @@
 // the admin password set a new one without authenticating against the
 // old one (since they don't know it). The backing endpoint is
 // POST /api/tournament/reset (handlers_reset.go); it is unauthenticated
-// by design and the operator hardens production deployments by passing
+// by design but answers only a browser on the machine running the server
+// (loopback peer and loopback Host, opened as http://localhost:<port>/reset;
+// 403 reset_local_only otherwise), and the operator hardens production
+// deployments by passing
 // --lock-password (mobile-app CLI) which 404s the reset endpoint AND
 // switches auth to a bcrypt env-var hash.
 //
@@ -102,6 +105,10 @@ function ResetPasswordForm({ authConfig, onBack, onSuccess, originatorId }) {
       // flipped --lock-password while the SPA was open).
       if (e2.status === 404) {
         setErr("Password reset has been disabled by the operator.");
+      } else if (e2.code === "reset_local_only") {
+        // File mode answers only a browser on the machine running the
+        // server (handlers_reset.go); the same sentence the server sends.
+        setErr("Reset the password on the machine running the server.");
       } else {
         setErr(e2.message || "Failed to reset password. Please try again.");
       }
@@ -113,7 +120,7 @@ function ResetPasswordForm({ authConfig, onBack, onSuccess, originatorId }) {
   return (
     <div className="page" style={{ maxWidth: 600, marginTop: 40 }}>
       <div className="card card--pad-lg">
-        <h2 style={{ marginBottom: 8 }}>Reset tournament password</h2>
+        <h2 style={{ marginBottom: 8 }}>Reset admin password</h2>
         <p style={{ color: "var(--ink-3)", marginBottom: 24 }}>
           Set a new admin password. The new password will replace the current one
           for everyone: any logged-in admins will need to sign in again.

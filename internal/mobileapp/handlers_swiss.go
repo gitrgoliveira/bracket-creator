@@ -88,7 +88,7 @@ func RegisterSwissHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 // which are themselves public via the viewer endpoint, so spectators,
 // coaches, and TV displays need them without admin credentials.
 // Discovered during the post-merge browser UAT pass: the SwissStandings
-// viewer tab broke with "invalid tournament password" because the
+// viewer tab broke with "invalid admin password" because the
 // admin-only RegisterSwissHandlers was the only registration.
 //
 // FR-050e.

@@ -77,7 +77,7 @@ describe('ResetPasswordForm', () => {
       const text = collectText(tree);
       expect(text).toContain('Password reset disabled');
       expect(text).toContain('environment variable');
-      expect(text).not.toContain('Reset tournament password');
+      expect(text).not.toContain('Reset admin password');
     });
 
     it('renders a Back button that fires onBack', () => {
@@ -102,7 +102,7 @@ describe('ResetPasswordForm', () => {
         onSuccess: vi.fn(),
       });
       const text = collectText(tree);
-      expect(text).toContain('Reset tournament password');
+      expect(text).toContain('Reset admin password');
       const pwInputs = [];
       findInTree(tree, (n) => {
         if (n.type === 'input' && n.props?.type === 'password') pwInputs.push(n);
@@ -127,7 +127,7 @@ describe('ResetPasswordForm', () => {
       });
       const text = collectText(tree);
       expect(text).toContain('Loading');
-      expect(text).not.toContain('Reset tournament password');
+      expect(text).not.toContain('Reset admin password');
       expect(text).not.toContain('Password reset disabled');
     });
 
@@ -136,7 +136,7 @@ describe('ResetPasswordForm', () => {
       const tree = runtime.mount(ResetPasswordForm, { onBack: vi.fn(), onSuccess: vi.fn() });
       const text = collectText(tree);
       expect(text).toContain('Loading');
-      expect(text).not.toContain('Reset tournament password');
+      expect(text).not.toContain('Reset admin password');
     });
   });
 
@@ -224,6 +224,22 @@ describe('ResetPasswordForm', () => {
       expect(collectText(runtime.currentTree())).toContain('Password reset has been disabled by the operator.');
       expect(onSuccess).not.toHaveBeenCalled();
       // localStorage must NOT have been written: the reset failed.
+      expect(mockStorage.setItem).not.toHaveBeenCalledWith('bc_password', expect.anything());
+    });
+
+    it('shows the local-only sentence when the server refuses a reset from another machine', async () => {
+      const err403 = new Error('refused');
+      err403.status = 403;
+      err403.code = 'reset_local_only';
+      window.API.resetPassword = vi.fn(async () => { throw err403; });
+      const onSuccess = vi.fn();
+      const { typeInto, submit } = setupForm({ onSuccess });
+      typeInto(0, 'newpw');
+      typeInto(1, 'newpw');
+      await submit();
+
+      expect(collectText(runtime.currentTree())).toContain('Reset the password on the machine running the server.');
+      expect(onSuccess).not.toHaveBeenCalled();
       expect(mockStorage.setItem).not.toHaveBeenCalledWith('bc_password', expect.anything());
     });
 

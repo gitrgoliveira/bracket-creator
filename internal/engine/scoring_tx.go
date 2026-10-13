@@ -52,6 +52,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"sort"
 	"time"
 
@@ -108,6 +109,12 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// lands, and nothing about it is lost (bc-mrgc phase 3).
 	if fo.HoldReason != "" {
 		return nil, e.holdWriteTx(tx, compID, matchID, result, comp, fo.HoldReason)
+	}
+	// An exact resend of a finish already recorded (a queued write whose
+	// first send landed but whose answer was lost) answers as recorded and
+	// writes nothing, before anything else judges it (bc-xrpl).
+	if replayed, err := e.answerExactScoreReplay(tx, compID, matchID, result, comp, fo.NoReplayHistory); err != nil || replayed {
+		return nil, err
 	}
 	// Only a COMPLETING write goes through the engi recorder. Engi's flag-total
 	// rule (odd, in {1,3,5}: a 3- or 5-referee panel cannot draw) can only be
@@ -210,88 +217,9 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// stores: a start's own representative-bout row is discarded above, and a
 	// winner derived from it would stand beside a stored bout that says
 	// otherwise.
-	deriveDaihyosenWinner(result)
-
-	// The bout rows as the writer sent them, before the server's own changes
-	// below (the kachinuki merge, the default-win padding). A writer that
-	// named its groups did not name those: noteServerBoutChanges adds them,
-	// or the merge would put the stored rows back over them.
-	writerSubs := state.CloneSubResults(result.SubResults)
-
-	// Kachinuki bout logs merge BY POSITION rather than replace wholesale
-	// (ACID: a client whose local log is behind the server must never
-	// destroy server-appended bouts). Applied here at the entry point,
-	// BEFORE the pool/bracket write primitives, so the rollback path
-	// below (which replays `prior` through those primitives) still
-	// restores the pre-write state exactly. A merge-time rejection (e.g. a
-	// kachinuki-exhaustion write ending on a tied bout, mp-gmcg review R2)
-	// returns BEFORE any write primitive, so nothing is persisted.
-	if merr := applyKachinukiMerge(comp, prior, result); merr != nil {
-		return nil, merr
+	if err := shapeScoreWrite(comp, prior, result, matchID); err != nil {
+		return nil, err
 	}
-
-	// Default-win bout padding (bc-tmfn follow-up): a non-kachinuki team
-	// match a default-win ruling (any kiken, fusenpai, or fusensho:
-	// domain.IsDefaultWinDecisionStr) closes before every numbered bout has
-	// a result of its own -- most commonly a kiken declared before the
-	// match's first bout was ever scored -- gets an empty SubMatchResult row
-	// (Position only) for every missing position 1..TeamSize, via
-	// state.NeedsDefaultWinBoutPadding / state.PadDefaultWinBoutPositions, the
-	// SAME predicate and function the legacy-load repair uses
-	// (state.EnsureLegacyUpgraded). Without a row for every position,
-	// state.DefaultWinCreditSide's readers (TeamResultFrom,
-	// accrueTeamSubResults, the Excel export) have nothing to range over for
-	// the positions nobody fought and silently credit them zero.
-	//
-	// Gated on PRIOR's sides and unreadable flag, never result's: a client
-	// score payload commonly omits SideA/SideB and relies on reconcileSides
-	// (inside applyPoolWrite/applyBracketResultIn, called later via
-	// writeToPoolOrBracket) to backfill them from the stored row -- reading
-	// result.SideA/SideB here would skip padding on exactly that common case
-	// (a bare kiken payload). Likewise a stored SubResults cell that failed
-	// to parse must never be padded over: NeedsDefaultWinBoutPadding's
-	// subResultsUnreadable check keeps this branch from turning an empty
-	// result.SubResults into a non-empty padded one, which would defeat
-	// applyPoolWrite's own raw-bytes preservation (it only keeps
-	// SubResultsRaw when the incoming SubResults is still empty) and destroy
-	// the only copy of the corrupt cell. prior is guaranteed non-nil here:
-	// the lookupExistingResult error above already returned on a miss.
-	//
-	// The decision tested is result's own, OR -- covering a CORRECTION that
-	// KEEPS a stored withdrawal ruling -- prior's: such a write's own
-	// Decision is either empty (a score sheet states no decision) or an
-	// explicit "hikiwake" (KeepsWithdrawalRuling's own two accepted shapes),
-	// and applyPoolWrite/applyBracketResultIn only reinstate the stored
-	// decision AFTER this point (preserveWithdrawalRuling), so testing
-	// result.Decision alone would miss it here -- and nothing downstream
-	// pads again once this function returns. A correction can legitimately
-	// send fewer SubResults rows than TeamSize (e.g. a bout-level edit that
-	// only touches the rows it corrects), so this is the one place that
-	// still needs to catch it up.
-	//
-	// Excluded: a bye (either side empty -- a bye never carries a
-	// default-win decision in practice, but the padding shape assumes two
-	// real teams either way) and a pool daihyosen/tiebreaker row
-	// (IsPoolDaihyosenMatchID / IsTiebreakerMatchID), which is scored as a
-	// single individual representative bout, never the team's own numbered
-	// positions. Both checked inside NeedsDefaultWinBoutPadding.
-	if comp != nil && comp.TeamSize >= 2 && !comp.IsKachinuki() {
-		// KeepsWithdrawalRuling is checked UNCONDITIONALLY, not only when
-		// result.Decision == "": it is also true for an explicit incoming
-		// "hikiwake" over a stored default win (its own definition allows
-		// incoming.Decision to be "" OR "hikiwake"), and that write must
-		// still pad, since preserveWithdrawalRuling reinstates prior.Decision
-		// downstream regardless of which of the two the correction sent.
-		padDecision := result.Decision
-		if KeepsWithdrawalRuling(prior.Status, prior.Decision, result) {
-			padDecision = prior.Decision
-		}
-		if state.NeedsDefaultWinBoutPadding(result.Status, padDecision, prior.SideA, prior.SideB, matchID,
-			result.SubResults, prior.SubResultsUnreadable, comp.TeamSize) {
-			result.SubResults = state.PadDefaultWinBoutPositions(result.SubResults, comp.TeamSize)
-		}
-	}
-	noteServerBoutChanges(result, writerSubs, prior.SubResults, comp.IsKachinuki())
 
 	// K3 ahead of the write: a withdrawal whose loser a DIFFERENT match has
 	// already made ineligible is refused before anything is written. The
@@ -1218,6 +1146,235 @@ func exactDecisionReplay(prior *state.MatchResult, decision, decisionBy string, 
 		prior.Decision == decision &&
 		prior.DecisionBy == decisionBy &&
 		prior.GroupStamp(state.GroupResult) == stamp
+}
+
+// shapeScoreWrite makes the server's own changes to a score write before the
+// pool or bracket write merges it: the representative bout's winner, the
+// kachinuki bout-log merge, the default-win bout padding, and the bout groups
+// those changes add to a write that named its groups. One function, shared by
+// RecordMatchResultWithIneligibilityTx and the exact-replay probe
+// (exactScoreReplayProbe), so the probe reads a write exactly as it would land
+// (bc-xrpl). prior is the stored match (never nil here); matchID the match's id.
+func shapeScoreWrite(comp *state.Competition, prior, result *state.MatchResult, matchID string) error {
+	deriveDaihyosenWinner(result)
+
+	// The bout rows as the writer sent them, before the server's own changes
+	// below (the kachinuki merge, the default-win padding). A writer that
+	// named its groups did not name those: noteServerBoutChanges adds them,
+	// or the merge would put the stored rows back over them.
+	writerSubs := state.CloneSubResults(result.SubResults)
+
+	// Kachinuki bout logs merge BY POSITION rather than replace wholesale
+	// (ACID: a client whose local log is behind the server must never
+	// destroy server-appended bouts). Applied here at the entry point,
+	// BEFORE the pool/bracket write primitives, so the rollback path in
+	// RecordMatchResultWithIneligibilityTx (which replays `prior` through those primitives) still
+	// restores the pre-write state exactly. A merge-time rejection (e.g. a
+	// kachinuki-exhaustion write ending on a tied bout, mp-gmcg review R2)
+	// returns BEFORE any write primitive, so nothing is persisted.
+	if merr := applyKachinukiMerge(comp, prior, result); merr != nil {
+		return merr
+	}
+
+	// Default-win bout padding (bc-tmfn follow-up): a non-kachinuki team
+	// match a default-win ruling (any kiken, fusenpai, or fusensho:
+	// domain.IsDefaultWinDecisionStr) closes before every numbered bout has
+	// a result of its own -- most commonly a kiken declared before the
+	// match's first bout was ever scored -- gets an empty SubMatchResult row
+	// (Position only) for every missing position 1..TeamSize, via
+	// state.NeedsDefaultWinBoutPadding / state.PadDefaultWinBoutPositions, the
+	// SAME predicate and function the legacy-load repair uses
+	// (state.EnsureLegacyUpgraded). Without a row for every position,
+	// state.DefaultWinCreditSide's readers (TeamResultFrom,
+	// accrueTeamSubResults, the Excel export) have nothing to range over for
+	// the positions nobody fought and silently credit them zero.
+	//
+	// Gated on PRIOR's sides and unreadable flag, never result's: a client
+	// score payload commonly omits SideA/SideB and relies on reconcileSides
+	// (inside applyPoolWrite/applyBracketResultIn, called later via
+	// writeToPoolOrBracket) to backfill them from the stored row -- reading
+	// result.SideA/SideB here would skip padding on exactly that common case
+	// (a bare kiken payload). Likewise a stored SubResults cell that failed
+	// to parse must never be padded over: NeedsDefaultWinBoutPadding's
+	// subResultsUnreadable check keeps this branch from turning an empty
+	// result.SubResults into a non-empty padded one, which would defeat
+	// applyPoolWrite's own raw-bytes preservation (it only keeps
+	// SubResultsRaw when the incoming SubResults is still empty) and destroy
+	// the only copy of the corrupt cell. prior is guaranteed non-nil here:
+	// the caller's lookupExistingResult error already returned on a miss.
+	//
+	// The decision tested is result's own, OR -- covering a CORRECTION that
+	// KEEPS a stored withdrawal ruling -- prior's: such a write's own
+	// Decision is either empty (a score sheet states no decision) or an
+	// explicit "hikiwake" (KeepsWithdrawalRuling's own two accepted shapes),
+	// and applyPoolWrite/applyBracketResultIn only reinstate the stored
+	// decision AFTER this point (preserveWithdrawalRuling), so testing
+	// result.Decision alone would miss it here -- and nothing downstream
+	// pads again once this function returns. A correction can legitimately
+	// send fewer SubResults rows than TeamSize (e.g. a bout-level edit that
+	// only touches the rows it corrects), so this is the one place that
+	// still needs to catch it up.
+	//
+	// Excluded: a bye (either side empty -- a bye never carries a
+	// default-win decision in practice, but the padding shape assumes two
+	// real teams either way) and a pool daihyosen/tiebreaker row
+	// (IsPoolDaihyosenMatchID / IsTiebreakerMatchID), which is scored as a
+	// single individual representative bout, never the team's own numbered
+	// positions. Both checked inside NeedsDefaultWinBoutPadding.
+	if comp != nil && comp.TeamSize >= 2 && !comp.IsKachinuki() {
+		// KeepsWithdrawalRuling is checked UNCONDITIONALLY, not only when
+		// result.Decision == "": it is also true for an explicit incoming
+		// "hikiwake" over a stored default win (its own definition allows
+		// incoming.Decision to be "" OR "hikiwake"), and that write must
+		// still pad, since preserveWithdrawalRuling reinstates prior.Decision
+		// downstream regardless of which of the two the correction sent.
+		padDecision := result.Decision
+		if KeepsWithdrawalRuling(prior.Status, prior.Decision, result) {
+			padDecision = prior.Decision
+		}
+		if state.NeedsDefaultWinBoutPadding(result.Status, padDecision, prior.SideA, prior.SideB, matchID,
+			result.SubResults, prior.SubResultsUnreadable, comp.TeamSize) {
+			result.SubResults = state.PadDefaultWinBoutPositions(result.SubResults, comp.TeamSize)
+		}
+	}
+	noteServerBoutChanges(result, writerSubs, prior.SubResults, comp.IsKachinuki())
+	return nil
+}
+
+// ExactScoreReplay reports whether incoming is a completing score write the
+// stored match has already recorded: the score counterpart of
+// exactDecisionReplay (bc-xrpl). A Finish whose first send landed but whose
+// answer was lost (the page went away, the connection dropped, the fetch
+// timed out) is sent again by the offline queue with the stamp it was sent
+// with; that resend is the same write, so it answers as recorded, with no
+// correction reason asked and nothing written. Exact means: both the stored
+// match and the write are completed, the write is stamped, its stamp is the
+// stored result group's, and, with the write shaped as the write path shapes
+// it (shapeScoreWrite and the side and id backfill; engiFinishProbe for an
+// engi write), the merge owner (mergeMatchWrite) would land its verdict and
+// every group it lands equals the stored value, as sent and as landed. A
+// group the merge would hold because its stored stamp is newer (a later
+// point from another board, R3 or S2) lands nothing and is not compared. A
+// same-stamp write that differs where it would land is a correction and
+// still needs its reason. comp names a kachinuki or engi competition (nil
+// for neither); nilSubsClear is the branch's (true for a pool match, false
+// for a knockout one, see mergeCtx).
+func ExactScoreReplay(stored, incoming *state.MatchResult, comp *state.Competition, nilSubsClear bool) bool {
+	_, ok := exactScoreReplayProbe(stored, incoming, comp, nilSubsClear)
+	return ok
+}
+
+// exactScoreReplayProbe is ExactScoreReplay's judgement, handing back the
+// write as the merge would land it (a copy: incoming is not changed), its
+// MergeReport on probe.Merge, which the replay's history entry records.
+func exactScoreReplayProbe(stored, incoming *state.MatchResult, comp *state.Competition, nilSubsClear bool) (*state.MatchResult, bool) {
+	if stored == nil || incoming == nil || incoming.ModifiedAt <= 0 ||
+		incoming.Status != state.MatchStatusCompleted ||
+		stored.Status != state.MatchStatusCompleted ||
+		incoming.ModifiedAt != stored.GroupStamp(state.GroupResult) {
+		return nil, false
+	}
+	probe := *incoming
+	// Copies that keep nil apart from empty (a nil list is a writer with
+	// nothing to say, an empty one says zero).
+	if incoming.IpponsA != nil {
+		probe.IpponsA = append(make([]string, 0, len(incoming.IpponsA)), incoming.IpponsA...)
+	}
+	if incoming.IpponsB != nil {
+		probe.IpponsB = append(make([]string, 0, len(incoming.IpponsB)), incoming.IpponsB...)
+	}
+	probe.SubResults = state.CloneSubResults(incoming.SubResults)
+	probe.GroupStamps = state.CloneGroupStamps(incoming.GroupStamps)
+	probe.Changed = slices.Clone(incoming.Changed)
+	if probe.CorrectionReason == "" {
+		probe.CorrectionReason = stored.CorrectionReason
+	}
+	if comp != nil && comp.Engi {
+		// An engi finish lands as the write the engi recorder builds on the
+		// stored match from the flags (engiFinishHeld merges this probe).
+		probe = engiFinishProbe(stored, &probe)
+	} else {
+		if applyHansokuIppons(&probe) != nil {
+			return nil, false
+		}
+		if shapeScoreWrite(comp, stored, &probe, stored.ID) != nil {
+			return nil, false
+		}
+		if reconcileSides(&probe, storedSides{A: stored.SideA, B: stored.SideB, AID: stored.SideAID, BID: stored.SideBID}) {
+			return nil, false
+		}
+		if backfillMatchIdentity(&probe, stored, matchWriteForward) != nil {
+			return nil, false
+		}
+	}
+	// The merge owner decides which groups of the write would land: a group
+	// whose stored stamp is newer is held and lands nothing (a later point
+	// from another board, R3 or S2), and every whole-write rule (R2, finish
+	// atomicity) applies as it would to the write. Exact means the verdict
+	// lands, and every group that lands equals the stored value both as the
+	// write sent it and as it would land (S2 can re-derive a verdict the
+	// write sent differently, which is still a correction).
+	sent := probe
+	sent.IpponsA, sent.IpponsB = slices.Clone(probe.IpponsA), slices.Clone(probe.IpponsB)
+	sent.SubResults = state.CloneSubResults(probe.SubResults)
+	rep := mergeMatchWrite(stored, &probe, matchWriteForward, mergeCtx{comp: comp, knockout: !nilSubsClear, nilSubsClear: nilSubsClear})
+	if rep == nil || !slices.Contains(rep.Applied, state.GroupResult) || len(rep.Displaced) > 0 {
+		return nil, false
+	}
+	for _, g := range rep.Applied {
+		if !slices.Contains(rep.Unchanged, g) || state.GroupDiffers(stored, &sent, g) {
+			return nil, false
+		}
+	}
+	return &probe, true
+}
+
+// answerExactScoreReplay answers an exact resend of a recorded finish
+// (ExactScoreReplay) as recorded: result becomes the stored match, exactly
+// as a landed write leaves it, and nothing is written to the match file. Its
+// history entry says the write arrived and changed nothing, as an exact
+// decision replay's does (a group changed since it was made is listed as
+// held, as the merge holds it). It runs before anything else judges the write, as
+// the decision replay runs before the decision's refusals: a downstream or
+// eligibility refusal would only misreport a result already recorded as one
+// to resolve and send again. false, with result untouched, for any other
+// write.
+func (e *Engine) answerExactScoreReplay(tx state.StoreTx, compID, matchID string, result *state.MatchResult, comp *state.Competition, noHistory bool) (bool, error) {
+	if result.Status != state.MatchStatusCompleted || result.ModifiedAt <= 0 {
+		return false, nil
+	}
+	prior, inPool, err := e.lookupExistingResultIn(tx, compID, matchID)
+	if err != nil {
+		return false, err
+	}
+	probe, ok := exactScoreReplayProbe(prior, result, comp, inPool)
+	if !ok {
+		return false, nil
+	}
+	// The probe's merge is the history entry's: what of the resend would
+	// land (echoes) and what would be held (groups changed since).
+	result.Merge = probe.Merge
+	if !noHistory {
+		e.recordWriteHistory(tx, compID, matchID, result)
+	}
+	// A bracket match's prior came through bracketMatchAsResult, which omits
+	// the court and the schedule a landed write echoes (the decision
+	// replay's fill, bc-cse finding 5).
+	if !inPool && (prior.Court == "" || prior.ScheduledAt == "") {
+		if bracket, berr := tx.LoadBracket(compID); berr == nil {
+			if court, scheduledAt, found := bracketMatchCourtAndSchedule(bracket, matchID); found {
+				if prior.Court == "" {
+					prior.Court = court
+				}
+				if prior.ScheduledAt == "" {
+					prior.ScheduledAt = scheduledAt
+				}
+			}
+		}
+	}
+	*result = *prior
+	result.ClearRequestFields()
+	return true, nil
 }
 
 // holdWriteTx keeps a write whole in the match's history without applying any

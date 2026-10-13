@@ -25,7 +25,6 @@ describe('AdminParticipants disables writes for an id-less row (bc-pnum)', () =>
   it('disables the Edit modal Save button for an id-less row and sends no request on click', async () => {
     const replaceParticipant = vi.fn().mockResolvedValue({});
     window.API = { replaceParticipant };
-    window.promptAdminPassword = vi.fn().mockResolvedValue('admin-pw');
     const { container, getByText } = await mountParticipants(makeParticipantsCompetition({
       players: [{ id: '', name: 'Bob', dojo: 'Dojo Bob', checkedIn: false }],
     }));

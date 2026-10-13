@@ -17,7 +17,7 @@ import (
 )
 
 // adminReqSwiss is a tiny helper that wraps a request through the
-// admin-protected swiss endpoints. Tournament password is the empty
+// admin-protected swiss endpoints. Admin password is the empty
 // string by default (set on the tournament in setupTestRouter); we
 // re-use the existing test plumbing.
 func adminReqSwiss(method, path string) *http.Request {

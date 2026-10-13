@@ -49,7 +49,7 @@ import {
 import { isBarredMatch } from './ineligible_match.jsx';
 import { isOlderRunningCopy } from './patch.jsx';
 
-import { useDebouncedRunningWrite, SyncStatusPill, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
+import { useDebouncedRunningWrite, SyncStatusPill, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote, landedAutosave } from './admin_scoring_autosave.jsx';
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
 import { GROUP_ENCHO, GROUP_RESULT, GROUP_REP_PICK_A, GROUP_REP_PICK_B, boutGroup } from './match_groups.jsx';
 import { serverNowMs } from './server_clock.jsx';
@@ -1771,6 +1771,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // pick-part edit stamp goes with it: whatever was edited was about the old team, and
     // the adopt takes the server's value for the side again.
     lastRepPickEditRef.current[side] = undefined;
+    repPickEditSeqRef.current[side] = undefined;
     if (daihyosenIdx >= 0 && subs[daihyosenIdx]?.[`${side}MemberIdOverride`]) {
       const memberKey = `${side}MemberIdOverride`;
       setSubs(prev => reconcileRowsToPositions(prev, serverSubs).map((s, i) => i === daihyosenIdx ? { ...s, [memberKey]: "" } : s));
@@ -2332,6 +2333,29 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // side's pick alone, so it stamps here and not on the row (updateSub's repPickSide).
   // The row's own entry in lastRowEditRef is then the score part's.
   const lastRepPickEditRef = useRefA({});
+  // The stamps above stand only while an edit is unsent: a point struck and taken back
+  // inside the debounce changes nothing on the server, so no write names the bout and the
+  // match's stamp may never pass the tap (the write is stamped `now - age`); a copy another
+  // device then writes stamped below it would be held off forever. Each stamp therefore
+  // carries the edit counter's value when it was made (editSeqRef; rowEditSeqRef per
+  // position, repPickEditSeqRef per side), and a save that LANDED clears the stamps of the
+  // edits it was built after (landedAutosave, clearLandedEditStamps), never a later tap's.
+  const editSeqRef = useRefA(0);
+  const rowEditSeqRef = useRefA(new Map());
+  const repPickEditSeqRef = useRefA({});
+  const clearLandedEditStamps = (seq) => {
+    for (const [pos, at] of rowEditSeqRef.current) {
+      if (at > seq) continue;
+      rowEditSeqRef.current.delete(pos);
+      lastRowEditRef.current.delete(pos);
+    }
+    for (const side of ["a", "b"]) {
+      const at = repPickEditSeqRef.current[side];
+      if (at === undefined || at > seq) continue;
+      repPickEditSeqRef.current[side] = undefined;
+      lastRepPickEditRef.current[side] = undefined;
+    }
+  };
   // C1: updateSub is the single choke-point for all sub-bout state
   // mutations. Calling markScoringDirty() here captures every edit
   // (pts add/remove, fouls, fusensho, draw) without repetition.
@@ -2349,8 +2373,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // representative row: it stamps the pick part, and every other edit of the row the score
   // part, because the adopt follows the server for each part on its own.
   const updateSub = (idx, fn, opts) => {
-    if (idx === daihyosenIdx && opts?.repPickSide) lastRepPickEditRef.current[opts.repPickSide] = serverNowMs();
-    else lastRowEditRef.current.set(subs[idx]._pos, serverNowMs());
+    editSeqRef.current += 1;
+    if (idx === daihyosenIdx && opts?.repPickSide) {
+      lastRepPickEditRef.current[opts.repPickSide] = serverNowMs();
+      repPickEditSeqRef.current[opts.repPickSide] = editSeqRef.current;
+    } else {
+      lastRowEditRef.current.set(subs[idx]._pos, serverNowMs());
+      rowEditSeqRef.current.set(subs[idx]._pos, editSeqRef.current);
+    }
     setSubsByOperator(prev => {
       const rows = reconcileRowsToPositions(prev, serverSubs);
       return rows.map((s, i) => i === idx ? fn(s) : s);
@@ -3721,7 +3751,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // case where a prior [Remove this bout] left one to adopt into.
   _autosaveSeenStampRef.current = Math.max(m.modifiedAt || 0, _recordBoutAnswerStampRef.current);
   _autosaveBuildPatchRef.current = buildPatch;
-  _autosaveOnSubmitRef.current = onSubmit;
+  _autosaveOnSubmitRef.current = landedAutosave(onSubmit, editSeqRef, clearLandedEditStamps);
 
   const doSubmit = async (fn) => {
     cancelScoringDebounce(); // C1: cancel pending autosave before explicit submit

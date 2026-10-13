@@ -25,6 +25,7 @@ Refer to the [Tournament app guide](../organisers/run-tournament.md) for a full 
 | `BIND_ADDRESS` | `--bind` default | Initial value for `--bind` if the flag isn't set. |
 | `LOCK_PASSWORD` | `--lock-password` default | `true` enables locked mode without passing the flag. |
 | `TOURNAMENT_PASSWORD_HASH` | locked mode auth | Bcrypt hash of the admin password. Required when `--lock-password` is set. Generate with [`hash-password`](hash-password.md). |
+| `TOURNAMENT_ADMIN_PASSWORD_HASH` | nothing | Ignored. When it is set, the server logs a line at startup saying so. The admin password above covers every action. Refer to [Upgrading from an earlier release](../organisers/operating-modes.md#upgrading-from-an-earlier-release). |
 
 ## Authentication
 
@@ -34,7 +35,7 @@ The server has two authentication modes for the admin console; viewer routes are
 
 The admin password is stored plaintext in `tournament-data/tournament.md` and compared by exact-string match. Set the password during the in-app **Create tournament** flow, or edit `tournament.md` directly.
 
-- `POST /api/tournament/reset` is enabled and unauthenticated. If you've forgotten the current password, browse to `http://<host>/reset` from any device on the same network to set a new one.
+- `POST /api/tournament/reset` needs no password but answers only a request from the machine running the server (a loopback address) that is addressed to a loopback name: `localhost`, `127.0.0.1` or `[::1]`. Any other request, from another machine or addressed by another name, gets `403` with the code `reset_local_only`. If you've forgotten the current password, browse to `http://localhost:<port>/reset` on the machine running the server to set a new one. In a Docker container run with `-p`, a browser on the host reaches the server through the container network, not loopback, so the reset is refused there too; edit `tournament.md` in the mounted data folder instead.
 - `GET /api/auth-config` returns `{"mode": "file", "resetEnabled": true}`.
 
 ### Locked mode (`--lock-password`)
@@ -63,8 +64,8 @@ Recommended for any deployment reachable over the internet. The plaintext-in-fil
 
 #### Operational caveats
 
-- **`POST /api/tournament/reset` has no rate limiting.** The endpoint is unauthenticated and the server does not throttle calls. For internet-exposed deployments, run with `--lock-password` (which 404s `POST /api/tournament/reset`) OR front the server with a reverse proxy that rate-limits that path.
-- **Locked mode has no bcrypt brute-force protection.** The server runs a full bcrypt comparison (`bcrypt.DefaultCost` approx 50-100 ms) on every `X-Tournament-Password` header, but does not throttle repeated failed attempts. For internet-exposed locked-mode deployments, add a reverse proxy that rate-limits authenticated routes (for example, nginx's `limit_req`) in addition to `POST /api/tournament/reset`.
+- **`POST /api/tournament/reset` is limited to the machine running the server, judged on the connection's peer address and on the request's `Host`, which must be a loopback name.** `X-Forwarded-For` and similar headers are not consulted. The `Host` rule means a web page whose domain was rebound to `127.0.0.1` in a browser on the server machine is refused. Behind a reverse proxy on the same machine, every request arrives from the proxy's loopback address, so the reset is reachable by whoever the proxy exposes it to; block that path at the proxy or run with `--lock-password` (which 404s `POST /api/tournament/reset`).
+- **Locked mode has no bcrypt brute-force protection.** The server runs a full bcrypt comparison (`bcrypt.DefaultCost` approx 50-100 ms) on every `X-Tournament-Password` header, but does not throttle repeated failed attempts. For internet-exposed locked-mode deployments, add a reverse proxy that rate-limits authenticated routes (for example, nginx's `limit_req`).
 - **Mode switching preserves the stored password.** Switching from file mode to locked mode does NOT erase `tournament.md`'s `password` field; auth stops consulting it. A later switch back to file mode resurrects the original password. This is a deliberate rollback feature, but anyone with filesystem access can still read the value. To fully retire a file-mode credential before going locked, `POST /api/tournament/reset` it to a one-time throwaway first.
 
 ## Competition configuration

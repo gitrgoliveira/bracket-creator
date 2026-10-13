@@ -704,6 +704,12 @@ type ForceOptions struct {
 	// (HoldReasonOlderRevision): the ordering protection the rev guard gives,
 	// without dropping anything.
 	HoldReason string
+	// NoReplayHistory leaves out the history line an exact resend of a
+	// recorded finish would otherwise add (answerExactScoreReplay). The score
+	// handler sets it for an anonymous self-run participant, whose resend
+	// changes nothing and could otherwise be looped to grow the match's
+	// history file. The organiser's resend keeps its line.
+	NoReplayHistory bool
 }
 
 // HoldReasonOlderRevision is the history reason of a running write the same

@@ -207,7 +207,7 @@ func TestKachinukiRosterGET_ReadFailureIs500(t *testing.T) {
 // not, so it is not in isSelfRunMainGatedConfigRoute.
 func TestSelfRun_KachinukiRosterIsPublic(t *testing.T) {
 	store := newTempStore(t)
-	seedSelfRunTournament(t, store, "admin-pw")
+	seedSelfRunTournament(t, store)
 	seedKachinukiRosterComp(t, store)
 	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
 

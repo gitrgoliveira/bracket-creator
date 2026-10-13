@@ -26,7 +26,7 @@ func (e *Engine) EstimateScheduleForCompetition(compID string) (ScheduleEstimate
 	}
 
 	// Step 3: derive participant count.
-	playerCount, err := e.estimateParticipantCount(comp)
+	playerCount, err := e.estimateParticipantCount(comp, tournament)
 	if err != nil {
 		return ScheduleEstimate{}, err
 	}
@@ -63,12 +63,12 @@ func (e *Engine) EstimateScheduleForCompetition(compID string) (ScheduleEstimate
 // estimateParticipantCount returns the number of participants for a
 // competition, applying the check-in filter when enabled (mirroring
 // runDrawPipeline's filterCheckedIn opt-in semantics).
-func (e *Engine) estimateParticipantCount(comp *state.Competition) (int, error) {
+func (e *Engine) estimateParticipantCount(comp *state.Competition, tournament *state.Tournament) (int, error) {
 	players, err := e.store.LoadParticipants(comp.ID, comp.EffectiveWithZekkenName())
 	if err != nil {
 		return 0, err
 	}
-	if comp.CheckInEnabled {
+	if comp.CheckInApplies(tournament) {
 		players = filterCheckedIn(players)
 	}
 	return len(players), nil

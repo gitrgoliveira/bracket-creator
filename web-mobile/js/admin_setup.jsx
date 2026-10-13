@@ -145,7 +145,7 @@ import {
   poolFormatHint, resolvePoolFormat, leagueTiebreakActive,
   HINT_ZEKKEN, HINT_ENGI, HINT_TEAM_SIZE, HINT_POOL_WINNERS_LOCKED,
   LABEL_NAGINATA, HINT_NAGINATA,
-  LABEL_CHECK_IN, HINT_CHECK_IN,
+  LABEL_CHECK_IN, HINT_CHECK_IN, tournamentHasCheckIn, SELF_RUN_NO_CHECK_IN,
   LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX, cutNumberPrefix, LABEL_COURTS,
 } from './competition_shape.jsx';
 import { PillGroup, PillButton, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
@@ -254,35 +254,6 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   }, [name, venue, date, durationDays, courts, openingBlock, lunchBlock, closingBlock,
     publicURL, venueAddress, venueMapURL, openingTime, closingTime, websiteURL,
     awardsNote, infoNotes, pass, contacts, theme]);
-
-  // Elevated (destructive-ops) password: spec 004 / mp-e21. File mode only;
-  // in locked mode it's the TOURNAMENT_ADMIN_PASSWORD_HASH env var (read-only
-  // here). `elevatedConfigured` decides whether the current-password field is
-  // shown (rotation) vs. a first-time set (TOFU).
-  const elevatedConfigured = authConfig && authConfig.elevatedConfigured === true;
-  const [adminNew, setAdminNew] = useStateA("");
-  const [adminCurrent, setAdminCurrent] = useStateA("");
-  const [adminSaving, setAdminSaving] = useStateA(false);
-
-  const handleSetAdminPassword = async () => {
-    if (!adminNew) { if (showToast) showToast("Enter a new admin password", "error"); return; }
-    setAdminSaving(true);
-    try {
-      await window.API.setAdminPassword(adminNew, adminCurrent, password);
-      setAdminNew(""); setAdminCurrent("");
-      // Refresh auth-config so elevatedConfigured/elevatedRequired reflect the
-      // new state (the gate is now active) for subsequent destructive actions.
-      try {
-        const cfg = await window.API.fetchAuthConfig();
-        if (cfg && typeof cfg === "object") window.setCachedAuthConfig(cfg);
-      } catch (_e) { /* non-fatal */ }
-      if (showToast) showToast("Admin password updated", "success");
-    } catch (e) {
-      if (showToast) showToast(e.message, "error");
-    } finally {
-      setAdminSaving(false);
-    }
-  };
 
   // mp-sspn: set a field-scoped error, then focus + scroll its input so the
   // message is visible at its cause. Returns false so callers can `return
@@ -491,15 +462,15 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
           </div>
           {/* Tournament type (mp-7h7): read-only after creation. Displayed
               for information: it affects the auth boundary (officiated:
-              main password gates everything; self-run: only destructive
-              actions require a password). Never submitted on PUT. */}
+              main password gates everything; self-run: play is public and
+              organiser actions need the password). Never submitted on PUT. */}
           <div className="field" style={{ marginBottom: 0 }}>
             <label className="field__label">Tournament type</label>
             <div className="field__hint" style={{ marginTop: 4 }}>
               <strong>{tournamentMode === "self-run" ? "Self-run" : "Officiated"}</strong>
               {tournamentMode === "self-run"
-                ? ": Scoring, check-in and other constructive actions are public. Only destructive actions (delete, import, roster changes) require the destructive-ops password."
-                : ": All admin actions require the tournament password."}
+                ? `: Scoring is public, and so are starting and completing a competition. Anyone can add and edit participants. ${SELF_RUN_NO_CHECK_IN} Organiser setup, corrections and destructive actions such as deleting and importing need the admin password, and deleting a competition asks for it again.`
+                : ": All admin actions require the admin password."}
               {" "}This setting was fixed at creation and cannot be changed.
             </div>
           </div>
@@ -640,44 +611,17 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
         <div className="card card--pad-lg">
           <div className="card__head"><div className="card__title">Access &amp; security</div></div>
           {locked ? (
-            <div className="field">
+            <div className="field" style={{ marginBottom: 0 }}>
               <label className="field__label">Admin password</label>
               <div className="field__hint" style={{ marginTop: 4 }}>
                 This server is in locked mode. The admin password comes from <code>TOURNAMENT_PASSWORD_HASH</code> and can only be rotated by restarting the server with a new hash.
               </div>
             </div>
           ) : (
-            <div className="field">
+            <div className="field" style={{ marginBottom: 0 }}>
               <label className="field__label" htmlFor="edit-password">Admin password</label>
               <input id="edit-password" className="input" type="password" value={pass} onChange={(e) => { setPass(e.target.value); setError(""); }} placeholder="••••••••" autoComplete="new-password" />
               <div className="field__hint">Enter a new password to change it. Leave blank to keep the current one.</div>
-            </div>
-          )}
-          {/* Elevated (destructive-ops) password: spec 004 / mp-e21. */}
-          {locked ? (
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label className="field__label">Destructive-ops password</label>
-              <div className="field__hint" style={{ marginTop: 4 }}>
-                This server is in locked mode. The destructive-ops password comes from <code>TOURNAMENT_ADMIN_PASSWORD_HASH</code> and can only be changed by restarting the server with a new hash. If unset, destructive actions (delete competition, discard draw, roster changes, import) return 503.
-              </div>
-            </div>
-          ) : (
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label className="field__label" htmlFor="edit-admin-password">Destructive-ops password {elevatedConfigured ? "(set)" : "(not set)"}</label>
-              {/* The label names the new password; the current one, shown
-                  only for a rotation, is named by its own words. */}
-              {elevatedConfigured && (
-                <input className="input" aria-label="Current destructive-ops password" type="password" value={adminCurrent} onChange={(e) => setAdminCurrent(e.target.value)} placeholder="Current destructive-ops password" autoComplete="off" style={{ marginBottom: 8 }} />
-              )}
-              <div style={{ display: "flex", gap: 8 }}>
-                <input id="edit-admin-password" className="input" type="password" value={adminNew} onChange={(e) => setAdminNew(e.target.value)} placeholder={elevatedConfigured ? "New destructive-ops password" : "Set destructive-ops password"} autoComplete="new-password" />
-                <button type="button" className="btn" disabled={adminSaving} onClick={handleSetAdminPassword}>
-                  {adminSaving ? "Saving…" : (elevatedConfigured ? "Update" : "Set")}
-                </button>
-              </div>
-              <div className="field__hint">
-                A separate password required for destructive actions (delete competition, discard draw, roster add/edit, import). Leave unset to gate those behind the main password only. {elevatedConfigured && "Changing it requires the current destructive-ops password."}
-              </div>
             </div>
           )}
         </div>
@@ -709,14 +653,13 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
         )}
         {/* Action bar is the page's final commit, sitting below every card it
             (partly) persists. Branding colors + main password ride along on
-            this Save; logo, sponsors and the destructive-ops password
-            self-save via their own buttons. */}
+            this Save; logo and sponsors self-save via their own buttons. */}
         <div className="edit-actions">
           {/* mp-sspn: make the split persistence model explicit so the single */}
           {/* Save button's scope isn't a guess. */}
           <div className="edit-actions__note">
             Saves the tournament details, schedule blocks, public information, branding colors, and admin password.
-            The logo, sponsors, and destructive-ops password save on their own buttons.
+            The logo and sponsors save on their own buttons.
           </div>
           <div className="edit-actions__buttons">
             {dirty && <span className="edit-actions__dirty" aria-live="polite">Unsaved changes</span>}
@@ -1470,7 +1413,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
 
           <CheckboxField label={LABEL_NAGINATA} checked={naginata} onChange={(on) => { setNaginata(on); setTwoThirdPlaces(twoThirdPlacesForNaginata(on)); }} hint={HINT_NAGINATA} />
 
-          <CheckboxField label={LABEL_CHECK_IN} checked={checkInEnabled} onChange={setCheckInEnabled} hint={HINT_CHECK_IN} />
+          {tournamentHasCheckIn(tournament) && <CheckboxField label={LABEL_CHECK_IN} checked={checkInEnabled} onChange={setCheckInEnabled} hint={HINT_CHECK_IN} />}
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
             <button type="button" className="btn" onClick={onCancel}>Cancel</button>
@@ -1577,8 +1520,6 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
   const doImport = async () => {
     if (!files.length) return;
     if (!(await window.confirmDialog({ message: "Are you sure you want to import these competitions? This will add new competitions to the tournament.", confirmLabel: "Import competitions" }))) return;
-    const admin = await window.promptAdminPassword();
-    if (admin === null) return;
     setLoading(true);
     setError(null);
     try {
@@ -1586,7 +1527,7 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
       files.forEach(f => fd.append("files", f, f.webkitRelativePath || f.name));
       // Use the centralized API wrapper (api.jsx) so auth + error handling
       // stay consistent with the rest of the admin UI.
-      const body = await window.API.importCompetitions(fd, password, admin);
+      const body = await window.API.importCompetitions(fd, password);
       // mountedRef gates the post-await setStates so a navigate-back
       // during the upload doesn't fire setResults / setTimeout on a
       // torn-down component. importedTimerRef has its own unmount

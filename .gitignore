@@ -68,6 +68,8 @@ Thumbs.db
 !web/package-lock.json
 !scripts/screenshots/package.json
 !scripts/screenshots/package-lock.json
+!scripts/e2e/package.json
+!scripts/e2e/package-lock.json
 # Go testdata fixtures. These are test INPUTS, not build output: the blanket
 # *.json above would silently drop them, and a golden table that never lands
 # fails CI on a checkout that works locally. /**/ matches zero or more
@@ -154,3 +156,7 @@ mp-*/
 
 # Docs capture harness: staged output, compared by eye before it replaces a committed file.
 scripts/screenshots/out/
+
+# E2E journeys (make e2e): per-run screenshots and Playwright's own artifacts.
+# Its node_modules/ is covered by the bare node_modules/ rule above.
+scripts/e2e/output/

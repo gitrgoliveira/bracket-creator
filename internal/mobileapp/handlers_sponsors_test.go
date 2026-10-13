@@ -426,7 +426,7 @@ func TestPostSponsor_NoTournament(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodPost, "/api/sponsors", body)
 	req.Header.Set("Content-Type", ct)
-	// No tournament password set (no tournament exists). AuthMiddleware
+	// No admin password set (no tournament exists). AuthMiddleware
 	// permits unauth POST /api/tournament on a virgin install, but
 	// /api/sponsors is NOT on that allowlist. The middleware should
 	// reject (4xx, not 200 or 404 from the handler), proving the auth
@@ -450,10 +450,9 @@ func TestPostSponsor_SelfRunMode_RejectsAnonymous(t *testing.T) {
 	store, err := state.NewStore(tempDir)
 	require.NoError(t, err)
 	require.NoError(t, store.SaveTournament(&state.Tournament{
-		Name:          "Self-Run Cup",
-		Password:      "main-pw",
-		AdminPassword: "admin-pw",
-		Mode:          state.TournamentModeSelfRun,
+		Name:     "Self-Run Cup",
+		Password: "main-pw",
+		Mode:     state.TournamentModeSelfRun,
 	}))
 	eng := engine.New(store)
 	mockFS := fstest.MapFS{"web-mobile/index.html": {Data: []byte("<html/>")}}

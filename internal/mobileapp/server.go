@@ -21,34 +21,26 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// AdminPasswordHashEnv is the env var holding the bcrypt hash of the
-// elevated (destructive-ops) password in locked mode (spec 004 / mp-e21).
-// It is the elevated-credential analogue of TOURNAMENT_PASSWORD_HASH.
-const AdminPasswordHashEnv = "TOURNAMENT_ADMIN_PASSWORD_HASH"
+// retiredAdminPasswordHashEnv held the bcrypt hash of the destructive-ops
+// password in locked mode. That password was removed (operator ruling
+// 2026-10-12: an admin-level action needs the admin sign-in alone), so the
+// variable is read only to say it is ignored: a deployment that still sets
+// it starts and works exactly as one that does not.
+const retiredAdminPasswordHashEnv = "TOURNAMENT_ADMIN_PASSWORD_HASH"
 
 // mobileWebRoot is the embedded-resources subdirectory the mobile-app SPA is
 // served from. Shared between the fs.Sub call below and FrontendBundleMissing
 // (frontend_bundle.go) so the two can't drift on which root they check.
 const mobileWebRoot = "web-mobile"
 
-// defaultElevatedVerifier derives the elevated-password verifier from the
-// main verifier's mode (spec 004). File mode reads the write-only
-// Tournament.AdminPassword from the store (no env var); locked mode reads
-// the bcrypt hash from TOURNAMENT_ADMIN_PASSWORD_HASH, falling back to the
-// fail-closed unconfigured verifier (503 on gated endpoints) when the env
-// var is absent or malformed. Reading the env here, rather than threading
-// an explicit param through NewRouter, keeps the router signature stable
-// for the many existing callers; file-mode tests never touch the env.
-func defaultElevatedVerifier(verifier PasswordVerifier, store *state.Store) ElevatedVerifier {
-	if verifier != nil && verifier.Mode() == "locked" {
-		if v, err := NewBcryptElevatedVerifier(os.Getenv(AdminPasswordHashEnv)); err == nil {
-			return v
-		}
-		slog.Warn("mobile-app: locked mode without a valid " + AdminPasswordHashEnv +
-			"; destructive operations will return 503 until it is set")
-		return NewLockedUnconfiguredElevatedVerifier()
+// noteRetiredAdminPasswordHash logs, once per router, that
+// TOURNAMENT_ADMIN_PASSWORD_HASH is set but no longer used. It never fails
+// startup: the value is simply ignored.
+func noteRetiredAdminPasswordHash() {
+	if os.Getenv(retiredAdminPasswordHashEnv) != "" {
+		slog.Info("mobile-app: " + retiredAdminPasswordHashEnv +
+			" is set but no longer used; admin actions need only the admin password")
 	}
-	return NewFileElevatedVerifier(store)
 }
 
 // NewRouter wires the mobile-app gin engine. The returned *gin.Engine
@@ -75,15 +67,13 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 		verifier = NewFileVerifier(store)
 	}
 
-	// Elevated (destructive-ops) password verifier, spec 004 / mp-e21.
-	// Derived from the main verifier's mode; see defaultElevatedVerifier.
-	elevated := defaultElevatedVerifier(verifier, store)
+	noteRetiredAdminPasswordHash()
 
 	// Enable CORS
 	r.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, X-Tournament-Password, X-Admin-Password")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, X-Tournament-Password, X-Confirm-Password")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -180,7 +170,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	// inert payloads when locked mode is active, see handlers_reset.go
 	// and handlers_auth_config.go.
 	RegisterResetHandlers(api, store, verifier, hub)
-	RegisterAuthConfigHandlers(api, verifier, elevated, scheduleEnabled)
+	RegisterAuthConfigHandlers(api, verifier, scheduleEnabled)
 
 	// Admin API endpoints (protected). Split into three sub-groups by
 	// expected body size so the body cap fires BEFORE AuthMiddleware at
@@ -197,9 +187,11 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 
 	adminSmallBody := adminGroup(r, DefaultMaxBodyBytes, verifier, store)
 	RegisterTournamentHandlers(adminSmallBody, store, hub, verifier)
-	RegisterAdminPasswordHandler(adminSmallBody, store, elevated)
-	RegisterCompetitionHandlers(adminSmallBody, store, eng, hub, elevated)
-	RegisterParticipantHandlers(adminSmallBody, store, eng, hub, elevated)
+	// Deleting a competition asks for the password again (X-Confirm-Password);
+	// this middleware judges only that one route, after the sign-in.
+	adminSmallBody.Use(RequireConfirmPasswordForDelete(verifier))
+	RegisterCompetitionHandlers(adminSmallBody, store, eng, hub)
+	RegisterParticipantHandlers(adminSmallBody, store, eng, hub)
 	RegisterMatchHandlers(adminSmallBody, eng, store, store, hub, verifier, store)
 	RegisterMatchHistoryHandler(adminSmallBody, store)
 	RegisterDecisionHandlers(adminSmallBody, eng, store, store, hub)
@@ -217,7 +209,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterExportResultsHandlers(adminSmallBody, store, eng)
 
 	adminLargeBody := adminGroup(r, MaxImportBodyBytes, verifier, store)
-	RegisterImportHandlers(adminLargeBody, store, eng, hub, elevated)
+	RegisterImportHandlers(adminLargeBody, store, eng, hub)
 
 	// Sponsor uploads (mp-c38), multipart logo upload needs envelope
 	// headroom for the file plus boundary/form-field overhead; so it gets

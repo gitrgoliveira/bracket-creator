@@ -735,3 +735,54 @@ describe('a queued finish that moved a later change to the history', () => {
         expect(localStorage.getItem('bc_write_queue')).toBeNull();
     });
 });
+
+describe('a write that leaves the queue leaves browser storage at once', () => {
+    // A queued write the server has answered must not wait in storage for
+    // the rest of the pass: a page that goes away meanwhile (a reload, the
+    // tab closed) leaves it there, and the next load sends it again. A Finish
+    // sent twice is refused the second time (an equal stamp over a finished
+    // match asks for a correction reason) and the operator is told a result
+    // that is recorded was not.
+    const twoFinishesOneHeld = async (status) => {
+        let release;
+        const sent = [];
+        let up = false;
+        global.fetch = vi.fn((url) => {
+            if (isClockPoll(url)) return Promise.reject(new TypeError('clock poll: not part of this test'));
+            if (!up) return Promise.reject(new TypeError('offline'));
+            sent.push(String(url));
+            const answer = (code) => ({ ok: code >= 200 && code < 300, status: code, json: () => Promise.resolve(code === 200 ? { id: 'x' } : { error: 'refused' }) });
+            if (String(url).includes('/m2/')) return new Promise((resolve) => { release = () => resolve(answer(200)); });
+            return Promise.resolve(answer(status));
+        });
+        await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A', ipponsA: ['M'] }, 'pw', null);
+        vi.advanceTimersByTime(1000);
+        await API.recordScore('c1', 'm2', { status: 'completed', winner: 'B', ipponsB: ['K'] }, 'pw', null);
+        await settleOfflinePass();
+        expect(storedEntries().map(([, d]) => d.matchID)).toEqual(['m1', 'm2']);
+        up = true;
+        window.dispatchEvent(new Event('online'));
+        await tick(50);
+        return { sent, release: () => release() };
+    };
+
+    it('a landed write is gone from storage while a later one is still being sent', async () => {
+        const { sent, release } = await twoFinishesOneHeld(200);
+        expect(sent.map((u) => u.split('/matches/')[1])).toEqual(['m1/score', 'm2/score']);
+        // m2 is still out: m1, answered, is no longer stored.
+        expect(storedEntries().map(([, d]) => d.matchID)).toEqual(['m2']);
+        release();
+        await tick(50);
+        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+    });
+
+    it('a refused write is gone from storage while a later one is still being sent', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const { release } = await twoFinishesOneHeld(400);
+        expect(storedEntries().map(([, d]) => d.matchID)).toEqual(['m2']);
+        release();
+        await tick(50);
+        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+        warnSpy.mockRestore();
+    });
+});

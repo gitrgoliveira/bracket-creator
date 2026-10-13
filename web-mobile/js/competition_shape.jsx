@@ -503,6 +503,22 @@ export const LABEL_NAGINATA = "Naginata competition";
 export const HINT_NAGINATA = "Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.";
 export const LABEL_CHECK_IN = "Check-in tracking";
 export const HINT_CHECK_IN = "Check competitors in at the registration desk. Once anyone is checked in, only checked-in competitors enter the draw. Disable for competitions that don't need attendance tracking.";
+// Self-run mode has no check-in (operator ruling 2026-10-13). The server's
+// Competition.CheckInApplies is the owner of the rule; these two are its client
+// mirror, asked by every surface that offers or reads check-in: the toggle, the
+// registration desk and its dashboard card, the draw-exclusion warning, the
+// estimate and the watchlist's "Checked in" badge. Nothing reads checkInEnabled
+// to decide behaviour on its own. The stored setting is never rewritten: the
+// settings form still sends it back as it was.
+export const SELF_RUN_NO_CHECK_IN = "Self-run mode has no check-in.";
+// Whether the tournament has check-in at all. A missing tournament has it.
+export function tournamentHasCheckIn(tournament) {
+  return !(tournament && tournament.mode === "self-run");
+}
+// Whether a competition's check-in setting counts: set, in a tournament that has check-in.
+export function checkInApplies(tournament, checkInEnabled) {
+  return !!checkInEnabled && tournamentHasCheckIn(tournament);
+}
 export const LABEL_NUMBER_PREFIX = "Player number prefix";
 // bc-pnum F12: one hint shared by the create form and the settings form, so
 // it has to describe what a BLANK field does in both places, which differ:

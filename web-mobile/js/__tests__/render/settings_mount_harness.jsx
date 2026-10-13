@@ -50,7 +50,6 @@ function defaultStubbedGlobals() {
       addListener: noop, removeListener: noop,
     }),
     confirmDialog: vi.fn().mockResolvedValue(false),
-    promptAdminPassword: vi.fn().mockResolvedValue(null),
     promptDialog: vi.fn().mockResolvedValue(null),
     API: {
       estimateCompetitionSchedule: vi.fn().mockResolvedValue(null),

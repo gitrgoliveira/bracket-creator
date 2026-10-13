@@ -49,8 +49,28 @@ describe('the first-run tournament form', () => {
     expect(within(group).getByRole('button', { name: 'Self-run' }).getAttribute('aria-pressed')).toBe('false');
   });
 
-  it('names the self-run destructive-ops password once Self-run is chosen', async () => {
+  // bc-cmpw: a self-run tournament is created with the tournament password
+  // alone; choosing Self-run adds no second password field.
+  it('asks for no second password once Self-run is chosen', async () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Self-run' })); });
-    expect(screen.getByLabelText('Destructive-ops password (required for self-run)').type).toBe('password');
+    expect(screen.queryByLabelText(/destructive-ops password/i)).toBeNull();
+    expect(screen.getAllByLabelText(/password/i)).toHaveLength(1);
+  });
+
+  // Operator ruling 2026-10-13: "Self run mode has no check-in." The form
+  // says so, and no longer lists check-in among what self-run makes public.
+  it('says self-run has no check-in and that its scoring is public', () => {
+    expect(screen.getByText(/In self-run mode, scoring is public so participants don't need this\./)).toBeInTheDocument();
+    expect(screen.getByText(/Self-run mode has no check-in\./)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('scoring, check-in');
+    expect(document.body.textContent).not.toContain('scoring and check-in');
+    expect(document.body.textContent).not.toContain('roster changes');
+  });
+
+  it('names the admin password, never the tournament password, in the self-run description', () => {
+    expect(document.body.textContent).toContain('Scoring is public, and so are starting and completing a competition.');
+    expect(document.body.textContent).toContain('need the admin password');
+    expect(document.body.textContent).toContain('deleting a competition asks for it again');
+    expect(document.body.textContent).not.toContain('tournament password');
   });
 });

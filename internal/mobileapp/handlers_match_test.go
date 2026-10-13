@@ -45,7 +45,7 @@ func TestApplyCorrectionReasonUnderTx_FailsClosedOnLoadError(t *testing.T) {
 	var gotErr error
 	txErr := store.WithTransaction("c1", func(stx state.StoreTx) error {
 		r := &state.MatchResult{ID: "m1", Status: state.MatchStatusCompleted}
-		_, _, gotErr = applyCorrectionReasonUnderTx(stx, "c1", "m1", r)
+		_, _, gotErr = applyCorrectionReasonUnderTx(stx, "c1", "m1", r, nil)
 		return nil
 	})
 	require.NoError(t, txErr)
@@ -3641,7 +3641,7 @@ func TestScoreHandler_ScheduledWriteCannotRevertCompleted(t *testing.T) {
 // near-future epoch into runningRevStore and poisoning the guard so that
 // every subsequent legitimate admin autosave looks "older" and gets dropped.
 //
-// Requires a non-empty tournament password so that a request with no
+// Requires a non-empty admin password so that a request with no
 // X-Tournament-Password header is treated as an anonymous caller (not admin).
 func TestSelfRunPolicy_NoRevMetadata(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)

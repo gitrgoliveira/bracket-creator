@@ -1349,8 +1349,7 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 	// persistence path; the bulk PUT /competitions/:id roster import (the
 	// SPA's primary flow), single add/edit, and any future caller; rejects
 	// duplicate (normalizedName, normalizedDojo) pairs uniformly. Enforcing
-	// only in the handlers would leave the guard bypassable, the same reason
-	// the elevated-password gate is inline on the roster PUT path.
+	// only in the handlers would leave the guard bypassable.
 	// Blank-dojo guard runs BEFORE the duplicate scan on purpose: with no
 	// dojo, two same-named competitors key identically, so a blank-dojo
 	// roster would otherwise be reported as a DUPLICATE, which names the

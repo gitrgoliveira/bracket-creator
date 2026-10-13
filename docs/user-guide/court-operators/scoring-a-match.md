@@ -11,7 +11,7 @@ Open a match from the Upcoming list to start scoring it; the score editor opens 
 !!! tip
     In self-run events, competitors or table helpers can record their own scores without the admin password. Refer to the [Competitor self-run guide](../competitors/self-run.md) and [Operating modes and access control](../organisers/operating-modes.md) for how that works.
 
-On a laptop you can score without the mouse. When scoring an individual match or a kachinuki bout, press **M**, **K**, **D**, **T**, or **H** to award that strike to Shiro (White). Hold **Shift** with the same key to award it to Aka (Red). **Left** and **Right** move to the previous or next match on the court, and **Esc** closes the editor. On a tablet, use the on-screen buttons.
+On a laptop you can score without the mouse. When scoring an individual match or a kachinuki bout, press **M**, **K**, **D**, **T**, or **H** to award that strike to Shiro (White). Hold **Shift** with the same key to award it to Aka (Red). In the score editor opened from the **Scores** tab, **Left** and **Right** move to the previous or next match on the court. **Esc** closes a score editor that opens over the page; the editor on the court console has no **Esc**, **Left** or **Right** shortcut. On a tablet, use the on-screen buttons.
 
 Everything you enter on a running match is saved as you go, so closing the editor or moving to another match keeps it, even straight after a tap. Two things are only kept when you press **Finish** or save a correction: a **Mark draw** on a running match, and changes to a finished match. If you close the editor or move to another match with one of those not yet saved, the app asks first: **Discard changes** drops it, and **Cancel** keeps you on the match.
 

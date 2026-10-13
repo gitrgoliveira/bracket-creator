@@ -1,0 +1,68 @@
+// Scoring an ENGI (kata pairs) match on the flag editor
+// (admin_scoring_engi.jsx). An engi competitor is a pair, rostered as one
+// participant ("Name 1 - Name 2, Dojo"), and a match is scored in flags, not
+// ippon: each side has a counter, and the total must be 1, 3 or 5. The editor
+// is the same whether the shiaijo page mounts it inline or the Scores tab
+// opens it as an overlay; the helpers default to the inline one.
+import { expect } from '@playwright/test';
+import { INLINE_EDITOR } from '../../screenshots/lib/editor.mjs';
+import { beforeFinish, finishLanded } from './scoring.mjs';
+import { settled } from './pace.mjs';
+import { sides, upNextCard } from './shiaijo.mjs';
+
+// The editor panel itself (inline) or its dialog (overlay).
+export const engiEditor = (page, root = INLINE_EDITOR) => page.locator(root).filter({ has: page.getByTestId('engi-submit') }).first();
+
+const SIDE_KEY = { aka: 'aka', shiro: 'shiro' };
+
+// A side's flag count as the board shows it, and its + / - buttons.
+export const flagCount = (page, side, root = INLINE_EDITOR) => engiEditor(page, root).getByTestId(`engi-${SIDE_KEY[side]}-count`);
+export const flagButton = (page, side, change, root = INLINE_EDITOR) => engiEditor(page, root)
+  .getByTestId(`engi-${SIDE_KEY[side]}-${change === '+' ? 'inc' : 'dec'}`);
+export const engiTotal = (page, root = INLINE_EDITOR) => engiEditor(page, root).getByTestId('engi-total');
+export const engiSubmit = (page, root = INLINE_EDITOR) => engiEditor(page, root).getByTestId('engi-submit');
+
+// The autosave pill of the open engi editor ("Synced", "Syncing…", ...).
+export const engiSync = (page, root = INLINE_EDITOR) => engiEditor(page, root).locator('.sync-pill__label').first();
+
+// Wait for the autosave to land.
+export const engiSettle = (page, root = INLINE_EDITOR) => expect(engiSync(page, root)).toHaveText('Synced');
+
+// The pair each side of the open editor holds, by the first member's line.
+export async function engiPair(page, root = INLINE_EDITOR) {
+  const ed = engiEditor(page, root);
+  const first = async (side) => (await ed.getByTestId(`engi-side-${side}`).locator('.numbered-name__text').first().textContent()).trim();
+  return { shiro: await first('shiro'), aka: await first('aka') };
+}
+
+// Start the Up next match from its card and return its pair once the engi
+// editor holds it.
+export async function startUpNextEngi(page) {
+  const card = upNextCard(page);
+  const pair = await sides(card);
+  await card.getByRole('button', { name: 'Start match' }).tap();
+  await expect(engiEditor(page)).toBeVisible();
+  const held = await engiPair(page);
+  expect(`${held.shiro} ${held.aka}`, 'the editor holds the match started').toContain(pair.shiro.split(' - ')[0]);
+  return held;
+}
+
+// Enter flags: tap + the given number of times on each side.
+export async function enterFlags(page, { aka = 0, shiro = 0 }, root = INLINE_EDITOR) {
+  for (let i = 0; i < aka; i += 1) await flagButton(page, 'aka', '+', root).tap();
+  for (let i = 0; i < shiro; i += 1) await flagButton(page, 'shiro', '+', root).tap();
+  await expect(flagCount(page, 'aka', root)).toHaveText(String(aka));
+  await expect(flagCount(page, 'shiro', root)).toHaveText(String(shiro));
+}
+
+// Save the result in two taps ("Save result" / "Finish + Start Next →", then
+// "Tap again to ..."), and return once the write has landed (finishLanded).
+export async function saveEngiResult(page, root = INLINE_EDITOR) {
+  const ed = page.locator(root).first();
+  await engiSubmit(page, root).tap();
+  const armed = engiSubmit(page, root).filter({ hasText: /^Tap again to/ });
+  await settled(armed);
+  const before = await beforeFinish(ed);
+  await armed.tap();
+  return finishLanded(ed, before);
+}

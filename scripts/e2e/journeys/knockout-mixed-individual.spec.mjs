@@ -39,6 +39,7 @@ import {
   doubleTap, hastyConfirm, hastyShiaijoConfirm, interrupt, retapWhileSaving, tapNeighbour,
 } from '../fixtures/clumsy.mjs';
 import { auditLog } from '../fixtures/audit.mjs';
+import { holdScoreWrites } from '../fixtures/held-write.mjs';
 import { tapSize } from '../fixtures/pointer.mjs';
 import {
   ROSTER_12, ROSTER_6, ROSTER_4_BRONZE, ROSTER_4_JOINT, ROSTER_6B, rosterOf,
@@ -1266,22 +1267,7 @@ test.describe('knockout-mixed-individual bead guards', () => {
     await seedOwn(page, { name: 'Finding A9', format: 'knockout', courts: ['O'], numberPrefix: 'FI' }, rosterOf('Anine', 4));
     await openShiaijo(page, 'O');
     expect(await ensureRunning(page), 'a semi-final starts on O').not.toBeNull();
-    let hold = null; // { release } while the next score write is to be held
-    const holdNextWrite = () => {
-      const h = {};
-      h.promise = new Promise((resolve) => { h.release = resolve; });
-      hold = h;
-      return h;
-    };
-    await page.route('**/api/competitions/*/matches/*/score', async (route) => {
-      if (route.request().method() === 'PUT' && hold) {
-        const { promise } = hold;
-        hold = null;
-        await Promise.race([promise, new Promise((r) => setTimeout(r, 10_000))]);
-      }
-      await route.continue();
-    });
-    const scoreSent = () => page.waitForRequest((r) => r.method() === 'PUT' && /\/score$/.test(r.url()));
+    const writes = await holdScoreWrites(page);
     const akaMark = () => inlineEditor(page).locator('[aria-label^="Aka slot "][aria-label*=": remove "]').first();
     const marksAfterReload = async () => {
       await page.reload();
@@ -1292,10 +1278,9 @@ test.describe('knockout-mixed-individual bead guards', () => {
     await ipponButton(page, 'aka', 'M').tap();
     await settle(page);
     // Remove, then the same mark back while the removal is out.
-    let held = holdNextWrite();
-    let sent = scoreSent();
+    let held = writes.holdNext();
     await akaMark().tap();
-    await sent;
+    await held.sent;
     await ipponButton(page, 'aka', 'M').tap();
     held.release();
     await settle(page);
@@ -1308,16 +1293,15 @@ test.describe('knockout-mixed-individual bead guards', () => {
     // The reverse: take it off, add it, and take it off again while the add is out.
     await akaMark().tap();
     await settle(page);
-    held = holdNextWrite();
-    sent = scoreSent();
+    held = writes.holdNext();
     await ipponButton(page, 'aka', 'M').tap();
-    await sent;
+    await held.sent;
     await akaMark().tap();
     held.release();
     await settle(page);
     await page.waitForTimeout(1000);
     await expect(filledSlots(page, 'aka'), 'the removal stays').toHaveCount(0);
     expect(await marksAfterReload(), 'and the server holds no mark').toBe(0);
-    await page.unroute('**/api/competitions/*/matches/*/score');
+    await writes.stop();
   });
 });

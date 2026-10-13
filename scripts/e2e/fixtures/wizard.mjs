@@ -46,6 +46,8 @@ async function setNumber(page, label, value) {
 //
 //   kind           'individual' | 'team'
 //   format         'knockout' | 'mixed' | 'league' | 'swiss'
+//   engi           boolean: "Engi (kata competition)" (individual only): the
+//                  roster is pairs and a match is scored in flags
 //   teamSize       number (team only)
 //   teamMatchType  'fixed' | 'kachinuki' (team only)
 //   poolSizeMode   'maximum' | 'minimum' (mixed only)
@@ -57,7 +59,7 @@ async function setNumber(page, label, value) {
 export async function createCompetition(page, opts = {}) {
   const {
     name, kind, format, teamSize, teamMatchType, poolSizeMode, poolSize, poolWinners,
-    courts, numberPrefix, twoThirdPlaces,
+    courts, numberPrefix, twoThirdPlaces, engi,
   } = opts;
   await page.goto('/admin/create-competition');
   await expect(page.getByRole('heading', { level: 1, name: 'Add competition' })).toBeVisible();
@@ -65,6 +67,7 @@ export async function createCompetition(page, opts = {}) {
   if (name !== undefined) await input(page, 'Display name').fill(name);
   if (kind) await choose(page, 'Competition type', KIND[kind]);
   if (format) await choose(page, 'Format', FORMAT[format]);
+  if (engi !== undefined) await page.getByRole('checkbox', { name: /^Engi \(kata competition\)/ }).setChecked(engi);
   if (teamSize !== undefined) await setNumber(page, 'Team size', teamSize);
   if (teamMatchType) await choose(page, 'Team match format', TEAM_MATCH_TYPE[teamMatchType]);
   if (poolSizeMode) await choose(page, 'Pool size is a', POOL_SIZE_MODE[poolSizeMode]);

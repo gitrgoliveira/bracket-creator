@@ -56,6 +56,10 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             row) and the team score sheet's bout rows
     fixtures/kachinuki.mjs  the kachinuki sheet: bouts, Record bout, Encho, End
                             match, the correction doors
+    fixtures/engi.mjs       the engi (kata pairs) flag editor: flag counters, entering
+                            flags, the two-tap Save result
+    fixtures/held-write.mjs holding a running match's score write in flight, to
+                            observe a race with its echo (below)
     fixtures/shared-court.mjs  two competitions on one shiaijo and a moved
                             match: seeding, the competition picker, the nudges
     fixtures/public.mjs     the public viewer and the TV board
@@ -154,6 +158,19 @@ judged by a person from the screenshots. `hidden` needs a note: headless Chromiu
 visibility on its own, so the helper overrides `document.hidden` and
 `document.visibilityState` and dispatches a real `visibilitychange` for each
 edge, which is what the app's listeners read.
+
+## Holding a save in flight
+
+On localhost the answer to an autosave comes back within milliseconds of the save
+going out, so a tap made "while the save is out" never lands in that window by
+itself. `fixtures/held-write.mjs` (`holdScoreWrites(page)`) intercepts the match
+score PUTs: `holdNext()` holds the next one, its `sent` promise resolves once that
+PUT is out (so the autosave debounce has run), and `release()` lets it through
+after the journey has made the next tap, as a slow uplink would. `bodies` lists
+every score PUT the page sent. The bc-ltap step of
+`knockout-mixed-individual.spec.mjs` (individual editor) and the bc-evts step of
+`engi.spec.mjs` (engi editor) use it to guard a flag or mark taken back while its
+add is still saving.
 
 ## The pace of a tap
 
@@ -271,4 +288,9 @@ removes the `fixme`, and the step then guards the fix.
 6. A defect the journey finds becomes a `test.fixme('<bead-id>: ...')` step
    (see below).
 
-`smoke.spec.mjs` is the smallest complete example.
+`smoke.spec.mjs` is the smallest complete example. `engi.spec.mjs` is the one
+journey on an engi (kata pairs) competition: it seeds four pairs through the
+wizard's "Engi (kata competition)" box (`engi: true` in `createCompetition`) and
+the roster paste box (`Name 1 - Name 2, Dojo`), scores a match in flags on the
+court console and checks the result on a spectator's phone, and guards the engi
+editor's tap-back race.

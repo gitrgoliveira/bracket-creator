@@ -7,6 +7,10 @@ High-signal instructions for AI agents working in this repository.
 Before implementing features or making architectural decisions, read the project constitution:
 **`.specify/memory/constitution.md`**: defines the core principles (YAGNI, DRY, TDD, DDD, evidence-based decisions, bracket integrity, and live-tournament constraints) that all changes must comply with.
 
+## Domain rules
+
+Detailed domain rulings (match results and marks, match writes and the offline queue, teams and lineups, eligibility, the store, workbooks, the draw) live in `.claude/rules/`, one file per area; each file's `paths` header lists the code it governs. Read the matching file before changing code in that area: nothing loads it for you outside Claude Code.
+
 ## Core Technical Context
 - **Domain Logic:** Primarily in `internal/helper/`. A new `internal/domain/` package is being introduced to decouple logic from Excel formatting; use it for new pure-domain models but check `helper` for existing Excel-linked logic.
 - **Excel Generation:** Uses `excelize/v2`. The workbook is constructed from scratch in `internal/excel/template.go`. Coordinates and formulas are hardcoded in `internal/helper/` (e.g., `tree.go`, `excel.go`). Layout/page-break constants live in `internal/helper/constants.go`.

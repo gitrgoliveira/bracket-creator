@@ -385,8 +385,9 @@ test.describe('knockout-mixed-team', () => {
         await shot(page, 'f3-lineups-add-member-confirm');
         hasty = await hastyConfirm(page);
       }
-      // The add is a write and the list refetches: the count the answer left.
-      const after = await untilStable(() => T.lineupsForm(page).locator('[data-testid^="squad-member-"]').count());
+      // The add is a write and the list refetches: the count the answer left,
+      // read against the count before the add (`from`).
+      const after = await untilStable(() => T.lineupsForm(page).locator('[data-testid^="squad-member-"]').count(), { from: before });
       await shot(page, 'f3-lineups-after-add-member', { fullPage: true });
       record({ step: 'EP1 add a substitute', action: '+ Add new member… at 3 (reserves .4/.5 blank)', variant: 'V4 hastyConfirm',
         ...(hasty || {}), membersBefore: before, membersAfter: after, alert: r.alert });
@@ -542,7 +543,12 @@ test.describe('knockout-mixed-team', () => {
       await expect(T.boutRow(ed, 1)).toBeVisible();
       await expect(T.syncPill(ed)).toBeVisible();
       const identity = (await ed.locator('.editor-modal__eyebrow').first().innerText()).trim();
-      // Up next moves on once the list has refetched after the start.
+      // Up next moves on once the list has refetched after the start: wait for
+      // it to leave the pairing just started before reading where it settled.
+      await expect.poll(async () => {
+        const now = await sides(upNextCard(page)).catch(() => null);
+        return now !== null && JSON.stringify(now) !== JSON.stringify(sf1);
+      }).toBe(true);
       const upNextNow = await untilStable(() => sides(upNextCard(page)).catch(() => null));
       await shot(page, 'sf1-started');
       record({ step: 'start SF1', action: 'Start match (Up next)', variant: 'V2 doubleTap', ...dbl, startTapBox: startBox, editorHolds: identity,

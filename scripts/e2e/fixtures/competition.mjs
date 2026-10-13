@@ -1,6 +1,7 @@
 // A competition's own admin pages: the roster paste box (Participants &
 // seeds), Generate draw, Discard draw and Start competition.
 import { expect } from '@playwright/test';
+import { dwell } from './pace.mjs';
 
 const compPath = (id, section = '') => `/admin/competition/${id}${section ? `/${section}` : ''}`;
 
@@ -37,6 +38,17 @@ export async function generateDraw(page, id) {
 export async function requestDiscardDraw(page) {
   await page.getByRole('button', { name: 'Discard draw' }).tap();
   await expect(page.locator('.modal[role="dialog"] .modal__foot')).toBeVisible();
+}
+
+// Discard the draw and answer its confirm, after the confirm's own bounce
+// window, with the button that discards. Returns once the header offers
+// Generate draw again.
+export async function discardDraw(page) {
+  await requestDiscardDraw(page);
+  const dlg = page.locator('.modal[role="dialog"]').filter({ has: page.locator('.modal__foot') }).last();
+  await dwell(page, Date.now());
+  await dlg.getByRole('button', { name: 'Discard draw' }).tap();
+  await expect(page.getByRole('button', { name: 'Generate draw' })).toBeVisible();
 }
 
 // Start the competition. There is no confirm: the tap starts it and lands on

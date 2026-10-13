@@ -25,8 +25,8 @@ import { playRunningBout } from '../fixtures/individual.mjs';
 import { openViewer, openTvBoard, tvBoard } from '../fixtures/public.mjs';
 import { dwell } from '../fixtures/pace.mjs';
 import {
-  addSponsor, downloadResultsWorkbook, importFiles, importResultRows, loadedImage, openEditTournament,
-  pngBytes, readWorkbook, resetPassword, todayDMY, uploadLogo, writeImportBundle,
+  addSponsor, dayFromNow, downloadResultsWorkbook, importFiles, importResultRows, loadedImage, openEditTournament,
+  pngBytes, readWorkbook, resetPassword, sheetCells, todayDMY, uploadLogo, writeImportBundle,
 } from '../fixtures/organiser.mjs';
 
 const ROSTER = [
@@ -39,6 +39,7 @@ const IMPORTED_B = [
   ['Hiro Sasaki', 'Seiwakan'], ['Ino Mizuno', 'Tenshin'],
 ];
 const NEW_PASSWORD = 'e2e-after-reset';
+const tournamentDay = dayFromNow(45);
 
 test.describe.configure({ mode: 'serial' });
 
@@ -60,14 +61,19 @@ test.describe('organiser admin (file mode)', () => {
 
   test('Excel export: a competition with a result downloads as a workbook', async ({ page }) => {
     let pair;
+    let unplayed;
     await test.step('seed a knockout of four and play one bout', async () => {
-      await enterTournament(page, { name: 'Organiser Cup', courts: 2 });
+      // Not today: a row the import gives no date must take THIS day.
+      await enterTournament(page, { name: 'Organiser Cup', courts: 2, date: tournamentDay.iso });
       compId = await createCompetition(page, {
         name: 'Export Men', kind: 'individual', format: 'knockout', courts: ['A'], numberPrefix: 'X',
       });
       await pasteRoster(page, compId, ROSTER);
       await generateDraw(page, compId);
       await startCompetition(page, compId);
+      // The export before any bout is played: the control the played one is
+      // measured against.
+      unplayed = (await downloadResultsWorkbook(page, compId)).bytes;
       await openShiaijo(page, 'A');
       pair = await playRunningBout(page);
       await shot(page, 'bout-played');
@@ -82,18 +88,25 @@ test.describe('organiser admin (file mode)', () => {
       expect(book.sheets.length).toBeGreaterThan(0);
       expect(book.sheets).toContain('Elimination Matches');
       for (const [name] of ROSTER) expect(book.text, `${name} is in the workbook`).toContain(name);
-      // The played bout's two names sit in the bracket, and its winner is told
-      // apart from the others by a mark: the workbook is not the blank draw.
       expect(book.text).toContain(pair.shiro);
       expect(book.text).toContain(pair.aka);
+      // What only a recorded result writes (the names alone are on the blank
+      // draw too): the winner's name carried into the next round's slot, and
+      // the waza letter the bout was won with in a score cell. Both are
+      // counted against the export taken before the bout was played.
+      const winner = pair[pair.winner];
+      const count = (bytes, text) => Object.values(sheetCells(bytes, 'Elimination Matches')).filter((v) => v === text).length;
+      expect(count(dl.bytes, winner), `${winner} is carried into the next round`).toBeGreaterThan(count(unplayed, winner));
+      expect(count(dl.bytes, 'M'), 'the men ippon is written in a score cell').toBeGreaterThan(count(unplayed, 'M'));
     });
   });
 
   test('Import competitions: a folder of CSVs lands on the dashboard and the public page', async ({ page, browser, baseURL }) => {
-    // Two rows: one with a date, and one without (the manifest's date is optional
-    // and a row without one takes the tournament's).
+    // Two rows: one with a date (it must be a tournament day: the import refuses
+    // any other), and one without (the manifest's date is optional and a row
+    // without one takes the tournament's).
     const files = writeImportBundle(path.join(work, 'bundle'), [
-      { id: 'imp-kyu', name: 'Imported Kyu', kind: 'individual', format: 'knockout', date: todayDMY(), roster: IMPORTED },
+      { id: 'imp-kyu', name: 'Imported Kyu', kind: 'individual', format: 'knockout', date: tournamentDay.dmy, roster: IMPORTED },
       { id: 'imp-nodate', name: 'Imported No Date', kind: 'individual', format: 'mixed', roster: IMPORTED_B },
     ]);
     await login(page, 'e2e-operator');
@@ -122,8 +135,10 @@ test.describe('organiser admin (file mode)', () => {
       await page.goto('/admin/competition/imp-nodate');
       await expect(page.getByRole('button', { name: 'Generate draw' })).toBeEnabled();
       await expect(page.getByText(/Cannot start: invalid date/)).toHaveCount(0);
-      // The tournament's date, as the page head writes it ("13 Oct 2026").
-      const day = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+      // The tournament's day, written by the page's own formatter, which is
+      // not today's: only taking the tournament's date can put it there.
+      const [day, today] = await page.evaluate(([a, b]) => [window.formatDate(a), window.formatDate(b)], [tournamentDay.dmy, todayDMY()]);
+      expect(day).not.toBe(today);
       await expect(page.locator('.page-head__sub')).toContainText(day);
       await shot(page, 'imported-no-date');
     });
@@ -188,7 +203,11 @@ test.describe('organiser admin (file mode)', () => {
 
         // The docs: sponsor images appear on the public viewer only, never on
         // the TV board.
+        // The board gets the sponsors with the tournament it loads: wait for that
+        // answer, and see the sponsor in it, before its absence means anything.
+        const tournamentLoaded = phone.waitForResponse((r) => new URL(r.url()).pathname === '/api/viewer/tournament' && r.ok());
         await openTvBoard(phone, 'A');
+        expect(JSON.stringify(await (await tournamentLoaded).json()), 'the board was sent the sponsor').toContain('Acme Dojo Supplies');
         await expect(tvBoard(phone).getByRole('img', { name: 'Acme Dojo Supplies' })).toHaveCount(0);
         await expect(phone.getByRole('complementary', { name: 'Sponsors' })).toHaveCount(0);
         await shot(phone, 'tv-board-no-sponsor');
@@ -205,17 +224,36 @@ test.describe('organiser admin (file mode)', () => {
     });
   });
 
-  test.fixme('bc-lblg: the docs list the lobby display among the surfaces that show the tournament logo, and it shows none', async ({ browser, baseURL }) => {
-    // run-tournament.md (Branding and sponsors): "Logo: ... shown on the viewer,
-    // the lobby displays, and the admin screens." The viewer and the admin top
-    // bar show it (asserted above); /display?court=all, the lobby grid, has no
-    // logo image at all (display_lobby.jsx). Runs after the upload test.
+  test.fixme('bc-lblg: the lobby display shows the tournament logo only when the organiser turns that setting on', async ({ page, browser, baseURL }) => {
+    // bc-lblg (operator decision 2026-10-13): the logo on the lobby display is an
+    // OPTIONAL organiser setting. run-tournament.md (Branding and sponsors) says
+    // the logo is "shown on the viewer, the lobby displays, and the admin
+    // screens"; today /display?court=all (display_lobby.jsx) draws no logo at
+    // all. The setting does not exist yet, so the step is written against the
+    // most likely control: a checkbox on Edit tournament details whose label
+    // contains "logo on the lobby display", saved by Save changes. Change the
+    // label here to the real one when bc-lblg lands. Runs after the upload test,
+    // so a logo is uploaded.
+    const setLogoOnLobby = async (show) => {
+      await login(page, 'e2e-operator');
+      await openEditTournament(page);
+      const toggle = page.getByLabel(/logo on the lobby display/i);
+      if (show) await toggle.check(); else await toggle.uncheck();
+      await page.getByRole('button', { name: 'Save changes' }).tap();
+      await expect(toggle).toBeChecked({ checked: show });
+    };
     const spectator = await browser.newContext({ ...PUBLIC_DEVICE, baseURL });
     try {
       const phone = await spectator.newPage();
-      await phone.goto('/display?court=all');
-      await expect(phone.getByTestId('lobby-root')).toBeVisible();
-      await expect(phone.getByRole('img', { name: 'Tournament logo' })).toBeVisible();
+      const lobbyLogo = async () => {
+        await phone.goto('/display?court=all');
+        await expect(phone.getByTestId('lobby-root')).toBeVisible();
+        return phone.getByRole('img', { name: 'Tournament logo' });
+      };
+      await setLogoOnLobby(true);
+      await expect(await lobbyLogo()).toBeVisible();
+      await setLogoOnLobby(false);
+      await expect(await lobbyLogo()).toHaveCount(0);
     } finally {
       await spectator.close();
     }

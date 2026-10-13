@@ -235,7 +235,7 @@ variants as real input:
 |---|---|
 | `tapNeighbour(locator, direction)` | taps the control next to the intended one, found by layout, and returns which it hit |
 | `doubleTap(locator)` | two taps inside the app's bounce window less 100 ms; throws when the machine was too slow to land them that close, so a caller may assert on the outcome unconditionally |
-| `retapWhileSaving(locator)` | a second tap while the button reads "Saving…" (writes are held briefly so the state is observable); throws when "Saving…" is never seen |
+| `retapWhileSaving(locator)` | a second tap while the button reads "Saving…" (writes are held briefly so the state is observable, and every write the taps caused is waited for before it returns, so a duplicate one is on the page when the caller reads it); throws when "Saving…" is never seen |
 | `interrupt(page, kind, { awayMs, during })` | `reload`, `back` (then forward, only if Back moved), `hidden` (tab to background and back), `offline` (network down and back); `awayMs` (600 by default) is the time away and `during(page)` runs while the operator is away, for every kind but `reload`, which reloads at once and uses neither |
 | `hastyConfirm(page)` | answers the open confirm dialog with its most prominent button and returns its label |
 | `hastyShiaijoConfirm(page)` | the same for the shiaijo page's own confirms (Send back to queue, Move court) |
@@ -305,8 +305,8 @@ copying it, and fails to load if the dwell is not longer than it.
 A journey waits for what it is about to read, and never for a guessed time.
 In order of preference: a state (`expect(...).toHave...`, `expect.poll`); the
 server's answer to a write (`nextMatchWrite(page)` before the tap that causes
-it, `writeLanded(answered)` after: the sync pill reads "Synced" until the
-autosave debounce has run, so it cannot say an edit was saved); and, when the
+it, `writeLanded(answered)` after: the sync pill is process-wide, not per
+match, so it cannot say that one match's edit was saved); and, when the
 outcome is the thing under audit and no single state names it, one of two
 settle helpers in `fixtures/pace.mjs`:
 
@@ -316,7 +316,12 @@ settle helpers in `fixtures/pace.mjs`:
 - `untilStable(read)` polls `read()` until two reads 400 ms apart agree and
   returns that value, for a screen that refetches after the action (a reload,
   Back and Forward, a write's echo) and ends in a state the journey records
-  rather than expects.
+  rather than expects. A read taken after a tap can agree with itself on the
+  state from BEFORE the tap, so a probe passes `from` (the settled read taken
+  before the tap): the helper then waits up to 3 s for the read to leave it,
+  and settles on it only if nothing ever changed. Where the end state IS known,
+  wait for that instead (`expect.poll(...)`); where the tap causes one match
+  write, wait for its answer (`nextMatchWrite`).
 
 `page.waitForTimeout` stays in four places, each marked `Deliberate:` or
 named for what it is: the dwell of a tap's pace (above); the time away of an

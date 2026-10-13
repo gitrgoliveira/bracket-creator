@@ -60,9 +60,13 @@ test.describe('organiser locked mode', () => {
 
     await test.step('the sign-in dialog has no Forgot password?, and the password signs in', async () => {
       await page.getByRole('button', { name: 'Sign out' }).tap();
+      // The dialog decides on Forgot password? from the auth config: wait for
+      // that answer, so its absence is not just the config not having come yet.
+      const authConfig = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/auth-config' && r.ok());
       await page.goto('/admin');
       const dialog = page.locator('.modal.auth');
       await expect(dialog.getByText('Admin sign in')).toBeVisible();
+      await authConfig;
       await dwell(page, Date.now());
       await expect(dialog.getByRole('button', { name: 'Forgot password?' })).toHaveCount(0);
       await shot(page, 'sign-in-no-forgot');

@@ -112,9 +112,10 @@ export const armedFinishButton = (page, root = INLINE_EDITOR) => within(page, ro
   .locator('button').filter({ hasText: /^Tap again to finish/ }).first();
 
 // The server's answer to the next write a match gets, for a journey that must
-// not move on (reload, read the court) before an edit has been saved. The
-// autosave is debounced and the sync pill still reads "Synced" until it runs,
-// so the pill alone cannot say the edit landed. Call this BEFORE the tap that
+// not move on (reload, read the court) before an edit has been saved. The sync
+// pill is process-wide, not per match: it says whether anything is still being
+// written, not that THIS match's edit was, so it cannot stand in for the
+// answer to the write itself. Call this BEFORE the tap that
 // causes the write, then `await writeLanded(...)` after it. `tail` is the
 // write's route below /matches/:id: 'score' (PUT, the default: marks, fusensho,
 // Tie, Start, Finish) or 'daihyosen' (POST, the representative bout's add).

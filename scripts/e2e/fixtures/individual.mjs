@@ -166,11 +166,15 @@ export async function playRunningBout(page, { waza = 'M' } = {}) {
 }
 
 // The bout the console's inline editor is running on the individual board, as
-// its pairing, or null when no bout runs there. The editor can leave between
-// the two reads (a send back lands), which is a bout no longer running: the
-// pairing read then gives up quickly rather than waiting for a gone editor.
-const liveIndividualBout = async (page) => (
-  (await inlineRunning(page)) ? editorSides(page, INLINE_EDITOR, { timeout: 1_000 }).catch(() => null) : null);
+// its pairing, or null when no bout runs there. With `quick` (the poll for the
+// bout to be gone) the editor can leave between the two reads, which is a bout
+// no longer running: the pairing read then gives up in a second rather than
+// waiting for a gone editor. A read that expects a bout waits as long as any
+// other.
+const liveIndividualBout = async (page, { quick = false } = {}) => (
+  (await inlineRunning(page))
+    ? editorSides(page, INLINE_EDITOR, quick ? { timeout: 1_000 } : {}).catch(() => null)
+    : null);
 
 // Open the correction of a completed bout on the shiaijo page, the way the
 // operator now must. The console never holds a live bout and an open
@@ -178,7 +182,7 @@ const liveIndividualBout = async (page) => (
 // notice at the row and a toast, and the notice says what to do: send the live
 // bout back to the queue (its score is kept), then correct. Returns the bout
 // that was live (null when the court was idle) and what the refusal said.
-// `readLive(page)` reads the bout the console's editor is running (null when
+// `readLive(page, { quick })` reads the bout the console's editor is running (null when
 // none): the individual board by default; fixtures/shared-court.mjs passes
 // liveBout, which reads a team sheet as well (correctAcross).
 export async function correctCompleted(page, pair, { readLive = liveIndividualBout } = {}) {
@@ -197,7 +201,7 @@ export async function correctCompleted(page, pair, { readLive = liveIndividualBo
     expect(refusal.notice).toMatch(/^Shiaijo \S+ is running .+\. Finish it or send it back to the queue first\. Then correct this match\.$/);
     await page.getByRole('button', { name: 'Send back to queue' }).tap();
     refusal.sendBack = await hastyShiaijoConfirm(page);
-    await expect.poll(() => readLive(page), { timeout: 10_000 }).toBeNull();
+    await expect.poll(() => readLive(page, { quick: true }), { timeout: 10_000 }).toBeNull();
     await done.getByRole('button', { name: 'Correct' }).tap();
   }
   await expect(inlineEditor(page).first().locator('.editor-head-pill')).toHaveText('CORRECTION');

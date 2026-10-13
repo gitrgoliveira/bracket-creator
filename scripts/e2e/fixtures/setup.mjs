@@ -15,12 +15,14 @@ const field = (page, label) => page.getByLabel(new RegExp(`^${label}`));
 // server with no tournament yet. Creating one signs this page in, so a
 // journey that wants the login form next calls signOut() then login().
 export async function createTournament(page, {
-  name = 'E2E Cup', venue = 'Test Hall', courts = 2, mode = 'Officiated', password = PASSWORD,
+  name = 'E2E Cup', venue = 'Test Hall', courts = 2, mode = 'Officiated', password = PASSWORD, date,
 } = {}) {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Welcome to Bracket Creator' })).toBeVisible();
   await field(page, 'Tournament Name').fill(name);
   await field(page, 'Venue').fill(venue);
+  // The form offers today; `date` (YYYY-MM-DD) sets another day.
+  if (date) await page.locator('#first-run-date').fill(date);
   await field(page, 'Number of Shiaijo').fill(String(courts));
   await page.getByRole('group', { name: 'Tournament type' }).getByRole('button', { name: mode }).tap();
   await field(page, 'Admin Password').fill(password);
@@ -32,7 +34,7 @@ export async function createTournament(page, {
 // Sign in, creating the tournament first when this file's server has none yet.
 // Every test in a file can call it, whichever runs first or in which worker.
 // Returns { created } so a caller can tell the first run from a later one.
-export async function enterTournament(page, { name = 'E2E Cup', courts = 2 } = {}) {
+export async function enterTournament(page, { name = 'E2E Cup', courts = 2, date } = {}) {
   await page.goto('/');
   // The first-run form, or the public home of a tournament that exists:
   // whichever the first paint shows, however long it takes.
@@ -40,7 +42,7 @@ export async function enterTournament(page, { name = 'E2E Cup', courts = 2 } = {
   const home = page.locator('.viewer__body');
   await welcome.or(home).first().waitFor({ state: 'visible' });
   if (await welcome.isVisible()) {
-    await createTournament(page, { name, courts });
+    await createTournament(page, { name, courts, date });
     return { created: true };
   }
   await login(page);

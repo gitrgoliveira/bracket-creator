@@ -123,7 +123,7 @@ export async function doubleTap(locator) {
 // "Saving…". A local server answers in milliseconds, far too fast for any
 // thumb, so the write is held for `holdWritesMs` first (every non-GET /api
 // request), which is what a venue's wifi does anyway. Returns
-// { savingSeen, retapped, labelAfter }, both flags always true: a button that
+// { savingSeen, retapped, labelAfter, writesSent }, both flags always true: a button that
 // never shows "Saving…" within the hold THROWS (the second tap was not made, so
 // a check built on this helper would pass without testing anything). Any other
 // failure propagates as it is.
@@ -141,6 +141,21 @@ export async function retapWhileSaving(locator, { holdWritesMs = 1200, savingTex
     return route.continue().catch(() => {});
   };
   await page.route('**/api/**', hold);
+  // Every write the two taps cause is counted and waited for: a second write
+  // from the bounced tap is held on its own clock and can land after the first
+  // one's answer has cleared "Saving…", so the caller reads the page only once
+  // none is in flight, whatever it then finds.
+  const inFlight = new Set();
+  let writesSent = 0;
+  const started = (req) => {
+    if (req.method() === 'GET' || !new URL(req.url()).pathname.startsWith('/api/')) return;
+    inFlight.add(req);
+    writesSent += 1;
+  };
+  const ended = (req) => inFlight.delete(req);
+  page.on('request', started);
+  page.on('requestfinished', ended);
+  page.on('requestfailed', ended);
   try {
     await page.touchscreen.tap(x, y);
     try {
@@ -163,9 +178,17 @@ export async function retapWhileSaving(locator, { holdWritesMs = 1200, savingTex
       [handle, savingText.source, savingText.flags],
       { timeout: holdWritesMs + EXPECT_TIMEOUT_MS },
     );
+    const drainBy = Date.now() + holdWritesMs + EXPECT_TIMEOUT_MS;
+    while (inFlight.size > 0) {
+      if (Date.now() > drainBy) throw new Error(`clumsy.retapWhileSaving: ${inFlight.size} write(s) still unanswered after the retap`);
+      await new Promise((r) => setTimeout(r, 50));
+    }
     const labelAfter = await handle.evaluate((el) => (el.isConnected ? el.textContent.trim() : null));
-    return { savingSeen, retapped: savingSeen, labelAfter };
+    return { savingSeen, retapped: savingSeen, labelAfter, writesSent };
   } finally {
+    page.off('request', started);
+    page.off('requestfinished', ended);
+    page.off('requestfailed', ended);
     await page.unroute('**/api/**', hold);
     await handle.dispose();
   }

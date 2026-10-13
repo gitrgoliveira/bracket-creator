@@ -41,6 +41,7 @@ import { completedRowFor, openShiaijo, sides, upNextCard } from '../fixtures/shi
 import { PUBLIC_DEVICE, EXPECT_TIMEOUT_MS } from '../fixtures/devices.mjs';
 import { openViewer, recentResult } from '../fixtures/public.mjs';
 import { scoreRows } from '../fixtures/scores.mjs';
+import { nextMatchWrite, writeLanded } from '../fixtures/scoring.mjs';
 import { EDITOR } from '../../screenshots/lib/editor.mjs';
 import { dwell, rendered, settled, tapOnSide, untilStable } from '../fixtures/pace.mjs';
 import { ensureCoarse } from '../fixtures/pointer.mjs';
@@ -546,11 +547,13 @@ test.describe('J5 kachinuki from the court console', () => {
         shiro: await editor(page).locator('.team-sub-match').nth(i).locator('.tsm-center-pts--shiro .editor-side__pt--filled').allInnerTexts(),
         aka: await editor(page).locator('.team-sub-match').nth(i).locator('.tsm-center-pts--aka .editor-side__pt--filled').allInnerTexts(),
       });
+      // Opening or closing a correction flushes the live bout's save first, so
+      // each tap below is read against the settled state before it (`from`): a
+      // read straight after the tap can still be the pre-tap page.
+      const openBeforeV1 = await untilStable(() => correctingBout(page).count());
       // V1: the thumb meant bout 5 and landed on the row below it.
       const v1 = await tapNeighbour(row5, 'down');
-      // Opening or closing a correction flushes the live bout's save first: wait
-      // for the rows to stop moving.
-      await untilStable(() => correctingBout(page).count());
+      await untilStable(() => correctingBout(page).count(), { from: openBeforeV1 });
       const openedWrong = await correctingBout(page).count() ? await boutNames(correctingBout(page)) : null;
       const v1Shot = await shot(page, 'v1-fought-row-neighbour');
       let v1Recover = 0;
@@ -563,8 +566,9 @@ test.describe('J5 kachinuki from the court console', () => {
       // V2: two taps inside 300ms on the fought row. The first expands it; where
       // does the second land?
       const before = await marksOf(4);
+      const openBeforeV2 = await untilStable(() => correctingBout(page).count());
       const v2 = await doubleTap(doneRows(page).nth(4));
-      await untilStable(() => correctingBout(page).count());
+      await untilStable(() => correctingBout(page).count(), { from: openBeforeV2 });
       // Which bout did the double tap leave open?
       const openCaret = editor(page).locator('[data-testid^="kachinuki-done-collapse-"]');
       const openIdx = await openCaret.count()
@@ -609,11 +613,16 @@ test.describe('J5 kachinuki from the court console', () => {
       if (!(await correctingBout(page).count())) await doneRows(page).nth(4).tap();
       // V2 on the collapse triangle.
       const caretBtn = editor(page).getByTestId('kachinuki-done-collapse-4');
+      const openBeforeV2c = await untilStable(() => correctingBout(page).count());
       const v2c = await doubleTap(caretBtn);
-      const reopened = await untilStable(() => correctingBout(page).count());
+      const reopened = await untilStable(() => correctingBout(page).count(), { from: openBeforeV2c });
+      const openedByV2c = reopened
+        ? await editor(page).locator('[data-testid^="kachinuki-done-collapse-"]').first().getAttribute('data-testid') : null;
       record({ step: 'M1 correction', action: 'collapse triangle', variant: 'V2 doubleTap', ...v2c,
-        openAfter: reopened, screenshot: await shot(page, 'v2-collapse-double-tap') });
-      if (reopened) await editor(page).getByTestId('kachinuki-done-collapse-4').tap();
+        openAfter: reopened, openedByV2c, screenshot: await shot(page, 'v2-collapse-double-tap') });
+      // Collapse whatever the double tap left open: the second tap may have
+      // landed on another bout's row once the first had collapsed bout 5.
+      if (reopened) await editor(page).locator('[data-testid^="kachinuki-done-collapse-"]').first().tap();
       await expect(correctingBout(page)).toHaveCount(0);
       await expect(syncPill(page)).toHaveText('Synced');
       expect(await boutFilled(doneRows(page).nth(4), 'shiro').allInnerTexts()).toEqual(['M', 'K']);
@@ -1018,6 +1027,7 @@ test.describe('J5 kachinuki from the court console', () => {
           await option(S[1]).tap();
           await expect(option(S[1])).toBeHidden();
           // The pick is saved and the row redrawn: a tap made meanwhile is lost with the old row.
+          await expect.poll(() => boutNames(currentBout(page))).toEqual({ shiro: S[1], aka: A[0] });
           await untilStable(() => boutNames(currentBout(page)));
           const afterPick = await shiroMarks();
           const pickShot = await shot(page, 'm2-fighter-picked-one-tap');
@@ -1069,6 +1079,7 @@ test.describe('J5 kachinuki from the court console', () => {
             recoverTaps += 1;
             await expect(option(S[1])).toBeHidden();
             // The pick is saved and the row redrawn: a tap made meanwhile is lost with the old row.
+            await expect.poll(() => boutNames(currentBout(page))).toEqual({ shiro: S[1], aka: A[0] });
             await untilStable(() => boutNames(currentBout(page)));
             recoverTaps += await clearGhostMarks();
           }
@@ -1151,7 +1162,11 @@ test.describe('J5 kachinuki from the court console', () => {
       const upNext = await upNextCard(page).isVisible() ? await sides(upNextCard(page)).catch(() => null) : null;
       let boutsAfter = null;
       if (upNext) {
+        // Start is one match write; the sheet shows the bout log only once that
+        // answer is in, so a count read before it is the empty sheet.
+        const startAnswered = nextMatchWrite(page);
         await upNextCard(page).getByRole('button', { name: 'Start match' }).tap();
+        await writeLanded(startAnswered, 'Start match');
         await expect(recordBoutButton(page)).toBeVisible();
         // Did the bout log survive the send back: the count once the sheet has loaded it.
         boutsAfter = await untilStable(() => doneRows(page).count());

@@ -313,11 +313,15 @@ test.describe('moved-match', () => {
     await (await startOf(moved)).tap();
     await expect.poll(async () => ((await courtState(B)).editor || {}).names, { timeout: EXPECT_TIMEOUT_MS }).toEqual([moved.shiro, moved.aka]);
     // 8a. At once, before the court's list has caught up with the start just made.
-    await (await startOf(secondPair)).tap();
     const notice = async () => (await B.locator('.shiaijo-upnext__error[role="alert"]').allInnerTexts()).join(' | ');
+    const courtB = async () => [await notice(), await runningOnCourt(H, 'B')];
+    // One plain read, not a settled one: the tap must still come at once.
+    const beforeSecondStart = await courtB();
+    await (await startOf(secondPair)).tap();
     // A start the server refuses shows its notice once answered; one it accepts
-    // shows the bout running: the row records whichever, so wait for it to settle.
-    await untilStable(async () => [await notice(), await runningOnCourt(H, 'B')]);
+    // shows the bout running: the row records whichever, so wait for the court
+    // to leave the state before the tap, and then to settle.
+    await untilStable(courtB, { from: beforeSecondStart });
     row({ step: '8 second start', action: `Start match on ${pairText(secondPair)} at once after starting ${pairText(moved)}`,
       variant: 'V2 hurried second start (inside the list refresh)', notice: await notice(), courtB: await courtState(B),
       runningOnB: await runningOnCourt(H, 'B'), shot: await shot(B, 'court-B-second-start-at-once') });
@@ -330,8 +334,9 @@ test.describe('moved-match', () => {
       return;
     }
     await expect.poll(async () => ((await courtState(B)).upNext || {}).names, { timeout: EXPECT_TIMEOUT_MS }).toEqual([secondPair.shiro, secondPair.aka]);
+    const beforeBusyStart = await untilStable(courtB);
     await (await startOf(secondPair)).tap();
-    await untilStable(async () => [await notice(), await runningOnCourt(H, 'B')]);
+    await untilStable(courtB, { from: beforeBusyStart });
     row({ step: '8 competitor busy', action: `Start match on ${pairText(secondPair)} (one of them fights on A) while ${pairText(moved)} runs on B`,
       variant: 'V5 lost place (the moved match\'s competitor is elsewhere)', notice: await notice(), courtB: await courtState(B),
       runningOnB: await runningOnCourt(H, 'B'), shot: await shot(B, 'court-B-start-refused-competitor-busy') });

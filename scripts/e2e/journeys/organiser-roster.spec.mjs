@@ -4,7 +4,8 @@
 //   1. Check-in on the Registration desk (one by one, by search, by dojo) and
 //      the draw that follows: only checked-in competitors are drawn, and the
 //      desk's search finds a competitor by number.
-//   2. Seeds typed before the draw: two seeds never share a pool.
+//   2. Seeds typed before the draw: two competitors the unseeded draw puts in
+//      one pool are seeded, and the draw then keeps them in different pools.
 //   3. The participant Edit dialog after the draw: a new name and dojo reach
 //      the court console, the bracket and the public viewer; the same name and
 //      dojo as another competitor is refused, the same name in another dojo is
@@ -20,7 +21,7 @@ import { journeyShots } from '../fixtures/shots.mjs';
 import { auditLog } from '../fixtures/audit.mjs';
 import { createTournament, login } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
-import { generateDraw, pasteRoster } from '../fixtures/competition.mjs';
+import { discardDraw, generateDraw, pasteRoster } from '../fixtures/competition.mjs';
 import { openShiaijo } from '../fixtures/shiaijo.mjs';
 import { openViewer } from '../fixtures/public.mjs';
 import {
@@ -134,27 +135,38 @@ test.describe('organiser roster', () => {
     });
     await pasteRoster(page, ids.seeds, ROSTER_8);
 
-    // The first two names on the roster: the order a plain draw would put
-    // together, which is what makes the rule visible.
+    // The draw with no seeds typed is read first. It is what the seeds must
+    // change: two competitors it puts in the SAME pool are the pair to seed,
+    // so a rule that held anyway cannot pass for the seeds working.
+    await generateDraw(page, ids.seeds);
+    await openCompetitionTab(page, ids.seeds, 'pools');
+    const unseeded = await poolMembers(page);
+    record({ journey: 'organiser-roster', action: 'unseeded draw', pools: unseeded });
+    expect(Object.keys(unseeded), 'two pools of four').toHaveLength(2);
+    const [firstSeed, secondSeed] = Object.values(unseeded).find((members) => members.length >= 2);
+    await shot(page, 'pools-unseeded');
+    await page.goto(`/admin/competition/${ids.seeds}`);
+    await discardDraw(page);
+
     await openParticipants(page, ids.seeds);
-    await setSeed(page, 'Akira Tanaka', 1);
-    await setSeed(page, 'Ben Carter', 2);
+    await setSeed(page, firstSeed, 1);
+    await setSeed(page, secondSeed, 2);
     // Each rank is saved as it is typed: they survive a reload.
     await page.reload();
     await expect(page.getByRole('button', { name: 'Clear seeds' })).toBeVisible();
-    expect(await seedRankOf(page, 'Akira Tanaka')).toBe('1');
-    expect(await seedRankOf(page, 'Ben Carter')).toBe('2');
+    expect(await seedRankOf(page, firstSeed)).toBe('1');
+    expect(await seedRankOf(page, secondSeed)).toBe('2');
     await shot(page, 'seeds-typed');
 
     await generateDraw(page, ids.seeds);
     await openCompetitionTab(page, ids.seeds, 'pools');
     const pools = await poolMembers(page);
     const poolOf = (n) => Object.keys(pools).find((p) => pools[p].includes(n));
-    record({ journey: 'organiser-roster', action: 'seeds placed', pools });
+    record({ journey: 'organiser-roster', action: 'seeds placed', seeds: [firstSeed, secondSeed], pools });
     expect(Object.keys(pools), 'two pools of four').toHaveLength(2);
-    expect(poolOf('Akira Tanaka'), 'seed 1 is drawn').toBeTruthy();
-    expect(poolOf('Ben Carter'), 'seed 2 is drawn').toBeTruthy();
-    expect(poolOf('Akira Tanaka'), 'two seeds never share a pool').not.toBe(poolOf('Ben Carter'));
+    expect(poolOf(firstSeed), 'seed 1 is drawn').toBeTruthy();
+    expect(poolOf(secondSeed), 'seed 2 is drawn').toBeTruthy();
+    expect(poolOf(firstSeed), 'two seeds never share a pool, though the unseeded draw put them together').not.toBe(poolOf(secondSeed));
     await shot(page, 'pools-seeds-apart');
   });
 
@@ -170,6 +182,7 @@ test.describe('organiser roster', () => {
     const slotOf = (slots, n) => Object.keys(slots).find((k) => slots[k].name === n);
     const danSlot = slotOf(before, 'Dan Evans');
     expect(danSlot, 'Dan Evans is drawn').toBeTruthy();
+    expect(before[danSlot].num, 'Dan Evans carries a number').not.toBe('');
 
     // A new name and a new dojo, after the draw.
     await openParticipants(page, ids.edit);
@@ -232,6 +245,7 @@ test.describe('organiser roster', () => {
     const before = await bracketSlots(page);
     const slot = Object.keys(before).find((k) => before[k].name === 'Hana Ito');
     expect(slot, 'Hana Ito is drawn and has not fought').toBeTruthy();
+    expect(before[slot].num, 'Hana Ito carries a number').not.toBe('');
 
     await openParticipants(page, ids.edit);
     await openEdit(page, 'Hana Ito');
@@ -246,7 +260,8 @@ test.describe('organiser roster', () => {
       });
       expect(Object.values(slots).map((s) => s.name), `${where}: Hana Ito is nowhere`).not.toContain('Hana Ito');
       // Nobody else moved.
-      Object.keys(before).filter((k) => k !== slot && before[k].name !== 'Finn Hale').forEach((k) => {
+      Object.keys(before).filter((k) => k !== slot).forEach((k) => {
+        expect(before[k].num, `${k} carries a number`).not.toBe('');
         expect(slots[k]?.num, `${where}: ${k} keeps its number`).toBe(before[k].num);
       });
     };

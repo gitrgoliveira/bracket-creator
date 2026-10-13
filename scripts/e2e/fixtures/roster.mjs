@@ -170,8 +170,8 @@ export async function generateDrawExcluding(page, id, excluded) {
   if (!(await page.getByRole('button', { name: 'Generate draw' }).isVisible())) await page.goto(`/admin/competition/${id}`);
   await page.getByRole('button', { name: 'Generate draw' }).tap();
   const dlg = page.locator('.modal[role="dialog"]');
-  const shown = Date.now();
   await expect(dlg).toContainText(`${excluded} participants are not checked in and will be excluded from the draw`);
+  const shown = Date.now();
   const asked = (await dlg.innerText()).replace(/\s+/g, ' ').trim();
   await dwell(page, shown);
   await dlg.getByRole('button', { name: 'Confirm' }).tap();

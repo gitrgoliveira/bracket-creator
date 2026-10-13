@@ -15,9 +15,10 @@
 //      a team exhausted (Record bout takes the last fighter off and no pairing
 //      follows).
 //   2  one of A/B against the third team (C): ends LEVEL on individual victories
-//      and points, both lineups used up on a double hikiwake. A pool may end in
-//      a draw and a pool has no representative bout, so it is recorded as a
-//      draw (T) and no daihyosen is offered.
+//      and points, both lineups used up on a double hikiwake. A pool encounter
+//      may end in a draw, so it is recorded as a draw (T) with no winner
+//      marked. (Kachinuki has no representative bout anywhere, in a pool or a
+//      knockout, so the sheet offering none here says nothing about pools.)
 //   3  the remaining pair: a clean win (End match straight after the win).
 // Encounter 3's winner is picked so the pool has a strict order on W, L and T
 // alone (no tie-break flow). The two-team pool's only encounter is one bout won
@@ -35,7 +36,7 @@ import { createTournament, login } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
 import { completedRowFor, openShiaijo, sides, upNextCard } from '../fixtures/shiaijo.mjs';
-import { PUBLIC_DEVICE } from '../fixtures/devices.mjs';
+import { EXPECT_TIMEOUT_MS, PUBLIC_DEVICE } from '../fixtures/devices.mjs';
 import { FIGURES, openAdminPools, openViewerPools, poolBlocks, poolTeams, rowFigures } from '../fixtures/pools.mjs';
 import {
   awardBoutIppon, boutNames, closeLineupPanel, currentBout, daihyosenControls, daihyosenOffer, doneRows, endMatch,
@@ -181,7 +182,7 @@ test.describe('kachinuki in pools', () => {
     record({ journey: JOURNEY, step: 'enc1', action: 'End match', pair, rowText, screenshot: await shot(page, 'enc1-completed') });
   }
 
-  // Encounter 2: level on victories and points, so a draw; no daihyosen.
+  // Encounter 2: level on victories and points, so a draw (T) with no winner marked.
   async function encounter2(page, pair) {
     role.C = pools[0].find((n) => n !== role.A && n !== role.B);
     const p = pair.shiro === role.C ? pair.aka : pair.shiro;
@@ -201,8 +202,8 @@ test.describe('kachinuki in pools', () => {
     await recordBoutButton(page).tap();
     await expect(recordBoutButton(page)).toBeDisabled();
     expect(await doneRows(page).count(), 'the tied last bout stays the current bout').toBe(3);
-    // A knockout would offer a representative bout on this tie; a pool
-    // encounter never does, and kachinuki has none at all.
+    // Kachinuki has no representative bout in any round, so none is offered on
+    // this tie. That holds in a knockout too; it is not a claim about pools.
     await expect(daihyosenOffer(page)).toHaveCount(0);
     await expect(daihyosenControls(page)).toHaveCount(0);
     await expect(endMatchButton(page)).toBeEnabled();
@@ -290,7 +291,7 @@ test.describe('kachinuki in pools', () => {
       expect(poolOf(pair.shiro), 'an encounter is within one pool').toBe(poolOf(pair.aka));
       const isThree = poolOf(pair.shiro) === 0;
       const title = !isThree ? `encounter ${n}: the pool of two`
-        : ['winner stays on, a hikiwake retires both, a team is exhausted', 'level on victories and points is a draw, no daihyosen offered',
+        : ['winner stays on, a hikiwake retires both, a team is exhausted', 'level on victories and points is a draw (T)',
           'a clean win ended with End match'][threeTeamPlayed];
       await test.step(`encounter ${n} (${pair.shiro} v ${pair.aka}): ${title}`, async () => {
         if (!isThree) await quickEncounter(page, pair);
@@ -338,7 +339,7 @@ test.describe('kachinuki in pools', () => {
       if (!(await card.count())) return null;
       const pair = await sides(card);
       return [pair.shiro, pair.aka].sort();
-    }, { message: 'the final seats the pool winners', timeout: 15_000 }).toEqual(winners);
+    }, { message: 'the final seats the pool winners', timeout: EXPECT_TIMEOUT_MS }).toEqual(winners);
     const text = (await upNextCard(page).innerText()).replace(/\s+/g, ' ');
     record({ journey: JOURNEY, step: 'knockout', action: 'Up next after the pools', winners, text,
       screenshot: await shot(page, 'final-seated') });

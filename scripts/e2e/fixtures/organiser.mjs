@@ -84,6 +84,37 @@ export function readWorkbook(buf) {
   return { sheets, text, parts: [...zip.keys()] };
 }
 
+// Every non-empty cell of one sheet, as { "F4": "M", ... }: shared and inline
+// strings resolved, numbers as written. A cell's place is what tells a played
+// bout's mark from the same letter in a heading, which the flat text of
+// readWorkbook cannot.
+export function sheetCells(buf, sheetName) {
+  const zip = readZip(buf);
+  const xml = (name) => (zip.get(name) ? zip.get(name).toString('utf8') : '');
+  const shared = [...xml('xl/sharedStrings.xml').matchAll(/<si>([\s\S]*?)<\/si>/g)]
+    .map((m) => xmlText(m[1].replace(/<[^>]+>/g, '')));
+  const entry = [...xml('xl/workbook.xml').matchAll(/<sheet\b[^>]*\bname="([^"]*)"[^>]*\br:id="([^"]*)"/g)]
+    .find((m) => xmlText(m[1]) === sheetName);
+  if (!entry) throw new Error(`sheetCells: no sheet named ${sheetName}`);
+  const rel = [...xml('xl/_rels/workbook.xml.rels').matchAll(/Id="([^"]*)"[^>]*Target="([^"]*)"|Target="([^"]*)"[^>]*Id="([^"]*)"/g)]
+    .map((m) => ({ id: m[1] || m[4], target: m[2] || m[3] })).find((r) => r.id === entry[2]);
+  if (!rel) throw new Error(`sheetCells: no part for ${sheetName}`);
+  const part = xml(`xl/${rel.target.replace(/^\/?(xl\/)?/, '')}`);
+  const out = {};
+  for (const m of part.matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+    const ref = /\br="([A-Z]+\d+)"/.exec(m[1]);
+    if (!ref || !m[2]) continue;
+    const type = /\bt="(\w+)"/.exec(m[1]);
+    const v = /<v>([\s\S]*?)<\/v>/.exec(m[2]);
+    const inline = /<is>([\s\S]*?)<\/is>/.exec(m[2]);
+    let text = null;
+    if (inline) text = xmlText(inline[1].replace(/<[^>]+>/g, ''));
+    else if (v) text = type && type[1] === 's' ? shared[Number(v[1])] : xmlText(v[1]);
+    if (text !== null && text !== '') out[ref[1]] = text;
+  }
+  return out;
+}
+
 // Open a competition's Export section and download its results workbook.
 // Resolves to { file, name, bytes } once Playwright's download event has fired.
 export async function downloadResultsWorkbook(page, id) {
@@ -190,4 +221,13 @@ export async function loadedImage(locator) {
 export function todayDMY(now = new Date()) {
   const pad = (n) => String(n).padStart(2, '0');
   return `${pad(now.getDate())}-${pad(now.getMonth() + 1)}-${now.getFullYear()}`;
+}
+
+// The day `days` from now, as the date input's YYYY-MM-DD and as the
+// manifest's DD-MM-YYYY: a tournament day that is not today.
+export function dayFromNow(days, now = new Date()) {
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + days);
+  const pad = (n) => String(n).padStart(2, '0');
+  const [y, m, dd] = [d.getFullYear(), pad(d.getMonth() + 1), pad(d.getDate())];
+  return { iso: `${y}-${m}-${dd}`, dmy: `${dd}-${m}-${y}` };
 }

@@ -626,11 +626,14 @@ test.describe('knockout-mixed-individual', () => {
       // operator scores it for the other side and Finishes.
       const live = await editorSides(page);
       const opp = live.aka === b1.aka ? 'shiro' : 'aka';
+      // A toast left by an earlier step must not stand for this Finish's answer:
+      // let it go, so what shows next is this tap's.
+      await expect(page.locator('.toast.is-visible')).toHaveCount(0);
       await ipponButton(page, opp, 'M').tap();
       await settle(page);
       await (await armFinish(page)).tap();
-      await expect(completedRowFor(page, live).or(page.locator('.toast, .pending-write-banner').first())).toBeVisible();
-      const msg = (await page.locator('.toast, .pending-write-banner').allInnerTexts().catch(() => [])).join(' | ');
+      await expect(completedRowFor(page, live).or(page.locator('.toast.is-visible, .pending-write-banner').first())).toBeVisible();
+      const msg = (await page.locator('.toast.is-visible, .pending-write-banner').allInnerTexts().catch(() => [])).join(' | ');
       const done = await completedRowFor(page, live).isVisible().catch(() => false);
       row({ step: 'kiken undo', action: 'Finish the running bout of the now-withdrawn competitor (M for the opponent)', variant: 'recovery attempt',
         pair: live, completed: done, message: msg.replace(/\s+/g, ' ').slice(0, 240), shot: await shot(page, 'finish-bout-of-withdrawn') });

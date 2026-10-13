@@ -78,7 +78,21 @@ export function rendered(page) {
 // refetches after an action (a reload, Back and Forward, a write's echo) whose
 // end state the journey cannot name, such as a probe of what the app does. The
 // answer is the last read, so the caller need not read again.
-export async function untilStable(read, { quietMs = 400, timeout = EXPECT_TIMEOUT_MS } = {}) {
+//
+// A probe that taps and then reads can settle on the state from BEFORE the tap
+// when the tap's effect (a refetch, a flushed save) has not arrived yet, and
+// two reads of an unchanged page agree. Pass `from`, the read taken (settled)
+// before the tap: the helper first waits up to `changeWithinMs` for the read to
+// leave that value. A tap that really changes nothing costs that wait, a
+// Deliberate: negative one, and settles on the unchanged value.
+export async function untilStable(read, { quietMs = 400, timeout = EXPECT_TIMEOUT_MS, changeWithinMs = 3_000, ...rest } = {}) {
+  if ('from' in rest) {
+    const was = JSON.stringify(rest.from);
+    const changeDeadline = Date.now() + changeWithinMs;
+    while (JSON.stringify(await read()) === was && Date.now() < changeDeadline) {
+      await new Promise((done) => setTimeout(done, 100));
+    }
+  }
   const deadline = Date.now() + timeout;
   let last = JSON.stringify(await read());
   for (;;) {

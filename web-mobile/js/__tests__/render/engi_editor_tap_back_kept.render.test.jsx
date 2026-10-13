@@ -24,6 +24,9 @@ const engi = (overrides = {}) => ({
   ...overrides,
 });
 
+// A save the server took: the answer a landed write comes back with.
+const LANDED = { id: 'm1', status: 'running' };
+
 const el = (match, onSubmit) => (
   <EngiScoreEditorModal match={match} onClose={vi.fn()} onSubmit={onSubmit} variant="inline" />
 );
@@ -34,7 +37,7 @@ const wait = async (ms) => { await act(async () => { vi.advanceTimersByTime(ms);
 
 describe('a flag tap made while the previous save is out is never wiped by that save\'s echo (bc-evts)', () => {
   it('add a flag, take it off before the add\'s echo: the count stays at the server\'s and the removal is saved', async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onSubmit = vi.fn().mockResolvedValue(LANDED);
     let r;
     await act(async () => { r = render(el(engi(), onSubmit)); });
     await tap(r, 'engi-aka-inc');
@@ -56,7 +59,7 @@ describe('a flag tap made while the previous save is out is never wiped by that 
   });
 
   it('take a flag off, tap it back before the removal\'s echo: the flag stays and is saved', async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onSubmit = vi.fn().mockResolvedValue(LANDED);
     let r;
     await act(async () => { r = render(el(engi({ flagsA: 1 }), onSubmit)); });
     await tap(r, 'engi-aka-dec');
@@ -78,7 +81,7 @@ describe('a flag tap made while the previous save is out is never wiped by that 
   });
 
   it('a change made elsewhere after the last tap is still followed', async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onSubmit = vi.fn().mockResolvedValue(LANDED);
     let r;
     await act(async () => { r = render(el(engi(), onSubmit)); });
     await tap(r, 'engi-aka-inc');
@@ -96,7 +99,7 @@ describe('a flag tap made while the previous save is out is never wiped by that 
     // read a millisecond before the tap that made it. Once that save has
     // landed the board holds nothing unsent, and a change the server applied
     // under such a stamp is the match as it stands.
-    const onSubmit = vi.fn().mockResolvedValue({ id: 'm1', status: 'running' });
+    const onSubmit = vi.fn().mockResolvedValue(LANDED);
     let r;
     await act(async () => { r = render(el(engi(), onSubmit)); });
     await tap(r, 'engi-aka-inc');
@@ -106,5 +109,74 @@ describe('a flag tap made while the previous save is out is never wiped by that 
     await act(async () => { r.rerender(el(echo, onSubmit)); });
     await act(async () => { r.rerender(el({ ...echo, flagsB: 1 }, onSubmit)); });
     expect(count(r, 'shiro'), 'the board took the Shiro flag stamped just before the tap').toBe('1');
+  });
+
+  it('a save built before the latest tap clears nothing when it lands', async () => {
+    let landFirst;
+    const first = new Promise((resolve) => { landFirst = resolve; });
+    const onSubmit = vi.fn().mockReturnValueOnce(first).mockResolvedValue(LANDED);
+    let r;
+    await act(async () => { r = render(el(engi(), onSubmit)); });
+    await tap(r, 'engi-aka-inc');
+    await wait(350); // the add's save is out and unanswered
+    expect(onSubmit.mock.calls.at(-1)?.[0]?.flagsA, 'precondition: the add was saved').toBe(1);
+
+    vi.setSystemTime(NOW + 400);
+    await tap(r, 'engi-aka-dec'); // a tap the save in flight was not built with
+    await act(async () => { landFirst(LANDED); });
+
+    // The add's echo, stamped before the removal.
+    await act(async () => { r.rerender(el(engi({ flagsA: 1, modifiedAt: NOW + 50 }), onSubmit)); });
+    expect(count(r, 'aka'), 'the add landing does not release the board from the removal it never carried').toBe('0');
+
+    await wait(350); // the removal's own autosave
+    expect(onSubmit.mock.calls.at(-1)?.[0]?.flagsA, 'the removal is sent').toBe(0);
+  });
+
+  it.each([
+    ['queued', { queued: true }],
+    ['refused', { applied: false, reason: 'superseded' }],
+  ])('a save the server did not take (%s) keeps the board against an older copy', async (_name, answer) => {
+    const onSubmit = vi.fn().mockResolvedValue(answer);
+    let r;
+    await act(async () => { r = render(el(engi(), onSubmit)); });
+    await tap(r, 'engi-aka-inc');
+    await wait(350);
+    vi.setSystemTime(NOW + 400);
+    await tap(r, 'engi-aka-dec');
+    await wait(350);
+    expect(onSubmit.mock.calls.length, 'precondition: both taps were saved').toBe(2);
+
+    await act(async () => { r.rerender(el(engi({ flagsA: 1, modifiedAt: NOW + 50 }), onSubmit)); });
+    expect(count(r, 'aka'), 'a write that did not land released nothing').toBe('0');
+  });
+
+  it('a scheduled match is not autosaved, so a net-zero fiddle holds nothing against another device', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(LANDED);
+    let r;
+    await act(async () => { r = render(el(engi({ status: 'scheduled' }), onSubmit)); });
+    await tap(r, 'engi-aka-inc');
+    await tap(r, 'engi-aka-dec');
+    await wait(350);
+    expect(onSubmit, 'precondition: nothing was autosaved').not.toHaveBeenCalled();
+
+    // Another device's flag, stamped before the taps.
+    await act(async () => { r.rerender(el(engi({ status: 'scheduled', flagsB: 1, modifiedAt: NOW - 1000 }), onSubmit)); });
+    expect(count(r, 'shiro'), 'the copy from the other device is followed').toBe('1');
+  });
+
+  it.each([
+    ['one millisecond before the tap\'s stamp is held', -1, '0'],
+    ['at the tap\'s stamp is followed', 0, '1'],
+  ])('a copy stamped %s', async (_name, offset, shiro) => {
+    const onSubmit = vi.fn().mockResolvedValue({ queued: true });
+    let r;
+    await act(async () => { r = render(el(engi(), onSubmit)); });
+    await tap(r, 'engi-aka-inc');
+    await wait(350);
+    vi.setSystemTime(NOW + 400);
+    await tap(r, 'engi-aka-dec'); // the board is back at the server's value; the stamp is NOW + 400
+    await act(async () => { r.rerender(el(engi({ flagsB: 1, modifiedAt: NOW + 400 + offset }), onSubmit)); });
+    expect(count(r, 'shiro')).toBe(shiro);
   });
 });

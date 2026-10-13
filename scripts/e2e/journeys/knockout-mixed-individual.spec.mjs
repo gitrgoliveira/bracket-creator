@@ -1263,40 +1263,46 @@ test.describe('knockout-mixed-individual bead guards', () => {
     await openShiaijo(page, 'O');
     expect(await ensureRunning(page), 'a semi-final starts on O').not.toBeNull();
     const writes = await holdScoreWrites(page);
-    const akaMark = () => inlineEditor(page).locator('[aria-label^="Aka slot "][aria-label*=": remove "]').first();
-    const marksAfterReload = async () => {
-      await page.reload();
-      await expect.poll(() => inlineRunning(page), { timeout: 15_000 }).toBe(true);
-      return filledSlots(page, 'aka').count();
-    };
+    try {
+      const akaMark = () => inlineEditor(page).locator('[aria-label^="Aka slot "][aria-label*=": remove "]').first();
+      const marksAfterReload = async () => {
+        await page.reload();
+        await expect.poll(() => inlineRunning(page), { timeout: 15_000 }).toBe(true);
+        return filledSlots(page, 'aka').count();
+      };
 
-    await ipponButton(page, 'aka', 'M').tap();
-    await settle(page);
-    // Remove, then the same mark back while the removal is out.
-    let held = writes.holdNext();
-    await akaMark().tap();
-    await held.sent;
-    await ipponButton(page, 'aka', 'M').tap();
-    held.release();
-    await settle(page);
-    await page.waitForTimeout(1000);
-    await expect(filledSlots(page, 'aka'), 'the tapped-back mark stays').toHaveCount(1);
-    await shot(page, 'tapped-back-mark-kept');
-    expect(await marksAfterReload(), 'and the server holds it').toBe(1);
-    await shot(page, 'tapped-back-mark-after-reload');
+      await ipponButton(page, 'aka', 'M').tap();
+      await settle(page);
+      // Remove, then the same mark back while the removal is out.
+      let held = writes.holdNext();
+      await akaMark().tap();
+      await held.sent;
+      await ipponButton(page, 'aka', 'M').tap();
+      held.release();
+      // The removal's response reached the page before the tap-back's own save went out.
+      await writes.answeredBeforeNextWrite(held);
+      await settle(page);
+      await page.waitForTimeout(1000);
+      await expect(filledSlots(page, 'aka'), 'the tapped-back mark stays').toHaveCount(1);
+      await shot(page, 'tapped-back-mark-kept');
+      expect(await marksAfterReload(), 'and the server holds it').toBe(1);
+      await shot(page, 'tapped-back-mark-after-reload');
 
-    // The reverse: take it off, add it, and take it off again while the add is out.
-    await akaMark().tap();
-    await settle(page);
-    held = writes.holdNext();
-    await ipponButton(page, 'aka', 'M').tap();
-    await held.sent;
-    await akaMark().tap();
-    held.release();
-    await settle(page);
-    await page.waitForTimeout(1000);
-    await expect(filledSlots(page, 'aka'), 'the removal stays').toHaveCount(0);
-    expect(await marksAfterReload(), 'and the server holds no mark').toBe(0);
-    await writes.stop();
+      // The reverse: take it off, add it, and take it off again while the add is out.
+      await akaMark().tap();
+      await settle(page);
+      held = writes.holdNext();
+      await ipponButton(page, 'aka', 'M').tap();
+      await held.sent;
+      await akaMark().tap();
+      held.release();
+      await writes.answeredBeforeNextWrite(held);
+      await settle(page);
+      await page.waitForTimeout(1000);
+      await expect(filledSlots(page, 'aka'), 'the removal stays').toHaveCount(0);
+      expect(await marksAfterReload(), 'and the server holds no mark').toBe(0);
+    } finally {
+      await writes.stop();
+    }
   });
 });

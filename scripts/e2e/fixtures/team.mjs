@@ -118,9 +118,21 @@ export async function lineupsNameSlot(page, label, name) {
 // page) or of one match (the lineup panel, the score sheet row), api_client.jsx
 // putTeamLineup / putMatchLineup. Armed BEFORE the tap that sends it. A timeout
 // the caller never reached (the tap threw first) is not an unhandled rejection.
-function lineupSaveAnswer(page) {
-  const answered = page.waitForResponse((r) => r.request().method() === 'PUT'
-    && /\/teams\/[^/]+\/(lineups|match-lineups)\/[^/?]+(\?|$)/.test(r.url()), { timeout: EXPECT_TIMEOUT_MS });
+// `teamId` names the team whose lineup is being saved, and `matchId` the match
+// whose own lineup it is (`null`: the team's starting lineup, round 0); a PUT
+// for another team or lineup is not this save's answer. `matchId` undefined
+// matches any match lineup of the team (the lineup panel does not show the id).
+const LINEUP_PUT = /\/teams\/([^/]+)\/(lineups|match-lineups)\/([^/?]+)(\?|$)/;
+function lineupPut(r, { teamId, matchId }) {
+  if (r.method() !== 'PUT') return false;
+  const m = LINEUP_PUT.exec(r.url());
+  if (!m || decodeURIComponent(m[1]) !== teamId) return false;
+  if (matchId === undefined) return m[2] === 'match-lineups';
+  if (matchId === null) return m[2] === 'lineups' && decodeURIComponent(m[3]) === '0';
+  return m[2] === 'match-lineups' && decodeURIComponent(m[3]) === matchId;
+}
+function lineupSaveAnswer(page, target) {
+  const answered = page.waitForResponse((r) => lineupPut(r.request(), target), { timeout: EXPECT_TIMEOUT_MS });
   answered.catch(() => {});
   return answered;
 }
@@ -129,7 +141,10 @@ function lineupSaveAnswer(page) {
 // the save with a success status. The "Lineup saved" toast is not the signal: it
 // also opens "Lineup saved, but ..." warnings, and an older toast outlives it.
 export async function lineupsSave(page) {
-  const answered = lineupSaveAnswer(page);
+  // The save is of the team and lineup the two selects show right now.
+  const teamId = await overlineField(page, 'Team').locator('select').inputValue();
+  const matchId = (await overlineField(page, 'Lineup for').locator('select').inputValue()) || null;
+  const answered = lineupSaveAnswer(page, { teamId, matchId });
   await lineupsForm(page).getByRole('button', { name: 'Save lineup' }).tap();
   const res = await answered;
   expect(res.ok(), `the lineup save was answered ${res.status()} ${res.url()}`).toBe(true);
@@ -207,13 +222,28 @@ export async function typeIntoNameBox(input, name) {
 // a success status. `refused: true` is for a save the panel refuses: it waits
 // for the side's inline error instead (a refusal the panel makes itself sends
 // no request), and the caller asserts its text.
-export async function panelSave(page, i, { refused = false } = {}) {
+export async function panelSave(page, i, { refused = false, matchId } = {}) {
   const side = panelSide(page, i);
-  const answered = refused ? null : lineupSaveAnswer(page);
-  await panelSaveButton(page, i).tap();
+  // The side's testid ends in its team's id (admin_schedule_lineup.jsx).
+  const teamId = (await side.getAttribute('data-testid')).replace(/^match-lineup-side-/, '');
+  const answered = refused ? null : lineupSaveAnswer(page, { teamId, matchId });
   if (refused) {
-    await expect(side.locator('.alert--error')).toBeVisible();
+    // An alert from an earlier save would satisfy the wait below on its own.
+    await expect(side.locator('.alert--error'), 'no refusal is showing before the tap').toHaveCount(0);
+    const sent = [];
+    const onRequest = (r) => { if (lineupPut(r, { teamId, matchId })) sent.push(r.url()); };
+    page.on('request', onRequest);
+    try {
+      await panelSaveButton(page, i).tap();
+      await expect(side.locator('.alert--error')).toBeVisible();
+      // A refusal the panel makes itself sends nothing; give a stray write time to go out.
+      await page.waitForTimeout(500);
+      expect(sent, 'the refused save sent no lineup write').toEqual([]);
+    } finally {
+      page.off('request', onRequest);
+    }
   } else {
+    await panelSaveButton(page, i).tap();
     const res = await answered;
     expect(res.ok(), `the lineup save was answered ${res.status()} ${res.url()}`).toBe(true);
   }

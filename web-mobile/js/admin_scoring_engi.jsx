@@ -151,7 +151,8 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // untouched, and that save's echo then wipes it (bc-ltap, bc-kclr; the
   // individual editor's boardEditedAtRef explains the rule at length). The seq
   // counts edits so landedAutosave clears the stamp only for a save built after
-  // the latest one.
+  // the latest one. The stamp is taken only while the match is running: only then
+  // is the edit autosaved, and only a landed autosave clears the stamp.
   const flagsEditedAtRef = useRefE(undefined);
   const flagsEditSeqRef = useRefE(0);
   autosaveOnSubmitRef.current = landedAutosave(onSubmit, flagsEditSeqRef, (seq) => {
@@ -166,8 +167,10 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
     const next = clamp(n);
     if (next === (side === "a" ? flagsA : flagsB)) return;
     (side === "a" ? setFlagsA : setFlagsB)(next);
-    flagsEditedAtRef.current = serverNowMs();
-    flagsEditSeqRef.current += 1;
+    if (m.status === "running") {
+      flagsEditedAtRef.current = serverNowMs();
+      flagsEditSeqRef.current += 1;
+    }
     markDirty();
   };
 

@@ -30,8 +30,10 @@ export { isCoarse };
 //   text        the message, as the browser or the app logs it
 //   url         where it came from (a failed request's URL, or the script)
 //   code        the app's refusal code in the failed /api answer's body; with
-//               codeUnreadable, an answer whose body could not be read (its page
-//               closed first) stands in for the code, the rest still matching
+//               codeUnreadable, an answer whose body could not be read because
+//               its page closed first stands in for the code, the rest still
+//               matching (a body missing for any other reason, a timeout or a
+//               failed read on a page still open, never does)
 //   request     which request was refused (method and body), for an entry that
 //               is about one kind of write only
 //   whileOffline  only while the page's context is offline (or just back)
@@ -69,9 +71,13 @@ const writeStatus = (postData) => {
     return null;
   }
 };
+// The page was closed when the answer's body was read: the one reason a body may
+// be missing and an entry with codeUnreadable still stand on the answer's status,
+// URL and request.
+const closedBeforeBody = (e) => e.body === null && e.bodyMissing === 'page-closed' && !!e.request;
 const allowed = (e) => e.kind === 'console' && CONSOLE_ALLOWLIST.find((r) => r.text.test(e.text)
   && (!r.url || r.url.test(e.url || ''))
-  && (!r.code || r.code.test(refusalCode(e.body) || '') || (r.codeUnreadable && e.body === null && !!e.request))
+  && (!r.code || r.code.test(refusalCode(e.body) || '') || (r.codeUnreadable && closedBeforeBody(e)))
   && (!r.request || r.request(e.request))
   && (!r.whileOffline || e.offline));
 
@@ -88,6 +94,7 @@ const OFFLINE_GRACE_MS = 3_000;
 // meanwhile never delivers it; the entry then carries no body). The expect
 // timeout, so a body slow under load is waited for as long as an assertion is.
 const BODY_WAIT_MS = EXPECT_TIMEOUT_MS;
+const ALLOWED_UNREAD_REASON = 'allowed: page closed before the refusal\'s code could be read';
 // How far apart a "Failed to load resource" line and its answer may be.
 const PAIR_WINDOW_MS = 5_000;
 function consoleCollector() {
@@ -121,12 +128,19 @@ function consoleCollector() {
       // this answer can reach drain() before the body has been read, and an
       // answer that is not in the list yet would read as "no answer".
       const at = Date.now();
+      // Why the body is missing, when it is: the page was closed when the read
+      // failed, the read failed on a page still open (a reload, a navigation),
+      // or it did not arrive in BODY_WAIT_MS.
+      const entry = { url: res.url(), status: res.status(), method: res.request().method(), postData: res.request().postData(), bodyMissing: null, at };
       let timer;
-      const body = Promise.race([
-        res.text().then((t) => t.slice(0, 1000), () => null),
-        new Promise((done) => { timer = setTimeout(done, BODY_WAIT_MS, null); }),
+      entry.body = Promise.race([
+        res.text().then((t) => t.slice(0, 1000), () => {
+          entry.bodyMissing = page.isClosed() ? 'page-closed' : 'read-failed';
+          return null;
+        }),
+        new Promise((done) => { timer = setTimeout(() => { entry.bodyMissing = 'timeout'; done(null); }, BODY_WAIT_MS); }),
       ]).finally(() => clearTimeout(timer));
-      failed.push({ url: res.url(), status: res.status(), method: res.request().method(), postData: res.request().postData(), body, at });
+      failed.push(entry);
     });
   };
   const attachContext = (ctx) => {
@@ -158,7 +172,7 @@ function consoleCollector() {
       const i = unclaimed.findIndex((f) => f.url === e.url && Math.abs(f.at - e.at) < PAIR_WINDOW_MS);
       if (i < 0) return e;
       const [answer] = unclaimed.splice(i, 1);
-      return { ...e, status: answer.status, body: answer.body, request: { url: answer.url, method: answer.method, postData: answer.postData } };
+      return { ...e, status: answer.status, body: answer.body, bodyMissing: answer.bodyMissing, request: { url: answer.url, method: answer.method, postData: answer.postData } };
     });
     // An answer no line claimed may still be claimed by one that has not
     // arrived: the 409 landing at the end of one test, its console line in the
@@ -282,7 +296,11 @@ export const test = base.extend({
     const errors = entries.filter((e) => e.type === 'error');
     for (const e of errors) {
       const rule = allowed(e);
-      console.log(`CONSOLE ${JSON.stringify({ test: testInfo.title, allowed: rule ? rule.reason : null, ...e })}`);
+      // An entry let through for want of a body says so, in place of the
+      // matched-code reason: nobody checked the code.
+      const unread = rule && rule.code && !rule.code.test(refusalCode(e.body) || '');
+      if (unread) testInfo.annotations.push({ type: 'console-allowed-unread', description: describeEntry(e) });
+      console.log(`CONSOLE ${JSON.stringify({ test: testInfo.title, allowed: rule ? (unread ? ALLOWED_UNREAD_REASON : rule.reason) : null, ...e })}`);
     }
     const bad = errors.filter((e) => !allowed(e));
     if (bad.length) {

@@ -43,21 +43,29 @@ export const MAX_CLEAR_TAPS = 6;
 // the layer it just opened, such as a correction row, tap_guard.jsx) removes
 // nothing, so after each tap the count is given TAP_DWELL_MS to drop, which
 // outlasts that window, before the next tap is made; a tap that lands is not
-// waited on. `from` is the end of the list the next tap takes ('last' or
-// 'first'); `pauseMs` is the operator's beat between two removals. Returns the
-// taps made.
+// waited on. A count that goes UP between taps is a failure, never tapped
+// away: a removed mark coming back is the bc-ltap class of defect. `from` is
+// the end of the list the next tap takes ('last' or 'first'); `pauseMs` is the
+// operator's beat between two removals. Returns the taps made.
 export async function clearMarks(slots, { keep = 0, from = 'last', pauseMs = 0 } = {}) {
   let taps = 0;
+  let last = null; // the count after the previous tap's wait
+  const cameBack = (was, now) => new Error(`clearMarks: ${slots} went UP from ${was} to ${now} mark(s) after ${taps} tap(s) (wanted ${keep}): a removed mark came back`);
   for (let before = await slots.count(); before > keep; before = await slots.count()) {
+    if (last !== null && before > last) throw cameBack(last, before);
     if (taps >= MAX_CLEAR_TAPS) {
       throw new Error(`clearMarks: ${slots} still holds ${before} mark(s) (wanted ${keep}) after ${MAX_CLEAR_TAPS} taps`);
     }
     await (from === 'first' ? slots.first() : slots.last()).tap();
     taps += 1;
     const tappedAt = Date.now();
-    while ((await slots.count()) >= before && Date.now() - tappedAt < TAP_DWELL_MS) {
+    let now = await slots.count();
+    while (now === before && Date.now() - tappedAt < TAP_DWELL_MS) {
       await slots.page().waitForTimeout(50);
+      now = await slots.count();
     }
+    if (now > before) throw cameBack(before, now);
+    last = now;
     if (pauseMs) await slots.page().waitForTimeout(pauseMs);
   }
   return taps;

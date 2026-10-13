@@ -43,7 +43,11 @@ export async function startUpNextEngi(page) {
   await card.getByRole('button', { name: 'Start match' }).tap();
   await expect(engiEditor(page)).toBeVisible();
   const held = await engiPair(page);
-  expect(`${held.shiro} ${held.aka}`, 'the editor holds the match started').toContain(pair.shiro.split(' - ')[0]);
+  // Each card holds its own pair: Shiro's the one the Up next card showed on
+  // Shiro, Aka's the one it showed on Aka.
+  const firstMember = (name) => name.split(' - ')[0].trim();
+  expect(held.shiro, 'the Shiro card holds the Shiro pair').toBe(firstMember(pair.shiro));
+  expect(held.aka, 'the Aka card holds the Aka pair').toBe(firstMember(pair.aka));
   return held;
 }
 

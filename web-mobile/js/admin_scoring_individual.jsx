@@ -329,11 +329,15 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // nothing on the server at all. Once an autosave built after the latest
   // board edit has landed, the board holds nothing the server lacks, so the
   // stamp is cleared (landedBoardSave) and every later server copy is followed.
+  // It is taken only while the match is running: only then is the edit autosaved,
+  // and a stamp no save can clear would hold the board against other devices.
   const boardEditedAtRef = useRefA(undefined);
   const boardEditSeqRef = useRefA(0);
   const markScoringDirty = () => {
-    boardEditedAtRef.current = serverNowMs();
-    boardEditSeqRef.current += 1;
+    if (m.status === "running") {
+      boardEditedAtRef.current = serverNowMs();
+      boardEditSeqRef.current += 1;
+    }
     markRunningWrite();
   };
   // The autosave's submit: the host's onSubmit, and on a landed answer the

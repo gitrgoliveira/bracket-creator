@@ -290,9 +290,13 @@ server's gate and shows refused (the court busy, a competitor fighting
 elsewhere or barred by a withdrawal, or the knockout match it feeds being
 fought). Any other write refused that way is an error. A browser "Failed to
 load resource" line is paired with the `/api` answer it is about one to one,
-in arrival order per URL. When the page closed before the 409's body was read,
-the refusal code cannot be checked, and the entry then stands on the answer's
-status, URL and request alone.
+in arrival order per URL. Only when the page was
+closed while the 409's body was being read is the refusal code unreadable, and
+the entry then stands on the answer's status, URL and request alone; the
+`CONSOLE` line and a `console-allowed-unread` annotation say "allowed: page
+closed before the refusal's code could be read". A body that is missing for any
+other reason (the read timed out, or failed on a page still open, as a reload
+does) is not allowed: the test fails.
 Each entry matches as narrowly as it can (the message, the URL, the refusal
 code, offline only) and says why in one line. An error that looks like the
 app's own fault does not go on it: the test stays red until a person decides.

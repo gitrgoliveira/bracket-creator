@@ -8,7 +8,7 @@
 // of bc-ltap (a flag taken back while the save of the one before is still out
 // must stay taken back).
 import { test, expect } from '../fixtures/test.mjs';
-import { OPERATOR_DEVICE, PUBLIC_DEVICE } from '../fixtures/devices.mjs';
+import { OPERATOR_DEVICE, PUBLIC_DEVICE, EXPECT_TIMEOUT_MS } from '../fixtures/devices.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
 import { auditLog } from '../fixtures/audit.mjs';
 import { createTournament, login } from '../fixtures/setup.mjs';
@@ -105,15 +105,18 @@ test.describe('engi', () => {
   test('bc-evts: a flag taken back while its add is saving stays taken back, and is saved', async ({ page }) => {
     await login(page);
     await openShiaijo(page, 'A');
-    // The previous test's Finish + Start Next left the second semi-final running.
-    if (!(await engiEditor(page).isVisible())) await startUpNextEngi(page);
+    // The previous test's Finish + Start Next left the second semi-final running;
+    // wait for the editor to render, and start the Up next match only when it
+    // never does.
+    const running = await engiEditor(page).waitFor({ timeout: EXPECT_TIMEOUT_MS }).then(() => true, () => false);
+    if (!running) await startUpNextEngi(page);
     await expect(engiEditor(page)).toBeVisible();
     await expect(flagCount(page, 'aka')).toHaveText('0');
     const writes = await holdScoreWrites(page);
     const lastBody = () => writes.bodies[writes.bodies.length - 1];
     const reloaded = async () => {
       await page.reload();
-      await expect(engiEditor(page)).toBeVisible({ timeout: 15_000 });
+      await expect(engiEditor(page)).toBeVisible({ timeout: EXPECT_TIMEOUT_MS });
       return Number(await flagCount(page, 'aka').innerText());
     };
     try {
@@ -123,12 +126,15 @@ test.describe('engi', () => {
       await held.sent; // past the autosave debounce: the add's PUT is out, held
       await flagButton(page, 'aka', '-').tap();
       held.release();
+      // The add's response reached the page before the removal's own save went out.
+      await writes.answeredBeforeNextWrite(held);
       await engiSettle(page);
       await page.waitForTimeout(1000);
       await expect(flagCount(page, 'aka'), 'the taken-back flag stays taken back').toHaveText('0');
       await shot(page, 'flag-taken-back-kept');
       expect(await reloaded(), 'and the server holds no flag').toBe(0);
       expect(lastBody(), 'the last save sent was the removal').toMatchObject({ flagsA: 0 });
+      expect(lastBody().changed, 'and named the flags as changed').toContain('flags');
       await shot(page, 'flag-taken-back-after-reload');
 
       // The mirror: from one flag saved, take it off, and put it back while
@@ -141,12 +147,14 @@ test.describe('engi', () => {
       await held.sent;
       await flagButton(page, 'aka', '+').tap();
       held.release();
+      await writes.answeredBeforeNextWrite(held);
       await engiSettle(page);
       await page.waitForTimeout(1000);
       await expect(flagCount(page, 'aka'), 'the flag put back stays').toHaveText('1');
       await shot(page, 'flag-put-back-kept');
       expect(await reloaded(), 'and the server holds it').toBe(1);
       expect(lastBody(), 'the last save sent was the add').toMatchObject({ flagsA: 1 });
+      expect(lastBody().changed, 'and named the flags as changed').toContain('flags');
     } finally {
       await writes.stop();
     }

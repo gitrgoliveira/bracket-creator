@@ -52,7 +52,7 @@ import {
 } from '../fixtures/clumsy.mjs';
 import { closeNameList } from '../fixtures/team.mjs';
 import {
-  awardBoutIppon, boutFilled, ensureCoarse, boutIpponButton, boutMiddle, boutNames, closeLineupPanel, correctingBout,
+  awardBoutIppon, boutFilled, clearBoutMarks, ensureCoarse, boutIpponButton, boutMiddle, boutNames, closeLineupPanel, correctingBout,
   currentBout, doneRowWinner, doneRows, editor, enchoButton, enchoUndoButton, endMatch, endMatchButton, lineupSide, lineupSource,
   openLineupFromUpNext, recordBout, recordBoutButton, removeBoutButton, reopenButton, syncPill, tieButton,
   typeLineup, winBout,
@@ -104,18 +104,6 @@ test.describe('J5 kachinuki from the court console', () => {
   // (In a serial file a failing test skips the rest, and a restarted worker
   // loses the shared state, so a guard of its own could not stand before them.)
   const guardFailures = [];
-  const MAX_CLEAR_TAPS = 6;
-  // Taps a side's filled marks off, at most MAX_CLEAR_TAPS times: a mark that
-  // does not go away fails with a message instead of looping until the timeout.
-  async function clearBoutMarks(live, side) {
-    for (let i = 0; i < MAX_CLEAR_TAPS; i += 1) {
-      if ((await boutFilled(live, side).count()) === 0) return;
-      await boutFilled(live, side).last().tap();
-    }
-    if ((await boutFilled(live, side).count()) > 0) {
-      throw new Error(`the ${side} marks did not clear after ${MAX_CLEAR_TAPS} taps`);
-    }
-  }
   async function guarded(page, title, fn) {
     try {
       await test.step(title, () => fn(page));
@@ -346,11 +334,7 @@ test.describe('J5 kachinuki from the court console', () => {
       // Recover: close a fighter list the second tap opened, then tap the second
       // mark if there is one (the editor's "Tap a scored mark to clear it").
       const fighterListOpened = await closeNameList(page);
-      let recoverTaps = 0;
-      while ((await boutFilled(currentBout(page), 'shiro').count()) > 1) {
-        await boutFilled(currentBout(page), 'shiro').last().tap();
-        recoverTaps += 1;
-      }
+      const recoverTaps = await clearBoutMarks(currentBout(page), 'shiro', { keep: 1 });
       record({ step: 'M1 bout 1', action: 'Shiro M', variant: 'V2 doubleTap', ...v2, marksAfter: marks, fighterListOpened,
         mMovedByPx: mBefore && mAfter ? Math.round(mAfter.y - mBefore.y) : null,
         recoverTaps, hintShown: await editor(page).getByTestId('team-scoring-clear-hint').isVisible(), screenshot: v2Shot });
@@ -361,7 +345,7 @@ test.describe('J5 kachinuki from the court console', () => {
       record({ step: 'M1 bout 1', action: 'Shiro M (second point)', variant: 'V1 tapNeighbour right', ...v1, marksAfter: after,
         screenshot: await shot(page, 'v1-ippon-neighbour') });
       // Put the board where the operator meant it: M K for Shiro.
-      while ((await boutFilled(currentBout(page), 'shiro').count()) > 1) await boutFilled(currentBout(page), 'shiro').last().tap();
+      await clearBoutMarks(currentBout(page), 'shiro', { keep: 1 });
       if ((await boutFilled(currentBout(page), 'shiro').count()) === 0) await awardBoutIppon(page, 'shiro', 'M');
       await awardBoutIppon(page, 'shiro', 'K');
       // V3: the iPad reloads the tab before Record bout was tapped. The wait
@@ -639,7 +623,7 @@ test.describe('J5 kachinuki from the court console', () => {
       const corr = correctingBout(page);
       await expect(corr).toBeVisible();
       // Clear Shiro's two marks, give Aka two: bout 1 now reads as Aka's.
-      while ((await boutFilled(corr, 'shiro').count()) > 0) await boutFilled(corr, 'shiro').last().tap();
+      await clearBoutMarks(corr, 'shiro');
       await boutIpponButton(corr, 'aka', 'M').tap();
       await boutIpponButton(corr, 'aka', 'M').tap();
       const warning = editor(page).getByTestId('kachinuki-done-edit-warn');
@@ -648,7 +632,7 @@ test.describe('J5 kachinuki from the court console', () => {
       const flipShot = await shot(page, 'bout-1-winner-flipped-warning');
       const laterUnchanged = await boutNames(currentBout(page));
       // Put it back as it was fought.
-      while ((await boutFilled(corr, 'aka').count()) > 0) await boutFilled(corr, 'aka').last().tap();
+      await clearBoutMarks(corr, 'aka');
       await boutIpponButton(corr, 'shiro', 'M').tap();
       await boutIpponButton(corr, 'shiro', 'K').tap();
       await editor(page).getByTestId('kachinuki-done-collapse-0').tap();
@@ -675,11 +659,7 @@ test.describe('J5 kachinuki from the court console', () => {
       await page.waitForTimeout(300);
       const marks = await boutFilled(currentBout(page), 'shiro').allInnerTexts();
       const v1Shot = await shot(page, 'v1-fusensho-neighbour');
-      let recoverTaps = 0;
-      while ((await boutFilled(currentBout(page), 'shiro').count()) > 0) {
-        await boutFilled(currentBout(page), 'shiro').last().tap();
-        recoverTaps += 1;
-      }
+      const recoverTaps = await clearBoutMarks(currentBout(page), 'shiro');
       record({ step: 'M1 bout 8', action: 'Fusensho (Shiro)', variant: 'V1 tapNeighbour left', ...v1, shiroMarks: marks,
         recoverTaps, screenshot: v1Shot });
       // V2: Fusensho double-tapped (it is a toggle).
@@ -791,7 +771,7 @@ test.describe('J5 kachinuki from the court console', () => {
       const wasFusensho = /✓/.test(await fus.innerText());
       if (wasFusensho) await fus.tap(); // re-tap undoes the walkover
       await expect(fus).toHaveText(/^Fusensho$/);
-      while ((await boutFilled(currentBout(page), 'shiro').count()) > 0) await boutFilled(currentBout(page), 'shiro').last().tap();
+      await clearBoutMarks(currentBout(page), 'shiro');
       await awardBoutIppon(page, 'shiro', 'M');
       return wasFusensho;
     };
@@ -1022,14 +1002,7 @@ test.describe('J5 kachinuki from the court console', () => {
             await expect(option(S[1])).toBeVisible();
             return taps;
           };
-          const clearGhostMarks = async () => {
-            let taps = 0;
-            while ((await boutFilled(currentBout(page), 'shiro').count()) > 0) {
-              await boutFilled(currentBout(page), 'shiro').last().tap();
-              taps += 1;
-            }
-            return taps;
-          };
+          const clearGhostMarks = () => clearBoutMarks(currentBout(page), 'shiro');
           // Correct path: one tap on the right fighter.
           await openList();
           await shot(page, 'm2-fighter-pick-open');

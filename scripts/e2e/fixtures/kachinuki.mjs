@@ -14,6 +14,8 @@
 // does for a thumb.
 import { expect } from '@playwright/test';
 import { dwell, settled } from './pace.mjs';
+import { EXPECT_TIMEOUT_MS } from './devices.mjs';
+import { clearMarks } from './scoring.mjs';
 import { isCoarse, restoreCoarse } from './pointer.mjs';
 import { inlineEditor } from './shiaijo.mjs';
 import * as T from './team.mjs';
@@ -126,6 +128,10 @@ export async function doneRowWinner(row) {
 // The centre mark of a row (vs / X / (E)).
 export const boutMiddle = async (row) => (await T.rowMiddle(row).first().innerText()).trim();
 
+// Tap one side's filled marks off a bout row until `keep` are left (the
+// bounded clearMarks, fixtures/scoring.mjs); returns the taps made.
+export const clearBoutMarks = (row, side, opts) => clearMarks(boutFilled(row, side), opts);
+
 // Award one ippon on the current bout and wait for the board to show it. A second
 // ippon on the same side only counts once the first one's bounce window has
 // passed (fixtures/pace.mjs), so the helper returns after it.
@@ -143,7 +149,7 @@ export async function awardBoutIppon(page, side, waza = 'M') {
 export async function recordBout(page) {
   const before = await doneRows(page).count();
   await recordBoutButton(page).tap();
-  await expect(doneRows(page)).toHaveCount(before + 1, { timeout: 15_000 });
+  await expect(doneRows(page)).toHaveCount(before + 1, { timeout: EXPECT_TIMEOUT_MS });
   await expect(recordBoutButton(page)).not.toHaveText('Saving…');
 }
 

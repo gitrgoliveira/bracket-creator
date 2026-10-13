@@ -22,7 +22,16 @@ const JOURNEYS_ROOT = process.env.E2E_RESULTS_DIR
 // The one owner of a journey's output folder: its screenshots and its
 // audit.json (fixtures/audit.mjs). `journey` may name a subfolder
 // ('knockout-mixed-individual/J1').
-export const journeyDir = (journey) => path.join(JOURNEYS_ROOT, journey);
+// A name that is empty, absolute or climbs out of the root is refused: this
+// path is what journeyShots empties.
+export function journeyDir(journey) {
+  const dir = path.resolve(JOURNEYS_ROOT, String(journey));
+  const inside = path.relative(JOURNEYS_ROOT, dir);
+  if (!journey || path.isAbsolute(journey) || !inside || inside.startsWith('..') || path.isAbsolute(inside)) {
+    throw new Error(`journeyDir: "${journey}" is not a folder inside ${JOURNEYS_ROOT}`);
+  }
+  return dir;
+}
 
 // Empty the journey's folder and return its camera. Call once per spec file
 // (in beforeAll), so a folder never mixes two runs.

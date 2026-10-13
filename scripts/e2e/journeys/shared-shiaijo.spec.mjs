@@ -31,7 +31,7 @@
 import { test, expect } from '../fixtures/test.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
 import { auditLog } from '../fixtures/audit.mjs';
-import { login } from '../fixtures/setup.mjs';
+import { enterTournament, login } from '../fixtures/setup.mjs';
 import {
   openShiaijo, upNextCard, sides, startUpNext, completedRowFor, inlineEditor, editorIdentity,
 } from '../fixtures/shiaijo.mjs';
@@ -50,7 +50,7 @@ import {
 } from '../fixtures/individual.mjs';
 import * as T from '../fixtures/team.mjs';
 import {
-  enterTournament, seedCompetitions, readScoresTab, bracketSlots, operatorDevice, publicDevice,
+  seedCompetitions, readScoresTab, bracketSlots, operatorDevice, publicDevice,
   competitionPicker, officiatingName, pickCompetition, nudges, nudgeLines, courtState, runningOnCourt,
   playTeamMatch, liveBout, correctAcross, chooseCourt,
 } from '../fixtures/shared-court.mjs';

@@ -17,7 +17,7 @@
 // them asserts app behaviour beyond "the tap landed", except Finish, which
 // checks the write landed (fixtures/scoring.mjs finishLanded).
 import { expect } from '@playwright/test';
-import { createTournament, login } from './setup.mjs';
+import { EXPECT_TIMEOUT_MS } from './devices.mjs';
 import { settled, tapOnSide } from './pace.mjs';
 import { beforeFinish, finishLanded } from './scoring.mjs';
 import { inlineEditor, upNextCard } from './shiaijo.mjs';
@@ -26,22 +26,6 @@ import { inlineEditor, upNextCard } from './shiaijo.mjs';
 // bare numbers (admin_lineup.jsx positionsForSize).
 export const FIK5 = ['Senpo', 'Jiho', 'Chuken', 'Fukusho', 'Taisho'];
 export const positionLabels = (teamSize) => (teamSize === 5 ? FIK5 : Array.from({ length: teamSize }, (_, i) => String(i + 1)));
-
-// Sign in, creating the tournament first if this server has none yet. Every
-// test in a file can call it, whichever runs first or in which worker.
-export async function enterAdmin(page, { courts = 16 } = {}) {
-  await page.goto('/');
-  // The first-run form, or the public home of a tournament that exists:
-  // whichever the first paint shows, however long it takes.
-  const welcome = page.getByRole('heading', { name: 'Welcome to Bracket Creator' });
-  const home = page.locator('.viewer__body');
-  await welcome.or(home).first().waitFor({ state: 'visible' });
-  if (await welcome.isVisible()) {
-    await createTournament(page, { name: 'Team Cup', courts });
-    return;
-  }
-  await login(page);
-}
 
 // ---------------------------------------------------------------- Lineups page
 
@@ -116,7 +100,7 @@ async function answerDialog(page, label) {
   const handle = await dialog.elementHandle();
   try {
     await dialog.getByRole('button', { name: label }).tap();
-    await handle.waitForElementState('hidden', { timeout: 15_000 });
+    await handle.waitForElementState('hidden', { timeout: EXPECT_TIMEOUT_MS });
   } finally {
     await handle.dispose();
   }
@@ -130,9 +114,25 @@ export async function lineupsNameSlot(page, label, name) {
   await expect(lineupsSelect(page, label).locator('option:checked')).toContainText(name);
 }
 
+// The PUT every lineup save sends: a team's lineup of a round (the Lineups
+// page) or of one match (the lineup panel, the score sheet row), api_client.jsx
+// putTeamLineup / putMatchLineup. Armed BEFORE the tap that sends it. A timeout
+// the caller never reached (the tap threw first) is not an unhandled rejection.
+function lineupSaveAnswer(page) {
+  const answered = page.waitForResponse((r) => r.request().method() === 'PUT'
+    && /\/teams\/[^/]+\/(lineups|match-lineups)\/[^/?]+(\?|$)/.test(r.url()), { timeout: EXPECT_TIMEOUT_MS });
+  answered.catch(() => {});
+  return answered;
+}
+
+// Tap Save lineup on the Lineups page and return once the server has answered
+// the save with a success status. The "Lineup saved" toast is not the signal: it
+// also opens "Lineup saved, but ..." warnings, and an older toast outlives it.
 export async function lineupsSave(page) {
+  const answered = lineupSaveAnswer(page);
   await lineupsForm(page).getByRole('button', { name: 'Save lineup' }).tap();
-  await expect(page.getByText('Lineup saved').first()).toBeVisible();
+  const res = await answered;
+  expect(res.ok(), `the lineup save was answered ${res.status()} ${res.url()}`).toBe(true);
 }
 
 // The option text currently selected at a position (e.g. "T1.2 Ito").
@@ -175,18 +175,20 @@ export async function pickFromNameBox(input, text) {
 }
 
 // A name list left open (by the operator, or by a tap that landed on a name
-// box). Close it the way a thumb does, with a tap on the empty page margin. A
-// box left focused that way still reopens its list on the next tap (bc-flst),
-// so Escape would do as well while the list is open, but it is not what a
-// touch operator does, and an Escape that arrives just after the list closed
-// closes the layer behind it instead (the panel, or the editor). Returns
-// whether one was open. Any LineupNameInput: the panel, the team sheet, the
-// kachinuki sheet.
+// box). Close it with Escape on the box that owns the list: an open list takes
+// the key and keeps it from the layer behind (LineupNameInput stops it there),
+// and pressing on the owning input puts the key where the list is, whatever
+// the focus was. A fixed tap on the page margin is not used: where it lands
+// depends on the surface (on the shiaijo page it can be a queue row). Escape
+// is pressed only while a list is drawn, since one that arrives with none
+// closes the layer behind instead (the panel, or the editor). Returns whether
+// one was open. Any LineupNameInput: the panel, the team sheet, the kachinuki
+// sheet.
 export async function closeNameList(page) {
   const options = page.locator('.pmf__option');
   const wasOpen = (await options.count()) > 0;
   if (wasOpen) {
-    await page.touchscreen.tap(6, 500);
+    await page.locator('.lineup-name').filter({ has: options }).first().locator('input.pmf__input').press('Escape');
     await expect(options).toHaveCount(0);
   }
   return wasOpen;
@@ -199,12 +201,23 @@ export async function typeIntoNameBox(input, name) {
   await input.press('Enter');
 }
 
-// Tap one side's Save lineup and return once the button is back from "Saving…".
-// It comes back disabled when the side was saved (nothing is left to save) and
-// enabled when the save was refused, so the caller asserts which it meant.
-export async function panelSave(page, i) {
+// Tap one side's Save lineup and return once the save has been answered, then
+// once the button is back from "Saving…" (disabled when the side was saved:
+// nothing is left to save). By default the server must answer the save PUT with
+// a success status. `refused: true` is for a save the panel refuses: it waits
+// for the side's inline error instead (a refusal the panel makes itself sends
+// no request), and the caller asserts its text.
+export async function panelSave(page, i, { refused = false } = {}) {
+  const side = panelSide(page, i);
+  const answered = refused ? null : lineupSaveAnswer(page);
   await panelSaveButton(page, i).tap();
-  await expect(panelSide(page, i).getByRole('button', { name: 'Save lineup' })).toBeVisible();
+  if (refused) {
+    await expect(side.locator('.alert--error')).toBeVisible();
+  } else {
+    const res = await answered;
+    expect(res.ok(), `the lineup save was answered ${res.status()} ${res.url()}`).toBe(true);
+  }
+  await expect(side.getByRole('button', { name: 'Save lineup' })).toBeVisible();
 }
 
 export async function closePanel(page) {

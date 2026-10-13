@@ -33,7 +33,7 @@ import {
   editorIdentity, UP_NEXT,
 } from '../fixtures/shiaijo.mjs';
 import {
-  INLINE_EDITOR, EDITOR, ipponButton, syncState, filledSlots, finishButton, armedFinishButton, armFinish, finishMatch,
+  INLINE_EDITOR, EDITOR, clearMarks, ipponButton, syncState, filledSlots, finishButton, armedFinishButton, armFinish, finishMatch,
 } from '../fixtures/scoring.mjs';
 import {
   doubleTap, hastyConfirm, hastyShiaijoConfirm, interrupt, retapWhileSaving, tapNeighbour,
@@ -175,7 +175,7 @@ test.describe('knockout-mixed-individual', () => {
     row({ step: 'clear mark', action: 'tap a scored mark', variant: 'V2 doubleTap', ...dblClear,
       marksBefore: afterDbl, marksAfter: afterDblClear, shot: await shot(page, 'mark-double-tapped') });
     // Put the bout back to one men for the winner.
-    while ((await filledSlots(page, w1).count()) > 1) await filledSlots(page, w1).first().tap();
+    await clearMarks(filledSlots(page, w1), { keep: 1, from: 'first' });
     if ((await filledSlots(page, w1).count()) === 0) {
       await settle(page); // the same reset race as below: let a removal land first
       await ipponButton(page, w1, 'M').tap();
@@ -195,12 +195,7 @@ test.describe('knockout-mixed-individual', () => {
     row({ step: 'running bout', action: `${other} K then reload within 300ms`, variant: 'V3 interrupt reload (inside autosave debounce)',
       pillAtTap, marksAfterReload: otherAfterFastReload, shot: await shot(page, 'fast-reload-after-tap') });
     // Whatever survived, go back to one men for the winner and nothing else.
-    for (const sd of [other, w1]) {
-      while ((await filledSlots(page, sd).count()) > 0) {
-        await filledSlots(page, sd).first().tap();
-        await page.waitForTimeout(150);
-      }
-    }
+    for (const sd of [other, w1]) await clearMarks(filledSlots(page, sd), { from: 'first', pauseMs: 150 });
     // Let the removals land before the M. A fresh-clone run lost this tap to
     // the removal's echo (bc-ltap, fixed in the same PR and guarded by its own
     // test below); this step only resets the bout, so it does not race.

@@ -13,12 +13,17 @@
 // happened (which element was hit, how far apart the taps were, what the
 // dialog said), so the journey can record it as an audit row. None of them
 // asserts the app's behaviour: whether the outcome is correct is the journey's
-// call, and judgement columns are formed by eye, never asserted.
+// call, and judgement columns are formed by eye, never asserted. They throw
+// only when the variant itself could not be performed, so the row would not
+// have tested what it says: tapNeighbour finds no neighbour in reach,
+// doubleTap's taps land too far apart, retapWhileSaving never sees "Saving…",
+// and a helper that needs a dialog or a button finds none.
 //
 // Taps go through page.touchscreen at the element's centre: the browser's own
 // hit-testing decides what is tapped, as it does for a thumb. Every project in
 // playwright.config.mjs has a touchscreen.
 import { errors } from '@playwright/test';
+import { EXPECT_TIMEOUT_MS } from './devices.mjs';
 import { dwell, TAP_BOUNCE_MS } from './pace.mjs';
 
 // The longest gap that still counts as a double tap: the app's bounce window
@@ -156,7 +161,7 @@ export async function retapWhileSaving(locator, { holdWritesMs = 1200, savingTex
     await page.waitForFunction(
       ([el, src, flags]) => !el.isConnected || !new RegExp(src, flags).test(el.textContent || ''),
       [handle, savingText.source, savingText.flags],
-      { timeout: holdWritesMs + 15000 },
+      { timeout: holdWritesMs + EXPECT_TIMEOUT_MS },
     );
     const labelAfter = await handle.evaluate((el) => (el.isConnected ? el.textContent.trim() : null));
     return { savingSeen, retapped: savingSeen, labelAfter };
@@ -280,7 +285,7 @@ export async function loudestButton(scope) {
 // answer opens would be waited on instead of the one that was answered.
 async function waitAnswered(handle) {
   try {
-    await handle.waitForElementState('hidden', { timeout: 15_000 });
+    await handle.waitForElementState('hidden', { timeout: EXPECT_TIMEOUT_MS });
   } finally {
     await handle.dispose();
   }

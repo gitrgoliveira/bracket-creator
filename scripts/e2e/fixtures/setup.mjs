@@ -1,5 +1,6 @@
-// The first-run tournament form, the admin sign-in form and Sign out.
-// Every selector for those three lives here.
+// The first-run tournament form, the admin sign-in form, Sign out, and the
+// sign-in-or-create step the journeys start from. Every selector for those
+// lives here.
 import { expect } from '@playwright/test';
 import { dwell } from './pace.mjs';
 
@@ -26,6 +27,24 @@ export async function createTournament(page, {
   await page.getByRole('button', { name: 'Create Tournament' }).tap();
   await expect(page).toHaveURL(/\/admin$/);
   await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
+}
+
+// Sign in, creating the tournament first when this file's server has none yet.
+// Every test in a file can call it, whichever runs first or in which worker.
+// Returns { created } so a caller can tell the first run from a later one.
+export async function enterTournament(page, { name = 'E2E Cup', courts = 2 } = {}) {
+  await page.goto('/');
+  // The first-run form, or the public home of a tournament that exists:
+  // whichever the first paint shows, however long it takes.
+  const welcome = page.getByRole('heading', { name: 'Welcome to Bracket Creator' });
+  const home = page.locator('.viewer__body');
+  await welcome.or(home).first().waitFor({ state: 'visible' });
+  if (await welcome.isVisible()) {
+    await createTournament(page, { name, courts });
+    return { created: true };
+  }
+  await login(page);
+  return { created: false };
 }
 
 export async function signOut(page) {

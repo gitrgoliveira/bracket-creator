@@ -17,11 +17,11 @@
 import { test, expect } from '../fixtures/test.mjs';
 import { OPERATOR_DEVICE, PUBLIC_DEVICE } from '../fixtures/devices.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
-import { login } from '../fixtures/setup.mjs';
+import { enterTournament, login } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
 import { inlineEditor, openShiaijo, sides, upNextCard, completedRows, completedRowFor } from '../fixtures/shiaijo.mjs';
-import { EDITOR } from '../fixtures/scoring.mjs';
+import { EDITOR, clearMarks } from '../fixtures/scoring.mjs';
 import { openScoreEditor } from '../fixtures/scores.mjs';
 import { openTvBoard, openViewer, tvBoard } from '../fixtures/public.mjs';
 import { doubleTap, hastyConfirm, interrupt, retapWhileSaving, tapNeighbour } from '../fixtures/clumsy.mjs';
@@ -72,6 +72,10 @@ async function seedF4(page, { name, court, prefix, teams }) {
   return id;
 }
 
+// The tournament every test here signs in to, or creates when its server has
+// none: sixteen shiaijo, so each test seeds its own competition on a court of its own.
+const TEAM_CUP = { name: 'Team Cup', courts: 16 };
+
 // Name every position of `team`'s starting lineup on the Lineups page.
 async function nameStartingLineup(page, id, team, names, teamSize) {
   await T.openLineups(page, id, { team });
@@ -81,10 +85,10 @@ async function nameStartingLineup(page, id, team, names, teamSize) {
 }
 
 // NOT serial: every test here seeds its own competitions on its own shiaijo
-// (T.enterAdmin creates the tournament when the worker's server has none), so
+// (enterTournament creates the tournament when the worker's server has none), so
 // a failing journey skips none of the others. After a failure Playwright runs
 // the rest in a fresh worker, which gets a fresh server (fixtures/test.mjs
-// serverForFile) and enterAdmin creates the tournament there again.
+// serverForFile) and enterTournament creates the tournament there again.
 test.describe('knockout-mixed-team', () => {
   test.afterAll(() => {
     for (const log of audits) log.flush();
@@ -95,7 +99,7 @@ test.describe('knockout-mixed-team', () => {
     test.setTimeout(600_000);
     const shot = journeyShots('J3-lineups');
     const { record } = recorder('J3', 'J3-lineups');
-    await T.enterAdmin(page);
+    await enterTournament(page, TEAM_CUP);
 
     let f3;
     let pair3;
@@ -236,7 +240,7 @@ test.describe('knockout-mixed-team', () => {
 
       // One member at two positions: type Dai (at 1) into 2 and save.
       await T.typeIntoNameBox(T.panelInput(page, 1, '2'), 'Dai');
-      await T.panelSave(page, 1);
+      await T.panelSave(page, 1, { refused: true });
       const err = T.panelSide(page, 1).locator('.alert--error');
       await expect(err).toBeVisible();
       const copy = (await err.innerText()).trim();
@@ -394,9 +398,7 @@ test.describe('knockout-mixed-team', () => {
       await expect(T.boutRow(ed, 1)).toBeVisible();
       const pairNow = await sides(ed);
       for (const n of [1, 2, 3]) {
-        for (const side of ['shiro', 'aka']) {
-          while (await T.rowSlots(T.boutRow(ed, n), side).count()) await T.rowSlots(T.boutRow(ed, n), side).first().tap();
-        }
+        for (const side of ['shiro', 'aka']) await clearMarks(T.rowSlots(T.boutRow(ed, n), side), { from: 'first' });
       }
       await T.boutIppon(ed, 1, 'shiro', 'M');
       await T.ensureTie(ed, 2);
@@ -526,7 +528,7 @@ test.describe('knockout-mixed-team', () => {
     test.setTimeout(600_000);
     const shot = journeyShots('J4-team-scoring');
     const { record } = recorder('J4', 'J4-team-scoring');
-    await T.enterAdmin(page);
+    await enterTournament(page, TEAM_CUP);
     const id = await seedF4(page, { name: 'Team KO J4', court: 'D', prefix: 'S', teams: FOUR_TEAMS('J4') });
     await openShiaijo(page, 'D');
     const ed = inlineEditor(page);
@@ -646,9 +648,7 @@ test.describe('knockout-mixed-team', () => {
       record({ step: 'bout 3', action: 'Fusensho Aka, reload, untoggle', variant: 'V3 interrupt reload', ...r, afterReload, afterUntoggle, sheet: await T.sheetState(ed),
         expected: 'Shiro K restored (the control title promises the previous score)', note: 'bc-fsnp when Shiro is empty' });
       // Make bout 3 a clean hikiwake for the tie that follows.
-      for (const side of ['shiro', 'aka']) {
-        while (await T.rowSlots(T.boutRow(ed, 3), side).count()) await T.rowSlots(T.boutRow(ed, 3), side).first().tap();
-      }
+      for (const side of ['shiro', 'aka']) await clearMarks(T.rowSlots(T.boutRow(ed, 3), side), { from: 'first' });
       if (/✓/.test(await T.rowFusensho(T.boutRow(ed, 3), 'aka').innerText())) await T.rowFusensho(T.boutRow(ed, 3), 'aka').tap();
       await T.ensureTie(ed, 3);
     });
@@ -692,7 +692,7 @@ test.describe('knockout-mixed-team', () => {
         sameMatch: edBack && (await ed.locator('.editor-modal__eyebrow').first().innerText()).trim() === identity,
         akaKept: edBack ? await T.rowSlots(T.boutRow(ed, 4), 'aka').allInnerTexts() : null, sheet: edBack ? await T.sheetState(ed) : null });
       await expect(T.boutRow(ed, 4)).toBeVisible();
-      while (await T.rowSlots(T.boutRow(ed, 4), 'aka').count()) await T.rowSlots(T.boutRow(ed, 4), 'aka').first().tap();
+      await clearMarks(T.rowSlots(T.boutRow(ed, 4), 'aka'), { from: 'first' });
       await T.ensureTie(ed, 4);
       // Bout 5, not yet fought: the operator taps its Tie for a real draw.
       const row5 = T.boutRow(ed, 5);
@@ -959,7 +959,7 @@ test.describe('knockout-mixed-team', () => {
     test.setTimeout(600_000);
     const shot = journeyShots('J7-one-result');
     const { record } = recorder('J7', 'J7-one-result');
-    await T.enterAdmin(page);
+    await enterTournament(page, TEAM_CUP);
     const id = await seedF4(page, { name: 'Team KO J7', court: 'E', prefix: 'F', teams: [['J7 Asahi', 'Kita Dojo'], ['J7 Yuhi', 'Minami Dojo']] });
     await openShiaijo(page, 'E');
     const pair = await sides(upNextCard(page));
@@ -1101,7 +1101,7 @@ test.describe('knockout-mixed-team', () => {
   // its previous team match (its starting lineup before its first), and the
   // panel shows the lineup in force with the line saying where it comes from.
   test('bc-lpfb: the match lineup panel shows the lineup the score sheet shows, and Save lineup waits for a change', async ({ page }) => {
-    await T.enterAdmin(page);
+    await enterTournament(page, TEAM_CUP);
     const id = await createCompetition(page, {
       name: 'B1 Pools', kind: 'team', format: 'mixed', teamSize: 3, teamMatchType: 'fixed', courts: ['G', 'H'], numberPrefix: 'G',
     });
@@ -1128,7 +1128,7 @@ test.describe('knockout-mixed-team', () => {
   // The refusal used to name the position being typed (Jiho), not the one the
   // member holds; this guards the fix.
   test('bc-lprf: the match lineup panel\'s "already at" refusal names the position the member holds', async ({ page }) => {
-    await T.enterAdmin(page);
+    await enterTournament(page, TEAM_CUP);
     await seedF4(page, { name: 'B2 KO', court: 'I', prefix: 'I', teams: FOUR_TEAMS('B2') });
     await openShiaijo(page, 'I');
     await T.openPanelFromUpNext(page);
@@ -1139,14 +1139,14 @@ test.describe('knockout-mixed-team', () => {
     // Dai holds Senpo; typing Dai at Jiho is refused naming where Dai IS
     // (team-tournaments.md: "refused with the position they hold").
     await T.typeIntoNameBox(T.panelInput(page, 1, 'Jiho'), 'Dai');
-    await T.panelSave(page, 1);
+    await T.panelSave(page, 1, { refused: true });
     await expect(T.panelSide(page, 1).locator('.alert--error')).toHaveText('Dai is already at Senpo.');
   });
 
   // A bout not yet fought used to read as a draw (X, "✓ Tie"); this guards
   // the fix on the sheet and on the TV board.
   test('bc-unfx: a bout not yet fought reads "vs" with Tie off, on the sheet and the TV board', async ({ page, browser, baseURL }) => {
-    await T.enterAdmin(page);
+    await enterTournament(page, TEAM_CUP);
     await seedF4(page, { name: 'B3 KO', court: 'J', prefix: 'J', teams: [['B3 Ume', 'Kita Dojo'], ['B3 Sakura', 'Minami Dojo']] });
     await openShiaijo(page, 'J');
     const ed = await T.startUpNextTeam(page);
@@ -1173,7 +1173,7 @@ test.describe('knockout-mixed-team', () => {
   // A fusensho used to wipe the points the other side had already scored, so
   // its undo could not bring them back after a reload; this guards the fix.
   test('bc-fsnp: a fusensho keeps the points the other side already scored, and its undo after a reload brings the score back', async ({ page }) => {
-    await T.enterAdmin(page);
+    await enterTournament(page, TEAM_CUP);
     await seedF4(page, { name: 'B4 KO', court: 'K', prefix: 'L', teams: [['B4 Ume', 'Kita Dojo'], ['B4 Sakura', 'Minami Dojo']] });
     await openShiaijo(page, 'K');
     const ed = await T.startUpNextTeam(page);
@@ -1199,7 +1199,7 @@ test.describe('knockout-mixed-team', () => {
   // are no unfinished team matches. So Finish must refuse while a numbered
   // bout has no result, and an unfought bout never reaches the standings.
   test('bc-tmfn: a team encounter cannot be finished while a bout has no result', async ({ page }) => {
-    await T.enterAdmin(page);
+    await enterTournament(page, TEAM_CUP);
     const id = await createCompetition(page, {
       name: 'B3 Pools', kind: 'team', format: 'mixed', teamSize: 3, teamMatchType: 'fixed', courts: ['M', 'N'], numberPrefix: 'Q',
     });
@@ -1231,7 +1231,7 @@ test.describe('knockout-mixed-team', () => {
   });
 
   test('bc-dhrp: the daihyosen row lets each team pick its representative', async ({ page }) => {
-    await T.enterAdmin(page);
+    await enterTournament(page, TEAM_CUP);
     await seedF4(page, { name: 'B6 KO', court: 'F', prefix: 'R', teams: [['B6 Ume', 'Kita Dojo'], ['B6 Sakura', 'Minami Dojo']] });
     await openShiaijo(page, 'F');
     const ed = await T.startUpNextTeam(page);
@@ -1248,7 +1248,7 @@ test.describe('knockout-mixed-team', () => {
   // A representative bout added right after the last Tie used to be erased by
   // that Tie's pending autosave; this guards the fix.
   test('bc-dhas: a representative bout added right after the last Tie survives that Tie\'s autosave and a reload', async ({ page }) => {
-    await T.enterAdmin(page);
+    await enterTournament(page, TEAM_CUP);
     await seedF4(page, { name: 'B9 KO', court: 'L', prefix: 'T', teams: [['B9 Ume', 'Kita Dojo'], ['B9 Sakura', 'Minami Dojo']] });
     await openShiaijo(page, 'L');
     const ed = await T.startUpNextTeam(page);

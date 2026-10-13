@@ -29,7 +29,9 @@ export { isCoarse };
 //
 //   text        the message, as the browser or the app logs it
 //   url         where it came from (a failed request's URL, or the script)
-//   code        the app's refusal code in the failed /api answer's body
+//   code        the app's refusal code in the failed /api answer's body; with
+//               codeUnreadable, an answer whose body could not be read (its page
+//               closed first) stands in for the code, the rest still matching
 //   request     which request was refused (method and body), for an entry that
 //               is about one kind of write only
 //   whileOffline  only while the page's context is offline (or just back)
@@ -51,6 +53,7 @@ const CONSOLE_ALLOWLIST = [
     text: /^Failed to load resource: the server responded with a status of 409 \(Conflict\)$/,
     url: /\/api\/competitions\/[^/]+\/matches\/[^/]+\/(score|reopen)$/,
     code: /^(court_busy|ineligible_competitor|downstream_knockout_running)$/,
+    codeUnreadable: true,
     request: (r) => !!r && (/\/reopen$/.test(r.url) || writeStatus(r.postData) === 'running'),
   },
 ];
@@ -68,7 +71,7 @@ const writeStatus = (postData) => {
 };
 const allowed = (e) => e.kind === 'console' && CONSOLE_ALLOWLIST.find((r) => r.text.test(e.text)
   && (!r.url || r.url.test(e.url || ''))
-  && (!r.code || r.code.test(refusalCode(e.body) || ''))
+  && (!r.code || r.code.test(refusalCode(e.body) || '') || (r.codeUnreadable && e.body === null && !!e.request))
   && (!r.request || r.request(e.request))
   && (!r.whileOffline || e.offline));
 

@@ -10,11 +10,10 @@
 // Generate draw and Start for each. What the draw produced is read back from
 // the Scores tab, never assumed.
 import { expect } from '@playwright/test';
-import { createTournament, login } from './setup.mjs';
 import { createCompetition } from './wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from './competition.mjs';
 import { hastyShiaijoConfirm } from './clumsy.mjs';
-import { OPERATOR_DEVICE, PUBLIC_DEVICE } from './devices.mjs';
+import { EXPECT_TIMEOUT_MS, OPERATOR_DEVICE, PUBLIC_DEVICE } from './devices.mjs';
 import { isCoarse, restoreCoarse } from './pointer.mjs';
 import { INLINE_EDITOR } from './scoring.mjs';
 import { UP_NEXT, WAITING_ROWS, completedRowFor, inlineEditor, waitingRows } from './shiaijo.mjs';
@@ -41,22 +40,6 @@ export async function publicDevice(browser, base) {
 export const markPage = (page, mark) => page.evaluate((m) => { window.__e2eMark = m; }, mark);
 export const pageMark = (page) => page.evaluate(() => window.__e2eMark || null);
 
-// Sign in, creating the tournament first when this file's server has none.
-export async function enterTournament(page, { name = 'Shared Court Cup', courts = 2 } = {}) {
-  await page.goto('/');
-  // The first-run form, or the public home of a tournament that exists:
-  // whichever the first paint shows, however long it takes.
-  const welcome = page.getByRole('heading', { name: 'Welcome to Bracket Creator' });
-  const home = page.locator('.viewer__body');
-  await welcome.or(home).first().waitFor({ state: 'visible' });
-  if (await welcome.isVisible()) {
-    await createTournament(page, { name, courts });
-    return { created: true };
-  }
-  await login(page);
-  return { created: false };
-}
-
 // What the create wizard offers before a competition is created: its default
 // Start time (stacked after the latest same-day competition, admin_setup.jsx)
 // and the hint under the shiaijo choice. Read on the wizard page itself, the
@@ -82,7 +65,7 @@ export async function wizardDefaults(page, { expectEstimate = false } = {}) {
   page.on('request', onRequest);
   try {
     const answered = expectEstimate
-      ? page.waitForResponse((r) => isEstimate(r.request()) && r.ok(), { timeout: 15_000 })
+      ? page.waitForResponse((r) => isEstimate(r.request()) && r.ok(), { timeout: EXPECT_TIMEOUT_MS })
       : null;
     await page.goto('/admin/create-competition');
     await expect(page.getByRole('heading', { level: 1, name: 'Add competition' })).toBeVisible();

@@ -27,7 +27,7 @@
 import { test, expect } from '../fixtures/test.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
 import { auditLog } from '../fixtures/audit.mjs';
-import { login } from '../fixtures/setup.mjs';
+import { enterTournament, login } from '../fixtures/setup.mjs';
 import { openShiaijo, upNextCard, sides, startUpNext } from '../fixtures/shiaijo.mjs';
 import { EDITOR, awardIppon, finishButton, finishMatch } from '../fixtures/scoring.mjs';
 import { hastyShiaijoConfirm } from '../fixtures/clumsy.mjs';
@@ -36,7 +36,7 @@ import { tapSize } from '../fixtures/pointer.mjs';
 import { ROSTER_6, recordDecision, slotMarks } from '../fixtures/individual.mjs';
 import * as T from '../fixtures/team.mjs';
 import {
-  enterTournament, seedCompetitions, readScoresTab, operatorDevice, markPage, pageMark,
+  seedCompetitions, readScoresTab, operatorDevice, markPage, pageMark,
   competitionPicker, officiatingName, pickCompetition, nudges, nudgeLines, courtState,
   upcomingRow, chooseCourt, runningOnCourt, playTeamMatch, liveBout,
 } from '../fixtures/shared-court.mjs';

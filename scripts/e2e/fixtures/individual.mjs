@@ -11,6 +11,7 @@ import {
   UP_NEXT, WAITING_ROWS, completedRowFor, courtDone, courtIdle, inlineEditor, upNextCard,
 } from './shiaijo.mjs';
 import { hastyShiaijoConfirm } from './clumsy.mjs';
+import { EXPECT_TIMEOUT_MS } from './devices.mjs';
 
 // Twelve entrants for F1 (pools of 3, two through): six dojos, two members
 // each, (name, dojo) unique. Names start with distinct letters so the
@@ -34,9 +35,14 @@ export const ROSTER_6B = [
 ];
 // Small rosters for the '<bead-id>: ...' tests, which seed their own
 // competitions so each runs alone.
-export const rosterOf = (prefix, n) => Array.from({ length: n }, (_, i) => [
-  `${prefix} ${['Aki', 'Bea', 'Cal', 'Dee', 'Eli', 'Fay'][i]}`, ['Gyokusen', 'Thames', 'Musashi', 'Seishinkan', 'Mumeishi', 'Hizen'][i],
-]);
+const ROSTER_FIRST_NAMES = ['Aki', 'Bea', 'Cal', 'Dee', 'Eli', 'Fay'];
+const ROSTER_DOJOS = ['Gyokusen', 'Thames', 'Musashi', 'Seishinkan', 'Mumeishi', 'Hizen'];
+export const rosterOf = (prefix, n) => {
+  if (n > ROSTER_FIRST_NAMES.length) {
+    throw new Error(`rosterOf: ${n} entrants asked for, only ${ROSTER_FIRST_NAMES.length} names to give them`);
+  }
+  return Array.from({ length: n }, (_, i) => [`${prefix} ${ROSTER_FIRST_NAMES[i]}`, ROSTER_DOJOS[i]]);
+};
 // Four for each knockout-only fixture: two semi-finals, then the final (and
 // the bronze match when joint 3rd places are off).
 export const ROSTER_4_BRONZE = [
@@ -116,7 +122,7 @@ export async function inlineRunning(page) {
 // renders is not taken for one with nothing left. Throws when Start was tapped
 // and no bout runs by the deadline, or the console never settles.
 const NOTHING_HELD_MS = 1_500;
-export async function ensureRunning(page, { timeout = 15_000 } = {}) {
+export async function ensureRunning(page, { timeout = EXPECT_TIMEOUT_MS } = {}) {
   const start = upNextCard(page).getByRole('button', { name: 'Start match' });
   let tappedAt = null;
   let nothingSince = null;

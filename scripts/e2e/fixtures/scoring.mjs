@@ -6,18 +6,62 @@
 // (fixtures/team.mjs, fixtures/kachinuki.mjs); they share the Finish check
 // below.
 //
-// The editor selectors and Start come from scripts/screenshots/lib/editor.mjs,
-// re-exported here so a journey imports one scoring module. Finish is this
-// file's own, not that library's: a journey TAPS, as the operator does on the
-// iPad, takes the inline editor as well as the overlay, and must know the
-// write LANDED (the library's finishMatch clicks, on the overlay only, and
-// returns once the button stops saving).
+// The editor selectors come from scripts/screenshots/lib/editor.mjs,
+// re-exported here so a journey imports one scoring module. Start and Finish
+// are this file's own, not that library's: a journey TAPS, as the operator does
+// on the iPad, and must know the action LANDED (the library's startMatch clicks
+// and returns silently when the button has not rendered yet; its finishMatch
+// clicks, on the overlay only, and returns once the button stops saving).
+// Finish also takes the inline editor as well as the overlay.
 import { expect } from '@playwright/test';
-import { EDITOR, INLINE_EDITOR, startMatch } from '../../screenshots/lib/editor.mjs';
+import { EDITOR, INLINE_EDITOR, TAP_DWELL_MS } from '../../screenshots/lib/editor.mjs';
+import { EXPECT_TIMEOUT_MS } from './devices.mjs';
 import { settled, tapOnSide } from './pace.mjs';
 import { courtIdle, editorIdentity } from './shiaijo.mjs';
 
-export { EDITOR, INLINE_EDITOR, startMatch };
+export { EDITOR, INLINE_EDITOR };
+
+// Start the match the OVERLAY editor holds and return once the start has
+// landed: "Start match" is offered only while the match is scheduled, so the
+// button leaving is the server having it running. Fails when the button never
+// appears (the editor did not open on a scheduled match) or never leaves.
+export async function startMatch(page) {
+  const btn = page.locator(EDITOR).locator('button').filter({ hasText: /^Start match$/ }).first();
+  await expect(btn, 'the overlay editor offers Start match').toBeVisible();
+  await btn.tap();
+  await expect(btn, 'Start match left the editor once the start landed').toBeHidden();
+}
+
+// The most taps clearMarks makes on one side before it gives up. A side holds a
+// couple of marks at most, so six leaves room for a tap or two that did not count.
+export const MAX_CLEAR_TAPS = 6;
+
+// Tap filled mark slots off until `slots` (a Locator of the FILLED slots, e.g.
+// filledSlots or fixtures/team.mjs rowSlots) holds `keep` of them. Bounded: a
+// mark that does not go away fails with a message instead of looping until the
+// test timeout. A tap the app does not count (one inside the bounce window of
+// the layer it just opened, such as a correction row, tap_guard.jsx) removes
+// nothing, so after each tap the count is given TAP_DWELL_MS to drop, which
+// outlasts that window, before the next tap is made; a tap that lands is not
+// waited on. `from` is the end of the list the next tap takes ('last' or
+// 'first'); `pauseMs` is the operator's beat between two removals. Returns the
+// taps made.
+export async function clearMarks(slots, { keep = 0, from = 'last', pauseMs = 0 } = {}) {
+  let taps = 0;
+  for (let before = await slots.count(); before > keep; before = await slots.count()) {
+    if (taps >= MAX_CLEAR_TAPS) {
+      throw new Error(`clearMarks: ${slots} still holds ${before} mark(s) (wanted ${keep}) after ${MAX_CLEAR_TAPS} taps`);
+    }
+    await (from === 'first' ? slots.first() : slots.last()).tap();
+    taps += 1;
+    const tappedAt = Date.now();
+    while ((await slots.count()) >= before && Date.now() - tappedAt < TAP_DWELL_MS) {
+      await slots.page().waitForTimeout(50);
+    }
+    if (pauseMs) await slots.page().waitForTimeout(pauseMs);
+  }
+  return taps;
+}
 
 const SIDE_NAME = { shiro: 'Shiro', aka: 'Aka' };
 
@@ -81,7 +125,7 @@ const visibleTexts = (loc) => loc.evaluateAll((els) => els
 export async function beforeFinish(ed) {
   const page = ed.page();
   const answer = page.waitForResponse((r) => r.request().method() === 'PUT' && /\/matches\/[^/]+\/score$/.test(r.url())
-    && /"status":"completed"/.test(r.request().postData() || ''), { timeout: 15_000 }).then((r) => r, () => null);
+    && /"status":"completed"/.test(r.request().postData() || ''), { timeout: EXPECT_TIMEOUT_MS }).then((r) => r, () => null);
   return { ...(await editorIdentity(page, ed)), notSaved: await visibleTexts(ed.locator(NOT_SAVED)), answer };
 }
 

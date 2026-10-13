@@ -5,6 +5,7 @@ import { test as base, expect } from '@playwright/test';
 import fs from 'node:fs';
 import { start, BIN } from '../../screenshots/lib/server.mjs';
 import { auditsFor } from './audit.mjs';
+import { EXPECT_TIMEOUT_MS } from './devices.mjs';
 import { isCoarse, restoreCoarse } from './pointer.mjs';
 
 export { isCoarse };
@@ -81,8 +82,11 @@ const allowed = (e) => e.kind === 'console' && CONSOLE_ALLOWLIST.find((r) => r.t
 // to (status and the start of its body, where the app's refusal code is).
 const OFFLINE_GRACE_MS = 3_000;
 // The longest drain() waits for a refused answer's body (a page that closed
-// meanwhile never delivers it; the entry then carries no body).
-const BODY_WAIT_MS = 3_000;
+// meanwhile never delivers it; the entry then carries no body). The expect
+// timeout, so a body slow under load is waited for as long as an assertion is.
+const BODY_WAIT_MS = EXPECT_TIMEOUT_MS;
+// How far apart a "Failed to load resource" line and its answer may be.
+const PAIR_WINDOW_MS = 5_000;
 function consoleCollector() {
   const pending = [];
   const failed = []; // { url, status, body, at }
@@ -114,10 +118,11 @@ function consoleCollector() {
       // this answer can reach drain() before the body has been read, and an
       // answer that is not in the list yet would read as "no answer".
       const at = Date.now();
+      let timer;
       const body = Promise.race([
         res.text().then((t) => t.slice(0, 1000), () => null),
-        new Promise((done) => setTimeout(done, BODY_WAIT_MS, null)),
-      ]);
+        new Promise((done) => { timer = setTimeout(done, BODY_WAIT_MS, null); }),
+      ]).finally(() => clearTimeout(timer));
       failed.push({ url: res.url(), status: res.status(), method: res.request().method(), postData: res.request().postData(), body, at });
     });
   };
@@ -147,11 +152,17 @@ function consoleCollector() {
     await Promise.all(unclaimed.map(async (f) => { f.body = await f.body; }));
     const out = lines.map((e) => {
       if (e.kind !== 'console' || !e.url || !/^Failed to load resource/.test(e.text)) return e;
-      const i = unclaimed.findIndex((f) => f.url === e.url && Math.abs(f.at - e.at) < 5_000);
+      const i = unclaimed.findIndex((f) => f.url === e.url && Math.abs(f.at - e.at) < PAIR_WINDOW_MS);
       if (i < 0) return e;
       const [answer] = unclaimed.splice(i, 1);
       return { ...e, status: answer.status, body: answer.body, request: { url: answer.url, method: answer.method, postData: answer.postData } };
     });
+    // An answer no line claimed may still be claimed by one that has not
+    // arrived: the 409 landing at the end of one test, its console line in the
+    // next test's drain. Keep the ones young enough to pair, in order and
+    // ahead of anything recorded meanwhile; drop the older ones.
+    const now = Date.now();
+    failed.unshift(...unclaimed.filter((f) => now - f.at < PAIR_WINDOW_MS));
     return out;
   };
   return { attachPage, attachContext, drain, late: [], file: null };
@@ -249,7 +260,10 @@ export const test = base.extend({
   },
 
   // The check, at the end of every test (auto, so no journey has to ask).
-  consolePolicy: [async ({ consoleCollector: c }, use, testInfo) => {
+  // It asks for serverLog only for ORDER: a fixture is torn down before the
+  // ones it depends on, so this check throws first (failing the test) and
+  // serverLog then looks at a failed status and attaches server.log.
+  consolePolicy: [async ({ consoleCollector: c, serverLog }, use, testInfo) => {
     const startedAt = Date.now();
     await use();
     const entries = (await c.drain()).map((e) => (e.at < startedAt ? { ...e, phase: 'before this test (a beforeAll hook or the previous test\'s open pages)' } : e));

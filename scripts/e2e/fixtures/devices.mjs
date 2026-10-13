@@ -3,6 +3,11 @@
 // viewer beside the operator's iPad) spreads the same constant into
 // browser.newContext(), so a project and a hand-made context cannot drift.
 
+// How long an expect() waits (playwright.config.mjs's expect.timeout), and so
+// how long the console policy waits for a refused answer's body
+// (fixtures/test.mjs): one constant, so the two cannot drift.
+export const EXPECT_TIMEOUT_MS = 15_000;
+
 // iPad Air, landscape: the court table's device. hasTouch + isMobile is what
 // makes `(pointer: coarse)` match, measured, so the 44px tap-floor rules in
 // styles.css apply as they do on the device. fixtures/test.mjs re-checks it

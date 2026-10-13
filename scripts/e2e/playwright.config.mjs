@@ -1,7 +1,7 @@
 // Local e2e journeys for the tournament app. Run through `make e2e`, which
 // builds bin/bracket-creator first; see README.md.
 import { defineConfig } from '@playwright/test';
-import { OPERATOR_DEVICE, PUBLIC_DEVICE } from './fixtures/devices.mjs';
+import { EXPECT_TIMEOUT_MS, OPERATOR_DEVICE, PUBLIC_DEVICE } from './fixtures/devices.mjs';
 
 // Chromium refuses to run its sandbox as root, so the sandbox is dropped there
 // and only there (the same rule as scripts/screenshots/run.mjs).
@@ -26,7 +26,7 @@ export default defineConfig({
   // can run in parallel, and a worker that runs several files starts a fresh
   // one for each; tests inside a file run in order.
   timeout: 240_000,
-  expect: { timeout: 15_000 },
+  expect: { timeout: EXPECT_TIMEOUT_MS },
   fullyParallel: false,
   forbidOnly: true,
   retries: 0,

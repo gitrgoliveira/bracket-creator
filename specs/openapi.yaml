@@ -655,6 +655,13 @@ paths:
         `pool_size` and `pool_size_mode`, by contrast, ARE defaulted when
         omitted (to 4 and `"max"`).
 
+        `date` is defaulted too: a row without one takes the tournament's
+        date (Day 1), as `POST /api/competitions` does, because a
+        competition with no date can never be drawn. If the tournament
+        has no date either, the row fails with
+        `date: the row has no date and the tournament has no date to give it; ...`
+        while the rest of the import proceeds.
+
         In self-run mode this is an organiser action: it needs
         `X-Tournament-Password`.
       security:

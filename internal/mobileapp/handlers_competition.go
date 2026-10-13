@@ -146,6 +146,19 @@ func extractSeeds(players []domain.Player) []domain.SeedAssignment {
 //   - comp.Date is NOT in the derived day list → return a descriptive error.
 //
 // errcheck: no bare ignored returns, always propagated by callers.
+// defaultCompetitionDate gives a competition that states no date the
+// tournament's Day 1, the one rule every door that creates a competition
+// shares (POST /competitions and the folder import). It leaves an explicit
+// date alone and reports whether the date is set afterwards, so a door that
+// cannot accept a dateless competition can refuse it (a tournament with no
+// date gives it nothing to take).
+func defaultCompetitionDate(comp *state.Competition, tourn *state.Tournament) bool {
+	if comp.Date == "" && tourn != nil && tourn.Date != "" {
+		comp.Date = tourn.Date
+	}
+	return comp.Date != ""
+}
+
 func validateCompetitionDateInTournament(comp *state.Competition, tourn *state.Tournament) error {
 	if comp.Date == "" || tourn == nil || tourn.Date == "" {
 		return nil
@@ -866,9 +879,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// from tournament.date directly (JS), but the backend defaulted to
 		// today when it was empty, using Day 1 is the correct multi-day
 		// behaviour and also keeps server and client in sync.
-		if comp.Date == "" && createTourn != nil && createTourn.Date != "" {
-			comp.Date = createTourn.Date
-		}
+		defaultCompetitionDate(&comp, createTourn)
 
 		// Reject a competition date that falls outside the tournament's day
 		// range. Skipped when tournament has no date configured.

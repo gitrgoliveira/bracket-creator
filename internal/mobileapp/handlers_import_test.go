@@ -21,6 +21,7 @@ import (
 
 func TestRegisterImportHandlers(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
+	seedImportTournamentDate(t, store)
 	defer os.RemoveAll(tempDir)
 
 	t.Run("Import Successful", func(t *testing.T) {

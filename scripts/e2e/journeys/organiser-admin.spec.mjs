@@ -90,7 +90,8 @@ test.describe('organiser admin (file mode)', () => {
   });
 
   test('Import competitions: a folder of CSVs lands on the dashboard and the public page', async ({ page, browser, baseURL }) => {
-    // Two rows: one with a date, and one without (the manifest's date is optional).
+    // Two rows: one with a date, and one without (the manifest's date is optional
+    // and a row without one takes the tournament's).
     const files = writeImportBundle(path.join(work, 'bundle'), [
       { id: 'imp-kyu', name: 'Imported Kyu', kind: 'individual', format: 'knockout', date: todayDMY(), roster: IMPORTED },
       { id: 'imp-nodate', name: 'Imported No Date', kind: 'individual', format: 'mixed', roster: IMPORTED_B },
@@ -117,12 +118,13 @@ test.describe('organiser admin (file mode)', () => {
       await shot(page, 'imported-roster');
     });
 
-    await test.step('the row with no date is imported but cannot be drawn until a date is set', async () => {
+    await test.step('the row with no date took the tournament date and can be drawn (bc-imdt)', async () => {
       await page.goto('/admin/competition/imp-nodate');
-      const generate = page.getByRole('button', { name: 'Generate draw' });
-      await expect(generate).toBeVisible();
-      const note = await page.getByText(/Cannot start: invalid date/).innerText().catch(() => null);
-      record({ journey: 'organiser-admin', step: 'import without a date', generateDrawEnabled: await generate.isEnabled(), note });
+      await expect(page.getByRole('button', { name: 'Generate draw' })).toBeEnabled();
+      await expect(page.getByText(/Cannot start: invalid date/)).toHaveCount(0);
+      // The tournament's date, as the page head writes it ("13 Oct 2026").
+      const day = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+      await expect(page.locator('.page-head__sub')).toContainText(day);
       await shot(page, 'imported-no-date');
     });
 
@@ -149,17 +151,6 @@ test.describe('organiser admin (file mode)', () => {
         await spectator.close();
       }
     });
-  });
-
-  test.fixme('bead-pending: a competition imported with no date cannot be drawn or started (invalid date in Settings tab, e.g. empty)', async ({ page }) => {
-    // The import accepts a manifest row with no date (and the server accepts an
-    // empty date everywhere), yet the competition page then disables Generate
-    // draw and Start competition with a note that quotes an empty date. A
-    // competition the import reported as imported must be drawable.
-    await login(page, 'e2e-operator');
-    await page.goto('/admin/competition/imp-nodate');
-    await expect(page.getByRole('button', { name: 'Generate draw' })).toBeEnabled();
-    await expect(page.getByText(/Cannot start: invalid date/)).toHaveCount(0);
   });
 
   test('Branding and sponsors: the logo and a sponsor show on the public page', async ({ page, browser, baseURL }) => {
@@ -214,7 +205,7 @@ test.describe('organiser admin (file mode)', () => {
     });
   });
 
-  test.fixme('bead-pending: the docs list the lobby display among the surfaces that show the tournament logo, and it shows none', async ({ browser, baseURL }) => {
+  test.fixme('bc-lblg: the docs list the lobby display among the surfaces that show the tournament logo, and it shows none', async ({ browser, baseURL }) => {
     // run-tournament.md (Branding and sponsors): "Logo: ... shown on the viewer,
     // the lobby displays, and the admin screens." The viewer and the admin top
     // bar show it (asserted above); /display?court=all, the lobby grid, has no

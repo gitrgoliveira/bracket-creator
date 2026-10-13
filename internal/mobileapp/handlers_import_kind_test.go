@@ -34,6 +34,7 @@ import (
 
 func TestImport_RejectsAnUnrecognisedKind(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
+	seedImportTournamentDate(t, store)
 	defer os.RemoveAll(tempDir)
 
 	res := importOneComp(t, r, `
@@ -68,6 +69,7 @@ func TestImport_AcceptsTheKindsTheServerRecognises(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r, store, _, _, tempDir := setupTestRouter(t)
+			seedImportTournamentDate(t, store)
 			defer os.RemoveAll(tempDir)
 
 			res := importOneComp(t, r, `
@@ -106,6 +108,7 @@ func TestImport_RejectsATeamSizeItsKindForbids(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r, store, _, _, tempDir := setupTestRouter(t)
+			seedImportTournamentDate(t, store)
 			defer os.RemoveAll(tempDir)
 
 			res := importOneComp(t, r, `
@@ -152,6 +155,7 @@ competitions:
 // specs/openapi.yaml rather than by weakening the guard.
 func TestImport_RequiresATeamCompetitionToStateItsSize(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
+	seedImportTournamentDate(t, store)
 	defer os.RemoveAll(tempDir)
 
 	// No `team_size:` key at all -- the shape the default was proposed for.

@@ -53,6 +53,12 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             untilStable (Waiting for the app)
     fixtures/wizard.mjs     the create-competition wizard
     fixtures/competition.mjs  roster paste box, Generate / Discard draw, Start
+    fixtures/roster.mjs     the Registration desk: check-in, search,
+                            Group by dojo; the seed boxes; the participant Edit
+                            dialog; reads of pool membership and bracket slots.
+    fixtures/pools.mjs      the pool standings tables, admin Pools tab and the
+                            public viewer's Pools tab: rows, figures, rank
+                            badge, advancing.
     fixtures/shiaijo.mjs    /admin/shiaijo/:court (queue, inline editor, which
                             match an editor holds)
     fixtures/scores.mjs     the Scores tab and its overlay editor
@@ -77,6 +83,9 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
     fixtures/shared-court.mjs  two competitions on one shiaijo and a moved
                             match: seeding, the competition picker, the nudges
     fixtures/public.mjs     the public viewer and the TV board
+    fixtures/organiser.mjs  the Excel download, folder import, /reset, logo and
+                            sponsor uploads; runtime PNG and import-bundle
+                            makers; a zip reader for workbooks.
     fixtures/clumsy.mjs     the clumsy operator (below)
     fixtures/pointer.mjs    the coarse pointer: check, restore, ensureCoarse
                             (the one "if not coarse, restore"), tap-target size
@@ -94,12 +103,27 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                                   surface
       knockout-mixed-kachinuki    kachinuki (winner stays on) played eight bouts
                                   deep, every correction door, the final
+      kachinuki-pools             kachinuki in pools: winner stays on, a
+                                  hikiwake, a team exhausted, a level pool draw
+                                  with no representative bout, the pool tables
+                                  on admin and phone, the winners in the final
       moved-match                 a waiting match moved to another shiaijo
                                   reaches that court's console without a reload
       shared-shiaijo              two competitions on one shiaijo: the picker,
                                   the nudge lines, correcting across them
       engi                        an engi (kata pairs) knockout scored in flags,
                                   and the bc-evts tap-back guard
+      organiser-roster            check-in decides who is drawn, and the desk
+                                  finds a number; seeds keep two seeds out of
+                                  one pool; an edited or replaced competitor
+                                  reaches the bracket, court console and public
+                                  viewer; a duplicate name and dojo is refused.
+      organiser-admin             file-mode organiser jobs: the results workbook,
+                                  folder import, including a row with no date,
+                                  logo and sponsor, forgotten-password reset.
+      organiser-locked            locked mode: sign-in with the hashed password,
+                                  no Forgot password, and /reset shows it is
+                                  disabled.
     output/                 screenshots, audit.json and traces (below);
                             gitignored
 
@@ -152,7 +176,11 @@ the worker ends. Tests in one file share its server, so a spec file that seeds
 once and then walks several tests declares
 `test.describe.configure({ mode: 'serial' })`. A `beforeAll` hook asks for it
 with `serverForFile(testInfo.file)`. Journeys navigate by path
-(`page.goto('/admin')`); the host is the file's server.
+(`page.goto('/admin')`); the host is the file's server. A spec file that
+needs its server started with extra arguments or environment declares them with
+`serverOptionsFor(fileURLToPath(import.meta.url), () => ({ args, env }))` from
+`fixtures/test.mjs`, as `organiser-locked.spec.mjs` does for `--lock-password`
+and its hash in `TOURNAMENT_PASSWORD_HASH`.
 
 When a test fails, Playwright discards its worker. In a serial file the rest of
 that file is skipped, because the later tests depend on what the earlier ones
@@ -325,16 +353,18 @@ beforeAll hook or the previous test's open pages)". What an `afterAll` hook's
 pages log is reported under its own file when the next file's server starts or
 the worker stops, and an error there fails the run.
 
-The allowlist holds only noise a journey's scenario makes, in three entries:
+The allowlist holds only noise a journey's scenario makes, in four entries:
 requests the browser could not send while a journey has the device offline;
 the app's own "Failed to fetch court matches" log from the court console
-while the device is offline; and the 409s of a start (a `/score` write whose
+while the device is offline; the 409s of a start (a `/score` write whose
 body carries `status: "running"`) or a reopen the app sends through the
 server's gate and shows refused (the court busy, a competitor fighting
 elsewhere or barred by a withdrawal, or the knockout match it feeds being
-fought). Any other write refused that way is an error. A browser "Failed to
-load resource" line is paired with the `/api` answer it is about one to one,
-in arrival order per URL. Only when the page was
+fought). Any other write refused that way is an error. The fourth is the 409
+refusing an organiser's participant edit to the same name and dojo as another
+competitor (organiser-roster journey); the same name in another dojo is
+accepted. A browser "Failed to load resource" line is paired with the `/api`
+answer it is about one to one, in arrival order per URL. Only when the page was
 closed while the 409's body was being read is the refusal code unreadable, and
 the entry then stands on the answer's status, URL and request alone; the
 `CONSOLE` line and a `console-allowed-unread` annotation say "allowed: page

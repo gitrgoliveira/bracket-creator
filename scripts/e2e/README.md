@@ -82,8 +82,8 @@ Two projects, both Chromium:
   alone (`*.public.spec.mjs`). No journey uses this project yet; the public
   surfaces are checked from `operator` journeys through a second context.
 
-Every test has a 240 s timeout (`expect` waits 15 s), `retries` is 0, and
-`forbidOnly` is on, so a stray `test.only` fails the run.
+240 s is the default test timeout (`expect` waits 15 s); some journeys raise it
+for a long test with `test.setTimeout`. `retries` is 0 and `forbidOnly` is on, so a stray `test.only` fails the run.
 
 An operator journey that needs a second device opens another context with one
 of the two devices from `fixtures/devices.mjs`: `PUBLIC_DEVICE` for a public
@@ -95,10 +95,13 @@ another court).
 
 `fixtures/test.mjs` starts one `mobile-app` per spec file, on a free port and
 a throwaway data folder, through `scripts/screenshots/lib/server.mjs`, and
-stops it by PID when the file is done. Playwright runs several files one after
-another in one worker when there are more files than workers (`--workers=1`
-runs them all in one), and each file starts with a fresh server, never the
-previous file's tournament. Tests in one file share its server, so a spec file
+stops it by PID. Spec files run in parallel across workers (Playwright's
+default, about half the cores), each worker with its own browser and its own
+server; on a slow or loaded machine pass `E2E_ARGS='--workers=1'`. A worker
+runs its files one after another (all of them with `--workers=1`), and each
+file starts with a fresh server, never the previous file's tournament. A
+worker stops a file's server when it starts the next file's server, or when
+the worker ends. Tests in one file share its server, so a spec file
 that seeds once and then walks several tests declares
 `test.describe.configure({ mode: 'serial' })`. A `beforeAll` hook asks for it
 with `serverForFile(testInfo.file)`. Journeys navigate by path
@@ -187,8 +190,9 @@ fixture is wrapped so none is missed). When the test ends:
 Everything a test's pages logged is attached to it as `console.json` (kept in a failing test's trace), with the
 page it came from, whether the device was offline at the time, and, for a
 failed request, the status and body of the `/api` answer. What a `beforeAll`
-hook's pages log is checked with the first test of the file and marked as
-such; what an `afterAll` hook's pages log is reported under its own file when
+hook's pages log, or what the previous test's pages still had open, is checked
+with the first test of the file and marked "before this test (a beforeAll hook or
+the previous test's open pages)"; what an `afterAll` hook's pages log is reported under its own file when
 the next file's server starts or the worker stops, and an error there fails
 the run.
 
@@ -226,7 +230,10 @@ does not write it to a file of its own, and a passing test keeps no trace, so
 its console errors are only in the run log as `CONSOLE {json}` lines. A failing
 test also carries the server's output as `server.log`.
 
-Every run empties `output/test-results/` when it starts, and a journey empties
+Every run empties its whole results folder (`output/test-results/`, or
+`E2E_RESULTS_DIR` when set) when it starts, and with `E2E_RESULTS_DIR` set the
+journey folders live inside it, so pointing it at a folder that holds anything
+else deletes that content. A journey empties
 its own `output/<journey>/` in `beforeAll`. Two runs at the same time in one
 checkout would delete each other's traces mid-test, and two runs without
 `E2E_RESULTS_DIR` share every `output/<journey>/`, so give the second one its

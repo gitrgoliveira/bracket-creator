@@ -104,20 +104,39 @@ test.describe('J5 kachinuki from the court console', () => {
   // (In a serial file a failing test skips the rest, and a restarted worker
   // loses the shared state, so a guard of its own could not stand before them.)
   const guardFailures = [];
+  const MAX_CLEAR_TAPS = 6;
+  // Taps a side's filled marks off, at most MAX_CLEAR_TAPS times: a mark that
+  // does not go away fails with a message instead of looping until the timeout.
+  async function clearBoutMarks(live, side) {
+    for (let i = 0; i < MAX_CLEAR_TAPS; i += 1) {
+      if ((await boutFilled(live, side).count()) === 0) return;
+      await boutFilled(live, side).last().tap();
+    }
+    if ((await boutFilled(live, side).count()) > 0) {
+      throw new Error(`the ${side} marks did not clear after ${MAX_CLEAR_TAPS} taps`);
+    }
+  }
   async function guarded(page, title, fn) {
     try {
       await test.step(title, () => fn(page));
     } catch (e) {
-      guardFailures.push(`${title}: ${String(e.message).split('\n')[0]}`);
-      record({ step: title, action: 'regression guard', variant: 'FAILED', error: String(e.message).split('\n')[0] });
-      await openShiaijo(page, 'A').catch(() => {});
-      if (await recordBoutButton(page).isVisible().catch(() => false)) {
-        // Leave the live bout unmarked and untied, as the final's play-out expects.
-        const live = currentBout(page);
-        for (const side of ['shiro', 'aka']) {
-          while ((await boutFilled(live, side).count().catch(() => 0)) > 0) await boutFilled(live, side).last().tap();
+      const message = String(e.message).split('\n')[0];
+      // Recorded at the moment it happens: the guard's name stays visible even
+      // when a later step fails first.
+      test.info().annotations.push({ type: 'guard-failure', description: `${title}: ${message}` });
+      guardFailures.push(`${title}: ${message}`);
+      record({ step: title, action: 'regression guard', variant: 'FAILED', error: message });
+      // Cleanup is best effort: its own error must not replace the guard's failure.
+      try {
+        await openShiaijo(page, 'A').catch(() => {});
+        if (await recordBoutButton(page).isVisible().catch(() => false)) {
+          // Leave the live bout unmarked and untied, as the final's play-out expects.
+          const live = currentBout(page);
+          for (const side of ['shiro', 'aka']) await clearBoutMarks(live, side);
+          if (/✓ Tie/.test(await tieButton(live).innerText().catch(() => ''))) await tieButton(live).tap();
         }
-        if (/✓ Tie/.test(await tieButton(live).innerText().catch(() => ''))) await tieButton(live).tap();
+      } catch (cleanupError) {
+        record({ step: title, action: 'regression guard cleanup', variant: 'FAILED', error: String(cleanupError.message).split('\n')[0] });
       }
     }
   }
@@ -156,7 +175,7 @@ test.describe('J5 kachinuki from the court console', () => {
   async function guardEmsl(page) {
     const row = currentBout(page);
     // The final's live bout carries one Shiro point; clear it, mark the tie.
-    while ((await boutFilled(row, 'shiro').count()) > 0) await boutFilled(row, 'shiro').last().tap();
+    await clearBoutMarks(row, 'shiro');
     await tieButton(row).tap();
     await expect(tieButton(row)).toHaveText(/✓ Tie/);
     await row.locator('.tsm-center-pts--aka .editor-side__pt:not(.editor-side__pt--filled)').first().tap();
@@ -172,11 +191,17 @@ test.describe('J5 kachinuki from the court console', () => {
   // bout. The (E) now lives on that bout's row only; this guards it.
   async function guardKheb(page) {
     const row = currentBout(page);
-    while ((await boutFilled(row, 'shiro').count()) > 0) await boutFilled(row, 'shiro').last().tap();
+    await clearBoutMarks(row, 'shiro');
     await tieButton(row).tap();
     await enchoButton(page).tap();
     await awardBoutIppon(page, 'shiro', 'M');
+    const bout1 = await doneRows(page).count();
     await recordBout(page);
+    // Positive check first: Encho was recorded on bout 1 (its row's centre reads (E)).
+    expect(await boutMiddle(doneRows(page).nth(bout1))).toBe('(E)');
+    // Bout 2 has rendered (the live row is a fresh, unmarked one) before the negative check.
+    await expect(currentBout(page)).toBeVisible();
+    await expect(boutFilled(currentBout(page), 'shiro')).toHaveCount(0);
     // Bout 2 is a regulation bout.
     await expect(editor(page).locator('.editor-modal__eyebrow').first()).not.toContainText(/overtime/i);
   }
@@ -444,7 +469,6 @@ test.describe('J5 kachinuki from the court console', () => {
       const tappedAt = Date.now();
       const dbl = await doubleTap(boutIpponButton(currentBout(page), 'shiro', 'M'));
       // The app ignores the bounce of a tap: two taps inside its window land one M.
-      expect(dbl.withinWindow).toBe(true);
       await expect(boutFilled(currentBout(page), 'shiro')).toHaveCount(1);
       record({ step: 'M1 bout 5', action: 'Shiro M', variant: 'V2 doubleTap', ...dbl,
         marksAfter: await boutFilled(currentBout(page), 'shiro').allInnerTexts() });

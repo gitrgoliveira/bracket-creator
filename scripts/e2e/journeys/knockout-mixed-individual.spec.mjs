@@ -164,7 +164,6 @@ test.describe('knockout-mixed-individual', () => {
       shot: await shot(page, 'ippon-double-tapped') });
     // The side was empty (the wrong mark was cleared above): a bounce would land
     // two marks, so exactly one is the app ignoring it.
-    expect(dblIppon.withinWindow).toBe(true);
     expect(afterDbl).toEqual(['M']);
 
     // V2 on the undo: a double tap on the outer mark.

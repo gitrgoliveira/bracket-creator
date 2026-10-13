@@ -100,7 +100,7 @@ export async function tapNeighbour(locator, direction) {
 // always true: a machine too slow to land the taps inside the window THROWS,
 // because the row would not have tested what it says. The first tap's effects
 // cannot be taken back, so the taps are not retried; the caller's test fails
-// and is run again. Callers may assert on the outcome unconditionally.
+// with the message above (playwright.config.mjs sets retries to 0). Callers may assert on the outcome unconditionally.
 export async function doubleTap(locator) {
   const page = locator.page();
   const { x, y } = await centreOf(locator);

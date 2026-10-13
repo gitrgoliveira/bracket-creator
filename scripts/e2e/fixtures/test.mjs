@@ -235,7 +235,7 @@ export const test = base.extend({
   consolePolicy: [async ({ consoleCollector: c }, use, testInfo) => {
     const startedAt = Date.now();
     await use();
-    const entries = c.drain().map((e) => (e.at < startedAt ? { ...e, phase: 'before this test (a beforeAll hook)' } : e));
+    const entries = c.drain().map((e) => (e.at < startedAt ? { ...e, phase: 'before this test (a beforeAll hook or the previous test\'s open pages)' } : e));
     if (!entries.length) return;
     await testInfo.attach('console.json', { body: JSON.stringify(entries, null, 2), contentType: 'application/json' });
     const audits = auditsFor(testInfo.file);

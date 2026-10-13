@@ -31,22 +31,11 @@ type Tournament struct {
 	// the load path (and ApplyTournamentDefaults).
 	DurationDays int `yaml:"duration_days,omitempty" json:"durationDays,omitempty"`
 
-	// AdminPassword gates destructive operations (spec 004 / mp-e21):
-	// competition delete, draw/override/invalidate, and participant roster
-	// mutations. It is a SEPARATE, higher-privilege credential from
-	// Password (which gates the API as a whole).
-	//
-	// CRITICAL: it is WRITE-ONLY at the API boundary; `json:"-"` means it
-	// is never emitted in any response AND never populated by binding a
-	// request body into a Tournament. That is the opposite of Password
-	// (which is a peer of the credential gating /tournament, so returning
-	// it is harmless). AdminPassword is HIGHER privilege than that gate, so
-	// leaking it via GET; or letting a main-password holder overwrite it
-	// via the bulk PUT; would collapse the separation. It is set only via
-	// the dedicated, elevated-gated PUT /api/auth/admin-password handler.
-	// File mode only; in locked mode the env-var bcrypt hash is
-	// authoritative and any on-disk value here is inert.
-	AdminPassword string `yaml:"admin_password,omitempty" json:"-"`
+	// No admin_password field: the separate destructive-ops password was
+	// removed (operator ruling 2026-10-12, "not re enter admin password to
+	// change something"). A tournament.md written by an earlier release may
+	// still carry admin_password; front-matter decoding ignores unknown keys,
+	// so it loads, and the next save drops it.
 
 	// Ceremony blocks expressed as human duration strings (e.g. "30m",
 	// "1h"). When set, the auto-scheduler reserves a contiguous range
@@ -73,9 +62,9 @@ type Tournament struct {
 	// creation and IMMUTABLE thereafter (mp-7h7). "officiated" (default)
 	// gates the full admin surface behind X-Tournament-Password.
 	// "self-run" inverts the boundary: constructive actions (scoring,
-	// check-in, start/complete) are public; only destructive actions
-	// (those already gated by RequireElevatedPassword / enforceElevated)
-	// still require X-Admin-Password. omitempty means older tournament.md
+	// start/complete) are public and there is no check-in; organiser actions (setup,
+	// corrections and every destructive action) still require
+	// X-Tournament-Password (isSelfRunMainGatedConfigRoute). omitempty means older tournament.md
 	// files (Mode == "") normalise to "officiated" via ApplyTournamentDefaults.
 	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
 
@@ -214,7 +203,7 @@ func ValidateTheme(theme *Theme) error {
 // Tournament mode constants (mp-7h7).
 const (
 	TournamentModeOfficiated = "officiated" // default: main-gate on all admin routes
-	TournamentModeSelfRun    = "self-run"   // main-gate skipped; elevated gate stays
+	TournamentModeSelfRun    = "self-run"   // main-gate skipped except on organiser routes
 )
 
 // ValidateTournamentMode reports whether the given mode value is acceptable.
@@ -277,6 +266,14 @@ func ApplyTournamentDefaults(t *Tournament) {
 //
 // Consumers should call ApplyTournamentDefaults before Days() to ensure
 // DurationDays has its correct minimum of 1.
+// IsSelfRun reports whether the tournament runs in self-run mode. A nil
+// tournament (none created yet) is not self-run. This is the one Go spelling
+// of the question for engine code; the HTTP layer compares t.Mode against
+// TournamentModeSelfRun directly where it already holds the tournament.
+func (t *Tournament) IsSelfRun() bool {
+	return t != nil && t.Mode == TournamentModeSelfRun
+}
+
 func (t *Tournament) Days() []string {
 	if t == nil || t.DurationDays < 1 || t.Date == "" {
 		return nil
@@ -629,6 +626,16 @@ func (c Competition) EffectiveFormat() string {
 // the API, so for one the two readings agree).
 func (c *Competition) IsTeam() bool {
 	return c != nil && (c.Kind == "team" || c.TeamSize > 0)
+}
+
+// CheckInApplies reports whether check-in decides anything for this
+// competition in tournament t: its CheckInEnabled setting, except in a
+// self-run tournament, which has no check-in (operator ruling 2026-10-13).
+// This is the ONE owner of that rule: the draw filter, the Swiss field and the
+// schedule estimate ask it, and nothing reads CheckInEnabled to decide
+// behaviour. The stored setting is never rewritten.
+func (c *Competition) CheckInApplies(t *Tournament) bool {
+	return c != nil && c.CheckInEnabled && !t.IsSelfRun()
 }
 
 // IsKachinuki reports whether c is a kachinuki (winner-stays-on) team

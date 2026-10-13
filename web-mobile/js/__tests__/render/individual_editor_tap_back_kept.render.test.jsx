@@ -130,4 +130,27 @@ describe('a tap made while the previous save is out is never wiped by that save\
     });
     expect(marks(r.container).some((l) => l.endsWith('remove K')), 'the later change shows').toBe(true);
   });
+
+  it('once the tap\'s own save has landed, a server copy stamped just before the tap is followed', async () => {
+    // The write's stamp is worked out at send, less the edit's age, so it can
+    // read a millisecond before the tap that made it. Once that save has
+    // landed the board holds nothing unsent, and a change the server applied
+    // under such a stamp (another device's overtime, made before the tap and
+    // arriving after it) is the match as it stands.
+    const onSubmit = vi.fn().mockResolvedValue({ id: 'm1', status: 'running' });
+    let r;
+    await act(async () => { r = render(el(bout(), onSubmit)); });
+    await tap(menButton(r.container.querySelector('.sb-side--aka')));
+    await wait(350); // the tap's save goes out and lands
+    await act(async () => {});
+    const added = onSubmit.mock.calls.at(-1)[0];
+    const echo = bout({ ipponsA: added.ipponsA, ipponsB: added.ipponsB, modifiedAt: NOW - 1 });
+    await act(async () => { r.rerender(el(echo, onSubmit)); });
+    await act(async () => { r.rerender(el({ ...echo, encho: { periodCount: 1 } }, onSubmit)); });
+
+    vi.setSystemTime(NOW + 1000);
+    await tap(menButton(r.container.querySelector('.sb-side--shiro')));
+    await wait(350);
+    expect(onSubmit.mock.calls.at(-1)[0].encho, 'the board took the overtime, so the next save keeps it').toEqual({ periodCount: 1 });
+  });
 });

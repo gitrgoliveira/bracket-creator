@@ -83,7 +83,7 @@ A court call, made with **Call to court** on the court console, is announced the
 
 ## Registration desk
 
-Open **Registration desk** from the dashboard to access the check-in surface for the welcome table. Check-in exists only for competitions with **Check-in tracking** turned on in their Settings, and this desk is the one place to do it: it lists every competitor across those competitions so a registration helper can mark participants present as they arrive. A competition with the setting off does not appear here, and its Ordering & seeding panel carries no check-in controls either. Refer to the [Check-in workflow](#check-in-workflow).
+Open **Registration desk** from the dashboard to access the check-in surface for the welcome table. Check-in exists only for competitions with **Check-in tracking** turned on in their Settings, and this desk is the one place to do it: it lists every competitor across those competitions so a registration helper can mark participants present as they arrive. A competition with the setting off does not appear here, and its Ordering & seeding panel carries no check-in controls either. A self-run tournament has no check-in, so the dashboard offers no Registration desk there. Refer to the [Check-in workflow](#check-in-workflow).
 
 ## Set up a competition
 
@@ -197,7 +197,7 @@ Click the pencil icon on any row to open the edit modal for that competitor. You
 
 ### Check-in workflow
 
-Enable **Check-in tracking** in **Settings** for the competition. Competitors are checked in at the [Registration desk](#registration-desk), which works across every competition; the Ordering & seeding panel carries no check-in controls.
+Enable **Check-in tracking** in **Settings** for the competition. Competitors are checked in at the [Registration desk](#registration-desk), which works across every competition; the Ordering & seeding panel carries no check-in controls. Self-run mode has no check-in: the setting is not offered and the draw includes every participant on the roster ([operating modes](operating-modes.md)).
 
 The check-in rule is opt-in: when you click **Generate draw**, if at least one participant is checked in, only checked-in participants join the draw and unchecked participants are excluded (their seeds are dropped). If nobody is checked in, everyone is included.
 
@@ -251,13 +251,15 @@ For naginata and Engi-kyogi divisions, refer to [Naginata](naginata.md).
 
 The public viewer shows a competition's podium when it finishes, and a provisional ranking while it is still in progress.
 
+A knockout or pools-then-knockout competition finishes when you tap **Complete competition** on its page. The button appears once every bracket match, the bronze match included when there is one, has been played, and completing cannot be undone. A league finishes by itself after its last match and any tie-breakers. In a team league, when a tie left after every ranking criterion is consequential, you first run or decline the tie-breaker; any other tie is left as a shared rank with no decision (refer to [Team standings and tie-breaks](team-tournaments.md#team-standings-and-tie-breaks)). A Swiss competition never finishes in this sense. After its last round, its organiser page shows a **Competition complete** notice and a link to the final standings, which the public viewer also shows, but there is no **Complete competition** button for it and it does not finish by itself, so the public viewer shows no podium for it.
+
 The **Award two joint 3rd places** setting, on the competition's Settings tab, controls whether a competition awards two joint 3rd places or decides a single one with a bronze match. It is on by default (the standard kendo convention) and applies to knockout, pools-then-knockout, and league competitions. It is not shown for Swiss, which has no bracket and no bronze match. Naginata competitions default the setting off (a single 3rd, decided by a bronze match). You can turn it back on for a naginata competition too, and you can turn it off for a kendo competition that needs a single 3rd, for example a selection event with one bronze medal. Refer to [Naginata](naginata.md#third-place-match) for the bronze match itself.
 
 - **Knockout** (default: joint 3rds on): 1st place, 2nd place, and two equal 3rd places. There is no bronze match; both semi-final losers share third.
 - **Knockout with joint 3rds off**: a single 3rd place is decided by a bronze match.
 - **Pools + Knockout** (still in its pool phase): the viewer shows a provisional cross-pool ranking until the knockout decides the final places.
 
-Operators see an all-competition winners view from the dashboard. You can also record optional **fighting-spirit** (敢闘賞) awards as free text; these appear on the viewer for all spectators. Saving awards requires the destructive-ops password in self-run mode; refer to [Operating modes](operating-modes.md#destructive-ops-password).
+Operators see an all-competition winners view from the dashboard. You can also record optional **fighting-spirit** (敢闘賞) awards as free text; these appear on the viewer for all spectators. Saving awards is an organiser action, so it needs the admin password in self-run mode too; refer to [Operating modes](operating-modes.md#self-run-mode).
 
 **League competitions** derive the podium from final standings. In an individual league, any tie within the top three places triggers a short ippon-shobu tie-breaker automatically, so the competition never closes with an unearned tie. Engi kata competitions never hold supplementary bouts; they rank by wins, then accumulated flags (refer to [Naginata](naginata.md#standings)). The one exception is 3rd place: with **Award two joint 3rd places** enabled, competitors tied entirely for third share the position instead, with no decider. In a team league, the operator chooses whether to run a tie-breaker or accept a tie at any position; refer to [Team standings and tie-breaks](team-tournaments.md#team-standings-and-tie-breaks).
 
@@ -287,7 +289,7 @@ When the **Public URL** is set and competitors have assigned numbers, each print
 
 Tournament state is stored as plain files inside the data folder you specified with `--folder`. You can hand-edit these files between rounds when a correction is needed:
 
-- `tournament.md`: YAML front-matter with the tournament name, date, venue, court count, and the admin password and destructive-ops password.
+- `tournament.md`: YAML front-matter with the tournament name, date, venue, court count, and the admin password.
 - `competitions/<id>/config.md`: YAML front-matter with competition kind, format, pool settings, and courts.
 - `competitions/<id>/participants.csv`: one participant per line with name, optional display name (zekken), dojo, and optional dan grade.
 

@@ -450,10 +450,9 @@ func TestPostSponsor_SelfRunMode_RejectsAnonymous(t *testing.T) {
 	store, err := state.NewStore(tempDir)
 	require.NoError(t, err)
 	require.NoError(t, store.SaveTournament(&state.Tournament{
-		Name:          "Self-Run Cup",
-		Password:      "main-pw",
-		AdminPassword: "admin-pw",
-		Mode:          state.TournamentModeSelfRun,
+		Name:     "Self-Run Cup",
+		Password: "main-pw",
+		Mode:     state.TournamentModeSelfRun,
 	}))
 	eng := engine.New(store)
 	mockFS := fstest.MapFS{"web-mobile/index.html": {Data: []byte("<html/>")}}

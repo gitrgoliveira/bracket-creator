@@ -13,6 +13,7 @@
 // helper re-exports; overview has no pure helper, so it needs a side-effect import.
 import './admin_competition_overview.jsx';
 import { effectiveDrawPlayers } from './qualifier_preview.jsx';
+import { checkInApplies } from './competition_shape.jsx';
 export { formatCompMinutes } from './admin_competition_settings.jsx';
 export { buildRunningIpponResult, loadScoreboardPoints } from './admin_competition_bracket.jsx';
 export {
@@ -107,7 +108,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   // roster. Empty roster (e.g. a knockout-from-source competition resolved
   // server-side) yields 0.
   const drawPlayers = c.players || [];
-  const excludedFromDraw = drawPlayers.length - effectiveDrawPlayers(drawPlayers, c.checkInEnabled).length;
+  const excludedFromDraw = drawPlayers.length - effectiveDrawPlayers(drawPlayers, checkInApplies(t, c.checkInEnabled)).length;
 
   // Confirm before a draw/start that would drop non-checked-in participants.
   // Returns false when the operator cancels.
@@ -144,11 +145,9 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
 
   const discardDraw = async () => {
     if (!(await window.confirmDialog({ message: `Discard the generated draw for "${c.name}"? The pools/bracket will be removed so you can edit participants and settings, then generate a new draw.`, confirmLabel: "Discard draw", danger: true }))) return;
-    const admin = await window.promptAdminPassword();
-    if (admin === null) return;
     setDiscarding(true);
     try {
-      await window.API.discardDraw(c.id, password, admin);
+      await window.API.discardDraw(c.id, password);
       if (!mountedRef.current) return;
       onRefreshCompetition?.();
       showToast(`Draw discarded for ${c.name}`);
@@ -183,13 +182,9 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
       confirmLabel: "Complete competition",
       danger: true,
     }))) return;
-    // Completion is irreversible → elevated-gated on the server; prompt for the
-    // admin password (a no-op when no admin password is configured).
-    const admin = await window.promptAdminPassword();
-    if (admin === null) return;
     setCompleting(true);
     try {
-      await window.API.completeCompetition(c.id, password, admin);
+      await window.API.completeCompetition(c.id, password);
       if (!mountedRef.current) return;
       onRefreshCompetition?.();
       showToast(`${c.name} marked complete`);

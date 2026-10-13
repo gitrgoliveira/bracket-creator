@@ -253,7 +253,7 @@ function formatLabelShort(format) {
 // confirmDialog(opts)/promptDialog(opts) return a Promise resolved by the
 // user's choice, backed by a single <DialogHost/> mounted once at the app
 // root. They replace native window.confirm/window.prompt across the admin
-// SPA so destructive/elevated prompts use the app's themed, accessible modal
+// SPA so destructive confirms and prompts use the app's themed, accessible modal
 // (Escape to cancel, focus management, consistent styling) instead of browser
 // chrome that can't be styled, labelled, or (for prompt) mask a password.
 //
@@ -300,7 +300,7 @@ function confirmDialog(opts = {}) {
 
 function promptDialog(opts = {}) {
   const o = typeof opts === "string" ? { message: opts } : (opts || {});
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     _setDialogReq({
       kind: "prompt",
       title: o.title || "Enter a value",
@@ -308,9 +308,16 @@ function promptDialog(opts = {}) {
       defaultValue: o.defaultValue != null ? String(o.defaultValue) : "",
       placeholder: o.placeholder || "",
       password: !!o.password,
+      danger: !!o.danger,
+      // submit(value) judges the typed value before the dialog closes. It
+      // resolves a string to keep the dialog open with that sentence shown (the
+      // operator types again), or nothing to accept the value; a rejection
+      // closes the dialog and rejects the promptDialog() promise with it.
+      submit: typeof o.submit === "function" ? o.submit : null,
       confirmLabel: o.confirmLabel || "OK",
       cancelLabel: o.cancelLabel || "Cancel",
       _resolve: resolve,
+      _reject: reject,
     });
   });
 }
@@ -320,6 +327,10 @@ function promptDialog(opts = {}) {
 function DialogHost() {
   const [req, setReq] = React.useState(_dialogReq);
   const [value, setValue] = React.useState("");
+  // A prompt with a `submit` judge: the sentence it refused with, and whether
+  // a judgement is out (the dialog neither closes nor submits twice meanwhile).
+  const [error, setError] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
   const inputRef = React.useRef(null);
   const triggerRef = React.useRef(null);
   const trapRef = React.useRef(null);
@@ -327,7 +338,7 @@ function DialogHost() {
   const { openedRef, onClickCapture } = useOpenedTapGuard();
 
   React.useEffect(() => {
-    const fn = (r) => { setReq(r); if (r && r.kind === "prompt") setValue(r.defaultValue || ""); };
+    const fn = (r) => { setReq(r); setError(""); setBusy(false); if (r && r.kind === "prompt") setValue(r.defaultValue || ""); };
     _dialogListeners.add(fn);
     // Pick up a request created before this host finished mounting.
     if (_dialogReq) fn(_dialogReq);
@@ -387,18 +398,44 @@ function DialogHost() {
     }
   }, [openedRef]);
 
-  const close = (result) => {
+  const close = (result, failure) => {
     const r = req;
     setReq(null);
+    setBusy(false);
     if (_dialogReq && _dialogReq._resolve === (r && r._resolve)) _dialogReq = null;
-    if (r && r._resolve) r._resolve(result);
+    if (failure && r && r._reject) r._reject(failure);
+    else if (r && r._resolve) r._resolve(result);
   };
 
   if (!req) return null;
   // req is guaranteed truthy past the guard, so no need to handle the null case.
   const cancelResult = req.kind === "confirm" ? false : null;
-  const onCancel = () => close(cancelResult);
-  const onConfirm = () => close(req.kind === "confirm" ? true : (value || null));
+  // A judgement still out (a password being checked) is not cancelled: closing
+  // then would leave the operator unsure whether the action went through.
+  const onCancel = () => { if (!busy) close(cancelResult); };
+  const onConfirm = async () => {
+    if (busy) return;
+    if (req.kind === "prompt" && req.submit) {
+      setBusy(true);
+      setError("");
+      let refusal;
+      try {
+        refusal = await req.submit(value);
+      } catch (e) {
+        close(null, e);
+        return;
+      }
+      if (refusal) {
+        setBusy(false);
+        setError(String(refusal));
+        if (inputRef.current) { inputRef.current.focus(); inputRef.current.select(); }
+        return;
+      }
+      close(value || null);
+      return;
+    }
+    close(req.kind === "confirm" ? true : (value || null));
+  };
 
   // Escape-to-cancel is handled ON the dialog container (not via the global
   // useEscapeToClose window listener). The dialog frequently opens on top of a
@@ -434,14 +471,16 @@ function DialogHost() {
               // fallback): otherwise screen readers announce a bare text field.
               aria-label={req.message || req.title}
               autoComplete={req.password ? "current-password" : "off"}
-              onChange={(e) => setValue(e.target.value)}
+              aria-invalid={error ? "true" : undefined}
+              onChange={(e) => { setValue(e.target.value); if (error) setError(""); }}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onConfirm(); } }}
             />
           )}
+          {error && <div className="field__hint field__hint--error" role="alert">{error}</div>}
         </div>
         <div className="modal__foot">
-          <button type="button" className="btn btn--ghost" onClick={onCancel}>{req.cancelLabel}</button>
-          <button type="button" className={`btn ${req.danger ? "btn--danger" : "btn--primary"}`} onClick={onConfirm}>{req.confirmLabel}</button>
+          <button type="button" className="btn btn--ghost" disabled={busy} onClick={onCancel}>{req.cancelLabel}</button>
+          <button type="button" className={`btn ${req.danger ? "btn--danger" : "btn--primary"}`} disabled={busy} onClick={onConfirm}>{busy && <span className="spinner" />}{req.confirmLabel}</button>
         </div>
       </div>
     </div>

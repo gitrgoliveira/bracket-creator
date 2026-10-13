@@ -18,8 +18,12 @@ Inspectability, repairability and diffability matter more here than normalisatio
 * **Repairable.** An organiser can correct a wrong cell by hand, and the app picks it up on reload.
 * **Diffable.** The whole tournament state can be committed to version control or copied to
   a USB stick as a backup. Two copies can then be compared line by line.
-  One exception: `tournament.md` holds the tournament and admin passwords in plain text, so
-  strip or change them before sharing a copy.
+  One exception: `tournament.md` holds the admin password in plain text, so strip or
+  change it before sharing a copy. A `tournament.md` that carries an `admin_password` field
+  may hold another password in plain text there. The app ignores that field and drops it the
+  next time it writes the file; remove it by hand before sharing a copy that still has it.
+  Refer to
+  [Upgrading from an earlier release](../user-guide/organisers/operating-modes.md#upgrading-from-an-earlier-release).
 
 The trade this makes is described honestly in [section 6](#6-how-the-model-maps-onto-rows).
 

@@ -724,7 +724,7 @@ func migrateMissingNumberPrefixes(store *state.Store, eng *engine.Engine, comps 
 	return reloaded
 }
 
-func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub, elevated ElevatedVerifier) {
+func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub) {
 	r.GET("/competitions", func(c *gin.Context) {
 		comps, err := loadAllCompetitions(store)
 		if err != nil {
@@ -1154,8 +1154,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 	// GET /competitions/:id/schedule/estimate, pre-draw schedule estimate
 	// for a specific competition. Read-only; main-password gated (registered
-	// under adminGroup via RegisterCompetitionHandlers) but does NOT require
-	// elevated auth. Returns a ScheduleEstimate JSON body; 404 for unknown
+	// under adminGroup via RegisterCompetitionHandlers). Returns a ScheduleEstimate JSON body; 404 for unknown
 	// competition. mp-zoh Phase 3.
 	r.GET("/competitions/:id/schedule/estimate", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
@@ -1222,18 +1221,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		comp.ID = id // ensure ID matches URL (also for empty-body case)
 
-		// Elevated-password gate for the ROSTER-mutation path (spec 004 /
-		// mp-e21; Copilot PR #193). This handler doubles as a roster writer:
-		// a non-nil Players field below triggers SaveParticipants/SaveSeeds.
-		// That is the SPA's PRIMARY roster flow (paste/import, seed edits via
-		// API.updateCompetition), so gating only the dedicated
-		// POST/PUT /participants endpoints would leave the gate bypassable.
-		// Route-level middleware can't see Players (it runs before binding),
-		// so enforce inline now that the body is decoded. Settings-only PUTs
-		// (Players == nil) are unaffected and stay single-factor.
-		if comp.Players != nil && !enforceElevated(c, elevated) {
-			return
-		}
+		// This handler doubles as a roster writer (a non-nil Players field
+		// below triggers SaveParticipants/SaveSeeds). It needs no second
+		// password: the admin sign-in is enough (operator ruling 2026-10-12),
+		// and in self-run the route is organiser-only
+		// (isSelfRunMainGatedConfigRoute).
 
 		comp.Name = strings.TrimSpace(comp.Name)
 		// See POST handler comment, same trim is needed here so the
@@ -2361,7 +2353,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}{Competition: updated, Warnings: nearDupWarnings})
 	})
 
-	r.DELETE("/competitions/:id", RequireElevatedPassword(elevated), func(c *gin.Context) {
+	r.DELETE("/competitions/:id", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
@@ -2385,7 +2377,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.Status(http.StatusNoContent)
 	})
 
-	r.POST("/competitions/:id/invalidate", RequireElevatedPassword(elevated), func(c *gin.Context) {
+	r.POST("/competitions/:id/invalidate", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
@@ -2499,7 +2491,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.JSON(http.StatusOK, comp)
 	})
 
-	r.DELETE("/competitions/:id/draw", RequireElevatedPassword(elevated), func(c *gin.Context) {
+	r.DELETE("/competitions/:id/draw", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
@@ -2512,11 +2504,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.Status(http.StatusNoContent)
 	})
 
-	// Elevated-gated for the same reason as DELETE /draw above: it discards
-	// recorded results. It does NOT delete the operator's file, but the
-	// knockout results inside it become unreachable through the app, so it is
-	// as consequential as a discard from the console's point of view.
-	r.POST("/competitions/:id/bracket/quarantine", RequireElevatedPassword(elevated), func(c *gin.Context) {
+	// Organiser-only in self-run (isSelfRunMainGatedConfigRoute), like DELETE
+	// /draw above: it discards recorded results. It does NOT delete the
+	// operator's file, but the knockout results inside it become unreachable
+	// through the app, so it is as consequential as a discard from the
+	// console's point of view.
+	r.POST("/competitions/:id/bracket/quarantine", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
@@ -2539,10 +2532,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		})
 	})
 
-	// Elevated-gated: completing a competition is IRREVERSIBLE (invalidate
-	// rejects a completed comp), like DELETE /competitions/:id and
-	// /invalidate. In file mode without an admin password the gate is a no-op.
-	r.POST("/competitions/:id/complete", RequireElevatedPassword(elevated), func(c *gin.Context) {
+	// Completing a competition is IRREVERSIBLE (invalidate rejects a completed
+	// comp), but it asks for no second password (operator ruling 2026-10-12:
+	// "Completing a competition must not require an admin password"). It needs
+	// what starting a competition needs: the sign-in in officiated mode, and
+	// nothing in self-run, where it is deliberately NOT in
+	// isSelfRunMainGatedConfigRoute. The bracket guard below is what stops a
+	// competition being sealed early.
+	r.POST("/competitions/:id/complete", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
@@ -2564,14 +2561,17 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// completion. tx.LoadBracket reuses the already-held lock; the public
 		// Store.LoadBracket would deadlock the non-reentrant mutex.
 		//
-		// len(Rounds) > 0 skips bracketless formats (league/swiss/pools complete
-		// via their own path -- no bracket.json, which LoadBracket maps to an
-		// empty bracket + nil error). Completion is IRREVERSIBLE, so a genuine
-		// I/O/parse fault fails CLOSED (500) rather than sealing with unknown
-		// bracket state.
+		// A bracketless format (league/swiss/pools: no bracket.json, which
+		// LoadBracket maps to an empty bracket + nil error) is held to its own
+		// matches instead (engine.PoolMatchesSettled, plus the Swiss round
+		// count). Completion is IRREVERSIBLE, so a genuine I/O/parse fault
+		// fails CLOSED (500) rather than sealing with unknown state.
 		var compOut *state.Competition
-		var statusErr, bracketFault error
+		var statusErr, bracketFault, matchesFault error
 		var notFoundFlag bool
+		// tx.LoadPoolMatches skips the first-read legacy conversion the
+		// store's own read runs; run it first, as AdvanceSwissRound does.
+		store.EnsureLegacyUpgraded(id)
 		txErr := store.WithTransaction(id, func(tx state.StoreTx) error {
 			current, lerr := tx.LoadCompetition(id)
 			if lerr != nil {
@@ -2594,6 +2594,27 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				statusErr = fmt.Errorf("all bracket matches must be completed before this competition can be finished")
 				return nil
 			}
+			if bracket == nil || len(bracket.Rounds) == 0 {
+				// No knockout rounds to check (a league, a Swiss competition,
+				// a pools-only one): the competition is finished only once its
+				// own matches are, by the rule a league completes by itself
+				// (engine.PoolMatchesSettled), and a Swiss competition only
+				// once every configured round has been drawn. Every caller is
+				// held to it, the anonymous self-run caller included.
+				matches, merr := tx.LoadPoolMatches(id)
+				if merr != nil {
+					matchesFault = merr
+					return nil
+				}
+				if !engine.PoolMatchesSettled(matches) {
+					statusErr = fmt.Errorf("all matches must be completed before this competition can be finished")
+					return nil
+				}
+				if n := engine.SwissRoundsToDraw(current); n > 0 {
+					statusErr = fmt.Errorf("%d Swiss round(s) remain to be drawn and played before this competition can be finished", n)
+					return nil
+				}
+			}
 			current.Status = state.CompStatusComplete
 			compOut = current
 			return tx.SaveCompetition(current)
@@ -2604,6 +2625,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		if bracketFault != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load bracket"})
+			return
+		}
+		if matchesFault != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load matches"})
 			return
 		}
 		if statusErr != nil {
@@ -2857,7 +2882,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.JSON(http.StatusOK, gin.H{"candidates": groupsJSON(report.Pending), "recorded": groupsJSON(report.Recorded)})
 	})
 
-	r.DELETE("/competitions/:id/overrides", RequireElevatedPassword(elevated), func(c *gin.Context) {
+	r.DELETE("/competitions/:id/overrides", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
@@ -2890,7 +2915,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.Status(http.StatusNoContent)
 	})
 
-	r.PUT("/competitions/:id/awards", RequireElevatedPassword(elevated), func(c *gin.Context) {
+	r.PUT("/competitions/:id/awards", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return

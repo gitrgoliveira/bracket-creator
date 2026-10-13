@@ -22,7 +22,6 @@ const STUBBED_GLOBALS = {
   isNonPublicOrigin: () => false,
   buildCompetition: (cfg) => ({ ...cfg }),
   addMinutes: (t) => t,
-  setCachedAuthConfig: noop,
   API: {
     estimateCompetitionSchedule: vi.fn().mockResolvedValue(null),
     getNumberPrefixDefault: vi.fn().mockResolvedValue({ numberPrefix: '' }),
@@ -61,7 +60,7 @@ describe('the tournament Edit details form', () => {
     await act(async () => {
       render(
         <AdminEditTournament tournament={tournament} onCancel={noop} onSave={noop} onLogout={noop}
-          onViewerMode={noop} authConfig={{ mode: 'file', elevatedConfigured: true }} password="pw" showToast={noop} />
+          onViewerMode={noop} authConfig={{ mode: 'file' }} password="pw" showToast={noop} />
       );
     });
     expect(screen.getByLabelText('Name').value).toBe('Spring Taikai');
@@ -84,8 +83,8 @@ describe('the tournament Edit details form', () => {
     expect(screen.getByLabelText('Contact 1 value').value).toBe('a@b.test');
     expect(screen.getByRole('button', { name: 'Remove contact 1' })).toBeInTheDocument();
     expect(screen.getByLabelText('Admin password').type).toBe('password');
-    expect(screen.getByLabelText('Destructive-ops password (set)').type).toBe('password');
-    expect(screen.getByLabelText('Current destructive-ops password').type).toBe('password');
+    // bc-cmpw: the separate destructive-ops password is gone from the form.
+    expect(screen.queryByLabelText(/destructive-ops password/i)).toBeNull();
   });
 });
 

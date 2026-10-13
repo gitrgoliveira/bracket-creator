@@ -57,7 +57,7 @@ import {
 // one owner of that question.
 import { isBarredMatch } from './ineligible_match.jsx';
 
-import { SyncStatusPill, useDebouncedRunningWrite, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
+import { SyncStatusPill, useDebouncedRunningWrite, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote, landedAutosave } from './admin_scoring_autosave.jsx';
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
 import { GROUP_POINTS, GROUP_RESULT, GROUP_ENCHO, GROUP_REP } from './match_groups.jsx';
 
@@ -323,11 +323,24 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // a mark off and tapping it back while the removal is still saving returns the
   // board to the value the server still shows, which reads as untouched, and the
   // removal's echo then wiped the tap (bc-ltap).
+  // The stamp stands only while an edit is unsent: the write's own stamp is
+  // worked out at send, less the edit's age (api_client.jsx), so its echo can
+  // read a millisecond before the tap, and taps that net to nothing change
+  // nothing on the server at all. Once an autosave built after the latest
+  // board edit has landed, the board holds nothing the server lacks, so the
+  // stamp is cleared (landedBoardSave) and every later server copy is followed.
   const boardEditedAtRef = useRefA(undefined);
+  const boardEditSeqRef = useRefA(0);
   const markScoringDirty = () => {
     boardEditedAtRef.current = serverNowMs();
+    boardEditSeqRef.current += 1;
     markRunningWrite();
   };
+  // The autosave's submit: the host's onSubmit, and on a landed answer the
+  // board stamp cleared when no board edit was made since this save was built.
+  const landedBoardSave = (submit) => landedAutosave(submit, boardEditSeqRef, (seq) => {
+    if (boardEditSeqRef.current === seq) boardEditedAtRef.current = undefined;
+  });
 
   useEffectA(() => {
     if (!m.compId) return;
@@ -555,7 +568,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   _autosaveIsRunningRef.current = m.status === "running";
   _autosaveSeenStampRef.current = m.modifiedAt || 0;
   _autosaveBuildPatchRef.current = buildPatch;
-  _autosaveOnSubmitRef.current = onSubmit;
+  _autosaveOnSubmitRef.current = landedBoardSave(onSubmit);
 
   const doSubmit = async (fn) => {
     cancelScoringDebounce(); // C1: cancel any pending autosave before explicit submit

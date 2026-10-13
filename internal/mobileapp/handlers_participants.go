@@ -13,7 +13,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub Broadcaster, elevated ElevatedVerifier) {
+func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub Broadcaster) {
 	r.GET("/competitions/:id/participants", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -33,7 +33,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.JSON(http.StatusOK, players)
 	})
 
-	r.POST("/competitions/:id/participants", RequireElevatedPassword(elevated), func(c *gin.Context) {
+	r.POST("/competitions/:id/participants", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
@@ -375,7 +375,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.JSON(http.StatusOK, saved)
 	})
 
-	r.PUT("/competitions/:id/participants/:pid", RequireElevatedPassword(elevated), func(c *gin.Context) {
+	r.PUT("/competitions/:id/participants/:pid", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
 			return
@@ -691,6 +691,9 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
+		if refuseCheckInInSelfRun(c, store) {
+			return
+		}
 		pid := c.Param("pid")
 
 		comp, err := store.LoadCompetition(id)
@@ -725,6 +728,9 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	r.POST("/competitions/:id/participants/checkin-bulk", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
+			return
+		}
+		if refuseCheckInInSelfRun(c, store) {
 			return
 		}
 
@@ -780,6 +786,9 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
+		if refuseCheckInInSelfRun(c, store) {
+			return
+		}
 		pid := c.Param("pid")
 
 		comp, err := store.LoadCompetition(id)
@@ -808,4 +817,30 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
 		c.JSON(http.StatusOK, updatedPlayer)
 	})
+}
+
+// errCheckInNotInSelfRun refuses every check-in write in a self-run
+// tournament, whoever sends it (operator ruling 2026-10-13: "Self run mode has
+// no check-in"). The organiser is refused too: the draw ignores check-in there
+// (Competition.CheckInApplies), so a stored check-in would decide nothing.
+var errCheckInNotInSelfRun = &selfRunRefusal{
+	status:  http.StatusConflict,
+	code:    "check_in_not_in_self_run",
+	message: "Self-run mode has no check-in.",
+}
+
+// refuseCheckInInSelfRun answers a check-in write with errCheckInNotInSelfRun
+// when the tournament is self-run and reports whether it did, so the handler
+// stops. A tournament that cannot be loaded is a 500, never a pass.
+func refuseCheckInInSelfRun(c *gin.Context, store *state.Store) bool {
+	t, err := store.LoadTournament()
+	if err != nil {
+		internalError(c, err)
+		return true
+	}
+	if !t.IsSelfRun() {
+		return false
+	}
+	c.JSON(errCheckInNotInSelfRun.status, errCheckInNotInSelfRun.body())
+	return true
 }

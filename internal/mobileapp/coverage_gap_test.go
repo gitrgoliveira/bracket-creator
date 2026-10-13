@@ -515,46 +515,6 @@ func TestRegistration_POST_BadJSON(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Admin password endpoint, input validation gaps
-// ---------------------------------------------------------------------------
-
-// TestAdminPassword_BadJSON covers the ShouldBindJSON error path
-// (line 50-53 in handlers_auth_admin.go).
-func TestAdminPassword_BadJSON(t *testing.T) {
-	store := setupVerifierTestStore(t)
-	seedTournament(t, store)
-	r, _ := elevatedHandlerRouter(t, store, NewFileVerifier(store))
-	req := httptest.NewRequest(http.MethodPut, "/api/auth/admin-password", bytes.NewBufferString("{invalid"))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-// TestAdminPassword_NewPasswordTooLong covers the validateMaxLen("newPassword")
-// error path (line 62-65 in handlers_auth_admin.go).
-func TestAdminPassword_NewPasswordTooLong(t *testing.T) {
-	store := setupVerifierTestStore(t)
-	seedTournament(t, store)
-	r, _ := elevatedHandlerRouter(t, store, NewFileVerifier(store))
-	w := putAdminPassword(r, map[string]string{"newPassword": strings.Repeat("x", MaxLenTournamentPassword+1)})
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-// TestAdminPassword_CurrentPasswordTooLong covers the validateMaxLen("currentPassword")
-// error path (line 66-69 in handlers_auth_admin.go).
-func TestAdminPassword_CurrentPasswordTooLong(t *testing.T) {
-	store := setupVerifierTestStore(t)
-	seedTournament(t, store)
-	r, _ := elevatedHandlerRouter(t, store, NewFileVerifier(store))
-	w := putAdminPassword(r, map[string]string{
-		"newPassword":     "valid",
-		"currentPassword": strings.Repeat("x", MaxLenTournamentPassword+1),
-	})
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-// ---------------------------------------------------------------------------
 // Eligibility POST, bad JSON and validate-length error paths
 // ---------------------------------------------------------------------------
 

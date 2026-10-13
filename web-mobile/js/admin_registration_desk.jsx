@@ -20,8 +20,12 @@
 //     bc-prow: check-in exists only under that setting and this desk is its
 //     only UI), so a competition with the setting off never appears in the
 //     rail, the all-competitions roster, or an "also in" chip.
-//   - walk-up add (POST single) needs the elevated password and only works
-//     while a competition is in "setup" status.
+//   - walk-up add (POST single) needs the tournament password in officiated
+//     mode (none in self-run, where anyone can edit the roster), and only
+//     works while a competition is in "setup" status.
+//   - a self-run tournament has no check-in (operator ruling 2026-10-13): the
+//     server refuses every check-in write there with 409, the dashboard offers
+//     no card for this page, and the page itself shows one line saying so.
 //
 // SSE: when this view is mounted, AdminApp renders ONLY this page: neither the
 // dashboard's nor the competition-view's SSE subscription is active. So this
@@ -31,6 +35,7 @@
 
 import { checkinPid, checkinApiPid } from './data.jsx';
 import { NO_ID_HINT, NoIdHint } from './data_integrity.jsx';
+import { checkInApplies, tournamentHasCheckIn, SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
 
 const { useState: useStateRD, useEffect: useEffectRD, useRef: useRefRD, useMemo: useMemoRD, useCallback: useCallbackRD } = React;
 
@@ -150,8 +155,8 @@ function rdPlayerTag(comp, p) {
 // the page the count it needs to tell "no competitions at all" from "none with
 // check-in tracking on", which are different empty states with different
 // remedies.
-function rdCheckInComps(list) {
-  return (list || []).filter((c) => c && c.checkInEnabled);
+function rdCheckInComps(list, tournament) {
+  return (list || []).filter((c) => c && checkInApplies(tournament, c.checkInEnabled));
 }
 
 // Build the cross-competition people index from the competitions array.
@@ -457,14 +462,12 @@ function RdWalkUp({ comp, seedName, password, showToast, onAdded, onCancel }) {
     e.preventDefault();
     const n = name.trim(), d = dojo.trim();
     if (!n || !d) { showToast(isTeam ? "Team name and dojo are required" : "Name and dojo are required", "error"); return; }
-    const admin = await window.promptAdminPassword();
-    if (admin === null) return;
     setBusy(true);
     try {
       const payload = { name: n, dojo: d };
       if (!isTeam && dan.trim()) payload.danGrade = dan.trim();
       if (!isTeam && comp.withZekkenName && zekken.trim()) payload.displayName = zekken.trim();
-      const added = await window.API.addParticipant(comp.id, payload, password, admin);
+      const added = await window.API.addParticipant(comp.id, payload, password);
       // Check them in straight away: they're standing at the desk.
       let checkInOk = false;
       try {
@@ -521,7 +524,7 @@ function RdWalkUp({ comp, seedName, password, showToast, onAdded, onCancel }) {
 // Inline edit: fix a wrong name / dojo / zekken on an existing entry without
 // leaving the desk. Operates on one (competition, participant); editing here
 // changes only that competition's record (the per-competition data model). Uses
-// the same elevated-password gate and replace endpoint as the Participants tab.
+// the same replace endpoint as the Participants tab.
 // ---------------------------------------------------------------------------
 function RdEditModal({ comp, player, password, showToast, onSaved, onClose }) {
   const isTeam = comp.kind === "team";
@@ -535,14 +538,12 @@ function RdEditModal({ comp, player, password, showToast, onSaved, onClose }) {
   const save = async () => {
     const n = name.trim(), d = dojo.trim();
     if (!n || !d) { showToast(isTeam ? "Team name and dojo are required" : "Name and dojo are required", "error"); return; }
-    const admin = await window.promptAdminPassword();
-    if (admin === null) return;
     setBusy(true);
     try {
       const metadata = window.buildPlayerMetadata(isTeam ? "" : dan.trim(), player.metadata);
       const payload = { name: n, dojo: d, displayName: !isTeam && comp.withZekkenName ? zekken.trim() : "", source: player.source || "" };
       if (metadata !== undefined) payload.metadata = metadata;
-      const updated = await window.API.replaceParticipant(comp.id, rdApiPid(player), payload, password, admin);
+      const updated = await window.API.replaceParticipant(comp.id, rdApiPid(player), payload, password);
       onSaved(comp, updated);
     } catch (err) {
       showToast(err.message, "error");
@@ -614,7 +615,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   // two empty states apart (no competitions yet vs none with check-in tracking
   // on).
   const [allComps, setAllComps] = useStateRD(() => tournament.competitions || []);
-  const comps = useMemoRD(() => rdCheckInComps(allComps), [allComps]);
+  const comps = useMemoRD(() => rdCheckInComps(allComps, tournament), [allComps, tournament]);
   const tRef = useRefRD(tournament);
   useEffectRD(() => { tRef.current = tournament; }, [tournament]);
   // Number of check-in writes in flight. While > 0 the SSE-driven refresh
@@ -932,6 +933,10 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   // competitions all have check-in tracking off needs the setting turned on.
   const noCompsAtAll = allComps.length === 0;
   const noComps = comps.length === 0;
+  // A self-run tournament has no check-in (operator ruling 2026-10-13): the
+  // desk, which is check-in only, says so instead of gathering any roster. The
+  // dashboard offers no card to reach it; this covers a view opened another way.
+  const noCheckIn = !tournamentHasCheckIn(tournament);
 
   return (
     <div className="app">
@@ -941,11 +946,16 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
         <div className="page-head">
           <div>
             <h1 className="page-head__title">Registration desk</h1>
-            <div className="page-head__sub">Check competitors in as they arrive, across every competition with check-in tracking on.</div>
+            {!noCheckIn && <div className="page-head__sub">Check competitors in as they arrive, across every competition with check-in tracking on.</div>}
           </div>
         </div>
 
-        {noComps ? (
+        {noCheckIn ? (
+          <div className="empty" style={{ padding: "48px 24px" }}>
+            <div className="icon" aria-hidden="true">🥋</div>
+            <h3>{SELF_RUN_NO_CHECK_IN}</h3>
+          </div>
+        ) : noComps ? (
           <div className="empty" style={{ padding: "48px 24px" }}>
             <div className="icon" aria-hidden="true">🥋</div>
             <h3>{noCompsAtAll ? "No competitions yet" : "No competition has check-in tracking on"}</h3>

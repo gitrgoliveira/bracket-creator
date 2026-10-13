@@ -25,6 +25,7 @@ Refer to the [Tournament app guide](../organisers/run-tournament.md) for a full 
 | `BIND_ADDRESS` | `--bind` default | Initial value for `--bind` if the flag isn't set. |
 | `LOCK_PASSWORD` | `--lock-password` default | `true` enables locked mode without passing the flag. |
 | `TOURNAMENT_PASSWORD_HASH` | locked mode auth | Bcrypt hash of the admin password. Required when `--lock-password` is set. Generate with [`hash-password`](hash-password.md). |
+| `TOURNAMENT_ADMIN_PASSWORD_HASH` | nothing | Ignored. When it is set, the server logs a line at startup saying so. The admin password above covers every action. Refer to [Upgrading from an earlier release](../organisers/operating-modes.md#upgrading-from-an-earlier-release). |
 
 ## Authentication
 

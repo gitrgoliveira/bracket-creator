@@ -215,6 +215,25 @@ describe('AdminRegistrationDeskPage scopes to competitions with check-in trackin
 // identifier at all, and checkPersonEntries now skips it client-side
 // (reporting the skip via toast) rather than sending a write the server
 // can only 404.
+// Operator ruling 2026-10-13: "Self run mode has no check-in." The desk is
+// check-in only, so in a self-run tournament it says so in one plain line
+// instead of gathering any roster, whatever the competitions' stored setting.
+describe('AdminRegistrationDeskPage in a self-run tournament', () => {
+  it('says self-run mode has no check-in and lists no competition or roster', async () => {
+    const { container } = await mount(makeTournament({ mode: 'self-run' }));
+    expect(container.textContent).toContain('Self-run mode has no check-in.');
+    expect(container.querySelector('.rd-workspace')).toBeNull();
+    expect(container.querySelector('.rd-search__input')).toBeNull();
+    expect(container.textContent).not.toContain('Turn on Check-in tracking');
+  });
+
+  it('still gathers the rosters in an officiated tournament', async () => {
+    const { container } = await mount(makeTournament({ mode: 'officiated' }));
+    expect(container.textContent).not.toContain('Self-run mode has no check-in.');
+    expect(container.querySelector('.rd-workspace')).not.toBeNull();
+  });
+});
+
 describe('AdminRegistrationDeskPage check-in sends the id-only wire pid (bc-pnum)', () => {
   let toggleCheckIn;
   let savedFetchCompetitions;
@@ -345,13 +364,11 @@ describe('AdminRegistrationDeskPage disables writes for an id-less row in comp m
     replaceParticipant = vi.fn().mockResolvedValue({});
     window.API.toggleCheckIn = toggleCheckIn;
     window.API.replaceParticipant = replaceParticipant;
-    window.promptAdminPassword = vi.fn().mockResolvedValue('admin-pw');
   });
 
   afterEach(() => {
     delete window.API.toggleCheckIn;
     delete window.API.replaceParticipant;
-    delete window.promptAdminPassword;
   });
 
   it('disables the row check-in control for an id-less row and sends no request', async () => {

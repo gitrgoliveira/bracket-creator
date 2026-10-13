@@ -45,7 +45,7 @@ func TestApplyCorrectionReasonUnderTx_FailsClosedOnLoadError(t *testing.T) {
 	var gotErr error
 	txErr := store.WithTransaction("c1", func(stx state.StoreTx) error {
 		r := &state.MatchResult{ID: "m1", Status: state.MatchStatusCompleted}
-		_, _, gotErr = applyCorrectionReasonUnderTx(stx, "c1", "m1", r)
+		_, _, gotErr = applyCorrectionReasonUnderTx(stx, "c1", "m1", r, nil)
 		return nil
 	})
 	require.NoError(t, txErr)

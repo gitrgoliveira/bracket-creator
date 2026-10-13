@@ -43,7 +43,7 @@ const (
 func newChangedLineupFixture(t *testing.T) changedLineupFixture {
 	t.Helper()
 	store := newTempStore(t)
-	seedSelfRunTournament(t, store, "admin-pw")
+	seedSelfRunTournament(t, store)
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: "c1", Name: "Teams", Kind: "team", TeamSize: 5, Format: state.CompFormatLeague, Status: state.CompStatusPools,
 	}))

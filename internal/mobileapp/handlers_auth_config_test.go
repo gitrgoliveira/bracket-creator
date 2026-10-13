@@ -33,8 +33,7 @@ func TestAuthConfigHandler_ScheduleEnabledFlag(t *testing.T) {
 			r := gin.New()
 			api := r.Group("/api")
 			verifier := NewFileVerifier(store)
-			elevated := NewFileElevatedVerifier(store)
-			RegisterAuthConfigHandlers(api, verifier, elevated, tc.scheduleEnabled)
+			RegisterAuthConfigHandlers(api, verifier, tc.scheduleEnabled)
 
 			w := httptest.NewRecorder()
 			req, _ := http.NewRequest("GET", "/api/auth-config", nil)
@@ -47,6 +46,14 @@ func TestAuthConfigHandler_ScheduleEnabledFlag(t *testing.T) {
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 			assert.Equal(t, tc.scheduleEnabled, resp.ScheduleEnabled,
 				"scheduleEnabled in response must match the flag passed to RegisterAuthConfigHandlers")
+
+			// The destructive-ops password was removed (operator ruling
+			// 2026-10-12), so the payload carries none of its bits.
+			var raw map[string]any
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
+			for _, gone := range []string{"elevatedRequired", "elevatedConfigured", "elevatedEditable"} {
+				assert.NotContains(t, raw, gone, "auth-config must not report %s", gone)
+			}
 		})
 	}
 }

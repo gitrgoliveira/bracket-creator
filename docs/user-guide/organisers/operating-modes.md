@@ -8,22 +8,23 @@ Tournament mode controls who can score matches and manage competitions. You choo
 
 ### Officiated mode
 
-Officiated mode is the default. Every action (scoring, check-in, starting, and completing competitions) requires the admin password. All recorded results carry the label "admin" to show they were entered by an operator.
+Officiated mode is the default. Every action (scoring, check-in, starting, and completing competitions) requires the admin password. Once you are signed in, one action asks for the password again: **Delete competition** (in the competition's Settings) opens a dialog that names the competition and asks you to type the admin password. A wrong password leaves the dialog open with "Wrong password. The competition was not deleted." and you stay signed in. The server checks the password typed in the dialog, so a request that does not carry it is refused too. Every other action, discarding a draw and marking a competition invalid included, needs no second password. All recorded results carry the label "admin" to show they were entered by an operator.
 
 ### Self-run mode
 
-In self-run mode, scoring, check-in, and starting competitions are open to anyone without a password, so competitors or table helpers can run and score their own matches. Completing a competition is irreversible, so it stays behind the destructive-ops password (refer to [Destructive-ops password](#destructive-ops-password)). A public self-registration page also becomes available for competitors to sign themselves up, for individual competitions only and only while the competition is still in setup, before the draw is generated.
+In self-run mode, scoring and starting a competition are open to anyone without a password, so competitors or table helpers can run and score their own matches. Completing a competition needs no password either: in self-run mode the server accepts it from anyone. The **Complete competition** button is on the organiser's competition page, which you reach by signing in. A public self-registration page also becomes available for competitors to sign themselves up, for individual competitions only and only while the competition is still in setup, before the draw is generated.
 
-Two kinds of action stay gated in self-run mode. Organiser setup (creating and editing competitions, tournament settings, seeds, scheduling, the **Lineups** page, match decisions such as kiken, and exports) still requires the admin password. Destructive actions (deleting a competition, discarding a draw, editing the roster, and completing a competition) require the destructive-ops password (refer to [Destructive-ops password](#destructive-ops-password)).
+Organiser actions stay behind the admin password in self-run mode: creating and editing competitions, tournament settings, the tournament logo and sponsor images, seeds, scheduling, the **Lineups** page, match decisions such as kiken, league tie-breaker decisions (adding or removing tie-breaker matches, and accepting shared ranks), exports, fighting-spirit awards, and every action that destroys data (deleting or invalidating a competition, discarding a draw, resetting manual overrides, and importing competitions).
+
+The roster is open to anyone in self-run mode: anyone can add and edit a competition's participants, without the password, before the competition starts.
+
+Self-run mode has no check-in. The **Check-in tracking** setting is not offered, the **Registration desk** is not offered, the server refuses every check-in request, and the draw includes every participant on the roster. A competition keeps the check-in setting it was saved with, but a self-run tournament ignores it.
 
 Competitors can name the fighters in a team match from its score sheet, without the password. A team member picked for a bout, or a typed name, is saved with that match, and a typed name fills in a team member who has no name yet or adds a new one. Two changes stay with the organiser: the lineup of a match that has finished, and the name of a team member who already has one.
 
 Competitors also run the representative bout (daihyosen) of a tied knockout team match from its score sheet while the match is in progress: they add it, score it like any other bout, and remove one added by mistake while it is still unscored. Once the match has finished, adding or removing its representative bout stays with you. A kachinuki match has no representative bout: a tied pairing that must produce a result is settled by encho on that same bout (refer to [Scoring a kachinuki encounter](team-tournaments.md#scoring-a-kachinuki-encounter)). A judges' decision (hantei) stays with the organiser, on the representative bout as on every other bout, so the public score sheet does not offer one. Once you record one, the public score sheet shows that bout as decided, and a competitor can finish the match on it but cannot change or clear it.
 
 Results in self-run mode carry a provenance label. A score entered without a password is tagged "self-reported"; a score entered by an authenticated operator is tagged "admin". Officiated mode always produces "admin" results.
-
-!!! note
-    In file mode, self-run requires a destructive-ops password. Without one, destructive actions would be unprotected, so the app refuses to create or save a self-run tournament until a destructive-ops password is set (you can set it in the same step).
 
 Refer to the [Competitor self-run guide](../competitors/self-run.md) for the attendee-facing workflow.
 
@@ -67,50 +68,20 @@ In locked mode:
 
 Refer to the [`hash-password` command reference](../commands/hash-password.md) for full details.
 
-## Destructive-ops password
-
-The destructive-ops password is a second, separately held credential that gates actions which are difficult to reverse. It lets table staff hold the main admin password for scoring, check-in, and match management, so they cannot accidentally or maliciously destroy data.
-
-Actions gated by the destructive-ops password include:
-
-- Deleting or invalidating a competition
-- Discarding a generated draw
-- Resetting manual overrides for a competition
-- Adding, editing, or replacing participants
-- Importing competitions
-- Recording or editing fighting-spirit awards
-- Completing a competition (completing is irreversible)
-
-The following are NOT gated by the destructive-ops password: scoring, match decisions, check-in, starting a competition, lineup management, or the `/reset` path.
-
-The admin UI prompts for the destructive-ops password each time you request a gated action. There is no cached session between prompts.
-
-### In file mode
-
-Set the destructive-ops password from **Admin > Edit details > Destructive-ops password**. The field is write-only and is never displayed. Changing it after it has been set requires supplying the current value first. While the field is unset, gated actions fall back to requiring the main admin password only. If you forget it, edit the `admin_password` field in `tournament.md` between rounds, as with any hand edit to the data folder. The main admin password is the `password` field in the same file.
-
-### In locked mode
-
-Supply the destructive-ops password as a bcrypt hash in the `TOURNAMENT_ADMIN_PASSWORD_HASH` environment variable. It cannot be changed through the UI.
-
-```bash
-printf '%s' "$MY_DESTRUCTIVE_OPS_SECRET" | bracket-creator hash-password
-
-TOURNAMENT_PASSWORD_HASH='$2a$10$...main...' \
-  TOURNAMENT_ADMIN_PASSWORD_HASH='$2a$10$...destructive...' \
-  bracket-creator mobile-app --lock-password -f ./tournament-data
-```
-
-In locked mode, the destructive-ops gate is always active. If `TOURNAMENT_ADMIN_PASSWORD_HASH` is unset or malformed, the gated actions are refused regardless of the admin password supplied. A malformed hash does not prevent the server from starting, but no destructive action can be completed until a valid hash is provided.
-
 ## Security notes
 
-The admin and destructive-ops passwords provide privilege separation for shared-credential operation at an event. They are not a network-security boundary on their own.
+The admin password is not a network-security boundary on its own.
 
-Over plain HTTP, both passwords travel in clear text on every request. Anyone with filesystem access to `tournament.md` can read both passwords in file mode.
+Over plain HTTP, the password travels in clear text on every request. Anyone with filesystem access to `tournament.md` can read it in file mode.
 
 For a real security boundary:
 
 - Run the server behind TLS. Refer to [Hosting](../install/hosting.md) for guidance.
 - Use locked mode for any deployment reachable from the internet.
 - In file mode, the password reset is unauthenticated: anyone who can reach the server can set a new admin password without knowing the current one, which locks out the operator or takes over the tournament. Locked mode disables reset entirely, so any internet-exposed deployment should use locked mode.
+
+### Upgrading from an earlier release
+
+The admin password is the only organiser password. Anyone who signs in with it can do every organiser action, including discarding a draw, and deleting a competition once they type the password again. If some staff should not be able to do this, give the tournament a new admin password and share it only with the people who should have it.
+
+A `tournament.md` that carries an `admin_password` field loads normally; the field is ignored. It may hold another password in plain text. The app drops the field the next time it writes `tournament.md`, for example when you change the tournament settings; until then, remove the line by hand before you share a copy of the data folder. The `TOURNAMENT_ADMIN_PASSWORD_HASH` environment variable is ignored: when it is set, the server logs a line at startup saying so, and you can remove it from your start-up scripts.

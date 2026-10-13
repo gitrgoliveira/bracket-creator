@@ -186,86 +186,33 @@ func loadExistingCompetition(c *gin.Context, comps CompetitionStore, compID stri
 	return comp, true
 }
 
-// RequireElevatedPassword gates destructive operations behind a SECOND
-// password supplied in the X-Admin-Password header (spec 004 / mp-e21). It
-// is layered on top of AuthMiddleware, the route group already verified the
-// main password, so this only adds the second factor. Attach it per-route to
-// the gated subset (competition delete / invalidate / draw / overrides,
-// participant roster mutations, CSV import) rather than to the whole group,
-// since most admin routes stay single-factor.
-//
-// Three outcomes, driven by the ElevatedVerifier contract:
-//
-//   - GateActive() == false  → c.Next(). File mode with no admin password
-//     set: the feature is opt-in, so destructive ops behave exactly as
-//     before (main password only). This is the back-compat path.
-//   - Configured() == false  → 503. Locked mode with no/invalid
-//     TOURNAMENT_ADMIN_PASSWORD_HASH: fail closed rather than silently
-//     allowing destructive ops with the main password alone.
-//   - otherwise               → Verify(X-Admin-Password); 401 on mismatch.
-//
-// Per the product decision (re-prompt every time) there is no elevation
-// token or session, the password travels on each gated request.
-func RequireElevatedPassword(ev ElevatedVerifier) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if !enforceElevated(c, ev) {
-			c.Abort()
-			return
-		}
-		c.Next()
-	}
-}
-
-// enforceElevated runs the elevated-password gate decision and returns true
-// when the request may proceed. On a blocked request it writes the
-// appropriate response (503 unconfigured / 401 wrong / 500 verify-error) and
-// returns false, the caller must stop (Abort in middleware, or `return` in a
-// handler).
-//
-// It exists as a standalone function, not just the middleware closure,
-// because some gated mutations can't be caught by route-level middleware:
-// PUT /api/competitions/:id persists the roster (SaveParticipants/SaveSeeds)
-// only when the bound body has a non-nil Players field, so its gate must run
-// INSIDE the handler after binding. Sharing this one decision keeps the
-// inline check and the middleware byte-for-byte identical (same status codes,
-// same fail-closed semantics), Copilot PR #193 caught that gating only the
-// dedicated participant endpoints left the bulk-PUT roster path open.
-func enforceElevated(c *gin.Context, ev ElevatedVerifier) bool {
-	if !ev.GateActive() {
-		return true
-	}
-	if !ev.Configured() {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "admin password not configured"})
-		return false
-	}
-	ok, err := ev.Verify(c.GetHeader("X-Admin-Password"))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "admin auth verification failed"})
-		return false
-	}
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid admin password"})
-		return false
-	}
-	return true
-}
-
 // isSelfRunMainGatedConfigRoute reports whether the given (method, route)
 // is an organiser-owned configuration/setup mutation that must remain behind
 // the main-password gate even in self-run mode (mp-7h7 / Copilot #203).
 //
-// Self-run makes the OPERATIONAL play surface public (scoring, check-in,
-// start, draw generation) because there is no table operator. But
-// competition COMPLETION is elevated-gated (irreversible, like invalidate).
-// configuration mutations are NOT operational play and are NOT elevated-gated,
-// so the self-run pass-through would otherwise let an anonymous client tamper
-// with setup. The routes below mutate: tournament setup (name/password/courts/
-// check-in windows) and competition setup (creation + config). They are keyed
-// by the param-free FullPath so the match is stable across path parameters.
+// Self-run makes the OPERATIONAL play surface public (scoring, start, draw
+// generation, and completing a competition; check-in does not exist) because there is no
+// table operator. Organiser actions are NOT operational play, so the self-run
+// pass-through would otherwise let an anonymous client tamper with them: the
+// routes below mutate tournament setup (name/password/courts/check-in
+// windows), competition setup (creation + config, seeds), make
+// corrections, or destroy data (delete or invalidate a competition, discard a
+// draw, reset overrides, import a tournament). There is no second password
+// for any of them (operator ruling 2026-10-12: the destructive-ops password
+// was removed; an admin-level action needs the admin sign-in alone), so this
+// list is the ONE thing keeping each of them off the public surface. They are
+// keyed by the param-free FullPath so the match is stable across path
+// parameters.
 //
-// IMPORTANT: any NEW admin route that mutates organiser-owned setup (rather
-// than operational play) and is not already elevated-gated MUST be added here,
-// otherwise it becomes anonymously writable in self-run mode.
+// Completing a competition (POST /api/competitions/:id/complete) is
+// deliberately NOT here: in self-run it is open like starting one (operator
+// ruling 2026-10-12, "For self managed, no admin password necessary"). Nor
+// are the roster add and edit (POST .../participants, PUT
+// .../participants/:pid): in self-run anyone can edit the roster (operator
+// ruling 2026-10-12).
+//
+// IMPORTANT: any NEW admin route that is not operational play MUST be added
+// here, otherwise it becomes anonymously writable in self-run mode.
 //
 // Three team writes are deliberately public in self-run (operator decision,
 // bc-dhas): the ones the public score sheet makes when a competitor names a
@@ -278,18 +225,27 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 	switch method + " " + fullPath {
 	case http.MethodGet + " /api/tournament", // Fix 3329406556: password field in full Tournament struct; viewer uses /api/viewer/tournament
 		http.MethodPost + " /api/tournament",                                               // Fix 3329416167: re-bootstrap overwrite when tournament already exists
-		http.MethodPut + " /api/tournament",                                                // tournament name/password/courts/check-in windows
+		http.MethodPut + " /api/tournament",                                                // tournament name/password/courts
 		http.MethodPost + " /api/competitions",                                             // create a competition (category), setup
 		http.MethodPut + " /api/competitions/:id",                                          // edit competition config, setup
 		http.MethodPost + " /api/tournament/announce",                                      // Fix 3329416176: organiser config, not operational play
 		http.MethodDelete + " /api/announcements/:id",                                      // Fix 3329416176: organiser config, not operational play
 		http.MethodDelete + " /api/announcements",                                          // Fix 3329416176: organiser config, not operational play
-		http.MethodPut + " /api/auth/admin-password",                                       // Fix 3330063192: relies on AuthMiddleware main-pw verification; not elevated-gated
+		http.MethodDelete + " /api/competitions/:id",                                       // bc-cmpw: deleting a competition, organiser, destructive
+		http.MethodPost + " /api/competitions/:id/invalidate",                              // bc-cmpw: invalidating a competition, organiser, irreversible
+		http.MethodDelete + " /api/competitions/:id/draw",                                  // bc-cmpw: discarding a draw, organiser, destructive
+		http.MethodPost + " /api/competitions/:id/bracket/quarantine",                      // bc-cmpw: setting aside a damaged bracket file, organiser repair
+		http.MethodDelete + " /api/competitions/:id/overrides",                             // bc-cmpw: resetting manual ranking overrides, organiser correction
+		http.MethodPut + " /api/competitions/:id/awards",                                   // bc-cmpw: fighting-spirit awards, organiser
+		http.MethodPost + " /api/tournament/import",                                        // bc-cmpw: importing a tournament replaces its data, organiser, destructive
 		http.MethodPut + " /api/competitions/:id/matches/:mid/override-winner",             // Fix 3330080949: result correction, organiser, not participant play
 		http.MethodPost + " /api/competitions/:id/matches/:mid/reopen",                     // mp-gmcg: reopen a finalized kachinuki result, organiser correction, same class as override-winner
 		http.MethodPost + " /api/competitions/:id/matches/:mid/requeue-blocker-and-reopen", // mp-gmcg A4: destructive (requeues a blocker) organiser correction; same class as reopen
 		http.MethodPut + " /api/competitions/:id/pools/:poolId/override-rank",              // Fix 3330080949: standings correction, organiser, not participant play
 		http.MethodPost + " /api/competitions/:id/competitor-status",                       // Fix 3331033814: eligibility mutation, organiser decision, not operational play
+		http.MethodPost + " /api/competitions/:id/league-tiebreak",                         // a team league's supplementary tie-break bouts, organiser decision, same class as override-rank
+		http.MethodDelete + " /api/competitions/:id/league-tiebreak",                       // removing them, organiser decision
+		http.MethodPost + " /api/competitions/:id/league-tiebreak/finalize",                // accepting a league's shared ranks, organiser decision
 		http.MethodGet + " /api/competitions/:id/export",                                   // Fix 3332740291: xlsx export, admin/CPU-heavy, not operational play
 		http.MethodGet + " /api/competitions/:id/export-results",                           // mp-i96p: results xlsx export, admin/CPU-heavy, keep gated like /export
 		http.MethodPut + " /api/competitions/:id/matches/:mid/court",                       // court assignment, organiser coordination
@@ -299,9 +255,13 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 		http.MethodPut + " /api/competitions/:id/matches/:mid/quick-score",                 // bc-dhas: same, and it replaces a match's bouts outright, finished or not
 		http.MethodPut + " /api/competitions/:id/seeds",                                    // seeding, organiser pre-draw setup
 		http.MethodPost + " /api/competitions/:id/competitors/:pid/reinstate",              // kiken-injury reinstatement, organiser decision
-		// Forward check-in (single PUT + bulk POST /checkin-bulk) is intentionally ungated,
-		// participants and desk staff can check in without the main admin password.
-		// Only reversal (DELETE) requires it.
+		// Self-run mode has no check-in (operator ruling 2026-10-13): the three
+		// check-in writes (PUT, POST /checkin-bulk, DELETE) answer 409
+		// check_in_not_in_self_run there for every caller
+		// (refuseCheckInInSelfRun). Forward check-in is ungated here, so that 409
+		// is what an anonymous PUT or bulk POST gets; the reversal below stays on
+		// this list, so an anonymous DELETE gets the gate's 401 first. In an
+		// officiated tournament the main gate covers all three.
 		http.MethodDelete + " /api/competitions/:id/participants/:pid/checkin", // check-in reversal, organiser correction
 		// The score sheet's own lineup and member writes are NOT here (see the
 		// doc comment above); these are the Lineups page's, which the public
@@ -315,6 +275,8 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 		http.MethodDelete + " /api/competitions/:id/matches/:mid/kachinuki-bout",       // mp-gmcg: removing a bout is an organiser correction, same class as reopen/override-winner; the participant score path gates itself via enforceSelfRunPolicy, this route does not
 		http.MethodPost + " /api/sponsors",                                             // mp-c38: sponsor logo upload, organiser setup, not operational play
 		http.MethodDelete + " /api/sponsors/:index",                                    // mp-c38: sponsor deletion, organiser setup, not operational play
+		http.MethodPost + " /api/branding/logo",                                        // mp-scf: tournament logo upload, organiser setup, not operational play
+		http.MethodDelete + " /api/branding/logo",                                      // mp-scf: tournament logo removal, organiser setup, not operational play
 		http.MethodPost + " /api/print/:type":                                          // mp-w87e: PDF export, admin/CPU-heavy, not operational play
 		return true
 	default:
@@ -427,18 +389,15 @@ func AuthMiddleware(verifier PasswordVerifier, store *state.Store) gin.HandlerFu
 		// Self-run mode (mp-7h7): skip the main-password gate for operational
 		// routes (scoring, check-in, start, generate draw, etc.),
 		// there is no dedicated table operator, so participants drive their own
-		// flow. Destructive routes (delete competition, invalidate, complete,
-		// draw, overrides, participant roster mutations, import) remain gated by the
-		// EXISTING RequireElevatedPassword / enforceElevated decorators that
-		// already fire downstream on those specific routes. No new allowlist
-		// needed, the elevated-decorator set IS the allowlist (DRY).
+		// flow.
 		//
-		// Exception, configuration/setup mutations stay main-gated even in
-		// self-run mode (see isSelfRunMainGatedConfigRoute). These routes
-		// mutate organiser-owned setup (tournament name/password/courts/
-		// check-in windows; competition creation and competition config) as
-		// opposed to the operational play surface participants drive. They are
-		// NOT elevated-gated, so without this carve-out the pass-through would
+		// Exception, organiser routes stay main-gated even in self-run mode
+		// (see isSelfRunMainGatedConfigRoute). These routes mutate
+		// organiser-owned setup (tournament name/password/courts/check-in
+		// windows; competition creation and config), make corrections,
+		// or destroy data (delete/invalidate a competition, discard a draw,
+		// reset overrides, import), as opposed to the operational play surface
+		// participants drive. Without this carve-out the pass-through would
 		// expose them to anonymous callers in self-run (Copilot #203). The SPA
 		// always sends the main password as X-Tournament-Password on admin
 		// mutations, so for the organiser who created the tournament this is

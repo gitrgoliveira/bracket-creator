@@ -479,15 +479,6 @@ func validateTournamentDurationDays(durationDays int) error {
 // participants out mid-scoring (self-run → officiated).
 var errModeImmutable = errors.New("tournament mode cannot be changed after creation")
 
-// errSelfRunRequiresAdminPassword is the sentinel returned when a caller
-// tries to create or save a self-run tournament in file mode without an
-// elevated (admin) password configured. In self-run mode the main-gate
-// is skipped, so if enforceElevated's GateActive()==false path (file mode,
-// no admin password) were reached the destructive routes would be fully
-// public, violating the self-run invariant that destructive calls still
-// require X-Admin-Password. (mp-7h7 fail-open fix)
-var errSelfRunRequiresAdminPassword = errors.New("self-run tournaments require an admin (destructive-ops) password to be set; configure it before switching to self-run mode or set it in the same request")
-
 // trimPublicInfoFields trims all optional public tournament info string fields
 // and normalises the Contacts slice: each entry's Label/Value is trimmed and
 // all-empty entries are dropped. Called identically by the PUT and POST
@@ -766,15 +757,6 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// immediately instead of waiting for their next write to 401.
 		passwordChanged := false
 		changed, err := store.UpdateTournamentChanged(&t, func(current, desired *state.Tournament) error {
-			// Preserve the write-only elevated password (spec 004). It has
-			// json:"-", so the bound body always leaves desired.AdminPassword
-			// == "", without copying it forward, a routine name/venue save
-			// would silently wipe the elevated credential. It is changed only
-			// via PUT /api/auth/admin-password, never here.
-			if current != nil {
-				desired.AdminPassword = current.AdminPassword
-			}
-
 			// Preserve Theme.LogoPath (mp-scf): LogoPath has json:"-" so the
 			// bound body never carries it. The logo is managed via
 			// POST/DELETE /api/branding/logo; this PUT must not clear it.
@@ -790,8 +772,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			}
 
 			// Immutability of Mode (mp-7h7): Mode is chosen once at creation
-			// and cannot be changed via PUT. Mirror the write-only AdminPassword
-			// preservation pattern: when the incoming body sends Mode == ""
+			// and cannot be changed via PUT. When the incoming body sends Mode == ""
 			// (omitempty), preserve the current stored value. When the body
 			// sends a non-empty Mode that differs from the stored Mode, reject.
 			//
@@ -847,27 +828,6 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 				passwordChanged = true
 			}
 
-			// Fail-open guard for self-run + file mode (mp-7h7): if the
-			// tournament is self-run, the main-gate is skipped, so
-			// destructive routes rely SOLELY on RequireElevatedPassword /
-			// enforceElevated. enforceElevated allows requests when
-			// GateActive()==false (file mode, no AdminPassword set). Without
-			// this guard, a self-run tournament with no admin password would
-			// leave destructive routes fully public. Locked mode always fails
-			// closed (GateActive always true → 503 when unconfigured) so we
-			// must NOT apply this guard in locked mode: there, the on-disk
-			// AdminPassword is always empty/inert (the env-var bcrypt hash is
-			// authoritative), so guarding on desired.AdminPassword == ""
-			// would wrongly reject every PUT to a locked-mode self-run
-			// tournament (e.g. a routine venue edit). The `locked` flag is
-			// captured from the enclosing handler scope.
-			//
-			// desired.AdminPassword was preserved from current above, so it
-			// reflects the current on-disk value.
-			if !locked && desired.Mode == state.TournamentModeSelfRun && desired.AdminPassword == "" {
-				return errSelfRunRequiresAdminPassword
-			}
-
 			return nil
 		})
 		if errors.Is(err, errPasswordRequired) {
@@ -876,10 +836,6 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		}
 		if errors.Is(err, errModeImmutable) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": errModeImmutable.Error()})
-			return
-		}
-		if errors.Is(err, errSelfRunRequiresAdminPassword) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": errSelfRunRequiresAdminPassword.Error()})
 			return
 		}
 		if err != nil {
@@ -921,31 +877,9 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 
 	r.POST("/tournament", func(c *gin.Context) {
 		var t state.Tournament
-		// ShouldBindBodyWith caches the raw request body so we can bind it a
-		// SECOND time below into a separate struct. This lets us read a
-		// transient `adminPassword` field from the SAME POST body WITHOUT
-		// weakening the json:"-" invariant on Tournament.AdminPassword (which
-		// deliberately can never be populated by binding a request body).
-		// Creation is the one safe place to accept the elevated credential in
-		// the body: there is no existing credential to protect at bootstrap,
-		// and it lets self-run creation be atomic (the fail-open guard never
-		// sees a self-run tournament persisted without an admin password). PUT
-		// keeps the json:"-" preserve-only behaviour (rotation stays on
-		// PUT /api/auth/admin-password).
+		// An `adminPassword` field sent by an older client (the removed
+		// destructive-ops password) is an unknown key here and is ignored.
 		if err := c.ShouldBindBodyWith(&t, binding.JSON); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		// Second bind into a local struct to capture the transient admin
-		// (destructive-ops) password. Tournament.AdminPassword has json:"-"
-		// so it is never populated by the bind above, this is the only way
-		// to read it from the body at creation time. A bind failure here is
-		// impossible (the first bind already validated the JSON), but handle
-		// it for safety.
-		var extra struct {
-			AdminPassword string `json:"adminPassword"`
-		}
-		if err := c.ShouldBindBodyWith(&extra, binding.JSON); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -1073,15 +1007,6 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			return
 		}
 
-		// Preserve the write-only elevated password (spec 004) across a
-		// re-bootstrap POST. It has json:"-" so the bound body never carries
-		// it; without this a re-POST over an existing record would wipe the
-		// elevated credential. On a true first bootstrap (existingForPost ==
-		// nil) it stays "", the operator sets it later via Settings.
-		if existingForPost != nil {
-			t.AdminPassword = existingForPost.AdminPassword
-		}
-
 		// Fix 3329416172: Mode is immutable after creation (mp-7h7). On a
 		// re-bootstrap POST (existingForPost != nil) preserve the stored Mode
 		// so a caller cannot flip an officiated tournament to self-run or vice
@@ -1095,59 +1020,6 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 				existingMode = state.TournamentModeOfficiated
 			}
 			t.Mode = existingMode
-		}
-
-		// Atomic admin-password set at creation (mp-7h7). In file mode the
-		// admin (destructive-ops) password is stored as PLAINTEXT in
-		// Tournament.AdminPassword (fileElevatedVerifier.Verify does an
-		// exact-string compare). When the body carried an `adminPassword`
-		// (read into `extra` above) and no admin password is already on disk,
-		// set it now, BEFORE the fail-open guard and before
-		// SaveTournamentChanged, so a self-run tournament is persisted WITH
-		// the credential in a single request. This is what makes self-run
-		// creation possible via the real API (the json:"-" invariant blocks
-		// the field from being bound directly into Tournament).
-		//
-		// Locked mode: the env-var bcrypt hash is the authoritative elevated
-		// credential; any body adminPassword is inert, so ignore it (do not
-		// write a plaintext value that would never be consulted).
-		//
-		// Fix 3329406566: validate adminPassword length before copy. The field
-		// is transient (not in Tournament) so validateTournamentLengths never
-		// sees it; enforce MaxLenTournamentPassword here.
-		fileMode := verifier == nil || !verifier.RedactStoredPassword()
-		// Fix 3331061367: validate adminPassword length whenever the field is
-		// present in the body, regardless of mode or whether an existing
-		// credential is already stored. This enforces the OpenAPI maxLength:256
-		// contract consistently: locked mode and re-bootstrap with an existing
-		// password would otherwise accept and silently discard an oversized
-		// value, giving callers no feedback that their request violates the
-		// contract. Only persist the value when in file mode with no existing
-		// elevated credential (locked mode uses TOURNAMENT_ADMIN_PASSWORD_HASH;
-		// re-bootstrap preserves the existing credential).
-		if extra.AdminPassword != "" {
-			if err := validateMaxLen("adminPassword", extra.AdminPassword, MaxLenTournamentPassword); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-			if fileMode && t.AdminPassword == "" {
-				t.AdminPassword = extra.AdminPassword
-			}
-		}
-
-		// Fail-open guard for self-run + file mode (mp-7h7).
-		// In self-run mode the main-gate is skipped, so destructive routes
-		// rely SOLELY on RequireElevatedPassword / enforceElevated.
-		// enforceElevated GateActive()==false (file mode, no admin password)
-		// means destructive routes would be fully public, violating the
-		// invariant. Reject creation of a self-run tournament in file mode
-		// unless an AdminPassword is set: either already on disk (preserved
-		// from existingForPost) or supplied in this request's body (set just
-		// above). Locked mode always fails closed (GateActive always true →
-		// 503) so no guard needed there.
-		if fileMode && t.Mode == state.TournamentModeSelfRun && t.AdminPassword == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": errSelfRunRequiresAdminPassword.Error()})
-			return
 		}
 
 		if _, err := store.SaveTournamentChanged(&t); err != nil {

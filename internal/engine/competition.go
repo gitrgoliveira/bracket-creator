@@ -15,6 +15,36 @@ import (
 // element-wise equal (used by StartCompetition's mid-pipeline
 // settings-drift check). nil and empty slices are treated as
 // equivalent, both mean "no courts" from the config's POV.
+// PoolMatchesSettled reports whether a competition's pool-matches.csv rows
+// (pool, league and Swiss matches alike) are all played: every match is
+// completed, and a supplementary tie-break or representative bout also names
+// a winner, since one decided without a winner (a hikiwake) leaves the tie it
+// was played for unresolved. It is the rule a league is completed by
+// (maybeAutoCompletePoolsRunning) and the one POST /complete asks of a
+// competition with no knockout rounds to check. Vacuously true with no rows.
+func PoolMatchesSettled(matches []state.MatchResult) bool {
+	for _, m := range matches {
+		if m.Status != state.MatchStatusCompleted {
+			return false
+		}
+		if (IsPoolDaihyosenMatchID(m.ID) || IsTiebreakerMatchID(m.ID)) && m.Winner == "" {
+			return false
+		}
+	}
+	return true
+}
+
+// SwissRoundsToDraw reports how many of a Swiss competition's configured
+// rounds have not been drawn yet: the inverse of the bound AdvanceSwissRound
+// refuses a further round by. 0 for any other format, and for a Swiss
+// competition with no configured round count.
+func SwissRoundsToDraw(comp *state.Competition) int {
+	if comp == nil || comp.Format != state.CompFormatSwiss || comp.SwissRounds <= 0 || comp.SwissCurrentRound >= comp.SwissRounds {
+		return 0
+	}
+	return comp.SwissRounds - comp.SwissCurrentRound
+}
+
 func courtsEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -462,13 +492,8 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 		if ferr != nil {
 			return nil, ferr
 		}
-		for _, m := range freshMatches {
-			if m.Status != state.MatchStatusCompleted {
-				return nil, nil
-			}
-			if (IsPoolDaihyosenMatchID(m.ID) || IsTiebreakerMatchID(m.ID)) && m.Winner == "" {
-				return nil, nil
-			}
+		if !PoolMatchesSettled(freshMatches) {
+			return nil, nil
 		}
 		comp.Status = state.CompStatusComplete
 		return comp, nil
@@ -1149,8 +1174,9 @@ func (e *Engine) runDrawPipeline(id string) error {
 	if err != nil {
 		return err
 	}
-	// Exclude participants who have not checked in (mp-w7x), but ONLY when the
-	// competition has check-in tracking enabled (comp.CheckInEnabled). The rest
+	// Exclude participants who have not checked in (mp-w7x), but ONLY when
+	// check-in applies to the competition (comp.CheckInApplies: its setting is
+	// on and the tournament is not self-run, which has no check-in). The rest
 	// of the stack masks checkedIn behind this flag (the viewer derives
 	// checkedIn as `checkInEnabled && p.checkedIn`), so a stale/imported
 	// checked_in marker on a competition that doesn't use check-in must not
@@ -1170,7 +1196,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// same-named participants by dojo.
 	var excludedByCheckIn map[string]bool
 	fullRoster := players
-	if comp.CheckInEnabled {
+	if comp.CheckInApplies(tourn) {
 		excludedByCheckIn = checkInExcludedKeys(players)
 		players = filterCheckedIn(players)
 	}

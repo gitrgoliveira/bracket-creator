@@ -41,7 +41,7 @@ func newTeamWritesFixture(t *testing.T, selfRun bool) teamWritesFixture {
 	t.Helper()
 	store := newTempStore(t)
 	if selfRun {
-		seedSelfRunTournament(t, store, "admin-pw")
+		seedSelfRunTournament(t, store)
 	} else {
 		seedOfficiatedTournament(t, store)
 	}

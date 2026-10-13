@@ -99,11 +99,10 @@ func TestGETCompetitionScheduleEstimate(t *testing.T) {
 			"expected non-zero total duration for competition with 8 participants")
 	})
 
-	t.Run("no elevated auth required, main password sufficient", func(t *testing.T) {
-		// The endpoint is registered under adminGroup (main-password gated)
-		// but does NOT require elevated (admin) auth. This test confirms
-		// the handler itself does not check for elevated credentials;
-		// AuthMiddleware enforcement is tested via the real server wiring,
+	t.Run("main password sufficient", func(t *testing.T) {
+		// The endpoint is registered under adminGroup (main-password gated).
+		// This test confirms the handler itself asks for no other
+		// credential; AuthMiddleware enforcement is tested via the real server wiring,
 		// not this unit-level router (setupTestRouter omits AuthMiddleware).
 		comp := state.Competition{
 			ID:     "main-auth-estimate",
@@ -115,10 +114,10 @@ func TestGETCompetitionScheduleEstimate(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", "/api/competitions/main-auth-estimate/schedule/estimate", nil)
-		// No X-Admin-Password, only main-password auth is needed (enforced
-		// by AuthMiddleware in production, not by the handler itself).
+		// Only main-password auth is needed (enforced by AuthMiddleware in
+		// production, not by the handler itself).
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code,
-			"estimate endpoint must not require elevated auth")
+			"estimate endpoint must need no other credential")
 	})
 }

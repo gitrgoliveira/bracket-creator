@@ -48,7 +48,7 @@ import {
   MIN_POOL_SIZE, MIN_POOL_WINNERS, MIN_SWISS_ROUNDS,
   HINT_ZEKKEN, HINT_ENGI, HINT_KIND_ONLY_INDIVIDUAL, HINT_TEAM_SIZE, HINT_POOL_WINNERS_LOCKED,
   LABEL_NAGINATA, HINT_NAGINATA,
-  LABEL_CHECK_IN, HINT_CHECK_IN,
+  LABEL_CHECK_IN, HINT_CHECK_IN, tournamentHasCheckIn, checkInApplies,
   LABEL_NUMBER_PREFIX, cutNumberPrefix, numberPrefixHint, LABEL_COURTS,
 } from './competition_shape.jsx';
 import { PillGroup, PillButton, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
@@ -95,7 +95,6 @@ function formatClearedValue(key, value) {
 function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, onStatusChange }) {
   const [lastSaved, setLastSaved] = useStateA(null);
   const [saveErr, setSaveErr] = useStateA(null);
-  const [deleting, setDeleting] = useStateA(false);
   const [invalidating, setInvalidating] = useStateA(false);
   // twoThirdPlaces (bc-3rdp) is seeded through effectiveTwoThirdPlaces, not a
   // bare `c.twoThirdPlaces` copy: a competition saved before this field
@@ -130,9 +129,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // roster and runs the full formation scan, and AdminSettings re-renders on
   // every keystroke of any settings field.
   const qualifierPreview = useMemoA(() => {
-    const drawPlayers = effectiveDrawPlayers(c.players, local.checkInEnabled);
+    const drawPlayers = effectiveDrawPlayers(c.players, checkInApplies(tournament, local.checkInEnabled));
     return computeQualifierPreview(drawPlayers.length, local.poolSize, local.poolWinners, seededRanks(drawPlayers));
-  }, [c.players, local.checkInEnabled, local.poolSize, local.poolWinners]);
+  }, [c.players, tournament, local.checkInEnabled, local.poolSize, local.poolWinners]);
 
   // Schedule estimate (mp-zoh Phase 4): fetch per-competition estimate and
   // display it inline near the duration inputs. Re-fetches whenever the
@@ -1535,7 +1534,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             twoThirdPlacesForNaginata picks a sane starting point; the
             operator can still re-tick "Award two joint 3rd places" after. */}
         <CheckboxField label={LABEL_NAGINATA} checked={!!local.naginata} disabled={lockedAfterDraw} onChange={(on) => { update("naginata", on); update("twoThirdPlaces", twoThirdPlacesForNaginata(on)); }} hint={`${HINT_NAGINATA}${lockedNote}`} />
-        <CheckboxField label={LABEL_CHECK_IN} checked={!!local.checkInEnabled} onChange={(on) => update("checkInEnabled", on)} hint={HINT_CHECK_IN} />
+        {tournamentHasCheckIn(tournament) && <CheckboxField label={LABEL_CHECK_IN} checked={!!local.checkInEnabled} onChange={(on) => update("checkInEnabled", on)} hint={HINT_CHECK_IN} />}
       </div>
       {/* Repeat Save at the foot of the long settings form so the operator
           doesn't have to scroll back to the header after editing. Same
@@ -1556,13 +1555,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       <div style={{ marginTop: 24, padding: 16, borderTop: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 12 }}>
         {(local.status === "pools" || local.status === "knockout") && (
           <div>
-            <button type="button" className="btn btn--danger btn--ghost" disabled={invalidating || deleting} onClick={async () => {
+            <button type="button" className="btn btn--danger btn--ghost" disabled={invalidating} onClick={async () => {
               if (await window.confirmDialog({ message: `Mark "${local.name}" as invalid? It will be excluded from results and can be deleted afterwards.`, confirmLabel: "Mark invalid", danger: true })) {
-                const admin = await window.promptAdminPassword();
-                if (admin === null) return;
                 setInvalidating(true);
                 try {
-                  const updated = await window.API.invalidateCompetition(local.id, password, admin);
+                  const updated = await window.API.invalidateCompetition(local.id, password);
                   if (mountedRef.current) {
                     // Use the server response (if any) so that server-side
                     // field updates are reflected immediately. Fall back to
@@ -1589,32 +1586,43 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             <div className="field__hint" style={{ marginTop: 4 }}>Required before deleting an in-progress competition.</div>
           </div>
         )}
-        <button type="button" className="btn btn--danger btn--ghost" disabled={deleting || invalidating} onClick={async () => {
+        <button type="button" className="btn btn--danger btn--ghost" disabled={invalidating} onClick={async () => {
           const started = local.status && local.status !== "setup" && local.status !== "draw-ready";
-          const msg = started
-            ? `"${local.name}" has already started. Deleting it will remove ALL matches and results. This cannot be undone. Continue?`
-            : `Are you sure you want to delete "${local.name}"? This action cannot be undone.`;
-          if (await window.confirmDialog({ message: msg, confirmLabel: "Delete competition", danger: true })) {
-            const admin = await window.promptAdminPassword();
-            if (admin === null) return;
-            setDeleting(true);
-            try {
-              const ok = await window.API.deleteCompetition(local.id, password, admin);
-              // onBack() unmounts AdminSettings via the parent's view
-              // switch; setDeleting(false) in finally would then fire on
-              // a torn-down component. Gate via mountedRef.
-              if (ok) onBack();
-              else if (mountedRef.current) showToast("Failed to delete competition.", "error");
-            } catch (e) {
-              console.error("Delete competition failed:", e);
-              if (mountedRef.current) showToast(e.message, "error");
-            } finally {
-              if (mountedRef.current) setDeleting(false);
-            }
+          // Deleting a competition is the one action that asks for the password
+          // again: the dialog takes it and the server checks it
+          // (X-Confirm-Password). A wrong one shows the server's sentence in the
+          // dialog, which stays open; the operator stays signed in.
+          const msg = `${started
+            ? `"${local.name}" has already started. Deleting it removes all matches and results and cannot be undone. `
+            : "Deleting it cannot be undone. "}Enter the admin password to delete "${local.name}".`;
+          let ok = false;
+          try {
+            await window.promptDialog({
+              title: "Delete competition",
+              message: msg,
+              password: true,
+              danger: true,
+              confirmLabel: "Delete",
+              submit: async (typed) => {
+                if (!typed) return "Enter the password.";
+                try {
+                  ok = await window.API.deleteCompetition(local.id, password, typed);
+                } catch (e) {
+                  if (typeof e.code === "string" && e.code.startsWith("confirm_password_")) return e.message;
+                  throw e;
+                }
+                return null;
+              },
+            });
+          } catch (e) {
+            console.error("Delete competition failed:", e);
+            if (mountedRef.current) showToast(e.message, "error");
+            return;
           }
+          // onBack() unmounts AdminSettings via the parent's view switch.
+          if (ok) onBack();
         }}>
-          {deleting && <span className="spinner" />}
-          {deleting ? "Deleting…" : "Delete competition"}
+          Delete competition
         </button>
         <div className="field__hint" style={{ marginTop: 4 }}>Deleting a started competition will remove all matches and results.</div>
       </div>

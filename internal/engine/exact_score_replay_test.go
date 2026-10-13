@@ -42,14 +42,27 @@ func TestExactScoreReplay(t *testing.T) {
 		{name: "a match not finished", change: func(s, _ *state.MatchResult) { s.Status = state.MatchStatusRunning }},
 		{name: "another competitor", change: func(_, w *state.MatchResult) { w.SideB = "Carol" }},
 		{name: "a winner id naming neither side", change: func(_, w *state.MatchResult) { w.WinnerID = "z" }},
+		// R3: a point made after the finish landed; the resend's points are
+		// held by the merge (the stored ones are newer), so they are not its
+		// to differ in.
+		{name: "points the merge would hold, changed since", change: func(s, w *state.MatchResult) {
+			s.GroupStamps = map[string]int64{state.GroupPoints: at + 5_000, state.GroupResult: at}
+			s.ModifiedAt = at + 5_000
+			w.IpponsA = []string{"M"}
+		}, want: true},
+		{name: "points changed since, and another winner", change: func(s, w *state.MatchResult) {
+			s.GroupStamps = map[string]int64{state.GroupPoints: at + 5_000, state.GroupResult: at}
+			s.ModifiedAt = at + 5_000
+			w.IpponsA, w.IpponsB, w.Winner = []string{}, []string{"M", "K"}, "Bob"
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, w := stored(), resend()
 			tc.change(s, w)
 			before := *w
-			assert.Equal(t, tc.want, ExactScoreReplay(s, w, true))
+			assert.Equal(t, tc.want, ExactScoreReplay(s, w, nil, true))
 			assert.Equal(t, before, *w, "the write is judged on a copy")
 		})
 	}
-	assert.False(t, ExactScoreReplay(nil, resend(), true))
+	assert.False(t, ExactScoreReplay(nil, resend(), nil, true))
 }

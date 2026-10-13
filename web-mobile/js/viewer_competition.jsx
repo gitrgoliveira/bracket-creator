@@ -81,7 +81,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // still feeds the "your next match" opponent-side logic.
   const [watchlist, setWatchlist] = useWatchlist();
   const [primaryKey, setPrimaryKey] = usePrimaryWatch();
-  const compRoster = useMemo(() => buildRoster([c]), [c]);
+  const compRoster = useMemo(() => buildRoster([c], tournament), [c, tournament]);
   const rosterById = useMemo(() => new Map(compRoster.map((p) => [p.id, p])), [compRoster]);
   // Restrict the filter bar chips to entries that are relevant to THIS competition:
   // player entries only shown when the player is in compRoster; dojo entries only

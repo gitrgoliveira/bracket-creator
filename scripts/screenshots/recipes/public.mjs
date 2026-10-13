@@ -13,8 +13,7 @@
 // them in self-run mode. That used to require scheduling care because every
 // mobile recipe shared one server; run.mjs now gives each FAMILY its own
 // server and data dir, so the families cannot contaminate one another.
-import { settle, PASSWORD, withAdminPage } from '../lib/ui.mjs';
-import { client } from '../lib/api.mjs';
+import { settle, withAdminPage } from '../lib/ui.mjs';
 import { EDITOR, sameSideTapPacer, finishMatch, startMatch } from '../lib/editor.mjs';
 import { assertIndividualBoutPoints, assertHanteiRecorded } from '../lib/fixture.mjs';
 import { SCORE_EDITOR_SOURCES, VIEWER_SOURCES } from '../lib/scope.mjs';
@@ -89,27 +88,22 @@ export const families = {
         name: 'Riverside Open',
         venue: 'Riverside Budokan',
         mode: 'self-run',
-        adminPassword: PASSWORD,
       });
       const compId = await api.competition(SELFRUN_COMP, 'Open Individual', { courts: ['A'] });
       // A SECOND open competition, because selfrun-viewer-home's caption reads
       // "each open competition carries a Register button" - a plural claim that
       // one card demonstrates poorly, and that a reader cannot check at all.
       const secondId = await api.competition('womens-open', "Women's Open", { courts: ['A'] });
-      // Setting a self-run tournament's adminPassword above flips
-      // ElevatedVerifier.GateActive() on (middleware.go's RequireElevatedPassword):
-      // a roster mutation is one of the gated "destructive ops" (delete
-      // competition, discard draw, roster add/edit, import), so it needs a
-      // SECOND header, X-Admin-Password, which the shared client sends when
-      // asked. A plain roster POST is scaffolding, not a fidelity concern.
-      const elevated = client(base, { 'X-Admin-Password': PASSWORD });
-      await elevated.post(`/api/competitions/${compId}/participants`, { players: [
+      // A roster add is an organiser action in self-run, so it goes with the
+      // tournament password the shared client sends. Scaffolding, not a
+      // fidelity concern.
+      await api.post(`/api/competitions/${compId}/participants`, { players: [
         { name: 'Emi Kondo', dojo: 'Riverside Dojo' },
         { name: 'Taro Fujita', dojo: 'Riverside Dojo' },
         { name: 'Nana Ishii', dojo: 'Harbor Dojo' },
         { name: 'Sho Matsuda', dojo: 'Harbor Dojo' },
       ] });
-      await elevated.post(`/api/competitions/${secondId}/participants`, { players: [
+      await api.post(`/api/competitions/${secondId}/participants`, { players: [
         { name: 'Aiko Tanaka', dojo: 'Riverside Dojo' },
         { name: 'Mika Suzuki', dojo: 'Harbor Dojo' },
         { name: 'Hana Sato', dojo: 'Northgate Dojo' },

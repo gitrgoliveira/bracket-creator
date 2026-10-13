@@ -31,7 +31,6 @@ const STUBBED_GLOBALS = {
   BrandingManager: Stub('BrandingManager'),
   isNonPublicOrigin: () => false,
   confirmDialog: vi.fn().mockResolvedValue(false),
-  promptAdminPassword: vi.fn().mockResolvedValue(null),
   API: {
     importCompetitions: vi.fn().mockResolvedValue({ results: [] }),
     updateTournament: vi.fn().mockResolvedValue(null),
@@ -85,6 +84,27 @@ const venueHint = (container) => {
   const el = container.querySelector('[data-testid="venue-shiaijo-hint"]');
   return el && el.textContent;
 };
+
+// Operator ruling 2026-10-13: "Self run mode has no check-in." The read-only
+// Tournament type line states what self-run makes public and names no check-in.
+describe('Tournament type line (self-run has no check-in)', () => {
+  const typeHint = (container) => Array.from(container.querySelectorAll('.field'))
+    .find((f) => f.textContent.includes('Tournament type')).textContent;
+
+  it('says scoring, starting and completing are public and that there is no check-in', async () => {
+    const { container } = await mountEdit(makeTournament({ mode: 'self-run' }));
+    const text = typeHint(container);
+    expect(text).toContain('Self-run');
+    expect(text).toContain('Scoring and starting and completing a competition are public.');
+    expect(text).toContain('Self-run mode has no check-in.');
+    expect(text).not.toContain('roster changes');
+  });
+
+  it('says nothing about check-in for an officiated tournament', async () => {
+    const { container } = await mountEdit(makeTournament({ mode: 'officiated' }));
+    expect(typeHint(container).toLowerCase()).not.toContain('check-in');
+  });
+});
 
 describe('Tournament venue field teaches the rule up front (U3)', () => {
   it('says any number is fine and scopes the rule to each competition', async () => {
@@ -225,7 +245,6 @@ describe('Import row errors read as prose, not as a tag (U4)', () => {
   const runImport = async (container, results) => {
     window.API.importCompetitions.mockResolvedValueOnce({ results });
     window.confirmDialog.mockResolvedValueOnce(true);
-    window.promptAdminPassword.mockResolvedValueOnce('');
     const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Import');
     await act(async () => { fireEvent.click(btn); });
     await flushUntil(container, '[data-testid="import-result-row"]');
@@ -283,7 +302,6 @@ describe('Import warning: a reassigned row surfaces without being mistaken for a
   const runImport = async (container, results) => {
     window.API.importCompetitions.mockResolvedValueOnce({ results });
     window.confirmDialog.mockResolvedValueOnce(true);
-    window.promptAdminPassword.mockResolvedValueOnce('');
     const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Import');
     await act(async () => { fireEvent.click(btn); });
     await flushUntil(container, '[data-testid="import-result-row"]');

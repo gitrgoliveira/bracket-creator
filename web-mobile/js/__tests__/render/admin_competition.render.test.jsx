@@ -63,13 +63,13 @@ const STUBBED_GLOBALS = {
   }),
   // Dialogs / async: only reached from handlers; safe resolved stubs.
   confirmDialog: vi.fn().mockResolvedValue(false),
-  promptAdminPassword: vi.fn().mockResolvedValue(null),
   promptDialog: vi.fn().mockResolvedValue(null),
   API: {
     estimateCompetitionSchedule: vi.fn().mockResolvedValue(null),
     swissGenerateRound: vi.fn().mockResolvedValue(null),
     updateCompetitionAwards: vi.fn().mockResolvedValue(null),
     completeCompetition: vi.fn().mockResolvedValue({ status: 'completed' }),
+    discardDraw: vi.fn().mockResolvedValue({}),
     // Advisory fetch made on every competition mount; per-test overrides in the
     // draw-warning suite below.
     fetchDrawWarnings: vi.fn().mockResolvedValue([]),
@@ -257,11 +257,9 @@ describe('AdminCompetition "Complete competition" action (mp-gy6g)', () => {
     }
   });
 
-  it('calls the API and refreshes on confirm', async () => {
+  it('calls the API and refreshes on confirm, asking for no password', async () => {
     window.confirmDialog.mockResolvedValueOnce(true);
-    // Completion is elevated-gated; promptAdminPassword resolves "" (no admin
-    // password configured) so the handler proceeds.
-    window.promptAdminPassword.mockResolvedValueOnce('');
+    window.promptDialog.mockClear();
     window.API.completeCompetition.mockClear();
     const onRefreshCompetition = vi.fn();
     const showToast = vi.fn();
@@ -299,7 +297,11 @@ describe('AdminCompetition "Complete competition" action (mp-gy6g)', () => {
     expect(btn).not.toBeUndefined();
     await act(async () => { fireEvent.click(btn); });
 
-    await waitFor(() => expect(window.API.completeCompetition).toHaveBeenCalledWith('nagi-1', 'shiaijo2026', ''));
+    // bc-cmpw: the confirm is the only step; the tournament password the
+    // operator signed in with authorises it, and nothing else is sent.
+    await waitFor(() => expect(window.API.completeCompetition).toHaveBeenCalledTimes(1));
+    expect(window.API.completeCompetition.mock.calls[0]).toEqual(['nagi-1', 'shiaijo2026']);
+    expect(window.promptDialog).not.toHaveBeenCalled();
     expect(onRefreshCompetition).toHaveBeenCalled();
     expect(showToast).toHaveBeenCalledWith(expect.stringContaining('marked complete'));
   });
@@ -315,6 +317,75 @@ describe('AdminCompetition "Complete competition" action (mp-gy6g)', () => {
     await act(async () => { fireEvent.click(btn); });
 
     expect(window.API.completeCompetition).not.toHaveBeenCalled();
+  });
+});
+
+// bc-cmpw: discarding a draw keeps its confirm, and once confirmed it goes
+// straight to the API with the signed-in tournament password: there is no
+// second, destructive-ops password to prompt for.
+describe('AdminCompetition "Discard draw" action (bc-cmpw)', () => {
+  const findButton = (container, text) =>
+    Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === text);
+
+  async function mountDrawReady() {
+    const comp = makeCompetition({ id: 'mud-1', status: 'draw-ready' });
+    const t = makeTournament(comp);
+    let container;
+    await act(async () => {
+      ({ container } = render(
+        <AdminCompetition
+          tournament={t}
+          competition={comp}
+          pools={[]}
+          poolMatches={[]}
+          standings={[]}
+          bracket={null}
+          section="overview"
+          onSection={noop}
+          onBack={noop}
+          onOpenCompetition={noop}
+          onUpdate={noop}
+          onRefreshCompetition={noop}
+          onMoveCourt={noop}
+          onEditScore={noop}
+          onLogout={noop}
+          onViewerMode={noop}
+          tweaks={{}}
+          password="shiaijo2026"
+          showToast={noop}
+        />
+      ));
+    });
+    return container;
+  }
+
+  it('calls discardDraw with exactly (id, password) after the confirm, with no password prompt', async () => {
+    window.confirmDialog.mockClear();
+    window.confirmDialog.mockResolvedValueOnce(true);
+    window.promptDialog.mockClear();
+    window.API.discardDraw.mockClear();
+    const container = await mountDrawReady();
+
+    const btn = findButton(container, 'Discard draw');
+    expect(btn).not.toBeUndefined();
+    await act(async () => { fireEvent.click(btn); });
+
+    await waitFor(() => expect(window.API.discardDraw).toHaveBeenCalledTimes(1));
+    expect(window.API.discardDraw.mock.calls[0]).toEqual(['mud-1', 'shiaijo2026']);
+    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(window.promptDialog).not.toHaveBeenCalled();
+  });
+
+  it('still asks for the confirm and does nothing when it is cancelled', async () => {
+    window.confirmDialog.mockClear();
+    window.confirmDialog.mockResolvedValueOnce(false);
+    window.API.discardDraw.mockClear();
+    const container = await mountDrawReady();
+
+    await act(async () => { fireEvent.click(findButton(container, 'Discard draw')); });
+
+    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(window.API.discardDraw).not.toHaveBeenCalled();
   });
 });
 
@@ -1100,6 +1171,35 @@ describe('AdminSettings Knockout qualifiers (bc-qual LP-5a)', () => {
       .querySelector('input');
     await act(async () => { fireEvent.click(checkbox); });
     expect(preview().textContent).toContain('Needs seeded pools');
+  });
+
+  // Operator ruling 2026-10-13: "Self run mode has no check-in." The setting
+  // is hidden there and the draw ignores it, so the preview reads the whole
+  // roster even though the stored setting is on.
+  const checkInLabel = (container) => Array.from(container.querySelectorAll('label.checkbox'))
+    .find((l) => l.textContent.includes('Check-in tracking'));
+
+  it('offers the check-in toggle in an officiated tournament', async () => {
+    const comp = mixedMinComp({ players: makePlayers(9), checkInEnabled: false });
+    const { container } = await mountSection('settings', { comp, tournament: { mode: 'officiated' } });
+    expect(checkInLabel(container)).toBeTruthy();
+  });
+
+  it('hides the check-in toggle in a self-run tournament', async () => {
+    const comp = mixedMinComp({ players: makePlayers(9), checkInEnabled: true });
+    const { container } = await mountSection('settings', { comp, tournament: { mode: 'self-run' } });
+    expect(checkInLabel(container)).toBeFalsy();
+  });
+
+  it('previews the whole roster in a self-run tournament although the stored setting is on', async () => {
+    const players = [
+      { id: 'noshow', name: 'No Show', seed: 1, checkedIn: false },
+      ...makePlayers(9, () => ({ checkedIn: true })),
+    ];
+    const comp = mixedMinComp({ players, checkInEnabled: true, extraQualifiers: 'fill-bracket' });
+    const { container } = await mountSection('settings', { comp, tournament: { mode: 'self-run' } });
+    const preview = container.querySelector('[data-testid="qualifier-preview-line"]');
+    expect(preview.textContent).not.toContain('Needs seeded pools');
   });
 });
 

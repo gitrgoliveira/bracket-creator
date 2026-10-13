@@ -3358,43 +3358,6 @@ func TestPUTCompetitionAwards(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
-	t.Run("missing elevated password rejected", func(t *testing.T) {
-		// Build a router with an active elevated gate: store has a tournament
-		// with a non-empty AdminPassword. The gate becomes active and any
-		// request without X-Admin-Password must be rejected.
-		tmpDir := t.TempDir()
-		s, err := state.NewStore(tmpDir)
-		require.NoError(t, err)
-		// SaveTournament with AdminPassword set activates the fileElevatedVerifier gate.
-		require.NoError(t, s.SaveTournament(&state.Tournament{
-			Name:          "T",
-			Password:      "mainpw",
-			Courts:        []string{"A"},
-			AdminPassword: "secretadminpw",
-		}))
-		require.NoError(t, s.SaveCompetition(&state.Competition{
-			ID: "awards-elev", Name: "Elev Test",
-		}))
-
-		gin.SetMode(gin.TestMode)
-		elev := NewFileElevatedVerifier(s)
-		hr := gin.New()
-		api := hr.Group("/api")
-		RegisterCompetitionHandlers(api, s, nil, NewHub(), elev)
-
-		body2, _ := json.Marshal(map[string]any{
-			"fightingSpiritAwards": []map[string]any{
-				{"title": "Spirit", "recipientName": "Alice"},
-			},
-		})
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/awards-elev/awards", bytes.NewBuffer(body2))
-		req.Header.Set("Content-Type", "application/json")
-		// Do NOT set X-Admin-Password, should be rejected with 401 (wrong credential).
-		hr.ServeHTTP(w, req)
-		assert.Equalf(t, http.StatusUnauthorized, w.Code, "missing elevated password must return 401, got %d: %s", w.Code, w.Body.String())
-	})
-
 	t.Run("whitespace trimmed from awards before persisting", func(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
 			"fightingSpiritAwards": []map[string]any{

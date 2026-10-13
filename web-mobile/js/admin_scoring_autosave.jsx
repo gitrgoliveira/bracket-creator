@@ -4,7 +4,7 @@
 
 import { toBackendMatchResult, matchWire } from './api_serializers.jsx';
 import { changedGroups, statedGroupsOf, groupMatches, keptInHistoryNote, GROUP_RESULT } from './match_groups.jsx';
-import { writeDidNotLand } from './write_result.jsx';
+import { writeDidNotLand, writeWasRefused } from './write_result.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -134,6 +134,26 @@ export function useKeptInHistoryNote() {
     };
   }
   return { note, noteFromWrite: noteFromWriteRef.current };
+}
+
+// landedAutosave: an editor's autosave submit, wrapped so `onLanded(seq)` runs when a save
+// LANDED (not queued, not refused), with `seq` the value of the editor's edit counter
+// (`seqRef`) when the save was handed over. The patch is built in the same tick, so a save
+// carries every edit counted up to `seq` and none after it: the edit stamps the editor
+// keeps to hold its board against an older server copy (bc-kclr, bc-ltap) clear only for
+// edits at or before it, never for a tap made while the save was out. The individual
+// editor's board stamp and the team sheet's row and pick stamps are its two callers.
+export function landedAutosave(submit, seqRef, onLanded) {
+  return (patch) => {
+    const seq = seqRef.current;
+    const p = submit(patch);
+    if (p && typeof p.then === "function") {
+      p.then((res) => {
+        if (!writeWasRefused(res) && !writeDidNotLand(res)) onLanded(seq);
+      }, () => {});
+    }
+    return p;
+  };
 }
 
 export function KeptInHistoryNote({ note }) {

@@ -130,7 +130,7 @@ describe('a bout row stamp stands only while an edit is unsent', () => {
     expect(filled('shiro')).toBe(0);
   });
 
-  it('keeps the row when the save was refused', async () => {
+  it('follows the server once the save was refused: the refusal clears the stamp', async () => {
     const onSubmit = vi.fn().mockResolvedValue({ applied: false, reason: 'superseded' });
     let utils;
     const el = (match) => <ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={onSubmit} password="" />;
@@ -141,6 +141,6 @@ describe('a bout row stamp stands only while an edit is unsent', () => {
     await act(async () => { vi.advanceTimersByTime(400); });
 
     await act(async () => { utils.rerender(el(otherDeviceScoredShiro(tappedAt - 1))); });
-    expect(filled('shiro'), 'a refused save landed nothing, so the stamp stands').toBe(0);
+    expect(filled('shiro'), "a refused save is never followed by a broadcast, so the other device's point shows").toBe(1);
   });
 });

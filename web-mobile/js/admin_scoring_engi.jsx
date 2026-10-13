@@ -155,8 +155,14 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // is the edit autosaved, and only a landed autosave clears the stamp.
   const flagsEditedAtRef = useRefE(undefined);
   const flagsEditSeqRef = useRefE(0);
+  // A REFUSED autosave stores and broadcasts nothing, so no later copy would re-run the
+  // adopt: with no edit since the save was built, the counts take the server's current
+  // copy now (takeServerFlagsRef holds the latest render's adopt, not this one's).
+  const takeServerFlagsRef = useRefE(null);
   autosaveOnSubmitRef.current = landedAutosave(onSubmit, flagsEditSeqRef, (seq) => {
     if (flagsEditSeqRef.current === seq) flagsEditedAtRef.current = undefined;
+  }, (seq) => {
+    if (flagsEditSeqRef.current === seq && takeServerFlagsRef.current) takeServerFlagsRef.current();
   });
   // The match left running (finished, or sent back to the queue, elsewhere) inside the
   // debounce: the write is dropped with no callback, so no landed save clears the stamp.
@@ -202,15 +208,19 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // Until the match is running nothing this editor holds reaches the server
   // before the operator submits, so a stale reading can sit in front of them
   // for as long as the match is open.
+  const takeServerFlags = () => {
+    flagsEditedAtRef.current = undefined;
+    setFlagsA(initialFlagsA);
+    setFlagsB(initialFlagsB);
+    claimChanged.agree(GROUP_FLAGS);
+  };
+  takeServerFlagsRef.current = takeServerFlags;
   useAdoptFromServer({
     signature: `${initialFlagsA}:${initialFlagsB}`,
     apply: () => {
       const editedAt = flagsEditedAtRef.current;
       if (editedAt !== undefined && (m.modifiedAt || 0) < editedAt) return;
-      flagsEditedAtRef.current = undefined;
-      setFlagsA(initialFlagsA);
-      setFlagsB(initialFlagsB);
-      claimChanged.agree(GROUP_FLAGS);
+      takeServerFlags();
     },
     keepLocalEdits: true,
     isDirty,

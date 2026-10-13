@@ -342,8 +342,14 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   };
   // The autosave's submit: the host's onSubmit, and on a landed answer the
   // board stamp cleared when no board edit was made since this save was built.
+  // A REFUSED autosave stores and broadcasts nothing, so no later copy would re-run the
+  // adopt: with no board edit since the save was built, the board takes the server's
+  // current copy now (applyServerScoreRef holds the latest render's, not this one's).
+  const applyServerScoreRef = useRefA(null);
   const landedBoardSave = (submit) => landedAutosave(submit, boardEditSeqRef, (seq) => {
     if (boardEditSeqRef.current === seq) boardEditedAtRef.current = undefined;
+  }, (seq) => {
+    if (boardEditSeqRef.current === seq && applyServerScoreRef.current) applyServerScoreRef.current();
   });
   // The match left running (finished, or sent back to the queue, elsewhere) inside the
   // debounce: the write is dropped with no callback, so no landed save clears the stamp.
@@ -711,6 +717,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     claimChanged.agree(GROUP_ENCHO);
     claimChanged.agree(GROUP_RESULT);
   };
+  applyServerScoreRef.current = applyServerScore;
 
   // Arranged as [left, right]: left is always SHIRO (White), right is always AKA (Red).
   // onIncrement applies the FIK 2-foul auto-award rule via applyFoulIncrement:

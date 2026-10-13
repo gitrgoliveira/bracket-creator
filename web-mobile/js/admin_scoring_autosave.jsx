@@ -144,13 +144,23 @@ export function useKeptInHistoryNote() {
 // edits at or before it, never for a tap made while the save was out. The individual
 // editor's board stamp, the team sheet's row and pick stamps and the engi editor's flags
 // stamp are its three callers.
-export function landedAutosave(submit, seqRef, onLanded) {
+//
+// `onRefused(seq)`, optional, runs instead when the save came back REFUSED
+// (writeWasRefused: nothing handed back, or applied:false), with the same `seq`. A refused
+// save stores nothing and broadcasts nothing, so no later server copy would ever bring
+// the board back: the stamp it left set would hold the operator's value for good while the
+// server and every other surface show the server's. The callback is for the editor to
+// compare `seq` with its counter (an edit made since is still owed and keeps its stamp),
+// then drop the stamp and take the server's CURRENT copy. A QUEUED answer calls neither:
+// that write will land, so the stamp stays.
+export function landedAutosave(submit, seqRef, onLanded, onRefused) {
   return (patch) => {
     const seq = seqRef.current;
     const p = submit(patch);
     if (p && typeof p.then === "function") {
       p.then((res) => {
-        if (!writeWasRefused(res) && !writeDidNotLand(res)) onLanded(seq);
+        if (writeWasRefused(res)) { if (onRefused) onRefused(seq); }
+        else if (!writeDidNotLand(res)) onLanded(seq);
       }, () => {});
     }
     return p;

@@ -23,7 +23,7 @@ const STUBBED_GLOBALS = {
     fetchCompetitionDetails: vi.fn().mockResolvedValue({
       id: 'comp1', config: { format: 'mixed', teamMatchType: 'kachinuki', naginata: false, players: [] },
     }),
-    recordScore: vi.fn().mockResolvedValue(undefined),
+    recordScore: vi.fn().mockResolvedValue({ applied: true }),
     recordDaihyosen: vi.fn(),
     removeDaihyosen: vi.fn(),
     putMatchLineup: vi.fn(),
@@ -58,7 +58,7 @@ const kachinukiMatch = (subResults, modifiedAt = 0) => ({
 });
 
 async function mount(match) {
-  const onSubmit = vi.fn().mockResolvedValue(undefined);
+  const onSubmit = vi.fn().mockResolvedValue({ applied: true });
   await act(async () => {
     render(<ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={onSubmit} password="" />);
   });
@@ -121,7 +121,7 @@ describe('a mark taken back on a kachinuki bout reaches the server (bc-kclr)', (
     // Each write is stamped when it is sent (server_clock.jsx's frame; the
     // offset is 0 here), and a snapshot of it carries that stamp.
     const sentAt = [];
-    const onSubmit = vi.fn().mockImplementation(() => { sentAt.push(Date.now()); return Promise.resolve(undefined); });
+    const onSubmit = vi.fn().mockImplementation(() => { sentAt.push(Date.now()); return Promise.resolve({ applied: true }); });
     let utils;
     const el = (match) => <ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={onSubmit} password="" />;
     await act(async () => { utils = render(el(kachinukiMatch([]))); });
@@ -145,7 +145,7 @@ describe('a mark taken back on a kachinuki bout reaches the server (bc-kclr)', (
   // adopted. It is keyed on the snapshot's stamp now: written after the edit,
   // it is news, and a row the operator has put back where it was follows it.
   it('a change saved on another device after the edit is adopted', async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onSubmit = vi.fn().mockResolvedValue({ applied: true });
     let utils;
     const el = (match) => <ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={onSubmit} password="" />;
     await act(async () => { utils = render(el(kachinukiMatch([]))); });
@@ -166,7 +166,7 @@ describe('a mark taken back on a kachinuki bout reaches the server (bc-kclr)', (
   // nothing.
   it('closing right after the clear flushes it with no discard prompt', async () => {
     window.confirmDialog = vi.fn().mockResolvedValue(false);
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onSubmit = vi.fn().mockResolvedValue({ applied: true });
     // Closing unmounts the editor, as every host does; the unmount writes it.
     let view;
     const onClose = vi.fn(() => view.unmount());

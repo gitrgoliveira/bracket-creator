@@ -183,11 +183,10 @@ describe('a tap made while the previous save is out is never wiped by that save\
     expect(onSubmit.mock.calls.at(-1)[0].ipponsA, 'the removal is sent').toEqual([]);
   });
 
-  it.each([
-    ['queued', { queued: true }],
-    ['refused', { applied: false, reason: 'superseded' }],
-  ])('a save the server did not take (%s) keeps the board against an older copy', async (_name, answer) => {
-    const onSubmit = vi.fn().mockResolvedValue(answer);
+  // A REFUSED save is not here: it takes the server's copy instead
+  // (individual_engi_refused_autosave_takes_server.render.test.jsx).
+  it('a queued save keeps the board against an older copy', async () => {
+    const onSubmit = vi.fn().mockResolvedValue({ queued: true });
     let r;
     await act(async () => { r = render(el(bout(), onSubmit)); });
     await tap(menButton(r.container.querySelector('.sb-side--aka')));

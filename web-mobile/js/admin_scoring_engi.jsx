@@ -158,6 +158,9 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   autosaveOnSubmitRef.current = landedAutosave(onSubmit, flagsEditSeqRef, (seq) => {
     if (flagsEditSeqRef.current === seq) flagsEditedAtRef.current = undefined;
   });
+  // The match left running (finished, or sent back to the queue, elsewhere) inside the
+  // debounce: the write is dropped with no callback, so no landed save clears the stamp.
+  useEffectE(() => { if (m.status !== "running") flagsEditedAtRef.current = undefined; }, [m.status]);
   // An operator change to either count: the value, then the save it schedules.
   // A count adopted from the server does not come through here. A key pressed
   // at a bound (a/s at MAX_FLAGS, Backspace at 0; the buttons are disabled

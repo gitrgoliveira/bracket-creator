@@ -222,3 +222,22 @@ describe('a tap made while the previous save is out is never wiped by that save\
     expect(marks(r.container).some((l) => l.endsWith('remove K')), 'the copy from the other device is followed').toBe(true);
   });
 });
+
+describe('a stamp left by a write the match\'s leaving running dropped is cleared (bc-ltap)', () => {
+  it('sent back to the queue inside the debounce: a later scheduled copy stamped before the tap is adopted', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(LANDED);
+    let r;
+    await act(async () => { r = render(el(bout(), onSubmit)); });
+    await tap(menButton(r.container.querySelector('.sb-side--aka')));
+    await tap(r.container.querySelector(`[aria-label="${marks(r.container)[0]}"]`)); // net zero
+    expect(marks(r.container), 'precondition: the board is empty again').toHaveLength(0);
+    // Another device sends the match back to the queue, same score, inside the
+    // debounce: the autosave is dropped at fire time, so no landed save clears the stamp.
+    await act(async () => { r.rerender(el(bout({ status: 'scheduled' }), onSubmit)); });
+    await wait(350);
+    expect(onSubmit, 'the autosave was dropped').not.toHaveBeenCalled();
+    // A later copy, stamped before the tap but after the match left running.
+    await act(async () => { r.rerender(el(bout({ status: 'scheduled', ipponsB: ['M'], modifiedAt: NOW - 4000 }), onSubmit)); });
+    expect(marks(r.container), 'the copy is adopted, not held against a stamp nothing can clear').toHaveLength(1);
+  });
+});

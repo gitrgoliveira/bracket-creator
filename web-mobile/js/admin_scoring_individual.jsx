@@ -345,6 +345,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   const landedBoardSave = (submit) => landedAutosave(submit, boardEditSeqRef, (seq) => {
     if (boardEditSeqRef.current === seq) boardEditedAtRef.current = undefined;
   });
+  // The match left running (finished, or sent back to the queue, elsewhere) inside the
+  // debounce: the write is dropped with no callback, so no landed save clears the stamp.
+  useEffectA(() => { if (m.status !== "running") boardEditedAtRef.current = undefined; }, [m.status]);
 
   useEffectA(() => {
     if (!m.compId) return;

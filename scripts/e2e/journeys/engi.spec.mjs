@@ -158,5 +158,6 @@ test.describe('engi', () => {
     } finally {
       await writes.stop();
     }
+    writes.assertNoSafetyRelease(); // after the body succeeded: a throw in the finally would hide its error
   });
 });

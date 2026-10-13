@@ -111,6 +111,10 @@ function consoleCollector() {
     seen.add(page);
     const pageUrl = () => { try { return page.url(); } catch { return null; } };
     const ctx = page.context();
+    // page.isClosed() can still read false while the close is in progress, so
+    // the close event is recorded too.
+    let closed = false;
+    page.on('close', () => { closed = true; });
     page.on('console', (msg) => {
       const type = msg.type();
       if (type !== 'error' && type !== 'warning') return;
@@ -134,8 +138,9 @@ function consoleCollector() {
       const entry = { url: res.url(), status: res.status(), method: res.request().method(), postData: res.request().postData(), bodyMissing: null, at };
       let timer;
       entry.body = Promise.race([
-        res.text().then((t) => t.slice(0, 1000), () => {
-          entry.bodyMissing = page.isClosed() ? 'page-closed' : 'read-failed';
+        res.text().then((t) => t.slice(0, 1000), (err) => {
+          const gone = closed || page.isClosed() || /(?:target|page|context|browser).*closed/i.test(String(err && err.message));
+          entry.bodyMissing = gone ? 'page-closed' : 'read-failed';
           return null;
         }),
         new Promise((done) => { timer = setTimeout(() => { entry.bodyMissing = 'timeout'; done(null); }, BODY_WAIT_MS); }),

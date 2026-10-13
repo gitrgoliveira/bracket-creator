@@ -3,8 +3,8 @@
 // of the save going out, so a tap made "while the save is out" never lands in
 // that window by itself; the write is held until the test releases it, and it
 // does so only after the next tap has been dispatched, as a slow uplink would
-// hold it. A safety timeout lets go of a hold nobody released, and stop()
-// throws when one had to.
+// hold it. A safety timeout lets go of a hold nobody released, and
+// assertNoSafetyRelease() throws when one had to.
 const SCORE_ROUTE = '**/api/competitions/*/matches/*/score';
 const isScorePut = (r) => r.method() === 'PUT' && /\/score$/.test(r.url());
 
@@ -19,9 +19,12 @@ const isScorePut = (r) => r.method() === 'PUT' && /\/score$/.test(r.url());
 //               (the echo then met a board whose next edit was still unsent,
 //               which is the race a journey holds the write for)
 //   bodies      the JSON body of every score PUT the page sent, in send order
-//   stop()      release any hold still pending, remove the route and the
-//               listener (call it in a finally), and throw when the safety
-//               timeout had to release a hold
+//   stop()      release any hold still pending and remove the route and the
+//               listener; cleanup only, never throws (call it in a finally,
+//               where a throw would replace the body's real assertion error)
+//   assertNoSafetyRelease()
+//               throws when the safety timeout had to release a hold; call it
+//               AFTER the body succeeded, outside the finally
 export async function holdScoreWrites(page, { safetyMs = 10_000 } = {}) {
   let hold = null; // armed by holdNext(), taken by the next PUT
   let safetyFired = 0;
@@ -81,11 +84,14 @@ export async function holdScoreWrites(page, { safetyMs = 10_000 } = {}) {
       }
     },
     async stop() {
-      // Release first: a PUT still blocked in the route handler would make the
-      // unroute wait for it.
+      // Release first: unrouting does not wait for a handler (Playwright
+      // 1.63.0), so a PUT still blocked in it would stay held until the safety
+      // timer instead of going through now.
       for (const h of holds) h.release();
       page.off('response', onResponse);
       await page.unroute(SCORE_ROUTE, handler);
+    },
+    assertNoSafetyRelease() {
       if (safetyFired) throw new Error(`held score write: the ${safetyMs} ms safety timeout released ${safetyFired} hold(s) nobody released`);
     },
   };

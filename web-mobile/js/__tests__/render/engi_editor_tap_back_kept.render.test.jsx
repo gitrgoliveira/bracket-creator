@@ -180,3 +180,21 @@ describe('a flag tap made while the previous save is out is never wiped by that 
     expect(count(r, 'shiro')).toBe(shiro);
   });
 });
+
+describe('a stamp left by a write the match\'s leaving running dropped is cleared (bc-evts)', () => {
+  it('sent back to the queue inside the debounce: a later scheduled copy stamped before the tap is adopted', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(LANDED);
+    let r;
+    await act(async () => { r = render(el(engi(), onSubmit)); });
+    await tap(r, 'engi-aka-inc');
+    await tap(r, 'engi-aka-dec'); // net zero: the board reads as untouched again
+    // Another device sends the match back to the queue, same score, inside the
+    // debounce: the autosave is dropped at fire time, so no landed save clears the stamp.
+    await act(async () => { r.rerender(el(engi({ status: 'scheduled' }), onSubmit)); });
+    await wait(350);
+    expect(onSubmit, 'the autosave was dropped').not.toHaveBeenCalled();
+    // A later copy, stamped before the tap but after the match left running.
+    await act(async () => { r.rerender(el(engi({ status: 'scheduled', flagsB: 1, modifiedAt: NOW - 4000 }), onSubmit)); });
+    expect(count(r, 'shiro'), 'the copy is adopted, not held against a stamp nothing can clear').toBe('1');
+  });
+});

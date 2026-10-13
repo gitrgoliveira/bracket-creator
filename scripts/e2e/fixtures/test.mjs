@@ -80,6 +80,9 @@ const allowed = (e) => e.kind === 'console' && CONSOLE_ALLOWLIST.find((r) => r.t
 // for the browser's "Failed to load resource" line, the /api answer it refers
 // to (status and the start of its body, where the app's refusal code is).
 const OFFLINE_GRACE_MS = 3_000;
+// The longest drain() waits for a refused answer's body (a page that closed
+// meanwhile never delivers it; the entry then carries no body).
+const BODY_WAIT_MS = 3_000;
 function consoleCollector() {
   const pending = [];
   const failed = []; // { url, status, body, at }
@@ -105,10 +108,16 @@ function consoleCollector() {
       pending.push({ kind: 'pageerror', type: 'error', text: err.message, stack: err.stack || null, page: pageUrl(),
         offline: wasOffline(ctx), at: Date.now() });
     });
-    page.on('response', async (res) => {
+    page.on('response', (res) => {
       if (res.status() < 400 || !/\/api\//.test(res.url())) return;
+      // Recorded at once, with the body still pending: the console line for
+      // this answer can reach drain() before the body has been read, and an
+      // answer that is not in the list yet would read as "no answer".
       const at = Date.now();
-      const body = await res.text().then((t) => t.slice(0, 1000), () => null);
+      const body = Promise.race([
+        res.text().then((t) => t.slice(0, 1000), () => null),
+        new Promise((done) => setTimeout(done, BODY_WAIT_MS, null)),
+      ]);
       failed.push({ url: res.url(), status: res.status(), method: res.request().method(), postData: res.request().postData(), body, at });
     });
   };
@@ -128,9 +137,15 @@ function consoleCollector() {
   // answered within a few seconds of it. Lines and answers pair one to one in
   // arrival order (per URL, first line takes the first answer), so a second
   // answer of another code can never be read as the first line's.
-  const drain = () => {
+  const drain = async () => {
+    // Both lists are taken at once, so a line and the answer it is about are
+    // always in the same drain.
     const unclaimed = failed.splice(0, failed.length);
-    const out = pending.splice(0, pending.length).map((e) => {
+    const lines = pending.splice(0, pending.length);
+    // Every pending body is awaited before any line is paired, so pairing
+    // never depends on which of the line and the body arrived first.
+    await Promise.all(unclaimed.map(async (f) => { f.body = await f.body; }));
+    const out = lines.map((e) => {
       if (e.kind !== 'console' || !e.url || !/^Failed to load resource/.test(e.text)) return e;
       const i = unclaimed.findIndex((f) => f.url === e.url && Math.abs(f.at - e.at) < 5_000);
       if (i < 0) return e;
@@ -147,8 +162,8 @@ const describeEntry = (e) => `${e.kind === 'pageerror' ? 'uncaught page error' :
 // Report what file `c.file` logged after its last test (its afterAll hooks).
 // Errors not on the allowlist are kept in c.late, which fails the run when the
 // worker ends.
-function settleLate(c) {
-  for (const e of c.drain()) {
+async function settleLate(c) {
+  for (const e of await c.drain()) {
     const phase = `after the last test of ${c.file} (an afterAll hook)`;
     console.log(`CONSOLE ${JSON.stringify({ phase, ...e })}`);
     if (e.type === 'error' && !allowed(e)) c.late.push({ ...e, file: c.file });
@@ -175,7 +190,7 @@ export const test = base.extend({
         await old.server.stop();
         // Whatever the previous file's afterAll hooks logged is still pending:
         // settle it as theirs, not as the first test of this file's.
-        settleLate(c);
+        await settleLate(c);
       }
       c.file = file;
       let server;
@@ -187,6 +202,8 @@ export const test = base.extend({
       current = { file, server };
       return server;
     };
+    // The server of `file` when one is running, else null: asks, never starts.
+    forFile.runningFor = (file) => (current && current.file === file ? current.server : null);
     try {
       await use(forFile);
     } finally {
@@ -201,7 +218,7 @@ export const test = base.extend({
   consoleCollector: [async ({}, use) => {
     const c = consoleCollector();
     await use(c);
-    settleLate(c);
+    await settleLate(c);
     if (c.late.length) {
       throw new Error(`console policy: ${c.late.length} error(s) after the last test of a file (an afterAll hook):\n${c.late.map((e) => `[${e.file}] ${describeEntry(e)}`).join('\n')}`);
     }
@@ -235,7 +252,7 @@ export const test = base.extend({
   consolePolicy: [async ({ consoleCollector: c }, use, testInfo) => {
     const startedAt = Date.now();
     await use();
-    const entries = c.drain().map((e) => (e.at < startedAt ? { ...e, phase: 'before this test (a beforeAll hook or the previous test\'s open pages)' } : e));
+    const entries = (await c.drain()).map((e) => (e.at < startedAt ? { ...e, phase: 'before this test (a beforeAll hook or the previous test\'s open pages)' } : e));
     if (!entries.length) return;
     await testInfo.attach('console.json', { body: JSON.stringify(entries, null, 2), contentType: 'application/json' });
     const audits = auditsFor(testInfo.file);
@@ -256,13 +273,22 @@ export const test = base.extend({
     }
   }, { auto: true }],
 
-  // The server of the file this test is in.
-  server: async ({ serverForFile }, use, testInfo) => {
-    const server = await serverForFile(testInfo.file);
-    await use(server);
-    if (testInfo.status !== testInfo.expectedStatus) {
+  // A failing test carries its file's server output as server.log, whether or
+  // not the test asked for `server` (a spec whose beforeAll starts the server
+  // and whose tests drive their own devices never does). Auto, but it only
+  // looks: it starts nothing, and a test in a file with no server running
+  // attaches nothing.
+  serverLog: [async ({ serverForFile }, use, testInfo) => {
+    await use();
+    const server = serverForFile.runningFor(testInfo.file);
+    if (server && testInfo.status !== testInfo.expectedStatus) {
       await testInfo.attach('server.log', { body: server.logTail(), contentType: 'text/plain' });
     }
+  }, { auto: true }],
+
+  // The server of the file this test is in.
+  server: async ({ serverForFile }, use, testInfo) => {
+    await use(await serverForFile(testInfo.file));
   },
 
   // Every journey navigates by path; the host is the file's server.

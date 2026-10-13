@@ -60,22 +60,54 @@ export async function enterTournament(page, { name = 'Shared Court Cup', courts 
 // What the create wizard offers before a competition is created: its default
 // Start time (stacked after the latest same-day competition, admin_setup.jsx)
 // and the hint under the shiaijo choice. Read on the wizard page itself, the
-// one createCompetition then fills; the stacked default arrives from an
-// estimate request, so the value is read once it has stopped changing.
-export async function wizardDefaults(page) {
-  await page.goto('/admin/create-competition');
-  await expect(page.getByRole('heading', { level: 1, name: 'Add competition' })).toBeVisible();
-  const input = page.locator('#create-start-time');
-  let last = await input.inputValue();
-  for (let i = 0; i < 6; i += 1) {
-    await page.waitForTimeout(300);
-    const now = await input.inputValue();
-    if (now === last && i >= 2) break;
-    last = now;
+// one createCompetition then fills.
+//
+// The stacked default comes from ONE request, GET /api/competitions/<id>/
+// schedule/estimate, which the wizard sends exactly when the tournament already
+// holds a same-day competition with a start time (pickStackPredecessor); with
+// none it keeps the 09:00 default and sends nothing. The caller knows which
+// case it is in (`expectEstimate`: a competition was created before this one,
+// all on the tournament's date), so the read does not guess from timing:
+//   - expected: the response is awaited (registered before the page loads, so
+//     it cannot be missed), the page is given two animation frames to render
+//     the value the answer set, and the input is then read once two reads
+//     agree (a competitions refresh can re-send the estimate; the earlier
+//     request is aborted and the later one wins).
+//   - not expected: the input is read as soon as the form shows, and an
+//     estimate request seen meanwhile is an error, never a stale default.
+export async function wizardDefaults(page, { expectEstimate = false } = {}) {
+  const isEstimate = (r) => /\/api\/competitions\/[^/]+\/schedule\/estimate$/.test(new URL(r.url()).pathname);
+  let sent = 0;
+  const onRequest = (r) => { if (isEstimate(r)) sent += 1; };
+  page.on('request', onRequest);
+  try {
+    const answered = expectEstimate
+      ? page.waitForResponse((r) => isEstimate(r.request()) && r.ok(), { timeout: 15_000 })
+      : null;
+    await page.goto('/admin/create-competition');
+    await expect(page.getByRole('heading', { level: 1, name: 'Add competition' })).toBeVisible();
+    const input = page.locator('#create-start-time');
+    await expect(input).toBeVisible();
+    if (answered) {
+      const res = await answered;
+      await res.finished();
+      await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+      let prev = null;
+      await expect.poll(async () => {
+        const v = await input.inputValue();
+        const settled = v === prev;
+        prev = v;
+        return settled;
+      }, { intervals: [100], timeout: 5_000 }).toBe(true);
+    } else if (sent) {
+      throw new Error('wizardDefaults: the wizard sent a schedule estimate request, but the caller said no same-day competition exists (pass expectEstimate: true)');
+    }
+    const hint = await page.locator('.field__hint', { hasText: 'Different competitions can share' }).first()
+      .innerText().then((t) => t.trim(), () => null);
+    return { startTime: await input.inputValue(), sharedCourtHint: hint };
+  } finally {
+    page.off('request', onRequest);
   }
-  const hint = await page.locator('.field__hint', { hasText: 'Different competitions can share' }).first()
-    .innerText().then((t) => t.trim(), () => null);
-  return { startTime: last, sharedCourtHint: hint };
 }
 
 // Create every competition first, then paste each roster, generate its draw and
@@ -85,7 +117,7 @@ export async function seedCompetitions(page, specs) {
   const ids = {};
   const defaults = {};
   for (const s of specs) {
-    defaults[s.key] = await wizardDefaults(page);
+    defaults[s.key] = await wizardDefaults(page, { expectEstimate: Object.keys(ids).length > 0 });
     ids[s.key] = await createCompetition(page, s.opts);
   }
   for (const s of specs) {

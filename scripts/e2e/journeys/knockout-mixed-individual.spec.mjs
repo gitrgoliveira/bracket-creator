@@ -1257,18 +1257,27 @@ test.describe('knockout-mixed-individual bead guards', () => {
   // two events"): a mark taken off and tapped back while the removal's save is
   // still out stays on the board and is sent, and so does the reverse. On
   // localhost the removal's echo arrives within milliseconds of the save going
-  // out, so the save is held 150 ms, as a slow uplink would hold it.
+  // out, so the save is held until the test releases it, and it does so only
+  // after the tap-back has been dispatched, as a slow uplink would hold it
+  // (a safety timeout lets go of a hold nobody released).
   test('bc-ltap: a mark tapped back while its removal is saving stays, and is saved', async ({ page }) => {
     const shot = journeyShots('knockout-mixed-individual/bc-ltap');
     await login(page);
     await seedOwn(page, { name: 'Finding A9', format: 'knockout', courts: ['O'], numberPrefix: 'FI' }, rosterOf('Anine', 4));
     await openShiaijo(page, 'O');
     expect(await ensureRunning(page), 'a semi-final starts on O').not.toBeNull();
-    let holdNext = false;
+    let hold = null; // { release } while the next score write is to be held
+    const holdNextWrite = () => {
+      const h = {};
+      h.promise = new Promise((resolve) => { h.release = resolve; });
+      hold = h;
+      return h;
+    };
     await page.route('**/api/competitions/*/matches/*/score', async (route) => {
-      if (route.request().method() === 'PUT' && holdNext) {
-        holdNext = false;
-        await new Promise((r) => setTimeout(r, 150));
+      if (route.request().method() === 'PUT' && hold) {
+        const { promise } = hold;
+        hold = null;
+        await Promise.race([promise, new Promise((r) => setTimeout(r, 10_000))]);
       }
       await route.continue();
     });
@@ -1283,11 +1292,12 @@ test.describe('knockout-mixed-individual bead guards', () => {
     await ipponButton(page, 'aka', 'M').tap();
     await settle(page);
     // Remove, then the same mark back while the removal is out.
-    holdNext = true;
+    let held = holdNextWrite();
     let sent = scoreSent();
     await akaMark().tap();
     await sent;
     await ipponButton(page, 'aka', 'M').tap();
+    held.release();
     await settle(page);
     await page.waitForTimeout(1000);
     await expect(filledSlots(page, 'aka'), 'the tapped-back mark stays').toHaveCount(1);
@@ -1298,11 +1308,12 @@ test.describe('knockout-mixed-individual bead guards', () => {
     // The reverse: take it off, add it, and take it off again while the add is out.
     await akaMark().tap();
     await settle(page);
-    holdNext = true;
+    held = holdNextWrite();
     sent = scoreSent();
     await ipponButton(page, 'aka', 'M').tap();
     await sent;
     await akaMark().tap();
+    held.release();
     await settle(page);
     await page.waitForTimeout(1000);
     await expect(filledSlots(page, 'aka'), 'the removal stays').toHaveCount(0);

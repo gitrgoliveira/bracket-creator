@@ -28,7 +28,7 @@ export const FIK5 = ['Senpo', 'Jiho', 'Chuken', 'Fukusho', 'Taisho'];
 export const positionLabels = (teamSize) => (teamSize === 5 ? FIK5 : Array.from({ length: teamSize }, (_, i) => String(i + 1)));
 
 // Sign in, creating the tournament first if this server has none yet. Every
-// test in a serial file can call it, whichever runs first.
+// test in a file can call it, whichever runs first or in which worker.
 export async function enterAdmin(page, { courts = 16 } = {}) {
   await page.goto('/');
   // The first-run form, or the public home of a tournament that exists:

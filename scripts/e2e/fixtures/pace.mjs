@@ -17,7 +17,22 @@
 // moment the journey saw the layer or the arm, or made the tap. TAP_DWELL_MS
 // is the screenshot harness's value, kept above the app's window, so both
 // harnesses pace alike.
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { TAP_DWELL_MS } from '../../screenshots/lib/editor.mjs';
+
+// The app's own window, read from its one source (tap_guard.jsx is JSX, so it
+// cannot be imported here). Failing to find it is an error: a harness that
+// guessed would drift from the app unnoticed.
+export const TAP_BOUNCE_MS = (() => {
+  const file = fileURLToPath(new URL('../../../web-mobile/js/tap_guard.jsx', import.meta.url));
+  const m = /export const TAP_BOUNCE_MS = (\d+);/.exec(fs.readFileSync(file, 'utf8'));
+  if (!m) throw new Error(`pace: no TAP_BOUNCE_MS found in ${file}`);
+  return Number(m[1]);
+})();
+if (TAP_DWELL_MS <= TAP_BOUNCE_MS) {
+  throw new Error(`pace: TAP_DWELL_MS (${TAP_DWELL_MS}) must exceed the app's TAP_BOUNCE_MS (${TAP_BOUNCE_MS})`);
+}
 
 // Wait out what is left of the dwell since `since` (a Date.now() reading taken
 // when the layer or the arm was seen, or the tap made).

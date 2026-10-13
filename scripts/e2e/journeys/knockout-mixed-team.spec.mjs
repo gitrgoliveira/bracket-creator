@@ -80,8 +80,11 @@ async function nameStartingLineup(page, id, team, names, teamSize) {
   await T.lineupsSave(page);
 }
 
-test.describe.configure({ mode: 'serial' });
-
+// NOT serial: every test here seeds its own competitions on its own shiaijo
+// (T.enterAdmin creates the tournament when the worker's server has none), so
+// a failing journey skips none of the others. After a failure Playwright runs
+// the rest in a fresh worker, which gets a fresh server (fixtures/test.mjs
+// serverForFile) and enterAdmin creates the tournament there again.
 test.describe('knockout-mixed-team', () => {
   test.afterAll(() => {
     for (const log of audits) log.flush();
@@ -357,9 +360,9 @@ test.describe('knockout-mixed-team', () => {
       expect(options[0]).toBe(T.STARTING_LINEUP);
       expect(options.length).toBeGreaterThan(1);
       await T.openLineups(page, f3, { team: pair3.aka, lineupFor: options[1] });
-      const names = [await T.lineupsSelected(page, '1'), await T.lineupsSelected(page, '2'), await T.lineupsSelected(page, '3')];
       await expect(T.lineupsForm(page).getByTestId('lineup-source')).toHaveText('Lineup for this match');
       await expect(T.lineupsForm(page).getByRole('button', { name: 'Save lineup' })).toBeDisabled();
+      const names = [await T.lineupsSelected(page, '1'), await T.lineupsSelected(page, '2'), await T.lineupsSelected(page, '3')];
       await shot(page, 'f3-lineups-for-a-match', { fullPage: true });
       record({ step: 'Lineup for', action: 'choose the first match in "Lineup for"', variant: 'correct', options, names });
       expect(names[0]).toContain('Dai');
@@ -429,49 +432,26 @@ test.describe('knockout-mixed-team', () => {
       await prompt.locator('input[value="shiro"]').check();
       await prompt.locator('button.btn--primary').tap();
       // The post-kiken Remaining matches panel was removed by the operator's
-      // "do not cascade" ruling (2026-09-26; bc-kpnl closed with it): `shown`
-      // records false and the award loop below taps nothing. Each remaining
-      // match is closed from its own notice when it comes up (the Start below).
-      const panel = ed.locator('.remaining-matches');
-      const shown = await panel.waitFor({ state: 'visible', timeout: 8000 }).then(() => true, () => false);
-      const panelText = shown ? (await panel.innerText({ timeout: 2000 }).catch(() => '')).replace(/\s+/g, ' ') : '';
-      await shot(page, 'f3-kiken-remaining-matches');
-      // Does it stay long enough to act on? The operator reads it first.
-      await page.waitForTimeout(1500);
-      const stillThere = await panel.isVisible().catch(() => false);
-      const editorNow = await sides(ed).catch(() => null);
-      await shot(page, 'f3-kiken-1500ms-later');
-      record({ step: 'pool kiken chain', action: 'the remaining-matches panel, 1.5 s later', variant: 'V5 lost place', stillThere, editorNow,
-        upNext: await sides(upNextCard(page)).catch(() => null) });
-      const award = panel.getByRole('button', { name: /opponent/ });
-      const awards = await award.count();
-      let nb = null;
-      if (awards) {
-        nb = await tapNeighbour(award.first(), 'up').catch((e) => ({ error: String(e.message).slice(0, 120) }));
-        await page.waitForTimeout(800);
-      }
-      const panelAfterSlip = await panel.isVisible().catch(() => false);
-      await shot(page, 'f3-kiken-after-neighbour-tap');
-      record({ step: 'pool kiken chain', action: `Kiken – Voluntary, Shiro (${pair.shiro}) withdraws`, variant: 'correct', panelShown: shown,
-        panelText: panelText.slice(0, 300), awardButtons: awards, awardTapBox: awards ? await tapSize(award.first()).catch(() => null) : null });
-      record({ step: 'pool kiken chain', action: 'Award the remaining match to the opponent', variant: 'V1 tapNeighbour up', ...(nb || {}), panelStillOpen: panelAfterSlip });
-      let awarded = 0;
-      if (panelAfterSlip) {
-        while (await award.count()) {
-          const dbl = awarded === 0 ? await doubleTap(award.first()) : (await award.first().tap(), null);
-          if (dbl) record({ step: 'pool kiken chain', action: 'Award the remaining match to the opponent', variant: 'V2 doubleTap', ...dbl });
-          awarded += 1;
-          await page.waitForTimeout(1200);
-          if (awarded > 4) break;
-        }
-      }
-      await shot(page, 'f3-kiken-after-awards');
+      // "do not cascade" ruling (2026-09-26; bc-kpnl closed with it): the
+      // withdrawal changes only this match, and each remaining match is closed
+      // from its own notice when it comes up (the Start below).
+      const kikenRow = completedRowFor(page, pair);
+      await expect(kikenRow).toBeVisible();
+      // A team encounter's Completed row reads its IV/PW summary: Shiro withdrew,
+      // so every bout (3 bouts, 2 points each) is credited to Aka and none to Shiro.
+      await expect(kikenRow.locator('.shiaijo-qrow__result')).toHaveText(/IV 0–3\s+PW 0–6/);
+      const kikenResult = (await kikenRow.locator('.shiaijo-qrow__result').innerText()).trim();
+      await expect(ed.locator('.remaining-matches')).toHaveCount(0);
+      await shot(page, 'f3-kiken-recorded');
+      record({ step: 'pool kiken chain', action: `Kiken – Voluntary, Shiro (${pair.shiro}) withdraws`, variant: 'correct', kikenResult,
+        editorNow: await sides(ed).catch(() => null), upNext: await sides(upNextCard(page)).catch(() => null) });
       await page.goto(`/admin/competition/${f3}/pools`);
       await page.waitForTimeout(1500);
       await shot(page, 'f3-pools-after-kiken-chain', { fullPage: true });
       const matchesText = (await page.locator('body').innerText()).replace(/\s+/g, ' ');
+      expect(matchesText).toContain('Kiken');
       const i = matchesText.indexOf('Pool A');
-      record({ step: 'pool kiken chain', action: 'Pools tab after the chain', variant: 'consistency', awardsTapped: awarded,
+      record({ step: 'pool kiken chain', action: 'Pools tab after the withdrawal', variant: 'consistency',
         poolA: matchesText.slice(i, i + 700), note: 'the remaining match stays scheduled: the Remaining matches panel is gone ("do not cascade"), and the match is closed from its own notice' });
       // The operator carries on at the court: Up next now holds the
       // withdrawn team's remaining match.
@@ -567,23 +547,27 @@ test.describe('knockout-mixed-team', () => {
       expect(await sides(ed)).toEqual(sf1);
     });
 
-    await test.step('bout 1: Shiro men; a double tap on kote; clear the extra mark', async () => {
+    await test.step('bout 1: a double tap on kote lands one mark; clear it, then Shiro men', async () => {
       const row = T.boutRow(ed, 1);
-      await T.boutIppon(ed, 1, 'shiro', 'M');
+      // The double tap goes on an EMPTY side, so one mark (not the two a bounce
+      // would add) is the only outcome that tells the tap guard held: on a side
+      // that already held a mark the cap of two would hide a bounce.
       const k = T.rowIppon(row, 'shiro', 'K');
       const ipponBox = await tapSize(k);
       const dbl = await doubleTap(k);
       await expect(T.syncPill(ed)).toHaveText('Synced');
       const slotsAfter = await T.rowSlots(row, 'shiro').allInnerTexts();
       await shot(page, 'bout1-double-tap-kote');
-      // Recover: tap the extra mark in the centre (the sheet's own hint).
+      expect(dbl.withinWindow).toBe(true);
+      expect(slotsAfter).toEqual(['K']);
+      // Take the mark back (the sheet's own hint), then record Shiro men.
       const hint = (await ed.getByTestId('team-scoring-clear-hint').innerText().catch(() => '')).trim();
-      const extra = T.rowSlots(row, 'shiro').filter({ hasText: /^K$/ });
-      const extraCount = await extra.count();
-      for (let i = 0; i < extraCount; i += 1) await T.rowSlots(row, 'shiro').filter({ hasText: /^K$/ }).first().tap();
-      await expect(T.rowSlots(row, 'shiro')).toHaveCount(1);
+      await T.rowSlots(row, 'shiro').first().tap();
+      await expect(T.rowSlots(row, 'shiro')).toHaveCount(0);
       await expect(T.syncPill(ed)).toHaveText('Synced');
-      record({ step: 'bout 1', action: 'Shiro kote', variant: 'V2 doubleTap', ...dbl, slotsAfter, hint, tapsToRecover: extraCount, ipponTapBox: ipponBox,
+      await T.boutIppon(ed, 1, 'shiro', 'M');
+      await expect(T.syncPill(ed)).toHaveText('Synced');
+      record({ step: 'bout 1', action: 'Shiro kote', variant: 'V2 doubleTap', ...dbl, slotsAfter, hint, tapsToRecover: 1, ipponTapBox: ipponBox,
         slotTapBox: await tapSize(T.rowSlots(row, 'shiro').first()) });
       expect(await T.rowSlots(row, 'shiro').allInnerTexts()).toEqual(['M']);
     });
@@ -1077,7 +1061,12 @@ test.describe('knockout-mixed-team', () => {
         await shot(phone, 'viewer-final', { fullPage: true });
         const viewerText = (await phone.locator('.viewer__body').innerText()).replace(/\s+/g, ' ');
         await tv.reload();
-        await tv.waitForTimeout(1500);
+        // A finished court's TV board carries no scoreline or winner by design
+        // (display_scoreboard.jsx: "All matches completed on Shiaijo E", with the
+        // QR code to the results), so what it can show is that the court is done,
+        // and not the encounter any more (no live "(DH)" row, no running score).
+        await expect(tvBoard(tv)).toContainText('All matches completed');
+        await expect(tvBoard(tv)).not.toContainText('(DH)');
         await shot(tv, 'tv-final');
         const tvText = (await tvBoard(tv).innerText()).replace(/\s+/g, ' ');
         record({ step: 'every surface', action: 'viewer and TV after the correction', variant: 'correct',

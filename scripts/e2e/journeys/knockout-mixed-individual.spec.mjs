@@ -162,6 +162,10 @@ test.describe('knockout-mixed-individual', () => {
     const afterDbl = await slotMarks(page, w1);
     row({ step: 'award ippon', action: `${w1} M`, variant: 'V2 doubleTap', ...dblIppon, marks: afterDbl,
       shot: await shot(page, 'ippon-double-tapped') });
+    // The side was empty (the wrong mark was cleared above): a bounce would land
+    // two marks, so exactly one is the app ignoring it.
+    expect(dblIppon.withinWindow).toBe(true);
+    expect(afterDbl).toEqual(['M']);
 
     // V2 on the undo: a double tap on the outer mark.
     const outer = inlineEditor(page).locator(`[aria-label^="${w1 === 'shiro' ? 'Shiro' : 'Aka'} slot "][aria-label*=": remove "]`).first();
@@ -430,11 +434,21 @@ test.describe('knockout-mixed-individual', () => {
       seen.push(await editorIdentity(page, EDITOR));
     }
     expect(new Set(seen.map((s) => s.key)).size, 'Next showed at least two matches').toBeGreaterThanOrEqual(2);
+    // Docs (scoring-a-match.md): Left and Right move to the previous or next
+    // match on the court, so each key must land on the neighbour the key names.
+    const atEnd = seen[seen.length - 1].key;
+    const keyed = [];
     for (const key of ['ArrowLeft', 'ArrowRight', 'ArrowLeft']) {
+      const was = (await editorIdentity(page, EDITOR)).key;
       await page.keyboard.press(key);
-      await page.waitForTimeout(200);
-      seen.push(await editorIdentity(page, EDITOR));
+      await expect.poll(async () => (await editorIdentity(page, EDITOR)).key, { message: `${key} moves the editor` }).not.toBe(was);
+      const now = await editorIdentity(page, EDITOR);
+      keyed.push({ key, from: was, to: now.key });
+      seen.push(now);
     }
+    expect(keyed[0].to, 'Left goes to the previous match').not.toBe(atEnd);
+    expect(keyed[1].to, 'Right comes back').toBe(atEnd);
+    expect(keyed[2].to, 'Left again goes to the same previous match').toBe(keyed[0].to);
     row({ step: 'scores tab nav', action: 'Next x3, ArrowLeft/Right', variant: 'correct path', courts: seen.map((s) => s.court), eyebrows: seen.map((s) => s.eyebrow),
       shot: await shot(page, 'scores-overlay-after-nav') });
     for (const s of seen) expect(s.court).toBe('B');
@@ -693,6 +707,7 @@ test.describe('knockout-mixed-individual', () => {
       finishEnabled: !koTieDisabled, label: koTieLabel, title: koTieTitle, completed: tieCompleted,
       stillRunning: await inlineRunning(page), shot: await shot(page, 'finish-on-knockout-tie') });
     expect(koTieDisabled).toBe(true);
+    expect(tieCompleted, 'the tied bout is not completed').toBe(false);
     expect(koTieLabel).toBe('Needs a winner');
     expect(koTieTitle).toBe('Needs a winner: fight encho, then record hantei if still tied.');
     expect(tieCompleted).toBe(false);
@@ -744,7 +759,9 @@ test.describe('knockout-mixed-individual', () => {
       labels: [(await shiroWins.innerText()).trim(), (await akaWins.innerText()).trim()] });
     await shot(page, 'hantei-armed');
     const nbHantei = await tapNeighbour(shiroWins, 'right');
-    await page.waitForTimeout(1000);
+    // The tap picked a side (a positive signal) before it is read that nothing committed.
+    await expect.poll(async () => (await shiroWins.getAttribute('aria-pressed')) === 'true'
+      || (await akaWins.getAttribute('aria-pressed')) === 'true', { message: 'the neighbour tap picked a side' }).toBe(true);
     const semiRow = completedRowFor(page, semi);
     const committedByPick = await semiRow.isVisible().catch(() => false);
     const picked = { shiro: await shiroWins.getAttribute('aria-pressed'), aka: await akaWins.getAttribute('aria-pressed') };
@@ -798,7 +815,7 @@ test.describe('knockout-mixed-individual', () => {
   // J6. Confirm + advance OFFLINE (F2, court C): the second semi-final is
   // finished with the network down. The write is queued, the local bracket
   // advances; back online, the server must agree.
-  test('J6 finish a knockout bout offline, then reconnect', async ({ page, context }) => {
+  test('J6 finish a knockout bout offline, then reconnect', async ({ page, context, browser, baseURL }) => {
     test.setTimeout(180_000);
     const J = 'J6';
     const shot = journeyShots('knockout-mixed-individual/J6');
@@ -906,16 +923,28 @@ test.describe('knockout-mixed-individual', () => {
     expect(landed).toBe(true);
     expect(semiResult).toMatch(/M/);
 
-    // A second device (fresh page) reads the server's bracket.
-    const other = await context.newPage();
-    await other.goto(`/admin/competition/${comps.F2}/bracket`);
-    await expect(other.getByText('3RD PLACE MATCH')).toBeVisible();
-    const bracketText = (await other.locator('.page').first().innerText()).replace(/\s+/g, ' ');
-    row({ step: 'reconnect', action: 'second page reads the bracket', variant: 'correct path',
-      finalHasWinner: bracketText.includes(winnerName), bronzeHasLoser: (bracketText.split('3RD PLACE MATCH')[1] || '').includes(loserName),
-      shot: await shot(other, 'server-bracket-after-reconnect', { fullPage: true }) });
-    expect((bracketText.split('3RD PLACE MATCH')[1] || '')).toContain(loserName);
-    await other.close();
+    // The first device's held write has gone out: its topbar shows no held-writes
+    // count once the queue is empty.
+    await expect(page.getByTestId('topbar-held')).toHaveCount(0, { timeout: 20_000 });
+
+    // A second device (its own browser context, so its own storage and no
+    // outbox shared with the first) reads the server's bracket.
+    const otherCtx = await browser.newContext({ ...OPERATOR_DEVICE, baseURL });
+    try {
+      const other = await otherCtx.newPage();
+      await login(other);
+      await other.goto(`/admin/competition/${comps.F2}/bracket`);
+      await expect(other.getByText('3RD PLACE MATCH')).toBeVisible();
+      // The server's bracket seats the semi-final's loser in the 3rd-place match.
+      const bracketText = (await other.locator('.page').first().innerText()).replace(/\s+/g, ' ');
+      await expect.poll(async () => ((await other.locator('.page').first().innerText()).replace(/\s+/g, ' ').split('3RD PLACE MATCH')[1] || ''),
+        { timeout: 15_000 }).toContain(loserName);
+      row({ step: 'reconnect', action: 'second device reads the bracket', variant: 'correct path',
+        finalHasWinner: bracketText.includes(winnerName), bronzeHasLoser: (bracketText.split('3RD PLACE MATCH')[1] || '').includes(loserName),
+        shot: await shot(other, 'server-bracket-after-reconnect', { fullPage: true }) });
+    } finally {
+      await otherCtx.close();
+    }
   });
 
   // J8. The same scoring from the competition's own Pools tab (F1c, overlay

@@ -2,7 +2,8 @@
 // file, an operator page whose pointer is verified coarse, and the console
 // policy every page of the test is held to.
 import { test as base, expect } from '@playwright/test';
-import { start } from '../../screenshots/lib/server.mjs';
+import fs from 'node:fs';
+import { start, BIN } from '../../screenshots/lib/server.mjs';
 import { auditsFor } from './audit.mjs';
 import { isCoarse, restoreCoarse } from './pointer.mjs';
 
@@ -28,6 +29,8 @@ export { isCoarse };
 //   text        the message, as the browser or the app logs it
 //   url         where it came from (a failed request's URL, or the script)
 //   code        the app's refusal code in the failed /api answer's body
+//   request     which request was refused (method and body), for an entry that
+//               is about one kind of write only
 //   whileOffline  only while the page's context is offline (or just back)
 const CONSOLE_ALLOWLIST = [
   {
@@ -43,19 +46,29 @@ const CONSOLE_ALLOWLIST = [
     whileOffline: true,
   },
   {
-    reason: 'A start or reopen the app sends through the server\'s gate and shows refused (toast, row notice, court-busy panel, reopen error): the shiaijo is running another bout, a competitor is fighting elsewhere or barred by a withdrawal, or the knockout match it feeds is being fought.',
+    reason: 'A start or reopen the app sends through the server\'s gate and shows refused (toast, row notice, court-busy panel, reopen error): the shiaijo is running another bout, a competitor is fighting elsewhere or barred by a withdrawal, or the knockout match it feeds is being fought. A start is a /score write with status "running"; any other /score write refused this way is a real error.',
     text: /^Failed to load resource: the server responded with a status of 409 \(Conflict\)$/,
     url: /\/api\/competitions\/[^/]+\/matches\/[^/]+\/(score|reopen)$/,
     code: /^(court_busy|ineligible_competitor|downstream_knockout_running)$/,
+    request: (r) => !!r && (/\/reopen$/.test(r.url) || writeStatus(r.postData) === 'running'),
   },
 ];
 
 // The `error` field of a refusal body; read with a pattern, since the body is
 // kept only in part.
 const refusalCode = (body) => (/"error"\s*:\s*"([^"]+)"/.exec(body || '') || [])[1] || null;
+// The `status` a score write carries (its postData is JSON), or null.
+const writeStatus = (postData) => {
+  try {
+    return JSON.parse(postData || '').status ?? null;
+  } catch {
+    return null;
+  }
+};
 const allowed = (e) => e.kind === 'console' && CONSOLE_ALLOWLIST.find((r) => r.text.test(e.text)
   && (!r.url || r.url.test(e.url || ''))
   && (!r.code || r.code.test(refusalCode(e.body) || ''))
+  && (!r.request || r.request(e.request))
   && (!r.whileOffline || e.offline));
 
 // One collector per worker. Pages report into `pending`, and each test's
@@ -96,7 +109,7 @@ function consoleCollector() {
       if (res.status() < 400 || !/\/api\//.test(res.url())) return;
       const at = Date.now();
       const body = await res.text().then((t) => t.slice(0, 1000), () => null);
-      failed.push({ url: res.url(), status: res.status(), body, at });
+      failed.push({ url: res.url(), status: res.status(), method: res.request().method(), postData: res.request().postData(), body, at });
     });
   };
   const attachContext = (ctx) => {
@@ -112,24 +125,35 @@ function consoleCollector() {
     for (const p of ctx.pages()) attachPage(p);
   };
   // The answer a "Failed to load resource" line is about: the same URL,
-  // answered within a few seconds of it.
-  const answerFor = (e) => {
-    if (e.kind !== 'console' || !e.url || !/^Failed to load resource/.test(e.text)) return null;
-    const near = failed.filter((f) => f.url === e.url && Math.abs(f.at - e.at) < 5_000);
-    return near.length ? near[near.length - 1] : null;
-  };
+  // answered within a few seconds of it. Lines and answers pair one to one in
+  // arrival order (per URL, first line takes the first answer), so a second
+  // answer of another code can never be read as the first line's.
   const drain = () => {
+    const unclaimed = failed.splice(0, failed.length);
     const out = pending.splice(0, pending.length).map((e) => {
-      const answer = answerFor(e);
-      return answer ? { ...e, status: answer.status, body: answer.body } : e;
+      if (e.kind !== 'console' || !e.url || !/^Failed to load resource/.test(e.text)) return e;
+      const i = unclaimed.findIndex((f) => f.url === e.url && Math.abs(f.at - e.at) < 5_000);
+      if (i < 0) return e;
+      const [answer] = unclaimed.splice(i, 1);
+      return { ...e, status: answer.status, body: answer.body, request: { url: answer.url, method: answer.method, postData: answer.postData } };
     });
-    failed.splice(0, failed.length);
     return out;
   };
-  return { attachPage, attachContext, drain };
+  return { attachPage, attachContext, drain, late: [], file: null };
 }
 
 const describeEntry = (e) => `${e.kind === 'pageerror' ? 'uncaught page error' : `console ${e.type}`} on ${e.page || '(no page)'}: ${e.text}${e.url ? ` (from ${e.url}${e.line != null ? `:${e.line}` : ''})` : ''}`;
+
+// Report what file `c.file` logged after its last test (its afterAll hooks).
+// Errors not on the allowlist are kept in c.late, which fails the run when the
+// worker ends.
+function settleLate(c) {
+  for (const e of c.drain()) {
+    const phase = `after the last test of ${c.file} (an afterAll hook)`;
+    console.log(`CONSOLE ${JSON.stringify({ phase, ...e })}`);
+    if (e.type === 'error' && !allowed(e)) c.late.push({ ...e, file: c.file });
+  }
+}
 
 export const test = base.extend({
   // One mobile-app server per SPEC FILE, on a free port and a throwaway
@@ -141,7 +165,7 @@ export const test = base.extend({
   // changes. Tests in a file share theirs, so a spec that seeds once and walks
   // several tests declares test.describe.configure({ mode: 'serial' }). A
   // beforeAll hook (worker scope) asks for it with its own testInfo.file.
-  serverForFile: [async ({}, use) => {
+  serverForFile: [async ({ consoleCollector: c }, use) => {
     let current = null; // { file, server }
     const forFile = async (file) => {
       if (current && current.file === file) return current.server;
@@ -149,12 +173,16 @@ export const test = base.extend({
         const old = current;
         current = null;
         await old.server.stop();
+        // Whatever the previous file's afterAll hooks logged is still pending:
+        // settle it as theirs, not as the first test of this file's.
+        settleLate(c);
       }
+      c.file = file;
       let server;
       try {
         server = await start('mobile');
       } catch (err) {
-        throw new Error(`${err.message}\n(make e2e builds the binary before it runs the suite)`);
+        throw new Error(`${err.message}${fs.existsSync(BIN) ? '' : '\n(make e2e builds the binary before it runs the suite)'}`);
       }
       current = { file, server };
       return server;
@@ -166,16 +194,17 @@ export const test = base.extend({
     }
   }, { scope: 'worker' }],
 
-  // The console policy's collector (above). Whatever is still pending when the
-  // worker ends came from an afterAll hook, after the last test's check: it is
-  // reported there, and an error fails the run.
+  // The console policy's collector (above). What is still pending when a file
+  // ends (its server is replaced) or the worker ends came from that file's
+  // afterAll hooks, after its last test's check: settleLate reports it under
+  // that file, and an error fails the run when the worker ends.
   consoleCollector: [async ({}, use) => {
     const c = consoleCollector();
     await use(c);
-    const late = c.drain();
-    for (const e of late) console.log(`CONSOLE ${JSON.stringify({ phase: 'after the last test (an afterAll hook)', ...e })}`);
-    const bad = late.filter((e) => e.type === 'error' && !allowed(e));
-    if (bad.length) throw new Error(`console policy: ${bad.length} error(s) after the last test:\n${bad.map(describeEntry).join('\n')}`);
+    settleLate(c);
+    if (c.late.length) {
+      throw new Error(`console policy: ${c.late.length} error(s) after the last test of a file (an afterAll hook):\n${c.late.map((e) => `[${e.file}] ${describeEntry(e)}`).join('\n')}`);
+    }
   }, { scope: 'worker' }],
 
   // Every context made through this browser, a spec's own browser.newContext
@@ -229,7 +258,11 @@ export const test = base.extend({
 
   // The server of the file this test is in.
   server: async ({ serverForFile }, use, testInfo) => {
-    await use(await serverForFile(testInfo.file));
+    const server = await serverForFile(testInfo.file);
+    await use(server);
+    if (testInfo.status !== testInfo.expectedStatus) {
+      await testInfo.attach('server.log', { body: server.logTail(), contentType: 'text/plain' });
+    }
   },
 
   // Every journey navigates by path; the host is the file's server.

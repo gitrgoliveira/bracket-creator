@@ -1,7 +1,8 @@
 # E2E journeys
 
 Playwright journeys that drive the tournament app (`mobile-app`) in a real
-browser, the way an operator and a spectator use it.
+browser, the way an operator and a spectator use it. This is developer
+documentation, for a contributor who runs, debugs and extends the journeys.
 
     make e2e                                               # every journey
     make e2e E2E_ARGS='journeys/smoke.spec.mjs'            # one spec
@@ -15,16 +16,23 @@ once per worktree), then runs `playwright test` here with `E2E_ARGS` passed
 through unchanged. It is not part of `make go/test` and does not run in CI. Run
 it before opening a PR that changes `web-mobile/`: the PR template asks.
 
-It needs Go (for the build), Node.js with npm, and a network connection on the
-first run: `make e2e/deps` (or the first `make e2e`) downloads the npm packages
-and Chromium, and the build fetches the vendored frontend libraries. After that
-it runs offline. "Green" means no test failed: the `test.fixme` steps of open
-beads (refer to [When a journey finds a bug](#when-a-journey-finds-a-bug)) are
-reported as skipped.
+It needs Go (for the build), Node.js with npm, and a network connection on
+every run: the first `make e2e/deps` (or `make e2e`) downloads the npm packages
+and Chromium, and each `make e2e` rebuilds the binary, whose `vendor-frontend`
+step downloads the vendored frontend libraries from unpkg every time and whose
+`esbuild-jsx` step runs esbuild through `npx --yes`. "Green" means no test
+failed: the `test.fixme` steps of open beads (see
+[When a journey finds a bug](#when-a-journey-finds-a-bug)) are reported as
+skipped.
 
-Playwright is pinned to the same release as `scripts/screenshots`, so the two
-share one Chromium under `~/.cache/ms-playwright`. If that cache is removed the
-stamp outlives it; run `npx playwright install chromium` here.
+The Playwright version here and the one `scripts/screenshots` resolves are the
+same release, so the two share one Chromium under `~/.cache/ms-playwright`. If
+that cache is removed the stamp outlives it; run `npx playwright install
+chromium` here.
+
+To debug, pass Playwright's own flags through `E2E_ARGS`: `--headed` shows the
+browser, `--debug` opens the inspector, and a failing test leaves a trace
+(see [Output](#output)).
 
 ## Layout
 
@@ -67,10 +75,15 @@ Two projects, both Chromium:
 
 - `operator`: an iPad Air in landscape (1180x820) with touch. Its page is
   checked to match `(pointer: coarse)`, so the tap-target rules apply as on
-  the device. Every journey runs here unless its file is named
-  `*.public.spec.mjs`.
+  the device. If it does not, `fixtures/pointer.mjs` turns on CDP touch
+  emulation and the test carries a `coarse-pointer` annotation saying so.
+  Every journey runs here unless its file is named `*.public.spec.mjs`.
 - `public`: a phone in portrait (390x844), for journeys about a public surface
-  alone (`*.public.spec.mjs`).
+  alone (`*.public.spec.mjs`). No journey uses this project yet; the public
+  surfaces are checked from `operator` journeys through a second context.
+
+Every test has a 240 s timeout (`expect` waits 15 s), `retries` is 0, and
+`forbidOnly` is on, so a stray `test.only` fails the run.
 
 An operator journey that needs a second device opens another context with one
 of the two devices from `fixtures/devices.mjs`: `PUBLIC_DEVICE` for a public
@@ -96,8 +109,8 @@ with `serverForFile(testInfo.file)`. Journeys navigate by path
 Every journey builds its tournament the way an operator does: the first-run
 form, the real sign-in form, the create wizard, the roster paste box, Generate
 draw and Start. The HTTP API is not a seeding path here, and neither are
-hand-written files in the data folder. That is an operator ruling, made knowing
-it couples every journey to the wizard's copy: the setup steps are part of what
+hand-written files in the data folder. This is a standing rule, and it couples
+every journey to the wizard's copy: the setup steps are part of what
 a journey exercises, and a shortcut would skip the part most likely to break.
 `scripts/screenshots` seeds over the API for a different reason (a capture is
 about one screen, not the path to it) and its `api.mjs`, `seed.mjs` and the
@@ -123,36 +136,39 @@ variants as real input:
 | Helper | Variant |
 |---|---|
 | `tapNeighbour(locator, direction)` | taps the control next to the intended one, found by layout, and returns which it hit |
-| `doubleTap(locator)` | two taps inside 300ms |
-| `retapWhileSaving(locator)` | a second tap while the button reads "Saving…" (writes are held briefly so the state is observable) |
-| `interrupt(page, kind)` | `reload`, `back` (then forward), `hidden` (tab to background and back), `offline` (network down and back) |
+| `doubleTap(locator)` | two taps inside the app's bounce window less 100 ms; throws when the machine was too slow to land them that close, so a caller may assert on the outcome unconditionally |
+| `retapWhileSaving(locator)` | a second tap while the button reads "Saving…" (writes are held briefly so the state is observable); throws when "Saving…" is never seen |
+| `interrupt(page, kind, { awayMs, during })` | `reload`, `back` (then forward, only if Back moved), `hidden` (tab to background and back), `offline` (network down and back); `awayMs` (600 by default) is the time away and `during(page)` runs while the operator is away |
 | `hastyConfirm(page)` | answers the open confirm dialog with its most prominent button and returns its label |
 | `hastyShiaijoConfirm(page)` | the same for the shiaijo page's own confirms (Send back to queue, Move court) |
+| `loudestButton(scope)` | the ranking both confirm helpers use, for any other panel |
 
 Each returns what happened, and a journey records that as an audit row. Where
 the docs or an operator ruling say what must happen (a double tap on an ippon
-button lands one mark, an interruption leaves the operator on the same court), the journey
-also asserts it, so a regression fails the suite; the rest is judged by a person
-from the screenshots. `hidden` needs a note: headless Chromium never changes page
+button lands one mark, an interruption leaves the operator on the same court),
+the journey also asserts it, so a regression fails the suite; the rest is
+judged by a person from the screenshots. `hidden` needs a note: headless Chromium never changes page
 visibility on its own, so the helper overrides `document.hidden` and
 `document.visibilityState` and dispatches a real `visibilitychange` for each
 edge, which is what the app's listeners read.
 
 ## The pace of a tap
 
-The app ignores a pointer tap that lands within 400ms of the layer it opened (a
+The app ignores a pointer tap that lands within 400 ms of the layer it opened (a
 confirm, the sign-in dialog) or of the tap that armed a two-tap commit (Finish,
 End match), and a second ippon or foul tap on the same SIDE of a bout inside
 that window, whichever button it lands on (`web-mobile/js/tap_guard.jsx`; a
 tap on the other side counts at once). Playwright's second tap is always
 inside it, so `fixtures/pace.mjs` holds the dwell (the screenshot harness's
-`TAP_DWELL_MS`) and every helper that taps into a fresh layer, confirms an arm
+`TAP_DWELL_MS`, 500 ms) and every helper that taps into a fresh layer, confirms an arm
 or strikes for a side waits it out: `login`, `hastyConfirm`,
 `hastyShiaijoConfirm`, `lineupsNameSlot`, `finishMatch`, `finishTeam`,
 `endMatch`, `awardIppon`, `boutIppon`, `awardBoutIppon` (`tapOnSide` keeps the
 time of the last tap on each side). A journey that taps such a thing by hand
 does the same. `doubleTap` is the one helper that deliberately does not: it is
-the bounce, and the app is meant to ignore the second tap.
+the bounce, and the app is meant to ignore the second tap. `pace.mjs` reads the
+app's window from `web-mobile/js/tap_guard.jsx` (`TAP_BOUNCE_MS`) rather than
+copying it, and fails to load if the dwell is not longer than it.
 
 ## The console policy
 
@@ -168,33 +184,53 @@ fixture is wrapped so none is missed). When the test ends:
   `CONSOLE {json}` line otherwise, and is listed on the test as a
   `console-warning` annotation.
 
-Everything a test's pages logged is attached to it as `console.json`, with the
+Everything a test's pages logged is attached to it as `console.json` (kept in a failing test's trace), with the
 page it came from, whether the device was offline at the time, and, for a
 failed request, the status and body of the `/api` answer. What a `beforeAll`
 hook's pages log is checked with the first test of the file and marked as
-such; what an `afterAll` hook's log is checked when the worker stops.
+such; what an `afterAll` hook's pages log is reported under its own file when
+the next file's server starts or the worker stops, and an error there fails
+the run.
 
-The allowlist holds only noise a journey's scenario makes: requests the
-browser could not send while a journey has the device offline, and the 409s of
-a start or reopen the app sends through the server's gate and shows refused
-(the court busy, a competitor fighting elsewhere or barred by a withdrawal, or
-the knockout match it feeds being fought).
+The allowlist holds only noise a journey's scenario makes, in three entries:
+requests the browser could not send while a journey has the device offline;
+the app's own "Failed to fetch court matches" log from the court console
+while the device is offline; and the 409s of a start (a `/score` write whose
+body carries `status: "running"`) or a reopen the app sends through the
+server's gate and shows refused (the court busy, a competitor fighting
+elsewhere or barred by a withdrawal, or the knockout match it feeds being
+fought). Any other write refused that way is an error. A browser "Failed to
+load resource" line is paired with the `/api` answer it is about one to one,
+in arrival order per URL.
 Each entry matches as narrowly as it can (the message, the URL, the refusal
 code, offline only) and says why in one line. An error that looks like the
 app's own fault does not go on it: the test stays red until a person decides.
 
 ## Output
 
-Each journey has a folder, `output/<journey>/`. Its per-step screenshots land
-there, numbered in the order they were taken, beside its `audit.json` (the
+Each journey has a folder, `output/<journey>/`, named by the journey passed to
+`journeyShots` (it may be a subfolder, `knockout-mixed-individual/J1`). Its
+per-step screenshots land there, numbered in the order they were taken, beside its `audit.json` (the
 audit rows, also printed to the run log as `AUDIT {json}` lines), and are
 replaced on the next run. Playwright's own traces and failure screenshots land
 in `output/test-results/`. All of it is gitignored. There are no pixel
 comparisons: a screenshot is for a person to look at.
 
-Every run empties `output/test-results/` when it starts. Two runs at the same
-time in one checkout would delete each other's traces mid-test, so give the
-second one its own folder: `E2E_RESULTS_DIR=output/test-results-2 make e2e ...`.
+Traces are kept for a failing test only (`retain-on-failure`). Open one with
+
+    npx playwright show-trace output/test-results/<test folder>/trace.zip
+
+from this directory. The trace's Attachments tab holds the test's
+`console.json` (see [The console policy](#the-console-policy)); the list reporter
+does not write it to a file of its own, and a passing test keeps no trace, so
+its console errors are only in the run log as `CONSOLE {json}` lines. A failing
+test also carries the server's output as `server.log`.
+
+Every run empties `output/test-results/` when it starts, and a journey empties
+its own `output/<journey>/` in `beforeAll`. Two runs at the same time in one
+checkout would delete each other's traces mid-test, and two runs without
+`E2E_RESULTS_DIR` share every `output/<journey>/`, so give the second one its
+own folder: `E2E_RESULTS_DIR=output/test-results-2 make e2e ...`.
 With `E2E_RESULTS_DIR` set, the journey folders move inside it too
 (`<E2E_RESULTS_DIR>/journeys/<journey>/`), so neither run empties the other's.
 A relative `E2E_RESULTS_DIR` is relative to this directory.
@@ -208,3 +244,24 @@ becomes
 
 so the suite stays green while the defect is open. The PR that fixes the bug
 removes the `fixme`, and the step then guards the fix.
+
+## Adding a journey
+
+1. Name the file `journeys/<name>.spec.mjs`. A journey about a public surface
+   alone is `journeys/<name>.public.spec.mjs` and runs on the phone project.
+2. Import `test` and `expect` from `../fixtures/test.mjs`, never from
+   `@playwright/test`: only that `test` starts the file's server and applies
+   the console policy and the coarse-pointer check.
+3. Seed through the interface with the fixtures (`createTournament`, `login`,
+   `createCompetition`, `pasteRoster`, `generateDraw`, `startCompetition`).
+4. Take screenshots and keep an audit: `const shot = journeyShots('<journey>')`
+   in `beforeAll` (it empties the folder), `const audit = auditLog('<journey>')`
+   at describe level with `audit.flush()` in `afterAll`, so a journey that fails
+   part way still leaves its rows. `record` from the audit prints each row as an
+   `AUDIT` line.
+5. When tests share the seeded server, declare
+   `test.describe.configure({ mode: 'serial' })`.
+6. A defect the journey finds becomes a `test.fixme('<bead-id>: ...')` step
+   (see below).
+
+`smoke.spec.mjs` is the smallest complete example.

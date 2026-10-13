@@ -2,7 +2,7 @@
 // helpers a journey calls around its intended actions:
 //
 //   V1 tapNeighbour     the tap lands on the control next to the intended one
-//   V2 doubleTap        two taps inside 300ms
+//   V2 doubleTap        two taps inside the app's bounce window
 //      retapWhileSaving a second tap while the button still reads "Saving…"
 //   V3 interrupt        reload / back / tab hidden / offline, then return
 //   V4 hastyConfirm     a confirm dialog answered by its loudest button
@@ -18,7 +18,14 @@
 // Taps go through page.touchscreen at the element's centre: the browser's own
 // hit-testing decides what is tapped, as it does for a thumb. Every project in
 // playwright.config.mjs has a touchscreen.
-import { dwell } from './pace.mjs';
+import { errors } from '@playwright/test';
+import { dwell, TAP_BOUNCE_MS } from './pace.mjs';
+
+// The longest gap that still counts as a double tap: the app's bounce window
+// less a margin for the time between the first tap's start and the click the
+// app times from.
+const DOUBLE_TAP_MARGIN_MS = 100;
+export const DOUBLE_TAP_LIMIT_MS = TAP_BOUNCE_MS - DOUBLE_TAP_MARGIN_MS;
 
 // Controls a thumb can land on.
 const INTERACTIVE = 'button, [role="button"], a[href], input:not([type="hidden"]), select, textarea, [role="checkbox"], [role="tab"], [role="switch"]';
@@ -86,10 +93,14 @@ export async function tapNeighbour(locator, direction) {
   return row;
 }
 
-// V2. Two taps on the same spot inside 300ms, the impatient thumb. Returns
-// { gapMs }, from the start of the first tap to the start of the second;
-// `withinWindow` is false if this machine was too slow to land them inside
-// 300ms, in which case the row did not test what it says.
+// V2. Two taps on the same spot inside the app's bounce window
+// (DOUBLE_TAP_LIMIT_MS, derived from tap_guard.jsx's TAP_BOUNCE_MS), the
+// impatient thumb. Returns { gapMs, withinWindow }, gapMs being the time from
+// the start of the first tap to the start of the second, and withinWindow
+// always true: a machine too slow to land the taps inside the window THROWS,
+// because the row would not have tested what it says. The first tap's effects
+// cannot be taken back, so the taps are not retried; the caller's test fails
+// and is run again. Callers may assert on the outcome unconditionally.
 export async function doubleTap(locator) {
   const page = locator.page();
   const { x, y } = await centreOf(locator);
@@ -97,15 +108,20 @@ export async function doubleTap(locator) {
   await page.touchscreen.tap(x, y);
   const gapMs = Date.now() - t0;
   await page.touchscreen.tap(x, y);
-  return { gapMs, withinWindow: gapMs < 300 };
+  if (gapMs >= DOUBLE_TAP_LIMIT_MS) {
+    throw new Error(`clumsy.doubleTap: the two taps were ${gapMs} ms apart (limit ${DOUBLE_TAP_LIMIT_MS} ms, the app's bounce window is ${TAP_BOUNCE_MS} ms): this machine was too slow, so the row did not test the bounce guard`);
+  }
+  return { gapMs, withinWindow: true };
 }
 
 // V2 (second form). Tap `locator`, then tap the same spot again while it reads
 // "Saving…". A local server answers in milliseconds, far too fast for any
 // thumb, so the write is held for `holdWritesMs` first (every non-GET /api
 // request), which is what a venue's wifi does anyway. Returns
-// { savingSeen, retapped, labelAfter }: savingSeen false means the button
-// never showed "Saving…" and the second tap was not made.
+// { savingSeen, retapped, labelAfter }, both flags always true: a button that
+// never shows "Saving…" within the hold THROWS (the second tap was not made, so
+// a check built on this helper would pass without testing anything). Any other
+// failure propagates as it is.
 export async function retapWhileSaving(locator, { holdWritesMs = 1200, savingText = /Saving…/ } = {}) {
   const page = locator.page();
   const { x, y } = await centreOf(locator);
@@ -122,12 +138,20 @@ export async function retapWhileSaving(locator, { holdWritesMs = 1200, savingTex
   await page.route('**/api/**', hold);
   try {
     await page.touchscreen.tap(x, y);
-    const savingSeen = await page.waitForFunction(
-      ([el, src, flags]) => new RegExp(src, flags).test(el.textContent || ''),
-      [handle, savingText.source, savingText.flags],
-      { timeout: holdWritesMs, polling: 'raf' },
-    ).then(() => true, () => false);
-    if (savingSeen) await page.touchscreen.tap(x, y);
+    try {
+      await page.waitForFunction(
+        ([el, src, flags]) => new RegExp(src, flags).test(el.textContent || ''),
+        [handle, savingText.source, savingText.flags],
+        { timeout: holdWritesMs, polling: 'raf' },
+      );
+    } catch (err) {
+      if (err instanceof errors.TimeoutError) {
+        throw new Error(`clumsy.retapWhileSaving: ${locator} never read ${savingText} within ${holdWritesMs} ms of the tap (writes were held for that long), so there was no second tap to make`);
+      }
+      throw err;
+    }
+    const savingSeen = true;
+    await page.touchscreen.tap(x, y);
     // Let the held write go through before the route is removed.
     await page.waitForFunction(
       ([el, src, flags]) => !el.isConnected || !new RegExp(src, flags).test(el.textContent || ''),

@@ -96,6 +96,128 @@ test.describe('J5 kachinuki from the court console', () => {
 
   test.afterAll(() => audit.flush());
 
+  // The four regression guards below (bc-crpn, bc-emsl, bc-kheb, bc-sync) need
+  // the final's live console, so they run as steps INSIDE the final's tests. A
+  // failure is deferred, not thrown: it is recorded, the console is put back,
+  // and the final's own checks (played out, completed, the public viewer) still
+  // run; the played-out test fails at its very end naming every guard that did.
+  // (In a serial file a failing test skips the rest, and a restarted worker
+  // loses the shared state, so a guard of its own could not stand before them.)
+  const guardFailures = [];
+  async function guarded(page, title, fn) {
+    try {
+      await test.step(title, () => fn(page));
+    } catch (e) {
+      guardFailures.push(`${title}: ${String(e.message).split('\n')[0]}`);
+      record({ step: title, action: 'regression guard', variant: 'FAILED', error: String(e.message).split('\n')[0] });
+      await openShiaijo(page, 'A').catch(() => {});
+      if (await recordBoutButton(page).isVisible().catch(() => false)) {
+        // Leave the live bout unmarked and untied, as the final's play-out expects.
+        const live = currentBout(page);
+        for (const side of ['shiro', 'aka']) {
+          while ((await boutFilled(live, side).count().catch(() => 0)) > 0) await boutFilled(live, side).last().tap();
+        }
+        if (/✓ Tie/.test(await tieButton(live).innerText().catch(() => ''))) await tieButton(live).tap();
+      }
+    }
+  }
+
+  // bc-crpn (fixed): the court console never holds a running match and an
+  // open correction at once. While a finished match is open for correction,
+  // Start match on the Up next card is refused with a notice at the card, the
+  // correction stays open and the queued match is not started.
+  async function guardCrpn(page) {
+    const next = await sides(upNextCard(page));
+    await completedRowFor(page, m1).locator('.shiaijo-row__correct').tap();
+    await expect(reopenButton(page)).toBeVisible();
+    const start = upNextCard(page).getByRole('button', { name: 'Start match' });
+    await start.tap();
+    const notice = upNextCard(page).locator('.shiaijo-upnext__error');
+    await expect(notice).toHaveText(new RegExp(
+      `^Save the correction of .*${m1.shiro} vs ${m1.aka}, or leave it with Back to court, then start this match\\.$`));
+    record({ step: 'bc-crpn', action: 'Start match (Up next) while M1 is open for correction', variant: 'refused',
+      notice: (await notice.innerText()).trim(),
+      toast: (await page.locator('.toast').allInnerTexts().catch(() => [])).join(' | '),
+      screenshot: await shot(page, 'bc-crpn-start-refused-during-correction') });
+    // The correction stays open, and the final is still waiting in the queue.
+    await expect(reopenButton(page)).toBeVisible();
+    await expect(recordBoutButton(page)).toHaveCount(0);
+    await expect(start).toBeVisible();
+    expect(await sides(upNextCard(page))).toEqual(next);
+    // Leave the correction; the court is as it was, with the final up next.
+    await page.getByRole('button', { name: /Back to court/ }).tap();
+    await expect(reopenButton(page)).toHaveCount(0);
+    await expect(notice).toHaveCount(0);
+    expect(await sides(upNextCard(page))).toEqual(next);
+  }
+
+  // bc-emsl (fixed): a tap on an EMPTY mark slot (the "·" beside the scored
+  // marks) used to clear the bout's Tie. It is a no-op now; this guards it.
+  async function guardEmsl(page) {
+    const row = currentBout(page);
+    // The final's live bout carries one Shiro point; clear it, mark the tie.
+    while ((await boutFilled(row, 'shiro').count()) > 0) await boutFilled(row, 'shiro').last().tap();
+    await tieButton(row).tap();
+    await expect(tieButton(row)).toHaveText(/✓ Tie/);
+    await row.locator('.tsm-center-pts--aka .editor-side__pt:not(.editor-side__pt--filled)').first().tap();
+    await expect(tieButton(row)).toHaveText(/✓ Tie/);
+    await expect(boutMiddle(row)).resolves.toBe('X');
+    // Restore: untie, one Shiro point.
+    await tieButton(row).tap();
+    await awardBoutIppon(page, 'shiro', 'M');
+  }
+
+  // bc-kheb (fixed): Encho on ONE kachinuki bout used to set the encounter's
+  // overtime count, so the header kept reading "(E) OVERTIME" on every later
+  // bout. The (E) now lives on that bout's row only; this guards it.
+  async function guardKheb(page) {
+    const row = currentBout(page);
+    while ((await boutFilled(row, 'shiro').count()) > 0) await boutFilled(row, 'shiro').last().tap();
+    await tieButton(row).tap();
+    await enchoButton(page).tap();
+    await awardBoutIppon(page, 'shiro', 'M');
+    await recordBout(page);
+    // Bout 2 is a regulation bout.
+    await expect(editor(page).locator('.editor-modal__eyebrow').first()).not.toContainText(/overtime/i);
+  }
+
+  // bc-sync (fixed): the sync pill used to read "Synced" through the
+  // autosave's debounce window after a tap, although nothing had been sent,
+  // so a reload there lost the point with no warning (audit row "final bout
+  // 4"). It reads "Syncing…" from the tap until the write lands; this guards
+  // it. The score write is held, so the pill is read while the point is
+  // provably still unsaved, whatever this machine's timing.
+  async function guardSync(page) {
+    const live = currentBout(page);
+    const isScoreWrite = (url) => /\/api\/competitions\/[^/]+\/matches\/[^/]+\/score$/.test(url.pathname);
+    let release;
+    const released = new Promise((r) => { release = r; });
+    const hold = async (route) => {
+      if (route.request().method() !== 'PUT') return route.continue();
+      await released;
+      return route.continue().catch(() => {});
+    };
+    await page.route(isScoreWrite, hold);
+    try {
+      const sent = page.waitForRequest((r) => r.method() === 'PUT' && isScoreWrite(new URL(r.url())));
+      // A test that fails before the write goes out must not leave this rejecting unheard.
+      sent.catch(() => {});
+      await boutIpponButton(live, 'aka', 'D').tap();
+      // From the tap: the edit waits out the debounce (nothing sent yet)...
+      await expect(syncPill(page)).toHaveText('Syncing…');
+      // ...then its write is out, and held: still unsaved.
+      await sent;
+      await expect(syncPill(page)).toHaveText('Syncing…');
+    } finally {
+      release();
+      await page.unroute(isScoreWrite, hold);
+    }
+    await expect(syncPill(page)).toHaveText('Synced');
+    // Leave the bout as it was: take the point back.
+    await boutFilled(currentBout(page), 'aka').last().tap();
+    await expect(boutFilled(currentBout(page), 'aka')).toHaveCount(0);
+  }
+
   test('F5: seed a kachinuki knockout and name every team member at the court', async ({ page }) => {
     await createTournament(page, { name: 'Kachinuki Cup', courts: 2 });
     compId = await createCompetition(page, {
@@ -322,7 +444,8 @@ test.describe('J5 kachinuki from the court console', () => {
       const tappedAt = Date.now();
       const dbl = await doubleTap(boutIpponButton(currentBout(page), 'shiro', 'M'));
       // The app ignores the bounce of a tap: two taps inside its window land one M.
-      if (dbl.withinWindow) await expect(boutFilled(currentBout(page), 'shiro')).toHaveCount(1);
+      expect(dbl.withinWindow).toBe(true);
+      await expect(boutFilled(currentBout(page), 'shiro')).toHaveCount(1);
       record({ step: 'M1 bout 5', action: 'Shiro M', variant: 'V2 doubleTap', ...dbl,
         marksAfter: await boutFilled(currentBout(page), 'shiro').allInnerTexts() });
       // The mistake the later correction is about: the operator, meaning M K,
@@ -563,15 +686,18 @@ test.describe('J5 kachinuki from the court console', () => {
       // it the bounce added a second). Does the court's own Completed record say so?
       const want = /IV 4–2\s+PW 7–3/;
       const result = row.locator('.shiaijo-qrow__result');
-      const settled = await expect(result).toHaveText(want, { timeout: 6000 }).then(() => true, () => false);
+      const settledWithoutRefresh = await expect(result).toHaveText(want, { timeout: 6000 }).then(() => true, () => false);
       const shownAtFirst = (await result.innerText()).replace(/\s+/g, ' ');
       const staleShot = await shot(page, 'm1-completed');
       await page.getByRole('button', { name: 'Refresh' }).tap();
       await page.waitForTimeout(1500);
       record({ step: 'M1 end', action: 'Completed row after End match', variant: 'result', expected: 'IV 4–2 PW 7–3',
-        shownFor6s: shownAtFirst, settledWithoutRefresh: settled,
+        shownFor6s: shownAtFirst, settledWithoutRefresh,
         afterRefresh: (await completedRowFor(page, m1).locator('.shiaijo-qrow__result').innerText()).replace(/\s+/g, ' '),
         screenshot: staleShot });
+      // Whatever the row showed before the refresh (recorded above), the totals
+      // the bouts add up to must be what the Completed record settles on.
+      await expect(completedRowFor(page, m1).locator('.shiaijo-qrow__result')).toHaveText(want, { timeout: 8000 });
       // The bracket advanced: the final on A now names M1's winner (Shiro).
       await expect(page.locator('.shiaijo-pending, .shiaijo-upnext').first()).toContainText(m1.shiro);
     });
@@ -707,10 +833,9 @@ test.describe('J5 kachinuki from the court console', () => {
       const immediately = (await row.locator('.shiaijo-qrow__result').innerText()).replace(/\s+/g, ' ');
       const immediateShot = await shot(page, 'm1-ended-again');
       // Bout 8 is now a men (1 point) instead of the walkover (2 maru).
-      const settled = await expect(row.locator('.shiaijo-qrow__result')).toHaveText(/IV 4–2\s+PW 6–3/, { timeout: 8000 })
-        .then(() => true, () => false);
+      await expect(row.locator('.shiaijo-qrow__result')).toHaveText(/IV 4–2\s+PW 6–3/, { timeout: 8000 });
       record({ step: 'M1 reopen', action: 'ended again: Completed row', variant: 'result', expected: 'IV 4–2 PW 6–3',
-        immediately, settledWithin8s: settled, after: (await row.locator('.shiaijo-qrow__result').innerText()).replace(/\s+/g, ' '),
+        immediately, settledWithin8s: true, after: (await row.locator('.shiaijo-qrow__result').innerText()).replace(/\s+/g, ' '),
         screenshot: immediateShot });
       // Still Kawasemi's (Shiro's) win: the final keeps its side.
       await expect(page.locator('.shiaijo-pending, .shiaijo-upnext').first()).toContainText(m1.shiro);
@@ -1047,37 +1172,6 @@ test.describe('J5 kachinuki from the court console', () => {
     });
   });
 
-  // bc-crpn (fixed): the court console never holds a running match and an
-  // open correction at once. While a finished match is open for correction,
-  // Start match on the Up next card is refused with a notice at the card, the
-  // correction stays open and the queued match is not started.
-  test('bc-crpn: Start match while a correction is open is refused', async ({ page }) => {
-    await login(page);
-    await openShiaijo(page, 'A');
-    const next = await sides(upNextCard(page));
-    await completedRowFor(page, m1).locator('.shiaijo-row__correct').tap();
-    await expect(reopenButton(page)).toBeVisible();
-    const start = upNextCard(page).getByRole('button', { name: 'Start match' });
-    await start.tap();
-    const notice = upNextCard(page).locator('.shiaijo-upnext__error');
-    await expect(notice).toHaveText(new RegExp(
-      `^Save the correction of .*${m1.shiro} vs ${m1.aka}, or leave it with Back to court, then start this match\\.$`));
-    record({ step: 'bc-crpn', action: 'Start match (Up next) while M1 is open for correction', variant: 'refused',
-      notice: (await notice.innerText()).trim(),
-      toast: (await page.locator('.toast').allInnerTexts().catch(() => [])).join(' | '),
-      screenshot: await shot(page, 'bc-crpn-start-refused-during-correction') });
-    // The correction stays open, and the final is still waiting in the queue.
-    await expect(reopenButton(page)).toBeVisible();
-    await expect(recordBoutButton(page)).toHaveCount(0);
-    await expect(start).toBeVisible();
-    expect(await sides(upNextCard(page))).toEqual(next);
-    // Leave the correction; the court is as it was, with the final up next.
-    await page.getByRole('button', { name: /Back to court/ }).tap();
-    await expect(reopenButton(page)).toHaveCount(0);
-    await expect(notice).toHaveCount(0);
-    expect(await sides(upNextCard(page))).toEqual(next);
-  });
-
   test('J5 final: lineups carried over, the final starts on A', async ({ page }) => {
     await login(page);
     await openShiaijo(page, 'A');
@@ -1085,6 +1179,7 @@ test.describe('J5 kachinuki from the court console', () => {
     // The final pairs the two semifinal winners: M1's Shiro and M2's Aka.
     expect([final.shiro, final.aka].sort()).toEqual([m1.shiro, m2.aka].sort());
     finalPair = final;
+    await guarded(page, 'bc-crpn: Start match while a correction is open is refused', guardCrpn);
 
     await test.step('lineups for the final: each team carries its previous match\'s lineup', async () => {
       await openLineupFromUpNext(page);
@@ -1138,83 +1233,13 @@ test.describe('J5 kachinuki from the court console', () => {
     });
   });
 
-  // bc-emsl (fixed): a tap on an EMPTY mark slot (the "·" beside the scored
-  // marks) used to clear the bout's Tie. It is a no-op now; this guards it.
-  test('bc-emsl: tapping an empty mark slot leaves the bout\'s Tie on', async ({ page }) => {
-    await login(page);
-    await openShiaijo(page, 'A');
-    const row = currentBout(page);
-    // The final's live bout carries one Shiro point; clear it, mark the tie.
-    while ((await boutFilled(row, 'shiro').count()) > 0) await boutFilled(row, 'shiro').last().tap();
-    await tieButton(row).tap();
-    await expect(tieButton(row)).toHaveText(/✓ Tie/);
-    await row.locator('.tsm-center-pts--aka .editor-side__pt:not(.editor-side__pt--filled)').first().tap();
-    await expect(tieButton(row)).toHaveText(/✓ Tie/);
-    await expect(boutMiddle(row)).resolves.toBe('X');
-    // Restore: untie, one Shiro point.
-    await tieButton(row).tap();
-    await awardBoutIppon(page, 'shiro', 'M');
-  });
-
-  // bc-kheb (fixed): Encho on ONE kachinuki bout used to set the encounter's
-  // overtime count, so the header kept reading "(E) OVERTIME" on every later
-  // bout. The (E) now lives on that bout's row only; this guards it.
-  test('bc-kheb: after one bout goes to encho, the next bout\'s header does not claim overtime', async ({ page }) => {
-    await login(page);
-    await openShiaijo(page, 'A');
-    const row = currentBout(page);
-    while ((await boutFilled(row, 'shiro').count()) > 0) await boutFilled(row, 'shiro').last().tap();
-    await tieButton(row).tap();
-    await enchoButton(page).tap();
-    await awardBoutIppon(page, 'shiro', 'M');
-    await recordBout(page);
-    // Bout 2 is a regulation bout.
-    await expect(editor(page).locator('.editor-modal__eyebrow').first()).not.toContainText(/overtime/i);
-  });
-
-  // bc-sync (fixed): the sync pill used to read "Synced" through the
-  // autosave's debounce window after a tap, although nothing had been sent,
-  // so a reload there lost the point with no warning (audit row "final bout
-  // 4"). It reads "Syncing…" from the tap until the write lands; this guards
-  // it. The score write is held, so the pill is read while the point is
-  // provably still unsaved, whatever this machine's timing.
-  test('bc-sync: the sync pill reads "Syncing…" while a tapped point is still unsaved', async ({ page }) => {
-    await login(page);
-    await openShiaijo(page, 'A');
-    const live = currentBout(page);
-    const isScoreWrite = (url) => /\/api\/competitions\/[^/]+\/matches\/[^/]+\/score$/.test(url.pathname);
-    let release;
-    const released = new Promise((r) => { release = r; });
-    const hold = async (route) => {
-      if (route.request().method() !== 'PUT') return route.continue();
-      await released;
-      return route.continue().catch(() => {});
-    };
-    await page.route(isScoreWrite, hold);
-    try {
-      const sent = page.waitForRequest((r) => r.method() === 'PUT' && isScoreWrite(new URL(r.url())));
-      // A test that fails before the write goes out must not leave this rejecting unheard.
-      sent.catch(() => {});
-      await boutIpponButton(live, 'aka', 'D').tap();
-      // From the tap: the edit waits out the debounce (nothing sent yet)...
-      await expect(syncPill(page)).toHaveText('Syncing…');
-      // ...then its write is out, and held: still unsaved.
-      await sent;
-      await expect(syncPill(page)).toHaveText('Syncing…');
-    } finally {
-      release();
-      await page.unroute(isScoreWrite, hold);
-    }
-    await expect(syncPill(page)).toHaveText('Synced');
-    // Leave the bout as it was: take the point back.
-    await boutFilled(currentBout(page), 'aka').last().tap();
-    await expect(boutFilled(currentBout(page), 'aka')).toHaveCount(0);
-  });
-
   test('J5 final: played out, the knockout completes', async ({ page, browser, baseURL }) => {
     await login(page);
     await openShiaijo(page, 'A');
     await expect(recordBoutButton(page)).toBeVisible();
+    await guarded(page, 'bc-emsl: tapping an empty mark slot leaves the bout\'s Tie on', guardEmsl);
+    await guarded(page, 'bc-kheb: after one bout goes to encho, the next bout\'s header does not claim overtime', guardKheb);
+    await guarded(page, 'bc-sync: the sync pill reads "Syncing…" while a tapped point is still unsaved', guardSync);
     const S = MEMBERS[finalPair.shiro];
     // Shiro keeps winning with whoever is on until End match; the operator
     // ends it when Aka is out of fighters. The Aka fighter changes each bout.
@@ -1285,6 +1310,9 @@ test.describe('J5 kachinuki from the court console', () => {
     } finally {
       await spectator.close();
     }
+    // Last: the deferred guards (above) fail the test only now, after the
+    // final and its viewer check ran.
+    expect(guardFailures, 'regression guards that failed').toEqual([]);
   });
 });
 

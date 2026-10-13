@@ -253,9 +253,14 @@ export async function chooseCourt(row, court) {
 export async function runningOnCourt(page, court) {
   await page.goto('/admin/score-editor');
   await expect(page.getByRole('heading', { level: 1, name: 'Score editor' })).toBeVisible();
-  await page.getByRole('group', { name: 'Match status' }).getByRole('button', { name: 'Now' }).tap();
-  await page.waitForTimeout(500);
-  const rows = await page.locator('.score-edit-row').evaluateAll((els) => els.map((r) => {
+  const now = page.getByRole('group', { name: 'Match status' }).getByRole('button', { name: 'Now' });
+  await now.tap();
+  await expect(now).toHaveAttribute('aria-pressed', 'true');
+  // Wait for the list to have settled on a row or on its empty state, then for two
+  // consecutive reads to agree: a read straight after the tap could see the list
+  // before the tournament loaded and make a zero-length assertion pass vacuously.
+  await expect(page.locator('.score-edit-row').first().or(page.getByText('No matches', { exact: true }))).toBeVisible();
+  const read = () => page.locator('.score-edit-row').evaluateAll((els) => els.map((r) => {
     const names = [...r.querySelectorAll('.numbered-name__text')].map((n) => n.textContent.trim());
     const ct = r.querySelector('.score-edit-row__court');
     const comp = r.querySelector(':scope > div:first-child > div:last-child');
@@ -267,6 +272,14 @@ export async function runningOnCourt(page, court) {
       status: r.classList.contains('score-edit-row--running') ? 'running' : 'other',
     };
   }));
+  let rows = await read();
+  for (let i = 0; i < 20; i++) {
+    await page.waitForTimeout(250);
+    const again = await read();
+    const same = JSON.stringify(again) === JSON.stringify(rows);
+    rows = again;
+    if (same) break;
+  }
   return rows.filter((r) => r.court === court && r.status === 'running');
 }
 

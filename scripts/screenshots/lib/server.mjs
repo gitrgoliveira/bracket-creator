@@ -74,14 +74,40 @@ export async function start(kind) {
   child.stdout.on('data', keep);
   child.stderr.on('data', keep);
 
+  // A worker or runner that exits without reaching stop() (an uncaught error,
+  // process.exit) must not leave the server running or its data folder behind.
+  // A synchronous 'exit' listener is the only thing that still runs then. A
+  // SIGKILL runs nothing, and no hook can cover it.
+  const removeData = () => fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  const onExit = () => {
+    if (!exited(child)) child.kill('SIGKILL');
+    try {
+      removeData();
+    } catch {
+      // the process is going away; nothing left to report to
+    }
+  };
+  process.on('exit', onExit);
+
   const base = `http://localhost:${port}`;
   try {
     await waitForHealth(base, child, readyPath);
+    // A health answer is only ours if our child is still alive: when another
+    // process took the port between freePort() and the bind, this child exits
+    // with a bind error and the answer came from the other server. A short
+    // settle, then the check.
+    await new Promise((r) => setTimeout(r, 250));
+    if (exited(child)) {
+      throw new Error(`server exited right after answering ${readyPath} `
+        + `(${child.signalCode ? `signal ${child.signalCode}` : `code ${child.exitCode}`}); `
+        + `the answer may have come from another process on port ${port}`);
+    }
   } catch (err) {
+    process.off('exit', onExit);
     child.kill('SIGKILL');
     // stop() is never handed out on this path, so the data dir it would have
     // removed is removed here.
-    fs.rmSync(dataDir, { recursive: true, force: true });
+    removeData();
     throw new Error(`${err.message}\n--- server output ---\n${log.join('')}`);
   }
 
@@ -89,14 +115,26 @@ export async function start(kind) {
   const stop = async () => {
     if (stopped) return;
     stopped = true;
-    child.kill('SIGTERM');
-    // The binary shuts SSE down gracefully; give it a moment before insisting.
-    await new Promise((r) => setTimeout(r, 400));
-    if (!exited(child)) child.kill('SIGKILL');
-    fs.rmSync(dataDir, { recursive: true, force: true });
+    process.off('exit', onExit);
+    if (!exited(child)) {
+      const gone = new Promise((resolve) => child.once('exit', resolve));
+      child.kill('SIGTERM');
+      // The binary shuts SSE down gracefully; give it a moment before insisting.
+      const timer = { id: null };
+      const graceful = await Promise.race([
+        gone.then(() => true),
+        new Promise((r) => { timer.id = setTimeout(() => r(false), 3000); }),
+      ]);
+      clearTimeout(timer.id);
+      if (!graceful) {
+        child.kill('SIGKILL');
+        await gone;
+      }
+    }
+    removeData();
   };
 
-  return { base, dataDir, stop };
+  return { base, dataDir, stop, logTail: () => log.join('') };
 }
 
 export { REPO, BIN };

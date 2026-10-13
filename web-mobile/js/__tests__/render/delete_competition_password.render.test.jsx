@@ -27,7 +27,7 @@ async function mountWithDialogHost({ comp, onBack, showToast }) {
           tournament={t} competition={comp} pools={[]} poolMatches={[]} standings={[]} bracket={null}
           section="settings" onSection={noop} onBack={onBack} onOpenCompetition={noop} onUpdate={noop}
           onRefreshCompetition={noop} onMoveCourt={noop} onEditScore={noop} onLogout={noop}
-          onViewerMode={noop} tweaks={{}} password="sign-in-pw" showToast={showToast}
+          onViewerMode={noop} tweaks={{}} password="pw" showToast={showToast}
         />
         <DialogHost />
       </div>
@@ -73,7 +73,7 @@ describe('Delete competition asks for the password again', () => {
     await type('nope');
     await keyboardClick(button(dialog(), 'Delete'));
 
-    expect(stubs.API.deleteCompetition).toHaveBeenCalledWith('c1', 'sign-in-pw', 'nope');
+    expect(stubs.API.deleteCompetition).toHaveBeenCalledWith('c1', 'pw', 'nope');
     expect(dialog()).not.toBeNull();
     expect(dialog().querySelector('[role="alert"]').textContent).toBe(SENTENCE);
     expect(onBack).not.toHaveBeenCalled();
@@ -89,7 +89,7 @@ describe('Delete competition asks for the password again', () => {
     await type('right');
     await keyboardClick(button(dialog(), 'Delete'));
 
-    expect(stubs.API.deleteCompetition).toHaveBeenLastCalledWith('c1', 'sign-in-pw', 'right');
+    expect(stubs.API.deleteCompetition).toHaveBeenLastCalledWith('c1', 'pw', 'right');
     expect(dialog()).toBeNull();
     expect(onBack).toHaveBeenCalledTimes(1);
   });

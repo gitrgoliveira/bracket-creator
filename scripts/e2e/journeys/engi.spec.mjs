@@ -130,6 +130,7 @@ test.describe('engi', () => {
       // The add's response reached the page before the removal's own save went out.
       await writes.answeredBeforeNextWrite(held);
       await engiSettle(page);
+      // Deliberate: a late echo that undoes the tap-back must be given the time to land, so the time is the evidence.
       await page.waitForTimeout(1000);
       await expect(flagCount(page, 'aka'), 'the taken-back flag stays taken back').toHaveText('0');
       await shot(page, 'flag-taken-back-kept');
@@ -150,6 +151,7 @@ test.describe('engi', () => {
       held.release();
       await writes.answeredBeforeNextWrite(held);
       await engiSettle(page);
+      // Deliberate: a late echo that undoes the tap-back must be given the time to land, so the time is the evidence.
       await page.waitForTimeout(1000);
       await expect(flagCount(page, 'aka'), 'the flag put back stays').toHaveText('1');
       await shot(page, 'flag-put-back-kept');

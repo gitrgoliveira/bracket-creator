@@ -57,10 +57,10 @@ export const ROSTER_4_JOINT = [
 export const winnerOf = ({ shiro, aka }) => (shiro.localeCompare(aka) <= 0 ? 'shiro' : 'aka');
 
 // The two names an editor shows, Shiro first.
-export async function editorSides(page, root = INLINE_EDITOR) {
+export async function editorSides(page, root = INLINE_EDITOR, { timeout } = {}) {
   const ed = page.locator(root).first();
-  const shiro = (await ed.locator('.sb-side--shiro .numbered-name__text').first().innerText()).trim();
-  const aka = (await ed.locator('.sb-side--aka .numbered-name__text').first().innerText()).trim();
+  const shiro = (await ed.locator('.sb-side--shiro .numbered-name__text').first().innerText({ timeout })).trim();
+  const aka = (await ed.locator('.sb-side--aka .numbered-name__text').first().innerText({ timeout })).trim();
   return { shiro, aka };
 }
 
@@ -165,15 +165,25 @@ export async function playRunningBout(page, { waza = 'M' } = {}) {
   return { ...pair, winner: side };
 }
 
+// The bout the console's inline editor is running on the individual board, as
+// its pairing, or null when no bout runs there. The editor can leave between
+// the two reads (a send back lands), which is a bout no longer running: the
+// pairing read then gives up quickly rather than waiting for a gone editor.
+const liveIndividualBout = async (page) => (
+  (await inlineRunning(page)) ? editorSides(page, INLINE_EDITOR, { timeout: 1_000 }).catch(() => null) : null);
+
 // Open the correction of a completed bout on the shiaijo page, the way the
 // operator now must. The console never holds a live bout and an open
 // correction at once (bc-crpn): while a bout runs, Correct is refused with a
 // notice at the row and a toast, and the notice says what to do: send the live
 // bout back to the queue (its score is kept), then correct. Returns the bout
 // that was live (null when the court was idle) and what the refusal said.
-export async function correctCompleted(page, pair) {
+// `readLive(page)` reads the bout the console's editor is running (null when
+// none): the individual board by default; fixtures/shared-court.mjs passes
+// liveBout, which reads a team sheet as well (correctAcross).
+export async function correctCompleted(page, pair, { readLive = liveIndividualBout } = {}) {
   const done = completedRowFor(page, pair);
-  const live = (await inlineRunning(page)) ? await editorSides(page) : null;
+  const live = await readLive(page);
   await done.getByRole('button', { name: 'Correct' }).tap();
   let refusal = null;
   if (live) {
@@ -182,12 +192,12 @@ export async function correctCompleted(page, pair) {
     const toast = (await page.locator('.toast').allInnerTexts().catch(() => [])).join(' | ');
     refusal = {
       notice: (await notice.innerText()).trim(), toast,
-      editorStillOnLiveBout: (await inlineRunning(page)) && JSON.stringify(await editorSides(page)) === JSON.stringify(live),
+      editorStillOnLiveBout: JSON.stringify(await readLive(page)) === JSON.stringify(live),
     };
     expect(refusal.notice).toMatch(/^Shiaijo \S+ is running .+\. Finish it or send it back to the queue first\. Then correct this match\.$/);
     await page.getByRole('button', { name: 'Send back to queue' }).tap();
     refusal.sendBack = await hastyShiaijoConfirm(page);
-    await expect.poll(() => inlineRunning(page), { timeout: 10_000 }).toBe(false);
+    await expect.poll(() => readLive(page), { timeout: 10_000 }).toBeNull();
     await done.getByRole('button', { name: 'Correct' }).tap();
   }
   await expect(inlineEditor(page).first().locator('.editor-head-pill')).toHaveText('CORRECTION');

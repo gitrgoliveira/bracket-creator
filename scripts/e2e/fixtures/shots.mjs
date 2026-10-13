@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isCoarse, restoreCoarse } from './pointer.mjs';
+import { ensureCoarse, isCoarse } from './pointer.mjs';
 
 // scripts/e2e, the directory playwright.config.mjs sits in.
 const E2E_DIR = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -49,7 +49,7 @@ export function journeyShots(journey) {
     // emulation: measured, (pointer: coarse) reads false afterwards, so every
     // tap-floor rule switches off for the rest of the test. Put it back in
     // place (fixtures/pointer.mjs).
-    if (coarse) await restoreCoarse(page);
+    if (coarse) await ensureCoarse(page);
     return file;
   };
 }

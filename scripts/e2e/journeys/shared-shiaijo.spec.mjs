@@ -41,7 +41,8 @@ import {
 import {
   doubleTap, hastyShiaijoConfirm, interrupt, loudestButton, retapWhileSaving, tapNeighbour,
 } from '../fixtures/clumsy.mjs';
-import { dwell, settled } from '../fixtures/pace.mjs';
+import { dwell, rendered, settled, untilStable } from '../fixtures/pace.mjs';
+import { EXPECT_TIMEOUT_MS } from '../fixtures/devices.mjs';
 import { tapSize } from '../fixtures/pointer.mjs';
 import { openTvBoard, tvBoard } from '../fixtures/public.mjs';
 import {
@@ -127,7 +128,7 @@ async function nextLive(prev) {
   await expect.poll(async () => {
     live = await liveOnConsole();
     return !!live && !same(live, prev);
-  }, { timeout: 15_000 }).toBe(true);
+  }, { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
   return live;
 }
 
@@ -182,10 +183,12 @@ test.describe('shared-shiaijo', () => {
   // should be one after the other and the start-time will need to be adjusted
   // depending on how the day is going"). ST was created after SI and shares
   // Shiaijo A with it, so by default every ST match on A comes after SI's last
-  // match there. First in the file because S1 re-times ST with Auto-schedule,
-  // after which the defaults can no longer be read; it only reads the Scores
-  // and Bracket tabs, so S1 starts from the same state. The wizard hint's new
-  // wording is the fix's to write: it is recorded here, not asserted.
+  // match there, and ends. First in the file because S1 re-times ST with
+  // Auto-schedule, after which the defaults can no longer be read; it only reads
+  // the Scores and Bracket tabs and the wizard's form (nothing is created), so
+  // S1 starts from the same state. The wizard still offers its start time to the
+  // operator, who can change it as the day goes. The hint's new wording is the
+  // fix's to write: it is recorded here, and only its presence is asserted.
   test.fixme('bc-seqc: a competition sharing a shiaijo with an earlier one is scheduled after it by default', async () => {
     const clock = (t) => /^\d\d:\d\d$/.test(t);
     const siOnA = [
@@ -197,8 +200,21 @@ test.describe('shared-shiaijo', () => {
       hint: draw.defaults.ST.sharedCourtHint, startTimes: { si: draw.defaults.SI.startTime, st: draw.defaults.ST.startTime } });
     expect(siOnA.length).toBeGreaterThan(0);
     expect(stOnA.length).toBeGreaterThan(0);
-    const siLast = siOnA[siOnA.length - 1];
-    expect(stOnA[0] > siLast, `${ST}'s first match on A (${stOnA[0]}) comes after ${SI}'s last there (${siLast})`).toBe(true);
+    // After SI's last match there ENDS, not merely starts: its slot is as long as
+    // the gap SI's own slots keep (an SI match of a single slot has no gap to read).
+    const minutes = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
+    const siStarts = [...new Set(siOnA.map(minutes))];
+    const slot = Math.min(...siStarts.slice(1).map((m, i) => m - siStarts[i]).filter((g) => g > 0), Infinity);
+    const siEnds = siStarts[siStarts.length - 1] + (Number.isFinite(slot) ? slot : 1);
+    expect(minutes(stOnA[0]), `${ST}'s first match on A (${stOnA[0]}) comes after ${SI}'s last there ends (${siEnds} min)`).toBeGreaterThanOrEqual(siEnds);
+    // The wizard still tells the operator something about sharing a shiaijo, and
+    // still lets them set the start time themselves.
+    expect(draw.defaults.ST.sharedCourtHint, 'the wizard hint about sharing a shiaijo').toBeTruthy();
+    await H.goto('/admin/create-competition');
+    const startInput = H.locator('#create-start-time');
+    await expect(startInput).toBeEditable();
+    await startInput.fill('13:45');
+    await expect(startInput).toHaveValue('13:45');
   });
 
   // S1 the picker, S8 the slot times (P6), S7 the public queue before play.
@@ -243,7 +259,7 @@ test.describe('shared-shiaijo', () => {
         nb.note.push(String(e.message).slice(0, 120));
       }
     }
-    await C.waitForTimeout(600);
+    await rendered(C);
     r({ step: 'S1 picker', action: 'competition picker', variant: 'V1 tapNeighbour (left, else down)', direction: nb.direction, hit: nb.hit, gapPx: nb.gapPx, note: nb.note,
       url: new URL(C.url()).pathname, officiating: await officiatingName(C).catch(() => null), shot: await shot(C, 's1-picker-neighbour-tapped') });
     r({ step: 'S1 picker', action: 'competition picker', variant: 'size', ...(await tapSize(competitionPicker(C))) });
@@ -261,8 +277,10 @@ test.describe('shared-shiaijo', () => {
     await H.locator('#auto-schedule-start').fill(ST_RESTART);
     const spacing = await H.locator('#auto-match-duration').inputValue().catch(() => null);
     await H.getByRole('button', { name: 'Auto-schedule competition' }).tap();
-    await expect(H.getByRole('button', { name: 'Auto-schedule competition' })).toBeEnabled({ timeout: 15_000 });
-    await H.waitForTimeout(800);
+    await expect(H.getByRole('button', { name: 'Auto-schedule competition' })).toBeEnabled({ timeout: EXPECT_TIMEOUT_MS });
+    // The button is enabled again before it has visibly been busy, so the saved
+    // times are what says the re-timing is done: ST's earliest slot is the restart.
+    await expect.poll(async () => (await readScoresTab(H, ids.ST)).map((m) => m.time).filter(Boolean).sort()[0]).toBe(ST_RESTART);
     const siAfter = await readScoresTab(H, ids.SI);
     draw.st = await readScoresTab(H, ids.ST);
     draw.stKnockout = await bracketSlots(H, ids.ST);
@@ -273,9 +291,9 @@ test.describe('shared-shiaijo', () => {
 
     // S7 / P8 / D2: the public surfaces for A before play.
     await openTvBoard(TV, 'A');
-    await TV.waitForTimeout(1000);
     await P.goto('/schedule');
-    await P.waitForTimeout(1000);
+    // Both screens fill from the server after they load: the text they settle on.
+    await untilStable(async () => [await tvBoard(TV).innerText(), await P.locator('body').innerText()]);
     r({ step: 'S7 public', action: 'TV board A and the public schedule before play', variant: 'P8 record (D2)',
       tv: (await tvBoard(TV).innerText()).replace(/\s+/g, ' ').slice(0, 500),
       schedule: (await P.locator('body').innerText()).replace(/\s+/g, ' ').slice(0, 900),
@@ -299,8 +317,19 @@ test.describe('shared-shiaijo', () => {
     const [shiro, aka] = s.upNext.names;
     const otherNames = s.officiating === SI ? TEAMS.map((t) => t[0]) : ROSTER_12.map((p) => p[0]);
     await openTvBoard(TV, 'A');
-    await expect(tvBoard(TV)).toContainText(shiro);
-    await expect(tvBoard(TV)).toContainText(aka);
+    // The board's next-match slots (display_scoreboard.jsx), each on its own. The
+    // promoted slot is the match the board puts first before play (its NOW row on an
+    // individual board, the headline on a team board) and must be the console's Up
+    // next; the NEXT line, drawn when a queued match is not already on the board,
+    // must not be the other competition's. The UP NEXT strip lists the next POOL and
+    // is not the next match, so it is not read here.
+    const promoted = s.officiating === SI ? TV.getByTestId('tvd-indiv-row-now').first() : tvBoard(TV);
+    await expect(promoted, 'the TV board promotes a match').toBeVisible();
+    await expect(promoted).toContainText(shiro);
+    await expect(promoted).toContainText(aka);
+    const nextLine = TV.locator('div:has(> span:text-is("NEXT"))');
+    if (await nextLine.count()) for (const name of otherNames) await expect(nextLine).not.toContainText(name);
+    // And the other competition appears nowhere else on the board either.
     for (const name of otherNames) await expect(tvBoard(TV)).not.toContainText(name);
     await P.goto('/schedule');
     const nextUp = scheduleColumn(P, 'A').locator('.tw-match')
@@ -329,7 +358,10 @@ test.describe('shared-shiaijo', () => {
     const fin = finishButton(C);
     const finLabel = (await fin.innerText()).trim();
     const dbl = await doubleTap(fin);
-    await C.waitForTimeout(1000);
+    await expect(completedRowFor(C, bouts.b1).or(armedFinishButton(C))).toBeVisible();
+    // Out the arm's bounce window before reading, so a second tap that was
+    // wrongly counted would have committed by now, and the tap below counts.
+    await dwell(C, Date.now());
     const committedByDouble = await completedRowFor(C, bouts.b1).isVisible().catch(() => false);
     const armedAfter = await armedFinishButton(C).isVisible().catch(() => false);
     r({ step: 'S2 advance', action: finLabel, variant: 'V2 doubleTap', ...dbl, committedByDouble, stillArmed: armedAfter,
@@ -338,7 +370,6 @@ test.describe('shared-shiaijo', () => {
     expect(finLabel).toBe('Finish + Start Next →');
     expect(committedByDouble).toBe(false);
     expect(armedAfter).toBe(true);
-    await dwell(C, Date.now() - 1000);
     await armedFinishButton(C).tap();
     await expect(completedRowFor(C, bouts.b1)).toBeVisible();
     live = await nextLive(bouts.b1);
@@ -360,7 +391,7 @@ test.describe('shared-shiaijo', () => {
       liveBout: corr.live, ...corr.refusal, shot: await shot(C, 's4a-correction-open') });
     expect(same(corr.live, bouts.b2)).toBe(true);
     await C.getByRole('button', { name: /Back to court/ }).tap();
-    await C.waitForTimeout(800);
+    await expect(C.getByRole('button', { name: /Back to court/ })).toBeHidden();
     const landed = await courtState(C);
     r({ step: 'S4a correct', action: 'Back to court', variant: 'V5 lost place', officiating: landed.officiating, upNext: landed.upNext,
       editor: landed.editor, idle: landed.idle, shot: await shot(C, 's4a-back-to-court') });
@@ -391,9 +422,8 @@ test.describe('shared-shiaijo', () => {
     r({ step: 'S2b advance', action: 'clock check', variant: 'note', stEarlierThanNextSi: !!nextSiTime && draw.st[0].time < nextSiTime });
 
     // S7 again (D2): what the public sees while the console runs SI.
-    await TV.waitForTimeout(800);
     await P.reload();
-    await P.waitForTimeout(1000);
+    await untilStable(async () => [await tvBoard(TV).innerText(), await P.locator('body').innerText()]);
     r({ step: 'S7 public', action: 'TV board A and the public schedule while SI runs on A', variant: 'P8 record (D2)',
       consoleRunsNext: 'the next SI bout on A (the console stays on SI)',
       tv: (await tvBoard(TV).innerText()).replace(/\s+/g, ' ').slice(0, 500),
@@ -417,7 +447,7 @@ test.describe('shared-shiaijo', () => {
     await expect.poll(async () => {
       ov = { ...(await editorIdentity(C, EDITOR)), ...(await editorSides(C, EDITOR)) };
       return !same(ov, bouts.b3) && (await C.locator(EDITOR).locator('.editor-head-pill').count()) === 0;
-    }, { timeout: 15_000 }).toBe(true);
+    }, { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     bouts.b4 = pairOf(ov);
     const expectedB4 = siA.find((m) => m.time > nextSiTime && ![m.shiro, m.aka].includes(withdrawn));
     r({ step: 'S9 scores page', action: s9Label, variant: 'correct path', listOnA, next: ov, expected: expectedB4,
@@ -431,8 +461,9 @@ test.describe('shared-shiaijo', () => {
     const nav = (cls) => C.locator(EDITOR).locator(cls);
     for (const cls of ['.score-nav__next', '.score-nav__next', '.score-nav__prev', '.score-nav__prev']) {
       if (!(await nav(cls).isEnabled().catch(() => false))) continue;
+      const heldBefore = await C.locator(EDITOR).innerText();
       await nav(cls).tap();
-      await C.waitForTimeout(300);
+      await expect.poll(() => C.locator(EDITOR).innerText()).not.toBe(heldBefore);
       walked.push((await editorIdentity(C, EDITOR)).eyebrow);
     }
     r({ step: 'S9 scores page', action: 'Next x2, Prev x2', variant: 'correct path (allowed to walk the court)', walked,
@@ -445,7 +476,7 @@ test.describe('shared-shiaijo', () => {
     await expect.poll(async () => {
       ov = { ...(await editorIdentity(C, EDITOR)), ...(await editorSides(C, EDITOR)) };
       return !same(ov, bouts.b4) && (await C.locator(EDITOR).locator('.editor-head-pill').count()) === 0;
-    }, { timeout: 15_000 }).toBe(true);
+    }, { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     bouts.b5 = pairOf(ov);
     r({ step: 'S9 scores page', action: 'Fusenpai (Aka) in the overlay', variant: 'correct path (after-decision advance)', ...fus, next: ov,
       shot: await shot(C, 's9-after-fusenpai') });
@@ -464,7 +495,7 @@ test.describe('shared-shiaijo', () => {
     // S3: back on the console, SI's bout running with a point. The operator
     // switches the picker to ST and starts ST's Up next.
     await openShiaijo(C, 'A');
-    await expect.poll(async () => (await liveOnConsole()) && same(await liveOnConsole(), bouts.b5), { timeout: 15_000 }).toBe(true);
+    await expect.poll(async () => (await liveOnConsole()) && same(await liveOnConsole(), bouts.b5), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     const marksB5 = await slotMarks(C, winnerOf(bouts.b5));
     await pickCompetition(C, ST);
     const s3 = await courtState(C);
@@ -474,7 +505,7 @@ test.describe('shared-shiaijo', () => {
     // P1: a reload drops the pick.
     await interrupt(C, 'reload');
     await expect(C.getByRole('heading', { level: 1, name: 'Shiaijo A' })).toBeVisible();
-    await C.waitForTimeout(1000);
+    await expect(C.locator('.shiaijo-officiating__name').first()).toBeVisible();
     r({ step: 'S3 switch', action: `reload with ${ST} picked and an SI bout running`, variant: 'V3 interrupt reload (P1)',
       officiatingAfter: await officiatingName(C), shot: await shot(C, 's3-reload-after-pick') });
     if ((await officiatingName(C)) !== ST) await pickCompetition(C, ST);
@@ -487,8 +518,11 @@ test.describe('shared-shiaijo', () => {
     } catch (e) {
       nbStart = { hit: null, note: String(e.message).slice(0, 120) };
     }
-    await C.waitForTimeout(800);
-    const panelOpen = await C.locator('[data-testid^="match-lineup-side-"]').first().isVisible().catch(() => false);
+    const lineupPanel = C.locator('[data-testid^="match-lineup-side-"]').first();
+    // A neighbour that is the lineup button opens the panel; any other control
+    // opens nothing, which the read below takes as it finds it.
+    if (/lineup/i.test((nbStart.hit && nbStart.hit.label) || '')) await expect(lineupPanel).toBeVisible();
+    const panelOpen = await lineupPanel.isVisible().catch(() => false);
     r({ step: 'S3 switch', action: "Start match (ST's Up next)", variant: 'V1 tapNeighbour right', hit: nbStart.hit && nbStart.hit.label,
       note: nbStart.note, lineupPanelOpened: panelOpen, stillRunning: await liveOnConsole(), shot: await shot(C, 's3-start-neighbour-tapped') });
     if (panelOpen) await T.closePanel(C);
@@ -509,8 +543,8 @@ test.describe('shared-shiaijo', () => {
     await expect.poll(async () => {
       const l = await liveOnConsole();
       return !!l && l.comp === ST;
-    }, { timeout: 15_000 }).toBe(true);
-    await C.waitForTimeout(1500);
+    }, { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
+    await expect.poll(() => writes.length).toBeGreaterThan(0);
     C.off('response', onRes);
     const onAafterSwitch = await runningOnCourt(H, 'A');
     const s3b = await courtState(C);
@@ -534,7 +568,7 @@ test.describe('shared-shiaijo', () => {
     await pickCompetition(C, SI);
     expect(same(await sides(upNextCard(C)), bouts.b5)).toBe(true);
     await upNextCard(C).getByRole('button', { name: 'Start match' }).tap();
-    await expect.poll(async () => same(await liveOnConsole(), bouts.b5), { timeout: 15_000 }).toBe(true);
+    await expect.poll(async () => same(await liveOnConsole(), bouts.b5), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     const onAback = await runningOnCourt(H, 'A');
     const marksBack = await slotMarks(C, winnerOf(bouts.b5));
     r({ step: 'S3 switch', action: 'Start the sent-back SI bout (ST semi-final running)', variant: 'correct path (bc-sbq)',
@@ -601,9 +635,9 @@ test.describe('shared-shiaijo', () => {
     await startBtn.waitFor({ state: 'visible' });
     await dwell(H, Date.now());
     await startBtn.tap();
-    await expect(T.syncPill(hed)).toBeVisible({ timeout: 15_000 });
+    await expect(T.syncPill(hed)).toBeVisible({ timeout: EXPECT_TIMEOUT_MS });
     const alert = C.locator('.shiaijo-also-running');
-    await expect(alert).toBeVisible({ timeout: 15_000 });
+    await expect(alert).toBeVisible({ timeout: EXPECT_TIMEOUT_MS });
     r({ step: 'S6d reopen', action: `head table starts ${ST}'s semi-final while the console holds an SI correction`, variant: 'two devices',
       alert: (await alert.innerText()).replace(/\s+/g, ' ').trim(), shot: await shot(C, 's6d-also-running-during-correction') });
     await hed.getByRole('button', { name: /✕ Close/ }).tap().catch(() => {});
@@ -617,7 +651,7 @@ test.describe('shared-shiaijo', () => {
     // V4: the hurried operator taps the loudest button.
     const loud = await loudestButton(conflict);
     await loud.button.tap();
-    await expect.poll(async () => same(await liveOnConsole(), bouts.b2), { timeout: 15_000 }).toBe(true);
+    await expect.poll(async () => same(await liveOnConsole(), bouts.b2), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     const onA = await runningOnCourt(H, 'A');
     const stRows = await readScoresTab(H, ids.ST);
     r({ step: 'S6d reopen', action: 'Clear kiken and reopen while ST runs', variant: 'V4 loudest button in the court_busy panel', conflictHead,
@@ -628,7 +662,7 @@ test.describe('shared-shiaijo', () => {
     // V5 / P1 / P7: the iPad reloads the tab now.
     await interrupt(C, 'reload');
     await expect(C.getByRole('heading', { level: 1, name: 'Shiaijo A' })).toBeVisible();
-    await C.waitForTimeout(1000);
+    await expect(C.locator('.shiaijo-officiating__name').first()).toBeVisible();
     r({ step: 'S6d reopen', action: 'reload right after the reopen', variant: 'V3/V5 interrupt reload (P1, P7)',
       court: await courtState(C), shot: await shot(C, 's6d-reload') });
     if ((await officiatingName(C)) !== SI) await pickCompetition(C, SI);
@@ -645,6 +679,7 @@ test.describe('shared-shiaijo', () => {
 
     // S5 (ii): SI's pools on A are done; its quarter-finals here still wait on
     // pool placeholders from B (hidden rows), and nothing runs on A.
+    // Deliberate: nothing may start, so the time is the evidence.
     await C.waitForTimeout(2500);
     const ii = await courtState(C);
     r({ step: 'S5 SI done on A', action: 'the console with SI pools done on A, B pools still to play', variant: 'P3 / P7 record', court: ii,
@@ -653,7 +688,7 @@ test.describe('shared-shiaijo', () => {
     // P1 / P7: a reload with no pick now.
     await interrupt(C, 'reload');
     await expect(C.getByRole('heading', { level: 1, name: 'Shiaijo A' })).toBeVisible();
-    await C.waitForTimeout(1200);
+    await expect(C.locator('.shiaijo-officiating__name').first()).toBeVisible();
     r({ step: 'S5 SI done on A', action: 'reload (the explicit pick is dropped)', variant: 'V3 interrupt reload (P1)',
       officiatingAfter: await officiatingName(C), shot: await shot(C, 's5-ii-after-reload') });
     if ((await officiatingName(C)) !== SI) await pickCompetition(C, SI);
@@ -694,6 +729,7 @@ test.describe('shared-shiaijo', () => {
 
     // S5 (i): SI has nothing running or scheduled on A, its final waits on
     // M6 (running on B): a Later row. 3 s later the console still shows SI.
+    // Deliberate: the console must NOT switch by itself, so the time is the evidence.
     await C.waitForTimeout(3000);
     const i5 = await courtState(C);
     const lines = await nudgeLines(C);
@@ -768,7 +804,7 @@ test.describe('shared-shiaijo', () => {
   // bead says.
   test.fixme('bc-sypl: score editors show no sync pill; the header shows what is not sent yet', async () => {
     if (!/\/admin\/shiaijo\/B$/.test(Bc.url())) await openShiaijo(Bc, 'B');
-    await expect.poll(async () => same(await liveBout(Bc), bouts.m6), { timeout: 15_000 }).toBe(true);
+    await expect.poll(async () => same(await liveBout(Bc), bouts.m6), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     const ed = inlineEditor(Bc);
     await expect(ed.getByText(SYNC_PILL)).toHaveCount(0);
     const conn = Bc.locator('.topbar').getByRole('status').filter({ hasText: 'Connected' });
@@ -812,7 +848,7 @@ test.describe('shared-shiaijo', () => {
     await expect(m6Row).toBeVisible();
     await m6Row.locator('button[aria-haspopup="listbox"]').tap();
     await H.getByRole('listbox', { name: 'Choose shiaijo' }).getByRole('option', { name: 'A', exact: true }).tap();
-    await H.waitForTimeout(500);
+    await rendered(H);
     const askedFirst = await H.locator('.modal[role="dialog"]').isVisible().catch(() => false);
     const alert = C.locator('.shiaijo-also-running');
     const alertShown = await alert.waitFor({ state: 'visible', timeout: 10_000 }).then(() => true, () => false);
@@ -824,6 +860,8 @@ test.describe('shared-shiaijo', () => {
     const held = await liveOnConsole();
     const ed = inlineEditor(C);
     let pointTried = null;
+    // The waits below are the time a refusal (or none) takes to show: whether
+    // the point is refused is what the row records, so there is no state to wait for.
     if (held && held.comp === ST) {
       const before = await T.rowSlots(T.boutRow(ed, 2), 'shiro').count();
       await T.rowIppon(T.boutRow(ed, 2), 'shiro', 'M').tap();
@@ -841,7 +879,7 @@ test.describe('shared-shiaijo', () => {
     // Recovery the alert points at: send the shown bout back to the queue.
     await C.getByRole('button', { name: 'Send back to queue' }).tap();
     const sent = await hastyShiaijoConfirm(C);
-    await C.waitForTimeout(1500);
+    await expect.poll(async () => !same(await liveOnConsole(), held)).toBe(true);
     const onAafter = await runningOnCourt(H, 'A');
     r({ step: 'S6a move', action: 'Send back to queue (the shown bout)', variant: 'V4 hastyShiaijoConfirm (recovery)', ...sent,
       runningOnA: onAafter, court: await courtState(C), shot: await shot(C, 's6a-after-send-back') });
@@ -878,14 +916,14 @@ test.describe('shared-shiaijo', () => {
     // ST's semi-final runs on A; starting it sends a running M6 back to A's queue.
     await pickCompetition(C, ST);
     if (((await liveOnConsole()) || {}).comp !== ST) await T.startUpNextTeam(C);
-    await expect.poll(async () => ((await liveOnConsole()) || {}).comp, { timeout: 15_000 }).toBe(ST);
+    await expect.poll(async () => ((await liveOnConsole()) || {}).comp, { timeout: EXPECT_TIMEOUT_MS }).toBe(ST);
     const stLive = await liveOnConsole();
     // M6, waiting on A, moves to B (a waiting move asks nothing) and starts there.
     const m6ScoresRow = () => H.locator('.score-edit-row').filter({ hasText: bouts.m6.shiro }).filter({ hasText: bouts.m6.aka }).first();
     await H.goto(`/admin/competition/${ids.SI}/scores`);
     await chooseCourt(m6ScoresRow(), 'B');
     await openShiaijo(Bc, 'B');
-    await expect.poll(async () => same(await sides(upNextCard(Bc)).catch(() => null), bouts.m6), { timeout: 15_000 }).toBe(true);
+    await expect.poll(async () => same(await sides(upNextCard(Bc)).catch(() => null), bouts.m6), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     expect(same(await ensureRunning(Bc), bouts.m6)).toBe(true);
     const marks = { shiro: await slotMarks(Bc, 'shiro'), aka: await slotMarks(Bc, 'aka') };
     // The move: the running M6, from B's column of the schedule page onto A.
@@ -908,7 +946,7 @@ test.describe('shared-shiaijo', () => {
     await expect(C.locator('.shiaijo-also-running')).toHaveCount(0);
     // M6 is SI's next match on A, with the score it had.
     await pickCompetition(C, SI);
-    await expect.poll(async () => same(await sides(upNextCard(C)).catch(() => null), bouts.m6), { timeout: 15_000 }).toBe(true);
+    await expect.poll(async () => same(await sides(upNextCard(C)).catch(() => null), bouts.m6), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     await H.goto(`/admin/competition/${ids.SI}/scores`);
     await m6ScoresRow().getByRole('button', { name: /^Score$/ }).tap();
     await expect(H.locator(EDITOR)).toBeVisible();

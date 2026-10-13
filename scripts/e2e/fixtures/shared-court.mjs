@@ -12,11 +12,12 @@
 import { expect } from '@playwright/test';
 import { createCompetition } from './wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from './competition.mjs';
-import { hastyShiaijoConfirm } from './clumsy.mjs';
+import { correctCompleted } from './individual.mjs';
 import { EXPECT_TIMEOUT_MS, OPERATOR_DEVICE, PUBLIC_DEVICE } from './devices.mjs';
-import { isCoarse, restoreCoarse } from './pointer.mjs';
+import { rendered } from './pace.mjs';
+import { ensureCoarse } from './pointer.mjs';
 import { INLINE_EDITOR } from './scoring.mjs';
-import { UP_NEXT, WAITING_ROWS, completedRowFor, inlineEditor, waitingRows } from './shiaijo.mjs';
+import { UP_NEXT, WAITING_ROWS, inlineEditor, waitingRows } from './shiaijo.mjs';
 import * as T from './team.mjs';
 
 // A device of its own: an operator iPad (pointer verified coarse, as the
@@ -27,7 +28,7 @@ import * as T from './team.mjs';
 export async function operatorDevice(browser, base) {
   const ctx = await browser.newContext({ ...OPERATOR_DEVICE, baseURL: base });
   const page = await ctx.newPage();
-  if (!(await isCoarse(page))) await restoreCoarse(page);
+  await ensureCoarse(page);
   return page;
 }
 export async function publicDevice(browser, base) {
@@ -74,7 +75,7 @@ export async function wizardDefaults(page, { expectEstimate = false } = {}) {
     if (answered) {
       const res = await answered;
       await res.finished();
-      await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+      await rendered(page);
       let prev = null;
       await expect.poll(async () => {
         const v = await input.inputValue();
@@ -223,29 +224,9 @@ export async function liveBout(page) {
 }
 
 // Correct a completed bout on the court console while a bout of EITHER
-// competition is live there (individual.mjs correctCompleted reads the live
-// bout off the individual board only). Correct is refused while a bout is live
-// (bc-crpn): the notice at the row says so, the operator sends the live bout
-// back to the queue (its score is kept) and taps Correct again. Returns the
-// live bout and what the refusal said.
-export async function correctAcross(page, pair) {
-  const done = completedRowFor(page, pair);
-  const live = await liveBout(page);
-  await done.getByRole('button', { name: 'Correct' }).tap();
-  let refusal = null;
-  if (live) {
-    const notice = done.locator('.shiaijo-upnext__error[role="alert"]');
-    await expect(notice).toBeVisible();
-    refusal = { notice: (await notice.innerText()).trim(), toast: (await page.locator('.toast').allInnerTexts().catch(() => [])).join(' | ') };
-    expect(refusal.notice).toMatch(/^Shiaijo \S+ is running .+\. Finish it or send it back to the queue first\. Then correct this match\.$/);
-    await page.getByRole('button', { name: 'Send back to queue' }).tap();
-    refusal.sendBack = await hastyShiaijoConfirm(page);
-    await expect.poll(() => liveBout(page), { timeout: 10_000 }).toBeNull();
-    await done.getByRole('button', { name: 'Correct' }).tap();
-  }
-  await expect(inlineEditor(page).first().locator('.editor-head-pill')).toHaveText('CORRECTION');
-  return { live, refusal };
-}
+// competition is live there: individual.mjs correctCompleted, reading the live
+// bout with liveBout, since the default reader sees the individual board only.
+export const correctAcross = (page, pair) => correctCompleted(page, pair, { readLive: liveBout });
 
 // A waiting row of the queue (Upcoming, not the Up next card) naming both
 // competitors of a pairing.

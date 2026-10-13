@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import { start, BIN } from '../../screenshots/lib/server.mjs';
 import { auditsFor } from './audit.mjs';
 import { EXPECT_TIMEOUT_MS } from './devices.mjs';
-import { isCoarse, restoreCoarse } from './pointer.mjs';
+import { ensureCoarse, isCoarse } from './pointer.mjs';
 
 export { isCoarse };
 
@@ -356,12 +356,12 @@ export const test = base.extend({
   // The operator project's page must really have a coarse pointer. hasTouch +
   // isMobile (fixtures/devices.mjs) is what provides it today, measured. If
   // that ever stops holding, turn on CDP touch emulation in place
-  // (restoreCoarse, which fails loudly if even that does not do it).
+  // (ensureCoarse, which fails loudly if even that does not do it).
   page: async ({ page, consoleCollector: c }, use, testInfo) => {
     c.attachPage(page);
-    if (testInfo.project.name === 'operator' && !(await isCoarse(page))) {
-      await restoreCoarse(page);
-      testInfo.annotations.push({ type: 'coarse-pointer', description: 'CDP Emulation.setTouchEmulationEnabled' });
+    if (testInfo.project.name === 'operator') {
+      const { coarseLost, restoredBy } = await ensureCoarse(page);
+      if (coarseLost) testInfo.annotations.push({ type: 'coarse-pointer', description: restoredBy });
     }
     await use(page);
   },

@@ -7,7 +7,7 @@
 import { expect } from '@playwright/test';
 import { INLINE_EDITOR } from '../../screenshots/lib/editor.mjs';
 import { beforeFinish, finishLanded } from './scoring.mjs';
-import { settled } from './pace.mjs';
+import { armTwoTap } from './pace.mjs';
 import { sides, upNextCard } from './shiaijo.mjs';
 
 // The editor panel itself (inline) or its dialog (overlay).
@@ -73,9 +73,7 @@ export async function enterFlags(page, { aka = 0, shiro = 0 }, root = INLINE_EDI
 // "Tap again to ..."), and return once the write has landed (finishLanded).
 export async function saveEngiResult(page, root = INLINE_EDITOR) {
   const ed = page.locator(root).first();
-  await engiSubmit(page, root).tap();
-  const armed = engiSubmit(page, root).filter({ hasText: /^Tap again to/ });
-  await settled(armed);
+  const armed = await armTwoTap(engiSubmit(page, root), engiSubmit(page, root).filter({ hasText: /^Tap again to/ }));
   const before = await beforeFinish(ed);
   await armed.tap();
   return finishLanded(ed, before);

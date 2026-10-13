@@ -19,7 +19,7 @@
 import { expect } from '@playwright/test';
 import { EXPECT_TIMEOUT_MS } from './devices.mjs';
 import { settled, tapOnSide } from './pace.mjs';
-import { beforeFinish, finishLanded } from './scoring.mjs';
+import { finishMatch } from './scoring.mjs';
 import { inlineEditor, upNextCard } from './shiaijo.mjs';
 
 // FIK position names for a five-person team, in order; any other size uses
@@ -318,32 +318,27 @@ export async function startUpNextTeam(page) {
   return ed;
 }
 
-// Award one strike on a bout row and wait for the autosave to land. A second
-// strike for the same side of the same bout waits out the bounce window of the
-// first (fixtures/pace.mjs).
-export async function boutIppon(root, n, side, waza = 'M') {
-  const row = boutRow(root, n);
-  const before = await rowSlots(row, side).count();
-  await tapOnSide(root.page(), `bout ${n} ${side}`, rowIppon(row, side, waza));
-  await expect(rowSlots(row, side)).toHaveCount(before + 1);
+// Award one strike on a bout row and return once the board shows it and the
+// autosave has landed. `getRow` returns the row (a function, because the
+// kachinuki sheet's live row is a different element after each Record bout);
+// `key` names the bout for pacing, so a second strike for the same side of
+// the same bout waits out the bounce window of the first (fixtures/pace.mjs).
+// The one strike, for the team sheet (boutIppon) and the kachinuki sheet
+// (fixtures/kachinuki.mjs awardBoutIppon) alike.
+export async function ipponOnRow(root, getRow, key, side, waza = 'M') {
+  const before = await rowSlots(getRow(), side).count();
+  await tapOnSide(root.page(), `${key} ${side}`, rowIppon(getRow(), side, waza));
+  await expect(rowSlots(getRow(), side)).toHaveCount(before + 1);
   await expect(syncPill(root)).toHaveText('Synced');
 }
+
+// One strike on bout `n` of the team sheet.
+export const boutIppon = (root, n, side, waza = 'M') => ipponOnRow(root, () => boutRow(root, n), `bout ${n}`, side, waza);
 
 // The primary footer button in whatever state it is in.
 export const finishBtn = (root) => root.locator('.score-nav__actions button.btn--primary').first();
 
 // Finish in two taps and return once the write has landed, failing if it did
-// not (fixtures/scoring.mjs finishLanded, which reads the same signs on the
-// team sheet as on the individual board).
-export async function finishTeam(root) {
-  const ed = root.first();
-  const btn = finishBtn(root);
-  await expect(btn).toHaveText(/^Finish( \+ Start Next →)?$/);
-  await btn.tap();
-  await expect(btn).toHaveText(/^Tap again to finish/);
-  // The second tap counts once the arming tap's bounce window has passed.
-  await settled(btn);
-  const before = await beforeFinish(ed);
-  await btn.tap();
-  return finishLanded(ed, before);
-}
+// not: fixtures/scoring.mjs finishMatch, which reads the same signs on the
+// team sheet as on the individual board.
+export const finishTeam = (root) => finishMatch(root.page(), root);

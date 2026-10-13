@@ -48,20 +48,26 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
     fixtures/setup.mjs      first-run tournament form, sign in, sign out, and
                             enterTournament (sign in, or create the tournament
                             when the file's server has none): the one owner
-    fixtures/pace.mjs       the dwell the app's tap-bounce guard needs (below)
+    fixtures/pace.mjs       the dwell the app's tap-bounce guard needs (below),
+                            and the two settle helpers, rendered and
+                            untilStable (Waiting for the app)
     fixtures/wizard.mjs     the create-competition wizard
     fixtures/competition.mjs  roster paste box, Generate / Discard draw, Start
     fixtures/shiaijo.mjs    /admin/shiaijo/:court (queue, inline editor, which
                             match an editor holds)
     fixtures/scores.mjs     the Scores tab and its overlay editor
     fixtures/scoring.mjs    scoring an individual bout on either editor, Start
-                            match (startMatch), clearMarks, and the Finish
-                            check every editor shares
+                            match (startMatch), clearMarks, the Finish check
+                            every editor shares (finishMatch, which the team
+                            sheet's finishTeam is), and the wait for a match
+                            write's answer (nextMatchWrite, writeLanded)
     fixtures/individual.mjs individual rosters, the decision panel, playing and
                             correcting a bout on the court console
     fixtures/team.mjs       team members, the three lineup entry points (the
                             Lineups page, the lineup panel, the score sheet
-                            row) and the team score sheet's bout rows
+                            row) and the team score sheet's bout rows (the
+                            strike on a row, ipponOnRow, is shared with the
+                            kachinuki sheet)
     fixtures/kachinuki.mjs  the kachinuki sheet: bouts, Record bout, Encho, End
                             match, the correction doors
     fixtures/engi.mjs       the engi (kata pairs) flag editor: flag counters, entering
@@ -72,7 +78,8 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             match: seeding, the competition picker, the nudges
     fixtures/public.mjs     the public viewer and the TV board
     fixtures/clumsy.mjs     the clumsy operator (below)
-    fixtures/pointer.mjs    the coarse pointer: check, restore, tap-target size
+    fixtures/pointer.mjs    the coarse pointer: check, restore, ensureCoarse
+                            (the one "if not coarse, restore"), tap-target size
     fixtures/shots.mjs      per-step screenshots, and each journey's folder
     fixtures/audit.mjs      audit rows (AUDIT lines and audit.json)
     journeys/*.spec.mjs     the journeys, one line each:
@@ -181,8 +188,9 @@ ippon helpers. Start and Finish are `fixtures/scoring.mjs`'s own, not that
 library's, which clicks and can return without having acted. `startMatch` taps
 the overlay editor's Start match, fails when the button never appears, and
 returns once the button has left. A journey taps Finish, on the inline editor as
-well as the overlay, and `finishMatch` (and
-`finishTeam`, through the same check) returns only once the write landed. It
+well as the overlay, and `finishMatch` (the team sheet's `finishTeam` is the
+same function, given the sheet as its root) returns only once the write
+landed. It
 fails at once when the server does not answer the completing write within the
 expect timeout, answers it with an error status, or answers `applied: false`
 (the refusal a disarmed Finish follows). It then waits for the editor to let
@@ -253,15 +261,43 @@ inside it, so `fixtures/pace.mjs` holds the dwell (the screenshot harness's
 `TAP_DWELL_MS`, 500 ms) and every helper that taps into a fresh layer, confirms an arm
 or strikes for a side waits it out. Into a fresh layer: `login`,
 `hastyConfirm`, `hastyShiaijoConfirm`, `lineupsNameSlot`. Onto an armed button,
-through `settled`: `armFinish` (so `finishMatch`), `finishTeam`, `endMatch`,
-`saveEngiResult`. Per side of a bout, through `tapOnSide`, which keeps the time
-of the last tap on each side: `awardIppon` and `boutIppon`. `awardBoutIppon`
-taps by itself and dwells after its tap instead, so the next strike is ready.
-A journey that taps such a thing by hand does the same. `doubleTap` is the one
+through `armTwoTap` (tap, wait for the armed state, out the dwell): `armFinish`
+(so `finishMatch` and `finishTeam`), `endMatch`, `saveEngiResult`. Per side of
+a bout, through `tapOnSide`, which keeps the time of the last tap on each side:
+`awardIppon` and `ipponOnRow` (the strike `boutIppon` makes on the team sheet
+and `awardBoutIppon` on the kachinuki sheet, which both wait for the board and
+the autosave). A journey that taps such a thing by hand does the same. `doubleTap` is the one
 helper that deliberately does not: it is the bounce, and the app is meant to
 ignore the second tap. `pace.mjs` reads the
 app's window from `web-mobile/js/tap_guard.jsx` (`TAP_BOUNCE_MS`) rather than
 copying it, and fails to load if the dwell is not longer than it.
+
+## Waiting for the app
+
+A journey waits for what it is about to read, and never for a guessed time.
+In order of preference: a state (`expect(...).toHave...`, `expect.poll`); the
+server's answer to a write (`nextMatchWrite(page)` before the tap that causes
+it, `writeLanded(answered)` after: the sync pill reads "Synced" until the
+autosave debounce has run, so it cannot say an edit was saved); and, when the
+outcome is the thing under audit and no single state names it, one of two
+settle helpers in `fixtures/pace.mjs`:
+
+- `rendered(page)` waits two animation frames, for the read after a tap whose
+  effect varies by design and is local to the page (the control next to the
+  intended one, a double tap).
+- `untilStable(read)` polls `read()` until two reads 400 ms apart agree and
+  returns that value, for a screen that refetches after the action (a reload,
+  Back and Forward, a write's echo) and ends in a state the journey records
+  rather than expects.
+
+`page.waitForTimeout` stays in four places, each marked `Deliberate:` or
+named for what it is: the dwell of a tap's pace (above); the time away of an
+`interrupt` (`awayMs`) and the operator's own delay a journey names ("3 s
+later", "300 ms after Finish"); and a NEGATIVE, where the journey asserts that
+nothing happens (no second bout appended by a bounced tap, no start after a
+decision, a taken-back mark staying taken back after a late echo). An absence
+has no state to wait for, so the time is the evidence, and a single read
+straight after the action would pass whatever came later.
 
 ## The console policy
 

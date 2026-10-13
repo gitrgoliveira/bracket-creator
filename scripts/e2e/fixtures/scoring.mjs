@@ -16,7 +16,7 @@
 import { expect } from '@playwright/test';
 import { EDITOR, INLINE_EDITOR, TAP_DWELL_MS } from '../../screenshots/lib/editor.mjs';
 import { EXPECT_TIMEOUT_MS } from './devices.mjs';
-import { settled, tapOnSide } from './pace.mjs';
+import { armTwoTap, tapOnSide } from './pace.mjs';
 import { courtIdle, editorIdentity } from './shiaijo.mjs';
 
 export { EDITOR, INLINE_EDITOR };
@@ -101,19 +101,42 @@ export async function awardIppon(page, side, waza = 'M', root = INLINE_EDITOR) {
   await expect(syncState(page, root)).toHaveText('Synced');
 }
 
+// `root` is an editor's selector or its Locator (the team sheet's callers hold one).
+const within = (page, root) => (typeof root === 'string' ? page.locator(root) : root);
+
 // The Finish button in its first state ("Finish" or "Finish + Start Next →"),
 // and the armed state the first tap turns it into.
-export const finishButton = (page, root = INLINE_EDITOR) => page.locator(root)
+export const finishButton = (page, root = INLINE_EDITOR) => within(page, root)
   .locator('button').filter({ hasText: /^Finish( \+ Start Next|$)/ }).first();
-export const armedFinishButton = (page, root = INLINE_EDITOR) => page.locator(root)
+export const armedFinishButton = (page, root = INLINE_EDITOR) => within(page, root)
   .locator('button').filter({ hasText: /^Tap again to finish/ }).first();
+
+// The server's answer to the next write a match gets, for a journey that must
+// not move on (reload, read the court) before an edit has been saved. The
+// autosave is debounced and the sync pill still reads "Synced" until it runs,
+// so the pill alone cannot say the edit landed. Call this BEFORE the tap that
+// causes the write, then `await writeLanded(...)` after it. `tail` is the
+// write's route below /matches/:id: 'score' (PUT, the default: marks, fusensho,
+// Tie, Start, Finish) or 'daihyosen' (POST, the representative bout's add).
+// A timeout the caller never reached is not an unhandled rejection.
+export function nextMatchWrite(page, { method = 'PUT', tail = 'score' } = {}) {
+  const answered = page.waitForResponse((r) => r.request().method() === method
+    && new RegExp(`/matches/[^/]+/${tail}$`).test(new URL(r.url()).pathname), { timeout: EXPECT_TIMEOUT_MS });
+  answered.catch(() => {});
+  return answered;
+}
+
+// Return once that write has been answered with a success status.
+export async function writeLanded(answered, what = 'the write') {
+  const res = await answered;
+  expect(res.ok(), `${what} was answered ${res.status()} ${res.url()}`).toBe(true);
+  return res;
+}
 
 // Tap Finish once: the two-tap guard arms and nothing is submitted yet. Returns
 // the armed button once the arm is old enough for a second tap to count.
 export async function armFinish(page, root = INLINE_EDITOR) {
-  await finishButton(page, root).tap();
-  await settled(armedFinishButton(page, root));
-  return armedFinishButton(page, root);
+  return armTwoTap(finishButton(page, root), armedFinishButton(page, root));
 }
 
 // What an editor shows when a write did not save: its not-saved banner
@@ -189,7 +212,7 @@ export async function finishLanded(ed, before) {
 // engi editor ("Save result" arms too, but is its own button) or a correction
 // ("Save correction" does not arm).
 export async function finishMatch(page, root = INLINE_EDITOR) {
-  const ed = page.locator(root).first();
+  const ed = within(page, root).first();
   const armed = await armFinish(page, root);
   const before = await beforeFinish(ed);
   await armed.tap();

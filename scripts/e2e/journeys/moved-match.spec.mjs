@@ -31,7 +31,8 @@ import { enterTournament, login } from '../fixtures/setup.mjs';
 import { openShiaijo, upNextCard, sides, startUpNext } from '../fixtures/shiaijo.mjs';
 import { EDITOR, awardIppon, finishButton, finishMatch } from '../fixtures/scoring.mjs';
 import { hastyShiaijoConfirm } from '../fixtures/clumsy.mjs';
-import { settled } from '../fixtures/pace.mjs';
+import { rendered, settled, untilStable } from '../fixtures/pace.mjs';
+import { EXPECT_TIMEOUT_MS } from '../fixtures/devices.mjs';
 import { tapSize } from '../fixtures/pointer.mjs';
 import { ROSTER_6, recordDecision, slotMarks } from '../fixtures/individual.mjs';
 import * as T from '../fixtures/team.mjs';
@@ -191,7 +192,7 @@ test.describe('moved-match', () => {
     // 5b. The console's own Start match: the Teams bout goes back to the queue
     // with its score (bc-sbq) and the moved match starts. One bout runs on B.
     await upNextCard(B).getByRole('button', { name: 'Start match' }).tap();
-    await expect.poll(async () => ((await courtState(B)).editor || {}).names, { timeout: 15_000 }).toEqual([moved.shiro, moved.aka]);
+    await expect.poll(async () => ((await courtState(B)).editor || {}).names, { timeout: EXPECT_TIMEOUT_MS }).toEqual([moved.shiro, moved.aka]);
     const oneRunning = await runningOnCourt(H, 'B');
     const bLive = await courtState(B);
     row({ step: '5b console start', action: 'Start match (Up next) while the Teams bout is fought', variant: 'correct path (bc-sbq: the running bout is sent back)',
@@ -224,7 +225,7 @@ test.describe('moved-match', () => {
     await T.finishTeam(hed);
     // Court B has seen the finish (its Completed list holds it) before it is
     // asked whether it stayed on Teams: read earlier, it would prove nothing.
-    await expect.poll(async () => (await courtState(B)).completed, { timeout: 15_000 }).toBeGreaterThan(completedOnB);
+    await expect.poll(async () => (await courtState(B)).completed, { timeout: EXPECT_TIMEOUT_MS }).toBeGreaterThan(completedOnB);
     const bHeld = await courtState(B);
     row({ step: '6 finish elsewhere', action: 'head table finishes the Teams semi-final', variant: 'two devices', headFinishLabel,
       courtB: bHeld, shot: await shot(B, 'court-B-after-head-table-finish') });
@@ -238,7 +239,7 @@ test.describe('moved-match', () => {
     await expect.poll(async () => {
       const s = await courtState(B);
       return !!(s.upNext || (s.editor && !s.editor.pill));
-    }, { timeout: 15_000 }).toBe(true);
+    }, { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     const sf2 = await playTeamMatch(B);
     row({ step: '6 finish elsewhere', action: 'court B plays the other semi-final', variant: 'correct path', pair: sf2 });
 
@@ -261,7 +262,8 @@ test.describe('moved-match', () => {
 
     // Teams has nothing left on B: B still shows Teams, now with the amber
     // line, and switches only on the tap.
-    await expect.poll(async () => (await nudgeLines(B)).map((l) => l.amber), { timeout: 15_000 }).toEqual([true]);
+    await expect.poll(async () => (await nudgeLines(B)).map((l) => l.amber), { timeout: EXPECT_TIMEOUT_MS }).toEqual([true]);
+    // Deliberate: the court must NOT switch by itself, so the time is the evidence.
     await B.waitForTimeout(3000);
     const bDone = await courtState(B);
     const amber = await nudgeLines(B);
@@ -288,7 +290,7 @@ test.describe('moved-match', () => {
     await H.goto(`/admin/competition/${ids.IND}/scores`);
     const hRow = H.locator('.score-edit-row').filter({ hasText: secondPair.shiro }).filter({ hasText: secondPair.aka }).first();
     await chooseCourt(hRow, 'B');
-    await H.waitForTimeout(400);
+    await rendered(H);
     const confirmAsked = await H.locator('.modal[role="dialog"], .shiaijo-move-confirm').isVisible().catch(() => false);
     await expect.poll(async () => queueNames(await courtState(A)).includes(pairText(secondPair)), { timeout: 10_000 }).toBe(false);
     await expect.poll(async () => queueNames(await courtState(B)).includes(pairText(secondPair)), { timeout: 10_000 }).toBe(true);
@@ -309,11 +311,13 @@ test.describe('moved-match', () => {
     const startOf = async (pair) => upNextCard(B).filter({ hasText: pair.shiro }).filter({ hasText: pair.aka })
       .or(upcomingRow(B, pair)).first().getByRole('button', { name: 'Start match' });
     await (await startOf(moved)).tap();
-    await expect.poll(async () => ((await courtState(B)).editor || {}).names, { timeout: 15_000 }).toEqual([moved.shiro, moved.aka]);
+    await expect.poll(async () => ((await courtState(B)).editor || {}).names, { timeout: EXPECT_TIMEOUT_MS }).toEqual([moved.shiro, moved.aka]);
     // 8a. At once, before the court's list has caught up with the start just made.
     await (await startOf(secondPair)).tap();
-    await B.waitForTimeout(2000);
     const notice = async () => (await B.locator('.shiaijo-upnext__error[role="alert"]').allInnerTexts()).join(' | ');
+    // A start the server refuses shows its notice once answered; one it accepts
+    // shows the bout running: the row records whichever, so wait for it to settle.
+    await untilStable(async () => [await notice(), await runningOnCourt(H, 'B')]);
     row({ step: '8 second start', action: `Start match on ${pairText(secondPair)} at once after starting ${pairText(moved)}`,
       variant: 'V2 hurried second start (inside the list refresh)', notice: await notice(), courtB: await courtState(B),
       runningOnB: await runningOnCourt(H, 'B'), shot: await shot(B, 'court-B-second-start-at-once') });
@@ -325,9 +329,9 @@ test.describe('moved-match', () => {
       row({ step: '8 competitor busy', action: '8a already sent the first moved match back', variant: 'note' });
       return;
     }
-    await expect.poll(async () => ((await courtState(B)).upNext || {}).names, { timeout: 15_000 }).toEqual([secondPair.shiro, secondPair.aka]);
+    await expect.poll(async () => ((await courtState(B)).upNext || {}).names, { timeout: EXPECT_TIMEOUT_MS }).toEqual([secondPair.shiro, secondPair.aka]);
     await (await startOf(secondPair)).tap();
-    await B.waitForTimeout(2000);
+    await untilStable(async () => [await notice(), await runningOnCourt(H, 'B')]);
     row({ step: '8 competitor busy', action: `Start match on ${pairText(secondPair)} (one of them fights on A) while ${pairText(moved)} runs on B`,
       variant: 'V5 lost place (the moved match\'s competitor is elsewhere)', notice: await notice(), courtB: await courtState(B),
       runningOnB: await runningOnCourt(H, 'B'), shot: await shot(B, 'court-B-start-refused-competitor-busy') });
@@ -353,7 +357,7 @@ test.describe('moved-match', () => {
     const runs = async (pair) => samePair(await liveBout(B), pair);
     if (!(await runs(moved))) {
       await startButton(B, moved).tap();
-      await expect.poll(() => runs(moved), { timeout: 15_000 }).toBe(true);
+      await expect.poll(() => runs(moved), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     }
     await awardIppon(B, 'shiro', 'M');
     const marks = await slotMarks(B, 'shiro');
@@ -364,10 +368,12 @@ test.describe('moved-match', () => {
       const r = [s.upNext, ...s.upcoming].filter(Boolean).find((x) => x.names.some((n) => busy.includes(n)));
       blocked = r ? { shiro: r.names[0], aka: r.names[1] } : null;
       return !!blocked;
-    }, { timeout: 15_000 }).toBe(true);
+    }, { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     await startButton(B, blocked).tap();
     const refusal = B.locator('[role="alert"], .toast').filter({ hasText: /is fighting now in .+ on Shiaijo A\. Finish that match first\./ }).first();
     await expect(refusal).toBeVisible({ timeout: 10_000 });
+    // Deliberate: the running bout must STAY running, and a late send back would
+    // pass a single read, so the time is the evidence.
     await B.waitForTimeout(1500);
     expect(await runs(moved), 'the moved match is still running on B').toBe(true);
     expect(await slotMarks(B, 'shiro')).toEqual(marks);
@@ -380,7 +386,7 @@ test.describe('moved-match', () => {
     await hastyShiaijoConfirm(A);
     await expect.poll(() => liveBout(A), { timeout: 10_000 }).toBeNull();
     await startButton(B, blocked).tap();
-    await expect.poll(() => runs(blocked), { timeout: 15_000 }).toBe(true);
+    await expect.poll(() => runs(blocked), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     const onBafter = await runningOnCourt(H, 'B');
     expect(onBafter).toHaveLength(1);
     expect(onBafter[0]).toMatchObject({ shiro: blocked.shiro, aka: blocked.aka });
@@ -400,8 +406,18 @@ test.describe('moved-match', () => {
   // Scores page) and the Scores tab refusal in step 5a above. Runs after
   // bc-stpf, but takes court A as it finds it: the running Individual bout
   // there, or else one it starts from the Scores tab whose competitors are not
-  // fighting on B.
+  // fighting on B. The network log is read too: the Scores tab sends no /score
+  // start the server refuses with court_busy (the refusal the toast of the bead's
+  // report came from), which the console policy would otherwise let pass.
   test.fixme('bc-adna: the Scores tab never starts a match by itself', async () => {
+    const courtBusyStarts = [];
+    const onResponse = async (res) => {
+      const req = res.request();
+      if (req.method() !== 'PUT' || res.status() !== 409 || !/\/matches\/[^/]+\/score$/.test(new URL(res.url()).pathname)) return;
+      if (!/"status"\s*:\s*"running"/.test(req.postData() || '')) return;
+      if (/"error"\s*:\s*"court_busy"/.test(await res.text().catch(() => ''))) courtBusyStarts.push(res.url());
+    };
+    H.on('response', onResponse);
     const onB = (await runningOnCourt(H, 'B')).flatMap((m) => [m.shiro, m.aka]);
     const rows = await readScoresTab(H, ids.IND);
     const waitingOnA = rows.filter((m) => m.court === 'A' && m.status === 'scheduled' && !onB.includes(m.shiro) && !onB.includes(m.aka));
@@ -427,6 +443,7 @@ test.describe('moved-match', () => {
     await expect(finishButton(H, EDITOR)).toHaveText('Finish');
     await awardIppon(H, 'shiro', 'M', EDITOR);
     await finishMatch(H, EDITOR);
+    // Deliberate: nothing may start by itself, so the time is the evidence.
     await H.waitForTimeout(1500);
     expect(await runningOnCourt(H, 'A'), 'nothing started on A after Finish').toHaveLength(0);
     // A fusenpai on the next one, started by the operator.
@@ -434,9 +451,12 @@ test.describe('moved-match', () => {
     await open(second);
     await start();
     await recordDecision(H, 'fusenpai', { side: 'aka', root: EDITOR });
+    // Deliberate: no start may follow (no toast, nothing running), so the time is the evidence.
     await H.waitForTimeout(2000);
     await expect(H.locator('.toast').filter({ hasText: /is running/ })).toHaveCount(0);
     await expect.poll(async () => ((await readScoresTab(H, ids.IND)).find((m) => samePair(m, second)) || {}).status, { timeout: 10_000 }).toBe('completed');
     expect(await runningOnCourt(H, 'A'), 'nothing started on A after the fusenpai').toHaveLength(0);
+    H.off('response', onResponse);
+    expect(courtBusyStarts, 'no start sent from the Scores tab was refused for the court').toEqual([]);
   });
 });

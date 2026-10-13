@@ -14,7 +14,7 @@ import { auditLog } from '../fixtures/audit.mjs';
 import { createTournament, login } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
-import { openShiaijo, completedRows } from '../fixtures/shiaijo.mjs';
+import { openShiaijo, completedRows, upNextCard } from '../fixtures/shiaijo.mjs';
 import { openViewer } from '../fixtures/public.mjs';
 import { holdScoreWrites } from '../fixtures/held-write.mjs';
 import {
@@ -106,10 +106,11 @@ test.describe('engi', () => {
     await login(page);
     await openShiaijo(page, 'A');
     // The previous test's Finish + Start Next left the second semi-final running;
-    // wait for the editor to render, and start the Up next match only when it
-    // never does.
-    const running = await engiEditor(page).waitFor({ timeout: EXPECT_TIMEOUT_MS }).then(() => true, () => false);
-    if (!running) await startUpNextEngi(page);
+    // when this test runs alone the Up next card shows instead. Wait for either,
+    // and start the Up next match only when the editor is not the one showing.
+    const upNextStart = upNextCard(page).getByRole('button', { name: 'Start match' });
+    await expect(engiEditor(page).or(upNextStart)).toBeVisible({ timeout: EXPECT_TIMEOUT_MS });
+    if (!(await engiEditor(page).isVisible())) await startUpNextEngi(page);
     await expect(engiEditor(page)).toBeVisible();
     await expect(flagCount(page, 'aka')).toHaveText('0');
     const writes = await holdScoreWrites(page);

@@ -51,10 +51,18 @@ export async function startUpNextEngi(page) {
   return held;
 }
 
-// Enter flags: tap + the given number of times on each side.
+// Enter flags: tap + the given number of times on each side. Each tap is
+// checked against the count it should show next, so a dropped tap fails at
+// once. No dwell between taps: engi counters are deliberately not tap-guarded.
 export async function enterFlags(page, { aka = 0, shiro = 0 }, root = INLINE_EDITOR) {
-  for (let i = 0; i < aka; i += 1) await flagButton(page, 'aka', '+', root).tap();
-  for (let i = 0; i < shiro; i += 1) await flagButton(page, 'shiro', '+', root).tap();
+  for (const [side, taps] of [['aka', aka], ['shiro', shiro]]) {
+    const count = flagCount(page, side, root);
+    const start = taps > 0 ? Number(await count.innerText()) : 0;
+    for (let i = 0; i < taps; i += 1) {
+      await flagButton(page, side, '+', root).tap();
+      await expect(count, `the ${side} count shows the tap`).toHaveText(String(start + i + 1));
+    }
+  }
   await expect(flagCount(page, 'aka', root)).toHaveText(String(aka));
   await expect(flagCount(page, 'shiro', root)).toHaveText(String(shiro));
 }

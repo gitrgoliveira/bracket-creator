@@ -236,7 +236,7 @@ describe('a stamp left by a write the match\'s leaving running dropped is cleare
     await act(async () => { r.rerender(el(bout({ status: 'scheduled' }), onSubmit)); });
     await wait(350);
     expect(onSubmit, 'the autosave was dropped').not.toHaveBeenCalled();
-    // A later copy, stamped before the tap but after the match left running.
+    // A later-arriving copy, stamped before the tap (and before the match left running).
     await act(async () => { r.rerender(el(bout({ status: 'scheduled', ipponsB: ['M'], modifiedAt: NOW - 4000 }), onSubmit)); });
     expect(marks(r.container), 'the copy is adopted, not held against a stamp nothing can clear').toHaveLength(1);
   });

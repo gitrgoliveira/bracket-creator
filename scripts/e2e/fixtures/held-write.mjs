@@ -14,8 +14,9 @@ const isScorePut = (r) => r.method() === 'PUT' && /\/score$/.test(r.url());
 //               autosave debounce has run), `release()` lets it through and
 //               `answered` resolves once its response has reached the page
 //   answeredBeforeNextWrite(held)
-//               waits for the held write's response, then throws unless it
-//               reached the page BEFORE the write that followed it was sent
+//               waits for the held write's response and then for the write that
+//               follows it (up to safetyMs each), and throws unless that write
+//               was sent AFTER the response reached the page
 //               (the echo then met a board whose next edit was still unsent,
 //               which is the race a journey holds the write for)
 //   bodies      the JSON body of every score PUT the page sent, in send order
@@ -74,19 +75,30 @@ export async function holdScoreWrites(page, { safetyMs = 10_000 } = {}) {
     },
     async answeredBeforeNextWrite(held) {
       const h = held.hold;
-      await Promise.race([
-        h.answered,
-        new Promise((_, reject) => setTimeout(() => reject(new Error('held score write: its response never reached the page')), safetyMs)),
-      ]);
-      const next = sends[h.sendIndex + 1];
-      if (next && next.at <= h.answeredAt) {
-        throw new Error(`held score write: the next write was sent ${h.answeredAt - next.at} ms before the held one's response reached the page, so the race was not exercised`);
+      const deadline = Date.now() + safetyMs;
+      const timers = new Set();
+      const wait = (ms) => new Promise((resolve) => { const t = setTimeout(resolve, ms); timers.add(t); });
+      try {
+        let timedOut = false;
+        const expire = wait(safetyMs).then(() => { timedOut = true; });
+        await Promise.race([h.answered, expire]);
+        if (timedOut) throw new Error('held score write: its response never reached the page');
+        // The answer is in; the write that follows it may not have been sent yet.
+        while (!sends[h.sendIndex + 1] && Date.now() < deadline) await wait(25);
+        const next = sends[h.sendIndex + 1];
+        if (!next) throw new Error('held score write: the follow-up write was never sent');
+        if (next.at <= h.answeredAt) {
+          throw new Error(`held score write: the next write was sent ${h.answeredAt - next.at} ms before the held one's response reached the page, so the race was not exercised`);
+        }
+      } finally {
+        for (const t of timers) clearTimeout(t);
       }
     },
     async stop() {
       // Release first: unrouting does not wait for a handler (Playwright
       // 1.63.0), so a PUT still blocked in it would stay held until the safety
       // timer instead of going through now.
+      hold = null;
       for (const h of holds) h.release();
       page.off('response', onResponse);
       await page.unroute(SCORE_ROUTE, handler);

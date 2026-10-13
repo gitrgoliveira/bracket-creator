@@ -230,8 +230,9 @@ score PUTs: `holdNext()` holds the next one, its `sent` promise resolves once th
 PUT is out (so the autosave debounce has run), and `release()` lets it through
 after the journey has made the next tap, as a slow uplink would. `bodies` lists
 every score PUT the page sent. `answeredBeforeNextWrite(held)` waits for the held
-write's response and throws unless it reached the page before the write that
-followed it was sent, so a journey cannot pass without exercising the race. A hold
+write's response, then for the write that follows it (each up to `safetyMs`), and
+throws if no follow-up write was ever sent or if it was sent before the response
+reached the page, so a journey cannot pass without exercising the race. A hold
 nobody releases is let go after a safety timeout (`safetyMs`, 10 s by default);
 `stop()` only cleans up (release, unroute, remove the listener) and is called in a
 `finally`, and `assertNoSafetyRelease()` throws when the safety timeout had to

@@ -297,7 +297,7 @@ describe('AdminCompetition "Complete competition" action (mp-gy6g)', () => {
     expect(btn).not.toBeUndefined();
     await act(async () => { fireEvent.click(btn); });
 
-    // bc-cmpw: the confirm is the only step; the tournament password the
+    // bc-cmpw: the confirm is the only step; the admin password the
     // operator signed in with authorises it, and nothing else is sent.
     await waitFor(() => expect(window.API.completeCompetition).toHaveBeenCalledTimes(1));
     expect(window.API.completeCompetition.mock.calls[0]).toEqual(['nagi-1', 'shiaijo2026']);
@@ -321,7 +321,7 @@ describe('AdminCompetition "Complete competition" action (mp-gy6g)', () => {
 });
 
 // bc-cmpw: discarding a draw keeps its confirm, and once confirmed it goes
-// straight to the API with the signed-in tournament password: there is no
+// straight to the API with the signed-in admin password: there is no
 // second, destructive-ops password to prompt for.
 describe('AdminCompetition "Discard draw" action (bc-cmpw)', () => {
   const findButton = (container, text) =>

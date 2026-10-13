@@ -250,7 +250,7 @@ Add Vitest tests for the validation and time estimator logic; these are pure fun
 
 **Problem**: The file-backed `state.Store` uses per-file reads and writes with no atomic transactions. Concurrent requests (e.g., two operators scoring different matches simultaneously) can produce TOCTOU races: read config, modify in-memory, write back; if two requests interleave, the second write overwrites the first's changes.
 
-PR #103/#104 addressed the most critical TOCTOU vectors (tournament password, pool/bracket scoring, competition lifecycle) with targeted mutex guards, but the store's overall design still relies on callers getting locking right. There is no store-level transaction primitive.
+PR #103/#104 addressed the most critical TOCTOU vectors (admin password, pool/bracket scoring, competition lifecycle) with targeted mutex guards, but the store's overall design still relies on callers getting locking right. There is no store-level transaction primitive.
 
 **Suggestion**: Introduce a `Store.WithTransaction(fn func(tx StoreTx) error) error` method that:
 - Acquires the relevant lock(s) for the competition/tournament being modified.

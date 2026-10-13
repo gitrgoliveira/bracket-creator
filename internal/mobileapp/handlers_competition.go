@@ -2826,7 +2826,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	// the override-rank endpoint. "recorded" lists the ties a chusen already
 	// settled, with the recorded ranks, so a wrong order can be changed. Admin-gated: RegisterCompetitionHandlers is
 	// mounted under the authenticated router group, so callers must send the
-	// tournament password header (unlike the public league-tiebreak candidates).
+	// admin password header (unlike the public league-tiebreak candidates).
 	r.GET("/competitions/:id/chusen-candidates", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {

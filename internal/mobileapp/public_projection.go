@@ -17,7 +17,7 @@ import (
 // them back over the wire (the SPA only WRITES decisionReason; decisionBy, an
 // enum, is what drives viewer rendering and is deliberately preserved). They must
 // never reach spectators. This mirrors the existing redaction at handlers_viewer.go
-// where the tournament password is zeroed before public serialization.
+// where the admin password is zeroed before public serialization.
 //
 // Two flavours, both safe against corrupting stored/cached state:
 //   - COPY helpers take the value by value and return a redacted copy:

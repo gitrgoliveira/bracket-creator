@@ -20,7 +20,7 @@
 //     bc-prow: check-in exists only under that setting and this desk is its
 //     only UI), so a competition with the setting off never appears in the
 //     rail, the all-competitions roster, or an "also in" chip.
-//   - walk-up add (POST single) needs the tournament password in officiated
+//   - walk-up add (POST single) needs the admin password in officiated
 //     mode (none in self-run, where anyone can edit the roster), and only
 //     works while a competition is in "setup" status.
 //   - a self-run tournament has no check-in (operator ruling 2026-10-13): the

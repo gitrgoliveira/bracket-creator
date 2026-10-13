@@ -39,7 +39,7 @@ const mobileWebRoot = "web-mobile"
 func noteRetiredAdminPasswordHash() {
 	if os.Getenv(retiredAdminPasswordHashEnv) != "" {
 		slog.Info("mobile-app: " + retiredAdminPasswordHashEnv +
-			" is set but no longer used; admin actions need only the tournament password")
+			" is set but no longer used; admin actions need only the admin password")
 	}
 }
 

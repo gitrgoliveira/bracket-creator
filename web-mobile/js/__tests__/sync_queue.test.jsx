@@ -1701,7 +1701,7 @@ describe('bc-qttl: API.resumeAfterAuth un-parks 401-blocked writes with the fres
 describe('bc-qttl: 403 retries like 5xx/429 (never parks, never drops)', () => {
     it('keeps retrying past the notice threshold; authBlocked stays 0; status becomes server-error, not auth-required', async () => {
         // Correction to an earlier spec: on this server 401 is "invalid
-        // tournament password" (re-auth fixes it) but 403 means the tournament
+        // admin password" (re-auth fixes it) but 403 means the tournament
         // itself is unusable ("not configured yet" / "password not set"), a
         // server-side state re-authenticating cannot repair. So 403 must NOT be
         // parked behind a "sign in to save" prompt; it retries like a 5xx.
@@ -1928,7 +1928,7 @@ describe('bc-qttl: API.parkQueueForReauth (password_reset no longer destroys que
         await flushMicrotasks();
         expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(true);
 
-        // Another admin resets the tournament password mid-event: this
+        // Another admin resets the admin password mid-event: this
         // tablet's queue is PARKED, not cleared.
         const parked = API.parkQueueForReauth();
         expect(parked).toBe(1);

@@ -324,7 +324,7 @@ func selfRunAnonymous(c *gin.Context, tl TournamentLoader, verifier PasswordVeri
 // wrong, on a gated route (AuthMiddleware) and on one that is public in
 // self-run (selfRunAnonymous) alike.
 func respondInvalidPassword(c *gin.Context) {
-	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid tournament password"})
+	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid admin password"})
 }
 
 // AuthMiddleware gates admin endpoints behind the X-Tournament-Password
@@ -428,7 +428,7 @@ func AuthMiddleware(verifier PasswordVerifier, store *state.Store) gin.HandlerFu
 		// tournament with empty Password is a misconfiguration, and
 		// refusing to authorize is the safer fail-closed choice. The
 		// 403 message tells the operator to fix the password rather than
-		// the misleading 401 ("invalid tournament password", which
+		// the misleading 401 ("invalid admin password", which
 		// would imply the request is wrong, not the server state).
 		//
 		// In locked mode the stored Password is irrelevant (auth comes

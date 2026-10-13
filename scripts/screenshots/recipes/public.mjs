@@ -95,7 +95,7 @@ export const families = {
       // one card demonstrates poorly, and that a reader cannot check at all.
       const secondId = await api.competition('womens-open', "Women's Open", { courts: ['A'] });
       // A roster add is an organiser action in self-run, so it goes with the
-      // tournament password the shared client sends. Scaffolding, not a
+      // admin password the shared client sends. Scaffolding, not a
       // fidelity concern.
       await api.post(`/api/competitions/${compId}/participants`, { players: [
         { name: 'Emi Kondo', dojo: 'Riverside Dojo' },

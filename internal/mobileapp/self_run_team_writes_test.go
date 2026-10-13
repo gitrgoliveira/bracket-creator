@@ -317,7 +317,7 @@ func TestSelfRun_ScoreSheetTeamWrites_AWrongPasswordIsRefused(t *testing.T) {
 func requireInvalidPassword(t *testing.T, w *httptest.ResponseRecorder) {
 	t.Helper()
 	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
-	assert.JSONEq(t, `{"error":"invalid tournament password"}`, w.Body.String())
+	assert.JSONEq(t, `{"error":"invalid admin password"}`, w.Body.String())
 }
 
 // An officiated tournament opens nothing: the same writes still need the

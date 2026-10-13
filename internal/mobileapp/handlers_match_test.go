@@ -3641,7 +3641,7 @@ func TestScoreHandler_ScheduledWriteCannotRevertCompleted(t *testing.T) {
 // near-future epoch into runningRevStore and poisoning the guard so that
 // every subsequent legitimate admin autosave looks "older" and gets dropped.
 //
-// Requires a non-empty tournament password so that a request with no
+// Requires a non-empty admin password so that a request with no
 // X-Tournament-Password header is treated as an anonymous caller (not admin).
 func TestSelfRunPolicy_NoRevMetadata(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)

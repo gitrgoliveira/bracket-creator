@@ -280,7 +280,7 @@ into a handler whose other fields only need the main password.
 ## 7. UI ([web-mobile/](../../web-mobile/))
 
 - **Settings page**: new "Admin / destructive-ops password" control next to the
-  existing tournament password input. The current value is **never displayed**
+  existing admin password input. The current value is **never displayed**
   (write-only, §6): the field is an empty "set / change" input, like any
   change-password form.
   - file mode → editable; saved via the **dedicated** `PUT /api/auth/admin-password`

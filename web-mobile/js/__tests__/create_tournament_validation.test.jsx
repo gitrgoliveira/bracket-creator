@@ -39,9 +39,9 @@ describe('validateCreateTournament', () => {
     expect(msg).not.toBe('');
   });
 
-  // bc-cmpw: a self-run tournament needs only the tournament password; the
+  // bc-cmpw: a self-run tournament needs only the admin password; the
   // form no longer collects a second one, so nothing else is validated.
-  it('returns "" for a self-run tournament given only the tournament password', () => {
+  it('returns "" for a self-run tournament given only the admin password', () => {
     expect(validateCreateTournament({ ...valid, isSelfRun: true, locked: false })).toBe('');
     expect(validateCreateTournament({ ...valid, isSelfRun: true, locked: true })).toBe('');
   });

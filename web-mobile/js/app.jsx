@@ -386,7 +386,7 @@ export function queueAlertMessage(alert) {
     case "storage_full":
       return "Browser storage is full, so unsaved results can no longer be kept safely. Let them sync before reloading this tab.";
     case "discarded":
-      return `${n} unsaved ${noun} ${one ? "was" : "were"} discarded because the tournament password changed.`;
+      return `${n} unsaved ${noun} ${one ? "was" : "were"} discarded because the admin password changed.`;
     case "sent":
       return `${n} ${noun} sent.`;
     // Held finishes that landed and moved a later change of their match to
@@ -1730,8 +1730,8 @@ function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled, reauth 
         <div className="auth__title">{reauth ? "Sign in to save" : "Admin sign in"}</div>
         <div className="auth__sub">
           {reauth
-            ? "Results saved on this device have not reached the server because the tournament password changed. Enter the current password to save them."
-            : "Enter the tournament password to manage brackets, schedules and results."}
+            ? "Results saved on this device have not reached the server because the admin password changed. Enter the current password to save them."
+            : "Enter the admin password to manage brackets, schedules and results."}
         </div>
         <form onSubmit={submit}>
           <div className="field">
@@ -1761,7 +1761,7 @@ function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled, reauth 
                 // re-authenticated): see resetPassword's tournament
                 // broadcast. Cheaper to ask twice than to surprise an
                 // operator who clicked the wrong link.
-                if (await window.confirmDialog({ message: "Reset the tournament password? This will sign out all other admins.", confirmLabel: "Reset password", danger: true })) {
+                if (await window.confirmDialog({ message: "Reset the admin password? This will sign out all other admins.", confirmLabel: "Reset password", danger: true })) {
                   onForgotPassword();
                 }
               }}

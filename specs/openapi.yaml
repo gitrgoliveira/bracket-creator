@@ -97,7 +97,7 @@ info:
     the recorded ones. One that would record, move or clear the decision (dropping
     the row included), or name a match winner other than the side it decided, is
     refused with 409 `hantei_organiser_only`. On these public writes a password that
-    is sent but wrong is answered 401 (`invalid tournament password`), as on a gated
+    is sent but wrong is answered 401 (`invalid admin password`), as on a gated
     route: only an empty one is a participant. `POST .../matches/bulk-score` and
     `PUT .../matches/{mid}/quick-score` stay gated: they write results without these
     checks.
@@ -415,7 +415,7 @@ paths:
         **File mode (default)**: allowed without the
         `X-Tournament-Password` header when no tournament has been
         configured yet (bootstrap). `password` must be non-empty
-        (`tournament password is required`); an empty Password on
+        (`admin password is required`); an empty Password on
         disk would let AuthMiddleware's `password != t.Password`
         check vacuously pass for any client sending an empty header.
         Once a tournament with a password exists, auth is required.
@@ -490,7 +490,7 @@ paths:
         to keep current"). If after the preserve step the password is
         STILL empty (operator manually edited `tournament.md`, or a
         fresh PUT against a never-initialized tournament), the
-        request is rejected with 400 (`tournament password is
+        request is rejected with 400 (`admin password is
         required`). Successful rotations broadcast
         `EventPasswordReset` over SSE so other logged-in admins clear
         their stale localStorage credential and re-prompt; name-only
@@ -825,7 +825,7 @@ paths:
         '400':
           description: Validation error (name missing/too long, link invalid, cap reached).
         '401':
-          description: Missing or incorrect tournament password.
+          description: Missing or incorrect admin password.
         '413':
           description: Logo file exceeds 1 MB.
         '415':
@@ -863,7 +863,7 @@ paths:
         '400':
           description: Invalid index (negative or non-integer).
         '401':
-          description: Missing or incorrect tournament password.
+          description: Missing or incorrect admin password.
         '404':
           description: Index out of range or tournament not initialized.
 
@@ -2655,7 +2655,7 @@ paths:
                     description: The sentence the page shows as it is, for those refusals.
         '401':
           description: >
-            `invalid tournament password`: the password is missing or wrong in an
+            `invalid admin password`: the password is missing or wrong in an
             officiated tournament, or, in a self-run one, sent but wrong. An empty
             password is a participant there, never a 401.
           content:
@@ -3006,7 +3006,7 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: >
-            Missing or invalid tournament password. Applies in every mode:
+            Missing or invalid admin password. Applies in every mode:
             in self-run mode this route is one of the main-gated organiser
             corrections, not participant-driven play.
           content:
@@ -3173,7 +3173,7 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: >
-            Missing or invalid tournament password. In self-run mode this route
+            Missing or invalid admin password. In self-run mode this route
             is a main-gated organiser correction, not participant-driven play.
           content:
             application/json:
@@ -3362,7 +3362,7 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
-          description: Missing or incorrect tournament password.
+          description: Missing or incorrect admin password.
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -4036,7 +4036,7 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: >
-            `invalid tournament password`: missing or wrong in an officiated
+            `invalid admin password`: missing or wrong in an officiated
             tournament, or sent but wrong in a self-run one, where an empty
             password is a participant. Answered before the body is read, so a
             wrong password is never told about its stamp.
@@ -4162,7 +4162,7 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: >
-            `invalid tournament password`: missing or wrong in an officiated
+            `invalid admin password`: missing or wrong in an officiated
             tournament, or sent but wrong in a self-run one, where an empty
             password is a participant. Answered before the body is read, so a
             wrong password is never told about its stamp.
@@ -4485,7 +4485,7 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: >
-            `invalid tournament password`: missing or wrong in an officiated
+            `invalid admin password`: missing or wrong in an officiated
             tournament, or sent but wrong in a self-run one, where an empty
             password is a participant.
           content:
@@ -4648,7 +4648,7 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: >
-            `invalid tournament password`: missing or wrong in an officiated
+            `invalid admin password`: missing or wrong in an officiated
             tournament, or sent but wrong in a self-run one, where an empty
             password is a participant.
           content:
@@ -4735,7 +4735,7 @@ paths:
                 $ref: '#/components/schemas/Error'
         '401':
           description: >
-            `invalid tournament password`: missing or wrong in an officiated
+            `invalid admin password`: missing or wrong in an officiated
             tournament, or sent but wrong in a self-run one, where an empty
             password is a participant.
           content:
@@ -4787,7 +4787,7 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
-          description: '`invalid tournament password`: missing or wrong.'
+          description: '`invalid admin password`: missing or wrong.'
           content:
             application/json:
               schema:
@@ -5332,7 +5332,7 @@ components:
         `POST/PUT /api/tournament` is allowed without the header so
         the SPA's CreateTournament flow can pick the admin password.
 
-        Defense-in-depth: if the stored tournament password is somehow
+        Defense-in-depth: if the stored admin password is somehow
         empty (e.g. operator manually edited `tournament.md` to land
         an empty `password:` field), AuthMiddleware returns 403
         (`tournament misconfigured: password is not set`) for ALL

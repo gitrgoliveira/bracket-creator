@@ -43,10 +43,10 @@ describe('API.deleteCompetition', () => {
   it('only the other 401 (the sign-in itself refused) has no confirm code', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false, status: 401, headers: { get: () => null },
-      json: async () => ({ error: 'invalid tournament password' }),
+      json: async () => ({ error: 'invalid admin password' }),
     });
     const err = await API.deleteCompetition('c1', 'stale', 'typed').catch((e) => e);
-    expect(err.message).toBe('invalid tournament password');
+    expect(err.message).toBe('invalid admin password');
     expect(err.code).toBeUndefined();
   });
 });

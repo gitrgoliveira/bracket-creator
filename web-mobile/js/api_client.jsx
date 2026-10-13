@@ -1800,7 +1800,7 @@ async function _flushQueue() {
                         anyFailed = true;
                     } else if (res.status === 401) {
                         // bc-qttl: an auth failure PARKS the write, it does not drop it.
-                        // 401 is precisely "invalid tournament password", the one 4xx
+                        // 401 is precisely "invalid admin password", the one 4xx
                         // where a later retry can genuinely succeed: the tournament
                         // password can be rotated mid-event, or the operator can simply
                         // sign in again. Discarding here would throw away a finished
@@ -2777,7 +2777,7 @@ const API = {
             return null;
         }
     },
-    // Reset the tournament password. Unauthenticated by design: the
+    // Reset the admin password. Unauthenticated by design: the
     // server enforces "is this endpoint enabled" via the verifier's
     // ResetEnabled() (locked mode returns 404). In file mode it answers
     // only a request made on the server machine (loopback peer and
@@ -4581,7 +4581,7 @@ const API = {
     // resolves each by chusen (drawing lots), recorded via overridePoolRanks.
     async chusenCandidates(compID, password) {
         // Lives in the admin-gated competition router, so it needs the
-        // tournament password header (unlike the public league candidates GET).
+        // admin password header (unlike the public league candidates GET).
         const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/chusen-candidates`, {
             headers: { 'X-Tournament-Password': password || '' }
         });

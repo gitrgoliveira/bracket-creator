@@ -1062,7 +1062,7 @@ describe('API Utils', () => {
 
     // mp-a7y: pins the invalidate endpoint URL + auth header so a
     // future refactor can't silently re-route the call. The handler
-    // is gated on tournament password (internal/mobileapp/handlers_competition.go);
+    // is gated on admin password (internal/mobileapp/handlers_competition.go);
     // missing the X-Tournament-Password header would 401 with the
     // status-flip never reaching disk.
     describe('invalidateCompetition', () => {
@@ -1422,9 +1422,9 @@ describe('API Utils', () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: false,
           status: 401,
-          json: async () => ({ error: 'invalid tournament password' }),
+          json: async () => ({ error: 'invalid admin password' }),
         });
-        await expect(API.createTournament({ name: 'X' }, 'wrong')).rejects.toThrow('invalid tournament password');
+        await expect(API.createTournament({ name: 'X' }, 'wrong')).rejects.toThrow('invalid admin password');
       });
     });
 
@@ -1821,9 +1821,9 @@ describe('API Utils', () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: false,
           status: 401,
-          json: async () => ({ error: 'invalid tournament password' }),
+          json: async () => ({ error: 'invalid admin password' }),
         });
-        await expect(API.chusenCandidates('comp-1', 'bad')).rejects.toThrow('invalid tournament password');
+        await expect(API.chusenCandidates('comp-1', 'bad')).rejects.toThrow('invalid admin password');
       });
     });
 

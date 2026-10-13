@@ -458,7 +458,7 @@ func resolveCompetitionCourts(compCourts []string, tourn *state.Tournament) []st
 // UpdateTournamentChanged unchanged so the handler can map it to a
 // 400 response. Using a typed sentinel rather than an inline error
 // keeps the handler's errors.Is check stable across refactors.
-var errPasswordRequired = errors.New("tournament password is required")
+var errPasswordRequired = errors.New("admin password is required")
 
 // validateTournamentDurationDays returns an error when durationDays is
 // outside the accepted range. 0 is allowed (treated as "default to 1" by
@@ -1003,7 +1003,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 				t.Password = ""
 			}
 		} else if t.Password == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "tournament password is required"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "admin password is required"})
 			return
 		}
 
@@ -1029,7 +1029,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 
 		hub.Broadcast(EventTournamentUpdated, nil)
 		// In file mode, broadcast EventPasswordReset when an existing
-		// tournament's password is OVERWRITTEN (re-bootstrap with a new
+		// admin password is OVERWRITTEN (re-bootstrap with a new
 		// credential) so other logged-in admin sessions clear their
 		// stale cached credentials. Mirrors the PUT handler's behavior.
 		//

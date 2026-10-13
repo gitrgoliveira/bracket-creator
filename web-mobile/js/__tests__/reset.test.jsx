@@ -77,7 +77,7 @@ describe('ResetPasswordForm', () => {
       const text = collectText(tree);
       expect(text).toContain('Password reset disabled');
       expect(text).toContain('environment variable');
-      expect(text).not.toContain('Reset tournament password');
+      expect(text).not.toContain('Reset admin password');
     });
 
     it('renders a Back button that fires onBack', () => {
@@ -102,7 +102,7 @@ describe('ResetPasswordForm', () => {
         onSuccess: vi.fn(),
       });
       const text = collectText(tree);
-      expect(text).toContain('Reset tournament password');
+      expect(text).toContain('Reset admin password');
       const pwInputs = [];
       findInTree(tree, (n) => {
         if (n.type === 'input' && n.props?.type === 'password') pwInputs.push(n);
@@ -127,7 +127,7 @@ describe('ResetPasswordForm', () => {
       });
       const text = collectText(tree);
       expect(text).toContain('Loading');
-      expect(text).not.toContain('Reset tournament password');
+      expect(text).not.toContain('Reset admin password');
       expect(text).not.toContain('Password reset disabled');
     });
 
@@ -136,7 +136,7 @@ describe('ResetPasswordForm', () => {
       const tree = runtime.mount(ResetPasswordForm, { onBack: vi.fn(), onSuccess: vi.fn() });
       const text = collectText(tree);
       expect(text).toContain('Loading');
-      expect(text).not.toContain('Reset tournament password');
+      expect(text).not.toContain('Reset admin password');
     });
   });
 

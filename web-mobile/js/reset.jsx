@@ -120,7 +120,7 @@ function ResetPasswordForm({ authConfig, onBack, onSuccess, originatorId }) {
   return (
     <div className="page" style={{ maxWidth: 600, marginTop: 40 }}>
       <div className="card card--pad-lg">
-        <h2 style={{ marginBottom: 8 }}>Reset tournament password</h2>
+        <h2 style={{ marginBottom: 8 }}>Reset admin password</h2>
         <p style={{ color: "var(--ink-3)", marginBottom: 24 }}>
           Set a new admin password. The new password will replace the current one
           for everyone: any logged-in admins will need to sign in again.

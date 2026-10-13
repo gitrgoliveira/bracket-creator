@@ -1,11 +1,11 @@
 // bc-cmpw: the separate destructive-ops password is gone. Every organiser
-// write is authorised by the tournament password alone, so no request may
+// write is authorised by the admin password alone, so no request may
 // carry X-Admin-Password, and the client no longer offers a way to set one.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { API } from '../api_client.jsx';
 import * as adminHelpers from '../admin_helpers.jsx';
 
-describe('organiser writes send the tournament password only', () => {
+describe('organiser writes send the admin password only', () => {
   afterEach(() => { vi.restoreAllMocks(); });
 
   const writes = [

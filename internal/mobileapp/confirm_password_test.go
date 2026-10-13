@@ -111,7 +111,7 @@ func TestDeleteCompetition_SelfRunAnonymousStillRefusedByTheGate(t *testing.T) {
 	r, store := confirmDeleteRig(t, state.TournamentModeSelfRun, false)
 	w := confirmDelete(r, "", "main-pw")
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
-	assert.Contains(t, w.Body.String(), "invalid tournament password")
+	assert.Contains(t, w.Body.String(), "invalid admin password")
 	c, err := store.LoadCompetition("doomed")
 	require.NoError(t, err)
 	require.NotNil(t, c)

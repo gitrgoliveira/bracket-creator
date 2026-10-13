@@ -75,7 +75,6 @@ export async function holdScoreWrites(page, { safetyMs = 10_000 } = {}) {
     },
     async answeredBeforeNextWrite(held) {
       const h = held.hold;
-      const deadline = Date.now() + safetyMs;
       const timers = new Set();
       const wait = (ms) => new Promise((resolve) => { const t = setTimeout(resolve, ms); timers.add(t); });
       try {
@@ -83,6 +82,7 @@ export async function holdScoreWrites(page, { safetyMs = 10_000 } = {}) {
         const expire = wait(safetyMs).then(() => { timedOut = true; });
         await Promise.race([h.answered, expire]);
         if (timedOut) throw new Error('held score write: its response never reached the page');
+        const deadline = Date.now() + safetyMs;
         // The answer is in; the write that follows it may not have been sent yet.
         while (!sends[h.sendIndex + 1] && Date.now() < deadline) await wait(25);
         const next = sends[h.sendIndex + 1];

@@ -421,6 +421,51 @@ func TestViewerCompetitionDetail_NumbersBeforeAndAfterTheDraw(t *testing.T) {
 	assert.Equal(t, []string{"K2", "K1"}, numbers, "post-draw: pool-order numbers from pools.csv")
 }
 
+// bc-fbtb: the standings page cannot tell which pools a fill-bracket draw
+// drafted to send their 2nd, so the payload says how many places each pool
+// sends, from the stored draw (engine.PoolQualifierCuts).
+func TestViewerCompetitionDetail_CarriesPoolQualifierCuts(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "viewer-cuts"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Viewer Cuts", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, PoolSize: 3, PoolWinners: 1, PoolSizeMode: "min",
+		ExtraQualifiers: state.ExtraQualifiersFillBracket, Status: state.CompStatusPools,
+	}))
+	get := func(t *testing.T) map[string]any {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/viewer/competitions/"+cid, nil)
+		r.ServeHTTP(w, req)
+		require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		return body
+	}
+	_, drawn := get(t)["poolQualifiers"]
+	assert.False(t, drawn, "before a draw there are no pools to count")
+
+	pool := func(name string, n int) helper.Pool {
+		p := helper.Pool{PoolName: name}
+		for i := 0; i < n; i++ {
+			p.Players = append(p.Players, helper.Player{Name: fmt.Sprintf("%s-%d", name, i), Dojo: "Dojo"})
+		}
+		return p
+	}
+	require.NoError(t, store.SavePools(cid, []helper.Pool{pool("Pool A", 3), pool("Pool B", 4), pool("Pool C", 4)}))
+	// Pool B was drafted: the stored draw seats its 2nd.
+	require.NoError(t, store.SaveBracket(cid, &state.Bracket{Rounds: [][]state.BracketMatch{{
+		{ID: "m1", SideA: "Pool A-1st", SideB: "Pool B-2nd", PlaceholderA: "Pool A-1st", PlaceholderB: "Pool B-2nd"},
+		{ID: "m2", SideA: "Pool B-1st", SideB: "Pool C-1st", PlaceholderA: "Pool B-1st", PlaceholderB: "Pool C-1st"},
+	}}}))
+
+	cuts, ok := get(t)["poolQualifiers"].(map[string]any)
+	require.True(t, ok, "the payload carries poolQualifiers")
+	assert.Equal(t, map[string]any{"Pool A": float64(1), "Pool B": float64(2), "Pool C": float64(1)}, cuts)
+}
+
 // TestViewerCompetitionDetail_KnockoutNumbersFollowBracketPosition pins
 // bc-pnum ruling 2 end to end, through the REAL draw pipeline
 // (eng.GenerateDraw / eng.DiscardDraw) and the real HTTP viewer detail

@@ -715,7 +715,8 @@ PoolNumberedMatchRow.displayName = "PoolNumberedMatchRow";
 // shares its best member's place.
 //
 // One cut: `qualifiers`, how many of the pool's places advance
-// (qualifiersForPool, with the larger-pools extra place). The server owes a
+// (qualifiersForPool: the server's count, with a larger-pools extra place or a
+// fill-bracket drafted 2nd). The server owes a
 // bout for a tie whose best place is within it (engine.poolTieBreakCut), so
 // `boutOwed` is true when the group's best place is, and a tie wholly below it
 // just shares its place. `decidesAdvancement` is true only when a bout is owed
@@ -761,46 +762,23 @@ function tieBadgeTitle(tie, isTeam) {
 }
 
 // qualifiersForPool: how many top-ranked finishers in `pool` advance to the
-// knockout (bc-qual LP-5a). PoolsViewer uses this PER POOL instead of a
-// single count across every pool, so an oversized pool's extra qualifier
-// (state.ExtraQualifiersLargerPools) is highlighted correctly, e.g. a
-// 4-person pool at minimum size 3 with poolWinners=1 highlights its top 2,
-// not just its winner.
+// knockout. PoolsViewer uses this PER POOL instead of a single count across
+// every pool, so an oversized pool's extra qualifier (larger-pools) and a
+// drafted pool's 2nd (fill-bracket) are both marked advancing.
 //
-// Mirrors state.Competition.QualifiersForPool's OVERSIZED test exactly (the
-// "trivial larger-pools size test" this client-side module is allowed to
-// duplicate, per the mp-3abe-adjacent rule against re-deriving the engine's
-// own oversized/draft logic in JS): a pool is oversized when it holds more
-// players than the competition's configured minimum PoolSize.
-// The base count mirrors EffectivePoolWinners() (the payload doesn't expose
-// it): an unset or non-positive poolWinners is 2. The same count is the cut the
-// server holds a tie-break bout against, per pool (engine.poolTieBreakCut).
-//
-// Deliberately does NOT attempt the fill-bracket drafted-2nd calculation
-// (helper.SelectFillBracketDrafts): drafts go to the SEEDED pools in seed
-// order (oversized as fallback), stopping once the bracket's shortfall is
-// met and skipping a candidate whose opposite half is full -- a WHOLE-
-// competition scan over the pool set plus the court layout, which no
-// per-pool test can reproduce. The per-pool seed ranks ARE on this wire
-// (pools[].players[].seed comes through pools.csv), so it is the cross-pool
-// stop-and-skip state that is missing, not the seed data. Under fill-bracket
-// this therefore returns the uniform EffectivePoolWinners() count, so only
-// rank 1 (never a drafted rank 2) is ever highlighted as advancing here; the
-// residue is a deliberate accepted gap, not a bug: a correct highlight needs
-// the server to say WHICH pools were drafted, which is future work if this
-// becomes worth wiring (bc-qual LP-5a report).
+// The count is the SERVER's, `pool.qualifiers` (the payload's `poolQualifiers`
+// map, normalized onto each pool in api_serializers.jsx; engine.PoolQualifierCuts
+// reads it off the stored draw): the same count the server holds a tie-break
+// bout against. It cannot be derived here, because which fill-bracket pools
+// were drafted is a whole-field selection over every pool's seeds and the court
+// layout, and a larger-pools pool's extra place follows the draw too. Without
+// it (a payload from before a draw, or a demo pool) the count is the base
+// Winners per pool, mirroring EffectivePoolWinners() (unset or non-positive is
+// 2).
 export function qualifiersForPool(competition, pool) {
-  const base = (competition && competition.poolWinners) > 0 ? competition.poolWinners : 2;
-  if (
-    competition &&
-    competition.extraQualifiers === "larger-pools" &&
-    competition.poolSize > 0 &&
-    pool && Array.isArray(pool.players) &&
-    pool.players.length > competition.poolSize
-  ) {
-    return base + 1;
-  }
-  return base;
+  const served = pool && pool.qualifiers;
+  if (Number.isInteger(served) && served > 0) return served;
+  return (competition && competition.poolWinners) > 0 ? competition.poolWinners : 2;
 }
 
 // showDataIssues: opt-in for the operator-only data-integrity notices (see

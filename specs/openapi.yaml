@@ -7298,6 +7298,19 @@ components:
             items:
               $ref: '#/components/schemas/PlayerStanding'
           description: Map of pool name to ordered standings.
+        poolQualifiers:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 1
+          description: >
+            Map of pool name to how many of that pool's places send a qualifier
+            to the knockout. Present once pools are drawn. It is read off the
+            stored draw, so a pool whose 2nd is drafted under extra qualifiers
+            "fill-bracket", or an oversized pool under "larger-pools", counts one
+            more than `config.poolWinners`. A tie over any of these places is
+            owed a tie-break bout (a daihyosen for a team pool), and the
+            standings mark exactly these places as advancing.
         bracket:
           $ref: '#/components/schemas/Bracket'
 

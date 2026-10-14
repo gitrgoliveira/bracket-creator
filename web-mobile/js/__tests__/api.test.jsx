@@ -931,6 +931,23 @@ describe('API Utils', () => {
       expect(out.config.extraQualifiers).toBe('fill-bracket');
     });
 
+    // bc-fbtb: the payload's poolQualifiers map (pool name -> places that send a
+    // qualifier) lands on each pool as `qualifiers`, which is what
+    // qualifiersForPool reads.
+    it('puts each pool\'s server-counted qualifiers on the pool', () => {
+      const out = normalizeCompetitionDetail({
+        config: { id: 'x', name: 'X' },
+        pools: [{ poolName: 'Pool A', players: [] }, { poolName: 'Pool B', players: [] }],
+        poolQualifiers: { 'Pool A': 1, 'Pool B': 2 },
+      });
+      expect(out.pools.map(p => p.qualifiers)).toEqual([1, 2]);
+    });
+
+    it('leaves qualifiers unset when the payload carries no poolQualifiers', () => {
+      const out = normalizeCompetitionDetail({ config: { id: 'x', name: 'X' }, pools: [{ poolName: 'Pool A', players: [] }] });
+      expect(out.pools[0].qualifiers).toBeUndefined();
+    });
+
     it('returns falsy input unchanged (no crash)', () => {
       expect(normalizeCompetitionDetail(null)).toBeNull();
       expect(normalizeCompetitionDetail(undefined)).toBeUndefined();

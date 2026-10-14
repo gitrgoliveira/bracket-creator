@@ -842,6 +842,13 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				"standings":   standings,
 				"bracket":     bracket,
 			}
+			// How many of each pool's places send a qualifier, by pool name,
+			// from the same owner the tie-break bouts are held to
+			// (engine.PoolQualifierCuts). Absent before a draw, when there are
+			// no pools to count.
+			if len(pools) > 0 {
+				payload["poolQualifiers"] = engine.PoolQualifierCuts(comp, pools, bracket)
+			}
 			// "teamMembers" is present only for a team competition (isTeamComp,
 			// above) and omitted entirely for an individual one, rather than
 			// carrying an always-empty {} -- a client can treat the key's

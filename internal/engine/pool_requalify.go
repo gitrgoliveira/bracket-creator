@@ -149,7 +149,7 @@ func (e *Engine) planRequalification(tx state.StoreTx, compID string, comp *stat
 	// label. Engi places are decided by the standings' own order.
 	tied := map[string]bool{}
 	if !comp.Engi {
-		tied, err = e.tiedQualifyingLabels(tx, compID, comp, poolName, comp.QualifiersForPool(*pool), standings[poolName], ranksNeeded)
+		tied, err = e.tiedQualifyingLabels(tx, compID, comp, poolName, poolTieBreakCut(comp, pools, bracket, poolName), standings[poolName], ranksNeeded)
 		if err != nil {
 			return nil, err
 		}

@@ -299,10 +299,10 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
 // ------------------------------------------------------------------
 // bc-qual LP-5a: per-pool qualifier highlighting. PoolsViewer used to
 // highlight a single UNIFORM top-N (competition.poolWinners) across every
-// pool; qualifiersForPool (viewer_standings.jsx) now computes the count
-// PER POOL so an oversized pool under ExtraQualifiersLargerPools highlights
-// one extra row, mirroring state.Competition.QualifiersForPool's oversized
-// test (pool.players.length > competition.poolSize).
+// pool; qualifiersForPool (viewer_standings.jsx) now reads the SERVER's count
+// per pool (`pool.qualifiers`, the payload's poolQualifiers map) so an
+// oversized pool under ExtraQualifiersLargerPools, or a pool whose 2nd a
+// fill-bracket draw drafted, highlights one extra row (bc-fbtb).
 // ------------------------------------------------------------------
 describe('PoolsViewer per-pool qualifier highlighting (bc-qual LP-5a)', () => {
   const realReact = global.React;
@@ -390,16 +390,16 @@ describe('PoolsViewer per-pool qualifier highlighting (bc-qual LP-5a)', () => {
 
   it('standard mode: poolWinners=1 highlights only rank 1 in every pool, regardless of size', () => {
     const comp = { kind: 'individual', teamSize: 0, format: 'mixed', poolWinners: 1, poolSize: 3, extraQualifiers: '' };
-    const tree = runtime.mount(PoolsViewer, { pools: [poolA, poolB], standings, poolMatches: [], tweaks, competition: comp });
+    const tree = runtime.mount(PoolsViewer, { pools: [{ ...poolA, qualifiers: 1 }, { ...poolB, qualifiers: 1 }], standings, poolMatches: [], tweaks, competition: comp });
     const rows = advancingRowTexts(tree);
     expect(rows).toHaveLength(2);
     expect(rows.some(t => t.includes('A1'))).toBe(true);
     expect(rows.some(t => t.includes('B1'))).toBe(true);
   });
 
-  it('larger-pools mode: an oversized pool (4 players, min size 3) highlights top 2; a minimum-size pool highlights only 1', () => {
+  it('larger-pools mode: an oversized pool (server count 2) highlights top 2; a minimum-size pool (count 1) highlights only 1', () => {
     const comp = { kind: 'individual', teamSize: 0, format: 'mixed', poolWinners: 1, poolSize: 3, extraQualifiers: 'larger-pools' };
-    const tree = runtime.mount(PoolsViewer, { pools: [poolA, poolB], standings, poolMatches: [], tweaks, competition: comp });
+    const tree = runtime.mount(PoolsViewer, { pools: [{ ...poolA, qualifiers: 2 }, { ...poolB, qualifiers: 1 }], standings, poolMatches: [], tweaks, competition: comp });
     const rows = advancingRowTexts(tree);
     // Pool A (oversized): top 2 (A1, A2). Pool B (exactly minimum): top 1 (B1) only.
     expect(rows).toHaveLength(3);
@@ -410,14 +410,16 @@ describe('PoolsViewer per-pool qualifier highlighting (bc-qual LP-5a)', () => {
     expect(rows.some(t => t.includes('B2'))).toBe(false);
   });
 
-  it('fill-bracket mode: only rank 1 highlights even in an oversized pool (drafted-2nd is a documented residue: the payload carries no draft-index list)', () => {
+  it('fill-bracket mode: the pool the draw drafted highlights its 2nd, wherever it sits and whatever its size', () => {
     const comp = { kind: 'individual', teamSize: 0, format: 'mixed', poolWinners: 1, poolSize: 3, extraQualifiers: 'fill-bracket' };
-    const tree = runtime.mount(PoolsViewer, { pools: [poolA, poolB], standings, poolMatches: [], tweaks, competition: comp });
+    // Pool B (the minimum size) was drafted; oversized Pool A was not.
+    const tree = runtime.mount(PoolsViewer, { pools: [{ ...poolA, qualifiers: 1 }, { ...poolB, qualifiers: 2 }], standings, poolMatches: [], tweaks, competition: comp });
     const rows = advancingRowTexts(tree);
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     expect(rows.some(t => t.includes('A1'))).toBe(true);
     expect(rows.some(t => t.includes('A2'))).toBe(false);
     expect(rows.some(t => t.includes('B1'))).toBe(true);
+    expect(rows.some(t => t.includes('B2'))).toBe(true);
   });
 });
 

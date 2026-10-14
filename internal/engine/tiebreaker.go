@@ -243,19 +243,84 @@ func tieAffectsAdvancement(positions []int, cut int) bool {
 }
 
 // poolTieBreakCut is the ONE statement of the cut a pool's ties are judged
-// against: how many of its places send a qualifier, which is
-// Competition.QualifiersForPool for that pool. Under larger-pools an oversized
-// pool sends one more than Winners per pool, so a tie over that extra place is
-// owed a bout like any other qualifying place. A pool absent from pools (not
-// yet saved, or hand-edited data) falls back to EffectivePoolWinners, the count
-// every pool sends without extra qualifiers.
-func poolTieBreakCut(comp *state.Competition, pools []helper.Pool, poolName string) int {
+// against: how many of its places send a qualifier. Under larger-pools an
+// oversized pool sends one more than Winners per pool, and under fill-bracket a
+// DRAFTED pool sends its 2nd too, so a tie over such a place is owed a bout like
+// any other qualifying place.
+//
+// The count is read off the stored draw (drawnQualifierPlaces), the truth the
+// qualifier seating uses and the only one that knows which pools fill-bracket
+// drafted. Where the bracket names none of the pool's places (a v1 bracket
+// predating the draw placeholders, which carries only the uniform Winners per
+// pool layout, or no bracket yet) the pool's own Competition.QualifiersForPool
+// answers. A pool absent from pools (not yet saved, or hand-edited data) falls
+// back to EffectivePoolWinners, the count every pool sends without extra
+// qualifiers.
+func poolTieBreakCut(comp *state.Competition, pools []helper.Pool, bracket *state.Bracket, poolName string) int {
 	for _, p := range pools {
-		if p.PoolName == poolName {
-			return comp.QualifiersForPool(p)
+		if p.PoolName != poolName {
+			continue
 		}
+		if n := drawnQualifierPlaces(bracket, p); n > 0 {
+			return n
+		}
+		return comp.QualifiersForPool(p)
 	}
 	return comp.EffectivePoolWinners()
+}
+
+// drawnQualifierPlaces is the highest place of pool that the STORED draw seats a
+// qualifier from: the largest rank r for which the bracket's draw-time
+// placeholders (recordDrawPlaceholders) name qualifierLabel(pool, r). It is 0
+// when the bracket names none of the pool's places (no bracket, a knockout
+// seeded without pool placeholders, or a v1 bracket whose placeholders
+// ResolveQualifiedPools has not backfilled yet).
+//
+// The stored draw, not the competition's config, is the truth the qualifier
+// seating reads: qualifierResolver fills exactly the labels the bracket holds.
+// Which pools a fill-bracket draw DRAFTED to send their 2nd is a whole-field
+// selection (helper.SelectFillBracketDraftIndices, which depends on the court
+// count and on every pool's seeds) that Competition.QualifiersForPool
+// deliberately cannot express, and re-running it here would drift from the
+// bracket on disk the moment courts, seeds or pool size changed after the draw.
+// Reading the placeholders cannot disagree with the seating, and covers
+// larger-pools and standard mode by the same rule.
+func drawnQualifierPlaces(bracket *state.Bracket, pool helper.Pool) int {
+	if bracket == nil {
+		return 0
+	}
+	labels := map[string]bool{}
+	note := func(m *state.BracketMatch) {
+		labels[m.PlaceholderA], labels[m.PlaceholderB], labels[m.PlaceholderWinner] = true, true, true
+	}
+	for ri := range bracket.Rounds {
+		for mi := range bracket.Rounds[ri] {
+			note(&bracket.Rounds[ri][mi])
+		}
+	}
+	if bracket.ThirdPlaceMatch != nil {
+		note(bracket.ThirdPlaceMatch)
+	}
+	for rank := len(pool.Players); rank >= 1; rank-- {
+		if labels[qualifierLabel(pool.PoolName, rank)] {
+			return rank
+		}
+	}
+	return 0
+}
+
+// PoolQualifierCuts maps each pool's name to how many of its places send a
+// qualifier: poolTieBreakCut for every pool. The viewer payload carries it so a
+// standings table marks the advancing places and the tie badge reads a tie over
+// the last of them against the SAME count the server holds a tie-break bout to,
+// instead of re-deriving it (the client cannot: which fill-bracket pools were
+// drafted is a property of the stored draw).
+func PoolQualifierCuts(comp *state.Competition, pools []helper.Pool, bracket *state.Bracket) map[string]int {
+	out := make(map[string]int, len(pools))
+	for _, p := range pools {
+		out[p.PoolName] = poolTieBreakCut(comp, pools, bracket, p.PoolName)
+	}
+	return out
 }
 
 // tieNeedsIndividualBreak decides whether InjectTiebreakerMatches should hold an
@@ -519,6 +584,10 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 		if err != nil {
 			return err
 		}
+		bracket, err := tx.LoadBracket(compID)
+		if err != nil {
+			return err
+		}
 
 		// Scan existing TB matches per pool for idempotency and ID sequencing.
 		// existingRows are handed to generateTiebreakerMatches raw (not reduced to
@@ -559,7 +628,7 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 			if regularIncomplete[poolName] {
 				continue
 			}
-			for _, p := range pendingTieBreaks(comp, poolName, poolTieBreakCut(comp, pools, poolName), poolStandings, poolTB[poolName], poolCourt[poolName], false) {
+			for _, p := range pendingTieBreaks(comp, poolName, poolTieBreakCut(comp, pools, bracket, poolName), poolStandings, poolTB[poolName], poolCourt[poolName], false) {
 				injected = append(injected, p.bouts...)
 			}
 		}

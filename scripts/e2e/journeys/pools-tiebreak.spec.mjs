@@ -1,6 +1,7 @@
 // Pools + knockout with a MINIMUM pool size, and a pool tie that needs a
 // tie-break bout (bc-e2tb). A second competition below (bc-xqtb) does the same
-// with a tie over the extra place an oversized pool sends.
+// with a tie over the extra place an oversized pool sends, and a third (bc-fbtb)
+// with a tie over the 2nd place that "Fit the knockout" drafts one pool to send.
 //
 // Fixture: an individual "Pools + Knockout" competition, seven entrants, pool
 // size a MINIMUM of 3, two qualifiers per pool, court A (the tournament has a
@@ -46,11 +47,11 @@ import { createCompetition } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
 import { completedRowFor, openShiaijo, sides, upNextCard } from '../fixtures/shiaijo.mjs';
 import { EXPECT_TIMEOUT_MS, PUBLIC_DEVICE } from '../fixtures/devices.mjs';
-import { INDIVIDUAL_FIGURES, openAdminPools, openViewerPools, playerRowFigures, poolBlocks, poolTeams } from '../fixtures/pools.mjs';
+import { INDIVIDUAL_FIGURES, openAdminPools, openViewerPools, playerRowFigures, poolBlocks, poolTeams, teamRow } from '../fixtures/pools.mjs';
 import { ROSTER_7, editorSides, ensureRunning, inlineRunning, playScriptedBout } from '../fixtures/individual.mjs';
 import { awardIppon, finishMatch, nextMatchWrite, writeLanded } from '../fixtures/scoring.mjs';
 import { scoreRows } from '../fixtures/scores.mjs';
-import { bracketSlots, openCompetitionTab } from '../fixtures/roster.mjs';
+import { bracketSlots, openCompetitionTab, openParticipants, setSeed } from '../fixtures/roster.mjs';
 import { openViewer } from '../fixtures/public.mjs';
 
 const JOURNEY = 'pools-tiebreak';
@@ -77,9 +78,9 @@ const order = (a, b) => (b.W - a.W) || (a.L - b.L) || (b.D - a.D) || (b.PW - a.P
 // The scripted bouts of one competition and the figures they must produce:
 // plan maps a sorted-pair key to { marks: { name: [waza] } } | { draw }, and
 // tally is each competitor's expected W, L, D, PW, PL, tallied from the scripts.
-function scripted() {
+function scripted(names = NAMES) {
   const plan = new Map();
-  const tally = Object.fromEntries(NAMES.map((n) => [n, zero()]));
+  const tally = Object.fromEntries(names.map((n) => [n, zero()]));
   const key = (a, b) => [a, b].sort().join(' | ');
 
   // Script one bout and add it to the expected tally.
@@ -116,17 +117,17 @@ function scripted() {
 
 // The pools the draw made, as the competitor names in each pool's draw order,
 // the largest pool first; asserts the sizes the draw was meant to make.
-async function readDrawnPools(page, compId, want) {
+async function readDrawnPools(page, compId, want, names = NAMES) {
   await openAdminPools(page, compId);
   await expect(poolBlocks(page)).toHaveCount(want.length);
   const read = [];
   for (let i = 0; i < want.length; i += 1) {
-    const names = await poolTeams(poolBlocks(page).nth(i));
-    read.push(names.map((t) => NAMES.find((n) => t.includes(n))));
+    const drawn = await poolTeams(poolBlocks(page).nth(i));
+    read.push(drawn.map((t) => names.find((n) => t.includes(n))));
   }
   const pools = read.sort((a, b) => b.length - a.length);
   expect(pools.map((p) => p.length), 'the draw cut the pools the minimum rule describes').toEqual(want);
-  expect(pools.flat().sort(), 'every entrant is in exactly one pool').toEqual([...NAMES].sort());
+  expect(pools.flat().sort(), 'every entrant is in exactly one pool').toEqual([...names].sort());
   return pools;
 }
 
@@ -178,7 +179,7 @@ test.describe('pools: minimum pool size and a tie-break bout', () => {
   const tieBreakPairing = (page) => tieBreakPairingOn(page, 'A', [tb.b, tb.c]);
 
   test('seed: seven entrants, pool size a minimum of 3, the draw makes a pool of 4 and a pool of 3', async ({ page }) => {
-    await createTournament(page, { name: 'Pools Tiebreak Cup', courts: 2 });
+    await createTournament(page, { name: 'Pools Tiebreak Cup', courts: 3 });
     compId = await createCompetition(page, {
       name: 'Minimum Pools', kind: 'individual', format: 'mixed', poolSizeMode: 'minimum', poolSize: MIN_POOL,
       poolWinners: POOL_WINNERS, courts: ['A'],
@@ -399,7 +400,7 @@ test.describe('pools: a tie over the extra qualifier place of an oversized pool'
   const tieBreakPairing = (page) => tieBreakPairingOn(page, EXTRA_COURT, [tb.q, tb.r]);
 
   test('seed: Oversized send +1, seven entrants, the draw makes a pool of 4 and a pool of 3', async ({ page }) => {
-    await enterTournament(page, { name: 'Pools Tiebreak Cup', courts: 2 });
+    await enterTournament(page, { name: 'Pools Tiebreak Cup', courts: 3 });
     compId = await createCompetition(page, {
       name: 'Extra Place Pools', kind: 'individual', format: 'mixed', poolSizeMode: 'minimum', poolSize: MIN_POOL,
       extraQualifiers: 'larger-pools', courts: [EXTRA_COURT],
@@ -560,5 +561,231 @@ test.describe('pools: a tie over the extra qualifier place of an oversized pool'
     }
     expect(qualifiers, 'the tie-break loser is out').not.toContain(tbLoser);
     record({ journey: JOURNEY_EXTRA, step: 'knockout', action: 'seated', qualifiers, out: [tbLoser, tb.s, small[1], small[2]] });
+  });
+});
+
+// bc-fbtb: Knockout qualifiers "Fit the knockout" (fill-bracket). Nine entrants
+// at a minimum of 3 make three pools of 3, which would send three qualifiers
+// into a four-slot bracket with a bye. The draw fills the gap by DRAFTING one
+// pool to send its 2nd as well, and it drafts a SEEDED pool first, so seeding
+// one entrant says which pool: the one holding them. A tie over that pool's 2nd
+// decides who takes the drafted place, so it is owed a tie-break bout; the same
+// tie in a pool that was not drafted shares its place with no bout. It runs on
+// court C, beside the competitions above, in the same tournament.
+//
+//   drafted pool, A B C      A beats B and C; B and C draw 1-1: level on every
+//                            criterion for 2nd, the drafted place.
+//   undrafted pool, D E F    D beats E and F; E and F draw 1-1: the same tie,
+//                            but 2nd sends nobody here.
+//   undrafted pool, G H I    G beats H and I, H beats I: no tie.
+// Asserted: the drafted pool's tie-break bout as the only bout left to score (so
+// the undrafted pool's identical tie got none); B and C at "=2nd" with a title
+// naming the bout, E and F at "=2nd" with a title naming no bout, none of the
+// four marked advancing; neither B nor C seated in the knockout while the bout
+// is open; after it, the winner ranked 2nd, marked advancing and seated beside
+// the three pool winners in the four-slot bracket, the loser out.
+const JOURNEY_FILL = 'pools-tiebreak-fit-the-knockout';
+const FILL_COURT = 'C';
+const ROSTER_9 = [
+  ['Akio Tanabe', 'Tokyo Kai'], ['Bruno Lopes', 'Lisbon Kan'], ['Chika Moriya', 'Nara Dojo'],
+  ['Daigo Hirano', 'Chiba Kai'], ['Emi Kashima', 'Himeji Kan'], ['Farid Nasser', 'Cairo Dojo'],
+  ['Gen Yamada', 'Akita Kai'], ['Hugo Brandt', 'Bonn Kan'], ['Iris Okada', 'Gifu Dojo'],
+];
+const NAMES_9 = ROSTER_9.map(([name]) => name);
+const SEEDED = NAMES_9[0];
+
+test.describe('pools: a tie over the 2nd place a Fit the knockout draw drafted', () => {
+  let shot;
+  let compId;
+  const audit = auditLog(JOURNEY_FILL);
+  const { record } = audit;
+  let drafted;
+  let tied;
+  let clean;
+  const { tally, script, planFor } = scripted(NAMES_9);
+  let tb;
+  let tbWinner;
+  let tbLoser;
+
+  test.beforeAll(() => {
+    shot = journeyShots(JOURNEY_FILL);
+  });
+
+  test.afterAll(() => audit.flush());
+
+  const tieBreakPairing = (page) => tieBreakPairingOn(page, FILL_COURT, [tb.b, tb.c]);
+  const badgeTitle = (page, name) => teamRow(page, name).locator('.rank-badge').getAttribute('title');
+
+  test('seed: Fit the knockout, nine entrants with one seed, the draw makes three pools of 3', async ({ page }) => {
+    await enterTournament(page, { name: 'Pools Tiebreak Cup', courts: 3 });
+    compId = await createCompetition(page, {
+      name: 'Fit Knockout Pools', kind: 'individual', format: 'mixed', poolSizeMode: 'minimum', poolSize: MIN_POOL,
+      extraQualifiers: 'fill-bracket', courts: [FILL_COURT],
+    });
+    await pasteRoster(page, compId, ROSTER_9);
+    await openParticipants(page, compId);
+    await setSeed(page, SEEDED, 1);
+    await generateDraw(page, compId);
+    await startCompetition(page, compId);
+
+    const pools = await readDrawnPools(page, compId, [3, 3, 3], NAMES_9);
+    drafted = pools.find((p) => p.includes(SEEDED));
+    expect(drafted, 'the seeded entrant is in one of the pools').toBeTruthy();
+    [tied, clean] = pools.filter((p) => p !== drafted);
+    record({ journey: JOURNEY_FILL, step: 'draw', action: 'pools', pools, seeded: SEEDED, drafted,
+      screenshot: await shot(page, 'pools-drawn') });
+
+    const [A, B, C] = drafted;
+    const [D, E, F] = tied;
+    const [G, H, I] = clean;
+    script(A, B, { marks: { [A]: ['M'] } });
+    script(A, C, { marks: { [A]: ['M'] } });
+    script(B, C, { marks: { [B]: ['M'], [C]: ['M'] } });
+    script(D, E, { marks: { [D]: ['M'] } });
+    script(D, F, { marks: { [D]: ['M'] } });
+    script(E, F, { marks: { [E]: ['M'], [F]: ['M'] } });
+    script(G, H, { marks: { [G]: ['M'] } });
+    script(G, I, { marks: { [G]: ['M'] } });
+    script(H, I, { marks: { [H]: ['M'] } });
+    tb = { a: A, b: B, c: C, d: D, e: E, f: F, g: G, h: H, i: I };
+    expect(order(tally[B], tally[C]), 'B and C are level on every criterion').toBe(0);
+    expect(order(tally[E], tally[F]), 'E and F are level on every criterion').toBe(0);
+  });
+
+  test('play the nine regular bouts on court C', async ({ page }) => {
+    await login(page);
+    await openShiaijo(page, FILL_COURT);
+    for (let n = 1; n <= 9; n += 1) {
+      const played = await test.step(`regular bout ${n}`, () => playScriptedBout(page, planFor));
+      record({ journey: JOURNEY_FILL, step: `bout ${n}`, action: 'Finish', shiro: played.shiro, aka: played.aka, plan: played.plan });
+    }
+    await shot(page, 'regular-bouts-done');
+  });
+
+  test('the drafted pool\'s level pair is owed a bout; the same tie in an undrafted pool is not', async ({ page, browser, baseURL }) => {
+    await login(page);
+    const pair = await tieBreakPairing(page);
+    record({ journey: JOURNEY_FILL, step: 'tie-break', action: 'on the console of court C', pair, screenshot: await shot(page, 'tie-break-on-console') });
+
+    // The Scores tab: the drafted pool's bout is the one bout left to score,
+    // which also says the undrafted pool's level pair was given none.
+    await openCompetitionTab(page, compId, 'scores');
+    await expect(scoreRows(page).first()).toBeVisible();
+    const toScore = scoreRows(page).filter({ has: page.getByRole('button', { name: /^Score$/ }) });
+    await expect(toScore, 'the drafted pool\'s tie-break bout is the only bout left to score').toHaveCount(1);
+    await expect(toScore.first()).toContainText(tb.b);
+    await expect(toScore.first()).toContainText(tb.c);
+
+    const level = (name) => ({ ...tally[name], rank: '=2nd', advancing: false, tied: true });
+    const ranked = (list) => (name) => ({
+      ...tally[name], rank: ORDINAL[list.indexOf(name)], advancing: list.indexOf(name) < 1, tied: false,
+    });
+    const expectPools = async (p, where) => {
+      await expectTable(p, where, [tb.b, tb.c], level);
+      await expectTable(p, where, [tb.e, tb.f], level);
+      await expectTable(p, where, [tb.a], ranked([tb.a]));
+      await expectTable(p, where, [tb.d], ranked([tb.d]));
+      await expectTable(p, where, clean, ranked(clean));
+      // The title says whether a bout decides it: only the drafted pool's tie.
+      expect(await badgeTitle(p, tb.b), `${where}: the drafted pool's level pair names the bout`).toMatch(/tie-break bout decides the order/);
+      expect(await badgeTitle(p, tb.e), `${where}: the undrafted pool's level pair names no bout`).toBe('Level on every criterion');
+    };
+    await openAdminPools(page, compId);
+    await expectPools(page, 'admin Pools tab');
+    record({ journey: JOURNEY_FILL, step: 'tie-break', action: 'table before the bout', columns: INDIVIDUAL_FIGURES,
+      rows: { b: await playerRowFigures(page, tb.b), e: await playerRowFigures(page, tb.e) },
+      screenshot: await shot(page, 'admin-pools-level', { fullPage: true }) });
+    const spectator = await browser.newContext({ ...PUBLIC_DEVICE, baseURL });
+    try {
+      const phone = await spectator.newPage();
+      await openViewerPools(phone, compId);
+      await expectPools(phone, 'public viewer Pools tab');
+      await shot(phone, 'viewer-pools-level', { fullPage: true });
+    } finally {
+      await spectator.close();
+    }
+
+    // The bracket: the two undrafted pools' winners are seated; the drafted
+    // pool waits for the bout, so neither of its level pair is seated.
+    await openCompetitionTab(page, compId, 'bracket');
+    const seated = Object.values(await bracketSlots(page, (slots) => {
+      const names = Object.values(slots).map((x) => x.name);
+      return names.includes(tb.d) && names.includes(tb.g);
+    })).map((x) => x.name);
+    record({ journey: JOURNEY_FILL, step: 'tie-break', action: 'bracket before the bout', seated, screenshot: await shot(page, 'admin-bracket-before') });
+    expect(seated, 'the undrafted pools are settled: their winners are seated').toEqual(expect.arrayContaining([tb.d, tb.g]));
+    for (const name of [tb.b, tb.c]) {
+      expect(seated, `${name} is not seated while the tie over the drafted 2nd is open`).not.toContain(name);
+    }
+  });
+
+  test('score the tie-break bout: the winner takes the drafted place', async ({ page }) => {
+    await login(page);
+    const pair = await tieBreakPairing(page);
+    const running = await ensureRunning(page);
+    expect(running, 'the tie-break bout runs on the court').toEqual(pair);
+    // Role C wins, one men: the table read them level, so the bout, not the
+    // draw order, decides the place.
+    const side = pair.shiro === tb.c ? 'shiro' : 'aka';
+    tbWinner = pair[side];
+    tbLoser = pair[side === 'shiro' ? 'aka' : 'shiro'];
+    expect(tbWinner, 'role C wins the tie-break bout').toBe(tb.c);
+    const wrote = nextMatchWrite(page);
+    await awardIppon(page, side, 'M');
+    const res = await writeLanded(wrote, 'the tie-break bout\'s first mark');
+    const id = decodeURIComponent(new URL(res.url()).pathname.split('/matches/')[1].replace(/\/score$/, ''));
+    expect(id, 'the bout is the pool\'s supplementary bout').toMatch(/^Pool [A-Z]-TB-\d+$/);
+    await finishMatch(page);
+    await expect(completedRowFor(page, pair)).toBeVisible();
+    record({ journey: JOURNEY_FILL, step: 'tie-break', action: 'Finish', id, winner: tbWinner, loser: tbLoser,
+      screenshot: await shot(page, 'tie-break-finished') });
+
+    await openAdminPools(page, compId);
+    await expectOrdered(page, 'admin Pools tab');
+    await shot(page, 'admin-pools-after', { fullPage: true });
+  });
+
+  // After the bout: the drafted pool is A, the winner, the loser, with the
+  // first two advancing; the undrafted pools are as they were.
+  async function expectOrdered(page, where) {
+    const first = [tb.a, tbWinner, tbLoser];
+    await expectTable(page, where, first, (n) => ({
+      rank: ORDINAL[first.indexOf(n)], advancing: first.indexOf(n) < 2, tied: false,
+    }));
+    await expectTable(page, where, [tb.d], (n) => ({ ...tally[n], rank: '1st', advancing: true, tied: false }));
+    await expectTable(page, where, [tb.e, tb.f], (n) => ({ ...tally[n], rank: '=2nd', advancing: false, tied: true }));
+    await expectTable(page, where, clean, (n) => ({
+      ...tally[n], rank: ORDINAL[clean.indexOf(n)], advancing: clean.indexOf(n) < 1, tied: false,
+    }));
+  }
+
+  test('the winner, not the loser, is seated in the knockout: admin and public viewer', async ({ page, browser, baseURL }) => {
+    await login(page);
+    const qualifiers = [tb.a, tbWinner, tb.d, tb.g].sort();
+    const seatedIn = async (p) => {
+      const slots = await bracketSlots(p, (read) => {
+        const names = Object.values(read).map((x) => x.name);
+        return qualifiers.every((q) => names.includes(q));
+      });
+      return Object.values(slots).map((x) => x.name).filter((n) => NAMES_9.includes(n)).sort();
+    };
+    await openCompetitionTab(page, compId, 'bracket');
+    expect(await seatedIn(page), 'the admin bracket seats the four qualifiers').toEqual(qualifiers);
+    await shot(page, 'admin-bracket-after');
+
+    const spectator = await browser.newContext({ ...PUBLIC_DEVICE, baseURL });
+    try {
+      const phone = await spectator.newPage();
+      await openViewerPools(phone, compId);
+      await expectOrdered(phone, 'public viewer Pools tab');
+      await openViewer(phone, compId);
+      await phone.getByRole('button', { name: 'Bracket' }).tap();
+      expect(await seatedIn(phone), 'the public bracket seats the same four').toEqual(qualifiers);
+      await shot(phone, 'viewer-bracket-after');
+    } finally {
+      await spectator.close();
+    }
+    expect(qualifiers, 'the tie-break loser is out').not.toContain(tbLoser);
+    record({ journey: JOURNEY_FILL, step: 'knockout', action: 'seated', qualifiers, out: [tbLoser, tb.e, tb.f, tb.h, tb.i] });
   });
 });

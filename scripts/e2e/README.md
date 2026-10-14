@@ -123,7 +123,10 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                                   knockout on admin and phone; a tie split on
                                   points lost adds none; a second competition
                                   with Oversized send +1 where the tie is over
-                                  the extra qualifier place, owed a bout too
+                                  the extra qualifier place, owed a bout too; a
+                                  third with Fit the knockout where the tie is
+                                  over the 2nd the draw drafted, owed a bout
+                                  while the same tie in an undrafted pool is not
       moved-match                 a waiting match moved to another shiaijo
                                   reaches that court's console without a reload
       shared-shiaijo              two competitions on one shiaijo: the picker,

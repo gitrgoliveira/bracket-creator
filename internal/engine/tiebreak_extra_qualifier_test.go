@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -270,4 +271,266 @@ func TestLargerPoolsExtraPlaceTie_QualificationWaitsForTheBout(t *testing.T) {
 	m, side = f.slot("Pool A-2nd")
 	name, _ = sideOf(m, side)
 	assert.Equal(t, "A2", name, "the rest of the pool is seated once the bout is played")
+}
+
+// bc-fbtb: under fill-bracket some pools are DRAFTED to send their 2nd as well
+// (helper.SelectFillBracketDraftIndices), and Competition.QualifiersForPool
+// deliberately cannot say which. A tie over a drafted pool's 2nd decides who
+// takes the "Pool X-2nd" knockout place, so it is owed a bout exactly like a
+// tie over any other qualifying place; the same tie in a pool that was not
+// drafted shares its place. The tests draw through the real pipeline and read
+// the drafted pool off the stored bracket, so they fail if the cut stops
+// following the draw.
+
+// startFillBracket draws an 11-entrant fill-bracket competition (Winners per
+// pool 1, min 3: pools of 3, 4 and 4, one 2nd drafted from an oversized pool)
+// and returns the drafted pool and the oversized pool left undrafted.
+func startFillBracket(t *testing.T, compID string, team bool) (eng *Engine, store *state.Store, drafted, undrafted string) {
+	t.Helper()
+	eng, store, _ = setupTestEngine(t)
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 3, func(c *state.Competition) {
+		c.PoolWinners = 1
+		c.ExtraQualifiers = state.ExtraQualifiersFillBracket
+		if team {
+			c.Kind = "team"
+			c.TeamSize = 2
+		}
+	})
+	names := make([]string, 11)
+	for i := range names {
+		names[i] = fmt.Sprintf("Player%02d", i)
+	}
+	saveTestParticipants(t, store, compID, names)
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	for _, m := range bracket.Rounds[0] {
+		for _, label := range []string{m.PlaceholderA, m.PlaceholderB} {
+			if strings.HasSuffix(label, "-2nd") {
+				require.Empty(t, drafted, "exactly one 2nd is drafted")
+				drafted = qualifierLabelPool(label)
+			}
+		}
+	}
+	require.NotEmpty(t, drafted, "the draw drafts one pool's 2nd")
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	for _, p := range pools {
+		if p.PoolName != drafted && len(p.Players) == 4 {
+			undrafted = p.PoolName
+		}
+	}
+	require.NotEmpty(t, undrafted, "an oversized pool is left undrafted")
+	return eng, store, drafted, undrafted
+}
+
+// scoreFillBracketPools completes the pool matches: the lower-seated player of
+// each pair wins, except that in tiePool the 2nd and 3rd players draw each
+// other (level for 2nd). Pools other than tiePool are scored only when all is
+// set, so a test can leave them incomplete.
+func scoreFillBracketPools(t *testing.T, eng *Engine, store *state.Store, compID, tiePool string, team, all bool) {
+	t.Helper()
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	order, poolOf := map[string]int{}, map[string]string{}
+	for _, p := range pools {
+		for i, pl := range p.Players {
+			order[pl.Name], poolOf[pl.Name] = i, p.PoolName
+		}
+	}
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for i := range matches {
+		m := &matches[i]
+		pn := poolOf[m.SideA]
+		if pn != tiePool && !all {
+			continue
+		}
+		a, b := order[m.SideA], order[m.SideB]
+		winner, winnerID := m.SideA, m.SideAID
+		if b < a {
+			winner, winnerID = m.SideB, m.SideBID
+		}
+		if pn == tiePool && a*b == 2 && a+b == 3 {
+			winner, winnerID = "", ""
+		}
+		m.Status = state.MatchStatusCompleted
+		m.Winner, m.WinnerID = winner, winnerID
+		if winner == "" {
+			m.Decision = string(domain.DecisionHikiwake)
+		}
+		if team {
+			m.SubResults = []state.SubMatchResult{
+				{Position: 1, SideA: m.SideA, SideB: m.SideB, Winner: winner, Decision: m.Decision},
+				{Position: 2, SideA: m.SideA, SideB: m.SideB, Winner: winner, Decision: m.Decision},
+			}
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+	eng.standingsCache.Delete(compID)
+	eng.standingsFlight.Delete(compID)
+}
+
+// drawnPoolNames returns pool's player names in draw order.
+func drawnPoolNames(t *testing.T, store *state.Store, compID, pool string) []string {
+	t.Helper()
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	for _, p := range pools {
+		if p.PoolName == pool {
+			names := make([]string, len(p.Players))
+			for i, pl := range p.Players {
+				names[i] = pl.Name
+			}
+			return names
+		}
+	}
+	require.Failf(t, "pool not found", "%s", pool)
+	return nil
+}
+
+func TestFillBracketDraftedSecondTie_OwesATieBreakBout(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		drafted bool
+	}{
+		{"a tie for 2nd in the drafted pool is tie-broken", true},
+		{"the same tie in an oversized pool that was not drafted shares its place", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eng, store, drafted, undrafted := startFillBracket(t, "fbtb-ind", false)
+			pool := undrafted
+			if tc.drafted {
+				pool = drafted
+			}
+			scoreFillBracketPools(t, eng, store, "fbtb-ind", pool, false, false)
+
+			injected, err := eng.InjectTiebreakerMatches("fbtb-ind")
+			require.NoError(t, err)
+			if !tc.drafted {
+				assert.Empty(t, injected)
+				return
+			}
+			require.Len(t, injected, 1)
+			names := drawnPoolNames(t, store, "fbtb-ind", pool)
+			assert.ElementsMatch(t, []string{names[1], names[2]}, []string{injected[0].SideA, injected[0].SideB})
+			assert.True(t, IsTiebreakerMatchID(injected[0].ID) && strings.HasPrefix(injected[0].ID, pool+"-TB-"), "got %q", injected[0].ID)
+		})
+	}
+}
+
+func TestFillBracketDraftedSecondTie_TeamPoolGetsADaihyosen(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		drafted bool
+		want    int
+	}{
+		{"drafted pool: the level teams play a daihyosen", true, 1},
+		{"undrafted pool: the level teams share the place", false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eng, store, drafted, undrafted := startFillBracket(t, "fbtb-team", true)
+			pool := undrafted
+			if tc.drafted {
+				pool = drafted
+			}
+			scoreFillBracketPools(t, eng, store, "fbtb-team", pool, true, false)
+
+			injected, err := eng.InjectPoolDaihyosenMatches("fbtb-team")
+			require.NoError(t, err)
+			require.Len(t, injected, tc.want)
+		})
+	}
+}
+
+func TestFillBracketDraftedSecondTie_ChusenWaitsOnlyInTheDraftedPool(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		drafted bool
+		want    int
+	}{
+		{"drafted pool: a daihyosen that leaves them level needs a chusen", true, 1},
+		{"undrafted pool: nothing to draw", false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eng, store, drafted, undrafted := startFillBracket(t, "fbtb-chusen", true)
+			pool := undrafted
+			if tc.drafted {
+				pool = drafted
+			}
+			scoreFillBracketPools(t, eng, store, "fbtb-chusen", pool, true, false)
+			_, err := eng.InjectPoolDaihyosenMatches("fbtb-chusen")
+			require.NoError(t, err)
+			all, err := store.LoadPoolMatches("fbtb-chusen")
+			require.NoError(t, err)
+			for i := range all {
+				if IsPoolDaihyosenMatchID(all[i].ID) {
+					all[i].Status = state.MatchStatusCompleted
+					all[i].Winner = "" // hikiwake: the round leaves them level
+				}
+			}
+			require.NoError(t, store.SavePoolMatches("fbtb-chusen", all))
+			eng.standingsCache.Delete("fbtb-chusen")
+			eng.standingsFlight.Delete("fbtb-chusen")
+
+			report, err := eng.ChusenStatus("fbtb-chusen")
+			require.NoError(t, err)
+			assert.Len(t, report.Pending, tc.want)
+		})
+	}
+}
+
+func TestFillBracketDraftedSecondTie_QualificationWaitsForTheBout(t *testing.T) {
+	eng, store, drafted, _ := startFillBracket(t, "fbtb-wait", false)
+	scoreFillBracketPools(t, eng, store, "fbtb-wait", drafted, false, true)
+	names := drawnPoolNames(t, store, "fbtb-wait", drafted)
+	label := drafted + "-2nd"
+
+	// slot reads who sits in the knockout place the drafted pool's 2nd fills.
+	slot := func() string {
+		bracket, err := store.LoadBracket("fbtb-wait")
+		require.NoError(t, err)
+		for _, m := range bracket.Rounds[0] {
+			if m.PlaceholderA == label {
+				return m.SideA
+			}
+			if m.PlaceholderB == label {
+				return m.SideB
+			}
+		}
+		require.Failf(t, "slot not found", "%s", label)
+		return ""
+	}
+
+	_, err := eng.MaybeAutoCompletePools("fbtb-wait")
+	require.NoError(t, err)
+	matches, err := store.LoadPoolMatches("fbtb-wait")
+	require.NoError(t, err)
+	var tbs []state.MatchResult
+	for _, m := range matches {
+		if IsTiebreakerMatchID(m.ID) {
+			tbs = append(tbs, m)
+		}
+	}
+	require.Len(t, tbs, 1, "the tie over the drafted 2nd is owed a tie-break bout")
+	assert.ElementsMatch(t, []string{names[1], names[2]}, []string{tbs[0].SideA, tbs[0].SideB})
+	assert.Equal(t, label, slot(), "the place stays open while the bout is unplayed")
+
+	tbs[0].Status = state.MatchStatusCompleted
+	tbs[0].Winner, tbs[0].WinnerID = names[2], tbs[0].SideAID
+	if tbs[0].SideB == names[2] {
+		tbs[0].WinnerID = tbs[0].SideBID
+	}
+	for i := range matches {
+		if matches[i].ID == tbs[0].ID {
+			matches[i] = tbs[0]
+		}
+	}
+	require.NoError(t, store.SavePoolMatches("fbtb-wait", matches))
+	eng.standingsCache.Delete("fbtb-wait")
+	eng.standingsFlight.Delete("fbtb-wait")
+	_, err = eng.MaybeAutoCompletePools("fbtb-wait")
+	require.NoError(t, err)
+	assert.Equal(t, names[2], slot(), "the bout's winner takes the drafted 2nd place")
 }

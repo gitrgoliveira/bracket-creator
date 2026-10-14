@@ -82,11 +82,11 @@ describe('a tie awaiting its tie-break bout', () => {
 
 describe('a tie over the larger-pools extra qualifier place', () => {
   // poolWinners 2 plus one extra place for an oversized pool (4 players over a
-  // minimum size of 3) sends three. The server owes a tie-break bout for a tie
+  // minimum size of 3) sends three (`qualifiers`, as the server counts it). The server owes a tie-break bout for a tie
   // over any of those places (engine.poolTieBreakCut is the pool's own qualifier
   // count), the extra one included, so 3rd and 4th level read as tied and neither
   // is marked advancing until the bout is scored.
-  const oversized = [{ poolName: 'Pool A', players: [A, B, C, D] }];
+  const oversized = [{ poolName: 'Pool A', players: [A, B, C, D], qualifiers: 3 }];
   const extra = { ...competition, poolSize: 3, extraQualifiers: 'larger-pools' };
   const all4 = [
     bout('Pool A-0', A, B), bout('Pool A-1', A, C), bout('Pool A-2', A, D),
@@ -123,7 +123,7 @@ describe('a tie over the larger-pools extra qualifier place', () => {
 
   it('reads 4th and 5th level as an ordinary shared place, since no bout is owed there', () => {
     const E = player('e', 'Eri');
-    const five = [{ poolName: 'Pool A', players: [A, B, C, D, E] }];
+    const five = [{ poolName: 'Pool A', players: [A, B, C, D, E], qualifiers: 3 }];
     const { container } = render(
       <PoolsViewer pools={five} standings={{ 'Pool A': [
         winner, row(B, 2, { points: 6 }), row(C, 3, { points: 4 }),
@@ -134,6 +134,42 @@ describe('a tie over the larger-pools extra qualifier place', () => {
     const dan = badges[3];
     expect(dan.textContent).toBe('=4th');
     expect(dan.getAttribute('title')).toBe('Level on every criterion');
+  });
+});
+
+describe('a tie over a fill-bracket drafted 2nd', () => {
+  // Winners per pool 1, and the draw drafted this pool to send its 2nd as well:
+  // the server's count (`qualifiers`, engine.PoolQualifierCuts, read off the
+  // stored draw) is 2 for a drafted pool and 1 for one that was not. The page
+  // cannot tell them apart without it.
+  const fill = { ...competition, poolWinners: 1, poolSize: 3, extraQualifiers: 'fill-bracket' };
+  const poolsOf = (qualifiers) => [{ poolName: 'Pool A', players: [A, B, C], qualifiers }];
+  const level = [winner, row(B, 2, { tied: true }), row(C, 3, { tied: true })];
+  const tbPending = [...regular, bout('Pool A-TB-1', B, C, 'scheduled')];
+
+  it('reads both as =2nd with no advancing mark, naming the bout that decides it', () => {
+    const rows = renderPool(level, tbPending, { comp: fill, poolList: poolsOf(2) });
+
+    expect(rows.Aoki).toMatchObject({ badge: '1st', badgeAdv: true, advancing: true });
+    expect(rows.Baba).toMatchObject({ badge: '=2nd', badgeAdv: false, advancing: false, tied: true });
+    expect(rows.Cho).toMatchObject({ badge: '=2nd', badgeAdv: false, advancing: false, tied: true });
+    expect(rows.Baba.title).toMatch(/tie-break bout decides the order/);
+  });
+
+  it('marks the winner of the bout as advancing once it is scored', () => {
+    const rows = renderPool([
+      winner, row(C, 2, { points: 2 }), row(B, 3, { points: 1 }),
+    ], [...regular, bout('Pool A-TB-1', B, C, 'completed')], { comp: fill, poolList: poolsOf(2) });
+
+    expect(rows.Cho).toMatchObject({ badge: '2nd', badgeAdv: true, advancing: true, tied: false });
+    expect(rows.Baba).toMatchObject({ badge: '3rd', badgeAdv: false, advancing: false });
+  });
+
+  it('shares the place with no bout owed when the pool was not drafted', () => {
+    const rows = renderPool(level, regular, { comp: fill, poolList: poolsOf(1) });
+
+    expect(rows.Baba).toMatchObject({ badge: '=2nd', badgeAdv: false, advancing: false, tied: true });
+    expect(rows.Baba.title).toBe('Level on every criterion');
   });
 });
 

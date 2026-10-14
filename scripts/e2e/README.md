@@ -39,7 +39,8 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
 
 ## Layout
 
-    package.json            Playwright, pinned; package-lock.json is its lockfile
+    package.json            Playwright, pinned; package-lock.json is its
+                            lockfile
     playwright.config.mjs   projects, timeouts, output
     fixtures/test.mjs       the `test` every journey imports (server, baseURL,
                             page) and the console policy (below)
@@ -76,8 +77,8 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             kachinuki sheet)
     fixtures/kachinuki.mjs  the kachinuki sheet: bouts, Record bout, Encho, End
                             match, the correction doors
-    fixtures/engi.mjs       the engi (kata pairs) flag editor: flag counters, entering
-                            flags, the two-tap Save result
+    fixtures/engi.mjs       the engi (kata pairs) flag editor: flag counters,
+                            entering flags, the two-tap Save result
     fixtures/held-write.mjs holding a running match's score write in flight, to
                             observe a race with its echo (below)
     fixtures/shared-court.mjs  two competitions on one shiaijo and a moved
@@ -118,9 +119,10 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                                   one pool; an edited or replaced competitor
                                   reaches the bracket, court console and public
                                   viewer; a duplicate name and dojo is refused.
-      organiser-admin             file-mode organiser jobs: the results workbook,
-                                  folder import, including a row with no date,
-                                  logo and sponsor, forgotten-password reset.
+      organiser-admin             file-mode organiser jobs: the results
+                                  workbook, folder import, including a row with
+                                  no date, logo and sponsor, forgotten-password
+                                  reset.
       organiser-locked            locked mode: sign-in with the hashed password,
                                   no Forgot password, and /reset shows it is
                                   disabled.

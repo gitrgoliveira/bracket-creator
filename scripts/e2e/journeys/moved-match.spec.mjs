@@ -400,29 +400,45 @@ test.describe('moved-match', () => {
   // bc-adna (operator ruling 2026-10-12: "The operator's view is where scoring
   // is done and has a queue. In Admin view, changes are not tied/blocked by
   // the court status, there's no queue or advancing"). On the competition's
-  // Scores tab, with other Individual matches waiting on A: Finish reads plain
-  // Finish and finishing starts nothing, and a fusenpai recorded there starts
-  // nothing either, so no court_busy refusal follows it. The other half of the
-  // acceptance (an admin write is never refused for court status) is not
-  // exercised: reaching it needs a second bout running on the court, which
-  // bc-mvrq's fix rules out, and what an admin Start on a busy court then does
-  // is for the bead's plan to settle. The same fix retires shared-shiaijo's S9
-  // assertions ("Finish + Start Next →" and the start after a fusenpai on the
-  // Scores page) and the Scores tab refusal in step 5a above. Runs after
+  // Scores tab, with other Individual matches waiting on A, the bead's fixed
+  // behaviour is three things, each asserted on its own (soft, so one failing
+  // does not hide the others, and the network ones sit in the finally so they
+  // are read whatever happened before): Finish reads plain Finish; the tab
+  // sends no /score start by itself (a start is a /score write whose request
+  // carries startOnly), after Finish or after a fusenpai, so nothing starts on
+  // A; and no start it sends is refused for the court's status (court_busy),
+  // whoever asked for it. The refusal half is read from
+  // the network log, because the console policy would otherwise let the toast
+  // of the bead's report pass. An operator's own Start match is logged apart
+  // from a start the tab made by itself. The same fix retires shared-shiaijo's
+  // S9 assertions ("Finish + Start Next →" and the start after a fusenpai on
+  // the Scores page) and the Scores tab refusal in step 5a above. Runs after
   // bc-stpf, but takes court A as it finds it: the running Individual bout
   // there, or else one it starts from the Scores tab whose competitors are not
-  // fighting on B. The network log is read too: the Scores tab sends no /score
-  // start the server refuses with court_busy (the refusal the toast of the bead's
-  // report came from), which the console policy would otherwise let pass.
+  // fighting on B.
   test.fixme('bc-adna: the Scores tab never starts a match by itself', async () => {
-    const courtBusyStarts = [];
+    const scoreWrites = [];
+    const pending = [];
+    let operatorStarting = false;
     const onResponse = async (res) => {
       const req = res.request();
-      if (req.method() !== 'PUT' || res.status() !== 409 || !/\/matches\/[^/]+\/score$/.test(new URL(res.url()).pathname)) return;
-      if (!/"status"\s*:\s*"running"/.test(req.postData() || '')) return;
-      if (/"error"\s*:\s*"court_busy"/.test(await res.text().catch(() => ''))) courtBusyStarts.push(res.url());
+      if (req.method() !== 'PUT' || !/\/matches\/[^/]+\/score$/.test(new URL(res.url()).pathname)) return;
+      const sent = req.postData() || '';
+      if (!/"status"\s*:\s*"running"/.test(sent)) return;
+      // A start is the write whose request carries startOnly (startPatch).
+      let isStart = false;
+      try { isStart = JSON.parse(sent).startOnly === true; } catch { /* not JSON: not a start */ }
+      const body = res.status() === 409 ? await res.text().catch(() => '') : '';
+      scoreWrites.push({
+        url: res.url(),
+        status: res.status(),
+        courtBusy: /"error"\s*:\s*"court_busy"/.test(body),
+        byOperator: operatorStarting,
+        isStart,
+      });
     };
-    H.on('response', onResponse);
+    const listener = (res) => { pending.push(onResponse(res)); };
+    H.on('response', listener);
     try {
       const onB = (await runningOnCourt(H, 'B')).flatMap((m) => [m.shiro, m.aka]);
       const rows = await readScoresTab(H, ids.IND);
@@ -438,20 +454,26 @@ test.describe('moved-match', () => {
         await H.locator('.score-edit-row').filter({ hasText: m.shiro }).filter({ hasText: m.aka }).first().getByRole('button', { name: /^Score$/ }).tap();
         await expect(ed).toBeVisible();
       };
+      // The operator's own Start match, logged apart from a start by itself.
       const start = async () => {
         const btn = ed.getByRole('button', { name: 'Start match' });
         await settled(btn);
-        await btn.tap();
-        await expect(finishButton(H, EDITOR)).toBeVisible();
+        operatorStarting = true;
+        try {
+          await btn.tap();
+          await expect(finishButton(H, EDITOR)).toBeVisible();
+        } finally {
+          operatorStarting = false;
+        }
       };
       await open(first);
       if (startsHere) await start();
-      await expect(finishButton(H, EDITOR)).toHaveText('Finish');
+      await expect.soft(finishButton(H, EDITOR), 'the Scores tab editor offers plain Finish').toHaveText('Finish');
       await awardIppon(H, 'shiro', 'M', EDITOR);
       await finishMatch(H, EDITOR);
       // Deliberate: nothing may start by itself, so the time is the evidence.
       await H.waitForTimeout(1500);
-      expect(await runningOnCourt(H, 'A'), 'nothing started on A after Finish').toHaveLength(0);
+      expect.soft(await runningOnCourt(H, 'A'), 'nothing started on A after Finish').toHaveLength(0);
       // A fusenpai on the next one, started by the operator.
       const second = waitingOnA.find((m) => !samePair(m, first));
       await open(second);
@@ -459,14 +481,16 @@ test.describe('moved-match', () => {
       await recordDecision(H, 'fusenpai', { side: 'aka', root: EDITOR });
       // Deliberate: no start may follow (no toast, nothing running), so the time is the evidence.
       await H.waitForTimeout(2000);
-      await expect(H.locator('.toast').filter({ hasText: /is running/ })).toHaveCount(0);
+      await expect.soft(H.locator('.toast').filter({ hasText: /is running/ })).toHaveCount(0);
       // One navigation; the poll reads the tab as the app follows the fusenpai.
       await H.goto(`/admin/competition/${encodeURIComponent(ids.IND)}/scores`);
       await expect.poll(async () => ((await readScoresRows(H)).find((m) => samePair(m, second)) || {}).status, { timeout: 10_000 }).toBe('completed');
-      expect(await runningOnCourt(H, 'A'), 'nothing started on A after the fusenpai').toHaveLength(0);
+      expect.soft(await runningOnCourt(H, 'A'), 'nothing started on A after the fusenpai').toHaveLength(0);
     } finally {
-      H.off('response', onResponse);
+      await Promise.all(pending);
+      H.off('response', listener);
+      expect.soft(scoreWrites.filter((w) => w.courtBusy), 'no start sent from the Scores tab was refused for the court').toEqual([]);
+      expect.soft(scoreWrites.filter((w) => w.isStart && !w.byOperator), 'the Scores tab sent no start by itself').toEqual([]);
     }
-    expect(courtBusyStarts, 'no start sent from the Scores tab was refused for the court').toEqual([]);
   });
 });

@@ -706,49 +706,37 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }
 });
 PoolNumberedMatchRow.displayName = "PoolNumberedMatchRow";
 
-// qualifiersForPool: how many top-ranked finishers in `pool` advance to the
-// knockout (bc-qual LP-5a). PoolsViewer uses this PER POOL instead of a
-// single count across every pool, so an oversized pool's extra qualifier
-// (state.ExtraQualifiersLargerPools) is highlighted correctly, e.g. a
-// 4-person pool at minimum size 3 with poolWinners=1 highlights its top 2,
-// not just its winner.
-//
-// Mirrors state.Competition.QualifiersForPool's OVERSIZED test exactly (the
-// "trivial larger-pools size test" this client-side module is allowed to
-// duplicate, per the mp-3abe-adjacent rule against re-deriving the engine's
-// own oversized/draft logic in JS): a pool is oversized when it holds more
-// players than the competition's configured minimum PoolSize.
-// competition.poolWinners is the RAW field (may be 0/unset); default to 2
-// exactly like EffectivePoolWinners() does, since this payload doesn't
-// expose that method.
-//
-// Deliberately does NOT attempt the fill-bracket drafted-2nd calculation
-// (helper.SelectFillBracketDrafts): drafts go to the SEEDED pools in seed
-// order (oversized as fallback), stopping once the bracket's shortfall is
-// met and skipping a candidate whose opposite half is full -- a WHOLE-
-// competition scan over the pool set plus the court layout, which no
-// per-pool test can reproduce. The per-pool seed ranks ARE on this wire
-// (pools[].players[].seed comes through pools.csv), so it is the cross-pool
-// stop-and-skip state that is missing, not the seed data. Under fill-bracket
-// this therefore returns the uniform EffectivePoolWinners() count, so only
-// rank 1 (never a drafted rank 2) is ever highlighted as advancing here; the
-// residue is a deliberate accepted gap, not a bug: a correct highlight needs
-// the server to say WHICH pools were drafted, which is future work if this
-// becomes worth wiring (bc-qual LP-5a report).
+// effectivePoolWinners: the number of finishers per pool that the SERVER counts
+// as the pool's places that matter. Mirrors state.Competition.EffectivePoolWinners
+// (an unset or non-positive poolWinners is 2), which is the cut
+// engine.pendingTieBreaks / tieAffectsAdvancement hold a tie-break bout against:
+// a bout is owed only for a tie whose best-placed member finishes within it. It
+// does NOT include the larger-pools extra qualifier (qualifiersForPool adds that).
+export function effectivePoolWinners(competition) {
+  return (competition && competition.poolWinners) > 0 ? competition.poolWinners : 2;
+}
+
 // tiedPlaces: the place each still-open tie holds, keyed by standings row.
 //
 // The server marks a row `tied` while the competitors level with it on EVERY
 // criterion await a tie-break bout, but each row still carries its own sorted
 // rank (draw order breaks the level pair), so reading `rank` alone badges one
 // of them 2nd and the other 3rd as though the order were decided. A tied group
-// shares its best member's place, and sits wholly inside the qualifying places
-// or not: `decidesAdvancement` is true only when the group straddles the cut,
-// so a pair level for 1st that both advance anyway still reads as advancing.
+// shares its best member's place.
+//
+// Two cuts, because the server uses two. `tieBreakCut` is where it owes a bout
+// (effectivePoolWinners): `boutOwed` is true when the group's best place is
+// within it. `qualifiers` is how many advance (qualifiersForPool, with the
+// larger-pools extra place): `decidesAdvancement` is true only when a bout is
+// owed AND the group straddles that line, so a pair level for 1st that both
+// advance anyway still reads as advancing, and a tie over the extra
+// larger-pools place, for which the server holds no bout, is never left
+// waiting for one that will not come.
 // `points` is the server's packed ranking key (engine individual/teamStandingPoints),
 // equal exactly when two rows are level on every criterion, so rows that share
 // it among the tied ones form one group. Pool standings only: a league has no
 // advancing mark to withhold.
-export function tiedPlaces(poolStandings, qualifiers) {
+export function tiedPlaces(poolStandings, qualifiers, tieBreakCut) {
   const groups = new Map();
   (poolStandings || []).forEach((s, i) => {
     if (!s || !s.tied) return;
@@ -766,13 +754,52 @@ export function tiedPlaces(poolStandings, qualifiers) {
     if (!s || !s.tied) return;
     const g = groups.get(s.points);
     const key = s.player.id || `${s.player.name}||${s.player.dojo || ""}`;
-    byRow.set(key, { place: g.place, decidesAdvancement: g.place <= qualifiers && g.last > qualifiers });
+    const boutOwed = g.place <= tieBreakCut;
+    byRow.set(key, { place: g.place, boutOwed, decidesAdvancement: boutOwed && g.last > qualifiers });
   });
   return byRow;
 }
 
+// The tooltip on a tied row's badge. It promises a deciding bout only where the
+// server owes one (`boutOwed`); a tie it holds none for just reads as level. A
+// team pool settles with a representative bout, an individual one with a
+// tie-break bout (engine.pendingTieBreaks).
+function tieBadgeTitle(tie, isTeam) {
+  const level = "Level on every criterion";
+  if (!tie.boutOwed) return level;
+  return `${level}: ${isTeam ? "a representative bout" : "a tie-break bout"} decides the order`;
+}
+
+// qualifiersForPool: how many top-ranked finishers in `pool` advance to the
+// knockout (bc-qual LP-5a). PoolsViewer uses this PER POOL instead of a
+// single count across every pool, so an oversized pool's extra qualifier
+// (state.ExtraQualifiersLargerPools) is highlighted correctly, e.g. a
+// 4-person pool at minimum size 3 with poolWinners=1 highlights its top 2,
+// not just its winner.
+//
+// Mirrors state.Competition.QualifiersForPool's OVERSIZED test exactly (the
+// "trivial larger-pools size test" this client-side module is allowed to
+// duplicate, per the mp-3abe-adjacent rule against re-deriving the engine's
+// own oversized/draft logic in JS): a pool is oversized when it holds more
+// players than the competition's configured minimum PoolSize.
+// The base count is effectivePoolWinners (the payload doesn't expose
+// EffectivePoolWinners() itself, so it is mirrored above).
+//
+// Deliberately does NOT attempt the fill-bracket drafted-2nd calculation
+// (helper.SelectFillBracketDrafts): drafts go to the SEEDED pools in seed
+// order (oversized as fallback), stopping once the bracket's shortfall is
+// met and skipping a candidate whose opposite half is full -- a WHOLE-
+// competition scan over the pool set plus the court layout, which no
+// per-pool test can reproduce. The per-pool seed ranks ARE on this wire
+// (pools[].players[].seed comes through pools.csv), so it is the cross-pool
+// stop-and-skip state that is missing, not the seed data. Under fill-bracket
+// this therefore returns the uniform EffectivePoolWinners() count, so only
+// rank 1 (never a drafted rank 2) is ever highlighted as advancing here; the
+// residue is a deliberate accepted gap, not a bug: a correct highlight needs
+// the server to say WHICH pools were drafted, which is future work if this
+// becomes worth wiring (bc-qual LP-5a report).
 export function qualifiersForPool(competition, pool) {
-  const base = (competition && competition.poolWinners) || 2;
+  const base = effectivePoolWinners(competition);
   if (
     competition &&
     competition.extraQualifiers === "larger-pools" &&
@@ -849,7 +876,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
         // A tie still waiting for its tie-break bout reads as tied (see
         // tiedPlaces): the level rows share one place, and none of them is
         // marked advancing when the tie decides who goes through.
-        const tiedByRow = isLeague ? new Map() : tiedPlaces(poolStandings, poolQualifiers);
+        const tiedByRow = isLeague ? new Map() : tiedPlaces(poolStandings, poolQualifiers, effectivePoolWinners(competition));
 
         // A pool has nothing to rank until at least one bout is decided: every
         // competitor is tied at 0 and the backend rank is merely the seed/draw
@@ -931,7 +958,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                           {poolHasResults && rank !== null ? (
                             <span
                               className={`rank-badge${isAdvancing ? " rank-badge--adv" : ""}`}
-                              title={tie ? "Level on every criterion: a tie-break bout decides the order" : undefined}
+                              title={tie ? tieBadgeTitle(tie, isTeam) : undefined}
                             >
                               {tie ? `=${rankOrdinal(tie.place)}` : rankOrdinal(rank)}{s && s.isOverridden ? "*" : ""}
                             </span>

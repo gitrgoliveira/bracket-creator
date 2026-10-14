@@ -33,8 +33,8 @@ export const ROSTER_6B = [
   ['Bo Grant', 'Gyokusen'], ['Cy Novak', 'Thames'], ['Di Weller', 'Musashi'],
   ['Ed Frost', 'Seishinkan'], ['Flo Adler', 'Mumeishi'], ['Gil Varga', 'Hizen'],
 ];
-// Seven for the minimum-pool-size journey (pools-tiebreak): three pools of 3 at
-// a maximum of 3, but two pools (4 and 3) at a minimum of 3. Seven dojos, so the
+// Seven for the minimum-pool-size journey (pools-tiebreak): three pools (3, 2
+// and 2) at a maximum of 3, but two pools (4 and 3) at a minimum of 3. Seven dojos, so the
 // draw has no dojo to keep apart and the pools are whatever the minimum rule cuts.
 export const ROSTER_7 = [
   ['Hiro Sasaki', 'Kyoto Kai'], ['Ines Ferrer', 'Osaka Kan'], ['Joan Mercer', 'Nagoya Dojo'],

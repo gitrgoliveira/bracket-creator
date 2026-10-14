@@ -26,7 +26,7 @@ import { dwell } from '../fixtures/pace.mjs';
 import { createTournament } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
-import { openShiaijo, sides, startUpNext, upNextCard } from '../fixtures/shiaijo.mjs';
+import { openShiaijo, sides, startUpNext, upNextCard, waitingRows } from '../fixtures/shiaijo.mjs';
 import { awardIppon, clearMarks, filledSlots, finishMatch, syncState } from '../fixtures/scoring.mjs';
 import { editorSides } from '../fixtures/individual.mjs';
 import {
@@ -272,11 +272,17 @@ test.describe('spectator on a phone', () => {
     // The app is never reloaded in this test: this marker is lost if it is.
     await page.evaluate(() => { window.__spectatorNoReload = 'kept'; });
     // Court A's first bout, and the one after it (read off the operator's
-    // console); the followed competitor is in both (pool of three).
+    // console). The followed competitor is the one in BOTH: named from the
+    // queue, not assumed to be a given side of the first bout.
     await openShiaijo(op, 'A');
     const first = await sides(upNextCard(op));
     expect(first).toEqual(ids.first);
-    const followed = first.aka;
+    const queued = [];
+    for (const row of await waitingRows(op).all()) queued.push(await sides(row));
+    const next = queued.find((q) => q.shiro !== first.shiro || q.aka !== first.aka);
+    expect(next, 'a second bout is queued on court A behind the first').toBeTruthy();
+    const followed = [first.shiro, first.aka].find((n) => n === next.shiro || n === next.aka);
+    expect(followed, `a competitor is in both court A's first bout (${first.shiro} v ${first.aka}) and its next (${next.shiro} v ${next.aka})`).toBeTruthy();
 
     await test.step('follow the Aka side of court A\'s first bout: the hero shows the match waiting', async () => {
       await watchInput(page).fill(followed.toLowerCase().slice(0, 5));
@@ -307,9 +313,9 @@ test.describe('spectator on a phone', () => {
     });
 
     await test.step('the operator finishes the match: the open card reads FINAL, the hero moves to the next bout', async () => {
-      const next = await sides(upNextCard(op));
-      const opponent = next.shiro === followed ? next.aka : next.aka === followed ? next.shiro : null;
-      expect(opponent, 'the next bout on court A also has the followed competitor (a pool of three)').not.toBeNull();
+      const started = await sides(upNextCard(op));
+      expect(started, 'the next bout is the one read off the queue').toEqual(next);
+      const opponent = started.shiro === followed ? started.aka : started.shiro;
       await finishMatch(op);
       await expect(card).toContainText('FINAL');
       expect(await cardMarks(card)).toEqual({ shiro: 'M', aka: '' });
@@ -396,8 +402,9 @@ test.describe('spectator on a phone', () => {
       await shot(page, 'door-overview-now');
 
       await finishMatch(op);
-      expect(await editorSides(op)).toEqual(match3);
+      await expect.poll(() => editorSides(op), { message: 'the operator\'s editor holds the third bout' }).toEqual(match3);
       await expect(nowCard(page), 'the ON NOW card moves to the started bout').toContainText(match3.aka);
+      await expect(nowCard(page), 'and shows both of its sides, not the finished bout\'s').toContainText(match3.shiro);
       await expect(expanded, 'the waiting bout is no longer in Up next').toHaveCount(0);
       expect(await cardMarks(nowCard(page))).toEqual({ shiro: '', aka: '' });
       await awardIppon(op, 'shiro', 'M');

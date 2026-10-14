@@ -256,7 +256,13 @@ test.describe('pools: minimum pool size and a tie-break bout', () => {
 
     // The bracket: the tied place is not seated yet (it waits for the tie-break).
     await openCompetitionTab(page, compId, 'bracket');
-    const seated = Object.values(await bracketSlots(page)).map((s) => s.name);
+    // Read until the settled pool's two qualifiers are seated, so a refetch
+    // still to land cannot make the tied pool's absence a false pass.
+    const settled = (slots) => {
+      const names = Object.values(slots).map((s) => s.name);
+      return names.includes(ranked[0]) && names.includes(ranked[1]);
+    };
+    const seated = Object.values(await bracketSlots(page, settled)).map((s) => s.name);
     record({ journey: JOURNEY, step: 'tie-break', action: 'bracket before the bout', seated, screenshot: await shot(page, 'admin-bracket-before') });
     expect(seated, 'the pool of 4 is settled: its two qualifiers are seated').toEqual(expect.arrayContaining([ranked[0], ranked[1]]));
     for (const name of [tb.b, tb.c]) {

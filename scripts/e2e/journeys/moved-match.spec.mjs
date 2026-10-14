@@ -409,8 +409,9 @@ test.describe('moved-match', () => {
   // A; and no start it sends is refused for the court's status (court_busy),
   // whoever asked for it. The refusal half is read from
   // the network log, because the console policy would otherwise let the toast
-  // of the bead's report pass. An operator's own Start match is logged apart
-  // from a start the tab made by itself. The same fix retires shared-shiaijo's
+  // of the bead's report pass. The operator's own Start match in the editor
+  // sends no startOnly (it writes the editor's own board), so it never counts
+  // as a start by itself. The same fix retires shared-shiaijo's
   // S9 assertions ("Finish + Start Next →" and the start after a fusenpai on
   // the Scores page) and the Scores tab refusal in step 5a above. Runs after
   // bc-stpf, but takes court A as it finds it: the running Individual bout
@@ -419,7 +420,6 @@ test.describe('moved-match', () => {
   test.fixme('bc-adna: the Scores tab never starts a match by itself', async () => {
     const scoreWrites = [];
     const pending = [];
-    let operatorStarting = false;
     const onResponse = async (res) => {
       const req = res.request();
       if (req.method() !== 'PUT' || !/\/matches\/[^/]+\/score$/.test(new URL(res.url()).pathname)) return;
@@ -433,7 +433,6 @@ test.describe('moved-match', () => {
         url: res.url(),
         status: res.status(),
         courtBusy: /"error"\s*:\s*"court_busy"/.test(body),
-        byOperator: operatorStarting,
         isStart,
       });
     };
@@ -454,17 +453,12 @@ test.describe('moved-match', () => {
         await H.locator('.score-edit-row').filter({ hasText: m.shiro }).filter({ hasText: m.aka }).first().getByRole('button', { name: /^Score$/ }).tap();
         await expect(ed).toBeVisible();
       };
-      // The operator's own Start match, logged apart from a start by itself.
+      // The operator's own Start match: the editor's write carries no startOnly.
       const start = async () => {
         const btn = ed.getByRole('button', { name: 'Start match' });
         await settled(btn);
-        operatorStarting = true;
-        try {
-          await btn.tap();
-          await expect(finishButton(H, EDITOR)).toBeVisible();
-        } finally {
-          operatorStarting = false;
-        }
+        await btn.tap();
+        await expect(finishButton(H, EDITOR)).toBeVisible();
       };
       await open(first);
       if (startsHere) await start();
@@ -490,7 +484,7 @@ test.describe('moved-match', () => {
       await Promise.all(pending);
       H.off('response', listener);
       expect.soft(scoreWrites.filter((w) => w.courtBusy), 'no start sent from the Scores tab was refused for the court').toEqual([]);
-      expect.soft(scoreWrites.filter((w) => w.isStart && !w.byOperator), 'the Scores tab sent no start by itself').toEqual([]);
+      expect.soft(scoreWrites.filter((w) => w.isStart), 'the Scores tab sent no start by itself').toEqual([]);
     }
   });
 });

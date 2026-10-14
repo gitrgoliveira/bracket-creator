@@ -31,10 +31,11 @@
 //
 // Asserted: the pool sizes the minimum rule makes; the tie-break bout appearing
 // on the court console and the Scores tab as the only bout left to score, with
-// no "Match n of m" label, while the pool table shows B and C level on every
-// figure and marked tied; no tie-break bout for the pool settled on points
-// lost; after the tie-break bout, the winner ranked above the loser and seated
-// in the knockout (the loser out), on the admin pages and the public viewer.
+// no "Match n of m" label, while the pool table (admin and public viewer) shows
+// B and C level on every figure, marked tied, both at "=2nd" with no advancing
+// mark; no tie-break bout for the pool settled on points lost; after the
+// tie-break bout, the winner ranked above the loser and seated in the knockout
+// (the loser out), on the admin pages and the public viewer.
 import { test, expect } from '../fixtures/test.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
 import { auditLog } from '../fixtures/audit.mjs';
@@ -90,8 +91,6 @@ test.describe('pools: minimum pool size and a tie-break bout', () => {
   // Who won the tie-break bout, who lost it.
   let tbWinner;
   let tbLoser;
-  // The rank badge each of the level pair carried before the bout.
-  let rankBefore;
 
   test.beforeAll(() => {
     shot = journeyShots(JOURNEY);
@@ -209,7 +208,7 @@ test.describe('pools: minimum pool size and a tie-break bout', () => {
     await shot(page, 'regular-bouts-done');
   });
 
-  test('the level pair: a tie-break bout is added, and the table shows them level until it is fought', async ({ page }) => {
+  test('the level pair: a tie-break bout is added, and the table shows them level until it is fought', async ({ page, browser, baseURL }) => {
     await login(page);
     const pair = await tieBreakPairing(page);
     record({ journey: JOURNEY, step: 'tie-break', action: 'on the court console', pair, screenshot: await shot(page, 'tie-break-on-console') });
@@ -226,18 +225,25 @@ test.describe('pools: minimum pool size and a tie-break bout', () => {
     expect(await toScore.first().innerText()).not.toMatch(POOL_MATCH_LABEL);
     await shot(page, 'scores-tab-tie-break');
 
-    // The pool table: B and C level on every figure and marked tied; A first.
-    const level = (name) => ({ ...tally[name], tied: true });
+    // The pool table: B and C level on every figure, marked tied, sharing ONE
+    // place (=2nd) with no advancing mark on either, since the tie-break bout
+    // decides which of them goes through; A first and advancing. The public
+    // viewer's table reads the same.
+    const level = (name) => ({ ...tally[name], rank: '=2nd', advancing: false, tied: true });
     await openAdminPools(page, compId);
     await expectTable(page, 'admin Pools tab', [tb.b, tb.c], level);
     const rows = { b: await playerRowFigures(page, tb.b), c: await playerRowFigures(page, tb.c) };
-    // The badges the level pair carries until the bout: the table lists them in
-    // draw order and badges the one drawn first higher, since the figures say
-    // nothing. The tie-break winner is picked from the one badged LOWER, so the
-    // bout visibly changes the order.
-    rankBefore = { [tb.b]: rows.b.rank, [tb.c]: rows.c.rank };
     record({ journey: JOURNEY, step: 'tie-break', action: 'table before the bout', columns: INDIVIDUAL_FIGURES, rows, screenshot: await shot(page, 'admin-pools-level', { fullPage: true }) });
     await expectTable(page, 'admin Pools tab', [tb.a], (n) => ({ ...tally[n], rank: '1st', advancing: true, tied: false }));
+    const spectator = await browser.newContext({ ...PUBLIC_DEVICE, baseURL });
+    try {
+      const phone = await spectator.newPage();
+      await openViewerPools(phone, compId);
+      await expectTable(phone, 'public viewer Pools tab', [tb.b, tb.c], level);
+      await expectTable(phone, 'public viewer Pools tab', [tb.a], (n) => ({ ...tally[n], rank: '1st', advancing: true, tied: false }));
+    } finally {
+      await spectator.close();
+    }
 
     // The pool of 4: Q above R on points lost alone, no tie, no bout for them.
     const [P, Q, R, S] = big;
@@ -264,11 +270,12 @@ test.describe('pools: minimum pool size and a tie-break bout', () => {
     // The bout starts from its Up next card unless a Finish + Start Next already did.
     const running = await ensureRunning(page);
     expect(running, 'the tie-break bout runs on the court').toEqual(pair);
-    // The one the table badged lower wins, one men (aka when it badged both alike).
-    const rankIndex = (name) => ORDINAL.indexOf(rankBefore[name]);
-    const side = rankIndex(pair.shiro) > rankIndex(pair.aka) ? 'shiro' : 'aka';
+    // The last of the pair in the draw (role C) wins, one men: the table
+    // read them level, so the bout, not the draw order, decides the place.
+    const side = pair.shiro === tb.c ? 'shiro' : 'aka';
     tbWinner = pair[side];
     tbLoser = pair[side === 'shiro' ? 'aka' : 'shiro'];
+    expect(tbWinner, 'role C wins the tie-break bout').toBe(tb.c);
     const wrote = nextMatchWrite(page);
     await awardIppon(page, side, 'M');
     const res = await writeLanded(wrote, 'the tie-break bout\'s first mark');

@@ -735,6 +735,42 @@ PoolNumberedMatchRow.displayName = "PoolNumberedMatchRow";
 // residue is a deliberate accepted gap, not a bug: a correct highlight needs
 // the server to say WHICH pools were drafted, which is future work if this
 // becomes worth wiring (bc-qual LP-5a report).
+// tiedPlaces: the place each still-open tie holds, keyed by standings row.
+//
+// The server marks a row `tied` while the competitors level with it on EVERY
+// criterion await a tie-break bout, but each row still carries its own sorted
+// rank (draw order breaks the level pair), so reading `rank` alone badges one
+// of them 2nd and the other 3rd as though the order were decided. A tied group
+// shares its best member's place, and sits wholly inside the qualifying places
+// or not: `decidesAdvancement` is true only when the group straddles the cut,
+// so a pair level for 1st that both advance anyway still reads as advancing.
+// `points` is the server's packed ranking key (engine individual/teamStandingPoints),
+// equal exactly when two rows are level on every criterion, so rows that share
+// it among the tied ones form one group. Pool standings only: a league has no
+// advancing mark to withhold.
+export function tiedPlaces(poolStandings, qualifiers) {
+  const groups = new Map();
+  (poolStandings || []).forEach((s, i) => {
+    if (!s || !s.tied) return;
+    const rank = s.rank || i + 1;
+    const g = groups.get(s.points);
+    if (g) {
+      g.place = Math.min(g.place, rank);
+      g.last = Math.max(g.last, rank);
+    } else {
+      groups.set(s.points, { place: rank, last: rank });
+    }
+  });
+  const byRow = new Map();
+  (poolStandings || []).forEach((s) => {
+    if (!s || !s.tied) return;
+    const g = groups.get(s.points);
+    const key = s.player.id || `${s.player.name}||${s.player.dojo || ""}`;
+    byRow.set(key, { place: g.place, decidesAdvancement: g.place <= qualifiers && g.last > qualifiers });
+  });
+  return byRow;
+}
+
 export function qualifiersForPool(competition, pool) {
   const base = (competition && competition.poolWinners) || 2;
   if (
@@ -810,6 +846,11 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
           });
         }
 
+        // A tie still waiting for its tie-break bout reads as tied (see
+        // tiedPlaces): the level rows share one place, and none of them is
+        // marked advancing when the tie decides who goes through.
+        const tiedByRow = isLeague ? new Map() : tiedPlaces(poolStandings, poolQualifiers);
+
         // A pool has nothing to rank until at least one bout is decided: every
         // competitor is tied at 0 and the backend rank is merely the seed/draw
         // fallback. Suppress rank badges + the "advancing" qualification
@@ -865,7 +906,9 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                   const lookup = rankByPlayerKey.get(p.id || `${p.name}||${p.dojo || ""}`);
                   const s = lookup ? lookup.standing : null;
                   const rank = lookup ? lookup.rank : null;
-                  const isAdvancing = !isLeague && poolHasResults && rank !== null && rank <= poolQualifiers;
+                  const tie = tiedByRow.get(p.id || `${p.name}||${p.dojo || ""}`);
+                  const isAdvancing = !isLeague && poolHasResults && rank !== null && rank <= poolQualifiers
+                    && !(tie && tie.decidesAdvancement);
 
                   const rowClasses = [
                     isPlayerWatched(p, highlightPlayers) ? "pool__row--me" : "",
@@ -886,8 +929,11 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                             <DHBadge />
                           )}
                           {poolHasResults && rank !== null ? (
-                            <span className={`rank-badge${isAdvancing ? " rank-badge--adv" : ""}`}>
-                              {rankOrdinal(rank)}{s && s.isOverridden ? "*" : ""}
+                            <span
+                              className={`rank-badge${isAdvancing ? " rank-badge--adv" : ""}`}
+                              title={tie ? "Level on every criterion: a tie-break bout decides the order" : undefined}
+                            >
+                              {tie ? `=${rankOrdinal(tie.place)}` : rankOrdinal(rank)}{s && s.isOverridden ? "*" : ""}
                             </span>
                           ) : null}
                         </div>

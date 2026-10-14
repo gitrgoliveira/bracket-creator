@@ -13,7 +13,9 @@ import (
 
 // These tests pin the band-aware rule for the pool daihyosen: a supplementary
 // bout is played only where the tie affects who advances (or their seed). The
-// top `poolWinners` of each pool advance and 1st place gets a bracket bye, so a
+// top `poolWinners` of each pool advance (the pool's own qualifier count, which
+// is larger for an oversized pool under larger-pools; see
+// tiebreak_extra_qualifier_test.go) and 1st place gets a bracket bye, so a
 // tie whose best position is within [1..poolWinners] is consequential, while a
 // tie sitting entirely below the cut shares its rank with no bout
 // (running_a_kendo_tournament.md:441 - a daihyosen is played "to determine
@@ -21,15 +23,19 @@ import (
 
 // setupTeamPoolWinners is setupTeamPool with an explicit advancement cutoff so a
 // tie can be placed above, across, or below the qualifying band.
-func setupTeamPoolWinners(t *testing.T, compID string, teams []string, poolWinners int, matches []state.MatchResult) (*Engine, *state.Store) {
+func setupTeamPoolWinners(t *testing.T, compID string, teams []string, poolWinners int, matches []state.MatchResult, opts ...func(*state.Competition)) (*Engine, *state.Store) {
 	t.Helper()
 	eng, store, _ := setupTestEngine(t)
-	require.NoError(t, store.SaveCompetition(&state.Competition{
+	comp := &state.Competition{
 		ID: compID, Name: "Band-aware DH Test",
 		Format: state.CompFormatLeague, Status: state.CompStatusPools,
 		Courts: []string{"A"}, Kind: "team", TeamSize: 2,
 		PoolWinners: poolWinners,
-	}))
+	}
+	for _, o := range opts {
+		o(comp)
+	}
+	require.NoError(t, store.SaveCompetition(comp))
 	players := make([]helper.Player, len(teams))
 	for i, n := range teams {
 		players[i] = helper.Player{Name: n}

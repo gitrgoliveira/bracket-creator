@@ -15,6 +15,9 @@ const FORMAT = {
 };
 const TEAM_MATCH_TYPE = { fixed: 'Regular', kachinuki: 'Kachinuki (winner stays on)' };
 const POOL_SIZE_MODE = { maximum: 'maximum', minimum: 'minimum' };
+// The "Knockout qualifiers" pills (competition_shape.jsx extraQualifiersLabel),
+// which only a minimum pool size offers.
+const EXTRA_QUALIFIERS = { standard: 'Standard', 'larger-pools': 'Oversized send +1', 'fill-bracket': 'Fit the knockout' };
 
 // The wizard's controls by their accessible names (competition_fields.jsx): a
 // NumberField or TextField input is named by its label through htmlFor, and a
@@ -52,6 +55,10 @@ async function setNumber(page, label, value) {
 //   teamMatchType  'fixed' | 'kachinuki' (team only)
 //   poolSizeMode   'maximum' | 'minimum' (mixed only)
 //   poolSize, poolWinners  numbers (mixed only)
+//   extraQualifiers 'standard' | 'larger-pools' | 'fill-bracket': the "Knockout
+//                  qualifiers" pills (mixed with a minimum pool size only).
+//                  Either non-standard choice sets Winners per pool to 1 and
+//                  locks it, so give poolWinners with 'standard' only
 //   courts         e.g. ['A', 'B']: exactly these shiaijo end up selected
 //   numberPrefix   up to 3 characters
 //   twoThirdPlaces boolean: "Award two joint 3rd places" (on by default;
@@ -59,7 +66,7 @@ async function setNumber(page, label, value) {
 //   checkIn        boolean: "Check-in tracking" (officiated tournaments only)
 export async function createCompetition(page, opts = {}) {
   const {
-    name, kind, format, teamSize, teamMatchType, poolSizeMode, poolSize, poolWinners,
+    name, kind, format, teamSize, teamMatchType, poolSizeMode, poolSize, poolWinners, extraQualifiers,
     courts, numberPrefix, twoThirdPlaces, engi, checkIn,
   } = opts;
   await page.goto('/admin/create-competition');
@@ -74,6 +81,14 @@ export async function createCompetition(page, opts = {}) {
   if (poolSizeMode) await choose(page, 'Pool size is a', POOL_SIZE_MODE[poolSizeMode]);
   if (poolSize !== undefined) await setNumber(page, 'Players per pool', poolSize);
   if (poolWinners !== undefined) await setNumber(page, 'Winners per pool', poolWinners);
+  if (extraQualifiers) {
+    await choose(page, 'Knockout qualifiers', EXTRA_QUALIFIERS[extraQualifiers]);
+    if (extraQualifiers !== 'standard') {
+      // The wizard locks the field at 1: oversized pools send one more than that.
+      await expect(input(page, 'Winners per pool')).toHaveValue('1');
+      await expect(input(page, 'Winners per pool')).toBeDisabled();
+    }
+  }
   if (twoThirdPlaces !== undefined) {
     await page.getByRole('checkbox', { name: 'Award two joint 3rd places' }).setChecked(twoThirdPlaces);
   }

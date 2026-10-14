@@ -149,7 +149,7 @@ func (e *Engine) planRequalification(tx state.StoreTx, compID string, comp *stat
 	// label. Engi places are decided by the standings' own order.
 	tied := map[string]bool{}
 	if !comp.Engi {
-		tied, err = e.tiedQualifyingLabels(tx, compID, comp, poolName, standings[poolName], ranksNeeded)
+		tied, err = e.tiedQualifyingLabels(tx, compID, comp, poolName, comp.QualifiersForPool(*pool), standings[poolName], ranksNeeded)
 		if err != nil {
 			return nil, err
 		}
@@ -253,7 +253,7 @@ func rankOfLabel(poolName, label string, ranksNeeded int) int {
 // tiedQualifyingLabels returns the pool's qualifying labels whose rank sits in
 // a tied group that still owes a supplementary bout (pendingTieBreaks, the
 // injectors' own rule), read through the transaction.
-func (e *Engine) tiedQualifyingLabels(tx state.StoreTx, compID string, comp *state.Competition, poolName string, poolStandings []state.PlayerStanding, ranksNeeded int) (map[string]bool, error) {
+func (e *Engine) tiedQualifyingLabels(tx state.StoreTx, compID string, comp *state.Competition, poolName string, cut int, poolStandings []state.PlayerStanding, ranksNeeded int) (map[string]bool, error) {
 	rows, err := tx.LoadPoolMatches(compID)
 	if err != nil {
 		return nil, fmt.Errorf("requalification: load pool matches for %s: %w", compID, err)
@@ -273,7 +273,7 @@ func (e *Engine) tiedQualifyingLabels(tx state.StoreTx, compID string, comp *sta
 		}
 	}
 	tied := map[string]bool{}
-	for _, p := range pendingTieBreaks(comp, poolName, poolStandings, existing, court, daihyosen) {
+	for _, p := range pendingTieBreaks(comp, poolName, cut, poolStandings, existing, court, daihyosen) {
 		for _, pos := range p.positions {
 			if pos+1 <= ranksNeeded {
 				tied[qualifierLabel(poolName, pos+1)] = true

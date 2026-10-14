@@ -121,7 +121,9 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                                   level on every criterion adds a tie-break
                                   bout, whose winner is ranked and seated in the
                                   knockout on admin and phone; a tie split on
-                                  points lost adds none
+                                  points lost adds none; a second competition
+                                  with Oversized send +1 where the tie is over
+                                  the extra qualifier place, owed a bout too
       moved-match                 a waiting match moved to another shiaijo
                                   reaches that court's console without a reload
       shared-shiaijo              two competitions on one shiaijo: the picker,

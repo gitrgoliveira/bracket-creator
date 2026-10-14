@@ -69,8 +69,13 @@ export function readZip(buf) {
   return entries;
 }
 
-const xmlText = (s) => s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-  .replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+// One pass, so a decoded '&' is never decoded again ("&amp;lt;" reads "&lt;").
+const XML_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+const xmlText = (s) => s.replace(/&(amp|lt|gt|quot|apos);/g, (_, e) => XML_ENTITIES[e]);
+
+// A shared or inline string's text: its <t> runs joined (a rich-text string
+// splits it across several), read rather than left over from stripping tags.
+const runText = (s) => [...s.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map((m) => xmlText(m[1])).join('');
 
 // What a downloaded workbook holds: its sheet names, in order, and all of its
 // cell text (shared strings and inline strings, joined), unescaped.
@@ -92,7 +97,7 @@ export function sheetCells(buf, sheetName) {
   const zip = readZip(buf);
   const xml = (name) => (zip.get(name) ? zip.get(name).toString('utf8') : '');
   const shared = [...xml('xl/sharedStrings.xml').matchAll(/<si>([\s\S]*?)<\/si>/g)]
-    .map((m) => xmlText(m[1].replace(/<[^>]+>/g, '')));
+    .map((m) => runText(m[1]));
   // Each <sheet> tag's attributes are read one by one, so their order does not matter.
   const entry = [...xml('xl/workbook.xml').matchAll(/<sheet\b[^>]*>/g)]
     .map((m) => ({ name: /\bname="([^"]*)"/.exec(m[0]), rid: /\br:id="([^"]*)"/.exec(m[0]) }))
@@ -110,7 +115,7 @@ export function sheetCells(buf, sheetName) {
     const v = /<v>([\s\S]*?)<\/v>/.exec(m[2]);
     const inline = /<is>([\s\S]*?)<\/is>/.exec(m[2]);
     let text = null;
-    if (inline) text = xmlText(inline[1].replace(/<[^>]+>/g, ''));
+    if (inline) text = runText(inline[1]);
     else if (v) text = type && type[1] === 's' ? shared[Number(v[1])] : xmlText(v[1]);
     if (text !== null && text !== '') out[ref[1]] = text;
   }

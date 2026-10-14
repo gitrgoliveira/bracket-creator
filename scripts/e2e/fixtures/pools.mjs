@@ -45,6 +45,27 @@ export async function rowFigures(page, team) {
   };
 }
 
+// An INDIVIDUAL pool's row carries five figures, not the team table's eight:
+// W L D (fights won, lost, drawn: hikiwake) and PW PL (points won, lost: ippons
+// scored and conceded). Beside them it reads the rank badge, whether the row is
+// marked as advancing, and whether it is marked tied (the amber row: a tie at a
+// place still to be broken; a group a tie-break bout already ordered is not).
+export const INDIVIDUAL_FIGURES = ['W', 'L', 'D', 'PW', 'PL'];
+
+export async function playerRowFigures(page, name) {
+  const row = teamRow(page, name);
+  await expect(row).toHaveCount(1);
+  const cells = (await row.locator('td.num').allInnerTexts()).map((t) => t.trim());
+  const badge = row.locator('.rank-badge');
+  const classes = ((await row.getAttribute('class')) || '').split(/\s+/);
+  return {
+    ...Object.fromEntries(INDIVIDUAL_FIGURES.map((f, i) => [f, cells[i] === undefined ? NaN : Number(cells[i])])),
+    rank: (await badge.count()) ? (await badge.first().innerText()).trim().toLowerCase() : '',
+    advancing: classes.includes('advancing'),
+    tied: classes.includes('pool__row--tied'),
+  };
+}
+
 // The names of the teams in a pool, in the table's (draw) order.
 export async function poolTeams(block) {
   return (await block.locator('table.pool__table tbody .pool__player-name').allInnerTexts())

@@ -101,6 +101,15 @@ export async function awardIppon(page, side, waza = 'M', root = INLINE_EDITOR) {
   await expect(syncState(page, root)).toHaveText('Synced');
 }
 
+// The hikiwake toggle of the individual board ("Mark draw", "Cancel draw" while
+// on). It is offered only while neither side holds a point. Returns once the
+// board shows the draw.
+export async function markDraw(page, root = INLINE_EDITOR) {
+  const toggle = page.locator(root).first().getByTestId('scoring-modal-mark-draw');
+  await toggle.tap();
+  await expect(toggle).toHaveText('Cancel draw');
+}
+
 // `root` is an editor's selector or its Locator (the team sheet's callers hold one).
 const within = (page, root) => (typeof root === 'string' ? page.locator(root) : root);
 

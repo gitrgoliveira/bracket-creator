@@ -6,7 +6,7 @@
 // tap-target measurement (fixtures/pointer.mjs) and the hasty confirms
 // (fixtures/clumsy.mjs) are shared with the other journeys.
 import { expect } from '@playwright/test';
-import { INLINE_EDITOR, awardIppon, finishMatch } from './scoring.mjs';
+import { INLINE_EDITOR, awardIppon, finishMatch, markDraw } from './scoring.mjs';
 import {
   UP_NEXT, WAITING_ROWS, completedRowFor, courtDone, courtIdle, inlineEditor, upNextCard,
 } from './shiaijo.mjs';
@@ -33,6 +33,15 @@ export const ROSTER_6B = [
   ['Bo Grant', 'Gyokusen'], ['Cy Novak', 'Thames'], ['Di Weller', 'Musashi'],
   ['Ed Frost', 'Seishinkan'], ['Flo Adler', 'Mumeishi'], ['Gil Varga', 'Hizen'],
 ];
+// Seven for the minimum-pool-size journey (pools-tiebreak): three pools of 3 at
+// a maximum of 3, but two pools (4 and 3) at a minimum of 3. Seven dojos, so the
+// draw has no dojo to keep apart and the pools are whatever the minimum rule cuts.
+export const ROSTER_7 = [
+  ['Hiro Sasaki', 'Kyoto Kai'], ['Ines Ferrer', 'Osaka Kan'], ['Joan Mercer', 'Nagoya Dojo'],
+  ['Kei Takagi', 'Sendai Kan'], ['Lars Nilsen', 'Sapporo Kai'], ['Mina Abara', 'Fukuoka Dojo'],
+  ['Noel Garnier', 'Kobe Kan'],
+];
+
 // Small rosters for the '<bead-id>: ...' tests, which seed their own
 // competitions so each runs alone.
 const ROSTER_FIRST_NAMES = ['Aki', 'Bea', 'Cal', 'Dee', 'Eli', 'Fay'];
@@ -163,6 +172,26 @@ export async function playRunningBout(page, { waza = 'M' } = {}) {
   await finishMatch(page);
   await expect(completedRowFor(page, pair)).toBeVisible();
   return { ...pair, winner: side };
+}
+
+// Play the running bout (or start the Up next one) as a script says, and Finish.
+// `script({ shiro, aka })` returns what to record for that pairing, or throws for
+// a pairing the journey did not plan:
+//   { draw: true }                       Mark draw (hikiwake, no points)
+//   { shiro: ['M'], aka: ['K', 'D'] }    the waza each side is awarded, in order
+// Marks level on both sides finish as hikiwake too (the board reads equal totals
+// as a draw). Returns the pairing and what was recorded.
+export async function playScriptedBout(page, script) {
+  const pair = await ensureRunning(page);
+  if (!pair) throw new Error('playScriptedBout: nothing running or startable on this court');
+  const plan = script(pair);
+  if (plan.draw) await markDraw(page);
+  for (const side of ['shiro', 'aka']) {
+    for (const waza of plan[side] || []) await awardIppon(page, side, waza);
+  }
+  await finishMatch(page);
+  await expect(completedRowFor(page, pair)).toBeVisible();
+  return { ...pair, plan };
 }
 
 // The bout the console's inline editor is running on the individual board, as

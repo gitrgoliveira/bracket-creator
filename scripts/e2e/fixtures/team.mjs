@@ -18,7 +18,7 @@
 // checks the write landed (fixtures/scoring.mjs finishLanded).
 import { expect } from '@playwright/test';
 import { EXPECT_TIMEOUT_MS } from './devices.mjs';
-import { settled, tapOnSide } from './pace.mjs';
+import { dwell, settled, tapOnSide } from './pace.mjs';
 import { finishMatch } from './scoring.mjs';
 import { inlineEditor, upNextCard } from './shiaijo.mjs';
 
@@ -179,6 +179,26 @@ export async function openPanelFromUpNext(page) {
   await expect(panelSide(page, 1)).toBeVisible();
 }
 
+// page -> when the last name-list option was tapped. A pick from the list stamps
+// the score sheet's bout list (stampTap(boutListTapRef), admin_scoring_team.jsx),
+// and that list swallows every click inside it for TAP_BOUNCE_MS afterwards: the
+// next option tap is a bounce of the pick's tap to the app, and a pick made that
+// soon does nothing (the list stays open, no write is sent). A person's next pick
+// is never that close, Playwright's is, so every option tap waits out the dwell
+// since the previous one, timed from that tap (nothing in the page says the
+// window has passed).
+const optionTaps = new WeakMap();
+
+// Tap one option of an open name list, at the operator's pace. The one owner of
+// "tap a name-list option"; a journey that taps an option itself calls this.
+export async function tapNameOption(option) {
+  const page = option.page();
+  const last = optionTaps.get(page);
+  if (last !== undefined) await dwell(page, last);
+  await option.tap();
+  optionTaps.set(page, Date.now());
+}
+
 // Tap a LineupNameInput and choose the option containing `text`. Works on the
 // panel and on the score sheet row alike (both render LineupNameInput).
 export async function pickFromNameBox(input, text) {
@@ -186,7 +206,7 @@ export async function pickFromNameBox(input, text) {
   const box = input.locator('xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " lineup-name ")][1]');
   const option = box.locator('.pmf__option').filter({ hasText: text }).first();
   await expect(option).toBeVisible();
-  await option.tap();
+  await tapNameOption(option);
 }
 
 // A name list left open (by the operator, or by a tap that landed on a name

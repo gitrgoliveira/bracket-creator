@@ -319,7 +319,7 @@ test.describe('knockout-mixed-team', () => {
       const aokiIdx = texts.findIndex((t) => t.includes('Aoki'));
       const wrongOpt = opts.nth(Math.min(aokiIdx + 1, texts.length - 1));
       const wrongText = (await wrongOpt.innerText()).trim();
-      await wrongOpt.tap();
+      await T.tapNameOption(wrongOpt);
       await rendered(page);
       const afterWrong = await box.inputValue();
       const labelAfterWrong = (await T.rowMemberLabel(row1, 'shiro').innerText().catch(() => '')).trim();

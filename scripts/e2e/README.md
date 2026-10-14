@@ -294,7 +294,11 @@ through `armTwoTap` (tap, wait for the armed state, out the dwell): `armFinish`
 a bout, through `tapOnSide`, which keeps the time of the last tap on each side:
 `awardIppon` and `ipponOnRow` (the strike `boutIppon` makes on the team sheet
 and `awardBoutIppon` on the kachinuki sheet, which both wait for the board and
-the autosave). A journey that taps such a thing by hand does the same. `doubleTap` is the one
+the autosave). In a fighter name list, through `tapNameOption`, which keeps the
+time of the last option tap: a pick stamps the team sheet's bout list, which
+ignores every click inside it for that window, so `pickFromNameBox` and any
+option tapped by hand go through it. A journey that taps such a thing by hand
+does the same. `doubleTap` is the one
 helper that deliberately does not: it is the bounce, and the app is meant to
 ignore the second tap. `pace.mjs` reads the
 app's window from `web-mobile/js/tap_guard.jsx` (`TAP_BOUNCE_MS`) rather than

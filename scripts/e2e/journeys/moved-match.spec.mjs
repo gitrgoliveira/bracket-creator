@@ -37,7 +37,7 @@ import { tapSize } from '../fixtures/pointer.mjs';
 import { ROSTER_6, recordDecision, slotMarks } from '../fixtures/individual.mjs';
 import * as T from '../fixtures/team.mjs';
 import {
-  seedCompetitions, readScoresTab, operatorDevice, markPage, pageMark,
+  seedCompetitions, readScoresTab, readScoresRows, operatorDevice, markPage, pageMark,
   competitionPicker, officiatingName, pickCompetition, nudges, nudgeLines, courtState,
   upcomingRow, chooseCourt, runningOnCourt, playTeamMatch, liveBout,
 } from '../fixtures/shared-court.mjs';
@@ -460,7 +460,9 @@ test.describe('moved-match', () => {
       // Deliberate: no start may follow (no toast, nothing running), so the time is the evidence.
       await H.waitForTimeout(2000);
       await expect(H.locator('.toast').filter({ hasText: /is running/ })).toHaveCount(0);
-      await expect.poll(async () => ((await readScoresTab(H, ids.IND)).find((m) => samePair(m, second)) || {}).status, { timeout: 10_000 }).toBe('completed');
+      // One navigation; the poll reads the tab as the app follows the fusenpai.
+      await H.goto(`/admin/competition/${encodeURIComponent(ids.IND)}/scores`);
+      await expect.poll(async () => ((await readScoresRows(H)).find((m) => samePair(m, second)) || {}).status, { timeout: 10_000 }).toBe('completed');
       expect(await runningOnCourt(H, 'A'), 'nothing started on A after the fusenpai').toHaveLength(0);
     } finally {
       H.off('response', onResponse);

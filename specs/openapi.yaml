@@ -7308,7 +7308,8 @@ components:
             to the knockout. Present once pools are drawn. It is read off the
             stored draw, so a pool whose 2nd is drafted under extra qualifiers
             "fill-bracket", or an oversized pool under "larger-pools", counts one
-            more than `config.poolWinners`. A tie over any of these places is
+            more than `config.poolWinners`, and a pool too small to fill every
+            place counts only the places the draw seats. A tie over any of these places is
             owed a tie-break bout (a daihyosen for a team pool), and the
             standings mark exactly these places as advancing.
         bracket:

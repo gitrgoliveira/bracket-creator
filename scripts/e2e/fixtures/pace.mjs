@@ -98,7 +98,9 @@ export async function untilStable(read, { quietMs = 400, timeout = EXPECT_TIMEOU
   for (;;) {
     await new Promise((done) => setTimeout(done, quietMs));
     const now = JSON.stringify(await read());
-    if (now === last) return JSON.parse(now === undefined ? 'null' : now);
+    // JSON.stringify(undefined) is undefined, which JSON.parse cannot take:
+    // a read of undefined settles as undefined, not as null.
+    if (now === last) return now === undefined ? undefined : JSON.parse(now);
     if (Date.now() > deadline) throw new Error(`untilStable: the read kept changing for ${timeout} ms (last: ${now})`);
     last = now;
   }

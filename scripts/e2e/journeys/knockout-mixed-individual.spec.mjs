@@ -1030,9 +1030,12 @@ test.describe('knockout-mixed-individual', () => {
     // Close straight away (inside the autosave's 300ms), as a hasty operator would.
     const closedByTap = await page.locator(EDITOR).getByRole('button', { name: /✕ Close/ }).tap({ timeout: 2000 }).then(() => true, () => false);
     const discardAsked = await page.locator('.modal[role="dialog"] .modal__foot').isVisible().catch(() => false);
+    // `from`: the editor as it stands before the answer (still open behind the
+    // confirm), so the settle cannot agree with the page as it was before.
+    const editorBeforeAnswer = await page.locator(EDITOR).isVisible().catch(() => false);
     const hasty = discardAsked ? await hastyConfirm(page) : null;
     // Whether the editor closed (and the unsaved ippon was kept) settles after the answer.
-    await untilStable(() => page.locator(EDITOR).isVisible().catch(() => false));
+    await untilStable(() => page.locator(EDITOR).isVisible().catch(() => false), { from: editorBeforeAnswer });
     await secondRow.tap();
     await expect(page.locator(EDITOR)).toBeVisible();
     const kept = await slotMarks(page, winnerOf(pair2), EDITOR);
@@ -1069,9 +1072,11 @@ test.describe('knockout-mixed-individual', () => {
     row({ step: 'bracket tab', action: 'Edit result', variant: 'size', ...(await tapSize(panel.getByRole('button', { name: 'Edit result' }))) });
     await panel.getByRole('button', { name: 'Edit result' }).tap();
     const editDialog = await hastyConfirm(page);
-    await rendered(page);
+    // The reopen is a server write: the editor is read once it has left the
+    // result card's state (not shown), or settled on not shown if it never did.
+    const editorReopened = await untilStable(() => panel.locator(INLINE_EDITOR).isVisible().catch(() => false), { from: false });
     row({ step: 'bracket tab', action: 'Edit result confirm', variant: 'V4 hastyConfirm', ...editDialog,
-      editorReopened: await panel.locator(INLINE_EDITOR).isVisible().catch(() => false),
+      editorReopened,
       shot: await shot(page, 'bracket-tab-edit-result') });
     const closeEdit = panel.getByRole('button', { name: /✕ Close|^Cancel$/ }).first();
     if (await closeEdit.isVisible().catch(() => false)) await closeEdit.tap();
@@ -1088,9 +1093,15 @@ test.describe('knockout-mixed-individual', () => {
     const bpair2 = await editorSides(page);
     await ipponButton(page, winnerOf(bpair2), 'M').tap();
     await settle(page);
+    const readBracket = async () => (await page.locator('.page').first().innerText()).replace(/\s+/g, ' ');
     await finishMatch(page, INLINE_EDITOR);
-    // The bracket redraws once the finish has refetched: the text it settles on.
-    const bracketText = await untilStable(async () => (await page.locator('.page').first().innerText()).replace(/\s+/g, ' '));
+    // The bracket redraws once the finish has refetched. Both semi-finals are
+    // played now, so the final is seated (no "Winner of ..." left): that is
+    // the state the absence below is read against, not the tree from before
+    // the finish, which has no 3rd place match either. Then the text it
+    // settles on.
+    await expect.poll(readBracket, { message: 'the final is seated once both semi-finals are played' }).not.toMatch(/Winner of /);
+    const bracketText = await untilStable(readBracket);
     row({ step: 'bracket tab', action: 'second semi-final, default joint 3rd places', variant: 'correct path', pair: bpair2,
       bronzeMatchShown: /3RD PLACE MATCH/i.test(bracketText), shot: await shot(page, 'bracket-tab-semis-done', { fullPage: true }) });
     expect(bracketText).not.toMatch(/3RD PLACE MATCH/i);

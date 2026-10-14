@@ -405,8 +405,11 @@ test.describe('J5 kachinuki from the court console', () => {
       await expectPairing(3, S[1], A[1]);
 
       const tie = tieButton(currentBout(page));
+      // `from`: the label before the taps, so the settle cannot agree with the
+      // page as it was before they were handled.
+      const tieBefore = await tie.innerText();
       const v2tie = await doubleTap(tie);
-      const tieLabel = (await untilStable(() => tie.innerText())).trim();
+      const tieLabel = (await untilStable(() => tie.innerText(), { from: tieBefore })).trim();
       record({ step: 'M1 bout 3', action: 'Tie (hikiwake)', variant: 'V2 doubleTap', ...v2tie, tieLabel,
         middle: await boutMiddle(currentBout(page)), screenshot: await shot(page, 'v2-tie-double-tap') });
       if (!/✓/.test(tieLabel)) await tie.tap();
@@ -428,11 +431,12 @@ test.describe('J5 kachinuki from the court console', () => {
       await tieButton(currentBout(page)).tap();
       await expect(enchoButton(page)).toBeVisible();
       await shot(page, 'bout-4-tied-encho-offered');
+      const overtimeBefore = await enchoUndoButton(page).isVisible();
       const v2 = await doubleTap(enchoButton(page));
       const eyebrow = (await editor(page).locator('.editor-modal__eyebrow').first().innerText()).trim();
       // Undo encho appears beside Encho with the first tap and the row re-centres, so
       // the second tap can land on it and take the period straight back.
-      const inOvertime = await untilStable(() => enchoUndoButton(page).isVisible());
+      const inOvertime = await untilStable(() => enchoUndoButton(page).isVisible(), { from: overtimeBefore });
       record({ step: 'M1 bout 4', action: 'Encho', variant: 'V2 doubleTap', ...v2, eyebrow, inOvertimeAfterDoubleTap: inOvertime,
         enchoStillOffered: await enchoButton(page).isVisible(), middle: await boutMiddle(currentBout(page)),
         screenshot: await shot(page, 'v2-encho-double-tap') });
@@ -602,11 +606,19 @@ test.describe('J5 kachinuki from the court console', () => {
         screenshot: await shot(page, 'bout-5-and-live-bout-both-editable', { fullPage: true }) });
       // V3: the Back button while bout 5 is open for correction.
       await expect(syncPill(page)).toHaveText('Synced');
+      // The sheet as the correction leaves it: whether the correction is open,
+      // the bouts fought and bout 5's marks. A Back that reloads the court's
+      // data changes one of them unless the correction survives it.
+      const sheetNow = async () => ({
+        open: await correctingBout(page).count(), done: await doneRows(page).count(), marks: await marksOf(4).catch(() => null),
+      });
+      const sheetBeforeBack = await sheetNow();
       const back = await interruptC(page, 'back');
       await expect(editor(page)).toBeVisible();
-      // Back reloads the court's data: whether the correction survives it is
-      // what the row records, so wait for the sheet to stop changing.
-      await untilStable(() => doneRows(page).count());
+      // Whether the correction survives is what the row records: wait for the
+      // sheet to leave its pre-Back state and stop changing (a correction that
+      // survives changes nothing, which costs the helper's wait for a change).
+      await untilStable(sheetNow, { from: sheetBeforeBack });
       record({ step: 'M1 correction', action: 'bout 5 open for correction', variant: 'V3 interrupt back', ...back,
         stillOpen: await correctingBout(page).count(), bout5: await boutNames(doneRows(page).nth(4)).catch(() => null),
         bout5Marks: await marksOf(4), live: await boutNames(currentBout(page)), screenshot: await shot(page, 'v3-back-mid-correction') });
@@ -677,8 +689,9 @@ test.describe('J5 kachinuki from the court console', () => {
       record({ step: 'M1 bout 8', action: 'Fusensho (Shiro)', variant: 'V1 tapNeighbour left', ...v1, shiroMarks: marks,
         recoverTaps, screenshot: v1Shot });
       // V2: Fusensho double-tapped (it is a toggle).
+      const fusBefore = await fus.innerText();
       const v2 = await doubleTap(fus);
-      const label = (await untilStable(() => fus.innerText())).trim();
+      const label = (await untilStable(() => fus.innerText(), { from: fusBefore })).trim();
       record({ step: 'M1 bout 8', action: 'Fusensho (Shiro)', variant: 'V2 doubleTap', ...v2, labelAfter: label,
         shiroMarks: await boutFilled(currentBout(page), 'shiro').allInnerTexts(), screenshot: await shot(page, 'v2-fusensho-double-tap') });
       if (!/✓/.test(label)) await fus.tap();
@@ -1169,7 +1182,9 @@ test.describe('J5 kachinuki from the court console', () => {
         await writeLanded(startAnswered, 'Start match');
         await expect(recordBoutButton(page)).toBeVisible();
         // Did the bout log survive the send back: the count once the sheet has loaded it.
-        boutsAfter = await untilStable(() => doneRows(page).count());
+        // The empty sheet (0) is the read before the log loads; `from` makes
+        // the settle wait for it to leave that.
+        boutsAfter = await untilStable(() => doneRows(page).count(), { from: 0 });
       }
       record({ step: 'M2 reopened', action: 'Send back to queue (reopened encounter)', variant: 'V4 hasty confirm', ...hasty,
         boutsBefore, upNext, boutsAfterRestart: boutsAfter, current: upNext ? await boutNames(currentBout(page)) : null,

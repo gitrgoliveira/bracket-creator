@@ -93,11 +93,13 @@ export function sheetCells(buf, sheetName) {
   const xml = (name) => (zip.get(name) ? zip.get(name).toString('utf8') : '');
   const shared = [...xml('xl/sharedStrings.xml').matchAll(/<si>([\s\S]*?)<\/si>/g)]
     .map((m) => xmlText(m[1].replace(/<[^>]+>/g, '')));
-  const entry = [...xml('xl/workbook.xml').matchAll(/<sheet\b[^>]*\bname="([^"]*)"[^>]*\br:id="([^"]*)"/g)]
-    .find((m) => xmlText(m[1]) === sheetName);
+  // Each <sheet> tag's attributes are read one by one, so their order does not matter.
+  const entry = [...xml('xl/workbook.xml').matchAll(/<sheet\b[^>]*>/g)]
+    .map((m) => ({ name: /\bname="([^"]*)"/.exec(m[0]), rid: /\br:id="([^"]*)"/.exec(m[0]) }))
+    .find((s) => s.name && s.rid && xmlText(s.name[1]) === sheetName);
   if (!entry) throw new Error(`sheetCells: no sheet named ${sheetName}`);
   const rel = [...xml('xl/_rels/workbook.xml.rels').matchAll(/Id="([^"]*)"[^>]*Target="([^"]*)"|Target="([^"]*)"[^>]*Id="([^"]*)"/g)]
-    .map((m) => ({ id: m[1] || m[4], target: m[2] || m[3] })).find((r) => r.id === entry[2]);
+    .map((m) => ({ id: m[1] || m[4], target: m[2] || m[3] })).find((r) => r.id === entry.rid[1]);
   if (!rel) throw new Error(`sheetCells: no part for ${sheetName}`);
   const part = xml(`xl/${rel.target.replace(/^\/?(xl\/)?/, '')}`);
   const out = {};

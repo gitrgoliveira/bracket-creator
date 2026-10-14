@@ -4,7 +4,7 @@
 // of the draw as it stands (pool membership, bracket slots) on the admin
 // preview or on the public viewer. Every selector for those lives here.
 import { expect } from '@playwright/test';
-import { dwell } from './pace.mjs';
+import { dwell, rendered } from './pace.mjs';
 import { EXPECT_TIMEOUT_MS } from './devices.mjs';
 
 // ---- the Registration desk (admin_registration_desk.jsx) -------------------
@@ -36,11 +36,15 @@ export async function toggleCheckIn(page, name, on = true) {
   await expect(box).toHaveAttribute('aria-checked', String(on));
 }
 
-// Type into the desk's search box and wait for the list to settle on it.
+// Type into the desk's search box and wait for the list to draw the filter.
+// The filter is local React state (no debounce, no request), so the box
+// holding the text and two frames later is the list drawn from it; a caller
+// that knows the result still asserts it (a row count, a row visible).
 export async function searchDesk(page, text) {
   const box = deskSearch(page);
   await box.fill(text);
   await expect(box).toHaveValue(text);
+  await rendered(page);
 }
 
 export async function groupByDojo(page, on = true) {
@@ -134,8 +138,26 @@ export async function poolMembers(page) {
 // Bracket slot -> { name, num, dojo }, read from the bracket (admin preview or
 // public viewer). A slot is "<match id>:a|b"; the match id (m-r1-3) is the
 // place in the tree, which a replaced competitor must keep.
-export async function bracketSlots(page) {
+//
+// `until(slots)`, when given, is the state the caller is about to assert: the
+// bracket is re-read until it holds (up to the expect timeout) instead of once
+// after the first match shows, which a late refetch could still change. On a
+// timeout the last read is returned, so the caller's own assertion names what
+// is missing.
+export async function bracketSlots(page, until) {
   await expect(page.locator('.bc-match').first()).toBeVisible();
+  if (!until) return readBracketSlots(page);
+  let slots = await readBracketSlots(page);
+  try {
+    await expect.poll(async () => {
+      slots = await readBracketSlots(page);
+      return until(slots);
+    }, { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
+  } catch { /* the caller's assertion on `slots` reports the difference */ }
+  return slots;
+}
+
+function readBracketSlots(page) {
   return page.locator('.bc-match').evaluateAll((matches) => {
     const out = {};
     matches.forEach((m) => {

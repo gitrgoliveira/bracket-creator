@@ -51,7 +51,7 @@ import {
 } from '../fixtures/individual.mjs';
 import * as T from '../fixtures/team.mjs';
 import {
-  seedCompetitions, readScoresTab, bracketSlots, operatorDevice, publicDevice,
+  seedCompetitions, readScoresTab, readScoresRows, bracketSlots, operatorDevice, publicDevice,
   competitionPicker, officiatingName, pickCompetition, nudges, nudgeLines, courtState, runningOnCourt,
   playTeamMatch, liveBout, correctAcross, chooseCourt,
 } from '../fixtures/shared-court.mjs';
@@ -210,11 +210,17 @@ test.describe('shared-shiaijo', () => {
     // The wizard still tells the operator something about sharing a shiaijo, and
     // still lets them set the start time themselves.
     expect(draw.defaults.ST.sharedCourtHint, 'the wizard hint about sharing a shiaijo').toBeTruthy();
-    await H.goto('/admin/create-competition');
-    const startInput = H.locator('#create-start-time');
-    await expect(startInput).toBeEditable();
-    await startInput.fill('13:45');
-    await expect(startInput).toHaveValue('13:45');
+    // H is shared with the tests after this one: the wizard it opens (a typed
+    // start time in it) is left again whatever the checks find.
+    try {
+      await H.goto('/admin/create-competition');
+      const startInput = H.locator('#create-start-time');
+      await expect(startInput).toBeEditable();
+      await startInput.fill('13:45');
+      await expect(startInput).toHaveValue('13:45');
+    } finally {
+      await H.goto('/admin');
+    }
   });
 
   // S1 the picker, S8 the slot times (P6), S7 the public queue before play.
@@ -280,7 +286,9 @@ test.describe('shared-shiaijo', () => {
     await expect(H.getByRole('button', { name: 'Auto-schedule competition' })).toBeEnabled({ timeout: EXPECT_TIMEOUT_MS });
     // The button is enabled again before it has visibly been busy, so the saved
     // times are what says the re-timing is done: ST's earliest slot is the restart.
-    await expect.poll(async () => (await readScoresTab(H, ids.ST)).map((m) => m.time).filter(Boolean).sort()[0]).toBe(ST_RESTART);
+    // One navigation; the poll reads the tab as the app follows the saved times.
+    await H.goto(`/admin/competition/${encodeURIComponent(ids.ST)}/scores`);
+    await expect.poll(async () => (await readScoresRows(H)).map((m) => m.time).filter(Boolean).sort()[0]).toBe(ST_RESTART);
     const siAfter = await readScoresTab(H, ids.SI);
     draw.st = await readScoresTab(H, ids.ST);
     draw.stKnockout = await bracketSlots(H, ids.ST);
@@ -328,7 +336,10 @@ test.describe('shared-shiaijo', () => {
     await expect(promoted).toContainText(shiro);
     await expect(promoted).toContainText(aka);
     const nextLine = TV.locator('div:has(> span:text-is("NEXT"))');
-    if (await nextLine.count()) for (const name of otherNames) await expect(nextLine).not.toContainText(name);
+    // The NEXT line is drawn only when a queued match is not already on the
+    // board, so its absence is allowed; the board has to have stopped drawing
+    // before it is taken to be absent.
+    if (await untilStable(() => nextLine.count())) for (const name of otherNames) await expect(nextLine).not.toContainText(name);
     // And the other competition appears nowhere else on the board either.
     for (const name of otherNames) await expect(tvBoard(TV)).not.toContainText(name);
     await P.goto('/schedule');
@@ -539,13 +550,18 @@ test.describe('shared-shiaijo', () => {
       }
     };
     C.on('response', onRes);
-    const dblStart = await doubleTap(stCard.getByRole('button', { name: 'Start match' }));
-    await expect.poll(async () => {
-      const l = await liveOnConsole();
-      return !!l && l.comp === ST;
-    }, { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
-    await expect.poll(() => writes.length).toBeGreaterThan(0);
-    C.off('response', onRes);
+    let dblStart;
+    try {
+      dblStart = await doubleTap(stCard.getByRole('button', { name: 'Start match' }));
+      await expect.poll(async () => {
+        const l = await liveOnConsole();
+        return !!l && l.comp === ST;
+      }, { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
+      await expect.poll(() => writes.length).toBeGreaterThan(0);
+    } finally {
+      // A failed poll must not leave the listener on the shared page.
+      C.off('response', onRes);
+    }
     const onAafterSwitch = await runningOnCourt(H, 'A');
     const s3b = await courtState(C);
     r({ step: 'S3 switch', action: "Start match (ST's Up next) while the SI bout runs", variant: 'V2 doubleTap', ...dblStart, writes,

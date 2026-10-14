@@ -423,45 +423,48 @@ test.describe('moved-match', () => {
       if (/"error"\s*:\s*"court_busy"/.test(await res.text().catch(() => ''))) courtBusyStarts.push(res.url());
     };
     H.on('response', onResponse);
-    const onB = (await runningOnCourt(H, 'B')).flatMap((m) => [m.shiro, m.aka]);
-    const rows = await readScoresTab(H, ids.IND);
-    const waitingOnA = rows.filter((m) => m.court === 'A' && m.status === 'scheduled' && !onB.includes(m.shiro) && !onB.includes(m.aka));
-    let first = rows.find((m) => m.court === 'A' && m.status === 'running');
-    const startsHere = !first;
-    if (startsHere) first = waitingOnA.shift();
-    expect(first, 'an Individual match on A to score').toBeTruthy();
-    expect(waitingOnA.length, 'two more Individual matches wait on A after it').toBeGreaterThan(1);
-    const ed = H.locator(EDITOR);
-    const open = async (m) => {
-      await H.goto(`/admin/competition/${ids.IND}/scores`);
-      await H.locator('.score-edit-row').filter({ hasText: m.shiro }).filter({ hasText: m.aka }).first().getByRole('button', { name: /^Score$/ }).tap();
-      await expect(ed).toBeVisible();
-    };
-    const start = async () => {
-      const btn = ed.getByRole('button', { name: 'Start match' });
-      await settled(btn);
-      await btn.tap();
-      await expect(finishButton(H, EDITOR)).toBeVisible();
-    };
-    await open(first);
-    if (startsHere) await start();
-    await expect(finishButton(H, EDITOR)).toHaveText('Finish');
-    await awardIppon(H, 'shiro', 'M', EDITOR);
-    await finishMatch(H, EDITOR);
-    // Deliberate: nothing may start by itself, so the time is the evidence.
-    await H.waitForTimeout(1500);
-    expect(await runningOnCourt(H, 'A'), 'nothing started on A after Finish').toHaveLength(0);
-    // A fusenpai on the next one, started by the operator.
-    const second = waitingOnA.find((m) => !samePair(m, first));
-    await open(second);
-    await start();
-    await recordDecision(H, 'fusenpai', { side: 'aka', root: EDITOR });
-    // Deliberate: no start may follow (no toast, nothing running), so the time is the evidence.
-    await H.waitForTimeout(2000);
-    await expect(H.locator('.toast').filter({ hasText: /is running/ })).toHaveCount(0);
-    await expect.poll(async () => ((await readScoresTab(H, ids.IND)).find((m) => samePair(m, second)) || {}).status, { timeout: 10_000 }).toBe('completed');
-    expect(await runningOnCourt(H, 'A'), 'nothing started on A after the fusenpai').toHaveLength(0);
-    H.off('response', onResponse);
+    try {
+      const onB = (await runningOnCourt(H, 'B')).flatMap((m) => [m.shiro, m.aka]);
+      const rows = await readScoresTab(H, ids.IND);
+      const waitingOnA = rows.filter((m) => m.court === 'A' && m.status === 'scheduled' && !onB.includes(m.shiro) && !onB.includes(m.aka));
+      let first = rows.find((m) => m.court === 'A' && m.status === 'running');
+      const startsHere = !first;
+      if (startsHere) first = waitingOnA.shift();
+      expect(first, 'an Individual match on A to score').toBeTruthy();
+      expect(waitingOnA.length, 'two more Individual matches wait on A after it').toBeGreaterThan(1);
+      const ed = H.locator(EDITOR);
+      const open = async (m) => {
+        await H.goto(`/admin/competition/${ids.IND}/scores`);
+        await H.locator('.score-edit-row').filter({ hasText: m.shiro }).filter({ hasText: m.aka }).first().getByRole('button', { name: /^Score$/ }).tap();
+        await expect(ed).toBeVisible();
+      };
+      const start = async () => {
+        const btn = ed.getByRole('button', { name: 'Start match' });
+        await settled(btn);
+        await btn.tap();
+        await expect(finishButton(H, EDITOR)).toBeVisible();
+      };
+      await open(first);
+      if (startsHere) await start();
+      await expect(finishButton(H, EDITOR)).toHaveText('Finish');
+      await awardIppon(H, 'shiro', 'M', EDITOR);
+      await finishMatch(H, EDITOR);
+      // Deliberate: nothing may start by itself, so the time is the evidence.
+      await H.waitForTimeout(1500);
+      expect(await runningOnCourt(H, 'A'), 'nothing started on A after Finish').toHaveLength(0);
+      // A fusenpai on the next one, started by the operator.
+      const second = waitingOnA.find((m) => !samePair(m, first));
+      await open(second);
+      await start();
+      await recordDecision(H, 'fusenpai', { side: 'aka', root: EDITOR });
+      // Deliberate: no start may follow (no toast, nothing running), so the time is the evidence.
+      await H.waitForTimeout(2000);
+      await expect(H.locator('.toast').filter({ hasText: /is running/ })).toHaveCount(0);
+      await expect.poll(async () => ((await readScoresTab(H, ids.IND)).find((m) => samePair(m, second)) || {}).status, { timeout: 10_000 }).toBe('completed');
+      expect(await runningOnCourt(H, 'A'), 'nothing started on A after the fusenpai').toHaveLength(0);
+    } finally {
+      H.off('response', onResponse);
+    }
     expect(courtBusyStarts, 'no start sent from the Scores tab was refused for the court').toEqual([]);
   });
 });

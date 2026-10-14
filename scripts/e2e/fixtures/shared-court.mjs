@@ -117,6 +117,12 @@ export async function seedCompetitions(page, specs) {
 // courts the draw produced come from here.
 export async function readScoresTab(page, id) {
   await page.goto(`/admin/competition/${encodeURIComponent(id)}/scores`);
+  return readScoresRows(page);
+}
+
+// The same rows of a Scores tab the page is already on (no navigation), for a
+// poll that waits on what the page shows as the app follows the server.
+export async function readScoresRows(page) {
   await expect(page.locator('.score-edit-row').first()).toBeVisible();
   return page.locator('.score-edit-row').evaluateAll((rows) => rows.map((r) => {
     const txt = (sel) => {

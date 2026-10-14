@@ -333,8 +333,10 @@ test.describe('kachinuki in pools', () => {
   test('the winner of each pool is seated in the final', async ({ page }) => {
     await login(page);
     const winners = pools.map((t) => rankedIn(t)[0]).sort();
+    // One navigation; the poll then reads the console as it follows the data
+    // (a goto per poll interval would re-load the page under every read).
+    await openShiaijo(page, 'A');
     await expect.poll(async () => {
-      await openShiaijo(page, 'A');
       const card = upNextCard(page);
       if (!(await card.count())) return null;
       const pair = await sides(card);

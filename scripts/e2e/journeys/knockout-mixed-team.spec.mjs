@@ -411,7 +411,14 @@ test.describe('knockout-mixed-team', () => {
       await shot(page, 'f3-pool-encounter-bout3-tied');
       await T.finishTeam(ed);
       await page.goto(`/admin/competition/${f3}/pools`);
-      await expect(page.locator('tr').filter({ hasText: pairNow.shiro }).first()).toBeVisible();
+      // The row is there before the standings have counted the encounter: wait
+      // for its team matches (W, L, T, the first three figures) to add up to the
+      // one just played, for both teams, before the rows are read.
+      const teamMatches = async (team) => (await page.locator('tr').filter({ hasText: team }).first().locator('td.num').allInnerTexts())
+        .slice(0, 3).reduce((n, t) => n + (Number(t.trim()) || 0), 0);
+      for (const team of [pairNow.shiro, pairNow.aka]) {
+        await expect.poll(() => teamMatches(team), { message: `${team}'s standings row counts the finished encounter` }).toBeGreaterThan(0);
+      }
       await shot(page, 'f3-pools-standings', { fullPage: true });
       const standings = await page.locator('tr').filter({ hasText: pairNow.shiro }).first().innerText().catch(() => '');
       const standingsAka = await page.locator('tr').filter({ hasText: pairNow.aka }).first().innerText().catch(() => '');

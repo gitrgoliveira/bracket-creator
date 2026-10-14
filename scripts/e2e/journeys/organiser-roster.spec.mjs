@@ -124,6 +124,9 @@ test.describe('organiser roster', () => {
     await shot(page, 'desk-search-number');
     // The two who were left out carry no number.
     await searchDesk(page, '');
+    // The row is drawn before its tag is counted absent: a row not drawn yet
+    // has no tag either.
+    await expect(deskRow(page, 'Ben Carter')).toBeVisible();
     await expect(deskRow(page, 'Ben Carter').locator('.rd-tag--number')).toHaveCount(0);
     await expect(deskRows(page).locator('.rd-tag--number')).toHaveCount(10);
   });
@@ -191,6 +194,8 @@ test.describe('organiser roster', () => {
     await expect(editDialog(page)).toHaveCount(0);
     await shot(page, 'participants-after-edit');
 
+    // The state expectEdited asserts, for bracketSlots to wait for.
+    const editedSlot = (slots) => slots[danSlot]?.name === 'Daniel Evans';
     const expectEdited = (slots, where) => {
       expect(slots[danSlot], `${where}: the same slot now holds Daniel Evans`).toMatchObject({
         name: 'Daniel Evans', dojo: 'Seishinkan UK', num: before[danSlot].num,
@@ -198,7 +203,7 @@ test.describe('organiser roster', () => {
       expect(Object.values(slots).map((s) => s.name), `${where}: Dan Evans is nowhere`).not.toContain('Dan Evans');
     };
     await openCompetitionTab(page, ids.edit, 'bracket');
-    expectEdited(await bracketSlots(page), 'admin bracket');
+    expectEdited(await bracketSlots(page, editedSlot), 'admin bracket');
     await shot(page, 'bracket-after-edit');
 
     await openShiaijo(page, 'B');
@@ -213,7 +218,7 @@ test.describe('organiser roster', () => {
       const phone = await spectator.newPage();
       await openViewer(phone, ids.edit);
       await phone.getByRole('button', { name: 'Bracket' }).tap();
-      expectEdited(await bracketSlots(phone), 'public viewer');
+      expectEdited(await bracketSlots(phone, editedSlot), 'public viewer');
       await shot(phone, 'viewer-after-edit', { fullPage: true });
     } finally {
       await spectator.close();
@@ -232,7 +237,7 @@ test.describe('organiser roster', () => {
     await saveEdit(page, { dojo: 'Thames' });
     await expect(editDialog(page)).toHaveCount(0);
     await openCompetitionTab(page, ids.edit, 'bracket');
-    const after = await bracketSlots(page);
+    const after = await bracketSlots(page, (slots) => Object.values(slots).filter((s) => s.name === 'Akira Tanaka').length === 2);
     const akiras = Object.values(after).filter((s) => s.name === 'Akira Tanaka').map((s) => s.dojo).sort();
     expect(akiras, 'two Akira Tanaka, told apart by dojo').toEqual(['Gyokusen', 'Thames']);
     expect(Object.values(after).map((s) => s.name), 'Finn Hale was renamed, not duplicated').not.toContain('Finn Hale');
@@ -254,6 +259,7 @@ test.describe('organiser roster', () => {
     await expect(page.getByRole('button', { name: 'Edit Zed Newman' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Edit Hana Ito' })).toHaveCount(0);
 
+    const replacedSlot = (slots) => slots[slot]?.name === 'Zed Newman';
     const expectReplaced = (slots, where) => {
       expect(slots[slot], `${where}: the newcomer holds the old slot, with its number`).toMatchObject({
         name: 'Zed Newman', dojo: 'Shudokan', num: before[slot].num,
@@ -266,10 +272,12 @@ test.describe('organiser roster', () => {
       });
     };
     await openCompetitionTab(page, ids.edit, 'bracket');
-    expectReplaced(await bracketSlots(page), 'admin bracket');
+    expectReplaced(await bracketSlots(page, replacedSlot), 'admin bracket');
     await shot(page, 'bracket-after-replace');
 
     await openShiaijo(page, 'B');
+    // The queue is drawn (the newcomer is in it) before its names are read.
+    await expect(page.locator('.shiaijo__queue .numbered-name__text', { hasText: 'Zed Newman' }).first()).toBeVisible();
     const consoleNames = (await page.locator('.shiaijo__queue .numbered-name__text').allInnerTexts()).map((n) => n.trim());
     expect(consoleNames, 'court console shows Zed Newman').toContain('Zed Newman');
     expect(consoleNames, 'court console: Hana Ito is nowhere').not.toContain('Hana Ito');
@@ -280,7 +288,7 @@ test.describe('organiser roster', () => {
       const phone = await spectator.newPage();
       await openViewer(phone, ids.edit);
       await phone.getByRole('button', { name: 'Bracket' }).tap();
-      expectReplaced(await bracketSlots(phone), 'public viewer');
+      expectReplaced(await bracketSlots(phone, replacedSlot), 'public viewer');
     } finally {
       await spectator.close();
     }

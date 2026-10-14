@@ -59,17 +59,21 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             dialog; reads of pool membership and bracket slots.
     fixtures/pools.mjs      the pool standings tables, admin Pools tab and the
                             public viewer's Pools tab: rows, figures, rank
-                            badge, advancing.
+                            badge, advancing; the individual pool row
+                            (playerRowFigures).
     fixtures/shiaijo.mjs    /admin/shiaijo/:court (queue, inline editor, which
                             match an editor holds)
     fixtures/scores.mjs     the Scores tab and its overlay editor
     fixtures/scoring.mjs    scoring an individual bout on either editor, Start
-                            match (startMatch), clearMarks, the Finish check
-                            every editor shares (finishMatch, which the team
-                            sheet's finishTeam is), and the wait for a match
-                            write's answer (nextMatchWrite, writeLanded)
+                            match (startMatch), clearMarks, Mark draw
+                            (markDraw), the Finish check every editor shares
+                            (finishMatch, which the team sheet's finishTeam
+                            is), and the wait for a match write's answer
+                            (nextMatchWrite, writeLanded)
     fixtures/individual.mjs individual rosters, the decision panel, playing and
-                            correcting a bout on the court console
+                            correcting a bout on the court console, and a bout
+                            played from a script (playScriptedBout), such as a
+                            pool bout
     fixtures/team.mjs       team members, the three lineup entry points (the
                             Lineups page, the lineup panel, the score sheet
                             row) and the team score sheet's bout rows (the
@@ -83,7 +87,11 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             observe a race with its echo (below)
     fixtures/shared-court.mjs  two competitions on one shiaijo and a moved
                             match: seeding, the competition picker, the nudges
-    fixtures/public.mjs     the public viewer and the TV board
+    fixtures/public.mjs     the public viewer and the TV board; the readers of
+                            the watch picker and the schedule filter's options
+                            (pickerEntries); schedule rows; the watchlist hero;
+                            the doors to a match card (homeNowRow, poolRow,
+                            upNextRow); the card's marks (cardMarks)
     fixtures/organiser.mjs  the Excel download, folder import, /reset, logo and
                             sponsor uploads; runtime PNG and import-bundle
                             makers; a zip reader for workbooks.
@@ -108,6 +116,12 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                                   hikiwake, a team exhausted, a level pool draw
                                   with no representative bout, the pool tables
                                   on admin and phone, the winners in the final
+      pools-tiebreak              pools and knockout at a minimum pool size (7
+                                  entrants make pools of 4 and 3); a pool tie
+                                  level on every criterion adds a tie-break
+                                  bout, whose winner is ranked and seated in the
+                                  knockout on admin and phone; a tie split on
+                                  points lost adds none
       moved-match                 a waiting match moved to another shiaijo
                                   reaches that court's console without a reload
       shared-shiaijo              two competitions on one shiaijo: the picker,
@@ -126,6 +140,11 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
       organiser-locked            locked mode: sign-in with the hashed password,
                                   no Forgot password, and /reset shows it is
                                   disabled.
+      spectator.public            a spectator's phone (public project): the
+                                  home, competition tabs, schedule; competitor
+                                  search by number, name and dojo; the watchlist
+                                  hero and the match card following an operator
+                                  live; the match card from each door
     output/                 screenshots, audit.json and traces (below);
                             gitignored
 
@@ -146,8 +165,10 @@ Two projects, both Chromium:
   emulation and the test carries a `coarse-pointer` annotation saying so.
   Every journey runs here unless its file is named `*.public.spec.mjs`.
 - `public`: a phone in portrait (390x844), for journeys about a public surface
-  alone (`*.public.spec.mjs`). No journey uses this project yet; the public
-  surfaces are checked from `operator` journeys through a second context.
+  alone (`*.public.spec.mjs`). `spectator.public.spec.mjs` is the one journey
+  on this project: it seeds and scores from a second context opened with
+  `OPERATOR_DEVICE`. Other public checks stay on the `operator` project,
+  through a second context.
 
 240 s is the default test timeout; some journeys raise it for a long test with
 `test.setTimeout`. `expect` waits 15 s (`EXPECT_TIMEOUT_MS` in

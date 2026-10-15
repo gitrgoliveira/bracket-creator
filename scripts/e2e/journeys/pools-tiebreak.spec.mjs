@@ -336,8 +336,9 @@ test.describe('pools: minimum pool size and a tie-break bout', () => {
   test('the winner, not the loser, is seated in the knockout: admin and public viewer', async ({ page, browser, baseURL }) => {
     await login(page);
     const qualifiers = [big[0], big[1], tb.a, tbWinner].sort();
-    const seatedIn = async (p) => Object.values(await bracketSlots(p, (slots) => Object.values(slots).length === 4))
-      .map((s) => s.name).sort();
+    // Roster names only, so an unresolved placeholder never counts as seated.
+    const seatedIn = async (p) => Object.values(await bracketSlots(p, (slots) => Object.values(slots).filter((s) => NAMES.includes(s.name)).length === 4))
+      .map((s) => s.name).filter((n) => NAMES.includes(n)).sort();
     await openCompetitionTab(page, compId, 'bracket');
     expect(await seatedIn(page), 'the admin bracket seats the four qualifiers').toEqual(qualifiers);
     await shot(page, 'admin-bracket-after');

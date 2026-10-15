@@ -119,8 +119,12 @@ export const nowCard = (page) => page.locator('.match-detail-card').filter({ has
 // The match card (MatchViewerModal): a dialog named "Match: <shiro> vs <aka>".
 export const matchCard = (page) => page.getByRole('dialog', { name: /^Match:/ });
 
-// The ippon letters the card shows per side, sorted ("DM", "K"): a side has two
-// slots, each holding a letter once scored and nothing before.
+// A card's ippon slots: two per side, each holding a letter once scored and
+// nothing before. Wait for all four before a single read that expects none,
+// since a slot not yet rendered also reads as nothing.
+export const cardSlots = (card) => card.getByTestId('sub-marks').locator('.msb-slot');
+
+// The ippon letters the card shows per side, sorted ("DM", "K").
 export async function cardMarks(card) {
   const marks = card.getByTestId('sub-marks');
   const letters = async (loc) => (await loc.allTextContents()).map((t) => t.trim()).filter(Boolean).sort().join('');

@@ -534,3 +534,127 @@ func TestFillBracketDraftedSecondTie_QualificationWaitsForTheBout(t *testing.T) 
 	require.NoError(t, err)
 	assert.Equal(t, names[2], slot(), "the bout's winner takes the drafted 2nd place")
 }
+
+// tiebreakBoutsOf lists the tie-break bouts a competition's pool matches hold.
+func tiebreakBoutsOf(t *testing.T, store *state.Store, compID string) []state.MatchResult {
+	t.Helper()
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	var tbs []state.MatchResult
+	for _, m := range matches {
+		if IsTiebreakerMatchID(m.ID) {
+			tbs = append(tbs, m)
+		}
+	}
+	return tbs
+}
+
+// bothPlayed finds the stored pool match whose sides are a and b.
+func bothPlayed(t *testing.T, store *state.Store, compID, a, b string) string {
+	t.Helper()
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for _, m := range matches {
+		if (m.SideA == a && m.SideB == b) || (m.SideA == b && m.SideB == a) {
+			return m.ID
+		}
+	}
+	require.Failf(t, "match not found", "%s v %s", a, b)
+	return ""
+}
+
+// bc-fbtb / bc-xqtb review: a CORRECTION that leaves two players level on the
+// pool's extra place goes through the requalification, which judges the tie
+// against the pool's own cut (poolTieBreakCut), not the uniform Winners per
+// pool. A pool whose extra place is cut by Winners per pool alone would seat
+// one of the two by sort order.
+func TestRequalify_CorrectionTieOnLargerPoolsExtraPlace_WaitsForTheBout(t *testing.T) {
+	f := newRQFixture(t, "rq-xqtb-fix", 1, [][]string{
+		{"A1", "A2", "A3", "A4"}, {"B1", "B2", "B3"}, {"C1", "C2", "C3"},
+	}, largerPools(3))
+	require.NoError(t, f.store.SaveBracket(f.compID, &state.Bracket{Rounds: [][]state.BracketMatch{{
+		{ID: "m-r1-0", MatchNumber: 1, SideA: "Pool A-1st", SideB: "Pool C-1st", PlaceholderA: "Pool A-1st", PlaceholderB: "Pool C-1st"},
+		{ID: "m-r1-1", MatchNumber: 2, SideA: "Pool B-1st", SideB: "Pool A-2nd", PlaceholderA: "Pool B-1st", PlaceholderB: "Pool A-2nd"},
+	}}}))
+	for _, w := range [][2]string{
+		{"Pool A-0", "A1"}, {"Pool A-1", "A1"}, {"Pool A-2", "A1"},
+		{"Pool A-3", "A2"}, {"Pool A-4", "A2"}, {"Pool A-5", "A3"},
+		{"Pool B-0", "B1"}, {"Pool B-1", "B1"}, {"Pool B-2", "B2"},
+		{"Pool C-0", "C1"}, {"Pool C-1", "C1"}, {"Pool C-2", "C2"},
+	} {
+		f.scorePool(w[0], w[1])
+	}
+	f.resolve()
+	setCompStatus(t, f.store, f.compID, state.CompStatusKnockout)
+	m, side := f.slot("Pool A-2nd")
+	name, _ := sideOf(m, side)
+	require.Equal(t, "A2", name, "before the correction A2 is the clear 2nd")
+
+	// Correct A2 v A3 to a hikiwake: A2 and A3 are level for the extra place.
+	require.NoError(t, f.write("Pool A-3", &state.MatchResult{
+		SideA: "A2", SideB: "A3", SideAID: rqID("A2"), SideBID: rqID("A3"),
+		Status: state.MatchStatusCompleted, Decision: string(domain.DecisionHikiwake),
+	}))
+	m, side = f.slot("Pool A-2nd")
+	name, id := sideOf(m, side)
+	assert.Equal(t, "Pool A-2nd", name, "a tied extra place is not seated by sort order")
+	assert.Empty(t, id)
+
+	_, err := f.eng.MaybeAutoCompletePools(f.compID)
+	require.NoError(t, err)
+	tbs := tiebreakBoutsOf(t, f.store, f.compID)
+	require.Len(t, tbs, 1, "the tie over the extra place is owed a tie-break bout")
+	assert.ElementsMatch(t, []string{"A2", "A3"}, []string{tbs[0].SideA, tbs[0].SideB})
+
+	f.scorePool(tbs[0].ID, "A3")
+	_, err = f.eng.MaybeAutoCompletePools(f.compID)
+	require.NoError(t, err)
+	m, side = f.slot("Pool A-2nd")
+	name, id = sideOf(m, side)
+	assert.Equal(t, "A3", name, "the bout's winner takes the extra place")
+	assert.Equal(t, rqID("A3"), id)
+}
+
+// The same correction over a fill-bracket drafted pool's 2nd, drawn through the
+// real pipeline.
+func TestRequalify_CorrectionTieOnFillBracketDraftedSecond_WaitsForTheBout(t *testing.T) {
+	const compID = "fbtb-fix"
+	eng, store, drafted, _ := startFillBracket(t, compID, false)
+	// A clean result everywhere: the drafted pool's order is the draw order.
+	scoreFillBracketPools(t, eng, store, compID, "", false, true)
+	names := drawnPoolNames(t, store, compID, drafted)
+	f := &rqFix{t: t, eng: eng, store: store, compID: compID}
+	label := drafted + "-2nd"
+
+	_, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	m, side := f.slot(label)
+	name, _ := sideOf(m, side)
+	require.Equal(t, names[1], name, "before the correction the draw's second seed holds the drafted 2nd")
+
+	// Correct the 2nd v 3rd result to a hikiwake: they are level for 2nd.
+	matchID := bothPlayed(t, store, compID, names[1], names[2])
+	prior := loadPoolMatchByID(t, store, compID, matchID)
+	require.NotNil(t, prior)
+	require.NoError(t, f.write(matchID, &state.MatchResult{
+		SideA: prior.SideA, SideB: prior.SideB, SideAID: prior.SideAID, SideBID: prior.SideBID,
+		Status: state.MatchStatusCompleted, Decision: string(domain.DecisionHikiwake),
+	}))
+	m, side = f.slot(label)
+	name, id := sideOf(m, side)
+	assert.Equal(t, label, name, "a tied drafted 2nd is not seated by sort order")
+	assert.Empty(t, id)
+
+	_, err = eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	tbs := tiebreakBoutsOf(t, store, compID)
+	require.Len(t, tbs, 1, "the tie over the drafted 2nd is owed a tie-break bout")
+	assert.ElementsMatch(t, []string{names[1], names[2]}, []string{tbs[0].SideA, tbs[0].SideB})
+
+	f.scorePool(tbs[0].ID, names[2])
+	_, err = eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	m, side = f.slot(label)
+	name, _ = sideOf(m, side)
+	assert.Equal(t, names[2], name, "the bout's winner takes the drafted 2nd place")
+}

@@ -30,7 +30,7 @@ import { openShiaijo, sides, startUpNext, upNextCard, waitingRows } from '../fix
 import { awardIppon, clearMarks, filledSlots, finishMatch, syncState } from '../fixtures/scoring.mjs';
 import { editorSides } from '../fixtures/individual.mjs';
 import {
-  NATURAL, applyScheduleText, cardMarks, clearScheduleText, competitionTab, homeNowRow, expandedCard, matchCard, nowCard, numbersOf, pickerEntries,
+  NATURAL, applyScheduleText, cardMarks, cardSlots, clearScheduleText, competitionTab, homeNowRow, expandedCard, matchCard, nowCard, numbersOf, pickerEntries,
   pickerOption, pickerPairs, poolRow, scheduleCount, scheduleFilterInput, scheduleRow, scheduleRows, upNextRow, watchHero,
   watchHeroMatch, watchInput,
 } from '../fixtures/public.mjs';
@@ -284,7 +284,7 @@ test.describe('spectator on a phone', () => {
     const followed = [first.shiro, first.aka].find((n) => n === next.shiro || n === next.aka);
     expect(followed, `a competitor is in both court A's first bout (${first.shiro} v ${first.aka}) and its next (${next.shiro} v ${next.aka})`).toBeTruthy();
 
-    await test.step('follow the Aka side of court A\'s first bout: the hero shows the match waiting', async () => {
+    await test.step('follow the competitor who fights both of court A\'s first two bouts: the hero shows the match waiting', async () => {
       await watchInput(page).fill(followed.toLowerCase().slice(0, 5));
       await pickerOption(page, followed).tap();
       await expect(watchHero(page)).toContainText(followed);
@@ -305,6 +305,7 @@ test.describe('spectator on a phone', () => {
       await watchHeroMatch(page).tap();
       await expect(card).toBeVisible();
       await expect(card).toContainText('NOW');
+      await expect(cardSlots(card)).toHaveCount(4);
       expect(await cardMarks(card)).toEqual({ shiro: '', aka: '' });
       await awardIppon(op, 'shiro', 'M');
       await expect.poll(() => cardMarks(card)).toEqual({ shiro: 'M', aka: '' });
@@ -391,6 +392,7 @@ test.describe('spectator on a phone', () => {
       const expanded = expandedCard(page);
       await expect(expanded).toBeVisible();
       await expect(expanded).not.toContainText('NOW');
+      await expect(cardSlots(expanded)).toHaveCount(4);
       expect(await cardMarks(expanded)).toEqual({ shiro: '', aka: '' });
       await expect.poll(() => cardMarks(nowCard(page)), { message: 'Overview: the ON NOW card opens on the live score' })
         .toEqual({ shiro: 'DM', aka: 'K' });

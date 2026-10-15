@@ -9,9 +9,14 @@
 // "The edit-time adopt rule" in .claude/rules/match-results-and-marks.md.
 
 import React from 'react';
-import { render, act, fireEvent } from '@testing-library/react';
+import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+
+const SQUADS = {
+  t1: [{ id: 'm1a', name: 'Alice', index: 1 }, { id: 'm2a', name: 'Brenda', index: 2 }],
+  t2: [{ id: 'm1b', name: 'Carol', index: 1 }, { id: 'm2b', name: 'Dana', index: 2 }],
+};
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -24,6 +29,10 @@ const STUBBED_GLOBALS = {
     fetchCompetitionDetails: vi.fn().mockResolvedValue({
       id: 'comp1', config: { format: 'mixed', teamMatchType: 'kachinuki', naginata: false, players: [] },
     }),
+    fetchSquads: vi.fn().mockResolvedValue(SQUADS),
+    fetchTeamLineup: vi.fn().mockResolvedValue({ saved: false, positions: {} }),
+    fetchLineupInForce: vi.fn().mockResolvedValue({ saved: false, positions: {} }),
+    fetchMatchHistory: vi.fn().mockResolvedValue([]),
     recordScore: vi.fn().mockResolvedValue(undefined),
     recordDaihyosen: vi.fn(),
     removeDaihyosen: vi.fn(),
@@ -42,6 +51,7 @@ let ScoreEditorModal;
 beforeAll(async () => {
   restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../../admin_scoring_modal.jsx');
+  await import('../../admin_lineup.jsx');
   ScoreEditorModal = window.ScoreEditorModal;
 });
 
@@ -170,5 +180,75 @@ describe('a refused autosave takes the server\'s copy of the rows it carried', (
     await act(async () => { settleFirst(REFUSED); });
     await settle();
     expect(filled('aka'), 'the newer edit is still owed').toBeGreaterThan(0);
+  });
+
+  // The representative bout (position -1) is taken PART by part: the server's row score for the
+  // bout the save carried, and the pick of each side whose pick the save carried. The other
+  // side's pick was not carried, so it stays the operator's (composeRepRow).
+  describe('the representative bout', () => {
+    const FOUGHT = [1, 2, 3].map((position) => ({
+      position, sideA: '', sideB: '', ipponsA: [], ipponsB: [], winner: '', decision: 'hikiwake',
+    }));
+    const repRow = (extra) => ({
+      position: -1, sideA: 'Team A', sideB: 'Team B', ipponsA: [], ipponsB: [], winner: '', decision: 'daihyosen', ...extra,
+    });
+    const repMatch = (row, modifiedAt = 0) => ({
+      id: 'k-rep', compId: 'comp1', status: 'running', phase: 'knockout', court: 'A', modifiedAt,
+      compKind: 'team', teamSize: 3, compFormat: 'mixed', teamMatchType: 'fixed',
+      sideA: { id: 't1', name: 'Team A' }, sideB: { id: 't2', name: 'Team B' },
+      subResults: [...FOUGHT, row],
+    });
+    const dhInput = (side) => screen.queryAllByLabelText(/^Daihyosen (SHIRO|AKA) player$/)
+      .find((e) => e.getAttribute('aria-label').includes(side));
+    const repRowEl = () => dhInput('AKA').closest('.team-sub-match');
+    const repFilled = (side) => repRowEl().querySelectorAll(`.tsm-center-pts--${side} .editor-side__pt--filled`).length;
+
+    async function pickShiro(name) {
+      await act(async () => { fireEvent.focus(dhInput('SHIRO')); fireEvent.click(dhInput('SHIRO')); });
+      await settle();
+      const opt = screen.getByText(name, { selector: '.pmf__opt-name' });
+      await act(async () => { fireEvent.click(opt.closest('button')); });
+      await settle();
+    }
+
+    async function repEditThenAnswer(answer) {
+      const onSubmit = vi.fn().mockResolvedValue(answer);
+      let utils;
+      // Aka (t1) already holds Alice; the sheet starts level.
+      const start = repMatch(repRow({ sideAMemberId: 'm1a' }));
+      await act(async () => { utils = render(el(start, onSubmit)); });
+      await settle();
+      // Aka strikes M on the representative bout and Shiro's representative is picked: two edits.
+      const men = [...repRowEl().querySelectorAll('.ipt-btn')].filter((b) => b.textContent === 'M');
+      await act(async () => { fireEvent.click(men[men.length - 1]); });
+      await pickShiro('Carol');
+      const tappedAt = Date.now();
+      expect([repFilled('aka'), dhInput('SHIRO').value, dhInput('AKA').value], 'precondition: both edits show')
+        .toEqual([1, 'Carol', 'Alice']);
+      // Another device's copy, stamped before the tap, so the stamps hold the operator's row: it
+      // scored Shiro and picked Dana for Shiro; Aka's pick stays Alice (the side the save did not
+      // carry: an unedited pick is followed by the ordinary adopt, so only a take that wrongly
+      // reached it, or dropped the sheet's, would show here).
+      const served = repMatch(repRow({ ipponsB: ['K'], sideAMemberId: 'm1a', sideBMemberId: 'm2b' }), tappedAt - 1);
+      await act(async () => { utils.rerender(el(served, onSubmit)); });
+      expect([repFilled('aka'), repFilled('shiro')], 'precondition: the older copy is held').toEqual([1, 0]);
+      await act(async () => { vi.advanceTimersByTime(400); });
+      await settle();
+      expect(onSubmit, 'precondition: the autosave went out').toHaveBeenCalled();
+      return onSubmit;
+    }
+
+    it.each([['a superseded answer', REFUSED], ['a nothing-handed-back answer', undefined]])(
+      '%s takes the server\'s score and the picked side\'s pick, and keeps the other side\'s pick',
+      async (_name, answer) => {
+        const onSubmit = await repEditThenAnswer(answer);
+        const sent = onSubmit.mock.calls[0][0].subResults.find((s) => s.position === -1);
+        // The save carried Aka's point and Shiro's pick, never Aka's pick.
+        expect(sent.ipponsA).toEqual(['M']);
+        expect(sent.sideBMemberId).toBe('m1b');
+        expect([repFilled('aka'), repFilled('shiro')], 'the server\'s score on the row').toEqual([0, 1]);
+        expect(dhInput('SHIRO').value, 'the picked side shows the server\'s pick').toBe('Dana');
+        expect(dhInput('AKA').value, 'the side the save did not carry keeps the operator\'s pick').toBe('Alice');
+      });
   });
 });

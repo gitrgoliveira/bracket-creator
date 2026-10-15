@@ -370,6 +370,7 @@ test.describe('knockout-mixed-individual', () => {
     await expect(syncState(page)).toHaveText('Synced');
     await finishMatch(page, INLINE_EDITOR);
     await expect(completedRowFor(page, lastPoolA)).toBeVisible();
+    // Deliberate: a settle before an audit row only; nothing is asserted on it.
     await page.waitForTimeout(2500);
     const afterBoundary = {
       editorRunning: await inlineRunning(page),
@@ -897,6 +898,7 @@ test.describe('knockout-mixed-individual', () => {
     let retryRow = { present: await retry.isVisible().catch(() => false) };
     if (retryRow.present) {
       retryRow = { ...retryRow, size: await tapSize(retry), ...(await doubleTap(retry)) };
+      // Deliberate: a settle before an audit row only; nothing is asserted on it.
       await page.waitForTimeout(1500);
       retryRow.bannerAfter = (await banner.allInnerTexts()).join(' | ');
     }
@@ -909,6 +911,7 @@ test.describe('knockout-mixed-individual', () => {
     let restart = null;
     if (upAgain && upAgain.shiro === semi.shiro && upAgain.aka === semi.aka) {
       await upNextCard(page).getByRole('button', { name: 'Start match' }).tap();
+      // Deliberate: a settle before an audit row only; nothing is asserted on it.
       await page.waitForTimeout(1500);
       restart = { editor: await inlineEditor(page).isVisible().catch(() => false),
         running: await inlineRunning(page) ? await editorSides(page) : null,

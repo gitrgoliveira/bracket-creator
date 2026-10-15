@@ -686,7 +686,7 @@ func (c *Competition) ClearKachinukiEncounterEncho(matchID string, encho **Encho
 	if !c.IsKachinuki() || encho == nil || *encho == nil {
 		return false
 	}
-	if IsPoolDaihyosenMatchID(matchID) || IsTiebreakerMatchID(matchID) {
+	if IsPoolSupplementaryMatchID(matchID) {
 		return false
 	}
 	*encho = nil

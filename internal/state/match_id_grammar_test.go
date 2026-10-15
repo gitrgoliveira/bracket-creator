@@ -70,3 +70,13 @@ func TestIsTiebreakerMatchID(t *testing.T) {
 		})
 	}
 }
+
+func TestIsPoolSupplementaryMatchID(t *testing.T) {
+	for id, want := range map[string]bool{
+		"Pool A-DH-0": true, "Pool A-TB-3": true,
+		"Pool A-0": false, "Pool A-DH-East-0": false, "Pool A-TB-East-1": false,
+		"r0-m0": false, "": false,
+	} {
+		assert.Equal(t, want, IsPoolSupplementaryMatchID(id), id)
+	}
+}

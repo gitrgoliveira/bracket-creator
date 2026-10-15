@@ -1958,7 +1958,7 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 				continue
 			}
 			// Tiebreaker and pool-daihyosen matches don't count toward regular pool stats.
-			if IsTiebreakerMatchID(m.ID) || IsPoolDaihyosenMatchID(m.ID) {
+			if state.IsPoolSupplementaryMatchID(m.ID) {
 				continue
 			}
 			sA := lookupStandingsPlayer(playerStandings, m.SideAID)
@@ -2255,7 +2255,7 @@ func markTiedStandings(comp *state.Competition, sorted []state.PlayerStanding, m
 	// Separate regular matches (exclude supplementary TB/DH bouts).
 	var regularMatches []state.MatchResult
 	for _, m := range matches {
-		if !IsTiebreakerMatchID(m.ID) && !IsPoolDaihyosenMatchID(m.ID) {
+		if !state.IsPoolSupplementaryMatchID(m.ID) {
 			regularMatches = append(regularMatches, m)
 		}
 	}

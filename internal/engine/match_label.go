@@ -122,7 +122,7 @@ func poolPhaseMatchLabel(comp *state.Competition, matchID string) (string, bool)
 // carries no numbered ordinal at all (DH/TB parse to 0 too, which is why
 // the supplementary check runs FIRST).
 func supplementaryOrNumberedLabel(heading, matchID string) string {
-	switch {
+	switch { // not state.IsPoolSupplementaryMatchID: each kind has its own label
 	case IsPoolDaihyosenMatchID(matchID):
 		return heading + " daihyosen"
 	case IsTiebreakerMatchID(matchID):

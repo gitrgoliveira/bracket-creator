@@ -1954,6 +1954,7 @@ func reopenPoolMatch(m *state.MatchResult, reason string, targetStatus state.Mat
 	m.WinnerID = ""
 	m.IpponsA = nil
 	m.IpponsB = nil
+	m.MarkIDs = nil // the marks went with the points (ScoreVersion only rises)
 	m.HansokuA = 0
 	m.HansokuB = 0
 	m.Decision = ""
@@ -2024,6 +2025,7 @@ func reopenBracketMatch(bm *state.BracketMatch, reason string, targetStatus stat
 	bm.WinnerID = "" // bc-brid: the verdict's id half, cleared with the name.
 	bm.IpponsA = nil
 	bm.IpponsB = nil
+	bm.MarkIDs = nil // the marks went with the points (ScoreVersion only rises)
 	bm.HansokuA = 0
 	bm.HansokuB = 0
 	bm.Decision = ""

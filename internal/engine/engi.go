@@ -537,7 +537,7 @@ func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string)
 				continue
 			}
 			// Supplementary bouts (TB/DH) don't count toward engi standings.
-			if IsTiebreakerMatchID(m.ID) || IsPoolDaihyosenMatchID(m.ID) {
+			if state.IsPoolSupplementaryMatchID(m.ID) {
 				continue
 			}
 			sA := lookupStandingsPlayer(playerStandings, m.SideAID)

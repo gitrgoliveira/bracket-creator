@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -689,6 +690,111 @@ func TestReplay_BaselineOfTheReplayIsTheReplay(t *testing.T) {
 	}
 }
 
+// replayChained replays lines one more line at a time, each step from the
+// previous step's output (the stored cache the next write starts from), and
+// asserts every step equals a fresh replay of the same lines from original.
+func replayChained(t *testing.T, original *state.MatchResult, lines []state.ScoreLogLine, shape ReplayShape) Replay {
+	t.Helper()
+	cur := cloneMatchForReplay(*original)
+	var last Replay
+	for k := 1; k <= len(lines); k++ {
+		chained := ReplayScoring(&cur, lines[:k], shape)
+		fresh := ReplayScoring(original, lines[:k], shape)
+		require.Equal(t, stateOf(fresh.Match), stateOf(chained.Match), "step %d", k)
+		require.Equal(t, fresh.Match.ModifiedAt, chained.Match.ModifiedAt, "step %d", k)
+		require.Equal(t, fresh.Match.ScoreVersion, chained.Match.ScoreVersion, "step %d", k)
+		require.Equal(t, fresh.Outcomes, chained.Outcomes, "step %d", k)
+		require.Equal(t, fresh.ClearedWithdrawal, chained.ClearedWithdrawal, "step %d", k)
+		cur, last = chained.Match, chained
+	}
+	return last
+}
+
+// The first baseline that sets a group mints its own mark ids: the cache it
+// replays over is the match after every line, so ids taken from it would be
+// ids of events the log has not reached yet.
+func TestReplay_FirstBaselineTakesNoIDsFromTheCache(t *testing.T) {
+	m := runningIndividual()
+	m.IpponsA = []string{"M"}
+	lines := append(migrated(m),
+		removeLine("e1", 20, "b:m0:0:a:0"),
+		evLine("e5", 30, domain.ScoreIpponAdd, 0, "a", "M"),
+		evLine("e6", 40, domain.ScoreEnchoAdd, 0, "", ""),
+	)
+	r := replayChained(t, m, lines, ReplayShape{})
+	assert.Equal(t, []string{"M"}, r.Match.IpponsA)
+	require.NotNil(t, r.Match.MarkIDs)
+	assert.Equal(t, []string{"e5"}, r.Match.MarkIDs.A)
+	assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("e1"))
+}
+
+// Replaying from its own output changes nothing, at every step of a log that
+// mixes events, removals, a later baseline and a finish.
+func TestReplay_ChainedStepsMatchAFreshReplay(t *testing.T) {
+	m := runningIndividual()
+	m.IpponsB = []string{"K"}
+	after := *m
+	after.IpponsA = []string{"M"}
+	after.IpponsB = []string{"K", "D"} // reinstates the D a removal took
+	finished := after
+	finished.Status, finished.Winner, finished.WinnerID = state.MatchStatusCompleted, "Shiro", "pb"
+	lines := append(migrated(m),
+		evLine("a1", 20, domain.ScoreIpponAdd, 0, "a", "M"),
+		evLine("b1", 21, domain.ScoreIpponAdd, 0, "b", "D"),
+		removeLine("rb", 22, "b:m0:0:b:0"),
+		evLine("f1", 23, domain.ScoreFoulAdd, 0, "a", ""),
+		baseLine(&after, "c", 30, state.ScoreBasis{Own: []string{"a1", "b1"}}, state.GroupPoints),
+		evLine("x1", 35, domain.ScoreIpponAdd, 0, "a", "K"),
+		removeLine("rx", 36, "x1"),
+		baseLine(&finished, "fin", 40, state.ScoreBasis{Own: []string{"x1", "rx"}}, state.GroupResult, state.GroupPoints),
+		evLine("late", 50, domain.ScoreEnchoAdd, 0, "", ""),
+	)
+	r := replayChained(t, m, lines, ReplayShape{Knockout: true})
+	assert.Equal(t, domain.ScoreOutcomeBeforeBaseline, r.Outcome("rb"), "the removal the baseline did not see")
+	assert.Equal(t, domain.ScoreOutcomeCapped, r.Outcome("x1"), "Shiro already holds two points")
+	assert.Equal(t, domain.ScoreOutcomeNoTarget, r.Outcome("rx"))
+	assert.Equal(t, []string{"K", "D"}, r.Match.IpponsB)
+}
+
+// A baseline whose value does not read never governs its group: until a
+// readable baseline sets the group the cache's value stands and nothing is
+// folded onto it, or a mark the cache already holds would count twice (and
+// once more at each replay from the output).
+func TestReplay_UnreadableBaselineValue(t *testing.T) {
+	unreadable := func(m *state.MatchResult, id string, stamp int64) state.ScoreLogLine {
+		l := baseLine(m, id, stamp, state.ScoreBasis{}, state.GroupPoints)
+		l.Baseline.Values[state.GroupPoints] = json.RawMessage(`"nope"`)
+		return l
+	}
+	t.Run("the first baseline of a group", func(t *testing.T) {
+		m := runningIndividual()
+		m.IpponsA = []string{"M"}
+		lines := []state.ScoreLogLine{unreadable(m, "bad", 10), evLine("e1", 20, domain.ScoreIpponAdd, 0, "a", "M")}
+		r := replayChained(t, m, lines, ReplayShape{})
+		assert.Equal(t, []string{"M"}, r.Match.IpponsA, "the cache's value stands")
+		assert.Equal(t, domain.ScoreOutcomeBeforeBaseline, r.Outcome("e1"))
+
+		// A later readable baseline takes over the group as usual.
+		lines = append(lines, baseLine(m, "ok", 30, state.ScoreBasis{Own: []string{"e1"}}, state.GroupPoints),
+			evLine("e2", 40, domain.ScoreIpponAdd, 0, "a", "K"))
+		r = replayChained(t, m, lines, ReplayShape{})
+		assert.Equal(t, []string{"M", "K"}, r.Match.IpponsA)
+		assert.Equal(t, domain.ScoreOutcomeRecorded, r.Outcome("e1"))
+		assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("e2"))
+	})
+	t.Run("a group a readable baseline already governs", func(t *testing.T) {
+		m := runningIndividual()
+		lines := append(migrated(m),
+			evLine("e1", 20, domain.ScoreIpponAdd, 0, "a", "M"),
+			unreadable(m, "bad", 30),
+			evLine("e2", 40, domain.ScoreIpponAdd, 0, "a", "K"))
+		r := replayChained(t, m, lines, ReplayShape{})
+		assert.Equal(t, []string{"M", "K"}, r.Match.IpponsA)
+		assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("e1"))
+		assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("e2"))
+	})
+}
+
 // Seq gaps: session S holding 1, 2, 3 and 5 is missing 4.
 func TestScoreLogGaps(t *testing.T) {
 	ev := func(id, session string, seq int64) state.ScoreLogLine {
@@ -844,5 +950,19 @@ func TestMarkIDsAndScoreVersionThroughTheWrites(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 6, bm.ScoreVersion)
 		assert.Equal(t, []string{"e9"}, bm.MarkIDs.A)
+	})
+	t.Run("a reopen clears the points and their ids, never the version", func(t *testing.T) {
+		m := pool()
+		m.Status = state.MatchStatusCompleted
+		reopenPoolMatch(m, "", state.MatchStatusRunning)
+		assert.Nil(t, m.MarkIDs)
+		assert.Equal(t, []string{"k1"}, m.SubResults[0].MarkIDs.A, "the kept bout keeps its ids")
+		assert.Equal(t, 5, m.ScoreVersion)
+
+		bm := &state.BracketMatch{ID: "r0-m0", SideA: "A", SideB: "B", Status: state.MatchStatusCompleted,
+			IpponsA: []string{"M"}, MarkIDs: &state.MarkIDs{A: []string{"e1"}}, ScoreVersion: 5}
+		reopenBracketMatch(bm, "", state.MatchStatusRunning)
+		assert.Nil(t, bm.MarkIDs)
+		assert.Equal(t, 5, bm.ScoreVersion)
 	})
 }

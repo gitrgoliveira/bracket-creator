@@ -125,7 +125,7 @@ func (e *Engine) LeagueTiebreakCandidates(compID string) ([]TiedGroup, error) {
 		return nil, err
 	}
 	for _, m := range matches {
-		if IsPoolDaihyosenMatchID(m.ID) || IsTiebreakerMatchID(m.ID) {
+		if state.IsPoolSupplementaryMatchID(m.ID) {
 			continue
 		}
 		if m.Status != state.MatchStatusCompleted {

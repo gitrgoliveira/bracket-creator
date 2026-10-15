@@ -27,7 +27,7 @@ func PoolMatchesSettled(matches []state.MatchResult) bool {
 		if m.Status != state.MatchStatusCompleted {
 			return false
 		}
-		if (IsPoolDaihyosenMatchID(m.ID) || IsTiebreakerMatchID(m.ID)) && m.Winner == "" {
+		if state.IsPoolSupplementaryMatchID(m.ID) && m.Winner == "" {
 			return false
 		}
 	}
@@ -355,7 +355,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 	hasIncompleteDH := false
 	hasCompleteDH := false
 	for _, m := range matches {
-		switch {
+		switch { // not state.IsPoolSupplementaryMatchID: TB and DH are counted apart
 		case IsTiebreakerMatchID(m.ID):
 			// A TB match without a winner (malformed payload) leaves standings
 			// still tied, so treat it as unresolved just like DH.

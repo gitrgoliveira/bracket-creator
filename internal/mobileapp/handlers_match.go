@@ -838,7 +838,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// mp-62vr: rep-player names belong only on a pool daihyosen/tiebreaker
 			// rep bout. Strip them from regular matches so a crafted bulk payload
 			// can't persist stale rep metadata (mirrors the single-score path).
-			if !engine.IsPoolDaihyosenMatchID(results[i].ID) && !engine.IsTiebreakerMatchID(results[i].ID) {
+			if !state.IsPoolSupplementaryMatchID(results[i].ID) {
 				results[i].RepPlayerA = ""
 				results[i].RepPlayerB = ""
 			}
@@ -3447,7 +3447,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// the same id shape via repIsTeam). Strip them from any regular match
 		// so a crafted authenticated payload can't persist stale rep metadata
 		// onto a normal pool/bracket result.
-		if !engine.IsPoolDaihyosenMatchID(mid) && !engine.IsTiebreakerMatchID(mid) {
+		if !state.IsPoolSupplementaryMatchID(mid) {
 			req.RepPlayerA = ""
 			req.RepPlayerB = ""
 		}

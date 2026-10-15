@@ -401,7 +401,13 @@ func (rp *replayer) applyBaseline(line int, b *state.ScoreBaseline) {
 	for _, g := range baselineGroupOrder(b.Values) {
 		pos, isBout := state.ParseBoutGroup(g)
 		var prevA, prevB, prevMA, prevMB []string
+		_, governed := rp.govern[g]
 		switch {
+		case !governed:
+			// The first baseline that sets the group replays over the cache,
+			// the match after EVERY line: its marks and ids are not this
+			// point of the log's, so the baseline mints its own ids rather
+			// than take ids of events the log has not reached yet.
 		case g == state.GroupPoints:
 			prevA, prevB = m.IpponsA, m.IpponsB
 			if m.MarkIDs != nil {
@@ -417,7 +423,16 @@ func (rp *replayer) applyBaseline(line int, b *state.ScoreBaseline) {
 		}
 		if err := state.SetGroupFromValue(m, g, b.Values[g]); err != nil {
 			// A line is validated before it is logged; a value that still
-			// does not read leaves the group as it was.
+			// does not read leaves the group as it was, and the baseline
+			// does not govern it. The replay's knowledge of a group begins
+			// at its first READABLE baseline: until one is reached the
+			// cache's value (the match after every line) stands and no
+			// event is folded onto it, since a fold there would count again
+			// a mark the cache already holds (and a replay from its own
+			// output would count it once more each time). Governing the
+			// group here would also let the next baseline take ids from
+			// that cache. So an event on a group no readable baseline has
+			// set stays early, and answers beforeBaseline at the end.
 			continue
 		}
 		switch {
@@ -704,8 +719,10 @@ func keepEntries(ippons, marks []string, keep func(string) bool) ([]string, []st
 // before are matched to the new ones by value, in order (a longest common
 // subsequence), so a mark the baseline keeps keeps its id wherever it now
 // sits: a finish echoing the board's points, less a mark removed from the
-// front, keeps the ids the board removes by. Of two equal letters the
-// earliest one before is the one kept. A new mark, or one whose earlier copy
+// front, keeps the ids the board removes by. When equal letters compete for
+// the ids that survive, the earliest copy keeps its id: the walk matches left
+// to right, so [M M] before and [M] after keeps the first M's id and drops the
+// second's. A new mark, or one whose earlier copy
 // had no id, is b:<line>:<pos>:<side>:<i>; a placeholder slot has none.
 func assignMarks(prev, prevMarks, next []string, lineID string, pos int, side string) []string {
 	isMark := func(v string) bool { return v != "" && v != domain.IpponPlaceholder }
@@ -815,8 +832,10 @@ func foldEvent(r *replayMatch, e *domain.ScoreEvent, shape ReplayShape, stamps m
 		// A rep player names the fighter a TEAM fields for a pool
 		// representative or tie-break bout (MatchResult.RepPlayerA: the
 		// /score door strips the names from any other match, and the editor
-		// offers the pickers only there, repIsTeam).
-		supplementary := state.IsPoolDaihyosenMatchID(m.ID) || state.IsTiebreakerMatchID(m.ID)
+		// offers the pickers only there, repIsTeam). The replay is stricter
+		// than the /score door's rule: it also requires a team competition
+		// (shape.team()), where the door keeps the names on any such id.
+		supplementary := state.IsPoolSupplementaryMatchID(m.ID)
 		if !shape.team() || !supplementary {
 			return domain.ScoreOutcomeNotAllowed
 		}
@@ -854,7 +873,7 @@ func foldEvent(r *replayMatch, e *domain.ScoreEvent, shape ReplayShape, stamps m
 // foldMatchLevel folds an event on the match itself: an individual match's
 // points, fouls and overtime, or a team encounter's overtime.
 func foldMatchLevel(m *state.MatchResult, e *domain.ScoreEvent, shape ReplayShape) string {
-	singleBout := state.IsPoolDaihyosenMatchID(m.ID) || state.IsTiebreakerMatchID(m.ID)
+	singleBout := state.IsPoolSupplementaryMatchID(m.ID)
 	if e.Kind == domain.ScoreEnchoAdd || e.Kind == domain.ScoreEnchoRemove {
 		if shape.kachinuki() && !singleBout {
 			// A kachinuki encounter never carries a match-level overtime

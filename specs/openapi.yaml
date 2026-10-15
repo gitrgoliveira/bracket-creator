@@ -2524,41 +2524,25 @@ paths:
           kept in the match's history with its values. Absent `changed` means
           every group the payload carries, except that a `running` or
           `scheduled` write over a `completed` match never carries `result`:
-          its scoring changes apply to the finished match when they were made
-          after the result (the match stays completed and its winner is worked
-          out again from the merged points or bouts; a pool or league match
-          left tied becomes a draw), and are held when made before it. A
-          change that would leave a finished knockout match tied, or an engi
-          match with no valid flag count, is never applied: the match keeps its
-          recorded finish (it never goes back to running) and the change is
-          held, answered with `heldReason: needs_winner`, so the operator
-          corrects the result with a winner. A running board's scoring, or
-          its overtime, over a match a decision already closed (a kiken or a
-          fusenpai of this match, or a fusensho awarded because the other
-          side is barred by a DIFFERENT match) is held the same way, answered
-          with `heldReason: default_win_stands` and `heldDecision` naming
-          that decision; the match already has the winner it needs, so the
-          operator corrects the decision from the match's score editor
-          instead of correcting the result with one. A finish whose result applies over
-          scoring stored NEWER than it gets the winner that scoring gives (the
-          same verdict as if the two had arrived in stamp order); when that
-          scoring would leave the finished match without a winner (a knockout
-          tie, an engi count that is not valid), the finish is applied on its
-          own scoreline, as in stamp order, and that newer scoring is moved to
-          the match's history as held; the answer names it in
-          `displacedGroups`, with `heldReason: needs_winner`. A finish that carries
-          no scoreline of its own is held instead. A write that removes the
+          its scoring changes are turned away when they were made after the
+          result (the closed-match rule: once a finish or a decision, a kiken,
+          fusenpai, fusensho, hantei, daihyosen or hikiwake, is recorded, any
+          tap or scoring write stamped after it is refused and kept in the
+          match's history), answered with `heldReason: match_closed`, so the
+          operator corrects the result from the match's score editor; and
+          are ordered by their stamp when made before it. The match stays
+          completed and its winner stays advanced. A finish or a decision
+          whose result applies over scoring stored NEWER than it closes that
+          scoring out, as in stamp order: it is moved to the match's history as
+          held and the answer names it in `displacedGroups`, with `heldReason:
+          match_closed`. A write that removes the
           representative bout (a write that names it and carries no row, such
           as the daihyosen DELETE) likewise moves a representative pick
           (`repPickA`, `repPickB`) stamped AFTER the removal to the history,
           since in stamp order the pick landed on a bout that no longer
           existed; the answer names it in `displacedGroups` with NO
-          `heldReason` (it is no question of the winner), and the history
-          keeps it with the reason "the representative bout was removed". A points change whose write does not apply
-          `result` keeps a recorded judges' decision (hantei mark). A scoring change made on a
-          running board after a recorded kiken, fusenpai, or fusensho clears
-          it (points scored mean the withdrawal was a mistake), and the competitor
-          it barred is eligible again. A name that is not a group is a 400.
+          `heldReason`, and the history keeps it with the reason "the
+          representative bout was removed". A name that is not a group is a 400.
         content:
           application/json:
             schema:
@@ -2570,17 +2554,12 @@ paths:
             MatchResult. When part of the write was held (a newer change to
             those groups is stored) the body also carries `heldGroups`, the
             groups kept in the match's history instead of applied, and
-            `heldReason: needs_winner` when they were held because applying
-            them would leave a finished match without the winner it needs, or
-            `heldReason: default_win_stands` with `heldDecision` naming the
-            decision (a kiken or a fusenpai of this match, or a fusensho
-            awarded for a bar on a DIFFERENT match) that already closed the
-            match.
-            An applied finish that moved stored, NEWER scoring into the
-            match's history (it would have left the match without a winner,
-            and in stamp order came after this finish) carries
-            `displacedGroups` naming those groups, with `heldReason:
-            needs_winner`. An applied removal of the representative bout that
+            `heldReason: match_closed` when they were held because a finish or a
+            decision stamped before them had already closed the match.
+            An applied finish or decision that moved stored, NEWER scoring into
+            the match's history (in stamp order it came after this result and
+            was closed out) carries `displacedGroups` naming those groups, with
+            `heldReason: match_closed`. An applied removal of the representative bout that
             moved a representative pick stamped after it into the history
             carries `displacedGroups` naming the pick's group (`repPickA` or
             `repPickB`) with no `heldReason`.
@@ -3805,22 +3784,12 @@ paths:
                           description: On a `superseded` entry, the groups held.
                         heldReason:
                           type: string
-                          enum: [needs_winner, default_win_stands]
+                          enum: [match_closed]
                           description: >
-                            On a `superseded` entry held because applying it would
-                            leave a finished match without the winner it needs, or
-                            because a decision (a kiken or a fusenpai of this
-                            match, or a fusensho awarded for a bar on a DIFFERENT
-                            match) already closed the match (see
-                            RefusedWrite.heldReason); `error` then carries that
-                            sentence.
-                        heldDecision:
-                          type: string
-                          description: >
-                            The decision code (e.g. `fusensho`, `kiken-voluntary`)
-                            that closed the match, present only beside
-                            `heldReason: default_win_stands`. See
-                            RefusedWrite.heldDecision.
+                            On a `superseded` entry held because a finish or a
+                            decision stamped before it had already closed the
+                            match (see RefusedWrite.heldReason); `error` then
+                            carries that sentence.
                   heldGroups:
                     type: array
                     description: >
@@ -3843,11 +3812,8 @@ paths:
                           description: As MatchResult.displacedGroups.
                         heldReason:
                           type: string
-                          enum: [needs_winner, default_win_stands]
+                          enum: [match_closed]
                           description: As RefusedWrite.heldReason.
-                        heldDecision:
-                          type: string
-                          description: As RefusedWrite.heldDecision.
 
   /api/competitions/{id}/matches/{mid}/quick-score:
     put:
@@ -4152,14 +4118,8 @@ paths:
                           and kept in the match's history. As RefusedWrite.heldGroups.
                       heldReason:
                         type: string
-                        enum: [needs_winner, default_win_stands]
+                        enum: [match_closed]
                         description: As RefusedWrite.heldReason.
-                      heldDecision:
-                        type: string
-                        description: >
-                          The decision code that closed the match, present
-                          only beside `heldReason: default_win_stands`. As
-                          RefusedWrite.heldDecision.
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
           description: >
@@ -4287,14 +4247,8 @@ paths:
                           `heldReason`. As MatchResult.displacedGroups.
                       heldReason:
                         type: string
-                        enum: [needs_winner, default_win_stands]
+                        enum: [match_closed]
                         description: As RefusedWrite.heldReason.
-                      heldDecision:
-                        type: string
-                        description: >
-                          The decision code that closed the match, present
-                          only beside `heldReason: default_win_stands`. As
-                          RefusedWrite.heldDecision.
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
           description: >
@@ -5641,7 +5595,7 @@ components:
           description: >
             Machine-readable cause. `superseded` means the write's groups were
             held rather than applied, either because a newer stored result won
-            or for one of the two other reasons named in `heldReason`;
+            or because the match was already closed (`heldReason`);
             `clock_skew` means this device's clock is ahead of the server and
             the stamp was refused.
         serverNowMs:
@@ -5666,31 +5620,15 @@ components:
             of them held and kept in the match's history.
         heldReason:
           type: string
-          enum: [needs_winner, default_win_stands]
+          enum: [match_closed]
           description: >
             Present on `superseded` when the groups were held not because a
-            newer change is stored but for one of two other reasons.
-            `needs_winner`: applying them would leave a FINISHED match
-            without the winner it needs (a knockout match left tied, an engi
-            match left with no valid flag count); `message` then tells the
-            operator to correct the result with a winner. `default_win_stands`:
-            a decision already closed the match -- a kiken or a fusenpai of
-            this match, or a fusensho awarded because the other side is
-            barred by a DIFFERENT match; `heldDecision` names which one, and
-            `message` then tells the operator to correct that decision from
-            the match's score editor instead, since the match already has
-            the winner it needs. Either way the change is kept in the
-            match's history. Also carried, beside `heldGroups`, by a write
+            newer change is stored but because a finish or a decision stamped
+            before them had already closed the match (the closed-match rule):
+            `message` then tells the operator the match is finished and to use
+            Correct result. The change is kept in the match's history. Also
+            carried, beside `heldGroups` or `displacedGroups`, by a write
             applied in part.
-        heldDecision:
-          type: string
-          description: >
-            The decision code (e.g. `fusensho`, `kiken-voluntary`) that
-            closed the match, present only beside `heldReason:
-            default_win_stands`. Kendo names the decision itself; there is no
-            shared umbrella term for this class of result, so a client
-            renders this value (or a word derived from it) rather than a
-            generic label.
 
     MatchHistoryEntry:
       type: object
@@ -5753,19 +5691,11 @@ components:
           description: >
             Why groups were held other than by their own stamps, when one rule
             did that: "older revision of this board" (a running write the same
-            client session had already followed with a newer one), "a finish
-            and the scoreline it stood on are kept together" (a completing
-            write stamped older than the stored result over a finished match,
-            held whole), "the flags and the winner they decide are kept
+            client session had already followed with a newer one), "the flags and the winner they decide are kept
             together" (an engi finish one of whose two groups a newer change
-            outranks), "a kiken closed this match" / "a fusenpai closed this
-            match" / "a fusensho closed this match" (scoring or overtime sent
-            for a match one of those decisions already closed; the answer
-            carries `heldReason: default_win_stands` and `heldDecision`), "a
-            knockout match needs a winner" (a change that would leave a
-            finished knockout match tied), "an engi result needs a valid
-            flag count" (a recount that would leave a finished engi match with
-            none), or "the representative bout was removed" (a representative
+            outranks), "the match was already finished" (scoring or overtime stamped after a
+            finish or a decision that closed the match; the answer carries
+            `heldReason: match_closed`), or "the representative bout was removed" (a representative
             pick stamped after the bout's removal, moved here by the removal).
             Absent when each group was judged by its own stamp.
         clearedWithdrawal:
@@ -5937,15 +5867,15 @@ components:
           type: string
         outcome:
           type: string
-          enum: [applied, recorded, duplicate, capped, beforeBaseline, needsWinner, defaultWinStands, noTarget, notAllowed, notStarted, refused, clock_skew]
+          enum: [applied, recorded, duplicate, capped, beforeBaseline, matchClosed, noTarget, notAllowed, notStarted, refused, clock_skew]
           description: >
             `applied`: in the match. `recorded`: a write built with it in view
             already holds it. `duplicate`: the log holds this id. `capped`: the
             side or bout already holds the most points it can. `beforeBaseline`:
             made before a write that never saw it, whose value stands (kept in
-            the history). `needsWinner`: it would leave a finished knockout
-            tied, or an engi count invalid, and no later tap gives the winner.
-            `defaultWinStands`: a kiken, fusenpai or fusensho closed the match.
+            the history). `matchClosed`: a finish or a decision stamped before it had closed
+            the match; the tap is kept in the history and changes nothing
+            (`reason` is `match_closed`, `message` the sentence to show).
             `noTarget`: what it names is not there. `notAllowed`: not a tap
             this match or bout takes. `notStarted`, `refused`, `clock_skew`:
             not logged, see `reason` and `message`.
@@ -6922,28 +6852,22 @@ components:
             $ref: '#/components/schemas/MergeGroup'
           description: >
             On a write's response only: the groups of THIS write that were not
-            applied (a newer change to them is stored, applying them would
-            leave a finished match without the winner it needs, or a
-            decision already closed the match: see `heldReason`) and were
-            kept in the match's history. Omitted when everything applied.
+            applied (a newer change to them is stored, or a finish or a
+            decision stamped before them had already closed the match: see
+            `heldReason`) and were kept in the match's history. Omitted when
+            everything applied.
         heldReason:
           type: string
           readOnly: true
-          enum: [needs_winner, default_win_stands]
+          enum: [match_closed]
           description: >
             On a write's response only, beside `heldGroups` or
-            `displacedGroups`: present when they were held or moved because
-            applying them would leave a finished match without the winner it
-            needs, or because a decision (a kiken or a fusenpai of this
-            match, or a fusensho awarded for a bar recorded on a DIFFERENT
-            match) already closed the match (see RefusedWrite.heldReason).
+            `displacedGroups`: present when they were held or moved because a
+            finish or a decision stamped before them had already closed the
+            match (see RefusedWrite.heldReason).
             Absent when the groups were held by their stamps alone, and
             absent beside a `displacedGroups` that names a representative
             pick moved by a removal of the representative bout.
-        heldDecision:
-          type: string
-          readOnly: true
-          description: As RefusedWrite.heldDecision.
         displacedGroups:
           type: array
           readOnly: true
@@ -6953,10 +6877,9 @@ components:
             On a write's response only: groups whose STORED values this
             (applied) write moved to the match's history, held. The history
             keeps them, at their own stamp, with door `displaced`. Two cases.
-            A finish moves scoring changed after the finish was made that
-            would have left the match without the winner it needs, so in
-            stamp order it could not apply after it; the answer then carries
-            `heldReason: needs_winner`. A removal of the representative bout
+            A finish or a decision moves scoring stamped after it, which in
+            stamp order could not apply after the match was closed; the answer
+            then carries `heldReason: match_closed`. A removal of the representative bout
             moves a representative pick (`repPickA`, `repPickB`) stamped after
             the removal, since in stamp order the pick landed on a bout that
             no longer existed; the answer then carries NO `heldReason`, and

@@ -107,7 +107,10 @@ func TestReplayScoring_HeadlineEveryArrivalOrder(t *testing.T) {
 	e1 := evLine("e1", 101, domain.ScoreIpponAdd, 0, "b", "K")
 	e2 := evLine("e2", 102, domain.ScoreIpponAdd, 0, "a", "D")
 
-	t.Run("with e2 the match keeps a winner", func(t *testing.T) {
+	// THE CLOSED-MATCH RULE: the finish closes the match in stamp order, so a
+	// tap stamped after it is turned away, whichever order the three reach
+	// the server in.
+	t.Run("taps after the finish are turned away in every order", func(t *testing.T) {
 		tail := []state.ScoreLogLine{fin, e1, e2}
 		var first *matchState
 		for _, order := range permutations(len(tail)) {
@@ -120,15 +123,14 @@ func TestReplayScoring_HeadlineEveryArrivalOrder(t *testing.T) {
 			assert.Equal(t, state.MatchStatusCompleted, got.Status, "order %v", order)
 			assert.Equal(t, "Aka", got.Winner, "order %v", order)
 			assert.Equal(t, "pa", got.WinnerID, "order %v", order)
-			assert.Equal(t, []string{"M", "D"}, got.IpponsA, "order %v", order)
-			assert.Equal(t, []string{"K"}, got.IpponsB, "order %v", order)
+			assert.Equal(t, []string{"M"}, got.IpponsA, "order %v", order)
+			assert.Empty(t, got.IpponsB, "order %v", order)
 			require.NotNil(t, got.MarkIDs, "order %v", order)
-			assert.Equal(t, []string{"b:m0:0:a:0", "e2"}, got.MarkIDs.A, "order %v", order)
-			assert.Equal(t, []string{"e1"}, got.MarkIDs.B, "order %v", order)
-			assert.Equal(t, int64(102), got.Stamps[state.GroupPoints], "order %v", order)
+			assert.Equal(t, []string{"b:m0:0:a:0"}, got.MarkIDs.A, "order %v", order)
+			assert.Equal(t, int64(100), got.Stamps[state.GroupPoints], "order %v", order)
 			assert.Equal(t, int64(100), got.Stamps[state.GroupResult], "order %v", order)
-			assert.Equal(t, domain.ScoreOutcomeApplied, outcomeOf(r, "e1"), "order %v", order)
-			assert.Equal(t, domain.ScoreOutcomeApplied, outcomeOf(r, "e2"), "order %v", order)
+			assert.Equal(t, domain.ScoreOutcomeMatchClosed, outcomeOf(r, "e1"), "order %v", order)
+			assert.Equal(t, domain.ScoreOutcomeMatchClosed, outcomeOf(r, "e2"), "order %v", order)
 			assert.Equal(t, len(lines), r.Match.ScoreVersion, "order %v", order)
 			if first == nil {
 				first = &got
@@ -138,19 +140,18 @@ func TestReplayScoring_HeadlineEveryArrivalOrder(t *testing.T) {
 		}
 	})
 
-	t.Run("without e2 the tying point needs a winner", func(t *testing.T) {
-		tail := []state.ScoreLogLine{fin, e1}
+	t.Run("a tap stamped before the finish and outside its basis is held out of it", func(t *testing.T) {
+		early := evLine("early", 90, domain.ScoreIpponAdd, 0, "b", "K")
+		tail := []state.ScoreLogLine{early, fin}
 		for _, order := range permutations(len(tail)) {
 			lines := []state.ScoreLogLine{{V: 1, Baseline: &m0}}
 			for _, i := range order {
 				lines = append(lines, tail[i])
 			}
 			r := ReplayScoring(start, lines, shape)
-			assert.Equal(t, domain.ScoreOutcomeNeedsWinner, outcomeOf(r, "e1"), "order %v", order)
-			assert.Equal(t, state.MatchStatusCompleted, r.Match.Status, "order %v", order)
-			assert.Equal(t, "Aka", r.Match.Winner, "order %v", order)
-			assert.Equal(t, []string{"M"}, r.Match.IpponsA, "order %v", order)
+			assert.Equal(t, domain.ScoreOutcomeBeforeBaseline, outcomeOf(r, "early"), "order %v", order)
 			assert.Empty(t, r.Match.IpponsB, "order %v", order)
+			assert.Equal(t, "Aka", r.Match.Winner, "order %v", order)
 		}
 	})
 }

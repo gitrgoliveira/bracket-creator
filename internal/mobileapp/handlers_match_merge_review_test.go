@@ -107,8 +107,8 @@ func TestScoreHandler_HeldForAWinnerSaysSo(t *testing.T) {
 	require.Equal(t, http.StatusOK, code, out)
 	assert.Equal(t, false, out["applied"])
 	assert.Equal(t, "superseded", out["reason"], "the not-retried, not-lost shape the queue keys on")
-	assert.Equal(t, state.HeldReasonNeedsWinner, out["heldReason"])
-	assert.Equal(t, NeedsWinnerMessage, out["message"])
+	assert.Equal(t, state.HeldReasonMatchClosed, out["heldReason"])
+	assert.Equal(t, MatchClosedMessage, out["message"])
 	assert.Equal(t, []any{"flags"}, out["heldGroups"])
 
 	m := mergeStored(t, store, compID)
@@ -145,9 +145,9 @@ func TestScoreHandler_HeldForADefaultWinSaysSo(t *testing.T) {
 	require.Equal(t, http.StatusOK, code, out)
 	assert.Equal(t, false, out["applied"])
 	assert.Equal(t, "superseded", out["reason"], "the not-retried, not-lost shape the queue keys on")
-	assert.Equal(t, state.HeldReasonDefaultWinStands, out["heldReason"])
-	assert.Equal(t, "fusensho", out["heldDecision"])
-	assert.Equal(t, DefaultWinStandsMessage("fusensho"), out["message"])
+	assert.Equal(t, state.HeldReasonMatchClosed, out["heldReason"])
+	assert.NotContains(t, out, "heldDecision", "one code, one remedy: Correct result")
+	assert.Equal(t, MatchClosedMessage, out["message"])
 	assert.Equal(t, []any{"points"}, out["heldGroups"])
 
 	m := mergeStored(t, store, compID)
@@ -183,7 +183,7 @@ func TestScoreHandler_FinishMovesANewerTyingChangeToTheHistory(t *testing.T) {
 	require.Equal(t, http.StatusOK, code, out)
 	assert.NotEqual(t, false, out["applied"], "the finish is applied")
 	assert.Equal(t, []any{"flags"}, out["displacedGroups"])
-	assert.Equal(t, state.HeldReasonNeedsWinner, out["heldReason"])
+	assert.Equal(t, state.HeldReasonMatchClosed, out["heldReason"])
 	assert.Nil(t, out["heldGroups"], "nothing of the finish was held")
 
 	m := mergeStored(t, store, compID)

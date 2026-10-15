@@ -754,16 +754,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// HeldGroups names, on a "superseded" entry, every group it
 			// changes: each was kept in the match's history (bc-mrgc).
 			HeldGroups []string `json:"heldGroups,omitempty"`
-			// HeldReason is "needs_winner" when they were held because
-			// applying them would leave the match without the winner it
-			// needs (R4), "default_win_stands" when a fusensho awarded for a
-			// bar on a DIFFERENT match (or a kiken/fusenpai of this match)
-			// already closed the match, or "" for a newer stored change.
+			// HeldReason is "match_closed" when a finish or a decision
+			// stamped before the entry had already closed the match, or "" for
+			// a newer stored change.
 			HeldReason string `json:"heldReason,omitempty"`
-			// HeldDecision is the decision code (e.g. "fusensho",
-			// "kiken-voluntary") that closed the match, set only beside
-			// HeldReason "default_win_stands".
-			HeldDecision string `json:"heldDecision,omitempty"`
 		}
 		var errs []scoreError
 		// partlyHeld reports each entry that was applied in part: its matchId
@@ -966,9 +960,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 					bulkErr.Error = SupersededMessage
 					bulkErr.HeldGroups = engine.HeldGroupsOf(err)
 					bulkErr.HeldReason = engine.HeldReasonOf(err)
-					bulkErr.HeldDecision = engine.HeldDecisionOf(err)
 					if bulkErr.HeldReason != "" {
-						bulkErr.Error = messageForHeldReason(bulkErr.HeldReason, bulkErr.HeldDecision)
+						bulkErr.Error = messageForHeldReason(bulkErr.HeldReason)
 					}
 				case errors.As(err, &alreadyIneligErr):
 					// bc-rawm/bc-cse: this batch shape has no dedicated 409 to
@@ -1258,7 +1251,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				// timestamp guard), but mapped anyway: the alternative default is
 				// a 500, which the offline write queue treats as transient and
 				// retries forever against a write that can never win.
-				respondSuperseded(c, result.Merge.HeldGroups(), result.Merge.HeldReason(), result.Merge.HeldDecision())
+				respondSuperseded(c, result.Merge.HeldGroups(), result.Merge.HeldReason())
 				return
 			}
 			if errors.Is(err, engine.ErrMatchSideMismatch) {
@@ -1890,7 +1883,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// named (the engine's recordOverrideHistory). Answered exactly like
 		// any other write whose every change was held (bc-mrgc phase 3): the
 		// result group it held, and the superseded reason the client keys on.
-		respondSuperseded(c, []string{state.GroupResult}, "", "")
+		respondSuperseded(c, []string{state.GroupResult}, "")
 	})
 
 	r.PUT("/competitions/:id/matches/:mid/time", func(c *gin.Context) {
@@ -2726,16 +2719,12 @@ func matchSnapshotOrErr(s matchStores, compID, matchID, guardLabel string) (matc
 // excluded from `successful` and cannot poison a queue.
 //
 // heldReason is the merge's code for why (engine.HeldReasonOf): "" for a newer
-// stored change, "needs_winner" when applying the write would have left a
-// finished match without the winner it needs (R4), "default_win_stands" when
-// a match-level default win awarded for a bar on a DIFFERENT match already
-// closed the match. Either of the latter two is still not lost and still
-// never wins a retry, so it keeps the same applied:false superseded shape,
-// with heldReason and its own message (messageForHeldReason) telling the
-// operator what to do: correct the result with a winner for needs_winner, or
-// correct the default win from the match's score editor for
-// default_win_stands.
-func respondSuperseded(c *gin.Context, heldGroups []string, heldReason, heldDecision string) {
+// stored change, "match_closed" when a finish or a decision stamped before the
+// write had already closed the match (the closed-match rule). It is still not
+// lost and still never wins a retry, so it keeps the same applied:false
+// superseded shape, with heldReason and its own message (messageForHeldReason)
+// telling the operator the match is finished and to use Correct result.
+func respondSuperseded(c *gin.Context, heldGroups []string, heldReason string) {
 	// LOGGED because this is the one successful-looking response whose work
 	// an operator does not see on the match. Since bc-mrgc the held values are
 	// in the match's history, but the line still names the request, which is
@@ -2753,10 +2742,7 @@ func respondSuperseded(c *gin.Context, heldGroups []string, heldReason, heldDeci
 	}
 	if heldReason != "" {
 		body["heldReason"] = heldReason
-		body["message"] = messageForHeldReason(heldReason, heldDecision)
-		if heldDecision != "" {
-			body["heldDecision"] = heldDecision
-		}
+		body["message"] = messageForHeldReason(heldReason)
 	}
 	c.JSON(http.StatusOK, body)
 }
@@ -2766,52 +2752,28 @@ func respondSuperseded(c *gin.Context, heldGroups []string, heldReason, heldDeci
 // match's history (bc-mrgc), not lost.
 const SupersededMessage = "Not applied: a newer change to this match is already recorded. This change was kept in the match's history."
 
-// NeedsWinnerMessage is the sentence a write is answered with when its change
-// was held because it would leave a finished match without the winner it
-// needs (R4, operator ruling 2026-10-04): a knockout match left tied, or an
-// engi match left with no valid flag count.
-const NeedsWinnerMessage = "Not applied: this change would leave the finished match without a winner, and it needs one. Correct the result with a winner. This change was kept in the match's history."
+// MatchClosedMessage is the sentence a write is answered with when its
+// scoring was turned away because a finish or a decision stamped before it had
+// already closed the match (the closed-match rule, operator ruling
+// 2026-10-15). The score-events door answers a tap with the same words; the
+// engine owns them.
+const MatchClosedMessage = engine.MatchClosedMessage
 
-// DefaultWinStandsMessage builds the sentence a write is answered with when
-// its scoring, or its overtime, was held because decision -- a kiken, a
-// fusenpai, or a fusensho awarded because the OTHER side is barred by a
-// DIFFERENT match -- already closed the match (bc-mrgc). Unlike
-// NeedsWinnerMessage above, the match already has the winner it needs, so
-// this does not ask for a correction with one; the remedy is to correct
-// that decision from the match's score editor, which sends the held
-// scoring on as the real result. The sentence names no specific button:
-// which control does that depends on the match's format (team vs
-// individual, kachinuki or not) and is owned by admin_scoring_shared.jsx.
-// Kendo has no shared word for this class of result, so the sentence names
-// the one decision that closed the match rather than reaching for a
-// generic label (operator ruling 2026-10-04).
-func DefaultWinStandsMessage(decision string) string {
-	word := domain.DecisionWord(decision)
-	if word == "" {
-		word = "decision"
-	}
-	return fmt.Sprintf("Not applied: this match was closed with a %s, so this change was kept in the match's history. To change the result, correct the %s from the match's score editor.", word, word)
-}
-
-// messageForHeldReason is the one place a heldReason code (plus, for a
-// default-win hold, the decision that closed the match) is turned into the
+// messageForHeldReason is the one place a heldReason code is turned into the
 // operator sentence that goes with it: respondSuperseded and the bulk-score
 // path (which cannot share its JSON body) both read it, so the two can never
-// say something different about the same code. NeedsWinnerMessage is the
-// default for a non-empty reason this binary does not otherwise recognise,
-// since every heldReason answer today needs a message and the two known
-// codes are exhaustive otherwise.
-func messageForHeldReason(heldReason, heldDecision string) string {
-	if heldReason == state.HeldReasonDefaultWinStands {
-		return DefaultWinStandsMessage(heldDecision)
+// say something different about the same code.
+func messageForHeldReason(heldReason string) string {
+	if heldReason == state.HeldReasonMatchClosed {
+		return MatchClosedMessage
 	}
-	return NeedsWinnerMessage
+	return SupersededMessage
 }
 
 // writesOverFinished reports whether a write of this status, over a finished
 // match, is a correction to it rather than a start: a completed correction, or
-// a running or scheduled write whose changes apply to the finished match
-// (bc-mrgc, R3). Neither takes the court.
+// a running or scheduled write that the closed-match rule turns away (it is
+// answered match_closed, not refused for the court). Neither takes the court.
 func writesOverFinished(status state.MatchStatus) bool {
 	return status == state.MatchStatusCompleted || status == state.MatchStatusRunning || status == state.MatchStatusScheduled
 }
@@ -3010,8 +2972,8 @@ func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult, comp *state
 		// stored is the finish already recorded, sent again because its
 		// answer was lost: the engine answers it as recorded and writes
 		// nothing (engine.ExactScoreReplay, bc-xrpl). A group changed since
-		// (a later point from another board, R3/S2) is held by the merge and
-		// lands nothing, so it is not the resend's to differ in. A same-stamp
+		// (a later point from another board) is turned away by the closed-match
+		// rule and lands nothing, so it is not the resend's to differ in. A same-stamp
 		// write that differs where it would land is a correction, and still
 		// needs its reason. comp tells the probe a kachinuki or engi write,
 		// which the write path shapes before the merge.
@@ -3277,15 +3239,13 @@ func scoreResponseWithReopened(result *state.MatchResult, reopened []engine.Reop
 
 // withHeldGroups adds to a write's answer what the merge did not apply or
 // moved (bc-mrgc): heldGroups, the groups kept in the match's history because
-// a newer change to each is stored (or, with heldReason "needs_winner",
-// because applying them would have left the match without the winner it
-// needs, R4); displacedGroups, stored newer scoring this write moved to the
-// history (S2 with R4, answered with heldReason "needs_winner"), or a
+// a newer change to each is stored (or, with heldReason "match_closed",
+// because a finish or a decision stamped before them had closed the match);
+// displacedGroups, stored scoring stamped after this write's result that it
+// closed out into the history (answered with heldReason "match_closed"), or a
 // representative pick stamped after the representative bout's removal that the
-// removal moved (answered with NO heldReason); heldReason itself; and, when
-// heldReason is
-// "default_win_stands", heldDecision naming the decision that closed the
-// match. The ONE owner of those four keys: the score answer, the
+// removal moved (answered with NO heldReason); and heldReason itself. The
+// ONE owner of those three keys: the score answer, the
 // representative-bout add and remove (handlers_daihyosen.go) and each
 // bulk-score entry build theirs here. The rest of the answer is applied, so
 // it still reads as applied.
@@ -3298,9 +3258,6 @@ func withHeldGroups(body gin.H, rep *state.MergeReport) gin.H {
 	}
 	if reason := rep.HeldReason(); reason != "" {
 		body["heldReason"] = reason
-		if decision := rep.HeldDecision(); decision != "" {
-			body["heldDecision"] = decision
-		}
 	}
 	return body
 }
@@ -3491,9 +3448,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// start gate still runs there and its eligibility/simultaneity checks
 		// are preserved.
 		//
-		// A running or scheduled write over a finished match is a correction
-		// too (bc-mrgc, R3): its changes apply to the finished match, which
-		// stays finished, so it takes no court either. That puts the store
+		// A running or scheduled write over a finished match takes no court
+		// either: the closed-match rule turns it away, so it must reach the
+		// merge to be answered match_closed. That puts the store
 		// read on the live-scoring path, where it is a cached read. A stale
 		// read there can only say "completed" for a match a reopen has just put
 		// back to running, and that match already holds its court.
@@ -3599,13 +3556,13 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 					return nil
 				}
 				// A running- or scheduled-status write over a finished match
-				// never reverts it (bc-mrgc, R3): such a write never carries the
-				// result group (engine.runningOverFinished), so the match stays
-				// finished. Its scoring changes apply to the finished match when
-				// they were made after the result was recorded (the winner is
-				// worked out again), and are held in the match's history when
-				// made before it, e.g. an autosave queued before Finish and
-				// flushed afterwards, which answers superseded. There is still no
+				// never reverts it: such a write never carries the result group
+				// (engine.runningOverFinished), so the match stays finished.
+				// Its scoring changes are turned away when they were made after
+				// the result was recorded (the closed-match rule: they are kept
+				// in the history and answered match_closed), and are ordered by
+				// their stamp when made before it, e.g. an autosave queued before
+				// Finish and flushed afterwards. There is still no
 				// sanctioned way to send a COMPLETED match back to the queue.
 				// The StartMatchTx eligibility/simultaneity gate keys off the
 				// RACE-FREE in-tx status, not the pre-tx cache read: `isCorrection`
@@ -3699,7 +3656,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// the shape the override endpoint already uses for this exact
 				// condition, and the client keys on it.
 
-				respondSuperseded(c, result.Merge.HeldGroups(), result.Merge.HeldReason(), result.Merge.HeldDecision())
+				respondSuperseded(c, result.Merge.HeldGroups(), result.Merge.HeldReason())
 				return
 			}
 			var refusal *selfRunRefusal

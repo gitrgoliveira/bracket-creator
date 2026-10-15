@@ -65,7 +65,9 @@ type MatchHistoryEntry struct {
 	// that would leave a finished match without the winner it needs. Empty
 	// when each group was judged by its own stamp.
 	Reason string `json:"reason,omitempty"`
-	// ClearedWithdrawal is the result a later scoring change cleared (R2).
+	// ClearedWithdrawal is the result a later scoring change cleared (R2,
+	// replaced by the closed-match rule). Read from entries recorded before it;
+	// no longer written.
 	ClearedWithdrawal json.RawMessage `json:"clearedWithdrawal,omitempty"`
 	// Event is the score event (one tap) a door "event" entry records
 	// (bc-evts), and EventOutcome what the replay made of it (one of the

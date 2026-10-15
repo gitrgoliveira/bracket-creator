@@ -97,13 +97,6 @@ const (
 	// ScoreOutcomeBeforeBaseline: the event was made before a baseline that
 	// was built without it (D5), so the baseline's value stands.
 	ScoreOutcomeBeforeBaseline = "beforeBaseline"
-	// ScoreOutcomeNeedsWinner: the event would leave a finished knockout
-	// match tied, or an engi match with no valid count (R4), and no later
-	// event gives the match its winner.
-	ScoreOutcomeNeedsWinner = "needsWinner"
-	// ScoreOutcomeDefaultWinStands: a kiken, fusenpai or fusensho closed the
-	// match and this event cannot replace it (R2).
-	ScoreOutcomeDefaultWinStands = "defaultWinStands"
 	// ScoreOutcomeMatchClosed: a finish or a decision stamped BEFORE this tap
 	// closed the match; a tap stamped after it is kept in the history and
 	// changes nothing. Correct the result to change a closed match.

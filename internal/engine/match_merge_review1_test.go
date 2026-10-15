@@ -54,14 +54,19 @@ func TestMerge_DaihyosenDecisionIsOrderedAgainstNewerPoints(t *testing.T) {
 			require.NoError(t, decide(h1))
 			h2 := mmIndividual(t, knockout)
 			require.NoError(t, decide(h2))
-			require.NoError(t, point(h2))
+			require.ErrorIs(t, point(h2), ErrMatchSuperseded, "the point is stamped after the decision: turned away")
 
 			s1, s2 := mmReviewState(t, h1), mmReviewState(t, h2)
 			assert.Equal(t, s2, s1, "by %s: both arrival orders end alike", by)
 			g := h1.load(t)
 			assert.Equal(t, state.MatchStatusCompleted, g.Status)
-			assert.Equal(t, wrTeamA, g.Winner, "by %s: the verdict agrees with the scoreline Ryu M-0", by)
-			assert.Equal(t, []string{"M"}, g.IpponsA)
+			assert.Equal(t, by, g.DecisionBy)
+			want := wrTeamA
+			if by == "aka" {
+				want = wrTeamB
+			}
+			assert.Equal(t, want, g.Winner, "by %s: the decision's verdict, not the later point's", by)
+			assert.NotContains(t, g.IpponsA, "M", "the point stamped after the decision is not in the match")
 		}
 	})
 }
@@ -74,13 +79,12 @@ func TestMerge_HanteiEchoIsNotHeld(t *testing.T) {
 		h1 := mmIndividual(t, knockout)
 		require.NoError(t, h1.write(mmReviewFinish(h1, mmT1, wrTeamA, []string{"Ht"}, nil)))
 		w := mmReviewPoint(h1, mmT2, nil, nil)
-		require.NoError(t, h1.write(w), "the carried-hantei echo is applied, not superseded")
-		if assert.NotNil(t, w.Merge) {
-			assert.Empty(t, w.Merge.Held, "an echo is no hold")
-		}
+		err := h1.write(w)
+		require.ErrorIs(t, err, ErrMatchSuperseded, "a scoring write after the finish is turned away, echo or not")
+		assert.Equal(t, state.HeldReasonMatchClosed, HeldReasonOf(err))
 
 		h2 := mmIndividual(t, knockout)
-		require.NoError(t, h2.write(mmReviewPoint(h2, mmT2, nil, nil)))
+		require.NoError(t, h2.write(mmReviewPoint(h2, mmT2, nil, nil)), "on a running match it is an ordinary write")
 		require.NoError(t, h2.write(mmReviewFinish(h2, mmT1, wrTeamA, []string{"Ht"}, nil)))
 		assert.Equal(t, mmReviewState(t, h2), mmReviewState(t, h1))
 		assert.Equal(t, []string{"Ht"}, h1.load(t).IpponsA, "the judges' mark stays")
@@ -98,14 +102,15 @@ func TestMerge_BareHikiwakeOverNewerScoringTakesItsVerdict(t *testing.T) {
 	h1 := mmIndividual(t, false)
 	require.NoError(t, h1.write(mmReviewPoint(h1, mmT2, []string{"M"}, nil)))
 	w := hik(h1)
-	require.NoError(t, h1.write(w), "not held as needing a winner")
+	require.NoError(t, h1.write(w), "the draw is the result: it applies over scoring stamped after it")
 	h2 := mmIndividual(t, false)
 	require.NoError(t, h2.write(hik(h2)))
-	require.NoError(t, h2.write(mmReviewPoint(h2, mmT2, []string{"M"}, nil)))
+	require.ErrorIs(t, h2.write(mmReviewPoint(h2, mmT2, []string{"M"}, nil)), ErrMatchSuperseded, "and the point stamped after it is turned away")
 	assert.Equal(t, mmReviewState(t, h2), mmReviewState(t, h1))
 	g := h1.load(t)
 	assert.Equal(t, state.MatchStatusCompleted, g.Status)
-	assert.Equal(t, wrTeamA, g.Winner, "Ryu leads M-0: the draw gives way to the newer scoring")
+	assert.Equal(t, state.DecisionDraw, g.Decision, "the draw stands: the newer scoring is closed out")
+	assert.Empty(t, g.Winner)
 }
 
 // A load-time repair fills ids (a winner's, a bout's members) on a match whose

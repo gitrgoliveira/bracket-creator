@@ -304,12 +304,12 @@ func TestScoreHandler_ExactResendAfterALaterPointIsAnsweredAsRecorded(t *testing
 	for _, tc := range []struct {
 		name         string
 		knockout     bool
-		pointArrives string // "after" (R3) or "before" (S2) the finish
+		pointArrives string // "after" or "before" the finish reaches the server
 	}{
-		{name: "pool, R3", pointArrives: "after"},
-		{name: "knockout, R3", knockout: true, pointArrives: "after"},
-		{name: "pool, S2", pointArrives: "before"},
-		{name: "knockout, S2", knockout: true, pointArrives: "before"},
+		{name: "pool, point after", pointArrives: "after"},
+		{name: "knockout, point after", knockout: true, pointArrives: "after"},
+		{name: "pool, point before", pointArrives: "before"},
+		{name: "knockout, point before", knockout: true, pointArrives: "before"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			const compID = "exact-replay-later-point"
@@ -330,13 +330,13 @@ func TestScoreHandler_ExactResendAfterALaterPointIsAnsweredAsRecorded(t *testing
 			require.Equal(t, http.StatusOK, w.Code, "the finish lands: %s", w.Body.String())
 			if tc.pointArrives == "after" {
 				w = serveJSON(r, "PUT", url, exactReplayLaterPoint(at+3_000))
-				require.Equal(t, http.StatusOK, w.Code, "R3: the later point applies to the finished match: %s", w.Body.String())
+				require.Equal(t, http.StatusOK, w.Code, "the later point is turned away with a 200: %s", w.Body.String())
 			}
 			versionBefore := store.FileVersion(compID, file)
 
 			out := requireAnsweredAsRecorded(t, serveJSON(r, "PUT", url, finish()), store, compID, file, versionBefore)
 			assert.Equal(t, mgAlice, out["winner"])
-			assert.Equal(t, []any{"M", "K"}, out["ipponsA"], "the answer is the match as stored, the later point included")
+			assert.Equal(t, []any{"M"}, out["ipponsA"], "the answer is the match as stored: the point stamped after the finish is not in it")
 		})
 	}
 }

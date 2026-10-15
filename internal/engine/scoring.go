@@ -763,7 +763,8 @@ func firstForceOptions(opts []ForceOptions) ForceOptions {
 // force (bc-kcdg) reaches ONLY the bracket branch's downstream-knockout-
 // correction guard; the pool branch has no equivalent concept and ignores it.
 func (e *Engine) writeToPoolOrBracket(h state.StoreTx, compId, matchId string, result *state.MatchResult, policy matchWritePolicy, force bool, comp *state.Competition) (mismatch bool, reopened []ReopenedMatch, inherited bool, err error) {
-	// The merge needs the competition to work a winner out again (R3), so a
+	// The merge needs the competition to judge the write (engi, team,
+	// kachinuki), so a
 	// forward write whose caller did not load it loads it here.
 	if comp == nil && policy == matchWriteForward {
 		if comp, err = h.LoadCompetition(compId); err != nil {
@@ -2753,7 +2754,7 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 				continue
 			}
 			// The stored pairing first, as the pool branch does it: the
-			// merge works a winner out again from the merged match (R3, S2),
+			// merge judges the write against the merged match,
 			// and a payload that omits its sides would otherwise read as one
 			// with no sides at all (bc-mrgc review S6).
 			if sidesBeforeMerge(bm, result, policy) {
@@ -2804,10 +2805,9 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 			// Propagate only a genuinely completed result. A "running" update is
 			// for live-status display, so the next round's SideA/SideB must stay
 			// empty until the match has a final result. A correction never
-			// puts a finished knockout match back to running: one that would
-			// leave it tied is held by the merge (R4, operator ruling
-			// 2026-10-04), so the match keeps its finish and its advanced
-			// winner.
+			// puts a finished knockout match back to running: scoring stamped
+			// after the result is turned away by the merge (the closed-match
+			// rule), so the match keeps its finish and its advanced winner.
 			var reopened []ReopenedMatch
 			if bracket.Rounds[rIdx][mIdx].Status == state.MatchStatusCompleted {
 				e.propagateBracketWinner(bracket, rIdx, mIdx)

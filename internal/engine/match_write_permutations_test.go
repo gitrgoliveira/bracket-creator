@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"slices"
@@ -53,6 +54,11 @@ func pmState(h mmHome, t *testing.T) string {
 	sort.Strings(ks)
 	st := ""
 	for _, k := range ks {
+		// A stamp on a group that holds nothing orders nothing (a decision's
+		// echo of "no overtime"), so it is not part of the outcome.
+		if bytes.Equal(state.GroupValue(&g, k), state.GroupValue(&state.MatchResult{}, k)) {
+			continue
+		}
 		st += fmt.Sprintf("%s@%d ", k, (g.GroupStamps[k]-mmT0)/60000)
 	}
 	subs := ""
@@ -141,11 +147,28 @@ func pmAnswer(err error) string {
 	return "error:" + err.Error()
 }
 
+// pmWrite sends a score write and names its answer: applied, partial (applied
+// with groups held) or superseded, each with the heldReason it carries.
+func pmWrite(h mmHome, w *state.MatchResult) string {
+	_, err := h.eng.RecordMatchResultWithIneligibility(h.compID, h.matchID, w)
+	return pmWriteAnswer(w, err)
+}
+
+func pmWriteAnswer(w *state.MatchResult, err error) string {
+	if err != nil {
+		return pmAnswer(err)
+	}
+	if w.Merge != nil && len(w.Merge.HeldGroups()) > 0 {
+		return "partial:" + w.Merge.HeldReason()
+	}
+	return "applied"
+}
+
 func pmPt(at int64, a, b []string) pmStep {
 	return pmStep{at: at, role: pmTap, run: func(h mmHome) string {
 		w := mmRunning(h, at, state.GroupPoints)
 		w.IpponsA, w.IpponsB = a, b
-		return pmAnswer(h.write(w))
+		return pmWrite(h, w)
 	}}
 }
 
@@ -156,7 +179,7 @@ func pmFin(at int64, win string, a, b []string, own ...string) pmStep {
 		if own != nil {
 			w.Basis = &state.ScoreBasis{Own: own}
 		}
-		return pmAnswer(h.write(w))
+		return pmWrite(h, w)
 	}}
 }
 
@@ -165,7 +188,7 @@ func pmBareInd(at int64, win string, a, b []string) pmStep {
 	return pmStep{at: at, role: pmRes, run: func(h mmHome) string {
 		w := mmRunning(h, at, state.GroupResult)
 		w.Status, w.Winner, w.IpponsA, w.IpponsB = state.MatchStatusCompleted, win, a, b
-		return pmAnswer(h.write(w))
+		return pmWrite(h, w)
 	}}
 }
 
@@ -176,7 +199,7 @@ func pmBareFin(at int64, win string, own ...string) pmStep {
 		w := mmRunning(h, at, state.GroupResult)
 		w.Status, w.Winner = state.MatchStatusCompleted, win
 		w.Basis = &state.ScoreBasis{Own: own}
-		return pmAnswer(h.write(w))
+		return pmWrite(h, w)
 	}}
 }
 
@@ -185,14 +208,14 @@ func pmBareTeam(at int64, win string, subs ...state.SubMatchResult) pmStep {
 	return pmStep{at: at, role: pmRes, run: func(h mmHome) string {
 		w := mmRunning(h, at, state.GroupResult)
 		w.Status, w.Winner, w.SubResults = state.MatchStatusCompleted, win, subs
-		return pmAnswer(h.write(w))
+		return pmWrite(h, w)
 	}}
 }
 
 func pmDec(at int64, d, by string) pmStep {
 	return pmStep{at: at, role: pmRes, run: func(h mmHome) string {
-		_, _, e := h.eng.RecordDecision(h.compID, h.matchID, d, by, "", nil, at)
-		return pmAnswer(e)
+		res, _, e := h.eng.RecordDecision(h.compID, h.matchID, d, by, "", nil, at)
+		return pmWriteAnswer(res, e)
 	}}
 }
 
@@ -208,7 +231,7 @@ func pmBout(at int64, pos int, a, b []string, win string) pmStep {
 	return pmStep{at: at, role: pmTap, run: func(h mmHome) string {
 		w := mmRunning(h, at, state.BoutGroup(pos))
 		w.SubResults = []state.SubMatchResult{{Position: pos, SideA: wrTeamA, SideB: wrTeamB, IpponsA: a, IpponsB: b, Winner: win}}
-		return pmAnswer(h.write(w))
+		return pmWrite(h, w)
 	}}
 }
 
@@ -235,7 +258,7 @@ func pmTeamFin(at int64, win string, own []string, subs ...state.SubMatchResult)
 		if own != nil {
 			w.Basis = &state.ScoreBasis{Own: own}
 		}
-		return pmAnswer(h.write(w))
+		return pmWrite(h, w)
 	}}
 }
 
@@ -350,7 +373,7 @@ func pmArrivalCheck(s pmStep, arrived []pmStep, ans string) string {
 			return fmt.Sprintf("a scoring write stamped %d with a result before it arrived=%v answered %q", s.at, closed, ans)
 		}
 	case pmRes:
-		if newerResult != strings.HasPrefix(ans, "superseded") {
+		if newerResult != (strings.HasPrefix(ans, "superseded") || strings.HasPrefix(ans, "partial")) {
 			return fmt.Sprintf("a result stamped %d with a newer result arrived=%v answered %q", s.at, newerResult, ans)
 		}
 	}
@@ -376,8 +399,11 @@ func pmFinalCheck(c pmCase, h mmHome) []string {
 		switch {
 		case closed && got != domain.ScoreOutcomeMatchClosed:
 			bad = append(bad, fmt.Sprintf("tap %s should end matchClosed, ended %q", s.id, got))
-		case !closed && later && got != domain.ScoreOutcomeRecorded && got != domain.ScoreOutcomeBeforeBaseline:
-			bad = append(bad, fmt.Sprintf("tap %s should end recorded or beforeBaseline, ended %q", s.id, got))
+		case !closed && later && got != domain.ScoreOutcomeApplied && got != domain.ScoreOutcomeRecorded && got != domain.ScoreOutcomeBeforeBaseline:
+			// Before the result: in a group it sets, the basis decides
+			// (recorded, or beforeBaseline); in one it leaves alone, the tap
+			// stands (applied).
+			bad = append(bad, fmt.Sprintf("tap %s should end applied, recorded or beforeBaseline, ended %q", s.id, got))
 		case !closed && !later && got != domain.ScoreOutcomeApplied:
 			bad = append(bad, fmt.Sprintf("tap %s should end applied, ended %q", s.id, got))
 		}

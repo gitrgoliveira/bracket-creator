@@ -27,7 +27,8 @@ const (
 	// never bound from a body, so no client can name it.
 	DoorEvent = "event"
 	// DoorDisplaced names a history entry for a stored change an earlier-
-	// stamped write arriving after it moved to the history (S2 with R4): the
+	// stamped result arriving after it closed out into the history (the
+	// closed-match rule): the
 	// change came through some door before; this entry records it held.
 	DoorDisplaced = "displaced"
 
@@ -101,16 +102,15 @@ func (e *Engine) recordWriteHistory(h state.StoreTx, compID, matchID string, res
 		outcomes[g] = state.HistoryOutcomeHeld
 	}
 	entry := state.MatchHistoryEntry{
-		MatchID:           matchID,
-		Door:              doorOf(result),
-		Stamp:             rep.Stamp,
-		ReceivedAt:        time.Now().UnixMilli(),
-		Session:           result.RevSession,
-		Changed:           rep.Changed,
-		Outcomes:          outcomes,
-		Held:              rep.HeldValues,
-		Reason:            rep.HoldReason,
-		ClearedWithdrawal: rep.ClearedWithdrawal,
+		MatchID:    matchID,
+		Door:       doorOf(result),
+		Stamp:      rep.Stamp,
+		ReceivedAt: time.Now().UnixMilli(),
+		Session:    result.RevSession,
+		Changed:    rep.Changed,
+		Outcomes:   outcomes,
+		Held:       rep.HeldValues,
+		Reason:     rep.HoldReason,
 	}
 	if err := h.AppendMatchHistory(compID, entry); err != nil {
 		log.Printf("engine: match %s/%s: history entry not recorded: %v", compID, matchID, err)
@@ -278,15 +278,9 @@ type SupersededError struct {
 	Held []string
 	// HeldReason is the merge report's code for why they were held
 	// (state.MergeReport.HeldReason): "" for a newer stored change,
-	// state.HeldReasonNeedsWinner when applying them would have left the
-	// match without the winner it needs.
+	// state.HeldReasonMatchClosed when a finish or a decision stamped before
+	// the write had already closed the match.
 	HeldReason string
-	// HeldDecision is the decision code (state.MergeReport.HeldDecision,
-	// e.g. "fusensho", "kiken-voluntary") that closed the match when
-	// HeldReason is state.HeldReasonDefaultWinStands; "" otherwise. Lets the
-	// handlers name the decision on the wire (heldDecision) instead of the
-	// eliminated "default win" umbrella term.
-	HeldDecision string
 }
 
 func (e *SupersededError) Error() string { return ErrMatchSuperseded.Error() }
@@ -297,9 +291,8 @@ func (e *SupersededError) Is(target error) bool { return target == ErrMatchSuper
 // supersededBy is the error a write whose every change was held returns.
 func supersededBy(result *state.MatchResult) error {
 	return &SupersededError{
-		Held:         result.Merge.HeldGroups(),
-		HeldReason:   result.Merge.HeldReason(),
-		HeldDecision: result.Merge.HeldDecision(),
+		Held:       result.Merge.HeldGroups(),
+		HeldReason: result.Merge.HeldReason(),
 	}
 }
 
@@ -309,16 +302,6 @@ func HeldReasonOf(err error) string {
 	var se *SupersededError
 	if errors.As(err, &se) {
 		return se.HeldReason
-	}
-	return ""
-}
-
-// HeldDecisionOf returns the decision code a superseded write's default-win
-// hold named (see SupersededError.HeldDecision), or "".
-func HeldDecisionOf(err error) string {
-	var se *SupersededError
-	if errors.As(err, &se) {
-		return se.HeldDecision
 	}
 	return ""
 }

@@ -2,7 +2,7 @@
  "comment": "bc-evts: the score event replay, pinned in Go (TestReplayScoring_GoldenTable, internal/engine/score_replay_golden_test.go) and mirrored in JS by the cases marked jsMirror. Each case's lines are replayed after its head in EVERY order; want.match lists only the fields it pins (wire names), want.outcomes each event id's outcomes, sorted.",
  "cases": [
   {
-   "name": "headline: a tying point after a finish waits for the point that gives the winner",
+   "name": "headline: taps after a finish are turned away, in every order they arrive",
    "jsMirror": true,
    "shape": {
     "kind": "individual",
@@ -112,40 +112,33 @@
      "winner": "Aka",
      "winnerId": "pa",
      "ipponsA": [
-      "M",
-      "D"
+      "M"
      ],
-     "ipponsB": [
-      "K"
-     ],
+     "ipponsB": [],
      "markIds": {
       "a": [
-       "b:m0:0:a:0",
-       "e2"
-      ],
-      "b": [
-       "e1"
+       "b:m0:0:a:0"
       ]
      },
      "groupStamps": {
-      "points": 102,
+      "points": 100,
       "result": 100
      },
      "scoreVersion": 4,
-     "modifiedAt": 102
+     "modifiedAt": 100
     },
     "outcomes": {
      "e1": [
-      "applied"
+      "matchClosed"
      ],
      "e2": [
-      "applied"
+      "matchClosed"
      ]
     }
    }
   },
   {
-   "name": "headline without the winning point: the tie needs a winner",
+   "name": "a tap after a finish is turned away and changes nothing",
    "jsMirror": true,
    "shape": {
     "kind": "individual",
@@ -259,7 +252,7 @@
     },
     "outcomes": {
      "e1": [
-      "needsWinner"
+      "matchClosed"
      ]
     }
    }
@@ -934,7 +927,7 @@
    }
   },
   {
-   "name": "points after a kiken that give a winner clear it",
+   "name": "a tap after a kiken is turned away: the kiken stands",
    "jsMirror": true,
    "shape": {
     "kind": "individual",
@@ -1007,30 +1000,31 @@
    "want": {
     "match": {
      "status": "completed",
-     "winner": "Shiro",
-     "decision": "",
-     "ipponsA": [],
+     "winner": "Aka",
+     "decision": "kiken-voluntary",
+     "ipponsA": [
+      "○",
+      "○"
+     ],
      "ipponsB": [
-      "M",
-      "K"
+      "M"
      ],
      "groupStamps": {
-      "points": 110,
-      "result": 110
+      "points": 100,
+      "result": 100
      },
      "scoreVersion": 2,
-     "modifiedAt": 110
+     "modifiedAt": 100
     },
     "outcomes": {
      "e": [
-      "applied"
+      "matchClosed"
      ]
-    },
-    "clearedWithdrawal": true
+    }
    }
   },
   {
-   "name": "a tie after a kiken waits, then a winner clears it in every order",
+   "name": "two taps after a kiken are both turned away, in every order",
    "jsMirror": true,
    "shape": {
     "kind": "individual",
@@ -1115,31 +1109,30 @@
    "want": {
     "match": {
      "winner": "Aka",
-     "decision": "",
+     "decision": "kiken-voluntary",
      "ipponsA": [
-      "M",
-      "K"
+      "○",
+      "○"
      ],
      "scoreVersion": 3,
-     "modifiedAt": 111,
+     "modifiedAt": 100,
      "groupStamps": {
-      "points": 111,
-      "result": 111
+      "points": 100,
+      "result": 100
      }
     },
     "outcomes": {
      "tie": [
-      "applied"
+      "matchClosed"
      ],
      "win": [
-      "applied"
+      "matchClosed"
      ]
-    },
-    "clearedWithdrawal": true
+    }
    }
   },
   {
-   "name": "overtime alone never clears a kiken",
+   "name": "overtime after a kiken is turned away too",
    "jsMirror": true,
    "shape": {
     "kind": "individual",
@@ -1219,13 +1212,13 @@
     },
     "outcomes": {
      "e": [
-      "defaultWinStands"
+      "matchClosed"
      ]
     }
    }
   },
   {
-   "name": "a fusensho stands whatever is scored",
+   "name": "a tap after a fusensho is turned away",
    "jsMirror": true,
    "shape": {
     "kind": "individual",
@@ -1306,13 +1299,13 @@
     },
     "outcomes": {
      "e": [
-      "defaultWinStands"
+      "matchClosed"
      ]
     }
    }
   },
   {
-   "name": "a hantei stays while its tie stands and goes when a point unties it",
+   "name": "a foul and a point after a finish with a hantei are turned away: the hantei stands",
    "jsMirror": true,
    "shape": {
     "kind": "individual",
@@ -1394,42 +1387,42 @@
    ],
    "want": {
     "match": {
-     "winner": "Shiro",
+     "winner": "Aka",
      "ipponsA": [
-      "M"
+      "M",
+      "Ht"
      ],
      "ipponsB": [
-      "K",
-      "D"
+      "K"
      ],
      "markIds": {
       "a": [
-       "b:m0:0:a:0"
+       "b:m0:0:a:0",
+       "b:m0:0:a:1"
       ],
       "b": [
-       "b:m0:0:b:0",
-       "k"
+       "b:m0:0:b:0"
       ]
      },
      "scoreVersion": 3,
-     "modifiedAt": 111,
+     "modifiedAt": 100,
      "groupStamps": {
-      "points": 111,
-      "result": 111
+      "points": 100,
+      "result": 100
      }
     },
     "outcomes": {
      "f": [
-      "applied"
+      "matchClosed"
      ],
      "k": [
-      "applied"
+      "matchClosed"
      ]
     }
    }
   },
   {
-   "name": "an engi count that is not valid waits for one that is",
+   "name": "flags counted after an engi finish are turned away",
    "jsMirror": true,
    "shape": {
     "kind": "engi",
@@ -1503,21 +1496,21 @@
    ],
    "want": {
     "match": {
-     "flagsB": 3,
-     "winner": "Shiro",
+     "flagsB": 1,
+     "winner": "Aka",
      "scoreVersion": 3,
-     "modifiedAt": 111,
+     "modifiedAt": 100,
      "groupStamps": {
-      "flags": 111,
-      "result": 111
+      "flags": 100,
+      "result": 100
      }
     },
     "outcomes": {
      "b1": [
-      "applied"
+      "matchClosed"
      ],
      "b2": [
-      "applied"
+      "matchClosed"
      ]
     }
    }
@@ -2089,12 +2082,11 @@
      "old": [
       "beforeBaseline"
      ]
-    },
-    "clearedWithdrawal": false
+    }
    }
   },
   {
-   "name": "a fusensho cache: an older event is before the baseline, a newer one meets the fusensho",
+   "name": "a fusensho cache: an older event is before the baseline, a newer one is turned away",
    "jsMirror": true,
    "shape": {
     "kind": "individual",
@@ -2246,13 +2238,12 @@
     },
     "outcomes": {
      "new": [
-      "defaultWinStands"
+      "matchClosed"
      ],
      "old": [
       "beforeBaseline"
      ]
-    },
-    "clearedWithdrawal": false
+    }
    }
   },
   {
@@ -2516,8 +2507,7 @@
      "r": [
       "applied"
      ]
-    },
-    "clearedWithdrawal": false
+    }
    }
   },
   {
@@ -2769,8 +2759,7 @@
      "m": [
       "applied"
      ]
-    },
-    "clearedWithdrawal": false
+    }
    }
   }
  ]

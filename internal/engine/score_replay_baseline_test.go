@@ -63,18 +63,22 @@ func TestReplay_BaselineGroupsReplayAtTheirOwnStamps(t *testing.T) {
 
 func TestReplay_SnapshotOnAFinishedMatch(t *testing.T) {
 	ko := ReplayShape{Knockout: true}
-	t.Run("R3: a later point applies and the winner is worked out again", func(t *testing.T) {
+	t.Run("a snapshot stamped after the finish is turned away", func(t *testing.T) {
 		m := finishedKnockout(true, []string{"M"}, nil)
 		m.ModifiedAt = 100
 		snap := snapLine("snap", 200, func(s *state.MatchResult) { s.IpponsA, s.IpponsB = []string{"M"}, []string{"K", "K"} }, state.GroupPoints)
 		r := ReplayScoring(m, append(migrated(m), snap), ko)
 		assert.Equal(t, state.MatchStatusCompleted, r.Match.Status, "the match stays finished")
-		assert.Equal(t, "Shiro", r.Match.Winner)
-		assert.Equal(t, "pb", r.Match.WinnerID)
-		assert.Equal(t, int64(200), r.Match.GroupStamps[state.GroupResult], "the verdict moved with the point")
-		assert.Empty(t, r.Held)
+		assert.Equal(t, "Aka", r.Match.Winner)
+		assert.Equal(t, []string{"M"}, r.Match.IpponsA)
+		assert.Empty(t, r.Match.IpponsB)
+		assert.Equal(t, int64(100), r.Match.GroupStamps[state.GroupResult])
+		require.Contains(t, r.Held, 1)
+		assert.Equal(t, []string{state.GroupPoints}, r.Held[1].Groups)
+		assert.True(t, r.Held[1].MatchClosed)
+		assert.Equal(t, HoldReasonMatchClosed, r.Held[1].Reason)
 	})
-	t.Run("R3: a snapshot made before the finish is the finish's to decide", func(t *testing.T) {
+	t.Run("a snapshot made before the finish is the finish's to decide", func(t *testing.T) {
 		m := finishedKnockout(true, []string{"M"}, nil)
 		m.ModifiedAt = 200
 		snap := snapLine("snap", 150, func(s *state.MatchResult) { s.IpponsB = []string{"K", "K"} }, state.GroupPoints)
@@ -83,7 +87,7 @@ func TestReplay_SnapshotOnAFinishedMatch(t *testing.T) {
 		assert.Empty(t, r.Match.IpponsB, "the finish declared the scoreline it stood on")
 		assert.Equal(t, "Aka", r.Match.Winner)
 	})
-	t.Run("R4: a knockout tie is not applied, the finish stands", func(t *testing.T) {
+	t.Run("a tie after the finish is turned away: a knockout and a pool alike", func(t *testing.T) {
 		m := finishedKnockout(true, []string{"M"}, nil)
 		m.ModifiedAt = 100
 		snap := snapLine("snap", 200, func(s *state.MatchResult) { s.IpponsA, s.IpponsB = []string{"M"}, []string{"K"} }, state.GroupPoints)
@@ -91,20 +95,16 @@ func TestReplay_SnapshotOnAFinishedMatch(t *testing.T) {
 		assert.Empty(t, r.Match.IpponsB)
 		assert.Equal(t, "Aka", r.Match.Winner)
 		require.Contains(t, r.Held, 1)
-		assert.Equal(t, []string{state.GroupPoints}, r.Held[1].Groups)
-		assert.True(t, r.Held[1].NeedsWinner)
-		assert.Equal(t, HoldReasonKnockoutNeedsWinner, r.Held[1].Reason)
+		assert.True(t, r.Held[1].MatchClosed)
+
+		p := finishedKnockout(true, []string{"M"}, nil)
+		p.ID, p.ModifiedAt = "Pool A-1", 100
+		r = ReplayScoring(p, append(migrated(p), snap), ReplayShape{})
+		assert.Empty(t, r.Match.Decision, "no draw is made of a closed match")
+		assert.Equal(t, "Aka", r.Match.Winner)
+		require.Contains(t, r.Held, 1)
 	})
-	t.Run("R4 in a pool: a tie is a draw", func(t *testing.T) {
-		m := finishedKnockout(true, []string{"M"}, nil)
-		m.ID, m.ModifiedAt = "Pool A-1", 100
-		snap := snapLine("snap", 200, func(s *state.MatchResult) { s.IpponsA, s.IpponsB = []string{"M"}, []string{"K"} }, state.GroupPoints)
-		r := ReplayScoring(m, append(migrated(m), snap), ReplayShape{})
-		assert.Equal(t, state.DecisionDraw, r.Match.Decision)
-		assert.Empty(t, r.Match.Winner)
-		assert.Empty(t, r.Held)
-	})
-	t.Run("S2: a finish arriving after newer scoring takes that scoring's verdict, in both orders", func(t *testing.T) {
+	t.Run("a finish arriving after newer scoring closes it out, in both orders", func(t *testing.T) {
 		m := knockoutIndividual()
 		m.ModifiedAt = 50
 		finish := snapLine("finish", 100, func(s *state.MatchResult) {
@@ -114,33 +114,17 @@ func TestReplay_SnapshotOnAFinishedMatch(t *testing.T) {
 		later := snapLine("later", 200, func(s *state.MatchResult) { s.IpponsA, s.IpponsB = []string{"M"}, []string{"K", "K"} }, state.GroupPoints)
 		r := replayAllOrders(t, m, migrated(m), []state.ScoreLogLine{finish, later}, ko)
 		assert.Equal(t, state.MatchStatusCompleted, r.Match.Status)
-		assert.Equal(t, "Shiro", r.Match.Winner)
-		assert.Equal(t, []string{"K", "K"}, r.Match.IpponsB)
-	})
-	t.Run("S2 with R4: newer scoring that would tie the knockout stays out, in both orders", func(t *testing.T) {
-		m := knockoutIndividual()
-		m.ModifiedAt = 50
-		finish := snapLine("finish", 100, func(s *state.MatchResult) {
-			s.Status, s.Winner, s.WinnerID = state.MatchStatusCompleted, "Aka", "pa"
-			s.IpponsA = []string{"M"}
-		}, state.GroupResult, state.GroupPoints)
-		later := snapLine("later", 200, func(s *state.MatchResult) { s.IpponsA, s.IpponsB = []string{"M"}, []string{"K"} }, state.GroupPoints)
-		r := replayAllOrders(t, m, migrated(m), []state.ScoreLogLine{finish, later}, ko)
 		assert.Equal(t, "Aka", r.Match.Winner)
 		assert.Empty(t, r.Match.IpponsB)
-		assert.Len(t, r.Held, 1, "the tying change is the history's")
+		assert.Len(t, r.Held, 1, "the later scoring is the history's")
 	})
-	t.Run("S3: points that do not claim the result keep the judges' decision", func(t *testing.T) {
+	t.Run("a hantei stands: scoring after the finish is turned away", func(t *testing.T) {
 		m := finishedKnockout(true, []string{domain.HanteiMark}, nil)
 		m.ModifiedAt = 100
-		snap := snapLine("snap", 200, func(s *state.MatchResult) { s.IpponsA, s.IpponsB = []string{}, []string{} }, state.GroupPoints)
+		snap := snapLine("snap", 200, func(s *state.MatchResult) { s.IpponsA, s.IpponsB = []string{}, []string{"K"} }, state.GroupPoints)
 		r := ReplayScoring(m, append(migrated(m), snap), ko)
 		assert.Equal(t, []string{domain.HanteiMark}, r.Match.IpponsA)
 		assert.Equal(t, "Aka", r.Match.Winner)
-		snap = snapLine("snap2", 300, func(s *state.MatchResult) { s.IpponsA, s.IpponsB = []string{}, []string{"K"} }, state.GroupPoints)
-		r = ReplayScoring(m, append(migrated(m), snap), ko)
-		assert.Empty(t, r.Match.IpponsA, "a point that unties it takes the mark off")
-		assert.Equal(t, "Shiro", r.Match.Winner)
 	})
 }
 
@@ -151,32 +135,30 @@ func TestReplay_SnapshotOnADecision(t *testing.T) {
 		m.Decision, m.DecisionBy, m.ModifiedAt = string(decision), "B", 100
 		return m
 	}
-	t.Run("R2: scoring that gives a winner clears a withdrawal", func(t *testing.T) {
-		m := kiken(domain.DecisionKikenVoluntary)
-		snap := snapLine("snap", 200, func(s *state.MatchResult) { s.IpponsA, s.IpponsB = []string{}, []string{"M", "K"} }, state.GroupPoints)
-		r := ReplayScoring(m, append(migrated(m), snap), ko)
-		assert.True(t, r.ClearedWithdrawal)
-		assert.Empty(t, r.Match.Decision)
-		assert.Equal(t, "Shiro", r.Match.Winner)
-		assert.Empty(t, r.Held)
+	t.Run("scoring after a withdrawal is turned away, whatever it gives", func(t *testing.T) {
+		for name, score := range map[string]func(s *state.MatchResult){
+			"a winner": func(s *state.MatchResult) { s.IpponsA, s.IpponsB = []string{}, []string{"M", "K"} },
+			"a tie":    func(s *state.MatchResult) { s.IpponsA, s.IpponsB = []string{"K"}, []string{"M"} },
+		} {
+			t.Run(name, func(t *testing.T) {
+				m := kiken(domain.DecisionKikenVoluntary)
+				snap := snapLine("snap", 200, score, state.GroupPoints)
+				r := ReplayScoring(m, append(migrated(m), snap), ko)
+
+				assert.Equal(t, string(domain.DecisionKikenVoluntary), r.Match.Decision)
+				assert.Equal(t, "Aka", r.Match.Winner)
+				require.Contains(t, r.Held, 1)
+				assert.True(t, r.Held[1].MatchClosed)
+			})
+		}
 	})
-	t.Run("R2: scoring that leaves the knockout tied leaves the withdrawal standing", func(t *testing.T) {
-		m := kiken(domain.DecisionKikenVoluntary)
-		snap := snapLine("snap", 200, func(s *state.MatchResult) { s.IpponsA, s.IpponsB = []string{"K"}, []string{"M"} }, state.GroupPoints)
-		r := ReplayScoring(m, append(migrated(m), snap), ko)
-		assert.False(t, r.ClearedWithdrawal)
-		assert.Equal(t, string(domain.DecisionKikenVoluntary), r.Match.Decision)
-		require.Contains(t, r.Held, 1)
-		assert.True(t, r.Held[1].DefaultWinStands)
-		assert.Equal(t, string(domain.DecisionKikenVoluntary), r.Held[1].Decision)
-	})
-	t.Run("R2: overtime alone says nothing about the withdrawal", func(t *testing.T) {
+	t.Run("overtime after a withdrawal is turned away", func(t *testing.T) {
 		m := kiken(domain.DecisionKikenVoluntary)
 		snap := snapLine("snap", 200, func(s *state.MatchResult) { s.Encho = &state.EnchoMetadata{PeriodCount: 1} }, state.GroupEncho)
 		r := ReplayScoring(m, append(migrated(m), snap), ko)
 		assert.Nil(t, r.Match.Encho)
 		require.Contains(t, r.Held, 1)
-		assert.True(t, r.Held[1].DefaultWinStands)
+		assert.True(t, r.Held[1].MatchClosed)
 	})
 	t.Run("a fusensho stands whatever is scored", func(t *testing.T) {
 		m := kiken(domain.DecisionFusensho)
@@ -185,15 +167,7 @@ func TestReplay_SnapshotOnADecision(t *testing.T) {
 		assert.Equal(t, string(domain.DecisionFusensho), r.Match.Decision)
 		assert.Equal(t, []string{"M"}, r.Match.IpponsB)
 		require.Contains(t, r.Held, 1)
-		assert.Equal(t, defaultWinStandsReason(string(domain.DecisionFusensho)), r.Held[1].Reason)
-	})
-	t.Run("an echo of the stored scoring is not judged", func(t *testing.T) {
-		m := kiken(domain.DecisionFusensho)
-		snap := snapLine("snap", 200, func(s *state.MatchResult) {
-			s.IpponsA, s.IpponsB = []string{domain.DefaultWinIppon, domain.DefaultWinIppon}, []string{"M"}
-		}, state.GroupPoints)
-		r := ReplayScoring(m, append(migrated(m), snap), ko)
-		assert.Empty(t, r.Held)
+		assert.Equal(t, HoldReasonMatchClosed, r.Held[1].Reason)
 	})
 }
 
@@ -205,19 +179,18 @@ func TestReplay_EngiSnapshotNewestCountDecides(t *testing.T) {
 		s.Status, s.Winner, s.WinnerID = state.MatchStatusCompleted, "Aka", "pa"
 		s.FlagsA, s.FlagsB = 3, 2
 	}, state.GroupResult, state.GroupFlags)
-	t.Run("a newer valid count decides, in both orders", func(t *testing.T) {
-		recount := snapLine("recount", 200, func(s *state.MatchResult) { s.FlagsA, s.FlagsB = 1, 2 }, state.GroupFlags)
-		r := replayAllOrders(t, m, migrated(m), []state.ScoreLogLine{finish, recount}, engi)
-		assert.Equal(t, "Shiro", r.Match.Winner)
-		assert.Equal(t, 2, r.Match.FlagsB)
-	})
-	t.Run("a newer count that is not valid stays out, in both orders", func(t *testing.T) {
-		recount := snapLine("recount", 200, func(s *state.MatchResult) { s.FlagsA, s.FlagsB = 2, 2 }, state.GroupFlags)
-		r := replayAllOrders(t, m, migrated(m), []state.ScoreLogLine{finish, recount}, engi)
-		assert.Equal(t, "Aka", r.Match.Winner)
-		assert.Equal(t, 3, r.Match.FlagsA)
-		assert.Len(t, r.Held, 1)
-	})
+	// The closed-match rule: a count stamped after the finish, valid or not, is
+	// turned away; the finish's own count stands.
+	for name, flags := range map[string][2]int{"a valid count": {1, 2}, "a count that is not valid": {2, 2}} {
+		t.Run(name+" after the finish is turned away, in both orders", func(t *testing.T) {
+			recount := snapLine("recount", 200, func(s *state.MatchResult) { s.FlagsA, s.FlagsB = flags[0], flags[1] }, state.GroupFlags)
+			r := replayAllOrders(t, m, migrated(m), []state.ScoreLogLine{finish, recount}, engi)
+			assert.Equal(t, "Aka", r.Match.Winner)
+			assert.Equal(t, 3, r.Match.FlagsA)
+			assert.Equal(t, 2, r.Match.FlagsB)
+			assert.Len(t, r.Held, 1)
+		})
+	}
 }
 
 // The older-revision hold reads the log (it replaced the score handler's

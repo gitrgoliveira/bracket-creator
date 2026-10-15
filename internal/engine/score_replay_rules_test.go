@@ -175,6 +175,9 @@ func TestReplay_BasisRules(t *testing.T) {
 // R2: points scored after a kiken of this match clear it, with a winner; an
 // overtime change alone never does; a fusensho stands; a clear that would
 // leave a knockout tied waits and, given nothing more, the kiken stands.
+// A withdrawal closes the match like any result (the closed-match rule): a tap
+// stamped after it, a point or an overtime period alike, is turned away and the
+// withdrawal stands. Correct result is how it is changed.
 func TestReplay_WithdrawalRules(t *testing.T) {
 	kiken := func() *state.MatchResult {
 		m := knockoutIndividual()
@@ -185,60 +188,58 @@ func TestReplay_WithdrawalRules(t *testing.T) {
 		m.ModifiedAt = 100
 		return m
 	}
-	t.Run("a point gives the other side the win and clears it", func(t *testing.T) {
+	t.Run("a point after it is turned away", func(t *testing.T) {
 		m := kiken()
 		r := ReplayScoring(m, append(migrated(m), evLine("e", 110, domain.ScoreIpponAdd, 0, "b", "K")), ReplayShape{Knockout: true})
-		assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("e"))
-		assert.True(t, r.ClearedWithdrawal)
-		assert.Equal(t, "Shiro", r.Match.Winner)
-		assert.Empty(t, r.Match.Decision)
-		assert.Empty(t, r.Match.IpponsA, "the circles go with the withdrawal")
-		assert.Equal(t, []string{"M", "K"}, r.Match.IpponsB)
-		assert.Equal(t, int64(110), r.Match.GroupStamps[state.GroupResult], "the verdict moved")
+		assert.Equal(t, domain.ScoreOutcomeMatchClosed, r.Outcome("e"))
+
+		assert.Equal(t, "Aka", r.Match.Winner)
+		assert.Equal(t, string(domain.DecisionKikenVoluntary), r.Match.Decision)
+		assert.Equal(t, []string{domain.DefaultWinIppon, domain.DefaultWinIppon}, r.Match.IpponsA)
+		assert.Equal(t, []string{"M"}, r.Match.IpponsB)
+		assert.Equal(t, int64(100), r.Match.GroupStamps[state.GroupResult], "the verdict did not move")
 	})
-	t.Run("an overtime change alone does not clear it", func(t *testing.T) {
+	t.Run("an overtime change is turned away too", func(t *testing.T) {
 		m := kiken()
 		r := ReplayScoring(m, append(migrated(m), evLine("e", 110, domain.ScoreEnchoAdd, 0, "", "")), ReplayShape{Knockout: true})
-		assert.Equal(t, domain.ScoreOutcomeDefaultWinStands, r.Outcome("e"))
+		assert.Equal(t, domain.ScoreOutcomeMatchClosed, r.Outcome("e"))
 		assert.Equal(t, string(domain.DecisionKikenVoluntary), r.Match.Decision)
-		assert.False(t, r.ClearedWithdrawal)
 		assert.Nil(t, r.Match.Encho)
 	})
-	t.Run("a tie waits, then a winner clears it in every order", func(t *testing.T) {
+	t.Run("two taps are both turned away in every order", func(t *testing.T) {
 		m := kiken()
 		r := replayAllOrders(t, m, migrated(m), []state.ScoreLogLine{
 			evLine("tie", 110, domain.ScoreIpponAdd, 0, "a", "M"),
 			evLine("win", 111, domain.ScoreIpponAdd, 0, "a", "K"),
 		}, ReplayShape{Knockout: true})
-		assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("tie"))
-		assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("win"))
+		assert.Equal(t, domain.ScoreOutcomeMatchClosed, r.Outcome("tie"))
+		assert.Equal(t, domain.ScoreOutcomeMatchClosed, r.Outcome("win"))
 		assert.Equal(t, "Aka", r.Match.Winner)
-		assert.Empty(t, r.Match.Decision)
-		assert.True(t, r.ClearedWithdrawal)
-		alone := ReplayScoring(m, append(migrated(m), evLine("tie", 110, domain.ScoreIpponAdd, 0, "a", "M")), ReplayShape{Knockout: true})
-		assert.Equal(t, domain.ScoreOutcomeDefaultWinStands, alone.Outcome("tie"))
-		assert.Equal(t, string(domain.DecisionKikenVoluntary), alone.Match.Decision)
+		assert.Equal(t, string(domain.DecisionKikenVoluntary), r.Match.Decision)
+
 	})
 	t.Run("a fusensho stands", func(t *testing.T) {
 		m := kiken()
 		m.Decision = string(domain.DecisionFusensho)
 		r := ReplayScoring(m, append(migrated(m), evLine("e", 110, domain.ScoreIpponAdd, 0, "b", "K")), ReplayShape{Knockout: true})
-		assert.Equal(t, domain.ScoreOutcomeDefaultWinStands, r.Outcome("e"))
+		assert.Equal(t, domain.ScoreOutcomeMatchClosed, r.Outcome("e"))
 		assert.Equal(t, []string{"M"}, r.Match.IpponsB)
 	})
-	t.Run("in a pool a tie is a draw and clears it", func(t *testing.T) {
+	t.Run("in a pool a tap after it is turned away too", func(t *testing.T) {
 		m := kiken()
 		m.ID = "Pool A-1"
 		r := ReplayScoring(m, append(migrated(m), evLine("e", 110, domain.ScoreIpponAdd, 0, "a", "M")), ReplayShape{})
-		assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("e"))
-		assert.Equal(t, state.DecisionDraw, r.Match.Decision)
-		assert.Empty(t, r.Match.Winner)
-		assert.True(t, r.ClearedWithdrawal)
+		assert.Equal(t, domain.ScoreOutcomeMatchClosed, r.Outcome("e"))
+		assert.Equal(t, string(domain.DecisionKikenVoluntary), r.Match.Decision)
+		assert.Equal(t, "Aka", r.Match.Winner)
 	})
 }
 
 // S3: the hantei mark stays while its scoreline is tied and goes when a point
 // unties it.
+// A finish with a hantei is a result like any other: a foul or a point stamped
+// after it is turned away, so the judges' decision and the scoreline it was
+// made on stand.
 func TestReplay_HanteiStaysWhileTied(t *testing.T) {
 	ht := func() *state.MatchResult {
 		m := knockoutIndividual()
@@ -250,16 +251,16 @@ func TestReplay_HanteiStaysWhileTied(t *testing.T) {
 	}
 	m := ht()
 	r := ReplayScoring(m, append(migrated(m), evLine("f", 110, domain.ScoreFoulAdd, 0, "a", "")), ReplayShape{Knockout: true})
-	assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("f"))
-	assert.Equal(t, []string{"M", domain.HanteiMark}, r.Match.IpponsA, "a foul leaves the tie and its verdict")
+	assert.Equal(t, domain.ScoreOutcomeMatchClosed, r.Outcome("f"))
+	assert.Equal(t, []string{"M", domain.HanteiMark}, r.Match.IpponsA)
 	assert.Equal(t, "Aka", r.Match.Winner)
 
 	m = ht()
 	r = ReplayScoring(m, append(migrated(m), evLine("k", 110, domain.ScoreIpponAdd, 0, "b", "D")), ReplayShape{Knockout: true})
-	assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("k"))
-	assert.Equal(t, []string{"M"}, r.Match.IpponsA, "the point untied it: the mark goes")
-	assert.Equal(t, []string{"b:m0:0:a:0"}, r.Match.MarkIDs.A)
-	assert.Equal(t, "Shiro", r.Match.Winner)
+	assert.Equal(t, domain.ScoreOutcomeMatchClosed, r.Outcome("k"))
+	assert.Equal(t, []string{"M", domain.HanteiMark}, r.Match.IpponsA, "the mark stands")
+	assert.Equal(t, []string{"K"}, r.Match.IpponsB)
+	assert.Equal(t, "Aka", r.Match.Winner)
 }
 
 // An engi knockout: an invalid count waits for a valid one.
@@ -274,13 +275,11 @@ func TestReplay_EngiFlags(t *testing.T) {
 		evLine("b1", 110, domain.ScoreFlagAdd, 0, "b", ""),
 		evLine("b2", 111, domain.ScoreFlagAdd, 0, "b", ""),
 	}, shape)
-	assert.Equal(t, 3, r.Match.FlagsB)
-	assert.Equal(t, "Shiro", r.Match.Winner)
-	assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("b1"))
-
-	alone := ReplayScoring(m, append(migrated(m), evLine("b1", 110, domain.ScoreFlagAdd, 0, "b", "")), shape)
-	assert.Equal(t, domain.ScoreOutcomeNeedsWinner, alone.Outcome("b1"))
-	assert.Equal(t, 1, alone.Match.FlagsB)
+	// The finish closed the match: flags counted after it are turned away.
+	assert.Equal(t, 1, r.Match.FlagsB)
+	assert.Equal(t, "Aka", r.Match.Winner)
+	assert.Equal(t, domain.ScoreOutcomeMatchClosed, r.Outcome("b1"))
+	assert.Equal(t, domain.ScoreOutcomeMatchClosed, r.Outcome("b2"))
 
 	running := knockoutIndividual()
 	var lines []state.ScoreLogLine
@@ -395,7 +394,7 @@ func TestReplay_FixedOrderBout(t *testing.T) {
 
 // A finished fixed-order knockout: a bout point that ties the encounter
 // waits for one that gives it a winner (R4), in every order.
-func TestReplay_FinishedTeamEncounterNeedsWinner(t *testing.T) {
+func TestReplay_FinishedTeamEncounterTurnsTapsAway(t *testing.T) {
 	shape := ReplayShape{Comp: replayTeamComp(false), Knockout: true}
 	m := replayTeamMatch()
 	m.SubResults[0] = state.SubMatchResult{Position: 1, IpponsA: []string{"M"}, Winner: "Kyoto"}
@@ -405,12 +404,11 @@ func TestReplay_FinishedTeamEncounterNeedsWinner(t *testing.T) {
 		evLine("t", 110, domain.ScoreIpponAdd, 2, "b", "K"),
 		evLine("w", 111, domain.ScoreIpponAdd, 3, "a", "D"),
 	}, shape)
-	assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("t"))
-	assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("w"))
+	assert.Equal(t, domain.ScoreOutcomeMatchClosed, r.Outcome("t"))
+	assert.Equal(t, domain.ScoreOutcomeMatchClosed, r.Outcome("w"))
 	assert.Equal(t, "Kyoto", r.Match.Winner)
-	alone := ReplayScoring(m, append(migrated(m), evLine("t", 110, domain.ScoreIpponAdd, 2, "b", "K")), shape)
-	assert.Equal(t, domain.ScoreOutcomeNeedsWinner, alone.Outcome("t"))
-	assert.Empty(t, state.SubResultAt(alone.Match.SubResults, 2).IpponsB)
+	assert.Empty(t, state.SubResultAt(r.Match.SubResults, 2).IpponsB)
+	assert.Empty(t, state.SubResultAt(r.Match.SubResults, 3).IpponsA)
 }
 
 // Kachinuki: events land only on rows that exist; a removed pairing's
@@ -461,7 +459,9 @@ func TestReplay_Kachinuki(t *testing.T) {
 
 // A bout un-recorded by an event a finished encounter commits keeps the
 // recorded group's stamp, as one on a running encounter does.
-func TestReplay_KachinukiUnrecordAfterTheFinish(t *testing.T) {
+// A kachinuki encounter that has finished is closed like any match: an
+// overtime tap on a bout it recorded is turned away and the bout stays recorded.
+func TestReplay_KachinukiRecordedBoutStaysAfterTheFinish(t *testing.T) {
 	shape := ReplayShape{Comp: replayTeamComp(true), Knockout: true}
 	m := replayTeamMatch()
 	m.Status, m.Winner, m.WinnerID = state.MatchStatusCompleted, "Kyoto", "ta"
@@ -470,10 +470,8 @@ func TestReplay_KachinukiUnrecordAfterTheFinish(t *testing.T) {
 		{Position: 2, SideA: "K1", SideB: "O2", SideAMemberID: "k1", SideBMemberID: "o2", IpponsA: []string{"M"}, Winner: "K1", WinnerMemberID: "k1", Recorded: true},
 	}
 	r := ReplayScoring(m, append(migrated(m), evLine("e", 20, domain.ScoreEnchoAdd, 2, "", "")), shape)
-	require.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("e"))
-	assert.False(t, state.SubResultAt(r.Match.SubResults, 2).Recorded, "the bout is fought again")
-	assert.Equal(t, int64(20), r.Match.GroupStamps[state.GroupRecorded])
-	assert.Equal(t, int64(20), r.Match.ModifiedAt)
+	require.Equal(t, domain.ScoreOutcomeMatchClosed, r.Outcome("e"))
+	assert.True(t, state.SubResultAt(r.Match.SubResults, 2).Recorded, "the bout stays recorded")
 }
 
 // The representative bout: its add and remove are baselines; a pick lands on
@@ -571,22 +569,22 @@ func TestReplay_EventsBeforeTheFirstBaseline(t *testing.T) {
 		assert.Equal(t, domain.ScoreOutcomeBeforeBaseline, r.Outcome("old"))
 		assert.Equal(t, string(domain.DecisionKikenVoluntary), r.Match.Decision)
 		assert.Equal(t, []string{"M"}, r.Match.IpponsB)
-		assert.False(t, r.ClearedWithdrawal)
+
 	})
 	t.Run("a fusensho cache answers beforeBaseline, not defaultWinStands", func(t *testing.T) {
 		m := finished(string(domain.DecisionFusensho))
 		r := ReplayScoring(m, append(migrated(m), evLine("old", 90, domain.ScoreIpponAdd, 0, "b", "K")), ReplayShape{Knockout: true})
 		assert.Equal(t, domain.ScoreOutcomeBeforeBaseline, r.Outcome("old"))
 	})
-	t.Run("a decision baseline re-recording the kiken un-clears it", func(t *testing.T) {
+	t.Run("a tap after the kiken is turned away and a decision baseline re-recording it stands", func(t *testing.T) {
 		m := finished(string(domain.DecisionKikenVoluntary))
 		lines := append(migrated(m),
 			evLine("clear", 105, domain.ScoreIpponAdd, 0, "b", "K"),
 			baseLine(m, "d", 110, state.ScoreBasis{}, state.GroupResult, state.GroupPoints))
 		r := ReplayScoring(m, lines, ReplayShape{Knockout: true})
-		assert.Equal(t, domain.ScoreOutcomeBeforeBaseline, r.Outcome("clear"))
+		assert.Equal(t, domain.ScoreOutcomeMatchClosed, r.Outcome("clear"))
 		assert.Equal(t, string(domain.DecisionKikenVoluntary), r.Match.Decision)
-		assert.False(t, r.ClearedWithdrawal, "the decision the baseline recorded stands")
+
 	})
 	t.Run("an older strike is not judged against the cache's cap", func(t *testing.T) {
 		m := runningIndividual()
@@ -613,7 +611,7 @@ func TestReplay_EventsBeforeTheFirstBaseline(t *testing.T) {
 		assert.Equal(t, domain.ScoreOutcomeRecorded, r.Outcome("seen"))
 		assert.Equal(t, []string{"M"}, r.Match.IpponsA)
 	})
-	t.Run("a pending event a later baseline did not see is beforeBaseline", func(t *testing.T) {
+	t.Run("a tap after the finish is turned away even when a correction follows it", func(t *testing.T) {
 		m := knockoutIndividual()
 		m.Status, m.Winner, m.WinnerID = state.MatchStatusCompleted, "Aka", "pa"
 		m.IpponsA = []string{"M"}
@@ -624,7 +622,7 @@ func TestReplay_EventsBeforeTheFirstBaseline(t *testing.T) {
 			evLine("tie", 20, domain.ScoreIpponAdd, 0, "b", "K"),
 			baseLine(&decided, "o", 30, state.ScoreBasis{}, state.GroupResult))
 		r := ReplayScoring(m, lines, ReplayShape{Knockout: true})
-		assert.Equal(t, domain.ScoreOutcomeBeforeBaseline, r.Outcome("tie"))
+		assert.Equal(t, domain.ScoreOutcomeMatchClosed, r.Outcome("tie"))
 	})
 }
 
@@ -638,7 +636,7 @@ func TestReplay_BaselineKeepsMarkIDsThatMove(t *testing.T) {
 		evLine("e1", 20, domain.ScoreIpponAdd, 0, "a", "M"),
 		evLine("e2", 30, domain.ScoreIpponAdd, 0, "a", "K"),
 		baseLine(&after, "f", 50, state.ScoreBasis{Own: []string{"e1", "e2", "r1"}}, state.GroupPoints),
-		removeLine("r1", 60, "e1"),
+		removeLine("r1", 40, "e1"),
 	)
 	r := ReplayScoring(m, lines, ReplayShape{})
 	assert.Equal(t, domain.ScoreOutcomeRecorded, r.Outcome("r1"))
@@ -704,7 +702,6 @@ func replayChained(t *testing.T, original *state.MatchResult, lines []state.Scor
 		require.Equal(t, fresh.Match.ModifiedAt, chained.Match.ModifiedAt, "step %d", k)
 		require.Equal(t, fresh.Match.ScoreVersion, chained.Match.ScoreVersion, "step %d", k)
 		require.Equal(t, fresh.Outcomes, chained.Outcomes, "step %d", k)
-		require.Equal(t, fresh.ClearedWithdrawal, chained.ClearedWithdrawal, "step %d", k)
 		cur, last = chained.Match, chained
 	}
 	return last

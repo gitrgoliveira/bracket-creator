@@ -138,25 +138,15 @@ func TestApplyMergedGroupStamps_CanLowerAStampAndRecomputesModifiedAt(t *testing
 // the fix, HeldDecision checked DefaultWinStands alone, so a report that
 // set it without holding anything answered heldDecision with no
 // heldReason, contradicting openapi.
-func TestMergeReport_HeldDecisionRequiresTheDefaultWinStandsReason(t *testing.T) {
-	// DefaultWinStands set, but nothing held: HeldReason reads "" (nothing
-	// to explain), so HeldDecision must read "" too.
-	rep := &MergeReport{DefaultWinStands: true, StandingDecision: "fusensho"}
-	assert.Empty(t, rep.HeldReason(), "precondition: nothing was held")
-	assert.Empty(t, rep.HeldDecision(), "no reason means no decision either")
-
-	// DefaultWinStands set AND something genuinely held: both read through.
-	rep2 := &MergeReport{DefaultWinStands: true, StandingDecision: "kiken-voluntary", Held: []string{GroupPoints}}
-	assert.Equal(t, HeldReasonDefaultWinStands, rep2.HeldReason())
-	assert.Equal(t, "kiken-voluntary", rep2.HeldDecision())
-
-	// NeedsWinner takes priority over DefaultWinStands in HeldReason, and a
-	// report in that shape never names a decision.
-	rep3 := &MergeReport{NeedsWinner: true, DefaultWinStands: true, StandingDecision: "fusensho", Held: []string{GroupPoints}}
-	assert.Equal(t, HeldReasonNeedsWinner, rep3.HeldReason())
-	assert.Empty(t, rep3.HeldDecision(), "needs_winner, not default_win_stands")
-
-	assert.Empty(t, (*MergeReport)(nil).HeldDecision(), "a nil report names no decision")
+func TestMergeReport_HeldReasonIsMatchClosedOnlyWhenSomethingWasTurnedAway(t *testing.T) {
+	// MatchClosed set, but nothing held or moved: there is nothing to explain.
+	assert.Empty(t, (&MergeReport{MatchClosed: true}).HeldReason())
+	// Held by a newer stored change: no reason beyond the stamps.
+	assert.Empty(t, (&MergeReport{Held: []string{GroupPoints}}).HeldReason())
+	// MatchClosed and something genuinely held, or moved to the history.
+	assert.Equal(t, HeldReasonMatchClosed, (&MergeReport{MatchClosed: true, Held: []string{GroupPoints}}).HeldReason())
+	assert.Equal(t, HeldReasonMatchClosed, (&MergeReport{MatchClosed: true, Displaced: []DisplacedChange{{Stamp: 1}}}).HeldReason())
+	assert.Empty(t, (*MergeReport)(nil).HeldReason(), "a nil report has no reason")
 }
 
 // Each side's representative of the representative bout is a change of its own

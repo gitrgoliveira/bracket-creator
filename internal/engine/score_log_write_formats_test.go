@@ -50,8 +50,10 @@ func TestScoreEvents_EngiFinishIsABaseline(t *testing.T) {
 	res = postIn(t, eng, compID, "Pool A-0",
 		flag("f4", 4, t0+2000, domain.ScoreFlagAdd, domain.ScoreSideA),
 		flag("f5", 5, t0+2001, domain.ScoreFlagAdd, domain.ScoreSideA))
-	assert.Equal(t, domain.ScoreOutcomeApplied, res.Answers[1].Outcome)
-	assert.Equal(t, 4, res.Match.FlagsA)
+	// The finish closed the match: flags counted after it are turned away.
+	assert.Equal(t, domain.ScoreOutcomeMatchClosed, res.Answers[0].Outcome)
+	assert.Equal(t, domain.ScoreOutcomeMatchClosed, res.Answers[1].Outcome)
+	assert.Equal(t, 2, res.Match.FlagsA)
 	assert.Equal(t, state.MatchStatusCompleted, res.Match.Status)
 	assertLogIsTheMatchIn(t, eng, store, compID, "Pool A-0")
 }

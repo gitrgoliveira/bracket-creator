@@ -180,11 +180,11 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		// write's full merge report (result.Merge), per-group outcomes
 		// included, so recordWriteHistory below is the one history entry
 		// for it; recordEngiMatch's own blunt "every changed group
-		// applied" entry would contradict it whenever a group (the flags,
-		// in bc-mrgc's S2 fix) was genuinely held rather than applied. That
-		// call also covers what recordDisplacedHistory used to be called
-		// for separately here (S2 with R4: a newer recount the finish
-		// moved to the history), since recordWriteHistory appends it too.
+		// applied" entry would contradict it whenever a group (the flags)
+		// was genuinely held rather than applied. That call also covers what
+		// recordDisplacedHistory used to be called for separately here (a
+		// newer count the finish closed out), since recordWriteHistory
+		// appends it too.
 		rec, recErr := e.recordEngiMatch(tx, compID, matchID, result.FlagsA, result.FlagsB, result.CorrectionReason, result.ModifiedAt, result.GroupStamps, true, fo)
 		if recErr != nil {
 			return nil, recErr
@@ -1000,10 +1000,12 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// misreport it as something to resolve and send again, when a newer
 	// change is already stored. It is kept in the match's history (bc-mrgc).
 	// The probes judge the write as the real one will: the branch it lands
-	// on (R4 reads it) and the score log it replays onto.
+	// on and the score log it replays onto.
 	probeCtx := mergeCtx{comp: comp, knockout: !inPool, lines: e.snapshotScoreLog(tx, compID, matchID, result, matchWriteForward)}
-	if decisionHeldByMerge(prior, result, probeCtx) {
-		e.recordWriteHistory(tx, compID, matchID, result)
+	if decisionHeldByMerge(comp, prior, result, matchID, probeCtx) {
+		// Kept in the history and in the log: a decision older than the
+		// stored result still closes the match for what is stamped after it.
+		e.recordSupersededWriteHistory(tx, compID, matchID, result)
 		return nil, nil, supersededBy(result)
 	}
 
@@ -1108,6 +1110,15 @@ func decisionChangedGroups() []string {
 // match alone. The winner gets the maru default-win fill; the withdrawing
 // side keeps whatever it had struck and the encounter keeps its prior
 // sub-bouts (FIK Art. 32, preserveLoserScore).
+// matchAsOf is the match the score log held at a decision's stamp: what was
+// stamped before it and nothing after. A decision keeps the loser's struck
+// points (FIK Art. 32) and the bouts already fought, and that is what it
+// stood on when it was made: a tap stamped after it is turned away by the
+// closed-match rule, so its mark must not ride in on the decision's own
+// scoreline just because the tap reached the server first. A match with no
+// log yet is read as its migration baseline reads it, group by group at the
+// stamps it holds. An unstamped decision is ordered after everything, so it
+// stands on the match as stored.
 func buildDecisionResult(prior *state.MatchResult, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, modifiedAtStamp int64) *state.MatchResult {
 	winIppons := domain.DefaultWinIppons(encho.On())
 	result := &state.MatchResult{
@@ -1154,8 +1165,16 @@ func buildDecisionResult(prior *state.MatchResult, matchID, decision, decisionBy
 // the decision makes would be held, and leaves that report on result for
 // the history entry when it would. It is the merge's own rule, not a second
 // statement of it: the write itself is judged by the same mergeMatchWrite.
-func decisionHeldByMerge(prior, result *state.MatchResult, mc mergeCtx) bool {
+func decisionHeldByMerge(comp *state.Competition, prior, result *state.MatchResult, matchID string, mc mergeCtx) bool {
+	// Judged as the real write will be: shaped as it is (the default-win bout
+	// padding is part of what the decision writes), so a decision older than
+	// the stored result is answered superseded only when it changes nothing.
 	probe := *result
+	probe.SubResults = state.CloneSubResults(result.SubResults)
+	probe.Changed = slices.Clone(result.Changed)
+	if err := shapeScoreWrite(comp, prior, &probe, matchID); err != nil {
+		return false
+	}
 	rep := mergeMatchWrite(prior, &probe, matchWriteForward, mc)
 	if !rep.Superseded() {
 		return false
@@ -1281,7 +1300,7 @@ func shapeScoreWrite(comp *state.Competition, prior, result *state.MatchResult, 
 // engi write), the merge owner (mergeMatchWrite) would land its verdict and
 // every group it lands equals the stored value, as sent and as landed. A
 // group the merge would hold because its stored stamp is newer (a later
-// point from another board, R3 or S2) lands nothing and is not compared. A
+// point from another board, turned away if stamped after it) lands nothing and is not compared. A
 // same-stamp write that differs where it would land is a correction and
 // still needs its reason. comp names a kachinuki or engi competition (nil
 // for neither); nilSubsClear is the branch's (true for a pool match, false
@@ -1336,11 +1355,10 @@ func exactScoreReplayProbe(stored, incoming *state.MatchResult, comp *state.Comp
 	}
 	// The merge owner decides which groups of the write would land: a group
 	// whose stored stamp is newer is held and lands nothing (a later point
-	// from another board, R3 or S2), and every whole-write rule (R2, finish
-	// atomicity) applies as it would to the write. Exact means the verdict
-	// lands, and every group that lands equals the stored value both as the
-	// write sent it and as it would land (S2 can re-derive a verdict the
-	// write sent differently, which is still a correction).
+	// from another board, or one stamped after the result), and every
+	// whole-write rule applies as it would to the write. Exact means the
+	// verdict lands, and every group that lands equals the stored value both
+	// as the write sent it and as it would land.
 	sent := probe
 	sent.IpponsA, sent.IpponsB = slices.Clone(probe.IpponsA), slices.Clone(probe.IpponsB)
 	sent.SubResults = state.CloneSubResults(probe.SubResults)

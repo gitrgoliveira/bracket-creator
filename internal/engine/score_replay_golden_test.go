@@ -26,9 +26,8 @@ type scoreReplayGolden struct {
 		Head  []state.ScoreLogLine `json:"head"`
 		Lines []state.ScoreLogLine `json:"lines"`
 		Want  struct {
-			Match             map[string]any      `json:"match"`
-			Outcomes          map[string][]string `json:"outcomes"`
-			ClearedWithdrawal bool                `json:"clearedWithdrawal"`
+			Match    map[string]any      `json:"match"`
+			Outcomes map[string][]string `json:"outcomes"`
 		} `json:"want"`
 	} `json:"cases"`
 }
@@ -154,13 +153,11 @@ func TestReplayScoring_GoldenTable(t *testing.T) {
 					slices.Sort(w)
 					require.Equal(t, w, g, "order %v, event %s", order, id)
 				}
-				require.Equal(t, c.Want.ClearedWithdrawal, r.ClearedWithdrawal, "order %v", order)
 				// The next write replays from this output: doing so with the
 				// same lines changes nothing.
 				again := ReplayScoring(&r.Match, lines, shape)
 				require.Equal(t, r.Match, again.Match, "order %v, replayed from its own output", order)
 				require.Equal(t, r.Outcomes, again.Outcomes, "order %v, replayed from its own output", order)
-				require.Equal(t, r.ClearedWithdrawal, again.ClearedWithdrawal, "order %v, replayed from its own output", order)
 			}
 		})
 	}

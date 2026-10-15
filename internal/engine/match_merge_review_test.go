@@ -68,18 +68,18 @@ func TestMergeReview_FinishAndNewerPointGiveOneVerdictInEitherOrder(t *testing.T
 			point.IpponsA, point.IpponsB = []string{"M"}, []string{"K", "D"}
 			if finishFirst {
 				require.NoError(t, h.write(finish))
-				require.NoError(t, h.write(point))
+				require.ErrorIs(t, h.write(point), ErrMatchSuperseded, "the point is stamped after the finish")
 			} else {
 				require.NoError(t, h.write(point))
-				require.NoError(t, h.write(finish), "the finish's result applies; its scoreline is held by the newer point")
+				require.NoError(t, h.write(finish), "the finish is the result; the point stamped after it is closed out")
 			}
 			return h.verdict(t, knockout)
 		}
 		inOrder := run(t, true)
 		reversed := run(t, false)
 		assert.Equal(t, state.MatchStatusCompleted, inOrder.Status)
-		assert.Equal(t, wrTeamB, inOrder.Winner, "Tora leads 2-1 on the newer point")
-		assert.Equal(t, wrTeamBID, inOrder.WinnerID)
+		assert.Equal(t, wrTeamA, inOrder.Winner, "Ryu's finish stands: the point stamped after it is turned away")
+		assert.Equal(t, wrTeamAID, inOrder.WinnerID)
 		assert.Equal(t, inOrder, reversed, "the arrival order makes no difference")
 	})
 }
@@ -114,69 +114,57 @@ func TestMergeReview_FinishAndNewerTyingPoint(t *testing.T) {
 		point.IpponsA, point.IpponsB = []string{"M"}, []string{"K"}
 		return h, finish, point
 	}
-	t.Run("pool: a draw either way", func(t *testing.T) {
-		var got []mmVerdict
-		for _, finishFirst := range []bool{true, false} {
-			h, finish, point := setup(t, false)
-			writes := []*state.MatchResult{point, finish}
-			if finishFirst {
-				writes = []*state.MatchResult{finish, point}
-			}
-			for _, w := range writes {
-				require.NoError(t, h.write(w))
-			}
-			v := h.verdict(t, false)
-			assert.Equal(t, state.MatchStatusCompleted, v.Status)
-			assert.Equal(t, state.DecisionDraw, v.Decision)
-			assert.Empty(t, v.Winner)
-			got = append(got, v)
+	// A tying point stamped after the finish is turned away in a pool and in
+	// a knockout alike: no draw is made of a finished pool match, and no
+	// knockout is left tied.
+	for _, knockout := range []bool{false, true} {
+		name := "pool"
+		if knockout {
+			name = "knockout"
 		}
-		assert.Equal(t, got[0], got[1])
-	})
-	t.Run("knockout: one state in either order", func(t *testing.T) {
-		const tying = `{"ipponsA":["M"],"ipponsB":["K"],"hansokuA":0,"hansokuB":0}`
+		t.Run(name+": one state in either order", func(t *testing.T) {
+			const tying = `{"ipponsA":["M"],"ipponsB":["K"],"hansokuA":0,"hansokuB":0}`
 
-		h1, finish, point := setup(t, true)
-		require.NoError(t, h1.write(finish))
-		err := h1.write(point)
-		require.ErrorIs(t, err, ErrMatchSuperseded, "the tying point arriving second is held")
-		assert.Equal(t, state.HeldReasonNeedsWinner, HeldReasonOf(err))
-		inOrder := h1.verdict(t, true)
-		mmTyingChangeHeld(t, h1, tying, HoldReasonKnockoutNeedsWinner)
+			h1, finish, point := setup(t, knockout)
+			require.NoError(t, h1.write(finish))
+			err := h1.write(point)
+			require.ErrorIs(t, err, ErrMatchSuperseded, "the tying point arriving second is turned away")
+			assert.Equal(t, state.HeldReasonMatchClosed, HeldReasonOf(err))
+			inOrder := h1.verdict(t, knockout)
+			mmTyingChangeHeld(t, h1, tying, HoldReasonMatchClosed)
 
-		h2, finish, point := setup(t, true)
-		require.NoError(t, h2.write(point))
-		require.NoError(t, h2.write(finish), "the finish arriving second is applied")
-		rep := finish.Merge
-		require.NotNil(t, rep)
-		assert.Equal(t, []string{state.GroupPoints}, rep.DisplacedGroups(), "the answer names what was moved to the history")
-		assert.Equal(t, state.HeldReasonNeedsWinner, rep.HeldReason())
-		assert.Empty(t, rep.HeldGroups(), "nothing of the finish was held")
-		reversed := h2.verdict(t, true)
-		mmTyingChangeHeld(t, h2, tying, HoldReasonKnockoutNeedsWinner)
+			h2, finish, point := setup(t, knockout)
+			require.NoError(t, h2.write(point))
+			require.NoError(t, h2.write(finish), "the finish arriving second is applied")
+			rep := finish.Merge
+			require.NotNil(t, rep)
+			assert.Equal(t, []string{state.GroupPoints}, rep.DisplacedGroups(), "the answer names what was moved to the history")
+			assert.Equal(t, state.HeldReasonMatchClosed, rep.HeldReason())
+			assert.Empty(t, rep.HeldGroups(), "nothing of the finish was held")
+			reversed := h2.verdict(t, knockout)
+			mmTyingChangeHeld(t, h2, tying, HoldReasonMatchClosed)
 
-		assert.Equal(t, state.MatchStatusCompleted, inOrder.Status)
-		assert.Equal(t, wrTeamA, inOrder.Winner, "the finish's result stands")
-		assert.Equal(t, []string{"M"}, inOrder.IpponsA)
-		assert.Empty(t, inOrder.IpponsB, "on the finish's own scoreline")
-		assert.Equal(t, wrTeamA, inOrder.NextRound)
-		assert.Equal(t, mmT2, inOrder.ModifiedAt)
-		assert.Equal(t, inOrder, reversed, "status, winner, scoreline, stamps and the next round match")
-	})
-	t.Run("knockout: a finish without its scoreline is held", func(t *testing.T) {
-		// A finish that names only its verdict and carries no scoreline
-		// does not say what it stood on, so the state before the newer
-		// point cannot be rebuilt: the finish is held instead.
+			assert.Equal(t, state.MatchStatusCompleted, inOrder.Status)
+			assert.Equal(t, wrTeamA, inOrder.Winner, "the finish's result stands")
+			assert.Equal(t, []string{"M"}, inOrder.IpponsA)
+			assert.Empty(t, inOrder.IpponsB, "on the finish's own scoreline")
+			if knockout {
+				assert.Equal(t, wrTeamA, inOrder.NextRound)
+			}
+			assert.Equal(t, mmT2, inOrder.ModifiedAt)
+			assert.Equal(t, inOrder, reversed, "status, winner, scoreline, stamps and the next round match")
+		})
+	}
+	t.Run("knockout: a finish without its scoreline stands on what was scored before it", func(t *testing.T) {
 		h, _, point := setup(t, true)
 		require.NoError(t, h.write(point))
 		bare := mmRunning(h, mmT2, state.GroupResult)
 		bare.Status, bare.Winner = state.MatchStatusCompleted, wrTeamA
-		err := h.write(bare)
-		require.ErrorIs(t, err, ErrMatchSuperseded)
-		assert.Equal(t, state.HeldReasonNeedsWinner, HeldReasonOf(err))
+		require.NoError(t, h.write(bare), "the finish is the result; the point stamped after it is closed out")
 		v := h.verdict(t, true)
-		assert.Equal(t, state.MatchStatusRunning, v.Status)
-		assert.Equal(t, []string{"K"}, v.IpponsB)
+		assert.Equal(t, state.MatchStatusCompleted, v.Status)
+		assert.Equal(t, wrTeamA, v.Winner)
+		assert.Empty(t, v.IpponsB, "the point stamped after the finish is not in the match")
 	})
 }
 
@@ -207,7 +195,7 @@ func TestMergeReview_EngiFinishAndNewerRecountInEitherOrder(t *testing.T) {
 				if e.Stamp == mmT3 && e.Outcomes[state.GroupFlags] == state.HistoryOutcomeHeld {
 					held = true
 					assert.Contains(t, string(e.Held[state.GroupFlags]), `"flagsA":1`)
-					assert.Equal(t, HoldReasonEngiNeedsValidCount, e.Reason)
+					assert.Equal(t, HoldReasonMatchClosed, e.Reason)
 				}
 			}
 			assert.True(t, held, "the recount is kept in the history")
@@ -233,15 +221,15 @@ func TestMergeReview_HanteiFinishAndNewerPointsInEitherOrder(t *testing.T) {
 			foul := mmRunning(h, mmT3, state.GroupPoints)
 			foul.IpponsA, foul.IpponsB = []string{"M"}, []string{"K"}
 			foul.HansokuB = 1
-			writes := []*state.MatchResult{foul, finish}
 			if finishFirst {
-				writes = []*state.MatchResult{finish, foul}
-			}
-			for _, w := range writes {
-				require.NoError(t, h.write(w))
+				require.NoError(t, h.write(finish))
+				require.ErrorIs(t, h.write(foul), ErrMatchSuperseded, "the foul is stamped after the finish")
+			} else {
+				require.NoError(t, h.write(foul))
+				require.NoError(t, h.write(finish))
 			}
 			m := h.load(t)
-			assert.Equal(t, 1, m.HansokuB, "the foul applied")
+			assert.Equal(t, 0, m.HansokuB, "the foul stamped after the finish is turned away")
 			return h.verdict(t, knockout)
 		}
 		inOrder, reversed := run(t, true), run(t, false)
@@ -264,13 +252,13 @@ func TestMergeReview_LatePointsKeepTheJudgesDecision(t *testing.T) {
 		foul := mmRunning(h, mmT2, state.GroupPoints)
 		foul.IpponsA, foul.IpponsB = []string{"M"}, []string{"K"} // the board never showed the mark
 		foul.HansokuB = 1
-		require.NoError(t, h.write(foul))
+		require.ErrorIs(t, h.write(foul), ErrMatchSuperseded, "a foul after the finish is turned away")
 
 		m := h.load(t)
 		assert.Equal(t, state.MatchStatusCompleted, m.Status)
 		assert.Equal(t, wrTeamA, m.Winner, "the judges' decision still settles the tie")
 		assert.True(t, domain.ContainsHantei(m.IpponsA), "the mark is kept")
-		assert.Equal(t, 1, m.HansokuB, "and the foul applied")
+		assert.Equal(t, 0, m.HansokuB, "and the foul did not apply")
 		assert.Empty(t, m.Decision)
 	})
 }
@@ -373,19 +361,21 @@ func TestMergeReview_SidelessCorrectionOverAFinishedKnockout(t *testing.T) {
 	h := mmIndividual(t, true)
 	require.NoError(t, h.write(mmFinish(h, mmT1, wrTeamA, []string{"M"}, []string{})))
 
+	// A running write that names no sides, stamped after the finish: it is
+	// judged on the stored pairing, and turned away like any other.
 	late := mmRunning(h, mmT2)
 	late.Changed = nil
 	late.SideA, late.SideB = "", ""
 	late.IpponsA, late.IpponsB = []string{"M"}, []string{"K", "D"}
-	require.NoError(t, h.write(late))
+	require.ErrorIs(t, h.write(late), ErrMatchSuperseded)
 
 	m := h.load(t)
 	assert.Equal(t, state.MatchStatusCompleted, m.Status)
-	assert.Equal(t, wrTeamB, m.Winner)
-	assert.Equal(t, wrTeamBID, m.WinnerID)
+	assert.Equal(t, wrTeamA, m.Winner)
+	assert.Equal(t, wrTeamAID, m.WinnerID)
 	b, err := h.store.LoadBracket(h.compID)
 	require.NoError(t, err)
-	assert.Equal(t, wrTeamB, b.Rounds[1][0].SideA, "the new winner advances")
+	assert.Equal(t, wrTeamA, b.Rounds[1][0].SideA, "the winner stays advanced")
 }
 
 // F1: a write queued before a team was renamed names it by the old name, in

@@ -215,17 +215,49 @@ func TestScoreEventsDoor_WriteIDResendAnswersRecorded(t *testing.T) {
 	}
 	mergeScoreAt(t, r, compID, finish())
 	out := sePost(t, r, compID, seMatch, seTap("e2", 2, now-7000, "a", "K"))
-	assert.Equal(t, domain.ScoreOutcomeApplied, out.Outcomes[0].Outcome)
+	assert.Equal(t, domain.ScoreOutcomeMatchClosed, out.Outcomes[0].Outcome, "stamped after the finish")
 	history, err := store.LoadMatchHistory(compID, seMatch)
 	require.NoError(t, err)
 
 	again := mergeScoreAt(t, r, compID, finish())
-	assert.Equal(t, []any{"M", "K"}, again["ipponsA"], "answered with the stored match")
+	assert.Equal(t, []any{"M"}, again["ipponsA"], "answered with the stored match")
 	assert.NotContains(t, again, "applied")
 	assert.NotContains(t, again, "heldGroups")
 	after, err := store.LoadMatchHistory(compID, seMatch)
 	require.NoError(t, err)
 	assert.Len(t, after, len(history), "a recorded resend leaves no history line")
+}
+
+// Round-4 finding 7: a tap and a scoring write turned away because the match
+// is finished are answered in the same words on both doors, for a tie and for a
+// winner-giving point alike, and the answer never claims a newer result exists
+// when none does.
+func TestMatchClosedIsAnsweredAlikeOnBothDoors(t *testing.T) {
+	const compID = "se-closed-both"
+	r, _, _, _ := seServer(t, compID)
+	now := time.Now().UnixMilli()
+	mergeScoreAt(t, r, compID, map[string]any{"status": "completed", "winner": mgAlice,
+		"ipponsA": []string{"M"}, "ipponsB": []string{}, "modifiedAt": now - 8000})
+
+	// The events door: a tying tap.
+	out := sePost(t, r, compID, seMatch, seTap("e1", 1, now-7000, "b", "M"))
+	require.Len(t, out.Outcomes, 1)
+	assert.Equal(t, domain.ScoreOutcomeMatchClosed, out.Outcomes[0].Outcome)
+	assert.Equal(t, state.HeldReasonMatchClosed, out.Outcomes[0].Reason)
+	assert.Equal(t, MatchClosedMessage, out.Outcomes[0].Message)
+
+	// The score door: the same tie, as a running snapshot.
+	tie := mergeScoreAt(t, r, compID, map[string]any{"status": "running",
+		"ipponsA": []string{"M"}, "ipponsB": []string{"M"}, "modifiedAt": now - 6000})
+	assert.Equal(t, false, tie["applied"])
+	assert.Equal(t, state.HeldReasonMatchClosed, tie["heldReason"])
+	assert.Equal(t, MatchClosedMessage, tie["message"], "not 'a newer result is already recorded': there is none")
+
+	// The score door: a point that would change the winner.
+	win := mergeScoreAt(t, r, compID, map[string]any{"status": "running",
+		"ipponsA": []string{"M"}, "ipponsB": []string{"K", "D"}, "modifiedAt": now - 5000})
+	assert.Equal(t, state.HeldReasonMatchClosed, win["heldReason"])
+	assert.Equal(t, MatchClosedMessage, win["message"])
 }
 
 // F3: a previous build's running snapshot (no writeId, no events) is a
@@ -318,7 +350,7 @@ func TestScoreEventsDoor_SelfRunParticipantLimits(t *testing.T) {
 
 	code, out = send("PoolA-1", "main-pw", seTap("o1", 1, now-700, "b", "K"))
 	require.Equal(t, http.StatusOK, code)
-	assert.Equal(t, domain.ScoreOutcomeApplied, out.Outcomes[0].Outcome, "the organiser's tap on a finished match applies (R3)")
+	assert.Equal(t, domain.ScoreOutcomeMatchClosed, out.Outcomes[0].Outcome, "the organiser's tap on a finished match is turned away: Correct result is the way")
 
 	code, _ = send("PoolA-0", "wrong", seTap("x1", 9, now, "a", "M"))
 	assert.Equal(t, http.StatusUnauthorized, code)
@@ -540,13 +572,18 @@ func TestScoreEventsDoor_SecondTapInTheWindowIsBroadcastAtItsEnd(t *testing.T) {
 // answered refused with the refusal's code, one history line per event id
 // however often they are sent again, and no log line (the transaction wrote
 // no match, so it wrote no baseline for it either).
+// A tap on a finished knockout match whose winner already plays on is turned
+// away by the closed-match rule before any write is tried: the downstream guard
+// never sees it, because a tap can no longer change a finished match. The tap
+// is a line of the log all the same (its outcome is the replay's), once however
+// often it is sent.
 func TestScoreEventsDoor_WriteRefusalIsAnAnswerNotALogLine(t *testing.T) {
 	const compID = "se-write-refused"
 	r, store, _, _, _ := setupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Courts: []string{"A", "B"}}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: compID, Kind: "individual", Status: state.CompStatusKnockout}))
 	// A finished first round whose winner already plays the final, which is
-	// being fought: scoring the first round over is refused.
+	// being fought.
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{
 		{{ID: "m-r1-0", SideA: "Alice", SideB: "Bob", SideAID: "alice", SideBID: "bob", Winner: "Alice", WinnerID: "alice",
 			Status: state.MatchStatusCompleted, IpponsA: []string{"M"}, MatchNumber: 1, DisplayRound: 2, Court: "B"}},
@@ -557,21 +594,32 @@ func TestScoreEventsDoor_WriteRefusalIsAnAnswerNotALogLine(t *testing.T) {
 	send := func() seAnswer {
 		return sePost(t, r, compID, "m-r1-0", seTap("w1", 1, now-3000, "b", "K"), seTap("w2", 2, now-2900, "b", "K"))
 	}
-	for range 3 {
+	for i := range 3 {
 		out := send()
 		require.Len(t, out.Outcomes, 2)
 		for _, o := range out.Outcomes {
-			assert.Equal(t, domain.ScoreOutcomeRefused, o.Outcome)
-			assert.Equal(t, "downstream_knockout_running", o.Reason)
-			assert.NotEmpty(t, o.Message)
+			if i == 0 {
+				assert.Equal(t, domain.ScoreOutcomeMatchClosed, o.Outcome)
+				assert.Equal(t, state.HeldReasonMatchClosed, o.Reason)
+				assert.Equal(t, MatchClosedMessage, o.Message, "the score door's words")
+			} else {
+				assert.Equal(t, domain.ScoreOutcomeDuplicate, o.Outcome, "a resend is quiet")
+			}
 		}
 	}
 	lines, err := store.LoadScoreLog(compID, "m-r1-0")
 	require.NoError(t, err)
-	assert.Empty(t, lines, "a refused write logs nothing, the migration baseline included")
-	history, err := store.LoadMatchHistory(compID, "m-r1-0")
+	events := 0
+	for _, l := range lines {
+		if l.Event != nil {
+			events++
+		}
+	}
+	assert.Equal(t, 2, events, "each tap is one line of the log, however often it is resent")
+	m, err := store.LoadBracket(compID)
 	require.NoError(t, err)
-	assert.Len(t, history, 2, "one line per event id, committed with the refusal, however often it is resent")
+	assert.Equal(t, "Alice", m.Rounds[0][0].Winner, "the finished match is as it was")
+	assert.Empty(t, m.Rounds[0][0].IpponsB)
 }
 
 // A fault that is not a refusal (here a stand-in engine) is a 500 the device
@@ -613,6 +661,8 @@ func TestEventWriteRefusalMapsEveryRefusal(t *testing.T) {
 
 // A tap that clears a withdrawal (R2) gives the competitor their eligibility
 // back in the same transaction, and the log still replays to the stored match.
+// A tap after a withdrawal no longer clears it (the closed-match rule): the
+// competitor stays barred, and the tap is turned away.
 func TestScoreEventsDoor_TapClearingAWithdrawalRestoresEligibility(t *testing.T) {
 	const compID = "se-clears"
 	r, store, _, _ := seServer(t, compID)
@@ -629,14 +679,14 @@ func TestScoreEventsDoor_TapClearingAWithdrawalRestoresEligibility(t *testing.T)
 	}
 
 	out := sePost(t, r, compID, seMatch, seTap("e2", 2, now-1000, "b", "K"))
-	require.Equal(t, domain.ScoreOutcomeApplied, out.Outcomes[0].Outcome)
+	require.Equal(t, domain.ScoreOutcomeMatchClosed, out.Outcomes[0].Outcome)
 	ms, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
-	assert.Empty(t, ms[0].Decision, "the withdrawal was cleared by the scoring")
+	assert.Equal(t, "kiken-voluntary", ms[0].Decision, "the withdrawal stands")
 	after, err := store.LoadCompetitorStatus(compID)
 	require.NoError(t, err)
 	for _, s := range after {
-		assert.True(t, s.Eligible, "eligibility is restored with the clear")
+		assert.False(t, s.Eligible, "the competitor stays barred")
 	}
 	assertLogReplaysToStored(t, store, compID, seMatch, false)
 }

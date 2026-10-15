@@ -235,14 +235,14 @@ func TestScoreEvents_BaselinesAreTotal(t *testing.T) {
 	assert.Equal(t, domain.ScoreOutcomeApplied, res.Answers[0].Outcome)
 	assertLogIsTheMatch(t, eng, store, slwMatch)
 
-	// The finish, a point made after it (R3), the correction, a decision, the
-	// reopen and the send back.
+	// The finish, a point made after it (turned away: the match is closed), the
+	// correction, a decision, the reopen and the send back.
 	write(state.MatchResult{SideA: "Aka", SideB: "Shiro", Status: state.MatchStatusCompleted, Decision: "hikiwake",
 		IpponsA: []string{"M"}, IpponsB: []string{"D"}, HansokuA: 1, ModifiedAt: t0 + 6000, WriteDoor: DoorScore})
 	res = slwPost(t, eng, slwMatch, slwEvent("e4", 4, t0+7000, domain.ScoreIpponAdd, domain.ScoreSideA, "D"))
-	assert.Equal(t, domain.ScoreOutcomeApplied, res.Answers[0].Outcome)
-	assert.Equal(t, state.MatchStatusCompleted, res.Match.Status, "R3: the finished match stays finished")
-	assert.Equal(t, "Aka", res.Match.Winner, "R3: the winner is worked out again")
+	assert.Equal(t, domain.ScoreOutcomeMatchClosed, res.Answers[0].Outcome)
+	assert.Equal(t, state.MatchStatusCompleted, res.Match.Status, "the finished match stays finished")
+	assert.Empty(t, res.Match.Winner, "the draw stands: the tap after it changed nothing")
 	assertLogIsTheMatch(t, eng, store, slwMatch)
 	write(state.MatchResult{SideA: "Aka", SideB: "Shiro", Status: state.MatchStatusCompleted, Winner: "Shiro",
 		IpponsA: []string{}, IpponsB: []string{"K", "K"}, ModifiedAt: t0 + 8000, CorrectionReason: "fix", WriteDoor: DoorScore})
@@ -290,7 +290,7 @@ func TestScoreEvents_WriteIDResendAnswersRecorded(t *testing.T) {
 	again := finish()
 	_, err = eng.RecordMatchResultWithIneligibility(slwComp, slwMatch, again)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"M", "K"}, again.IpponsA, "answered with the stored match, the later point in it")
+	assert.Equal(t, []string{"M"}, again.IpponsA, "answered with the stored match; the tap after the finish was turned away")
 	after, err := store.LoadMatchHistory(slwComp, slwMatch)
 	require.NoError(t, err)
 	assert.Len(t, after, len(history), "a recorded resend writes no history line (Q6 b)")

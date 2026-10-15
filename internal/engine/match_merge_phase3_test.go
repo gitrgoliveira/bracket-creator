@@ -62,6 +62,9 @@ func TestMerge_EngiFinishTakesItsOwnStamp(t *testing.T) {
 // running with no winner even though the stored count alone already settled
 // it; see TestMerge_EngiNewestValidCountDecidesInBothOrders for the other
 // arrival order, which already reached this same state.
+// An engi finish stamped before a count that reached the server first is the
+// result, and the count (stamped after it) is closed out into the history: the
+// match is what the two give in stamp order, Ryu's own 3-0.
 func TestMerge_EngiStaleFinishIsHeldInHistory(t *testing.T) {
 	bothBranches(t, func(t *testing.T, knockout bool) {
 		h := mmEngi(t, knockout)
@@ -69,27 +72,27 @@ func TestMerge_EngiStaleFinishIsHeldInHistory(t *testing.T) {
 		count.FlagsA, count.FlagsB = 1, 2
 		require.NoError(t, h.write(count))
 
-		require.NoError(t, h.write(mmEngiFinish(h, mmT2, 3, 0)), "the newer, valid count already decides it")
+		require.NoError(t, h.write(mmEngiFinish(h, mmT2, 3, 0)), "the finish is the result: it applies")
 
 		m := h.load(t)
-		assert.Equal(t, state.MatchStatusCompleted, m.Status, "the stored count gives the match its winner")
-		assert.Equal(t, wrTeamB, m.Winner, "1-2: Tora's count, not the finish's own 3-0")
-		assert.Equal(t, 1, m.FlagsA)
-		assert.Equal(t, 2, m.FlagsB)
-		assert.Equal(t, mmT3, m.GroupStamp(state.GroupFlags))
-		assert.Equal(t, mmT3, m.GroupStamp(state.GroupResult), "the result moved because of the newer count, so it is as new as that count")
+		assert.Equal(t, state.MatchStatusCompleted, m.Status)
+		assert.Equal(t, wrTeamA, m.Winner, "3-0: the finish's own count, the count stamped after it is closed out")
+		assert.Equal(t, 3, m.FlagsA)
+		assert.Equal(t, 0, m.FlagsB)
+		assert.Equal(t, mmT2, m.GroupStamp(state.GroupFlags))
+		assert.Equal(t, mmT2, m.GroupStamp(state.GroupResult))
+		assert.Equal(t, mmT2, m.ModifiedAt)
 
-		entries := h.history(t)
-		last := entries[len(entries)-1]
-		assert.Equal(t, doorEngi, last.Door)
-		assert.Equal(t, mmT2, last.Stamp, "the finish's own stamp")
-		assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupFlags])
-		assert.Contains(t, string(last.Held[state.GroupFlags]), `"flagsA":3`, "the finish's own attempted count is kept with its values")
-		// The result is no longer held WITH the flags: mergeMatchWrite's own
-		// S2 block already turned the stored, newer count into a winner, so
-		// the result applied rather than being held atomically beside it.
-		assert.NotEqual(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupResult], "the result applied, derived from the stored count")
-		assert.Empty(t, last.Reason, "nothing was held atomically")
+		var displaced bool
+		for _, e := range h.history(t) {
+			if e.Door == DoorDisplaced && e.Stamp == mmT3 {
+				displaced = true
+				assert.Equal(t, state.HistoryOutcomeHeld, e.Outcomes[state.GroupFlags])
+				assert.Contains(t, string(e.Held[state.GroupFlags]), `"flagsA":1`, "the count is kept with its values")
+				assert.Equal(t, HoldReasonMatchClosed, e.Reason)
+			}
+		}
+		assert.True(t, displaced, "the count stamped after the finish is kept in the history")
 	})
 }
 
@@ -135,6 +138,9 @@ func TestMerge_EngiFinishOlderThanTheStoredResultIsHeldWithItsCount(t *testing.T
 // Both orders now end completed, Tora winning 1-2, with the flags and result
 // groups stamped at the recount's T3 and the finish's own 3-0 kept in the
 // match's history as held. On the knockout branch, Tora (not Ryu) advances.
+// The closed-match rule replaces "the newest valid count decides" (2026-10-04):
+// the finish closes the match, so a count stamped after it is turned away in
+// whichever order the two arrive.
 func TestMerge_EngiNewestValidCountDecidesInBothOrders(t *testing.T) {
 	bothBranches(t, func(t *testing.T, knockout bool) {
 		type out struct {
@@ -152,30 +158,14 @@ func TestMerge_EngiNewestValidCountDecidesInBothOrders(t *testing.T) {
 			recount := mmRunning(h, mmT3, state.GroupFlags)
 			recount.FlagsA, recount.FlagsB = 1, 2
 			if finishFirst {
-				// The finish lands first: nothing is stored yet, so its own
-				// 3-0 applies cleanly. R3 then applies the later, valid
-				// recount to the finished match, exactly as it already did
-				// before this fix -- there is nothing to hold here.
 				require.NoError(t, h.write(finish))
-				require.NoError(t, h.write(recount))
+				err := h.write(recount)
+				require.ErrorIs(t, err, ErrMatchSuperseded, "a count after the finish is turned away")
+				assert.Equal(t, state.HeldReasonMatchClosed, HeldReasonOf(err))
 			} else {
-				// The recount lands first and is stored as the newer count.
-				// The finish arrives after it: its own 3-0 is held (this is
-				// the arrival order the fix changes), and the winner is
-				// derived from the stored, newer count instead.
 				require.NoError(t, h.write(recount))
-				require.NoError(t, h.write(finish), "the newer, valid count already decides it")
-
-				var heldAtFinishStamp bool
-				for _, e := range h.history(t) {
-					if e.Stamp == mmT2 && e.Outcomes[state.GroupFlags] == state.HistoryOutcomeHeld {
-						heldAtFinishStamp = true
-						assert.Contains(t, string(e.Held[state.GroupFlags]), `"flagsA":3`, "the finish's own attempted count is kept with its values")
-					}
-				}
-				assert.True(t, heldAtFinishStamp, "the finish's own flags are kept in the match's history as held")
+				require.NoError(t, h.write(finish), "the finish is the result, whatever reached the server first")
 			}
-
 			m := h.load(t)
 			return out{
 				Status: m.Status, Winner: m.Winner, WinnerID: m.WinnerID,
@@ -187,19 +177,19 @@ func TestMerge_EngiNewestValidCountDecidesInBothOrders(t *testing.T) {
 		inOrder, h1 := run(t, true)
 		reversed, h2 := run(t, false)
 		want := out{
-			Status: state.MatchStatusCompleted, Winner: wrTeamB, WinnerID: wrTeamBID,
-			FlagsA: 1, FlagsB: 2, FlagsStamp: mmT3, ResultStamp: mmT3, ModifiedAt: mmT3,
+			Status: state.MatchStatusCompleted, Winner: wrTeamA, WinnerID: wrTeamAID,
+			FlagsA: 3, FlagsB: 0, FlagsStamp: mmT2, ResultStamp: mmT2, ModifiedAt: mmT2,
 		}
-		assert.Equal(t, want, inOrder, "finish first, then the recount: Tora's later, valid count decides it")
-		assert.Equal(t, want, reversed, "recount first, then the finish: no longer held atomically beside it")
+		assert.Equal(t, want, inOrder, "finish first, then the count: the finish stands")
+		assert.Equal(t, want, reversed, "count first, then the finish: the same match")
 
 		if knockout {
 			b1, err := h1.store.LoadBracket(h1.compID)
 			require.NoError(t, err)
 			b2, err := h2.store.LoadBracket(h2.compID)
 			require.NoError(t, err)
-			assert.Equal(t, wrTeamB, b1.Rounds[1][0].SideA, "Tora, not Ryu, advances")
-			assert.Equal(t, wrTeamB, b2.Rounds[1][0].SideA, "the same in either arrival order")
+			assert.Equal(t, wrTeamA, b1.Rounds[1][0].SideA, "Ryu advances")
+			assert.Equal(t, wrTeamA, b2.Rounds[1][0].SideA, "the same in either arrival order")
 		}
 	})
 }
@@ -224,8 +214,8 @@ func TestMerge_EngiAnswerReportsTheMergedModifiedAt(t *testing.T) {
 		require.NoError(t, h.write(recount))
 
 		finish := mmEngiFinish(h, mmT2, 3, 0)
-		require.NoError(t, h.write(finish), "the newer, valid count already decides it")
-		assert.Equal(t, mmT3, finish.ModifiedAt, "the answer must report the merge's settled stamp, not the finish's own older one")
+		require.NoError(t, h.write(finish), "the finish is the result")
+		assert.Equal(t, mmT2, finish.ModifiedAt, "the answer must report the merge's settled stamp: the count after the finish is closed out")
 
 		m := h.load(t)
 		assert.Equal(t, m.ModifiedAt, finish.ModifiedAt, "the answer and the stored match must agree")
@@ -300,42 +290,6 @@ func TestMerge_EngiFinishEchoingTheStoredFlagsApplies(t *testing.T) {
 // stampGroups must never lower a group's stamp (the fix), so the flags
 // group keeps the real T3 stamp of the count that set it, and the T2
 // recount -- genuinely older than that -- is held.
-func TestMerge_EngiFinishEchoNeverLowersTheFlagsStamp(t *testing.T) {
-	bothBranches(t, func(t *testing.T, knockout bool) {
-		h := mmEngi(t, knockout)
-		// The board's own, real count: 3-2.
-		count := mmRunning(h, mmT3, state.GroupFlags)
-		count.FlagsA, count.FlagsB = 3, 2
-		require.NoError(t, h.write(count))
-
-		// A stale Save result from another device, made before that count
-		// but delivered after it: an echo of the SAME 3-2, so it applies
-		// (Finding 2's own fix), but must not touch the flags group's
-		// already-newer T3 stamp.
-		require.NoError(t, h.write(mmEngiFinish(h, mmT1, 3, 2)))
-		afterFinish := h.load(t)
-		require.Equal(t, mmT3, afterFinish.GroupStamp(state.GroupFlags), "precondition: the echoed finish did not lower the flags' stamp")
-
-		// A third device's own recount, made between the two writes above
-		// (T2), arrives last. In real time it is OLDER than the T3 count
-		// actually on record, so it must be held, never applied.
-		late := mmRunning(h, mmT2, state.GroupFlags)
-		late.FlagsA, late.FlagsB = 2, 3
-		err := h.write(late)
-		require.ErrorIs(t, err, ErrMatchSuperseded, "T2 is older than the flags group's real T3 stamp")
-
-		m := h.load(t)
-		assert.Equal(t, state.MatchStatusCompleted, m.Status)
-		assert.Equal(t, wrTeamA, m.Winner, "the flags never actually moved off 3-2")
-		assert.Equal(t, 3, m.FlagsA)
-		assert.Equal(t, 2, m.FlagsB)
-		assert.Equal(t, mmT3, m.GroupStamp(state.GroupFlags), "the stale finish's older stamp never lowered it")
-
-		last := h.history(t)[len(h.history(t))-1]
-		assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupFlags], "the stale recount is held, in the history")
-	})
-}
-
 // R3 on an engi match: a count changed after the finish applies to the
 // finished match, and the winner is worked out again. An engi match is never
 // a draw, and (R4 revised, operator ruling 2026-10-04) a recount that cannot
@@ -350,9 +304,9 @@ func TestMerge_EngiRecountAfterTheFinishIsNeverADraw(t *testing.T) {
 		recount := mmRunning(h, mmT2, state.GroupFlags)
 		recount.FlagsA, recount.FlagsB = 1, 1
 		err := h.write(recount)
-		require.ErrorIs(t, err, ErrMatchSuperseded, "its one change is held")
+		require.ErrorIs(t, err, ErrMatchSuperseded, "its one change is turned away")
 		assert.Equal(t, []string{state.GroupFlags}, HeldGroupsOf(err))
-		assert.Equal(t, state.HeldReasonNeedsWinner, HeldReasonOf(err), "the operator is told the match needs a winner")
+		assert.Equal(t, state.HeldReasonMatchClosed, HeldReasonOf(err), "the finish closed the match")
 
 		m := h.load(t)
 		assert.NotEqual(t, state.DecisionDraw, m.Decision, "an engi match cannot be drawn")
@@ -360,11 +314,11 @@ func TestMerge_EngiRecountAfterTheFinishIsNeverADraw(t *testing.T) {
 		assert.Equal(t, wrTeamA, m.Winner)
 		assert.Equal(t, 3, m.FlagsA)
 		assert.Equal(t, 0, m.FlagsB)
-		assert.Equal(t, mmT1, m.GroupStamp(state.GroupFlags), "the held count moves no stamp")
+		assert.Equal(t, mmT1, m.GroupStamp(state.GroupFlags), "the turned-away count moves no stamp")
 		last := h.history(t)[len(h.history(t))-1]
 		assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupFlags])
 		assert.Contains(t, string(last.Held[state.GroupFlags]), `"flagsA":1`)
-		assert.Equal(t, HoldReasonEngiNeedsValidCount, last.Reason)
+		assert.Equal(t, HoldReasonMatchClosed, last.Reason)
 	})
 }
 
@@ -378,62 +332,6 @@ func TestMerge_EngiRecountAfterTheFinishIsNeverADraw(t *testing.T) {
 // against that wrong stamp and was wrongly held. Both arrival orders of the
 // same three writes -- an invalid partial count, a finish made before it but
 // delivered after, and a later valid recount -- must reach the same state.
-func TestMerge_EngiFinishDisplacementStampsTheFlagsAtTheFinishesOwnTime(t *testing.T) {
-	bothBranches(t, func(t *testing.T, knockout bool) {
-		t.Run("the invalid partial count arrives before the stale finish", func(t *testing.T) {
-			h := mmEngi(t, knockout)
-			partial := mmRunning(h, mmT4, state.GroupFlags)
-			partial.FlagsA, partial.FlagsB = 1, 1 // not a valid engi total: held for nobody to see
-			require.NoError(t, h.write(partial))
-
-			// A queued Save result made before the partial count but
-			// delivered after it: the merge cannot apply the stored (invalid)
-			// count, so it displaces it to the history and applies the
-			// finish on its own, older scoreline instead.
-			require.NoError(t, h.write(mmEngiFinish(h, mmT2, 3, 0)))
-
-			recount := mmRunning(h, mmT3, state.GroupFlags)
-			recount.FlagsA, recount.FlagsB = 1, 2
-			require.NoError(t, h.write(recount), "T3 is after the finish's T2, so the valid recount applies")
-
-			m := h.load(t)
-			assert.Equal(t, state.MatchStatusCompleted, m.Status)
-			assert.Equal(t, wrTeamB, m.Winner, "the later, valid recount decides it")
-			assert.Equal(t, 1, m.FlagsA)
-			assert.Equal(t, 2, m.FlagsB)
-			assert.Equal(t, mmT3, m.GroupStamp(state.GroupFlags))
-			assert.Equal(t, mmT3, m.GroupStamp(state.GroupResult))
-
-			entries := h.history(t)
-			var sawDisplaced bool
-			for _, e := range entries {
-				if e.Door == DoorDisplaced && e.Stamp == mmT4 {
-					sawDisplaced = true
-					assert.Equal(t, state.HistoryOutcomeHeld, e.Outcomes[state.GroupFlags])
-					assert.Contains(t, string(e.Held[state.GroupFlags]), `"flagsA":1`)
-				}
-			}
-			assert.True(t, sawDisplaced, "the invalid partial count is kept in the history as displaced")
-		})
-		t.Run("the finish lands first, then the same valid recount", func(t *testing.T) {
-			h := mmEngi(t, knockout)
-			require.NoError(t, h.write(mmEngiFinish(h, mmT2, 3, 0)))
-
-			recount := mmRunning(h, mmT3, state.GroupFlags)
-			recount.FlagsA, recount.FlagsB = 1, 2
-			require.NoError(t, h.write(recount))
-
-			m := h.load(t)
-			assert.Equal(t, state.MatchStatusCompleted, m.Status)
-			assert.Equal(t, wrTeamB, m.Winner, "the later, valid recount decides it")
-			assert.Equal(t, 1, m.FlagsA)
-			assert.Equal(t, 2, m.FlagsB)
-			assert.Equal(t, mmT3, m.GroupStamp(state.GroupFlags))
-			assert.Equal(t, mmT3, m.GroupStamp(state.GroupResult))
-		})
-	})
-}
-
 // A stale finish arriving after the match is already completed by a LATER
 // finish is held WHOLE, never allowed to move the winner back: this is
 // mergeMatchWrite's own finish-atomicity rule (finishAtomic,
@@ -472,15 +370,9 @@ func TestMerge_EngiStaleFinishOverACompletedMatchIsHeldWhole(t *testing.T) {
 			assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupResult], "the result is held, not just the flags")
 			assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupFlags])
 			assert.Contains(t, string(last.Held[state.GroupFlags]), `"flagsA":1`, "the stale finish's own attempted count is kept with its values")
-			// HoldReasonFinishAtomic, not HoldReasonEngiAtomic: the generic
-			// rule fired on the FIRST merge pass inside engiFinishHeld
-			// (stored.Status already completed, the stale finish's own
-			// result held by its stamp, and GroupDiffers true because Tora
-			// != Ryu), so rep.Superseded() was already true and
-			// engiFinishHeld returned that report untouched -- its own
-			// `if !rep.Superseded()` guard never runs the second, atomic
-			// re-merge that would have used HoldReasonEngiAtomic.
-			assert.Equal(t, HoldReasonFinishAtomic, last.Reason)
+			// The engi finish is atomic with its count: the older finish's
+			// flags and the winner they decide are kept together.
+			assert.Equal(t, HoldReasonEngiAtomic, last.Reason)
 
 			if knockout {
 				b, err := h.store.LoadBracket(h.compID)

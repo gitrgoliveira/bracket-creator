@@ -146,15 +146,20 @@ func TestScoreHandler_RunningCorrectionAfterTheFinishApplies(t *testing.T) {
 	ms[1].Status = state.MatchStatusRunning
 	require.NoError(t, store.SavePoolMatches(compID, ms))
 
+	// The closed-match rule: a running write stamped after the finish is turned
+	// away (a 200 that says so), whatever the court is doing: no court_busy.
 	out := mergeScore(t, r, compID, map[string]any{
 		"status": "running", "ipponsA": []string{"M"}, "ipponsB": []string{"K", "D"},
 		"modifiedAt": now - 10_000,
 	})
-	assert.NotContains(t, out, "applied", "no court_busy, no stale: it applied; got %v", out)
+	assert.Equal(t, false, out["applied"])
+	assert.Equal(t, "superseded", out["reason"])
+	assert.Equal(t, state.HeldReasonMatchClosed, out["heldReason"])
+	assert.Equal(t, MatchClosedMessage, out["message"])
 	m := mergeStored(t, store, compID)
 	assert.Equal(t, state.MatchStatusCompleted, m.Status, "the match stays finished")
-	assert.Equal(t, mgBob, m.Winner, "worked out again from the points")
-	assert.Equal(t, mgBobID, m.WinnerID)
+	assert.Equal(t, mgAlice, m.Winner, "the finish stands")
+	assert.Equal(t, mgAliceID, m.WinnerID)
 }
 
 // A decision made before a point that is already stored is held whole, and

@@ -251,7 +251,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		// nothing of it lands on the match, and all of it is kept in the
 		// match's history (bc-mrgc). The callers commit the transaction on
 		// this error, so the entry lands.
-		e.recordWriteHistory(tx, compID, matchID, result)
+		e.recordSupersededWriteHistory(tx, compID, matchID, result)
 		return nil, supersededBy(result)
 	}
 	if err != nil {

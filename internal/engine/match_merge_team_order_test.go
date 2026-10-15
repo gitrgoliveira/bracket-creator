@@ -74,8 +74,16 @@ func TestTeamMatchWriteOrderConverges(t *testing.T) {
 	}{
 		{"finish Ryu with bout 1 T1, bout 2 Tora T2", nil, toFinish(mmT1, wrTeamA, b(1, M, nil, wrTeamA)), toBout(mmT2, 2, nil, M, wrTeamB)},
 		{"finish Ryu with bout 1 T1, bout 1 flipped T2", nil, toFinish(mmT1, wrTeamA, b(1, M, nil, wrTeamA)), toBout(mmT2, 1, nil, K, wrTeamB)},
-		// A finish naming its verdict alone over newer stored scoring is not in
-		// this table on purpose: S2 holds it (needs_winner), nothing can replay it.
+		// A finish naming its verdict alone is the routine Finish on a scoreline
+		// already stored: S2 gives it the verdict the newer scoring gives, in
+		// either order. Only one the newer scoring leaves without a winner
+		// (a knockout tie) cannot be replayed and is held.
+		{"bare finish Ryu T1, bout 3 Tora T2", func(h mmHome) error {
+			if err := toBout(mmT0+1000, 1, M, nil, wrTeamA)(h); err != nil {
+				return err
+			}
+			return toBout(mmT0+2000, 2, nil, M, wrTeamB)(h)
+		}, toFinish(mmT1, wrTeamA), toBout(mmT2, 3, nil, K, wrTeamB)},
 		{"daihyosen aka T1, bout 1 A T2", nil, toDecision(mmT1, "daihyosen", "aka"), toBout(mmT2, 1, M, nil, wrTeamA)},
 	}
 	for _, c := range cases {

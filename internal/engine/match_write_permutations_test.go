@@ -165,10 +165,11 @@ func pmPerms(n int) [][]int {
 // tree (9b8a0a5f) also followed: the order-dependent outcome is the rule, not a
 // regression, so the case is run and logged but its convergence is not asserted.
 const (
-	r2Why           = "R2: a withdrawal older than stored points is held (withdrawalOutranked), a newer scoring change clears an older withdrawal only with the winner it gives; a fusensho stands whatever is scored"
-	finishAtomicWhy = "finish atomicity (HoldReasonFinishAtomic): a result older than the stored one is held WHOLE with its scoreline, a newer one replaces it"
-	s3Why           = "S3: a hantei mark is the result's; points that do not claim the result keep it while tied, so which Ht survives follows the order the marks arrive"
-	r4DecisionWhy   = "R2/R4: a decision's closing points and a newer tying scoreline on a knockout match are ordered by what each leaves, not by the log alone"
+	bareFinishTieWhy = "S2: a finish that names its verdict alone cannot be replayed over newer scoring that ties a knockout; it is held (needs_winner) and the match stays as stored"
+	r2Why            = "R2: a withdrawal older than stored points is held (withdrawalOutranked), a newer scoring change clears an older withdrawal only with the winner it gives; a fusensho stands whatever is scored"
+	finishAtomicWhy  = "finish atomicity (HoldReasonFinishAtomic): a result older than the stored one is held WHOLE with its scoreline, a newer one replaces it"
+	s3Why            = "S3: a hantei mark is the result's; points that do not claim the result keep it while tied, so which Ht survives follows the order the marks arrive"
+	r4DecisionWhy    = "R2/R4: a decision's closing points and a newer tying scoreline on a knockout match are ordered by what each leaves, not by the log alone"
 )
 
 type pmCase struct {
@@ -177,9 +178,11 @@ type pmCase struct {
 	pre   pmStep
 	steps []pmStep
 	// byDesign, when set, names the rule that makes the arrival orders differ
-	// (and so excuses the convergence check, never the replay check). where
-	// limits it to "pool" or "ko"; empty means both.
+	// (and so excuses the convergence check, never the replay check). designIn
+	// limits that to "pool" or "ko" (empty means both); where limits the case
+	// itself to one of them.
 	byDesign string
+	designIn string
 	where    string
 }
 
@@ -196,7 +199,7 @@ func pmCases() []pmCase {
 		// Item 1-4 of the round-3 review: bare finishes over newer scoring.
 		{name: "ind bareFin Ryu(M-0) T1 / pt MK-0 T2 (still Ryu)", pre: preInd, steps: []pmStep{pmBareInd(mmT1, wrTeamA, M, nil), pmPt(mmT2, MK, nil)}},
 		{name: "ind bareFin Ryu(M-0) T1 / pt M-MK T2 (Tora)", pre: preInd, steps: []pmStep{pmBareInd(mmT1, wrTeamA, M, nil), pmPt(mmT2, M, MK)}},
-		{name: "ind bareFin Ryu(M-0) T1 / pt M-M T2 (tie)", pre: preInd, steps: []pmStep{pmBareInd(mmT1, wrTeamA, M, nil), pmPt(mmT2, M, M)}},
+		{name: "ind bareFin Ryu(M-0) T1 / pt M-M T2 (tie)", pre: preInd, steps: []pmStep{pmBareInd(mmT1, wrTeamA, M, nil), pmPt(mmT2, M, M)}, byDesign: bareFinishTieWhy, designIn: "ko"},
 		{name: "team bareFin Ryu(payload bouts) T1 / b3 B T2", team: true, pre: preTeam, steps: []pmStep{pmBareTeam(mmT1, wrTeamA, b(1, M, nil, wrTeamA), b(2, nil, M, wrTeamB)), pmBout(mmT2, 3, nil, K, wrTeamB)}},
 		{name: "team bareFin Ryu(no bouts) T1 / b3 B T2", team: true, pre: preTeam, steps: []pmStep{pmTeamFin(mmT1, wrTeamA), pmBout(mmT2, 3, nil, K, wrTeamB)}},
 		{name: "team bareFin Ryu(no bouts) T1 / b3 A T2 (Ryu)", team: true, pre: preTeam, steps: []pmStep{pmTeamFin(mmT1, wrTeamA), pmBout(mmT2, 3, K, nil, wrTeamA)}},
@@ -220,7 +223,7 @@ func pmCases() []pmCase {
 		// Two-write pairs: decisions against scoring, finishes against decisions.
 		{name: "dai aka T1 / pt M-0 T2", steps: []pmStep{pmDec(mmT1, "daihyosen", "aka"), pmPt(mmT2, M, nil)}},
 		{name: "dai shiro T1 / pt M-0 T2", steps: []pmStep{pmDec(mmT1, "daihyosen", "shiro"), pmPt(mmT2, M, nil)}},
-		{name: "dai aka T1 / pt M-K T2 (tie)", steps: []pmStep{pmDec(mmT1, "daihyosen", "aka"), pmPt(mmT2, M, K)}, byDesign: r4DecisionWhy, where: "ko"},
+		{name: "dai aka T1 / pt M-K T2 (tie)", steps: []pmStep{pmDec(mmT1, "daihyosen", "aka"), pmPt(mmT2, M, K)}, byDesign: r4DecisionWhy, designIn: "ko"},
 		{name: "dai aka T1 / pt 0-0 T2", steps: []pmStep{pmDec(mmT1, "daihyosen", "aka"), pmPt(mmT2, nil, nil)}},
 		{name: "dai aka T1 / fin Ryu M-0 T2", steps: []pmStep{pmDec(mmT1, "daihyosen", "aka"), pmFin(mmT2, wrTeamA, M, nil)}, byDesign: finishAtomicWhy},
 		{name: "fin Ryu M-0 T1 / dai aka T2", steps: []pmStep{pmFin(mmT1, wrTeamA, M, nil), pmDec(mmT2, "daihyosen", "aka")}, byDesign: finishAtomicWhy},
@@ -285,6 +288,15 @@ func TestMatchWritePermutationsConverge(t *testing.T) {
 					if r := pmReplay(h, t); r != "" {
 						t.Errorf("order %v: stored match differs from a replay of its log: %s", p, r)
 					}
+					if !ko {
+						// A pool or league tie is a draw, which is a verdict: no
+						// pool write is ever held for a knockout's winner.
+						for _, e := range h.history(t) {
+							if e.Reason == HoldReasonKnockoutNeedsWinner {
+								t.Errorf("order %v: a pool match's history holds %q: %+v", p, e.Reason, e)
+							}
+						}
+					}
 					s := pmState(h, t)
 					states[s] = append(states[s], fmt.Sprintf("%v errs=%s", p, errs))
 				}
@@ -296,12 +308,12 @@ func TestMatchWritePermutationsConverge(t *testing.T) {
 							sb.WriteString("\n      " + p)
 						}
 					}
-					if c.byDesign != "" {
+					if c.byDesign != "" && (c.designIn == "" || c.designIn == kind) {
 						t.Logf("byDesign (%s): %d outcomes%s", c.byDesign, len(states), sb.String())
 						return
 					}
 					t.Errorf("arrival order changed the outcome (%d outcomes):%s", len(states), sb.String())
-				} else if c.byDesign != "" {
+				} else if c.byDesign != "" && (c.designIn == "" || c.designIn == kind) {
 					t.Errorf("tagged byDesign (%s) but every order converges: drop the tag", c.byDesign)
 				}
 			})

@@ -21,9 +21,11 @@ package engine
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"slices"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -356,6 +358,12 @@ type writeBaseline struct {
 	// kept on its baseline for the older-revision hold.
 	revSession string
 	rev        int64
+	// sentResult is the verdict a finish sent when the replay worked another
+	// out (MergeReport.SentResult): logged in place of the worked-out one.
+	sentResult json.RawMessage
+	// waiting are the scoring groups held for a winner, with the values sent
+	// (MergeReport.WaitingValues): logged, though the match keeps its own.
+	waiting map[string]json.RawMessage
 }
 
 // baselineNote is what noteWriteBaseline appended: the replayed match (the
@@ -379,6 +387,7 @@ func (e *Engine) recordLandedWriteHistory(h state.StoreTx, compID, matchID strin
 		door: doorOf(result), stamp: rep.Stamp, named: rep.Applied,
 		writeID: result.WriteID, basis: result.Basis, unchanged: rep.Unchanged,
 		prefix: rep.LogPrefix, revSession: result.RevSession, rev: result.Rev,
+		sentResult: rep.SentResult, waiting: rep.WaitingValues,
 	})
 	if note == nil {
 		return
@@ -386,6 +395,22 @@ func (e *Engine) recordLandedWriteHistory(h state.StoreTx, compID, matchID strin
 	rep.EventsNotApplied = note.notApplied
 	result.ScoreVersion = note.match.ScoreVersion
 	takeDerivedMarks(&result.MarkIDs, result.SubResults, &note.match)
+}
+
+// recordSupersededWriteHistory is recordWriteHistory for a write the merge
+// held whole. Scoring it held for a winner (R4) still leaves its baseline in
+// the score log, the groups it sent logged beside the match that keeps its own:
+// a later change that gives the match its winner finds them waiting.
+func (e *Engine) recordSupersededWriteHistory(h state.StoreTx, compID, matchID string, result *state.MatchResult) {
+	e.recordWriteHistory(h, compID, matchID, result)
+	rep := result.Merge
+	if rep == nil || result.WriteDoor == DoorEvent || len(rep.WaitingValues) == 0 {
+		return
+	}
+	e.noteWriteBaseline(h, compID, matchID, writeBaseline{
+		door: doorOf(result), stamp: rep.Stamp, writeID: result.WriteID, basis: result.Basis,
+		prefix: rep.LogPrefix, revSession: result.RevSession, rev: result.Rev, waiting: rep.WaitingValues,
+	})
 }
 
 // noteWriteBaseline appends, to a match whose score event log has begun, the
@@ -460,6 +485,7 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 		})
 	}
 	set := unionGroups(named, replayGroupsDiffer(post, &before.Match))
+	set = unionGroups(set, slices.Sorted(maps.Keys(wb.waiting)))
 	// A running write that changed nothing still leaves its board's revision,
 	// so an older revision of that board arriving later is held
 	// (olderRevisionThanLogged) rather than put back over the value it echoed.
@@ -471,18 +497,51 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 	// it); a baseline that does not replay there (a direct writer that kept
 	// an older stamp on a group it changed) is placed after every line.
 	newest := max(post.ModifiedAt, newestLineStamp(lines), wb.stamp)
+	// A verdict the replay works out from the scoring around it (a finish's
+	// the newer scoring moved, a scoring change that moved a finished match's)
+	// is not logged: the replay works it out again, so a change that arrives
+	// later and sits between them is ordered by its stamp.
+	variants := []string{"plain", "newest"}
+	if wb.stamp > 0 && slices.Contains(set, state.GroupResult) {
+		switch {
+		case wb.sentResult != nil:
+			variants = append([]string{"sent"}, variants...)
+		case !slices.Contains(wb.named, state.GroupResult):
+			variants = append([]string{"derived"}, variants...)
+		}
+	}
+	if len(wb.waiting) > 0 {
+		// What the replay moved on its own account (a stored change the
+		// waiting scoring now holds back) is the replay's to move again.
+		variants = append([]string{"waiting"}, variants...)
+	}
 	var line state.ScoreLogLine
 	var after Replay
-	for i := range 2 {
-		if i == 1 && post.Status == state.MatchStatusCompleted && !slices.Contains(set, state.GroupResult) &&
-			slices.ContainsFunc(set, func(g string) bool { return state.IsScoringGroup(g) || g == state.GroupEncho }) {
-			// Scoring that lands on a finished match without moving its
-			// verdict (a correction under a ruling it keeps) is logged with
-			// that verdict, so no replay judges it again as a later change.
-			set = append(slices.Clone(set), state.GroupResult)
+	for n, variant := range variants {
+		vset := set
+		switch variant {
+		case "waiting":
+			vset = unionGroups(wb.named, slices.Sorted(maps.Keys(wb.waiting)))
+		case "derived":
+			vset = slices.DeleteFunc(slices.Clone(set), func(g string) bool { return g == state.GroupResult })
+		case "newest":
+			if post.Status == state.MatchStatusCompleted && !slices.Contains(set, state.GroupResult) &&
+				slices.ContainsFunc(set, func(g string) bool { return state.IsScoringGroup(g) || g == state.GroupEncho }) {
+				// Scoring that lands on a finished match without moving its
+				// verdict (a correction under a ruling it keeps) is logged with
+				// that verdict, so no replay judges it again as a later change.
+				vset = append(slices.Clone(set), state.GroupResult)
+			}
 		}
-		bl := BaselineFromMatch(post, logBaselineID(len(lines), wb.door), wb.door, wb.stamp, set, basis)
-		if i == 1 || wb.stamp <= 0 {
+		bl := BaselineFromMatch(post, logBaselineID(len(lines), wb.door), wb.door, wb.stamp, vset, basis)
+		if variant == "sent" {
+			// The finish as it was sent, at its own stamp.
+			bl.Values[state.GroupResult], bl.Stamps[state.GroupResult] = wb.sentResult, wb.stamp
+		}
+		for g, v := range wb.waiting {
+			bl.Values[g], bl.Stamps[g] = v, wb.stamp
+		}
+		if variant == "newest" || wb.stamp <= 0 {
 			bl.Stamp = newest
 			for g := range bl.Stamps {
 				bl.Stamps[g] = newest
@@ -498,7 +557,7 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 		if len(diff) == 0 {
 			break
 		}
-		if i == 1 {
+		if n == len(variants)-1 {
 			log.Printf("engine: ERROR: match %s/%s: the %s write's baseline does not replay to the stored match (groups %v); the drift net will heal it", compID, matchID, wb.door, diff)
 		}
 	}

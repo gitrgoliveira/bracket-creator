@@ -281,6 +281,39 @@ func baselineGroupStamp(b *state.ScoreBaseline, g string) int64 {
 	return b.Stamp
 }
 
+// baselineOwnStamp is the stamp a baseline's write was made at. A door's
+// baseline logs the merged match, so a group it carries may be dated by a later
+// change that moved it (a result the newer scoring moved, S2/R3); the line's
+// own stamp is the write's. A baseline that logs a match as stored (the
+// migration, a drift or repair) has no write of its own: the group's stamp is
+// its date.
+func baselineOwnStamp(b *state.ScoreBaseline, g string) int64 {
+	switch b.Door {
+	case MigrationDoor, DoorDrift, DoorRepair:
+		return baselineGroupStamp(b, g)
+	}
+	return cmp.Or(b.Stamp, baselineGroupStamp(b, g))
+}
+
+// finishStampOf is the stamp the newest finish in the log was made at: R3
+// judges a running write against it, not against the stamp scoring moved the
+// result to (a write stamped between the two is after the finish).
+func finishStampOf(lines []state.ScoreLogLine, stored *state.MatchResult) int64 {
+	storedAt := stored.GroupStamp(state.GroupResult)
+	var own int64
+	for _, l := range lines {
+		if b := l.Baseline; b != nil {
+			if _, ok := b.Values[state.GroupResult]; ok {
+				own = max(own, baselineOwnStamp(b, state.GroupResult))
+			}
+		}
+	}
+	if own == 0 {
+		return storedAt
+	}
+	return min(own, storedAt)
+}
+
 // baselineFinishesFought reports whether the baseline sets a completed result
 // that no decision (kiken, fusenpai, fusensho) closed.
 func baselineFinishesFought(b *state.ScoreBaseline) bool {
@@ -371,6 +404,63 @@ type replayer struct {
 	outcome map[int]string
 	cleared bool
 	held    map[int]BaselineHold
+	// waiting is R4 for baselines, as pending is for events: a baseline's
+	// scoring that would leave a finished knockout tied (or an engi count
+	// invalid) waits for a later baseline that gives the match its winner, and
+	// both then apply. Without one, it stays held (needsWinner).
+	waiting []waitingBaseline
+	// The result a baseline set, and the scoring baselines judged over it
+	// since: the result's stamp at the end is a function of the surviving
+	// lines alone (see datedByFinish), never of a tie a later change removed.
+	finish baselineFinish
+}
+
+// baselineFinish tracks the verdict the last result-setting baseline gave and
+// the newest scoring baseline R3/S2 applied over it.
+type baselineFinish struct {
+	set      bool
+	verdict  json.RawMessage
+	stamp    int64
+	scoredAt int64
+	moved    bool
+	byEvent  bool
+}
+
+// datedByFinish dates the result of a match whose verdict a baseline's scoring
+// moved. The stamp is a function of the lines the log keeps: a write held
+// whole because a newer one superseded its group leaves no line, so an
+// in-between tie that was visible in one arrival order and not in another must
+// not decide it. A verdict back at the finish's own is dated by the finish; one
+// that differs, by the newest scoring applied over it.
+func (rp *replayer) datedByFinish() {
+	f := rp.finish
+	if !f.set || !f.moved || f.byEvent {
+		return
+	}
+	if sameVerdictValue(state.GroupValue(&rp.cur.m, state.GroupResult), f.verdict) {
+		rp.stamps[state.GroupResult] = f.stamp
+		return
+	}
+	rp.stamps[state.GroupResult] = max(f.stamp, f.scoredAt)
+}
+
+// sameVerdictValue compares two result groups by what they decide (status,
+// winner, decision); the winner's id is derived beside it and may be missing
+// from a value that was sent.
+func sameVerdictValue(a, b json.RawMessage) bool {
+	type verdict struct{ Status, Winner, Decision string }
+	var x, y verdict
+	if json.Unmarshal(a, &x) != nil || json.Unmarshal(b, &y) != nil {
+		return bytes.Equal(a, b)
+	}
+	return x == y
+}
+
+// waitingBaseline is the scoring groups of one baseline R4 holds for now.
+type waitingBaseline struct {
+	line   int
+	b      *state.ScoreBaseline
+	groups []string
 }
 
 // ReplayScoring folds a match's event log onto it. current supplies what no
@@ -427,6 +517,7 @@ func ReplayScoring(current *state.MatchResult, lines []state.ScoreLogLine, shape
 		}
 	}
 	rp.settlePending()
+	rp.datedByFinish()
 
 	out := Replay{Match: rp.cur.m, ClearedWithdrawal: rp.cleared, Held: rp.held}
 	out.Match.GroupStamps = rp.stamps
@@ -507,8 +598,110 @@ func (rp *replayer) applyBaseline(line int, b *state.ScoreBaseline, groups []str
 		prev := rp.held[line]
 		hold.Groups = unionGroups(prev.Groups, hold.Groups)
 		rp.held[line] = *hold
+		if hold.NeedsWinner {
+			// R4: it waits for a later baseline that gives the winner.
+			rp.waiting = append(rp.waiting, waitingBaseline{line: line, b: b, groups: slices.Clone(hold.Groups)})
+			// A bout no line has set yet is not in the match at this point:
+			// the cache's row is the final one, a copy of what an earlier
+			// arrival of this same line landed.
+			for _, g := range hold.Groups {
+				pos, isBout := state.ParseBoutGroup(g)
+				if _, governed := rp.govern[g]; !isBout || governed {
+					continue
+				}
+				m.SubResults = slices.DeleteFunc(m.SubResults, func(r state.SubMatchResult) bool { return r.Position == pos })
+				delete(rp.cur.bouts, pos)
+				delete(rp.stamps, g)
+			}
+		}
 	}
 	said := *m
+	if verdict != nil {
+		// The winner this baseline gives is the winner the waiting scoring
+		// was holding out for: it applies with it, each group at its own
+		// stamp, and is no longer held. A group this baseline sets itself
+		// takes this baseline's value below.
+		for _, w := range rp.waiting {
+			own := slices.DeleteFunc(slices.Clone(w.groups), func(g string) bool { return slices.Contains(groups, g) })
+			rp.applyBaselineGroups(w.line, w.b, own, nil)
+			if h, ok := rp.held[w.line]; ok {
+				h.Groups = slices.DeleteFunc(slices.Clone(h.Groups), func(g string) bool { return slices.Contains(w.groups, g) })
+				if len(h.Groups) == 0 {
+					delete(rp.held, w.line)
+				} else {
+					rp.held[w.line] = h
+				}
+			}
+		}
+		rp.waiting = nil
+	}
+	rp.applyBaselineGroups(line, b, groups, values)
+	if len(rp.waiting) > 0 {
+		// What this baseline sets itself supersedes what was waiting on it;
+		// a new result settles the rest, which never applied.
+		setsResult := slices.Contains(groups, state.GroupResult)
+		var keep []waitingBaseline
+		for _, w := range rp.waiting {
+			if w.line == line || setsResult {
+				if w.line == line {
+					keep = append(keep, w)
+				}
+				continue
+			}
+			w.groups = slices.DeleteFunc(w.groups, func(g string) bool { return slices.Contains(groups, g) })
+			if len(w.groups) > 0 {
+				keep = append(keep, w)
+			}
+		}
+		rp.waiting = keep
+	}
+	if verdict != nil {
+		// R3: the finished match takes the winner its new scoring gives (or
+		// R2: the withdrawal that scoring cleared), and the result is dated
+		// by the baseline when the verdict moved.
+		state.CopyGroup(m, verdict, state.GroupResult)
+		rp.finish.scoredAt = max(rp.finish.scoredAt, b.Stamp)
+		if verdictMoved(&said, m) {
+			rp.finish.moved = true
+			if s := cmp.Or(b.Stamp, rp.stamps[state.GroupResult]); s > 0 {
+				rp.stamps[state.GroupResult] = max(rp.stamps[state.GroupResult], s)
+			}
+		}
+		if verdict.ClearsWithdrawal {
+			rp.cleared = true
+		}
+	}
+	if len(rp.pending) == 0 {
+		return
+	}
+	// A pending event whose group this baseline sets is settled by it; a new
+	// result settles the rest, which never applied: still waiting for the
+	// winner when the baseline saw it, else older than the baseline (D5).
+	setsResult := slices.Contains(groups, state.GroupResult)
+	var keep []int
+	for _, i := range rp.pending {
+		sets := slices.Contains(groups, rp.groupOf(rp.lines[i].Event))
+		switch {
+		case sets:
+			rp.absorb(b, i)
+		case setsResult && rp.contains(b, i):
+			rp.outcome[i] = rp.pendingOutcome()
+		case setsResult:
+			rp.outcome[i] = domain.ScoreOutcomeBeforeBaseline
+		default:
+			keep = append(keep, i)
+		}
+	}
+	rp.pending = keep
+	if len(keep) == 0 {
+		rp.clears = false
+	}
+}
+
+// applyBaselineGroups sets each of the groups to the baseline's value at the
+// group's own stamp (values overrides a value the replay adjusted).
+func (rp *replayer) applyBaselineGroups(line int, b *state.ScoreBaseline, groups []string, values map[string]json.RawMessage) {
+	m := &rp.cur.m
 	for _, g := range groups {
 		pos, isBout := state.ParseBoutGroup(g)
 		var prevA, prevB, prevMA, prevMB []string
@@ -595,46 +788,8 @@ func (rp *replayer) applyBaseline(line int, b *state.ScoreBaseline, groups []str
 			// The result is this baseline's: a withdrawal an earlier event
 			// cleared is cleared (or recorded again) by it, not by the replay.
 			rp.cleared = false
+			rp.finish = baselineFinish{set: true, verdict: state.GroupValue(m, g), stamp: baselineOwnStamp(b, g), byEvent: rp.finish.byEvent}
 		}
-	}
-	if verdict != nil {
-		// R3: the finished match takes the winner its new scoring gives (or
-		// R2: the withdrawal that scoring cleared), and the result is dated
-		// by the baseline when the verdict moved.
-		state.CopyGroup(m, verdict, state.GroupResult)
-		if verdictMoved(&said, m) {
-			if s := cmp.Or(b.Stamp, rp.stamps[state.GroupResult]); s > 0 {
-				rp.stamps[state.GroupResult] = max(rp.stamps[state.GroupResult], s)
-			}
-		}
-		if verdict.ClearsWithdrawal {
-			rp.cleared = true
-		}
-	}
-	if len(rp.pending) == 0 {
-		return
-	}
-	// A pending event whose group this baseline sets is settled by it; a new
-	// result settles the rest, which never applied: still waiting for the
-	// winner when the baseline saw it, else older than the baseline (D5).
-	setsResult := slices.Contains(groups, state.GroupResult)
-	var keep []int
-	for _, i := range rp.pending {
-		sets := slices.Contains(groups, rp.groupOf(rp.lines[i].Event))
-		switch {
-		case sets:
-			rp.absorb(b, i)
-		case setsResult && rp.contains(b, i):
-			rp.outcome[i] = rp.pendingOutcome()
-		case setsResult:
-			rp.outcome[i] = domain.ScoreOutcomeBeforeBaseline
-		default:
-			keep = append(keep, i)
-		}
-	}
-	rp.pending = keep
-	if len(keep) == 0 {
-		rp.clears = false
 	}
 }
 
@@ -653,6 +808,26 @@ func (rp *replayer) judgeOverFinished(b *state.ScoreBaseline, groups []string) (
 		return nil, nil, nil
 	}
 	probe := cloneMatchForReplay(*cur)
+	// The match as this point of the log has it: a bout no baseline has
+	// reached yet sits in the cache with its FINAL value, and a verdict judged
+	// with it would count a bout that, in stamp order, has not been fought.
+	probe.SubResults = slices.DeleteFunc(probe.SubResults, func(r state.SubMatchResult) bool {
+		g := state.BoutGroup(r.Position)
+		_, governed := rp.govern[g]
+		return !governed && rp.covered[g]
+	})
+	// R4: scoring waiting for a winner counts toward the verdict this one
+	// gives.
+	for _, w := range rp.waiting {
+		for _, g := range w.groups {
+			if slices.Contains(groups, g) {
+				continue
+			}
+			if err := state.SetGroupFromValue(&probe, g, w.b.Values[g]); err != nil {
+				continue // a value that does not read keeps the match's own
+			}
+		}
+	}
 	var scoring []string
 	changed, scored := false, false
 	for _, g := range groups {
@@ -874,6 +1049,7 @@ func (rp *replayer) tryCommit() {
 	if string(before) != string(state.GroupValue(&rp.cur.m, state.GroupResult)) {
 		// The verdict moved: the result is dated by the change that moved it.
 		rp.stamps[state.GroupResult] = max(rp.stamps[state.GroupResult], last)
+		rp.finish.byEvent = true
 	}
 	if rp.clears {
 		rp.cleared = true

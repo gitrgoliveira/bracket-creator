@@ -807,6 +807,20 @@ type MergeReport struct {
 	// replaced without having seen them (beforeBaseline, D5): each is kept in
 	// the history with that outcome, and the answer names them.
 	EventsNotApplied []string
+	// SentResult is the result group a finish SENT when the replay worked a
+	// different verdict out from scoring stored newer than it (S2); nil when
+	// the verdict landed as sent. The finish's baseline logs the verdict it
+	// sent, at its own stamp, and the replay works the winner out again from
+	// the scoring that follows it, so a change that arrives later and sits
+	// between them is ordered by its stamp instead of finding a verdict
+	// already worked out without it.
+	SentResult json.RawMessage
+	// WaitingValues are the scoring groups the replay held for a winner (R4)
+	// with the values the write sent. They are logged with the write's baseline
+	// (the stored match keeps its own), so a later change that gives the match
+	// its winner finds them waiting and both apply, in whatever order the two
+	// arrived.
+	WaitingValues map[string]json.RawMessage
 	// LogPrefix are the score log lines the replay that decided a snapshot
 	// write needed ahead of the write's own baseline (the match's migration
 	// baseline, or a drift baseline): the door logs them first.
@@ -818,7 +832,7 @@ type MergeReport struct {
 // Only then is it answered applied:false, and nothing is written but its
 // history entry.
 func (r *MergeReport) Superseded() bool {
-	return r != nil && len(r.Held)+len(r.HeldEcho) > 0 && len(r.Applied) == len(r.Unchanged)
+	return r != nil && len(r.Held)+len(r.HeldEcho) > 0 && len(r.Applied) == len(r.Unchanged) && len(r.Displaced) == 0
 }
 
 // DisplacedChange is a stored change a later-arriving, earlier-stamped write

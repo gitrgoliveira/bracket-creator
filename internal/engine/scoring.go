@@ -1703,7 +1703,7 @@ func (e *Engine) writeMatchResult(h state.StoreTx, compId string, matchId string
 	if errors.Is(err, ErrMatchSuperseded) {
 		// Kept in the match's history (bc-mrgc); RecordMatchResult commits
 		// the transaction on this error so the entry lands.
-		e.recordWriteHistory(h, compId, matchId, result)
+		e.recordSupersededWriteHistory(h, compId, matchId, result)
 		return supersededBy(result)
 	}
 	if err != nil {

@@ -1086,6 +1086,12 @@ var (
 // changed still applies.
 func (e *Engine) ReopenMatch(compID, matchID, reason string, opts ...ForceOptions) (*domain.CompetitorStatus, error) {
 	fo := firstForceOptions(opts)
+	// A resend of a reopen already logged (its write id) is answered as
+	// recorded, before the preconditions that would now refuse it (the match
+	// is no longer completed): nothing written, no history line (bc-evts F1).
+	if e.loggedWriteID(e.store, compID, matchID, fo.WriteID) {
+		return nil, nil
+	}
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
 		return nil, err
@@ -1239,7 +1245,7 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 				if serr := h.Save(); serr != nil {
 					return serr
 				}
-				e.recordDirectHistory(tx, compID, matchID, doorReopen, h.Pool.GroupStamp(state.GroupResult), reopenedPoolGroups...)
+				e.recordDirectHistoryTagged(tx, compID, matchID, doorReopen, h.Pool.GroupStamp(state.GroupResult), fo, reopenedPoolGroups...)
 				// The reopen cleared the decision: a withdrawal it removed
 				// bars nobody (see ELIGIBILITY on ReopenMatch).
 				restored = e.restoreIfWithdrawalRemoved(tx, compID, matchID, prior, h.Pool.Decision, nil)
@@ -1282,7 +1288,7 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 			if serr := h.Save(); serr != nil {
 				return serr
 			}
-			e.recordDirectHistory(tx, compID, matchID, doorReopen, h.Bracket.GroupStamp(state.GroupResult), reopenedBracketGroups...)
+			e.recordDirectHistoryTagged(tx, compID, matchID, doorReopen, h.Bracket.GroupStamp(state.GroupResult), fo, reopenedBracketGroups...)
 			e.restoreForceReopened(tx, compID, reopenedDownstream)
 			e.recordRepPickClears(tx, compID, clears, reopenedDownstream)
 			if fo.Reopened != nil {
@@ -1337,6 +1343,11 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 // removes no withdrawal.
 func (e *Engine) RequeueBlockerAndReopen(targetComp, targetMatch, blockerComp, blockerMatch, reason string, opts ...ForceOptions) (*domain.CompetitorStatus, error) {
 	fo := firstForceOptions(opts)
+	// A resend already logged on the target (its write id) is answered as
+	// recorded, as ReopenMatch answers one (bc-evts F1).
+	if e.loggedWriteID(e.store, targetComp, targetMatch, fo.WriteID) {
+		return nil, nil
+	}
 	comp, err := e.store.LoadCompetition(targetComp)
 	if err != nil {
 		return nil, err
@@ -1604,7 +1615,8 @@ func (e *Engine) requireBlockerHoldsCourt(targetComp, targetMatch, blockerComp, 
 // of the two. Returns the updated match for the caller to broadcast. No
 // court gate: the match is (and stays) running, so removing an empty bout
 // changes no court occupancy.
-func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.MatchResult, error) {
+func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string, opts ...ForceOptions) (*state.MatchResult, error) {
+	fo := firstForceOptions(opts)
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
 		return nil, err
@@ -1618,6 +1630,15 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 		opErr   error
 	)
 	txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+		// A resend of a removal already logged (its write id) is answered as
+		// recorded, before the precondition that would now refuse it (the
+		// bout is gone): the match as stored, nothing written, no history
+		// line (bc-evts F1, Q6).
+		if e.loggedWriteID(tx, compID, matchID, fo.WriteID) {
+			m, _, lerr := e.lookupExistingResultIn(tx, compID, matchID)
+			updated = m
+			return lerr
+		}
 		// strip is the SINGLE precondition+mutation every match home applies:
 		// the encounter must be RUNNING and must carry a trailing unscored bout.
 		// One closure so pool/round/bronze cannot drift (same reasoning as
@@ -1713,7 +1734,7 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 				if werr := h.Save(); werr != nil {
 					return werr
 				}
-				e.recordDirectHistory(tx, compID, matchID, doorKachinukiRemove, stamp, removed...)
+				e.recordDirectHistoryTagged(tx, compID, matchID, doorKachinukiRemove, stamp, fo, removed...)
 				u := *h.Pool
 				updated = &u
 				return nil
@@ -1730,7 +1751,7 @@ func (e *Engine) RemoveTrailingKachinukiBout(compID, matchID string) (*state.Mat
 			if werr := h.Save(); werr != nil {
 				return werr
 			}
-			e.recordDirectHistory(tx, compID, matchID, doorKachinukiRemove, stamp, removed...)
+			e.recordDirectHistoryTagged(tx, compID, matchID, doorKachinukiRemove, stamp, fo, removed...)
 			updated = bracketMatchToTeamResult(*h.Bracket)
 			return nil
 		})

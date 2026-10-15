@@ -156,6 +156,13 @@ func (e *Engine) recordDisplacedHistory(h state.StoreTx, compID, matchID string,
 // engi recorder, the kachinuki advance): every group it changed, applied, at
 // stamp. Same failure rule as recordWriteHistory.
 func (e *Engine) recordDirectHistory(h state.StoreTx, compID, matchID, door string, stamp int64, groups ...string) {
+	e.recordDirectHistoryTagged(h, compID, matchID, door, stamp, ForceOptions{}, groups...)
+}
+
+// recordDirectHistoryTagged is recordDirectHistory for a door the client
+// tagged (bc-evts F1): the baseline it leaves carries the write's id, so a
+// resend is answered as recorded (loggedWriteID), and its basis.
+func (e *Engine) recordDirectHistoryTagged(h state.StoreTx, compID, matchID, door string, stamp int64, tag ForceOptions, groups ...string) {
 	outcomes := make(map[string]string, len(groups))
 	for _, g := range groups {
 		outcomes[g] = state.HistoryOutcomeApplied
@@ -172,8 +179,10 @@ func (e *Engine) recordDirectHistory(h state.StoreTx, compID, matchID, door stri
 		log.Printf("engine: match %s/%s: history entry not recorded: %v", compID, matchID, err)
 	}
 	// A direct writer has written the match by now: what it set is a
-	// baseline of the score event log once that log has begun (bc-evts).
-	e.noteWriteBaseline(h, compID, matchID, writeBaseline{door: door, stamp: stamp, named: groups})
+	// baseline of the score event log once that log has begun, or when the
+	// write carries an id a resend must find (bc-evts).
+	e.noteWriteBaseline(h, compID, matchID, writeBaseline{door: door, stamp: stamp, named: groups,
+		writeID: tag.WriteID, basis: tag.Basis})
 }
 
 // noteServerBoutChanges adds to an explicit Changed every bout row the
@@ -239,9 +248,9 @@ func serverNowMs() int64 {
 // together. A HELD override makes no write at all, so there is nothing to
 // share a transaction with: it is appended on its own, directly through the
 // store.
-func (e *Engine) recordOverrideHistory(h state.StoreTx, compID, matchID, winnerName string, stamp int64, applied bool) {
+func (e *Engine) recordOverrideHistory(h state.StoreTx, compID, matchID, winnerName string, stamp int64, applied bool, tag ForceOptions) {
 	if applied {
-		e.recordDirectHistory(h, compID, matchID, doorOverride, stamp, state.GroupResult)
+		e.recordDirectHistoryTagged(h, compID, matchID, doorOverride, stamp, tag, state.GroupResult)
 		return
 	}
 	held, err := json.Marshal(map[string]string{"winner": winnerName})

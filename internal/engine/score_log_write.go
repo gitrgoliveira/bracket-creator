@@ -408,13 +408,24 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 		}
 		lines = append(lines, wb.prefix...)
 	}
-	if len(lines) == 0 {
+	if len(lines) == 0 && wb.writeID == "" {
 		return nil
 	}
 	post, inPool, err := e.lookupExistingResultIn(h, compID, matchID)
 	if err != nil {
 		log.Printf("engine: ERROR: match %s/%s: written match not read for its baseline: %v", compID, matchID, err)
 		return nil
+	}
+	if len(lines) == 0 {
+		// A write with an id a resend must find begins the log: the match
+		// as written is its first baseline, and the write's own follows.
+		mb := MigrationBaseline(post, MigrationDoor+"-0", serverNowMs())
+		first := state.ScoreLogLine{Baseline: &mb}
+		if err := h.AppendScoreLog(compID, matchID, first); err != nil {
+			log.Printf("engine: ERROR: match %s/%s: the %s write's log not begun: %v", compID, matchID, wb.door, err)
+			return nil
+		}
+		lines = []state.ScoreLogLine{first}
 	}
 	comp, err := h.LoadCompetition(compID)
 	if err != nil {
@@ -562,19 +573,7 @@ func takeDerivedMarks(marks **state.MarkIDs, subs []state.SubMatchResult, derive
 // line for anyone (bc-evts F1, Q6 b). A match with no log falls back to the
 // exact-resend probe (answerExactScoreReplay).
 func (e *Engine) answerLoggedWrite(tx state.StoreTx, compID, matchID string, result *state.MatchResult) (bool, error) {
-	if result.WriteID == "" {
-		return false, nil
-	}
-	lines, err := tx.LoadScoreLog(compID, matchID)
-	if err != nil {
-		// The write is judged as any other; its baseline will not be logged
-		// either, which noteWriteBaseline reports.
-		log.Printf("engine: ERROR: match %s/%s: score event log not read for a resend check: %v", compID, matchID, err)
-		return false, nil
-	}
-	if !slices.ContainsFunc(lines, func(l state.ScoreLogLine) bool {
-		return l.Baseline != nil && l.Baseline.WriteID == result.WriteID
-	}) {
+	if !e.loggedWriteID(tx, compID, matchID, result.WriteID) {
 		return false, nil
 	}
 	prior, inPool, err := e.lookupExistingResultIn(tx, compID, matchID)
@@ -583,6 +582,26 @@ func (e *Engine) answerLoggedWrite(tx state.StoreTx, compID, matchID string, res
 	}
 	answerAsStored(tx, compID, matchID, prior, inPool, result)
 	return true, nil
+}
+
+// loggedWriteID reports whether the match's score event log holds a baseline
+// with this write id (bc-evts F1): the write was recorded, so a resend whose
+// answer was lost is answered as recorded, with nothing written and no
+// history line (Q6). An empty id is never logged.
+func (e *Engine) loggedWriteID(h state.StoreTx, compID, matchID, writeID string) bool {
+	if writeID == "" {
+		return false
+	}
+	lines, err := h.LoadScoreLog(compID, matchID)
+	if err != nil {
+		// The write is judged as any other; its baseline will not be logged
+		// either, which noteWriteBaseline reports.
+		log.Printf("engine: ERROR: match %s/%s: score event log not read for a resend check: %v", compID, matchID, err)
+		return false
+	}
+	return slices.ContainsFunc(lines, func(l state.ScoreLogLine) bool {
+		return l.Baseline != nil && l.Baseline.WriteID == writeID
+	})
 }
 
 // replayedGroups is every group of a and b: the scalar and server groups and

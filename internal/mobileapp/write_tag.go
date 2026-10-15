@@ -1,7 +1,12 @@
 package mobileapp
 
 import (
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
@@ -53,4 +58,24 @@ func (w writeTag) tagOnto(m *state.MatchResult) {
 func (w writeTag) tagInto(fo engine.ForceOptions) engine.ForceOptions {
 	fo.WriteID, fo.Basis = w.WriteID, w.Basis
 	return fo
+}
+
+// bindOptionalWriteTag reads the optional {writeId, basis} body of a door
+// that takes no other input (a send back to the queue, a kachinuki bout's
+// removal): an empty body is the one-tap shape and carries no tag. It answers
+// 400 itself for a malformed body or tag.
+func bindOptionalWriteTag(c *gin.Context) (writeTag, bool) {
+	var tag writeTag
+	if c.Request.Body == nil || c.Request.Body == http.NoBody {
+		return tag, true
+	}
+	if err := c.ShouldBindJSON(&tag); err != nil && !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return writeTag{}, false
+	}
+	if err := tag.validateTag(); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return writeTag{}, false
+	}
+	return tag, true
 }

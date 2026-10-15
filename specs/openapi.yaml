@@ -2933,6 +2933,22 @@ paths:
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
         - $ref: '#/components/parameters/MatchId'
+      requestBody:
+        required: false
+        description: >
+          Optional. The write's `writeId` and `basis`: a resend of a
+          write whose id the match's score event log holds is answered as the
+          first was, with nothing written and no history line. An empty body
+          is the one-tap shape.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                writeId:
+                  $ref: '#/components/schemas/WriteId'
+                basis:
+                  $ref: '#/components/schemas/ScoreBasis'
       responses:
         '200':
           description: Match reverted to the scheduled queue.
@@ -3056,6 +3072,10 @@ paths:
                     Optional. The operator's confirmation after a 409
                     `downstream_knockout_played`: also reopen the later
                     knockout match(es) the refusal named.
+                writeId:
+                  $ref: '#/components/schemas/WriteId'
+                basis:
+                  $ref: '#/components/schemas/ScoreBasis'
       responses:
         '200':
           description: Match reopened (status back to `running`).
@@ -3247,6 +3267,10 @@ paths:
                 forceDownstreamReopen:
                   type: boolean
                   description: Optional. As on the reopen endpoint.
+                writeId:
+                  $ref: '#/components/schemas/WriteId'
+                basis:
+                  $ref: '#/components/schemas/ScoreBasis'
       responses:
         '200':
           description: >
@@ -3367,6 +3391,22 @@ paths:
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
         - $ref: '#/components/parameters/MatchId'
+      requestBody:
+        required: false
+        description: >
+          Optional. The write's `writeId` and `basis`: a resend of a
+          write whose id the match's score event log holds is answered as the
+          first was, with nothing written and no history line. An empty body
+          is the one-tap shape.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                writeId:
+                  $ref: '#/components/schemas/WriteId'
+                basis:
+                  $ref: '#/components/schemas/ScoreBasis'
       responses:
         '200':
           description: The trailing unscored bout was removed; returns the updated match.
@@ -3570,6 +3610,10 @@ paths:
                     reconciliation, unix milliseconds; omit (or 0) when
                     unstamped. A value implausibly far in the future is refused
                     with the RefusedWrite shape, see the 200 response.
+                writeId:
+                  $ref: '#/components/schemas/WriteId'
+                basis:
+                  $ref: '#/components/schemas/ScoreBasis'
       responses:
         '200':
           description: >

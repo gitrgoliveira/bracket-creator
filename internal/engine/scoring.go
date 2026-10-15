@@ -3547,8 +3547,14 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 	// (errLWWDropped) assertion makes no write at all, so it is recorded
 	// outside the transaction below, but an APPLIED override must not land
 	// with no history line explaining it if the process dies right after.
-	var held bool
+	var held, recorded bool
 	err := e.store.WithTransaction(compId, func(tx state.StoreTx) error {
+		// A resend of an override already logged (its write id) is answered
+		// as recorded: nothing written, no history line (bc-evts F1, Q6).
+		if e.loggedWriteID(tx, compId, matchId, fo.WriteID) {
+			recorded = true
+			return nil
+		}
 		uerr := tx.UpdateBracket(compId, func(bracket *state.Bracket) error {
 			if bracket == nil {
 				return notFoundErrorf("bracket not found for competition %s", compId)
@@ -3633,7 +3639,7 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 		if uerr != nil {
 			return uerr
 		}
-		e.recordOverrideHistory(tx, compId, matchId, winnerName, modifiedAt, true)
+		e.recordOverrideHistory(tx, compId, matchId, winnerName, modifiedAt, true, fo)
 		// restoreForceReopened must run with the SAME handle the bracket write
 		// just used (its own doc comment says so): it both restores eligibility
 		// for a competitor the reopen un-bars and appends that reopen's history
@@ -3654,11 +3660,14 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 		// history as held, with the winner it named (bc-mrgc). No write
 		// landed, so this is appended on its own, outside the transaction
 		// above (which, for this case, staged nothing).
-		e.recordOverrideHistory(e.store, compId, matchId, winnerName, modifiedAt, false)
+		e.recordOverrideHistory(e.store, compId, matchId, winnerName, modifiedAt, false, fo)
 		return false, nil
 	}
 	if err != nil {
 		return false, err
+	}
+	if recorded {
+		return true, nil
 	}
 	if fo.Reopened != nil {
 		*fo.Reopened = reopened
@@ -3755,7 +3764,8 @@ func (e *Engine) UpdateMatchTime(compId string, matchId string, scheduledAt stri
 // court-FREEING operation and needs no court gate; if that ever changes, add a
 // lock-free `revertMatchToQueueUnderCourtLock` core and call THAT from the
 // composition, mirroring reopenUnderCourtLock.
-func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
+func (e *Engine) RevertMatchToQueue(compId, matchId string, opts ...ForceOptions) error {
+	fo := firstForceOptions(opts)
 	var alreadyCompleted, notFound bool
 
 	// The write and its history entry are one transaction (bc-mrgc): a
@@ -3763,6 +3773,11 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 	// after it lands must not leave the match with nothing explaining how
 	// it got there.
 	err := e.store.WithTransaction(compId, func(tx state.StoreTx) error {
+		// A resend of a send back already logged (its write id) is answered
+		// as recorded: nothing written, no history line (bc-evts F1, Q6).
+		if e.loggedWriteID(tx, compId, matchId, fo.WriteID) {
+			return nil
+		}
 		stamp := serverNowMs()
 		perr := e.withPoolMatch(tx, compId, matchId, func(r *state.MatchResult) error {
 			if r.Status == state.MatchStatusCompleted {
@@ -3807,7 +3822,7 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 		})
 		if perr == nil {
 			if !alreadyCompleted {
-				e.recordDirectHistory(tx, compId, matchId, doorRequeue, stamp, state.GroupResult)
+				e.recordDirectHistoryTagged(tx, compId, matchId, doorRequeue, stamp, fo, state.GroupResult)
 			}
 			return nil
 		}
@@ -3840,7 +3855,7 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 			return berr
 		}
 		if !alreadyCompleted {
-			e.recordDirectHistory(tx, compId, matchId, doorRequeue, stamp, state.GroupResult)
+			e.recordDirectHistoryTagged(tx, compId, matchId, doorRequeue, stamp, fo, state.GroupResult)
 		}
 		return nil
 	})

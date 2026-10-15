@@ -1372,7 +1372,13 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
-		if err := eng.RevertMatchToQueue(id, mid); err != nil {
+		// The optional {writeId, basis} (bc-evts F1): a resend of a send back
+		// the match's score event log holds is answered as recorded.
+		tag, ok := bindOptionalWriteTag(c)
+		if !ok {
+			return
+		}
+		if err := eng.RevertMatchToQueue(id, mid, tag.tagInto(engine.ForceOptions{})); err != nil {
 			if errors.Is(err, engine.ErrMatchAlreadyCompleted) {
 				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 				return
@@ -1444,11 +1450,17 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		var body struct {
 			Reason                string `json:"reason"`
 			ForceDownstreamReopen bool   `json:"forceDownstreamReopen"`
+			// The optional writeId and basis (bc-evts F1).
+			writeTag
 		}
 		// io.EOF is an EMPTY body, which is the one-tap case: the client sends
 		// no JSON at all. Only a malformed body is a 400 — an operator tapping
 		// Reopen must never be blocked on request shape.
 		if err := c.ShouldBindJSON(&body); err != nil && !errors.Is(err, io.EOF) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := body.validateTag(); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -1477,10 +1489,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// same-comp check are atomic by construction — the handler no longer
 		// has to remember to wrap the call.
 		var reopenedDownstream []engine.ReopenedMatch
-		restored, err := eng.ReopenMatch(id, mid, reason, engine.ForceOptions{
+		restored, err := eng.ReopenMatch(id, mid, reason, body.tagInto(engine.ForceOptions{
 			Force:    body.ForceDownstreamReopen,
 			Reopened: &reopenedDownstream,
-		})
+		}))
 		if err != nil {
 			var notFoundErr *engine.NotFoundError
 			var validationErr *engine.ValidationError
@@ -1571,8 +1583,14 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			BlockerMatchID        string `json:"blockerMatchId"`
 			Reason                string `json:"reason"`
 			ForceDownstreamReopen bool   `json:"forceDownstreamReopen"`
+			// The optional writeId and basis (bc-evts F1), the target's.
+			writeTag
 		}
 		if err := c.ShouldBindJSON(&body); err != nil && !errors.Is(err, io.EOF) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := body.validateTag(); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -1597,10 +1615,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 
 		var reopenedDownstream []engine.ReopenedMatch
-		restored, err := eng.RequeueBlockerAndReopen(id, mid, body.BlockerCompID, body.BlockerMatchID, reason, engine.ForceOptions{
+		restored, err := eng.RequeueBlockerAndReopen(id, mid, body.BlockerCompID, body.BlockerMatchID, reason, body.tagInto(engine.ForceOptions{
 			Force:    body.ForceDownstreamReopen,
 			Reopened: &reopenedDownstream,
-		})
+		}))
 		if err != nil {
 			var notFoundErr *engine.NotFoundError
 			var validationErr *engine.ValidationError
@@ -1703,7 +1721,13 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
-		updated, err := eng.RemoveTrailingKachinukiBout(id, mid)
+		// The optional {writeId, basis} (bc-evts F1): a resend of a removal
+		// the match's score event log holds is answered as recorded.
+		tag, ok := bindOptionalWriteTag(c)
+		if !ok {
+			return
+		}
+		updated, err := eng.RemoveTrailingKachinukiBout(id, mid, tag.tagInto(engine.ForceOptions{}))
 		if err != nil {
 			var notFoundErr *engine.NotFoundError
 			var validationErr *engine.ValidationError
@@ -1752,8 +1776,14 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// correction guard, same field name and contract as the score-write
 			// endpoint's (see scoreRequestBody.ForceDownstreamReopen).
 			ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
+			// The optional writeId and basis (bc-evts F1).
+			writeTag
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := req.validateTag(); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -1805,10 +1835,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// bracket match reopened by a forced override, populated only when
 		// req.ForceDownstreamReopen actually unblocked one.
 		var reopenedDownstream []engine.ReopenedMatch
-		applied, err := eng.OverrideBracketWinner(id, mid, winnerName, clampClientModifiedAt(req.ModifiedAt), engine.ForceOptions{
+		applied, err := eng.OverrideBracketWinner(id, mid, winnerName, clampClientModifiedAt(req.ModifiedAt), req.tagInto(engine.ForceOptions{
 			Force:    req.ForceDownstreamReopen,
 			Reopened: &reopenedDownstream,
-		})
+		}))
 		if err != nil {
 			// Map engine client-errors to their proper status so the offline
 			// terminal-write replay never treats a permanent 4xx (unknown match,

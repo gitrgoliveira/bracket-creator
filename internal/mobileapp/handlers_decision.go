@@ -199,10 +199,11 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 				return snapErr
 			}
 			// Pass the TRIMMED reason (not req.DecisionReason): it is persisted
-			// into DecisionReason, and dischargeReopenPendingUnderTx stores the
-			// same trimmed value into CorrectionReason below — feeding the raw one
-			// here left the two audit fields on one record disagreeing byte-for-
-			// byte on padding. Mirrors the score path's up-front TrimSpace of
+			// into DecisionReason, and ForceOptions.ReopenReason below carries the
+			// same trimmed value into CorrectionReason on the write itself, so
+			// the two audit fields on one record agree byte for byte on padding.
+			// dischargeReopenPendingUnderTx is handed no reason: it only clears
+			// the flag. Mirrors the score path's up-front TrimSpace of
 			// CorrectionReason (mp-gmcg review).
 			// bc-kcdg/bc-cse finding 5: RecordDecisionTxWithOptions carries
 			// req.ForceDownstreamReopen (the bc-kcdg downstream-knockout-
@@ -246,6 +247,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		}
 
 		stampWithdrawnStatus(store, id, result)
+		discardHeldMatchPush(hub, id, mid)
 		hub.Broadcast(EventMatchUpdated, gin.H{
 			"competitionId": id,
 			"matchId":       mid,

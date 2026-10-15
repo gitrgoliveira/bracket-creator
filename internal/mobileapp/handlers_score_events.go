@@ -246,7 +246,12 @@ func registerScoreEventsHandler(r *gin.RouterGroup, eng ScoringEngine, store Com
 			// A second tap inside the window is held and sent when it ends,
 			// so the board and the other devices end on the last state.
 			matchUpdated := gin.H{"competitionId": id, "matchId": mid, "result": matchPtrForBroadcast(match)}
-			coalescer.Submit(id+":"+mid, match.Status == state.MatchStatusRunning, func() { hub.Broadcast(EventMatchUpdated, matchUpdated) })
+			// The send reads the match again when it runs, so a push held to the
+			// window's end, or one that crossed another request, shows the
+			// newest stored state and not this request's.
+			coalescer.Submit(id+":"+mid, match.Status == state.MatchStatusRunning, func() {
+				hub.Broadcast(EventMatchUpdated, freshMatchPush(store, id, mid, matchUpdated))
+			})
 			if res.Status != nil {
 				hub.Broadcast(EventCompetitorStatusUpdated, gin.H{"competitionId": id, "status": res.Status})
 			}

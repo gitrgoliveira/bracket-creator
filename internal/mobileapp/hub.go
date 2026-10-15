@@ -189,6 +189,19 @@ type Hub struct {
 	// interval and observe a real emitted heartbeat frame rather than asserting
 	// a hard-coded literal.
 	HeartbeatInterval time.Duration
+
+	// heldPushes is the match-update coalescer RegisterMatchHandlers attaches;
+	// discardHeldMatchPush reaches it from the handlers that broadcast a
+	// match_updated of their own. Set once at registration, before serving.
+	heldPushes *matchBroadcastCoalescer
+}
+
+// discardHeldMatchPush drops the running push the attached coalescer holds for
+// matchKey (compID:matchID); see discardHeldMatchPush.
+func (h *Hub) discardHeldMatchPush(matchKey string) {
+	if h.heldPushes != nil {
+		h.heldPushes.Discard(matchKey)
+	}
 }
 
 func NewHub() *Hub {

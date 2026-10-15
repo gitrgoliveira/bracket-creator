@@ -1282,6 +1282,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
+		discardHeldMatchPush(hub, id, mid)
 		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": mid})
 		// bc-kcdg: each reopened match is distinct from the one just corrected;
 		// broadcast it too so a client watching only that court/match learns
@@ -1338,6 +1339,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
+		discardHeldMatchPush(hub, id, mid)
 		hub.Broadcast(EventMatchUpdated, gin.H{
 			"competitionId": id,
 			"matchId":       mid,
@@ -1391,6 +1393,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// stale against a leftover mark.
 		runningRevStore.Delete(id + ":" + mid)
 
+		discardHeldMatchPush(hub, id, mid)
 		hub.Broadcast(EventMatchUpdated, gin.H{
 			"competitionId": id,
 			"matchId":       mid,
@@ -1529,6 +1532,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// mark from its previous life is dead (mirrors revert-to-queue).
 		runningRevStore.Delete(id + ":" + mid)
 
+		discardHeldMatchPush(hub, id, mid)
 		hub.Broadcast(EventMatchUpdated, gin.H{
 			"competitionId": id,
 			"matchId":       mid,
@@ -1674,7 +1678,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// and revert-to-queue).
 		runningRevStore.Delete(id + ":" + mid)
 		runningRevStore.Delete(body.BlockerCompID + ":" + body.BlockerMatchID)
+		discardHeldMatchPush(hub, id, mid)
 		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": mid})
+		discardHeldMatchPush(hub, body.BlockerCompID, body.BlockerMatchID)
 		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": body.BlockerCompID, "matchId": body.BlockerMatchID})
 		broadcastReopenedDownstream(hub, id, reopenedDownstream)
 		if restored != nil {
@@ -1736,6 +1742,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
+		discardHeldMatchPush(hub, id, mid)
 		hub.Broadcast(EventMatchUpdated, gin.H{
 			"competitionId": id,
 			"matchId":       mid,
@@ -1848,6 +1855,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 
 		if applied {
 			hub.Broadcast(EventTournamentUpdated, nil)
+			discardHeldMatchPush(hub, id, mid)
 			hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": mid})
 			// bc-kcdg: each reopened match is distinct from the one the
 			// operator just overrode; broadcast it too so a client watching
@@ -3351,6 +3359,11 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 	// C3: coalesce high-frequency "running" match_updated broadcasts to ≤4/s
 	// per match. Completed writes always proceed (isRunning=false).
 	coalescer := newMatchBroadcastCoalescer()
+	// The decision, requeue, reopen, start and representative-bout broadcasts
+	// reach it through the hub to discard a push it still holds.
+	if h, ok := hub.(*Hub); ok {
+		h.heldPushes = coalescer
+	}
 	// The taps' door shares the coalescer (bc-evts).
 	registerScoreEventsHandler(r, eng, store, tx, hub, verifier, tl, coalescer)
 
@@ -3929,7 +3942,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			"matchId":       mid,
 			"result":        matchPtrForBroadcast(result),
 		}
-		coalescer.Submit(matchKey, isRunning, func() { hub.Broadcast(EventMatchUpdated, matchUpdated) })
+		coalescer.Submit(matchKey, isRunning, func() {
+			hub.Broadcast(EventMatchUpdated, freshMatchPush(store, id, mid, matchUpdated))
+		})
 		// bc-kcdg: a forced correction may have reopened downstream bracket
 		// matches whose SideA/SideB the correction's propagation just
 		// repainted (forceReopenDownstreamChain). Each is a distinct match

@@ -148,6 +148,10 @@ func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, r
 			known[l.Event.ID] = true
 		}
 	}
+	notRunning := stored.Status != state.MatchStatusRunning && stored.Status != state.MatchStatusCompleted
+	// Whether the match was sent back is a property of the request's match, not
+	// of an event: read its history once, and only when an event can need it.
+	sentBack := notRunning && e.sentBackToQueue(tx, compID, matchID)
 	var take []int // indexes of the events to log
 	var turnedAway []int
 	for i, ev := range req.Events {
@@ -157,11 +161,11 @@ func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, r
 		case known[ev.ID]:
 			ans.Outcome = domain.ScoreOutcomeDuplicate
 			continue
-		case stored.Status != state.MatchStatusRunning && stored.Status != state.MatchStatusCompleted:
+		case notRunning:
 			ans.Outcome = domain.ScoreOutcomeNotStarted
 			ans.Reason, ans.Message = EventReasonNotStarted, EventMessageNotStarted
 			switch {
-			case e.sentBackToQueue(tx, compID, matchID):
+			case sentBack:
 				ans.Reason, ans.Message = EventReasonSentBack, EventMessageSentBack
 			case len(lines) > 0 || len(stored.GroupStamps) > 0 || stored.ModifiedAt > 0:
 				// It ran, and is not running now, but nobody sent it back.
@@ -182,7 +186,7 @@ func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, r
 		take = append(take, i)
 	}
 	if len(take) == 0 {
-		e.recordEventHistory(tx, compID, matchID, req.Events, e.unrecordedTurnedAway(tx, compID, matchID, req, turnedAway), res.Answers)
+		e.recordEventHistory(tx, compID, matchID, req.Events, e.unrecordedTurnedAway(tx, compID, matchID, req, turnedAway, res.Answers), res.Answers)
 		res.Gaps = ScoreLogGaps(lines)[req.Session]
 		res.Match = e.storedForAnswer(tx, compID, matchID, stored, inPool)
 		return res, nil
@@ -226,7 +230,7 @@ func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, r
 		for _, i := range take {
 			res.Answers[i].Outcome = domain.ScoreOutcomeRefused
 		}
-		e.recordEventHistory(tx, compID, matchID, req.Events, e.unrecordedTurnedAway(tx, compID, matchID, req, append(turnedAway, take...)), res.Answers)
+		e.recordEventHistory(tx, compID, matchID, req.Events, e.unrecordedTurnedAway(tx, compID, matchID, req, append(turnedAway, take...), res.Answers), res.Answers)
 		res.Gaps = ScoreLogGaps(lines)[req.Session]
 		res.Match = e.storedForAnswer(tx, compID, matchID, stored, inPool)
 		return res, nil
@@ -238,7 +242,7 @@ func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, r
 	for _, i := range take {
 		res.Answers[i].Outcome = rp.Outcome(req.Events[i].ID)
 	}
-	e.recordEventHistory(tx, compID, matchID, req.Events, append(e.unrecordedTurnedAway(tx, compID, matchID, req, turnedAway), take...), res.Answers)
+	e.recordEventHistory(tx, compID, matchID, req.Events, append(e.unrecordedTurnedAway(tx, compID, matchID, req, turnedAway, res.Answers), take...), res.Answers)
 	// An earlier event whose outcome this batch moved (a later tap gave the
 	// match the winner a waiting one needed, R4) gets a line saying so.
 	e.recordMovedOutcomes(tx, compID, matchID, lines, prev, rp, "")
@@ -335,6 +339,9 @@ type writeBaseline struct {
 	named   []string
 	writeID string
 	basis   *state.ScoreBasis
+	// unchanged is the part of named whose applied value only echoes the stored
+	// one (MergeReport.Unchanged).
+	unchanged []string
 }
 
 // baselineNote is what noteWriteBaseline appended: the replayed match (the
@@ -356,7 +363,7 @@ func (e *Engine) recordLandedWriteHistory(h state.StoreTx, compID, matchID strin
 	}
 	note := e.noteWriteBaseline(h, compID, matchID, writeBaseline{
 		door: doorOf(result), stamp: rep.Stamp, named: rep.Applied,
-		writeID: result.WriteID, basis: result.Basis,
+		writeID: result.WriteID, basis: result.Basis, unchanged: rep.Unchanged,
 	})
 	if note == nil {
 		return
@@ -400,10 +407,7 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 	}
 	shape := ReplayShape{Comp: comp, Knockout: !inPool}
 	before := ReplayScoring(post, lines, shape)
-	set := unionGroups(wb.named, replayGroupsDiffer(post, &before.Match))
-	if len(set) == 0 {
-		return nil
-	}
+	named := wb.named
 	basis := state.ScoreBasis{Seen: len(lines)}
 	movedReason := ""
 	switch {
@@ -411,9 +415,16 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 		basis = *wb.basis
 	case wb.door == DoorScore || wb.door == DoorBulkScore:
 		// A write the client built says nothing of the events it saw, so none
-		// is called recorded: Seen is unknown, not "all of them".
+		// is called recorded: Seen is unknown, not "all of them". A group it
+		// applied only to echo the stored value says nothing about the older
+		// events either, so it is not one the rule judges them by.
 		basis = state.ScoreBasis{}
 		movedReason = ReasonNoBasis
+		named = slices.DeleteFunc(slices.Clone(named), func(g string) bool { return slices.Contains(wb.unchanged, g) })
+	}
+	set := unionGroups(named, replayGroupsDiffer(post, &before.Match))
+	if len(set) == 0 {
+		return nil
 	}
 	newest := max(post.ModifiedAt, newestLineStamp(lines))
 	stamps := []int64{wb.stamp, newest}
@@ -594,7 +605,7 @@ const ReasonNoBasis = "no basis"
 // for being turned away. An anonymous caller's get none; the organiser's get
 // one per event id, so a resend of an id the history already holds adds
 // nothing.
-func (e *Engine) unrecordedTurnedAway(h state.StoreTx, compID, matchID string, req ScoreEventsRequest, idx []int) []int {
+func (e *Engine) unrecordedTurnedAway(h state.StoreTx, compID, matchID string, req ScoreEventsRequest, idx []int, answers []ScoreEventAnswer) []int {
 	if req.NoTurnedAwayHistory || len(idx) == 0 {
 		return nil
 	}
@@ -603,19 +614,23 @@ func (e *Engine) unrecordedTurnedAway(h state.StoreTx, compID, matchID string, r
 		log.Printf("engine: match %s/%s: history not read, turned-away events not recorded: %v", compID, matchID, err)
 		return nil
 	}
-	held := make(map[string]bool, len(entries))
+	// A turn-away is kept once per event id AND answer: the same event turned
+	// away for a new reason (first not started, later sent back) is news to the
+	// organiser, while an exact resend would only grow the file.
+	type answered struct{ id, outcome, reason string }
+	held := make(map[answered]bool, len(entries))
 	for _, en := range entries {
 		if en.Event != nil {
-			held[en.Event.ID] = true
+			held[answered{en.Event.ID, en.EventOutcome, en.Reason}] = true
 		}
 	}
 	var out []int
 	for _, i := range idx {
-		id := req.Events[i].ID
-		if held[id] {
+		key := answered{req.Events[i].ID, answers[i].Outcome, answers[i].Reason}
+		if held[key] {
 			continue
 		}
-		held[id] = true
+		held[key] = true
 		out = append(out, i)
 	}
 	return out
@@ -629,10 +644,24 @@ func (e *Engine) sentBackToQueue(h state.StoreTx, compID, matchID string) bool {
 		return false
 	}
 	for i := len(entries) - 1; i >= 0; i-- {
-		if entries[i].Door == DoorEvent {
+		if !doorChangesStatus(entries[i].Door) {
 			continue
 		}
 		return entries[i].Door == doorRequeue
 	}
 	return false
+}
+
+// doorChangesStatus reports whether a history line from this door can have moved
+// the match between scheduled, running and completed. The lines that cannot (a
+// tap, a drift baseline, the migration, a displaced or reseated or downstream
+// line, a kachinuki bout step) say nothing about HOW the match came to its
+// status, so the latest line that can is the one that does.
+func doorChangesStatus(door string) bool {
+	switch door {
+	case DoorEvent, DoorDrift, MigrationDoor, DoorDisplaced, doorReseat, doorDownstreamReopen,
+		doorKachinukiAdvance, doorKachinukiRecord, doorKachinukiRemove:
+		return false
+	}
+	return true
 }

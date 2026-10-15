@@ -433,6 +433,7 @@ func blockedMatchesPayload(blocking []engine.ReopenedMatch) []map[string]any {
 // downstream, so none of them can announce the reopen and miss the restore.
 func broadcastReopenedDownstream(hub Broadcaster, compID string, reopened []engine.ReopenedMatch) {
 	for _, r := range reopened {
+		discardHeldMatchPush(hub, compID, r.ID)
 		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": compID, "matchId": r.ID})
 		if r.Restored != nil {
 			hub.Broadcast(EventCompetitorStatusUpdated, gin.H{"competitionId": compID, "status": r.Restored})

@@ -104,6 +104,10 @@ const (
 	// ScoreOutcomeDefaultWinStands: a kiken, fusenpai or fusensho closed the
 	// match and this event cannot replace it (R2).
 	ScoreOutcomeDefaultWinStands = "defaultWinStands"
+	// ScoreOutcomeMatchClosed: a finish or a decision stamped BEFORE this tap
+	// closed the match; a tap stamped after it is kept in the history and
+	// changes nothing. Correct the result to change a closed match.
+	ScoreOutcomeMatchClosed = "matchClosed"
 	// ScoreOutcomeNoTarget: the mark, foul, flag, overtime period or bout the
 	// event names is not there.
 	ScoreOutcomeNoTarget = "noTarget"

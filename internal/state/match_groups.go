@@ -876,6 +876,12 @@ const HeldReasonNeedsWinner = "needs_winner"
 // default win.
 const HeldReasonDefaultWinStands = "default_win_stands"
 
+// HeldReasonMatchClosed is the wire code (heldReason) of a scoring write held
+// because a finish or a decision stamped before it had already closed the
+// match (the closed-match rule): the write is kept in the history and the
+// device is told to use Correct result.
+const HeldReasonMatchClosed = "match_closed"
+
 // HeldReason is the code a response carries beside heldGroups, "" when the
 // held groups were held by their stamps alone.
 func (r *MergeReport) HeldReason() string {

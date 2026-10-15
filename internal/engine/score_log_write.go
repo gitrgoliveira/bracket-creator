@@ -426,15 +426,20 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 	if len(set) == 0 {
 		return nil
 	}
-	newest := max(post.ModifiedAt, newestLineStamp(lines))
-	stamps := []int64{wb.stamp, newest}
-	if wb.stamp <= 0 || wb.stamp >= newest {
-		stamps = []int64{max(wb.stamp, newest)}
-	}
+	// First at the write's own stamps (each group at the stamp the merge left
+	// it); a baseline that does not replay there (a direct writer that kept
+	// an older stamp on a group it changed) is placed after every line.
+	newest := max(post.ModifiedAt, newestLineStamp(lines), wb.stamp)
 	var line state.ScoreLogLine
 	var after Replay
-	for i, s := range stamps {
-		bl := BaselineFromMatch(post, fmt.Sprintf("%s-%d", wb.door, len(lines)), wb.door, s, set, basis)
+	for i := range 2 {
+		bl := BaselineFromMatch(post, fmt.Sprintf("%s-%d", wb.door, len(lines)), wb.door, wb.stamp, set, basis)
+		if i == 1 || wb.stamp <= 0 {
+			bl.Stamp = newest
+			for g := range bl.Stamps {
+				bl.Stamps[g] = newest
+			}
+		}
 		bl.WriteID, bl.ReceivedAt = wb.writeID, serverNowMs()
 		line = state.ScoreLogLine{Baseline: &bl}
 		after = ReplayScoring(post, append(slices.Clone(lines), line), shape)
@@ -442,7 +447,7 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 		if len(diff) == 0 {
 			break
 		}
-		if i == len(stamps)-1 {
+		if i == 1 {
 			log.Printf("engine: ERROR: match %s/%s: the %s write's baseline does not replay to the stored match (groups %v); the drift net will heal it", compID, matchID, wb.door, diff)
 		}
 	}

@@ -550,6 +550,26 @@ func driftBaseline(stored *state.MatchResult, lines []state.ScoreLogLine, shape 
 	return &state.ScoreLogLine{Baseline: &b}
 }
 
+// winnerSideIDs lists the side ids the match's winner can legitimately carry:
+// the id of the side the winner names (its side hint, else its name), both
+// when the two sides share a name.
+func winnerSideIDs(m *state.MatchResult) []string {
+	switch m.WinnerSide {
+	case "A":
+		return []string{m.SideAID}
+	case "B":
+		return []string{m.SideBID}
+	}
+	var ids []string
+	if m.Winner == m.SideA {
+		ids = append(ids, m.SideAID)
+	}
+	if m.Winner == m.SideB {
+		ids = append(ids, m.SideBID)
+	}
+	return ids
+}
+
 // repairFillsIDsOnly reports whether the stored group differs from the
 // replayed one only in ids the stored match holds and the replay lacks: a
 // result's winner id, a bout's member ids. An id the replay holds and the
@@ -558,6 +578,10 @@ func repairFillsIDsOnly(stored, replayed *state.MatchResult, g string) bool {
 	a, b := cloneMatchForReplay(*stored), cloneMatchForReplay(*replayed)
 	if g == state.GroupResult {
 		if b.WinnerID != "" && b.WinnerID != a.WinnerID {
+			return false
+		}
+		// The id a repair filled must be the winning side's own id.
+		if a.WinnerID != "" && !slices.Contains(winnerSideIDs(&a), a.WinnerID) {
 			return false
 		}
 		a.WinnerID, b.WinnerID = "", ""
@@ -572,6 +596,14 @@ func repairFillsIDsOnly(stored, replayed *state.MatchResult, g string) bool {
 					continue
 				}
 				ra, rb := &a.SubResults[j], &b.SubResults[i]
+				// A filled winner must be one of the row's two fighters, and
+				// the fighters of the two sides must differ.
+				if ra.WinnerMemberID != "" && ra.WinnerMemberID != ra.SideAMemberID && ra.WinnerMemberID != ra.SideBMemberID {
+					return false
+				}
+				if ra.SideAMemberID != "" && ra.SideAMemberID == ra.SideBMemberID {
+					return false
+				}
 				for _, ids := range [][2]*string{{&ra.SideAMemberID, &rb.SideAMemberID}, {&ra.SideBMemberID, &rb.SideBMemberID}, {&ra.WinnerMemberID, &rb.WinnerMemberID}} {
 					if *ids[1] != "" && *ids[1] != *ids[0] {
 						return false

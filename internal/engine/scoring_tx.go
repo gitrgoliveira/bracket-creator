@@ -963,7 +963,7 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// feeder, or an unrepaired legacy row) still has every id below come
 	// back "", falling through to each consumer's documented name-only
 	// fallback.
-	prior, err := e.lookupExistingResult(tx, compID, matchID)
+	prior, inPool, err := e.lookupExistingResultIn(tx, compID, matchID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -999,7 +999,10 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// (already barred, a running later match) would only
 	// misreport it as something to resolve and send again, when a newer
 	// change is already stored. It is kept in the match's history (bc-mrgc).
-	if decisionHeldByMerge(prior, result, comp) {
+	// The probes judge the write as the real one will: the branch it lands
+	// on (R4 reads it) and the score log it replays onto.
+	probeCtx := mergeCtx{comp: comp, knockout: !inPool, lines: e.snapshotScoreLog(tx, compID, matchID, result, matchWriteForward)}
+	if decisionHeldByMerge(prior, result, probeCtx) {
 		e.recordWriteHistory(tx, compID, matchID, result)
 		return nil, nil, supersededBy(result)
 	}
@@ -1013,7 +1016,7 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// nothing; its history entry says so (bc-mrgc phase 3).
 	if exactDecisionReplay(prior, decision, decisionBy, modifiedAtStamp) {
 		probe := *result
-		result.Merge = mergeMatchWrite(prior, &probe, matchWriteForward, mergeCtx{comp: comp})
+		result.Merge = mergeMatchWrite(prior, &probe, matchWriteForward, probeCtx)
 		e.recordWriteHistory(tx, compID, matchID, result)
 		// The replay makes no write, so nothing echoes Court/ScheduledAt onto
 		// prior the way a fresh decision's applyPoolWrite/applyBracketMatchResult
@@ -1151,9 +1154,9 @@ func buildDecisionResult(prior *state.MatchResult, matchID, decision, decisionBy
 // the decision makes would be held, and leaves that report on result for
 // the history entry when it would. It is the merge's own rule, not a second
 // statement of it: the write itself is judged by the same mergeMatchWrite.
-func decisionHeldByMerge(prior, result *state.MatchResult, comp *state.Competition) bool {
+func decisionHeldByMerge(prior, result *state.MatchResult, mc mergeCtx) bool {
 	probe := *result
-	rep := mergeMatchWrite(prior, &probe, matchWriteForward, mergeCtx{comp: comp})
+	rep := mergeMatchWrite(prior, &probe, matchWriteForward, mc)
 	if !rep.Superseded() {
 		return false
 	}

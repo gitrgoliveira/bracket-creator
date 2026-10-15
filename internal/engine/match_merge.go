@@ -617,6 +617,7 @@ func mergeByReplay(stored, incoming *state.MatchResult, changed []string, stamp 
 	// S2 with R4: the write's finish applied on its own scoreline, so newer
 	// stored scoring that would have left the match without its winner is
 	// the history's (one entry per stamp).
+	displacedEarlier := false
 	if completesMatch(&sent, mc) && stamp > 0 {
 		byStamp := map[int64]map[string]json.RawMessage{}
 		for _, g := range changed {
@@ -629,6 +630,33 @@ func mergeByReplay(stored, incoming *state.MatchResult, changed []string, stamp 
 					byStamp[at] = map[string]json.RawMessage{}
 				}
 				byStamp[at][g] = was
+			}
+		}
+		// Scoring the replay held from an EARLIER line (a stored bout:N no
+		// write of this one names) is displaced too: stamp order says it came
+		// after the finish, and it cannot apply (R4), so it leaves the match
+		// for the history exactly as a changed group does, and the match is
+		// what the other arrival order gives.
+		for _, h := range after.Held {
+			if !h.NeedsWinner {
+				continue
+			}
+			for _, g := range h.Groups {
+				if !state.IsScoringGroup(g) || slices.Contains(changed, g) || stored.GroupStamp(g) <= stamp {
+					continue
+				}
+				was := state.GroupValue(stored, g)
+				if bytes.Equal(was, state.GroupValue(&sent, g)) {
+					continue
+				}
+				at := stored.GroupStamp(g)
+				if byStamp[at] == nil {
+					byStamp[at] = map[string]json.RawMessage{}
+				}
+				byStamp[at][g] = was
+				state.CopyGroup(incoming, &sent, g)
+				delete(stamps, g)
+				displacedEarlier = true
 			}
 		}
 		ats := slices.Sorted(maps.Keys(byStamp))
@@ -653,7 +681,7 @@ func mergeByReplay(stored, incoming *state.MatchResult, changed []string, stamp 
 	for _, g := range append(slices.Clone(rep.Held), rep.HeldEcho...) {
 		mh.restoreStamp(g)
 	}
-	recompute := mh.settleOrphanPicks(payloadPickA, payloadPickB, removalWrite, stamp)
+	recompute := mh.settleOrphanPicks(payloadPickA, payloadPickB, removalWrite, stamp) || displacedEarlier
 	state.CopyGroup(incoming, final, state.GroupRecorded)
 	mh.unrecordReopenedBouts(stamp)
 	for _, g := range rep.Applied {

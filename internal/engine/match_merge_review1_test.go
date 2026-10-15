@@ -156,3 +156,35 @@ func TestDriftBaseline_IDsFilledByARepairAreNotDrift(t *testing.T) {
 	assert.Equal(t, DoorDrift, line.Baseline.Door)
 	assert.Contains(t, out, "ERROR")
 }
+
+// A repair fills only the id the stored row itself explains: a winner id that
+// is not the winning side's, or a winner member who fought on neither side of
+// the bout, is a fault however well the name matches.
+func TestDriftBaseline_AWrongFilledIDIsDriftNotRepair(t *testing.T) {
+	cur := state.MatchResult{ID: "Pool A-0", SideA: "Ryu", SideB: "Tora", SideAID: "pa", SideBID: "pb",
+		Status: state.MatchStatusCompleted, Winner: "Ryu", IpponsA: []string{"M"}, ModifiedAt: mmT1,
+		SubResults: []state.SubMatchResult{{Position: 1, SideA: "Ryu", SideB: "Tora", IpponsA: []string{"M"}, Winner: "Ryu"}}}
+	mb := MigrationBaseline(&cur, "m0", mmT1)
+	lines := []state.ScoreLogLine{{Baseline: &mb}}
+	shape := ReplayShape{Comp: &state.Competition{Kind: "team", TeamSize: 1}}
+	drift := func(m state.MatchResult) string {
+		line := driftBaseline(&m, lines, shape, mmT2)
+		require.NotNil(t, line)
+		return line.Baseline.Door
+	}
+
+	good := cur
+	good.WinnerID = "pa"
+	assert.Equal(t, DoorRepair, drift(good))
+
+	// Right name, the other side's id.
+	wrong := cur
+	wrong.WinnerID = "pb"
+	assert.Equal(t, DoorDrift, drift(wrong))
+
+	// Right winner, a member id that is neither fighter of the row.
+	member := cur
+	member.SubResults = state.CloneSubResults(cur.SubResults)
+	member.SubResults[0].SideAMemberID, member.SubResults[0].SideBMemberID, member.SubResults[0].WinnerMemberID = "ma", "mb", "mz"
+	assert.Equal(t, DoorDrift, drift(member))
+}

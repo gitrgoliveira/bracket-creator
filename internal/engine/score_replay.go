@@ -663,7 +663,10 @@ func (rp *replayer) judgeOverFinished(b *state.ScoreBaseline, groups []string) (
 			continue
 		}
 		scoring = append(scoring, g)
-		if state.GroupDiffers(cur, &probe, g) {
+		// A group no line has governed yet (a bout:N a stored baseline set)
+		// already sits in the cache, so comparing with it reads as no
+		// change; the finish still has to be judged against it.
+		if _, governed := rp.govern[g]; !governed || state.GroupDiffers(cur, &probe, g) {
 			changed = true
 			scored = scored || state.IsScoringGroup(g)
 		}

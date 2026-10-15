@@ -1,0 +1,395 @@
+/* Styles for the pool draw walk-through (assets/javascripts/pool-draw-animation.js).
+   Colours come from the site tokens in extra.css wherever one exists, so the
+   widget follows the light and dark schemes without a second palette. */
+
+.bcda {
+	--bcda-rail: 1.6rem;
+	--bcda-on: #ffffff;
+	margin: 1.4rem 0;
+	padding: 0.9rem 1rem 1rem;
+	border: 1px solid var(--bc-line);
+	border-radius: var(--bc-radius);
+	background: var(--bc-card-bg);
+	font-size: 0.72rem;
+	line-height: 1.5;
+}
+
+/* Five dojo colours, chosen for separation at small sizes. Every chip also
+   carries the dojo's initial, so nothing here depends on colour alone. */
+.bcda__d0 { --bcda-c: oklch(0.45 0.12 258); }
+.bcda__d1 { --bcda-c: oklch(0.48 0.16 25); }
+.bcda__d2 { --bcda-c: oklch(0.44 0.10 155); }
+.bcda__d3 { --bcda-c: oklch(0.50 0.11 65); }
+.bcda__d4 { --bcda-c: oklch(0.46 0.13 315); }
+
+[data-md-color-scheme="slate"] .bcda {
+	--bcda-on: oklch(0.18 0.02 262);
+}
+
+[data-md-color-scheme="slate"] .bcda__d0 { --bcda-c: oklch(0.79 0.09 258); }
+[data-md-color-scheme="slate"] .bcda__d1 { --bcda-c: oklch(0.76 0.13 25); }
+[data-md-color-scheme="slate"] .bcda__d2 { --bcda-c: oklch(0.78 0.10 155); }
+[data-md-color-scheme="slate"] .bcda__d3 { --bcda-c: oklch(0.82 0.10 65); }
+[data-md-color-scheme="slate"] .bcda__d4 { --bcda-c: oklch(0.77 0.11 315); }
+
+/* ---------------------------------------------------------------- header */
+
+.bcda__tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.3rem;
+}
+
+.bcda__tab {
+	padding: 0.28rem 0.7rem;
+	border: 1px solid var(--bc-line);
+	border-radius: 999px;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+}
+
+.bcda__tab--on {
+	border-color: var(--md-primary-fg-color);
+	background: var(--md-primary-fg-color);
+	color: var(--bc-ice, #ffffff);
+}
+
+.md-typeset .bcda__blurb {
+	margin: 0.6rem 0 0.2rem;
+	font-size: inherit;
+	color: var(--md-default-fg-color--light);
+}
+
+/* ---------------------------------------------------------------- roster */
+
+.md-typeset .bcda__roster {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.25rem;
+	margin: 0.7rem 0 0;
+	padding: 0;
+	list-style: none;
+}
+
+.md-typeset .bcda__roster li { margin: 0; }
+
+.bcda__entrant {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.25rem;
+	padding: 0.1rem 0.4rem 0.1rem 0.15rem;
+	border: 1px solid transparent;
+	border-radius: 999px;
+	color: var(--bcda-c);
+	background: color-mix(in srgb, var(--bcda-c) 10%, transparent);
+}
+
+.bcda__entrant--todo { opacity: 0.45; }
+.bcda__entrant--done { opacity: 0.8; }
+
+.bcda__entrant--now {
+	border-color: var(--bcda-c);
+	font-weight: 700;
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--bcda-c) 25%, transparent);
+}
+
+.bcda__tag {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: none;
+	width: 1.15rem;
+	height: 1.15rem;
+	border-radius: 50%;
+	background: var(--bcda-c);
+	color: var(--bcda-on);
+	font-size: 0.62rem;
+	font-weight: 700;
+	line-height: 1;
+}
+
+.bcda__nm {
+	overflow-wrap: anywhere;
+	min-width: 0;
+}
+
+/* -------------------------------------------------------------- controls */
+
+.bcda__bar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.35rem;
+	margin: 0.8rem 0 0.6rem;
+	padding-top: 0.7rem;
+	border-top: 1px solid var(--bc-line-soft, var(--bc-line));
+}
+
+.bcda__btn {
+	padding: 0.32rem 0.8rem;
+	border: 1px solid var(--bc-line);
+	border-radius: var(--bc-radius-sm, 6px);
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+}
+
+.bcda__btn--primary {
+	min-width: 4.6rem;
+	border-color: var(--md-primary-fg-color);
+	background: var(--md-primary-fg-color);
+	color: var(--bc-ice, #ffffff);
+}
+
+.bcda__btn[disabled] {
+	opacity: 0.4;
+	cursor: default;
+}
+
+.bcda__btn:focus-visible,
+.bcda__tab:focus-visible {
+	outline: 2px solid var(--md-accent-fg-color);
+	outline-offset: 2px;
+}
+
+.md-typeset .bcda__progress {
+	margin: 0 0 0 auto;
+	font-size: inherit;
+	color: var(--md-default-fg-color--light);
+	font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------ the bracket */
+
+.bcda__grid {
+	display: grid;
+	column-gap: 0.3rem;
+	row-gap: 0.25rem;
+	align-items: stretch;
+}
+
+.bcda__colhead {
+	padding-bottom: 0.2rem;
+	font-size: 0.6rem;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--md-default-fg-color--light);
+	text-align: center;
+	white-space: nowrap;
+	overflow: hidden;
+}
+
+.bcda__colhead--left {
+	text-align: left;
+	padding-left: 0.3rem;
+}
+
+.bcda__node {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	margin: 1px;
+	border: 1px solid var(--bc-line);
+	border-radius: var(--bc-radius-sm, 6px);
+	background: color-mix(in srgb, var(--md-default-fg-color) 3%, transparent);
+	font-size: 0.66rem;
+	font-weight: 700;
+	color: var(--md-default-fg-color--light);
+}
+
+.bcda__node--on {
+	border-color: var(--md-primary-fg-color);
+	background: color-mix(in srgb, var(--md-primary-fg-color) 14%, transparent);
+	color: var(--md-default-fg-color);
+}
+
+.bcda__node--off { opacity: 0.35; }
+
+.bcda__pool {
+	display: grid;
+	grid-template-columns: 3.6rem minmax(0, 1fr);
+	align-items: center;
+	gap: 0.4rem;
+	padding: 0.15rem 0.3rem;
+	border-radius: var(--bc-radius-sm, 6px);
+}
+
+.bcda__pool--on { background: color-mix(in srgb, var(--md-primary-fg-color) 10%, transparent); }
+.bcda__pool--off { opacity: 0.72; }
+.bcda__pool--bye { opacity: 0.4; }
+
+.bcda__poolname {
+	font-weight: 700;
+	font-size: 0.66rem;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.bcda__seats {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.2rem;
+	min-width: 0;
+}
+
+.bcda__seat {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.22rem;
+	min-width: 4.4rem;
+	min-height: 1.5rem;
+	padding: 0.06rem 0.35rem 0.06rem 0.1rem;
+	border: 1px dashed color-mix(in srgb, var(--md-default-fg-color) 25%, transparent);
+	border-radius: 999px;
+}
+
+.bcda__seat--full {
+	border-style: solid;
+	border-color: color-mix(in srgb, var(--bcda-c) 45%, transparent);
+	background: color-mix(in srgb, var(--bcda-c) 12%, transparent);
+	color: var(--bcda-c);
+}
+
+.bcda__seat--new {
+	border-color: var(--bcda-c);
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--bcda-c) 28%, transparent);
+}
+
+/* ------------------------------------------------------------ the reasons */
+
+.bcda__why {
+	margin-top: 0.8rem;
+	padding-top: 0.7rem;
+	border-top: 1px solid var(--bc-line-soft, var(--bc-line));
+	min-height: 6.5rem;
+}
+
+.md-typeset .bcda__why p {
+	margin: 0 0 0.35rem;
+	font-size: inherit;
+}
+
+.md-typeset .bcda__why p:last-child { margin-bottom: 0; }
+
+.bcda__now { font-size: 0.78rem; }
+
+.bcda__line { color: var(--md-default-fg-color--light); }
+
+.bcda__line--close { color: var(--md-default-fg-color); }
+
+.bcda__step {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.1rem;
+	height: 1.1rem;
+	margin-right: 0.35rem;
+	border-radius: 50%;
+	background: color-mix(in srgb, var(--md-primary-fg-color) 16%, transparent);
+	color: var(--md-default-fg-color);
+	font-size: 0.6rem;
+	font-weight: 700;
+}
+
+.md-typeset .bcda__legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.2rem 0.9rem;
+	margin: 0.8rem 0 0;
+	padding: 0;
+	list-style: none;
+	color: var(--md-default-fg-color--light);
+}
+
+.md-typeset .bcda__legend li {
+	display: flex;
+	align-items: center;
+	gap: 0.3rem;
+	margin: 0;
+}
+
+/* In the dark scheme the site's primary navy sits too close to the card to
+   carry an active state, so the highlights borrow the accent the scheme
+   already uses for links. */
+
+[data-md-color-scheme="slate"] .bcda__tab--on,
+[data-md-color-scheme="slate"] .bcda__btn--primary {
+	border-color: var(--md-accent-fg-color);
+	background: var(--md-accent-fg-color);
+	color: oklch(0.2 0.02 262);
+}
+
+[data-md-color-scheme="slate"] .bcda__node--on {
+	border-color: var(--md-accent-fg-color);
+	background: color-mix(in srgb, var(--md-accent-fg-color) 22%, transparent);
+}
+
+[data-md-color-scheme="slate"] .bcda__pool--on {
+	background: color-mix(in srgb, var(--md-accent-fg-color) 14%, transparent);
+}
+
+[data-md-color-scheme="slate"] .bcda__step {
+	background: color-mix(in srgb, var(--md-accent-fg-color) 26%, transparent);
+}
+
+/* -------------------------------------------------------------- responsive */
+
+/* The tree column heading is spelled out where there is room for it and cut
+   to one word where there is not, rather than being clipped mid-letter. */
+.bcda__colhead .bcda__short { display: none; }
+
+@media screen and (max-width: 34em) {
+	.bcda {
+		/* Every rem taken off the rails and the pool name goes to the seats,
+		   which need about 3.2rem each to hold a name beside its dojo mark.
+		   Below that they stack one to a line and the board doubles in height. */
+		--bcda-rail: 1rem;
+		padding: 0.8rem 0.7rem;
+		font-size: 0.68rem;
+	}
+
+	.bcda__colhead .bcda__long { display: none; }
+	.bcda__colhead .bcda__short { display: inline; }
+
+	/* Side by side, the pool name leaves the seats about 112px, which is one
+	   name chip and a wrapped remainder. Stacking the name over them hands
+	   back the whole column, which fits two, and the row comes out shorter
+	   than the three stacked chips it replaces. */
+	.bcda__pool {
+		display: block;
+		padding: 0.15rem 0.15rem 0.25rem;
+	}
+
+	.bcda__poolname {
+		display: block;
+		margin-bottom: 0.15rem;
+	}
+
+	.bcda__grid { column-gap: 0.2rem; }
+	.bcda__seat { min-width: 3.2rem; padding-right: 0.25rem; }
+	.bcda__tag { width: 1rem; height: 1rem; font-size: 0.56rem; }
+	.bcda__progress { margin-left: 0; width: 100%; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	.bcda__seat,
+	.bcda__node,
+	.bcda__pool,
+	.bcda__entrant {
+		transition: background-color var(--bc-dur, 200ms) var(--bc-ease-out, ease),
+			border-color var(--bc-dur, 200ms) var(--bc-ease-out, ease),
+			box-shadow var(--bc-dur, 200ms) var(--bc-ease-out, ease),
+			opacity var(--bc-dur, 200ms) var(--bc-ease-out, ease);
+	}
+
+	.bcda__seat--new { animation: bcda-land 420ms var(--bc-ease-out, ease); }
+}
+
+@keyframes bcda-land {
+	from { transform: scale(0.82); opacity: 0; }
+	to { transform: scale(1); opacity: 1; }
+}

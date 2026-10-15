@@ -119,7 +119,7 @@ func engiFinishHeld(prior, result *state.MatchResult, comp *state.Competition, k
 		result.Merge = rep
 		// The merge is the ONE place that ordered the result and flags
 		// groups against every stored group, including S2's
-		// displaceNewerScoring, which can legitimately move a group's stamp
+		// displacement (mergeByReplay, MergeReport.Displaced), which can legitimately move a group's stamp
 		// BACK to the finish's own, older time when it replaces a newer but
 		// invalid stored count. The recorder has no way to work that out
 		// again on its own, so the merge's own per-group stamps ride along
@@ -207,7 +207,7 @@ type engiStampable interface {
 // flags) on m. When groupStamps is set, engiFinishHeld has already ordered
 // the write against every stored group (bc-mrgc fix): the merge is the ONE
 // place that can decide a group's stamp must move BACK to the write's own,
-// older time (S2's displaceNewerScoring, replacing a newer but invalid
+// older time (S2's displacement, MergeReport.Displaced, replacing a newer but invalid
 // stored count with the finish's own scoreline and moving that count to the
 // history), so the recorder applies exactly what it decided rather than
 // re-deriving a stamp with StampGroups' never-lower guard, which cannot

@@ -25,8 +25,8 @@ import (
 // (score_replay.go):
 //
 // OWNED BY THE REPLAY (mergeByReplay): a scoring snapshot -- /score (running
-// or finishing), bulk-score, quick-score, the engine's own callers and the
-// engi finish (replaysSnapshot) -- becomes a baseline of the groups it
+// or finishing), bulk-score, quick-score, the engine's own callers, the
+// engi finish, and a daihyosen or hikiwake decision (replaysSnapshot) -- becomes a baseline of the groups it
 // changes at its stamp (points, encho, flags, rep, repPickA/B, bout:N, and
 // the result it carries) and is replayed onto the match's log (its
 // migration baseline when it has none). Each group is ordered at its own
@@ -45,8 +45,8 @@ import (
 // any replay):
 //
 //   - Group by group by stamp (domain.ApplyByTimestamp) for every write
-//     replaysSnapshot does not take: a decision, the representative bout's
-//     add and remove, the both-barred hikiwake, a start's server twins.
+//     replaysSnapshot does not take: a kiken, fusenpai or fusensho, the
+//     representative bout's add and remove, a start's server twins.
 //   - Finish atomicity (HoldReasonFinishAtomic): a write completing a match
 //     whose stored verdict is newer is held WHOLE; engi's twin
 //     (HoldReasonEngiAtomic) holds a stale engi finish with its count.
@@ -297,11 +297,13 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 		completesMatch(incoming, mc) && state.GroupDiffers(stored, incoming, state.GroupResult)
 	holdWhole = holdWhole || engiAtomic
 	// S2's one shape nothing can replay: a finish that names its verdict
-	// alone, with no scoreline, over scoring stored newer than it. What it
+	// alone, with no scoreline, over scoring stored newer than it. A decision
+	// is not one: it is a baseline of its own, ordered against that scoring
+	// by the replay. What it
 	// stood on is not in the write, so it is held, and the match stays as
 	// stored with its later scoring.
 	bareFinish := !holdWhole && inChanged[state.GroupResult] && completesMatch(incoming, mc) &&
-		!domain.IsDefaultWinDecisionStr(incoming.Decision) && stamp > 0 &&
+		!domain.IsDefaultWinDecisionStr(incoming.Decision) && doorOf(incoming) != DoorDecision && stamp > 0 &&
 		!slices.ContainsFunc(changed, state.IsScoringGroup) && newestStoredScoringStamp(stored) > stamp
 	holdWhole = holdWhole || bareFinish
 	// A previous build's running write older than one its own board already
@@ -470,21 +472,24 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 	return rep
 }
 
-// replaysSnapshot reports whether a write is a scoring snapshot the score
-// replay decides (bc-evts stage 2b): /score, bulk-score, quick-score, the
-// engine's own callers and the engi finish. Every other door (a decision,
-// the representative bout's add and remove, a start's server twins) names
-// what it changes on purpose and is merged group by group below.
+// replaysSnapshot reports whether a write is one the score replay decides
+// (bc-evts stage 2b): a scoring snapshot (/score, bulk-score, quick-score, the
+// engine's own callers, the engi finish) or a decision that is not a
+// default-win one (a daihyosen or a hikiwake: it closes a match on a scoreline,
+// so S2 and R3 order it against scoring stored newer, as they order a finish).
+// Every other door (a kiken, fusenpai or fusensho, which R2 holds whole; the
+// representative bout's add and remove; a start's server twins) names what it
+// changes on purpose and is merged group by group below.
 func replaysSnapshot(incoming *state.MatchResult) bool {
 	switch doorOf(incoming) {
 	case DoorScore, DoorBulkScore, DoorQuickScore, DoorEngine, doorEngi:
 		return true
+	case DoorDecision:
+		return !domain.IsDefaultWinDecisionStr(incoming.Decision)
 	}
 	return false
 }
 
-// olderRevisionThanLogged reports whether the log holds a baseline written by
-// the same board session (RevSession) at a higher revision than rev.
 // olderRevisionThanLogged reports whether the log holds a baseline written by
 // the same board session (RevSession) at a higher revision than rev, since the
 // match last started running: a reopen, a send back to the queue or a result
@@ -595,9 +600,11 @@ func mergeByReplay(stored, incoming *state.MatchResult, changed []string, stamp 
 	for _, g := range changed {
 		was, got, said := state.GroupValue(stored, g), state.GroupValue(final, g), state.GroupValue(&sent, g)
 		switch {
-		case bytes.Equal(got, said), !bytes.Equal(got, was):
-			// Landed, as sent or as the replay adjusted it (a judges'
-			// decision kept, a winner worked out again).
+		case bytes.Equal(got, said), !bytes.Equal(got, was), g == state.GroupPoints && sameModuloHantei(final, &sent):
+			// Landed, as sent or as the replay adjusted it (a winner worked
+			// out again; a judges' decision kept: a board that never showed
+			// the mark sends the scoreline without it, which echoes the
+			// stored one and only the mark is carried).
 			rep.Applied = append(rep.Applied, g)
 		default:
 			reportHeld(rep, g, stored, &sent, nil)
@@ -725,23 +732,11 @@ func cloneIppons(s []string) []string {
 	return append([]string(nil), s...)
 }
 
-// carriesGroup reports whether a write's own payload holds a value for
-// scoring group g: points it sent, its engi flags, or a row at that bout
-// position. A payload that omits a group says nothing about it.
-// displaceNewerScoring is S2's answer when the scoring stored after a finish
-// would leave the match without the winner it needs (R4): in stamp order the
-// finish came first and that scoring could not apply after it. Each scoring
-// group stored newer than the finish takes the finish's own value (orig) and
-// the finish's stamp, and the stored newer value is moved to the history as
-// held (MergeReport.Displaced), so the match reaches the state the other
-// arrival order gives and nothing is lost. It reports false, changing
-// nothing, when the finish does not carry every such group, or when its own
-// scoreline does not decide the match either.
 // carryHantei puts a judges'-decision mark from one scoreline onto another
 // that carries none, on the same side, through domain.AppendHantei (the one
 // placement rule): the judges' decision is the result's, so a points change
-// that does not claim the result does not erase it (S3: from the stored
-// match; S2: from the finish that arrived after newer points).
+// that does not claim the result does not erase it (S3). The replay applies
+// the same rule to a baseline over a finished match (judgeOverFinished).
 func carryHantei(from, to *state.MatchResult) {
 	if domain.ContainsHantei(to.IpponsA) || domain.ContainsHantei(to.IpponsB) {
 		return
@@ -754,10 +749,22 @@ func carryHantei(from, to *state.MatchResult) {
 	}
 }
 
-// mergeHold takes groups the merge had applied back out of a write: each is
-// reported held (its incoming value kept for the history), the stored value
-// and stamp are put back. The ONE place a group is un-applied, used by R4 and
-// S2 (bc-mrgc review).
+// sameModuloHantei reports whether two matches hold the same points group
+// apart from the judges' hantei mark (which a write that never showed it does
+// not carry, and carryHantei puts back): the write then echoed the stored
+// scoreline and is no loss.
+func sameModuloHantei(a, b *state.MatchResult) bool {
+	return slices.Equal(domain.StripHantei(a.IpponsA), domain.StripHantei(b.IpponsA)) &&
+		slices.Equal(domain.StripHantei(a.IpponsB), domain.StripHantei(b.IpponsB)) &&
+		a.HansokuA == b.HansokuA && a.HansokuB == b.HansokuB
+}
+
+// mergeHold is what the group-by-group merge needs of a write once its groups
+// are placed: the report, the stored and incoming matches and both stamp maps.
+// Its methods settle the parts of a write that depend on the placed groups
+// (the representative picks, the stamps a held group keeps, the recorded
+// kachinuki marks); a group the merge or the replay holds is reported held
+// with reportHeld.
 type mergeHold struct {
 	rep          *state.MergeReport
 	stored       *state.MatchResult
@@ -766,17 +773,6 @@ type mergeHold struct {
 	storedStamps map[string]int64
 }
 
-// raw captures group's incoming value before the merge adjusts it.
-// holdGroups takes each applied group back out, with reason as the history
-// entry's reason and NeedsWinner reported to the writer.
-// holdScoring holds every applied group that decides who won.
-// holdDefaultWinScoring holds every applied group that decides who won
-// together with a changed overtime: a default win already decided this
-// match, and nothing a board still scoring it sends says otherwise, whether
-// that is a point, a bout, or an (E) mark. holdScoring alone would miss the
-// overtime group, since IsScoringGroup does not count it as scoring, and a
-// held scoreline landing beside an applied (E) would put overtime on a match
-// the default win rule says had none (FIK Art. 32: one maru in encho).
 // unrecordReopenedBouts takes the recorded mark off every numbered bout this
 // write reopens, as a change of GroupRecorded at the write's stamp, named in
 // its history line. A recorded bout is reopened when the write either

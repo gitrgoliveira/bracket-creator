@@ -697,7 +697,7 @@ func (bm *BracketMatch) StampGroups(stamp int64, groups ...string) {
 // mergeMatchWrite has already decided for them, bypassing stampGroups' never-
 // lower guard (bc-mrgc fix: the engi recorder). The merge is the one place
 // that orders a group against every other stored group, including S2's
-// displaceNewerScoring: a finish that arrives after a newer but INVALID
+// displacement (mergeByReplay, MergeReport.Displaced): a finish that arrives after a newer but INVALID
 // stored count applies on its own, older scoreline and moves that count to
 // the history, which legitimately puts the group's stamp BACK to the
 // finish's own time. A naive never-lower re-stamp cannot express that move

@@ -114,7 +114,7 @@ func TestStampGroups_NeverLowersAGroupsStamp(t *testing.T) {
 // in deliberate contrast with StampGroups' never-lower rule above: it
 // applies exactly the stamp mergeMatchWrite already decided for a group,
 // even when that is OLDER than what the match currently records (S2's
-// displaceNewerScoring moves a stored, invalid count's stamp out and
+// displacement, MergeReport.Displaced, moves a stored, invalid count's stamp out and
 // replaces it with a finish's own, earlier one), and ModifiedAt is
 // recomputed as the newest stamp actually left on the match -- which can
 // itself move backward when the group that had been keeping it high is

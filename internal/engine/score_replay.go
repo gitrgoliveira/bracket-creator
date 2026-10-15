@@ -239,25 +239,13 @@ type replayItem struct {
 }
 
 // baselineItems splits a baseline into one item per distinct group stamp
-// (the group's own, else the line's), each setting its groups in
-// baselineGroupOrder.
-// baselineItems splits a baseline into one item per distinct group stamp
-// (the group's own, else the line's), each setting its groups in
-// baselineGroupOrder. A baseline that FINISHES the match declares the
-// scoreline its verdict stood on, so a scoring group stamped at or before
-// its result is set together with the result: a change made between the
-// two, arriving later, is older than the finish (R3) rather than applied
-// beneath it.
-// baselineItems splits a baseline into one item per distinct group stamp
-// (baselineGroupStamp), each setting its groups in baselineGroupOrder.
-// baselineItems splits a baseline into one item per distinct group stamp
 // (baselineGroupStamp), each setting its groups in baselineGroupOrder. A
 // baseline whose result is a FOUGHT finish declares the scoreline its verdict
 // stood on, so a scoring group stamped before that result is set together
 // with it: a change made between the two, arriving later, is older than the
-// finish (R3) rather than applied beneath it. A decision's verdict does not
-// stand on the scoreline (R2 orders the bouts fought before a withdrawal on
-// their own stamps), so its scoring keeps its own stamps.
+// finish (R3) rather than applied beneath it. A withdrawal's verdict (kiken,
+// fusenpai, fusensho) does not stand on the scoreline (R2 orders the bouts
+// fought before it on their own stamps), so its scoring keeps its own stamps.
 func baselineItems(line int, b *state.ScoreBaseline) []replayItem {
 	resultAt := int64(0)
 	if baselineFinishesFought(b) {
@@ -732,10 +720,8 @@ func (rp *replayer) judgeOverFinished(b *state.ScoreBaseline, groups []string) (
 	return &probe, values, nil
 }
 
-// beforeTheFinish reports whether the replay has not reached the line that
-// sets the result of a match the cache holds finished: the replay starts
-// from the cache (the match after every line), so until a baseline sets the
-// result its finished status is a later line's, not this point's.
+// absorb settles event i, which baseline b's group value now holds or replaces:
+// recorded when b saw it (BasisContains), else older than the baseline.
 func (rp *replayer) absorb(b *state.ScoreBaseline, i int) {
 	if rp.contains(b, i) {
 		rp.outcome[i] = domain.ScoreOutcomeRecorded

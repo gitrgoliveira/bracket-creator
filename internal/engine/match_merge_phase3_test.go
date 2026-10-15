@@ -370,7 +370,7 @@ func TestMerge_EngiRecountAfterTheFinishIsNeverADraw(t *testing.T) {
 
 // bc-mrgc fix: the engi recorder used to re-stamp the flags group with
 // StampGroups' never-lower guard after the merge had already decided its
-// stamp, which could not express S2's displaceNewerScoring moving a group's
+// stamp, which could not express S2's displacement (MergeReport.Displaced) moving a group's
 // stamp BACK to the finish's own, older time (it replaces a newer but
 // INVALID stored count with the finish's own scoreline and moves that count
 // to the history). The flags group was left stuck at the displaced count's

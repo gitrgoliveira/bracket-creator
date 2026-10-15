@@ -12,7 +12,9 @@
 //   - the drift net (driftBaseline): before replaying, the door compares the
 //     replay with the stored match; a difference is a write that left no
 //     baseline, logged as an ERROR and healed with a "drift" baseline holding
-//     the stored values.
+//     the stored values. A difference of ids alone, which a load-time repair
+//     fills on a match the log already covers, is healed the same way with a
+//     "repair" baseline, logged quietly.
 //   - answerLoggedWrite: a write whose writeId the log already holds (its
 //     answer was lost) is answered as recorded, with nothing written (F1).
 package engine
@@ -28,8 +30,12 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// DoorDrift names the baseline the drift net appends.
-const DoorDrift = "drift"
+// DoorDrift names the baseline the drift net appends; DoorRepair the one it
+// appends when the only difference is ids a load-time repair filled.
+const (
+	DoorDrift  = "drift"
+	DoorRepair = "repair"
+)
 
 // The reasons a refused event carries (ScoreEventAnswer.Reason) that the
 // engine itself decides.
@@ -521,11 +527,61 @@ func driftBaseline(stored *state.MatchResult, lines []state.ScoreLogLine, shape 
 	if len(diff) == 0 {
 		return nil
 	}
-	log.Printf("engine: ERROR: match %s: the stored match differs from its score event log in %v (a write left no baseline); logging a drift baseline", stored.ID, diff)
+	// A load-time repair (EnsureLegacyUpgraded: a winner's id, a bout's member
+	// ids) fills ids on a row the log already covers, in memory and again after
+	// every restart. That is no write that skipped its baseline: the log says
+	// the same thing without the ids, so the stored ids are logged as a repair
+	// baseline, quietly, and drift stays a real fault.
+	door := DoorRepair
+	for _, g := range diff {
+		if !repairFillsIDsOnly(stored, &rp.Match, g) {
+			door = DoorDrift
+			break
+		}
+	}
+	if door == DoorDrift {
+		log.Printf("engine: ERROR: match %s: the stored match differs from its score event log in %v (a write left no baseline); logging a drift baseline", stored.ID, diff)
+	} else {
+		log.Printf("engine: match %s: a repair filled ids the score event log lacks in %v; logging a repair baseline", stored.ID, diff)
+	}
 	stamp := max(stored.ModifiedAt, newestLineStamp(lines))
-	b := BaselineFromMatch(stored, logBaselineID(len(lines), DoorDrift), DoorDrift, stamp, diff, state.ScoreBasis{Seen: len(lines)})
+	b := BaselineFromMatch(stored, logBaselineID(len(lines), door), door, stamp, diff, state.ScoreBasis{Seen: len(lines)})
 	b.ReceivedAt = now
 	return &state.ScoreLogLine{Baseline: &b}
+}
+
+// repairFillsIDsOnly reports whether the stored group differs from the
+// replayed one only in ids the stored match holds and the replay lacks: a
+// result's winner id, a bout's member ids. An id the replay holds and the
+// stored match changed is no repair.
+func repairFillsIDsOnly(stored, replayed *state.MatchResult, g string) bool {
+	a, b := cloneMatchForReplay(*stored), cloneMatchForReplay(*replayed)
+	if g == state.GroupResult {
+		if b.WinnerID != "" && b.WinnerID != a.WinnerID {
+			return false
+		}
+		a.WinnerID, b.WinnerID = "", ""
+	}
+	if pos, ok := state.ParseBoutGroup(g); ok {
+		for i := range b.SubResults {
+			if b.SubResults[i].Position != pos {
+				continue
+			}
+			for j := range a.SubResults {
+				if a.SubResults[j].Position != pos {
+					continue
+				}
+				ra, rb := &a.SubResults[j], &b.SubResults[i]
+				for _, ids := range [][2]*string{{&ra.SideAMemberID, &rb.SideAMemberID}, {&ra.SideBMemberID, &rb.SideBMemberID}, {&ra.WinnerMemberID, &rb.WinnerMemberID}} {
+					if *ids[1] != "" && *ids[1] != *ids[0] {
+						return false
+					}
+					*ids[0], *ids[1] = "", ""
+				}
+			}
+		}
+	}
+	return bytes.Equal(state.GroupValue(&a, g), state.GroupValue(&b, g))
 }
 
 // logBaselineID names a baseline a door logs at line: two baselines dated at
@@ -728,7 +784,7 @@ func (e *Engine) sentBackToQueue(h state.StoreTx, compID, matchID string) bool {
 // status, so the latest line that can is the one that does.
 func doorChangesStatus(door string) bool {
 	switch door {
-	case DoorEvent, DoorDrift, MigrationDoor, DoorDisplaced, doorReseat, doorDownstreamReopen,
+	case DoorEvent, DoorDrift, DoorRepair, MigrationDoor, DoorDisplaced, doorReseat, doorDownstreamReopen,
 		doorKachinukiAdvance, doorKachinukiRecord, doorKachinukiRemove:
 		return false
 	}

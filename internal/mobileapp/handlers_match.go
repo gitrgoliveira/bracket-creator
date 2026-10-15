@@ -10,7 +10,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -1387,13 +1386,6 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
-		// The match just left the running state, so its rev-guard high-water
-		// mark is dead. Drop it (mirrors the score handler's `!isRunning`
-		// cleanup) so a later re-start of this match, whose client may reuse the
-		// same RevSession or reset its rev counter, is not wrongly dropped as
-		// stale against a leftover mark.
-		runningRevStore.Delete(id + ":" + mid)
-
 		broadcastMatchNow(hub, store, id, mid, gin.H{
 			"competitionId": id,
 			"matchId":       mid,
@@ -1527,10 +1519,6 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			}
 			return
 		}
-
-		// The match re-entered the running state; any rev-guard high-water
-		// mark from its previous life is dead (mirrors revert-to-queue).
-		runningRevStore.Delete(id + ":" + mid)
 
 		broadcastMatchNow(hub, store, id, mid, gin.H{
 			"competitionId": id,
@@ -1672,11 +1660,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
-		// Target re-entered running; blocker went back to scheduled. Clear both
-		// rev-guard high-water marks and broadcast both matches (mirrors reopen
-		// and revert-to-queue).
-		runningRevStore.Delete(id + ":" + mid)
-		runningRevStore.Delete(body.BlockerCompID + ":" + body.BlockerMatchID)
+		// Target re-entered running; blocker went back to scheduled: broadcast
+		// both matches.
 		broadcastMatchNow(hub, store, id, mid, gin.H{"competitionId": id, "matchId": mid})
 		broadcastMatchNow(hub, store, body.BlockerCompID, body.BlockerMatchID, gin.H{"competitionId": body.BlockerCompID, "matchId": body.BlockerMatchID})
 		broadcastReopenedDownstream(hub, store, id, reopenedDownstream)
@@ -3139,42 +3124,6 @@ func dischargeReopenPendingUnderTx(stx state.StoreTx, compID, matchID, reason st
 // NOT migrated: the partial-success error array semantics need a
 // per-result tx (or a different commit shape) and that's out of scope
 // for this slice.
-// runningRev is the per-match value stored in runningRevStore: the highest
-// Rev seen WITHIN a given client scoring session (RevSession). A write whose
-// RevSession differs from the stored one is treated as last-write-wins
-// (concurrent operators, multiple operators may score one shiaijo). The
-// completed-match regression guard is the real protection against a stale
-// running write reverting a finished result.
-type runningRev struct {
-	Session string
-	Rev     int64
-}
-
-// runningRevStore is a process-lifetime, in-memory map that tracks the
-// highest client-side revision number (Rev) seen for each running-status
-// write on a given match. Key is "compID:matchID". Value is a runningRev
-// (session + rev).
-//
-// C2 rev-guard: when a "running" write arrives with a Rev that is lower
-// than the stored high-water mark WITHIN THE SAME RevSession, nothing of it
-// is applied: it is kept whole in the match's history and answered
-// superseded (holdOlderRevision, bc-mrgc phase 3; it used to be dropped with
-// a bare 200 {stale:true}). This prevents out-of-order delivery from a
-// reconnect flush overwriting a more-recent in-flight write. Writes from a
-// DIFFERENT RevSession are treated as last-write-wins, multiple operators
-// may legitimately score the same shiaijo concurrently. The merge
-// (engine.mergeMatchWrite) is the authoritative protection: a running write
-// never carries the result group over a finished match, so it never reverts
-// one, regardless of session (bc-mrgc, R3). Only "running" writes are gated, completed writes
-// and Rev==0 (unversioned) writes always proceed so the guard never blocks
-// explicit operator submits or legacy clients.
-//
-// The map is process-scoped and therefore reset on server restart; the
-// on-disk state is the ground truth. A mis-ordered running-write that
-// slips through after a restart is harmless: the operator's explicit
-// Finish is the authoritative write and carries no rev constraint.
-var runningRevStore sync.Map
-
 // scoreRequestBody wraps ScoreRequest with transient, request-only
 // fields. These bind from the JSON body but are NOT part of
 // state.MatchResult, so they can never be persisted.
@@ -3315,41 +3264,6 @@ func withHeldGroups(body gin.H, rep *state.MergeReport) gin.H {
 	return body
 }
 
-// holdOlderRevision answers a running write the same scoring board has
-// already followed with a newer one (the rev guard below). The ordering
-// protection stays: nothing of it is applied. But nothing is dropped either
-// (bc-mrgc phase 3, "Nothing should be dropped"): the engine keeps the whole
-// write in the match's history with the reason, through the merge owner, and
-// the write is answered superseded with the groups it held, exactly like any
-// other write a newer change outranks. It takes no court and passes no gate,
-// since it changes nothing: no court lock, no start gate, no correction
-// check, and the rev high-water mark is left where the newer write put it.
-func holdOlderRevision(c *gin.Context, tx CompetitionTransactor, eng ScoringEngine, id, mid string, result *state.MatchResult) {
-	var engErr error
-	txErr := tx.WithTransaction(id, func(stx state.StoreTx) error {
-		_, engErr = eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, result, engine.ForceOptions{
-			HoldReason: engine.HoldReasonOlderRevision,
-		})
-		return nil
-	})
-	if txErr == nil {
-		txErr = engErr
-	}
-	var notFoundErr *engine.NotFoundError
-	switch {
-	case errors.Is(txErr, engine.ErrMatchSuperseded):
-		respondSuperseded(c, engine.HeldGroupsOf(txErr), engine.HeldReasonOf(txErr), engine.HeldDecisionOf(txErr))
-	case errors.As(txErr, &notFoundErr):
-		c.JSON(http.StatusNotFound, gin.H{"error": txErr.Error()})
-	case txErr != nil:
-		internalError(c, txErr)
-	default:
-		// The hold always answers superseded; a nil here would be a write
-		// that neither applied nor was kept, which must not read as saved.
-		internalError(c, fmt.Errorf("match %s: an older revision was neither applied nor held", mid))
-	}
-}
-
 func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store CompetitionStore, tx CompetitionTransactor, hub Broadcaster, verifier PasswordVerifier, tl TournamentLoader) {
 	// C3: coalesce high-frequency "running" match_updated broadcasts to ≤4/s
 	// per match. Completed writes always proceed (isRunning=false).
@@ -3375,8 +3289,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		// Composite key used by the rev-guard and broadcast coalescer; hoisted
-		// here so all four use-sites share a single allocation (FINDING 3).
+		// The broadcast coalescer's key.
 		matchKey := id + ":" + mid
 
 		var body scoreRequestBody
@@ -3517,58 +3430,14 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// cannot second-guess the shiaijo. The former premature-completion
 		// 409 gate was removed with the engine's auto-finalize.
 
-		// C2 rev-guard: a "running" autosave write that arrives after a newer
-		// one from the same board (out of order after a reconnect flush) is
-		// not applied, and is kept in the match's history (holdOlderRevision).
-		//
-		// Only gated when:
-		//   - status is "running" (autosave writes; completed writes always win)
-		//   - the incoming Rev > 0 (client opted in; Rev==0 means unversioned)
-		//   - RevSession is non-empty (the guard is scoped to a session; a Rev
-		//     without a session can't be safely compared, so treat it as
-		//     unversioned and always proceed rather than collapse mixed clients
-		//     into the "" session and wrongly drop a reload starting at rev=1)
-		//
-		// Same-session ordering: if the stored high-water mark for this match
-		// (within the same session) is already > the incoming Rev, the write is
-		// an older revision: nothing of it is applied, the whole write goes to
-		// the match's history, and it is answered superseded with the groups it
-		// held (200, never a 4xx: it can never win a retry). A higher-or-equal
-		// rev advances the mark.
-		//
-		// Different sessions (concurrent operators): last-write-wins. Multiple
-		// operators may legitimately score the same shiaijo simultaneously. The
-		// merge (engine.mergeMatchWrite) is the real protection against a
-		// running write reverting a finished match: it never carries the result.
-		if result.Status == state.MatchStatusRunning && result.Rev > 0 && result.RevSession != "" {
-			incoming := runningRev{Session: result.RevSession, Rev: result.Rev}
-			for {
-				existing, loaded := runningRevStore.LoadOrStore(matchKey, incoming)
-				if !loaded {
-					break // first running write for this key
-				}
-				stored := existing.(runningRev)
-				// Same session: a lower rev is a stale out-of-order delivery (e.g.
-				// a reconnect flush). Hold it in the history. DIFFERENT sessions are concurrent
-				// operators (multiple operators may score one shiaijo), last write
-				// wins; the completed-match regression guard below still prevents a
-				// running write from reverting a finished match.
-				if stored.Session == incoming.Session && result.Rev < stored.Rev {
-					holdOlderRevision(c, tx, eng, id, mid, result)
-					return
-				}
-				if runningRevStore.CompareAndSwap(matchKey, existing, incoming) {
-					break
-				}
-				// Lost the CAS race, retry.
-			}
-		}
+		// A previous build's running write older than one its own board
+		// already sent (a lower rev of the same revSession) is held whole by
+		// the engine against the score event log (engine
+		// olderRevisionThanLogged, bc-evts stage 2b), which replaced the
+		// in-memory rev guard here: it survives a restart and needs no
+		// clearing when the match leaves running.
 
 		isWithdrawal := domain.IsWithdrawalDecisionStr(result.Decision)
-		// The status this write carries; the engine's merge rewrites result
-		// with the merged match.
-		incomingStatus := result.Status
-
 		// isCorrection: a completed -> completed overwrite (the operator is
 		// fixing an already-finished result, e.g. via the shiaijo console's or
 		// the Scores page's "Correct" affordance). Such a write never places or
@@ -3769,11 +3638,6 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			}
 			var notFoundErr *engine.NotFoundError
 			if errors.As(txErr, &notFoundErr) {
-				// Match not found, drop any rev-guard entry this request created so
-				// fabricated match IDs can't grow runningRevStore unbounded (mirrors
-				// the engErr NotFoundError path; scoring is unauthenticated in
-				// self-run mode).
-				runningRevStore.Delete(matchKey)
 				c.JSON(http.StatusNotFound, gin.H{"error": txErr.Error()})
 				return
 			}
@@ -3793,19 +3657,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// forever (the mp-q8c6 poisoned-queue pattern). `applied:false` is
 				// the shape the override endpoint already uses for this exact
 				// condition, and the client keys on it.
-				//
-				// Mirrors the success path's rev-store rule rather than inventing
-				// one: a match that has left `running` has no live high-water mark
-				// to keep, while a running entry must stay so a later out-of-order
-				// delivery from this session is still fenced.
-				//
-				// Either half can have left running: the write (judged by the
-				// status it carried, since the merge has copied the stored
-				// match into result) or the match itself (result's status now
-				// IS the stored one).
-				if incomingStatus != state.MatchStatusRunning || result.Status != state.MatchStatusRunning {
-					runningRevStore.Delete(matchKey)
-				}
+
 				respondSuperseded(c, result.Merge.HeldGroups(), result.Merge.HeldReason(), result.Merge.HeldDecision())
 				return
 			}
@@ -3886,10 +3738,6 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			}
 			var notFoundEngErr *engine.NotFoundError
 			if errors.As(engErr, &notFoundEngErr) {
-				// The match doesn't exist, drop any rev-guard entry this request
-				// created so fabricated match IDs can't grow runningRevStore
-				// unbounded (scoring is unauthenticated in self-run mode).
-				runningRevStore.Delete(matchKey)
 				c.JSON(http.StatusNotFound, gin.H{"error": engErr.Error()})
 				return
 			}
@@ -3921,14 +3769,6 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// C3: coalesce high-frequency running-status broadcasts (first-wins
 		// within 250ms); completed writes always broadcast unconditionally.
 		isRunning := result.Status == state.MatchStatusRunning
-		// Bound runningRevStore: once a match leaves the running state its rev
-		// high-water mark is dead (the guard only gates running writes), so drop
-		// the entry to keep the process-lifetime map from growing without bound
-		// across many matches/competitions. A later correction that re-opens the
-		// match starts a fresh session anyway.
-		if !isRunning {
-			runningRevStore.Delete(matchKey)
-		}
 		// The payload is built now: a push held to the window's end must show
 		// this write's match, not whatever the handler does to it afterwards.
 		stampWithdrawnStatus(store, id, result)

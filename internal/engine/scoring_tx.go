@@ -106,13 +106,6 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	if loadErr != nil {
 		return nil, fmt.Errorf("RecordMatchResultWithIneligibilityTx: load competition %s: %w", compID, loadErr)
 	}
-	// A write the caller already knows must not apply (the running rev
-	// guard's older revision) is kept whole in the match's history and
-	// answered superseded, before anything else judges it: nothing of it
-	// lands, and nothing about it is lost (bc-mrgc phase 3).
-	if fo.HoldReason != "" {
-		return nil, e.holdWriteTx(tx, compID, matchID, result, comp, fo.HoldReason)
-	}
 	// An exact resend of a finish already recorded (a queued write whose
 	// first send landed but whose answer was lost) answers as recorded and
 	// writes nothing, before anything else judges it (bc-xrpl).
@@ -1412,25 +1405,6 @@ func answerAsStored(tx state.StoreTx, compID, matchID string, prior *state.Match
 	}
 	*result = *prior
 	result.ClearRequestFields()
-}
-
-// holdWriteTx keeps a write whole in the match's history without applying any
-// of it, for ForceOptions.HoldReason. The merge owner decides what the write
-// changes and the values it holds (mergeMatchWrite with holdAll), on a copy,
-// so the stored match is untouched; the entry records the reason. Returns the
-// superseded error the write is answered with.
-func (e *Engine) holdWriteTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, comp *state.Competition, reason string) error {
-	prior, inPool, err := e.lookupExistingResultIn(tx, compID, matchID)
-	if err != nil {
-		return err
-	}
-	probe := *result
-	probe.SubResults = state.CloneSubResults(result.SubResults)
-	result.Merge = mergeMatchWrite(prior, &probe, matchWriteForward, mergeCtx{
-		comp: comp, knockout: !inPool, nilSubsClear: inPool, holdAll: reason,
-	})
-	e.recordWriteHistory(tx, compID, matchID, result)
-	return supersededBy(result)
 }
 
 // refuseDecisionReachingRunningMatch is the decision path's early answer to

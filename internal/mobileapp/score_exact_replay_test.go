@@ -48,7 +48,6 @@ func exactReplayServer(t *testing.T, compID string, knockout bool) (http.Handler
 		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 			{ID: "Pool A-0", SideA: mgAlice, SideAID: mgAliceID, SideB: mgBob, SideBID: mgBobID, Court: "A", Status: state.MatchStatusRunning},
 		}))
-		runningRevStore.Delete(compID + ":Pool A-0")
 		return r, store, "Pool A-0", "pool-matches.csv", dataDir
 	}
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{
@@ -60,7 +59,6 @@ func exactReplayServer(t *testing.T, compID string, knockout bool) (http.Handler
 			{ID: "m-r2-0", SideA: "Winner of m-r1-0", MatchNumber: 2, Court: "A"},
 		},
 	}}))
-	runningRevStore.Delete(compID + ":m-r1-0")
 	return r, store, "m-r1-0", "bracket.json", dataDir
 }
 

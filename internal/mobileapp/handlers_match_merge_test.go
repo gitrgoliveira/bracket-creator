@@ -45,7 +45,6 @@ func mergeServer(t *testing.T, compID string) (http.Handler, *state.Store) {
 		{ID: "Pool A-0", SideA: mgAlice, SideAID: mgAliceID, SideB: mgBob, SideBID: mgBobID, Court: "A", Status: state.MatchStatusRunning},
 		{ID: "Pool A-1", SideA: mgBob, SideAID: mgBobID, SideB: mgAlice, SideBID: mgAliceID, Court: "A", Status: state.MatchStatusScheduled},
 	}))
-	runningRevStore.Delete(compID + ":Pool A-0")
 	return r, store
 }
 

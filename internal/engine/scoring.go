@@ -697,13 +697,6 @@ type ForceOptions struct {
 	// bytes as an operator clearing every mark on an editor board, which must
 	// still clear them.
 	StartOnly bool
-	// HoldReason, when set, holds the write whole: nothing of it is applied,
-	// all of it is kept in the match's history with this reason, and the
-	// write answers superseded (holdWriteTx). The score handler sets it for a
-	// running write older than one the same board already sent
-	// (HoldReasonOlderRevision): the ordering protection the rev guard gives,
-	// without dropping anything.
-	HoldReason string
 	// NoReplayHistory leaves out the history line an exact resend of a
 	// recorded finish would otherwise add (answerExactScoreReplay). The score
 	// handler sets it for an anonymous self-run participant, whose resend
@@ -724,9 +717,11 @@ type ForceOptions struct {
 	ReopenReason string
 }
 
-// HoldReasonOlderRevision is the history reason of a running write the same
-// scoring board had already followed with a newer one (the score handler's
-// rev guard, bc-mrgc phase 3).
+// HoldReasonOlderRevision is the history reason of a previous build's running
+// write the same scoring board had already followed with a newer one: a lower
+// revision of a session whose higher one the score event log holds
+// (olderRevisionThanLogged, bc-evts stage 2b; an in-memory guard in the score
+// handler before it).
 const HoldReasonOlderRevision = "older revision of this board"
 
 // firstForceOptions returns the caller's ForceOptions, or the zero value

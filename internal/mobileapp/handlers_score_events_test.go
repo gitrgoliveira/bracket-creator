@@ -40,7 +40,6 @@ func seServer(t *testing.T, compID string) (http.Handler, *state.Store, *Hub, st
 		{ID: seMatch, SideA: mgAlice, SideAID: mgAliceID, SideB: mgBob, SideBID: mgBobID, Court: "A", Status: state.MatchStatusRunning},
 		{ID: "Pool A-1", SideA: mgBob, SideAID: mgBobID, SideB: mgAlice, SideBID: mgAliceID, Court: "A", Status: state.MatchStatusScheduled},
 	}))
-	runningRevStore.Delete(compID + ":" + seMatch)
 	return r, store, hub, dir
 }
 

@@ -1826,7 +1826,6 @@ func TestReopenHandler_CourtBusy409(t *testing.T) {
 		// dimension can reject anything here.
 		{ID: "P1-1", SideA: "Kuma", SideB: "Washi", Court: "A", Status: state.MatchStatusRunning},
 	}))
-	runningRevStore.Delete(compID + ":P1-1")
 
 	w := postReopen(t, r, compID, "P1-0", "need more bouts")
 	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())

@@ -56,6 +56,10 @@ import (
 //   - R3's hold: a running write over a finished match made before (or at)
 //     the result, or unstamped, is held whole; one made after it is the
 //     replay's.
+//   - The older-revision hold (HoldReasonOlderRevision): a previous build's
+//     running write with a lower revision than one its board's session
+//     already logged is held whole (olderRevisionThanLogged; it replaced the
+//     score handler's in-memory rev guard).
 //   - A finish that names its verdict alone over newer stored scoring (it
 //     carries nothing the replay could replay) is held, needs_winner.
 //   - The representative picks on a removed row (settleOrphanPicks, the
@@ -300,6 +304,13 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 		!domain.IsDefaultWinDecisionStr(incoming.Decision) && stamp > 0 &&
 		!slices.ContainsFunc(changed, state.IsScoringGroup) && newestStoredScoringStamp(stored) > stamp
 	holdWhole = holdWhole || bareFinish
+	// A previous build's running write older than one its own board already
+	// sent (a lower revision of the same session than one the log holds,
+	// out of order after a reconnect flush) is held whole: its stamp may tie
+	// the newer one's, which the replay could not order.
+	olderRevision := !holdWhole && replaysSnapshot(incoming) && incoming.Status == state.MatchStatusRunning &&
+		olderRevisionThanLogged(mc.lines, incoming.RevSession, incoming.Rev)
+	holdWhole = holdWhole || olderRevision
 	if holdWhole {
 		for _, g := range changed {
 			hold[g] = true
@@ -350,6 +361,8 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 		holdReason = HoldReasonEngiAtomic
 	case bareFinish:
 		holdReason = needsWinnerReason(mc)
+	case olderRevision:
+		holdReason = HoldReasonOlderRevision
 	}
 	rep := &state.MergeReport{Stamp: stamp, Changed: changed, HoldReason: holdReason, NeedsWinner: bareFinish}
 	storedStamps := state.MaterializedGroupStamps(stored.GroupStamps, stored.ModifiedAt, state.SubPositions(stored.SubResults))
@@ -466,6 +479,38 @@ func replaysSnapshot(incoming *state.MatchResult) bool {
 	switch doorOf(incoming) {
 	case DoorScore, DoorBulkScore, DoorQuickScore, DoorEngine, doorEngi:
 		return true
+	}
+	return false
+}
+
+// olderRevisionThanLogged reports whether the log holds a baseline written by
+// the same board session (RevSession) at a higher revision than rev.
+// olderRevisionThanLogged reports whether the log holds a baseline written by
+// the same board session (RevSession) at a higher revision than rev, since the
+// match last started running: a reopen, a send back to the queue or a result
+// that left running ends the board's run, and a board may count its
+// revisions afresh after one.
+func olderRevisionThanLogged(lines []state.ScoreLogLine, session string, rev int64) bool {
+	if session == "" || rev <= 0 {
+		return false
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		b := lines[i].Baseline
+		if b == nil {
+			continue
+		}
+		if b.Door == doorReopen || b.Door == doorRequeue {
+			return false
+		}
+		if raw, ok := b.Values[state.GroupResult]; ok {
+			var m state.MatchResult
+			if state.SetGroupFromValue(&m, state.GroupResult, raw) == nil && m.Status != state.MatchStatusRunning {
+				return false
+			}
+		}
+		if b.RevSession == session && b.Rev > rev {
+			return true
+		}
 	}
 	return false
 }

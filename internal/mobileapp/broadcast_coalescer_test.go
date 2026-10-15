@@ -147,8 +147,6 @@ func BenchmarkScoreWrite_TwoCourts(b *testing.B) {
 		{ID: "courtB-1", SideA: "Carol", SideB: "Dave", Status: state.MatchStatusRunning},
 	}))
 	// Reset the rev store so the benchmark starts clean.
-	runningRevStore.Delete("bench1:courtA-1")
-	runningRevStore.Delete("bench1:courtB-1")
 
 	// A FIXED rev (not a monotonic per-write counter) is intentional here. Under
 	// b.RunParallel, monotonically-increasing revs would arrive out of order, so
@@ -211,7 +209,6 @@ func TestScoreHandler_C3Coalescer(t *testing.T) {
 	require.NoError(t, store.SavePoolMatches("c3", []state.MatchResult{
 		{ID: "c3-m1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning},
 	}))
-	runningRevStore.Delete("c3:c3-m1")
 
 	// Count how many match_updated broadcasts the hub receives.
 	var broadcastCount atomic.Int64

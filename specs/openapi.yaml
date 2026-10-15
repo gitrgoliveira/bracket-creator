@@ -2584,13 +2584,18 @@ paths:
             moved a representative pick stamped after it into the history
             carries `displacedGroups` naming the pick's group (`repPickA` or
             `repPickB`) with no `heldReason`.
-            A running write the rev-guard finds older than one the same client
-            session already sent (a lower rev, e.g. an out-of-order reconnect
-            flush) is not applied and not dropped: the whole write is kept in
-            the match's history with the reason "older revision of this board"
-            and answered with the RefusedWrite shape below (`superseded`, with
-            the `heldGroups` it held). Different client sessions are concurrent
-            operators; the server merges their writes by stamp. When EVERY
+            A running write older than one the same client session already
+            sent (a lower rev than one the match's score event log holds for
+            that revSession since the match last started running, e.g. an
+            out-of-order reconnect flush) is not applied and not dropped: the
+            whole write is kept in the match's history with the reason "older
+            revision of this board" and answered with the RefusedWrite shape
+            below (`superseded`, with the `heldGroups` it held). Different
+            client sessions are concurrent operators; the server orders their
+            writes by stamp. A scoring write (running or finishing, and every
+            bulk-score and quick-score entry) is decided by the score event
+            log's replay: it is logged as a baseline of the groups it changes
+            at its stamp, never refused for the build that sent it. When EVERY
             group the write changes is held, the body is the RefusedWrite shape
             (`{"applied": false, "reason": "superseded", "heldGroups": [...],
             ...}`): nothing of it was applied to the match, no SSE broadcast is
@@ -6808,17 +6813,19 @@ components:
           writeOnly: true
           description: >
             Optional client-monotonic revision counter, stamped only on
-            "running"-status autosave writes. The server's rev-guard uses it
-            (scoped to revSession) to drop out-of-order delivery from a
-            reconnect flush. Never returned in responses or public projections.
+            "running"-status autosave writes. The server keeps it (scoped to
+            revSession) on the write's baseline in the match's score event log
+            and holds a lower revision of the same session, an out-of-order
+            delivery from a reconnect flush, until the match leaves running.
+            Never returned in responses or public projections.
         revSession:
           type: string
           maxLength: 64
           writeOnly: true
           description: >
             Optional per-page-load scoring-session id (opaque, e.g. a UUID) sent
-            with "running" autosave writes. It lets the server's rev-guard drop a
-            single session's own out-of-order delivery (a reconnect flush). Writes
+            with "running" autosave writes. It lets the server hold a single
+            session's own out-of-order delivery (a reconnect flush). Writes
             from different sessions are concurrent operators and apply
             last-write-wins. Never returned in responses or public projections.
         changed:

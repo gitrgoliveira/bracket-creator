@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -216,4 +218,34 @@ func TestReplay_EngiSnapshotNewestCountDecides(t *testing.T) {
 		assert.Equal(t, 3, r.Match.FlagsA)
 		assert.Len(t, r.Held, 1)
 	})
+}
+
+// The older-revision hold reads the log (it replaced the score handler's
+// in-memory rev guard): a lower revision of a session the log holds a higher
+// one of is older, until the board's run ends (a reopen, a send back to the
+// queue, a result that left running).
+func TestOlderRevisionThanLogged(t *testing.T) {
+	running := func(rev int64, session string) state.ScoreLogLine {
+		l := snapLine(fmt.Sprintf("r%d", rev), 100+rev, func(s *state.MatchResult) { s.IpponsA = []string{"M"} }, state.GroupPoints, state.GroupResult)
+		l.Baseline.RevSession, l.Baseline.Rev = session, rev
+		return l
+	}
+	ended := func(door string, status state.MatchStatus) state.ScoreLogLine {
+		l := snapLine(door, 200, func(s *state.MatchResult) { s.Status = status }, state.GroupResult)
+		l.Baseline.Door = door
+		return l
+	}
+	lines := []state.ScoreLogLine{running(5, "s1")}
+	assert.True(t, olderRevisionThanLogged(lines, "s1", 3), "a lower revision of the same board")
+	assert.False(t, olderRevisionThanLogged(lines, "s1", 5), "the same revision is not older")
+	assert.False(t, olderRevisionThanLogged(lines, "s2", 1), "another board's session is its own")
+	assert.False(t, olderRevisionThanLogged(lines, "", 1), "no session: unversioned")
+	assert.False(t, olderRevisionThanLogged(lines, "s1", 0), "no revision: unversioned")
+	for _, end := range []state.ScoreLogLine{
+		ended(doorRequeue, state.MatchStatusScheduled),
+		ended(doorReopen, state.MatchStatusRunning),
+		ended(DoorScore, state.MatchStatusCompleted),
+	} {
+		assert.False(t, olderRevisionThanLogged(append(slices.Clone(lines), end), "s1", 1), "the run ended at %s", end.Baseline.Door)
+	}
 }

@@ -91,8 +91,8 @@ const (
 	// MaxLenMatchID caps the byte length of the "mid" path parameter accepted
 	// by the score endpoint. Match IDs legitimately contain spaces (e.g.
 	// "Pool A-1"), so a charset regex is inappropriate, a length cap is the
-	// right defense-in-depth guard against abusive keys growing runningRevStore
-	// unbounded. 128 bytes covers any realistic match ID.
+	// right defense-in-depth guard against abusive keys growing the per-match
+	// broadcast coalescer's map. 128 bytes covers any realistic match ID.
 	MaxLenMatchID = 128
 
 	// MaxBulkCheckInIDs is the upper bound on the participantIds array

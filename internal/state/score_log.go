@@ -59,6 +59,12 @@ type ScoreBaseline struct {
 	WriteID string `json:"writeId,omitempty"`
 	// Session is the writing device's event session, when it has one.
 	Session string `json:"session,omitempty"`
+	// RevSession and Rev are a previous build's running-write revision (the
+	// board's page session and its counter, MatchResult.Rev): a running
+	// snapshot with a lower Rev from the same RevSession than one the log
+	// holds is an older revision of that board and is held whole.
+	RevSession string `json:"revSession,omitempty"`
+	Rev        int64  `json:"rev,omitempty"`
 	// Stamp places the baseline in the replay's order: after every event
 	// stamped at or before it.
 	Stamp int64 `json:"stamp"`

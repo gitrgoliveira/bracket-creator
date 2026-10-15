@@ -346,6 +346,10 @@ type writeBaseline struct {
 	// its baseline (MergeReport.LogPrefix): logged first, so a scoring
 	// snapshot always leaves the log it was decided on.
 	prefix []state.ScoreLogLine
+	// revSession and rev are a running write's revision (MatchResult.Rev),
+	// kept on its baseline for the older-revision hold.
+	revSession string
+	rev        int64
 }
 
 // baselineNote is what noteWriteBaseline appended: the replayed match (the
@@ -368,7 +372,7 @@ func (e *Engine) recordLandedWriteHistory(h state.StoreTx, compID, matchID strin
 	note := e.noteWriteBaseline(h, compID, matchID, writeBaseline{
 		door: doorOf(result), stamp: rep.Stamp, named: rep.Applied,
 		writeID: result.WriteID, basis: result.Basis, unchanged: rep.Unchanged,
-		prefix: rep.LogPrefix,
+		prefix: rep.LogPrefix, revSession: result.RevSession, rev: result.Rev,
 	})
 	if note == nil {
 		return
@@ -439,7 +443,11 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 		})
 	}
 	set := unionGroups(named, replayGroupsDiffer(post, &before.Match))
-	if len(set) == 0 {
+	// A running write that changed nothing still leaves its board's revision,
+	// so an older revision of that board arriving later is held
+	// (olderRevisionThanLogged) rather than put back over the value it echoed.
+	revMarker := wb.rev > 0 && wb.revSession != "" && !olderRevisionThanLogged(lines, wb.revSession, wb.rev-1)
+	if len(set) == 0 && !revMarker {
 		return nil
 	}
 	// First at the write's own stamps (each group at the stamp the merge left
@@ -464,6 +472,9 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 			}
 		}
 		bl.WriteID, bl.ReceivedAt = wb.writeID, serverNowMs()
+		if wb.rev > 0 && wb.revSession != "" {
+			bl.RevSession, bl.Rev = wb.revSession, wb.rev
+		}
 		line = state.ScoreLogLine{Baseline: &bl}
 		after = ReplayScoring(post, append(slices.Clone(lines), line), shape)
 		diff := replayGroupsDiffer(post, &after.Match)

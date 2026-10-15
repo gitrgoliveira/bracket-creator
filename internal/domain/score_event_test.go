@@ -148,3 +148,20 @@ func TestBoutScoreFold(t *testing.T) {
 	assert.Equal(t, domain.ScoreOutcomeNoTarget, (&domain.BoutScore{}).AdjustEncho(-1))
 	assert.True(t, domain.FusenshoAllowed(domain.BoutScore{Fusensho: "a"}, "a"))
 }
+
+// The cap counts struck points on both sides: a fusensho winner's circles
+// are no strikes, so a strike on that side lands and ends the fusensho.
+func TestAddIpponOnAFusenshoWinnersSide(t *testing.T) {
+	b := domain.BoutScore{}
+	if !assert.Equal(t, domain.ScoreOutcomeApplied, b.SetFusensho(domain.ScoreSideA, "f")) {
+		return
+	}
+	assert.Equal(t, []string{domain.DefaultWinIppon, domain.DefaultWinIppon}, b.IpponsA)
+	assert.Equal(t, domain.ScoreOutcomeApplied, b.AddIppon(domain.ScoreSideA, "M", "e"))
+	assert.Empty(t, b.Fusensho, "the strike ends the fusensho")
+	assert.Equal(t, []string{"M"}, b.IpponsA)
+	assert.Equal(t, []string{"e"}, b.MarksA)
+
+	b = domain.BoutScore{IpponsA: []string{"M", "K"}}
+	assert.Equal(t, domain.ScoreOutcomeCapped, b.AddIppon(domain.ScoreSideA, "D", "x"), "two struck points still cap")
+}

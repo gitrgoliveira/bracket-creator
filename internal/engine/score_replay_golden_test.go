@@ -118,6 +118,13 @@ func TestReplayScoring_GoldenTable(t *testing.T) {
 			require.LessOrEqual(t, len(c.Lines), 6, "every order of more than 6 lines is too many")
 			shape, err := goldenShape(c.Shape.Kind, c.Shape.Knockout)
 			require.NoError(t, err)
+			// The version, the match's time and every group's stamp are pinned
+			// whole in every case: a group stamped where it should not be is
+			// a drift a subset comparison would let through.
+			pinned := []string{"scoreVersion", "modifiedAt", "groupStamps"}
+			for _, k := range pinned {
+				require.Contains(t, c.Want.Match, k, "every case pins %s", k)
+			}
 			wantMatch := emptyToNil(c.Want.Match)
 			for _, order := range permutations(len(c.Lines)) {
 				lines := append([]state.ScoreLogLine(nil), c.Head...)
@@ -133,6 +140,9 @@ func TestReplayScoring_GoldenTable(t *testing.T) {
 				var got map[string]any
 				require.NoError(t, json.Unmarshal(b, &got))
 				require.NoError(t, subsetOf(wantMatch, emptyToNil(got), "match"), "order %v", order)
+				for _, k := range pinned {
+					require.Equal(t, emptyToNil(c.Want.Match[k]), emptyToNil(got[k]), "order %v, %s", order, k)
+				}
 				gotOutcomes := map[string][]string{}
 				for _, o := range r.Outcomes {
 					gotOutcomes[o.ID] = append(gotOutcomes[o.ID], o.Outcome)

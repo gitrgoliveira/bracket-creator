@@ -810,6 +810,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			}
 			results[i].Changed = results[i].ChangedGroups
 			results[i].WriteDoor = engine.DoorBulkScore
+			// Mark ids and the event-log version are the replay's, never a body's.
+			results[i].ClearDerivedScoreFields()
 			if _, aheadMs, refuse := clientClockSkew(results[i].ModifiedAt); refuse {
 				logClockSkewRefusal(c, aheadMs, results[i].ID)
 				errs = append(errs, scoreError{
@@ -3363,6 +3365,8 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		}
 		req.Changed = body.Changed
 		req.WriteDoor = engine.DoorScore
+		// Mark ids and the event-log version are the replay's, never a body's.
+		(*state.MatchResult)(&req).ClearDerivedScoreFields()
 		// A start changes the status alone: the score the stored match holds
 		// is kept (keepQueuedScore), so the merge must not apply the
 		// payload's empty one either.

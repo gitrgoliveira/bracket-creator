@@ -241,7 +241,6 @@ func parseScoreLog(path string, raw []byte) ([]ScoreLogLine, error) {
 	return out, nil
 }
 
-// LoadScoreLog reads a match's event log; none yet reads as empty.
 // AppendScoreLog appends lines to a match's event log outside a transaction
 // (Store satisfies StoreTx). A door that writes a match takes the
 // transaction's twin, so its lines land with the write.
@@ -259,6 +258,7 @@ func (s *Store) AppendScoreLog(compID, matchID string, lines ...ScoreLogLine) er
 	return s.appendScoreLogLocked(compID, matchID, existing, lines, s.directWrite)
 }
 
+// LoadScoreLog reads a match's event log; none yet reads as empty.
 func (s *Store) LoadScoreLog(compID, matchID string) ([]ScoreLogLine, error) {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return nil, err

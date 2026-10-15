@@ -295,6 +295,37 @@ func TestReplay_EngiFlags(t *testing.T) {
 	assert.Equal(t, domain.ScoreOutcomeNotAllowed, r.Outcome("k"))
 }
 
+// pool.rep names a team's fighter on a pool representative or tie-break bout
+// only; any other match has no rep players.
+func TestReplay_PoolRepOnlyOnATeamsSupplementaryBout(t *testing.T) {
+	rep := func(id string) state.ScoreLogLine {
+		return state.ScoreLogLine{V: state.ScoreLogFormatVersion, Event: &domain.ScoreEvent{
+			ID: id, Session: "s", Seq: 1, Stamp: 20, Kind: domain.ScorePoolRep, Side: "a", Name: "K1"}}
+	}
+	m := runningIndividual()
+	r := ReplayScoring(m, []state.ScoreLogLine{rep("ind")}, ReplayShape{})
+	assert.Equal(t, domain.ScoreOutcomeNotAllowed, r.Outcome("ind"), "an individual match")
+	assert.Empty(t, r.Match.RepPlayerA)
+
+	m.ID = "Pool A-DH-1"
+	r = ReplayScoring(m, []state.ScoreLogLine{rep("engi")}, ReplayShape{Comp: &state.Competition{Engi: true}})
+	assert.Equal(t, domain.ScoreOutcomeNotAllowed, r.Outcome("engi"), "an engi bout")
+	r = ReplayScoring(m, []state.ScoreLogLine{rep("ind-dh")}, ReplayShape{})
+	assert.Equal(t, domain.ScoreOutcomeNotAllowed, r.Outcome("ind-dh"), "an individual competition's representative bout")
+
+	team := replayTeamMatch()
+	r = ReplayScoring(team, []state.ScoreLogLine{rep("team")}, ReplayShape{Comp: replayTeamComp(false)})
+	assert.Equal(t, domain.ScoreOutcomeNotAllowed, r.Outcome("team"), "an ordinary team match")
+
+	team.ID, team.SubResults = "Pool A-DH-1", nil
+	r = ReplayScoring(team, []state.ScoreLogLine{rep("dh")}, ReplayShape{Comp: replayTeamComp(false)})
+	assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("dh"))
+	assert.Equal(t, "K1", r.Match.RepPlayerA)
+	team.ID = "Pool A-TB-1"
+	r = ReplayScoring(team, []state.ScoreLogLine{rep("tb")}, ReplayShape{Comp: replayTeamComp(false)})
+	assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("tb"))
+}
+
 func replayTeamComp(kachinuki bool) *state.Competition {
 	c := &state.Competition{Kind: "team", TeamSize: 3}
 	if kachinuki {
@@ -427,6 +458,23 @@ func TestReplay_Kachinuki(t *testing.T) {
 	assert.Equal(t, domain.ScoreOutcomeNotAllowed, r.Outcome("x"), "no match-level overtime on a kachinuki encounter")
 }
 
+// A bout un-recorded by an event a finished encounter commits keeps the
+// recorded group's stamp, as one on a running encounter does.
+func TestReplay_KachinukiUnrecordAfterTheFinish(t *testing.T) {
+	shape := ReplayShape{Comp: replayTeamComp(true), Knockout: true}
+	m := replayTeamMatch()
+	m.Status, m.Winner, m.WinnerID = state.MatchStatusCompleted, "Kyoto", "ta"
+	m.SubResults = []state.SubMatchResult{
+		{Position: 1, SideA: "K1", SideB: "O1", SideAMemberID: "k1", SideBMemberID: "o1", IpponsA: []string{"M", "K"}, Winner: "K1", WinnerMemberID: "k1", Recorded: true},
+		{Position: 2, SideA: "K1", SideB: "O2", SideAMemberID: "k1", SideBMemberID: "o2", IpponsA: []string{"M"}, Winner: "K1", WinnerMemberID: "k1", Recorded: true},
+	}
+	r := ReplayScoring(m, append(migrated(m), evLine("e", 20, domain.ScoreEnchoAdd, 2, "", "")), shape)
+	require.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("e"))
+	assert.False(t, state.SubResultAt(r.Match.SubResults, 2).Recorded, "the bout is fought again")
+	assert.Equal(t, int64(20), r.Match.GroupStamps[state.GroupRecorded])
+	assert.Equal(t, int64(20), r.Match.ModifiedAt)
+}
+
 // The representative bout: its add and remove are baselines; a pick lands on
 // it, a pick after its removal finds nothing; the verdict only on a tie.
 func TestReplay_DaihyosenAddRemoveAndPicks(t *testing.T) {
@@ -500,6 +548,125 @@ func TestReplay_LazyMigration(t *testing.T) {
 		assert.Equal(t, domain.ScoreOutcomeNoTarget, r.Outcome("e"))
 		assert.Equal(t, int64(12), r.Match.GroupStamps[state.BoutGroup(2)])
 	})
+}
+
+// An event ordered before the first baseline that sets its group is judged by
+// that baseline alone, never folded onto the stored cache (which is the match
+// AFTER every line): the invariant is that any event older than the migration
+// baseline answers beforeBaseline.
+func TestReplay_EventsBeforeTheFirstBaseline(t *testing.T) {
+	finished := func(decision string) *state.MatchResult {
+		m := knockoutIndividual()
+		m.Status, m.Winner, m.WinnerID = state.MatchStatusCompleted, "Aka", "pa"
+		m.Decision, m.DecisionBy = decision, "B"
+		m.IpponsA = []string{domain.DefaultWinIppon, domain.DefaultWinIppon}
+		m.IpponsB = []string{"M"}
+		m.ModifiedAt = 100
+		return m
+	}
+	t.Run("a kiken cache keeps its kiken", func(t *testing.T) {
+		m := finished(string(domain.DecisionKikenVoluntary))
+		r := ReplayScoring(m, append(migrated(m), evLine("old", 90, domain.ScoreIpponAdd, 0, "b", "K")), ReplayShape{Knockout: true})
+		assert.Equal(t, domain.ScoreOutcomeBeforeBaseline, r.Outcome("old"))
+		assert.Equal(t, string(domain.DecisionKikenVoluntary), r.Match.Decision)
+		assert.Equal(t, []string{"M"}, r.Match.IpponsB)
+		assert.False(t, r.ClearedWithdrawal)
+	})
+	t.Run("a fusensho cache answers beforeBaseline, not defaultWinStands", func(t *testing.T) {
+		m := finished(string(domain.DecisionFusensho))
+		r := ReplayScoring(m, append(migrated(m), evLine("old", 90, domain.ScoreIpponAdd, 0, "b", "K")), ReplayShape{Knockout: true})
+		assert.Equal(t, domain.ScoreOutcomeBeforeBaseline, r.Outcome("old"))
+	})
+	t.Run("a decision baseline re-recording the kiken un-clears it", func(t *testing.T) {
+		m := finished(string(domain.DecisionKikenVoluntary))
+		lines := append(migrated(m),
+			evLine("clear", 105, domain.ScoreIpponAdd, 0, "b", "K"),
+			baseLine(m, "d", 110, state.ScoreBasis{}, state.GroupResult, state.GroupPoints))
+		r := ReplayScoring(m, lines, ReplayShape{Knockout: true})
+		assert.Equal(t, domain.ScoreOutcomeBeforeBaseline, r.Outcome("clear"))
+		assert.Equal(t, string(domain.DecisionKikenVoluntary), r.Match.Decision)
+		assert.False(t, r.ClearedWithdrawal, "the decision the baseline recorded stands")
+	})
+	t.Run("an older strike is not judged against the cache's cap", func(t *testing.T) {
+		m := runningIndividual()
+		m.IpponsA = []string{"M", "K"}
+		m.ModifiedAt = 100
+		r := ReplayScoring(m, append(migrated(m), evLine("old", 90, domain.ScoreIpponAdd, 0, "a", "D")), ReplayShape{})
+		assert.Equal(t, domain.ScoreOutcomeBeforeBaseline, r.Outcome("old"))
+	})
+	t.Run("an older event on a removed bout is not noTarget", func(t *testing.T) {
+		m := replayTeamMatch()
+		m.SubResults = m.SubResults[:1]
+		m.ModifiedAt = 100
+		m.GroupStamps = map[string]int64{state.BoutGroup(1): 100, state.BoutGroup(2): 100}
+		r := ReplayScoring(m, append(migrated(m), evLine("old", 90, domain.ScoreIpponAdd, 2, "a", "M")), ReplayShape{Comp: replayTeamComp(true)})
+		assert.Equal(t, domain.ScoreOutcomeBeforeBaseline, r.Outcome("old"))
+	})
+	t.Run("an older event the baseline saw is recorded", func(t *testing.T) {
+		m := runningIndividual()
+		m.IpponsA = []string{"M"}
+		m.ModifiedAt = 100
+		head := migrated(m)
+		head[0].Baseline.Basis = state.ScoreBasis{Own: []string{"seen"}}
+		r := ReplayScoring(m, append(head, evLine("seen", 90, domain.ScoreIpponAdd, 0, "a", "M")), ReplayShape{})
+		assert.Equal(t, domain.ScoreOutcomeRecorded, r.Outcome("seen"))
+		assert.Equal(t, []string{"M"}, r.Match.IpponsA)
+	})
+	t.Run("a pending event a later baseline did not see is beforeBaseline", func(t *testing.T) {
+		m := knockoutIndividual()
+		m.Status, m.Winner, m.WinnerID = state.MatchStatusCompleted, "Aka", "pa"
+		m.IpponsA = []string{"M"}
+		m.ModifiedAt = 10
+		decided := *m
+		decided.Winner, decided.WinnerID = "Shiro", "pb"
+		lines := append(migrated(m),
+			evLine("tie", 20, domain.ScoreIpponAdd, 0, "b", "K"),
+			baseLine(&decided, "o", 30, state.ScoreBasis{}, state.GroupResult))
+		r := ReplayScoring(m, lines, ReplayShape{Knockout: true})
+		assert.Equal(t, domain.ScoreOutcomeBeforeBaseline, r.Outcome("tie"))
+	})
+}
+
+// A mark a baseline keeps carries its id even when it moves index: the ids
+// follow the marks by value, in order, not by position.
+func TestReplay_BaselineKeepsMarkIDsThatMove(t *testing.T) {
+	m := runningIndividual()
+	after := *m
+	after.IpponsA = []string{"K"}
+	lines := append(migrated(m),
+		evLine("e1", 20, domain.ScoreIpponAdd, 0, "a", "M"),
+		evLine("e2", 30, domain.ScoreIpponAdd, 0, "a", "K"),
+		baseLine(&after, "f", 50, state.ScoreBasis{Own: []string{"e1", "e2", "r1"}}, state.GroupPoints),
+		removeLine("r1", 60, "e1"),
+	)
+	r := ReplayScoring(m, lines, ReplayShape{})
+	assert.Equal(t, domain.ScoreOutcomeRecorded, r.Outcome("r1"))
+	require.NotNil(t, r.Match.MarkIDs)
+	assert.Equal(t, []string{"e2"}, r.Match.MarkIDs.A, "K keeps its id at its new index")
+
+	r = ReplayScoring(m, append(lines, removeLine("r2", 70, "e2")), ReplayShape{})
+	assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("r2"))
+	assert.Empty(t, r.Match.IpponsA)
+}
+
+func TestAssignMarks_OrderedValueMatch(t *testing.T) {
+	cases := []struct {
+		name                  string
+		prev, prevMarks, next []string
+		want                  []string
+	}{
+		{"same", []string{"M", "K"}, []string{"e1", "e2"}, []string{"M", "K"}, []string{"e1", "e2"}},
+		{"first removed", []string{"M", "K"}, []string{"e1", "e2"}, []string{"K"}, []string{"e2"}},
+		{"inserted in front", []string{"K"}, []string{"e2"}, []string{"M", "K"}, []string{"b:x:0:a:0", "e2"}},
+		{"repeated letter keeps the earliest", []string{"M", "M"}, []string{"e1", "e2"}, []string{"M"}, []string{"e1"}},
+		{"placeholder", []string{"M"}, []string{"e1"}, []string{domain.IpponPlaceholder, "M"}, []string{"", "e1"}},
+		{"an unnamed previous mark gets a new id", []string{"M"}, []string{""}, []string{"M"}, []string{"b:x:0:a:0"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, assignMarks(c.prev, c.prevMarks, c.next, "x", 0, domain.ScoreSideA))
+		})
+	}
 }
 
 // A replay of the log a match was replayed from changes nothing: a baseline
@@ -604,15 +771,78 @@ func TestMarkIDsAndScoreVersionThroughTheWrites(t *testing.T) {
 	p.MarkIDs.A[0] = "x"
 	assert.Equal(t, "e1", bm.MarkIDs.A[0], "the projection does not share the ids")
 
-	stored := &state.MatchResult{ID: "Pool A-1", SideA: "A", SideB: "B", Status: state.MatchStatusRunning, ScoreVersion: 5}
-	incoming := &state.MatchResult{ID: "Pool A-1", SideA: "A", SideB: "B", Status: state.MatchStatusRunning, IpponsA: []string{"M"}, MarkIDs: &state.MarkIDs{A: []string{"e9"}}}
-	_, _, _, err := applyPoolWrite(stored, incoming, matchWriteForward, nil)
-	require.NoError(t, err)
-	assert.Equal(t, 5, stored.ScoreVersion, "a write without a version keeps the stored one")
-	assert.Equal(t, []string{"e9"}, stored.MarkIDs.A)
+	pool := func() *state.MatchResult {
+		return &state.MatchResult{ID: "Pool A-1", SideA: "A", SideB: "B", Status: state.MatchStatusRunning,
+			IpponsA: []string{"M"}, MarkIDs: &state.MarkIDs{A: []string{"e1"}}, ScoreVersion: 5,
+			SubResults: []state.SubMatchResult{{Position: 1, IpponsA: []string{"K"}, MarkIDs: &state.MarkIDs{A: []string{"k1"}}}}}
+	}
+	forged := &state.MarkIDs{A: []string{"forged"}}
+	t.Run("a write that is not the replay's sets neither", func(t *testing.T) {
+		stored := pool()
+		incoming := pool()
+		incoming.MarkIDs, incoming.ScoreVersion = forged, 1_000_000_000
+		incoming.SubResults[0].MarkIDs = forged
+		_, _, _, err := applyPoolWrite(stored, incoming, matchWriteForward, nil)
+		require.NoError(t, err)
+		assert.Equal(t, 5, stored.ScoreVersion)
+		assert.Equal(t, []string{"e1"}, stored.MarkIDs.A, "an unchanged group keeps the stored ids")
+		assert.Equal(t, []string{"k1"}, stored.SubResults[0].MarkIDs.A)
+		assert.Equal(t, 5, incoming.ScoreVersion, "the answer says what is stored")
+	})
+	t.Run("a group the write changed loses its ids", func(t *testing.T) {
+		stored := pool()
+		incoming := pool()
+		incoming.IpponsA = []string{"M", "K"}
+		incoming.SubResults[0].IpponsA = nil
+		_, _, _, err := applyPoolWrite(stored, incoming, matchWriteForward, nil)
+		require.NoError(t, err)
+		assert.Nil(t, stored.MarkIDs)
+		assert.Nil(t, stored.SubResults[0].MarkIDs)
+	})
+	t.Run("the replay's write sets both", func(t *testing.T) {
+		stored := pool()
+		incoming := pool()
+		incoming.WriteDoor = DoorEvent
+		incoming.MarkIDs, incoming.ScoreVersion = &state.MarkIDs{A: []string{"e9"}}, 6
+		_, _, _, err := applyPoolWrite(stored, incoming, matchWriteForward, nil)
+		require.NoError(t, err)
+		assert.Equal(t, 6, stored.ScoreVersion)
+		assert.Equal(t, []string{"e9"}, stored.MarkIDs.A)
+	})
+	t.Run("a restore puts back the snapshot's", func(t *testing.T) {
+		stored := pool()
+		restore := &state.MatchResult{ID: "Pool A-1", SideA: "A", SideB: "B", Status: state.MatchStatusRunning, ScoreVersion: 2}
+		_, _, _, err := applyPoolWrite(stored, restore, matchWriteRestore, nil)
+		require.NoError(t, err)
+		assert.Equal(t, 2, stored.ScoreVersion)
+		assert.Nil(t, stored.MarkIDs)
+	})
+	t.Run("the bracket branch follows the same rule", func(t *testing.T) {
+		bracket := func() *state.BracketMatch {
+			return &state.BracketMatch{ID: "r0-m0", SideA: "A", SideB: "B", Status: state.MatchStatusRunning,
+				IpponsA: []string{"M"}, MarkIDs: &state.MarkIDs{A: []string{"e1"}}, ScoreVersion: 5}
+		}
+		bm := bracket()
+		incoming := bracketMatchAsResult(bracket())
+		incoming.MarkIDs, incoming.ScoreVersion = forged, 1_000_000_000
+		_, err := applyBracketMatchResult(bm, incoming, matchWriteForward)
+		require.NoError(t, err)
+		assert.Equal(t, 5, bm.ScoreVersion)
+		assert.Equal(t, []string{"e1"}, bm.MarkIDs.A)
 
-	restore := &state.MatchResult{ID: "Pool A-1", SideA: "A", SideB: "B", Status: state.MatchStatusRunning, ScoreVersion: 2}
-	_, _, _, err = applyPoolWrite(stored, restore, matchWriteRestore, nil)
-	require.NoError(t, err)
-	assert.Equal(t, 2, stored.ScoreVersion, "a restore puts back the snapshot's")
+		bm = bracket()
+		incoming = bracketMatchAsResult(bracket())
+		incoming.IpponsA = []string{"K"}
+		_, err = applyBracketMatchResult(bm, incoming, matchWriteForward)
+		require.NoError(t, err)
+		assert.Nil(t, bm.MarkIDs, "a changed scoreline loses its ids")
+
+		bm = bracket()
+		incoming = bracketMatchAsResult(bracket())
+		incoming.WriteDoor, incoming.MarkIDs, incoming.ScoreVersion = DoorEvent, &state.MarkIDs{A: []string{"e9"}}, 6
+		_, err = applyBracketMatchResult(bm, incoming, matchWriteForward)
+		require.NoError(t, err)
+		assert.Equal(t, 6, bm.ScoreVersion)
+		assert.Equal(t, []string{"e9"}, bm.MarkIDs.A)
+	})
 }

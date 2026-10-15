@@ -2182,3 +2182,15 @@ func (m *MatchResult) ClearRequestFields() {
 	m.Changed, m.WriteDoor, m.Merge = nil, "", nil
 	m.ClearsWithdrawal = false
 }
+
+// ClearDerivedScoreFields drops what only the score replay derives (bc-evts):
+// the mark ids, the match's and every bout's, and the event-log version. The
+// HTTP doors that bind a whole MatchResult from a body (/score, each
+// bulk-score entry) call it as they bind, so no client can name a mark or
+// claim a version; the engine stores them only from the replay's own write.
+func (m *MatchResult) ClearDerivedScoreFields() {
+	m.MarkIDs, m.ScoreVersion = nil, 0
+	for i := range m.SubResults {
+		m.SubResults[i].MarkIDs = nil
+	}
+}

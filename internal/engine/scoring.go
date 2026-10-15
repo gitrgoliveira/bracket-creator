@@ -917,18 +917,28 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy, 
 		result.SubResultsRaw = ""
 		result.SubResultsUnreadable = false
 	}
-	storedVersion := stored.ScoreVersion
+	prior := derivedScoreOf(stored.IpponsA, stored.IpponsB, stored.MarkIDs, stored.SubResults, stored.ScoreVersion)
 	*stored = *result
 	// The write's own merge inputs and report stay on the incoming result for
 	// the caller; the stored copy must not carry them to a later writer.
 	stored.ClearRequestFields()
 	stored.GroupStamps = state.CloneGroupStamps(result.GroupStamps)
-	stored.MarkIDs = result.MarkIDs.Clone()
-	// The event-log version only grows (bc-evts): a write that does not
-	// carry one (any write but the replay's) keeps the stored version.
-	// A restore puts back the snapshot's exactly.
-	if policy != matchWriteRestore {
-		stored.ScoreVersion = max(storedVersion, result.ScoreVersion)
+	// The mark ids and the event-log version are the replay's alone
+	// (bc-evts): only its derived write (DoorEvent) sets them, and its
+	// version only grows. Any other write is built by a client (or from
+	// one), so what it carries is never stored: it keeps the stored ids of
+	// each scoreline it left as it was, and the stored version
+	// (derivedScore.carry). A restore puts back the snapshot's exactly.
+	switch {
+	case policy == matchWriteRestore:
+		stored.MarkIDs = result.MarkIDs.Clone()
+	case result.WriteDoor == DoorEvent:
+		stored.MarkIDs = result.MarkIDs.Clone()
+		stored.ScoreVersion = max(prior.version, result.ScoreVersion)
+	default:
+		stored.MarkIDs = prior.carry(stored.IpponsA, stored.IpponsB, stored.SubResults)
+		stored.ScoreVersion = prior.version
+		result.MarkIDs, result.ScoreVersion = stored.MarkIDs.Clone(), stored.ScoreVersion
 	}
 	return false, false, inherited, nil
 }
@@ -2587,13 +2597,19 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	// exactly (restore, nil included: a match never stamped goes back to
 	// unstamped, as ModifiedAt does above).
 	bm.GroupStamps = state.CloneGroupStamps(result.GroupStamps)
-	// The mark ids the write carries (the replay's derived write), and the
-	// event-log version, which only grows except under restore (bc-evts).
-	bm.MarkIDs = result.MarkIDs.Clone()
-	if policy == matchWriteRestore {
-		bm.ScoreVersion = result.ScoreVersion
-	} else {
-		bm.ScoreVersion = max(bm.ScoreVersion, result.ScoreVersion)
+	// The mark ids and the event-log version, the replay's alone (bc-evts),
+	// as applyPoolWrite settles them: the snapshot's under restore, the
+	// derived write's (DoorEvent, the version only growing), and for any
+	// other write the stored ones, carried below once the scorelines land.
+	var prior *derivedScore
+	switch {
+	case policy == matchWriteRestore:
+		bm.MarkIDs, bm.ScoreVersion = result.MarkIDs.Clone(), result.ScoreVersion
+	case result.WriteDoor == DoorEvent:
+		bm.MarkIDs, bm.ScoreVersion = result.MarkIDs.Clone(), max(bm.ScoreVersion, result.ScoreVersion)
+	default:
+		d := derivedScoreOf(bm.IpponsA, bm.IpponsB, bm.MarkIDs, bm.SubResults, bm.ScoreVersion)
+		prior = &d
 	}
 	// The verdict rides in the ippons about to be rendered; forward writes
 	// from non-validated paths must not persist a mark that contradicts the
@@ -2644,6 +2660,11 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	// projection below). Without this a nil-preserve re-score would keep the
 	// stored bouts on disk but emit an omitted subResults payload in the same turn.
 	result.SubResults = bm.SubResults
+	if prior != nil {
+		bm.MarkIDs = prior.carry(bm.IpponsA, bm.IpponsB, bm.SubResults)
+		bm.ScoreVersion = prior.version
+		result.MarkIDs, result.ScoreVersion = bm.MarkIDs.Clone(), bm.ScoreVersion
+	}
 	// Echo the persisted scheduling fields back into result so the caller (and
 	// the SSE broadcast) sees the full match state rather than the empty
 	// Court/ScheduledAt the scoring UI sends.

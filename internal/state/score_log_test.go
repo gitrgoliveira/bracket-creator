@@ -5,12 +5,15 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/state/wal"
 )
 
 func scoreLogStore(t *testing.T) (*Store, string) {
@@ -107,6 +110,41 @@ func TestScoreLog_AppendRefusesBadLines(t *testing.T) {
 	assert.Error(t, s.DeleteScoreLog("../x"))
 }
 
+// A score log line staged in a transaction whose WAL committed, the process
+// dying before the WAL was applied, lands when the store starts again: the
+// events file rides the WAL like the history (bc-evts).
+func TestScoreLog_CrashAfterCommitReplaysTheLine(t *testing.T) {
+	const mid = "Pool A-0"
+	// The bytes a real append writes, taken from a scratch store.
+	scratch, _ := scoreLogStore(t)
+	require.NoError(t, scratch.AppendScoreLog("c", mid, tapLine("e1")))
+	want, err := os.ReadFile(scratch.scoreLogPath("c", mid))
+	require.NoError(t, err)
+
+	s, dir := scoreLogStore(t)
+	// The transaction's append creates the events folder as it stages.
+	require.NoError(t, s.ensureScoreLogDirLocked("c"))
+	w, err := wal.BeginTx(s.walDir, wal.NewWALID(), s.directWriteWAL)
+	require.NoError(t, err)
+	w.Append(wal.FileIntent{Path: s.scoreLogPath("c", mid), Data: want, Mode: 0o600})
+	require.NoError(t, w.Commit())
+	// The crash: committed, never applied.
+	_, err = os.Stat(s.scoreLogPath("c", mid))
+	require.True(t, os.IsNotExist(err), "nothing applied before the restart")
+
+	restarted, err := NewStore(dir)
+	require.NoError(t, err)
+	got, err := restarted.LoadScoreLog("c", mid)
+	require.NoError(t, err)
+	require.Len(t, got, 1, "the replay on startup lands the line")
+	assert.Equal(t, "e1", got[0].ID())
+	entries, err := os.ReadDir(filepath.Join(dir, ".wal"))
+	require.NoError(t, err)
+	for _, e := range entries {
+		assert.NotEqual(t, ".json", filepath.Ext(e.Name()), "the WAL is removed once replayed: %s", e.Name())
+	}
+}
+
 // A baseline's values set each group back exactly as GroupValue projected it.
 func TestSetGroupFromValue_RoundTrip(t *testing.T) {
 	src := &MatchResult{
@@ -129,6 +167,89 @@ func TestSetGroupFromValue_RoundTrip(t *testing.T) {
 	assert.Equal(t, []int{1, -1}, SubPositions(dst.SubResults), "bout 2's null removed it")
 	assert.Error(t, SetGroupFromValue(dst, "nope", nil))
 	assert.Error(t, SetGroupFromValue(dst, GroupPoints, json.RawMessage(`[`)))
+}
+
+// fillEveryField sets every exported field of v, recursively, to a value that
+// is not its zero, so a test built on it sees a field added to a type.
+func fillEveryField(v reflect.Value, name string, depth int) {
+	if depth > 4 || !v.CanSet() {
+		return
+	}
+	switch v.Kind() {
+	case reflect.String:
+		v.SetString("x" + name)
+	case reflect.Bool:
+		v.SetBool(true)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		v.SetInt(1)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		v.SetUint(1)
+	case reflect.Float32, reflect.Float64:
+		v.SetFloat(1)
+	case reflect.Pointer:
+		p := reflect.New(v.Type().Elem())
+		fillEveryField(p.Elem(), name, depth+1)
+		v.Set(p)
+	case reflect.Slice:
+		s := reflect.MakeSlice(v.Type(), 1, 1)
+		fillEveryField(s.Index(0), name, depth+1)
+		v.Set(s)
+	case reflect.Map:
+		if v.Type().Key().Kind() != reflect.String {
+			return
+		}
+		m := reflect.MakeMap(v.Type())
+		val := reflect.New(v.Type().Elem()).Elem()
+		fillEveryField(val, name, depth+1)
+		m.SetMapIndex(reflect.ValueOf("k").Convert(v.Type().Key()), val)
+		v.Set(m)
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			if v.Type().Field(i).IsExported() {
+				fillEveryField(v.Field(i), v.Type().Field(i).Name, depth+1)
+			}
+		}
+	}
+}
+
+// Every field of every group's projection is set from a match whose every
+// field is set, and comes back through SetGroupFromValue: a field added to a
+// group's projection without its inverse (or to a group's type without its
+// projection) fails here.
+func TestSetGroupFromValue_EveryFieldRoundTrips(t *testing.T) {
+	var src MatchResult
+	fillEveryField(reflect.ValueOf(&src).Elem(), "", 0)
+	var row1, rep SubMatchResult
+	fillEveryField(reflect.ValueOf(&row1).Elem(), "", 0)
+	fillEveryField(reflect.ValueOf(&rep).Elem(), "", 0)
+	row1.Position, rep.Position = 1, DaihyosenSubPosition
+	src.SubResults = []SubMatchResult{row1, rep}
+
+	// What a bout's value deliberately leaves out (match_groups.go): the
+	// recorded mark is GroupRecorded's, the mark ids the replay's, and on the
+	// representative bout the members are the pick groups'.
+	notInBout := map[string]bool{"Recorded": true, "MarkIDs": true}
+	notInRepBout := map[string]bool{"SideAMemberID": true, "SideBMemberID": true, "WinnerMemberID": true}
+	groups := append(slices.Clone(ScalarGroups), ServerGroups...)
+	groups = append(groups, BoutGroup(1), BoutGroup(DaihyosenSubPosition))
+	for _, g := range groups {
+		pos, isBout := ParseBoutGroup(g)
+		proj := reflect.ValueOf(groupProjection(&src, g))
+		if proj.Kind() == reflect.Pointer {
+			require.False(t, proj.IsNil(), "%s projects a value", g)
+			proj = proj.Elem()
+		}
+		for i := 0; i < proj.NumField(); i++ {
+			f := proj.Type().Field(i)
+			if !f.IsExported() || (isBout && notInBout[f.Name]) || (pos == DaihyosenSubPosition && notInRepBout[f.Name]) {
+				continue
+			}
+			assert.False(t, proj.Field(i).IsZero(), "%s: %s is not projected", g, f.Name)
+		}
+		dst := &MatchResult{SubResults: []SubMatchResult{{Position: 1}, {Position: DaihyosenSubPosition}}}
+		require.NoError(t, SetGroupFromValue(dst, g, GroupValue(&src, g)), g)
+		assert.False(t, GroupDiffers(&src, dst, g), "%s does not round-trip", g)
+	}
 }
 
 // The mark ids and the event-log version survive bracket.json, and the store

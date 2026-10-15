@@ -101,6 +101,50 @@ func BaselineFromMatch(m *state.MatchResult, id, door string, stamp int64, group
 	return b
 }
 
+// derivedScore is what a stored match holds that only the replay derives
+// (bc-evts): the mark ids of its scoreline and of each bout, and the event-log
+// version, with the ippons each set of ids names.
+type derivedScore struct {
+	ipponsA, ipponsB []string
+	marks            *state.MarkIDs
+	bouts            map[int]derivedBout
+	version          int
+}
+
+type derivedBout struct {
+	ipponsA, ipponsB []string
+	marks            *state.MarkIDs
+}
+
+func derivedScoreOf(ipponsA, ipponsB []string, marks *state.MarkIDs, subs []state.SubMatchResult, version int) derivedScore {
+	d := derivedScore{ipponsA: slices.Clone(ipponsA), ipponsB: slices.Clone(ipponsB), marks: marks.Clone(),
+		bouts: make(map[int]derivedBout, len(subs)), version: version}
+	for _, row := range subs {
+		d.bouts[row.Position] = derivedBout{ipponsA: slices.Clone(row.IpponsA), ipponsB: slices.Clone(row.IpponsB), marks: row.MarkIDs.Clone()}
+	}
+	return d
+}
+
+// carry settles the derived fields of a write that is not the replay's
+// (DoorEvent): the mark ids and the version are never taken from a write,
+// which a client builds and may fill with anything. A scoreline (the match's,
+// or a bout's) the write left as it was keeps the ids it had; one it changed
+// has none until the replay names its marks again. It returns the match-level
+// ids and rewrites each row's in subs; the version is d.version.
+func (d derivedScore) carry(ipponsA, ipponsB []string, subs []state.SubMatchResult) *state.MarkIDs {
+	for i := range subs {
+		row := &subs[i]
+		row.MarkIDs = nil
+		if b, ok := d.bouts[row.Position]; ok && slices.Equal(b.ipponsA, row.IpponsA) && slices.Equal(b.ipponsB, row.IpponsB) {
+			row.MarkIDs = b.marks.Clone()
+		}
+	}
+	if slices.Equal(d.ipponsA, ipponsA) && slices.Equal(d.ipponsB, ipponsB) {
+		return d.marks.Clone()
+	}
+	return nil
+}
+
 // MigrationBaseline is the stored match as the first line of its log (lazy
 // migration): every group at the stamp it already holds
 // (state.MaterializedGroupStamps), a bout whose row is gone but whose stamp
@@ -228,8 +272,16 @@ type replayer struct {
 	stamps  map[string]int64
 	govern  map[string]int   // group -> line of the baseline that last set it
 	applied map[string][]int // group -> event lines folded into it since
-	pending []int            // event lines waiting for the result they need (R4/R2)
-	clears  bool             // the pending events would clear a withdrawal
+	// covered names every group some baseline of the log sets. An event on
+	// such a group ordered before the first baseline that sets it is never
+	// folded: the replay starts from the stored cache, the match AFTER every
+	// line, so a fold there would judge it against a state that did not exist
+	// yet. It waits in early for that baseline, which alone decides it
+	// (recorded when its basis holds it, else beforeBaseline).
+	covered map[string]bool
+	early   map[string][]int
+	pending []int // event lines waiting for the result they need (R4/R2)
+	clears  bool  // the pending events would clear a withdrawal
 	outcome map[int]string
 	cleared bool
 }
@@ -247,6 +299,8 @@ func ReplayScoring(current *state.MatchResult, lines []state.ScoreLogLine, shape
 		stamps:  state.CloneGroupStamps(current.GroupStamps),
 		govern:  map[string]int{},
 		applied: map[string][]int{},
+		covered: map[string]bool{},
+		early:   map[string][]int{},
 		outcome: map[int]string{},
 	}
 	if rp.stamps == nil {
@@ -259,6 +313,11 @@ func ReplayScoring(current *state.MatchResult, lines []state.ScoreLogLine, shape
 		if l.Event != nil {
 			if _, ok := firstLine[l.Event.ID]; !ok {
 				firstLine[l.Event.ID] = i
+			}
+		}
+		if l.Baseline != nil {
+			for g := range l.Baseline.Values {
+				rp.covered[g] = true
 			}
 		}
 	}
@@ -386,14 +445,23 @@ func (rp *replayer) applyBaseline(line int, b *state.ScoreBaseline) {
 		for _, i := range rp.applied[g] {
 			rp.absorb(b, i)
 		}
-		rp.applied[g] = nil
+		for _, i := range rp.early[g] {
+			rp.absorb(b, i)
+		}
+		rp.applied[g], rp.early[g] = nil, nil
 		rp.govern[g] = line
+		if g == state.GroupResult {
+			// The result is this baseline's: a withdrawal an earlier event
+			// cleared is cleared (or recorded again) by it, not by the replay.
+			rp.cleared = false
+		}
 	}
 	if len(rp.pending) == 0 {
 		return
 	}
 	// A pending event whose group this baseline sets is settled by it; a new
-	// result settles the rest, which never applied.
+	// result settles the rest, which never applied: still waiting for the
+	// winner when the baseline saw it, else older than the baseline (D5).
 	_, setsResult := b.Values[state.GroupResult]
 	var keep []int
 	for _, i := range rp.pending {
@@ -401,8 +469,10 @@ func (rp *replayer) applyBaseline(line int, b *state.ScoreBaseline) {
 		switch {
 		case sets:
 			rp.absorb(b, i)
-		case setsResult:
+		case setsResult && rp.contains(b, i):
 			rp.outcome[i] = rp.pendingOutcome()
+		case setsResult:
+			rp.outcome[i] = domain.ScoreOutcomeBeforeBaseline
 		default:
 			keep = append(keep, i)
 		}
@@ -433,6 +503,14 @@ func (rp *replayer) settlePending() {
 		rp.outcome[i] = rp.pendingOutcome()
 	}
 	rp.pending, rp.clears = nil, false
+	// An early event whose baseline never set its group (a value that did not
+	// read) is still older than that baseline.
+	for g, lines := range rp.early {
+		for _, i := range lines {
+			rp.outcome[i] = domain.ScoreOutcomeBeforeBaseline
+		}
+		delete(rp.early, g)
+	}
 }
 
 // groupOf is the one group an event changes.
@@ -464,7 +542,13 @@ func ScoreEventGroup(e *domain.ScoreEvent) string {
 
 func (rp *replayer) applyEvent(line int, e *domain.ScoreEvent) {
 	g := rp.groupOf(e)
-	if b, ok := rp.govern[g]; ok && rp.contains(rp.lines[b].Baseline, line) {
+	b, governed := rp.govern[g]
+	if !governed && rp.covered[g] {
+		// Older than the first baseline that sets the group (see covered).
+		rp.early[g] = append(rp.early[g], line)
+		return
+	}
+	if governed && rp.contains(rp.lines[b].Baseline, line) {
 		rp.outcome[line] = domain.ScoreOutcomeRecorded
 		return
 	}
@@ -484,7 +568,7 @@ func (rp *replayer) applyEvent(line int, e *domain.ScoreEvent) {
 		return
 	}
 	rp.clears = domain.IsWithdrawalDecisionStr(m.Decision)
-	probe := rp.probeWithPending()
+	probe, _ := rp.probeWithPending()
 	if out := foldEvent(probe, e, rp.shape, map[string]int64{}); out != domain.ScoreOutcomeApplied {
 		rp.outcome[line] = out
 		return
@@ -495,21 +579,24 @@ func (rp *replayer) applyEvent(line int, e *domain.ScoreEvent) {
 
 // probeWithPending is the committed match with the pending events folded
 // in, the withdrawal's circles taken off when they would clear it.
-func (rp *replayer) probeWithPending() *replayMatch {
+func (rp *replayer) probeWithPending() (*replayMatch, map[string]int64) {
 	probe := rp.cur.clone()
 	if rp.clears {
 		stripMaru(&probe.m)
 	}
+	// The stamps the folds set beside their own group (a bout fought again
+	// is no longer recorded), merged into the replay's only on a commit.
+	stamps := map[string]int64{}
 	for _, i := range rp.pending {
-		foldEvent(probe, rp.lines[i].Event, rp.shape, map[string]int64{})
+		foldEvent(probe, rp.lines[i].Event, rp.shape, stamps)
 	}
-	return probe
+	return probe, stamps
 }
 
 // tryCommit applies the pending events together when they give the finished
 // match the result it needs.
 func (rp *replayer) tryCommit() {
-	probe := rp.probeWithPending()
+	probe, probeStamps := rp.probeWithPending()
 	scoring := false
 	for _, i := range rp.pending {
 		if k := rp.lines[i].Event.Kind; k != domain.ScoreEnchoAdd && k != domain.ScoreEnchoRemove {
@@ -538,6 +625,9 @@ func (rp *replayer) tryCommit() {
 		rp.outcome[i] = domain.ScoreOutcomeApplied
 		rp.stamps[g] = max(rp.stamps[g], e.Stamp)
 		rp.applied[g] = append(rp.applied[g], i)
+	}
+	for g, s := range probeStamps {
+		rp.stamps[g] = max(rp.stamps[g], s)
 	}
 	if string(before) != string(state.GroupValue(&rp.cur.m, state.GroupResult)) {
 		// The verdict moved: the result is dated by the change that moved it.
@@ -610,18 +700,49 @@ func keepEntries(ippons, marks []string, keep func(string) bool) ([]string, []st
 	return outI, outM
 }
 
-// assignMarks names the marks a baseline brings: a mark equal to the one at
-// the same place before keeps its id (a finish echoing the board's points
-// keeps the ids the board removes by), any other is b:<line>:<pos>:<side>:<i>.
+// assignMarks names the marks a baseline brings. The marks the board held
+// before are matched to the new ones by value, in order (a longest common
+// subsequence), so a mark the baseline keeps keeps its id wherever it now
+// sits: a finish echoing the board's points, less a mark removed from the
+// front, keeps the ids the board removes by. Of two equal letters the
+// earliest one before is the one kept. A new mark, or one whose earlier copy
+// had no id, is b:<line>:<pos>:<side>:<i>; a placeholder slot has none.
 func assignMarks(prev, prevMarks, next []string, lineID string, pos int, side string) []string {
+	isMark := func(v string) bool { return v != "" && v != domain.IpponPlaceholder }
+	same := func(i, j int) bool { return isMark(next[j]) && prev[i] == next[j] }
+	// lcs[i][j] is the length of the longest common subsequence of prev[i:]
+	// and next[j:] (both a handful of marks).
+	lcs := make([][]int, len(prev)+1)
+	for i := range lcs {
+		lcs[i] = make([]int, len(next)+1)
+	}
+	for i := len(prev) - 1; i >= 0; i-- {
+		for j := len(next) - 1; j >= 0; j-- {
+			if same(i, j) {
+				lcs[i][j] = lcs[i+1][j+1] + 1
+			} else {
+				lcs[i][j] = max(lcs[i+1][j], lcs[i][j+1])
+			}
+		}
+	}
 	out := make([]string, len(next))
-	for i, v := range next {
+	for i, j := 0, 0; j < len(next); {
 		switch {
-		case v == "" || v == domain.IpponPlaceholder:
-		case i < len(prev) && prev[i] == v && i < len(prevMarks) && prevMarks[i] != "":
-			out[i] = prevMarks[i]
+		case i < len(prev) && same(i, j) && lcs[i][j] == lcs[i+1][j+1]+1:
+			if i < len(prevMarks) {
+				out[j] = prevMarks[i]
+			}
+			i++
+			j++
+		case i < len(prev) && lcs[i+1][j] >= lcs[i][j+1]:
+			i++
 		default:
-			out[i] = "b:" + lineID + ":" + strconv.Itoa(pos) + ":" + side + ":" + strconv.Itoa(i)
+			j++
+		}
+	}
+	for j, v := range next {
+		if isMark(v) && out[j] == "" {
+			out[j] = "b:" + lineID + ":" + strconv.Itoa(pos) + ":" + side + ":" + strconv.Itoa(j)
 		}
 	}
 	return out
@@ -691,6 +812,14 @@ func foldEvent(r *replayMatch, e *domain.ScoreEvent, shape ReplayShape, stamps m
 		*f = next
 		return out
 	case domain.ScorePoolRep:
+		// A rep player names the fighter a TEAM fields for a pool
+		// representative or tie-break bout (MatchResult.RepPlayerA: the
+		// /score door strips the names from any other match, and the editor
+		// offers the pickers only there, repIsTeam).
+		supplementary := state.IsPoolDaihyosenMatchID(m.ID) || state.IsTiebreakerMatchID(m.ID)
+		if !shape.team() || !supplementary {
+			return domain.ScoreOutcomeNotAllowed
+		}
 		if e.Side == domain.ScoreSideB {
 			m.RepPlayerB = e.Name
 		} else {

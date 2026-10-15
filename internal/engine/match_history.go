@@ -21,6 +21,11 @@ const (
 	DoorDaihyosenAdd = "daihyosen-add"
 	DoorDaihyosenDel = "daihyosen-remove"
 	DoorEngine       = "engine"
+	// DoorEvent is the write engine.ReplayScoring derives from a match's score
+	// event log (bc-evts): the one write whose mark ids and event-log version
+	// are stored (settleDerivedScoreFields). WriteDoor is request-only and
+	// never bound from a body, so no client can name it.
+	DoorEvent = "event"
 	// DoorDisplaced names a history entry for a stored change an earlier-
 	// stamped write arriving after it moved to the history (S2 with R4): the
 	// change came through some door before; this entry records it held.

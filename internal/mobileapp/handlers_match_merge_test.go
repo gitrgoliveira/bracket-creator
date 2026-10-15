@@ -228,6 +228,41 @@ func TestBulkScore_ReportsHeldGroups(t *testing.T) {
 	assert.Len(t, history, 3, "both entries recorded, the superseded one included")
 }
 
+// The mark ids and the event-log version are the replay's, never a client's
+// (bc-evts): /score and bulk-score bind a whole MatchResult, so a body
+// carrying them must leave the stored ones as they were.
+func TestScoreWrites_IgnoreClientMarkIDsAndScoreVersion(t *testing.T) {
+	const compID = "merge-derived"
+	r, store := mergeServer(t, compID)
+	ms, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	ms[0].IpponsA = []string{"M"}
+	ms[0].MarkIDs = &state.MarkIDs{A: []string{"e1"}}
+	ms[0].ScoreVersion = 7
+	require.NoError(t, store.SavePoolMatches(compID, ms))
+	forged := map[string]any{"a": []string{"forged"}}
+	now := time.Now().UnixMilli()
+
+	mergeScore(t, r, compID, map[string]any{
+		"status": "running", "ipponsA": []string{"M"}, "ipponsB": []string{},
+		"scoreVersion": 1_000_000_000, "markIds": forged, "modifiedAt": now,
+	})
+	got := mergeStored(t, store, compID)
+	assert.Equal(t, 7, got.ScoreVersion, "/score: the stored version stands")
+	require.NotNil(t, got.MarkIDs)
+	assert.Equal(t, []string{"e1"}, got.MarkIDs.A, "/score: the stored ids stand")
+
+	w := serveJSON(r, "POST", "/api/competitions/"+compID+"/matches/bulk-score", []map[string]any{
+		{"id": "Pool A-0", "sideA": mgAlice, "sideB": mgBob, "status": "running", "ipponsA": []string{"M"}, "ipponsB": []string{},
+			"scoreVersion": 1_000_000_000, "markIds": forged, "modifiedAt": now + 1},
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	got = mergeStored(t, store, compID)
+	assert.Equal(t, 7, got.ScoreVersion, "bulk-score: the stored version stands")
+	require.NotNil(t, got.MarkIDs)
+	assert.Equal(t, []string{"e1"}, got.MarkIDs.A, "bulk-score: the stored ids stand")
+}
+
 // A start write (startOnly) changes the status alone: the score the stored
 // match holds is kept (keepQueuedScore), so its history entry names the
 // result group and nothing else, and its empty payload score is no change an

@@ -326,9 +326,10 @@ func (b BoutScore) Points() (int, int) {
 func (b *BoutScore) AddIppon(side, letter, id string) string {
 	ip, _, _ := b.side(side)
 	oip, _, _ := b.side(otherSide(side))
-	// The other side counts only the points it struck: a fusensho's maru go
-	// as soon as this strike lands (ApplyBoutScoreEdit).
-	mine, theirs := CountScoringIppons(*ip), len(StruckIppons(*oip))
+	// Each side counts only the points it struck: a fusensho's maru are no
+	// strikes, and they go as soon as this strike lands, on either side
+	// (ApplyBoutScoreEdit).
+	mine, theirs := len(StruckIppons(*ip)), len(StruckIppons(*oip))
 	if mine >= MaxIpponsPerSide || theirs >= MaxIpponsPerSide {
 		return ScoreOutcomeCapped
 	}

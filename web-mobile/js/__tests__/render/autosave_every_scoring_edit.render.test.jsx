@@ -62,7 +62,7 @@ beforeEach(() => {
   window.API.recordScore.mockReset();
   window.API.recordScore.mockImplementation((_c, _m, patch) => {
     writes.push(patch);
-    return Promise.resolve(undefined);
+    return Promise.resolve({ applied: true });
   });
   window.API.notePendingEdit.mockReset();
   vi.useFakeTimers();

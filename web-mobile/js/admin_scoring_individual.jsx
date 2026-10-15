@@ -329,18 +329,34 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // nothing on the server at all. Once an autosave built after the latest
   // board edit has landed, the board holds nothing the server lacks, so the
   // stamp is cleared (landedBoardSave) and every later server copy is followed.
+  // It is taken only while the match is running: only then is the edit autosaved,
+  // and a stamp no save can clear would hold the board against other devices.
   const boardEditedAtRef = useRefA(undefined);
   const boardEditSeqRef = useRefA(0);
   const markScoringDirty = () => {
-    boardEditedAtRef.current = serverNowMs();
-    boardEditSeqRef.current += 1;
+    if (m.status === "running") {
+      boardEditedAtRef.current = serverNowMs();
+      boardEditSeqRef.current += 1;
+    }
     markRunningWrite();
   };
   // The autosave's submit: the host's onSubmit, and on a landed answer the
   // board stamp cleared when no board edit was made since this save was built.
+  // A REFUSED autosave stores and broadcasts nothing, so no later copy would re-run the
+  // adopt: with no board edit since the save was built, the board takes the server's
+  // current copy now (applyServerScoreRef holds the latest render's, not this one's).
+  const applyServerScoreRef = useRefA(null);
   const landedBoardSave = (submit) => landedAutosave(submit, boardEditSeqRef, (seq) => {
     if (boardEditSeqRef.current === seq) boardEditedAtRef.current = undefined;
+  }, (seq) => {
+    // The stamp must still be set: the seq counts only RUNNING edits, so a correction tapped
+    // after the match finished elsewhere (the status effect cleared the stamp, the seq did
+    // not move) would otherwise be wiped by a refusal that arrives late.
+    if (boardEditSeqRef.current === seq && boardEditedAtRef.current !== undefined && applyServerScoreRef.current) applyServerScoreRef.current();
   });
+  // The match left running (finished, or sent back to the queue, elsewhere) inside the
+  // debounce: the write is dropped with no callback, so no landed save clears the stamp.
+  useEffectA(() => { if (m.status !== "running") boardEditedAtRef.current = undefined; }, [m.status]);
 
   useEffectA(() => {
     if (!m.compId) return;
@@ -704,6 +720,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     claimChanged.agree(GROUP_ENCHO);
     claimChanged.agree(GROUP_RESULT);
   };
+  applyServerScoreRef.current = applyServerScore;
 
   // Arranged as [left, right]: left is always SHIRO (White), right is always AKA (Red).
   // onIncrement applies the FIK 2-foul auto-award rule via applyFoulIncrement:

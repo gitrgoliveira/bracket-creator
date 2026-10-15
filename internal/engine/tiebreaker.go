@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -217,28 +218,109 @@ func tieSettled(group []state.PlayerStanding, matches []state.MatchResult, isTea
 // positions from detectPoolTies over the sorted standings) can change the pool
 // outcome and therefore warrants a supplementary bout.
 //
-// A pool seeds its knockout from the top EffectivePoolWinners of each pool, and
+// A pool seeds its knockout from its top qualifying places (poolTieBreakCut), and
 // finishing position decides where in the bracket a qualifier lands: the 1st
 // stays in its own block while lower finishers cross to a partner block half the
 // bracket away (R4), and a block's structural bye goes to its highest-precedence
 // occupant (R6, helper.BuildKnockoutDraw). That occupant is NOT necessarily a
 // pool winner -- a block may hold only crossed-in qualifiers, and R5's separation
 // can take a bye off a winner -- but the ordering always favours the better
-// finish, so every position in [1..poolWinners] is a distinct, consequential
+// finish, so every position in [1..cut] is a distinct, consequential
 // seed. That is all this predicate needs; it does not depend on who byes. A tied
-// group whose BEST position is already past the cutoff (positions[0]+1 > poolWinners)
+// group whose BEST position is already past the cutoff (positions[0]+1 > cut)
 // sits entirely among eliminated ranks: those teams share that rank and no
 // supplementary ippon-shobu / daihyosen is played. This mirrors the rule that a
 // supplementary bout is held only "to determine their relative ranking" where
 // that ranking matters (running_a_kendo_tournament.md:405/441), and the
 // band-aware LeagueTiebreakCandidates gate used for team leagues.
-func tieAffectsAdvancement(positions []int, poolWinners int) bool {
+func tieAffectsAdvancement(positions []int, cut int) bool {
 	if len(positions) == 0 {
 		return false
 	}
 	// positions[0] is 0-based into the descending-sorted standings; +1 makes it
 	// the 1-based finishing rank of the best-placed member of the tied group.
-	return positions[0]+1 <= poolWinners
+	return positions[0]+1 <= cut
+}
+
+// poolTieBreakCut is the ONE statement of the cut a pool's ties are judged
+// against: how many of its places send a qualifier. Under larger-pools an
+// oversized pool sends one more than Winners per pool, and under fill-bracket a
+// DRAFTED pool sends its 2nd too, so a tie over such a place is owed a bout like
+// any other qualifying place.
+//
+// The count is read off the stored draw (drawnQualifierPlaces), the truth the
+// qualifier seating uses and the only one that knows which pools fill-bracket
+// drafted. Where the bracket names none of the pool's places (a v1 bracket
+// predating the draw placeholders, which carries only the uniform Winners per
+// pool layout, or no bracket yet) the pool's own Competition.QualifiersForPool
+// answers. A pool absent from pools (not yet saved, or hand-edited data) falls
+// back to EffectivePoolWinners, the count every pool sends without extra
+// qualifiers.
+func poolTieBreakCut(comp *state.Competition, pools []helper.Pool, bracket *state.Bracket, poolName string) int {
+	for _, p := range pools {
+		if p.PoolName != poolName {
+			continue
+		}
+		if n := drawnQualifierPlaces(bracket, p); n > 0 {
+			return n
+		}
+		return comp.QualifiersForPool(p)
+	}
+	return comp.EffectivePoolWinners()
+}
+
+// drawnQualifierPlaces is the highest place of pool that the STORED draw seats a
+// qualifier from: the largest rank r for which the bracket's draw-time
+// placeholders (recordDrawPlaceholders) name qualifierLabel(pool, r). It is 0
+// when the bracket names none of the pool's places (no bracket, a knockout
+// seeded without pool placeholders, or a v1 bracket whose placeholders
+// ResolveQualifiedPools has not backfilled yet).
+//
+// The stored draw, not the competition's config, is the truth the qualifier
+// seating reads: qualifierResolver fills exactly the labels the bracket holds.
+// Which pools a fill-bracket draw DRAFTED to send their 2nd is a whole-field
+// selection (helper.SelectFillBracketDraftIndices, which depends on the court
+// count and on every pool's seeds) that Competition.QualifiersForPool
+// deliberately cannot express, and re-running it here would drift from the
+// bracket on disk the moment courts, seeds or pool size changed after the draw.
+// Reading the placeholders cannot disagree with the seating, and covers
+// larger-pools and standard mode by the same rule.
+func drawnQualifierPlaces(bracket *state.Bracket, pool helper.Pool) int {
+	if bracket == nil {
+		return 0
+	}
+	labels := map[string]bool{}
+	note := func(m *state.BracketMatch) {
+		labels[m.PlaceholderA], labels[m.PlaceholderB], labels[m.PlaceholderWinner] = true, true, true
+	}
+	for ri := range bracket.Rounds {
+		for mi := range bracket.Rounds[ri] {
+			note(&bracket.Rounds[ri][mi])
+		}
+	}
+	if bracket.ThirdPlaceMatch != nil {
+		note(bracket.ThirdPlaceMatch)
+	}
+	for rank := len(pool.Players); rank >= 1; rank-- {
+		if labels[qualifierLabel(pool.PoolName, rank)] {
+			return rank
+		}
+	}
+	return 0
+}
+
+// PoolQualifierCuts maps each pool's name to how many of its places send a
+// qualifier: poolTieBreakCut for every pool. The viewer payload carries it so a
+// standings table marks the advancing places and the tie badge reads a tie over
+// the last of them against the SAME count the server holds a tie-break bout to,
+// instead of re-deriving it (the client cannot: which fill-bracket pools were
+// drafted is a property of the stored draw).
+func PoolQualifierCuts(comp *state.Competition, pools []helper.Pool, bracket *state.Bracket) map[string]int {
+	out := make(map[string]int, len(pools))
+	for _, p := range pools {
+		out[p.PoolName] = poolTieBreakCut(comp, pools, bracket, p.PoolName)
+	}
+	return out
 }
 
 // tieNeedsIndividualBreak decides whether InjectTiebreakerMatches should hold an
@@ -254,7 +336,7 @@ func tieAffectsAdvancement(positions []int, poolWinners int) bool {
 //   - Non-league (mixed pools feeding a knockout): only ties that change who
 //     advances or their seed warrant a bout; a tie entirely below the qualifying
 //     cut shares its rank with no bout.
-func tieNeedsIndividualBreak(comp *state.Competition, positions []int, group []state.PlayerStanding, poolWinners int) bool {
+func tieNeedsIndividualBreak(comp *state.Competition, positions []int, group []state.PlayerStanding, cut int) bool {
 	if len(positions) == 0 {
 		return false
 	}
@@ -266,7 +348,7 @@ func tieNeedsIndividualBreak(comp *state.Competition, positions []int, group []s
 		}
 		return isConsequentialTie(g, comp)
 	}
-	return tieAffectsAdvancement(positions, poolWinners)
+	return tieAffectsAdvancement(positions, cut)
 }
 
 // pendingTieBreak is one tied group of a pool that still owes supplementary
@@ -293,26 +375,28 @@ type pendingTieBreak struct {
 //
 // The band each kind breaks is the injector's own: individual bouts follow
 // tieNeedsIndividualBreak, team daihyosen follows tieAffectsAdvancement, both
-// against EffectivePoolWinners (not MatchWinnerRanksNeeded: an
-// extra-qualifier "-2nd" slot below that band is never given a bout, so
-// treating it as owing one would leave it unresolved forever).
+// against the pool's OWN qualifier count, cut (poolTieBreakCut, which is
+// Competition.QualifiersForPool), so a larger-pools extra qualifier's place
+// is tie-broken like any other qualifying place. Not MatchWinnerRanksNeeded:
+// that is the one global bound for the whole competition, so a pool that
+// sends no extra qualifier would owe a bout for a place that qualifies
+// nobody and leave it unresolved forever.
 //
 // existingRows are the pool's rows of the matching kind (TB rows for
 // individual, DH rows for team); their count seeds the new bouts' ids.
-func pendingTieBreaks(comp *state.Competition, poolName string, poolStandings []state.PlayerStanding, existingRows []state.MatchResult, court string, daihyosen bool) []pendingTieBreak {
-	poolWinners := comp.EffectivePoolWinners()
+func pendingTieBreaks(comp *state.Competition, poolName string, cut int, poolStandings []state.PlayerStanding, existingRows []state.MatchResult, court string, daihyosen bool) []pendingTieBreak {
 	existingCount := len(existingRows)
 	var out []pendingTieBreak
 	for _, positions := range detectPoolTies(poolStandings) {
 		group := standingsAt(poolStandings, positions)
 		var bouts []state.MatchResult
 		if daihyosen {
-			if !tieAffectsAdvancement(positions, poolWinners) {
+			if !tieAffectsAdvancement(positions, cut) {
 				continue
 			}
 			bouts = generatePoolDaihyosenMatches(poolName, group, existingCount, court, existingRows)
 		} else {
-			if !tieNeedsIndividualBreak(comp, positions, group, poolWinners) {
+			if !tieNeedsIndividualBreak(comp, positions, group, cut) {
 				continue
 			}
 			bouts = generateTiebreakerMatches(poolName, group, existingCount, court, existingRows)
@@ -496,6 +580,14 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 			return err
 		}
 		e.noteMatchRead(compID)
+		pools, err := tx.LoadPools(compID)
+		if err != nil {
+			return err
+		}
+		bracket, err := tx.LoadBracket(compID)
+		if err != nil {
+			return err
+		}
 
 		// Scan existing TB matches per pool for idempotency and ID sequencing.
 		// existingRows are handed to generateTiebreakerMatches raw (not reduced to
@@ -536,7 +628,7 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 			if regularIncomplete[poolName] {
 				continue
 			}
-			for _, p := range pendingTieBreaks(comp, poolName, poolStandings, poolTB[poolName], poolCourt[poolName], false) {
+			for _, p := range pendingTieBreaks(comp, poolName, poolTieBreakCut(comp, pools, bracket, poolName), poolStandings, poolTB[poolName], poolCourt[poolName], false) {
 				injected = append(injected, p.bouts...)
 			}
 		}

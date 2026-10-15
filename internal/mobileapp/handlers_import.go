@@ -265,6 +265,17 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 		return res
 	}
 
+	// A row with no date takes the tournament's Day 1, the rule POST
+	// /competitions applies (defaultCompetitionDate). It has to be settled
+	// here: a competition with no date can never be drawn ("Cannot start:
+	// invalid date in Settings tab"), so a row that still has none (the
+	// tournament has no date to give it) is refused rather than imported
+	// as a competition the organiser cannot use (bc-imdt).
+	if !defaultCompetitionDate(comp, importTourn) {
+		res.Error = "date: the row has no date and the tournament has no date to give it; set the tournament date or add a date to the row"
+		return res
+	}
+
 	// Cross-file guard symmetry with POST/PUT /competitions: reject a
 	// competition date that falls outside the tournament's day range.
 	if err := validateCompetitionDateInTournament(comp, importTourn); err != nil {

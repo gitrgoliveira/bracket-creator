@@ -54,6 +54,9 @@ const bout = (overrides = {}) => ({
   ...overrides,
 });
 
+// A save the server took: the answer a landed write comes back with.
+const LANDED = { id: 'm1', status: 'running' };
+
 const el = (match, onSubmit) => (
   <ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={onSubmit} password="" variant="inline" />
 );
@@ -67,7 +70,7 @@ const wait = async (ms) => { await act(async () => { vi.advanceTimersByTime(ms);
 
 describe('a tap made while the previous save is out is never wiped by that save\'s echo (bc-ltap)', () => {
   it('remove a mark, tap it back before the removal\'s echo: the mark stays and is saved', async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onSubmit = vi.fn().mockResolvedValue(LANDED);
     const stored = bout({ ipponsA: ['M'] });
     let r;
     await act(async () => { r = render(el(stored, onSubmit)); });
@@ -95,7 +98,7 @@ describe('a tap made while the previous save is out is never wiped by that save\
   });
 
   it('add a mark, take it off before the add\'s echo: the board stays empty', async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onSubmit = vi.fn().mockResolvedValue(LANDED);
     let r;
     await act(async () => { r = render(el(bout(), onSubmit)); });
     const aka = r.container.querySelector('.sb-side--aka');
@@ -114,7 +117,7 @@ describe('a tap made while the previous save is out is never wiped by that save\
   });
 
   it('a change made elsewhere after the last tap is still followed', async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onSubmit = vi.fn().mockResolvedValue(LANDED);
     let r;
     await act(async () => { r = render(el(bout(), onSubmit)); });
     await tap(menButton(r.container.querySelector('.sb-side--aka')));
@@ -137,7 +140,7 @@ describe('a tap made while the previous save is out is never wiped by that save\
     // landed the board holds nothing unsent, and a change the server applied
     // under such a stamp (another device's overtime, made before the tap and
     // arriving after it) is the match as it stands.
-    const onSubmit = vi.fn().mockResolvedValue({ id: 'm1', status: 'running' });
+    const onSubmit = vi.fn().mockResolvedValue(LANDED);
     let r;
     await act(async () => { r = render(el(bout(), onSubmit)); });
     await tap(menButton(r.container.querySelector('.sb-side--aka')));
@@ -152,5 +155,88 @@ describe('a tap made while the previous save is out is never wiped by that save\
     await tap(menButton(r.container.querySelector('.sb-side--shiro')));
     await wait(350);
     expect(onSubmit.mock.calls.at(-1)[0].encho, 'the board took the overtime, so the next save keeps it').toEqual({ periodCount: 1 });
+  });
+
+  it('a save built before the latest tap clears nothing when it lands', async () => {
+    let landFirst;
+    const first = new Promise((resolve) => { landFirst = resolve; });
+    const onSubmit = vi.fn().mockReturnValueOnce(first).mockResolvedValue(LANDED);
+    let r;
+    await act(async () => { r = render(el(bout(), onSubmit)); });
+    await tap(menButton(r.container.querySelector('.sb-side--aka')));
+    await wait(350); // the add's save is out and unanswered
+    const added = onSubmit.mock.calls.at(-1)[0];
+    expect(added.ipponsA, 'precondition: the add was saved').toEqual(['M']);
+
+    vi.setSystemTime(NOW + 400);
+    const [label] = marks(r.container);
+    await tap(r.container.querySelector(`[aria-label="${label}"]`)); // a tap the save in flight was not built with
+    expect(marks(r.container)).toHaveLength(0);
+    await act(async () => { landFirst(LANDED); });
+
+    await act(async () => {
+      r.rerender(el(bout({ ipponsA: added.ipponsA, ipponsB: added.ipponsB, modifiedAt: NOW + 50 }), onSubmit));
+    });
+    expect(marks(r.container), 'the add landing does not release the board from the removal it never carried').toHaveLength(0);
+
+    await wait(350); // the removal's own autosave
+    expect(onSubmit.mock.calls.at(-1)[0].ipponsA, 'the removal is sent').toEqual([]);
+  });
+
+  // A REFUSED save is not here: it takes the server's copy instead
+  // (individual_engi_refused_autosave_takes_server.render.test.jsx).
+  it('a queued save keeps the board against an older copy', async () => {
+    const onSubmit = vi.fn().mockResolvedValue({ queued: true });
+    let r;
+    await act(async () => { r = render(el(bout(), onSubmit)); });
+    await tap(menButton(r.container.querySelector('.sb-side--aka')));
+    await wait(350);
+    const added = onSubmit.mock.calls.at(-1)[0];
+    vi.setSystemTime(NOW + 400);
+    const [label] = marks(r.container);
+    await tap(r.container.querySelector(`[aria-label="${label}"]`));
+    await wait(350);
+    expect(onSubmit.mock.calls.length, 'precondition: both taps were saved').toBe(2);
+
+    await act(async () => {
+      r.rerender(el(bout({ ipponsA: added.ipponsA, ipponsB: added.ipponsB, modifiedAt: NOW + 50 }), onSubmit));
+    });
+    expect(marks(r.container), 'a write that did not land released nothing').toHaveLength(0);
+  });
+
+  it('a scheduled match is not autosaved, so a net-zero fiddle holds nothing against another device', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(LANDED);
+    let r;
+    await act(async () => { r = render(el(bout({ status: 'scheduled' }), onSubmit)); });
+    await tap(menButton(r.container.querySelector('.sb-side--aka')));
+    const [label] = marks(r.container);
+    expect(label, 'precondition: the scheduled board takes the tap').toBeTruthy();
+    await tap(r.container.querySelector(`[aria-label="${label}"]`));
+    expect(marks(r.container)).toHaveLength(0);
+    await wait(350);
+    expect(onSubmit, 'precondition: nothing was autosaved').not.toHaveBeenCalled();
+
+    // Another device's K, stamped before the taps.
+    await act(async () => { r.rerender(el(bout({ status: 'scheduled', ipponsB: ['K'], modifiedAt: NOW - 1000 }), onSubmit)); });
+    expect(marks(r.container).some((l) => l.endsWith('remove K')), 'the copy from the other device is followed').toBe(true);
+  });
+});
+
+describe('a stamp left by a write the match\'s leaving running dropped is cleared (bc-ltap)', () => {
+  it('sent back to the queue inside the debounce: a later scheduled copy stamped before the tap is adopted', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(LANDED);
+    let r;
+    await act(async () => { r = render(el(bout(), onSubmit)); });
+    await tap(menButton(r.container.querySelector('.sb-side--aka')));
+    await tap(r.container.querySelector(`[aria-label="${marks(r.container)[0]}"]`)); // net zero
+    expect(marks(r.container), 'precondition: the board is empty again').toHaveLength(0);
+    // Another device sends the match back to the queue, same score, inside the
+    // debounce: the autosave is dropped at fire time, so no landed save clears the stamp.
+    await act(async () => { r.rerender(el(bout({ status: 'scheduled' }), onSubmit)); });
+    await wait(350);
+    expect(onSubmit, 'the autosave was dropped').not.toHaveBeenCalled();
+    // A later-arriving copy, stamped before the tap (and before the match left running).
+    await act(async () => { r.rerender(el(bout({ status: 'scheduled', ipponsB: ['M'], modifiedAt: NOW - 4000 }), onSubmit)); });
+    expect(marks(r.container), 'the copy is adopted, not held against a stamp nothing can clear').toHaveLength(1);
   });
 });

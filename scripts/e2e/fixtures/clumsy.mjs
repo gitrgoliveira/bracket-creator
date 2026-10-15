@@ -13,12 +13,17 @@
 // happened (which element was hit, how far apart the taps were, what the
 // dialog said), so the journey can record it as an audit row. None of them
 // asserts the app's behaviour: whether the outcome is correct is the journey's
-// call, and judgement columns are formed by eye, never asserted.
+// call, and judgement columns are formed by eye, never asserted. They throw
+// only when the variant itself could not be performed, so the row would not
+// have tested what it says: tapNeighbour finds no neighbour in reach,
+// doubleTap's taps land too far apart, retapWhileSaving never sees "Saving…",
+// and a helper that needs a dialog or a button finds none.
 //
 // Taps go through page.touchscreen at the element's centre: the browser's own
 // hit-testing decides what is tapped, as it does for a thumb. Every project in
 // playwright.config.mjs has a touchscreen.
 import { errors } from '@playwright/test';
+import { EXPECT_TIMEOUT_MS } from './devices.mjs';
 import { dwell, TAP_BOUNCE_MS } from './pace.mjs';
 
 // The longest gap that still counts as a double tap: the app's bounce window
@@ -118,7 +123,7 @@ export async function doubleTap(locator) {
 // "Saving…". A local server answers in milliseconds, far too fast for any
 // thumb, so the write is held for `holdWritesMs` first (every non-GET /api
 // request), which is what a venue's wifi does anyway. Returns
-// { savingSeen, retapped, labelAfter }, both flags always true: a button that
+// { savingSeen, retapped, labelAfter, writesSent }, both flags always true: a button that
 // never shows "Saving…" within the hold THROWS (the second tap was not made, so
 // a check built on this helper would pass without testing anything). Any other
 // failure propagates as it is.
@@ -136,6 +141,21 @@ export async function retapWhileSaving(locator, { holdWritesMs = 1200, savingTex
     return route.continue().catch(() => {});
   };
   await page.route('**/api/**', hold);
+  // Every write the two taps cause is counted and waited for: a second write
+  // from the bounced tap is held on its own clock and can land after the first
+  // one's answer has cleared "Saving…", so the caller reads the page only once
+  // none is in flight, whatever it then finds.
+  const inFlight = new Set();
+  let writesSent = 0;
+  const started = (req) => {
+    if (req.method() === 'GET' || !new URL(req.url()).pathname.startsWith('/api/')) return;
+    inFlight.add(req);
+    writesSent += 1;
+  };
+  const ended = (req) => inFlight.delete(req);
+  page.on('request', started);
+  page.on('requestfinished', ended);
+  page.on('requestfailed', ended);
   try {
     await page.touchscreen.tap(x, y);
     try {
@@ -156,11 +176,19 @@ export async function retapWhileSaving(locator, { holdWritesMs = 1200, savingTex
     await page.waitForFunction(
       ([el, src, flags]) => !el.isConnected || !new RegExp(src, flags).test(el.textContent || ''),
       [handle, savingText.source, savingText.flags],
-      { timeout: holdWritesMs + 15000 },
+      { timeout: holdWritesMs + EXPECT_TIMEOUT_MS },
     );
+    const drainBy = Date.now() + holdWritesMs + EXPECT_TIMEOUT_MS;
+    while (inFlight.size > 0) {
+      if (Date.now() > drainBy) throw new Error(`clumsy.retapWhileSaving: ${inFlight.size} write(s) still unanswered after the retap`);
+      await new Promise((r) => setTimeout(r, 50));
+    }
     const labelAfter = await handle.evaluate((el) => (el.isConnected ? el.textContent.trim() : null));
-    return { savingSeen, retapped: savingSeen, labelAfter };
+    return { savingSeen, retapped: savingSeen, labelAfter, writesSent };
   } finally {
+    page.off('request', started);
+    page.off('requestfinished', ended);
+    page.off('requestfailed', ended);
     await page.unroute('**/api/**', hold);
     await handle.dispose();
   }
@@ -280,7 +308,7 @@ export async function loudestButton(scope) {
 // answer opens would be waited on instead of the one that was answered.
 async function waitAnswered(handle) {
   try {
-    await handle.waitForElementState('hidden', { timeout: 15_000 });
+    await handle.waitForElementState('hidden', { timeout: EXPECT_TIMEOUT_MS });
   } finally {
     await handle.dispose();
   }

@@ -11,7 +11,7 @@
 // cross-surface result need. The knockout-mixed journeys are where variants
 // get judged.
 import { test, expect, isCoarse } from '../fixtures/test.mjs';
-import { PUBLIC_DEVICE } from '../fixtures/devices.mjs';
+import { PUBLIC_DEVICE, EXPECT_TIMEOUT_MS } from '../fixtures/devices.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
 import { auditLog } from '../fixtures/audit.mjs';
 import { createTournament, login, signOut } from '../fixtures/setup.mjs';
@@ -101,7 +101,7 @@ test.describe('smoke', () => {
       const identity = await editorIdentity(page);
 
       const reload = await interrupt(page, 'reload');
-      const backAfterReload = await inlineEditor(page).waitFor({ state: 'visible', timeout: 15_000 })
+      const backAfterReload = await inlineEditor(page).waitFor({ state: 'visible', timeout: EXPECT_TIMEOUT_MS })
         .then(() => true, () => false);
       record({ variant: 'V3 interrupt', action: 'running bout', ...reload, editorBack: backAfterReload,
         sameMatch: backAfterReload && (await editorIdentity(page)).key === identity.key });
@@ -113,7 +113,7 @@ test.describe('smoke', () => {
         sameMatch: (await editorIdentity(page)).key === identity.key });
 
       const back = await interrupt(page, 'back');
-      const backAfterBack = await inlineEditor(page).waitFor({ state: 'visible', timeout: 15_000 })
+      const backAfterBack = await inlineEditor(page).waitFor({ state: 'visible', timeout: EXPECT_TIMEOUT_MS })
         .then(() => true, () => false);
       const shiroPoints = backAfterBack
         ? await inlineEditor(page).locator('[aria-label^="Shiro slot "][aria-label*=": remove "]').count() : null;
@@ -142,9 +142,9 @@ test.describe('smoke', () => {
       const offline = await interrupt(page, 'offline', {
         during: async (p) => {
           await ipponButton(p, 'aka', 'M').tap();
-          // What the autosave pill settles on while the network is down: give
-          // it a moment to leave "Synced", and record whatever it shows.
-          await expect(syncState(p)).not.toHaveText('Synced', { timeout: 3000 }).catch(() => {});
+          // The pill must stop claiming "Synced" while the point cannot be
+          // saved; what it settles on instead is recorded, not asserted.
+          await expect(syncState(p)).not.toHaveText('Synced');
           offlineState = (await syncState(p).innerText()).trim();
         },
       });

@@ -51,6 +51,7 @@ func TestImport_FormatNormalizesToKnockout(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r, store, _, _, tempDir := setupTestRouter(t)
+			seedImportTournamentDate(t, store)
 			defer os.RemoveAll(tempDir)
 
 			res := importOneComp(t, r, "competitions:\n"+

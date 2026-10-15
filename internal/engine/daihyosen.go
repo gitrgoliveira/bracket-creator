@@ -238,6 +238,14 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 			return err
 		}
 		e.noteMatchRead(compID)
+		pools, err := tx.LoadPools(compID)
+		if err != nil {
+			return err
+		}
+		bracket, err := tx.LoadBracket(compID)
+		if err != nil {
+			return err
+		}
 
 		// Scan existing DH matches per pool for idempotency and ID sequencing.
 		// poolNameFromMatchID strips the trailing suffix deterministically so
@@ -281,7 +289,7 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 			if regularIncomplete[poolName] {
 				continue
 			}
-			for _, p := range pendingTieBreaks(comp, poolName, poolStandings, poolDH[poolName], poolCourt[poolName], true) {
+			for _, p := range pendingTieBreaks(comp, poolName, poolTieBreakCut(comp, pools, bracket, poolName), poolStandings, poolDH[poolName], poolCourt[poolName], true) {
 				injected = append(injected, p.bouts...)
 			}
 		}

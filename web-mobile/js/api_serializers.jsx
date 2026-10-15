@@ -521,13 +521,22 @@ function normalizeCompetitionDetail(data) {
         result.config = config;
     }
 
-    // Normalize pools (Go: PoolName, Players → poolName, players)
+    // Normalize pools (Go: PoolName, Players → poolName, players). `qualifiers`
+    // is how many of the pool's places send a qualifier, from the payload's
+    // sibling `poolQualifiers` map (engine.PoolQualifierCuts, keyed by pool
+    // name): the server owns it because which fill-bracket pools were drafted
+    // is a property of the stored draw. qualifiersForPool reads it back.
     if (result.pools) {
-        result.pools = result.pools.map(p => ({
-            poolName: p.PoolName || p.poolName || "",
-            players: (p.Players || p.players || []).map(normalizePlayer),
-            matches: p.Matches || p.matches || [],
-        }));
+        const cuts = result.poolQualifiers || {};
+        result.pools = result.pools.map(p => {
+            const poolName = p.PoolName || p.poolName || "";
+            return {
+                poolName,
+                players: (p.Players || p.players || []).map(normalizePlayer),
+                matches: p.Matches || p.matches || [],
+                qualifiers: cuts[poolName],
+            };
+        });
     }
 
     // Normalize standings player field (carry flags for engi standings)

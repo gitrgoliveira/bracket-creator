@@ -23,7 +23,7 @@ const STUBBED_GLOBALS = {
   confirmDialog: vi.fn().mockResolvedValue(true),
   API: {
     fetchCompetitionDetails: vi.fn().mockResolvedValue(null),
-    recordScore: vi.fn().mockResolvedValue(undefined),
+    recordScore: vi.fn().mockResolvedValue({ applied: true }),
     recordDaihyosen: vi.fn(),
     removeDaihyosen: vi.fn(),
     putMatchLineup: vi.fn(),

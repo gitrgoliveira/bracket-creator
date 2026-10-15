@@ -655,6 +655,13 @@ paths:
         `pool_size` and `pool_size_mode`, by contrast, ARE defaulted when
         omitted (to 4 and `"max"`).
 
+        `date` is defaulted too: a row without one takes the tournament's
+        date (Day 1), as `POST /api/competitions` does, because a
+        competition with no date can never be drawn. If the tournament
+        has no date either, the row fails with
+        `date: the row has no date and the tournament has no date to give it; ...`
+        while the rest of the import proceeds.
+
         In self-run mode this is an organiser action: it needs
         `X-Tournament-Password`.
       security:
@@ -6028,6 +6035,30 @@ components:
             `password`, which is redacted in locked mode). Defaults to `officiated` when
             omitted on POST (backward-compatible with pre-mp-7h7 tournaments whose
             `tournament.md` lacks the field).
+        theme:
+          type: object
+          description: >
+            Optional branding. Absent when nothing is set (a theme holding
+            only a logo is returned as `{"hasLogo": true}`).
+          properties:
+            primaryColor:
+              type: string
+              description: Accent colour as `#rrggbb`.
+            accentSoftColor:
+              type: string
+              description: Soft accent (background tint) as `#rrggbb`.
+            windowTitle:
+              type: string
+              maxLength: 100
+              description: Browser tab / window title.
+            hasLogo:
+              type: boolean
+              readOnly: true
+              description: >
+                True when a custom logo has been uploaded; absent otherwise.
+                Derived by the server, so a value sent on PUT is ignored. A
+                client reads it instead of probing `HEAD /api/branding/logo`,
+                which answers 404 while no logo is set.
     TournamentWithCompetitions:
       description: >
         The response shape for POST and PUT /api/tournament: every Tournament
@@ -7267,6 +7298,20 @@ components:
             items:
               $ref: '#/components/schemas/PlayerStanding'
           description: Map of pool name to ordered standings.
+        poolQualifiers:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 1
+          description: >
+            Map of pool name to how many of that pool's places send a qualifier
+            to the knockout. Present once pools are drawn. It is read off the
+            stored draw, so a pool whose 2nd is drafted under extra qualifiers
+            "fill-bracket", or an oversized pool under "larger-pools", counts one
+            more than `config.poolWinners`, and a pool too small to fill every
+            place counts only the places the draw seats. A tie over any of these places is
+            owed a tie-break bout (a daihyosen for a team pool), and the
+            standings mark exactly these places as advancing.
         bracket:
           $ref: '#/components/schemas/Bracket'
 

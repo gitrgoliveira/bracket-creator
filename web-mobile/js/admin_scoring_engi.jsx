@@ -22,7 +22,8 @@
 const { useState: useStateE, useEffect: useEffectE, useRef: useRefE } = React;
 
 import { ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer, HeldWriteDiscard, HeldWriteNotice, useClearPendingWhenNothingHeld } from './admin_scoring_shared.jsx';
-import { SyncStatusPill, useDebouncedRunningWrite, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
+import { SyncStatusPill, useDebouncedRunningWrite, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote, landedAutosave } from './admin_scoring_autosave.jsx';
+import { serverNowMs } from './server_clock.jsx';
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
 import { GROUP_FLAGS } from './match_groups.jsx';
 import { useEscapeToClose, confirmDialog } from './ui.jsx';
@@ -143,7 +144,32 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   autosaveIsRunningRef.current = m.status === "running";
   autosaveSeenStampRef.current = m.modifiedAt || 0;
   autosaveBuildPatchRef.current = (status) => claimChanged({ flagsA, flagsB, status });
-  autosaveOnSubmitRef.current = onSubmit;
+  // When the operator last changed a count here, in the server's clock frame;
+  // undefined once the board holds the server's copy again. A server copy
+  // stamped before it cannot know that edit, so the adopt below keeps the
+  // counts: comparing values alone reads a tap taken back during a save as
+  // untouched, and that save's echo then wipes it (bc-ltap, bc-kclr; the
+  // individual editor's boardEditedAtRef explains the rule at length). The seq
+  // counts edits so landedAutosave clears the stamp only for a save built after
+  // the latest one. The stamp is taken only while the match is running: only then
+  // is the edit autosaved, and only a landed autosave clears the stamp.
+  const flagsEditedAtRef = useRefE(undefined);
+  const flagsEditSeqRef = useRefE(0);
+  // A REFUSED autosave stores and broadcasts nothing, so no later copy would re-run the
+  // adopt: with no edit since the save was built, the counts take the server's current
+  // copy now (takeServerFlagsRef holds the latest render's adopt, not this one's).
+  const takeServerFlagsRef = useRefE(null);
+  autosaveOnSubmitRef.current = landedAutosave(onSubmit, flagsEditSeqRef, (seq) => {
+    if (flagsEditSeqRef.current === seq) flagsEditedAtRef.current = undefined;
+  }, (seq) => {
+    // The stamp must still be set: the seq counts only RUNNING edits, so a correction tapped
+    // after the match finished elsewhere (the status effect cleared the stamp, the seq did
+    // not move) would otherwise be wiped by a refusal that arrives late.
+    if (flagsEditSeqRef.current === seq && flagsEditedAtRef.current !== undefined && takeServerFlagsRef.current) takeServerFlagsRef.current();
+  });
+  // The match left running (finished, or sent back to the queue, elsewhere) inside the
+  // debounce: the write is dropped with no callback, so no landed save clears the stamp.
+  useEffectE(() => { if (m.status !== "running") flagsEditedAtRef.current = undefined; }, [m.status]);
   // An operator change to either count: the value, then the save it schedules.
   // A count adopted from the server does not come through here. A key pressed
   // at a bound (a/s at MAX_FLAGS, Backspace at 0; the buttons are disabled
@@ -153,6 +179,10 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
     const next = clamp(n);
     if (next === (side === "a" ? flagsA : flagsB)) return;
     (side === "a" ? setFlagsA : setFlagsB)(next);
+    if (m.status === "running") {
+      flagsEditedAtRef.current = serverNowMs();
+      flagsEditSeqRef.current += 1;
+    }
     markDirty();
   };
 
@@ -173,14 +203,28 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // keepLocalEdits, like the individual editor's scoreline and unlike the team
   // board: a pair of flag counts is ONE reading of ONE kata performance, so
   // there is no per-row seam to merge along. An operator with unsaved flags
-  // keeps all of them.
+  // keeps all of them. isDirty is value-only, so it cannot see a tap taken
+  // back to the server's value while a save is out; the apply holds the
+  // counts against a server copy stamped before the last edit (flagsEditedAtRef)
+  // and, once it does take one, clears the stamp.
   //
   // Until the match is running nothing this editor holds reaches the server
   // before the operator submits, so a stale reading can sit in front of them
   // for as long as the match is open.
+  const takeServerFlags = () => {
+    flagsEditedAtRef.current = undefined;
+    setFlagsA(initialFlagsA);
+    setFlagsB(initialFlagsB);
+    claimChanged.agree(GROUP_FLAGS);
+  };
+  takeServerFlagsRef.current = takeServerFlags;
   useAdoptFromServer({
     signature: `${initialFlagsA}:${initialFlagsB}`,
-    apply: () => { setFlagsA(initialFlagsA); setFlagsB(initialFlagsB); claimChanged.agree(GROUP_FLAGS); },
+    apply: () => {
+      const editedAt = flagsEditedAtRef.current;
+      if (editedAt !== undefined && (m.modifiedAt || 0) < editedAt) return;
+      takeServerFlags();
+    },
     keepLocalEdits: true,
     isDirty,
   });

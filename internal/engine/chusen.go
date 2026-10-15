@@ -198,7 +198,14 @@ func (e *Engine) ChusenStatus(compID string) (ChusenReport, error) {
 	if overridesObj != nil {
 		poolRanks = overridesObj.PoolRanks
 	}
-	poolWinners := comp.EffectivePoolWinners()
+	pools, err := e.store.LoadPools(compID)
+	if err != nil {
+		return report, err
+	}
+	bracket, err := e.store.LoadBracket(compID)
+	if err != nil {
+		return report, err
+	}
 
 	poolNames := make([]string, 0, len(standings))
 	for name := range standings {
@@ -209,9 +216,10 @@ func (e *Engine) ChusenStatus(compID string) (ChusenReport, error) {
 	for _, poolName := range poolNames {
 		poolStandings := standings[poolName]
 		groupOverrides := poolRanks[poolName]
+		cut := poolTieBreakCut(comp, pools, bracket, poolName)
 		for _, positions := range detectPoolTies(poolStandings) {
 			// Only a tie that affects advancement/seed warrants a decider at all.
-			if !tieAffectsAdvancement(positions, poolWinners) {
+			if !tieAffectsAdvancement(positions, cut) {
 				continue
 			}
 			group := standingsAt(poolStandings, positions)

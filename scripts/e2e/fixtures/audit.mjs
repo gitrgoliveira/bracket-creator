@@ -13,11 +13,16 @@ import { fileURLToPath } from 'node:url';
 import { journeyDir } from './shots.mjs';
 
 // spec file -> the audits it made, so the console policy (fixtures/test.mjs)
-// can add its warning rows to the audit of the test's own file. The file is
-// read off the call stack: auditLog is always called while a spec file loads.
+// can add its warning rows to the audit of the test's own file, looked up by
+// the testInfo.file Playwright reports. auditLog runs while a spec file loads,
+// before any testInfo exists, so the file is read off the call stack: the first
+// frame in a `.spec.mjs` followed by its `:line:column`, taken to that suffix
+// (not to the next space, parenthesis or colon), so a checkout path holding any
+// of those still resolves. An ESM frame is a file URL (percent-encoded), which
+// fileURLToPath decodes to the path testInfo.file carries.
 const bySpec = new Map();
 function callingSpec() {
-  const m = (new Error().stack || '').match(/((?:file:\/\/)?\/[^\s():]+\.spec\.mjs)/);
+  const m = /(file:\/\/\/[^\n]*?\.spec\.mjs|\/[^\n]*?\.spec\.mjs)(?=:\d+:\d+)/.exec(new Error().stack || '');
   if (!m) return null;
   return m[1].startsWith('file://') ? fileURLToPath(m[1]) : m[1];
 }

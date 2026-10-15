@@ -706,47 +706,79 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }
 });
 PoolNumberedMatchRow.displayName = "PoolNumberedMatchRow";
 
+// tiedPlaces: the place each still-open tie holds, keyed by standings row.
+//
+// The server marks a row `tied` while the competitors level with it on EVERY
+// criterion await a tie-break bout, but each row still carries its own sorted
+// rank (draw order breaks the level pair), so reading `rank` alone badges one
+// of them 2nd and the other 3rd as though the order were decided. A tied group
+// shares its best member's place.
+//
+// One cut: `qualifiers`, how many of the pool's places advance
+// (qualifiersForPool: the server's count, with a larger-pools extra place or a
+// fill-bracket drafted 2nd). The server owes a
+// bout for a tie whose best place is within it (engine.poolTieBreakCut), so
+// `boutOwed` is true when the group's best place is, and a tie wholly below it
+// just shares its place. `decidesAdvancement` is true only when a bout is owed
+// AND the group straddles the line, so a pair level for 1st that both advance
+// anyway still reads as advancing, while a tie over the extra larger-pools
+// place leaves none of them marked until its bout is scored.
+// `points` is the server's packed ranking key (engine individual/teamStandingPoints),
+// equal exactly when two rows are level on every criterion, so rows that share
+// it among the tied ones form one group. Pool standings only: a league has no
+// advancing mark to withhold.
+export function tiedPlaces(poolStandings, qualifiers) {
+  const groups = new Map();
+  (poolStandings || []).forEach((s, i) => {
+    if (!s || !s.tied) return;
+    const rank = s.rank || i + 1;
+    const g = groups.get(s.points);
+    if (g) {
+      g.place = Math.min(g.place, rank);
+      g.last = Math.max(g.last, rank);
+    } else {
+      groups.set(s.points, { place: rank, last: rank });
+    }
+  });
+  const byRow = new Map();
+  (poolStandings || []).forEach((s) => {
+    if (!s || !s.tied) return;
+    const g = groups.get(s.points);
+    const key = s.player.id || `${s.player.name}||${s.player.dojo || ""}`;
+    const boutOwed = g.place <= qualifiers;
+    byRow.set(key, { place: g.place, boutOwed, decidesAdvancement: boutOwed && g.last > qualifiers });
+  });
+  return byRow;
+}
+
+// The tooltip on a tied row's badge. It promises a deciding bout only where the
+// server owes one (`boutOwed`); a tie it holds none for just reads as level. A
+// team pool settles with a representative bout, an individual one with a
+// tie-break bout (engine.pendingTieBreaks).
+function tieBadgeTitle(tie, isTeam) {
+  const level = "Level on every criterion";
+  if (!tie.boutOwed) return level;
+  return `${level}: ${isTeam ? "a representative bout" : "a tie-break bout"} decides the order`;
+}
+
 // qualifiersForPool: how many top-ranked finishers in `pool` advance to the
-// knockout (bc-qual LP-5a). PoolsViewer uses this PER POOL instead of a
-// single count across every pool, so an oversized pool's extra qualifier
-// (state.ExtraQualifiersLargerPools) is highlighted correctly, e.g. a
-// 4-person pool at minimum size 3 with poolWinners=1 highlights its top 2,
-// not just its winner.
+// knockout. PoolsViewer uses this PER POOL instead of a single count across
+// every pool, so an oversized pool's extra qualifier (larger-pools) and a
+// drafted pool's 2nd (fill-bracket) are both marked advancing.
 //
-// Mirrors state.Competition.QualifiersForPool's OVERSIZED test exactly (the
-// "trivial larger-pools size test" this client-side module is allowed to
-// duplicate, per the mp-3abe-adjacent rule against re-deriving the engine's
-// own oversized/draft logic in JS): a pool is oversized when it holds more
-// players than the competition's configured minimum PoolSize.
-// competition.poolWinners is the RAW field (may be 0/unset); default to 2
-// exactly like EffectivePoolWinners() does, since this payload doesn't
-// expose that method.
-//
-// Deliberately does NOT attempt the fill-bracket drafted-2nd calculation
-// (helper.SelectFillBracketDrafts): drafts go to the SEEDED pools in seed
-// order (oversized as fallback), stopping once the bracket's shortfall is
-// met and skipping a candidate whose opposite half is full -- a WHOLE-
-// competition scan over the pool set plus the court layout, which no
-// per-pool test can reproduce. The per-pool seed ranks ARE on this wire
-// (pools[].players[].seed comes through pools.csv), so it is the cross-pool
-// stop-and-skip state that is missing, not the seed data. Under fill-bracket
-// this therefore returns the uniform EffectivePoolWinners() count, so only
-// rank 1 (never a drafted rank 2) is ever highlighted as advancing here; the
-// residue is a deliberate accepted gap, not a bug: a correct highlight needs
-// the server to say WHICH pools were drafted, which is future work if this
-// becomes worth wiring (bc-qual LP-5a report).
+// The count is the SERVER's, `pool.qualifiers` (the payload's `poolQualifiers`
+// map, normalized onto each pool in api_serializers.jsx; engine.PoolQualifierCuts
+// reads it off the stored draw): the same count the server holds a tie-break
+// bout against. It cannot be derived here, because which fill-bracket pools
+// were drafted is a whole-field selection over every pool's seeds and the court
+// layout, and a larger-pools pool's extra place follows the draw too. Without
+// it (a payload from before a draw, or a demo pool) the count is the base
+// Winners per pool, mirroring EffectivePoolWinners() (unset or non-positive is
+// 2).
 export function qualifiersForPool(competition, pool) {
-  const base = (competition && competition.poolWinners) || 2;
-  if (
-    competition &&
-    competition.extraQualifiers === "larger-pools" &&
-    competition.poolSize > 0 &&
-    pool && Array.isArray(pool.players) &&
-    pool.players.length > competition.poolSize
-  ) {
-    return base + 1;
-  }
-  return base;
+  const served = pool && pool.qualifiers;
+  if (Number.isInteger(served) && served > 0) return served;
+  return (competition && competition.poolWinners) > 0 ? competition.poolWinners : 2;
 }
 
 // showDataIssues: opt-in for the operator-only data-integrity notices (see
@@ -810,6 +842,11 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
           });
         }
 
+        // A tie still waiting for its tie-break bout reads as tied (see
+        // tiedPlaces): the level rows share one place, and none of them is
+        // marked advancing when the tie decides who goes through.
+        const tiedByRow = isLeague ? new Map() : tiedPlaces(poolStandings, poolQualifiers);
+
         // A pool has nothing to rank until at least one bout is decided: every
         // competitor is tied at 0 and the backend rank is merely the seed/draw
         // fallback. Suppress rank badges + the "advancing" qualification
@@ -865,7 +902,9 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                   const lookup = rankByPlayerKey.get(p.id || `${p.name}||${p.dojo || ""}`);
                   const s = lookup ? lookup.standing : null;
                   const rank = lookup ? lookup.rank : null;
-                  const isAdvancing = !isLeague && poolHasResults && rank !== null && rank <= poolQualifiers;
+                  const tie = tiedByRow.get(p.id || `${p.name}||${p.dojo || ""}`);
+                  const isAdvancing = !isLeague && poolHasResults && rank !== null && rank <= poolQualifiers
+                    && !(tie && tie.decidesAdvancement);
 
                   const rowClasses = [
                     isPlayerWatched(p, highlightPlayers) ? "pool__row--me" : "",
@@ -886,8 +925,11 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                             <DHBadge />
                           )}
                           {poolHasResults && rank !== null ? (
-                            <span className={`rank-badge${isAdvancing ? " rank-badge--adv" : ""}`}>
-                              {rankOrdinal(rank)}{s && s.isOverridden ? "*" : ""}
+                            <span
+                              className={`rank-badge${isAdvancing ? " rank-badge--adv" : ""}`}
+                              title={tie ? tieBadgeTitle(tie, isTeam) : undefined}
+                            >
+                              {tie ? `=${rankOrdinal(tie.place)}` : rankOrdinal(rank)}{s && s.isOverridden ? "*" : ""}
                             </span>
                           ) : null}
                         </div>

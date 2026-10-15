@@ -65,7 +65,7 @@ beforeEach(() => {
   window.API.recordScore.mockReset();
   window.API.recordScore.mockImplementation((_c, _m, patch) => {
     writes.push(patch);
-    return Promise.resolve(undefined);
+    return Promise.resolve({ applied: true });
   });
   window.API.notePendingEdit.mockReset();
   vi.useFakeTimers();
@@ -203,6 +203,9 @@ describe('individual editor', () => {
     // The agreement follows the server leaving the finished result every time, not once.
     const done = () => individual({ status: 'completed', ipponsA: ['M', 'K'], winner: { id: 'p1', name: 'Yamada' } });
     const reopened = () => individual({ status: 'scheduled', ipponsA: ['M', 'K'] });
+    // The host hands nothing back for a finish (a landed one closes the editor), so the
+    // editor stays armed for the second finish.
+    window.API.recordScore.mockImplementation((_c, _m, patch) => { writes.push(patch); return Promise.resolve(undefined); });
     const { rerender } = await mount(done());
     await act(async () => { rerender(editorFor(reopened())); });
     await finish();
@@ -610,6 +613,8 @@ describe('an adopted value is agreed, never re-sent', () => {
     });
 
     it('a bout whose point was struck and taken back here stays the other device\'s (held, not agreed)', async () => {
+      // The saves are queued (offline): none has landed, so the row's edit stamp stands.
+      window.API.recordScore.mockImplementation((_c, _m, patch) => { writes.push(patch); return Promise.resolve({ queued: true }); });
       const rerenderWith = await mountTeam(team());
       await pointerTap(boutBtn(0, 'shiro', 'K'));
       await settle();

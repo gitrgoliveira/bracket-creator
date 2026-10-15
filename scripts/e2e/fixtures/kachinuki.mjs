@@ -13,21 +13,11 @@
 // Locator.tap(), so the coarse-pointer hit test decides what is hit, as it
 // does for a thumb.
 import { expect } from '@playwright/test';
-import { dwell, settled } from './pace.mjs';
-import { isCoarse, restoreCoarse } from './pointer.mjs';
-import { inlineEditor } from './shiaijo.mjs';
+import { armTwoTap } from './pace.mjs';
+import { EXPECT_TIMEOUT_MS } from './devices.mjs';
+import { clearMarks } from './scoring.mjs';
+import { inlineEditor, sides, upNextCard } from './shiaijo.mjs';
 import * as T from './team.mjs';
-
-// Does the page still match (pointer: coarse)? If an interruption or a
-// fullPage screenshot lost it, every tap-floor rule in styles.css would be off
-// for the rest of the test, so put it back in place (fixtures/pointer.mjs, no
-// reload, so the bout is not interrupted a second time) and report whether it
-// had been lost, so the audit can say which pointer a measurement was made at.
-export async function ensureCoarse(page) {
-  if (await isCoarse(page)) return { coarseLost: false };
-  await restoreCoarse(page);
-  return { coarseLost: true, restoredBy: 'CDP Emulation.setTouchEmulationEnabled (in place)' };
-}
 
 export const editor = (page) => inlineEditor(page).filter({ has: page.locator('.team-bouts-scroll') }).first();
 
@@ -126,24 +116,22 @@ export async function doneRowWinner(row) {
 // The centre mark of a row (vs / X / (E)).
 export const boutMiddle = async (row) => (await T.rowMiddle(row).first().innerText()).trim();
 
-// Award one ippon on the current bout and wait for the board to show it. A second
-// ippon on the same side only counts once the first one's bounce window has
-// passed (fixtures/pace.mjs), so the helper returns after it.
-export async function awardBoutIppon(page, side, waza = 'M') {
-  const row = currentBout(page);
-  const before = await boutFilled(row, side).count();
-  const tappedAt = Date.now();
-  await boutIpponButton(row, side, waza).tap();
-  await expect(boutFilled(currentBout(page), side)).toHaveCount(before + 1);
-  await dwell(page, tappedAt);
-}
+// Tap one side's filled marks off a bout row until `keep` are left (the
+// bounded clearMarks, fixtures/scoring.mjs); returns the taps made.
+export const clearBoutMarks = (row, side, opts) => clearMarks(boutFilled(row, side), opts);
+
+// Award one ippon on the current bout and return once the board shows it and
+// the autosave has landed (fixtures/team.mjs ipponOnRow, the one strike the
+// team sheet shares). A second ippon on the same side waits out the bounce
+// window of the first (fixtures/pace.mjs).
+export const awardBoutIppon = (page, side, waza = 'M') => T.ipponOnRow(editor(page), () => currentBout(page), 'current bout', side, waza);
 
 // Record bout: one tap. Returns once the bout has become a read-only row (the
 // server appended the next pairing, or the tie retired both).
 export async function recordBout(page) {
   const before = await doneRows(page).count();
   await recordBoutButton(page).tap();
-  await expect(doneRows(page)).toHaveCount(before + 1, { timeout: 15_000 });
+  await expect(doneRows(page)).toHaveCount(before + 1, { timeout: EXPECT_TIMEOUT_MS });
   await expect(recordBoutButton(page)).not.toHaveText('Saving…');
 }
 
@@ -157,11 +145,32 @@ export async function winBout(page, side) {
 // End match: the two-tap guard. Returns the armed label the first tap showed.
 export async function endMatch(page) {
   const btn = endMatchButton(page);
-  await btn.tap();
-  await expect(btn).toHaveText(/^Tap again/);
-  const armed = (await btn.innerText()).trim();
-  // The second tap counts once the arming tap's bounce window has passed.
-  await settled(btn);
-  await btn.tap();
-  return armed;
+  const armed = await armTwoTap(btn, btn.filter({ hasText: /^Tap again/ }));
+  const label = (await armed.innerText()).trim();
+  await armed.tap();
+  return label;
 }
+
+// ------------------------------------------------------------ pool play --
+
+// Start the Up next kachinuki encounter from its card and return the pairing
+// (Shiro, Aka team names) once the sheet is running. The individual board's
+// startUpNext (fixtures/shiaijo.mjs) waits for `.sb-side--*`, which this sheet
+// does not have.
+export async function startUpNextKachinuki(page) {
+  const pair = await sides(upNextCard(page));
+  await upNextCard(page).getByRole('button', { name: 'Start match' }).tap();
+  await expect(recordBoutButton(page)).toBeVisible();
+  return pair;
+}
+
+// The line that stands where the current bout was once Record bout took a
+// team's last fighter off ("Aka has no fighters left. End match finishes the
+// encounter.").
+export const noPairingLine = (page) => editor(page).getByTestId('kachinuki-no-pairing');
+
+// The representative bout (daihyosen) offer. A kachinuki sheet never carries
+// it (admin_scoring_team.jsx hides the add affordance under isKachinuki), so a
+// journey asserts both are absent.
+export const daihyosenOffer = (page) => editor(page).getByTestId('scoring-modal-daihyosen-button');
+export const daihyosenControls = (page) => editor(page).locator('.daihyosen-controls');

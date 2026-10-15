@@ -6,18 +6,70 @@
 // (fixtures/team.mjs, fixtures/kachinuki.mjs); they share the Finish check
 // below.
 //
-// The editor selectors and Start come from scripts/screenshots/lib/editor.mjs,
-// re-exported here so a journey imports one scoring module. Finish is this
-// file's own, not that library's: a journey TAPS, as the operator does on the
-// iPad, takes the inline editor as well as the overlay, and must know the
-// write LANDED (the library's finishMatch clicks, on the overlay only, and
-// returns once the button stops saving).
+// The editor selectors come from scripts/screenshots/lib/editor.mjs,
+// re-exported here so a journey imports one scoring module. Start and Finish
+// are this file's own, not that library's: a journey TAPS, as the operator does
+// on the iPad, and must know the action LANDED (the library's startMatch clicks
+// and returns silently when the button has not rendered yet; its finishMatch
+// clicks, on the overlay only, and returns once the button stops saving).
+// Finish also takes the inline editor as well as the overlay.
 import { expect } from '@playwright/test';
-import { EDITOR, INLINE_EDITOR, startMatch } from '../../screenshots/lib/editor.mjs';
-import { settled, tapOnSide } from './pace.mjs';
+import { EDITOR, INLINE_EDITOR, TAP_DWELL_MS } from '../../screenshots/lib/editor.mjs';
+import { EXPECT_TIMEOUT_MS } from './devices.mjs';
+import { armTwoTap, tapOnSide } from './pace.mjs';
 import { courtIdle, editorIdentity } from './shiaijo.mjs';
 
-export { EDITOR, INLINE_EDITOR, startMatch };
+export { EDITOR, INLINE_EDITOR };
+
+// Start the match the OVERLAY editor holds and return once the start has
+// landed: "Start match" is offered only while the match is scheduled, so the
+// button leaving is the server having it running. Fails when the button never
+// appears (the editor did not open on a scheduled match) or never leaves.
+export async function startMatch(page) {
+  const btn = page.locator(EDITOR).locator('button').filter({ hasText: /^Start match$/ }).first();
+  await expect(btn, 'the overlay editor offers Start match').toBeVisible();
+  await btn.tap();
+  await expect(btn, 'Start match left the editor once the start landed').toBeHidden();
+}
+
+// The most taps clearMarks makes on one side before it gives up. A side holds a
+// couple of marks at most, so six leaves room for a tap or two that did not count.
+export const MAX_CLEAR_TAPS = 6;
+
+// Tap filled mark slots off until `slots` (a Locator of the FILLED slots, e.g.
+// filledSlots or fixtures/team.mjs rowSlots) holds `keep` of them. Bounded: a
+// mark that does not go away fails with a message instead of looping until the
+// test timeout. A tap the app does not count (one inside the bounce window of
+// the layer it just opened, such as a correction row, tap_guard.jsx) removes
+// nothing, so after each tap the count is given TAP_DWELL_MS to drop, which
+// outlasts that window, before the next tap is made; a tap that lands is not
+// waited on. A count that goes UP between taps is a failure, never tapped
+// away: a removed mark coming back is the bc-ltap class of defect. `from` is
+// the end of the list the next tap takes ('last' or 'first'); `pauseMs` is the
+// operator's beat between two removals. Returns the taps made.
+export async function clearMarks(slots, { keep = 0, from = 'last', pauseMs = 0 } = {}) {
+  let taps = 0;
+  let last = null; // the count after the previous tap's wait
+  const cameBack = (was, now) => new Error(`clearMarks: ${slots} went UP from ${was} to ${now} mark(s) after ${taps} tap(s) (wanted ${keep}): a removed mark came back`);
+  for (let before = await slots.count(); before > keep; before = await slots.count()) {
+    if (last !== null && before > last) throw cameBack(last, before);
+    if (taps >= MAX_CLEAR_TAPS) {
+      throw new Error(`clearMarks: ${slots} still holds ${before} mark(s) (wanted ${keep}) after ${MAX_CLEAR_TAPS} taps`);
+    }
+    await (from === 'first' ? slots.first() : slots.last()).tap();
+    taps += 1;
+    const tappedAt = Date.now();
+    let now = await slots.count();
+    while (now === before && Date.now() - tappedAt < TAP_DWELL_MS) {
+      await slots.page().waitForTimeout(50);
+      now = await slots.count();
+    }
+    if (now > before) throw cameBack(before, now);
+    last = now;
+    if (pauseMs) await slots.page().waitForTimeout(pauseMs);
+  }
+  return taps;
+}
 
 const SIDE_NAME = { shiro: 'Shiro', aka: 'Aka' };
 
@@ -49,19 +101,52 @@ export async function awardIppon(page, side, waza = 'M', root = INLINE_EDITOR) {
   await expect(syncState(page, root)).toHaveText('Synced');
 }
 
+// The hikiwake toggle of the individual board ("Mark draw", "Cancel draw" while
+// on). It is offered only while neither side holds a point. Returns once the
+// board shows the draw.
+export async function markDraw(page, root = INLINE_EDITOR) {
+  const toggle = within(page, root).first().getByTestId('scoring-modal-mark-draw');
+  await toggle.tap();
+  await expect(toggle).toHaveText('Cancel draw');
+}
+
+// `root` is an editor's selector or its Locator (the team sheet's callers hold one).
+const within = (page, root) => (typeof root === 'string' ? page.locator(root) : root);
+
 // The Finish button in its first state ("Finish" or "Finish + Start Next →"),
 // and the armed state the first tap turns it into.
-export const finishButton = (page, root = INLINE_EDITOR) => page.locator(root)
+export const finishButton = (page, root = INLINE_EDITOR) => within(page, root)
   .locator('button').filter({ hasText: /^Finish( \+ Start Next|$)/ }).first();
-export const armedFinishButton = (page, root = INLINE_EDITOR) => page.locator(root)
+export const armedFinishButton = (page, root = INLINE_EDITOR) => within(page, root)
   .locator('button').filter({ hasText: /^Tap again to finish/ }).first();
+
+// The server's answer to the next write a match gets, for a journey that must
+// not move on (reload, read the court) before an edit has been saved. The sync
+// pill is process-wide, not per match: it says whether anything is still being
+// written, not that THIS match's edit was, so it cannot stand in for the
+// answer to the write itself. Call this BEFORE the tap that
+// causes the write, then `await writeLanded(...)` after it. `tail` is the
+// write's route below /matches/:id: 'score' (PUT, the default: marks, fusensho,
+// Tie, Start, Finish) or 'daihyosen' (POST, the representative bout's add).
+// A timeout the caller never reached is not an unhandled rejection.
+export function nextMatchWrite(page, { method = 'PUT', tail = 'score' } = {}) {
+  const answered = page.waitForResponse((r) => r.request().method() === method
+    && new RegExp(`/matches/[^/]+/${tail}$`).test(new URL(r.url()).pathname), { timeout: EXPECT_TIMEOUT_MS });
+  answered.catch(() => {});
+  return answered;
+}
+
+// Return once that write has been answered with a success status.
+export async function writeLanded(answered, what = 'the write') {
+  const res = await answered;
+  expect(res.ok(), `${what} was answered ${res.status()} ${res.url()}`).toBe(true);
+  return res;
+}
 
 // Tap Finish once: the two-tap guard arms and nothing is submitted yet. Returns
 // the armed button once the arm is old enough for a second tap to count.
 export async function armFinish(page, root = INLINE_EDITOR) {
-  await finishButton(page, root).tap();
-  await settled(armedFinishButton(page, root));
-  return armedFinishButton(page, root);
+  return armTwoTap(finishButton(page, root), armedFinishButton(page, root));
 }
 
 // What an editor shows when a write did not save: its not-saved banner
@@ -81,7 +166,7 @@ const visibleTexts = (loc) => loc.evaluateAll((els) => els
 export async function beforeFinish(ed) {
   const page = ed.page();
   const answer = page.waitForResponse((r) => r.request().method() === 'PUT' && /\/matches\/[^/]+\/score$/.test(r.url())
-    && /"status":"completed"/.test(r.request().postData() || ''), { timeout: 15_000 }).then((r) => r, () => null);
+    && /"status":"completed"/.test(r.request().postData() || ''), { timeout: EXPECT_TIMEOUT_MS }).then((r) => r, () => null);
   return { ...(await editorIdentity(page, ed)), notSaved: await visibleTexts(ed.locator(NOT_SAVED)), answer };
 }
 
@@ -137,7 +222,7 @@ export async function finishLanded(ed, before) {
 // engi editor ("Save result" arms too, but is its own button) or a correction
 // ("Save correction" does not arm).
 export async function finishMatch(page, root = INLINE_EDITOR) {
-  const ed = page.locator(root).first();
+  const ed = within(page, root).first();
   const armed = await armFinish(page, root);
   const before = await beforeFinish(ed);
   await armed.tap();

@@ -6,11 +6,12 @@
 // tap-target measurement (fixtures/pointer.mjs) and the hasty confirms
 // (fixtures/clumsy.mjs) are shared with the other journeys.
 import { expect } from '@playwright/test';
-import { INLINE_EDITOR, awardIppon, finishMatch } from './scoring.mjs';
+import { INLINE_EDITOR, awardIppon, finishMatch, markDraw } from './scoring.mjs';
 import {
   UP_NEXT, WAITING_ROWS, completedRowFor, courtDone, courtIdle, inlineEditor, upNextCard,
 } from './shiaijo.mjs';
 import { hastyShiaijoConfirm } from './clumsy.mjs';
+import { EXPECT_TIMEOUT_MS } from './devices.mjs';
 
 // Twelve entrants for F1 (pools of 3, two through): six dojos, two members
 // each, (name, dojo) unique. Names start with distinct letters so the
@@ -32,11 +33,25 @@ export const ROSTER_6B = [
   ['Bo Grant', 'Gyokusen'], ['Cy Novak', 'Thames'], ['Di Weller', 'Musashi'],
   ['Ed Frost', 'Seishinkan'], ['Flo Adler', 'Mumeishi'], ['Gil Varga', 'Hizen'],
 ];
+// Seven for the minimum-pool-size journey (pools-tiebreak): three pools (3, 2
+// and 2) at a maximum of 3, but two pools (4 and 3) at a minimum of 3. Seven dojos, so the
+// draw has no dojo to keep apart and the pools are whatever the minimum rule cuts.
+export const ROSTER_7 = [
+  ['Hiro Sasaki', 'Kyoto Kai'], ['Ines Ferrer', 'Osaka Kan'], ['Joan Mercer', 'Nagoya Dojo'],
+  ['Kei Takagi', 'Sendai Kan'], ['Lars Nilsen', 'Sapporo Kai'], ['Mina Abara', 'Fukuoka Dojo'],
+  ['Noel Garnier', 'Kobe Kan'],
+];
+
 // Small rosters for the '<bead-id>: ...' tests, which seed their own
 // competitions so each runs alone.
-export const rosterOf = (prefix, n) => Array.from({ length: n }, (_, i) => [
-  `${prefix} ${['Aki', 'Bea', 'Cal', 'Dee', 'Eli', 'Fay'][i]}`, ['Gyokusen', 'Thames', 'Musashi', 'Seishinkan', 'Mumeishi', 'Hizen'][i],
-]);
+const ROSTER_FIRST_NAMES = ['Aki', 'Bea', 'Cal', 'Dee', 'Eli', 'Fay'];
+const ROSTER_DOJOS = ['Gyokusen', 'Thames', 'Musashi', 'Seishinkan', 'Mumeishi', 'Hizen'];
+export const rosterOf = (prefix, n) => {
+  if (n > ROSTER_FIRST_NAMES.length) {
+    throw new Error(`rosterOf: ${n} entrants asked for, only ${ROSTER_FIRST_NAMES.length} names to give them`);
+  }
+  return Array.from({ length: n }, (_, i) => [`${prefix} ${ROSTER_FIRST_NAMES[i]}`, ROSTER_DOJOS[i]]);
+};
 // Four for each knockout-only fixture: two semi-finals, then the final (and
 // the bronze match when joint 3rd places are off).
 export const ROSTER_4_BRONZE = [
@@ -51,10 +66,10 @@ export const ROSTER_4_JOINT = [
 export const winnerOf = ({ shiro, aka }) => (shiro.localeCompare(aka) <= 0 ? 'shiro' : 'aka');
 
 // The two names an editor shows, Shiro first.
-export async function editorSides(page, root = INLINE_EDITOR) {
+export async function editorSides(page, root = INLINE_EDITOR, { timeout } = {}) {
   const ed = page.locator(root).first();
-  const shiro = (await ed.locator('.sb-side--shiro .numbered-name__text').first().innerText()).trim();
-  const aka = (await ed.locator('.sb-side--aka .numbered-name__text').first().innerText()).trim();
+  const shiro = (await ed.locator('.sb-side--shiro .numbered-name__text').first().innerText({ timeout })).trim();
+  const aka = (await ed.locator('.sb-side--aka .numbered-name__text').first().innerText({ timeout })).trim();
   return { shiro, aka };
 }
 
@@ -116,7 +131,7 @@ export async function inlineRunning(page) {
 // renders is not taken for one with nothing left. Throws when Start was tapped
 // and no bout runs by the deadline, or the console never settles.
 const NOTHING_HELD_MS = 1_500;
-export async function ensureRunning(page, { timeout = 15_000 } = {}) {
+export async function ensureRunning(page, { timeout = EXPECT_TIMEOUT_MS } = {}) {
   const start = upNextCard(page).getByRole('button', { name: 'Start match' });
   let tappedAt = null;
   let nothingSince = null;
@@ -159,15 +174,49 @@ export async function playRunningBout(page, { waza = 'M' } = {}) {
   return { ...pair, winner: side };
 }
 
+// Play the running bout (or start the Up next one) as a script says, and Finish.
+// `script({ shiro, aka })` returns what to record for that pairing, or throws for
+// a pairing the journey did not plan:
+//   { draw: true }                       Mark draw (hikiwake, no points)
+//   { shiro: ['M'], aka: ['K', 'D'] }    the waza each side is awarded, in order
+// Marks level on both sides finish as hikiwake too (the board reads equal totals
+// as a draw). Returns the pairing and what was recorded.
+export async function playScriptedBout(page, script) {
+  const pair = await ensureRunning(page);
+  if (!pair) throw new Error('playScriptedBout: nothing running or startable on this court');
+  const plan = script(pair);
+  if (plan.draw) await markDraw(page);
+  for (const side of ['shiro', 'aka']) {
+    for (const waza of plan[side] || []) await awardIppon(page, side, waza);
+  }
+  await finishMatch(page);
+  await expect(completedRowFor(page, pair)).toBeVisible();
+  return { ...pair, plan };
+}
+
+// The bout the console's inline editor is running on the individual board, as
+// its pairing, or null when no bout runs there. With `quick` (the poll for the
+// bout to be gone) the editor can leave between the two reads, which is a bout
+// no longer running: the pairing read then gives up in a second rather than
+// waiting for a gone editor. A read that expects a bout waits as long as any
+// other.
+const liveIndividualBout = async (page, { quick = false } = {}) => (
+  (await inlineRunning(page))
+    ? editorSides(page, INLINE_EDITOR, quick ? { timeout: 1_000 } : {}).catch(() => null)
+    : null);
+
 // Open the correction of a completed bout on the shiaijo page, the way the
 // operator now must. The console never holds a live bout and an open
 // correction at once (bc-crpn): while a bout runs, Correct is refused with a
 // notice at the row and a toast, and the notice says what to do: send the live
 // bout back to the queue (its score is kept), then correct. Returns the bout
 // that was live (null when the court was idle) and what the refusal said.
-export async function correctCompleted(page, pair) {
+// `readLive(page, { quick })` reads the bout the console's editor is running (null when
+// none): the individual board by default; fixtures/shared-court.mjs passes
+// liveBout, which reads a team sheet as well (correctAcross).
+export async function correctCompleted(page, pair, { readLive = liveIndividualBout } = {}) {
   const done = completedRowFor(page, pair);
-  const live = (await inlineRunning(page)) ? await editorSides(page) : null;
+  const live = await readLive(page);
   await done.getByRole('button', { name: 'Correct' }).tap();
   let refusal = null;
   if (live) {
@@ -176,12 +225,12 @@ export async function correctCompleted(page, pair) {
     const toast = (await page.locator('.toast').allInnerTexts().catch(() => [])).join(' | ');
     refusal = {
       notice: (await notice.innerText()).trim(), toast,
-      editorStillOnLiveBout: (await inlineRunning(page)) && JSON.stringify(await editorSides(page)) === JSON.stringify(live),
+      editorStillOnLiveBout: JSON.stringify(await readLive(page)) === JSON.stringify(live),
     };
     expect(refusal.notice).toMatch(/^Shiaijo \S+ is running .+\. Finish it or send it back to the queue first\. Then correct this match\.$/);
     await page.getByRole('button', { name: 'Send back to queue' }).tap();
     refusal.sendBack = await hastyShiaijoConfirm(page);
-    await expect.poll(() => inlineRunning(page), { timeout: 10_000 }).toBe(false);
+    await expect.poll(() => readLive(page, { quick: true }), { timeout: 10_000 }).toBeNull();
     await done.getByRole('button', { name: 'Correct' }).tap();
   }
   await expect(inlineEditor(page).first().locator('.editor-head-pill')).toHaveText('CORRECTION');

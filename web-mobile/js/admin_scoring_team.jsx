@@ -2356,6 +2356,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       lastRepPickEditRef.current[side] = undefined;
     }
   };
+  // The stamps are taken only while the match is RUNNING, because only then is the edit
+  // autosaved: on a scheduled match, or a correction of a completed one, nothing is sent,
+  // no landed save would ever clear a stamp, and a net-zero fiddle would make the sheet
+  // refuse a copy from another device it would otherwise follow. When the match leaves
+  // running (another device finished it or sent it back to the queue inside the debounce)
+  // the write is dropped with no callback, so no landed save clears them either: they go
+  // here. The individual and engi editors do the same.
+  useEffectA(() => { if (m.status !== "running") clearLandedEditStamps(Infinity); }, [m.status]);
+  // A REFUSED autosave stores and broadcasts nothing, so no later copy would re-run the
+  // adopt, and the stamps it left would hold the operator's rows against the server for
+  // good. With no edit since the save was built, every row and pick it carried takes the
+  // server's current copy (assigned beside the adopt below; the ref is the latest render's).
+  const takeServerRowsRef = useRefA(null);
   // C1: updateSub is the single choke-point for all sub-bout state
   // mutations. Calling markScoringDirty() here captures every edit
   // (pts add/remove, fouls, fusensho, draw) without repetition.
@@ -2374,12 +2387,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // part, because the adopt follows the server for each part on its own.
   const updateSub = (idx, fn, opts) => {
     editSeqRef.current += 1;
-    if (idx === daihyosenIdx && opts?.repPickSide) {
-      lastRepPickEditRef.current[opts.repPickSide] = serverNowMs();
-      repPickEditSeqRef.current[opts.repPickSide] = editSeqRef.current;
-    } else {
-      lastRowEditRef.current.set(subs[idx]._pos, serverNowMs());
-      rowEditSeqRef.current.set(subs[idx]._pos, editSeqRef.current);
+    // Stamped only while running: nothing else is autosaved to clear one (the effect above).
+    if (m.status === "running") {
+      if (idx === daihyosenIdx && opts?.repPickSide) {
+        lastRepPickEditRef.current[opts.repPickSide] = serverNowMs();
+        repPickEditSeqRef.current[opts.repPickSide] = editSeqRef.current;
+      } else {
+        lastRowEditRef.current.set(subs[idx]._pos, serverNowMs());
+        rowEditSeqRef.current.set(subs[idx]._pos, editSeqRef.current);
+      }
     }
     setSubsByOperator(prev => {
       const rows = reconcileRowsToPositions(prev, serverSubs);
@@ -3751,7 +3767,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // case where a prior [Remove this bout] left one to adopt into.
   _autosaveSeenStampRef.current = Math.max(m.modifiedAt || 0, _recordBoutAnswerStampRef.current);
   _autosaveBuildPatchRef.current = buildPatch;
-  _autosaveOnSubmitRef.current = landedAutosave(onSubmit, editSeqRef, clearLandedEditStamps);
+  _autosaveOnSubmitRef.current = landedAutosave(onSubmit, editSeqRef, clearLandedEditStamps, (seq) => {
+    if (takeServerRowsRef.current) takeServerRowsRef.current(seq);
+  });
 
   const doSubmit = async (fn) => {
     cancelScoringDebounce(); // C1: cancel pending autosave before explicit submit
@@ -3984,6 +4002,30 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // per-MATCH, not per-bout, so it cannot merge two people's rows. That case is
   // theirs to resolve.
   const prevServerSubsRef = useRefA(serverSubs);
+  // A refused autosave (takeServerRowsRef above): the rows and picks stamped up to `seq`
+  // take the server's current copy, by the adopt's own composition (composeRepRow) and
+  // agreement (boutGroup, the pick groups). An edit since `seq` is still owed, so
+  // nothing is taken; the save that carries it decides. A row the server does not hold
+  // stays the operator's.
+  takeServerRowsRef.current = (seq) => {
+    if (editSeqRef.current !== seq) return;
+    const rows = new Set(rowEditSeqRef.current.keys());
+    const picks = { a: repPickEditSeqRef.current.a !== undefined, b: repPickEditSeqRef.current.b !== undefined };
+    clearLandedEditStamps(seq);
+    const servedByPos = new Map(serverSubs.map(s => [s._pos, s]));
+    const repServed = servedByPos.has(DAIHYOSEN_POSITION);
+    setSubs(prev => prev.map(local => {
+      const ss = servedByPos.get(local._pos);
+      if (!ss) return local;
+      if (local._pos === DAIHYOSEN_POSITION) {
+        return composeRepRow(local, ss, { score: rows.has(local._pos), a: picks.a, b: picks.b });
+      }
+      return rows.has(local._pos) ? ss : local;
+    }));
+    for (const pos of rows) if (servedByPos.has(pos)) claimChanged.agree(boutGroup(pos));
+    if (repServed && picks.a) claimChanged.agree(GROUP_REP_PICK_A);
+    if (repServed && picks.b) claimChanged.agree(GROUP_REP_PICK_B);
+  };
   useAdoptFromServer({
     signature: serverSubsSig,
     apply: () => {

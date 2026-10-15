@@ -25,10 +25,13 @@ failed: the `test.fixme` steps of open beads (see
 [When a journey finds a bug](#when-a-journey-finds-a-bug)) are reported as
 skipped.
 
-The Playwright version here and the one `scripts/screenshots` resolves are the
-same release, so the two share one Chromium under `~/.cache/ms-playwright`. If
-that cache is removed the stamp outlives it; run `npx playwright install
-chromium` here.
+This directory pins `@playwright/test` at 1.63.0, and `scripts/screenshots`
+resolves `playwright-core` 1.63.0 from its lockfile (its `package.json` only
+asks for `^1.56.0`, so the match holds because both lockfiles are current, not
+because anything enforces it). While the two agree they share one Chromium under
+`~/.cache/ms-playwright`; if either lockfile moves to another release, each
+downloads its own. If that cache is removed the stamp outlives it; run
+`npx playwright install chromium` here.
 
 To debug, pass Playwright's own flags through `E2E_ARGS`: `--headed` shows the
 browser, `--debug` opens the inspector, and a failing test leaves a trace
@@ -36,38 +39,126 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
 
 ## Layout
 
+    package.json            Playwright, pinned; package-lock.json is its
+                            lockfile
     playwright.config.mjs   projects, timeouts, output
     fixtures/test.mjs       the `test` every journey imports (server, baseURL,
                             page) and the console policy (below)
-    fixtures/devices.mjs    the operator iPad and the spectator phone
-    fixtures/setup.mjs      first-run tournament form, sign in, sign out
-    fixtures/pace.mjs       the dwell the app's tap-bounce guard needs (below)
+    fixtures/devices.mjs    the operator iPad and the spectator phone, and
+                            EXPECT_TIMEOUT_MS, the one expect timeout
+    fixtures/setup.mjs      first-run tournament form, sign in, sign out, and
+                            enterTournament (sign in, or create the tournament
+                            when the file's server has none): the one owner
+    fixtures/pace.mjs       the dwell the app's tap-bounce guard needs (below),
+                            and the two settle helpers, rendered and
+                            untilStable (Waiting for the app)
     fixtures/wizard.mjs     the create-competition wizard
     fixtures/competition.mjs  roster paste box, Generate / Discard draw, Start
+    fixtures/roster.mjs     the Registration desk: check-in, search,
+                            Group by dojo; the seed boxes; the participant Edit
+                            dialog; reads of pool membership and bracket slots.
+    fixtures/pools.mjs      the pool standings tables, admin Pools tab and the
+                            public viewer's Pools tab: rows, figures, rank
+                            badge, advancing; the individual pool row
+                            (playerRowFigures).
     fixtures/shiaijo.mjs    /admin/shiaijo/:court (queue, inline editor, which
                             match an editor holds)
     fixtures/scores.mjs     the Scores tab and its overlay editor
-    fixtures/scoring.mjs    scoring an individual bout on either editor, and
-                            the Finish check every editor shares
+    fixtures/scoring.mjs    scoring an individual bout on either editor, Start
+                            match (startMatch), clearMarks, Mark draw
+                            (markDraw), the Finish check every editor shares
+                            (finishMatch, which the team sheet's finishTeam
+                            is), and the wait for a match write's answer
+                            (nextMatchWrite, writeLanded)
     fixtures/individual.mjs individual rosters, the decision panel, playing and
-                            correcting a bout on the court console
+                            correcting a bout on the court console, and a bout
+                            played from a script (playScriptedBout), such as a
+                            pool bout
     fixtures/team.mjs       team members, the three lineup entry points (the
                             Lineups page, the lineup panel, the score sheet
-                            row) and the team score sheet's bout rows
+                            row) and the team score sheet's bout rows (the
+                            strike on a row, ipponOnRow, is shared with the
+                            kachinuki sheet)
     fixtures/kachinuki.mjs  the kachinuki sheet: bouts, Record bout, Encho, End
                             match, the correction doors
+    fixtures/engi.mjs       the engi (kata pairs) flag editor: flag counters,
+                            entering flags, the two-tap Save result
+    fixtures/held-write.mjs holding a running match's score write in flight, to
+                            observe a race with its echo (below)
     fixtures/shared-court.mjs  two competitions on one shiaijo and a moved
                             match: seeding, the competition picker, the nudges
-    fixtures/public.mjs     the public viewer and the TV board
+    fixtures/public.mjs     the public viewer and the TV board; the readers of
+                            the watch picker and the schedule filter's options
+                            (pickerEntries); schedule rows; the watchlist hero;
+                            the doors to a match card (homeNowRow, poolRow,
+                            upNextRow); the card's marks (cardMarks)
+    fixtures/organiser.mjs  the Excel download, folder import, /reset, logo and
+                            sponsor uploads; runtime PNG and import-bundle
+                            makers; a zip reader for workbooks.
     fixtures/clumsy.mjs     the clumsy operator (below)
-    fixtures/pointer.mjs    the coarse pointer: check, restore, tap-target size
+    fixtures/pointer.mjs    the coarse pointer: check, restore, ensureCoarse
+                            (the one "if not coarse, restore"), tap-target size
     fixtures/shots.mjs      per-step screenshots, and each journey's folder
     fixtures/audit.mjs      audit rows (AUDIT lines and audit.json)
-    journeys/*.spec.mjs     the journeys
+    journeys/*.spec.mjs     the journeys, one line each:
+      smoke                       the harness end to end: seeding through the
+                                  interface, scoring on both editors, every
+                                  clumsy helper once, a spectator's phone
+      knockout-mixed-individual   the court operator's review of individual
+                                  competitions (pools and knockout), and the
+                                  bead guards (bc-ltap and others)
+      knockout-mixed-team         team lineups from the three entry points,
+                                  scoring a team encounter, one result on every
+                                  surface
+      knockout-mixed-kachinuki    kachinuki (winner stays on) played eight bouts
+                                  deep, every correction door, the final
+      kachinuki-pools             kachinuki in pools: winner stays on, a
+                                  hikiwake, a team exhausted, a level pool draw
+                                  with no representative bout, the pool tables
+                                  on admin and phone, the winners in the final
+      pools-tiebreak              pools and knockout at a minimum pool size (7
+                                  entrants make pools of 4 and 3); a pool tie
+                                  level on every criterion adds a tie-break
+                                  bout, whose winner is ranked and seated in the
+                                  knockout on admin and phone; a tie split on
+                                  points lost adds none; a second competition
+                                  with Oversized send +1 where the tie is over
+                                  the extra qualifier place, owed a bout too; a
+                                  third with Fit the knockout where the tie is
+                                  over the 2nd the draw drafted, owed a bout
+                                  while the same tie in an undrafted pool is not
+      moved-match                 a waiting match moved to another shiaijo
+                                  reaches that court's console without a reload
+      shared-shiaijo              two competitions on one shiaijo: the picker,
+                                  the nudge lines, correcting across them
+      engi                        an engi (kata pairs) knockout scored in flags,
+                                  and the bc-evts tap-back guard
+      organiser-roster            check-in decides who is drawn, and the desk
+                                  finds a number; seeds keep two seeds out of
+                                  one pool; an edited or replaced competitor
+                                  reaches the bracket, court console and public
+                                  viewer; a duplicate name and dojo is refused.
+      organiser-admin             file-mode organiser jobs: the results
+                                  workbook, folder import, including a row with
+                                  no date, logo and sponsor, forgotten-password
+                                  reset.
+      organiser-locked            locked mode: sign-in with the hashed password,
+                                  no Forgot password, and /reset shows it is
+                                  disabled.
+      spectator.public            a spectator's phone (public project): the
+                                  home, competition tabs, schedule; competitor
+                                  search by number, name and dojo; the watchlist
+                                  hero and the match card following an operator
+                                  live; the match card from each door
+    output/                 screenshots, audit.json and traces (below);
+                            gitignored
 
-Each fixture module owns the selectors for one surface, so a UI change breaks
-one file. The wizard is the one most likely to move; `fixtures/wizard.mjs` is
-the only file that knows its copy.
+Each fixture module owns the selectors for one surface, so a UI change
+usually breaks one fixture file. Not only one: `fixtures/shared-court.mjs`
+reads the create wizard page itself (`/admin/create-competition`, its "Add
+competition" heading, `#create-start-time`) beside `fixtures/wizard.mjs`, and
+a spec holds raw locators for what it checks once. The wizard is the surface
+most likely to move; look in both files when it does.
 
 ## Projects and devices
 
@@ -79,11 +170,19 @@ Two projects, both Chromium:
   emulation and the test carries a `coarse-pointer` annotation saying so.
   Every journey runs here unless its file is named `*.public.spec.mjs`.
 - `public`: a phone in portrait (390x844), for journeys about a public surface
-  alone (`*.public.spec.mjs`). No journey uses this project yet; the public
-  surfaces are checked from `operator` journeys through a second context.
+  alone (`*.public.spec.mjs`). `spectator.public.spec.mjs` is the one journey
+  on this project: it seeds and scores from a second context opened with
+  `OPERATOR_DEVICE`. Other public checks stay on the `operator` project,
+  through a second context.
 
-240 s is the default test timeout (`expect` waits 15 s); some journeys raise it
-for a long test with `test.setTimeout`. `retries` is 0 and `forbidOnly` is on, so a stray `test.only` fails the run.
+240 s is the default test timeout; some journeys raise it for a long test with
+`test.setTimeout`. `expect` waits 15 s (`EXPECT_TIMEOUT_MS` in
+`fixtures/devices.mjs`, which the fixtures use for their own waits), an action
+such as a tap waits 15 s (`actionTimeout`) and a navigation 30 s
+(`navigationTimeout`). `retries` is 0 and `forbidOnly` is on, so a stray
+`test.only` fails the run. Chromium runs with `--no-sandbox` only when the
+process is root, which it refuses to sandbox; anywhere else the sandbox stays
+on (the same rule as `scripts/screenshots/run.mjs`).
 
 An operator journey that needs a second device opens another context with one
 of the two devices from `fixtures/devices.mjs`: `PUBLIC_DEVICE` for a public
@@ -101,11 +200,31 @@ server; on a slow or loaded machine pass `E2E_ARGS='--workers=1'`. A worker
 runs its files one after another (all of them with `--workers=1`), and each
 file starts with a fresh server, never the previous file's tournament. A
 worker stops a file's server when it starts the next file's server, or when
-the worker ends. Tests in one file share its server, so a spec file
-that seeds once and then walks several tests declares
+the worker ends. Tests in one file share its server, so a spec file that seeds
+once and then walks several tests declares
 `test.describe.configure({ mode: 'serial' })`. A `beforeAll` hook asks for it
 with `serverForFile(testInfo.file)`. Journeys navigate by path
-(`page.goto('/admin')`); the host is the file's server.
+(`page.goto('/admin')`); the host is the file's server. A spec file that
+needs its server started with extra arguments or environment declares them with
+`serverOptionsFor(fileURLToPath(import.meta.url), () => ({ args, env }))` from
+`fixtures/test.mjs`, as `organiser-locked.spec.mjs` does for `--lock-password`
+and its hash in `TOURNAMENT_PASSWORD_HASH`.
+
+When a test fails, Playwright discards its worker. In a serial file the rest of
+that file is skipped, because the later tests depend on what the earlier ones
+seeded. A file that is not serial (`knockout-mixed-team.spec.mjs`, and the bead
+guards at the end of `knockout-mixed-individual.spec.mjs`) goes on in a fresh
+worker, with a fresh server and an empty data folder, so each of its tests must
+seed or sign in again itself (`enterTournament` creates the tournament when the
+server has none).
+
+`knockout-mixed-kachinuki.spec.mjs` is serial but cannot let a guard skip the
+rest. Its four regression guards (bc-crpn, bc-emsl, bc-kheb, bc-sync) need the
+final's live console, so they run as steps inside the final's tests, wrapped in
+`guarded()`. A guard that fails is not thrown. It is recorded as a
+`guard-failure` annotation on the test and as an audit row, the console is put
+back, and the final's own checks still run; the played-out test then fails at
+its end naming every guard that failed.
 
 ## Seeding goes through the interface
 
@@ -120,10 +239,14 @@ about one screen, not the path to it) and its `api.mjs`, `seed.mjs` and the
 `authAdmin` sign-in shortcut are not used here.
 
 Scoring goes through the score editors too. `scripts/screenshots/lib/editor.mjs`
-owns the editor selectors and Start, which `fixtures/scoring.mjs` re-exports
-beside the ippon helpers. Finish is `fixtures/scoring.mjs`'s own: a journey
-taps it, on the inline editor as well as the overlay, and `finishMatch` (and
-`finishTeam`, through the same check) returns only once the write landed. It
+owns the editor selectors, which `fixtures/scoring.mjs` re-exports beside the
+ippon helpers. Start and Finish are `fixtures/scoring.mjs`'s own, not that
+library's, which clicks and can return without having acted. `startMatch` taps
+the overlay editor's Start match, fails when the button never appears, and
+returns once the button has left. A journey taps Finish, on the inline editor as
+well as the overlay, and `finishMatch` (the team sheet's `finishTeam` is the
+same function, given the sheet as its root) returns only once the write
+landed. It
 fails at once when the server does not answer the completing write within the
 expect timeout, answers it with an error status, or answers `applied: false`
 (the refusal a disarmed Finish follows). It then waits for the editor to let
@@ -140,8 +263,8 @@ variants as real input:
 |---|---|
 | `tapNeighbour(locator, direction)` | taps the control next to the intended one, found by layout, and returns which it hit |
 | `doubleTap(locator)` | two taps inside the app's bounce window less 100 ms; throws when the machine was too slow to land them that close, so a caller may assert on the outcome unconditionally |
-| `retapWhileSaving(locator)` | a second tap while the button reads "Saving…" (writes are held briefly so the state is observable); throws when "Saving…" is never seen |
-| `interrupt(page, kind, { awayMs, during })` | `reload`, `back` (then forward, only if Back moved), `hidden` (tab to background and back), `offline` (network down and back); `awayMs` (600 by default) is the time away and `during(page)` runs while the operator is away |
+| `retapWhileSaving(locator)` | a second tap while the button reads "Saving…" (writes are held briefly so the state is observable, and every write the taps caused is waited for before it returns, so a duplicate one is on the page when the caller reads it); throws when "Saving…" is never seen |
+| `interrupt(page, kind, { awayMs, during })` | `reload`, `back` (then forward, only if Back moved), `hidden` (tab to background and back), `offline` (network down and back); `awayMs` (600 by default) is the time away and `during(page)` runs while the operator is away, for every kind but `reload`, which reloads at once and uses neither |
 | `hastyConfirm(page)` | answers the open confirm dialog with its most prominent button and returns its label |
 | `hastyShiaijoConfirm(page)` | the same for the shiaijo page's own confirms (Send back to queue, Move court) |
 | `loudestButton(scope)` | the ranking both confirm helpers use, for any other panel |
@@ -150,10 +273,38 @@ Each returns what happened, and a journey records that as an audit row. Where
 the docs or an operator ruling say what must happen (a double tap on an ippon
 button lands one mark, an interruption leaves the operator on the same court),
 the journey also asserts it, so a regression fails the suite; the rest is
-judged by a person from the screenshots. `hidden` needs a note: headless Chromium never changes page
-visibility on its own, so the helper overrides `document.hidden` and
-`document.visibilityState` and dispatches a real `visibilitychange` for each
-edge, which is what the app's listeners read.
+judged by a person from the screenshots.
+
+A helper asserts nothing about the app, but it throws when it could not perform
+its variant: `tapNeighbour` finds no neighbour, `doubleTap` lands its taps too
+far apart, `retapWhileSaving` never sees "Saving…", and the confirm helpers find
+no dialog.
+
+`hidden` needs a note: headless Chromium never changes page visibility on its
+own, so the helper overrides `document.hidden` and `document.visibilityState`
+and dispatches a real `visibilitychange` for each edge, which is what the app's
+listeners read.
+
+## Holding a save in flight
+
+On localhost the answer to an autosave comes back within milliseconds of the save
+going out, so a tap made "while the save is out" never lands in that window by
+itself. `fixtures/held-write.mjs` (`holdScoreWrites(page)`) intercepts the match
+score PUTs: `holdNext()` holds the next one, its `sent` promise resolves once that
+PUT is out (so the autosave debounce has run), and `release()` lets it through
+after the journey has made the next tap, as a slow uplink would. `bodies` lists
+every score PUT the page sent. `answeredBeforeNextWrite(held)` waits for the held
+write's response, then for the write that follows it (each up to `safetyMs`), and
+throws if no follow-up write was ever sent or if it was sent before the response
+reached the page, so a journey cannot pass without exercising the race. A hold
+nobody releases is let go after a safety timeout (`safetyMs`, 10 s by default);
+`stop()` only cleans up (release, unroute, remove the listener) and is called in a
+`finally`, and `assertNoSafetyRelease()` throws when the safety timeout had to
+fire, so a journey calls it after its body succeeded, outside the `finally`, where
+a throw would hide the body's own assertion error. The bc-ltap step of
+`knockout-mixed-individual.spec.mjs` (individual editor) and the bc-evts step of
+`engi.spec.mjs` (engi editor) use it to guard a flag or mark taken back while its
+add is still saving.
 
 ## The pace of a tap
 
@@ -164,14 +315,54 @@ that window, whichever button it lands on (`web-mobile/js/tap_guard.jsx`; a
 tap on the other side counts at once). Playwright's second tap is always
 inside it, so `fixtures/pace.mjs` holds the dwell (the screenshot harness's
 `TAP_DWELL_MS`, 500 ms) and every helper that taps into a fresh layer, confirms an arm
-or strikes for a side waits it out: `login`, `hastyConfirm`,
-`hastyShiaijoConfirm`, `lineupsNameSlot`, `finishMatch`, `finishTeam`,
-`endMatch`, `awardIppon`, `boutIppon`, `awardBoutIppon` (`tapOnSide` keeps the
-time of the last tap on each side). A journey that taps such a thing by hand
-does the same. `doubleTap` is the one helper that deliberately does not: it is
-the bounce, and the app is meant to ignore the second tap. `pace.mjs` reads the
+or strikes for a side waits it out. Into a fresh layer: `login`,
+`hastyConfirm`, `hastyShiaijoConfirm`, `lineupsNameSlot`. Onto an armed button,
+through `armTwoTap` (tap, wait for the armed state, out the dwell): `armFinish`
+(so `finishMatch` and `finishTeam`), `endMatch`, `saveEngiResult`. Per side of
+a bout, through `tapOnSide`, which keeps the time of the last tap on each side:
+`awardIppon` and `ipponOnRow` (the strike `boutIppon` makes on the team sheet
+and `awardBoutIppon` on the kachinuki sheet, which both wait for the board and
+the autosave). In a fighter name list, through `tapNameOption`, which keeps the
+time of the last option tap: a pick stamps the team sheet's bout list, which
+ignores every click inside it for that window, so `pickFromNameBox` and any
+option tapped by hand go through it. A journey that taps such a thing by hand
+does the same. `doubleTap` is the one
+helper that deliberately does not: it is the bounce, and the app is meant to
+ignore the second tap. `pace.mjs` reads the
 app's window from `web-mobile/js/tap_guard.jsx` (`TAP_BOUNCE_MS`) rather than
 copying it, and fails to load if the dwell is not longer than it.
+
+## Waiting for the app
+
+A journey waits for what it is about to read, and never for a guessed time.
+In order of preference: a state (`expect(...).toHave...`, `expect.poll`); the
+server's answer to a write (`nextMatchWrite(page)` before the tap that causes
+it, `writeLanded(answered)` after: the sync pill is process-wide, not per
+match, so it cannot say that one match's edit was saved); and, when the
+outcome is the thing under audit and no single state names it, one of two
+settle helpers in `fixtures/pace.mjs`:
+
+- `rendered(page)` waits two animation frames, for the read after a tap whose
+  effect varies by design and is local to the page (the control next to the
+  intended one, a double tap).
+- `untilStable(read)` polls `read()` until two reads 400 ms apart agree and
+  returns that value, for a screen that refetches after the action (a reload,
+  Back and Forward, a write's echo) and ends in a state the journey records
+  rather than expects. A read taken after a tap can agree with itself on the
+  state from BEFORE the tap, so a probe passes `from` (the settled read taken
+  before the tap): the helper then waits up to 3 s for the read to leave it,
+  and settles on it only if nothing ever changed. Where the end state IS known,
+  wait for that instead (`expect.poll(...)`); where the tap causes one match
+  write, wait for its answer (`nextMatchWrite`).
+
+`page.waitForTimeout` stays in four places, each marked `Deliberate:` or
+named for what it is: the dwell of a tap's pace (above); the time away of an
+`interrupt` (`awayMs`) and the operator's own delay a journey names ("3 s
+later", "300 ms after Finish"); and a NEGATIVE, where the journey asserts that
+nothing happens (no second bout appended by a bounced tap, no start after a
+decision, a taken-back mark staying taken back after a late echo). An absence
+has no state to wait for, so the time is the evidence, and a single read
+straight after the action would pass whatever came later.
 
 ## The console policy
 
@@ -187,25 +378,36 @@ fixture is wrapped so none is missed). When the test ends:
   `CONSOLE {json}` line otherwise, and is listed on the test as a
   `console-warning` annotation.
 
-Everything a test's pages logged is attached to it as `console.json` (kept in a failing test's trace), with the
-page it came from, whether the device was offline at the time, and, for a
-failed request, the status and body of the `/api` answer. What a `beforeAll`
-hook's pages log, or what the previous test's pages still had open, is checked
-with the first test of the file and marked "before this test (a beforeAll hook or
-the previous test's open pages)"; what an `afterAll` hook's pages log is reported under its own file when
-the next file's server starts or the worker stops, and an error there fails
-the run.
+Everything a test's pages logged is attached to it as `console.json`, but only
+when there is something to attach. A failing test keeps it in its trace. Each
+entry carries the page it came from and whether the device was offline at the
+time. For a failed request it also carries the status and body of the `/api`
+answer.
 
-The allowlist holds only noise a journey's scenario makes, in three entries:
+What a `beforeAll` hook's pages log, or what the previous test's pages still had
+open, is checked with the first test of the file and marked "before this test (a
+beforeAll hook or the previous test's open pages)". What an `afterAll` hook's
+pages log is reported under its own file when the next file's server starts or
+the worker stops, and an error there fails the run.
+
+The allowlist holds only noise a journey's scenario makes, in four entries:
 requests the browser could not send while a journey has the device offline;
 the app's own "Failed to fetch court matches" log from the court console
-while the device is offline; and the 409s of a start (a `/score` write whose
+while the device is offline; the 409s of a start (a `/score` write whose
 body carries `status: "running"`) or a reopen the app sends through the
 server's gate and shows refused (the court busy, a competitor fighting
 elsewhere or barred by a withdrawal, or the knockout match it feeds being
-fought). Any other write refused that way is an error. A browser "Failed to
-load resource" line is paired with the `/api` answer it is about one to one,
-in arrival order per URL.
+fought). Any other write refused that way is an error. The fourth is the 409
+refusing an organiser's participant edit to the same name and dojo as another
+competitor (organiser-roster journey); the same name in another dojo is
+accepted. A browser "Failed to load resource" line is paired with the `/api`
+answer it is about one to one, in arrival order per URL. Only when the page was
+closed while the 409's body was being read is the refusal code unreadable, and
+the entry then stands on the answer's status, URL and request alone; the
+`CONSOLE` line and a `console-allowed-unread` annotation say "allowed: page
+closed before the refusal's code could be read". A body that is missing for any
+other reason (the read timed out, or failed on a page still open, as a reload
+does) is not allowed: the test fails.
 Each entry matches as narrowly as it can (the message, the URL, the refusal
 code, offline only) and says why in one line. An error that looks like the
 app's own fault does not go on it: the test stays red until a person decides.
@@ -228,19 +430,22 @@ from this directory. The trace's Attachments tab holds the test's
 `console.json` (see [The console policy](#the-console-policy)); the list reporter
 does not write it to a file of its own, and a passing test keeps no trace, so
 its console errors are only in the run log as `CONSOLE {json}` lines. A failing
-test also carries the server's output as `server.log`.
+test also carries the server's output as `server.log`, when a server is running
+for its file.
 
 Every run empties its whole results folder (`output/test-results/`, or
-`E2E_RESULTS_DIR` when set) when it starts, and with `E2E_RESULTS_DIR` set the
-journey folders live inside it, so pointing it at a folder that holds anything
-else deletes that content. A journey empties
-its own `output/<journey>/` in `beforeAll`. Two runs at the same time in one
-checkout would delete each other's traces mid-test, and two runs without
-`E2E_RESULTS_DIR` share every `output/<journey>/`, so give the second one its
-own folder: `E2E_RESULTS_DIR=output/test-results-2 make e2e ...`.
-With `E2E_RESULTS_DIR` set, the journey folders move inside it too
-(`<E2E_RESULTS_DIR>/journeys/<journey>/`), so neither run empties the other's.
-A relative `E2E_RESULTS_DIR` is relative to this directory.
+`E2E_RESULTS_DIR` when set) when it starts, so pointing `E2E_RESULTS_DIR` at a
+folder that holds anything else deletes that content. A journey empties its own
+folder when it calls `journeyShots`, which is once per spec file or once per
+test (see below).
+
+Two runs at the same time in one checkout would delete each other's traces
+mid-test, and two runs without `E2E_RESULTS_DIR` share every `output/<journey>/`,
+so give the second one its own folder:
+`E2E_RESULTS_DIR=output/test-results-2 make e2e ...`. With `E2E_RESULTS_DIR` set,
+the journey folders live inside it, as `<E2E_RESULTS_DIR>/journeys/<journey>/`,
+so neither run empties the other's. A relative `E2E_RESULTS_DIR` is relative to
+this directory.
 
 ## When a journey finds a bug
 
@@ -262,13 +467,20 @@ removes the `fixme`, and the step then guards the fix.
 3. Seed through the interface with the fixtures (`createTournament`, `login`,
    `createCompetition`, `pasteRoster`, `generateDraw`, `startCompetition`).
 4. Take screenshots and keep an audit: `const shot = journeyShots('<journey>')`
-   in `beforeAll` (it empties the folder), `const audit = auditLog('<journey>')`
-   at describe level with `audit.flush()` in `afterAll`, so a journey that fails
-   part way still leaves its rows. `record` from the audit prints each row as an
+   (it empties the folder) either in `beforeAll`, for a file whose tests share
+   one folder, or inside a test, for a file that gives each test a folder of its
+   own (`knockout-mixed-individual` and `knockout-mixed-team` do);
+   `const audit = auditLog('<journey>')` at describe level with `audit.flush()`
+   in `afterAll`, so a journey that fails part way still leaves its rows. `record` from the audit prints each row as an
    `AUDIT` line.
 5. When tests share the seeded server, declare
    `test.describe.configure({ mode: 'serial' })`.
 6. A defect the journey finds becomes a `test.fixme('<bead-id>: ...')` step
    (see below).
 
-`smoke.spec.mjs` is the smallest complete example.
+`smoke.spec.mjs` is the smallest complete example. `engi.spec.mjs` is the one
+journey on an engi (kata pairs) competition: it seeds four pairs through the
+wizard's "Engi (kata competition)" box (`engi: true` in `createCompetition`) and
+the roster paste box (`Name 1 - Name 2, Dojo`), scores a match in flags on the
+court console and checks the result on a spectator's phone, and guards the engi
+editor's tap-back race.

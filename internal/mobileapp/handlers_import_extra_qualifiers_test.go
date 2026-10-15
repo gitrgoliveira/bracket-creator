@@ -63,6 +63,7 @@ func importOneComp(t *testing.T, r http.Handler, manifest string) ImportResult {
 
 func TestImport_ExtraQualifiers_RoundTripsAValidSetting(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
+	seedImportTournamentDate(t, store)
 	defer os.RemoveAll(tempDir)
 
 	res := importOneComp(t, r, `
@@ -89,6 +90,7 @@ competitions:
 
 func TestImport_ExtraQualifiers_RejectsAnUnknownValue(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
+	seedImportTournamentDate(t, store)
 	defer os.RemoveAll(tempDir)
 
 	res := importOneComp(t, r, `
@@ -114,6 +116,7 @@ competitions:
 
 func TestImport_ExtraQualifiers_RejectsMaximumSizingPairing(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
+	seedImportTournamentDate(t, store)
 	defer os.RemoveAll(tempDir)
 
 	res := importOneComp(t, r, `
@@ -143,6 +146,7 @@ competitions:
 // the mode, and store the pair the rule forbids.
 func TestImport_ExtraQualifiers_ValidatedAgainstTheDefaultedSizingMode(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
+	seedImportTournamentDate(t, store)
 	defer os.RemoveAll(tempDir)
 
 	res := importOneComp(t, r, `
@@ -171,6 +175,7 @@ competitions:
 // two cannot answer differently for the same record.
 func TestImport_ExtraQualifiers_ZeroedForAFormatWithNoPoolFedKnockout(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
+	seedImportTournamentDate(t, store)
 	defer os.RemoveAll(tempDir)
 
 	res := importOneComp(t, r, `

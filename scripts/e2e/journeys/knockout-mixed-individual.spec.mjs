@@ -23,7 +23,7 @@
 // which gets a fresh server (fixtures/test.mjs serverForFile), and the
 // file-level beforeAll below creates the tournament again there.
 import { test, expect, isCoarse } from '../fixtures/test.mjs';
-import { OPERATOR_DEVICE } from '../fixtures/devices.mjs';
+import { OPERATOR_DEVICE, EXPECT_TIMEOUT_MS } from '../fixtures/devices.mjs';
 import { journeyShots } from '../fixtures/shots.mjs';
 import { createTournament, login } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
@@ -33,12 +33,15 @@ import {
   editorIdentity, UP_NEXT,
 } from '../fixtures/shiaijo.mjs';
 import {
-  INLINE_EDITOR, EDITOR, ipponButton, syncState, filledSlots, finishButton, armedFinishButton, armFinish, finishMatch,
+  INLINE_EDITOR, EDITOR, clearMarks, ipponButton, syncState, filledSlots, finishButton, armedFinishButton, armFinish, finishMatch,
+  startMatch, awardIppon, nextMatchWrite, writeLanded,
 } from '../fixtures/scoring.mjs';
+import { dwell, rendered, untilStable } from '../fixtures/pace.mjs';
 import {
   doubleTap, hastyConfirm, hastyShiaijoConfirm, interrupt, retapWhileSaving, tapNeighbour,
 } from '../fixtures/clumsy.mjs';
 import { auditLog } from '../fixtures/audit.mjs';
+import { holdScoreWrites } from '../fixtures/held-write.mjs';
 import { tapSize } from '../fixtures/pointer.mjs';
 import {
   ROSTER_12, ROSTER_6, ROSTER_4_BRONZE, ROSTER_4_JOINT, ROSTER_6B, rosterOf,
@@ -125,10 +128,10 @@ test.describe('knockout-mixed-individual', () => {
     const startBtn = card.getByRole('button', { name: /Start match|Starting…/ });
     row({ step: 'start bout', action: 'Start match (Up next card)', variant: 'size', ...(await tapSize(startBtn)) });
     const dbl = await doubleTap(startBtn);
-    await expect.poll(() => inlineRunning(page), { timeout: 15_000 }).toBe(true);
+    await expect.poll(() => inlineRunning(page), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     const running1 = await editorSides(page);
     const inProgress = (await page.locator('.admin-live-strip, .live-strip').allInnerTexts()).join(' ');
-    await page.waitForTimeout(800);
+    await expect.poll(async () => JSON.stringify(await sides(upNextCard(page)).catch(() => null))).not.toBe(JSON.stringify(running1));
     const upNextAfter = await sides(upNextCard(page)).catch(() => null);
     row({ step: 'start bout', action: 'Start match (Up next card)', variant: 'V2 doubleTap', ...dbl,
       intended: firstPair, editorHolds: running1, upNextAfter, liveStrip: inProgress,
@@ -174,7 +177,7 @@ test.describe('knockout-mixed-individual', () => {
     row({ step: 'clear mark', action: 'tap a scored mark', variant: 'V2 doubleTap', ...dblClear,
       marksBefore: afterDbl, marksAfter: afterDblClear, shot: await shot(page, 'mark-double-tapped') });
     // Put the bout back to one men for the winner.
-    while ((await filledSlots(page, w1).count()) > 1) await filledSlots(page, w1).first().tap();
+    await clearMarks(filledSlots(page, w1), { keep: 1, from: 'first' });
     if ((await filledSlots(page, w1).count()) === 0) {
       await settle(page); // the same reset race as below: let a removal land first
       await ipponButton(page, w1, 'M').tap();
@@ -188,18 +191,13 @@ test.describe('knockout-mixed-individual', () => {
     await ipponButton(page, other, 'K').tap();
     const pillAtTap = (await syncState(page).innerText()).trim();
     await interrupt(page, 'reload');
-    await expect.poll(() => inlineRunning(page), { timeout: 15_000 }).toBe(true);
-    await page.waitForTimeout(1000);
+    await expect.poll(() => inlineRunning(page), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
+    await expect(syncState(page)).toHaveText('Synced');
     const otherAfterFastReload = await slotMarks(page, other);
     row({ step: 'running bout', action: `${other} K then reload within 300ms`, variant: 'V3 interrupt reload (inside autosave debounce)',
       pillAtTap, marksAfterReload: otherAfterFastReload, shot: await shot(page, 'fast-reload-after-tap') });
     // Whatever survived, go back to one men for the winner and nothing else.
-    for (const sd of [other, w1]) {
-      while ((await filledSlots(page, sd).count()) > 0) {
-        await filledSlots(page, sd).first().tap();
-        await page.waitForTimeout(150);
-      }
-    }
+    for (const sd of [other, w1]) await clearMarks(filledSlots(page, sd), { from: 'first', pauseMs: 150 });
     // Let the removals land before the M. A fresh-clone run lost this tap to
     // the removal's echo (bc-ltap, fixed in the same PR and guarded by its own
     // test below); this step only resets the bout, so it does not race.
@@ -212,7 +210,7 @@ test.describe('knockout-mixed-individual', () => {
     // V3 interruptions mid-bout, and V5: same court, same match, marks kept?
     for (const kind of ['reload', 'hidden', 'back', 'offline']) {
       const r = await interrupt(page, kind);
-      const back = await expect.poll(() => inlineRunning(page), { timeout: 15_000 }).toBe(true).then(() => true, () => false);
+      const back = await expect.poll(() => inlineRunning(page), { timeout: EXPECT_TIMEOUT_MS }).toBe(true).then(() => true, () => false);
       const id = back ? await editorIdentity(page) : null;
       const marks = back ? await slotMarks(page, w1) : null;
       row({ step: 'running bout, one ippon', action: 'interruption', variant: `V3 interrupt ${kind}`, ...r,
@@ -225,7 +223,9 @@ test.describe('knockout-mixed-individual', () => {
     const finish = finishButton(page);
     row({ step: 'finish', action: 'Finish + Start Next', variant: 'size', label: (await finish.innerText()).trim(), ...(await tapSize(finish)) });
     const dblFinish = await doubleTap(finish);
-    await page.waitForTimeout(1500);
+    await expect(completedRowFor(page, running1).or(armedFinishButton(page))).toBeVisible();
+    // A tap inside the arm's bounce window is ignored: out it, so the tap below counts.
+    await dwell(page, Date.now());
     const finishedByDouble = await completedRowFor(page, running1).isVisible().catch(() => false);
     const armedLeft = await armedFinishButton(page).isVisible().catch(() => false);
     row({ step: 'finish', action: 'Finish + Start Next', variant: 'V2 doubleTap', ...dblFinish,
@@ -239,7 +239,7 @@ test.describe('knockout-mixed-individual', () => {
     expect(r1.result).toMatch(/M/);
 
     // Finish + Start Next started the next bout on THIS court.
-    await expect.poll(() => inlineRunning(page), { timeout: 15_000 }).toBe(true);
+    await expect.poll(() => inlineRunning(page), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     const id2 = await editorIdentity(page);
     const running2 = await editorSides(page);
     expect(id2.court).toBe('A');
@@ -256,14 +256,14 @@ test.describe('knockout-mixed-individual', () => {
     } catch (e) {
       nbFinish = { hit: null, note: String(e.message).slice(0, 120) };
     }
-    await page.waitForTimeout(500);
+    await rendered(page);
     row({ step: 'finish', action: 'armed Finish', variant: 'V1 tapNeighbour left', hit: nbFinish.hit ? nbFinish.hit.label : null,
       note: nbFinish.note, stillArmed: await armedFinishButton(page).isVisible().catch(() => false),
       editorCourt: (await editorIdentity(page)).court, shot: await shot(page, 'finish-neighbour-tapped') });
     if (!(await armedFinishButton(page).isVisible().catch(() => false))) await armFinish(page);
     const retap = await retapWhileSaving(armedFinishButton(page));
     await expect(completedRowFor(page, running2)).toBeVisible();
-    await expect.poll(() => inlineRunning(page), { timeout: 15_000 }).toBe(true);
+    await expect.poll(() => inlineRunning(page), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     const running3 = await editorSides(page);
     const completedCount = await completedRows(page).count();
     row({ step: 'finish', action: 'armed Finish', variant: 'V2 retapWhileSaving', ...retap,
@@ -281,7 +281,7 @@ test.describe('knockout-mixed-individual', () => {
     await page.locator('.shiaijo-move-confirm[role="dialog"]').waitFor({ state: 'visible' });
     const sendBackDialogShot = await shot(page, 'send-back-dialog');
     const hasty = await hastyShiaijoConfirm(page);
-    await page.waitForTimeout(800);
+    await expect.poll(() => inlineRunning(page)).toBe(false);
     const idleAfter = await page.locator('.shiaijo__placeholder').isVisible().catch(() => false);
     const upNextAfterRevert = await sides(upNextCard(page)).catch(() => null);
     row({ step: 'send back', action: 'Send back to queue confirm', variant: 'V4 hastyConfirm', ...hasty,
@@ -296,7 +296,7 @@ test.describe('knockout-mixed-individual', () => {
 
     // Play out court A's pool bouts but the last one.
     for (let i = 0; i < 8 && (await queuedPoolBouts(page)) > 0; i += 1) await playRunningBout(page);
-    await expect.poll(() => inlineRunning(page), { timeout: 15_000 }).toBe(true);
+    await expect.poll(() => inlineRunning(page), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     expect((await editorIdentity(page)).eyebrow).toMatch(/POOL/);
     await shot(page, 'court-A-last-pool-bout-running');
 
@@ -321,7 +321,7 @@ test.describe('knockout-mixed-individual', () => {
     await expect(reason).toBeVisible();
     await shot(page, 'correction-reason');
     await reason.locator('button.btn--primary').tap();
-    await page.waitForTimeout(800);
+    await expect(reason).toBeHidden();
     const backToCourt = page.getByRole('button', { name: /Back to court/ });
     const stillCorrecting = await backToCourt.isVisible().catch(() => false);
     row({ step: 'correct', action: 'Save correction (reason prompt, loud button)', variant: 'V4 hasty (inline prompt)',
@@ -348,8 +348,9 @@ test.describe('knockout-mixed-individual', () => {
       const played = await playRunningBout(page);
       bOrder.push({ ...played, eyebrow: eyebrow || '(started from Up next)' });
       // Did Finish + Start Next leave the court idle with pool bouts queued?
-      await page.waitForTimeout(1500);
-      if (!(await inlineRunning(page)) && (await queuedPoolBouts(page)) > 0) {
+      // Give it the time a start takes; an idle court is what the row records.
+      const restarted = await expect.poll(() => inlineRunning(page), { timeout: 1500 }).toBe(true).then(() => true, () => false);
+      if (!restarted && (await queuedPoolBouts(page)) > 0) {
         const toasts = (await page.locator('.toast, [role="status"]').allInnerTexts()).join(' | ');
         row({ step: 'court B pools', action: `Finish + Start Next after ${eyebrow || 'a bout'}`, variant: 'correct path',
           happened: 'court left idle although pool bouts wait in Up next', upNext: await sides(upNextCard(page)).catch(() => null),
@@ -362,13 +363,14 @@ test.describe('knockout-mixed-individual', () => {
 
     // Back on A: the last pool bout, finished with Finish + Start Next.
     await openShiaijo(page, 'A');
-    await expect.poll(() => inlineRunning(page), { timeout: 15_000 }).toBe(true);
+    await expect.poll(() => inlineRunning(page), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     expect(await editorSides(page)).toEqual(lastPoolA);
     const labelAtBoundary = (await finishButton(page).innerText()).trim();
     await ipponButton(page, winnerOf(lastPoolA), 'M').tap();
     await expect(syncState(page)).toHaveText('Synced');
     await finishMatch(page, INLINE_EDITOR);
     await expect(completedRowFor(page, lastPoolA)).toBeVisible();
+    // Deliberate: a settle before an audit row only; nothing is asserted on it.
     await page.waitForTimeout(2500);
     const afterBoundary = {
       editorRunning: await inlineRunning(page),
@@ -404,7 +406,7 @@ test.describe('knockout-mixed-individual', () => {
     const seenK = [];
     for (const key of ['ArrowRight', 'ArrowLeft', 'Escape']) {
       await page.keyboard.press(key);
-      await page.waitForTimeout(300);
+      await rendered(page);
       seenK.push({ key, eyebrow: (await editorIdentity(page).catch(() => ({ eyebrow: null }))).eyebrow,
         editor: await inlineEditor(page).isVisible().catch(() => false) });
     }
@@ -481,7 +483,7 @@ test.describe('knockout-mixed-individual', () => {
 
     // V1: the thumb meant Kiken - Voluntary and landed on its neighbour.
     const nbKiken = await tapNeighbour(decisionButton(page, 'kiken-voluntary'), 'right');
-    await page.waitForTimeout(400);
+    await rendered(page);
     const promptOpen = await decisionPrompt(page).isVisible().catch(() => false);
     const popover = await page.locator('[role="tooltip"], .glossary-pop, .term-pop').first().isVisible().catch(() => false);
     row({ step: 'kiken', action: 'Kiken - Voluntary', variant: 'V1 tapNeighbour right', hit: nbKiken.hit.label, gapPx: nbKiken.gapPx,
@@ -504,6 +506,8 @@ test.describe('knockout-mixed-individual', () => {
     const recordLabelBefore = (await record.innerText()).trim();
     const hint = (await decisionPrompt(page).getByTestId('decision-prompt-hint').innerText()).trim();
     await record.tap({ force: true });
+    // Deliberate: the prompt must STAY open and nothing may be recorded, and
+    // an absence has no state to wait for, so the time is the evidence.
     await page.waitForTimeout(500);
     const stillOpen = await decisionPrompt(page).isVisible();
     const recordedByHastyTap = await completedRowFor(page, b1).isVisible().catch(() => false);
@@ -604,8 +608,10 @@ test.describe('knockout-mixed-individual', () => {
       ...undo, confirmShown, result: undoneResult, shot: await shot(page, 'kiken-undo-recorded') });
     expect(confirmShown).toBe(false);
     const backToCourt = page.getByRole('button', { name: /Back to court/ });
-    if (await backToCourt.isVisible().catch(() => false)) await backToCourt.tap();
-    await page.waitForTimeout(1000);
+    if (await backToCourt.isVisible().catch(() => false)) {
+      await backToCourt.tap();
+      await expect(backToCourt).toBeHidden();
+    }
     const liveAfter = await inlineRunning(page) ? await editorSides(page) : null;
     row({ step: 'kiken undo', action: 'back to the court after the undo', variant: 'V5 lost place',
       running: liveAfter, runningHasNowIneligible: !!liveAfter && (liveAfter.shiro === b1.aka || liveAfter.aka === b1.aka),
@@ -621,11 +627,14 @@ test.describe('knockout-mixed-individual', () => {
       // operator scores it for the other side and Finishes.
       const live = await editorSides(page);
       const opp = live.aka === b1.aka ? 'shiro' : 'aka';
+      // A toast left by an earlier step must not stand for this Finish's answer:
+      // let it go, so what shows next is this tap's.
+      await expect(page.locator('.toast.is-visible')).toHaveCount(0);
       await ipponButton(page, opp, 'M').tap();
       await settle(page);
       await (await armFinish(page)).tap();
-      await page.waitForTimeout(1500);
-      const msg = (await page.locator('.toast, .pending-write-banner').allInnerTexts().catch(() => [])).join(' | ');
+      await expect(completedRowFor(page, live).or(page.locator('.toast.is-visible, .pending-write-banner').first())).toBeVisible();
+      const msg = (await page.locator('.toast.is-visible, .pending-write-banner').allInnerTexts().catch(() => [])).join(' | ');
       const done = await completedRowFor(page, live).isVisible().catch(() => false);
       row({ step: 'kiken undo', action: 'Finish the running bout of the now-withdrawn competitor (M for the opponent)', variant: 'recovery attempt',
         pair: live, completed: done, message: msg.replace(/\s+/g, ' ').slice(0, 240), shot: await shot(page, 'finish-bout-of-withdrawn') });
@@ -638,15 +647,17 @@ test.describe('knockout-mixed-individual', () => {
       .filter({ hasText: /Match 1 of 3/ }).filter({ hasNotText: withdrawnName }).last();
     const b2 = await sides(poolBCard);
     await poolBCard.getByRole('button', { name: 'Start match' }).tap();
-    await expect.poll(() => inlineRunning(page), { timeout: 15_000 }).toBe(true);
+    await expect.poll(() => inlineRunning(page), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     expect(await editorSides(page)).toEqual(b2);
     const id2 = await editorIdentity(page);
     await decisionButton(page, 'fusenpai').tap();
     await expect(decisionPrompt(page)).toBeVisible();
     await decisionPrompt(page).locator('input[name="decision-side"][value="aka"]').check();
     const dblRecord = await doubleTap(decisionPrompt(page).getByRole('button', { name: 'Record' }));
-    await page.waitForTimeout(2000);
-    const dialogAfterDbl = await page.locator('.modal[role="dialog"]').isVisible().catch(() => false);
+    // Either a confirm asks first, or the decision is recorded.
+    const confirmDialog = page.locator('.modal[role="dialog"]');
+    await expect(confirmDialog.first().or(completedRowFor(page, b2))).toBeVisible();
+    const dialogAfterDbl = await confirmDialog.first().isVisible().catch(() => false);
     let dblDialog = null;
     if (dialogAfterDbl) {
       await shot(page, 'fusenpai-double-record-dialog');
@@ -716,8 +727,8 @@ test.describe('knockout-mixed-individual', () => {
     // Docs: "open the Overtime control and tick Encho started". The pill is
     // tapped where a thumb lands, its centre.
     await pill.tap();
-    await page.waitForTimeout(500);
     const encho = inlineEditor(page).getByTestId('scoring-modal-encho-checkbox');
+    await expect(encho).toBeVisible();
     const openedByCentre = await encho.isVisible().catch(() => false);
     const enchoPopover = await page.getByText('Overtime, when a knockout match').isVisible().catch(() => false);
     row({ step: 'encho', action: 'tap the Overtime pill (centre)', variant: 'correct path', counterOpened: openedByCentre,
@@ -822,7 +833,7 @@ test.describe('knockout-mixed-individual', () => {
     await login(page);
     await openShiaijo(page, 'C');
     // Semi-final 1 (M1) online first unless J2 already played it.
-    await expect.poll(async () => (await inlineRunning(page)) || (await upNextCard(page).isVisible().catch(() => false)), { timeout: 15_000 }).toBe(true);
+    await expect.poll(async () => (await inlineRunning(page)) || (await upNextCard(page).isVisible().catch(() => false)), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     let played = null;
     const liveNow = (await inlineRunning(page)) ? (await editorIdentity(page)).eyebrow : '';
     const upNow = ((await page.locator('.shiaijo-upnext__time').allInnerTexts())[0] || '');
@@ -836,11 +847,11 @@ test.describe('knockout-mixed-individual', () => {
       }
       if (await page.locator('.shiaijo__placeholder').isVisible().catch(() => false)) return 'idle';
       return 'waiting';
-    }, { timeout: 15_000 }).not.toBe('waiting');
+    }, { timeout: EXPECT_TIMEOUT_MS }).not.toBe('waiting');
     if (!semi) {
       semi = await sides(upNextCard(page));
       await upNextCard(page).getByRole('button', { name: 'Start match' }).tap();
-      await expect.poll(async () => ((await inlineRunning(page)) ? JSON.stringify(await editorSides(page)) : ''), { timeout: 15_000 })
+      await expect.poll(async () => ((await inlineRunning(page)) ? JSON.stringify(await editorSides(page)) : ''), { timeout: EXPECT_TIMEOUT_MS })
         .toBe(JSON.stringify(semi));
     }
     row({ step: 'finish offline', action: 'the last semi-final is running', variant: 'correct path', semi });
@@ -863,6 +874,9 @@ test.describe('knockout-mixed-individual', () => {
     };
     row({ step: 'finish offline', action: 'the screen 300ms after Finish, offline', variant: 'V5 lost place', ...at300,
       shot: await shot(page, 'offline-finish-300ms') });
+    // The operator watches the screen for the rest of two seconds with the
+    // network down: what it shows by then (a banner, or the court moved on) is
+    // what the row records, so the time is the scenario, not a wait for the app.
     await page.waitForTimeout(1700);
     const banner = inlineEditor(page).locator('.pending-write-banner');
     const bannerText = (await banner.allInnerTexts()).join(' | ');
@@ -884,6 +898,7 @@ test.describe('knockout-mixed-individual', () => {
     let retryRow = { present: await retry.isVisible().catch(() => false) };
     if (retryRow.present) {
       retryRow = { ...retryRow, size: await tapSize(retry), ...(await doubleTap(retry)) };
+      // Deliberate: a settle before an audit row only; nothing is asserted on it.
       await page.waitForTimeout(1500);
       retryRow.bannerAfter = (await banner.allInnerTexts()).join(' | ');
     }
@@ -896,6 +911,7 @@ test.describe('knockout-mixed-individual', () => {
     let restart = null;
     if (upAgain && upAgain.shiro === semi.shiro && upAgain.aka === semi.aka) {
       await upNextCard(page).getByRole('button', { name: 'Start match' }).tap();
+      // Deliberate: a settle before an audit row only; nothing is asserted on it.
       await page.waitForTimeout(1500);
       restart = { editor: await inlineEditor(page).isVisible().catch(() => false),
         running: await inlineRunning(page) ? await editorSides(page) : null,
@@ -937,7 +953,7 @@ test.describe('knockout-mixed-individual', () => {
       // The server's bracket seats the semi-final's loser in the 3rd-place match.
       const bracketText = (await other.locator('.page').first().innerText()).replace(/\s+/g, ' ');
       await expect.poll(async () => ((await other.locator('.page').first().innerText()).replace(/\s+/g, ' ').split('3RD PLACE MATCH')[1] || ''),
-        { timeout: 15_000 }).toContain(loserName);
+        { timeout: EXPECT_TIMEOUT_MS }).toContain(loserName);
       row({ step: 'reconnect', action: 'second device reads the bracket', variant: 'correct path',
         finalHasWinner: bracketText.includes(winnerName), bronzeHasLoser: (bracketText.split('3RD PLACE MATCH')[1] || '').includes(loserName),
         shot: await shot(other, 'server-bracket-after-reconnect', { fullPage: true }) });
@@ -969,8 +985,7 @@ test.describe('knockout-mixed-individual', () => {
     await shot(page, 'pools-tab-editor-open');
     const start = page.locator(EDITOR).getByRole('button', { name: 'Start match' });
     const startOffered = await start.isVisible().catch(() => false);
-    if (startOffered) await start.tap();
-    await page.waitForTimeout(1500);
+    if (startOffered) await startMatch(page);
     const openAfterStart = await page.locator(EDITOR).isVisible().catch(() => false);
     row({ step: 'pools tab', action: 'Start match in the Pools-tab editor', variant: 'correct path', row: rowText.slice(0, 80),
       startOffered, editorStillOpen: openAfterStart, shot: await shot(page, 'pools-tab-after-start') });
@@ -979,8 +994,9 @@ test.describe('knockout-mixed-individual', () => {
       await expect(page.locator(EDITOR)).toBeVisible();
     }
     const w = winnerOf(pair);
+    const ipponSaved = nextMatchWrite(page);
     await ipponButton(page, w, 'M', EDITOR).tap();
-    await page.waitForTimeout(1500);
+    await writeLanded(ipponSaved, 'the ippon save');
     const openAfterIppon = await page.locator(EDITOR).isVisible().catch(() => false);
     row({ step: 'pools tab', action: 'award one ippon in the Pools-tab editor', variant: 'correct path', editorStillOpen: openAfterIppon,
       shot: await shot(page, 'pools-tab-after-ippon') });
@@ -992,13 +1008,13 @@ test.describe('knockout-mixed-individual', () => {
     }
     const finishLabel = (await finishButton(page, EDITOR).innerText()).trim();
     await finishMatch(page, EDITOR);
-    await page.waitForTimeout(800);
-    const after = {
+    // Where the screen ends up once the list has refetched after the finish.
+    const after = await untilStable(async () => ({
       editorOpen: await page.locator(EDITOR).isVisible().catch(() => false),
       url: new URL(page.url()).pathname,
       rowNow: (await firstRow.innerText()).replace(/\s+/g, ' ').slice(0, 120),
       toast: (await page.locator('.toast').allInnerTexts().catch(() => [])).join(' | '),
-    };
+    }));
     row({ step: 'pools tab', action: 'Finish (Pools tab: no Start Next)', variant: 'V5 lost place', finishLabel, court: idP.court, ...after,
       shot: await shot(page, 'pools-tab-after-finish') });
     expect(after.editorOpen).toBe(false);
@@ -1010,16 +1026,19 @@ test.describe('knockout-mixed-individual', () => {
     await expect(page.locator(EDITOR)).toBeVisible();
     const pair2 = await editorSides(page, EDITOR);
     if (await page.locator(EDITOR).getByRole('button', { name: 'Start match' }).isVisible().catch(() => false)) {
-      await page.locator(EDITOR).getByRole('button', { name: 'Start match' }).tap();
-      await page.waitForTimeout(1000);
+      await startMatch(page);
       if (!(await page.locator(EDITOR).isVisible().catch(() => false))) await secondRow.tap();
     }
     await ipponButton(page, winnerOf(pair2), 'M', EDITOR).tap();
     // Close straight away (inside the autosave's 300ms), as a hasty operator would.
     const closedByTap = await page.locator(EDITOR).getByRole('button', { name: /✕ Close/ }).tap({ timeout: 2000 }).then(() => true, () => false);
     const discardAsked = await page.locator('.modal[role="dialog"] .modal__foot').isVisible().catch(() => false);
+    // `from`: the editor as it stands before the answer (still open behind the
+    // confirm), so the settle cannot agree with the page as it was before.
+    const editorBeforeAnswer = await page.locator(EDITOR).isVisible().catch(() => false);
     const hasty = discardAsked ? await hastyConfirm(page) : null;
-    await page.waitForTimeout(800);
+    // Whether the editor closed (and the unsaved ippon was kept) settles after the answer.
+    await untilStable(() => page.locator(EDITOR).isVisible().catch(() => false), { from: editorBeforeAnswer });
     await secondRow.tap();
     await expect(page.locator(EDITOR)).toBeVisible();
     const kept = await slotMarks(page, winnerOf(pair2), EDITOR);
@@ -1042,7 +1061,7 @@ test.describe('knockout-mixed-individual', () => {
     await ipponButton(page, winnerOf(bpair), 'M').tap();
     await settle(page);
     await finishMatch(page, INLINE_EDITOR);
-    await page.waitForTimeout(1000);
+    await expect(panel.locator('.running-panel__result')).toBeVisible();
     const bAfter = {
       resultCard: await panel.locator('.running-panel__result').isVisible().catch(() => false),
       editRes: await panel.getByRole('button', { name: 'Edit result' }).isVisible().catch(() => false),
@@ -1056,9 +1075,11 @@ test.describe('knockout-mixed-individual', () => {
     row({ step: 'bracket tab', action: 'Edit result', variant: 'size', ...(await tapSize(panel.getByRole('button', { name: 'Edit result' }))) });
     await panel.getByRole('button', { name: 'Edit result' }).tap();
     const editDialog = await hastyConfirm(page);
-    await page.waitForTimeout(500);
+    // The reopen is a server write: the editor is read once it has left the
+    // result card's state (not shown), or settled on not shown if it never did.
+    const editorReopened = await untilStable(() => panel.locator(INLINE_EDITOR).isVisible().catch(() => false), { from: false });
     row({ step: 'bracket tab', action: 'Edit result confirm', variant: 'V4 hastyConfirm', ...editDialog,
-      editorReopened: await panel.locator(INLINE_EDITOR).isVisible().catch(() => false),
+      editorReopened,
       shot: await shot(page, 'bracket-tab-edit-result') });
     const closeEdit = panel.getByRole('button', { name: /✕ Close|^Cancel$/ }).first();
     if (await closeEdit.isVisible().catch(() => false)) await closeEdit.tap();
@@ -1075,9 +1096,15 @@ test.describe('knockout-mixed-individual', () => {
     const bpair2 = await editorSides(page);
     await ipponButton(page, winnerOf(bpair2), 'M').tap();
     await settle(page);
+    const readBracket = async () => (await page.locator('.page').first().innerText()).replace(/\s+/g, ' ');
     await finishMatch(page, INLINE_EDITOR);
-    await page.waitForTimeout(1000);
-    const bracketText = (await page.locator('.page').first().innerText()).replace(/\s+/g, ' ');
+    // The bracket redraws once the finish has refetched. Both semi-finals are
+    // played now, so the final is seated (no "Winner of ..." left): that is
+    // the state the absence below is read against, not the tree from before
+    // the finish, which has no 3rd place match either. Then the text it
+    // settles on.
+    await expect.poll(readBracket, { message: 'the final is seated once both semi-finals are played' }).not.toMatch(/Winner of /);
+    const bracketText = await untilStable(readBracket);
     row({ step: 'bracket tab', action: 'second semi-final, default joint 3rd places', variant: 'correct path', pair: bpair2,
       bronzeMatchShown: /3RD PLACE MATCH/i.test(bracketText), shot: await shot(page, 'bracket-tab-semis-done', { fullPage: true }) });
     expect(bracketText).not.toMatch(/3RD PLACE MATCH/i);
@@ -1186,11 +1213,9 @@ test.describe('knockout-mixed-individual bead guards', () => {
     await first.tap();
     await expect(page.locator(EDITOR)).toBeVisible();
     const pair = await editorSides(page, EDITOR);
-    await page.locator(EDITOR).getByRole('button', { name: 'Start match' }).tap();
-    await page.waitForTimeout(1500);
+    await startMatch(page);
     await expect(page.locator(EDITOR)).toBeVisible();
-    await ipponButton(page, winnerOf(pair), 'M', EDITOR).tap();
-    await page.waitForTimeout(1500);
+    await awardIppon(page, winnerOf(pair), 'M', EDITOR);
     await expect(page.locator(EDITOR)).toBeVisible();
   });
   test('bc-sbq: Send back to queue says the score is kept, and starting the bout again carries it on', async ({ page }) => {
@@ -1246,7 +1271,6 @@ test.describe('knockout-mixed-individual bead guards', () => {
     await context.setOffline(true);
     try {
       await (await armFinish(page)).tap();
-      await page.waitForTimeout(1000);
       await expect(page.getByText('Offline: 1 result not sent')).toBeVisible();
     } finally {
       await context.setOffline(false);
@@ -1266,58 +1290,50 @@ test.describe('knockout-mixed-individual bead guards', () => {
     await seedOwn(page, { name: 'Finding A9', format: 'knockout', courts: ['O'], numberPrefix: 'FI' }, rosterOf('Anine', 4));
     await openShiaijo(page, 'O');
     expect(await ensureRunning(page), 'a semi-final starts on O').not.toBeNull();
-    let hold = null; // { release } while the next score write is to be held
-    const holdNextWrite = () => {
-      const h = {};
-      h.promise = new Promise((resolve) => { h.release = resolve; });
-      hold = h;
-      return h;
-    };
-    await page.route('**/api/competitions/*/matches/*/score', async (route) => {
-      if (route.request().method() === 'PUT' && hold) {
-        const { promise } = hold;
-        hold = null;
-        await Promise.race([promise, new Promise((r) => setTimeout(r, 10_000))]);
-      }
-      await route.continue();
-    });
-    const scoreSent = () => page.waitForRequest((r) => r.method() === 'PUT' && /\/score$/.test(r.url()));
-    const akaMark = () => inlineEditor(page).locator('[aria-label^="Aka slot "][aria-label*=": remove "]').first();
-    const marksAfterReload = async () => {
-      await page.reload();
-      await expect.poll(() => inlineRunning(page), { timeout: 15_000 }).toBe(true);
-      return filledSlots(page, 'aka').count();
-    };
+    const writes = await holdScoreWrites(page);
+    try {
+      const akaMark = () => inlineEditor(page).locator('[aria-label^="Aka slot "][aria-label*=": remove "]').first();
+      const marksAfterReload = async () => {
+        await page.reload();
+        await expect.poll(() => inlineRunning(page), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
+        return filledSlots(page, 'aka').count();
+      };
 
-    await ipponButton(page, 'aka', 'M').tap();
-    await settle(page);
-    // Remove, then the same mark back while the removal is out.
-    let held = holdNextWrite();
-    let sent = scoreSent();
-    await akaMark().tap();
-    await sent;
-    await ipponButton(page, 'aka', 'M').tap();
-    held.release();
-    await settle(page);
-    await page.waitForTimeout(1000);
-    await expect(filledSlots(page, 'aka'), 'the tapped-back mark stays').toHaveCount(1);
-    await shot(page, 'tapped-back-mark-kept');
-    expect(await marksAfterReload(), 'and the server holds it').toBe(1);
-    await shot(page, 'tapped-back-mark-after-reload');
+      await ipponButton(page, 'aka', 'M').tap();
+      await settle(page);
+      // Remove, then the same mark back while the removal is out.
+      let held = writes.holdNext();
+      await akaMark().tap();
+      await held.sent;
+      await ipponButton(page, 'aka', 'M').tap();
+      held.release();
+      // The removal's response reached the page before the tap-back's own save went out.
+      await writes.answeredBeforeNextWrite(held);
+      await settle(page);
+      // Deliberate: a late echo that undoes the tap-back must be given the time to land, so the time is the evidence.
+      await page.waitForTimeout(1000);
+      await expect(filledSlots(page, 'aka'), 'the tapped-back mark stays').toHaveCount(1);
+      await shot(page, 'tapped-back-mark-kept');
+      expect(await marksAfterReload(), 'and the server holds it').toBe(1);
+      await shot(page, 'tapped-back-mark-after-reload');
 
-    // The reverse: take it off, add it, and take it off again while the add is out.
-    await akaMark().tap();
-    await settle(page);
-    held = holdNextWrite();
-    sent = scoreSent();
-    await ipponButton(page, 'aka', 'M').tap();
-    await sent;
-    await akaMark().tap();
-    held.release();
-    await settle(page);
-    await page.waitForTimeout(1000);
-    await expect(filledSlots(page, 'aka'), 'the removal stays').toHaveCount(0);
-    expect(await marksAfterReload(), 'and the server holds no mark').toBe(0);
-    await page.unroute('**/api/competitions/*/matches/*/score');
+      // The reverse: take it off, add it, and take it off again while the add is out.
+      await akaMark().tap();
+      await settle(page);
+      held = writes.holdNext();
+      await ipponButton(page, 'aka', 'M').tap();
+      await held.sent;
+      await akaMark().tap();
+      held.release();
+      await writes.answeredBeforeNextWrite(held);
+      await settle(page);
+      // Deliberate: a late echo that undoes the tap-back must be given the time to land, so the time is the evidence.
+      await page.waitForTimeout(1000);
+      await expect(filledSlots(page, 'aka'), 'the removal stays').toHaveCount(0);
+      expect(await marksAfterReload(), 'and the server holds no mark').toBe(0);
+    } finally {
+      await writes.stop();
+    }
+    writes.assertNoSafetyRelease(); // after the body succeeded: a throw in the finally would hide its error
   });
 });

@@ -30,6 +30,19 @@ export async function restoreCoarse(page) {
   }
 }
 
+// Is the page still (pointer: coarse)? If an interruption or a fullPage
+// screenshot lost it, every tap-floor rule in styles.css is off for the rest of
+// the test, so put it back in place (restoreCoarse, no reload, so the bout is
+// not interrupted a second time) and say whether it had been lost, so an audit
+// row can name the pointer a measurement was made at. The one owner of "if not
+// coarse, restore": the page fixture, the second devices, the screenshot
+// camera and the kachinuki interruptions all ask it.
+export async function ensureCoarse(page) {
+  if (await isCoarse(page)) return { coarseLost: false };
+  await restoreCoarse(page);
+  return { coarseLost: true, restoredBy: 'CDP Emulation.setTouchEmulationEnabled (in place)' };
+}
+
 // A control's rendered size, for the 44px coarse-pointer floor. The page must
 // still match (pointer: coarse) at the moment of measuring, or the 44px floor
 // rules are off and the size reads low, so that is asserted first.

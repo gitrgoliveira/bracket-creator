@@ -1,6 +1,7 @@
 package state
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -175,6 +176,19 @@ type Theme struct {
 	AccentSoftColor string `yaml:"accent_soft_color,omitempty" json:"accentSoftColor,omitempty"`
 	WindowTitle     string `yaml:"window_title,omitempty"      json:"windowTitle,omitempty"`
 	LogoPath        string `yaml:"logo_path,omitempty"         json:"-"` // disk filename; served via /api/branding/logo
+}
+
+// MarshalJSON adds hasLogo (true when a custom logo is uploaded) to the wire
+// shape, derived from LogoPath, which stays off the wire. A client learns
+// whether a logo exists from the tournament it already holds, so it never
+// probes /api/branding/logo and meets a 404 while none is set (bc-lgnf).
+// Absent when false, so a theme without a logo serialises exactly as before.
+func (t Theme) MarshalJSON() ([]byte, error) {
+	type plain Theme
+	return json.Marshal(struct {
+		plain
+		HasLogo bool `json:"hasLogo,omitempty"`
+	}{plain(t), t.LogoPath != ""})
 }
 
 const maxWindowTitleLen = 100

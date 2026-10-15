@@ -27,9 +27,10 @@ var validBrandingContentTypes = map[string]string{
 // RegisterPublicBrandingHandlers wires the unauthenticated GET and HEAD routes
 // that serve the tournament logo bytes. When no custom logo is configured, GET
 // redirects to the bundled default (/logo.jpeg) so image consumers never see a
-// 404, while HEAD returns 404 so BrandingManager can probe whether a custom
-// logo is set. HEAD is registered explicitly because Gin does not auto-route
-// HEAD to GET.
+// 404. HEAD answers 404 while none is set, as it always has, but the app no
+// longer asks: BrandingManager reads theme.hasLogo off the tournament instead
+// (bc-lgnf), so a console never logs this 404. HEAD is registered explicitly
+// because Gin does not auto-route HEAD to GET.
 func RegisterPublicBrandingHandlers(r *gin.RouterGroup, store *state.Store) {
 	// serveLogo serves the custom logo when one is configured; otherwise it
 	// calls onMissing, which differs by method (GET redirects to the default,
@@ -77,9 +78,10 @@ func RegisterPublicBrandingHandlers(r *gin.RouterGroup, store *state.Store) {
 	r.GET("/branding/logo", func(c *gin.Context) {
 		serveLogo(c, func(c *gin.Context) { c.Redirect(http.StatusFound, "/logo.jpeg") })
 	})
-	// HEAD is used by BrandingManager to probe custom-logo existence without
-	// fetching the payload, so it must keep returning 404 when none is set.
-	// Gin does not auto-route HEAD to GET, so register it explicitly.
+	// HEAD reports custom-logo existence without the payload: 404 when none is
+	// set. The app reads theme.hasLogo instead of probing, so this is for
+	// outside callers only; keep the answer. Gin does not auto-route HEAD to
+	// GET, so register it explicitly.
 	r.HEAD("/branding/logo", func(c *gin.Context) {
 		serveLogo(c, func(c *gin.Context) { c.JSON(http.StatusNotFound, gin.H{"error": "no logo configured"}) })
 	})

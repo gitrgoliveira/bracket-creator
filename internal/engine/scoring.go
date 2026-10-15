@@ -917,11 +917,19 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy, 
 		result.SubResultsRaw = ""
 		result.SubResultsUnreadable = false
 	}
+	storedVersion := stored.ScoreVersion
 	*stored = *result
 	// The write's own merge inputs and report stay on the incoming result for
 	// the caller; the stored copy must not carry them to a later writer.
 	stored.ClearRequestFields()
 	stored.GroupStamps = state.CloneGroupStamps(result.GroupStamps)
+	stored.MarkIDs = result.MarkIDs.Clone()
+	// The event-log version only grows (bc-evts): a write that does not
+	// carry one (any write but the replay's) keeps the stored version.
+	// A restore puts back the snapshot's exactly.
+	if policy != matchWriteRestore {
+		stored.ScoreVersion = max(storedVersion, result.ScoreVersion)
+	}
 	return false, false, inherited, nil
 }
 
@@ -1563,13 +1571,7 @@ func keptWithdrawalScoreline(stored withdrawalRuling, result *state.MatchResult)
 // construction, so a future non-scoring token added there (as HanteiMark
 // itself once was) does not also need remembering here.
 func struckIppons(ippons []string) []string {
-	var out []string
-	for _, v := range ippons {
-		if domain.IsScoringIppon(v) && v != domain.DefaultWinIppon {
-			out = append(out, v)
-		}
-	}
-	return out
+	return domain.StruckIppons(ippons)
 }
 
 // countScoringIppons is the package-local spelling of domain.CountScoringIppons
@@ -2585,6 +2587,14 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	// exactly (restore, nil included: a match never stamped goes back to
 	// unstamped, as ModifiedAt does above).
 	bm.GroupStamps = state.CloneGroupStamps(result.GroupStamps)
+	// The mark ids the write carries (the replay's derived write), and the
+	// event-log version, which only grows except under restore (bc-evts).
+	bm.MarkIDs = result.MarkIDs.Clone()
+	if policy == matchWriteRestore {
+		bm.ScoreVersion = result.ScoreVersion
+	} else {
+		bm.ScoreVersion = max(bm.ScoreVersion, result.ScoreVersion)
+	}
 	// The verdict rides in the ippons about to be rendered; forward writes
 	// from non-validated paths must not persist a mark that contradicts the
 	// result (see stripInvalidHantei). Restore replays the snapshot verbatim.

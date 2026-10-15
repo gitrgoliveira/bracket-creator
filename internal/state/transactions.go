@@ -151,6 +151,12 @@ type StoreTx interface {
 	// read-your-own-writes over an append this transaction staged.
 	AppendMatchHistory(compID string, entry MatchHistoryEntry) error
 	LoadMatchHistory(compID, matchID string) ([]MatchHistoryEntry, error)
+	// AppendScoreLog stages lines onto a match's score event log
+	// (score_log.go) in this transaction, so they land exactly when the
+	// write they belong to does. LoadScoreLog reads it back,
+	// read-your-own-writes over lines this transaction staged.
+	AppendScoreLog(compID, matchID string, lines ...ScoreLogLine) error
+	LoadScoreLog(compID, matchID string) ([]ScoreLogLine, error)
 }
 
 // WithTransaction runs fn under the per-competition write lock for

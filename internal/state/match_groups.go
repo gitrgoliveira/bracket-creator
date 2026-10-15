@@ -20,6 +20,7 @@ package state
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"slices"
 	"sort"
@@ -349,6 +350,86 @@ func GroupValue(m *MatchResult, group string) json.RawMessage {
 	return b
 }
 
+// SetGroupFromValue sets one group of m to a value GroupValue projected (a
+// score log baseline's, bc-evts), through CopyGroup, so the one owner of
+// which fields a group holds also decides what setting it moves. A bout
+// group's null removes the bout (a tombstone).
+func SetGroupFromValue(m *MatchResult, group string, raw json.RawMessage) error {
+	var src MatchResult
+	src.SubResults = CloneSubResults(m.SubResults)
+	unmarshal := func(v any) error {
+		if err := json.Unmarshal(raw, v); err != nil {
+			return fmt.Errorf("group %s: %w", group, err)
+		}
+		return nil
+	}
+	switch group {
+	case GroupPoints:
+		var v pointsGroup
+		if err := unmarshal(&v); err != nil {
+			return err
+		}
+		src.IpponsA, src.IpponsB, src.HansokuA, src.HansokuB = v.IpponsA, v.IpponsB, v.HansokuA, v.HansokuB
+	case GroupResult:
+		var v resultGroup
+		if err := unmarshal(&v); err != nil {
+			return err
+		}
+		src.Status, src.Winner, src.WinnerID = v.Status, v.Winner, v.WinnerID
+		src.Decision, src.DecisionBy, src.DecisionReason = v.Decision, v.DecisionBy, v.DecisionReason
+		src.CorrectionReason, src.ResultSource = v.CorrectionReason, v.ResultSource
+	case GroupEncho:
+		if err := unmarshal(&src.Encho); err != nil {
+			return err
+		}
+	case GroupFlags:
+		var v flagsGroup
+		if err := unmarshal(&v); err != nil {
+			return err
+		}
+		src.FlagsA, src.FlagsB = v.FlagsA, v.FlagsB
+	case GroupRep:
+		var v repGroup
+		if err := unmarshal(&v); err != nil {
+			return err
+		}
+		src.RepPlayerA, src.RepPlayerB = v.RepPlayerA, v.RepPlayerB
+	case GroupRepPickA:
+		var v repPickAGroup
+		if err := unmarshal(&v); err != nil {
+			return err
+		}
+		src.SetRepPick(domain.MatchSideA, v.SideAMemberID)
+	case GroupRepPickB:
+		var v repPickBGroup
+		if err := unmarshal(&v); err != nil {
+			return err
+		}
+		src.SetRepPick(domain.MatchSideB, v.SideBMemberID)
+	case GroupRecorded:
+		var v recordedGroup
+		if err := unmarshal(&v); err != nil {
+			return err
+		}
+		setRecordedPositions(src.SubResults, v.Positions)
+	default:
+		pos, ok := ParseBoutGroup(group)
+		if !ok {
+			return fmt.Errorf("group %q: not a group", group)
+		}
+		var row *SubMatchResult
+		if err := unmarshal(&row); err != nil {
+			return err
+		}
+		if row != nil {
+			row.Position = pos
+		}
+		src.SubResults = setSubAt(src.SubResults, pos, row)
+	}
+	CopyGroup(m, &src, group)
+	return nil
+}
+
 type pointsGroup struct {
 	IpponsA  []string `json:"ipponsA"`
 	IpponsB  []string `json:"ipponsB"`
@@ -455,8 +536,10 @@ func groupProjection(m *MatchResult, group string) any {
 		}
 		c := CloneSubResults([]SubMatchResult{*row})[0]
 		c.IpponsA, c.IpponsB = nonNilStrings(c.IpponsA), nonNilStrings(c.IpponsB)
-		// The recorded mark is GroupRecorded's.
+		// The recorded mark is GroupRecorded's, and the mark ids are derived
+		// by the replay (bc-evts), never part of the bout's value.
 		c.Recorded = false
+		c.MarkIDs = nil
 		if pos == DaihyosenSubPosition {
 			// The representatives are GroupRepPickA's and GroupRepPickB's, not
 			// the bout's. The row's WinnerMemberID is derived from the winner's

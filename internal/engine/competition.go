@@ -735,6 +735,10 @@ func (e *Engine) DiscardDraw(id string) error {
 	if err := e.store.DeleteMatchHistory(id); err != nil {
 		return fmt.Errorf("DiscardDraw: failed to delete the match history: %w", err)
 	}
+	// And their score event logs (bc-evts), for the same reason.
+	if err := e.store.DeleteScoreLog(id); err != nil {
+		return fmt.Errorf("DiscardDraw: failed to delete the score event logs: %w", err)
+	}
 	// So do the lineups saved for those matches, and the record of the pairs the
 	// round-lineup conversion settled in them: the next draw reuses the match ids,
 	// so a lineup left behind would become a team's own lineup at the reused id

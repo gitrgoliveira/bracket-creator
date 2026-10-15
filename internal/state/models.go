@@ -1367,6 +1367,10 @@ type SubMatchResult struct {
 	// bout's result only when it is set. omitempty: absent on every row written
 	// before it, which reads as not recorded, so old data needs no migration.
 	Recorded bool `json:"recorded,omitempty" yaml:"recorded,omitempty"`
+	// MarkIDs names each mark of the bout, as MatchResult.MarkIDs does for a
+	// match (bc-evts). Derived by the replay; not part of the bout's group
+	// value.
+	MarkIDs *MarkIDs `json:"markIds,omitempty" yaml:"mark_ids,omitempty"`
 }
 
 // HanteiDecided reports whether a hantei verdict stands on this sub-bout:
@@ -1749,6 +1753,35 @@ type MatchResult struct {
 	// back. Persisted as the last pool-matches.csv column and in bracket.json
 	// (BracketMatch.GroupStamps).
 	GroupStamps map[string]int64 `json:"groupStamps,omitempty" yaml:"-"`
+	// MarkIDs names each mark in IpponsA/IpponsB (bc-evts): the id of the
+	// score event that struck it, the foul event's for an H a second foul
+	// landed, b:<lineID>:<pos>:<side>:<i> for a mark a baseline brought. A
+	// removal names its mark by this id. Derived by engine.ReplayScoring,
+	// never part of a group's value (a write is not "changed" for lacking
+	// it); persisted after GroupStamps in pool-matches.csv and in
+	// bracket.json so a reader shows ids without replaying.
+	MarkIDs *MarkIDs `json:"markIds,omitempty" yaml:"-"`
+	// ScoreVersion is the number of lines in the match's score event log
+	// (state.ScoreLogLine) the stored match was derived from. It only ever
+	// grows, so a client orders two copies of a running match by it before
+	// their stamps: a late older event changes a match without moving its
+	// ModifiedAt. 0 for a match with no log. Persisted after MarkIDs.
+	ScoreVersion int `json:"scoreVersion,omitempty" yaml:"-"`
+}
+
+// MarkIDs carries one id per entry of a side's ippon slice, index for index
+// (A names IpponsA[i], B names IpponsB[i]; "" for a placeholder slot).
+type MarkIDs struct {
+	A []string `json:"a,omitempty"`
+	B []string `json:"b,omitempty"`
+}
+
+// Clone deep-copies the ids; nil stays nil.
+func (m *MarkIDs) Clone() *MarkIDs {
+	if m == nil {
+		return nil
+	}
+	return &MarkIDs{A: cloneStrings(m.A), B: cloneStrings(m.B)}
 }
 
 // HanteiDecided reports whether a hantei verdict stands on this match: the
@@ -1854,6 +1887,7 @@ func CloneSubResults(subs []SubMatchResult) []SubMatchResult {
 			copy(out[i].IpponsB, sr.IpponsB)
 		}
 		out[i].Encho = sr.Encho.Clone()
+		out[i].MarkIDs = sr.MarkIDs.Clone()
 		// Clone the tri-state hantei pointer too: a caller mutating a
 		// returned sub through *DecidedByHantei must not corrupt cache.
 		if sr.DecidedByHantei != nil {
@@ -2035,6 +2069,10 @@ type BracketMatch struct {
 	// last applied change to each group of this match, persisted in
 	// bracket.json. nil on a legacy match (every group reads ModifiedAt).
 	GroupStamps map[string]int64 `json:"groupStamps,omitempty"`
+	// MarkIDs and ScoreVersion mirror MatchResult.MarkIDs/ScoreVersion
+	// (bc-evts), persisted in bracket.json.
+	MarkIDs      *MarkIDs `json:"markIds,omitempty"`
+	ScoreVersion int      `json:"scoreVersion,omitempty"`
 	// PlaceholderA / PlaceholderB / PlaceholderWinner record what SideA / SideB /
 	// Winner held at DRAW time, before any pool resolved. They are written once,
 	// by engine.buildBracketFromDraw, for a pool-fed (mixed) knockout whose

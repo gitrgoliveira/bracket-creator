@@ -26,6 +26,9 @@ func TestNewStoreRefusesDataItCannotWrite(t *testing.T) {
 		{"a competition's history folder", func(root string) string {
 			return filepath.Join(root, "competitions", "individual", matchHistoryDir)
 		}},
+		{"a competition's score event log folder", func(root string) string {
+			return filepath.Join(root, "competitions", "individual", scoreLogDir)
+		}},
 		{"the transaction log folder", func(root string) string { return filepath.Join(root, ".wal") }},
 		{"the branding folder", func(root string) string { return filepath.Join(root, BrandingDirName) }},
 	} {

@@ -165,6 +165,7 @@ func (s *Store) copyMatchResults(results []MatchResult) []MatchResult {
 		// state. Mirrors copyBracket, which already clones its Encho pointer.
 		res[i].Encho = r.Encho.Clone()
 		res[i].GroupStamps = CloneGroupStamps(r.GroupStamps)
+		res[i].MarkIDs = r.MarkIDs.Clone()
 		// The write's own transient inputs and outputs never travel on a
 		// stored copy: a writer that builds its result from one (the
 		// daihyosen add, `u := *match`) must state its own.
@@ -667,6 +668,48 @@ var poolMatchColumns = []poolMatchColumn{
 				return
 			}
 			m.GroupStamps = stamps
+		}},
+	// The mark ids (bc-evts), JSON {"a":[...],"b":[...]}, appended after
+	// GroupStamps. A corrupt cell reads as no ids: the next replay of the
+	// match's event log derives them again.
+	{name: "MarkIDs",
+		put: func(r *MatchResult) string {
+			if r.MarkIDs == nil {
+				return ""
+			}
+			b, err := json.Marshal(r.MarkIDs)
+			if err != nil {
+				slog.Error("state: pool match MarkIDs marshal failed; writing empty cell",
+					"matchID", r.ID, "error", err)
+				return ""
+			}
+			return string(b)
+		},
+		take: func(m *MatchResult, cell string) {
+			if cell == "" {
+				return
+			}
+			var ids MarkIDs
+			if err := json.Unmarshal([]byte(cell), &ids); err != nil {
+				slog.Error("state: pool match MarkIDs cell corrupt; reading as no mark ids",
+					"matchID", m.ID, "error", err)
+				return
+			}
+			m.MarkIDs = &ids
+		}},
+	// The number of score event log lines the match was derived from
+	// (bc-evts); empty for 0.
+	{name: "ScoreVersion",
+		put: func(r *MatchResult) string {
+			if r.ScoreVersion <= 0 {
+				return ""
+			}
+			return strconv.Itoa(r.ScoreVersion)
+		},
+		take: func(m *MatchResult, cell string) {
+			if v, err := strconv.Atoi(cell); err == nil && v > 0 {
+				m.ScoreVersion = v
+			}
 		}},
 }
 

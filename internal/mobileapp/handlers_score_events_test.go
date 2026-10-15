@@ -2,6 +2,7 @@ package mobileapp
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -479,4 +480,164 @@ func TestScoreEventsDoor_DecisionWriteIDResend(t *testing.T) {
 	again, err := store.LoadScoreLog(compID, seMatch)
 	require.NoError(t, err)
 	assert.Len(t, again, len(lines), "nor a log line")
+}
+
+// A decision that ends a match reopened with no reason keeps the decision's
+// reason as the correction reason. That reason is part of the result group, so
+// it must be on the write the baseline is taken from: set after the engine
+// wrote, the stored match carried a field its log did not replay to, and the
+// next tap fired the drift net.
+func TestScoreEventsDoor_DecisionOnAReopenedMatchCarriesItsReasonInTheBaseline(t *testing.T) {
+	const compID = "se-reopen-reason"
+	r, store, _, _ := seServer(t, compID)
+	now := time.Now().UnixMilli()
+	sePost(t, r, compID, seMatch, seTap("e1", 1, now-9000, "a", "M"))
+	base := "/api/competitions/" + compID + "/matches/" + seMatch
+	w := serveJSON(r, http.MethodPost, base+"/decision", map[string]any{
+		"decision": "kiken-voluntary", "decisionBy": "shiro", "modifiedAt": now - 8000})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	w = serveJSON(r, http.MethodPost, base+"/reopen", map[string]any{})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	w = serveJSON(r, http.MethodPost, base+"/decision", map[string]any{
+		"decision": "kiken-voluntary", "decisionBy": "shiro", "decisionReason": "left the court",
+		"modifiedAt": time.Now().UnixMilli() + 100})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	ms, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Equal(t, "left the court", ms[0].CorrectionReason, "the reason is the match's correction reason")
+
+	sePost(t, r, compID, seMatch, seTap("e2", 2, time.Now().UnixMilli()+1000, "b", "K"))
+	assertLogReplaysToStored(t, store, compID, seMatch, false)
+}
+
+// Two taps inside the coalescer's window both reach the stream: the second is
+// held to the window's end and carries the last state.
+func TestScoreEventsDoor_SecondTapInTheWindowIsBroadcastAtItsEnd(t *testing.T) {
+	const compID = "se-trailing"
+	r, _, hub, _ := seServer(t, compID)
+	ch := hub.Subscribe()
+	defer hub.Unsubscribe(ch)
+	now := time.Now().UnixMilli()
+	sePost(t, r, compID, seMatch, seTap("e1", 1, now-2000, "a", "M"))
+	sePost(t, r, compID, seMatch, seTap("e2", 2, now-1900, "b", "K"))
+
+	var payloads []string
+	deadline := time.After(3 * time.Second)
+	for len(payloads) < 2 {
+		select {
+		case msg := <-ch:
+			if strings.Contains(msg.payload, `"match_updated"`) {
+				payloads = append(payloads, msg.payload)
+			}
+		case <-deadline:
+			t.Fatalf("only %d match_updated broadcast(s) arrived", len(payloads))
+		}
+	}
+	assert.NotContains(t, payloads[0], `"K"`, "the first broadcast is the first tap's state")
+	assert.Contains(t, payloads[1], `"K"`, "the held broadcast carries the last tap")
+}
+
+// The door's write refusal mapping, and what a refusal leaves: the taps
+// answered refused with the refusal's code, one history line per event id
+// however often they are sent again, and no log line (the transaction wrote
+// no match, so it wrote no baseline for it either).
+func TestScoreEventsDoor_WriteRefusalIsAnAnswerNotALogLine(t *testing.T) {
+	const compID = "se-write-refused"
+	r, store, _, _, _ := setupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Courts: []string{"A", "B"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: compID, Kind: "individual", Status: state.CompStatusKnockout}))
+	// A finished first round whose winner already plays the final, which is
+	// being fought: scoring the first round over is refused.
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{
+		{{ID: "m-r1-0", SideA: "Alice", SideB: "Bob", SideAID: "alice", SideBID: "bob", Winner: "Alice", WinnerID: "alice",
+			Status: state.MatchStatusCompleted, IpponsA: []string{"M"}, MatchNumber: 1, DisplayRound: 2, Court: "B"}},
+		{{ID: "m-r2-0", SideA: "Alice", SideB: "Charlie", SideAID: "alice", SideBID: "charlie",
+			Status: state.MatchStatusRunning, MatchNumber: 2, DisplayRound: 1, Court: "A"}},
+	}}))
+	now := time.Now().UnixMilli()
+	send := func() seAnswer {
+		return sePost(t, r, compID, "m-r1-0", seTap("w1", 1, now-3000, "b", "K"), seTap("w2", 2, now-2900, "b", "K"))
+	}
+	for range 3 {
+		out := send()
+		require.Len(t, out.Outcomes, 2)
+		for _, o := range out.Outcomes {
+			assert.Equal(t, domain.ScoreOutcomeRefused, o.Outcome)
+			assert.Equal(t, "downstream_knockout_running", o.Reason)
+			assert.NotEmpty(t, o.Message)
+		}
+	}
+	lines, err := store.LoadScoreLog(compID, "m-r1-0")
+	require.NoError(t, err)
+	assert.Empty(t, lines, "a refused write logs nothing, the migration baseline included")
+	history, err := store.LoadMatchHistory(compID, "m-r1-0")
+	require.NoError(t, err)
+	assert.Len(t, history, 2, "one line per event id, committed with the refusal, however often it is resent")
+}
+
+// A fault that is not a refusal (here a stand-in engine) is a 500 the device
+// retries, never a refused answer.
+type faultyScoreEvents struct{ ScoringEngine }
+
+func (faultyScoreEvents) RecordScoreEventsTx(_ state.StoreTx, _, _ string, req engine.ScoreEventsRequest) (*engine.ScoreEventsResult, error) {
+	return &engine.ScoreEventsResult{Answers: make([]engine.ScoreEventAnswer, len(req.Events)),
+		WriteErr: errors.New("disk fault"), Match: &state.MatchResult{}}, nil
+}
+
+func TestScoreEventsDoor_NonRefusalWriteFaultIs500(t *testing.T) {
+	const compID = "se-fault"
+	_, store, hub, _ := seServer(t, compID)
+	g := gin.New()
+	registerScoreEventsHandler(g.Group("/api"), faultyScoreEvents{engine.New(store)}, store, store, hub, NewFileVerifier(store), store, newMatchBroadcastCoalescer())
+	w := serveJSON(g, http.MethodPost, sePath(compID, seMatch), map[string]any{"session": "evs",
+		"events": []map[string]any{seTap("f1", 1, time.Now().UnixMilli()-1000, "a", "M")}})
+	assert.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+}
+
+func TestEventWriteRefusalMapsEveryRefusal(t *testing.T) {
+	for want, err := range map[string]error{
+		"downstream_knockout_played":  &engine.DownstreamKnockoutPlayedError{},
+		"downstream_knockout_running": &engine.DownstreamKnockoutRunningError{},
+		"already_ineligible":          &engine.AlreadyIneligibleError{},
+		"ineligible_competitor":       &engine.IneligibleCompetitorError{},
+		"side_mismatch":               engine.ErrMatchSideMismatch,
+		"invalid":                     &engine.ValidationError{Msg: "bad scoreline"},
+	} {
+		reason, message, ok := eventWriteRefusal(fmt.Errorf("wrapped: %w", err))
+		assert.True(t, ok, want)
+		assert.Equal(t, want, reason)
+		assert.NotEmpty(t, message, want)
+	}
+	_, _, ok := eventWriteRefusal(errors.New("disk fault"))
+	assert.False(t, ok, "anything else is a fault, not a refusal")
+}
+
+// A tap that clears a withdrawal (R2) gives the competitor their eligibility
+// back in the same transaction, and the log still replays to the stored match.
+func TestScoreEventsDoor_TapClearingAWithdrawalRestoresEligibility(t *testing.T) {
+	const compID = "se-clears"
+	r, store, _, _ := seServer(t, compID)
+	now := time.Now().UnixMilli()
+	sePost(t, r, compID, seMatch, seTap("e1", 1, now-9000, "a", "M"))
+	w := serveJSON(r, http.MethodPost, "/api/competitions/"+compID+"/matches/"+seMatch+"/decision",
+		map[string]any{"decision": "kiken-voluntary", "decisionBy": "shiro", "modifiedAt": now - 8000})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	barred, err := store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, barred, "the withdrawal bars the competitor")
+	for _, s := range barred {
+		require.False(t, s.Eligible)
+	}
+
+	out := sePost(t, r, compID, seMatch, seTap("e2", 2, now-1000, "b", "K"))
+	require.Equal(t, domain.ScoreOutcomeApplied, out.Outcomes[0].Outcome)
+	ms, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	assert.Empty(t, ms[0].Decision, "the withdrawal was cleared by the scoring")
+	after, err := store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	for _, s := range after {
+		assert.True(t, s.Eligible, "eligibility is restored with the clear")
+	}
+	assertLogReplaysToStored(t, store, compID, seMatch, false)
 }

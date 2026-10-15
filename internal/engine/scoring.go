@@ -716,6 +716,12 @@ type ForceOptions struct {
 	// carries them on the MatchResult itself.
 	WriteID string
 	Basis   *state.ScoreBasis
+	// ReopenReason is the reason a decision that ends a match reopened with no
+	// reason keeps as the match's correction reason. It rides on the write
+	// itself, so the baseline the write leaves in the score event log holds it:
+	// set after the write it would be a result-group field its log did not
+	// replay to. Taken only when the stored match holds no correction reason.
+	ReopenReason string
 }
 
 // HoldReasonOlderRevision is the history reason of a running write the same

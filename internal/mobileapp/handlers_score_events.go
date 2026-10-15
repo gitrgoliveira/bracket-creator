@@ -207,6 +207,7 @@ func registerScoreEventsHandler(r *gin.RouterGroup, eng ScoringEngine, store Com
 			var err error
 			res, err = eng.RecordScoreEventsTx(stx, id, mid, engine.ScoreEventsRequest{
 				Session: body.Session, Events: take, Judge: selfRunEventJudge(stx, id, anonymous),
+				NoTurnedAwayHistory: anonymous,
 			})
 			if err == nil && res.WriteErr != nil {
 				if _, _, refusal := eventWriteRefusal(res.WriteErr); !refusal {
@@ -242,13 +243,10 @@ func registerScoreEventsHandler(r *gin.RouterGroup, eng ScoringEngine, store Com
 		answer["match"] = matchPtrForBroadcast(match)
 
 		if res.Written {
-			if coalescer.Allow(id+":"+mid, match.Status == state.MatchStatusRunning) {
-				hub.Broadcast(EventMatchUpdated, gin.H{
-					"competitionId": id,
-					"matchId":       mid,
-					"result":        matchPtrForBroadcast(match),
-				})
-			}
+			// A second tap inside the window is held and sent when it ends,
+			// so the board and the other devices end on the last state.
+			matchUpdated := gin.H{"competitionId": id, "matchId": mid, "result": matchPtrForBroadcast(match)}
+			coalescer.Submit(id+":"+mid, match.Status == state.MatchStatusRunning, func() { hub.Broadcast(EventMatchUpdated, matchUpdated) })
 			if res.Status != nil {
 				hub.Broadcast(EventCompetitorStatusUpdated, gin.H{"competitionId": id, "status": res.Status})
 			}

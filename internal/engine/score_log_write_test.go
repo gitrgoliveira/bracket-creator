@@ -329,6 +329,35 @@ func TestScoreEvents_FinishBasisDecidesOlderEvents(t *testing.T) {
 	assert.True(t, found, "the unseen event's new outcome is in the history")
 }
 
+// A write the client builds with no basis cannot say which events it saw, so
+// none of the older ones is called recorded: they are before the baseline, in
+// the report and the history alike. A server-built write keeps what it read.
+func TestScoreEvents_NoBasisLeavesOlderEventsBeforeTheBaseline(t *testing.T) {
+	eng, store, _ := slwSetup(t)
+	t0 := time.Now().UnixMilli() - 60_000
+	slwPost(t, eng, slwMatch, slwEvent("ev1", 1, t0, domain.ScoreIpponAdd, domain.ScoreSideA, "M"))
+	other := domain.ScoreEvent{ID: "ev2", Session: "other", Seq: 1, Stamp: t0 + 500, Kind: domain.ScoreIpponAdd, Side: domain.ScoreSideB, Letter: "K"}
+	_, err := eng.RecordScoreEvents(slwComp, slwMatch, ScoreEventsRequest{Session: "other", Events: []domain.ScoreEvent{other}})
+	require.NoError(t, err)
+
+	w := &state.MatchResult{Status: state.MatchStatusRunning, IpponsA: []string{"D"}, IpponsB: []string{},
+		ModifiedAt: t0 + 1000, Changed: []string{state.GroupPoints}, WriteDoor: DoorScore}
+	_, err = eng.RecordMatchResultWithIneligibility(slwComp, slwMatch, w)
+	require.NoError(t, err)
+	require.NotNil(t, w.Merge)
+	assert.ElementsMatch(t, []string{"ev1", "ev2"}, w.Merge.EventsNotApplied)
+	assertLogIsTheMatch(t, eng, store, slwMatch)
+	history, err := store.LoadMatchHistory(slwComp, slwMatch)
+	require.NoError(t, err)
+	var reasons []string
+	for _, h := range history {
+		if h.Event != nil && h.EventOutcome == domain.ScoreOutcomeBeforeBaseline {
+			reasons = append(reasons, h.Reason)
+		}
+	}
+	assert.Equal(t, []string{"no basis", "no basis"}, reasons)
+}
+
 func TestScoreEvents_JudgeRefusesWithoutLogging(t *testing.T) {
 	eng, store, _ := slwSetup(t)
 	now := time.Now().UnixMilli()
@@ -348,4 +377,85 @@ func TestScoreEvents_JudgeRefusesWithoutLogging(t *testing.T) {
 	assert.Equal(t, ScoreEventAnswer{ID: "no", Outcome: domain.ScoreOutcomeRefused, Reason: "nope", Message: "Not this one."}, res.Answers[1])
 	lines := assertLogIsTheMatch(t, eng, store, slwMatch)
 	assert.Len(t, lines, 2, "the migration baseline and the one event taken")
+}
+
+// A tap turned away never enters the log, so a resend meets the same wall
+// every time: an anonymous caller's turned-away taps leave no history line, and
+// the organiser's leave one per event id, however often they are sent again.
+func TestScoreEvents_TurnedAwayTapsDoNotGrowTheHistory(t *testing.T) {
+	eng, store, _ := slwSetup(t)
+	now := time.Now().UnixMilli()
+	history := func(matchID string) []state.MatchHistoryEntry {
+		t.Helper()
+		h, err := store.LoadMatchHistory(slwComp, matchID)
+		require.NoError(t, err)
+		return h
+	}
+	send := func(anonymous bool, matchID string, judge func(*state.MatchResult, *state.Competition, domain.ScoreEvent) *EventRefusal) {
+		t.Helper()
+		_, err := eng.RecordScoreEvents(slwComp, matchID, ScoreEventsRequest{Session: "evs", NoTurnedAwayHistory: anonymous, Judge: judge,
+			Events: []domain.ScoreEvent{
+				slwEvent("t1", 1, now, domain.ScoreIpponAdd, domain.ScoreSideA, "M"),
+				slwEvent("t2", 2, now+1, domain.ScoreIpponAdd, domain.ScoreSideB, "K"),
+			}})
+		require.NoError(t, err)
+	}
+
+	// Not started (the scheduled match): anonymous leaves nothing.
+	for range 3 {
+		send(true, "Pool A-1", nil)
+	}
+	assert.Empty(t, history("Pool A-1"), "an anonymous caller's turned-away taps write no history")
+	// The organiser: one line per event id, looped.
+	for range 3 {
+		send(false, "Pool A-1", nil)
+	}
+	assert.Len(t, history("Pool A-1"), 2, "one line for each of the two ids, not one per send")
+
+	// Refused by a judge on a running match: the same two rules.
+	refuse := func(*state.MatchResult, *state.Competition, domain.ScoreEvent) *EventRefusal {
+		return &EventRefusal{Reason: "nope", Message: "No."}
+	}
+	for range 3 {
+		send(true, slwMatch, refuse)
+	}
+	assert.Empty(t, history(slwMatch))
+	for range 3 {
+		send(false, slwMatch, refuse)
+	}
+	assert.Len(t, history(slwMatch), 2)
+}
+
+// A tap the match was not running for is told the truth: "sent back to the
+// queue" only when the match was sent back; otherwise that it is not running.
+func TestScoreEvents_NotStartedWordingFollowsTheQueueSendBack(t *testing.T) {
+	eng, store, _ := slwSetup(t)
+	now := time.Now().UnixMilli()
+	slwPost(t, eng, slwMatch, slwEvent("e1", 1, now-5000, domain.ScoreIpponAdd, domain.ScoreSideA, "M"))
+
+	// Withdrawn, reopened, and scheduled again by something other than the
+	// operator's send back (here the file edited directly).
+	_, _, err := eng.RecordDecision(slwComp, slwMatch, "kiken-voluntary", "aka", "", nil, now-4000)
+	require.NoError(t, err)
+	_, err = eng.ReopenMatch(slwComp, slwMatch, "mistake")
+	require.NoError(t, err)
+	found, err := store.UpdatePoolMatchByID(slwComp, slwMatch, func(r *state.MatchResult) error {
+		r.Status = state.MatchStatusScheduled
+		return nil
+	})
+	require.NoError(t, err)
+	require.True(t, found)
+	res := slwPost(t, eng, slwMatch, slwEvent("e2", 2, time.Now().UnixMilli(), domain.ScoreIpponAdd, domain.ScoreSideA, "K"))
+	assert.Equal(t, domain.ScoreOutcomeNotStarted, res.Answers[0].Outcome)
+	assert.Equal(t, EventMessageNotRunning, res.Answers[0].Message, "the match was not sent back, so the tap is not told it was")
+
+	_, err = store.UpdatePoolMatchByID(slwComp, slwMatch, func(r *state.MatchResult) error {
+		r.Status = state.MatchStatusRunning
+		return nil
+	})
+	require.NoError(t, err)
+	require.NoError(t, eng.RevertMatchToQueue(slwComp, slwMatch))
+	res = slwPost(t, eng, slwMatch, slwEvent("e3", 3, time.Now().UnixMilli(), domain.ScoreIpponAdd, domain.ScoreSideA, "K"))
+	assert.Equal(t, EventReasonSentBack, res.Answers[0].Reason)
+	assert.Equal(t, EventMessageSentBack, res.Answers[0].Message)
 }

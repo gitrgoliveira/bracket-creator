@@ -47,6 +47,7 @@ const (
 const (
 	EventMessageNotStarted    = "This match has not started yet, so the tap was not scored. Start the match to score it."
 	EventMessageSentBack      = "The match was sent back to the queue, so the tap was not scored. Start the match again to score it."
+	EventMessageNotRunning    = "This match is not running, so the tap was not scored. Start the match to score it."
 	EventMessageLogUnreadable = "This match's score log cannot be read, so the tap was not saved. The organiser needs to check the tournament data."
 )
 
@@ -68,6 +69,12 @@ type ScoreEventsRequest struct {
 	// (a self-run participant's limits), judged on the stored match under
 	// the write's lock. A refused event is not logged.
 	Judge func(stored *state.MatchResult, comp *state.Competition, ev domain.ScoreEvent) *EventRefusal
+	// NoTurnedAwayHistory leaves out the history line of an event turned away
+	// (refused, not started, or the write refused): a turned-away event never
+	// enters the log, so an anonymous self-run caller could otherwise loop a
+	// resend to grow the match's history file. The organiser's turned-away
+	// events keep one line per event id.
+	NoTurnedAwayHistory bool
 }
 
 // ScoreEventAnswer is the door's answer for one event.
@@ -153,8 +160,12 @@ func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, r
 		case stored.Status != state.MatchStatusRunning && stored.Status != state.MatchStatusCompleted:
 			ans.Outcome = domain.ScoreOutcomeNotStarted
 			ans.Reason, ans.Message = EventReasonNotStarted, EventMessageNotStarted
-			if len(lines) > 0 || len(stored.GroupStamps) > 0 || stored.ModifiedAt > 0 {
+			switch {
+			case e.sentBackToQueue(tx, compID, matchID):
 				ans.Reason, ans.Message = EventReasonSentBack, EventMessageSentBack
+			case len(lines) > 0 || len(stored.GroupStamps) > 0 || stored.ModifiedAt > 0:
+				// It ran, and is not running now, but nobody sent it back.
+				ans.Message = EventMessageNotRunning
 			}
 		default:
 			if req.Judge != nil {
@@ -171,7 +182,7 @@ func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, r
 		take = append(take, i)
 	}
 	if len(take) == 0 {
-		e.recordEventHistory(tx, compID, matchID, req.Events, turnedAway, res.Answers)
+		e.recordEventHistory(tx, compID, matchID, req.Events, e.unrecordedTurnedAway(tx, compID, matchID, req, turnedAway), res.Answers)
 		res.Gaps = ScoreLogGaps(lines)[req.Session]
 		res.Match = e.storedForAnswer(tx, compID, matchID, stored, inPool)
 		return res, nil
@@ -215,7 +226,7 @@ func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, r
 		for _, i := range take {
 			res.Answers[i].Outcome = domain.ScoreOutcomeRefused
 		}
-		e.recordEventHistory(tx, compID, matchID, req.Events, append(turnedAway, take...), res.Answers)
+		e.recordEventHistory(tx, compID, matchID, req.Events, e.unrecordedTurnedAway(tx, compID, matchID, req, append(turnedAway, take...)), res.Answers)
 		res.Gaps = ScoreLogGaps(lines)[req.Session]
 		res.Match = e.storedForAnswer(tx, compID, matchID, stored, inPool)
 		return res, nil
@@ -227,10 +238,10 @@ func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, r
 	for _, i := range take {
 		res.Answers[i].Outcome = rp.Outcome(req.Events[i].ID)
 	}
-	e.recordEventHistory(tx, compID, matchID, req.Events, append(turnedAway, take...), res.Answers)
+	e.recordEventHistory(tx, compID, matchID, req.Events, append(e.unrecordedTurnedAway(tx, compID, matchID, req, turnedAway), take...), res.Answers)
 	// An earlier event whose outcome this batch moved (a later tap gave the
 	// match the winner a waiting one needed, R4) gets a line saying so.
-	e.recordMovedOutcomes(tx, compID, matchID, lines, prev, rp)
+	e.recordMovedOutcomes(tx, compID, matchID, lines, prev, rp, "")
 	res.Gaps = ScoreLogGaps(all)[req.Session]
 	if len(res.Gaps) > 0 {
 		log.Printf("engine: match %s/%s: score events of session %s missing from the log: %v", compID, matchID, req.Session, res.Gaps)
@@ -298,7 +309,7 @@ func (e *Engine) appendEventLine(h state.StoreTx, compID, matchID string, ev dom
 
 // recordMovedOutcomes appends a line for each event of lines whose outcome
 // differs between the replay before (prev) and after (next) the log grew.
-func (e *Engine) recordMovedOutcomes(h state.StoreTx, compID, matchID string, lines []state.ScoreLogLine, prev, next Replay) []string {
+func (e *Engine) recordMovedOutcomes(h state.StoreTx, compID, matchID string, lines []state.ScoreLogLine, prev, next Replay, reason string) []string {
 	was := make(map[string]string, len(prev.Outcomes))
 	for _, o := range prev.Outcomes {
 		was[o.ID] = o.Outcome
@@ -312,7 +323,7 @@ func (e *Engine) recordMovedOutcomes(h state.StoreTx, compID, matchID string, li
 		}
 		seen[o.ID] = true
 		moved = append(moved, o.ID)
-		e.appendEventLine(h, compID, matchID, *lines[o.Line].Event, o.Outcome, "")
+		e.appendEventLine(h, compID, matchID, *lines[o.Line].Event, o.Outcome, reason)
 	}
 	return moved
 }
@@ -394,8 +405,15 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 		return nil
 	}
 	basis := state.ScoreBasis{Seen: len(lines)}
-	if wb.basis != nil {
+	movedReason := ""
+	switch {
+	case wb.basis != nil:
 		basis = *wb.basis
+	case wb.door == DoorScore || wb.door == DoorBulkScore:
+		// A write the client built says nothing of the events it saw, so none
+		// is called recorded: Seen is unknown, not "all of them".
+		basis = state.ScoreBasis{}
+		movedReason = ReasonNoBasis
 	}
 	newest := max(post.ModifiedAt, newestLineStamp(lines))
 	stamps := []int64{wb.stamp, newest}
@@ -424,7 +442,7 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 	after.Match.ScoreVersion = len(lines) + 1
 	e.takeReplayDerived(h, compID, matchID, inPool, &after.Match)
 	note := &baselineNote{match: after.Match}
-	for _, id := range e.recordMovedOutcomes(h, compID, matchID, lines, before, after) {
+	for _, id := range e.recordMovedOutcomes(h, compID, matchID, lines, before, after, movedReason) {
 		if after.Outcome(id) == domain.ScoreOutcomeBeforeBaseline {
 			note.notApplied = append(note.notApplied, id)
 		}
@@ -566,4 +584,55 @@ func newestLineStamp(lines []state.ScoreLogLine) int64 {
 		newest = max(newest, l.Stamp())
 	}
 	return newest
+}
+
+// ReasonNoBasis is the history reason of an older event a client-built write
+// put before its baseline because the write named no basis.
+const ReasonNoBasis = "no basis"
+
+// unrecordedTurnedAway returns the events (idx) that still need a history line
+// for being turned away. An anonymous caller's get none; the organiser's get
+// one per event id, so a resend of an id the history already holds adds
+// nothing.
+func (e *Engine) unrecordedTurnedAway(h state.StoreTx, compID, matchID string, req ScoreEventsRequest, idx []int) []int {
+	if req.NoTurnedAwayHistory || len(idx) == 0 {
+		return nil
+	}
+	entries, err := h.LoadMatchHistory(compID, matchID)
+	if err != nil {
+		log.Printf("engine: match %s/%s: history not read, turned-away events not recorded: %v", compID, matchID, err)
+		return nil
+	}
+	held := make(map[string]bool, len(entries))
+	for _, en := range entries {
+		if en.Event != nil {
+			held[en.Event.ID] = true
+		}
+	}
+	var out []int
+	for _, i := range idx {
+		id := req.Events[i].ID
+		if held[id] {
+			continue
+		}
+		held[id] = true
+		out = append(out, i)
+	}
+	return out
+}
+
+// sentBackToQueue says whether the match's latest write, apart from the taps
+// turned away at this door, was the operator's send back to the queue.
+func (e *Engine) sentBackToQueue(h state.StoreTx, compID, matchID string) bool {
+	entries, err := h.LoadMatchHistory(compID, matchID)
+	if err != nil {
+		return false
+	}
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].Door == DoorEvent {
+			continue
+		}
+		return entries[i].Door == doorRequeue
+	}
+	return false
 }

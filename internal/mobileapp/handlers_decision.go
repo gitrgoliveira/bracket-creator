@@ -208,8 +208,14 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			// req.ForceDownstreamReopen (the bc-kcdg downstream-knockout-
 			// correction guard) and surfaces the reopened downstream match
 			// ids so they can be broadcast below.
+			fo := engine.ForceOptions{Force: req.ForceDownstreamReopen, Reopened: &reopenedDownstream}
+			if snap.ReopenPending {
+				// The reason is part of the result group: it goes on the
+				// write itself, so the baseline the write leaves holds it.
+				fo.ReopenReason = reason
+			}
 			result, status, engErr = eng.RecordDecisionTxWithOptions(stx, id, mid, req.Decision, req.DecisionBy, reason, req.Encho,
-				req.tagInto(engine.ForceOptions{Force: req.ForceDownstreamReopen, Reopened: &reopenedDownstream}), req.ModifiedAt)
+				req.tagInto(fo), req.ModifiedAt)
 			if result != nil && result.ResultSource == "" {
 				result.ResultSource = "admin"
 			}
@@ -221,7 +227,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 				// A decision can complete a POOL or a bracket match, so pass the
 				// snapshot's own home: a pool match still takes the pool arm, a
 				// bracket match skips the guaranteed-miss pool probe (mp-gmcg review).
-				return dischargeReopenPendingUnderTx(stx, id, mid, reason, snap.InBracket)
+				return dischargeReopenPendingUnderTx(stx, id, mid, "", snap.InBracket)
 			}
 			return nil
 		})
@@ -439,6 +445,10 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 			// The draw is a verdict and nothing else (bc-mrgc).
 			Changed: []string{state.GroupResult}, WriteDoor: engine.DoorDecision,
 		}
+		if m.ReopenPending && m.CorrectionReason == "" {
+			// Part of the result group: on the write, so its baseline holds it.
+			write.CorrectionReason = reason
+		}
 		if _, werr := eng.RecordMatchResultWithIneligibilityTx(stx, compID, matchID, write); werr != nil {
 			writeErr = werr
 			return nil
@@ -446,7 +456,7 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 		result = *write
 		applied = true
 		if m.ReopenPending {
-			return dischargeReopenPendingUnderTx(stx, compID, matchID, reason, false)
+			return dischargeReopenPendingUnderTx(stx, compID, matchID, "", false)
 		}
 		return nil
 	})

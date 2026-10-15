@@ -990,6 +990,9 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// A resend of a decision the score event log already holds (its writeId,
 	// bc-evts F1) is answered as recorded before anything judges it.
 	result.WriteID, result.Basis = kcdgOpts.WriteID, kcdgOpts.Basis
+	if kcdgOpts.ReopenReason != "" && prior.CorrectionReason == "" {
+		result.CorrectionReason = kcdgOpts.ReopenReason
+	}
 	if logged, err := e.answerLoggedWrite(tx, compID, matchID, result); err != nil || logged {
 		if err != nil {
 			return nil, nil, err

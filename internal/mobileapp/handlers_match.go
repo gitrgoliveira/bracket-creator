@@ -3921,14 +3921,15 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		if !isRunning {
 			runningRevStore.Delete(matchKey)
 		}
-		if coalescer.Allow(matchKey, isRunning) {
-			stampWithdrawnStatus(store, id, result)
-			hub.Broadcast(EventMatchUpdated, gin.H{
-				"competitionId": id,
-				"matchId":       mid,
-				"result":        matchPtrForBroadcast(result),
-			})
+		// The payload is built now: a push held to the window's end must show
+		// this write's match, not whatever the handler does to it afterwards.
+		stampWithdrawnStatus(store, id, result)
+		matchUpdated := gin.H{
+			"competitionId": id,
+			"matchId":       mid,
+			"result":        matchPtrForBroadcast(result),
 		}
+		coalescer.Submit(matchKey, isRunning, func() { hub.Broadcast(EventMatchUpdated, matchUpdated) })
 		// bc-kcdg: a forced correction may have reopened downstream bracket
 		// matches whose SideA/SideB the correction's propagation just
 		// repainted (forceReopenDownstreamChain). Each is a distinct match

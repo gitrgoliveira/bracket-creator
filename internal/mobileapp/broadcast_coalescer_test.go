@@ -83,6 +83,38 @@ func TestMatchBroadcastCoalescer_Allow(t *testing.T) {
 	})
 }
 
+// A broadcast dropped inside the window is sent once when it ends, carrying
+// the LAST state of the burst; a non-running one supersedes what was held.
+func TestMatchBroadcastCoalescer_TrailingSendCarriesTheLastState(t *testing.T) {
+	var mu sync.Mutex
+	var got []string
+	send := func(s string) func() {
+		return func() { mu.Lock(); got = append(got, s); mu.Unlock() }
+	}
+	seen := func() []string { mu.Lock(); defer mu.Unlock(); return append([]string(nil), got...) }
+
+	c := newMatchBroadcastCoalescer()
+	c.Submit("m1", true, send("first"))
+	c.Submit("m1", true, send("second"))
+	c.Submit("m1", true, send("third"))
+	assert.Equal(t, []string{"first"}, seen(), "inside the window only the first goes out now")
+	assert.Eventually(t, func() bool { return len(seen()) == 2 }, 2*time.Second, 10*time.Millisecond)
+	assert.Equal(t, []string{"first", "third"}, seen(), "the window's end sends the last state, once")
+	time.Sleep(2 * matchCoalesceWindow)
+	assert.Len(t, seen(), 2, "and nothing else")
+
+	// A finish inside the window goes out at once and the held tap is dropped.
+	mu.Lock()
+	got = nil
+	mu.Unlock()
+	c2 := newMatchBroadcastCoalescer()
+	c2.Submit("m2", true, send("a"))
+	c2.Submit("m2", true, send("b"))
+	c2.Submit("m2", false, send("done"))
+	time.Sleep(2 * matchCoalesceWindow)
+	assert.Equal(t, []string{"a", "done"}, seen())
+}
+
 // ---------------------------------------------------------------------------
 // BenchmarkScoreWrite_TwoCourts, measures per-comp-lock serialisation when
 // two courts of the SAME competition write running-status scores concurrently.

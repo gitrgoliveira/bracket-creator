@@ -93,6 +93,32 @@ func TestMerge_EngiStaleFinishIsHeldInHistory(t *testing.T) {
 	})
 }
 
+// An engi finish is atomic with its count (HoldReasonEngiAtomic): a finish
+// made before the stored result was dated again (here the board named the
+// running status later, as a reopen dates it) is held whole, count included,
+// though the count alone is newer than the stored one.
+func TestMerge_EngiFinishOlderThanTheStoredResultIsHeldWithItsCount(t *testing.T) {
+	bothBranches(t, func(t *testing.T, knockout bool) {
+		h := mmEngi(t, knockout)
+		count := mmRunning(h, mmT1, state.GroupFlags)
+		count.FlagsA = 1
+		require.NoError(t, h.write(count))
+		restart := mmRunning(h, mmT3, state.GroupResult)
+		require.NoError(t, h.write(restart))
+		restarted := h.load(t)
+		require.Equal(t, mmT3, restarted.GroupStamp(state.GroupResult))
+
+		err := h.write(mmEngiFinish(h, mmT2, 3, 0))
+		require.ErrorIs(t, err, ErrMatchSuperseded)
+		m := h.load(t)
+		assert.Equal(t, state.MatchStatusRunning, m.Status)
+		assert.Equal(t, 1, m.FlagsA, "the count is held with the finish")
+		last := h.history(t)[len(h.history(t))-1]
+		assert.Equal(t, HoldReasonEngiAtomic, last.Reason)
+		assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupFlags])
+	})
+}
+
 // S2, generalized to engi (operator ruling 2026-10-04: "the newest count
 // decides" in either arrival order). A finish made at T2 (3-0, Ryu, offline,
 // sent late) and a later, VALID recount made at T3 (1-2, Tora) on a board

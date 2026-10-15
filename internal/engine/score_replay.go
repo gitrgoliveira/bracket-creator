@@ -23,6 +23,13 @@
 //   - S3: a hantei mark stays while the scoreline it rests on is tied, and
 //     goes once a point unties it.
 //
+// A baseline (a door's write: a snapshot, a finish, a decision) sets each of
+// its groups at that group's own stamp (baselineItems), a fought finish's
+// scoring together with its result. One that sets scoring but not the
+// result on a match the log has finished meets the same rules as an event
+// (judgeOverFinished); what it does not land is Replay.Held. Since stage 2b
+// every scoring snapshot is decided this way (mergeByReplay, match_merge.go).
+//
 // Lazy migration: a match with no log is the match as stored. A door writing
 // the first line of a log writes MigrationBaseline first, so the stored match
 // becomes the log's first baseline at its own group stamps.

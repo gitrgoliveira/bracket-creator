@@ -21,59 +21,73 @@ import (
 // matchBroadcastCoalescer unit tests
 // ---------------------------------------------------------------------------
 
-func TestMatchBroadcastCoalescer_Allow(t *testing.T) {
-	t.Run("first call always allowed", func(t *testing.T) {
+// stillRunning adapts a test send to Submit's: the match still runs, so the
+// key keeps its window.
+func stillRunning(send func()) func() bool {
+	return func() bool { send(); return true }
+}
+
+// sentNow submits a push and reports whether Submit sent it at once (true)
+// or held it for the window's end (false).
+func sentNow(c *matchBroadcastCoalescer, key string, running bool) bool {
+	var sent atomic.Bool
+	c.Submit(key, running, stillRunning(func() { sent.Store(true) }))
+	return sent.Load()
+}
+
+func TestMatchBroadcastCoalescer_Submit(t *testing.T) {
+	t.Run("first push goes out at once", func(t *testing.T) {
 		c := newMatchBroadcastCoalescer()
-		assert.True(t, c.Allow("m1", true))
+		assert.True(t, sentNow(c, "m1", true))
 	})
 
-	t.Run("second call within window is coalesced", func(t *testing.T) {
+	t.Run("second running push within the window is held", func(t *testing.T) {
 		c := newMatchBroadcastCoalescer()
-		assert.True(t, c.Allow("m1", true))
-		assert.False(t, c.Allow("m1", true), "should be coalesced within 250ms")
+		assert.True(t, sentNow(c, "m1", true))
+		assert.False(t, sentNow(c, "m1", true), "held within 250ms")
 	})
 
-	t.Run("call after window proceeds", func(t *testing.T) {
+	t.Run("a push after the window goes out at once", func(t *testing.T) {
 		c := newMatchBroadcastCoalescer()
-		assert.True(t, c.Allow("m1", true))
+		assert.True(t, sentNow(c, "m1", true))
 		// Force the last timestamp to be old.
 		k := c.lock("m1")
 		k.last = time.Now().Add(-300 * time.Millisecond)
 		k.mu.Unlock()
-		assert.True(t, c.Allow("m1", true), "should proceed after window expires")
+		assert.True(t, sentNow(c, "m1", true), "should proceed after window expires")
 	})
 
-	t.Run("non-running writes always allowed regardless of window", func(t *testing.T) {
+	t.Run("non-running pushes always go out regardless of window", func(t *testing.T) {
 		c := newMatchBroadcastCoalescer()
-		assert.True(t, c.Allow("m1", false))
-		assert.True(t, c.Allow("m1", false), "completed writes must never be coalesced")
+		assert.True(t, sentNow(c, "m1", false))
+		assert.True(t, sentNow(c, "m1", false), "completed writes must never be held")
 	})
 
 	t.Run("different matches have independent windows", func(t *testing.T) {
 		c := newMatchBroadcastCoalescer()
-		assert.True(t, c.Allow("m1", true))
-		assert.False(t, c.Allow("m1", true)) // m1 coalesced
-		assert.True(t, c.Allow("m2", true))  // m2 independent
-		assert.False(t, c.Allow("m2", true)) // m2 now coalesced
+		assert.True(t, sentNow(c, "m1", true))
+		assert.False(t, sentNow(c, "m1", true)) // m1 held
+		assert.True(t, sentNow(c, "m2", true))  // m2 independent
+		assert.False(t, sentNow(c, "m2", true)) // m2 now held
 	})
 
 	t.Run("competition-scoped keys are independent", func(t *testing.T) {
 		c := newMatchBroadcastCoalescer()
 		// Same bare match id "Pool A-1" in two different competitions must not
 		// share a coalesce window, the call site keys by compID:matchID.
-		assert.True(t, c.Allow("comp1:Pool A-1", true))
-		assert.False(t, c.Allow("comp1:Pool A-1", true)) // comp1 coalesced
-		assert.True(t, c.Allow("comp2:Pool A-1", true))  // comp2 independent
+		assert.True(t, sentNow(c, "comp1:Pool A-1", true))
+		assert.False(t, sentNow(c, "comp1:Pool A-1", true)) // comp1 held
+		assert.True(t, sentNow(c, "comp2:Pool A-1", true))  // comp2 independent
 	})
 
-	t.Run("non-running Allow prunes the match entry (bounded map)", func(t *testing.T) {
+	t.Run("a non-running push prunes the match entry (bounded map)", func(t *testing.T) {
 		c := newMatchBroadcastCoalescer()
-		assert.True(t, c.Allow("m1", true)) // running write records the entry
+		assert.True(t, sentNow(c, "m1", true)) // running push records the entry
 		_, present := c.keys.Load("m1")
 		require.True(t, present, "running broadcast must record an entry")
 
-		// A completed (non-running) broadcast proceeds AND prunes the entry.
-		assert.True(t, c.Allow("m1", false))
+		// A completed (non-running) broadcast goes out AND prunes the entry.
+		assert.True(t, sentNow(c, "m1", false))
 		_, present = c.keys.Load("m1")
 		assert.False(t, present, "non-running broadcast must drop the entry to keep the map bounded")
 	})
@@ -90,9 +104,9 @@ func TestMatchBroadcastCoalescer_TrailingSendCarriesTheLastState(t *testing.T) {
 	seen := func() []string { mu.Lock(); defer mu.Unlock(); return append([]string(nil), got...) }
 
 	c := newMatchBroadcastCoalescer()
-	c.Submit("m1", true, send("first"))
-	c.Submit("m1", true, send("second"))
-	c.Submit("m1", true, send("third"))
+	c.Submit("m1", true, stillRunning(send("first")))
+	c.Submit("m1", true, stillRunning(send("second")))
+	c.Submit("m1", true, stillRunning(send("third")))
 	assert.Equal(t, []string{"first"}, seen(), "inside the window only the first goes out now")
 	assert.Eventually(t, func() bool { return len(seen()) == 2 }, 2*time.Second, 10*time.Millisecond)
 	assert.Equal(t, []string{"first", "third"}, seen(), "the window's end sends the last state, once")
@@ -104,9 +118,9 @@ func TestMatchBroadcastCoalescer_TrailingSendCarriesTheLastState(t *testing.T) {
 	got = nil
 	mu.Unlock()
 	c2 := newMatchBroadcastCoalescer()
-	c2.Submit("m2", true, send("a"))
-	c2.Submit("m2", true, send("b"))
-	c2.Submit("m2", false, send("done"))
+	c2.Submit("m2", true, stillRunning(send("a")))
+	c2.Submit("m2", true, stillRunning(send("b")))
+	c2.Submit("m2", false, stillRunning(send("done")))
 	time.Sleep(2 * matchCoalesceWindow)
 	assert.Equal(t, []string{"a", "done"}, seen())
 }

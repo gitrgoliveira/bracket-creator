@@ -249,11 +249,7 @@ func registerScoreEventsHandler(r *gin.RouterGroup, eng ScoringEngine, store Com
 			// The send reads the match again when it runs, so a push held to the
 			// window's end, or one that crossed another request, shows the
 			// newest stored state and not this request's.
-			coalescer.Submit(id+":"+mid, match.Status == state.MatchStatusRunning, func() {
-				if p, ok := freshMatchPush(store, id, mid, matchUpdated); ok {
-					hub.Broadcast(EventMatchUpdated, p)
-				}
-			})
+			coalescer.Submit(id+":"+mid, match.Status == state.MatchStatusRunning, runningPushSender(hub, store, id, mid, matchUpdated))
 			if res.Status != nil {
 				hub.Broadcast(EventCompetitorStatusUpdated, gin.H{"competitionId": id, "status": res.Status})
 			}

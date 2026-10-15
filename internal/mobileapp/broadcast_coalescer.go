@@ -45,7 +45,7 @@ type coalescerKey struct {
 	dead    bool // dropped from the map; a holder that finds it retries
 	last    time.Time
 	hasLast bool
-	pending func()
+	pending func() bool
 	timer   *time.Timer
 	// gen counts cancellations: a timer flushes only the generation it was
 	// armed for, so a cancelled timer that already fired cannot send a later
@@ -115,16 +115,6 @@ func (c *matchBroadcastCoalescer) release(matchKey string, k *coalescerKey) {
 	k.mu.Unlock()
 }
 
-// Allow returns true when the push should proceed and false when it should be
-// dropped (inside the window). isRunning must be true for the rate limit to
-// apply; all other pushes pass. It keeps the first-wins-and-drop shape for a
-// caller with nothing to send later.
-func (c *matchBroadcastCoalescer) Allow(matchKey string, isRunning bool) bool {
-	k := c.lock(matchKey)
-	defer c.release(matchKey, k)
-	return k.allowLocked(isRunning)
-}
-
 // SendNow cancels what is held for the key, ends its window and sends at once,
 // under the key's lock: a flush already in flight finishes first and this
 // push follows it. Every match_updated that is not a running score write
@@ -137,18 +127,19 @@ func (c *matchBroadcastCoalescer) SendNow(matchKey string, send func()) {
 	send()
 }
 
-// Submit sends now when the push may proceed (see Allow). A running push
+// Submit sends now when the push may proceed (allowLocked: a non-running push
+// always, a running one outside the window). A running push
 // inside the window is held instead, replacing any held earlier, and sent once
 // when the window ends. send runs under the key's lock and must read the
 // stored match when it runs (freshMatchPush). The held send runs on a one-shot
 // timer of at most the window, recovered like any spawned goroutine (safeGo).
 // A hub closed meanwhile still takes a seq and writes its ring when Broadcast
 // runs; no subscriber is left to receive it.
-func (c *matchBroadcastCoalescer) Submit(matchKey string, isRunning bool, send func()) {
+func (c *matchBroadcastCoalescer) Submit(matchKey string, isRunning bool, send func() bool) {
 	k := c.lock(matchKey)
 	defer c.release(matchKey, k)
 	if k.allowLocked(isRunning) {
-		send()
+		k.sentLocked(send())
 		return
 	}
 	k.pending = send
@@ -164,6 +155,15 @@ func (c *matchBroadcastCoalescer) Submit(matchKey string, isRunning bool, send f
 	})
 }
 
+// sentLocked takes a send's answer: a match no longer running ends its window,
+// so the key holds nothing and release drops it.
+func (k *coalescerKey) sentLocked(stillRunning bool) {
+	if !stillRunning {
+		k.cancelLocked()
+		k.hasLast = false
+	}
+}
+
 // flushPending sends what the key holds when its timer fires, unless that
 // timer's generation was cancelled meanwhile.
 func (c *matchBroadcastCoalescer) flushPending(matchKey string, k *coalescerKey, gen uint64) {
@@ -175,7 +175,7 @@ func (c *matchBroadcastCoalescer) flushPending(matchKey string, k *coalescerKey,
 	send := k.pending
 	k.pending, k.timer = nil, nil
 	k.last, k.hasLast = coalescerNow(), true
-	send()
+	k.sentLocked(send())
 }
 
 // matchPushStore is the read side a push needs: the stored match and the
@@ -195,16 +195,23 @@ type matchPushStore interface {
 // deleted within the window): the push is dropped. A read error is logged and
 // the captured payload goes out, since the write did commit.
 func freshMatchPush(store matchPushStore, compID, matchID string, captured gin.H) (gin.H, bool) {
+	p, ok, _ := freshMatchRead(store, compID, matchID, captured)
+	return p, ok
+}
+
+// freshMatchRead is freshMatchPush with the match it read (nil when it did
+// not read one: a payload with no result, or a read error).
+func freshMatchRead(store matchPushStore, compID, matchID string, captured gin.H) (gin.H, bool, *state.MatchResult) {
 	if _, carries := captured["result"]; !carries {
-		return captured, true
+		return captured, true, nil
 	}
 	r, found, err := readStoredMatch(store, compID, matchID)
 	if err != nil {
 		log.Printf("mobileapp: push %s/%s: read stored match: %v", compID, matchID, err)
-		return captured, true
+		return captured, true, nil
 	}
 	if !found {
-		return nil, false
+		return nil, false, nil
 	}
 	stampWithdrawnStatus(store, compID, r)
 	out := make(gin.H, len(captured))
@@ -212,7 +219,22 @@ func freshMatchPush(store matchPushStore, compID, matchID string, captured gin.H
 		out[k] = v
 	}
 	out["result"] = matchPtrForBroadcast(r)
-	return out, true
+	return out, true, r
+}
+
+// runningPushSender is the send a running match's push hands Submit: it
+// broadcasts the match as stored when it runs (freshMatchRead) and answers
+// whether that match still runs, so a key whose match has left running (or
+// is gone) is dropped at once rather than kept until its next push.
+func runningPushSender(b Broadcaster, store matchPushStore, compID, matchID string, captured gin.H) func() bool {
+	return func() bool {
+		p, ok, r := freshMatchRead(store, compID, matchID, captured)
+		if !ok {
+			return false
+		}
+		b.Broadcast(EventMatchUpdated, p)
+		return r == nil || r.Status == state.MatchStatusRunning
+	}
 }
 
 // readStoredMatch finds a match by id in the pool matches, then the bracket.

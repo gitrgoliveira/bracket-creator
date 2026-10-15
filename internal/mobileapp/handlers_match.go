@@ -662,6 +662,11 @@ func answerAutoComplete(c *gin.Context, hub Broadcaster, compID string, outcome 
 	}
 }
 
+// bulkScorePushEachMax is the largest bulk-score batch that pushes one
+// match_updated per landed entry; a larger one pushes one naming only the
+// competition.
+const bulkScorePushEachMax = 50
+
 // RegisterMatchHandlers wires up the score / quick-score / bulk-score /
 // court / override-winner / time endpoints under the admin group.
 //
@@ -1028,15 +1033,21 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 
 		if len(successful) > 0 {
-			for i := range successful {
-				stampWithdrawnStatus(store, id, &successful[i])
-			}
-			for i := range successful {
-				broadcastMatchNow(hub, store, id, successful[i].ID, gin.H{
-					"competitionId": id,
-					"matchId":       successful[i].ID,
-					"result":        matchPtrForBroadcast(&successful[i]),
-				})
+			// Each push is built from the match as stored when it is sent
+			// (freshMatchPush, which stamps the withdrawn status itself). A
+			// large batch sends one push naming only the competition instead,
+			// which every client answers with one refetch: a push per entry
+			// would queue hundreds of frames on a slow subscriber.
+			if len(successful) > bulkScorePushEachMax {
+				hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id})
+			} else {
+				for i := range successful {
+					broadcastMatchNow(hub, store, id, successful[i].ID, gin.H{
+						"competitionId": id,
+						"matchId":       successful[i].ID,
+						"result":        matchPtrForBroadcast(&successful[i]),
+					})
+				}
 			}
 			tryAutoCompletePoolsAfterWrite(c, eng, hub, id, successful...)
 		}
@@ -3807,11 +3818,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			"matchId":       mid,
 			"result":        matchPtrForBroadcast(result),
 		}
-		coalescer.Submit(matchKey, isRunning, func() {
-			if p, ok := freshMatchPush(store, id, mid, matchUpdated); ok {
-				hub.Broadcast(EventMatchUpdated, p)
-			}
-		})
+		coalescer.Submit(matchKey, isRunning, runningPushSender(hub, store, id, mid, matchUpdated))
 		// bc-kcdg: a forced correction may have reopened downstream bracket
 		// matches whose SideA/SideB the correction's propagation just
 		// repainted (forceReopenDownstreamChain). Each is a distinct match

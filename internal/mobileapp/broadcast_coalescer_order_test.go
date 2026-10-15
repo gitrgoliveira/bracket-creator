@@ -41,11 +41,11 @@ func TestMatchBroadcastCoalescer_LateTimerNeverPushesOlderStateAfterNewer(t *tes
 
 	rec := &recorder{}
 	c := newMatchBroadcastCoalescer()
-	c.Submit("m", true, rec.send("a"))
+	c.Submit("m", true, stillRunning(rec.send("a")))
 	setOff(100 * time.Millisecond)
-	c.Submit("m", true, rec.send("b")) // held
+	c.Submit("m", true, stillRunning(rec.send("b"))) // held
 	setOff(300 * time.Millisecond)
-	c.Submit("m", true, rec.send("c")) // past the window: goes out at once
+	c.Submit("m", true, stillRunning(rec.send("c"))) // past the window: goes out at once
 	time.Sleep(2 * matchCoalesceWindow)
 	assert.Equal(t, []string{"a", "c"}, rec.seen(), "the held older state is dropped when a newer one goes out")
 }
@@ -55,8 +55,8 @@ func TestMatchBroadcastCoalescer_LateTimerNeverPushesOlderStateAfterNewer(t *tes
 func TestMatchBroadcastCoalescer_SendNowCancelsTheHeldPush(t *testing.T) {
 	rec := &recorder{}
 	c := newMatchBroadcastCoalescer()
-	c.Submit("m", true, rec.send("a"))
-	c.Submit("m", true, rec.send("b")) // held
+	c.Submit("m", true, stillRunning(rec.send("a")))
+	c.Submit("m", true, stillRunning(rec.send("b"))) // held
 	c.SendNow("m", rec.send("direct"))
 	time.Sleep(2 * matchCoalesceWindow)
 	assert.Equal(t, []string{"a", "direct"}, rec.seen(), "the held tap must not follow the newer direct push")
@@ -69,8 +69,8 @@ func TestMatchBroadcastCoalescer_SendNowWaitsForASendInFlight(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	rec := &recorder{}
-	c.Submit("m", true, rec.send("a"))
-	c.Submit("m", true, func() { close(started); <-release; rec.send("held")() })
+	c.Submit("m", true, stillRunning(rec.send("a")))
+	c.Submit("m", true, stillRunning(func() { close(started); <-release; rec.send("held")() }))
 	<-started // the window's end fired the held send
 
 	done := make(chan struct{})
@@ -93,7 +93,7 @@ func TestMatchBroadcastCoalescer_KeysAreIndependent(t *testing.T) {
 	release := make(chan struct{})
 	slowDone := make(chan struct{})
 	go func() {
-		c.Submit("A:m", false, func() { close(started); <-release }) // a blocking fake reader
+		c.Submit("A:m", false, stillRunning(func() { close(started); <-release })) // a blocking fake reader
 		close(slowDone)
 	}()
 	<-started
@@ -101,7 +101,7 @@ func TestMatchBroadcastCoalescer_KeysAreIndependent(t *testing.T) {
 	rec := &recorder{}
 	fast := make(chan struct{})
 	go func() {
-		c.Submit("B:m", true, rec.send("b-running"))
+		c.Submit("B:m", true, stillRunning(rec.send("b-running")))
 		c.SendNow("B:m", rec.send("b-direct"))
 		close(fast)
 	}()
@@ -127,12 +127,12 @@ func TestMatchBroadcastCoalescer_CancelledTimerCannotFlushALaterPendingEarly(t *
 
 	rec := &recorder{}
 	c := newMatchBroadcastCoalescer()
-	c.Submit("m", true, rec.send("a"))
+	c.Submit("m", true, stillRunning(rec.send("a")))
 	setOff(200 * time.Millisecond)
-	c.Submit("m", true, rec.send("b")) // held, timer due in 50ms
+	c.Submit("m", true, stillRunning(rec.send("b"))) // held, timer due in 50ms
 	setOff(300 * time.Millisecond)
-	c.Submit("m", true, rec.send("c")) // window lapsed: goes out, cancels b and its timer
-	c.Submit("m", true, rec.send("d")) // inside the new window: held, due in 250ms
+	c.Submit("m", true, stillRunning(rec.send("c"))) // window lapsed: goes out, cancels b and its timer
+	c.Submit("m", true, stillRunning(rec.send("d"))) // inside the new window: held, due in 250ms
 	time.Sleep(matchCoalesceWindow / 2)
 	assert.Equal(t, []string{"a", "c"}, rec.seen(), "b's cancelled timer must not send d early")
 	time.Sleep(matchCoalesceWindow)
@@ -181,11 +181,7 @@ func TestBroadcastMatchNow_AfterAHeldRunningPushLeavesTheNewestStateLast(t *test
 	c := newMatchBroadcastCoalescer()
 	rec := &payloadRecorder{c: c}
 	captured := gin.H{"competitionId": compID, "matchId": seMatch, "result": "captured"}
-	running := func() {
-		if p, ok := freshMatchPush(store, compID, seMatch, captured); ok {
-			rec.Broadcast(EventMatchUpdated, p)
-		}
-	}
+	running := runningPushSender(rec, store, compID, seMatch, captured)
 	key := compID + ":" + seMatch
 	c.Submit(key, true, running)
 	c.Submit(key, true, running) // held
@@ -257,4 +253,26 @@ func TestHubPushMatchNow(t *testing.T) {
 	hub.heldPushes = newMatchBroadcastCoalescer()
 	hub.pushMatchNow("c:m", func() { ran++ })
 	assert.Equal(t, 2, ran)
+}
+
+// A held running push whose fresh read finds the match no longer running
+// (another device finished it) ends the key's window: the key is dropped at
+// once rather than kept until the match's next push.
+func TestRunningPushSender_DropsTheKeyOnceTheMatchLeavesRunning(t *testing.T) {
+	const compID = "held-then-finished"
+	_, store, _, _ := seServer(t, compID)
+	c := newMatchBroadcastCoalescer()
+	rec := &payloadRecorder{c: c}
+	captured := gin.H{"competitionId": compID, "matchId": seMatch, "result": "captured"}
+	key := compID + ":" + seMatch
+	send := runningPushSender(rec, store, compID, seMatch, captured)
+	c.Submit(key, true, send)
+	_, present := c.keys.Load(key)
+	require.True(t, present, "a running push keeps its window")
+	c.Submit(key, true, send) // held
+	setPoolStatus(t, store, compID, state.MatchStatusCompleted)
+	time.Sleep(2 * matchCoalesceWindow)
+	assert.Equal(t, []state.MatchStatus{state.MatchStatusRunning, state.MatchStatusCompleted}, rec.statuses())
+	_, present = c.keys.Load(key)
+	assert.False(t, present, "the held push read a finished match: the key is dropped")
 }

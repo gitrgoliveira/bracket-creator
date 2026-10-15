@@ -63,19 +63,25 @@ func respondIfSuperseded(c *gin.Context, err error) bool {
 // timestamps like a score write, and a copy of the match read before it is
 // older than the one it returns, which is how a stale refetch is told apart
 // from it (keepNewerMatches, patch.jsx).
-func daihyosenWriteStamp(c *gin.Context) (int64, bool) {
+func daihyosenWriteStamp(c *gin.Context) (int64, writeTag, bool) {
 	var body struct {
 		ModifiedAt int64 `json:"modifiedAt"`
+		// The optional writeId and basis (bc-evts F1).
+		writeTag
 	}
 	if err := c.ShouldBindJSON(&body); err != nil && !errors.Is(err, io.EOF) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return 0, false
+		return 0, writeTag{}, false
+	}
+	if err := body.validateTag(); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return 0, writeTag{}, false
 	}
 	if serverNowMs, aheadMs, refuse := clientClockSkew(body.ModifiedAt); refuse {
 		respondClockSkew(c, serverNowMs, aheadMs)
-		return 0, false
+		return 0, writeTag{}, false
 	}
-	return clampClientModifiedAt(body.ModifiedAt), true
+	return clampClientModifiedAt(body.ModifiedAt), body.writeTag, true
 }
 
 // respondIfValidationError maps a transaction error that is
@@ -179,7 +185,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 		if !ok {
 			return
 		}
-		stamp, ok := daihyosenWriteStamp(c)
+		stamp, tag, ok := daihyosenWriteStamp(c)
 		if !ok {
 			return
 		}
@@ -274,6 +280,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// of it.
 			u.Changed = daihyosenChangedGroups(match, &u, state.GroupResult, state.GroupEncho, state.GroupRepPickA, state.GroupRepPickB)
 			u.WriteDoor = engine.DoorDaihyosenDel
+			tag.tagOnto(&u)
 			if _, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, &u); err != nil {
 				if errors.Is(err, engine.ErrMatchSuperseded) {
 					// Committed, not aborted: the write's history entry is
@@ -328,7 +335,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 		if !ok {
 			return
 		}
-		stamp, ok := daihyosenWriteStamp(c)
+		stamp, tag, ok := daihyosenWriteStamp(c)
 		if !ok {
 			return
 		}
@@ -486,6 +493,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// landing on the new bout through the remove's tombstone stamp.
 			u.Changed = daihyosenChangedGroups(match, &u, state.GroupResult, state.GroupRepPickA, state.GroupRepPickB)
 			u.WriteDoor = engine.DoorDaihyosenAdd
+			tag.tagOnto(&u)
 			if _, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, &u); err != nil {
 				if errors.Is(err, engine.ErrMatchSuperseded) {
 					supersededErr = err

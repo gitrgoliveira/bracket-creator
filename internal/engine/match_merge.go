@@ -212,6 +212,12 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 		incoming.Merge = nil
 		return nil
 	}
+	// The score replay's derived write (bc-evts) was ordered line by line by
+	// the replay, which owns R2/R3/R4/S2/S3 in event form: nothing below may
+	// judge it again by its stamps.
+	if incoming.WriteDoor == DoorEvent {
+		return mergeReplayedWrite(stored, incoming)
+	}
 	// An unstamped write the server itself orders (a completing write, or one
 	// a server door built) takes the server's time here, so it leaves a fence
 	// a later stale replay is ordered against (writeStamp).
@@ -541,6 +547,42 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 	if (incoming.Changed != nil || len(rep.Applied) > len(rep.Unchanged)) && stamp > incoming.ModifiedAt {
 		incoming.ModifiedAt = stamp
 	}
+	incoming.Merge = rep
+	return rep
+}
+
+// mergeReplayedWrite is the merge of the score replay's derived write
+// (DoorEvent, bc-evts). The replay built incoming from the stored match and the
+// whole event log, in (Stamp, ID) order, with the rules after a result in
+// event form, so every group it changed applies with the stamp the replay gave
+// it (never the write's newest, or a later baseline would absorb events it
+// never saw). The recorded marks are the replay's too: an event un-records a
+// kachinuki bout it reopens. A group the replay left alone already holds the
+// stored value. The representative bout's winner id is derived again, as
+// every write's is.
+func mergeReplayedWrite(stored, incoming *state.MatchResult) *state.MergeReport {
+	rep := &state.MergeReport{Changed: slices.Clone(incoming.Changed)}
+	for _, s := range incoming.GroupStamps {
+		rep.Stamp = max(rep.Stamp, s)
+	}
+	for _, g := range rep.Changed {
+		rep.Applied = append(rep.Applied, g)
+		if !state.GroupDiffers(stored, incoming, g) {
+			rep.Unchanged = append(rep.Unchanged, g)
+		}
+	}
+	rep.ResultChanged = state.GroupDiffers(stored, incoming, state.GroupResult)
+	if incoming.ClearsWithdrawal {
+		rep.ClearedWithdrawal = state.GroupValue(stored, state.GroupResult)
+	}
+	if i := state.DaihyosenSubIndex(incoming.SubResults); i >= 0 {
+		incoming.SubResults[i].ReconcileWinnerMemberID()
+	}
+	incoming.GroupStamps = state.CloneGroupStamps(incoming.GroupStamps)
+	if len(incoming.GroupStamps) == 0 {
+		incoming.GroupStamps = nil
+	}
+	incoming.ModifiedAt = max(incoming.ModifiedAt, stored.ModifiedAt)
 	incoming.Merge = rep
 	return rep
 }

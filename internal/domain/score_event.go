@@ -114,6 +114,22 @@ const (
 	ScoreOutcomeNotAllowed = "notAllowed"
 )
 
+// The outcomes the score-events door gives an event it does NOT log, so the
+// replay never sees them. The device is told, and may send the event again
+// with the same id once the cause is gone (a clock relearned).
+const (
+	// ScoreOutcomeNotStarted: the match is not running (not yet started, or
+	// sent back to the queue), so a tap has nothing to score (Q3).
+	ScoreOutcomeNotStarted = "notStarted"
+	// ScoreOutcomeRefused: a rule of the door refused it (the reason says
+	// which: a self-run participant's limits, a knockout match after it that
+	// a change here would reach, a log that cannot be read).
+	ScoreOutcomeRefused = "refused"
+	// ScoreOutcomeClockSkew: the event's stamp is too far in the server's
+	// future to be ordered; the device relearns its clock and re-stamps it.
+	ScoreOutcomeClockSkew = "clock_skew"
+)
+
 var errScoreEvent = errors.New("score event")
 
 // Validate checks the event's own shape. It says nothing about the match the

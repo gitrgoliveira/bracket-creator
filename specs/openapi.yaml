@@ -27,6 +27,12 @@ info:
     - **`GET /api/competitions/{id}/swiss/standings`**: public read; always public.
     - **`GET /api/tournament/announcement`**: public read; returns the currently active admin broadcast announcement (204 when none/expired).
 
+    **The build header.** Every answer of the Mobile/Admin API carries
+    `X-App-Build`, the git commit of the server's build (`unknown` when the
+    binary was built without one), and the SSE stream's first data frame names
+    the same build. A tab running another build's bundle reloads, or tells the
+    operator to; the server refuses nothing for its version.
+
     **Self-run mode.** When the tournament is created with `mode: self-run`, the
     main-password gate is bypassed for the operational play surface (scoring,
     start/complete, generate-draw, etc.) so participants can drive their own flow without
@@ -340,6 +346,11 @@ paths:
       summary: Server-Sent Events stream
       description: |
         Subscribe to real-time tournament updates via SSE.
+
+        The first data frame is the stream's hello: a heartbeat (no `id:`, no
+        seq consumed) carrying `hello: true`, the server's `nowMs` and its
+        `build` (the `X-App-Build` value). A `match_updated` frame's `result`
+        carries the match's `markIds` and `scoreVersion` (see MatchResult).
 
         Event types (canonical set defined in `internal/mobileapp/hub.go`):
         - `match_updated`: a match's score/court/scheduledAt changed.
@@ -2408,6 +2419,66 @@ paths:
 
   # ── Matches (Admin, requires auth) ─────────────────────────────────────────
 
+  /api/competitions/{id}/matches/{mid}/score-events:
+    post:
+      tags: [matches]
+      summary: Record score taps (events)
+      description: |
+        A score editor's taps, one event per tap (an ippon struck or taken
+        back, a foul, an overtime period, an engi flag, a team bout's decision
+        or fighter, a representative pick, the representative bout's verdict).
+        The server appends each event it takes to the match's score event log
+        (`competitions/<id>/events/<match>.jsonl`), replays the whole log in
+        the order the taps were made (`stamp`, then `id`) and writes the match
+        the replay gives through the same write every other door uses, so
+        eligibility, knockout propagation and the history follow as for any
+        write. Outcomes are recomputed from the whole log on every replay, so
+        the order taps ARRIVE in changes nothing.
+
+        Public in self-run mode, where a caller with an empty
+        `X-Tournament-Password` is held to the self-run score path's limits
+        (no tap on a finished match, `result_finalized`; no judges' decision,
+        `hantei_organiser_only`; a fighter or representative of the side's own
+        team only, `team_member_not_in_team`). A password sent but wrong is 401.
+
+        The answer is ALWAYS 200 (a malformed batch excepted, 400), with one
+        outcome per event in request order: nothing here is cured by a retry.
+        An event whose id the log holds is `duplicate`; a batch of duplicates
+        writes nothing. An event stamped more than 5s ahead of the server is
+        `clock_skew` and is not logged (the device relearns its clock and
+        sends it again under the same id). A tap on a match that is not running
+        or finished is `notStarted`, with `reason` `match_not_started` or
+        `match_sent_back` and a sentence the device shows. A tap refused by a
+        rule is `refused` with its reason (a knockout match after this one
+        already played or being fought, a self-run limit, or
+        `score_log_unreadable` when the match's log cannot be read).
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - $ref: '#/components/parameters/MatchId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScoreEventsRequest'
+      responses:
+        '200':
+          description: Every event answered; `match` is the match as it now stands.
+          headers:
+            X-App-Build:
+              $ref: '#/components/headers/AppBuild'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoreEventsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: A password was sent and it is wrong.
+        '404':
+          description: Competition or match not found.
   /api/competitions/{id}/matches/{mid}/score:
     put:
       tags: [matches]
@@ -2434,6 +2505,15 @@ paths:
           competitor the withdrawal barred is eligible again. Without it, a
           completed correction with no decision, or `hikiwake`, keeps the
           ruling. A team match must then carry a result on every bout.
+
+          `writeId` and `basis` (also request-only, optional) tag the write
+          for the match's score event log: a write whose `writeId` the log
+          already holds (its first send landed, its answer was lost) is
+          answered as recorded, the stored match with nothing written and no
+          history line; `basis` is what the board had in view (see
+          ScoreBasis), so a score event made before the write that the board
+          never showed is kept in the history as not applied
+          (`beforeBaseline`). A write without them is judged as before.
 
           `changed` (also request-only) names the GROUPS this write changes,
           and the server merges the write group by group (see the MergeGroup
@@ -3763,6 +3843,10 @@ paths:
                 draws:
                   type: integer
                   description: Number of individual bouts that were draws.
+                writeId:
+                  $ref: '#/components/schemas/WriteId'
+                basis:
+                  $ref: '#/components/schemas/ScoreBasis'
       responses:
         '200':
           description: >
@@ -3837,6 +3921,10 @@ paths:
               type: object
               required: [decision]
               properties:
+                writeId:
+                  $ref: '#/components/schemas/WriteId'
+                basis:
+                  $ref: '#/components/schemas/ScoreBasis'
                 decision:
                   type: string
                   enum: [kiken, kiken-voluntary, kiken-injury, fusenpai, fusensho, hikiwake, daihyosen]
@@ -5393,6 +5481,13 @@ components:
         type: string
       description: Match ID (e.g. "pool-a-0" or "bracket-r1-m0").
 
+  headers:
+    AppBuild:
+      description: >
+        The git commit of the build that answered (`unknown` when the binary
+        has none). Set on every answer of the Mobile/Admin API.
+      schema:
+        type: string
   responses:
     BadRequest:
       description: Invalid input.
@@ -5571,7 +5666,9 @@ components:
             engi, kachinuki-advance (Record bout appending the next pairing),
             kachinuki-record (Record bout appending none, only marking the bout
             it closes recorded), kachinuki-remove-bout, downstream-reopen,
-            or engine for a write the server made itself.
+            event (one score tap through POST .../score-events, with `event`
+            and `eventOutcome`; a later `event` line for the same tap says its
+            outcome moved), or engine for a write the server made itself.
           example: score
         stamp:
           type: integer
@@ -5626,6 +5723,13 @@ components:
           type: object
           description: The kiken, fusenpai, or fusensho a later scoring change cleared (the result group as it was), when one was.
           additionalProperties: {}
+        event:
+          $ref: '#/components/schemas/ScoreEvent'
+        eventOutcome:
+          type: string
+          description: >
+            What became of the `event` (door `event`): a ScoreEventOutcome
+            outcome; a refused tap's line carries the refusal in `reason`.
 
     MergeGroup:
       type: string
@@ -5665,6 +5769,168 @@ components:
         `recorded`, which the server alone writes.
       pattern: '^(points|result|encho|flags|rep|repPickA|repPickB|bout:-?[0-9]+)$'
 
+    WriteId:
+      type: string
+      maxLength: 128
+      description: >
+        The client's id for one write (request-only). A write whose id the
+        match's score event log already holds is answered as recorded, with
+        nothing written and no history line.
+    ScoreBasis:
+      type: object
+      description: >
+        What the writer had in view when it built the write (request-only):
+        `seen`, the number of lines of the match's score event log its board
+        had reached (its `scoreVersion`); `own`, its own events not yet
+        acknowledged; `seq`, the highest sequence number of its own session it
+        had made. An event the basis holds is `recorded` by the write; an
+        older one it does not hold is `beforeBaseline`. Without a basis the
+        write is taken as having seen every line logged.
+      properties:
+        seen:
+          type: integer
+          minimum: 0
+        own:
+          type: array
+          maxItems: 1024
+          items:
+            type: string
+            maxLength: 128
+        seq:
+          type: integer
+          format: int64
+          minimum: 0
+    MarkIDs:
+      type: object
+      readOnly: true
+      description: >
+        The id of each mark of a scoreline, index for index with ipponsA and
+        ipponsB: the id of the score event that struck it, or `b:`-prefixed
+        for a mark a baseline (a write that is not a tap) brought. A removal
+        tap names its mark by this id. Derived by the server's replay of the
+        match's score event log; a value a write carries is ignored.
+      properties:
+        a:
+          type: array
+          items:
+            type: string
+        b:
+          type: array
+          items:
+            type: string
+    ScoreEvent:
+      type: object
+      required: [id, stamp, kind]
+      description: >
+        One tap. `id` is the device's and never reused; `stamp` the
+        server-relative time it was made (unix ms, from GET /api/time); `seq`
+        its place in the device's session (a gap is reported back). `pos` is
+        0 for the match, a bout's position, or -1 for the representative bout.
+        `side` is `a` (sideA) or `b` (sideB).
+      properties:
+        id:
+          type: string
+          maxLength: 128
+        session:
+          type: string
+          maxLength: 256
+          description: The device's event session (the batch's, when absent).
+        seq:
+          type: integer
+          format: int64
+          minimum: 0
+        stamp:
+          type: integer
+          format: int64
+          minimum: 1
+        kind:
+          type: string
+          enum: [ippon.add, ippon.remove, foul.add, foul.remove, encho.add, encho.remove, flag.add, flag.remove, bout.decision, bout.fighter, rep.pick, pool.rep, daihyosen.verdict]
+        pos:
+          type: integer
+          minimum: -1
+        side:
+          type: string
+          enum: [a, b]
+        letter:
+          type: string
+          description: The strike (ippon.add).
+        target:
+          type: string
+          description: The mark id a removal takes off (ippon.remove).
+        value:
+          type: string
+          description: >
+            bout.decision: `hikiwake`, `fusensho` (side is the side awarded
+            the bout) or `clear`; daihyosen.verdict: empty, or `clear`.
+        memberId:
+          type: string
+        name:
+          type: string
+    ScoreEventsRequest:
+      type: object
+      required: [session, events]
+      properties:
+        session:
+          type: string
+          maxLength: 256
+        events:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items:
+            $ref: '#/components/schemas/ScoreEvent'
+    ScoreEventOutcome:
+      type: object
+      required: [id, outcome]
+      properties:
+        id:
+          type: string
+        outcome:
+          type: string
+          enum: [applied, recorded, duplicate, capped, beforeBaseline, needsWinner, defaultWinStands, noTarget, notAllowed, notStarted, refused, clock_skew]
+          description: >
+            `applied`: in the match. `recorded`: a write built with it in view
+            already holds it. `duplicate`: the log holds this id. `capped`: the
+            side or bout already holds the most points it can. `beforeBaseline`:
+            made before a write that never saw it, whose value stands (kept in
+            the history). `needsWinner`: it would leave a finished knockout
+            tied, or an engi count invalid, and no later tap gives the winner.
+            `defaultWinStands`: a kiken, fusenpai or fusensho closed the match.
+            `noTarget`: what it names is not there. `notAllowed`: not a tap
+            this match or bout takes. `notStarted`, `refused`, `clock_skew`:
+            not logged, see `reason` and `message`.
+        reason:
+          type: string
+        message:
+          type: string
+          description: The sentence the tapping device shows.
+        serverNowMs:
+          type: integer
+          format: int64
+          description: clock_skew only, the server's clock.
+        aheadMs:
+          type: integer
+          format: int64
+          description: clock_skew only, how far ahead the stamp was.
+    ScoreEventsResponse:
+      type: object
+      required: [match, outcomes]
+      properties:
+        match:
+          $ref: '#/components/schemas/MatchResult'
+        outcomes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScoreEventOutcome'
+        gaps:
+          type: array
+          description: >
+            Sequence numbers of the posting session the log is missing: taps
+            the device made that never arrived. Absent when none.
+          items:
+            type: integer
+            format: int64
     DaihyosenWriteStamp:
       type: object
       description: >
@@ -5681,6 +5947,10 @@ components:
             result is refused as `superseded`, and one more than 5s in the
             server's future as `clock_skew` (see RefusedWrite). A write that
             applies moves the match's stored `modifiedAt` to it.
+        writeId:
+          $ref: '#/components/schemas/WriteId'
+        basis:
+          $ref: '#/components/schemas/ScoreBasis'
 
     Error:
       type: object
@@ -6564,6 +6834,24 @@ components:
             group it does not apply in the match's history. Absent means every
             group the payload carries; see PUT /score. Never stored or
             returned.
+        writeId:
+          allOf:
+            - $ref: '#/components/schemas/WriteId'
+          writeOnly: true
+        basis:
+          allOf:
+            - $ref: '#/components/schemas/ScoreBasis'
+          writeOnly: true
+        markIds:
+          $ref: '#/components/schemas/MarkIDs'
+        scoreVersion:
+          type: integer
+          readOnly: true
+          description: >
+            The number of lines in the match's score event log (0 or absent:
+            no log yet). It only grows, so of two copies of a running match the
+            one with the higher version is the newer. Derived by the server;
+            a value a write carries is ignored.
         groupStamps:
           type: object
           readOnly: true
@@ -6818,6 +7106,8 @@ components:
       type: object
       description: Individual member match result within a team match.
       properties:
+        markIds:
+          $ref: '#/components/schemas/MarkIDs'
         position:
           type: integer
         sideA:
@@ -7129,6 +7419,12 @@ components:
           description: >
             The stamp of the last applied change to each group of this match,
             keyed by MergeGroup; see MatchResult.groupStamps.
+        markIds:
+          $ref: '#/components/schemas/MarkIDs'
+        scoreVersion:
+          type: integer
+          readOnly: true
+          description: See MatchResult.scoreVersion.
         placeholderA:
           type: string
           readOnly: true

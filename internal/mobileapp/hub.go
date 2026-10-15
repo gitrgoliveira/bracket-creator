@@ -468,6 +468,15 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 		if _, err := c.Writer.Write([]byte(": open\n\n")); err == nil {
 			c.Writer.Flush()
 		}
+		// The stream's hello (bc-evts F2): the first data frame names the
+		// server's build, so a tab running an older bundle can tell it must
+		// reload. It is shaped as a heartbeat (no id:, no seq consumed), which
+		// every client already takes as liveness only.
+		if hello, err := json.Marshal(sseHello{Type: "heartbeat", Hello: true, NowMs: time.Now().UnixMilli(), Build: AppBuild()}); err == nil {
+			if _, werr := fmt.Fprintf(c.Writer, "data: %s\n\n", hello); werr == nil {
+				c.Writer.Flush()
+			}
+		}
 
 		// Replay buffered events (T216). We write directly to the
 		// response writer using the SSE wire format `id: N\ndata: …\n\n`
@@ -577,6 +586,15 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 // return). The errcheck-friendly Fprintf return is captured and
 // logged so a degraded connection leaves a breadcrumb without
 // stalling the broadcast path.
+// sseHello is the stream's first data frame (bc-evts F2): a heartbeat that
+// also names the server's build (AppBuild).
+type sseHello struct {
+	Type  string `json:"type"`
+	Hello bool   `json:"hello"`
+	NowMs int64  `json:"nowMs"`
+	Build string `json:"build"`
+}
+
 func writeSSEEnvelope(w io.Writer, seq int64, payload string) {
 	if _, err := fmt.Fprintf(w, "id: %d\nevent: message\ndata: %s\n\n", seq, payload); err != nil {
 		// Don't print every write error, a disconnected client

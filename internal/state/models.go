@@ -1583,6 +1583,16 @@ type MatchResult struct {
 	// "daihyosen-add", ...), for the match history entry the write leaves.
 	// Transient, set by the handler; "" reads as "engine" in the history.
 	WriteDoor string `json:"-" yaml:"-"`
+	// WriteID is the client's id for this write, when it sent one (bc-evts
+	// F1): the baseline the write leaves in the match's score event log
+	// carries it, so a resend of a write already logged is answered as
+	// recorded. Request-only, like Changed.
+	WriteID string `json:"-" yaml:"-"`
+	// Basis is what the writer had in view when it built the write (the
+	// score events it had seen and its own still unacknowledged ones), for
+	// the baseline the write leaves. nil: the server judges the write saw
+	// every line already logged. Request-only.
+	Basis *ScoreBasis `json:"-" yaml:"-"`
 	// Merge is what engine.mergeMatchWrite decided for THIS write: which
 	// groups applied, which were held (kept in the match history because a
 	// newer change to them is stored), and the held values. Set on the
@@ -2181,6 +2191,7 @@ type Announcement struct {
 func (m *MatchResult) ClearRequestFields() {
 	m.Changed, m.WriteDoor, m.Merge = nil, "", nil
 	m.ClearsWithdrawal = false
+	m.WriteID, m.Basis = "", nil
 }
 
 // ClearDerivedScoreFields drops what only the score replay derives (bc-evts):

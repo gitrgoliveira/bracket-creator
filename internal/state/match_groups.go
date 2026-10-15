@@ -803,6 +803,10 @@ type MergeReport struct {
 	// group applied, a withdrawal was cleared, or the winner was worked out
 	// again. A write that leaves it unmoved has no eligibility consequence.
 	ResultChanged bool
+	// EventsNotApplied are the score events (bc-evts) this write's baseline
+	// replaced without having seen them (beforeBaseline, D5): each is kept in
+	// the history with that outcome, and the answer names them.
+	EventsNotApplied []string
 }
 
 // Superseded reports whether nothing of the write applied: a group it

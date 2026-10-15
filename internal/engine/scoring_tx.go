@@ -94,6 +94,9 @@ import (
 func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, opts ...ForceOptions) (*domain.CompetitorStatus, error) {
 	fo := firstForceOptions(opts)
 	result.ID = matchID
+	if result.WriteID == "" && fo.WriteID != "" {
+		result.WriteID, result.Basis = fo.WriteID, fo.Basis
+	}
 
 	// Engi dispatch seam (tx-aware): a flag-scored competition records via the
 	// engi slice through the SAME tx so the write stays inside the caller's
@@ -113,8 +116,20 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// An exact resend of a finish already recorded (a queued write whose
 	// first send landed but whose answer was lost) answers as recorded and
 	// writes nothing, before anything else judges it (bc-xrpl).
-	if replayed, err := e.answerExactScoreReplay(tx, compID, matchID, result, comp, fo.NoReplayHistory); err != nil || replayed {
-		return nil, err
+	// The score replay's derived write (bc-evts) is built by the server from
+	// the stored match and the event log: it is never a resend, it owns the
+	// hansoku fold and the bout rows it carries, and an engi count reaches it
+	// through flag events, so it skips the client-write shaping below.
+	replayedWrite := result.WriteDoor == DoorEvent
+	if !replayedWrite {
+		// A resend of a write the score event log already holds (its writeId,
+		// bc-evts F1) answers as recorded with no history line for anyone (Q6).
+		if logged, err := e.answerLoggedWrite(tx, compID, matchID, result); err != nil || logged {
+			return nil, err
+		}
+		if replayed, err := e.answerExactScoreReplay(tx, compID, matchID, result, comp, fo.NoReplayHistory); err != nil || replayed {
+			return nil, err
+		}
 	}
 	// Only a COMPLETING write goes through the engi recorder. Engi's flag-total
 	// rule (odd, in {1,3,5}: a 3- or 5-referee panel cannot draw) can only be
@@ -139,7 +154,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// sent back to the queue or switched away from keeps them, and a panel
 	// part-way through its count has no valid total yet.
 	engiRunningWrite := result.Status == state.MatchStatusRunning
-	if comp != nil && comp.Engi && !engiStartWrite && !engiRunningWrite {
+	if comp != nil && comp.Engi && !engiStartWrite && !engiRunningWrite && !replayedWrite {
 		// A pool write in a mixed engi competition answers for the knockout
 		// its pool feeds exactly as a kendo one does (below): prior is read
 		// first, so a refusal can put the pool row back. Only a pool write in
@@ -191,12 +206,14 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		if err := e.requalifyMixedPoolWrite(tx, compID, comp, matchID, rec, engiPrior, fo); err != nil {
 			return nil, err
 		}
-		e.recordWriteHistory(tx, compID, matchID, result)
+		e.recordLandedWriteHistory(tx, compID, matchID, result)
 		return nil, nil
 	}
 
-	if err := applyHansokuIppons(result); err != nil {
-		return nil, err
+	if !replayedWrite {
+		if err := applyHansokuIppons(result); err != nil {
+			return nil, err
+		}
 	}
 
 	// Capture the prior result so we can roll back the score on
@@ -217,8 +234,10 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// stores: a start's own representative-bout row is discarded above, and a
 	// winner derived from it would stand beside a stored bout that says
 	// otherwise.
-	if err := shapeScoreWrite(comp, prior, result, matchID); err != nil {
-		return nil, err
+	if !replayedWrite {
+		if err := shapeScoreWrite(comp, prior, result, matchID); err != nil {
+			return nil, err
+		}
 	}
 
 	// K3 ahead of the write: a withdrawal whose loser a DIFFERENT match has
@@ -275,7 +294,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	recordHistory := func() {
 		if !historyRecorded {
 			historyRecorded = true
-			e.recordWriteHistory(tx, compID, matchID, result)
+			e.recordLandedWriteHistory(tx, compID, matchID, result)
 		}
 	}
 
@@ -968,6 +987,15 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	}
 	comp.ClearKachinukiEncounterEncho(matchID, &encho)
 	result := buildDecisionResult(prior, matchID, decision, decisionBy, decisionReason, encho, modifiedAtStamp)
+	// A resend of a decision the score event log already holds (its writeId,
+	// bc-evts F1) is answered as recorded before anything judges it.
+	result.WriteID, result.Basis = kcdgOpts.WriteID, kcdgOpts.Basis
+	if logged, err := e.answerLoggedWrite(tx, compID, matchID, result); err != nil || logged {
+		if err != nil {
+			return nil, nil, err
+		}
+		return result, nil, nil
+	}
 
 	// A stale decision (an offline replay older than the stored match) is
 	// superseded before anything judges it: the write below would hold it by
@@ -1357,9 +1385,16 @@ func (e *Engine) answerExactScoreReplay(tx state.StoreTx, compID, matchID string
 	if !noHistory {
 		e.recordWriteHistory(tx, compID, matchID, result)
 	}
-	// A bracket match's prior came through bracketMatchAsResult, which omits
-	// the court and the schedule a landed write echoes (the decision
-	// replay's fill, bc-cse finding 5).
+	answerAsStored(tx, compID, matchID, prior, inPool, result)
+	return true, nil
+}
+
+// answerAsStored makes result the stored match prior, for a write answered as
+// recorded with nothing written (an exact resend, a logged writeId). A bracket
+// match's prior came through bracketMatchAsResult, which omits the court and
+// the schedule a landed write echoes (the decision replay's fill, bc-cse
+// finding 5).
+func answerAsStored(tx state.StoreTx, compID, matchID string, prior *state.MatchResult, inPool bool, result *state.MatchResult) {
 	if !inPool && (prior.Court == "" || prior.ScheduledAt == "") {
 		if bracket, berr := tx.LoadBracket(compID); berr == nil {
 			if court, scheduledAt, found := bracketMatchCourtAndSchedule(bracket, matchID); found {
@@ -1374,7 +1409,6 @@ func (e *Engine) answerExactScoreReplay(tx state.StoreTx, compID, matchID string
 	}
 	*result = *prior
 	result.ClearRequestFields()
-	return true, nil
 }
 
 // holdWriteTx keeps a write whole in the match's history without applying any

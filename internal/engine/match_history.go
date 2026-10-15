@@ -80,7 +80,9 @@ func doorOf(result *state.MatchResult) string {
 // staged, and failing it here would report an error for a result that lands.
 func (e *Engine) recordWriteHistory(h state.StoreTx, compID, matchID string, result *state.MatchResult) {
 	rep := result.Merge
-	if rep == nil {
+	// The score replay's derived write is recorded by its door, one line per
+	// event (RecordScoreEventsTx), never as one write.
+	if rep == nil || result.WriteDoor == DoorEvent {
 		return
 	}
 	outcomes := make(map[string]string, len(rep.Changed))
@@ -169,6 +171,9 @@ func (e *Engine) recordDirectHistory(h state.StoreTx, compID, matchID, door stri
 	if err := h.AppendMatchHistory(compID, entry); err != nil {
 		log.Printf("engine: match %s/%s: history entry not recorded: %v", compID, matchID, err)
 	}
+	// A direct writer has written the match by now: what it set is a
+	// baseline of the score event log once that log has begun (bc-evts).
+	e.noteWriteBaseline(h, compID, matchID, writeBaseline{door: door, stamp: stamp, named: groups})
 }
 
 // noteServerBoutChanges adds to an explicit Changed every bout row the

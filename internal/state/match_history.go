@@ -22,6 +22,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 )
 
 // The per-group outcomes a history entry records: applied, held (a newer
@@ -65,6 +67,13 @@ type MatchHistoryEntry struct {
 	Reason string `json:"reason,omitempty"`
 	// ClearedWithdrawal is the result a later scoring change cleared (R2).
 	ClearedWithdrawal json.RawMessage `json:"clearedWithdrawal,omitempty"`
+	// Event is the score event (one tap) a door "event" entry records
+	// (bc-evts), and EventOutcome what the replay made of it (one of the
+	// domain.ScoreOutcome* values, or a refusal reason such as
+	// "result_finalized"). A later entry for the same event says its outcome
+	// moved (a finish that never saw it, D5).
+	Event        *domain.ScoreEvent `json:"event,omitempty"`
+	EventOutcome string             `json:"eventOutcome,omitempty"`
 }
 
 // matchHistoryFile is the file name of a match's history: the match id

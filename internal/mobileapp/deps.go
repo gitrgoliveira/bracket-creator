@@ -116,6 +116,10 @@ type ScoringEngine interface {
 	// match that itself created the ineligibility) is permitted.
 	// Score handler wraps fought/hikiwake submissions with this.
 	StartMatchTx(tx state.StoreTx, compID, matchID string) error
+	// RecordScoreEventsTx is the score-events door (bc-evts): it logs the
+	// taps it takes, replays the match's log and writes the derived match,
+	// under the caller's transaction. Mirrors engine.Engine.RecordScoreEventsTx.
+	RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, req engine.ScoreEventsRequest) (*engine.ScoreEventsResult, error)
 	// CheckCrossCompCourtBusy checks whether the court for matchID is
 	// already occupied by a running match in a different competition.
 	// Must be called before entering WithTransaction to avoid a deadlock

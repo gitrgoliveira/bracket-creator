@@ -710,6 +710,12 @@ type ForceOptions struct {
 	// changes nothing and could otherwise be looped to grow the match's
 	// history file. The organiser's resend keeps its line.
 	NoReplayHistory bool
+	// WriteID and Basis tag a door's server-built write (a decision) with
+	// the client's write id and what it had in view (bc-evts F1, Q9), for the
+	// baseline it leaves in the score event log; a write the client builds
+	// carries them on the MatchResult itself.
+	WriteID string
+	Basis   *state.ScoreBasis
 }
 
 // HoldReasonOlderRevision is the history reason of a running write the same
@@ -881,7 +887,10 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy, 
 	}
 	result.Round = stored.Round
 	// Everything below is forward-only; matchWriteRestore inherits nothing more.
-	if policy == matchWriteForward {
+	// Nor does the score replay's derived write (bc-evts): the replay owns
+	// its hantei marks and its rows, and a change made here would be a match
+	// its own log no longer replays to.
+	if policy == matchWriteForward && result.WriteDoor != DoorEvent {
 		// Set-if-empty: see the drift note on this function.
 		if result.CorrectionReason == "" {
 			result.CorrectionReason = stored.CorrectionReason
@@ -1691,7 +1700,7 @@ func (e *Engine) writeMatchResult(h state.StoreTx, compId string, matchId string
 	if policy == matchWriteRestore {
 		return nil
 	}
-	e.recordWriteHistory(h, compId, matchId, result)
+	e.recordLandedWriteHistory(h, compId, matchId, result)
 	// A write that kept a recorded withdrawal (preserveWithdrawalRuling), or
 	// whose merge left the verdict where it was, changed no ruling, so it has
 	// no eligibility consequence to record.
@@ -2539,10 +2548,14 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	// completed verdict-silent write that the pool path accepts (deriving the
 	// winner from the preserved rep bout) was rejected here.
 	// Forward only: see the restore note on bm.SubResults below.
-	if policy == matchWriteForward && result.SubResults != nil {
-		preserveDaihyosenOutcome(bm.SubResults, result)
+	// The score replay's derived write (bc-evts) is the replay's own: no
+	// verdict is restored onto it or derived for it here.
+	if result.WriteDoor != DoorEvent {
+		if policy == matchWriteForward && result.SubResults != nil {
+			preserveDaihyosenOutcome(bm.SubResults, result)
+		}
+		deriveDaihyosenWinner(result)
 	}
-	deriveDaihyosenWinner(result)
 	// Preserve the match's fixed pairing ids (stamped at generation/pool
 	// resolution/propagation, never rewritten by a score write -- see the
 	// reconcileSides comment above) and resolve the winner id from them, the
@@ -2613,8 +2626,9 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	}
 	// The verdict rides in the ippons about to be rendered; forward writes
 	// from non-validated paths must not persist a mark that contradicts the
-	// result (see stripInvalidHantei). Restore replays the snapshot verbatim.
-	if policy == matchWriteForward {
+	// result (see stripInvalidHantei). Restore replays the snapshot verbatim,
+	// and the score replay's derived write already holds S3 (bc-evts).
+	if policy == matchWriteForward && result.WriteDoor != DoorEvent {
 		stripInvalidHantei(result)
 	}
 	// Defensive copies: bm must not alias result's slices, mirroring the

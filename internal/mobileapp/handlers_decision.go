@@ -49,6 +49,9 @@ type DecisionRequest struct {
 	// engine.ForceOptions.Force on the RecordDecisionTxWithOptions call
 	// below.
 	ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
+	// writeTag is the optional writeId and basis (bc-evts F1): a resend of a
+	// decision the match's score event log holds answers as recorded.
+	writeTag
 }
 
 // Validate enforces request-shape invariants on a decision payload
@@ -83,6 +86,9 @@ func (r *DecisionRequest) Validate() error {
 	}
 	if err := validateMaxLen("decisionReason", r.DecisionReason, MaxLenDecisionReason); err != nil {
 		return err
+	}
+	if err := r.validateTag(); err != nil {
+		return &ValidationError{Field: "writeId", Message: err.Error()}
 	}
 	return nil
 }
@@ -203,7 +209,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			// correction guard) and surfaces the reopened downstream match
 			// ids so they can be broadcast below.
 			result, status, engErr = eng.RecordDecisionTxWithOptions(stx, id, mid, req.Decision, req.DecisionBy, reason, req.Encho,
-				engine.ForceOptions{Force: req.ForceDownstreamReopen, Reopened: &reopenedDownstream}, req.ModifiedAt)
+				req.tagInto(engine.ForceOptions{Force: req.ForceDownstreamReopen, Reopened: &reopenedDownstream}), req.ModifiedAt)
 			if result != nil && result.ResultSource == "" {
 				result.ResultSource = "admin"
 			}

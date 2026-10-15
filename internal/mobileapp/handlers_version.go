@@ -2,6 +2,7 @@ package mobileapp
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/cmd/version"
@@ -28,4 +29,18 @@ func RegisterVersionHandlers(r *gin.RouterGroup) {
 			BuildDate: version.GetBuildDate(),
 		})
 	})
+}
+
+// BuildHeader is the response header naming the build that answered, set on
+// every answer (bc-evts F2): a tab running another build's bundle reloads, or
+// says it must. The SSE stream's hello carries the same value.
+const BuildHeader = "X-App-Build"
+
+// AppBuild is the build this server runs: its git commit, or "unknown" when
+// the binary was built without one (a client treats unknown as a match).
+func AppBuild() string {
+	if b := strings.TrimSpace(version.GetGitCommit()); b != "" {
+		return b
+	}
+	return "unknown"
 }

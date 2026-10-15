@@ -74,6 +74,9 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, X-Tournament-Password, X-Confirm-Password")
+		// Every answer names the build that gave it (bc-evts F2).
+		c.Writer.Header().Set(BuildHeader, AppBuild())
+		c.Writer.Header().Set("Access-Control-Expose-Headers", BuildHeader)
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)

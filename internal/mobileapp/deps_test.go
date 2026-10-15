@@ -54,6 +54,10 @@ func (stubScoringEngine) RecordMatchResult(string, string, *state.MatchResult) e
 	return nil
 }
 
+func (stubScoringEngine) RecordScoreEventsTx(state.StoreTx, string, string, engine.ScoreEventsRequest) (*engine.ScoreEventsResult, error) {
+	return &engine.ScoreEventsResult{}, nil
+}
+
 func (stubScoringEngine) RecordMatchResultWithIneligibility(string, string, *state.MatchResult, ...engine.ForceOptions) (*domain.CompetitorStatus, error) {
 	return nil, nil
 }

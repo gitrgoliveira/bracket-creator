@@ -698,6 +698,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// ChangedGroups is this entry's `changed`, the groups it changes
 			// (bc-mrgc), with the same meaning and default as /score's.
 			ChangedGroups []string `json:"changed"`
+			// writeTag is the entry's optional writeId and basis (bc-evts).
+			writeTag
 		}
 		var results []bulkScoreEntry
 		if err := c.ShouldBindJSON(&results); err != nil {
@@ -812,6 +814,11 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			results[i].WriteDoor = engine.DoorBulkScore
 			// Mark ids and the event-log version are the replay's, never a body's.
 			results[i].ClearDerivedScoreFields()
+			if err := results[i].validateTag(); err != nil {
+				errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
+				continue
+			}
+			results[i].tagOnto(&results[i].MatchResult)
 			if _, aheadMs, refuse := clientClockSkew(results[i].ModifiedAt); refuse {
 				logClockSkewRefusal(c, aheadMs, results[i].ID)
 				errs = append(errs, scoreError{
@@ -1060,6 +1067,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// correction guard, same field name and contract as the score-write
 			// endpoint's (see scoreRequestBody.ForceDownstreamReopen).
 			ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
+			// writeTag is the optional writeId and basis (bc-evts).
+			writeTag
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -1067,6 +1076,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 		if req.SideA == "" || req.SideB == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "sideA and sideB are required"})
+			return
+		}
+		if err := req.validateTag(); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 		if err := validateMaxLen("sideA", req.SideA, MaxLenMatchSide); err != nil {
@@ -1171,6 +1184,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			SubResults: subResults,
 			WriteDoor:  engine.DoorQuickScore,
 		}
+		req.tagOnto(&result)
 		// The team finish gate (every bout of a non-kachinuki team match has a
 		// result or a decision) sees the rows this endpoint is about to store,
 		// as it does for /score and bulk-score, with the same exemption for a
@@ -3163,6 +3177,9 @@ var runningRevStore sync.Map
 // state.MatchResult, so they can never be persisted.
 type scoreRequestBody struct {
 	ScoreRequest
+	// writeTag is the optional writeId and basis (bc-evts F1): a resend of
+	// a write the match's score event log holds answers as recorded.
+	writeTag
 	// KachinukiBoutFinal marks an explicit operator "record bout" submit
 	// on a kachinuki team match. Only a flagged write triggers
 	// MaybeAdvanceKachinuki; unflagged running writes (autosave fires
@@ -3334,6 +3351,8 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 	// C3: coalesce high-frequency "running" match_updated broadcasts to ≤4/s
 	// per match. Completed writes always proceed (isRunning=false).
 	coalescer := newMatchBroadcastCoalescer()
+	// The taps' door shares the coalescer (bc-evts).
+	registerScoreEventsHandler(r, eng, store, tx, hub, verifier, tl, coalescer)
 
 	r.PUT("/competitions/:id/matches/:mid/score", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
@@ -3367,6 +3386,11 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		req.WriteDoor = engine.DoorScore
 		// Mark ids and the event-log version are the replay's, never a body's.
 		(*state.MatchResult)(&req).ClearDerivedScoreFields()
+		if err := body.validateTag(); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		body.tagOnto((*state.MatchResult)(&req))
 		// A start changes the status alone: the score the stored match holds
 		// is kept (keepQueuedScore), so the merge must not apply the
 		// payload's empty one either.

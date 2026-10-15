@@ -637,14 +637,18 @@ func (e *Engine) unrecordedTurnedAway(h state.StoreTx, compID, matchID string, r
 }
 
 // sentBackToQueue says whether the match's latest write, apart from the taps
-// turned away at this door, was the operator's send back to the queue.
+// turned away at this door, was the operator's send back to the queue. Lines
+// whose result group was not applied are skipped.
 func (e *Engine) sentBackToQueue(h state.StoreTx, compID, matchID string) bool {
 	entries, err := h.LoadMatchHistory(compID, matchID)
 	if err != nil {
 		return false
 	}
 	for i := len(entries) - 1; i >= 0; i-- {
-		if !doorChangesStatus(entries[i].Door) {
+		// A line moves the status only when its door can AND its result group was
+		// applied: a held or superseded line (a stale running autosave) changed
+		// nothing, so it says nothing about how the match came to its status.
+		if o, named := entries[i].Outcomes[state.GroupResult]; !doorChangesStatus(entries[i].Door) || (named && o != state.HistoryOutcomeApplied) {
 			continue
 		}
 		return entries[i].Door == doorRequeue

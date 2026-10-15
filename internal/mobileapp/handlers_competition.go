@@ -2819,7 +2819,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if changed {
 			hub.Broadcast(EventTournamentUpdated, nil)
 		}
-		broadcastReopenedDownstream(hub, id, reopened)
+		broadcastReopenedDownstream(hub, store, id, reopened)
 		if changed && comp.Format == state.CompFormatMixed {
 			// A new order can complete a pool (a chusen settles its last
 			// tie): seating a pool's slots for the first time is the

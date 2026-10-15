@@ -37,9 +37,9 @@ func TestMatchBroadcastCoalescer_Allow(t *testing.T) {
 		c := newMatchBroadcastCoalescer()
 		assert.True(t, c.Allow("m1", true))
 		// Force the last timestamp to be old.
-		c.mu.Lock()
-		c.last["m1"] = time.Now().Add(-300 * time.Millisecond)
-		c.mu.Unlock()
+		k := c.lock("m1")
+		k.last = time.Now().Add(-300 * time.Millisecond)
+		k.mu.Unlock()
 		assert.True(t, c.Allow("m1", true), "should proceed after window expires")
 	})
 
@@ -69,16 +69,12 @@ func TestMatchBroadcastCoalescer_Allow(t *testing.T) {
 	t.Run("non-running Allow prunes the match entry (bounded map)", func(t *testing.T) {
 		c := newMatchBroadcastCoalescer()
 		assert.True(t, c.Allow("m1", true)) // running write records the entry
-		c.mu.Lock()
-		_, present := c.last["m1"]
-		c.mu.Unlock()
+		_, present := c.keys.Load("m1")
 		require.True(t, present, "running broadcast must record an entry")
 
 		// A completed (non-running) broadcast proceeds AND prunes the entry.
 		assert.True(t, c.Allow("m1", false))
-		c.mu.Lock()
-		_, present = c.last["m1"]
-		c.mu.Unlock()
+		_, present = c.keys.Load("m1")
 		assert.False(t, present, "non-running broadcast must drop the entry to keep the map bounded")
 	})
 }

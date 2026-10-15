@@ -144,6 +144,7 @@ type DaihyosenEngine interface {
 // inside the closure would deadlock (the lock is non-reentrant), so the
 // store surface here is just the transaction entry point.
 type DaihyosenStore interface {
+	matchPushStore
 	WithTransaction(compID string, fn func(tx state.StoreTx) error) error
 }
 
@@ -314,8 +315,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			return
 		}
 
-		discardHeldMatchPush(hub, id, mid)
-		hub.Broadcast(EventMatchUpdated, gin.H{
+		broadcastMatchNow(hub, store, id, mid, gin.H{
 			"competitionId": id,
 			"matchId":       mid,
 			"result":        matchForBroadcast(updated),
@@ -527,8 +527,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			return
 		}
 
-		discardHeldMatchPush(hub, id, mid)
-		hub.Broadcast(EventMatchUpdated, gin.H{
+		broadcastMatchNow(hub, store, id, mid, gin.H{
 			"competitionId": id,
 			"matchId":       mid,
 			"result":        matchForBroadcast(updated),

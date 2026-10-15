@@ -247,8 +247,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		}
 
 		stampWithdrawnStatus(store, id, result)
-		discardHeldMatchPush(hub, id, mid)
-		hub.Broadcast(EventMatchUpdated, gin.H{
+		broadcastMatchNow(hub, store, id, mid, gin.H{
 			"competitionId": id,
 			"matchId":       mid,
 			"result":        matchPtrForBroadcast(result),
@@ -257,7 +256,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		// just corrected; broadcast it too so a client watching only that
 		// court/match learns its verdict was cleared (mirrors /score,
 		// /override-winner, and /quick-score).
-		broadcastReopenedDownstream(hub, id, reopenedDownstream)
+		broadcastReopenedDownstream(hub, store, id, reopenedDownstream)
 		if status != nil {
 			hub.Broadcast(EventCompetitorStatusUpdated, gin.H{
 				"competitionId": id,
@@ -483,9 +482,10 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 		}
 		return false
 	}
-	hub.Broadcast(EventMatchUpdated, gin.H{
+	broadcastMatchNow(hub, store, compID, matchID, gin.H{
 		"competitionId": compID,
-		"results":       matchesForBroadcast([]state.MatchResult{result}),
+		"matchId":       matchID,
+		"result":        matchPtrForBroadcast(&result),
 	})
 	tryAutoCompletePoolsAfterWrite(c, eng, hub, compID, result)
 	c.JSON(http.StatusOK, scoreResponseWithReopened(&result, nil))

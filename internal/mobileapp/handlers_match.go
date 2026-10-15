@@ -353,7 +353,7 @@ func annotateEligibility(poolMatches []state.MatchResult, bracket *state.Bracket
 // score editor left on a withdrawal it had just recorded worded the clear from
 // no stamp until the refetch landed. Only a completed withdrawal or default
 // win carries the stamp, so only those pay for the status read.
-func stampWithdrawnStatus(store CompetitionStore, compID string, r *state.MatchResult) {
+func stampWithdrawnStatus(store matchPushStore, compID string, r *state.MatchResult) {
 	if r.Status != state.MatchStatusCompleted || !domain.IsDefaultWinDecisionStr(r.Decision) {
 		return
 	}
@@ -1025,17 +1025,20 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// corrected; broadcast it too so a client watching only that
 			// court/match learns its verdict was cleared (mirrors /score and
 			// /override-winner).
-			broadcastReopenedDownstream(hub, id, reopenedThisItem)
+			broadcastReopenedDownstream(hub, store, id, reopenedThisItem)
 		}
 
 		if len(successful) > 0 {
 			for i := range successful {
 				stampWithdrawnStatus(store, id, &successful[i])
 			}
-			hub.Broadcast(EventMatchUpdated, gin.H{
-				"competitionId": id,
-				"results":       matchesForBroadcast(successful),
-			})
+			for i := range successful {
+				broadcastMatchNow(hub, store, id, successful[i].ID, gin.H{
+					"competitionId": id,
+					"matchId":       successful[i].ID,
+					"result":        matchPtrForBroadcast(&successful[i]),
+				})
+			}
 			tryAutoCompletePoolsAfterWrite(c, eng, hub, id, successful...)
 		}
 		for _, status := range eligibilityUpdates {
@@ -1282,12 +1285,11 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
-		discardHeldMatchPush(hub, id, mid)
-		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": mid})
+		broadcastMatchNow(hub, store, id, mid, gin.H{"competitionId": id, "matchId": mid})
 		// bc-kcdg: each reopened match is distinct from the one just corrected;
 		// broadcast it too so a client watching only that court/match learns
 		// its verdict was cleared (mirrors /score and /override-winner).
-		broadcastReopenedDownstream(hub, id, reopenedDownstream)
+		broadcastReopenedDownstream(hub, store, id, reopenedDownstream)
 		if engStatus != nil {
 			hub.Broadcast(EventCompetitorStatusUpdated, gin.H{
 				"competitionId": id,
@@ -1339,8 +1341,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
-		discardHeldMatchPush(hub, id, mid)
-		hub.Broadcast(EventMatchUpdated, gin.H{
+		broadcastMatchNow(hub, store, id, mid, gin.H{
 			"competitionId": id,
 			"matchId":       mid,
 			"court":         req.Court,
@@ -1393,8 +1394,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// stale against a leftover mark.
 		runningRevStore.Delete(id + ":" + mid)
 
-		discardHeldMatchPush(hub, id, mid)
-		hub.Broadcast(EventMatchUpdated, gin.H{
+		broadcastMatchNow(hub, store, id, mid, gin.H{
 			"competitionId": id,
 			"matchId":       mid,
 		})
@@ -1532,14 +1532,13 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// mark from its previous life is dead (mirrors revert-to-queue).
 		runningRevStore.Delete(id + ":" + mid)
 
-		discardHeldMatchPush(hub, id, mid)
-		hub.Broadcast(EventMatchUpdated, gin.H{
+		broadcastMatchNow(hub, store, id, mid, gin.H{
 			"competitionId": id,
 			"matchId":       mid,
 		})
 		// A confirmed reopen also reopened the downstream match(es) it named;
 		// each is a distinct match whose verdict was cleared (mirrors /score).
-		broadcastReopenedDownstream(hub, id, reopenedDownstream)
+		broadcastReopenedDownstream(hub, store, id, reopenedDownstream)
 		// Reopening a match a withdrawal ended removes the withdrawal, and
 		// the engine restored the competitor it barred; broadcast that
 		// exactly as /score does.
@@ -1678,11 +1677,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// and revert-to-queue).
 		runningRevStore.Delete(id + ":" + mid)
 		runningRevStore.Delete(body.BlockerCompID + ":" + body.BlockerMatchID)
-		discardHeldMatchPush(hub, id, mid)
-		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": mid})
-		discardHeldMatchPush(hub, body.BlockerCompID, body.BlockerMatchID)
-		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": body.BlockerCompID, "matchId": body.BlockerMatchID})
-		broadcastReopenedDownstream(hub, id, reopenedDownstream)
+		broadcastMatchNow(hub, store, id, mid, gin.H{"competitionId": id, "matchId": mid})
+		broadcastMatchNow(hub, store, body.BlockerCompID, body.BlockerMatchID, gin.H{"competitionId": body.BlockerCompID, "matchId": body.BlockerMatchID})
+		broadcastReopenedDownstream(hub, store, id, reopenedDownstream)
 		if restored != nil {
 			hub.Broadcast(EventCompetitorStatusUpdated, gin.H{
 				"competitionId": id,
@@ -1742,8 +1739,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
-		discardHeldMatchPush(hub, id, mid)
-		hub.Broadcast(EventMatchUpdated, gin.H{
+		broadcastMatchNow(hub, store, id, mid, gin.H{
 			"competitionId": id,
 			"matchId":       mid,
 			"result":        matchPtrForBroadcast(updated),
@@ -1855,12 +1851,11 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 
 		if applied {
 			hub.Broadcast(EventTournamentUpdated, nil)
-			discardHeldMatchPush(hub, id, mid)
-			hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": mid})
+			broadcastMatchNow(hub, store, id, mid, gin.H{"competitionId": id, "matchId": mid})
 			// bc-kcdg: each reopened match is distinct from the one the
 			// operator just overrode; broadcast it too so a client watching
 			// only that court/match learns its verdict was cleared.
-			broadcastReopenedDownstream(hub, id, reopenedDownstream)
+			broadcastReopenedDownstream(hub, store, id, reopenedDownstream)
 			c.JSON(http.StatusOK, gin.H{"applied": true})
 			return
 		}
@@ -3943,7 +3938,9 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			"result":        matchPtrForBroadcast(result),
 		}
 		coalescer.Submit(matchKey, isRunning, func() {
-			hub.Broadcast(EventMatchUpdated, freshMatchPush(store, id, mid, matchUpdated))
+			if p, ok := freshMatchPush(store, id, mid, matchUpdated); ok {
+				hub.Broadcast(EventMatchUpdated, p)
+			}
 		})
 		// bc-kcdg: a forced correction may have reopened downstream bracket
 		// matches whose SideA/SideB the correction's propagation just
@@ -3951,7 +3948,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// from the one the operator corrected, so each gets its own
 		// match_updated broadcast; a client watching only that court/match
 		// would otherwise never learn its verdict was cleared.
-		broadcastReopenedDownstream(hub, id, reopenedDownstream)
+		broadcastReopenedDownstream(hub, store, id, reopenedDownstream)
 		// T085/T092, when a kiken or fusenpai is recorded, the engine
 		// persisted a CompetitorStatus for the losing player; surface
 		// it so admin clients can invalidate cached match lists.
@@ -3994,9 +3991,10 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				result.SubResults = post.BoutLog
 				result.ModifiedAt = post.ModifiedAt
 				result.GroupStamps = post.GroupStamps
-				hub.Broadcast(EventMatchUpdated, gin.H{
+				broadcastMatchNow(hub, store, id, mid, gin.H{
 					"competitionId": id,
 					"matchId":       mid,
+					"result":        matchPtrForBroadcast(result),
 				})
 			}
 		}

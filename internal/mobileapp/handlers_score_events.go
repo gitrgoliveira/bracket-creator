@@ -250,7 +250,9 @@ func registerScoreEventsHandler(r *gin.RouterGroup, eng ScoringEngine, store Com
 			// window's end, or one that crossed another request, shows the
 			// newest stored state and not this request's.
 			coalescer.Submit(id+":"+mid, match.Status == state.MatchStatusRunning, func() {
-				hub.Broadcast(EventMatchUpdated, freshMatchPush(store, id, mid, matchUpdated))
+				if p, ok := freshMatchPush(store, id, mid, matchUpdated); ok {
+					hub.Broadcast(EventMatchUpdated, p)
+				}
 			})
 			if res.Status != nil {
 				hub.Broadcast(EventCompetitorStatusUpdated, gin.H{"competitionId": id, "status": res.Status})

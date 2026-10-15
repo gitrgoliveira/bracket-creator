@@ -776,11 +776,12 @@ func (e *Engine) writeToPoolOrBracket(h state.StoreTx, compId, matchId string, r
 		}
 	}
 	var superseded bool
+	lines := e.snapshotScoreLog(h, compId, matchId, result, policy)
 	perr := e.withPoolMatch(h, compId, matchId, func(r *state.MatchResult) error {
 		// The POOL branch of the path POST /score and the bulk-score endpoint
 		// actually take — the site the hand-copied merge once missed.
 		var werr error
-		mismatch, superseded, inherited, werr = applyPoolWrite(r, result, policy, comp)
+		mismatch, superseded, inherited, werr = applyPoolWriteLog(r, result, policy, comp, lines)
 		if werr != nil {
 			// A genuine validation failure (e.g. backfillMatchIdentity's
 			// winnerId-names-neither-side check): propagate it AS the error,
@@ -817,8 +818,25 @@ func (e *Engine) writeToPoolOrBracket(h state.StoreTx, compId, matchId string, r
 		return false, nil, false, perr
 	}
 	// The SAME policy the pool branch would have used.
-	reopened, inherited, err = e.recordBracketMatchResult(h, compId, matchId, result, policy, force, comp)
+	reopened, inherited, err = e.recordBracketMatchResultLog(h, compId, matchId, result, policy, force, comp, lines)
 	return false, reopened, inherited, err
+}
+
+// snapshotScoreLog reads the match's score event log for a scoring snapshot
+// the replay decides (replaysSnapshot); nil for any other write. A log that
+// cannot be read is logged and read as empty: the snapshot is then replayed
+// onto the stored match alone, and the door's baseline is not logged (its
+// append reads the log again and fails the same way).
+func (e *Engine) snapshotScoreLog(h state.StoreTx, compID, matchID string, result *state.MatchResult, policy matchWritePolicy) []state.ScoreLogLine {
+	if policy != matchWriteForward || result.WriteDoor == DoorEvent || !replaysSnapshot(result) {
+		return nil
+	}
+	lines, err := h.LoadScoreLog(compID, matchID)
+	if err != nil {
+		log.Printf("engine: ERROR: match %s/%s: score event log not read, the %s write is replayed onto the stored match alone: %v", compID, matchID, doorOf(result), err)
+		return nil
+	}
+	return lines
 }
 
 // applyPoolWrite folds the stored match into an incoming result and then
@@ -852,6 +870,12 @@ func (e *Engine) writeToPoolOrBracket(h state.StoreTx, compId, matchId string, r
 // and not "stale" (superseded), but "this winner doesn't correspond to
 // either competitor in this match" -- and the caller maps it to 400, not 409.
 func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy, comp *state.Competition) (mismatch, superseded, inherited bool, err error) {
+	return applyPoolWriteLog(stored, result, policy, comp, nil)
+}
+
+// applyPoolWriteLog is applyPoolWrite with the match's score event log, which
+// a scoring snapshot is replayed onto (mergeByReplay).
+func applyPoolWriteLog(stored, result *state.MatchResult, policy matchWritePolicy, comp *state.Competition, lines []state.ScoreLogLine) (mismatch, superseded, inherited bool, err error) {
 	// reconcileSides BACKFILLS omitted sides as a side effect and only reports
 	// the mismatch, so it must run under both policies; hoisted out of the
 	// condition below because folding it into a short-circuit would let a later
@@ -870,7 +894,7 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy, 
 	// match untouched (its history entry is written by the caller). A pool's
 	// whole-struct write has always replaced the stored bouts with a nil
 	// list, so the default keeps that (nilSubsClear).
-	if mergeMatchWrite(stored, result, policy, mergeCtx{comp: comp, nilSubsClear: true}).Superseded() {
+	if mergeMatchWrite(stored, result, policy, mergeCtx{comp: comp, nilSubsClear: true, lines: lines}).Superseded() {
 		return false, true, false, nil
 	}
 	// A bout-row correction over a recorded withdrawal keeps the ruling
@@ -2438,6 +2462,12 @@ func markTiedStandingsLeague(comp *state.Competition, sorted []state.PlayerStand
 // beside the reopen lines (recordRepPickClears), in the same transaction; a
 // restore (matchWriteRestore) is not a door and records none.
 func (e *Engine) recordBracketMatchResult(h state.StoreTx, compId string, matchId string, result *state.MatchResult, policy matchWritePolicy, force bool, comp *state.Competition) ([]ReopenedMatch, bool, error) {
+	return e.recordBracketMatchResultLog(h, compId, matchId, result, policy, force, comp, e.snapshotScoreLog(h, compId, matchId, result, policy))
+}
+
+// recordBracketMatchResultLog is recordBracketMatchResult with the match's
+// score event log already read (snapshotScoreLog).
+func (e *Engine) recordBracketMatchResultLog(h state.StoreTx, compId string, matchId string, result *state.MatchResult, policy matchWritePolicy, force bool, comp *state.Competition, lines []state.ScoreLogLine) ([]ReopenedMatch, bool, error) {
 	var (
 		reopened  []ReopenedMatch
 		inherited bool
@@ -2445,7 +2475,7 @@ func (e *Engine) recordBracketMatchResult(h state.StoreTx, compId string, matchI
 	)
 	err := h.UpdateBracket(compId, func(bracket *state.Bracket) error {
 		var ierr error
-		reopened, inherited, clears, ierr = e.applyBracketResultIn(bracket, compId, matchId, result, policy, force, comp)
+		reopened, inherited, clears, ierr = e.applyBracketResultIn(bracket, compId, matchId, result, policy, force, comp, lines)
 		return ierr
 	})
 	if err == nil {
@@ -2716,11 +2746,11 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 // correction and its propagation have landed, requeues the ONE downstream
 // match the correction would otherwise have silently repainted; its id is
 // returned so the caller can broadcast match_updated for it.
-func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID string, result *state.MatchResult, policy matchWritePolicy, force bool, comp *state.Competition) ([]ReopenedMatch, bool, []repPickClear, error) {
+func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID string, result *state.MatchResult, policy matchWritePolicy, force bool, comp *state.Competition, lines []state.ScoreLogLine) ([]ReopenedMatch, bool, []repPickClear, error) {
 	if bracket == nil {
 		return nil, false, nil, notFoundErrorf("bracket not found for competition %s", compID)
 	}
-	mc := mergeCtx{comp: comp, knockout: true}
+	mc := mergeCtx{comp: comp, knockout: true, lines: lines}
 	for rIdx := range bracket.Rounds {
 		for mIdx := range bracket.Rounds[rIdx] {
 			bm := &bracket.Rounds[rIdx][mIdx]

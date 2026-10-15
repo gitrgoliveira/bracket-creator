@@ -108,9 +108,13 @@ func TestScoreEvents_FirstEventLogsTheStoredMatchFirst(t *testing.T) {
 	assert.Equal(t, "e1", res.Match.MarkIDs.A[1], "the event's mark carries the event's id")
 
 	lines := assertLogIsTheMatch(t, eng, store, slwMatch)
-	require.Len(t, lines, 2)
+	// The /score write was replayed onto the stored match (bc-evts stage 2b),
+	// so it already logged the match first, then its own baseline.
+	require.Len(t, lines, 3)
 	require.NotNil(t, lines[0].Baseline)
-	assert.Equal(t, MigrationDoor, lines[0].Baseline.Door, "an event is never appended to an empty log")
+	assert.Equal(t, MigrationDoor, lines[0].Baseline.Door, "nothing is appended to an empty log before the stored match")
+	require.NotNil(t, lines[1].Baseline)
+	assert.Equal(t, DoorScore, lines[1].Baseline.Door)
 
 	history, err := store.LoadMatchHistory(slwComp, slwMatch)
 	require.NoError(t, err)

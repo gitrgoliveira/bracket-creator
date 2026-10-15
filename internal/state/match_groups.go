@@ -807,6 +807,10 @@ type MergeReport struct {
 	// replaced without having seen them (beforeBaseline, D5): each is kept in
 	// the history with that outcome, and the answer names them.
 	EventsNotApplied []string
+	// LogPrefix are the score log lines the replay that decided a snapshot
+	// write needed ahead of the write's own baseline (the match's migration
+	// baseline, or a drift baseline): the door logs them first.
+	LogPrefix []ScoreLogLine
 }
 
 // Superseded reports whether nothing of the write applied: a group it

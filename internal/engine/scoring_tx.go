@@ -172,7 +172,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 			return nil, lerr
 		}
 		if engiValidTotal(result.FlagsA, result.FlagsB) {
-			if engiFinishHeld(engiPrior, result, comp, !inPool) {
+			if engiFinishHeld(engiPrior, result, comp, !inPool, e.snapshotScoreLog(tx, compID, matchID, &state.MatchResult{WriteDoor: doorEngi}, matchWriteForward)) {
 				e.recordWriteHistory(tx, compID, matchID, result)
 				return nil, supersededBy(result)
 			}

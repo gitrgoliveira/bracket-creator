@@ -342,6 +342,10 @@ type writeBaseline struct {
 	// unchanged is the part of named whose applied value only echoes the stored
 	// one (MergeReport.Unchanged).
 	unchanged []string
+	// prefix are the lines the replay that decided the write needed ahead of
+	// its baseline (MergeReport.LogPrefix): logged first, so a scoring
+	// snapshot always leaves the log it was decided on.
+	prefix []state.ScoreLogLine
 }
 
 // baselineNote is what noteWriteBaseline appended: the replayed match (the
@@ -364,6 +368,7 @@ func (e *Engine) recordLandedWriteHistory(h state.StoreTx, compID, matchID strin
 	note := e.noteWriteBaseline(h, compID, matchID, writeBaseline{
 		door: doorOf(result), stamp: rep.Stamp, named: rep.Applied,
 		writeID: result.WriteID, basis: result.Basis, unchanged: rep.Unchanged,
+		prefix: rep.LogPrefix,
 	})
 	if note == nil {
 		return
@@ -391,6 +396,13 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 	if err != nil {
 		log.Printf("engine: ERROR: match %s/%s: score event log not read, the %s write leaves no baseline: %v", compID, matchID, wb.door, err)
 		return nil
+	}
+	if len(wb.prefix) > 0 {
+		if err := h.AppendScoreLog(compID, matchID, wb.prefix...); err != nil {
+			log.Printf("engine: ERROR: match %s/%s: the lines the %s write was replayed on not logged: %v", compID, matchID, wb.door, err)
+			return nil
+		}
+		lines = append(lines, wb.prefix...)
 	}
 	if len(lines) == 0 {
 		return nil
@@ -420,7 +432,11 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 		// events either, so it is not one the rule judges them by.
 		basis = state.ScoreBasis{}
 		movedReason = ReasonNoBasis
-		named = slices.DeleteFunc(slices.Clone(named), func(g string) bool { return slices.Contains(wb.unchanged, g) })
+		// A named echo that took the write's stamp is an action at that
+		// stamp (it fences out an older write), so the log keeps it.
+		named = slices.DeleteFunc(slices.Clone(named), func(g string) bool {
+			return slices.Contains(wb.unchanged, g) && post.GroupStamp(g) == before.Match.GroupStamp(g)
+		})
 	}
 	set := unionGroups(named, replayGroupsDiffer(post, &before.Match))
 	if len(set) == 0 {
@@ -433,7 +449,14 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 	var line state.ScoreLogLine
 	var after Replay
 	for i := range 2 {
-		bl := BaselineFromMatch(post, fmt.Sprintf("%s-%d", wb.door, len(lines)), wb.door, wb.stamp, set, basis)
+		if i == 1 && post.Status == state.MatchStatusCompleted && !slices.Contains(set, state.GroupResult) &&
+			slices.ContainsFunc(set, func(g string) bool { return state.IsScoringGroup(g) || g == state.GroupEncho }) {
+			// Scoring that lands on a finished match without moving its
+			// verdict (a correction under a ruling it keeps) is logged with
+			// that verdict, so no replay judges it again as a later change.
+			set = append(slices.Clone(set), state.GroupResult)
+		}
+		bl := BaselineFromMatch(post, logBaselineID(len(lines), wb.door), wb.door, wb.stamp, set, basis)
 		if i == 1 || wb.stamp <= 0 {
 			bl.Stamp = newest
 			for g := range bl.Stamps {
@@ -478,9 +501,16 @@ func driftBaseline(stored *state.MatchResult, lines []state.ScoreLogLine, shape 
 	}
 	log.Printf("engine: ERROR: match %s: the stored match differs from its score event log in %v (a write left no baseline); logging a drift baseline", stored.ID, diff)
 	stamp := max(stored.ModifiedAt, newestLineStamp(lines))
-	b := BaselineFromMatch(stored, fmt.Sprintf("%s-%d", DoorDrift, len(lines)), DoorDrift, stamp, diff, state.ScoreBasis{Seen: len(lines)})
+	b := BaselineFromMatch(stored, logBaselineID(len(lines), DoorDrift), DoorDrift, stamp, diff, state.ScoreBasis{Seen: len(lines)})
 	b.ReceivedAt = now
 	return &state.ScoreLogLine{Baseline: &b}
+}
+
+// logBaselineID names a baseline a door logs at line: two baselines dated at
+// the same moment replay in the order they were logged (the id breaks the
+// tie, compareReplayItems), after the match's migration baseline.
+func logBaselineID(line int, door string) string {
+	return fmt.Sprintf("w%06d-%s", line, door)
 }
 
 // takeReplayDerived stores the replay's mark ids and version on the match

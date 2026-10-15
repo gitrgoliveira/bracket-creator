@@ -99,9 +99,9 @@ const HoldReasonEngiAtomic = "the flags and the winner they decide are kept toge
 // group is held both are (a stale finish must not set a winner over newer
 // flags, nor new flags under an older winner). On a hold the report is left
 // on result.Merge for the history entry and true is returned.
-func engiFinishHeld(prior, result *state.MatchResult, comp *state.Competition, knockout bool) bool {
+func engiFinishHeld(prior, result *state.MatchResult, comp *state.Competition, knockout bool, lines []state.ScoreLogLine) bool {
 	probe := engiFinishProbe(prior, result)
-	rep := mergeMatchWrite(prior, &probe, matchWriteForward, mergeCtx{comp: comp, knockout: knockout})
+	rep := mergeMatchWrite(prior, &probe, matchWriteForward, mergeCtx{comp: comp, knockout: knockout, lines: lines})
 	// Default for a write this function ultimately holds whole (the atomic
 	// re-merge below, `return true`): the finish's own attempted stamp,
 	// exactly as before. The two "applied" returns below override this with

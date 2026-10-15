@@ -1,11 +1,13 @@
 package engine
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"slices"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -19,53 +21,47 @@ import (
 // applyBracketResultIn (rounds and bronze) for a knockout match, before
 // anything else in either pipeline judges the write.
 //
-// The rule (design C, "merge changes"):
+// bc-evts stage 2b split the work between this merge and the score replay
+// (score_replay.go):
 //
-//   - A write names the GROUPS it changes (state.MatchResult.Changed; the
-//     groups are owned by state/match_groups.go). Each changed group is
-//     applied only if the write's stamp (modifiedAt: when the change was
-//     made, server-relative, never arrival order) is not older than that
-//     group's stored stamp, with domain.ApplyByTimestamp's semantics (0 on
-//     either side applies). An applied group takes the write's stamp.
-//   - A group the write does not change is never overwritten: the stored
-//     value is copied into the incoming result, so the rest of the pipeline
-//     judges the merged match.
-//   - A changed group that is not applied is HELD: its incoming value goes to
-//     the match's history (match_history.go), never discarded.
-//   - The write is superseded only when every group it changes is held.
+// OWNED BY THE REPLAY (mergeByReplay): a scoring snapshot -- /score (running
+// or finishing), bulk-score, quick-score, the engine's own callers and the
+// engi finish (replaysSnapshot) -- becomes a baseline of the groups it
+// changes at its stamp (points, encho, flags, rep, repPickA/B, bout:N, and
+// the result it carries) and is replayed onto the match's log (its
+// migration baseline when it has none). Each group is ordered at its own
+// stamp, so per-group last-write-wins needs no merge here. The replay
+// judges a baseline that lands scoring on a finished match as it judges an
+// event: R3 applies it and works the winner out again, R4 holds a change
+// that would leave a knockout tied or an engi count invalid, R2 clears a
+// withdrawal only with the winner it needs and leaves a fusensho (and an
+// overtime-only change) standing, S3 keeps a hantei mark while the
+// scoreline stays tied, and S2 (a finish arriving after newer scoring) is
+// the same rules in the other order, its R4 half moving the newer scoring
+// to the history (MergeReport.Displaced). What the replay does not keep of
+// the write is reported held, from the values alone.
 //
-// Four rules ride on top, each with one home here:
+// STILL THE MERGE'S (rule-bound writes, and the holds a snapshot meets before
+// any replay):
 //
-//   - R2 (withdrawalOutranked, and the clearing block in mergeMatchWrite): a
-//     withdrawal or default win is atomic with its scoreline, and is held when
-//     any stored points or bout change was made after it. A scoring change
-//     made after a stored withdrawal, on a board that was scoring the match
-//     (a running write), clears it: points scored mean the withdrawal was a
-//     mistake. The eligibility restore follows from the decision changing
-//     (restoreIfWithdrawalRemoved).
-//   - R3 (runningOverFinished): a running or scheduled write over a finished
-//     match never carries the result group. Its scoring changes apply to the
-//     finished match only when made after the result; the match stays
-//     finished and the winner is worked out again (deriveWinnerAfterMerge).
-//   - R4 (deriveWinnerAfterMerge reporting false, and mergeHold), operator
-//     ruling 2026-10-04: "It needs a winner if the match is finished and is
-//     being corrected." A scoring change that would leave a finished knockout
-//     match tied, or an engi match with no valid flag count (pool or
-//     knockout), is NOT applied: the match keeps its recorded finish (never
-//     back to running), the change is held in the history with that reason,
-//     and the answer carries heldReason "needs_winner". A pool or league tie
-//     becomes a completed draw.
-//   - S2 (the same owners, the other arrival order): a finish whose result
-//     applies over scoring stored NEWER than it gets the verdict that scoring
-//     gives, exactly as R3 would have made of the two arriving the other way
-//     round, keeping the finish's own hantei mark (carryHantei). When that
-//     scoring would leave the match without the winner it needs, it could
-//     not have applied after the finish (R4): the finish is applied on its
-//     own scoreline and the newer scoring is moved to the history as held
-//     (displaceNewerScoring), so both arrival orders reach one state.
-//   - S3 (carryHantei): a judges' decision belongs to the result. A
-//     points change from a write whose result did not apply keeps the stored
-//     hantei mark.
+//   - Group by group by stamp (domain.ApplyByTimestamp) for every write
+//     replaysSnapshot does not take: a decision, the representative bout's
+//     add and remove, the both-barred hikiwake, a start's server twins.
+//   - Finish atomicity (HoldReasonFinishAtomic): a write completing a match
+//     whose stored verdict is newer is held WHOLE; engi's twin
+//     (HoldReasonEngiAtomic) holds a stale engi finish with its count.
+//   - R2's late half (withdrawalOutranked): a kiken, fusenpai or fusensho is
+//     held whole when any of its groups is held or a stored point or bout is
+//     newer than it; recordDecisionTx asks it first (decisionHeldByMerge).
+//   - R3's hold: a running write over a finished match made before (or at)
+//     the result, or unstamped, is held whole; one made after it is the
+//     replay's.
+//   - A finish that names its verdict alone over newer stored scoring (it
+//     carries nothing the replay could replay) is held, needs_winner.
+//   - The representative picks on a removed row (settleOrphanPicks, the
+//     daihyosen DELETE), the server's recorded marks (unrecordReopenedBouts),
+//     the echo rule for a write naming no groups, and the superseded answer
+//     (MergeReport.Superseded) for every door.
 //
 // A write the server orders itself (a completing write or a server door's)
 // that arrives unstamped takes the server's time (writeStamp), so it leaves
@@ -88,14 +84,18 @@ type mergeCtx struct {
 	// them. The default keeps both exactly as they were.
 	nilSubsClear bool
 	// holdAll, when set, holds every group the write changes whatever its
-	// stamp, and is recorded as the reason in the history entry. The running
-	// rev guard uses it for a write older than one the same board already
-	// sent (ForceOptions.HoldReason): kept, never applied, never dropped.
+	// stamp, and is recorded as the reason in the history entry (the engi
+	// finish's atomic hold, HoldReasonEngiAtomic): kept, never applied,
+	// never dropped.
 	holdAll string
 	// storedAID and storedBID are the stored match's side ids, set by
 	// mergeMatchWrite: a payload that omits its ids (they are backfilled
 	// only after the merge) still gets the winner's id worked out.
 	storedAID, storedBID string
+	// lines is the match's score event log (bc-evts) a snapshot write is
+	// replayed onto (mergeByReplay); nil reads as an empty log, the stored
+	// match being its only baseline.
+	lines []state.ScoreLogLine
 }
 
 // runningOverFinished reports R3's shape: a running or scheduled write over a
@@ -224,9 +224,6 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 	incoming.ModifiedAt = writeStamp(stored, incoming)
 	stamp := incoming.ModifiedAt
 	mc.storedAID, mc.storedBID = stored.SideAID, stored.SideBID
-	// The write as it arrived, before the merge copies stored groups over
-	// it: S2 reads the scoreline a finish was made on from here.
-	orig := snapshotScoring(incoming)
 	logUnstampedOverwrite(incoming, stored.ModifiedAt)
 	if serverBuiltWithoutGroups(incoming) {
 		// A door that builds its write on the server knows exactly what it
@@ -247,24 +244,23 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 			hold[g] = true
 		}
 	}
+	// What a write that completes the match, or carries a decision, still
+	// needs of the merge: it is atomic with what it changes, so these rules
+	// hold it WHOLE, before the score replay ever sees it.
+	holdWhole := mc.holdAll != ""
 	// R3's shape: the write would leave a finished match finished, since it
-	// does not carry the verdict.
+	// does not carry the verdict. A change made before the result was
+	// recorded (an autosave queued before Finish), or one that cannot be
+	// ordered against it (unstamped), is held whole; one made after it is the
+	// replay's to judge (mergeByReplay).
 	finished := runningOverFinished(stored, incoming) && !inChanged[state.GroupResult]
-	// R3: a change from a board still scoring a finished match applies only
-	// when it was made after the result was recorded. An earlier one (an
-	// autosave queued before Finish) is held whole; an unstamped one cannot
-	// be ordered and is held exactly as the whole-match guard dropped it.
 	if finished && (stamp <= 0 || stamp <= stored.GroupStamp(state.GroupResult)) {
-		for _, g := range changed {
-			hold[g] = true
-		}
+		holdWhole = true
 	}
 	// R2, late half: a withdrawal is atomic with what it changes.
 	if inChanged[state.GroupResult] && domain.IsDefaultWinDecisionStr(incoming.Decision) &&
 		withdrawalOutranked(stored, changed, hold, stamp) {
-		for _, g := range changed {
-			hold[g] = true
-		}
+		holdWhole = true
 	}
 	// Finish atomicity (a write that COMPLETES the match is atomic with
 	// what it changes, mirroring R2's withdrawal atomicity and
@@ -289,10 +285,41 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 		stored.Status == state.MatchStatusCompleted && completesMatch(incoming, mc) &&
 		!domain.IsDefaultWinDecisionStr(incoming.Decision) && !domain.IsDefaultWinDecisionStr(stored.Decision) &&
 		state.GroupDiffers(stored, incoming, state.GroupResult)
-	if finishAtomic {
+	holdWhole = holdWhole || finishAtomic
+	// An engi finish is atomic with its count (HoldReasonEngiAtomic): a
+	// verdict older than the stored one (a reopen made after it) holds the
+	// count with it, rather than landing the count under a running match.
+	engiAtomic := mc.comp != nil && mc.comp.Engi && inChanged[state.GroupResult] && hold[state.GroupResult] &&
+		completesMatch(incoming, mc) && state.GroupDiffers(stored, incoming, state.GroupResult)
+	holdWhole = holdWhole || engiAtomic
+	// S2's one shape nothing can replay: a finish that names its verdict
+	// alone, with no scoreline, over scoring stored newer than it. What it
+	// stood on is not in the write, so it is held, and the match stays as
+	// stored with its later scoring.
+	bareFinish := !holdWhole && inChanged[state.GroupResult] && completesMatch(incoming, mc) &&
+		!domain.IsDefaultWinDecisionStr(incoming.Decision) && stamp > 0 &&
+		!slices.ContainsFunc(changed, state.IsScoringGroup) && newestStoredScoringStamp(stored) > stamp
+	holdWhole = holdWhole || bareFinish
+	if holdWhole {
 		for _, g := range changed {
 			hold[g] = true
 		}
+	}
+
+	// What the write said about the representatives, before anything copies
+	// stored rows over its own.
+	payloadPickA, payloadPickB := incoming.RepPicks()
+	// A write that names the representative bout and carries no row removes
+	// it: the daihyosen DELETE, or a stale whole-match write that omits it.
+	removalWrite := inChanged[state.BoutGroup(state.DaihyosenSubPosition)] &&
+		state.DaihyosenSubIndex(incoming.SubResults) < 0 && state.DaihyosenSubIndex(stored.SubResults) >= 0
+
+	// A scoring snapshot (a score door, the engine's own callers, the engi
+	// finish) is the score replay's: its groups are ordered at their stamps
+	// and a change to a finished match is judged by the replay (R2, R3, R4,
+	// S2, S3 in event form), not by this merge.
+	if !holdWhole && replaysSnapshot(incoming) {
+		return mergeByReplay(stored, incoming, changed, stamp, mc, payloadPickA, payloadPickB, removalWrite)
 	}
 
 	// Every group either side holds, plus a changed bout neither holds (a
@@ -315,17 +342,16 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 	}
 
 	holdReason := mc.holdAll
-	if holdReason == "" && finishAtomic {
+	switch {
+	case holdReason != "":
+	case finishAtomic:
 		holdReason = HoldReasonFinishAtomic
+	case engiAtomic:
+		holdReason = HoldReasonEngiAtomic
+	case bareFinish:
+		holdReason = needsWinnerReason(mc)
 	}
-	// What the write said about the representatives, before the loop below
-	// copies stored rows over its own.
-	payloadPickA, payloadPickB := incoming.RepPicks()
-	// A write that names the representative bout and carries no row removes
-	// it: the daihyosen DELETE, or a stale whole-match write that omits it.
-	removalWrite := inChanged[state.BoutGroup(state.DaihyosenSubPosition)] &&
-		state.DaihyosenSubIndex(incoming.SubResults) < 0 && state.DaihyosenSubIndex(stored.SubResults) >= 0
-	rep := &state.MergeReport{Stamp: stamp, Changed: changed, HoldReason: holdReason}
+	rep := &state.MergeReport{Stamp: stamp, Changed: changed, HoldReason: holdReason, NeedsWinner: bareFinish}
 	storedStamps := state.MaterializedGroupStamps(stored.GroupStamps, stored.ModifiedAt, state.SubPositions(stored.SubResults))
 	stamps := state.CloneGroupStamps(storedStamps)
 	for _, g := range groups {
@@ -346,129 +372,15 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 	mh := mergeHold{rep: rep, stored: stored, incoming: incoming, stamps: stamps, storedStamps: storedStamps}
 
 	// S3: a judges' decision is the result's. A points change from a write
-	// whose result did not apply (a board still scoring, a write that does
-	// not name the verdict) keeps the stored hantei mark rather than erasing
-	// it. Before any winner is worked out, so the mark still settles a tie.
+	// whose result did not apply (a write that does not name the verdict)
+	// keeps the stored hantei mark rather than erasing it.
 	if !resultApplied && slices.Contains(rep.Applied, state.GroupPoints) {
-		mh.raw(state.GroupPoints)
 		carryHantei(stored, incoming)
-	}
-
-	// R2 and R3: a scoring change applied to a finished match. A GENUINE
-	// overtime change (its value actually differs from the stored one)
-	// rides along even with no scoring change of its own (a board still
-	// toggling encho on a match a default win already closed), since
-	// R2/R4's default-win branch below must hold it with any scoring too:
-	// otherwise an (E) mark could land on a default win on its own, which
-	// FIK Art. 32 never produces (one maru in encho, never overtime). An
-	// ECHO of the stored overtime (the same "no overtime" sent back) must
-	// NOT ride along: it is in rep.Applied like any echo, but entering this
-	// block for it alone used to hold the whole write as if something had
-	// changed, answering "Not applied" for a write that changed nothing.
-	if finished && (scoringChanged(stored, incoming, rep.Applied) ||
-		(slices.Contains(rep.Applied, state.GroupEncho) && state.GroupDiffers(stored, incoming, state.GroupEncho))) {
-		probe := *incoming
-		// R2 clears a withdrawal OF THIS MATCH: points scored after it mean
-		// it was a mistake. A fusensho is a default win awarded for a bar
-		// recorded on ANOTHER match (the other side cannot fight), which
-		// points scored here say nothing about, and a scoreline cannot land
-		// beside the circles a default win records without one discarding
-		// the other: the default win stands and the scoring is held, in the
-		// history with the reason (R4's shape).
-		// A clear needs an actual SCORING change: an overtime toggle alone
-		// (no point, bout or flag moved) says nothing about whether the
-		// withdrawal was a mistake, so it must not read as one -- the
-		// stored decision stays, and the encho-only change is held below
-		// with the same default-win-stands reason a real default win gets,
-		// never silently reopened on an (E) tap alone.
-		cleared := domain.IsWithdrawalDecisionStr(probe.Decision) && scoringChanged(stored, incoming, rep.Applied)
-		if cleared {
-			probe.Decision, probe.DecisionBy, probe.DecisionReason = "", "", ""
-			probe.Winner, probe.WinnerID, probe.WinnerSide = "", "", ""
-		}
-		switch {
-		case !cleared && domain.IsDefaultWinDecisionStr(probe.Decision):
-			mh.holdDefaultWinScoring(probe.Decision)
-		case deriveWinnerAfterMerge(&probe, mc):
-			if cleared {
-				rep.ClearedWithdrawal = state.GroupValue(incoming, state.GroupResult)
-				// The scoring change replaces the ruling: KeepsWithdrawalRuling
-				// must not reinstate it from the stored match.
-				probe.ClearsWithdrawal = true
-			}
-			*incoming = probe
-			if state.GroupDiffers(stored, incoming, state.GroupResult) {
-				rep.ResultChanged = true
-				if stamp > 0 {
-					stamps[state.GroupResult] = stamp
-				}
-			}
-		default:
-			if cleared {
-				// The clear cannot give the match the winner it needs (the
-				// new scoreline leaves a knockout tied, or an engi count
-				// with no valid total): the decision it would have cleared
-				// is the only thing that gives the match a winner, so it
-				// STANDS instead, exactly as a write that never tried to
-				// clear it (holdDefaultWinScoring holds the scoring AND the
-				// overtime together, so an (E) mark can never land on a
-				// default win on its own, FIK Art. 32). stored.Decision,
-				// never probe's: cleared already emptied that.
-				mh.holdDefaultWinScoring(stored.Decision)
-				break
-			}
-			// R4 (operator ruling 2026-10-04): the change would leave a
-			// finished knockout match tied, or an engi match with no valid
-			// count. It is not applied: the match keeps its recorded finish,
-			// and the change is kept in the history for the operator to
-			// correct the result with a winner.
-			mh.holdScoring(needsWinnerReason(mc))
-		}
-	}
-
-	// S2: a finish applied over scoring stored NEWER than it. In stamp order
-	// the finish came first and the newer scoring after it, so the verdict
-	// is the one that scoring gives (exactly what R3 makes of the reverse
-	// arrival order), worked out by the same owner. A withdrawal is R2's
-	// (withdrawalOutranked holds it), never worked out here.
-	recomputeModifiedAt := false
-	if resultApplied && completesMatch(incoming, mc) && !domain.IsDefaultWinDecisionStr(incoming.Decision) {
-		if newest := newestStoredScoringStamp(stored); stamp > 0 && newest > stamp {
-			probe := *incoming
-			// The finish's judges' decision stays with its result, as S3
-			// keeps a stored one: newer points that do not claim the
-			// result do not erase it, in this arrival order either.
-			carryHantei(orig, &probe)
-			switch {
-			case deriveWinnerAfterMerge(&probe, mc):
-				if verdictMoved(incoming, &probe) {
-					// The verdict moved because of the newer scoring, so it
-					// is as new as that scoring (R3 stamps it the same way).
-					stamps[state.GroupResult] = newest
-				}
-				*incoming = probe
-			case mh.displaceNewerScoring(orig, mc, stamp):
-				// In stamp order the finish came first, and the newer
-				// scoring, which leaves the knockout tied, could not be
-				// applied after it (R4). The finish stands on the scoreline
-				// it was made on, and the newer scoring is moved to the
-				// history as held, exactly as it is when it arrives second.
-				recomputeModifiedAt = true
-			default:
-				// The finish's own scoreline is not in the write, so the
-				// state it stood on cannot be rebuilt: it is held, and the
-				// match stays as stored, its later scoring included.
-				mh.holdGroups(needsWinnerReason(mc), state.GroupResult)
-				rep.ResultChanged = false
-			}
-		}
 	}
 
 	// The representatives sit on the representative bout's row, so what
 	// became of the row is judged once every hold above has had its say.
-	if mh.settleOrphanPicks(payloadPickA, payloadPickB, removalWrite, stamp) {
-		recomputeModifiedAt = true
-	}
+	recomputeModifiedAt := mh.settleOrphanPicks(payloadPickA, payloadPickB, removalWrite, stamp)
 	// The recorded marks are the server's (ServerGroups): no write names
 	// them, so once every hold and displacement above has put its rows in
 	// place, every row takes the stored match's marks, whichever copy (the
@@ -485,21 +397,16 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 		}
 	}
 	// A group that moved nothing keeps its stored stamp, but ONLY when the
-	// write named no groups at all (Changed is nil: bulk-score, an older
-	// client). Such a write cannot tell an echo from a change -- it re-sends
-	// every group it carries whether or not the operator touched it -- so
-	// letting its echoes take its own stamp would fence out a real, older
-	// change made on another device in the gap. A write that DOES name a
-	// group named it because it changed against the operator's own screen,
-	// so a named echo (the same value sent back, e.g. a replayed decision)
-	// is still a real action taken at this write's stamp and must keep that
-	// stamp: reverting it is what let a later-arriving change compare
-	// itself against a stale, reverted stamp instead of the time the
-	// operator actually acted (the regression this guards against; a named
-	// write's groups already took `stamp` in the Applied loop above, so
-	// here there is nothing to do for it). Delete rather than zero when the
-	// stored match never stamped the group at all, so an echoed legacy
-	// group keeps reading as never written.
+	// write named no groups at all (Changed is nil: an older client). Such a
+	// write cannot tell an echo from a change -- it re-sends every group it
+	// carries whether or not the operator touched it -- so letting its
+	// echoes take its own stamp would fence out a real, older change made on
+	// another device in the gap. A write that DOES name a group named it
+	// because it changed against the operator's own screen, so a named echo
+	// (the same value sent back, e.g. a replayed decision) is still a real
+	// action taken at this write's stamp and must keep that stamp. Delete
+	// rather than zero when the stored match never stamped the group at all,
+	// so an echoed legacy group keeps reading as never written.
 	if incoming.Changed == nil {
 		for _, g := range rep.Unchanged {
 			if s, ok := storedStamps[g]; ok {
@@ -510,10 +417,9 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 		}
 	}
 	// A verdict that applied but equals the stored one (an echo: the same
-	// decision sent again under a later stamp, or a winner worked out again
-	// to the same answer) did not move. Recording it again would rewrite the
-	// competitor's status (and undo a reinstatement made since), so it has
-	// no eligibility consequence.
+	// decision sent again under a later stamp) did not move. Recording it
+	// again would rewrite the competitor's status (and undo a reinstatement
+	// made since), so it has no eligibility consequence.
 	if slices.Contains(rep.Unchanged, state.GroupResult) {
 		rep.ResultChanged = false
 	}
@@ -530,7 +436,7 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 	incoming.GroupStamps = stamps
 	incoming.ModifiedAt = stored.ModifiedAt
 	if recomputeModifiedAt {
-		// A newer stamp left with the scoring it was moved out with:
+		// A newer stamp left with the pick it was moved out with:
 		// ModifiedAt is the newest stamp the match still holds.
 		incoming.ModifiedAt = 0
 		for _, s := range stamps {
@@ -541,11 +447,181 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 	// persisted (an echo included: see above), since naming a group is
 	// itself the operator's action at this stamp. A write that named NONE
 	// (Changed nil) moves it only when something it carried actually
-	// differed from stored, or a whole-match echo (bulk-score, an older
-	// client) would drag ModifiedAt forward and fence out a real, older
-	// change the same way a per-group one would.
+	// differed from stored, or a whole-match echo would drag ModifiedAt
+	// forward and fence out a real, older change the same way a per-group
+	// one would.
 	if (incoming.Changed != nil || len(rep.Applied) > len(rep.Unchanged)) && stamp > incoming.ModifiedAt {
 		incoming.ModifiedAt = stamp
+	}
+	incoming.Merge = rep
+	return rep
+}
+
+// replaysSnapshot reports whether a write is a scoring snapshot the score
+// replay decides (bc-evts stage 2b): /score, bulk-score, quick-score, the
+// engine's own callers and the engi finish. Every other door (a decision,
+// the representative bout's add and remove, a start's server twins) names
+// what it changes on purpose and is merged group by group below.
+func replaysSnapshot(incoming *state.MatchResult) bool {
+	switch doorOf(incoming) {
+	case DoorScore, DoorBulkScore, DoorQuickScore, DoorEngine, doorEngi:
+		return true
+	}
+	return false
+}
+
+// mergeByReplay decides a scoring snapshot by the score replay: the stored
+// match's log (its migration baseline when it has none, a drift baseline
+// when the stored match is not what the log replays to), then the write as
+// a baseline of the groups it changes at its stamp, replayed together. The
+// match takes what the replay gives for every group; what the write sent
+// and the replay did not keep is held (in the history), and a newer stored
+// change the write's finish took out of the match is displaced (S2 with
+// R4). The lines the replay needed ahead of the write's own ride on the
+// report (LogPrefix), for the door's baseline to log first.
+func mergeByReplay(stored, incoming *state.MatchResult, changed []string, stamp int64, mc mergeCtx, payloadPickA, payloadPickB string, removalWrite bool) *state.MergeReport {
+	rep := &state.MergeReport{Stamp: stamp, Changed: changed}
+	shape := ReplayShape{Comp: mc.comp, Knockout: mc.knockout}
+	now := serverNowMs()
+	lines := mc.lines
+	if len(lines) == 0 {
+		mb := MigrationBaseline(stored, MigrationDoor+"-0", now)
+		lines = []state.ScoreLogLine{{Baseline: &mb}}
+		rep.LogPrefix = lines
+	} else if drift := driftBaseline(stored, lines, shape, now); drift != nil {
+		lines = append(slices.Clone(lines), *drift)
+		rep.LogPrefix = []state.ScoreLogLine{*drift}
+	}
+	// The write's own stamps are never a client's: every group it changes is
+	// dated by the write. An unstamped one is ordered after everything the
+	// match holds (the old unstamped bypass).
+	at := stamp
+	if at == 0 {
+		at = max(now, stored.ModifiedAt, newestLineStamp(lines))
+	}
+	sent := *incoming
+	sent.GroupStamps = nil
+	sent.SubResults = state.CloneSubResults(incoming.SubResults)
+	// A representative bout the write is silent on (nil ippons) keeps the
+	// judges' decision recorded on it: the baseline carries the verdict, not
+	// a blank the replay would read as the operator clearing it.
+	preserveDaihyosenOutcome(stored.SubResults, &sent)
+	// A write naming no groups cannot tell an echo from a change, so a group
+	// it only echoes keeps its stored stamp: it is not part of its baseline.
+	groups := changed
+	if incoming.Changed == nil {
+		groups = slices.DeleteFunc(slices.Clone(changed), func(g string) bool { return !state.GroupDiffers(stored, &sent, g) })
+		// A finish that changes anything declares its verdict with it, even
+		// one equal to the stored verdict: the scoreline it lands is the one
+		// the verdict stands on, so both are dated by the finish.
+		if len(groups) > 0 && slices.Contains(changed, state.GroupResult) && !slices.Contains(groups, state.GroupResult) &&
+			completesMatch(&sent, mc) {
+			groups = append(groups, state.GroupResult)
+		}
+	}
+	bl := BaselineFromMatch(&sent, "write-"+doorOf(incoming), doorOf(incoming), at, groups, state.ScoreBasis{})
+	all := append(slices.Clone(lines), state.ScoreLogLine{Baseline: &bl})
+	after := ReplayScoring(stored, all, shape)
+	final := &after.Match
+
+	// Every group takes what the replay gives; one the replay left as the
+	// write sent it keeps the write's own copy (an omitted scoreline stays
+	// omitted for what judges silence after the merge).
+	groupsOf := replayedGroups(stored, final)
+	for _, p := range state.SubPositions(sent.SubResults) {
+		if g := state.BoutGroup(p); !slices.Contains(groupsOf, g) {
+			groupsOf = append(groupsOf, g)
+		}
+	}
+	for _, g := range groupsOf {
+		if !bytes.Equal(state.GroupValue(final, g), state.GroupValue(&sent, g)) {
+			state.CopyGroup(incoming, final, g)
+		}
+	}
+	// The write's side hint travels with the winner it named, for the
+	// identity backfill after the merge to resolve the winner's id by.
+	if incoming.Winner == sent.Winner && incoming.WinnerID == sent.WinnerID {
+		incoming.WinnerSide = sent.WinnerSide
+	}
+	stamps := state.CloneGroupStamps(final.GroupStamps)
+	if stamps == nil {
+		stamps = map[string]int64{}
+	}
+	for _, g := range changed {
+		was, got, said := state.GroupValue(stored, g), state.GroupValue(final, g), state.GroupValue(&sent, g)
+		switch {
+		case bytes.Equal(got, said), !bytes.Equal(got, was):
+			// Landed, as sent or as the replay adjusted it (a judges'
+			// decision kept, a winner worked out again).
+			rep.Applied = append(rep.Applied, g)
+		default:
+			reportHeld(rep, g, stored, &sent, nil)
+		}
+	}
+	if h, ok := after.Held[len(all)-1]; ok && len(rep.Held) > 0 {
+		rep.HoldReason, rep.NeedsWinner = h.Reason, h.NeedsWinner
+		rep.DefaultWinStands, rep.StandingDecision = h.DefaultWinStands, h.Decision
+	}
+	// S2 with R4: the write's finish applied on its own scoreline, so newer
+	// stored scoring that would have left the match without its winner is
+	// the history's (one entry per stamp).
+	if completesMatch(&sent, mc) && stamp > 0 {
+		byStamp := map[int64]map[string]json.RawMessage{}
+		for _, g := range changed {
+			if !state.IsScoringGroup(g) || stored.GroupStamp(g) <= stamp {
+				continue
+			}
+			if was := state.GroupValue(stored, g); !bytes.Equal(was, state.GroupValue(final, g)) && bytes.Equal(state.GroupValue(final, g), state.GroupValue(&sent, g)) {
+				at := stored.GroupStamp(g)
+				if byStamp[at] == nil {
+					byStamp[at] = map[string]json.RawMessage{}
+				}
+				byStamp[at][g] = was
+			}
+		}
+		ats := slices.Sorted(maps.Keys(byStamp))
+		for _, at := range ats {
+			rep.Displaced = append(rep.Displaced, state.DisplacedChange{Stamp: at, Values: byStamp[at], Reason: needsWinnerReason(mc)})
+		}
+		if len(ats) > 0 {
+			rep.NeedsWinner = true
+		}
+	}
+	rep.ResultChanged = state.GroupDiffers(stored, final, state.GroupResult)
+	if after.ClearedWithdrawal && domain.IsWithdrawalDecisionStr(stored.Decision) && !domain.IsWithdrawalDecisionStr(final.Decision) {
+		rep.ClearedWithdrawal = state.GroupValue(stored, state.GroupResult)
+		// The scoring change replaces the ruling: KeepsWithdrawalRuling must
+		// not reinstate it from the stored match.
+		incoming.ClearsWithdrawal = true
+	}
+	storedStamps := state.MaterializedGroupStamps(stored.GroupStamps, stored.ModifiedAt, state.SubPositions(stored.SubResults))
+	mh := mergeHold{rep: rep, stored: stored, incoming: incoming, stamps: stamps, storedStamps: storedStamps}
+	// A group the write did not land keeps the stamp it had (a pick on a row
+	// the replay took out lands nothing, though its baseline dated it).
+	for _, g := range append(slices.Clone(rep.Held), rep.HeldEcho...) {
+		mh.restoreStamp(g)
+	}
+	recompute := mh.settleOrphanPicks(payloadPickA, payloadPickB, removalWrite, stamp)
+	state.CopyGroup(incoming, final, state.GroupRecorded)
+	mh.unrecordReopenedBouts(stamp)
+	for _, g := range rep.Applied {
+		if !state.GroupDiffers(stored, incoming, g) {
+			rep.Unchanged = append(rep.Unchanged, g)
+		}
+	}
+	if i := state.DaihyosenSubIndex(incoming.SubResults); i >= 0 {
+		incoming.SubResults[i].ReconcileWinnerMemberID()
+	}
+	if len(stamps) == 0 {
+		stamps = nil
+	}
+	incoming.GroupStamps = stamps
+	incoming.ModifiedAt = cmp.Or(final.ModifiedAt, stored.ModifiedAt)
+	if recompute {
+		incoming.ModifiedAt = 0
+		for _, s := range stamps {
+			incoming.ModifiedAt = max(incoming.ModifiedAt, s)
+		}
 	}
 	incoming.Merge = rep
 	return rep
@@ -597,15 +673,6 @@ func verdictMoved(said, derived *state.MatchResult) bool {
 
 // snapshotScoring copies the groups of m that decide who won (points, flags,
 // bouts), deep, so the merge's later copies over m cannot reach it.
-func snapshotScoring(m *state.MatchResult) *state.MatchResult {
-	return &state.MatchResult{
-		IpponsA: cloneIppons(m.IpponsA), IpponsB: cloneIppons(m.IpponsB),
-		HansokuA: m.HansokuA, HansokuB: m.HansokuB,
-		FlagsA: m.FlagsA, FlagsB: m.FlagsB,
-		SubResults: state.CloneSubResults(m.SubResults),
-	}
-}
-
 func cloneIppons(s []string) []string {
 	if s == nil {
 		return nil
@@ -616,23 +683,6 @@ func cloneIppons(s []string) []string {
 // carriesGroup reports whether a write's own payload holds a value for
 // scoring group g: points it sent, its engi flags, or a row at that bout
 // position. A payload that omits a group says nothing about it.
-func carriesGroup(w *state.MatchResult, g string) bool {
-	switch g {
-	case state.GroupPoints:
-		return w.IpponsA != nil || w.IpponsB != nil || w.HansokuA != 0 || w.HansokuB != 0
-	case state.GroupFlags:
-		return true
-	}
-	if pos, ok := state.ParseBoutGroup(g); ok {
-		for i := range w.SubResults {
-			if w.SubResults[i].Position == pos {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // displaceNewerScoring is S2's answer when the scoring stored after a finish
 // would leave the match without the winner it needs (R4): in stamp order the
 // finish came first and that scoring could not apply after it. Each scoring
@@ -642,67 +692,6 @@ func carriesGroup(w *state.MatchResult, g string) bool {
 // arrival order gives and nothing is lost. It reports false, changing
 // nothing, when the finish does not carry every such group, or when its own
 // scoreline does not decide the match either.
-func (h *mergeHold) displaceNewerScoring(orig *state.MatchResult, mc mergeCtx, stamp int64) bool {
-	var newer []string
-	for _, g := range append([]string{state.GroupPoints, state.GroupFlags}, storedBoutGroups(h.stored)...) {
-		if h.stored.GroupStamp(g) > stamp && !slices.Contains(newer, g) {
-			newer = append(newer, g)
-		}
-	}
-	probe := *h.incoming
-	probe.SubResults = state.CloneSubResults(h.incoming.SubResults)
-	var moved []string
-	for _, g := range newer {
-		if !state.GroupDiffers(h.stored, orig, g) {
-			continue
-		}
-		if !carriesGroup(orig, g) {
-			return false
-		}
-		state.CopyGroup(&probe, orig, g)
-		moved = append(moved, g)
-	}
-	if len(moved) == 0 || !deriveWinnerAfterMerge(&probe, mc) {
-		return false
-	}
-	*h.incoming = probe
-	byStamp := map[int64]map[string]json.RawMessage{}
-	for _, g := range moved {
-		at := h.stored.GroupStamp(g)
-		if byStamp[at] == nil {
-			byStamp[at] = map[string]json.RawMessage{}
-		}
-		byStamp[at][g] = state.GroupValue(h.stored, g)
-		h.stamps[g] = stamp
-		// The finish's own value now applies.
-		if i := slices.Index(h.rep.Held, g); i >= 0 {
-			h.rep.Held = slices.Delete(h.rep.Held, i, i+1)
-			delete(h.rep.HeldValues, g)
-		}
-		if i := slices.Index(h.rep.HeldEcho, g); i >= 0 {
-			h.rep.HeldEcho = slices.Delete(h.rep.HeldEcho, i, i+1)
-		}
-		if !slices.Contains(h.rep.Applied, g) {
-			h.rep.Applied = append(h.rep.Applied, g)
-		}
-	}
-	if len(h.rep.HeldValues) == 0 {
-		h.rep.HeldValues = nil
-	}
-	stamps := make([]int64, 0, len(byStamp))
-	for at := range byStamp {
-		stamps = append(stamps, at)
-	}
-	slices.Sort(stamps)
-	for _, at := range stamps {
-		h.rep.Displaced = append(h.rep.Displaced, state.DisplacedChange{
-			Stamp: at, Values: byStamp[at], Reason: needsWinnerReason(mc),
-		})
-	}
-	h.rep.NeedsWinner = true
-	return true
-}
-
 // carryHantei puts a judges'-decision mark from one scoreline onto another
 // that carries none, on the same side, through domain.AppendHantei (the one
 // placement rule): the judges' decision is the result's, so a points change
@@ -730,65 +719,12 @@ type mergeHold struct {
 	incoming     *state.MatchResult
 	stamps       map[string]int64
 	storedStamps map[string]int64
-	// rawValues are a group's incoming value captured before the merge
-	// adjusted it (S3's kept hantei), so the history keeps what the writer
-	// sent.
-	rawValues map[string]json.RawMessage
 }
 
 // raw captures group's incoming value before the merge adjusts it.
-func (h *mergeHold) raw(group string) {
-	if h.rawValues == nil {
-		h.rawValues = map[string]json.RawMessage{}
-	}
-	h.rawValues[group] = state.GroupValue(h.incoming, group)
-}
-
 // holdGroups takes each applied group back out, with reason as the history
 // entry's reason and NeedsWinner reported to the writer.
-func (h *mergeHold) holdGroups(reason string, groups ...string) bool {
-	var heldSomething bool
-	for _, g := range groups {
-		i := slices.Index(h.rep.Applied, g)
-		if i < 0 {
-			continue
-		}
-		h.rep.Applied = slices.Delete(h.rep.Applied, i, i+1)
-		// An echo (the incoming value equals the stored one, and reportHeld
-		// has no raw pre-adjustment value to fall back on) is no loss: it
-		// goes to HeldEcho below, and holding nothing real must not report a
-		// reason or ask the operator for a correction nothing needed.
-		if h.rawValues[g] != nil || state.GroupDiffers(h.stored, h.incoming, g) {
-			heldSomething = true
-		}
-		reportHeld(h.rep, g, h.stored, h.incoming, h.rawValues[g])
-		state.CopyGroup(h.incoming, h.stored, g)
-		h.restoreStamp(g)
-	}
-	if !heldSomething {
-		return false
-	}
-	h.rep.HoldReason = reason
-	// "Correct the result with a winner" is the answer for the two R4
-	// reasons only; a default win that stands asks for no correction.
-	// holdDefaultWinScoring sets DefaultWinStands and StandingDecision
-	// itself, since the reason text it builds here now names the decision
-	// and so can no longer be compared against one fixed constant.
-	h.rep.NeedsWinner = reason == HoldReasonKnockoutNeedsWinner || reason == HoldReasonEngiNeedsValidCount
-	return true
-}
-
 // holdScoring holds every applied group that decides who won.
-func (h *mergeHold) holdScoring(reason string) bool {
-	var scoring []string
-	for _, g := range h.rep.Applied {
-		if state.IsScoringGroup(g) {
-			scoring = append(scoring, g)
-		}
-	}
-	return h.holdGroups(reason, scoring...)
-}
-
 // holdDefaultWinScoring holds every applied group that decides who won
 // together with a changed overtime: a default win already decided this
 // match, and nothing a board still scoring it sends says otherwise, whether
@@ -796,28 +732,6 @@ func (h *mergeHold) holdScoring(reason string) bool {
 // overtime group, since IsScoringGroup does not count it as scoring, and a
 // held scoreline landing beside an applied (E) would put overtime on a match
 // the default win rule says had none (FIK Art. 32: one maru in encho).
-func (h *mergeHold) holdDefaultWinScoring(decision string) {
-	var groups []string
-	for _, g := range h.rep.Applied {
-		if state.IsScoringGroup(g) || g == state.GroupEncho {
-			groups = append(groups, g)
-		}
-	}
-	if !h.holdGroups(defaultWinStandsReason(decision), groups...) {
-		// Nothing of it was genuinely held (every named group was an echo,
-		// or there was none to hold at all): the write fully applied, so it
-		// gets no reason and names no decision either.
-		return
-	}
-	// The decision that closed the match already has the winner it needs,
-	// so the answer sends the operator to the editor's own Remove <decision>
-	// instead of asking for a correction with a winner (holdGroups'
-	// NeedsWinner stays false for this reason). StandingDecision lets the
-	// HTTP layer name the decision on the wire (heldDecision).
-	h.rep.DefaultWinStands = true
-	h.rep.StandingDecision = decision
-}
-
 // unrecordReopenedBouts takes the recorded mark off every numbered bout this
 // write reopens, as a change of GroupRecorded at the write's stamp, named in
 // its history line. A recorded bout is reopened when the write either
@@ -1088,15 +1002,6 @@ func reportHeld(rep *state.MergeReport, group string, stored, incoming *state.Ma
 // scoringChanged reports whether an applied group that decides who won (the
 // points, a bout, the engi flags) now holds a different value from the
 // stored one. An echo of the stored scoreline is not a correction.
-func scoringChanged(stored, merged *state.MatchResult, applied []string) bool {
-	for _, g := range applied {
-		if state.IsScoringGroup(g) && state.GroupDiffers(stored, merged, g) {
-			return true
-		}
-	}
-	return false
-}
-
 // logUnstampedOverwrite keeps the unstamped bypass visible (bc-cse). An
 // unstamped forward write over a STAMPED stored result is the one path that
 // overwrites a known-newer result with no comparison possible:

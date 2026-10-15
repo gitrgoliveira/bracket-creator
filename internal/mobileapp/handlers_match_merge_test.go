@@ -230,7 +230,8 @@ func TestBulkScore_ReportsHeldGroups(t *testing.T) {
 
 // The mark ids and the event-log version are the replay's, never a client's
 // (bc-evts): /score and bulk-score bind a whole MatchResult, so a body
-// carrying them must leave the stored ones as they were.
+// carrying them must not land them. A snapshot write is replayed onto the
+// match's log (stage 2b), so what is stored is the log's version and ids.
 func TestScoreWrites_IgnoreClientMarkIDsAndScoreVersion(t *testing.T) {
 	const compID = "merge-derived"
 	r, store := mergeServer(t, compID)
@@ -248,9 +249,7 @@ func TestScoreWrites_IgnoreClientMarkIDsAndScoreVersion(t *testing.T) {
 		"scoreVersion": 1_000_000_000, "markIds": forged, "modifiedAt": now,
 	})
 	got := mergeStored(t, store, compID)
-	assert.Equal(t, 7, got.ScoreVersion, "/score: the stored version stands")
-	require.NotNil(t, got.MarkIDs)
-	assert.Equal(t, []string{"e1"}, got.MarkIDs.A, "/score: the stored ids stand")
+	assertReplayOwnsDerived(t, store, compID, got, "/score")
 
 	w := serveJSON(r, "POST", "/api/competitions/"+compID+"/matches/bulk-score", []map[string]any{
 		{"id": "Pool A-0", "sideA": mgAlice, "sideB": mgBob, "status": "running", "ipponsA": []string{"M"}, "ipponsB": []string{},
@@ -258,9 +257,19 @@ func TestScoreWrites_IgnoreClientMarkIDsAndScoreVersion(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	got = mergeStored(t, store, compID)
-	assert.Equal(t, 7, got.ScoreVersion, "bulk-score: the stored version stands")
+	assertReplayOwnsDerived(t, store, compID, got, "bulk-score")
+}
+
+// assertReplayOwnsDerived checks the stored version is the log's line count
+// and no forged id landed.
+func assertReplayOwnsDerived(t *testing.T, store *state.Store, compID string, got state.MatchResult, door string) {
+	t.Helper()
+	lines, err := store.LoadScoreLog(compID, "Pool A-0")
+	require.NoError(t, err)
+	assert.Equal(t, len(lines), got.ScoreVersion, door+": the version is the log's")
 	require.NotNil(t, got.MarkIDs)
-	assert.Equal(t, []string{"e1"}, got.MarkIDs.A, "bulk-score: the stored ids stand")
+	assert.NotContains(t, got.MarkIDs.A, "forged", door+": no forged id lands")
+	assert.Len(t, got.MarkIDs.A, 1)
 }
 
 // A start write (startOnly) changes the status alone: the score the stored

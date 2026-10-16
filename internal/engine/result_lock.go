@@ -25,6 +25,10 @@ import (
 // because the next knockout match had already been played or started.
 const HoldReasonResultLocked = "the next round was already fought"
 
+// HoldReasonResultLockedRunning is the same hold when the next round is only
+// under way.
+const HoldReasonResultLockedRunning = "the next round has already started"
+
 // rivalDisplacesResult reports whether the merge moved the stored result out
 // for a write that did not see it: an older-stamped finish or decision (a
 // rival under I1, never a correction) that arrived after a newer result.

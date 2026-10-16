@@ -1061,6 +1061,12 @@ func pmKindCases() []pmCase {
 			want: []string{`st=completed`, ryu}, outs: map[string]string{"e1": "recorded", "e2": "recorded"}},
 		{name: "kind engi fin 3-0 T1, flag b T2, flag remove a T3", engi: true, steps: []pmStep{pmEngiFin(t1, 3, 0), e("e1", 1, t2, domain.ScoreFlagAdd, 0, "b", "", "", ""), e("e2", 2, t3, domain.ScoreFlagRemove, 0, "a", "", "", "")},
 			refused: []int{1, 2}, want: []string{`st=completed`, ryu}},
+		// Two engi finishes from two devices (review round 9): the first
+		// recorded result stands whichever arrives first, as for any finish.
+		{name: "kind engi fin 3-0 T1, fin 0-3 T2 (a rival)", engi: true, steps: []pmStep{pmEngiFin(t1, 3, 0), pmEngiFin(t2, 0, 3)},
+			refused: []int{1}, want: []string{`st=completed`, ryu}},
+		{name: "kind engi fin 0-3 T1, fin 3-0 T2 (a rival)", engi: true, steps: []pmStep{pmEngiFin(t1, 0, 3), pmEngiFin(t2, 3, 0)},
+			refused: []int{1}, want: []string{`st=completed`, `w="Tora"`}},
 		// Team bout decisions.
 		{name: "kind team e1 hikiwake b1 T1, e2 fusensho b2 T2, fin Ryu(b1 b2) T3 own e1 e2", team: true, rows: true, steps: []pmStep{
 			e("e1", 1, t1, domain.ScoreBoutDecision, 1, "", "", "", domain.BoutDecisionHikiwake), e("e2", 2, t2, domain.ScoreBoutDecision, 2, "b", "", "", domain.BoutDecisionFusensho), pmTeamFin(t3, wrTeamA, []string{"e1", "e2"}, b(1, M, nil, "A1"), b(2, M, nil, "A2"))},

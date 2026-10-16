@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // A score event is one tap on a running match's score sheet (bc-evts,
@@ -137,6 +138,11 @@ func (e ScoreEvent) Validate() error {
 	}
 	if e.ID == "" || len(e.ID) > MaxScoreEventIDLen {
 		return bad("id must be 1 to %d characters", MaxScoreEventIDLen)
+	}
+	// "b:" is the server's own mark-id namespace (b:<pos>:<side>:<letter>:<n>,
+	// engine markID): a client id there could collide with a minted mark id.
+	if strings.HasPrefix(e.ID, "b:") {
+		return bad("id must not start with b: (the server's mark ids)")
 	}
 	for name, v := range map[string]string{"session": e.Session, "letter": e.Letter, "target": e.Target, "value": e.Value, "memberId": e.MemberID, "name": e.Name} {
 		if len(v) > MaxScoreEventFieldLen {

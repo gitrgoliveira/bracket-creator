@@ -35,6 +35,8 @@ func TestScoreHandler_AnUnreadableScoreLogIsARefusalNotAMissingReason(t *testing
 	require.NoError(t, os.WriteFile(filepath.Join(logDir, "Pool%20A-0.jsonl"), []byte("{not json\n"), 0o600))
 	_, lerr := store.LoadScoreLog(compID, "Pool A-0")
 	require.ErrorIs(t, lerr, state.ErrScoreLogUnreadable, "the log is unreadable, as set up")
+	before, herr := store.LoadMatchHistory(compID, "Pool A-0")
+	require.NoError(t, herr)
 
 	var logged bytes.Buffer
 	log.SetOutput(&logged)
@@ -46,8 +48,13 @@ func TestScoreHandler_AnUnreadableScoreLogIsARefusalNotAMissingReason(t *testing
 	})
 	require.Equal(t, http.StatusOK, code, "never the 400 a queued replay loops on: %v", out)
 	assert.Equal(t, false, out["applied"])
-	assert.Equal(t, engine.EventReasonLogUnreadable, out["reason"])
-	assert.NotEmpty(t, out["message"])
+	assert.NotEqual(t, engine.EventReasonLogUnreadable, out["reason"], "the write is judged, not dropped before the engine")
+	after, herr := store.LoadMatchHistory(compID, "Pool A-0")
+	require.NoError(t, herr)
+	require.Len(t, after, len(before)+1, "the refused write is kept in the match's history, as the answer says")
+	last := after[len(after)-1]
+	assert.Equal(t, now-10_000, last.Stamp)
+	assert.Contains(t, string(last.Held["points"]), "M", "the history holds the write's values")
 	assert.Contains(t, logged.String(), "ERROR", "the fault is logged as one")
 	assert.Contains(t, logged.String(), "Pool%20A-0.jsonl", "and names the file")
 }

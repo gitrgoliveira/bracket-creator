@@ -997,7 +997,30 @@ func pmKindCases() []pmCase {
 		}
 		return s
 	}
+	hID := new(string)
+	secondFoul := e("e2", 2, t2, domain.ScoreFoulAdd, 0, "a", "", "", "")
+	foulRun := secondFoul.run
+	secondFoul.run = func(h mmHome) string {
+		a := foulRun(h)
+		if m, err := h.eng.lookupExistingResult(h.store, h.compID, h.matchID); err == nil && m.MarkIDs != nil && len(m.MarkIDs.B) > 0 {
+			*hID = m.MarkIDs.B[0]
+		}
+		return a
+	}
+	removeH := func(at int64) pmStep {
+		s := pmEventOf(domain.ScoreEvent{ID: "r1", Session: "d2", Seq: 1, Stamp: at, Kind: domain.ScoreIpponRemove, Target: "unset"})
+		s.run = func(h mmHome) string {
+			return pmEventOf(domain.ScoreEvent{ID: "r1", Session: "d2", Seq: 1, Stamp: at, Kind: domain.ScoreIpponRemove, Target: *hID}).run(h)
+		}
+		return s
+	}
 	return []pmCase{
+		// The H a second foul awards is a mark like any other: removed by its id.
+		{name: "kind ind foul a T1 / foul a T2 (H to b) / remove the H T3 by its id", steps: []pmStep{e("e1", 1, t1, domain.ScoreFoulAdd, 0, "a", "", "", ""), secondFoul, removeH(t3)},
+			causal: [][2]int{{0, 1}, {1, 2}}, want: []string{`st=running`, `B=[]`}, outs: map[string]string{"r1": "applied"}},
+		// A team kiken, then a bout decision of a device that never saw it.
+		{name: "kind team kiken aka T1 / hikiwake b1 T2 (the bout lands)", team: true, landsAfter: true, steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), e("e1", 1, t2, domain.ScoreBoutDecision, 1, "", "", "", domain.BoutDecisionHikiwake)},
+			want: []string{`st=completed`, `w="Tora" d="kiken-voluntary" by="aka"`, `d="hikiwake"`}, outs: map[string]string{"e1": "applied"}},
 		// ippon.remove by the id of a mark.
 		{name: "kind ind e1 add a:M T1, e2 remove e1 T2", steps: []pmStep{e("e1", 1, t1, domain.ScoreIpponAdd, 0, "a", "M", "", ""), e("e2", 2, t2, domain.ScoreIpponRemove, 0, "", "", "e1", "")},
 			want: []string{`st=running`, `A=[] B=[]`}, outs: map[string]string{"e1": "applied", "e2": "applied"}},

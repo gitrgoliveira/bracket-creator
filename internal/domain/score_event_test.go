@@ -17,6 +17,7 @@ func TestScoreEventValidate(t *testing.T) {
 		edit func(*domain.ScoreEvent)
 	}{
 		{"no id", func(e *domain.ScoreEvent) { e.ID = "" }},
+		{"id in the server's mark namespace", func(e *domain.ScoreEvent) { e.ID = "b:1:a:M:1" }},
 		{"long id", func(e *domain.ScoreEvent) { e.ID = strings.Repeat("x", domain.MaxScoreEventIDLen+1) }},
 		{"long name", func(e *domain.ScoreEvent) { e.Name = strings.Repeat("x", domain.MaxScoreEventFieldLen+1) }},
 		{"no stamp", func(e *domain.ScoreEvent) { e.Stamp = 0 }},

@@ -54,7 +54,7 @@ const (
 	EventMessageNotStarted    = "This match has not started yet, so the tap was not scored. Start the match to score it."
 	EventMessageSentBack      = "The match was sent back to the queue, so the tap was not scored. Start the match again to score it."
 	EventMessageNotRunning    = "This match is not running, so the tap was not scored. Start the match to score it."
-	EventMessageLogUnreadable = "This match's score log cannot be read, so the tap was not saved. The organiser needs to check the tournament data."
+	EventMessageLogUnreadable = "This match's score log cannot be read, so nothing from this device was saved. The organiser needs to check the tournament data."
 )
 
 // EventRefusal is why the door's caller refuses one event (the self-run

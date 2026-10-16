@@ -5597,7 +5597,10 @@ components:
             held rather than applied, either because a newer stored result won
             or because the match was already closed (`heldReason`);
             `clock_skew` means this device's clock is ahead of the server and
-            the stamp was refused.
+            the stamp was refused. A match whose score log cannot be read
+            never gets `score_log_unreadable` here (only the score-events
+            door answers it): the write is judged as having seen nothing and
+            is kept in the match's history.
         serverNowMs:
           type: integer
           format: int64

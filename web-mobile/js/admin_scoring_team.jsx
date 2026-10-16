@@ -1629,7 +1629,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       preSave: m.status === "running" && (hadPending || isDirty),
       // bc-evts: the remove is the outbox's, queued after the pre-save; the
       // sheet drops the row at once and adopts the answer when it comes.
-      send: () => window.API.removeDaihyosen(m.compId, m.id, resolveDecisionPassword(password), m.modifiedAt || 0),
+      send: (claim) => window.API.removeDaihyosen(m.compId, m.id, resolveDecisionPassword(password), m.modifiedAt || 0, { onRefusal: claim }),
       optimistic: (subs) => subs.filter((s) => s.position !== DAIHYOSEN_POSITION),
       clearsEncho: true,
       refusals: REP_BOUT_REMOVE_REFUSALS,
@@ -3007,7 +3007,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     const current = () => mountedRef.current && removeBoutTokenRef.current === token;
     let sent;
     try {
-      sent = window.API.removeKachinukiBout(m.compId, m.id, resolveDecisionPassword(password));
+      // Its refusal is said beside the bout (below), claimed so the queue's
+      // own alerts do not say it again.
+      sent = window.API.removeKachinukiBout(m.compId, m.id, resolveDecisionPassword(password), { onRefusal: () => true });
     } catch (e) {
       setRemoveBoutErr(String(e?.message || "Could not remove that bout"));
       return;
@@ -3933,9 +3935,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       setMatchOverride(null);
       setEditorErr(msg);
     };
+    // A refusal is said here, beside the change (the `settled` rejection
+    // below), and claimed so the queue's own alerts do not say it again.
+    const claim = () => true;
     let sent;
     try {
-      sent = send();
+      sent = send(claim);
     } catch (e) {
       refused(refusals.get(String(e?.message || "")) || String(e?.message || "") || notDone);
       return;
@@ -5126,7 +5131,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               // bc-evts: the add is the outbox's, queued after the pre-save; the
               // sheet shows the new row at once (named for the two teams, as
               // the server's is) and adopts the answer when it comes.
-              send: () => window.API.recordDaihyosen(m.compId, m.id, resolveDecisionPassword(password), m.modifiedAt || 0),
+              send: (claim) => window.API.recordDaihyosen(m.compId, m.id, resolveDecisionPassword(password), m.modifiedAt || 0, { onRefusal: claim }),
               optimistic: (subs) => [
                 ...subs.filter((s) => s.position !== DAIHYOSEN_POSITION),
                 { position: DAIHYOSEN_POSITION, sideA: m.sideA?.name || "", sideB: m.sideB?.name || "", decision: "daihyosen", ipponsA: [], ipponsB: [] },

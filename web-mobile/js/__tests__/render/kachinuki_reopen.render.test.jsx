@@ -520,7 +520,7 @@ describe('kachinuki [× Remove this bout] undoes a bout added by mistake', () =>
     await renderEditor({ match: runningWithAppendedBout() });
     expect(screen.getByTestId('kachinuki-remove-bout-button')).toBeTruthy();
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-remove-bout-button')); });
-    expect(window.API.removeKachinukiBout).toHaveBeenCalledWith('comp1', 'm1', 'secret');
+    expect(window.API.removeKachinukiBout).toHaveBeenCalledWith('comp1', 'm1', 'secret', expect.objectContaining({ onRefusal: expect.any(Function) }));
     await waitFor(() => expect(screen.queryByTestId('kachinuki-remove-bout-button')).toBeNull());
   });
 

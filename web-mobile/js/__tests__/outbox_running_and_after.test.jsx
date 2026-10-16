@@ -200,5 +200,10 @@ describe('`after`: a write that follows another match\'s entry', () => {
         await API.recordScore('c1', 'm2', { status: 'running', ipponsA: [], ipponsB: [], after: back.key }, 'pw', { id: 'm2', modifiedAt: 0 });
         await flushMicrotasks();
         expect(writes().filter(([u]) => String(u).includes('/m2/')).length).toBe(0);
+        // Waiting is not failing: the start is not marked held (the send back,
+        // whose send failed, is).
+        const byMatch = Object.fromEntries(stored().map(([k, d]) => [k.split('\u001f')[0], d]));
+        expect(byMatch['c1:m1'].held).toBe(true);
+        expect(byMatch['c1:m2'].held).toBeFalsy();
     });
 });

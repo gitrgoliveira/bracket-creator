@@ -123,13 +123,40 @@ describe('the write-result rule is importable without running the gate', () => {
     expect(trips('<span>{window.queuedNotice(res)}</span>')).toBe(true);
     expect(trips('<span>{window.QUEUED_UNSAVED_NOTICE}</span>')).toBe(true);
     expect(trips('<span>{queuedNotice(pendingWrite)}</span>')).toBe(false);
-    // The needs-winner reading: a held change and a later change moved to
+    // The closed-match reading: a held change and a later change moved to
     // the history are told apart by the owner alone.
-    expect(trips('window.writeNeedsWinner(res)')).toBe(true);
+    expect(trips('window.writeMatchClosed(res)')).toBe(true);
     expect(trips('window.writeDisplacedGroups(res)')).toBe(true);
-    expect(trips('window.writeDisplacedForWinner(res)')).toBe(true);
+    expect(trips('window.writeDisplacedForClosedMatch(res)')).toBe(true);
+    expect(trips('window.writeResultLocked(res)')).toBe(true);
+    expect(trips('window.tapNotAppliedText(o)')).toBe(true);
     expect(trips('<span>{QUEUED_NOTICE}</span>')).toBe(false);
     expect(trips('if (writeDidNotLand(res)) return;')).toBe(false);
+  });
+});
+
+// bc-evts stage 3: a tap's outcome is read through the owner
+// (tapOutcomeQuiet / tapNotAppliedText), never compared by hand outside
+// write_result.jsx, api_client.jsx and score_events.jsx; and the two retired
+// held reasons stay retired.
+describe('the tap-outcome and retired-reason rules', () => {
+  const rule = (name) => WRITE_RULES.find((r) => r.name === name);
+  const trips = (r, line) => scanSource(line + '\n', [r]).length === 1;
+  it('a hand-rolled .outcome comparison trips, asking the owner does not', () => {
+    const r = rule('tap-outcome');
+    expect(r).toBeTruthy();
+    expect(trips(r, "if (o.outcome === 'capped') note();")).toBe(true);
+    expect(trips(r, "if (res.outcomes[0].outcome !== 'applied') x();")).toBe(true);
+    expect(trips(r, 'if (!tapOutcomeQuiet(o)) note(tapNotAppliedText(o));')).toBe(false);
+    expect(r.exempt).toEqual(expect.arrayContaining(['write_result.jsx', 'api_client.jsx', 'score_events.jsx']));
+  });
+  it('the retired needs_winner and default_win_stands codes trip anywhere', () => {
+    const r = rule('retired-held-reasons');
+    expect(r).toBeTruthy();
+    expect(trips(r, "if (res.heldReason === 'needs_winner') x();")).toBe(true);
+    expect(trips(r, "const c = 'default_win_stands';")).toBe(true);
+    expect(trips(r, "if (res.heldReason === 'match_closed') x();")).toBe(false);
+    expect(r.exempt || []).toEqual([]);
   });
 });
 

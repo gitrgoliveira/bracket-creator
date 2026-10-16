@@ -41,8 +41,7 @@ import { bridge as _bridge } from './court_bridge.jsx';
 // The offset lives in a leaf so a score editor can read the same clock (server_clock.jsx).
 import { serverNowMs, serverClockOffsetMs, setServerClockOffsetMs } from './server_clock.jsx';
 import {
-    writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock, writeNeedsWinner, writeDefaultWinStands, writeHeldDecision, writeDisplacedGroups, writeDisplacedForWinner, supersededBanner,
-    decisionWord,
+    writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock, writeMatchClosed, writeResultLocked, writeDisplacedGroups, supersededBanner,
     SUPERSEDED_REASON, SUPERSEDED_ADVICE,
     CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, CLOCK_SKEW_UNHEALED_ADVICE,
     downstreamKnockoutPlayedQueueDrop, downstreamKnockoutRunningMessage, downstreamKnockoutRunningReopenMessage,
@@ -720,9 +719,6 @@ function _isAllowedTerminalRequest(method, url) {
 //                   flush; the one kind App renders as a success toast
 //   'displaced'     held finished results landed and moved a later change of
 //                   their match to its history; recorded, told once.
-//                   `forWinner` of the `count` were moved because the change
-//                   would have left the finished match without a winner
-//                   (writeDisplacedForWinner); the rest carry no such reason
 // ---------------------------------------------------------------------------
 const _queueAlertListeners = new Set();
 const _pendingQueueAlerts = [];
@@ -1129,9 +1125,8 @@ function _notifyScoreSupersededEditor(compID, matchID, body) {
     // directly from the awaited result (via notLandedBanner), since this
     // broadcast is deliberately silent for that status. Same strings, one
     // owner, so a future wording change cannot paste the copy anywhere a
-    // fourth time. `body` is the server's answer: a change held because it
-    // would leave a finished match without a winner gets its own advice
-    // (writeNeedsWinner).
+    // fourth time. `body` is the server's answer: a change turned away
+    // because the match was finished gets its own advice (writeMatchClosed).
     _notifyTerminalWriteFailed({ compID, matchID, kind: 'score', status: 200, ...supersededBanner(body) });
 }
 
@@ -1141,18 +1136,24 @@ function _notifyScoreSupersededEditor(compID, matchID, body) {
 // Publishing count:1 per drop made queueAlertMessage's plural branch dead code
 // and left a court that reconnected with several dropped results looking at a
 // single toast reading "A result was not saved".
-function _notifyScoreSupersededAlert(count, compID, matchID, needsWinner = false, defaultWinStands = false, decision = null) {
+function _notifyScoreSupersededAlert(count, compID, matchID, matchClosed = false) {
     if (count <= 0) return;
     _notifyQueueAlert({
         kind: 'superseded', count, terminalCount: count, compID, matchID,
-        ...(needsWinner ? { needsWinner: true } : {}),
-        ...(defaultWinStands ? { defaultWinStands: true, decision } : {}),
+        ...(matchClosed ? { matchClosed: true } : {}),
     });
+}
+
+// _heldForClosedMatch: the answer turned this write's own change away because
+// the match was finished, or because the next knockout round depends on its
+// result. One remedy either way: Correct result.
+function _heldForClosedMatch(body) {
+    return writeMatchClosed(body) || writeResultLocked(body) !== null;
 }
 
 function _notifyScoreSuperseded(compID, matchID, body) {
     _notifyScoreSupersededEditor(compID, matchID, body);
-    _notifyScoreSupersededAlert(1, compID, matchID, writeNeedsWinner(body), writeDefaultWinStands(body), writeHeldDecision(body));
+    _notifyScoreSupersededAlert(1, compID, matchID, _heldForClosedMatch(body));
 }
 
 // Bracket-resync channel. When a queued override-winner assertion the server
@@ -1425,52 +1426,13 @@ async function _flushQueue() {
     // carried only so a single-drop alert can still name its match.
     let supersededThisPass = 0;
     let lastSupersededMatch = null;
-    // Whether any of them was held because it would leave a finished match
-    // without a winner (writeNeedsWinner): the alert then says to correct it.
-    let needsWinnerThisPass = false;
-    // Whether any of them was held because a decision recorded for a bar on
-    // another match still stands (writeDefaultWinStands): the alert then
-    // names that recorded decision instead of pointing at a specific button.
-    let defaultWinStandsThisPass = false;
-    // The decision code held across the pass, read with writeHeldDecision.
-    // undefined (unseen) until the first hold, then that hold's decision;
-    // a later hold for a DIFFERENT decision collapses it to null (mixed),
-    // which defaultWinStandsWord (write_result.jsx) reads as "no single
-    // decision to name" exactly like an absent heldDecision does.
-    //
-    // bc-cse: "different" is judged through decisionWord, not the raw code.
-    // kiken-voluntary and kiken-injury are two raw codes for the one word an
-    // operator reads, "kiken" (decisionWord collapses both), so one hold of
-    // each in the same pass must still read as ONE decision, not "mixed".
-    // defaultWinStandsWordThisPass carries that word for the comparison only;
-    // the RAW code is what downstream still needs (defaultWinStandsWord
-    // derives its own word from it again), so it is what gets kept and
-    // passed on, never the word itself.
-    let defaultWinStandsDecisionThisPass;
-    let defaultWinStandsWordThisPass;
-    // Records one writeDefaultWinStands hold against the trackers above,
-    // called at both sites below so they can never drift apart (one named
-    // the decision, the other read it, before this was one function).
-    const noteDefaultWinStands = (body) => {
-        if (!writeDefaultWinStands(body)) return;
-        defaultWinStandsThisPass = true;
-        const d = writeHeldDecision(body);
-        const w = decisionWord(d);
-        if (defaultWinStandsDecisionThisPass === undefined) {
-            defaultWinStandsDecisionThisPass = d;
-            defaultWinStandsWordThisPass = w;
-        } else if (defaultWinStandsWordThisPass !== w) {
-            defaultWinStandsDecisionThisPass = null;
-            defaultWinStandsWordThisPass = null;
-        }
-    };
+    // Whether any of them was turned away because the match was finished
+    // (writeMatchClosed) or the next round depends on its result: the alert
+    // then says to use Correct result.
+    let matchClosedThisPass = false;
     // Held finishes that landed and moved a LATER change of their match to
     // its history (writeDisplacedGroups): told once per pass, like 'sent'.
-    // displacedForWinnerThisPass counts those whose answer said the change
-    // would have left the finished match without a winner
-    // (writeDisplacedForWinner); the alert words the rest plainly.
     let displacedThisPass = 0;
-    let displacedForWinnerThisPass = 0;
     // bc-offl: HELD finished results that landed in this flush, counted the
     // same way and announced once at the end ('sent'), so the operator who saw
     // them held is told they arrived. A terminal write enters the queue only
@@ -1674,8 +1636,7 @@ async function _flushQueue() {
                                     if (_writeQueue.get(key) === descriptor) {
                                         _notifyScoreSupersededEditor(compID, matchID, body);
                                         supersededThisPass++;
-                                        if (writeNeedsWinner(body)) needsWinnerThisPass = true;
-                                        noteDefaultWinStands(body);
+                                        if (_heldForClosedMatch(body)) matchClosedThisPass = true;
                                         lastSupersededMatch = { compID, matchID };
                                     }
                                 }
@@ -1720,21 +1681,18 @@ async function _flushQueue() {
                                 console.warn(`[sync] dropping queued running write for ${matchID} refused twice for clock skew (serverNowMs=${body.serverNowMs}); a pending kachinuki advancement may need re-pressing`);
                             }
                         }
-                        // A change held because it would leave a finished match
-                        // without a winner (writeNeedsWinner), or because a
-                        // default win recorded for a bar on another match still
-                        // stands (writeDefaultWinStands), is the operator's
-                        // correction, never routine noise, so it is said
-                        // whatever the write: a queued Finish applied in part,
-                        // or a running write. A superseded Finish was counted
-                        // above. Never a displaced answer: that finish was
-                        // recorded (writeDisplacedGroups, the 'displaced' alert).
-                        if (kind === 'score' && (writeNeedsWinner(body) || writeDefaultWinStands(body)) && !(terminal && writeWasSuperseded(body))
+                        // A change turned away because the match was finished
+                        // (writeMatchClosed) is the operator's to correct, never
+                        // routine noise, so it is said whatever the write: a
+                        // queued Finish applied in part, or a running write. A
+                        // superseded Finish was counted above. Never a displaced
+                        // answer: that finish was recorded (writeDisplacedGroups,
+                        // the 'displaced' alert).
+                        if (kind === 'score' && writeMatchClosed(body) && !(terminal && writeWasSuperseded(body))
                             && _writeQueue.get(key) === descriptor) {
                             _notifyScoreSupersededEditor(compID, matchID, body);
                             supersededThisPass++;
-                            if (writeNeedsWinner(body)) needsWinnerThisPass = true;
-                            noteDefaultWinStands(body);
+                            matchClosedThisPass = true;
                             lastSupersededMatch = { compID, matchID };
                         }
                         if (leaveQueue()) {
@@ -1745,7 +1703,6 @@ async function _flushQueue() {
                             if (terminal && !writeWasSuperseded(body)) sentThisPass++;
                             if (terminal && writeDisplacedGroups(body).length > 0) {
                                 displacedThisPass++;
-                                if (writeDisplacedForWinner(body)) displacedForWinnerThisPass++;
                             }
                             // A confirmed terminal score write needs no further rev
                             // tracking: drop its counter (mirrors recordScore's online
@@ -1934,14 +1891,12 @@ async function _flushQueue() {
         // success, so a pass with both still ends on the error, and a pass with
         // no error shows the confirmation.
         if (sentThisPass > 0) _notifyQueueAlert({ kind: 'sent', count: sentThisPass, terminalCount: sentThisPass });
-        if (displacedThisPass > 0) _notifyQueueAlert({ kind: 'displaced', count: displacedThisPass, terminalCount: displacedThisPass, forWinner: displacedForWinnerThisPass });
+        if (displacedThisPass > 0) _notifyQueueAlert({ kind: 'displaced', count: displacedThisPass, terminalCount: displacedThisPass });
         _notifyScoreSupersededAlert(
             supersededThisPass,
             lastSupersededMatch ? lastSupersededMatch.compID : undefined,
             lastSupersededMatch ? lastSupersededMatch.matchID : undefined,
-            needsWinnerThisPass,
-            defaultWinStandsThisPass,
-            defaultWinStandsDecisionThisPass || null,
+            matchClosedThisPass,
         );
     }
 }
@@ -3340,9 +3295,9 @@ const API = {
                 // moments from now carries a CORRECTED stamp instead of losing
                 // again to this device's own uncorrected skew.
                 _relearnClockThrottled();
-                // A running write held because it would leave the finished
-                // match without a winner is told by the editor that sent it
-                // (useKeptInHistoryNote reads writeNeedsWinner), and an
+                // A running write turned away because the match was finished
+                // is told by the editor that sent it (useKeptInHistoryNote
+                // reads writeMatchClosed), and an
                 // explicit tap by notLandedBanner.
                 if (!isRunning) _notifyScoreSuperseded(compID, matchID, body);
                 return body;

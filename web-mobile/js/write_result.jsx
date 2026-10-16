@@ -77,103 +77,104 @@ export const SUPERSEDED_LEAD = 'Not applied';
 export const SUPERSEDED_REASON = "a newer change to the same thing was recorded first, so this one was kept in the match's history and nothing is lost";
 export const SUPERSEDED_ADVICE = 'Check the match and its history before entering anything again: entering it again would replace the newer change.';
 
-// supersededAlertText: the queue alert for finished results a replay found
-// superseded (app.jsx queueAlertMessage), worded like the banner above. `n` is
-// how many, `one` whether that is a single result (queuedWritesNoun),
-// `needsWinner` whether any was held because it would leave a finished match
-// without a winner (writeNeedsWinner).
-export function supersededAlertText(n, one, needsWinner = false, defaultWinStands = false, decision = null) {
-    const text = one
+// supersededAlertText: the queue alert for writes a replay found not applied
+// (app.jsx queueAlertMessage), worded like the banner above. `n` is how many,
+// `one` whether that is a single result (queuedWritesNoun), `matchClosed`
+// whether any was turned away because the match was already finished
+// (writeMatchClosed): for that one nothing newer won, and the remedy is
+// Correct result.
+export function supersededAlertText(n, one, matchClosed = false) {
+    if (matchClosed) {
+        return one
+            ? `A result was not applied: ${MATCH_CLOSED_REASON}, so nothing is lost. ${MATCH_CLOSED_ADVICE}`
+            : `${n} results were not applied because the matches were already finished or newer changes were recorded first. They were kept in each match's history, so nothing is lost. To change a finished match's result, use Correct result.`;
+    }
+    return one
         ? "A result was not applied because a newer change to the same match was recorded first. It was kept in the match's history, so nothing is lost: check the match and its history before entering anything again."
         : `${n} results were not applied because newer changes to the same matches were recorded first. They were kept in each match's history, so nothing is lost: check those matches and their history before entering anything again.`;
-    if (needsWinner) {
-        // At least one was held because it would leave a finished match
-        // without a winner (writeNeedsWinner): for that one, nothing newer won.
-        return one
-            ? "A result was not applied because it would leave the finished match without a winner, and it needs one. It was kept in the match's history, so nothing is lost: correct the result with a winner."
-            : `${text} Where one would leave a finished match without a winner, correct that result with a winner.`;
-    }
-    if (defaultWinStands) {
-        // At least one was held because a decision already closed the match
-        // (writeDefaultWinStands): the fix is to correct that decision from
-        // the match's score editor, never re-entering the score. `decision`
-        // names it when the whole pass held exactly one kind
-        // (defaultWinStandsWord falls back to "recorded decision" for a
-        // mixed pass or an older server with no heldDecision).
-        const word = defaultWinStandsWord(decision);
-        return one
-            ? `A result was not applied because this match was closed with a ${word}. It was kept in the match's history, so nothing is lost: correct the ${word} from the match's score editor to change the result.`
-            : `${text} Where one was closed with a ${word}, correct the ${word} from the match's score editor to change that result.`;
-    }
-    return text;
 }
 
-// writeNeedsWinner / supersededBanner / NEEDS_WINNER_* (operator ruling
-// 2026-10-04): a scoring change that would leave a FINISHED match without the
-// winner it must have (a knockout match left tied, an engi match left with no
-// valid flag count) is not applied. The match keeps its recorded finish, the
-// change is kept in the match's history, and the server says why with
-// heldReason "needs_winner", on a superseded answer and on one applied in
-// part alike. Here the advice is the opposite of the plain superseded one:
-// nothing newer won, so the operator corrects the result, with a winner.
-// writeNeedsWinner is the one reading of that field; supersededBanner is the
-// one choice of banner for a superseded write, asked by notLandedBanner and by
-// api_client.jsx's not-applied broadcast.
-//
-// The same reason can ride on a second, APPLIED answer (writeDisplacedGroups):
-// a finish that arrived after a newer scoring change which, applied after it,
-// would have left the match without a winner. The finish is recorded and that
-// later change is MOVED to the history (`displacedGroups`, no heldGroups).
-// writeNeedsWinner is therefore true only for a write whose OWN change was
-// held for the reason; a displaced answer is not one, and says "Saved".
-//
-// A change can also be moved for another reason and then carries NO
-// heldReason: a representative's pick stamped after the representative bout's
-// removal has nothing left to stand on. writeDisplacedForWinner is the one
-// question "was the move for a winner": true for heldReason needs_winner only,
-// never for "a reason is present", because the reason is per ANSWER and a
-// decision that stands (default_win_stands) can ride beside displacedGroups
-// too. An answer that both held groups and moved a later change carries the
-// one reason and is worded by it, which is the move's: telling the operator to
-// correct a result that IS recorded would be the worse error.
-export const HELD_REASON_NEEDS_WINNER = 'needs_winner';
+// The closed-match rule (operator ruling 2026-10-15) and the first recorded
+// result (I1, K1, 2026-10-16): the server has ONE code for a change made
+// after the match was finished, heldReason "match_closed", on a superseded
+// answer, on one applied in part, and beside `displacedGroups` when a finish
+// moved a later change of the match to its history. One code, one remedy:
+// Correct result. A rival result that would displace one the next knockout
+// round already depends on is held whole with "downstream_knockout_played"
+// or "downstream_knockout_running" (writeResultLocked). The server's own
+// sentence (`message`) wins over these words when it sends one.
+export const HELD_REASON_MATCH_CLOSED = 'match_closed';
+export const HELD_REASON_RESULT_LOCKED_PLAYED = 'downstream_knockout_played';
+export const HELD_REASON_RESULT_LOCKED_RUNNING = 'downstream_knockout_running';
+export const MATCH_CLOSED_REASON = "the match is finished, so this change was kept in the match's history";
+export const MATCH_CLOSED_ADVICE = 'To change the result, use Correct result.';
+// The sentence the partial-apply note (heldGroupsNote) ends on instead of
+// "A newer change to the same thing was recorded first."
+export const MATCH_CLOSED_NOTE = 'The match is finished: to change the result, use Correct result.';
+export const RESULT_LOCKED_PLAYED_REASON = 'the next round was already fought, so the recorded result stands';
+export const RESULT_LOCKED_RUNNING_REASON = 'the next round has already started, so the recorded result stands';
+
 export function writeDisplacedGroups(res) {
     return res && Array.isArray(res.displacedGroups) ? res.displacedGroups.filter((g) => typeof g === 'string') : [];
 }
-export function writeNeedsWinner(res) {
-    return !!res && res.heldReason === HELD_REASON_NEEDS_WINNER
+// writeMatchClosed: this write's OWN change was turned away because the match
+// was finished (superseded, or applied in part). A displaced answer is not
+// one: that finish was recorded, and says "Saved".
+export function writeMatchClosed(res) {
+    return !!res && res.heldReason === HELD_REASON_MATCH_CLOSED
         && writeDisplacedGroups(res).length === 0
         && (writeWasSuperseded(res) || writeHeldGroups(res).length > 0);
 }
-export function writeDisplacedForWinner(res) {
-    return !!res && res.heldReason === HELD_REASON_NEEDS_WINNER && writeDisplacedGroups(res).length > 0;
+// writeDisplacedForClosedMatch: a recorded finish moved a later change, made
+// after the match was finished, to the history.
+export function writeDisplacedForClosedMatch(res) {
+    return !!res && res.heldReason === HELD_REASON_MATCH_CLOSED && writeDisplacedGroups(res).length > 0;
+}
+// writeResultLocked: 'played' or 'running' when the write was held because the
+// next knockout round already depends on the stored result, else null.
+export function writeResultLocked(res) {
+    if (!res) return null;
+    if (res.heldReason === HELD_REASON_RESULT_LOCKED_PLAYED) return 'played';
+    if (res.heldReason === HELD_REASON_RESULT_LOCKED_RUNNING) return 'running';
+    return null;
 }
 // displacedAlertText: the queue alert for queued finishes that landed and
 // moved a later change of the same match to its history (writeDisplacedGroups).
-// `forWinner` is how many of the n answers moved their change for a winner
-// (writeDisplacedForWinner): all of them keeps the winner sentence, none says
-// plainly that the change was moved, and a mix says both. An alert that
-// carries no such count reads as none.
-export function displacedAlertText(n, one, forWinner = 0) {
-    const f = Number(forWinner) || 0;
-    if (one) {
-        return f > 0
-            ? "A held result was saved. A later change to that match would have left it without a winner, so the change was moved to the match's history."
-            : "A held result was saved. A later change to that match was moved to the match's history.";
-    }
-    if (f >= n) {
-        return `${n} held results were saved. Later changes to those matches would have left them without a winner, so the changes were moved to each match's history.`;
-    }
-    const moved = `${n} held results were saved. Later changes to those matches were moved to each match's history.`;
-    return f > 0 ? `${moved} ${f} of those changes would have left a match without a winner.` : moved;
+export function displacedAlertText(n, one) {
+    return one
+        ? "A held result was saved. A later change to that match was moved to the match's history."
+        : `${n} held results were saved. Later changes to those matches were moved to each match's history.`;
 }
-export const NEEDS_WINNER_REASON = "this change would leave the finished match without a winner, and it needs one, so it was kept in the match's history and nothing is lost";
-export const NEEDS_WINNER_ADVICE = 'Correct the result with a winner.';
-// The sentence the partial-apply note (heldGroupsNote) ends on instead of
-// "A newer change to the same thing was recorded first."
-export const NEEDS_WINNER_NOTE = 'It would leave the finished match without a winner, and it needs one: correct the result with a winner.';
 
-// decisionWord / FALLBACK_DECISION_WORD (operator ruling 2026-10-04): "default
+// The tap outcomes the score-events door answers per event (score_events.jsx
+// names them). QUIET ones need no word: the tap is in the match's log.
+// Everything else was not applied, and the server's `message` is its sentence
+// when it sends one.
+const QUIET_TAP_OUTCOMES = new Set(['applied', 'recorded', 'duplicate']);
+export function tapOutcomeQuiet(o) {
+    return !!o && QUIET_TAP_OUTCOMES.has(o.outcome);
+}
+export function tapNotAppliedText(o) {
+    if (!o || tapOutcomeQuiet(o)) return null;
+    if (typeof o.message === 'string' && o.message) return o.message;
+    switch (o.outcome) {
+        case 'capped': return 'Not applied: the bout was already decided.';
+        case 'matchClosed': return `Not applied: ${MATCH_CLOSED_REASON}. ${MATCH_CLOSED_ADVICE}`;
+        case 'beforeBaseline': return "Not applied: a result recorded since already covers it, so it was kept in the match's history.";
+        case 'noTarget': return "Not applied: the mark it takes off is no longer there, so it was kept in the match's history.";
+        case 'notAllowed': return "Not applied: this match does not take that change, so it was kept in the match's history.";
+        case 'notStarted': return 'Not applied: the match is not running. Start it to score it.';
+        default: return 'Not applied: the server refused it.';
+    }
+}
+// tapNotAppliedAlertText: the one queue alert per pass for taps the server did
+// not apply (kind 'not_applied'); `text` is the one tap's sentence.
+export function tapNotAppliedAlertText(n, one, text) {
+    if (one) return text || 'A tap was not applied.';
+    return `${n} taps were not applied. Open their matches to see why; anything the server kept is in the match's history.`;
+}
+
+// decisionWord (operator ruling 2026-10-04): "default
 // win" does not exist in kendo and must never appear in anything a person
 // reads -- every finished match has a result, a scoreline or a registered
 // decision that NAMES the winner (kiken: kiken-voluntary or kiken-injury;
@@ -192,68 +193,23 @@ export function decisionWord(code) {
     return null;
 }
 
-// FALLBACK_DECISION_WORD: what a sentence names when there is no specific
-// decision to name -- an older server answering with no `heldDecision`, or a
-// flushed queue pass that held more than one kind across several matches, so
-// naming the wrong one would be worse than naming none.
-const FALLBACK_DECISION_WORD = 'recorded decision';
-
-// defaultWinStandsWord: decisionWord with that fallback applied, the one
-// place DEFAULT_WIN_STANDS_* and supersededAlertText read a decision code
-// from.
-function defaultWinStandsWord(decision) {
-    return decisionWord(decision) || FALLBACK_DECISION_WORD;
-}
-
-// writeHeldDecision: the decision code the server named alongside heldReason
-// "default_win_stands" (e.g. "fusensho", "kiken-voluntary"), read for the
-// writeDefaultWinStands case only -- null for anything else, including an
-// older server that sends no `heldDecision` at all, in which case callers
-// fall back to FALLBACK_DECISION_WORD through defaultWinStandsWord.
-export function writeHeldDecision(res) {
-    return (res && typeof res.heldDecision === 'string' && res.heldDecision) || null;
-}
-
-// writeDefaultWinStands / DEFAULT_WIN_STANDS_* (bc-mrgc): a running board's
-// scoring, or its overtime, over a match a decision ALREADY closed -- kiken,
-// fusenpai, or a fusensho awarded because the OTHER side is barred by a
-// DIFFERENT match -- is held rather than applied: that decision already
-// settled this match, and a scoreline cannot land beside it without one
-// discarding the other. The server says why with heldReason
-// "default_win_stands" and names which decision with `heldDecision`. Unlike
-// needs_winner, nothing here asks for a correction with a winner: the match
-// already has one. The fix is to correct that decision from the match's
-// score editor, which sends the held scoring on as the real result instead.
-// The copy names no specific button: which control does that (Clear
-// <decision>, Remove <decision>, or none at all on a kachinuki match)
-// depends on the match's format and is owned by admin_scoring_shared.jsx,
-// not restated here.
-export const HELD_REASON_DEFAULT_WIN_STANDS = 'default_win_stands';
-export function writeDefaultWinStands(res) {
-    return !!res && res.heldReason === HELD_REASON_DEFAULT_WIN_STANDS
-        && writeDisplacedGroups(res).length === 0
-        && (writeWasSuperseded(res) || writeHeldGroups(res).length > 0);
-}
-export function DEFAULT_WIN_STANDS_REASON(decision) {
-    const word = defaultWinStandsWord(decision);
-    return `this match was closed with a ${word}, so this change was kept in the match's history and nothing is lost`;
-}
-export function DEFAULT_WIN_STANDS_ADVICE(decision) {
-    const word = defaultWinStandsWord(decision);
-    return `To change the result, correct the ${word} from the match's score editor.`;
-}
-export function DEFAULT_WIN_STANDS_NOTE(decision) {
-    const word = defaultWinStandsWord(decision);
-    return `This match was closed with a ${word}: to change the result, correct the ${word} from the match's score editor.`;
-}
-
+// supersededBanner: the one choice of banner for a superseded write, asked by
+// notLandedBanner and by api_client.jsx's not-applied broadcast. The server's
+// sentence (`message`) is shown as it is when it sends one (notSavedText's
+// `sentence` path).
 export function supersededBanner(res) {
-    if (writeNeedsWinner(res)) {
-        return { lead: SUPERSEDED_LEAD, reason: NEEDS_WINNER_REASON, advice: NEEDS_WINNER_ADVICE };
-    }
-    if (writeDefaultWinStands(res)) {
-        const decision = writeHeldDecision(res);
-        return { lead: SUPERSEDED_LEAD, reason: DEFAULT_WIN_STANDS_REASON(decision), advice: DEFAULT_WIN_STANDS_ADVICE(decision) };
+    const sentence = res && typeof res.message === 'string' && res.message;
+    const locked = writeResultLocked(res);
+    if (locked || writeMatchClosed(res)) {
+        if (sentence) return { lead: SUPERSEDED_LEAD, reason: sentence, sentence: true };
+        if (locked) {
+            return {
+                lead: SUPERSEDED_LEAD,
+                reason: locked === 'played' ? RESULT_LOCKED_PLAYED_REASON : RESULT_LOCKED_RUNNING_REASON,
+                advice: MATCH_CLOSED_ADVICE,
+            };
+        }
+        return { lead: SUPERSEDED_LEAD, reason: MATCH_CLOSED_REASON, advice: MATCH_CLOSED_ADVICE };
     }
     return { lead: SUPERSEDED_LEAD, reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE };
 }

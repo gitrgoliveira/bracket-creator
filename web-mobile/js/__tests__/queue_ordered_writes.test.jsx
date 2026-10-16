@@ -653,12 +653,12 @@ describe('a second held write crossing the server-error threshold is published',
     });
 });
 
-describe('a queued change held because the finished match needs a winner', () => {
-    // Operator ruling 2026-10-04: the server keeps the match's recorded finish
-    // and the change in its history, and says why (heldReason). The replay
-    // tells the editor and the operator to correct the result with a winner.
-    it('the not-applied banner and the alert both say to correct it with a winner', async () => {
-        const s = server({ answer: () => ({ applied: false, reason: 'superseded', heldGroups: ['points'], heldReason: 'needs_winner' }) });
+describe('a queued change turned away because the match is finished', () => {
+    // The closed-match rule (2026-10-15): the server keeps the match's recorded
+    // finish and the change in its history, and says why (heldReason). The
+    // replay tells the editor and the operator to use Correct result.
+    it('the not-applied banner and the alert both say to use Correct result', async () => {
+        const s = server({ answer: () => ({ applied: false, reason: 'superseded', heldGroups: ['points'], heldReason: 'match_closed' }) });
         await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A', ipponsA: ['M'] }, 'pw', null);
         await settleOfflinePass();
         const failed = [];
@@ -670,10 +670,10 @@ describe('a queued change held because the finished match needs a winner', () =>
         unsubFail();
         unsubAlert();
         expect(failed).toHaveLength(1);
-        expect(failed[0].reason).toMatch(/without a winner/);
-        expect(failed[0].advice).toBe('Correct the result with a winner.');
+        expect(failed[0].reason).toMatch(/the match is finished/);
+        expect(failed[0].advice).toBe('To change the result, use Correct result.');
         expect(alerts.filter((a) => a.kind === 'superseded')).toEqual([
-            expect.objectContaining({ count: 1, needsWinner: true, matchID: 'm1' }),
+            expect.objectContaining({ count: 1, matchClosed: true, matchID: 'm1' }),
         ]);
     });
 
@@ -697,7 +697,7 @@ describe('a queued finish that moved a later change to the history', () => {
     // answer is applied: the finish counts as sent, the operator is told
     // once that a later change was moved, and no "not applied" is raised.
     it('sent, plus one displaced alert; no not-applied banner', async () => {
-        const s = server({ answer: () => ({ id: 'm1', status: 'completed', displacedGroups: ['points'], heldReason: 'needs_winner' }) });
+        const s = server({ answer: () => ({ id: 'm1', status: 'completed', displacedGroups: ['points'], heldReason: 'match_closed' }) });
         await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A', ipponsA: ['M'] }, 'pw', null);
         await settleOfflinePass();
         const failed = [];
@@ -710,7 +710,7 @@ describe('a queued finish that moved a later change to the history', () => {
         unsubAlert();
         expect(failed).toEqual([]);
         expect(alerts.map((a) => a.kind)).toEqual(['sent', 'displaced']);
-        expect(alerts.find((a) => a.kind === 'displaced')).toEqual(expect.objectContaining({ count: 1, forWinner: 1 }));
+        expect(alerts.find((a) => a.kind === 'displaced')).toEqual(expect.objectContaining({ count: 1 }));
         expect(localStorage.getItem('bc_write_queue')).toBeNull();
     });
 
@@ -731,7 +731,7 @@ describe('a queued finish that moved a later change to the history', () => {
         unsubAlert();
         expect(failed).toEqual([]);
         expect(alerts.map((a) => a.kind)).toEqual(['sent', 'displaced']);
-        expect(alerts.find((a) => a.kind === 'displaced')).toEqual(expect.objectContaining({ count: 1, forWinner: 0 }));
+        expect(alerts.find((a) => a.kind === 'displaced')).toEqual(expect.objectContaining({ count: 1 }));
         expect(localStorage.getItem('bc_write_queue')).toBeNull();
     });
 });

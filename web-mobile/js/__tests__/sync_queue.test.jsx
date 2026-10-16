@@ -12,7 +12,6 @@
 // to avoid infinite loops caused by the backoff re-scheduling itself.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { decisionWord } from '../write_result.jsx';
 
 // Setup / teardown
 
@@ -2117,12 +2116,10 @@ describe('_flushQueue: a superseded queued score is announced before the entry d
         expect(superseded[0].terminalCount).toBe(3);
     });
 
-    // bc-cse: two holds in one pass for kiken-voluntary and kiken-injury are
-    // the SAME decision an operator reads ("kiken"; decisionWord collapses
-    // both), so the pass must not read them as "mixed" and fall back to the
-    // vague "recorded decision" wording. Before this fix the pass compared
-    // the raw heldDecision codes, which differ, and collapsed to null.
-    it('two kiken variants in one pass still name "kiken", never "recorded decision"', async () => {
+    // The closed-match rule (2026-10-15): the server has one code for a
+    // change turned away because the match was finished, and the pass's one
+    // alert says so, whichever decision closed the match.
+    it('two writes turned away by a finished match in one pass give one alert that says so', async () => {
         const alerts = [];
         const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
 
@@ -2131,14 +2128,9 @@ describe('_flushQueue: a superseded queued score is announced before the entry d
         await API.recordScore('c1', 'md2', { status: 'completed' }, 'pw', null);
         await flushMicrotasks();
 
-        let callIndex = 0;
-        const answers = [
-            { applied: false, heldReason: 'default_win_stands', heldDecision: 'kiken-voluntary' },
-            { applied: false, heldReason: 'default_win_stands', heldDecision: 'kiken-injury' },
-        ];
         mockFetch(() => Promise.resolve({
             ok: true, status: 200,
-            json: () => Promise.resolve(answers[callIndex++] || answers[answers.length - 1]),
+            json: () => Promise.resolve({ applied: false, reason: 'superseded', heldGroups: ['points'], heldReason: 'match_closed' }),
         }));
         window.dispatchEvent(new Event('online'));
         await tick(80);
@@ -2146,13 +2138,8 @@ describe('_flushQueue: a superseded queued score is announced before the entry d
 
         const superseded = alerts.filter((a) => a.kind === 'superseded');
         expect(superseded.length).toBe(1);
-        expect(superseded[0].defaultWinStands).toBe(true);
-        // Not null (the pre-fix "mixed" collapse): decisionWord reads both
-        // raw codes as the same word, so the pass keeps a real decision to
-        // name, and the alert text that builds on it names "kiken", not the
-        // "recorded decision" fallback.
-        expect(superseded[0].decision).not.toBeNull();
-        expect(decisionWord(superseded[0].decision)).toBe('kiken');
+        expect(superseded[0].count).toBe(2);
+        expect(superseded[0].matchClosed).toBe(true);
     });
 });
 

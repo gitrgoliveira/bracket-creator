@@ -376,7 +376,7 @@ export function queueAlertMessage(alert) {
     // result that just won. A supersede is the one drop where re-entering is the
     // wrong move, so it gets its own wording.
     case "superseded":
-      return supersededAlertText(n, one, !!alert.needsWinner, !!alert.defaultWinStands, alert.decision || null);
+      return supersededAlertText(n, one, !!alert.matchClosed);
     case "server_error":
       // It holds back no other write (each queued write is sent on its own),
       // and the editor of that match offers to discard it (HeldWriteDiscard).
@@ -390,12 +390,9 @@ export function queueAlertMessage(alert) {
     case "sent":
       return `${n} ${noun} sent.`;
     // Held finishes that landed and moved a later change of their match to
-    // its history. `forWinner` of them say the change would have left the
-    // finished match without a winner; the rest carry no such reason, and an
-    // alert without the count words none of them so. Recorded, so not an
-    // error: the history has the change.
+    // its history. Recorded, so not an error: the history has the change.
     case "displaced":
-      return displacedAlertText(n, one, alert.forWinner || 0);
+      return displacedAlertText(n, one);
     default:
       return null;
   }

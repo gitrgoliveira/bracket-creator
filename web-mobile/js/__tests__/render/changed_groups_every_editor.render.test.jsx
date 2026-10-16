@@ -363,14 +363,13 @@ describe('a write applied in part', () => {
     expect(note()?.textContent).toBe("Kept in the match's history, not applied: bout 2 and overtime. A newer change to the same thing was recorded first.");
   });
 
-  // Operator ruling 2026-10-04: a point added to a finished knockout match
-  // that would leave it tied is not applied. That is the operator's own
-  // correction and nothing newer won, so the note says to correct the result
-  // with a winner, whether the rest of the write applied or not.
+  // The closed-match rule (2026-10-15): a point added after the match was
+  // finished is not applied, and the note says to use Correct result,
+  // whether the rest of the write applied or not.
   it.each([
-    ['applied in part', { id: 'm-ind', status: 'completed', heldGroups: ['points'], heldReason: 'needs_winner' }],
-    ['superseded', { applied: false, reason: 'superseded', heldGroups: ['points'], heldReason: 'needs_winner' }],
-  ])('a change held because the finished match needs a winner (%s) says to correct it', async (_how, answer) => {
+    ['applied in part', { id: 'm-ind', status: 'completed', heldGroups: ['points'], heldReason: 'match_closed' }],
+    ['superseded', { applied: false, reason: 'superseded', heldGroups: ['points'], heldReason: 'match_closed' }],
+  ])('a change turned away because the match is finished (%s) says to use Correct result', async (_how, answer) => {
     window.API.recordScore.mockImplementation((_c, _m, patch) => {
       writes.push(patch);
       return Promise.resolve(answer);
@@ -379,27 +378,26 @@ describe('a write applied in part', () => {
     await pointerTap(ipponBtn('aka', 'M'));
     await settle();
     expect(note()?.textContent).toBe(
-      "Kept in the match's history, not applied: points. It would leave the finished match without a winner, and it needs one: correct the result with a winner.");
+      "Kept in the match's history, not applied: points. The match is finished: to change the result, use Correct result.");
   });
 
   // An earlier-made finish that moved this later change to the history
-  // answers APPLIED with displacedGroups and the needs-winner reason: the
-  // note says "Saved", never "not applied" or "correct the result".
+  // answers APPLIED with displacedGroups and the match_closed reason: the
+  // note says "Saved", never "not applied".
   it('a write that moved a later change to the history says Saved', async () => {
     window.API.recordScore.mockImplementation((_c, _m, patch) => {
       writes.push(patch);
-      return Promise.resolve({ id: 'm-ind', status: 'completed', displacedGroups: ['points'], heldReason: 'needs_winner' });
+      return Promise.resolve({ id: 'm-ind', status: 'completed', displacedGroups: ['points'], heldReason: 'match_closed' });
     });
     await mount(individual());
     await pointerTap(ipponBtn('aka', 'M'));
     await settle();
     expect(note()?.textContent).toBe(
-      "Saved. A later change to points would have left the finished match without a winner, so it was moved to the match's history.");
+      "Saved. A later change to points was made after the match was finished, so it was moved to the match's history.");
   });
 
   // A later change moved for another reason (a representative's pick stamped after the
-  // representative bout's removal) carries no needs_winner reason: the match lacks no
-  // winner, and the note must not say it does.
+  // representative bout's removal) carries no reason, and the note words it plainly.
   it('a write that moved a later change to the history for no winner reason says only that', async () => {
     window.API.recordScore.mockImplementation((_c, _m, patch) => {
       writes.push(patch);

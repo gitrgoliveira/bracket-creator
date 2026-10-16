@@ -24,18 +24,20 @@ import {
     SUPERSEDED_ADVICE,
     CLOCK_SKEW_REASON_TEXT,
     CLOCK_SKEW_ADVICE,
-    writeNeedsWinner,
-    NEEDS_WINNER_REASON,
-    NEEDS_WINNER_ADVICE,
-    writeDefaultWinStands,
-    writeHeldDecision,
+    writeMatchClosed,
+    writeResultLocked,
+    MATCH_CLOSED_REASON,
+    MATCH_CLOSED_ADVICE,
+    RESULT_LOCKED_PLAYED_REASON,
+    RESULT_LOCKED_RUNNING_REASON,
     decisionWord,
-    DEFAULT_WIN_STANDS_REASON,
-    DEFAULT_WIN_STANDS_ADVICE,
     supersededAlertText,
     writeDisplacedGroups,
-    writeDisplacedForWinner,
+    writeDisplacedForClosedMatch,
     displacedAlertText,
+    tapOutcomeQuiet,
+    tapNotAppliedText,
+    tapNotAppliedAlertText,
     markToasted,
     wasToasted,
     startWhileStartingMessage,
@@ -189,165 +191,105 @@ describe('writeHeldGroups / writePartlyHeld', () => {
     });
 });
 
-// Operator ruling 2026-10-04: a scoring change that would leave a finished
-// match without the winner it needs (a knockout left tied) is not applied, is
-// kept in the match's history, and the server says so with heldReason
-// "needs_winner". Nothing newer won, so the advice is to correct the result
-// with a winner, never the plain superseded "check the newer change".
-describe('a change held because the finished match needs a winner', () => {
-    const superseded = { applied: false, reason: 'superseded', heldGroups: ['points'], heldReason: 'needs_winner' };
-    const partly = { id: 'm1', status: 'completed', heldGroups: ['points'], heldReason: 'needs_winner' };
+// The closed-match rule (operator ruling 2026-10-15): a change made after the
+// match was finished is not applied, is kept in the match's history, and the
+// server says so with heldReason "match_closed". Nothing newer won, so the
+// advice is Correct result, never the plain superseded "check the newer change".
+describe('a change turned away because the match is finished (match_closed)', () => {
+    const held = { applied: false, reason: 'superseded', heldGroups: ['points'], heldReason: 'match_closed' };
 
     it('is read from heldReason, on a superseded answer and on one applied in part', () => {
-        expect(writeNeedsWinner(superseded)).toBe(true);
-        expect(writeNeedsWinner(partly)).toBe(true);
-        expect(writeNeedsWinner({ applied: false, reason: 'superseded', heldGroups: ['points'] })).toBe(false);
-        expect(writeNeedsWinner({ queued: true })).toBe(false);
-        expect(writeNeedsWinner(null)).toBe(false);
+        expect(writeMatchClosed(held)).toBe(true);
+        expect(writeMatchClosed({ id: 'm1', status: 'completed', heldGroups: ['points'], heldReason: 'match_closed' })).toBe(true);
+        expect(writeMatchClosed({ ...held, heldReason: undefined })).toBe(false);
+        // A finish that moved a later change is recorded: not turned away.
+        expect(writeMatchClosed({ id: 'm1', status: 'completed', displacedGroups: ['points'], heldReason: 'match_closed' })).toBe(false);
+        expect(writeMatchClosed({ id: 'm1', status: 'completed', heldReason: 'match_closed' })).toBe(false);
+        expect(writeMatchClosed(null)).toBe(false);
     });
 
-    it('the superseded banner tells the operator to correct the result with a winner', () => {
-        const banner = notLandedBanner(superseded);
-        expect(banner).toEqual({ lead: SUPERSEDED_LEAD, reason: NEEDS_WINNER_REASON, advice: NEEDS_WINNER_ADVICE });
-        const text = notSavedText(banner);
-        expect(text).toMatch(/^Not applied: /);
-        expect(text).toMatch(/without a winner/);
-        expect(text).toMatch(/Correct the result with a winner\.$/);
-        expect(text).not.toMatch(/newer change/);
+    it('the banner says the match is finished and to use Correct result', () => {
+        expect(notLandedBanner(held)).toEqual({ lead: SUPERSEDED_LEAD, reason: MATCH_CLOSED_REASON, advice: MATCH_CLOSED_ADVICE });
+        expect(notSavedText(notLandedBanner(held))).toBe(
+            "Not applied: the match is finished, so this change was kept in the match's history. To change the result, use Correct result.");
+    });
+
+    it("the server's sentence wins when it sends one", () => {
+        const message = 'This match is finished. To change its result, use Correct result.';
+        expect(notLandedBanner({ ...held, message })).toEqual({ lead: SUPERSEDED_LEAD, reason: message, sentence: true });
+        expect(notSavedText(notLandedBanner({ ...held, message }))).toBe(`Not applied: ${message}`);
     });
 
     it('the partial-apply note says it in place of "a newer change"', () => {
-        expect(heldGroupsNote(['points'], true)).toBe(
-            "Kept in the match's history, not applied: points. It would leave the finished match without a winner, and it needs one: correct the result with a winner.");
+        expect(keptInHistoryNote({ id: 'm1', status: 'completed', heldGroups: ['points'], heldReason: 'match_closed' })).toBe(
+            "Kept in the match's history, not applied: points. The match is finished: to change the result, use Correct result.");
         expect(heldGroupsNote(['points'])).toBe(
             "Kept in the match's history, not applied: points. A newer change to the same thing was recorded first.");
     });
 
     it('the queue alert says it too', () => {
-        expect(supersededAlertText(1, true, true)).toMatch(/without a winner.*correct the result with a winner\.$/);
-        expect(supersededAlertText(1, true, true)).not.toMatch(/newer change/);
-        expect(supersededAlertText(2, false, true)).toMatch(/correct that result with a winner\.$/);
-        expect(supersededAlertText(1, true)).not.toMatch(/winner/);
-    });
-
-    it('no em-dash and no "mat" in any of the copy', () => {
-        const all = [NEEDS_WINNER_REASON, NEEDS_WINNER_ADVICE, heldGroupsNote(['points'], true), supersededAlertText(2, false, true)].join(' ');
-        expect(all).not.toMatch(/\u2014/);
-        expect(all).not.toMatch(/\bmats?\b/i);
+        expect(supersededAlertText(1, true, true)).toMatch(/^A result was not applied: the match is finished.*use Correct result\.$/);
+        expect(supersededAlertText(2, false, true)).toMatch(/^2 results were not applied.*use Correct result\.$/);
+        expect(supersededAlertText(1, true)).toMatch(/newer change/);
     });
 });
 
-// bc-mrgc / bc-cse: a running board's scoring, or its overtime, over a match
-// a decision ALREADY closed (kiken, fusenpai, or a fusensho awarded because
-// the other side is barred by a DIFFERENT match) is not applied, is kept in
-// the match's history, and the server says so with heldReason
-// "default_win_stands" plus `heldDecision` naming which one. The match
-// already has the winner it needs, so the advice is to correct that
-// decision from the match's score editor, never "correct the result with a
-// winner" and never the plain superseded "check the newer change". The copy
-// names no specific button: a kachinuki match's editor offers no "Remove
-// fusensho" control at all (`useWithdrawalRemoval({ enabled: !isKachinuki })`),
-// so a sentence naming one would describe a button that is not there. "default
-// win" does not exist in kendo and must never appear here (operator ruling
-// 2026-10-04): the recorded decision is named instead, or "a recorded
-// decision" when the server named none (an older server) or a flushed pass
-// held more than one kind.
-describe('a change held because a decision for a bar elsewhere stands', () => {
-    const superseded = { applied: false, reason: 'superseded', heldGroups: ['points'], heldReason: 'default_win_stands', heldDecision: 'fusensho' };
-    const partly = { id: 'm1', status: 'completed', heldGroups: ['points'], heldReason: 'default_win_stands', heldDecision: 'fusensho' };
+describe('a result held because the next knockout round depends on it', () => {
+    const played = { applied: false, reason: 'superseded', heldGroups: ['result'], heldReason: 'downstream_knockout_played' };
+    const running = { ...played, heldReason: 'downstream_knockout_running' };
 
-    it('is read from heldReason, on a superseded answer and on one applied in part', () => {
-        expect(writeDefaultWinStands(superseded)).toBe(true);
-        expect(writeDefaultWinStands(partly)).toBe(true);
-        expect(writeDefaultWinStands({ applied: false, reason: 'superseded', heldGroups: ['points'] })).toBe(false);
-        expect(writeDefaultWinStands({ queued: true })).toBe(false);
-        expect(writeDefaultWinStands(null)).toBe(false);
-        // The two reasons are mutually exclusive.
-        expect(writeNeedsWinner(superseded)).toBe(false);
+    it('writeResultLocked names which', () => {
+        expect(writeResultLocked(played)).toBe('played');
+        expect(writeResultLocked(running)).toBe('running');
+        expect(writeResultLocked(held())).toBeNull();
+        expect(writeResultLocked(null)).toBeNull();
+        function held() { return { applied: false, reason: 'superseded', heldReason: 'match_closed' }; }
     });
 
-    it('the superseded banner names the recorded decision, never a specific button or "correct the result"', () => {
-        const banner = notLandedBanner(superseded);
-        expect(banner).toEqual({ lead: SUPERSEDED_LEAD, reason: DEFAULT_WIN_STANDS_REASON('fusensho'), advice: DEFAULT_WIN_STANDS_ADVICE('fusensho') });
-        const text = notSavedText(banner);
-        expect(text).toMatch(/^Not applied: /);
-        expect(text).toMatch(/fusensho/);
-        expect(text).toMatch(/score editor/);
-        expect(text).not.toMatch(/default[ -]win/i);
-        expect(text).not.toMatch(/Remove fusensho/);
-        expect(text).not.toMatch(/newer change/);
-        expect(text).not.toMatch(/correct the result/);
-        expect(text).not.toMatch(/cannot fight/);
+    it('the banner says the recorded result stands, unless the server sends its sentence', () => {
+        expect(notLandedBanner(played)).toEqual({ lead: SUPERSEDED_LEAD, reason: RESULT_LOCKED_PLAYED_REASON, advice: MATCH_CLOSED_ADVICE });
+        expect(notLandedBanner(running)).toEqual({ lead: SUPERSEDED_LEAD, reason: RESULT_LOCKED_RUNNING_REASON, advice: MATCH_CLOSED_ADVICE });
+        expect(notLandedBanner({ ...played, message: 'The next round was already fought.' }).sentence).toBe(true);
     });
 
-    it('falls back to "a recorded decision" when the server names none (an older server)', () => {
-        const noDecision = { applied: false, reason: 'superseded', heldGroups: ['points'], heldReason: 'default_win_stands' };
-        const banner = notLandedBanner(noDecision);
-        expect(banner.reason).toMatch(/a recorded decision/);
-        expect(banner.advice).toMatch(/the recorded decision/);
-        expect(banner.reason).not.toMatch(/default[ -]win/i);
-    });
-
-    it('the partial-apply note names the decision in place of "a newer change", and names no button', () => {
-        expect(heldGroupsNote(['points'], false, true, 'fusensho')).toBe(
-            "Kept in the match's history, not applied: points. This match was closed with a fusensho: to change the result, correct the fusensho from the match's score editor.");
-    });
-
-    it('the queue alert names the decision too, and names no button', () => {
-        expect(supersededAlertText(1, true, false, true, 'fusensho')).toMatch(/score editor/);
-        expect(supersededAlertText(1, true, false, true, 'fusensho')).not.toMatch(/Remove fusensho/);
-        expect(supersededAlertText(1, true, false, true, 'fusensho')).not.toMatch(/newer change/);
-        expect(supersededAlertText(1, true, false, true, 'fusensho')).toMatch(/\bfusensho\b/);
-        expect(supersededAlertText(2, false, false, true, 'kiken-voluntary')).toMatch(/score editor/);
-        expect(supersededAlertText(2, false, false, true, 'kiken-voluntary')).toMatch(/\bkiken\b/);
-        expect(supersededAlertText(2, false, false, true, 'kiken-voluntary')).not.toMatch(/Remove fusensho/);
-        // A mixed or absent decision falls back, never guesses.
-        expect(supersededAlertText(2, false, false, true, null)).toMatch(/a recorded decision/);
-    });
-
-    it('no em-dash and no "mat" in any of the copy, and no "default win" anywhere', () => {
-        const all = [
-            DEFAULT_WIN_STANDS_REASON('fusensho'), DEFAULT_WIN_STANDS_ADVICE('fusensho'),
-            heldGroupsNote(['points'], false, true, 'fusensho'), supersededAlertText(2, false, false, true, 'fusensho'),
-            displacedAlertText(1, true, 1), displacedAlertText(2, false, 2), displacedAlertText(1, true, 0),
-            displacedAlertText(2, false, 0), displacedAlertText(3, false, 1),
-        ].join(' ');
-        expect(all).not.toMatch(/—/);
-        expect(all).not.toMatch(/\bmats?\b/i);
-        expect(all).not.toMatch(/default[ -]win/i);
+    it('the note names it', () => {
+        expect(keptInHistoryNote(played)).toBe(
+            "Kept in the match's history, not applied: the result. The next round was already fought, so the recorded result stands. To change the result, use Correct result.");
     });
 });
 
-// The same reason on a second, APPLIED answer: an older finish arrived after a
-// newer scoring change that, applied after it, would have left the finished
-// knockout without a winner. The finish IS recorded and that later change was
-// MOVED to the history (`displacedGroups`, no heldGroups). Nothing tells the
-// operator to correct a result that is recorded.
 describe('a finish recorded that moved a later change to the history', () => {
-    const displaced = { id: 'm1', status: 'completed', winner: 'A', displacedGroups: ['points'], heldReason: 'needs_winner' };
-    const SAVED = "Saved. A later change to points would have left the finished match without a winner, so it was moved to the match's history.";
+    const displaced = { id: 'm1', status: 'completed', winner: 'A', displacedGroups: ['points'], heldReason: 'match_closed' };
+    const SAVED = "Saved. A later change to points was made after the match was finished, so it was moved to the match's history.";
 
-    it('is not a write held for a winner', () => {
+    it('is not a write turned away', () => {
         expect(writeDisplacedGroups(displaced)).toEqual(['points']);
-        expect(writeNeedsWinner(displaced)).toBe(false);
-        expect(writeNeedsWinner({ ...displaced, heldGroups: [] })).toBe(false); // bulk-score's item shape
+        expect(writeMatchClosed(displaced)).toBe(false);
+        expect(writeMatchClosed({ ...displaced, heldGroups: [] })).toBe(false); // bulk-score's item shape
         expect(writeDisplacedGroups({ id: 'm1' })).toEqual([]);
-        // Held groups beside a move: the one reason is read as the move's,
-        // so nothing says to correct a result that is recorded.
-        expect(writeNeedsWinner({ ...displaced, heldGroups: ['encho'] })).toBe(false);
+        expect(writeMatchClosed({ ...displaced, heldGroups: ['encho'] })).toBe(false);
     });
 
-    it('the note says Saved and what was moved, never "not applied" or "correct"', () => {
+    it('the note says Saved and what was moved, never "not applied"', () => {
         expect(keptInHistoryNote(displaced)).toBe(SAVED);
         expect(keptInHistoryNote({ ...displaced, heldGroups: [] })).toBe(SAVED);
-        expect(SAVED).not.toMatch(/not applied|correct the result/i);
+        expect(SAVED).not.toMatch(/not applied/i);
+    });
+
+    it('a change moved for another reason is worded plainly', () => {
+        expect(keptInHistoryNote({ id: 'm1', status: 'completed', displacedGroups: ['repPickB'] })).toBe(
+            "Saved. A later change to Shiro's pick for the representative bout was moved to the match's history.");
+        expect(writeDisplacedForClosedMatch(displaced)).toBe(true);
+        expect(writeDisplacedForClosedMatch({ ...displaced, heldReason: undefined })).toBe(false);
+        expect(writeDisplacedForClosedMatch({ ...displaced, displacedGroups: [] })).toBe(false);
+        expect(writeDisplacedForClosedMatch(null)).toBe(false);
     });
 
     it('a write held in part and one that moved a later change says both', () => {
-        const both = { id: 'm1', status: 'completed', heldGroups: ['encho'], displacedGroups: ['bout:2'], heldReason: 'needs_winner' };
+        const both = { id: 'm1', status: 'completed', heldGroups: ['encho'], displacedGroups: ['bout:2'] };
         expect(keptInHistoryNote(both)).toBe(
             "Kept in the match's history, not applied: overtime. A newer change to the same thing was recorded first. "
-            + "Saved. A later change to bout 2 would have left the finished match without a winner, so it was moved to the match's history.");
+            + "Saved. A later change to bout 2 was moved to the match's history.");
     });
 
     it('nothing kept: no note', () => {
@@ -358,69 +300,51 @@ describe('a finish recorded that moved a later change to the history', () => {
     it('the closing toast after a Finish says it; a write that did not land, or keeps the editor open, says nothing here', () => {
         expect(closingHistoryToast({ status: 'completed', winner: 'A' }, displaced)).toBe(SAVED);
         expect(closingHistoryToast({ status: 'completed', winner: 'A' }, { queued: true })).toBeNull();
-        expect(closingHistoryToast({ status: 'completed', winner: 'A' }, { applied: false, reason: 'superseded', heldGroups: ['points'], heldReason: 'needs_winner' })).toBeNull();
+        expect(closingHistoryToast({ status: 'completed', winner: 'A' }, { applied: false, reason: 'superseded', heldGroups: ['points'], heldReason: 'match_closed' })).toBeNull();
         expect(closingHistoryToast({ status: 'running' }, displaced)).toBeNull();
     });
 
     it('the queue alert says the held result was saved', () => {
-        expect(displacedAlertText(1, true, 1)).toMatch(/^A held result was saved\. .*moved to the match's history\.$/);
-        expect(displacedAlertText(2, false, 2)).toMatch(/^2 held results were saved\./);
-    });
-
-    // The reason is per ANSWER: only an answer whose heldReason is needs_winner
-    // moved its change for a winner. A change moved for another reason (a
-    // representative's pick stamped after the representative bout's removal)
-    // carries no reason, and a decision that stands (default_win_stands) is
-    // not a winner reason either.
-    it('writeDisplacedForWinner is true only for a displaced answer that carries needs_winner', () => {
-        expect(writeDisplacedForWinner(displaced)).toBe(true);
-        expect(writeDisplacedForWinner({ ...displaced, heldReason: undefined })).toBe(false);
-        expect(writeDisplacedForWinner({ id: 'm1', status: 'completed', displacedGroups: ['repPickB'] })).toBe(false);
-        expect(writeDisplacedForWinner({ ...displaced, heldReason: 'default_win_stands' })).toBe(false);
-        expect(writeDisplacedForWinner({ id: 'm1', status: 'completed', heldReason: 'needs_winner' })).toBe(false);
-        expect(writeDisplacedForWinner({ ...displaced, displacedGroups: [] })).toBe(false);
-        expect(writeDisplacedForWinner(null)).toBe(false);
-        expect(writeDisplacedForWinner(undefined)).toBe(false);
-    });
-
-    it('a change moved for another reason is worded plainly, never with a winner the match does not lack', () => {
-        const removed = { id: 'm1', status: 'completed', displacedGroups: ['repPickB'] };
-        expect(keptInHistoryNote(removed)).not.toMatch(/without a winner/);
-        expect(keptInHistoryNote(removed)).toMatch(/^Saved\. A later change to .* was moved to the match's history\.$/);
-        expect(keptInHistoryNote({ ...removed, heldReason: 'default_win_stands' })).not.toMatch(/without a winner/);
-    });
-
-    // The queue alert follows the same rule over the replayed answers of one
-    // pass: all moved for a winner keeps the winner sentence, none says
-    // plainly that a later change was moved, and a mix says both.
-    it('the queue alert names a winner only for the changes that were moved for one', () => {
-        const FOR_ONE = "A held result was saved. A later change to that match would have left it without a winner, so the change was moved to the match's history.";
-        const FOR_MANY = "2 held results were saved. Later changes to those matches would have left them without a winner, so the changes were moved to each match's history.";
-        expect(displacedAlertText(1, true, 1)).toBe(FOR_ONE);
-        expect(displacedAlertText(2, false, 2)).toBe(FOR_MANY);
-
-        const NONE_ONE = "A held result was saved. A later change to that match was moved to the match's history.";
-        const NONE_MANY = "2 held results were saved. Later changes to those matches were moved to each match's history.";
-        expect(displacedAlertText(1, true, 0)).toBe(NONE_ONE);
-        expect(displacedAlertText(2, false, 0)).toBe(NONE_MANY);
-        expect(displacedAlertText(1, true, 0)).not.toMatch(/without a winner/);
-        expect(displacedAlertText(2, false, 0)).not.toMatch(/without a winner/);
-        // An alert that says nothing about a winner (an older caller, no
-        // third argument) reads as none for a winner.
-        expect(displacedAlertText(1, true)).toBe(NONE_ONE);
-        expect(displacedAlertText(2, false)).toBe(NONE_MANY);
-
-        expect(displacedAlertText(3, false, 1)).toBe(
-            "3 held results were saved. Later changes to those matches were moved to each match's history. 1 of those changes would have left a match without a winner.");
-        expect(displacedAlertText(3, false, 2)).toBe(
-            "3 held results were saved. Later changes to those matches were moved to each match's history. 2 of those changes would have left a match without a winner.");
+        expect(displacedAlertText(1, true)).toBe("A held result was saved. A later change to that match was moved to the match's history.");
+        expect(displacedAlertText(2, false)).toMatch(/^2 held results were saved\./);
     });
 });
 
-// decisionWord / writeHeldDecision (operator ruling 2026-10-04): the ONE map
-// from a wire decision code to the operator's bare word, and the ONE reader
-// of the server's heldDecision field. "default win" is not a kendo term and
-// must never be produced by either.
+describe('the tap-outcome readers', () => {
+    it('applied, recorded and duplicate are quiet; everything else is not', () => {
+        for (const outcome of ['applied', 'recorded', 'duplicate']) expect(tapOutcomeQuiet({ outcome })).toBe(true);
+        for (const outcome of ['capped', 'beforeBaseline', 'noTarget', 'notAllowed', 'matchClosed', 'notStarted', 'refused']) {
+            expect(tapOutcomeQuiet({ outcome })).toBe(false);
+            expect(tapNotAppliedText({ outcome })).toMatch(/^Not applied: /);
+        }
+        expect(tapOutcomeQuiet(null)).toBe(false);
+        expect(tapNotAppliedText({ outcome: 'applied' })).toBeNull();
+    });
+    it("the server's message comes first", () => {
+        expect(tapNotAppliedText({ outcome: 'notStarted', reason: 'match_sent_back', message: 'The match was sent back to the queue.' }))
+            .toBe('The match was sent back to the queue.');
+    });
+    it('a capped tap reads that the bout was already decided; a closed match says Correct result', () => {
+        expect(tapNotAppliedText({ outcome: 'capped' })).toBe('Not applied: the bout was already decided.');
+        expect(tapNotAppliedText({ outcome: 'matchClosed' })).toMatch(/use Correct result\.$/);
+    });
+    it('the alert counts one item per tap', () => {
+        expect(tapNotAppliedAlertText(1, true, 'Not applied: the bout was already decided.')).toBe('Not applied: the bout was already decided.');
+        expect(tapNotAppliedAlertText(3, false)).toMatch(/^3 taps were not applied\./);
+    });
+    it('no em-dash, no "mat", no "default win" in any of the copy', () => {
+        const all = [MATCH_CLOSED_REASON, MATCH_CLOSED_ADVICE, RESULT_LOCKED_PLAYED_REASON, RESULT_LOCKED_RUNNING_REASON,
+            supersededAlertText(1, true, true), supersededAlertText(2, false, true), displacedAlertText(1, true), displacedAlertText(2, false),
+            ...['capped', 'beforeBaseline', 'noTarget', 'notAllowed', 'matchClosed', 'notStarted', 'refused'].map((outcome) => tapNotAppliedText({ outcome })),
+            tapNotAppliedAlertText(2, false)];
+        for (const t of all) {
+            expect(t).not.toMatch(/\u2014/);
+            expect(t).not.toMatch(/\bmats?\b/i);
+            expect(t).not.toMatch(/default[\s-]+win/i);
+        }
+    });
+});
+
 describe('decisionWord', () => {
     it('collapses every kiken variant to "kiken"', () => {
         expect(decisionWord('kiken')).toBe('kiken');
@@ -440,24 +364,6 @@ describe('decisionWord', () => {
     });
 });
 
-describe('writeHeldDecision', () => {
-    it('reads the string heldDecision field', () => {
-        expect(writeHeldDecision({ heldDecision: 'fusensho' })).toBe('fusensho');
-    });
-    it('is null when absent, empty, or not a string (an older server)', () => {
-        expect(writeHeldDecision({})).toBeNull();
-        expect(writeHeldDecision({ heldDecision: '' })).toBeNull();
-        expect(writeHeldDecision({ heldDecision: 7 })).toBeNull();
-        expect(writeHeldDecision(null)).toBeNull();
-    });
-});
-
-// A start refused because another start was still out says so while that start
-// is out (startWhileStartingMessage, present tense). Once that start has landed
-// nothing else tells the operator the match they asked for was never started, so
-// the refusal is kept, in the past tense, on the refused match
-// (startWasBlockedByStartMessage). Both surfaces that refuse a start for this
-// reason (the court console and the Scores tab) read the sentence from here.
 describe('the sentence for a start that was blocked by another start', () => {
     it('names the start that was out and says what to do, in the past tense', () => {
         expect(startWasBlockedByStartMessage({ label: 'Pool A · Match 2' })).toBe(

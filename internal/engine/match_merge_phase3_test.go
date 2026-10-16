@@ -374,6 +374,12 @@ func TestMerge_EngiStaleFinishOverACompletedMatchIsHeldWhole(t *testing.T) {
 			require.NotNil(t, displaced, "the later finish is kept in the history")
 			assert.Equal(t, state.HistoryOutcomeHeld, displaced.Outcomes[state.GroupResult])
 			assert.Contains(t, string(displaced.Held[state.GroupFlags]), `"flagsA":3`, "with its own count")
+
+			if knockout {
+				b, err := h.store.LoadBracket(h.compID)
+				require.NoError(t, err)
+				assert.Equal(t, wrTeamB, b.Rounds[1][0].SideA, "Tora advances, Ryu does not")
+			}
 		})
 
 		// The variant where the stale finish carries the SAME count already

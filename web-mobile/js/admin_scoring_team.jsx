@@ -3279,6 +3279,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const tapFoulIncrement = (ev, rs) => {
     if (acceptTap(foulTapRef, ev, rs.tapKey)) rs.onIncrement();
   };
+  // bc-evts stage 3 (bc-dtfn): Add and Remove representative bout, Record
+  // bout and Remove this bout wait for nothing, so the sheet changes at once
+  // and a double tap's second click lands on what took the button's place: a
+  // second Record bout, the Remove beside the representative bout just added.
+  // One stamp per place, shared by a control and its replacement: "rep" for
+  // the representative bout's Add and Remove, "bout" for Record bout and
+  // Remove this bout. A tap after TAP_BOUNCE_MS, or from the keyboard, is a tap.
+  const boutChangeTapRef = useRefA(null);
+  const boutChangeTap = (place, change) => (ev) => {
+    if (acceptTap(boutChangeTapRef, ev, place)) change();
+  };
   const closeDoneBoutEdit = () => { editingDoneOriginalRef.current = null; setEditingDoneBoutIdx(-1); };
 
   // mp-gmcg: the non-destructive warning shown beneath a past bout opened for
@@ -5008,7 +5019,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     type="button"
                     className="btn btn--ghost btn--sm"
                     data-testid="kachinuki-remove-bout-button"
-                    onClick={removeCurrentBout}
+                    onClick={boutChangeTap("bout", removeCurrentBout)}
                     disabled={submitting}
                     title="Remove this empty bout: added by mistake. Nothing has been recorded for it, so nothing is lost."
                   >
@@ -5057,7 +5068,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     className="btn btn--ghost btn--sm"
                     data-testid="team-daihyosen-remove"
                     title="Remove the representative bout"
-                    onClick={onRemoveDaihyosen}
+                    onClick={boutChangeTap("rep", onRemoveDaihyosen)}
                     disabled={submitting || decisionSubmitting || repTyping}
                   >
                     Remove daihyosen
@@ -5155,7 +5166,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     admin_scoring_shared.jsx). The term is taught in the
                     title/hint above instead. */}
                 {!removingWithdrawal && <div>
-                  <button data-testid="scoring-modal-daihyosen-button" type="button" className={`btn btn--sm ${teamTied ? "btn--primary" : "btn--ghost"}`} onClick={onDaihyosen} disabled={submitting || decisionSubmitting || repTyping}>
+                  <button data-testid="scoring-modal-daihyosen-button" type="button" className={`btn btn--sm ${teamTied ? "btn--primary" : "btn--ghost"}`} onClick={boutChangeTap("rep", onDaihyosen)} disabled={submitting || decisionSubmitting || repTyping}>
                     Add representative bout
                   </button>
                 </div>}
@@ -5469,7 +5480,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 // ONE TAP (hot path, recoverable); End keeps the two-step
                 // arm/confirm and any score edit disarms it.
                 <>
-                <button type="button" className="btn btn--primary" onClick={() => {
+                <button type="button" className="btn btn--primary" onClick={boutChangeTap("bout", () => {
                   // ONE TAP (user ruling via critique): Record is the hot
                   // path, repeated every bout, and a running, mergeable
                   // write — a mis-tap is recovered by editing the appended
@@ -5489,7 +5500,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     // banner for a queued write; returning nothing hid it.
                     return sent;
                   });
-                }} disabled={submitting || !kachinukiCurrentBoutPlayed || kachinukiCurBoutRecorded}
+                })} disabled={submitting || !kachinukiCurrentBoutPlayed || kachinukiCurBoutRecorded}
                   title={kachinukiNoLiveBout ? "Bout recorded: no next pairing"
                     : kachinukiCurBoutRecorded ? "Bout recorded"
                     : !kachinukiCurrentBoutPlayed ? "Nothing recorded for this bout yet" : undefined}>

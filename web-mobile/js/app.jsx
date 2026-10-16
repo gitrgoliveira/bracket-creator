@@ -6,7 +6,8 @@ import { createTimerPool } from './timer_pool.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, applyPatchToTree, mergeSnapshotIntoTree, deriveLinkState, freshnessMs } from './court_bridge.jsx';
 import { BRANDING_DEFAULTS } from './admin_branding.jsx';
-import { queuedWritesNoun, supersededAlertText, displacedAlertText } from './write_result.jsx';
+import { queuedWritesNoun, supersededAlertText, displacedAlertText, tapNotAppliedAlertText, tapNotAppliedText } from './write_result.jsx';
+import { VersionBanner } from './version_banner.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
 
@@ -393,6 +394,13 @@ export function queueAlertMessage(alert) {
     // its history. Recorded, so not an error: the history has the change.
     case "displaced":
       return displacedAlertText(n, one);
+    // bc-evts: taps the server did not apply this pass, one alert a pass;
+    // a single one says why in the server's words or the outcome's.
+    case "not_applied":
+      return tapNotAppliedAlertText(n, one, tapNotAppliedText(alert.outcome));
+    // bc-evts S5 b: a batch of taps the server refused is held, not dropped.
+    case "taps_parked":
+      return `The server refused ${one ? "a tap" : `${n} taps`}. ${one ? "It is" : "They are"} held and ${one ? "holds" : "hold"} back that match's later changes: open the held writes list to discard ${one ? "it" : "them"}.`;
     default:
       return null;
   }
@@ -2071,6 +2079,8 @@ window.fireNotification = fireNotification;
 ReactDOM.createRoot(document.getElementById("root")).render(
   <ErrorBoundary>
     <App />
+    {/* bc-evts S2: the one new-build banner, for the app and the displays. */}
+    <VersionBanner />
     {/* Single host for confirmDialog()/promptDialog(): sibling to App so it
         is always mounted exactly once, on every screen (incl. the pre-auth
         login screen's "Forgot password?" confirm). */}

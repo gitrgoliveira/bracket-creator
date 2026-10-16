@@ -10,6 +10,7 @@
 
 import { ScoreEditorModal } from './admin_scoring_individual.jsx';
 import { EngiScoreEditorModal } from './admin_scoring_engi.jsx';
+import { registerOpenEditor } from './app_version.jsx';
 
 import {
   teamResultLabel,
@@ -46,8 +47,20 @@ import {
   DecisionPrompt,
 } from './admin_scoring_shared.jsx';
 
-window.ScoreEditorModal = ScoreEditorModal;
-window.EngiScoreEditorModal = EngiScoreEditorModal;
+// bc-evts S2: an open score editor holds a new build's reload back (the
+// reload waits, behind the banner, until no editor is open). Every host
+// reaches the editors through these window bridges, the self-run public
+// sheet included, so the editors register here, on mount.
+function withOpenEditorRegistered(Editor) {
+  function OpenEditor(props) {
+    React.useEffect(() => registerOpenEditor(), []);
+    return <Editor {...props} />;
+  }
+  return OpenEditor;
+}
+
+window.ScoreEditorModal = withOpenEditorRegistered(ScoreEditorModal);
+window.EngiScoreEditorModal = withOpenEditorRegistered(EngiScoreEditorModal);
 
 export {
   EngiScoreEditorModal,

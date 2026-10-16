@@ -9484,6 +9484,30 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   flex-shrink: 0;
 }
 
+/* bc-evts S2: a new build is installed; the page reloads once no editor is
+   open and nothing is unsent. Fixed over every screen, displays included,
+   below the dialogs (1100) and the toast (1200). */
+.version-banner {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100vw - 32px);
+  background: var(--bg);
+  border: 1px solid color-mix(in oklch, var(--ink-1) 25%, transparent);
+  border-radius: var(--r-md);
+  box-shadow: 0 4px 16px color-mix(in oklch, var(--ink-1) 18%, transparent);
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-1);
+}
+.version-banner__reload { flex-shrink: 0; }
+
 /* Vlist row with inline padding override */
 .vlist-item--row-padded { padding: 0 12px 12px; }
 /* Non-interactive vlist row, no hover cursor */

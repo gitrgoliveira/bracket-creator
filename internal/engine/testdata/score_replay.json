@@ -592,6 +592,119 @@
    }
   },
   {
+   "name": "eventSeqs names each session's highest logged seq, a seq never logged below it included",
+   "jsMirror": true,
+   "shape": {
+    "kind": "individual"
+   },
+   "match": {
+    "id": "r0-m0",
+    "sideA": "Aka",
+    "sideB": "Shiro",
+    "sideAId": "pa",
+    "sideBId": "pb",
+    "winner": "",
+    "ipponsA": [],
+    "ipponsB": [],
+    "hansokuA": 0,
+    "hansokuB": 0,
+    "decision": "",
+    "status": "running",
+    "court": "A",
+    "round": 0,
+    "scheduledAt": ""
+   },
+   "head": [
+    {
+     "v": 1,
+     "baseline": {
+      "id": "m0",
+      "door": "test",
+      "stamp": 10,
+      "values": {
+       "points": {
+        "ipponsA": [],
+        "ipponsB": [],
+        "hansokuA": 0,
+        "hansokuB": 0
+       }
+      },
+      "basis": {
+       "seen": 0
+      }
+     }
+    }
+   ],
+   "lines": [
+    {
+     "v": 1,
+     "event": {
+      "id": "s1.1",
+      "session": "s1",
+      "seq": 1,
+      "stamp": 20,
+      "kind": "ippon.add",
+      "side": "a",
+      "letter": "M"
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "s2.1",
+      "session": "s2",
+      "seq": 1,
+      "stamp": 25,
+      "kind": "ippon.add",
+      "side": "b",
+      "letter": "K"
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "s1.3",
+      "session": "s1",
+      "seq": 3,
+      "stamp": 30,
+      "kind": "foul.add",
+      "side": "b"
+     }
+    }
+   ],
+   "want": {
+    "match": {
+     "ipponsA": [
+      "M"
+     ],
+     "ipponsB": [
+      "K"
+     ],
+     "hansokuB": 1,
+     "eventSeqs": {
+      "s1": 3,
+      "s2": 1
+     },
+     "scoreVersion": 4,
+     "modifiedAt": 30,
+     "groupStamps": {
+      "points": 30
+     }
+    },
+    "outcomes": {
+     "s1.1": [
+      "applied"
+     ],
+     "s2.1": [
+      "applied"
+     ],
+     "s1.3": [
+      "applied"
+     ]
+    }
+   }
+  },
+  {
    "name": "the second foul lands an H named by the foul; removing it by that id takes it off",
    "jsMirror": true,
    "shape": {

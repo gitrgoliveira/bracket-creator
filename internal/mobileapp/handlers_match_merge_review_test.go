@@ -62,21 +62,28 @@ func TestScoreHandler_StaleFinishIsHeldNotRefusedForAReason(t *testing.T) {
 		"ipponsA": []string{}, "ipponsB": []string{"K"}, "modifiedAt": now - 20_000,
 	})
 	require.Equal(t, http.StatusOK, code, out)
-	assert.Equal(t, false, out["applied"])
-	assert.Equal(t, "superseded", out["reason"])
+	// The FIRST recorded result stands, in stamp order (operator decision
+	// 2026-10-16): the late finish was made before the stored one, so it is the
+	// first, and the stored one, kept in the history, no longer stands.
+	assert.NotEqual(t, false, out["applied"], "no 400, and no loss: it is applied")
 
 	m := mergeStored(t, store, compID)
-	assert.Equal(t, mgAlice, m.Winner, "the newer finish stands")
+	assert.Equal(t, mgBob, m.Winner, "the first finish stands")
 	entries, err := store.LoadMatchHistory(compID, "Pool A-0")
 	require.NoError(t, err)
-	last := entries[len(entries)-1]
-	assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupResult])
-	assert.Contains(t, string(last.Held[state.GroupResult]), `"winner":"`+mgBob+`"`, "the stale finish is kept")
+	var displaced bool
+	for _, e := range entries {
+		if e.Door == "displaced" && e.Outcomes[state.GroupResult] == state.HistoryOutcomeHeld {
+			displaced = true
+			assert.Contains(t, string(e.Held[state.GroupResult]), `"winner":"`+mgAlice+`"`, "the later finish is kept")
+		}
+	}
+	assert.True(t, displaced, "the later finish is kept in the history")
 
 	t.Run("an equal stamp is a correction, which still needs its reason", func(t *testing.T) {
 		code, out := mergeReviewPut(t, r, compID, map[string]any{
-			"sideA": mgAlice, "sideB": mgBob, "status": "completed", "winner": mgBob,
-			"ipponsA": []string{}, "ipponsB": []string{"K"}, "modifiedAt": now - 10_000,
+			"sideA": mgAlice, "sideB": mgBob, "status": "completed", "winner": mgAlice,
+			"ipponsA": []string{"M"}, "ipponsB": []string{}, "modifiedAt": now - 20_000,
 		})
 		assert.Equal(t, http.StatusBadRequest, code, out)
 	})

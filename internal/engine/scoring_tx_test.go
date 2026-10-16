@@ -435,10 +435,18 @@ func TestRecordDecisionTx_StaleReplayIsSupersededBeforeTheRefusals(t *testing.T)
 		require.NoError(t, err)
 		return eng, store, compID
 	}
-	decide := func(eng *Engine, store *state.Store, compID, matchID, decisionBy string, stamp int64) error {
+	// decide sends a kiken; corrects says it comes from a screen that showed the
+	// recorded one (a correction), where otherwise it is a device that never
+	// saw it, and the first recorded result stands (bc-evts, operator decision
+	// 2026-10-16).
+	decide := func(eng *Engine, store *state.Store, compID, matchID, decisionBy string, stamp int64, corrects bool) error {
 		var engErr error
+		fo := ForceOptions{}
+		if corrects {
+			fo.Basis = &state.ScoreBasis{Seen: 1 << 20}
+		}
 		_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-			_, _, engErr = eng.RecordDecisionTx(tx, compID, matchID, "kiken", decisionBy, "replay", nil, stamp)
+			_, _, engErr = eng.RecordDecisionTxWithOptions(tx, compID, matchID, "kiken", decisionBy, "replay", nil, fo, stamp)
 			return nil
 		})
 		return engErr
@@ -447,22 +455,22 @@ func TestRecordDecisionTx_StaleReplayIsSupersededBeforeTheRefusals(t *testing.T)
 	t.Run("a withdrawal moved to the other side", func(t *testing.T) {
 		// Moving Pool A-0's kiken to the other side while Alice's Pool A-1 is running.
 		eng, store, compID := setup(t)
-		err := decide(eng, store, compID, "Pool A-0", "shiro", 5_000)
-		require.ErrorIs(t, err, ErrMatchSuperseded)
+		err := decide(eng, store, compID, "Pool A-0", "shiro", 20_000, false)
+		require.ErrorIs(t, err, ErrMatchSuperseded, "a device that never saw the kiken is turned away, before the refusals")
 
-		err = decide(eng, store, compID, "Pool A-0", "shiro", 20_000)
-		assert.NoError(t, err, "a newer stamp applies")
+		err = decide(eng, store, compID, "Pool A-0", "shiro", 20_000, true)
+		assert.NoError(t, err, "a correction that saw it applies")
 	})
 
 	t.Run("the already-barred check", func(t *testing.T) {
 		// A second kiken against Alice, in Pool A-1 (Alice is SideB, shiro, there).
 		eng, store, compID := setup(t)
-		err := decide(eng, store, compID, "Pool A-1", "shiro", 5_000)
+		err := decide(eng, store, compID, "Pool A-1", "shiro", 5_000, false)
 		require.ErrorIs(t, err, ErrMatchSuperseded)
 		var already *AlreadyIneligibleError
 		assert.False(t, errors.As(err, &already))
 
-		err = decide(eng, store, compID, "Pool A-1", "shiro", 20_000)
+		err = decide(eng, store, compID, "Pool A-1", "shiro", 20_000, false)
 		assert.True(t, errors.As(err, &already), "a newer stamp still meets the check, got %v", err)
 	})
 }

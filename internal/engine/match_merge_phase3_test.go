@@ -488,7 +488,11 @@ func TestMerge_ExactDecisionReplayAnswersAsRecorded(t *testing.T) {
 	assert.Equal(t, "kiken-voluntary", got.Decision)
 
 	t.Run("a different decision at a newer stamp is recorded, with no confirm", func(t *testing.T) {
-		res, _, err := h.eng.RecordDecision(h.compID, h.matchID, "fusenpai", "aka", "", nil, mmT3)
+		// From a screen that showed the kiken (its basis holds it): a
+		// decision from a device that had not seen it would be turned away,
+		// the first recorded result standing.
+		res, _, err := h.eng.RecordDecisionWithOptions(h.compID, h.matchID, "fusenpai", "aka", "", nil,
+			ForceOptions{Basis: &state.ScoreBasis{Seen: 1 << 20}}, mmT3)
 		require.NoError(t, err)
 		require.NotNil(t, res)
 		assert.Equal(t, "fusenpai", res.Decision)

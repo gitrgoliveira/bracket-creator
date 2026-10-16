@@ -246,7 +246,10 @@ func TestScoreEvents_BaselinesAreTotal(t *testing.T) {
 	assertLogIsTheMatch(t, eng, store, slwMatch)
 	write(state.MatchResult{SideA: "Aka", SideB: "Shiro", Status: state.MatchStatusCompleted, Winner: "Shiro",
 		IpponsA: []string{}, IpponsB: []string{"K", "K"}, ModifiedAt: t0 + 8000, CorrectionReason: "fix", WriteDoor: DoorScore})
-	_, _, err = eng.RecordDecision(slwComp, slwMatch, "kiken-voluntary", "aka", "", nil, t0+9000)
+	// From the screen that showed the corrected result (its basis holds it):
+	// a decision from a device that had not seen it would be turned away.
+	_, _, err = eng.RecordDecisionWithOptions(slwComp, slwMatch, "kiken-voluntary", "aka", "", nil,
+		ForceOptions{Basis: &state.ScoreBasis{Seen: 1 << 20}}, t0+9000)
 	require.NoError(t, err)
 	assertLogIsTheMatch(t, eng, store, slwMatch)
 	_, err = eng.ReopenMatch(slwComp, slwMatch, "mistake")

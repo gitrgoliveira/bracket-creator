@@ -13,8 +13,9 @@
 // baseline's scoring groups are Replay.Held. Both are kept in the history and
 // the device is told the match is finished and to use Correct result. What is
 // stamped BEFORE the result keeps the D5 rule (recorded when the result's
-// basis holds it, else beforeBaseline). A newer result over an older one is
-// the newer one. A correction or a reopen is the way to change a closed match,
+// basis holds it, else beforeBaseline). The FIRST recorded result stands: a
+// later finish or decision from a device that did not see it is turned away
+// as scoring is (rivalResult). A correction or a reopen is the way to change a closed match,
 // and the match is open again from the reopen's stamp. Because the rule is
 // stamp order, the same lines give the same match in every arrival order.
 //
@@ -517,7 +518,7 @@ func (rp *replayer) applyBaseline(line int, b *state.ScoreBaseline, groups []str
 	// A baseline that carries scoring, and not the result, onto a match the
 	// log has already closed is turned away as an event is (the closed-match
 	// rule).
-	if hold := rp.judgeOverFinished(b, groups); hold != nil {
+	if hold := rp.judgeOverFinished(line, b, groups); hold != nil {
 		groups = slices.DeleteFunc(slices.Clone(groups), func(g string) bool { return slices.Contains(hold.Groups, g) })
 		if rp.held == nil {
 			rp.held = map[int]BaselineHold{}
@@ -689,15 +690,21 @@ func (rp *replayer) closed() bool {
 	return governed && rp.cur.m.Status == state.MatchStatusCompleted
 }
 
-func (rp *replayer) judgeOverFinished(b *state.ScoreBaseline, groups []string) *BaselineHold {
-	// One that carries the result is a correction, ordered by its stamp like
-	// any other result.
-	if !rp.closed() || slices.Contains(groups, state.GroupResult) {
+func (rp *replayer) judgeOverFinished(line int, b *state.ScoreBaseline, groups []string) *BaselineHold {
+	if !rp.closed() {
 		return nil
+	}
+	// A result that carries the result group is a correction only when the
+	// writer saw the one in force; a rival result is turned away (rivalResult).
+	if slices.Contains(groups, state.GroupResult) {
+		if !rp.rivalResult(line, b) {
+			return nil
+		}
+		return &BaselineHold{Groups: rp.rivalHeldGroups(groups), Reason: HoldReasonMatchClosed, MatchClosed: true}
 	}
 	var scoring []string
 	for _, g := range groups {
-		if state.IsScoringGroup(g) || g == state.GroupEncho {
+		if (state.IsScoringGroup(g) || g == state.GroupEncho) && !rp.boutsStayOpen(g) {
 			scoring = append(scoring, g)
 		}
 	}
@@ -705,6 +712,110 @@ func (rp *replayer) judgeOverFinished(b *state.ScoreBaseline, groups []string) *
 		return nil
 	}
 	return &BaselineHold{Groups: scoring, Reason: HoldReasonMatchClosed, MatchClosed: true}
+}
+
+// rivalResult reports whether baseline b, which carries a result onto a match
+// the log has already closed, is a RIVAL of the result in force: a finish or a
+// decision from a device that did not see it. THE FIRST RECORDED RESULT STANDS
+// (operator decision 2026-10-16, I1): in stamp order, a later rival is turned
+// away as scoring is (match_closed), whichever order the two arrived in.
+//
+// A result is no rival when its writer saw the one in force: it names a
+// correction (a reason, or clearWithdrawal), sent a basis that holds the
+// line of the result in force, or is the server's own write (it carries no
+// stamp of a device's: an engine-internal caller, made with the whole match
+// in view). A reopen or a send back to the queue (a result
+// that leaves the match open), a direct writer's result (override-winner, the
+// engine's own callers, bulk and quick score: an organiser acting on what the
+// screen shows) is no rival either. Only a finish or a decision from the
+// score, engi or decision doors is.
+func (rp *replayer) rivalResult(line int, b *state.ScoreBaseline) bool {
+	switch b.Door {
+	case DoorScore, doorEngi, DoorDecision:
+	default:
+		return false
+	}
+	inForce, governed := rp.govern[state.GroupResult]
+	if !governed || inForce == line || b.Informed || baselineResultStatus(b) != state.MatchStatusCompleted {
+		return false
+	}
+	if b.BasisSent && inForce < b.Basis.Seen {
+		return false
+	}
+	// A result that says what the match already holds, in every group it
+	// carries, is the same write sent again (a queued replay whose answer was
+	// lost, a second board recording the same decision): it changes nothing, so
+	// it is an echo, not a rival.
+	for g, v := range b.Values {
+		if !bytes.Equal(state.GroupValue(&rp.cur.m, g), v) {
+			return true
+		}
+	}
+	return false
+}
+
+// rivalHeldGroups is what a rival result loses: everything it carries, except
+// the numbered bouts of a team match a default-win decision closed
+// (boutsStayOpen), whose scores it brings along.
+func (rp *replayer) rivalHeldGroups(groups []string) []string {
+	return slices.DeleteFunc(slices.Clone(groups), rp.boutsStayOpen)
+}
+
+// boutsStayOpen reports whether group g is a numbered bout of a team match
+// closed by a match-level default-win decision (kiken, fusenpai, fusensho): the
+// decision decides the match and credits only the numbered bouts with no
+// result of their own (padDefaultWin), so a bout scored on a device that never
+// saw it keeps its score, whichever way the two arrive (operator decision
+// 2026-10-16, T1: merge by bout). Kachinuki is left out, as the padding is: its
+// bouts are a log with no bout to credit, so a closed kachinuki match is
+// closed whole, like an individual one.
+func (rp *replayer) boutsStayOpen(g string) bool {
+	pos, isBout := state.ParseBoutGroup(g)
+	if !isBout || pos < 1 {
+		return false
+	}
+	comp, m := rp.shape.Comp, &rp.cur.m
+	return comp != nil && comp.TeamSize >= 2 && !comp.IsKachinuki() &&
+		m.Status == state.MatchStatusCompleted && domain.IsDefaultWinDecisionStr(m.Decision)
+}
+
+// baselineResultStatus is the status the baseline's result group carries.
+func baselineResultStatus(b *state.ScoreBaseline) state.MatchStatus {
+	var m state.MatchResult
+	if raw, ok := b.Values[state.GroupResult]; !ok || state.SetGroupFromValue(&m, state.GroupResult, raw) != nil {
+		return ""
+	}
+	return m.Status
+}
+
+// writesAsRival reports whether a write is the kind of result that can be a
+// rival of the one in force (rivalResult): from the score, engi or decision
+// door, naming no correction (no reason, no clearWithdrawal) and sending no
+// basis of its own. What the merge cannot yet know, whether such a write finds
+// a result in force, is the replay's to say.
+func writesAsRival(w *state.MatchResult) bool {
+	switch doorOf(w) {
+	case DoorScore, doorEngi, DoorDecision:
+	default:
+		return false
+	}
+	return w.ModifiedAt > 0 && w.CorrectionReason == "" && !w.ClearsWithdrawal && w.Basis == nil
+}
+
+// BasisSawResult reports whether a write's own basis holds a line of the score
+// log that recorded a completed result: the writer's screen showed the result
+// it is correcting, so it is a correction (and needs its reason), not a rival
+// (rivalResult). A write sending no basis saw nothing.
+func BasisSawResult(lines []state.ScoreLogLine, basis *state.ScoreBasis) bool {
+	if basis == nil {
+		return false
+	}
+	for i := 0; i < min(basis.Seen, len(lines)); i++ {
+		if b := lines[i].Baseline; b != nil && baselineResultStatus(b) == state.MatchStatusCompleted {
+			return true
+		}
+	}
+	return false
 }
 
 // absorb settles event i, which baseline b's group value now holds or replaces:
@@ -775,7 +886,7 @@ func (rp *replayer) applyEvent(line int, e *domain.ScoreEvent) {
 	// recorded (in stamp order) closed the match, so a tap stamped after it
 	// is kept and changes nothing. Correct result (a baseline) or a reopen is
 	// the only way to change it.
-	if rp.closed() {
+	if rp.closed() && !rp.boutsStayOpen(g) {
 		rp.outcome[line] = domain.ScoreOutcomeMatchClosed
 		return
 	}

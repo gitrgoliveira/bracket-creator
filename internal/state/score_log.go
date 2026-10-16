@@ -77,6 +77,15 @@ type ScoreBaseline struct {
 	Stamps map[string]int64 `json:"stamps,omitempty"`
 	// Basis is what the writer had in view when it built the write.
 	Basis ScoreBasis `json:"basis"`
+	// Informed is set when the writer knew the result in force: it named a
+	// correction (a correction reason, or clearWithdrawal), or it is the
+	// server's own write (no stamp of its own). Such a result is no rival of
+	// the one in force.
+	Informed bool `json:"informed,omitempty"`
+	// BasisSent is set when the writer sent its own Basis (what it had seen),
+	// rather than the server making one up for it: only then does Basis say
+	// whether the writer saw an earlier line (the result in force).
+	BasisSent bool `json:"basisSent,omitempty"`
 }
 
 // ScoreBasis says which events a baseline was built with: the first Seen

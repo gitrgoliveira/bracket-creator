@@ -40,10 +40,16 @@ import (
 // heldReason match_closed, or displaced into the history when the result
 // arrives second). It replaces R2 (points after a withdrawal clear it), R3 (a
 // point after a finish applies), R4 (a tie waits for a winner), S2 and S3.
-// A newer result over an older one is the newer one: the older result is a
-// line of the log all the same, so a tap stamped between the two is closed out
-// by it. What the replay does not keep of the write is reported held, from the
-// values alone.
+// THE FIRST RECORDED RESULT STANDS (operator decision 2026-10-16, I1): a later
+// finish or decision from a device that did not see it is a rival (rivalResult)
+// and is turned away like scoring, in every arrival order; only a correction
+// that saw the result in force (a reason, clearWithdrawal, a basis holding it)
+// replaces it. A result so turned away is a line of the log all the same, and
+// when the first result arrives second the one stored is displaced into the
+// history. A TEAM match closed by a match-level kiken, fusenpai or fusensho
+// merges BY BOUT (boutsStayOpen, T1): the numbered bouts scored elsewhere keep
+// their scores and the decision credits the rest. What the replay does not keep
+// of the write is reported held, from the values alone.
 //
 // STILL THE MERGE'S (writes the replay does not take, and the holds a snapshot
 // meets before any replay):
@@ -97,6 +103,11 @@ type mergeCtx struct {
 	// replayed onto (mergeByReplay); nil reads as an empty log, the stored
 	// match being its only baseline.
 	lines []state.ScoreLogLine
+	// serverStamped is set by mergeMatchWrite for a write that arrived with no
+	// stamp of its own: the server's (an engine-internal caller, a door that
+	// orders it itself), made with the whole match in view, so it is never a
+	// rival of the result in force (rivalResult).
+	serverStamped bool
 }
 
 // runningOverFinished reports the shape the closed-match rule turns away: a
@@ -200,6 +211,7 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 	// An unstamped write the server itself orders (a completing write, or one
 	// a server door built) takes the server's time here, so it leaves a fence
 	// a later stale replay is ordered against (writeStamp).
+	mc.serverStamped = incoming.ModifiedAt <= 0
 	incoming.ModifiedAt = writeStamp(stored, incoming)
 	stamp := incoming.ModifiedAt
 	mc.storedAID, mc.storedBID = stored.SideAID, stored.SideBID
@@ -526,6 +538,12 @@ func mergeByReplay(stored, incoming *state.MatchResult, changed []string, stamp 
 		basis = state.ScoreBasis{}
 	}
 	bl := BaselineFromMatch(&sent, logBaselineID(len(lines), doorOf(incoming)), doorOf(incoming), at, groups, basis)
+	// What the writer said of the result in force, for the first-recorded-
+	// result rule (rivalResult): a correction names a reason or clears the
+	// withdrawal, the server's own write had the whole match in view, and only
+	// a basis the writer SENT says what it had seen.
+	bl.Informed = incoming.CorrectionReason != "" || incoming.ClearsWithdrawal || mc.serverStamped
+	bl.BasisSent = incoming.Basis != nil
 	rep.Baseline = &bl
 	all := append(slices.Clone(lines), state.ScoreLogLine{Baseline: &bl})
 	after := ReplayScoring(stored, all, shape)
@@ -564,7 +582,14 @@ func mergeByReplay(stored, incoming *state.MatchResult, changed []string, stamp 
 		was, got, said := state.GroupValue(stored, g), state.GroupValue(final, g), state.GroupValue(&sent, g)
 		switch {
 		case slices.Contains(turnedAway, g):
-			reportHeld(rep, g, stored, &sent, said)
+			// A scoring write turned away loses its echo too; a rival RESULT
+			// (rivalResult) is turned away whole, and what it carries that
+			// the match already holds is no loss (a held echo).
+			if slices.Contains(turnedAway, state.GroupResult) {
+				reportHeld(rep, g, stored, &sent, nil)
+			} else {
+				reportHeld(rep, g, stored, &sent, said)
+			}
 		case bytes.Equal(got, said), !bytes.Equal(got, was), g == state.GroupPoints && sameModuloHantei(final, &sent):
 			// Landed, as sent or as the replay adjusted it (a winner worked
 			// out again; a judges' decision kept: a board that never showed
@@ -592,7 +617,9 @@ func mergeByReplay(stored, incoming *state.MatchResult, changed []string, stamp 
 				continue
 			}
 			for _, g := range h.Groups {
-				if !state.IsScoringGroup(g) && g != state.GroupEncho {
+				// A rival result (rivalResult) leaves the match with its
+				// verdict as well as its scoring.
+				if !state.IsScoringGroup(g) && g != state.GroupEncho && g != state.GroupResult {
 					continue
 				}
 				// Only a held line that IS the stored value is displaced: a

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"sort"
 	"sync"
 
@@ -1543,7 +1544,8 @@ func KeepsWithdrawalRuling(storedStatus state.MatchStatus, storedDecision string
 // reads result.Winner for this write: applyPoolWrite before identity
 // backfill, applyBracketResultIn before the downstream-correction guard.
 func preserveWithdrawalRuling(stored withdrawalRuling, result *state.MatchResult, policy matchWritePolicy) bool {
-	if policy != matchWriteForward || !KeepsWithdrawalRuling(stored.Status, stored.Decision, result) {
+	if policy != matchWriteForward || !KeepsWithdrawalRuling(stored.Status, stored.Decision, result) ||
+		displacesStoredResult(result) {
 		return false
 	}
 	result.Decision = stored.Decision
@@ -1561,6 +1563,21 @@ func preserveWithdrawalRuling(stored withdrawalRuling, result *state.MatchResult
 		result.Encho = &encho
 	}
 	return true
+}
+
+// displacesStoredResult reports whether the write's merge took the stored
+// result out of the match: the stored result was a rival of this one, stamped
+// after it by a device that had not seen it (rivalResult), so the first
+// recorded result is the write's and there is no stored ruling left to keep.
+// A correction that saw the ruling displaces nothing and keeps it (bc-tmfn).
+func displacesStoredResult(result *state.MatchResult) bool {
+	if result.Merge == nil {
+		return false
+	}
+	return slices.ContainsFunc(result.Merge.Displaced, func(d state.DisplacedChange) bool {
+		_, ok := d.Values[state.GroupResult]
+		return ok
+	})
 }
 
 // keptWithdrawalScoreline is the match-level scoreline a correction that keeps

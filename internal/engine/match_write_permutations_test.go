@@ -28,8 +28,13 @@ import (
 // THE CLOSED-MATCH RULE (operator, 2026-10-15) decides what that outcome is: in
 // stamp order, once a finish or a decision (kiken, fusenpai, fusensho, hantei,
 // daihyosen, hikiwake) is recorded, a tap or a scoring write stamped AFTER it is
-// refused and kept in the history. A newer finish or decision over an older one
-// is the newer one. Everything stamped BEFORE the result keeps the D5 rule
+// refused and kept in the history. THE FIRST RECORDED RESULT STANDS (operator
+// decision 2026-10-16, I1): in stamp order, a later finish or decision from a
+// device that did not see it is refused (match_closed) in every arrival order;
+// only a correction that saw it (a reason, clearWithdrawal, a basis holding it)
+// replaces it. A TEAM match closed by a match-level kiken, fusenpai or
+// fusensho merges BY BOUT (T1, landsAfter): the bouts scored elsewhere keep
+// their scores. Everything stamped BEFORE the result keeps the D5 rule
 // (recorded when the result's basis holds it, else beforeBaseline). So a case
 // names its refused writes (refused): the stored match must equal the match a
 // device that never sent them would have, whichever order they arrived in.
@@ -45,7 +50,7 @@ const (
 	pmTap = "tap"    // a scoring write: refused once an earlier result is stored
 	pmEv  = "event"  // a tap on the score-events door
 	// pmCorr is a result from a screen that showed the recorded one (a
-	// correction reason, clearWithdrawal): the newer one stands, as before.
+	// correction reason, clearWithdrawal, a basis holding it): the newer one stands, as before.
 	pmCorr = "correction"
 )
 
@@ -503,7 +508,7 @@ func pmStanding(results []pmStep) pmStep {
 // carries a correction reason, so it is an explicit correction, not a rival.
 func pmDecC(at int64, d, by string) pmStep {
 	return pmStep{at: at, role: pmCorr, run: func(h mmHome) string {
-		res, _, e := h.eng.RecordDecisionWithOptions(h.compID, h.matchID, d, by, "", nil, ForceOptions{ReopenReason: "operator correction"}, at)
+		res, _, e := h.eng.RecordDecisionWithOptions(h.compID, h.matchID, d, by, "", nil, ForceOptions{Basis: &state.ScoreBasis{Seen: 1 << 20}}, at)
 		return pmWriteAnswer(res, e)
 	}}
 }
@@ -676,7 +681,7 @@ func pmCases() []pmCase {
 		{name: "dai shiro T1 / pt M-0 T2", steps: []pmStep{pmDec(t1, "daihyosen", "shiro"), pmPt(t2, M, nil)}, refused: []int{1}, want: []string{`st=completed`, `d="daihyosen" by="shiro"`}},
 		{name: "dai aka T1 / pt M-K T2 (tie)", steps: []pmStep{pmDec(t1, "daihyosen", "aka"), pmPt(t2, M, K)}, refused: []int{1}, want: []string{`st=completed`, `d="daihyosen" by="aka"`}},
 		{name: "dai aka T1 / pt 0-0 T2", steps: []pmStep{pmDec(t1, "daihyosen", "aka"), pmPt(t2, nil, nil)}, refused: []int{1}, want: []string{`st=completed`, `d="daihyosen" by="aka"`}},
-		// A newer finish over an older decision, and the other way round: the newer one stands.
+		// A finish over a decision, and the other way round: the first recorded one stands.
 		{name: "dai aka T1 / fin Ryu M-0 T2", steps: []pmStep{pmDec(t1, "daihyosen", "aka"), pmFin(t2, wrTeamA, M, nil)}, refused: []int{1}, want: []string{`st=completed`, `w="Tora"`, `d="daihyosen" by="aka"`}},
 		{name: "fin Ryu M-0 T1 / dai aka T2", steps: []pmStep{pmFin(t1, wrTeamA, M, nil), pmDec(t2, "daihyosen", "aka")}, refused: []int{1}, want: []string{`st=completed`, ryu, `d="" by=""`, `A=[M] B=[]`}},
 		{name: "pt M-0 T1 / dai aka T2", steps: []pmStep{pmPt(t1, M, nil), pmDec(t2, "daihyosen", "aka")}, want: []string{`st=completed`, `d="daihyosen" by="aka"`}},
@@ -707,11 +712,11 @@ func pmCases() []pmCase {
 		{name: "team fin Ryu(b1 A) T1 / b1 B T2 flip", team: true, steps: []pmStep{pmTeamFin(t1, wrTeamA, nil, b(1, M, nil, wrTeamA)), pmBout(t2, 1, nil, K, wrTeamB)}, refused: []int{1}, want: []string{`st=completed`, ryu}},
 		{name: "team pre b1A b2B; fin Ryu(dec only) T1 / b3 B T2", team: true, pre: preTeam, steps: []pmStep{pmTeamFin(t1, wrTeamA, nil), pmBout(t2, 3, nil, K, wrTeamB)}, refused: []int{1}, want: []string{`st=completed`, ryu}},
 		{name: "team fusensho aka T1 / b1 A T2 (the bout lands)", team: true, landsAfter: true, steps: []pmStep{pmDec(t1, "fusensho", "aka"), pmBout(t2, 1, M, nil, wrTeamA)}, want: []string{`st=completed`, `w="Tora" d="fusensho" by="aka"`, `[1 [M]-[] w="Ryu" d=""]`}},
-		// Two results: the newer one stands, whichever arrives first.
+		// Two results: the first recorded one stands, whichever arrives first.
 		{name: "kiken aka T1 -> dai shiro T2", steps: []pmStep{pmDec(t1, "kiken-injury", "aka"), pmDec(t2, "daihyosen", "shiro")}, refused: []int{1}, want: []string{`st=completed`, `d="kiken-injury" by="aka"`, `cs=[`}},
 		{name: "dai shiro T1 -> dai aka T2 (correction, saw it)", steps: []pmStep{pmDec(t1, "daihyosen", "shiro"), pmDecC(t2, "daihyosen", "aka")}, causal: [][2]int{{0, 1}}, want: []string{`st=completed`, `d="daihyosen" by="aka"`}},
 		{name: "team kiken aka T1 -> dai shiro T2", team: true, steps: []pmStep{pmDec(t1, "kiken-injury", "aka"), pmDec(t2, "daihyosen", "shiro")}, refused: []int{1}, want: []string{`st=completed`, `d="kiken-injury" by="aka"`, `cs=[`}},
-		// The older decision arriving after the newer one (round-4 finding 8).
+		// The older decision arriving after the newer one (round-4 finding 8): it is the first result, so it stands.
 		{name: "kiken aka T2 / dai shiro T1 (the first stands)", steps: []pmStep{pmDec(t1, "daihyosen", "shiro"), pmDec(t2, "kiken-injury", "aka")}, refused: []int{1}, want: []string{`st=completed`, `d="daihyosen" by="shiro"`, `cs=[]`}},
 		{name: "dai shiro T2 / dai aka T1 (the first stands)", steps: []pmStep{pmDec(t1, "daihyosen", "aka"), pmDec(t2, "daihyosen", "shiro")}, refused: []int{1}, want: []string{`st=completed`, `d="daihyosen" by="aka"`}},
 		{name: "team kiken aka T2 / dai shiro T1 (the first stands)", team: true, steps: []pmStep{pmDec(t1, "daihyosen", "shiro"), pmDec(t2, "kiken-injury", "aka")}, refused: []int{1}, want: []string{`st=completed`, `d="daihyosen" by="shiro"`, `cs=[]`}},
@@ -851,6 +856,45 @@ func TestMatchWriteExactResendIsRecorded(t *testing.T) {
 			}
 		}
 	}
+}
+
+// Kachinuki (bc-evts stage 2b, operator decision 2026-10-16, T1): its bouts are
+// a LOG with no numbered position to credit, so a closed kachinuki match is
+// closed whole, like an individual one -- the closest consistent reading of the
+// merge-by-bout rule, which credits only numbered bouts still without a result.
+// A bout appended after a kiken from a board that never saw it is turned away
+// (and kept in the history), whichever way the two arrive.
+func TestMatchWriteKachinukiClosedMatchStaysWhole(t *testing.T) {
+	run := func(t *testing.T, kikenFirst bool) (string, string) {
+		eng, store, _ := setupKachinukiComp(t, "kach-closed", 3)
+		require.NoError(t, store.SavePoolMatches("kach-closed", []state.MatchResult{{
+			ID: "Pool A-0", SideA: "Red", SideB: "White", Status: state.MatchStatusRunning, ModifiedAt: mmT0,
+			SubResults: []state.SubMatchResult{{Position: 1, SideA: "Red", SideB: "White", SideAMemberID: "r1", SideBMemberID: "w1", WinnerMemberID: "r1", Winner: "r1", IpponsA: []string{"M"}}},
+		}}))
+		h := mmHome{eng: eng, store: store, compID: "kach-closed", matchID: "Pool A-0"}
+		kiken := pmDec(mmT1, "kiken-voluntary", "shiro")
+		bout := pmStep{at: mmT2, role: pmTap, run: func(h mmHome) string {
+			w := &state.MatchResult{ID: "Pool A-0", SideA: "Red", SideB: "White", Status: state.MatchStatusRunning, ModifiedAt: mmT2,
+				Changed: []string{state.BoutGroup(2)}, WriteDoor: DoorScore,
+				SubResults: []state.SubMatchResult{{Position: 2, SideA: "Red", SideB: "White", SideAMemberID: "r1", SideBMemberID: "w2", WinnerMemberID: "r1", Winner: "r1", IpponsA: []string{"K"}}}}
+			return pmWrite(h, w)
+		}}
+		steps := []pmStep{kiken, bout}
+		if !kikenFirst {
+			steps = []pmStep{bout, kiken}
+		}
+		answers := ""
+		for _, s := range steps {
+			answers += s.run(h) + ";"
+		}
+		m := wrPoolMatch(t, store, "kach-closed")
+		return fmt.Sprintf("%s %s %v", m.Status, m.Decision, state.SubPositions(m.SubResults)), answers
+	}
+	first, a1 := run(t, true)
+	second, a2 := run(t, false)
+	assert.Equal(t, first, second, "arrival order never changes the match (%s | %s)", a1, a2)
+	assert.Equal(t, "completed kiken-voluntary [1]", first, "the bout appended after the kiken is not in the match")
+	assert.Contains(t, a1, "superseded:"+state.HeldReasonMatchClosed, "turned away as match_closed when it arrives second")
 }
 
 // TestMatchWriteReopenFastClockTapConverges: a reopen is stamped by the

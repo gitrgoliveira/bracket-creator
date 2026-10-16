@@ -227,14 +227,17 @@ func TestMerge_SameGroupClashKeepsTheOlderInHistory(t *testing.T) {
 func TestMerge_EchoOfAHeldGroupIsNotListedAsHeld(t *testing.T) {
 	bothBranches(t, func(t *testing.T, knockout bool) {
 		h := mmIndividual(t, knockout)
-		finish := mmRunning(h, mmT2)
+		finish := mmRunning(h, mmT1)
 		finish.Changed = nil
 		finish.Status = state.MatchStatusCompleted
 		finish.IpponsA, finish.IpponsB = []string{"M"}, []string{}
 		finish.Winner, finish.WinnerID = wrTeamA, wrTeamAID
 		require.NoError(t, h.write(finish))
 
-		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, mmT1)
+		// The decision is stamped AFTER the finish by a device that never saw
+		// it: the first recorded result stands (bc-evts, operator decision
+		// 2026-10-16), so the decision is held whole.
+		_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, mmT2)
 		require.ErrorIs(t, err, ErrMatchSuperseded)
 		assert.NotContains(t, HeldGroupsOf(err), state.GroupEncho, "an echo of the stored overtime is not a held change")
 		assert.Contains(t, HeldGroupsOf(err), state.GroupResult)
@@ -298,8 +301,9 @@ func TestMerge_LateKikenOlderThanAPointIsHeld(t *testing.T) {
 			assert.Empty(t, m.IpponsA)
 			assert.False(t, wrEligible(t, h.store, h.compID, wrTeamAID))
 		})
-		// A bout is not a group the decision changes: the replay closes out
-		// the one scored after the kiken all the same.
+		// A team match merges BY BOUT (operator decision 2026-10-16, T1): a
+		// bout scored on a board that never saw the kiken keeps its score; the
+		// kiken credits only the bouts with no result of their own.
 		t.Run("a team board that names only a bout", func(t *testing.T) {
 			h := mmTeam(t, knockout)
 			bout := mmRunning(h, mmT2, state.BoutGroup(2))
@@ -311,12 +315,31 @@ func TestMerge_LateKikenOlderThanAPointIsHeld(t *testing.T) {
 			m := h.load(t)
 			assert.Equal(t, state.MatchStatusCompleted, m.Status)
 			assert.Equal(t, "kiken-voluntary", m.Decision)
-			assert.Empty(t, state.SubResultAt(m.SubResults, 2).IpponsA, "the bout scored after the kiken is not in the match")
+			assert.Equal(t, []string{"K"}, state.SubResultAt(m.SubResults, 2).IpponsA, "the bout scored after the kiken keeps its score")
 			assert.False(t, wrEligible(t, h.store, h.compID, wrTeamAID))
 		})
-		// A kiken older than a stored result is the older of two results:
-		// the whole write is turned down and nobody is barred.
-		t.Run("a kiken older than the stored result is held whole", func(t *testing.T) {
+		// The FIRST recorded result stands (operator decision 2026-10-16, I1):
+		// a kiken stamped after a finish it never saw is turned down whole and
+		// nobody is barred...
+		t.Run("a kiken stamped after the stored finish is held whole", func(t *testing.T) {
+			h := mmIndividual(t, knockout)
+			finish := mmRunning(h, mmT1)
+			finish.Changed = nil
+			finish.Status = state.MatchStatusCompleted
+			finish.IpponsA, finish.IpponsB = []string{"M"}, []string{}
+			finish.Winner, finish.WinnerID = wrTeamA, wrTeamAID
+			require.NoError(t, h.write(finish))
+
+			_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, mmT2)
+			require.ErrorIs(t, err, ErrMatchSuperseded)
+			m := h.load(t)
+			assert.Equal(t, wrTeamA, m.Winner, "the first result stands")
+			assert.Empty(t, m.Decision)
+			assert.True(t, wrEligible(t, h.store, h.compID, wrTeamAID), "the competitor was never barred")
+		})
+		// ...and one stamped BEFORE the stored finish is the first: it stands
+		// and the finish, kept in the history, no longer does.
+		t.Run("a kiken stamped before the stored finish is the first result", func(t *testing.T) {
 			h := mmIndividual(t, knockout)
 			finish := mmRunning(h, mmT2)
 			finish.Changed = nil
@@ -326,11 +349,11 @@ func TestMerge_LateKikenOlderThanAPointIsHeld(t *testing.T) {
 			require.NoError(t, h.write(finish))
 
 			_, _, err := h.eng.RecordDecision(h.compID, h.matchID, "kiken-voluntary", "aka", "knee", nil, mmT1)
-			require.ErrorIs(t, err, ErrMatchSuperseded)
+			require.NoError(t, err)
 			m := h.load(t)
-			assert.Equal(t, wrTeamA, m.Winner, "the newer result stands")
-			assert.Empty(t, m.Decision)
-			assert.True(t, wrEligible(t, h.store, h.compID, wrTeamAID), "the competitor was never barred")
+			assert.Equal(t, wrTeamB, m.Winner, "the first result stands")
+			assert.Equal(t, "kiken-voluntary", m.Decision)
+			assert.False(t, wrEligible(t, h.store, h.compID, wrTeamAID), "the withdrawer is barred")
 		})
 		t.Run("a kiken made after the point applies", func(t *testing.T) {
 			h := mmIndividual(t, knockout)
@@ -439,19 +462,18 @@ func TestMerge_ScoringAfterATeamDefaultWinForABarElsewhereIsHeld(t *testing.T) {
 		{Position: 3, SideA: "r3", SideB: "t3", Winner: "t3", IpponsB: []string{"D", "M"}},
 	}
 	board.IpponsA, board.IpponsB = []string{}, []string{}
-	err := h.write(board)
-	require.ErrorIs(t, err, ErrMatchSuperseded, "nothing of the board applies")
-	held := HeldGroupsOf(err)
-	assert.Subset(t, held, []string{state.BoutGroup(2), state.BoutGroup(3)}, "every bout the board changed is held")
-	assert.NotContains(t, held, state.BoutGroup(1), "an echo of the stored bout is not a held change")
-	assert.Equal(t, state.HeldReasonMatchClosed, HeldReasonOf(err), "the default win stands, so no winner is asked for")
+	// A team match merges BY BOUT (operator decision 2026-10-16, T1): the
+	// bouts a board that never saw the fusensho scored keep their scores, and
+	// the fusensho still decides the match.
+	require.NoError(t, h.write(board), "the bouts scored elsewhere land")
 
 	m := wrPoolMatch(t, store, compID)
 	assert.Equal(t, state.MatchStatusCompleted, m.Status)
-	assert.Equal(t, "fusensho", m.Decision, "the default win stands")
+	assert.Equal(t, "fusensho", m.Decision, "the fusensho still decides the match")
 	assert.Equal(t, before.Winner, m.Winner)
-	assert.Equal(t, before.SubResults, m.SubResults, "the rows the default win padded are untouched")
-	assert.Equal(t, HoldReasonMatchClosed, h.history(t)[len(h.history(t))-1].Reason)
+	assert.Equal(t, []string{"K"}, state.SubResultAt(m.SubResults, 2).IpponsB, "the fought bout keeps its score")
+	assert.Equal(t, []string{"D", "M"}, state.SubResultAt(m.SubResults, 3).IpponsB, "the fought bout keeps its score")
+	assert.Equal(t, before.SubResults[0], m.SubResults[0], "an echo of the stored bout changes nothing")
 }
 
 // bc-mrgc Finding 3 (a regression): holdScoring only holds groups
@@ -767,13 +789,16 @@ func TestMerge_ScoringAfterATeamWithdrawalClearsIt(t *testing.T) {
 		{Position: 3, SideA: "r3", SideB: "t3", Winner: "t3", IpponsB: []string{"D", "M"}},
 	}
 	board.IpponsA, board.IpponsB = []string{}, []string{}
-	require.ErrorIs(t, h.write(board), ErrMatchSuperseded, "the bouts scored after the withdrawal are turned away")
+	// The bouts scored on a board that never saw the withdrawal keep their
+	// scores (merge by bout, operator decision 2026-10-16, T1); the
+	// withdrawal still decides the match and the competitor stays barred.
+	require.NoError(t, h.write(board))
 
 	m := wrPoolMatch(t, store, compID)
 	assert.Equal(t, state.MatchStatusCompleted, m.Status)
 	assert.Equal(t, "kiken-voluntary", m.Decision)
 	assert.Equal(t, before.Winner, m.Winner)
-	assert.Equal(t, before.SubResults, m.SubResults)
+	assert.Equal(t, []string{"K"}, state.SubResultAt(m.SubResults, 2).IpponsB)
 	assert.False(t, wrEligible(t, store, compID, wrTeamAID))
 }
 
@@ -928,11 +953,15 @@ func TestMerge_FinishIsAtomicWithTheScorelineItStoodOn(t *testing.T) {
 		correction := mmRunning(h, mmT3, state.GroupResult)
 		correction.Status = state.MatchStatusCompleted
 		correction.Winner, correction.WinnerID = wrTeamB, wrTeamBID
+		correction.CorrectionReason = "hantei call" // a screen that showed the finish
 		require.NoError(t, h.write(correction))
 
-		// Device B's queued Finish from T2: stamped before the correction,
-		// carrying a different scoreline than the one the correction judged.
+		// Device B's queued correction from T2: stamped before the T3 one,
+		// carrying a different scoreline than the one that one judged. (A
+		// plain Finish from a device that never saw the first would be turned
+		// away whole: the first recorded result stands.)
 		late := mmRunning(h, mmT2)
+		late.CorrectionReason = "recount"
 		late.Changed = nil
 		late.Status = state.MatchStatusCompleted
 		late.IpponsA, late.IpponsB = []string{"M"}, []string{"K"}
@@ -951,12 +980,14 @@ func TestMerge_FinishIsAtomicWithTheScorelineItStoodOn(t *testing.T) {
 		o := mmIndividual(t, knockout)
 		require.NoError(t, o.write(finishCopy(o, mmT1)))
 		lateO := mmRunning(o, mmT2)
+		lateO.CorrectionReason = "recount"
 		lateO.Changed = nil
 		lateO.Status = state.MatchStatusCompleted
 		lateO.IpponsA, lateO.IpponsB = []string{"M"}, []string{"K"}
 		lateO.Winner, lateO.WinnerID = wrTeamA, wrTeamAID
 		require.NoError(t, o.write(lateO))
 		corrO := mmRunning(o, mmT3, state.GroupResult)
+		corrO.CorrectionReason = "hantei call"
 		corrO.Status = state.MatchStatusCompleted
 		corrO.Winner, corrO.WinnerID = wrTeamB, wrTeamBID
 		require.NoError(t, o.write(corrO))

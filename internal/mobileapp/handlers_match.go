@@ -2955,7 +2955,26 @@ type correctionCheck struct {
 // reads the snapshot ONCE for every guard of the write (the self-run judge or
 // the pick judge, then this), and the start gate after it reads the returned
 // status instead.
-func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult, comp *state.Competition) correctionCheck {
+// seenResultCheck lets applyCorrectionReason ask the match's score log whether a
+// reason-less finish's basis holds a result the log recorded (engine.BasisSawResult).
+// Only the score door passes one: bulk-score is an organiser's tool and is never
+// the rival of a result, so it keeps asking every overwrite for its reason.
+type seenResultCheck struct {
+	stx             state.StoreTx
+	compID, matchID string
+}
+
+// sawResult reports whether basis holds a recorded result. A log that cannot be
+// read answers yes, which keeps the reason requirement (fail closed).
+func (c *seenResultCheck) sawResult(basis *state.ScoreBasis) bool {
+	lines, err := c.stx.LoadScoreLog(c.compID, c.matchID)
+	if err != nil {
+		return true
+	}
+	return engine.BasisSawResult(lines, basis)
+}
+
+func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult, comp *state.Competition, score *seenResultCheck) correctionCheck {
 	r.ReopenPending = snap.ReopenPending
 	if r.Status == state.MatchStatusCompleted && snap.Status == state.MatchStatusCompleted {
 		// A finish made BEFORE the stored result (a queued Finish replayed
@@ -2981,6 +3000,20 @@ func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult, comp *state
 			return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision}
 		}
 		if r.CorrectionReason == "" {
+			// A finish from a device that never saw the recorded result is no
+			// correction either, and asking it for a reason would be refusing
+			// it with a 400 a queued replay could never answer (operator
+			// decision 2026-10-16, I1): the first recorded result stands, and
+			// the replay turns the finish away as match_closed and keeps it in
+			// the history. Only a write that names a clearWithdrawal, or whose
+			// basis holds the result, claims to have seen it. One stamped no
+			// later than the result (an equal stamp may be the same board
+			// changing its own finish) or with no stamp of its own (the
+			// server's, which the replay never turns away) still needs its
+			// reason.
+			if score != nil && r.ModifiedAt > snap.ResultStamp && !r.ClearsWithdrawal && !score.sawResult(r.Basis) {
+				return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision}
+			}
 			return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision, Reject: missingCorrectionReasonError()}
 		}
 		return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision}
@@ -3023,7 +3056,7 @@ func applyCorrectionReasonUnderTx(stx state.StoreTx, compID, matchID string, r *
 	if err != nil {
 		return correctionCheck{}, matchSnapshot{}, err
 	}
-	return applyCorrectionReason(snap, r, comp), snap, nil
+	return applyCorrectionReason(snap, r, comp, nil), snap, nil
 }
 
 // missingCorrectionReasonError is the refusal for overwriting a completed
@@ -3543,7 +3576,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// runs inside the tx so the is-completed read is race-free (same
 				// lock), over the snapshot read above, and the status it returns
 				// is reused by the start gate below.
-				check := applyCorrectionReason(snap, result, comp)
+				check := applyCorrectionReason(snap, result, comp, &seenResultCheck{stx: stx, compID: id, matchID: mid})
 				existingStatus := check.StoredStatus
 				if check.Reject != nil {
 					engErr = check.Reject

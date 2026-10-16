@@ -1275,7 +1275,10 @@ func shapeScoreWrite(comp *state.Competition, prior, result *state.MatchResult, 
 		// still pad, since preserveWithdrawalRuling reinstates prior.Decision
 		// downstream regardless of which of the two the correction sent.
 		padDecision := result.Decision
-		if KeepsWithdrawalRuling(prior.Status, prior.Decision, result) {
+		// A finish that names no correction is a rival of the ruling, not a
+		// correction of it (rivalResult): it either loses to the ruling or
+		// displaces it, so it keeps nothing and pads nothing of its own.
+		if KeepsWithdrawalRuling(prior.Status, prior.Decision, result) && !writesAsRival(result) {
 			padDecision = prior.Decision
 		}
 		if state.NeedsDefaultWinBoutPadding(result.Status, padDecision, prior.SideA, prior.SideB, matchID,

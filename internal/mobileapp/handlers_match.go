@@ -2965,19 +2965,23 @@ type seenResultCheck struct {
 }
 
 // sawResult reports whether basis holds a recorded result. A log that cannot be
-// read answers false with the error: the caller judges the write as one whose
-// basis did not see the result (the engine reads that log as empty too), so it
-// reaches the engine and ends in the match's history. The fault is logged here
-// with the file and line the error names.
-func (c *seenResultCheck) sawResult(basis *state.ScoreBasis) (bool, error) {
+// read answers false: the caller judges the write as one whose basis did not
+// see the result (the engine reads that log as empty too), so it reaches the
+// engine and ends in the match's history. Every read error is logged here,
+// naming the file and line when the error carries them.
+func (c *seenResultCheck) sawResult(basis *state.ScoreBasis) bool {
 	lines, err := c.stx.LoadScoreLog(c.compID, c.matchID)
 	if err != nil {
-		if errors.Is(err, state.ErrScoreLogUnreadable) {
-			log.Printf("mobileapp: ERROR: match %s/%s: %v", c.compID, c.matchID, err)
-		}
-		return false, err
+		log.Printf("mobileapp: ERROR: match %s/%s: score log not read: %v", c.compID, c.matchID, err)
+		return false
 	}
-	return engine.BasisSawResult(lines, basis), nil
+	return engine.BasisSawResult(lines, basis)
+}
+
+// logReadable reports whether the match's score log can be read at all.
+func (c *seenResultCheck) logReadable() bool {
+	_, err := c.stx.LoadScoreLog(c.compID, c.matchID)
+	return err == nil
 }
 
 func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult, comp *state.Competition, score *seenResultCheck) correctionCheck {
@@ -3022,7 +3026,13 @@ func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult, comp *state
 				// not see the result: the engine reads it as empty too, and the
 				// write then ends in the match's history, which is a separate
 				// file, instead of being dropped before it gets there.
-				if saw, _ := score.sawResult(r.Basis); !saw {
+				if !score.sawResult(r.Basis) {
+					if !score.logReadable() {
+						// The engine reads this log as empty, so a basis naming lines of
+						// it means nothing: the write is judged, and logged, as one that
+						// sent none.
+						r.Basis = nil
+					}
 					return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision}
 				}
 			}

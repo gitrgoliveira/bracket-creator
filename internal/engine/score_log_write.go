@@ -54,7 +54,7 @@ const (
 	EventMessageNotStarted    = "This match has not started yet, so the tap was not scored. Start the match to score it."
 	EventMessageSentBack      = "The match was sent back to the queue, so the tap was not scored. Start the match again to score it."
 	EventMessageNotRunning    = "This match is not running, so the tap was not scored. Start the match to score it."
-	EventMessageLogUnreadable = "This match's score log cannot be read, so nothing from this device was saved. The organiser needs to check the tournament data."
+	EventMessageLogUnreadable = "This match's score log cannot be read, so this tap was not applied; it is kept in the match history. The organiser needs to check the tournament data."
 )
 
 // EventRefusal is why the door's caller refuses one event (the self-run
@@ -137,10 +137,15 @@ func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, r
 		// Never a 5xx: the device's outbox retries those for ever, and this
 		// one cannot be cured by retrying. The error names the file and line.
 		log.Printf("engine: ERROR: match %s/%s: %v", compID, matchID, err)
+		turnedAway := make([]int, 0, len(req.Events))
 		for i, ev := range req.Events {
 			res.Answers[i] = ScoreEventAnswer{ID: ev.ID, Outcome: domain.ScoreOutcomeRefused,
 				Reason: EventReasonLogUnreadable, Message: EventMessageLogUnreadable}
+			turnedAway = append(turnedAway, i)
 		}
+		// The history is a separate file: the taps are kept there even though
+		// the log that would hold them is not readable.
+		e.recordEventHistory(tx, compID, matchID, req.Events, e.unrecordedTurnedAway(tx, compID, matchID, req, turnedAway, res.Answers), res.Answers)
 		res.Match = e.storedForAnswer(tx, compID, matchID, stored, inPool)
 		return res, nil
 	}

@@ -466,3 +466,43 @@ func TestScoreEvents_NotStartedWordingFollowsTheQueueSendBack(t *testing.T) {
 	assert.Equal(t, EventReasonSentBack, res.Answers[0].Reason)
 	assert.Equal(t, EventMessageSentBack, res.Answers[0].Message)
 }
+
+// bc-evts stage 2b review round 8: an event refused because the log cannot be
+// read is still kept in the match's history (a separate file), one line per
+// event and answer; an exact resend adds none, and an anonymous self-run
+// caller (NoTurnedAwayHistory) gets none at all.
+func TestScoreEvents_UnreadableLogRefusalIsKeptInTheHistory(t *testing.T) {
+	eng, store, dir := slwSetup(t)
+	now := time.Now().UnixMilli()
+	slwPost(t, eng, slwMatch, slwEvent("e1", 1, now-1000, domain.ScoreIpponAdd, domain.ScoreSideA, "M"))
+	logPath := filepath.Join(dir, "competitions", slwComp, "events", "Pool%20A-0.jsonl")
+	require.NoError(t, os.WriteFile(logPath, []byte("{not json\n"), 0o600))
+	before, err := store.LoadMatchHistory(slwComp, slwMatch)
+	require.NoError(t, err)
+
+	ev := slwEvent("e2", 2, now, domain.ScoreIpponAdd, domain.ScoreSideA, "K")
+	res := slwPost(t, eng, slwMatch, ev)
+	assert.Equal(t, EventReasonLogUnreadable, res.Answers[0].Reason)
+	assert.NotContains(t, res.Answers[0].Message, "nothing from this device was saved")
+	assert.Contains(t, res.Answers[0].Message, "match history")
+	after, err := store.LoadMatchHistory(slwComp, slwMatch)
+	require.NoError(t, err)
+	require.Len(t, after, len(before)+1, "the refused tap reaches the match history")
+	last := after[len(after)-1]
+	require.NotNil(t, last.Event)
+	assert.Equal(t, "e2", last.Event.ID)
+	assert.Equal(t, domain.ScoreOutcomeRefused, last.EventOutcome)
+	assert.Equal(t, EventReasonLogUnreadable, last.Reason)
+
+	slwPost(t, eng, slwMatch, ev)
+	again, err := store.LoadMatchHistory(slwComp, slwMatch)
+	require.NoError(t, err)
+	assert.Len(t, again, len(after), "an exact resend adds no line")
+
+	_, err = eng.RecordScoreEvents(slwComp, slwMatch, ScoreEventsRequest{Session: "evs", NoTurnedAwayHistory: true,
+		Events: []domain.ScoreEvent{slwEvent("e3", 3, now+1, domain.ScoreIpponAdd, domain.ScoreSideA, "D")}})
+	require.NoError(t, err)
+	anon, err := store.LoadMatchHistory(slwComp, slwMatch)
+	require.NoError(t, err)
+	assert.Len(t, anon, len(after), "an anonymous caller's refusal leaves no line")
+}

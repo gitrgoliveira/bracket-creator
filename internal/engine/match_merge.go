@@ -548,6 +548,10 @@ func mergeByReplay(stored, incoming *state.MatchResult, changed []string, stamp 
 	switch {
 	case incoming.Basis != nil:
 		basis = *incoming.Basis
+		// Only lines the log really holds can have been seen: the migration
+		// baseline minted above for an empty (or unreadable) log is no line a
+		// device saw.
+		basis.Seen = min(basis.Seen, len(mc.lines))
 	case doorOf(incoming) == DoorScore || doorOf(incoming) == DoorBulkScore:
 		// A write the client built says nothing of the events it saw, so
 		// none is called recorded: Seen is unknown, not "all of them".

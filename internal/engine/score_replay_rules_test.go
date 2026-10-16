@@ -524,7 +524,7 @@ func TestReplay_LazyMigration(t *testing.T) {
 		assert.Empty(t, b.Stamps)
 		r := ReplayScoring(m, append(migrated(m), evLine("e", 5, domain.ScoreIpponAdd, 0, "b", "K")), ReplayShape{})
 		assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("e"))
-		assert.Equal(t, []string{"b:m0:0:a:0"}, r.Match.MarkIDs.A)
+		assert.Equal(t, []string{"b:0:a:M:0"}, r.Match.MarkIDs.A)
 	})
 	t.Run("stamped: an older event is before it", func(t *testing.T) {
 		m := runningIndividual()
@@ -656,14 +656,14 @@ func TestAssignMarks_OrderedValueMatch(t *testing.T) {
 	}{
 		{"same", []string{"M", "K"}, []string{"e1", "e2"}, []string{"M", "K"}, []string{"e1", "e2"}},
 		{"first removed", []string{"M", "K"}, []string{"e1", "e2"}, []string{"K"}, []string{"e2"}},
-		{"inserted in front", []string{"K"}, []string{"e2"}, []string{"M", "K"}, []string{"b:x:0:a:0", "e2"}},
+		{"inserted in front", []string{"K"}, []string{"e2"}, []string{"M", "K"}, []string{"b:0:a:M:0", "e2"}},
 		{"repeated letter keeps the earliest", []string{"M", "M"}, []string{"e1", "e2"}, []string{"M"}, []string{"e1"}},
 		{"placeholder", []string{"M"}, []string{"e1"}, []string{domain.IpponPlaceholder, "M"}, []string{"", "e1"}},
-		{"an unnamed previous mark gets a new id", []string{"M"}, []string{""}, []string{"M"}, []string{"b:x:0:a:0"}},
+		{"an unnamed previous mark gets a new id", []string{"M"}, []string{""}, []string{"M"}, []string{"b:0:a:M:0"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			assert.Equal(t, c.want, assignMarks(c.prev, c.prevMarks, c.next, "x", 0, domain.ScoreSideA))
+			assert.Equal(t, c.want, assignMarks(c.prev, c.prevMarks, c.next, 0, domain.ScoreSideA))
 		})
 	}
 }
@@ -714,7 +714,7 @@ func TestReplay_FirstBaselineTakesNoIDsFromTheCache(t *testing.T) {
 	m := runningIndividual()
 	m.IpponsA = []string{"M"}
 	lines := append(migrated(m),
-		removeLine("e1", 20, "b:m0:0:a:0"),
+		removeLine("e1", 20, "b:0:a:M:0"),
 		evLine("e5", 30, domain.ScoreIpponAdd, 0, "a", "M"),
 		evLine("e6", 40, domain.ScoreEnchoAdd, 0, "", ""),
 	)
@@ -738,7 +738,7 @@ func TestReplay_ChainedStepsMatchAFreshReplay(t *testing.T) {
 	lines := append(migrated(m),
 		evLine("a1", 20, domain.ScoreIpponAdd, 0, "a", "M"),
 		evLine("b1", 21, domain.ScoreIpponAdd, 0, "b", "D"),
-		removeLine("rb", 22, "b:m0:0:b:0"),
+		removeLine("rb", 22, "b:0:b:K:0"),
 		evLine("f1", 23, domain.ScoreFoulAdd, 0, "a", ""),
 		baseLine(&after, "c", 30, state.ScoreBasis{Own: []string{"a1", "b1"}}, state.GroupPoints),
 		evLine("x1", 35, domain.ScoreIpponAdd, 0, "a", "K"),

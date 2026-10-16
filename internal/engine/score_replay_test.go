@@ -126,7 +126,7 @@ func TestReplayScoring_HeadlineEveryArrivalOrder(t *testing.T) {
 			assert.Equal(t, []string{"M"}, got.IpponsA, "order %v", order)
 			assert.Empty(t, got.IpponsB, "order %v", order)
 			require.NotNil(t, got.MarkIDs, "order %v", order)
-			assert.Equal(t, []string{"b:m0:0:a:0"}, got.MarkIDs.A, "order %v", order)
+			assert.Equal(t, []string{"b:0:a:M:0"}, got.MarkIDs.A, "order %v", order)
 			assert.Equal(t, int64(100), got.Stamps[state.GroupPoints], "order %v", order)
 			assert.Equal(t, int64(100), got.Stamps[state.GroupResult], "order %v", order)
 			assert.Equal(t, domain.ScoreOutcomeMatchClosed, outcomeOf(r, "e1"), "order %v", order)

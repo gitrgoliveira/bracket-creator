@@ -796,6 +796,12 @@ type MergeReport struct {
 	// write needed ahead of the write's own baseline (the match's migration
 	// baseline, or a drift baseline): the door logs them first.
 	LogPrefix []ScoreLogLine
+	// Prior is the match as it was stored before the write (a copy), set when
+	// the write was decided by the replay over a log that had lines: the door
+	// reads the outcome each earlier event had at its own arrival from it, so
+	// a move the write causes (a tap that found no bout row, and finds one
+	// the write pads) is recorded.
+	Prior *MatchResult `json:"-"`
 }
 
 // Superseded reports whether nothing of the write applied: a group it

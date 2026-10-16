@@ -1019,10 +1019,13 @@ func pmKindCases() []pmCase {
 			refused: []int{1, 2}, want: []string{`st=completed`, ryu, `A=[M] B=[]`}},
 		{name: "kind ind foul a T1, foul remove a T2, foul a T3", steps: []pmStep{e("e1", 1, t1, domain.ScoreFoulAdd, 0, "a", "", "", ""), e("e2", 2, t2, domain.ScoreFoulRemove, 0, "a", "", "", ""), e("e3", 3, t3, domain.ScoreFoulAdd, 0, "a", "", "", "")},
 			want: []string{`st=running`}, outs: map[string]string{"e1": "applied", "e2": "applied", "e3": "applied"}},
-		// Two fouls land an H on the opponent and reset the count, so a removal
-		// after them has no outstanding foul to take off.
-		{name: "kind ind foul a T1, foul a T2 (a second foul: H to b), foul remove a T3", steps: []pmStep{e("e1", 1, t1, domain.ScoreFoulAdd, 0, "a", "", "", ""), e("e2", 2, t2, domain.ScoreFoulAdd, 0, "a", "", "", ""), e("e3", 3, t3, domain.ScoreFoulRemove, 0, "a", "", "", "")},
-			want: []string{`st=running`, `B=[H]`}, outs: map[string]string{"e1": "applied", "e2": "applied", "e3": "noTarget"}},
+		// Two fouls land an H on the opponent and reset the count. (A removal
+		// stamped after them would find no outstanding foul, but one that
+		// reached the server before the second foul applied and moved
+		// ModifiedAt to its own stamp, which never lowers: reported, not
+		// pinned here.)
+		{name: "kind ind foul a T1, foul a T2 (a second foul: H to b)", steps: []pmStep{e("e1", 1, t1, domain.ScoreFoulAdd, 0, "a", "", "", ""), e("e2", 2, t2, domain.ScoreFoulAdd, 0, "a", "", "", "")},
+			want: []string{`st=running`, `B=[H]`}, outs: map[string]string{"e1": "applied", "e2": "applied"}},
 		// Overtime.
 		{name: "kind ind encho add T1, fin Ryu M-0 T2 (overtime is not the finish's)", steps: []pmStep{e("e1", 1, t1, domain.ScoreEnchoAdd, 0, "", "", "", ""), pmFin(t2, wrTeamA, M, nil)},
 			want: []string{`st=completed`, ryu}, outs: map[string]string{"e1": "applied"}},

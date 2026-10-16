@@ -133,26 +133,7 @@ func repBoutHanteiRecorded(stored *state.MatchResult) bool {
 // written as a refusal the device is told about, or false for a fault (the
 // request then answers 500).
 func eventWriteRefusal(err error) (reason, message string, ok bool) {
-	var played *engine.DownstreamKnockoutPlayedError
-	var running *engine.DownstreamKnockoutRunningError
-	var verr *engine.ValidationError
-	var already *engine.AlreadyIneligibleError
-	var inelig *engine.IneligibleCompetitorError
-	switch {
-	case errors.As(err, &played):
-		return "downstream_knockout_played", played.Error(), true
-	case errors.As(err, &running):
-		return "downstream_knockout_running", running.Error(), true
-	case errors.As(err, &already):
-		return "already_ineligible", already.Error(), true
-	case errors.As(err, &inelig):
-		return "ineligible_competitor", inelig.Error(), true
-	case errors.Is(err, engine.ErrMatchSideMismatch):
-		return "side_mismatch", "The competitors of this match changed. Close the score sheet and open it again.", true
-	case errors.As(err, &verr):
-		return "invalid", verr.Error(), true
-	}
-	return "", "", false
+	return engine.EventWriteRefusal(err)
 }
 
 // registerScoreEventsHandler wires the score-events door. It shares the score

@@ -2904,6 +2904,10 @@ type correctionCheck struct {
 	StoredDecision            string
 	Reject                    *ValidationError
 	ClearBracketReopenPending bool
+	// LogErr is why the score log could not be asked whether the write saw
+	// the stored result (an unreadable log). The handler answers it as the
+	// score-events door does, a 200 refusal, never a 400 for a reason.
+	LogErr error
 }
 
 // applyCorrectionReason applies the correction-reason audit policy to r over
@@ -2966,12 +2970,19 @@ type seenResultCheck struct {
 
 // sawResult reports whether basis holds a recorded result. A log that cannot be
 // read answers yes, which keeps the reason requirement (fail closed).
-func (c *seenResultCheck) sawResult(basis *state.ScoreBasis) bool {
+func (c *seenResultCheck) sawResult(basis *state.ScoreBasis) (bool, error) {
 	lines, err := c.stx.LoadScoreLog(c.compID, c.matchID)
 	if err != nil {
-		return true
+		// Not a 400 asking for a reason (the device's outbox would loop on
+		// it) and not a 5xx: the caller answers the 200 refusal the
+		// score-events door gives a log it cannot read, and the fault is
+		// logged here with the file and line the error names.
+		if errors.Is(err, state.ErrScoreLogUnreadable) {
+			log.Printf("mobileapp: ERROR: match %s/%s: %v", c.compID, c.matchID, err)
+		}
+		return false, err
 	}
-	return engine.BasisSawResult(lines, basis)
+	return engine.BasisSawResult(lines, basis), nil
 }
 
 func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult, comp *state.Competition, score *seenResultCheck) correctionCheck {
@@ -3011,8 +3022,14 @@ func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult, comp *state
 			// changing its own finish) or with no stamp of its own (the
 			// server's, which the replay never turns away) still needs its
 			// reason.
-			if score != nil && r.ModifiedAt > snap.ResultStamp && !r.ClearsWithdrawal && !score.sawResult(r.Basis) {
-				return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision}
+			if score != nil && r.ModifiedAt > snap.ResultStamp && !r.ClearsWithdrawal {
+				saw, err := score.sawResult(r.Basis)
+				if err != nil {
+					return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision, LogErr: err}
+				}
+				if !saw {
+					return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision}
+				}
 			}
 			return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision, Reject: missingCorrectionReasonError()}
 		}
@@ -3582,6 +3599,10 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 					engErr = check.Reject
 					return nil
 				}
+				if check.LogErr != nil {
+					engErr = check.LogErr
+					return nil
+				}
 				// bc-tmfn: the team finish gate's in-tx half (see the
 				// refusal computed before the court lock above).
 				if refusal := teamFinishRefusalUnderTx(finishRefusal, check, result); refusal != nil {
@@ -3676,6 +3697,13 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			return
 		}
 		if engErr != nil {
+			if errors.Is(engErr, state.ErrScoreLogUnreadable) {
+				// Never a 4xx or 5xx: the device's outbox retries those for
+				// ever and a retry cannot cure this. The 200 refusal is the one
+				// the score-events door gives (the file is in the ERROR log).
+				c.JSON(http.StatusOK, gin.H{"applied": false, "reason": engine.EventReasonLogUnreadable, "message": engine.EventMessageLogUnreadable})
+				return
+			}
 			if errors.Is(engErr, engine.ErrMatchSuperseded) {
 				// bc-lww1: the timestamp guard dropped this write because a NEWER
 				// result is already stored. Nothing was persisted, so everything

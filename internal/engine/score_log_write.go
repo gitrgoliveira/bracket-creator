@@ -229,8 +229,13 @@ func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, r
 	status, werr := e.RecordMatchResultWithIneligibilityTx(tx, compID, matchID, &derived)
 	if werr != nil {
 		res.WriteErr = werr
+		// The refusal code is on the answer before the history line is
+		// written from it, so the stored line says why the tap changed
+		// nothing (a fault has no code to give, and its transaction aborts).
+		reason, message, _ := EventWriteRefusal(werr)
 		for _, i := range take {
 			res.Answers[i].Outcome = domain.ScoreOutcomeRefused
+			res.Answers[i].Reason, res.Answers[i].Message = reason, message
 		}
 		e.recordEventHistory(tx, compID, matchID, req.Events, e.unrecordedTurnedAway(tx, compID, matchID, req, append(turnedAway, take...), res.Answers), res.Answers)
 		res.Gaps = ScoreLogGaps(lines)[req.Session]
@@ -273,6 +278,34 @@ func (e *Engine) RecordScoreEvents(compID, matchID string, req ScoreEventsReques
 
 // storedForAnswer is the match as the transaction now holds it (prior when
 // given), with a bracket match's court and schedule filled in.
+// EventWriteRefusal reads why the match the replay derived could not be
+// written as a refusal the device is told about (the reason code and the
+// sentence), or false for a fault (the request then answers 500). The score
+// events door answers with it, and the history line kept for the tap carries
+// the same code.
+func EventWriteRefusal(err error) (reason, message string, ok bool) {
+	var played *DownstreamKnockoutPlayedError
+	var running *DownstreamKnockoutRunningError
+	var verr *ValidationError
+	var already *AlreadyIneligibleError
+	var inelig *IneligibleCompetitorError
+	switch {
+	case errors.As(err, &played):
+		return "downstream_knockout_played", played.Error(), true
+	case errors.As(err, &running):
+		return "downstream_knockout_running", running.Error(), true
+	case errors.As(err, &already):
+		return "already_ineligible", already.Error(), true
+	case errors.As(err, &inelig):
+		return "ineligible_competitor", inelig.Error(), true
+	case errors.Is(err, ErrMatchSideMismatch):
+		return "side_mismatch", "The competitors of this match changed. Close the score sheet and open it again.", true
+	case errors.As(err, &verr):
+		return "invalid", verr.Error(), true
+	}
+	return "", "", false
+}
+
 func (e *Engine) storedForAnswer(tx state.StoreTx, compID, matchID string, prior *state.MatchResult, inPool bool) *state.MatchResult {
 	if prior == nil {
 		m, pool, err := e.lookupExistingResultIn(tx, compID, matchID)
@@ -333,7 +366,13 @@ func (e *Engine) recordMovedOutcomes(h state.StoreTx, compID, matchID string, li
 		}
 		seen[o.ID] = true
 		moved = append(moved, o.ID)
-		e.appendEventLine(h, compID, matchID, *lines[o.Line].Event, o.Outcome, reason)
+		why := reason
+		if o.Outcome == domain.ScoreOutcomeMatchClosed {
+			// A tap a later-arriving finish closes out reads as the same
+			// refusal as one that arrived after it, whatever write moved it.
+			why = state.HeldReasonMatchClosed
+		}
+		e.appendEventLine(h, compID, matchID, *lines[o.Line].Event, o.Outcome, why)
 	}
 	return moved
 }
@@ -356,6 +395,10 @@ type writeBaseline struct {
 	// sent is the baseline the replay judged for the write
 	// (MergeReport.Baseline): logged as it was made, whatever became of it.
 	sent *state.ScoreBaseline
+	// prior is the match as it was stored before the write
+	// (MergeReport.Prior): the outcomes the earlier events had then are the
+	// ones a move is recorded against. Nil reads them off the written match.
+	prior *state.MatchResult
 }
 
 // baselineNote is what noteWriteBaseline appended: the replayed match (the
@@ -379,7 +422,7 @@ func (e *Engine) recordLandedWriteHistory(h state.StoreTx, compID, matchID strin
 		door: doorOf(result), stamp: rep.Stamp, named: rep.Applied,
 		writeID: result.WriteID, basis: result.Basis,
 		prefix: rep.LogPrefix, revSession: result.RevSession, rev: result.Rev,
-		sent: sentBaseline(rep),
+		sent: sentBaseline(rep), prior: rep.Prior,
 	})
 	if note == nil {
 		return
@@ -602,7 +645,13 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 		e.takeReplayDerived(h, compID, matchID, inPool, &after.Match)
 	}
 	note := &baselineNote{match: after.Match}
-	for _, id := range e.recordMovedOutcomes(h, compID, matchID, lines, before, after, movedReason) {
+	was := before
+	if wb.prior != nil {
+		// The outcomes at the earlier events' own arrival: a bout row the
+		// write pads is not there yet for a tap that came first.
+		was = ReplayScoring(wb.prior, lines, shape)
+	}
+	for _, id := range e.recordMovedOutcomes(h, compID, matchID, lines, was, after, movedReason) {
 		if after.Outcome(id) == domain.ScoreOutcomeBeforeBaseline {
 			note.notApplied = append(note.notApplied, id)
 		}

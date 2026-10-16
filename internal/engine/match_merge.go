@@ -471,11 +471,27 @@ func olderRevisionThanLogged(lines []state.ScoreLogLine, session string, rev int
 // change the write's result closed out of the match is displaced (the
 // closed-match rule, in the other arrival order). The lines the replay needed ahead of the write's own ride on the
 // report (LogPrefix), for the door's baseline to log first.
+// priorMatch is a copy of the stored match that later writes to it cannot
+// reach (MergeReport.Prior).
+func priorMatch(m *state.MatchResult) *state.MatchResult {
+	p := *m
+	p.IpponsA, p.IpponsB = slices.Clone(m.IpponsA), slices.Clone(m.IpponsB)
+	p.SubResults = state.CloneSubResults(m.SubResults)
+	p.Encho = m.Encho.Clone()
+	p.GroupStamps = state.CloneGroupStamps(m.GroupStamps)
+	p.MarkIDs = m.MarkIDs.Clone()
+	p.ClearRequestFields()
+	return &p
+}
+
 func mergeByReplay(stored, incoming *state.MatchResult, changed []string, stamp int64, mc mergeCtx, payloadPickA, payloadPickB string, removalWrite bool) *state.MergeReport {
 	rep := &state.MergeReport{Stamp: stamp, Changed: changed, Replayed: true}
 	shape := ReplayShape{Comp: mc.comp, Knockout: mc.knockout}
 	now := serverNowMs()
 	lines := mc.lines
+	if len(lines) > 0 {
+		rep.Prior = priorMatch(stored)
+	}
 	if len(lines) == 0 {
 		mb := MigrationBaseline(stored, MigrationDoor+"-0", now)
 		lines = []state.ScoreLogLine{{Baseline: &mb}}

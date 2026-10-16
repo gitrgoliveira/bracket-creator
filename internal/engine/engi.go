@@ -83,6 +83,10 @@ func engiFinishProbe(prior, result *state.MatchResult) state.MatchResult {
 	p.Changed = append([]string(nil), engiChangedGroups...)
 	p.WriteDoor = doorEngi
 	p.RevSession = result.RevSession
+	// The finish's basis rides on the probe, or the merge report's baseline
+	// would read as one that saw nothing and a tap its writer's screen showed
+	// would end beforeBaseline or recorded by arrival order.
+	p.Basis = result.Basis
 	return p
 }
 

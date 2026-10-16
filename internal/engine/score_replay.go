@@ -641,15 +641,15 @@ func (rp *replayer) applyBaselineGroups(line int, b *state.ScoreBaseline, groups
 		switch {
 		case g == state.GroupPoints:
 			m.MarkIDs = markIDsOf(m.IpponsA, m.IpponsB,
-				assignMarks(prevA, prevMA, m.IpponsA, b.ID, 0, domain.ScoreSideA),
-				assignMarks(prevB, prevMB, m.IpponsB, b.ID, 0, domain.ScoreSideB))
+				assignMarks(prevA, prevMA, m.IpponsA, 0, domain.ScoreSideA),
+				assignMarks(prevB, prevMB, m.IpponsB, 0, domain.ScoreSideB))
 		case isBout:
 			delete(rp.cur.bouts, pos)
 			for i := range m.SubResults {
 				if row := &m.SubResults[i]; row.Position == pos {
 					row.MarkIDs = markIDsOf(row.IpponsA, row.IpponsB,
-						assignMarks(prevA, prevMA, row.IpponsA, b.ID, pos, domain.ScoreSideA),
-						assignMarks(prevB, prevMB, row.IpponsB, b.ID, pos, domain.ScoreSideB))
+						assignMarks(prevA, prevMA, row.IpponsA, pos, domain.ScoreSideA),
+						assignMarks(prevB, prevMB, row.IpponsB, pos, domain.ScoreSideB))
 				}
 			}
 		}
@@ -932,8 +932,9 @@ func keepEntries(ippons, marks []string, keep func(string) bool) ([]string, []st
 // the ids that survive, the earliest copy keeps its id: the walk matches left
 // to right, so [M M] before and [M] after keeps the first M's id and drops the
 // second's. A new mark, or one whose earlier copy
-// had no id, is b:<line>:<pos>:<side>:<i>; a placeholder slot has none.
-func assignMarks(prev, prevMarks, next []string, lineID string, pos int, side string) []string {
+// had no id, is b:<pos>:<side>:<letter>:<n> (markID), the same in every arrival
+// order; a placeholder slot has none.
+func assignMarks(prev, prevMarks, next []string, pos int, side string) []string {
 	isMark := func(v string) bool { return v != "" && v != domain.IpponPlaceholder }
 	same := func(i, j int) bool { return isMark(next[j]) && prev[i] == next[j] }
 	// lcs[i][j] is the length of the longest common subsequence of prev[i:]
@@ -966,12 +967,44 @@ func assignMarks(prev, prevMarks, next []string, lineID string, pos int, side st
 			j++
 		}
 	}
-	for j, v := range next {
-		if isMark(v) && out[j] == "" {
-			out[j] = "b:" + lineID + ":" + strconv.Itoa(pos) + ":" + side + ":" + strconv.Itoa(j)
+	// A mark no earlier mark accounts for is minted an id from what it IS
+	// (the bout, the side, the strike and how many of that strike the side
+	// holds before it), never from the baseline that introduced it: which
+	// baseline that is depends on the order writes arrived in (an older save
+	// of the same mark arriving later introduces it first), and a device that
+	// read the id from its answer would then find it gone. The ordinal skips
+	// an id the side already holds, so two marks never share one.
+	taken := make(map[string]bool, len(out))
+	for _, id := range out {
+		if id != "" {
+			taken[id] = true
 		}
 	}
+	ordinal := map[string]int{}
+	for j, v := range next {
+		if !isMark(v) {
+			continue
+		}
+		n := ordinal[v]
+		ordinal[v]++
+		if out[j] != "" {
+			continue
+		}
+		id := markID(pos, side, v, n)
+		for taken[id] {
+			n++
+			id = markID(pos, side, v, n)
+		}
+		taken[id] = true
+		out[j] = id
+	}
 	return out
+}
+
+// markID is the id a baseline-minted mark takes: the bout, the side, the strike
+// and its ordinal among the side's strikes of that letter.
+func markID(pos int, side, letter string, n int) string {
+	return "b:" + strconv.Itoa(pos) + ":" + side + ":" + letter + ":" + strconv.Itoa(n)
 }
 
 // markIDsOf is the stored form: nil when neither side holds a mark.

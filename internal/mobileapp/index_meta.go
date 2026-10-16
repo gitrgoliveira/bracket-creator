@@ -95,12 +95,21 @@ func injectPreviewMeta(pageHTML string, store *state.Store, base string) string 
 		writeMeta("name", "twitter:description", description)
 		writeMeta("name", "description", description)
 	}
+	b.WriteString(appBuildMeta(AppBuild()))
 
 	pageHTML = replaceTitleContent(pageHTML, title)
 	if idx := strings.Index(pageHTML, "</head>"); idx != -1 {
 		pageHTML = pageHTML[:idx] + b.String() + pageHTML[idx:]
 	}
 	return pageHTML
+}
+
+// appBuildMeta is the page's own build stamp (bc-evts S2): the value the
+// X-App-Build header and the SSE hello carry (AppBuild, "unknown" without a
+// commit), so the bundle can tell a server running a newer build than the one
+// it was served with and reload (web-mobile/js/app_version.jsx).
+func appBuildMeta(build string) string {
+	return `    <meta name="app-build" content="` + html.EscapeString(build) + `">` + "\n"
 }
 
 // replaceTitleContent swaps the text between the first <title> and </title> for

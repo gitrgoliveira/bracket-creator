@@ -1,9 +1,9 @@
 {
- "comment": "bc-evts: the score event replay, pinned in Go (TestReplayScoring_GoldenTable, internal/engine/score_replay_golden_test.go) and mirrored in JS by the cases marked jsMirror. Each case's lines are replayed after its head in EVERY order; want.match lists only the fields it pins (wire names), want.outcomes each event id's outcomes, sorted.",
+ "comment": "bc-evts: the score event replay, pinned in Go (TestReplayScoring_GoldenTable, internal/engine/score_replay_golden_test.go) and mirrored in JS (web-mobile/js/__tests__/score_replay_golden.test.jsx) by the individual and engi cases marked jsMirror. A case whose lines hold a baseline is Go only (jsMirror false): a screen folds its taps on top of the server's last confirmed match and never folds a baseline. Each case's lines are replayed after its head in EVERY order; want.match lists only the fields it pins (wire names), want.outcomes each event id's outcomes, sorted.",
  "cases": [
   {
    "name": "headline: taps after a finish are turned away, in every order they arrive",
-   "jsMirror": true,
+   "jsMirror": false,
    "shape": {
     "kind": "individual",
     "knockout": true
@@ -139,7 +139,7 @@
   },
   {
    "name": "a tap after a finish is turned away and changes nothing",
-   "jsMirror": true,
+   "jsMirror": false,
    "shape": {
     "kind": "individual",
     "knockout": true
@@ -798,7 +798,7 @@
   },
   {
    "name": "a finish counts its own tap once and holds out the tap it never saw",
-   "jsMirror": true,
+   "jsMirror": false,
    "shape": {
     "kind": "individual",
     "knockout": true

@@ -885,6 +885,13 @@ function _dequeue(key, descriptor, outcome) {
     if (!d || (descriptor && d !== descriptor)) return false;
     _writeQueue.delete(key);
     _markSettled(key, d);
+    // The server answered it: a clock-skew re-stamp of a later write of the
+    // match is never stamped below it (_afterSettledStamp).
+    if (outcome && 'value' in outcome) {
+        const base = _baseOf(key);
+        const s = _entryStamp(d);
+        if (s > (_lastSettledStamp.get(base) || 0)) _lastSettledStamp.set(base, s);
+    }
     // Every entry that leaves settles its door's promise: with the answer the
     // flush passes, else as discarded (a discard, another tab sending it).
     _settleKey(key, outcome || { value: { discarded: true } });
@@ -1017,6 +1024,10 @@ let _tapFlushKicked = false;
 // before an earlier one (the replay orders by stamp).
 const _tapSeq = new Map();
 const _lastStampFor = new Map();
+// Per match: the stamp of the newest write of this device the server
+// answered (an entry that left the queue with an answer). A clock-skew
+// re-stamp is never below it (_afterSettledStamp).
+const _lastSettledStamp = new Map();
 // Per match: the newest derived match a score-events answer handed back (the
 // broadcast copy, with markIds and scoreVersion).
 const _latestDerived = new Map();
@@ -1042,6 +1053,32 @@ function _afterOwnStamp(base, stamp) {
     return s;
 }
 
+// _noteOwnStamp: a write of this device for the match that this page did not
+// stamp (left queued by a previous page, or taken up from another tab) still
+// counts as one it gave: a later write is stamped after it (M1). The clock
+// offset is not stored, so after a reload the frame can read a little behind
+// the one the stored write was stamped in.
+function _noteOwnStamp(key, d) {
+    const s = _entryStamp(d);
+    if (!(s > 0)) return;
+    const base = _baseOf(key);
+    if (s > (_lastStampFor.get(base) || 0)) _lastStampFor.set(base, s);
+}
+
+// _afterSettledStamp: the stamp a clock-skew re-stamp gives a queued write,
+// never at or before a write of its match the server already answered, so a
+// re-stamped write never lands before one made before it. Floored by what
+// LANDED, not by _lastStampFor: that holds the later writes queued behind this
+// one too, and the skewed stamp itself, and a re-stamp above them would move
+// this write behind them, or back into the future. The later writes are still
+// counted from it.
+function _afterSettledStamp(base, stamp) {
+    const settled = _lastSettledStamp.get(base) || 0;
+    const s = stamp > settled ? stamp : settled + 1;
+    if (s > (_lastStampFor.get(base) || 0)) _lastStampFor.set(base, s);
+    return s;
+}
+
 function _listenOn(map, base, fn) {
     if (typeof fn !== 'function') return () => {};
     let set = map.get(base);
@@ -1056,7 +1093,8 @@ function _emitOn(map, base, value) {
     const set = map.get(base);
     if (!set) return;
     for (const fn of set) {
-        try { fn(value); } catch (_e) { /* swallow */ }
+        // One listener that throws must not stop the others hearing it.
+        try { fn(value); } catch (e) { console.error(`[sync] a listener for ${base} threw:`, e); }
     }
 }
 
@@ -1065,7 +1103,10 @@ function _tapEntriesFor(base) {
     return _entriesFor(base).filter(([, d]) => d.kind === 'evt');
 }
 function _pendingTapsFor(base) {
-    return _tapEntriesFor(base).map(([, d]) => ({ ...d.payload }));
+    // A parked tap (the server refused its batch) is not counted on the board
+    // or the TV: it is held until an operator discards it, and the server
+    // will never apply it as it stands.
+    return _tapEntriesFor(base).filter(([, d]) => !d.parked).map(([, d]) => ({ ...d.payload }));
 }
 function _publishPendingTaps(base) {
     if (!_pendingTapListeners.has(base)) return;
@@ -1090,7 +1131,9 @@ function _noteDerived(base, match) {
 // so the server's seq arm counts the device's own taps (operator S8 b).
 function _basisFor(base, seen) {
     const derived = _latestDerived.get(base);
-    const s = Number(seen) > 0 ? Number(seen) : (Number(derived && derived.scoreVersion) || 0);
+    // The larger of what the caller says it showed and the derived match a
+    // tap's answer handed back: the board shows the newer of the two.
+    const s = Math.max(Number(seen) > 0 ? Number(seen) : 0, Number(derived && derived.scoreVersion) || 0);
     const own = _tapEntriesFor(base).map(([, d]) => d.payload && d.payload.id).filter(Boolean);
     return {
         seen: s,
@@ -1139,7 +1182,8 @@ function _claimRefusal(key, err) {
     if (!h) return false;
     let claimed = false;
     for (const fn of h.claims) {
-        try { if (fn(err) === true) claimed = true; } catch (_e) { /* swallow */ }
+        // A claim that throws has not shown the refusal: the outbox says it.
+        try { if (fn(err) === true) claimed = true; } catch (e) { console.error(`[sync] a refusal handler for ${key} threw:`, e); }
     }
     return claimed;
 }
@@ -1628,7 +1672,8 @@ let _queueGen = 0;
 async function _restampQueuedEntryForSkew(descriptor) {
     await _learnServerClockOffset();
     const enqueuedAt = Number.isFinite(descriptor.enqueuedAt) ? descriptor.enqueuedAt : Date.now();
-    descriptor.payload.modifiedAt = _stampAfterSeen(_restampFor(enqueuedAt, descriptor.perfAtEnqueue), descriptor.seenModifiedAt);
+    descriptor.payload.modifiedAt = _afterSettledStamp(_revKey(descriptor.compID, descriptor.matchID),
+        _stampAfterSeen(_restampFor(enqueuedAt, descriptor.perfAtEnqueue), descriptor.seenModifiedAt));
     descriptor.skewRetried = true;
     _persistQueue();
 }
@@ -2124,14 +2169,25 @@ async function _sendTapBatch(base, batch, pass) {
         if (body.match) _noteDerived(base, body.match);
         const byId = new Map((Array.isArray(body.outcomes) ? body.outcomes : []).map((o) => [o && o.id, o]));
         let result = 'settled';
+        // Taps the server answered without logging them (re-stamped for the
+        // clock, or named no outcome): each may need a fresh seq (_reseqUnheldTap).
+        const unheld = [];
         for (const [k, d] of batch) {
             if (_writeQueue.get(k) !== d) continue;
             const o = byId.get(d.payload && d.payload.id);
-            if (!o) { if (result === 'settled') result = 'kept'; continue; }
+            if (!o) {
+                // No outcome: whether it was applied is unknown. It stays queued
+                // and is sent again on the backoff, like any write that failed.
+                pass.anyFailed = true;
+                if (result === 'settled') result = 'kept';
+                unheld.push([k, d]);
+                continue;
+            }
             if (o.outcome === TAP_CLOCK_SKEW && !d.skewRetried) {
                 await _restampQueuedTapForSkew(d);
                 _flushRequested = true;
                 if (result === 'settled') result = 'restamped';
+                unheld.push([k, d]);
                 continue;
             }
             if (result !== 'settled') continue; // keep strict order behind it
@@ -2144,6 +2200,12 @@ async function _sendTapBatch(base, batch, pass) {
                 });
             }
         }
+        const heldSeqs = (body.match && body.match.eventSeqs) || {};
+        let reseq = false;
+        for (const [k, d] of unheld) {
+            if (_writeQueue.get(k) === d && _reseqUnheldTap(base, d, heldSeqs)) reseq = true;
+        }
+        if (reseq) { _persistQueue(); _publishPendingTaps(base); }
         // S6 b: the server is missing taps of this session for the match; send
         // the ones the outbox still holds at once (a duplicate is harmless).
         if (Array.isArray(body.gaps) && body.gaps.length > 0) {
@@ -2192,6 +2254,8 @@ async function _sendTapBatch(base, batch, pass) {
     for (const [, d] of batch) d.parked = { status: res.status, reason: refusal.reason };
     pass.parkedTaps += batch.length;
     _persistQueue();
+    // A parked tap is not counted on the board or the TV (_pendingTapsFor).
+    _publishPendingTaps(base);
     _recomputeSyncStatus();
     return 'kept';
 }
@@ -2202,9 +2266,37 @@ async function _sendTapBatch(base, batch, pass) {
 async function _restampQueuedTapForSkew(d) {
     await _learnServerClockOffset();
     const enqueuedAt = Number.isFinite(d.enqueuedAt) ? d.enqueuedAt : Date.now();
-    d.payload.stamp = _stampAfterSeen(_restampFor(enqueuedAt, d.perfAtEnqueue), d.seenModifiedAt);
+    d.payload.stamp = _afterSettledStamp(_revKey(d.compID, d.matchID),
+        _stampAfterSeen(_restampFor(enqueuedAt, d.perfAtEnqueue), d.seenModifiedAt));
     d.skewRetried = true;
     _persistQueue();
+}
+
+
+// _reseqUnheldTap (M3): the ONE rule for a queued tap the server answered
+// without logging it (a clock-skew refusal, or an answer naming no outcome for
+// it). A match copy names, per device session, the highest seq its score log
+// holds (`eventSeqs`), and a screen reads a tap at or below it as already in
+// the copy (applyPending, score_events.jsx). When a later tap of the same
+// session landed, that number already covers this one, so the board would drop
+// a tap the server does not hold. Such a tap takes the session's next seq for
+// the match, above every seq the server or this outbox holds for it, under the
+// same id: the server keys duplicates by id, and the writes that saw the tap
+// name it by id (`basis.own`), so containment is unchanged. Exact both ways: it
+// counts as held only once the server logs it. Returns whether it moved.
+function _reseqUnheldTap(base, d, heldSeqs) {
+    const p = d && d.payload;
+    if (!p || !p.session || !(Number(p.seq) > 0)) return false;
+    const held = Number(heldSeqs && heldSeqs[p.session]) || 0;
+    if (held < Number(p.seq)) return false;
+    let top = held;
+    for (const [, e] of _tapEntriesFor(base)) {
+        if (e.payload && e.payload.session === p.session) top = Math.max(top, Number(e.payload.seq) || 0);
+    }
+    if (p.session === _eventSession) top = Math.max(top, _tapSeq.get(base) || 0);
+    p.seq = top + 1;
+    if (p.session === _eventSession) _tapSeq.set(base, p.seq);
+    return true;
 }
 
 // Shared post-enqueue tail for every queue path: place the write in its
@@ -2212,7 +2304,10 @@ async function _restampQueuedTapForSkew(d) {
 // an entry of its own), persist, republish sync status, reset the backoff
 // counter (a fresh user write must not inherit a stale max-backoff delay from
 // a prior failure run), and kick a flush. Returns the entry's key.
-function _commitEnqueue(base, descriptor, beforeFlush) {
+// The ONE enqueue: every outbox entry, a tap included, is stored here.
+// `nextTick`: kick the flush in a microtask instead of now, so the taps of one
+// tick go in one batch (recordTap).
+function _commitEnqueue(base, descriptor, beforeFlush, { nextTick = false } = {}) {
     // bc-cse: the monotonic half of the clock-skew re-stamp. performance.now()
     // is immune to wall-clock steps, so the difference between this reading and
     // one taken at flush time is the write's TRUE age even if the OS corrects
@@ -2233,9 +2328,17 @@ function _commitEnqueue(base, descriptor, beforeFlush) {
     // The door's promise exists before anything can settle it.
     if (typeof beforeFlush === 'function') beforeFlush(key);
     _recomputeSyncStatus();
-    if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
-    _flushAttempt = 0;
-    _flushQueue();
+    if (descriptor.kind === 'evt') _publishPendingTaps(base);
+    const kick = () => {
+        if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
+        _flushAttempt = 0;
+        _flushQueue();
+    };
+    if (!nextTick) kick();
+    else if (!_tapFlushKicked) {
+        _tapFlushKicked = true;
+        queueMicrotask(() => { _tapFlushKicked = false; kick(); });
+    }
     return key;
 }
 
@@ -2261,6 +2364,8 @@ function _queuedAnswer() {
 // the positions the queued save changed (joinQueuedLineupSave). Otherwise it is
 // a new entry, after the others in replay order.
 function _placeWrite(base, descriptor) {
+    // A tap is never merged; its key names its event id.
+    if (descriptor.kind === 'evt') return `${base}${QUEUE_ENTRY_SEP}evt:${descriptor.payload.id}`;
     const target = _coalesceTarget(base, descriptor);
     if (!target) return _newEntryKey(base);
     const [key, prev] = target;
@@ -2408,6 +2513,7 @@ function _onStoredQueueChanged(oldRaw, newRaw) {
         if (_storedEntryProblem(d)) continue;
         if (d.payload && d.payload.forceDownstreamReopen) d.payload = _withoutDownstreamConfirmation(d.payload);
         _writeQueue.set(k, d);
+        _noteOwnStamp(k, d);
         _adopted.add(d);
         changed = adopted = true;
     }
@@ -2546,6 +2652,7 @@ if (typeof fetch === 'function') {
                     descriptor.payload = _withoutDownstreamConfirmation(descriptor.payload);
                 }
                 _writeQueue.set(key, descriptor);
+                _noteOwnStamp(key, descriptor);
                 anyLoaded = true;
             }
         }
@@ -4465,27 +4572,18 @@ const API = {
         const seen = Number(match && match.modifiedAt) || 0;
         const stamp = _afterOwnStamp(base, _stampAfterSeen(_serverNowMs(), seen));
         const payload = { ...ev, id, session: _eventSession, seq, stamp };
-        const key = `${base}${QUEUE_ENTRY_SEP}evt:${id}`;
         const descriptor = {
             compID, matchID, payload, password: password || '', kind: 'evt', terminal: false,
             method: 'POST', url: `/api/competitions/${compID}/matches/${matchID}/score-events`,
-            enqueuedAt: Date.now(), perfAtEnqueue: _perfNow(),
+            enqueuedAt: Date.now(),
             ...(seen > 0 ? { seenModifiedAt: seen } : {}),
         };
-        _writeQueue.set(key, descriptor);
-        _lastEnqueuePersisted = _persistQueue();
-        _recomputeSyncStatus();
-        _publishPendingTaps(base);
-        if (!_tapFlushKicked) {
-            _tapFlushKicked = true;
-            queueMicrotask(() => {
-                _tapFlushKicked = false;
-                if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
-                _flushAttempt = 0;
-                _flushQueue();
-            });
-        }
-        return { id, stamp, seq };
+        // Through the one enqueue (_commitEnqueue), the flush kicked in a
+        // microtask so the taps of one tick go in one batch.
+        _commitEnqueue(base, descriptor, null, { nextTick: true });
+        const answer = { id, stamp, seq };
+        if (!_lastEnqueuePersisted) answer.persisted = false;
+        return answer;
     },
     // The taps this device still holds for a match, in send order (event
     // payloads), for an editor's board and the same-device TV overlay.

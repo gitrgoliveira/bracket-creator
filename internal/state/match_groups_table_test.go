@@ -132,12 +132,10 @@ func TestApplyMergedGroupStamps_CanLowerAStampAndRecomputesModifiedAt(t *testing
 	assert.Equal(t, int64(100), m.GroupStamp(GroupPoints), "a group not named in decided keeps its materialized stamp")
 }
 
-// TestMergeReport_HeldDecisionRequiresTheDefaultWinStandsReason pins
-// bc-mrgc Fix 4: HeldDecision must agree with HeldReason, which also
-// requires something actually held (len(Held)+len(Displaced) > 0). Before
-// the fix, HeldDecision checked DefaultWinStands alone, so a report that
-// set it without holding anything answered heldDecision with no
-// heldReason, contradicting openapi.
+// TestMergeReport_HeldReasonIsMatchClosedOnlyWhenSomethingWasTurnedAway pins
+// that HeldReason names match_closed only when something was actually held or
+// moved to the history (len(Held)+len(Displaced) > 0), never for a report
+// that merely sets MatchClosed.
 func TestMergeReport_HeldReasonIsMatchClosedOnlyWhenSomethingWasTurnedAway(t *testing.T) {
 	// MatchClosed set, but nothing held or moved: there is nothing to explain.
 	assert.Empty(t, (&MergeReport{MatchClosed: true}).HeldReason())

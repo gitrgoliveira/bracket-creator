@@ -82,9 +82,9 @@ func TestScoreHandler_StaleFinishIsHeldNotRefusedForAReason(t *testing.T) {
 	})
 }
 
-// R4 on the wire: a recount that leaves a finished engi match with no valid
-// count is not applied, and the answer says why (heldReason "needs_winner",
-// with its own message), so the operator corrects the result with a winner.
+// The closed-match rule on the wire: a recount stamped after an engi finish is
+// not applied, and the answer says why (heldReason "match_closed", with its
+// message), so the operator corrects the result with Correct result.
 func TestScoreHandler_HeldForAWinnerSaysSo(t *testing.T) {
 	const compID = "merge-review-r4"
 	r, store := mergeServer(t, compID)
@@ -117,14 +117,11 @@ func TestScoreHandler_HeldForAWinnerSaysSo(t *testing.T) {
 	assert.Equal(t, 3, m.FlagsA)
 }
 
-// R2's fusensho arm (bc-mrgc, the fusensho twin of the R4 test above): a
-// running board's scoring over a match a match-level default win closed (the
-// OTHER side is barred by a DIFFERENT match, recorded from the queue row's
-// Record default win) is not applied either, and the answer says why with its
-// own code and message (heldReason "default_win_stands",
-// DefaultWinStandsMessage), so the operator is sent to correct the default
-// win from the match's score editor rather than told to correct the result
-// with a winner: the match already has one.
+// The closed-match rule's fusensho arm (the twin of the test above): a running
+// board's scoring over a match a match-level fusensho closed (the OTHER side is
+// barred by a DIFFERENT match, recorded from the queue row) is not applied
+// either, and the answer says why with the one code and message
+// (heldReason "match_closed", MatchClosedMessage).
 func TestScoreHandler_HeldForADefaultWinSaysSo(t *testing.T) {
 	const compID = "merge-review-dws"
 	r, store := mergeServer(t, compID)

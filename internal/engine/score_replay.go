@@ -541,8 +541,25 @@ func (rp *replayer) applyBaseline(line int, b *state.ScoreBaseline, groups []str
 	rp.applyBaselineGroups(line, b, groups)
 }
 
-// applyBaselineGroups sets each of the groups to the baseline's value at the
-// group's own stamp (values overrides a value the replay adjusted).
+// decisionLoserSide is the side whose struck points a decision on group g
+// keeps ("a" or "b"), or "" when the baseline is no decision of that kind.
+func decisionLoserSide(b *state.ScoreBaseline, g string) string {
+	if g != state.GroupPoints || b.Door != DoorDecision {
+		return ""
+	}
+	var verdict state.MatchResult
+	if err := state.SetGroupFromValue(&verdict, state.GroupResult, b.Values[state.GroupResult]); err != nil || verdict.Decision == "" {
+		return ""
+	}
+	switch verdict.DecisionBy {
+	case "shiro":
+		return domain.ScoreSideB
+	case "aka":
+		return domain.ScoreSideA
+	}
+	return ""
+}
+
 // keepLoserPoints is a decision's points as the log gives them at its stamp:
 // the side that did not withdraw takes the decision's circles, and the side
 // that did keeps the points it had already struck (FIK Art. 32). The decision
@@ -571,6 +588,8 @@ func (rp *replayer) keepLoserPoints(b *state.ScoreBaseline, value json.RawMessag
 	return state.GroupValue(&pv, state.GroupPoints)
 }
 
+// applyBaselineGroups sets each of the groups to the baseline's value at the
+// group's own stamp (values overrides a value the replay adjusted).
 func (rp *replayer) applyBaselineGroups(line int, b *state.ScoreBaseline, groups []string) {
 	m := &rp.cur.m
 	for _, g := range groups {
@@ -648,10 +667,10 @@ func (rp *replayer) applyBaselineGroups(line int, b *state.ScoreBaseline, groups
 				kept = append(kept, i)
 				continue
 			}
-			rp.absorb(b, i)
+			rp.absorb(b, i, g)
 		}
 		for _, i := range rp.early[g] {
-			rp.absorb(b, i)
+			rp.absorb(b, i, g)
 		}
 		rp.applied[g], rp.early[g] = kept, nil
 		rp.govern[g] = line
@@ -690,7 +709,21 @@ func (rp *replayer) judgeOverFinished(b *state.ScoreBaseline, groups []string) *
 
 // absorb settles event i, which baseline b's group value now holds or replaces:
 // recorded when b saw it (BasisContains), else older than the baseline.
-func (rp *replayer) absorb(b *state.ScoreBaseline, i int) {
+func (rp *replayer) absorb(b *state.ScoreBaseline, i int, g string) {
+	if loser := decisionLoserSide(b, g); loser != "" {
+		// A decision keeps the points its loser had struck and replaces the
+		// other side's (keepLoserPoints), so the side of a tap stamped before
+		// it decides, not the basis: whether the decision saw the tap changes
+		// with arrival order, the scoreline does not.
+		if side := rp.lines[i].Event.Side; side == domain.ScoreSideA || side == domain.ScoreSideB {
+			if side == loser {
+				rp.outcome[i] = domain.ScoreOutcomeRecorded
+			} else {
+				rp.outcome[i] = domain.ScoreOutcomeBeforeBaseline
+			}
+			return
+		}
+	}
 	if rp.contains(b, i) {
 		rp.outcome[i] = domain.ScoreOutcomeRecorded
 	} else {

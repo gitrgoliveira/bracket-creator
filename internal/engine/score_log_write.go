@@ -543,6 +543,13 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 		// every line.
 		newest := max(post.ModifiedAt, newestLineStamp(lines), wb.stamp)
 		variants := []string{"plain", "newest"}
+		if directResultWrite(wb.door) {
+			// A reopen or a requeue is placed at its own stamp and never bent
+			// to a later one: a tap stamped after it (a device clock running
+			// ahead of the server's) follows it in every arrival order, so
+			// the match it gives is the replay's, taken below.
+			variants = variants[:1]
+		}
 		for n, variant := range variants {
 			vset := set
 			if variant == "newest" && post.Status == state.MatchStatusCompleted && !slices.Contains(set, state.GroupResult) &&
@@ -569,7 +576,7 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 			if len(diff) == 0 {
 				break
 			}
-			if n == len(variants)-1 {
+			if n == len(variants)-1 && !directResultWrite(wb.door) {
 				log.Printf("engine: ERROR: match %s/%s: the %s write's baseline does not replay to the stored match (groups %v); the drift net will heal it", compID, matchID, wb.door, diff)
 			}
 		}
@@ -579,7 +586,21 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 		return nil
 	}
 	after.Match.ScoreVersion = len(lines) + 1
-	e.takeReplayDerived(h, compID, matchID, inPool, &after.Match)
+	if directResultWrite(wb.door) && wb.sent == nil && len(replayGroupsDiffer(post, &after.Match)) > 0 {
+		// The log orders a later-stamped tap after this write, which the
+		// writer could not know: the match is the replay's, written as an
+		// event's derived write is.
+		derived := after.Match
+		derived.ClearRequestFields()
+		derived.ID = matchID
+		derived.WriteDoor = DoorEvent
+		derived.Changed = groupsReplayChanged(post, &derived)
+		if _, err := e.RecordMatchResultWithIneligibilityTx(h, compID, matchID, &derived); err != nil {
+			log.Printf("engine: ERROR: match %s/%s: the %s write's replay not stored: %v", compID, matchID, wb.door, err)
+		}
+	} else {
+		e.takeReplayDerived(h, compID, matchID, inPool, &after.Match)
+	}
 	note := &baselineNote{match: after.Match}
 	for _, id := range e.recordMovedOutcomes(h, compID, matchID, lines, before, after, movedReason) {
 		if after.Outcome(id) == domain.ScoreOutcomeBeforeBaseline {
@@ -879,6 +900,12 @@ func (e *Engine) sentBackToQueue(h state.StoreTx, compID, matchID string) bool {
 		return entries[i].Door == doorRequeue
 	}
 	return false
+}
+
+// directResultWrite reports whether a baseline is a reopen or a requeue: a
+// direct write of the match's result that the server stamps itself.
+func directResultWrite(door string) bool {
+	return door == doorReopen || door == doorRequeue
 }
 
 // doorChangesStatus reports whether a history line from this door can have moved

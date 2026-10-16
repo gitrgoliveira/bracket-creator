@@ -184,13 +184,11 @@ func TestOrganiser_AStalePickTheMergeHoldsIsNotRefused(t *testing.T) {
 	}
 }
 
-// A finish stamped before the stored verdict that names another winner is held
-// WHOLE by the merge (HoldReasonFinishAtomic): its picks land nowhere, even when
-// their own stamps are newer than the stored picks'. The judge reads what the
-// write landed, and a held write lands nothing, so such a write is answered
-// superseded and kept in the history, never refused for a pick that was not
-// written.
-func TestOrganiser_AStaleFinishWithAForeignPickIsSupersededNotRefused(t *testing.T) {
+// A finish stamped before the stored verdict that names another winner has its
+// verdict held by the replay, but its groups land or are held by their own
+// stamps, so a pick newer than the stored one WOULD land. The judge reads what
+// the write landed, so a foreign pick is refused (400) and nothing is written.
+func TestOrganiser_AStaleFinishWithAForeignPickThatWouldLandIsRefused(t *testing.T) {
 	for _, mode := range organiserModes {
 		t.Run(mode.name, func(t *testing.T) {
 			p := newOrganiserPickFixture(t, mode.selfRun)

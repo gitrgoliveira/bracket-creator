@@ -333,10 +333,9 @@ func TestMerge_EngiRecountAfterTheFinishIsNeverADraw(t *testing.T) {
 // same three writes -- an invalid partial count, a finish made before it but
 // delivered after, and a later valid recount -- must reach the same state.
 // A stale finish arriving after the match is already completed by a LATER
-// finish is held WHOLE, never allowed to move the winner back: this is
-// mergeMatchWrite's own finish-atomicity rule (finishAtomic,
-// HoldReasonFinishAtomic, bc-mrgc generalized well beyond engi), not
-// engiFinishHeld's engi-specific atomic re-merge (HoldReasonEngiAtomic).
+// finish never moves the winner back: the replay orders it by its stamp and
+// holds its verdict, not engiFinishHeld's engi-specific atomic re-merge
+// (HoldReasonEngiAtomic).
 // Both groups the stale finish changes are older than what is stored, so
 // the first merge pass inside engiFinishHeld already holds everything
 // (rep.Superseded() is true on that first pass); engiFinishHeld's own
@@ -382,8 +381,7 @@ func TestMerge_EngiStaleFinishOverACompletedMatchIsHeldWhole(t *testing.T) {
 		})
 
 		// The variant where the stale finish carries the SAME count already
-		// stored: no winner moves, so finishAtomic's GroupDiffers check on
-		// the result group is false and it never fires. Each group the
+		// stored: no winner moves, so the result group is no change. Each group the
 		// stale finish names is then an echo of what mergeMatchWrite already
 		// has (reportHeld records an unchanged value as HeldEcho, not Held),
 		// so engiFinishHeld's own `len(rep.Held) == 0` gate reads this as

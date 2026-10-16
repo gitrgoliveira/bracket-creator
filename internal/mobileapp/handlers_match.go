@@ -2960,11 +2960,11 @@ func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult, comp *state
 	if r.Status == state.MatchStatusCompleted && snap.Status == state.MatchStatusCompleted {
 		// A finish made BEFORE the stored result (a queued Finish replayed
 		// after the match was finished on another device) is no correction:
-		// the merge holds it WHOLE, by the result's own stamp
-		// (HoldReasonFinishAtomic, bc-mrgc Finding 4) -- its scoreline never
-		// lands beside a verdict it never declared -- and keeps it in the
-		// match's history. Demanding a reason here refused it before it got
-		// there, and it was lost (bc-mrgc review).
+		// the replay orders it by its stamp (its verdict is the older of two
+		// results and is held, the groups it names land or are held by their
+		// own stamps) and keeps what loses in the match's history. Demanding
+		// a reason here refused it before it got there, and it was lost
+		// (bc-mrgc review).
 		if r.ModifiedAt > 0 && r.ModifiedAt < snap.ResultStamp {
 			return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision}
 		}

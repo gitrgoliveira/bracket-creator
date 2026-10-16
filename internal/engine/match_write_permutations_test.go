@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -411,6 +412,29 @@ func pmFinalCheck(c pmCase, h mmHome) []string {
 	return bad
 }
 
+// pmBeforeResultOutcomes is the final outcome of each tap stamped before some
+// result and after none.
+func pmBeforeResultOutcomes(c pmCase, h mmHome) map[string]string {
+	outs := pmOutcomes(h)
+	got := map[string]string{}
+	for _, s := range c.steps {
+		if s.role != pmEv {
+			continue
+		}
+		closed, later := false, false
+		for _, a := range c.steps {
+			if a.role == pmRes {
+				closed = closed || a.at < s.at
+				later = later || a.at > s.at
+			}
+		}
+		if !closed && later {
+			got[s.id] = outs[s.id]
+		}
+	}
+	return got
+}
+
 // pmAssertAdvanced checks the knockout winner is in the next match.
 func pmAssertAdvanced(t *testing.T, h mmHome, order []int) {
 	if h.matchID != "m-r1-0" {
@@ -459,6 +483,7 @@ func TestMatchWritePermutationsConverge(t *testing.T) {
 					oracle = pmState(h, t)
 				}
 				states := map[string][]string{}
+				tapOuts := map[string]string{}
 				for _, p := range pmPerms(len(c.steps)) {
 					h := pmHome(t, c, ko)
 					if c.pre.run != nil {
@@ -481,6 +506,14 @@ func TestMatchWritePermutationsConverge(t *testing.T) {
 					}
 					for _, bad := range pmFinalCheck(c, h) {
 						t.Errorf("order %v: %s", p, bad)
+					}
+					// A tap stamped before the result has ONE outcome, whichever
+					// order the writes arrive in.
+					for id, got := range pmBeforeResultOutcomes(c, h) {
+						if first, seen := tapOuts[id]; seen && first != got {
+							t.Errorf("order %v: tap %s ended %q, another order ended %q", p, id, got, first)
+						}
+						tapOuts[id] = got
 					}
 					pmAssertAdvanced(t, h, p)
 					s := pmState(h, t)
@@ -643,6 +676,13 @@ func pmCases() []pmCase {
 		{name: "mix team dai shiro T1, e b1 a:M T2, e b2 b:M T3", team: true, rows: true, steps: []pmStep{
 			pmDec(t1, "daihyosen", "shiro"), pmEvent("e1", "d1", 1, t2, 1, "a", "M"), pmEvent("e2", "d1", 2, t3, 2, "b", "M")},
 			refused: []int{1, 2}, want: []string{`st=completed`, `d="daihyosen" by="shiro"`}},
+		// Round 5: a tap stamped before a decision that did not see it ends the
+		// same whichever arrives first: the loser's side is in the stored
+		// scoreline (recorded), the winner's is replaced by the decision's marks.
+		{name: "mix ind e a:M T1 / kiken aka T2 (loser's tap)", steps: []pmStep{pmEvent("e1", "d1", 1, t1, 0, "a", "M"), pmDec(t2, "kiken-voluntary", "aka")}, want: []string{`st=completed`, `d="kiken-voluntary" by="aka"`, `A=[M]`}},
+		{name: "mix ind e b:M T1 / kiken aka T2 (winner's tap)", steps: []pmStep{pmEvent("e1", "d1", 1, t1, 0, "b", "M"), pmDec(t2, "kiken-voluntary", "aka")}, want: []string{`st=completed`, `d="kiken-voluntary" by="aka"`}},
+		{name: "mix ind e b:M T1 / dai shiro T2 (loser's tap)", steps: []pmStep{pmEvent("e1", "d1", 1, t1, 0, "b", "M"), pmDec(t2, "daihyosen", "shiro")}, want: []string{`st=completed`, `d="daihyosen" by="shiro"`}},
+		{name: "mix ind e a:M T1 / dai shiro T2 (winner's tap)", steps: []pmStep{pmEvent("e1", "d1", 1, t1, 0, "a", "M"), pmDec(t2, "daihyosen", "shiro")}, want: []string{`st=completed`, `d="daihyosen" by="shiro"`}},
 		// Two results with a tap between them.
 		{name: "mix ind kiken aka T1 / e b:M T2 / dai shiro T3", steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmEvent("e1", "d2", 1, t2, 0, "b", "M"), pmDec(t3, "daihyosen", "shiro")}, refused: []int{1}, want: []string{`st=completed`, `d="daihyosen" by="shiro"`, `cs=[]`}},
 	}
@@ -695,6 +735,63 @@ func TestMatchWriteExactResendIsRecorded(t *testing.T) {
 					assert.Empty(t, pmReplay(h, t))
 				})
 			}
+		}
+	}
+}
+
+// TestMatchWriteReopenFastClockTapConverges: a reopen is stamped by the
+// server's clock, so a tap whose device clock runs ahead of it is stamped
+// LATER than the reopen however it arrives. Whatever order the kiken's reopen
+// and the two taps (one stamped between the reopen and the fast clock, one at
+// the fast clock) reach the server in, both taps land on the reopened match
+// and the reopen's log baseline is not bent to the tap's stamp.
+func TestMatchWriteReopenFastClockTapConverges(t *testing.T) {
+	base := time.Now().UnixMilli() - 3_600_000
+	soon, fut := time.Now().UnixMilli()+60_000, time.Now().UnixMilli()+120_000
+	steps := []pmStep{
+		pmEvent("e1", "d1", 1, fut, 0, "a", "K"),
+		{role: "reopen", run: func(h mmHome) string {
+			_, err := h.eng.ReopenMatch(h.compID, h.matchID, "")
+			return "reopen:" + pmAnswer(err)
+		}},
+		pmEvent("e2", "d2", 1, soon, 0, "b", "M"),
+	}
+	for _, ko := range []bool{false, true} {
+		seen := map[string][]string{}
+		for _, p := range pmPerms(len(steps)) {
+			h := pmHome(t, pmCase{}, ko)
+			if ko {
+				b, err := h.store.LoadBracket(h.compID)
+				require.NoError(t, err)
+				b.Rounds[0][0].ModifiedAt = base
+				require.NoError(t, h.store.SaveBracket(h.compID, b))
+			} else {
+				ms, err := h.store.LoadPoolMatches(h.compID)
+				require.NoError(t, err)
+				ms[0].ModifiedAt = base
+				require.NoError(t, h.store.SavePoolMatches(h.compID, ms))
+			}
+			require.Equal(t, "applied", pmDec(base+60_000, "kiken-voluntary", "aka").run(h))
+			for _, i := range p {
+				steps[i].run(h)
+			}
+			if r := pmReplay(h, t); r != "" {
+				t.Errorf("ko=%v order %v: stored match differs from a replay of its log: %s", ko, p, r)
+			}
+			m := h.load(t)
+			outs := pmOutcomes(h)
+			got := fmt.Sprintf("st=%s A=%v B=%v e1=%s e2=%s", m.Status, m.IpponsA, m.IpponsB, outs["e1"], outs["e2"])
+			seen[got] = append(seen[got], fmt.Sprint(p))
+			lines, err := h.store.LoadScoreLog(h.compID, h.matchID)
+			require.NoError(t, err)
+			for _, l := range lines {
+				if l.Baseline != nil && l.Baseline.Door == "reopen" && l.Baseline.Stamp >= soon {
+					t.Errorf("ko=%v order %v: the reopen's baseline is stamped %d ms into the future", ko, p, l.Baseline.Stamp-time.Now().UnixMilli())
+				}
+			}
+		}
+		if len(seen) != 1 {
+			t.Errorf("ko=%v: arrival order changed the outcome: %v", ko, seen)
 		}
 	}
 }

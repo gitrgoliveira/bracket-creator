@@ -181,11 +181,6 @@ func storedBoutGroups(stored *state.MatchResult) []string {
 	return out
 }
 
-// withdrawalOutranked is R2's late half: a withdrawal or default win stands
-// on the scoreline it was declared over, so it is held, with everything it
-// changes, when any of its groups is held or when ANY stored points or bout
-// change was made after it. Points scored after the withdrawal was declared
-// mean the withdrawal no longer describes the match.
 // mergeMatchWrite merges incoming onto stored in place (see the file header)
 // and returns what it decided, also left on incoming.Merge. Under
 // matchWriteRestore it merges nothing: the snapshot's groups and stamps are

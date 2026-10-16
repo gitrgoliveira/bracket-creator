@@ -182,7 +182,7 @@ func (e *Engine) recordDirectHistoryTagged(h state.StoreTx, compID, matchID, doo
 	// baseline of the score event log once that log has begun, or when the
 	// write carries an id a resend must find (bc-evts).
 	e.noteWriteBaseline(h, compID, matchID, writeBaseline{door: door, stamp: stamp, named: groups,
-		writeID: tag.WriteID, basis: tag.Basis})
+		writeID: tag.WriteID, basis: tag.Basis, session: tag.Session})
 }
 
 // noteServerBoutChanges adds to an explicit Changed every bout row the

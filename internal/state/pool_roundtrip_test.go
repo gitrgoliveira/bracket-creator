@@ -72,6 +72,8 @@ var notPersistedInPoolCSV = map[string]string{
 		"resend is recognised.",
 	"Basis": "request-only (bc-evts): what the writer had in view, kept on the " +
 		"baseline it leaves in the score event log.",
+	"WriteSession": "request-only (bc-evts S8 b): the writer's event session, " +
+		"kept on the baseline it leaves in the score event log.",
 	"Merge": "the merge's report on THIS write (bc-mrgc), read by the history " +
 		"writer and the handlers' heldGroups; the history file keeps it.",
 	"DecidedByHantei": "LEGACY READ-ONLY compatibility channel (models.go doc " +

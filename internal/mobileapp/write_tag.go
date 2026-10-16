@@ -21,16 +21,24 @@ const maxBasisOwnIDs = 1024
 // the client's id for the write, so a resend of one the match's score event
 // log already holds is answered as recorded, and the basis, what the board
 // showed when the write was built (the score events it had seen, its own
-// still unacknowledged ones). Both ride on the baseline the write leaves.
+// still unacknowledged ones), with the device's event session. All ride on
+// the baseline the write leaves.
 type writeTag struct {
 	WriteID string            `json:"writeId,omitempty"`
 	Basis   *state.ScoreBasis `json:"basis,omitempty"`
+	// Session is the device's event session (the score-events batch's), so
+	// the baseline carries it and basis.seq counts that device's own events
+	// up to seq as seen (bc-evts S8 b). Meaningless without a basis.
+	Session string `json:"session,omitempty"`
 }
 
 // validateTag refuses a tag no write could carry (a 400 for the request).
 func (w writeTag) validateTag() error {
 	if len(w.WriteID) > domain.MaxScoreEventIDLen {
 		return fmt.Errorf("writeId is longer than %d characters", domain.MaxScoreEventIDLen)
+	}
+	if len(w.Session) > domain.MaxScoreEventFieldLen {
+		return fmt.Errorf("session is longer than %d characters", domain.MaxScoreEventFieldLen)
 	}
 	if w.Basis == nil {
 		return nil
@@ -51,12 +59,12 @@ func (w writeTag) validateTag() error {
 
 // tagOnto puts the tag on a write the client built.
 func (w writeTag) tagOnto(m *state.MatchResult) {
-	m.WriteID, m.Basis = w.WriteID, w.Basis
+	m.WriteID, m.Basis, m.WriteSession = w.WriteID, w.Basis, w.Session
 }
 
 // tagInto puts the tag on the options of a write a door builds on the server.
 func (w writeTag) tagInto(fo engine.ForceOptions) engine.ForceOptions {
-	fo.WriteID, fo.Basis = w.WriteID, w.Basis
+	fo.WriteID, fo.Basis, fo.Session = w.WriteID, w.Basis, w.Session
 	return fo
 }
 

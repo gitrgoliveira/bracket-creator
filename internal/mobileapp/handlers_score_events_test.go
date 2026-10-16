@@ -228,6 +228,45 @@ func TestScoreEventsDoor_WriteIDResendAnswersRecorded(t *testing.T) {
 	assert.Len(t, after, len(history), "a recorded resend leaves no history line")
 }
 
+// S8 b: a /score write carrying the device's event session and basis.seq
+// leaves a baseline with that session, so the device's own taps up to seq are
+// recorded though the basis's seen and own name none of them; a session longer
+// than the batch's limit is a 400.
+func TestScoreDoor_SessionCarriesTheBasisSeq(t *testing.T) {
+	const compID = "se-session"
+	r, store, _, _ := seServer(t, compID)
+	now := time.Now().UnixMilli()
+	sePost(t, r, compID, seMatch, seTap("e1", 1, now-9000, "a", "M"), seTap("e2", 2, now-8500, "b", "K"))
+
+	long := map[string]any{"status": "running", "ipponsA": []string{"M"}, "ipponsB": []string{},
+		"modifiedAt": now - 8200, "session": strings.Repeat("s", domain.MaxScoreEventFieldLen+1),
+		"sideA": mgAlice, "sideB": mgBob}
+	w := serveJSON(r, http.MethodPut, "/api/competitions/"+compID+"/matches/"+seMatch+"/score", long)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "session")
+
+	mergeScoreAt(t, r, compID, map[string]any{"status": "completed", "winner": mgAlice, "ipponsA": []string{"M"},
+		"ipponsB": []string{}, "modifiedAt": now - 8000, "writeId": "w-fin", "session": "evs",
+		"basis": map[string]any{"seen": 0, "seq": 1}})
+	lines, err := store.LoadScoreLog(compID, seMatch)
+	require.NoError(t, err)
+	var fin *state.ScoreBaseline
+	for _, l := range lines {
+		if l.Baseline != nil && l.Baseline.WriteID == "w-fin" {
+			fin = l.Baseline
+		}
+	}
+	require.NotNil(t, fin, "the finish left its baseline")
+	assert.Equal(t, "evs", fin.Session)
+	ms, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	rp := engine.ReplayScoring(&ms[0], lines, engine.ReplayShape{Comp: comp})
+	assert.Equal(t, domain.ScoreOutcomeRecorded, rp.Outcome("e1"), "seq 1 is within the basis's seq")
+	assert.Equal(t, domain.ScoreOutcomeBeforeBaseline, rp.Outcome("e2"), "seq 2 is past it")
+}
+
 // Round-4 finding 7: a tap and a scoring write turned away because the match
 // is finished are answered in the same words on both doors, for a tie and for a
 // winner-giving point alike, and the answer never claims a newer result exists

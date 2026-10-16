@@ -95,7 +95,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	fo := firstForceOptions(opts)
 	result.ID = matchID
 	if result.WriteID == "" && fo.WriteID != "" {
-		result.WriteID, result.Basis = fo.WriteID, fo.Basis
+		result.WriteID, result.Basis, result.WriteSession = fo.WriteID, fo.Basis, fo.Session
 	}
 
 	// Engi dispatch seam (tx-aware): a flag-scored competition records via the
@@ -1013,7 +1013,7 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	result := buildDecisionResult(prior, matchID, decision, decisionBy, decisionReason, encho, modifiedAtStamp)
 	// A resend of a decision the score event log already holds (its writeId,
 	// bc-evts F1) is answered as recorded before anything judges it.
-	result.WriteID, result.Basis = kcdgOpts.WriteID, kcdgOpts.Basis
+	result.WriteID, result.Basis, result.WriteSession = kcdgOpts.WriteID, kcdgOpts.Basis, kcdgOpts.Session
 	if kcdgOpts.ReopenReason != "" && prior.CorrectionReason == "" {
 		result.CorrectionReason = kcdgOpts.ReopenReason
 	}

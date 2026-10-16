@@ -336,6 +336,63 @@ func TestScoreEvents_FinishBasisDecidesOlderEvents(t *testing.T) {
 	assert.True(t, found, "the unseen event's new outcome is in the history")
 }
 
+// TestScoreEvents_FinishBasisSeqCountsTheDevicesOwnEvents pins the basis's seq
+// arm (bc-evts S8 b): a write carrying the device's event session leaves a
+// baseline with that Session, so the device's own events up to basis.seq are
+// seen (recorded) though neither Seen nor Own names them, and one past it is
+// not (beforeBaseline).
+func TestScoreEvents_FinishBasisSeqCountsTheDevicesOwnEvents(t *testing.T) {
+	eng, store, _ := slwSetup(t)
+	t0 := time.Now().UnixMilli() - 60_000
+	slwPost(t, eng, slwMatch,
+		slwEvent("s1", 1, t0, domain.ScoreIpponAdd, domain.ScoreSideA, "M"),
+		slwEvent("s2", 2, t0+500, domain.ScoreIpponAdd, domain.ScoreSideB, "K"))
+
+	fin := &state.MatchResult{SideA: "Aka", SideB: "Shiro", Status: state.MatchStatusCompleted, Winner: "Aka",
+		IpponsA: []string{"M"}, IpponsB: []string{}, ModifiedAt: t0 + 1000, WriteDoor: DoorScore,
+		WriteID: "w1", WriteSession: "evs", Basis: &state.ScoreBasis{Seq: 1}}
+	_, err := eng.RecordMatchResultWithIneligibility(slwComp, slwMatch, fin)
+	require.NoError(t, err)
+	require.NotNil(t, fin.Merge)
+	assert.Equal(t, []string{"s2"}, fin.Merge.EventsNotApplied)
+	lines := assertLogIsTheMatch(t, eng, store, slwMatch)
+	var logged *state.ScoreBaseline
+	for _, l := range lines {
+		if l.Baseline != nil && l.Baseline.WriteID == "w1" {
+			logged = l.Baseline
+		}
+	}
+	require.NotNil(t, logged, "the finish left its baseline")
+	assert.Equal(t, "evs", logged.Session, "the write's session rides on its baseline")
+	m, _ := slwStored(t, eng, store, slwMatch)
+	comp, err := store.LoadCompetition(slwComp)
+	require.NoError(t, err)
+	rp := ReplayScoring(m, lines, ReplayShape{Comp: comp})
+	assert.Equal(t, domain.ScoreOutcomeRecorded, rp.Outcome("s1"), "seq 1 is within the basis's seq")
+	assert.Equal(t, domain.ScoreOutcomeBeforeBaseline, rp.Outcome("s2"), "seq 2 is past it")
+}
+
+// TestDecision_TagSessionRidesOnTheBaseline pins the server-built door's
+// half: a decision's ForceOptions session lands on the baseline it leaves.
+func TestDecision_TagSessionRidesOnTheBaseline(t *testing.T) {
+	eng, store, _ := slwSetup(t)
+	t0 := time.Now().UnixMilli() - 60_000
+	slwPost(t, eng, slwMatch, slwEvent("s1", 1, t0, domain.ScoreIpponAdd, domain.ScoreSideA, "M"))
+	_, _, err := eng.RecordDecisionWithOptions(slwComp, slwMatch, "kiken-voluntary", "shiro", "", nil,
+		ForceOptions{WriteID: "d1", Session: "evs", Basis: &state.ScoreBasis{Seq: 1}}, t0+1000)
+	require.NoError(t, err)
+	lines, err := store.LoadScoreLog(slwComp, slwMatch)
+	require.NoError(t, err)
+	var logged *state.ScoreBaseline
+	for _, l := range lines {
+		if l.Baseline != nil && l.Baseline.WriteID == "d1" {
+			logged = l.Baseline
+		}
+	}
+	require.NotNil(t, logged, "the decision left its baseline")
+	assert.Equal(t, "evs", logged.Session)
+}
+
 // A write the client builds with no basis cannot say which events it saw, so
 // none of the older ones is called recorded: they are before the baseline, in
 // the report and the history alike. A server-built write keeps what it read.

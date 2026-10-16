@@ -1593,6 +1593,10 @@ type MatchResult struct {
 	// the baseline the write leaves. nil: the server judges the write saw
 	// every line already logged. Request-only.
 	Basis *ScoreBasis `json:"-" yaml:"-"`
+	// WriteSession is the writing device's event session (bc-evts S8 b), for
+	// the baseline the write leaves: with it, the basis's Seq counts that
+	// device's own events up to Seq as seen. Request-only.
+	WriteSession string `json:"-" yaml:"-"`
 	// Merge is what engine.mergeMatchWrite decided for THIS write: which
 	// groups applied, which were held (kept in the match history because a
 	// newer change to them is stored), and the held values. Set on the
@@ -2191,7 +2195,7 @@ type Announcement struct {
 func (m *MatchResult) ClearRequestFields() {
 	m.Changed, m.WriteDoor, m.Merge = nil, "", nil
 	m.ClearsWithdrawal = false
-	m.WriteID, m.Basis = "", nil
+	m.WriteID, m.Basis, m.WriteSession = "", nil, ""
 }
 
 // ClearDerivedScoreFields drops what only the score replay derives (bc-evts):

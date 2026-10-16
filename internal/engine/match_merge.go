@@ -567,6 +567,8 @@ func mergeByReplay(stored, incoming *state.MatchResult, changed []string, stamp 
 	// a basis the writer SENT says what it had seen.
 	bl.Informed = incoming.CorrectionReason != "" || incoming.ClearsWithdrawal || mc.serverStamped
 	bl.BasisSent = incoming.Basis != nil
+	// The writer's event session, so the basis's Seq counts its own events.
+	bl.Session = incoming.WriteSession
 	rep.Baseline = &bl
 	all := append(slices.Clone(lines), state.ScoreLogLine{Baseline: &bl})
 	// The lines past the log as found were minted by this write: a basis

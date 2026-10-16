@@ -86,7 +86,7 @@ func engiFinishProbe(prior, result *state.MatchResult) state.MatchResult {
 	// The finish's basis rides on the probe, or the merge report's baseline
 	// would read as one that saw nothing and a tap its writer's screen showed
 	// would end beforeBaseline or recorded by arrival order.
-	p.Basis = result.Basis
+	p.Basis, p.WriteSession = result.Basis, result.WriteSession
 	return p
 }
 

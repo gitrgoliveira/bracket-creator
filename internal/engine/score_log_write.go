@@ -385,6 +385,8 @@ type writeBaseline struct {
 	named   []string
 	writeID string
 	basis   *state.ScoreBasis
+	// session is the writer's event session, for the basis's Seq arm.
+	session string
 	// prefix are the lines the replay that decided the write needed ahead of
 	// its baseline (MergeReport.LogPrefix): logged first, so a scoring
 	// snapshot always leaves the log it was decided on.
@@ -452,7 +454,7 @@ func (e *Engine) recordLandedWriteHistory(h state.StoreTx, compID, matchID strin
 	}
 	note := e.noteWriteBaseline(h, compID, matchID, writeBaseline{
 		door: doorOf(result), stamp: rep.Stamp, named: rep.Applied,
-		writeID: result.WriteID, basis: result.Basis,
+		writeID: result.WriteID, basis: result.Basis, session: result.WriteSession,
 		prefix: rep.LogPrefix, revSession: result.RevSession, rev: result.Rev,
 		sent: sentBaseline(rep), prior: rep.Prior, replay: mergeReplayOf(rep),
 	})
@@ -496,7 +498,7 @@ func (e *Engine) recordSupersededWriteHistory(h state.StoreTx, compID, matchID s
 		}
 	}
 	e.noteWriteBaseline(h, compID, matchID, writeBaseline{
-		door: doorOf(result), stamp: rep.Stamp, writeID: result.WriteID, basis: result.Basis,
+		door: doorOf(result), stamp: rep.Stamp, writeID: result.WriteID, basis: result.Basis, session: result.WriteSession,
 		prefix: rep.LogPrefix, revSession: result.RevSession, rev: result.Rev, sent: sentBaseline(rep),
 		replay: mr,
 	})
@@ -602,7 +604,7 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 		// A write the replay judged is logged as it was made.
 		bl := *wb.sent
 		bl.ID = logBaselineID(len(lines), wb.door)
-		bl.WriteID, bl.ReceivedAt = wb.writeID, serverNowMs()
+		bl.WriteID, bl.Session, bl.ReceivedAt = wb.writeID, wb.session, serverNowMs()
 		if wb.rev > 0 && wb.revSession != "" {
 			bl.RevSession, bl.Rev = wb.revSession, wb.rev
 		}
@@ -674,7 +676,7 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 					bl.Stamps[g] = newest
 				}
 			}
-			bl.WriteID, bl.ReceivedAt = wb.writeID, serverNowMs()
+			bl.WriteID, bl.Session, bl.ReceivedAt = wb.writeID, wb.session, serverNowMs()
 			if wb.rev > 0 && wb.revSession != "" {
 				bl.RevSession, bl.Rev = wb.revSession, wb.rev
 			}

@@ -2506,7 +2506,7 @@ paths:
           completed correction with no decision, or `hikiwake`, keeps the
           ruling. A team match must then carry a result on every bout.
 
-          `writeId` and `basis` (also request-only, optional) tag the write
+          `writeId`, `basis` and `session` (also request-only, optional) tag the write
           for the match's score event log: a write whose `writeId` the log
           already holds (its first send landed, its answer was lost) is
           answered as recorded, the stored match with nothing written and no
@@ -2928,6 +2928,8 @@ paths:
                   $ref: '#/components/schemas/WriteId'
                 basis:
                   $ref: '#/components/schemas/ScoreBasis'
+                session:
+                  $ref: '#/components/schemas/WriteSession'
       responses:
         '200':
           description: Match reverted to the scheduled queue.
@@ -3055,6 +3057,8 @@ paths:
                   $ref: '#/components/schemas/WriteId'
                 basis:
                   $ref: '#/components/schemas/ScoreBasis'
+                session:
+                  $ref: '#/components/schemas/WriteSession'
       responses:
         '200':
           description: Match reopened (status back to `running`).
@@ -3250,6 +3254,8 @@ paths:
                   $ref: '#/components/schemas/WriteId'
                 basis:
                   $ref: '#/components/schemas/ScoreBasis'
+                session:
+                  $ref: '#/components/schemas/WriteSession'
       responses:
         '200':
           description: >
@@ -3386,6 +3392,8 @@ paths:
                   $ref: '#/components/schemas/WriteId'
                 basis:
                   $ref: '#/components/schemas/ScoreBasis'
+                session:
+                  $ref: '#/components/schemas/WriteSession'
       responses:
         '200':
           description: The trailing unscored bout was removed; returns the updated match.
@@ -3593,6 +3601,8 @@ paths:
                   $ref: '#/components/schemas/WriteId'
                 basis:
                   $ref: '#/components/schemas/ScoreBasis'
+                session:
+                  $ref: '#/components/schemas/WriteSession'
       responses:
         '200':
           description: >
@@ -3862,6 +3872,8 @@ paths:
                   $ref: '#/components/schemas/WriteId'
                 basis:
                   $ref: '#/components/schemas/ScoreBasis'
+                session:
+                  $ref: '#/components/schemas/WriteSession'
       responses:
         '200':
           description: >
@@ -3940,6 +3952,8 @@ paths:
                   $ref: '#/components/schemas/WriteId'
                 basis:
                   $ref: '#/components/schemas/ScoreBasis'
+                session:
+                  $ref: '#/components/schemas/WriteSession'
                 decision:
                   type: string
                   enum: [kiken, kiken-voluntary, kiken-injury, fusenpai, fusensho, hikiwake, daihyosen]
@@ -5763,6 +5777,15 @@ components:
         The client's id for one write (request-only). A write whose id the
         match's score event log already holds is answered as recorded, with
         nothing written and no history line.
+    WriteSession:
+      type: string
+      maxLength: 256
+      description: >
+        The writing device's score event session (request-only, optional),
+        the same string its score-events batches carry. It rides on the
+        baseline the write leaves, so the basis's `seq` counts that device's
+        own events up to `seq` as seen. Ignored without a `basis`; longer
+        than 256 characters is a 400.
     ScoreBasis:
       type: object
       description: >
@@ -5770,9 +5793,11 @@ components:
         `seen`, the number of lines of the match's score event log its board
         had reached (its `scoreVersion`); `own`, its own events not yet
         acknowledged; `seq`, the highest sequence number of its own session it
-        had made. An event the basis holds is `recorded` by the write; an
-        older one it does not hold is `beforeBaseline`. Without a basis the
-        write is taken as having seen every line logged.
+        had made, counted only when the write also sends its `session`
+        (WriteSession): every event of that session with a sequence number up
+        to `seq` is then held. An event the basis holds is `recorded` by the
+        write; an older one it does not hold is `beforeBaseline`. Without a
+        basis the write is taken as having seen every line logged.
       properties:
         seen:
           type: integer
@@ -5938,6 +5963,8 @@ components:
           $ref: '#/components/schemas/WriteId'
         basis:
           $ref: '#/components/schemas/ScoreBasis'
+        session:
+          $ref: '#/components/schemas/WriteSession'
 
     Error:
       type: object

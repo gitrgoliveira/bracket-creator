@@ -2784,8 +2784,19 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 			// clock frame"), never a downstream refusal the guard would raise
 			// against a result it is not changing (bc-cse finding 2).
 			// Returning an error makes UpdateBracket skip the save.
-			if mergeMatchWrite(bracketMatchAsResult(bm), result, policy, mc).Superseded() {
+			rep := mergeMatchWrite(bracketMatchAsResult(bm), result, policy, mc)
+			if rep.Superseded() {
 				return nil, false, nil, ErrMatchSuperseded
+			}
+			// The result lock (K1, result_lock.go): an older finish that did
+			// not see the stored result is held, never refused, once the next
+			// match was played or started.
+			if policy == matchWriteForward && rivalDisplacesResult(rep) {
+				if code := downstreamLockCode(bracket, rIdx, mIdx); code != "" {
+					result.Merge = rep
+					holdAsLocked(result, code)
+					return nil, false, nil, ErrMatchSuperseded
+				}
 			}
 			// A bout-row correction over a recorded withdrawal keeps the
 			// ruling (bc-tmfn). It must run BEFORE the downstream guard below,

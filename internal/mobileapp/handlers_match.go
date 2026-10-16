@@ -2764,11 +2764,25 @@ const MatchClosedMessage = engine.MatchClosedMessage
 // path (which cannot share its JSON body) both read it, so the two can never
 // say something different about the same code.
 func messageForHeldReason(heldReason string) string {
-	if heldReason == state.HeldReasonMatchClosed {
+	switch heldReason {
+	case state.HeldReasonMatchClosed:
 		return MatchClosedMessage
+	case state.HeldReasonDownstreamPlayed:
+		return ResultLockedPlayedMessage
+	case state.HeldReasonDownstreamRunning:
+		return ResultLockedRunningMessage
 	}
 	return SupersededMessage
 }
+
+// ResultLockedPlayedMessage and ResultLockedRunningMessage are the sentences a
+// finish or decision is answered with when the next knockout match was already
+// played or started, so the recorded result is locked (operator decision K1,
+// 2026-10-16). The write is kept in the match's history.
+const (
+	ResultLockedPlayedMessage  = "Not applied: the next round was already fought, so the recorded result stands. This result was kept in the match's history. To change the result, use Correct result."
+	ResultLockedRunningMessage = "Not applied: the next round has already started, so the recorded result stands. This result was kept in the match's history. To change the result, use Correct result."
+)
 
 // writesOverFinished reports whether a write of this status, over a finished
 // match, is a correction to it rather than a start: a completed correction, or

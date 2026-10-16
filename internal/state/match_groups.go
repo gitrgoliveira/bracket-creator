@@ -802,6 +802,12 @@ type MergeReport struct {
 	// a move the write causes (a tap that found no bout row, and finds one
 	// the write pads) is recorded.
 	Prior *MatchResult `json:"-"`
+	// ResultLocked, when set, is the wire code (HeldReasonDownstreamPlayed or
+	// HeldReasonDownstreamRunning) of a finish or decision held because the
+	// next knockout match had already been played or started (operator decision
+	// K1, 2026-10-16): the stored result is locked, and the write is kept in the
+	// history instead of displacing it.
+	ResultLocked string
 }
 
 // Superseded reports whether nothing of the write applied: a group it
@@ -848,11 +854,23 @@ const HeldReasonMatchClosed = "match_closed"
 // HeldReason is the code a response carries beside heldGroups, "" when the
 // held groups were held by their stamps alone.
 func (r *MergeReport) HeldReason() string {
+	if r != nil && r.ResultLocked != "" && len(r.Held) > 0 {
+		return r.ResultLocked
+	}
 	if r == nil || len(r.Held)+len(r.Displaced) == 0 || !r.MatchClosed {
 		return ""
 	}
 	return HeldReasonMatchClosed
 }
+
+// HeldReasonDownstreamPlayed and HeldReasonDownstreamRunning are the wire codes
+// (heldReason) of a finish or decision held because the next knockout match was
+// already played or started (operator decision K1, 2026-10-16): the recorded
+// result is locked. They reuse the codes of the explicit-correction refusal.
+const (
+	HeldReasonDownstreamPlayed  = "downstream_knockout_played"
+	HeldReasonDownstreamRunning = "downstream_knockout_running"
+)
 
 // HeldGroups is the list a response carries, nil when nothing was held.
 func (r *MergeReport) HeldGroups() []string {

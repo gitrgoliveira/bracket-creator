@@ -275,6 +275,15 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// every pool write, a first completion included: it only ever acts on a
 	// slot that is already occupied, and ignores a pool that is not complete.
 	if err := e.requalifyMixedPoolWrite(tx, compID, comp, matchID, result, prior, fo); err != nil {
+		// The result lock (K1, result_lock.go): a pool result that did not see
+		// the stored one, refused only because a seated knockout match was
+		// played or started, is held (the refusal rolled the match back), not
+		// refused.
+		if code := lockedByRequalification(err); code != "" && rivalDisplacesResult(result.Merge) {
+			holdAsLocked(result, code)
+			e.recordSupersededWriteHistory(tx, compID, matchID, result)
+			return nil, supersededBy(result)
+		}
 		return nil, err
 	}
 

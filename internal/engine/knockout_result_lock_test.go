@@ -57,6 +57,9 @@ func TestKnockoutResultLock(t *testing.T) {
 		{"kiken then older finish, next started", "running", func() []pmStep {
 			return []pmStep{pmFin(mmT1, wrTeamA, M, nil), pmDec(mmT2, "kiken-voluntary", "aka"), lkNext(t, "running")}
 		}},
+		{"finish then older kiken (the decision door), next played", "played", func() []pmStep {
+			return []pmStep{pmDec(mmT1, "kiken-voluntary", "aka"), pmFin(mmT2, wrTeamA, M, nil), lkNext(t, "played")}
+		}},
 		{"finish then older finish of the other side, next played", "played", func() []pmStep {
 			return []pmStep{pmFin(mmT1, wrTeamA, M, nil), pmFin(mmT2, wrTeamB, nil, M), lkNext(t, "played")}
 		}},
@@ -107,9 +110,53 @@ func TestKnockoutResultLock(t *testing.T) {
 				}
 				assert.NotContains(t, answers[i], "downstream_knockout", label)
 			}
-			assert.Equal(t, wrTeamA, h.load(t).Winner, label)
+			assert.Equal(t, firstWinner(steps[0], h), h.load(t).Winner, label)
 		}
 	}
+}
+
+// The pool requalification guard is locked the same way: once the knockout
+// match a pool result seats was played, an older pool finish that never saw
+// the stored result is held, not refused.
+func TestPoolResultLockedByAPlayedKnockoutMatch(t *testing.T) {
+	f := newRQFixture(t, "rq-k1", 2, [][]string{{"A1", "A2"}, {"B1", "B2"}})
+	stamped := func(at int64, winner string) *state.MatchResult {
+		r := f.poolResult("Pool A-0", winner)
+		r.ModifiedAt, r.WriteDoor, r.Changed = at, DoorScore, []string{state.GroupPoints, state.GroupResult}
+		return r
+	}
+	require.NoError(t, f.write("Pool A-0", stamped(mmT2, "A1")))
+	f.scorePool("Pool B-0", "B1")
+	f.resolve()
+	m1, _ := f.slot("Pool A-1st")
+	require.NoError(t, f.scoreKO(m1.ID, "A1"))
+
+	held := f.write("Pool A-0", stamped(mmT1, "A2"))
+	require.ErrorIs(t, held, ErrMatchSuperseded)
+	assert.Equal(t, state.HeldReasonDownstreamPlayed, HeldReasonOf(held))
+	assert.Equal(t, "A1", loadPoolMatchByID(t, f.store, f.compID, "Pool A-0").Winner, "the stored result stands")
+	entries, err := f.store.LoadMatchHistory(f.compID, "Pool A-0")
+	require.NoError(t, err)
+	var kept bool
+	for _, e := range entries {
+		kept = kept || (e.Stamp == mmT1 && e.Outcomes[state.GroupResult] == state.HistoryOutcomeHeld && e.Reason != "")
+	}
+	assert.True(t, kept, "the held finish is in the history")
+
+	// An explicit correction keeps the refusal and its force option.
+	fix := stamped(mmT3, "A2")
+	fix.CorrectionReason = "scoresheet was misread"
+	var played *DownstreamKnockoutPlayedError
+	require.ErrorAs(t, f.write("Pool A-0", fix), &played)
+}
+
+// firstWinner is the winner the older (first by stamp) write gives: a kiken
+// against Ryu (aka) gives the other team.
+func firstWinner(older pmStep, _ mmHome) string {
+	if older.dec {
+		return wrTeamB
+	}
+	return wrTeamA
 }
 
 func fmtOrder(o []int) string {

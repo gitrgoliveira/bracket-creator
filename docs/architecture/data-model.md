@@ -254,6 +254,8 @@ classDiagram
         +bool ReopenPending
         +long ModifiedAt
         +map GroupStamps
+        +int ScoreVersion (score-log line count)
+        +map EventSeqs (per device session, the highest logged tap seq)
     }
 
     class CompetitorSide {
@@ -337,6 +339,8 @@ classDiagram
         +bool DecidedByHantei (legacy, read-only)
         +long ModifiedAt
         +map GroupStamps
+        +int ScoreVersion (score-log line count)
+        +map EventSeqs (per device session, the highest logged tap seq)
     }
 
     MatchResult "1" *-- "2" CompetitorSide : side A is aka, side B is shiro

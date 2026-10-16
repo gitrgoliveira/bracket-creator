@@ -672,6 +672,18 @@ func mergeByReplay(stored, incoming *state.MatchResult, changed []string, stamp 
 			rep.MatchClosed = true
 		}
 	}
+	// What the result lock asks of the log as this write found it (the one
+	// owner, resultInForceIn): was a finished result in force at its end, and
+	// did the write's SENT basis hold the line that set it. Read only for a
+	// write that displaced something without naming a correction.
+	if len(rep.DisplacedGroups()) > 0 && !bl.Informed {
+		var sentBasis *state.ScoreBasis
+		if bl.BasisSent {
+			sentBasis = &bl.Basis
+		}
+		r := resultInForceIn(stored, lines, shape, nil, sentBasis, len(mc.lines))
+		rep.StoredResultInForce, rep.StoredResultSeen = r.InForce, r.Saw
+	}
 	rep.ResultChanged = state.GroupDiffers(stored, final, state.GroupResult)
 	storedStamps := state.MaterializedGroupStamps(stored.GroupStamps, stored.ModifiedAt, state.SubPositions(stored.SubResults))
 	mh := mergeHold{rep: rep, stored: stored, incoming: incoming, stamps: stamps, storedStamps: storedStamps}

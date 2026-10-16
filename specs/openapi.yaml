@@ -3784,7 +3784,7 @@ paths:
                           description: On a `superseded` entry, the groups held.
                         heldReason:
                           type: string
-                          enum: [match_closed]
+                          enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
                           description: >
                             On a `superseded` entry held because a finish or a
                             decision stamped before it had already closed the
@@ -3812,7 +3812,7 @@ paths:
                           description: As MatchResult.displacedGroups.
                         heldReason:
                           type: string
-                          enum: [match_closed]
+                          enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
                           description: As RefusedWrite.heldReason.
 
   /api/competitions/{id}/matches/{mid}/quick-score:
@@ -4118,7 +4118,7 @@ paths:
                           and kept in the match's history. As RefusedWrite.heldGroups.
                       heldReason:
                         type: string
-                        enum: [match_closed]
+                        enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
                         description: As RefusedWrite.heldReason.
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
@@ -4247,7 +4247,7 @@ paths:
                           `heldReason`. As MatchResult.displacedGroups.
                       heldReason:
                         type: string
-                        enum: [match_closed]
+                        enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
                         description: As RefusedWrite.heldReason.
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
@@ -5623,7 +5623,7 @@ components:
             of them held and kept in the match's history.
         heldReason:
           type: string
-          enum: [match_closed]
+          enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
           description: >
             Present on `superseded` when the groups were held not because a
             newer change is stored but because a finish or a decision stamped
@@ -5631,7 +5631,12 @@ components:
             `message` then tells the operator the match is finished and to use
             Correct result. The change is kept in the match's history. Also
             carried, beside `heldGroups` or `displacedGroups`, by a write
-            applied in part.
+            applied in part. `downstream_knockout_played` and
+            `downstream_knockout_running` say the stored result is locked: a
+            finish or decision stamped before it, from a device that did not
+            see it, was held because the next knockout match had already been
+            played or started. The stored result stands and the write is kept
+            in the history.
 
     MatchHistoryEntry:
       type: object
@@ -6862,7 +6867,7 @@ components:
         heldReason:
           type: string
           readOnly: true
-          enum: [match_closed]
+          enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
           description: >
             On a write's response only, beside `heldGroups` or
             `displacedGroups`: present when they were held or moved because a

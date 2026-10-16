@@ -166,11 +166,10 @@ func r10PoolSetup(t *testing.T, id string, requeue bool) r10Pool {
 	f.resolve()
 	m1, _ := f.slot("Pool A-1st")
 	require.NoError(t, f.scoreKO(m1.ID, win))
+	_, err = f.eng.ReopenMatch(f.compID, "Pool A-0", "")
+	require.NoError(t, err)
 	if requeue {
 		require.NoError(t, f.eng.RevertMatchToQueue(f.compID, "Pool A-0"))
-	} else {
-		_, err = f.eng.ReopenMatch(f.compID, "Pool A-0", "")
-		require.NoError(t, err)
 	}
 	lines, err := f.store.LoadScoreLog(f.compID, "Pool A-0")
 	require.NoError(t, err)
@@ -230,7 +229,7 @@ func TestResultLockNeedsAResultInForce(t *testing.T) {
 			require.ErrorAs(t, finErr, &played, label+": the finish meets the downstream guard, not a hold")
 			assert.NotErrorIs(t, finErr, ErrMatchSuperseded, label)
 			m := loadPoolMatchByID(t, p.f.store, p.f.compID, "Pool A-0")
-			assert.Equal(t, state.MatchStatusRunning, m.Status, label+": nothing is held forever; the match is still open")
+			assert.NotEqual(t, state.MatchStatusCompleted, m.Status, label+": nothing is held forever; the match is still open")
 			assert.Equal(t, []string{"M"}, m.IpponsB, label+": the point landed")
 			assert.Zero(t, p.lockedLines(), label+": nothing was held as locked")
 		}
@@ -273,15 +272,27 @@ func TestResultLockBasisMustHoldTheLineInForce(t *testing.T) {
 }
 
 // A sent basis that saw nothing is no more a correction of the stored ruling
-// than no basis at all: the finish pads nothing of its own.
+// than no basis at all: the finish pads nothing of its own. One that holds the
+// line of the ruling in force is a correction of it, and pads as it always did.
 func TestRivalFinishWithABasisThatSawNothingPadsNothing(t *testing.T) {
 	comp := &state.Competition{ID: "c", Kind: "team", TeamSize: 3, Format: state.CompFormatLeague}
-	for _, basis := range []*state.ScoreBasis{nil, {Own: []string{"x"}}} {
+	for _, tc := range []struct {
+		name  string
+		basis *state.ScoreBasis
+		want  int
+	}{
+		{"no basis", nil, 1},
+		{"a basis that holds no line", &state.ScoreBasis{Own: []string{"x"}}, 1},
+		{"a basis past the log", &state.ScoreBasis{Seen: 9}, 3}, // capped to the one line the log holds: the ruling
+		{"a basis that holds the ruling", &state.ScoreBasis{Seen: 1}, 3},
+	} {
 		prior := &state.MatchResult{ID: "Pool A-0", SideA: "Kenshikan", SideB: "Sanshukan", Status: state.MatchStatusCompleted, Decision: "fusensho", Winner: "Sanshukan"}
+		mb := MigrationBaseline(prior, MigrationDoor+"-0", 0)
+		lines := []state.ScoreLogLine{{Baseline: &mb}}
 		res := &state.MatchResult{ID: "Pool A-0", SideA: "Kenshikan", SideB: "Sanshukan", Status: state.MatchStatusCompleted, Winner: "Kenshikan", ModifiedAt: 5, WriteDoor: DoorScore,
-			SubResults: []state.SubMatchResult{{Position: 1, SideA: "A1", SideB: "B1"}}, Basis: basis}
-		require.NoError(t, shapeScoreWrite(comp, prior, res, "Pool A-0"))
-		assert.Len(t, res.SubResults, 1, "basis sent=%v: a rival pads nothing", basis != nil)
+			SubResults: []state.SubMatchResult{{Position: 1, SideA: "A1", SideB: "B1"}}, Basis: tc.basis}
+		require.NoError(t, shapeScoreWrite(comp, prior, res, "Pool A-0", lines))
+		assert.Len(t, res.SubResults, tc.want, tc.name)
 	}
 }
 

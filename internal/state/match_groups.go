@@ -808,6 +808,15 @@ type MergeReport struct {
 	// K1, 2026-10-16): the stored result is locked, and the write is kept in the
 	// history instead of displacing it.
 	ResultLocked string
+	// StoredResultInForce and StoredResultSeen are what the replay's one owner
+	// of "the result in force" (engine.ResultInForceAt) says of the log as the
+	// write found it, set when the write displaced something and named no
+	// correction: whether a finished result was in force at the log's end (the
+	// stored result the write would displace; none after a reopen or a send
+	// back to the queue), and whether the write's SENT basis holds the line
+	// that set it. The result lock reads them (engine.rivalDisplacesResult).
+	StoredResultInForce bool `json:"-"`
+	StoredResultSeen    bool `json:"-"`
 }
 
 // Superseded reports whether nothing of the write applied: a group it

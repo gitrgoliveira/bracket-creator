@@ -2970,7 +2970,7 @@ type correctionCheck struct {
 // the pick judge, then this), and the start gate after it reads the returned
 // status instead.
 // seenResultCheck lets applyCorrectionReason ask the match's score log whether a
-// reason-less finish's basis holds a result the log recorded (engine.BasisSawResult).
+// reason-less finish's basis holds the line of the result in force at its stamp (engine.ResultInForceAt).
 // Only the score door passes one: bulk-score is an organiser's tool and is never
 // the rival of a result, so it keeps asking every overwrite for its reason.
 type seenResultCheck struct {
@@ -2984,13 +2984,14 @@ type seenResultCheck struct {
 // engine and ends in the match's history. Every read error is logged here,
 // naming the file and line when the error carries them.
 // readable says whether the log could be read at all, from the same one read.
-func (c *seenResultCheck) sawResult(basis *state.ScoreBasis) (saw, readable bool) {
+func (c *seenResultCheck) sawResult(stored *state.MatchResult, comp *state.Competition, knockout bool, stamp int64, basis *state.ScoreBasis) (saw, readable bool) {
 	lines, err := c.stx.LoadScoreLog(c.compID, c.matchID)
 	if err != nil {
 		log.Printf("mobileapp: ERROR: match %s/%s: score log not read: %v", c.compID, c.matchID, err)
 		return false, false
 	}
-	return engine.BasisSawResult(lines, basis), true
+	r := engine.ResultInForceAt(stored, lines, comp, knockout, stamp, basis)
+	return r.InForce && r.Saw, true
 }
 
 func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult, comp *state.Competition, score *seenResultCheck) correctionCheck {
@@ -3035,7 +3036,7 @@ func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult, comp *state
 				// not see the result: the engine reads it as empty too, and the
 				// write then ends in the match's history, which is a separate
 				// file, instead of being dropped before it gets there.
-				if saw, readable := score.sawResult(r.Basis); !saw {
+				if saw, readable := score.sawResult(snap.Stored, comp, snap.InBracket, r.ModifiedAt, r.Basis); !saw {
 					if !readable {
 						// The engine reads this log as empty, so a basis naming lines of
 						// it means nothing: the write is judged, and logged, as one that

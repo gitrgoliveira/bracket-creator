@@ -171,14 +171,14 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		var engiValues *state.MatchResult
 		if engiValidTotal(result.FlagsA, result.FlagsB) {
 			if engiFinishHeld(engiPrior, result, comp, !inPool, engiLines) {
-				e.recordWriteHistory(tx, compID, matchID, result)
+				e.recordSupersededWriteHistory(tx, compID, matchID, result)
 				return nil, supersededBy(result)
 			}
 			// The result lock (K1, result_lock.go): an engi finish that
 			// displaced the stored result without having seen it is held, never
 			// refused, once the next knockout match was played or started. A
 			// pool finish is judged by the requalification below.
-			engiRival = rivalDisplacesResult(result.Merge, engiLines)
+			engiRival = rivalDisplacesResult(result.Merge)
 			if engiRival {
 				probe := engiFinishProbe(engiPrior, result)
 				engiValues = &probe
@@ -249,7 +249,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// winner derived from it would stand beside a stored bout that says
 	// otherwise.
 	if !replayedWrite {
-		if err := shapeScoreWrite(comp, prior, result, matchID); err != nil {
+		if err := shapeScoreWrite(comp, prior, result, matchID, e.snapshotScoreLog(tx, compID, matchID, result, matchWriteForward)); err != nil {
 			return nil, err
 		}
 	}
@@ -300,7 +300,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// stored one without having seen it is held, never refused or forced,
 	// when a seated knockout match was played or started (the refusal rolls
 	// the match back); force belongs to an explicit correction only.
-	if err := e.requalifyMixedPoolWriteLocked(tx, compID, comp, matchID, result, prior, result, nil, fo, e.rivalDisplacesNow(tx, compID, matchID, result)); err != nil {
+	if err := e.requalifyMixedPoolWriteLocked(tx, compID, comp, matchID, result, prior, result, nil, fo, rivalDisplacesResult(result.Merge)); err != nil {
 		return nil, err
 	}
 
@@ -1105,7 +1105,7 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// A decision that is a RIVAL displacing the stored result is not refused
 	// here: the result lock holds it when the next match is under way
 	// (applyBracketResultIn), kept in the history, where this 409 lost it.
-	if !rivalDisplacesResult(decisionProbeMerge(comp, prior, result, matchID, probeCtx), probeCtx.lines) {
+	if !rivalDisplacesResult(decisionProbeMerge(comp, prior, result, matchID, probeCtx)) {
 		if err := refuseDecisionReachingRunningMatch(tx, compID, matchID, decisionBy, prior); err != nil {
 			return nil, nil, err
 		}
@@ -1214,7 +1214,7 @@ func decisionProbeMerge(comp *state.Competition, prior, result *state.MatchResul
 	probe := *result
 	probe.SubResults = state.CloneSubResults(result.SubResults)
 	probe.Changed = slices.Clone(result.Changed)
-	if err := shapeScoreWrite(comp, prior, &probe, matchID); err != nil {
+	if err := shapeScoreWrite(comp, prior, &probe, matchID, mc.lines); err != nil {
 		return nil
 	}
 	return mergeMatchWrite(prior, &probe, matchWriteForward, mc)
@@ -1238,7 +1238,7 @@ func exactDecisionReplay(prior *state.MatchResult, decision, decisionBy string, 
 // RecordMatchResultWithIneligibilityTx and the exact-replay probe
 // (exactScoreReplayProbe), so the probe reads a write exactly as it would land
 // (bc-xrpl). prior is the stored match (never nil here); matchID the match's id.
-func shapeScoreWrite(comp *state.Competition, prior, result *state.MatchResult, matchID string) error {
+func shapeScoreWrite(comp *state.Competition, prior, result *state.MatchResult, matchID string, lines []state.ScoreLogLine) error {
 	deriveDaihyosenWinner(result)
 
 	// The bout rows as the writer sent them, before the server's own changes
@@ -1315,7 +1315,7 @@ func shapeScoreWrite(comp *state.Competition, prior, result *state.MatchResult, 
 		// A finish that names no correction is a rival of the ruling, not a
 		// correction of it (rivalResult): it either loses to the ruling or
 		// displaces it, so it keeps nothing and pads nothing of its own.
-		if KeepsWithdrawalRuling(prior.Status, prior.Decision, result) && !writesAsRival(result) {
+		if KeepsWithdrawalRuling(prior.Status, prior.Decision, result) && !writesAsRival(result, prior, lines, comp, !IsPoolMatchID(matchID)) {
 			padDecision = prior.Decision
 		}
 		if state.NeedsDefaultWinBoutPadding(result.Status, padDecision, prior.SideA, prior.SideB, matchID,
@@ -1383,7 +1383,7 @@ func exactScoreReplayProbe(stored, incoming *state.MatchResult, comp *state.Comp
 		if applyHansokuIppons(&probe) != nil {
 			return nil, false
 		}
-		if shapeScoreWrite(comp, stored, &probe, stored.ID) != nil {
+		if shapeScoreWrite(comp, stored, &probe, stored.ID, nil) != nil {
 			return nil, false
 		}
 		if reconcileSides(&probe, storedSides{A: stored.SideA, B: stored.SideB, AID: stored.SideAID, BID: stored.SideBID}) {

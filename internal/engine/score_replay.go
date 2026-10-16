@@ -388,8 +388,16 @@ func (rp *replayer) padDefaultWin() {
 // group holds (sides, ids, court, schedule, round) and, while the log is
 // empty, everything: a match with no log is the match as stored.
 func ReplayScoring(current *state.MatchResult, lines []state.ScoreLogLine, shape ReplayShape) Replay {
+	out, _ := replayScoring(current, lines, shape, nil)
+	return out
+}
+
+// replayScoring is ReplayScoring, stopping before the first item that does not
+// sort before stopAt (nil: the whole log), and handing back the replayer so a
+// caller can ask what it held at that point (resultInForce).
+func replayScoring(current *state.MatchResult, lines []state.ScoreLogLine, shape ReplayShape, stopAt *replayItem) (Replay, *replayer) {
 	if len(lines) == 0 {
-		return Replay{Match: cloneMatchForReplay(*current)}
+		return Replay{Match: cloneMatchForReplay(*current)}, nil
 	}
 	rp := &replayer{
 		lines: lines, shape: shape,
@@ -427,6 +435,9 @@ func ReplayScoring(current *state.MatchResult, lines []state.ScoreLogLine, shape
 	}
 	slices.SortFunc(items, compareReplayItems)
 	for _, it := range items {
+		if stopAt != nil && compareReplayItems(it, *stopAt) >= 0 {
+			break
+		}
 		l := lines[it.line]
 		switch {
 		case l.Baseline != nil:
@@ -459,7 +470,7 @@ func ReplayScoring(current *state.MatchResult, lines []state.ScoreLogLine, shape
 			out.Outcomes = append(out.Outcomes, EventOutcome{ID: l.Event.ID, Line: i, Outcome: rp.outcome[i]})
 		}
 	}
-	return out
+	return out, rp
 }
 
 // baselineGroupOrder applies a baseline's groups so a bout row exists before
@@ -686,8 +697,17 @@ func (rp *replayer) applyBaselineGroups(line int, b *state.ScoreBaseline, groups
 // has set the result and it is a finished one. A reopen sets it running again,
 // so the match is open from the reopen's stamp.
 func (rp *replayer) closed() bool {
-	_, governed := rp.govern[state.GroupResult]
-	return governed && rp.cur.m.Status == state.MatchStatusCompleted
+	_, ok := rp.resultInForce()
+	return ok
+}
+
+// resultInForce is THE answer to "is a result in force, and which line set
+// it": the line of the baseline that last set the result group, when the match
+// it left is finished. A reopen or a send back to the queue is such a baseline
+// leaving the match open, so it clears the result.
+func (rp *replayer) resultInForce() (line int, ok bool) {
+	line, governed := rp.govern[state.GroupResult]
+	return line, governed && rp.cur.m.Status == state.MatchStatusCompleted
 }
 
 func (rp *replayer) judgeOverFinished(line int, b *state.ScoreBaseline, groups []string) *BaselineHold {
@@ -735,11 +755,11 @@ func (rp *replayer) rivalResult(line int, b *state.ScoreBaseline) bool {
 	default:
 		return false
 	}
-	inForce, governed := rp.govern[state.GroupResult]
-	if !governed || inForce == line || b.Informed || baselineResultStatus(b) != state.MatchStatusCompleted {
+	inForce, ok := rp.resultInForce()
+	if !ok || inForce == line || b.Informed || baselineResultStatus(b) != state.MatchStatusCompleted {
 		return false
 	}
-	if b.BasisSent && basisHoldsLine(&b.Basis, inForce) {
+	if b.BasisSent && basisSawLine(&b.Basis, len(rp.lines), inForce) {
 		return false
 	}
 	// A result that says what the match already holds, in every group it
@@ -788,44 +808,79 @@ func baselineResultStatus(b *state.ScoreBaseline) state.MatchStatus {
 	return m.Status
 }
 
-// writesAsRival reports whether a write is the kind of result that can be a
-// rival of the one in force (rivalResult): from the score, engi or decision
-// door, naming no correction (no reason, no clearWithdrawal) and sending no
-// basis of its own. What the merge cannot yet know, whether such a write finds
-// a result in force, is the replay's to say.
-func writesAsRival(w *state.MatchResult) bool {
+// ResultInForce is what the score log says of the result a write meets: whether
+// a finished result was in force at the point asked about, the log line that
+// set it, and whether the write's basis (capped to the lines the log really
+// holds) holds that line, so the writer saw it. It is the ONE answer every
+// caller reads: the replay's rival test (rivalResult), the result lock
+// (rivalDisplacesResult), the padding gate (writesAsRival) and the /score
+// handler's reason check (ResultInForceAt).
+type ResultInForce struct {
+	InForce bool
+	Line    int
+	Saw     bool
+}
+
+// basisSawLine reports whether a write's basis holds the log line at index
+// line. lineCount is how many lines the log really holds: a count past it
+// names lines no device saw (the migration baseline minted for an empty log is
+// no line a device saw either). A write sending no basis saw nothing.
+func basisSawLine(basis *state.ScoreBasis, lineCount, line int) bool {
+	return basis != nil && line < min(basis.Seen, lineCount)
+}
+
+// resultInForceIn replays lines (the log as a merge sees it: a migration or
+// drift baseline included) up to stopAt (nil: all of them) and reads what the
+// replay holds. basis is the writer's SENT basis, nil when it sent none.
+func resultInForceIn(stored *state.MatchResult, lines []state.ScoreLogLine, shape ReplayShape, stopAt *replayItem, basis *state.ScoreBasis, lineCount int) ResultInForce {
+	_, rp := replayScoring(stored, lines, shape, stopAt)
+	if rp == nil {
+		return ResultInForce{}
+	}
+	line, ok := rp.resultInForce()
+	if !ok {
+		return ResultInForce{}
+	}
+	return ResultInForce{InForce: true, Line: line, Saw: basisSawLine(basis, lineCount, line)}
+}
+
+// ResultInForceAt works out, from the stamp-ordered score log lines of a match
+// (stored is the match as it stands), the result in force at stamp (0: after
+// every line), exactly as the replay does: the line that last set the result
+// while the match was finished, none once a reopen or a send back to the queue
+// opened it again. basis is what the write sent (nil: none). An empty log is
+// the stored match as its migration baseline.
+func ResultInForceAt(stored *state.MatchResult, lines []state.ScoreLogLine, comp *state.Competition, knockout bool, stamp int64, basis *state.ScoreBasis) ResultInForce {
+	count := len(lines)
+	if count == 0 {
+		mb := MigrationBaseline(stored, MigrationDoor+"-0", 0)
+		lines = []state.ScoreLogLine{{Baseline: &mb}}
+	}
+	var stopAt *replayItem
+	if stamp > 0 {
+		stopAt = &replayItem{stamp: stamp, baseline: true}
+	}
+	return resultInForceIn(stored, lines, ReplayShape{Comp: comp, Knockout: knockout}, stopAt, basis, count)
+}
+
+// writesAsRival reports whether a write is a rival of the stored result (the
+// one in force at the end of lines): from the score, engi or decision door,
+// stamped, naming no correction (no reason, no clearWithdrawal), and with no
+// sent basis that holds the line of the result in force.
+func writesAsRival(w, stored *state.MatchResult, lines []state.ScoreLogLine, comp *state.Competition, knockout bool) bool {
 	switch doorOf(w) {
 	case DoorScore, doorEngi, DoorDecision:
 	default:
 		return false
 	}
-	return w.ModifiedAt > 0 && w.CorrectionReason == "" && !w.ClearsWithdrawal && w.Basis == nil
-}
-
-// BasisSawResult reports whether a write's own basis holds a line of the score
-// log that recorded a completed result: the writer's screen showed the result
-// it is correcting, so it is a correction (and needs its reason), not a rival
-// (rivalResult). A write sending no basis saw nothing.
-func BasisSawResult(lines []state.ScoreLogLine, basis *state.ScoreBasis) bool {
-	if basis == nil {
+	if w.ModifiedAt <= 0 || w.CorrectionReason != "" || w.ClearsWithdrawal {
 		return false
 	}
-	for i, l := range lines {
-		if !basisHoldsLine(basis, i) {
-			break
-		}
-		if b := l.Baseline; b != nil && baselineResultStatus(b) == state.MatchStatusCompleted {
-			return true
-		}
+	if w.Basis == nil {
+		return true
 	}
-	return false
-}
-
-// basisHoldsLine reports whether a write's basis holds the log line at index
-// line: the one reading of "this write saw that line", shared by the replay's
-// rivalResult (the line of the result in force) and BasisSawResult.
-func basisHoldsLine(basis *state.ScoreBasis, line int) bool {
-	return line < basis.Seen
+	r := ResultInForceAt(stored, lines, comp, knockout, 0, w.Basis)
+	return !r.InForce || !r.Saw
 }
 
 // absorb settles event i, which baseline b's group value now holds or replaces:

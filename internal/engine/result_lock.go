@@ -30,21 +30,21 @@ const HoldReasonResultLocked = "the next round was already fought"
 // under way.
 const HoldReasonResultLockedRunning = "the next round has already started"
 
-// rivalDisplacesResult reports whether the merge moved the stored result out
-// for a write that did not see it: an older-stamped finish or decision (a
+// rivalDisplacesResult reports whether the merge moved a finished stored result
+// out for a write that did not see it: an older-stamped finish or decision (a
 // rival under I1, never a correction) that arrived after a newer result. The
 // stored result is the whole of it (verdict, scoreline, overtime, flags, bouts),
-// so ANY displaced group counts, not the verdict alone. "Did not see it" is
-// judged exactly as the replay's rivalResult does: a correction is informed,
-// and so is a basis that holds the line of a recorded result (lines is the
-// match's score log as the write found it); a basis that holds none (an unknown
-// session, a count past the log) saw nothing.
-func rivalDisplacesResult(rep *state.MergeReport, lines []state.ScoreLogLine) bool {
+// so ANY displaced group counts, not the verdict alone; but a result must BE in
+// force to be locked: a match reopened or sent back to the queue holds none, and
+// a finish displacing only the scoring stamped after the reopen locks nothing.
+// "Did not see it" and "in force" are the replay's own reading of the log as the
+// write found it (ResultInForceAt, set on the report by the merge): a correction
+// is informed, and so is a SENT basis that holds the line of the result in force.
+func rivalDisplacesResult(rep *state.MergeReport) bool {
 	if rep == nil || rep.Baseline == nil || rep.Baseline.Informed || len(rep.DisplacedGroups()) == 0 {
 		return false
 	}
-	b := rep.Baseline
-	return !b.BasisSent || !BasisSawResult(lines, &b.Basis)
+	return rep.StoredResultInForce && !rep.StoredResultSeen
 }
 
 // downstreamLockCode names the lock a played or started knockout match one hop
@@ -108,16 +108,6 @@ func lockReason(code string) string {
 	return HoldReasonResultLocked
 }
 
-// rivalDisplacesNow is rivalDisplacesResult for the write just landed, reading
-// the score log only when the merge displaced something at all.
-func (e *Engine) rivalDisplacesNow(tx state.StoreTx, compID, matchID string, result *state.MatchResult) bool {
-	rep := result.Merge
-	if rep == nil || rep.Baseline == nil || len(rep.DisplacedGroups()) == 0 {
-		return false
-	}
-	return rivalDisplacesResult(rep, e.snapshotScoreLog(tx, compID, matchID, result, matchWriteForward))
-}
-
 // knockoutLockCode is downstreamLockCode for the knockout round match matchID
 // of a stored bracket: "" for a pool, the bronze match or an unknown id.
 func (e *Engine) knockoutLockCode(tx state.StoreTx, compID, matchID string) string {
@@ -166,7 +156,7 @@ func (e *Engine) recordLockedHoldHistory(h state.StoreTx, compID, matchID string
 	if rep := result.Merge; rep != nil {
 		if past, err := h.LoadMatchHistory(compID, matchID); err == nil {
 			for _, p := range past {
-				if sameHeldLine(p, rep, doorOf(result)) {
+				if sameHeldLine(p, rep, doorOf(result), result.RevSession) {
 					return
 				}
 			}
@@ -176,9 +166,10 @@ func (e *Engine) recordLockedHoldHistory(h state.StoreTx, compID, matchID string
 }
 
 // sameHeldLine reports whether a history line is the line a locked hold would
-// add: the same door, stamp, reason, groups and held values.
-func sameHeldLine(p state.MatchHistoryEntry, rep *state.MergeReport, door string) bool {
-	if p.Door != door || p.Stamp != rep.Stamp || p.Reason != rep.HoldReason ||
+// add: the same door, session, stamp, reason, groups and held values (two
+// devices sending the same value are two writes; a device's resend is one).
+func sameHeldLine(p state.MatchHistoryEntry, rep *state.MergeReport, door, session string) bool {
+	if p.Door != door || p.Session != session || p.Stamp != rep.Stamp || p.Reason != rep.HoldReason ||
 		!slices.Equal(p.Changed, rep.Changed) || len(p.Held) != len(rep.HeldValues) {
 		return false
 	}

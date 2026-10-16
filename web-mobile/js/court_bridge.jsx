@@ -388,3 +388,38 @@ export function openBridge() {
 // load time.
 // -----------------------------------------------------------------------
 export const bridge = openBridge();
+
+// -----------------------------------------------------------------------
+// The operator's board on a display of the same device (bc-evts stage 3,
+// operator S1 a). A display in another tab of this device (or on its HDMI
+// output) shows exactly what the operator's individual score editor shows,
+// pending taps included: the editor publishes its board, the server's last
+// copy with this device's taps folded on, as a patch on every tap and every
+// outcome. It carries the server copy's scoreVersion, so a display already
+// holding a newer server copy keeps that one (mergeMatchPatch). A display on
+// ANOTHER device shows a tap once the server has it (its push), one round
+// trip later: the known limit of a board kept by the server.
+// -----------------------------------------------------------------------
+const OVERLAY_FIELDS = ['status', 'ipponsA', 'ipponsB', 'hansokuA', 'hansokuB', 'markIds', 'scoreVersion', 'modifiedAt', 'repPlayerA', 'repPlayerB'];
+
+// boardOverlayResult: the match_updated `result` a board publishes, or null
+// for a match no display can place (no id or no court).
+export function boardOverlayResult(match) {
+    if (!match || match.id == null || !match.court) return null;
+    const result = { id: match.id };
+    if (match.sideA && match.sideA.id) result.sideAId = match.sideA.id;
+    if (match.sideB && match.sideB.id) result.sideBId = match.sideB.id;
+    for (const f of OVERLAY_FIELDS) {
+        if (match[f] !== undefined) result[f] = match[f];
+    }
+    // No overtime is said, not left out, so a period taken back clears it.
+    result.encho = match.encho && match.encho.periodCount > 0 ? { periodCount: match.encho.periodCount } : null;
+    return result;
+}
+
+// publishBoardOverlay sends the board to this device's displays of its court.
+export function publishBoardOverlay(match) {
+    const result = boardOverlayResult(match);
+    if (!result) return;
+    bridge.publish('patch', match.court, match.compId || '', { result });
+}

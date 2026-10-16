@@ -4,17 +4,18 @@
 // in that window cancelled the timer and lost the edit. The hook now
 // registers the pending edit with api_client (API.notePendingEdit) from the
 // first tap until the write is dispatched, and on pagehide (or the tab being
-// hidden) writes a pending edit at once with `durable: true`, which puts it
-// straight into the persisted outbox.
+// hidden) writes a pending edit at once: the outbox stores it in that tick
+// (bc-evts).
 
 import React from 'react';
 import { render, act, fireEvent, screen, cleanup } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 
 // The log of what happened, in order, so a test can say whether the write was
-// dispatched before the pending edit was released, and whether it was durable.
+// dispatched before the pending edit was released.
 let events;
 
 const STUBBED_GLOBALS = {
@@ -54,7 +55,7 @@ beforeEach(() => {
   events = [];
   window.API.recordScore.mockReset();
   window.API.recordScore.mockImplementation((_c, _m, patch) => {
-    events.push(`write:${patch.status}${patch.durable ? ':durable' : ''}`);
+    events.push(`write:${patch.status}`);
     return Promise.resolve(undefined);
   });
   window.API.notePendingEdit.mockReset();
@@ -64,9 +65,12 @@ beforeEach(() => {
 
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
+// bc-evts stage 3: the individual editor no longer autosaves (a running
+// individual match is scored by taps, below), so the autosave's pending edit
+// is pinned on the engi editor, which still autosaves until stage 4.
 const running = () => ({
-  id: 'm-run', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A',
-  sideA: { id: 'p1', name: 'Yamada' }, sideB: { id: 'p2', name: 'Tanaka' },
+  id: 'm-run', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A', compEngi: true,
+  sideA: { id: 'p1', name: 'Aka One - Aka Two' }, sideB: { id: 'p2', name: 'Shiro One - Shiro Two' },
 });
 
 async function mount(match) {
@@ -77,7 +81,7 @@ async function mount(match) {
   return utils;
 }
 
-const tapM = () => act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
+const tapM = () => act(async () => { fireEvent.click(screen.getByTestId('engi-aka-inc')); });
 const wait = (ms) => act(async () => { vi.advanceTimersByTime(ms); });
 
 describe('bc-sync: the autosave reports a pending edit', () => {
@@ -121,13 +125,13 @@ describe('bc-sync: the autosave reports a pending edit', () => {
 });
 
 describe('bc-sync: a pending edit survives the page going away', () => {
-  it('pagehide writes it at once, marked durable', async () => {
+  it('pagehide writes it at once', async () => {
     await mount(running());
     await tapM();
     await act(async () => { window.dispatchEvent(new Event('pagehide')); });
     // Released only after the write is dispatched, so the status never reads
     // "synced" in between.
-    expect(events).toEqual(['pending', 'write:running:durable', 'released']);
+    expect(events).toEqual(['pending', 'write:running', 'released']);
     // And the debounce timer is gone: no second write when it would have fired.
     await wait(AUTOSAVE_DEBOUNCE_MS + 50);
     expect(window.API.recordScore).toHaveBeenCalledTimes(1);
@@ -144,7 +148,7 @@ describe('bc-sync: a pending edit survives the page going away', () => {
       delete document.visibilityState;
       if (vis) Object.defineProperty(Document.prototype, 'visibilityState', vis);
     }
-    expect(events).toContain('write:running:durable');
+    expect(events).toContain('write:running');
   });
 
   it('with nothing pending, pagehide sends nothing', async () => {
@@ -154,5 +158,28 @@ describe('bc-sync: a pending edit survives the page going away', () => {
     window.API.recordScore.mockClear();
     await act(async () => { window.dispatchEvent(new Event('pagehide')); });
     expect(window.API.recordScore).not.toHaveBeenCalled();
+  });
+});
+
+
+// bc-evts stage 3: the individual editor holds no pending edit. A tap on a
+// running individual match is handed to the outbox as it is made (which
+// persists it at once and owns the sync pill), so nothing is registered,
+// nothing waits for a debounce, and the page going away sends nothing more.
+describe('the individual editor has no pending edit to report', () => {
+  beforeEach(() => { Object.assign(window.API, makeFakeOutbox().api); });
+  const individual = () => ({
+    id: 'm-ind', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A',
+    sideA: { id: 'p1', name: 'Yamada' }, sideB: { id: 'p2', name: 'Tanaka' },
+  });
+
+  it('a tap goes to the outbox at once and registers no pending edit', async () => {
+    await mount(individual());
+    await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
+    expect(window.API.notePendingEdit).not.toHaveBeenCalled();
+    await act(async () => { window.dispatchEvent(new Event('pagehide')); });
+    await wait(AUTOSAVE_DEBOUNCE_MS + 50);
+    expect(events).toEqual([]);
   });
 });

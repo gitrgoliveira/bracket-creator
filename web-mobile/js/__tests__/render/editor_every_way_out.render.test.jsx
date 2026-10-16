@@ -15,6 +15,12 @@ import React from 'react';
 import { render, act, fireEvent, screen, cleanup, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { beforeEach as beforeEachTest } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
+
+// bc-evts stage 3: a running individual match is scored by taps handed to
+// the outbox (API.recordTap); each test gets a fresh fake of that surface.
+beforeEachTest(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });
 import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
 
 // Every patch recordScore was handed, in order.
@@ -114,7 +120,6 @@ const teamPoint = (i, side, letter) => [...teamRow(i).querySelectorAll(`.team-su
 
 describe('the unmount writes a tap still inside the autosave window', () => {
   it.each([
-    ['individual', () => individual(), 'kendo', () => screen.getAllByText('M')[0]],
     ['team', () => team(), 'kendo', () => teamPoint(0, 'shiro', 'K')],
     ['engi', () => engi(), 'engi', () => screen.getByTestId('engi-aka-inc')],
   ])('%s editor: the host moving on by itself still saves it', async (_kind, make, editor, target) => {
@@ -129,24 +134,17 @@ describe('the unmount writes a tap still inside the autosave window', () => {
     expect(writes).toHaveLength(1);
   });
 
-  it('the write carries the time of the last tap, not of the unmount', async () => {
+  // bc-evts stage 3: the individual editor has no autosave window. A tap is
+  // in the outbox the moment it is made, stamped then, so the host moving on
+  // by itself owes nothing and writes nothing.
+  it('individual editor: a tap is in the outbox as it is made, so the unmount writes nothing', async () => {
     const { view } = await mount(individual());
     await click(screen.getAllByText('M')[0]);
-    await act(async () => { vi.advanceTimersByTime(100); });
-    await click(screen.getAllByText('K')[1]);
-    const lastTap = performance.now();
-    await act(async () => { vi.advanceTimersByTime(100); });
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
     await act(async () => { view.unmount(); });
-    expect(writes).toHaveLength(1);
-    expect(writes[0].editedPerf).toBe(lastTap);
-  });
-
-  it('a write the debounce sends carries the time of the last tap too', async () => {
-    await mount(individual());
-    await click(screen.getAllByText('M')[0]);
-    const lastTap = performance.now();
     await settle();
-    expect(writes[0].editedPerf).toBe(lastTap);
+    expect(writes).toHaveLength(0);
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -227,7 +225,9 @@ describe('Prev/Next ask first whenever Close would', () => {
     await viaButton();
     expect(window.confirmDialog).not.toHaveBeenCalled();
     expect(onNext).toHaveBeenCalledTimes(1);
-    expect(writes).toHaveLength(1);
+    // The tap is kept in the outbox (bc-evts stage 3), not by a write on leaving.
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
+    expect(writes).toHaveLength(0);
   });
 });
 

@@ -21,6 +21,12 @@ import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { beforeEach as beforeEachTest } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
+
+// bc-evts stage 3: a running individual match is scored by taps handed to
+// the outbox (API.recordTap); each test gets a fresh fake of that surface.
+beforeEachTest(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });
 
 const STUBBED_GLOBALS = {
   isHikiwake: (_type) => false,
@@ -112,20 +118,19 @@ const clickClose = () => act(async () => { fireEvent.click(screen.getByText('✕
 
 describe('bc-dscn: individual editor', () => {
   it('a RUNNING match closes without the prompt and saves the pending edit now', async () => {
+    // bc-evts stage 3: the point is a tap, in the outbox the moment it is
+    // made, so closing asks nothing and writes nothing more.
     const { onSubmit, onClose } = mount(individualMatch('running'));
     await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
-    expect(onSubmit).not.toHaveBeenCalled(); // still inside the debounce window
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
 
     await clickClose();
 
     expect(window.confirmDialog).not.toHaveBeenCalled();
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit.mock.calls[0][0].status).toBe('running');
     expect(onClose).toHaveBeenCalledTimes(1);
-
-    // The debounce timer was cancelled by the flush, not left to fire again.
     await act(async () => { vi.advanceTimersByTime(350); });
-    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
   });
 
   it('an untouched RUNNING match closes without writing', async () => {

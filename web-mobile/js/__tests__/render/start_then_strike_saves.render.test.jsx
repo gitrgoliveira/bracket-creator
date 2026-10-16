@@ -10,6 +10,12 @@ import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { beforeEach as beforeEachTest } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
+
+// bc-evts stage 3: a running individual match is scored by taps handed to
+// the outbox (API.recordTap); each test gets a fresh fake of that surface.
+beforeEachTest(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -95,18 +101,21 @@ describe('a point struck right after Start match saves at once (bc-strt)', () =>
     await tapStart();
     expect(onSubmit.mock.calls[0][0].status, 'precondition: Start match wrote running').toBe('running');
 
+    // bc-evts stage 3: the point is a tap, sent without waiting for the list.
     await strikeIndividualMen();
-    const saves = autosaves(onSubmit);
-    expect(saves.length, 'the point is autosaved without waiting for the list').toBe(1);
-    expect([...(saves[0].ipponsA || []), ...(saves[0].ipponsB || [])]).toContain('M');
+    expect(autosaves(onSubmit), 'no running score write').toEqual([]);
+    expect(window.API.recordTap.mock.calls.map((c) => c[2])).toEqual([
+      expect.objectContaining({ kind: 'ippon.add', letter: 'M' }),
+    ]);
   });
 
   it('individual: a start the host made (the Up next card) counts too', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     await act(async () => { render(el(individual(), onSubmit, { started: true })); });
     await strikeIndividualMen();
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit.mock.calls[0][0].status).toBe('running');
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
+    expect(window.API.recordTap.mock.calls[0][2]).toMatchObject({ kind: 'ippon.add', letter: 'M' });
   });
 
   it('a scheduled match nobody started still does not autosave', async () => {

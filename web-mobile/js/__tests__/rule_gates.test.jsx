@@ -150,6 +150,16 @@ describe('the tap-outcome and retired-reason rules', () => {
     expect(trips(r, 'if (!tapOutcomeQuiet(o)) note(tapNotAppliedText(o));')).toBe(false);
     expect(r.exempt).toEqual(expect.arrayContaining(['write_result.jsx', 'api_client.jsx', 'score_events.jsx']));
   });
+  it('the individual editor scores a running match by taps: no autosave, no kept local edit', () => {
+    const r = rule('individual-editor-taps');
+    expect(r).toBeTruthy();
+    expect(r.only).toEqual(['admin_scoring_individual.jsx']);
+    expect(trips(r, 'const { markDirty } = useDebouncedRunningWrite({ isRunningRef });')).toBe(true);
+    expect(trips(r, '_ref.current = landedAutosave(onSubmit, seqRef, onLanded);')).toBe(true);
+    expect(trips(r, 'useAdoptFromServer({ signature, apply, keepLocalEdits: true, isDirty });')).toBe(true);
+    expect(trips(r, 'useAdoptFromServer({ signature, apply, keepLocalEdits: keepUnsavedEdits });')).toBe(false);
+    expect(trips(r, "window.API.recordTap(m.compId, m.id, makeEvent(ev), password, base);")).toBe(false);
+  });
   it('the retired needs_winner and default_win_stands codes trip anywhere', () => {
     const r = rule('retired-held-reasons');
     expect(r).toBeTruthy();

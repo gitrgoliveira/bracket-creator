@@ -4,6 +4,10 @@
 // takes the server's CURRENT copy when the refusal arrives (landedAutosave's onRefused) and
 // clears the stamp; a QUEUED answer keeps the board and the stamp, since that write will
 // land later. See "The edit-time adopt rule" in .claude/rules/match-results-and-marks.md.
+// bc-evts stage 3: the individual editor's half is gone (a running individual
+// match is scored by taps, with no autosave to refuse; see
+// individual_editor_taps and tap_not_applied_note). The engi half goes in
+// stage 4.
 
 import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
@@ -33,12 +37,10 @@ const STUBBED_GLOBALS = {
 };
 
 let restoreGlobals;
-let ScoreEditorModal;
 
 beforeAll(async () => {
   restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../../admin_scoring_modal.jsx');
-  ScoreEditorModal = window.ScoreEditorModal;
 });
 
 afterAll(() => restoreGlobals());
@@ -57,98 +59,6 @@ const tap = async (node) => { await act(async () => { fireEvent.click(node); });
 const wait = async (ms) => { await act(async () => { vi.advanceTimersByTime(ms); }); };
 // The save's answer is read in a microtask after the timer fires.
 const settle = async () => { for (let i = 0; i < 6; i++) await act(async () => { await Promise.resolve(); }); };
-
-describe('individual editor: a refused autosave takes the server\'s copy', () => {
-  const bout = (overrides = {}) => ({
-    id: 'm1', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A',
-    sideA: { id: 'p1', name: 'Yamada' }, sideB: { id: 'p2', name: 'Tanaka' },
-    ipponsA: [], ipponsB: [], modifiedAt: NOW - 5000,
-    ...overrides,
-  });
-  const el = (match, onSubmit) => (
-    <ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={onSubmit} password="" variant="inline" />
-  );
-  const marks = (c) => [...c.querySelectorAll('[aria-label*=" slot "]')]
-    .map((s) => s.getAttribute('aria-label'))
-    .filter((l) => /: remove /.test(l));
-  const menButton = (side) => [...side.querySelectorAll('.ipt-btn')].find((b) => b.textContent.trim() === 'M');
-
-  // Aka taps M; the server's copy (another device's Shiro M, stamped before the tap) is held
-  // by the stamp; the autosave then comes back with `answer`.
-  async function tapThenAnswer(answer) {
-    const onSubmit = vi.fn().mockResolvedValue(answer);
-    let r;
-    await act(async () => { r = render(el(bout(), onSubmit)); });
-    await tap(menButton(r.container.querySelector('.sb-side--aka')));
-    expect(marks(r.container), 'precondition: the tap shows').toHaveLength(1);
-    await act(async () => { r.rerender(el(bout({ ipponsB: ['M'], modifiedAt: NOW - 1 }), onSubmit)); });
-    expect(marks(r.container).map((l) => l.split(' ')[0]), 'precondition: the older copy is held').toEqual(['Aka']);
-    await wait(350);
-    await settle();
-    expect(onSubmit, 'precondition: the autosave went out').toHaveBeenCalled();
-    return r;
-  }
-
-  it('a superseded answer puts the server\'s mark on the board and drops the operator\'s', async () => {
-    const r = await tapThenAnswer(REFUSED);
-    expect(marks(r.container).map((l) => l.split(' ')[0])).toEqual(['Shiro']);
-  });
-
-  it('a nothing-handed-back answer (a thrown refusal the host reported) does the same', async () => {
-    const r = await tapThenAnswer(undefined);
-    expect(marks(r.container).map((l) => l.split(' ')[0])).toEqual(['Shiro']);
-  });
-
-  it('a queued answer keeps the board: that write will land', async () => {
-    const r = await tapThenAnswer(QUEUED);
-    expect(marks(r.container).map((l) => l.split(' ')[0])).toEqual(['Aka']);
-  });
-
-  it('a tap made after the refused save was built is kept', async () => {
-    let settleFirst;
-    const onSubmit = vi.fn().mockImplementationOnce(() => new Promise((res) => { settleFirst = res; }))
-      .mockResolvedValue({ id: 'm1', status: 'running' });
-    let r;
-    await act(async () => { r = render(el(bout(), onSubmit)); });
-    await tap(menButton(r.container.querySelector('.sb-side--aka')));
-    await act(async () => { r.rerender(el(bout({ ipponsB: ['M'], modifiedAt: NOW - 1 }), onSubmit)); });
-    await wait(350); // the first save is out and unanswered
-    vi.setSystemTime(NOW + 400);
-    await tap(menButton(r.container.querySelector('.sb-side--aka'))); // a second Aka mark, after it was built
-    await act(async () => { settleFirst(REFUSED); });
-    await settle();
-    expect(marks(r.container).filter((l) => l.startsWith('Aka')), 'the newer edit is still owed').not.toHaveLength(0);
-  });
-
-  it('a clock_skew answer keeps the board: the tap is owed to the next save, not wiped', async () => {
-    const r = await tapThenAnswer(CLOCK_SKEW);
-    expect(marks(r.container).map((l) => l.split(' ')[0])).toEqual(['Aka']);
-  });
-
-  it('a late refusal does not wipe a correction tapped after the match finished elsewhere', async () => {
-    let settleFirst;
-    const onSubmit = vi.fn().mockImplementationOnce(() => new Promise((res) => { settleFirst = res; }))
-      .mockResolvedValue({ id: 'm1', status: 'completed' });
-    let r;
-    await act(async () => { r = render(el(bout(), onSubmit)); });
-    await tap(menButton(r.container.querySelector('.sb-side--aka')));
-    await wait(350); // the autosave is out and unanswered
-    expect(onSubmit, 'precondition: the autosave went out').toHaveBeenCalledTimes(1);
-    // Another device finishes the match: Shiro won by M, stamped after the tap.
-    await act(async () => {
-      r.rerender(el(bout({
-        status: 'completed', ipponsB: ['M'], winner: { id: 'p2', name: 'Tanaka' }, modifiedAt: NOW + 100,
-      }), onSubmit));
-    });
-    vi.setSystemTime(NOW + 600);
-    await tap(menButton(r.container.querySelector('.sb-side--aka'))); // a correction on the finished match
-    const before = marks(r.container).map((l) => l.split(' ')[0]);
-    expect(before, 'precondition: the correction shows').toContain('Aka');
-    await act(async () => { settleFirst(REFUSED); }); // the autosave is refused late
-    await settle();
-    expect(marks(r.container).map((l) => l.split(' ')[0]), 'the correction stays').toEqual(before);
-  });
-});
 
 describe('engi editor: a refused autosave takes the server\'s copy', () => {
   const engi = (overrides = {}) => ({

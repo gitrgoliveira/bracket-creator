@@ -14,6 +14,12 @@ import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { beforeEach as beforeEachTest } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
+
+// bc-evts stage 3: a running individual match is scored by taps handed to
+// the outbox (API.recordTap); each test gets a fresh fake of that surface.
+beforeEachTest(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });
 import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
 import { SUPERSEDED_REASON, SUPERSEDED_ADVICE, CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, FETCH_TIMEOUT_MS } from '../../write_result.jsx';
 
@@ -125,191 +131,70 @@ function renderModal(match, extraProps = {}) {
 // Tests
 
 describe('C1 debounced autosave: ScoreEditorModal (individual match)', () => {
+  // bc-evts stage 3: the individual editor has no debounced autosave. A tap on
+  // a running match is handed to the outbox at once (API.recordTap) and no
+  // running score write is ever sent; the team and engi editors below keep
+  // theirs until stages 4 and 5.
+  const taps = () => window.API.recordTap.mock.calls.map((c) => c[2]);
 
-  it('an ippon tap on a RUNNING match triggers exactly ONE debounced write after 300ms', async () => {
+  it('an ippon tap on a RUNNING match is one tap, sent at once, and never a running write', async () => {
     renderModal(makeRunningMatch());
-
-    // Tap an "M" (Men) ippon button. Both sides render an identical M button;
-    // this test is side-agnostic: any ippon tap on a running match must
-    // schedule exactly one debounced autosave, so we click the first one.
-    const menButtons = screen.getAllByText('M');
-    expect(menButtons.length).toBeGreaterThanOrEqual(1);
-
-    // Tap: updates local state immediately (optimistic). No network call yet.
-    await act(async () => { fireEvent.click(menButtons[0]); });
-    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
-
-    // Advance past the 300ms debounce; the trailing-edge timer fires.
+    await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
+    expect(taps()).toEqual([expect.objectContaining({ kind: 'ippon.add', letter: 'M' })]);
     await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-
-    // The patch must carry status "running" (NOT "completed" / "scheduled").
-    const [, , patch] = window.API.recordScore.mock.calls[0];
-    expect(patch.status).toBe('running');
-    expect(patch.score?.live).toBe(true);
+    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
   });
 
-  it('does NOT fire a running autosave if the match completes during the debounce window', async () => {
+  it('a match completed right after a tap gets no running write', async () => {
     const running = makeRunningMatch();
     const { rerender } = renderModal(running);
-
-    const menButtons = screen.getAllByText('M');
-    await act(async () => { fireEvent.click(menButtons[0]); });
-    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
-
-    // The match is completed out from under the operator (an SSE update or
-    // another operator) BEFORE the 300ms debounce fires; re-render completed.
+    await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
     const completed = { ...running, status: 'completed' };
     await act(async () => {
-      rerender(
-        <ScoreEditorModal
-          match={completed}
-          onClose={vi.fn()}
-          onSubmit={makeOnSubmit(completed)}
-          password=""
-        />,
-      );
+      rerender(<ScoreEditorModal match={completed} onClose={vi.fn()} onSubmit={makeOnSubmit(completed)} password="" />);
     });
-
-    // Advance past the debounce. The fire-time isRunning re-check (gate 3) must
-    // suppress the now-stale running write so it can't regress the completed
-    // result.
     await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
     expect(window.API.recordScore).toHaveBeenCalledTimes(0);
   });
 
-  it('rapid double-tap coalesces into ONE write (trailing-edge debounce)', async () => {
+  it('two quick taps are two taps, each its own event', async () => {
     renderModal(makeRunningMatch());
-
-    const menButtons = screen.getAllByText('M');
-
-    // Two taps in quick succession (within the debounce window).
-    await act(async () => {
-      fireEvent.click(menButtons[0]);
-    });
-    // Advance only 100ms; still within debounce window. Timer should reset.
+    await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
     await act(async () => { vi.advanceTimersByTime(100); });
-    // The second tap resets the debounce (ScoreEditorModal caps at 2 ippons
-    // per side, so use a different letter to ensure the second tap is accepted).
-    const koteButtons = screen.getAllByText('K');
-    await act(async () => {
-      fireEvent.click(koteButtons[0]);
-    });
-    // Still before the debounce window from the second tap expires.
-    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
-
-    // Now advance past the debounce from the SECOND tap.
+    await act(async () => { fireEvent.click(screen.getAllByText('K')[0]); });
+    expect(taps().map((e) => e.letter)).toEqual(['M', 'K']);
     await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    // Only ONE write despite two taps.
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-  });
-
-  it('an ippon tap on a SCHEDULED match does NOT trigger a write (gate: never auto-start)', async () => {
-    renderModal(makeScheduledMatch());
-
-    // The "M" buttons are still rendered (the scoring board is always visible).
-    const menButtons = screen.getAllByText('M');
-    await act(async () => { fireEvent.click(menButtons[0]); });
-
-    // Advance well past debounce.
-    await act(async () => { vi.advanceTimersByTime(500); });
-
-    // Gate: status !== "running" → no write.
     expect(window.API.recordScore).toHaveBeenCalledTimes(0);
   });
 
-  it('the autosave write is cancelled when the operator clicks the explicit Finish button', async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
-    render(
-      <ScoreEditorModal
-        match={makeRunningMatch()}
-        onClose={vi.fn()}
-        onSubmit={onSubmit}
-        password=""
-      />,
-    );
-
-    // Tap an ippon to arm the debounce.
-    const menButtons = screen.getAllByText('M');
-    await act(async () => { fireEvent.click(menButtons[0]); });
-    expect(onSubmit).toHaveBeenCalledTimes(0);
-
-    // Click the Finish button (first arm: the label flips to the explicit
-    // "Tap again to finish" instruction; canFinish is true because aTotal>0).
-    const finishBtn = screen.getByText(/Finish/);
-    await act(async () => { fireEvent.click(finishBtn); });
-
-    // Armed state — the label is now "Tap again to finish". Tap it again to
-    // actually submit; the explicit finish must CANCEL the pending autosave.
-    const confirmBtn = screen.queryByText(/Tap again/);
-    if (confirmBtn) {
-      await act(async () => { fireEvent.click(confirmBtn); });
-    }
-
-    // Now advance past the debounce window; the cancelled timer must NOT fire.
+  it('an ippon tap on a SCHEDULED match sends nothing (gate: never auto-start)', async () => {
+    renderModal(makeScheduledMatch());
+    await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
     await act(async () => { vi.advanceTimersByTime(500); });
-
-    // The explicit onSubmit was called (via Finish), but the autosave should
-    // NOT have added an extra call. Any call from the debounce after the
-    // explicit submit would mean double-write; check total calls:
-    // Either 1 (Finish armed only) or 2 (arm + confirm) depending on UI flow,
-    // but the autosave debounce must NOT add an extra call on top.
-    // We verify by checking that every call had the patch from the explicit
-    // submit path; none should have come from the debounce firing AFTER
-    // the explicit submit. The simplest assertion: at most 2 total calls
-    // (arm + confirm), NOT 3 (arm + confirm + stale debounce).
-    expect(onSubmit.mock.calls.length).toBeLessThanOrEqual(2);
-    // And no call should be the stale "running" autosave AFTER the explicit
-    // submit; the last call (if any) must not be a running-status patch
-    // that arrived post-submit.
-    const calls = onSubmit.mock.calls;
-    if (calls.length > 0) {
-      // All completed-or-armed calls should NOT be the stale debounce. If the
-      // last call has status "running" it means the debounce fired after the
-      // explicit Finish. That's the bug we're guarding against.
-      const lastPatch = calls[calls.length - 1][0];
-      // After Finish, the patch should be "completed" or the arm triggered the
-      // 2-tap guard and the patch is pending. Either way it must NOT be a
-      // stale "running" patch fired by the debounce after the explicit submit.
-      // We only assert this if more than 1 call happened (arm + potential debounce).
-      if (calls.length >= 2) {
-        expect(lastPatch.status).not.toBe('running');
-      }
-    }
+    expect(taps()).toEqual([]);
+    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
   });
 
-  it('prop-driven re-render (SSE update) does NOT trigger a write (no feedback loop)', async () => {
-    // Render with a running match, then re-render with updated props (simulating
-    // an SSE match_updated arrival). The autosave must NOT fire because the
-    // dirty flag was never set by a user action.
+  it('Finish after a tap sends the one finishing write', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
-    const { rerender } = render(
-      <ScoreEditorModal
-        match={makeRunningMatch()}
-        onClose={vi.fn()}
-        onSubmit={onSubmit}
-        password=""
-      />,
-    );
-
-    // Simulate SSE: re-render with slightly different match props (e.g.
-    // scheduledAt changed). No user tap occurred.
-    await act(async () => {
-      rerender(
-        <ScoreEditorModal
-          match={makeRunningMatch({ scheduledAt: '10:05' })}
-          onClose={vi.fn()}
-          onSubmit={onSubmit}
-          password=""
-        />,
-      );
-    });
-
-    // Advance well past the debounce window.
+    render(<ScoreEditorModal match={makeRunningMatch()} onClose={vi.fn()} onSubmit={onSubmit} password="" />);
+    await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
+    await act(async () => { fireEvent.click(screen.getByText(/Finish/)); });
+    await act(async () => { fireEvent.click(screen.getByText(/Tap again/)); });
     await act(async () => { vi.advanceTimersByTime(500); });
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0].status).toBe('completed');
+  });
 
-    // No user action → dirty flag never set → no write.
+  it('prop-driven re-render (SSE update) sends nothing (no feedback loop)', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const { rerender } = render(<ScoreEditorModal match={makeRunningMatch()} onClose={vi.fn()} onSubmit={onSubmit} password="" />);
+    await act(async () => {
+      rerender(<ScoreEditorModal match={makeRunningMatch({ scheduledAt: '10:05' })} onClose={vi.fn()} onSubmit={onSubmit} password="" />);
+    });
+    await act(async () => { vi.advanceTimersByTime(500); });
     expect(onSubmit).toHaveBeenCalledTimes(0);
+    expect(taps()).toEqual([]);
   });
 });
 
@@ -369,7 +254,7 @@ describe('C1 debounced autosave: TeamScoreEditorModal (team match)', () => {
 // A tap on an empty cell can therefore cost a real result.
 describe('bc-rvfx: tapping an EMPTY ippon slot is a no-op', () => {
 
-  it('does not schedule an autosave write', async () => {
+  it('sends nothing', async () => {
     renderModal(makeRunningMatch());
 
     // Both sides start with two empty slots; the aria-label is the contract.
@@ -380,25 +265,28 @@ describe('bc-rvfx: tapping an EMPTY ippon slot is a no-op', () => {
     await act(async () => { vi.advanceTimersByTime(500); });
 
     expect(window.API.recordScore).toHaveBeenCalledTimes(0);
+    expect(window.API.recordTap).toHaveBeenCalledTimes(0);
   });
 
-  it('still writes when the tap actually clears a scored mark', async () => {
+  it('still sends a removal when the tap actually clears a scored mark', async () => {
     // The guard must not be over-broad: clearing a REAL mark is the documented
-    // way to take a strike back, and it must still autosave.
+    // way to take a strike back. bc-evts stage 3: it is an ippon.remove tap
+    // naming the mark (here the pending tap's own id).
     renderModal(makeRunningMatch());
 
     const menButtons = screen.getAllByText('M');
     await act(async () => { fireEvent.click(menButtons[0]); });
-    await act(async () => { vi.advanceTimersByTime(500); });
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
+    const { id } = window.API.recordTap.mock.results[0].value;
 
     // That slot now holds a mark, so its label changes from "empty" to "remove".
     const filled = screen.getAllByLabelText(/slot \d: remove /);
     expect(filled.length).toBeGreaterThanOrEqual(1);
 
     await act(async () => { fireEvent.click(filled[0]); });
-    await act(async () => { vi.advanceTimersByTime(500); });
-    expect(window.API.recordScore).toHaveBeenCalledTimes(2);
+    expect(window.API.recordTap).toHaveBeenCalledTimes(2);
+    expect(window.API.recordTap.mock.calls[1][2]).toMatchObject({ kind: 'ippon.remove', target: id });
+    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
   });
 });
 
@@ -464,9 +352,24 @@ describe('an edit inside the autosave window survives Prev/Next', () => {
   const viaButton = async () => { fireEvent.click(screen.getByText('Next →')); };
   const viaKey = async () => { fireEvent.keyDown(window, { key: 'ArrowRight' }); };
 
+  // bc-evts stage 3: the individual editor's tap is in the outbox as it is
+  // made, so leaving by Next or → owes nothing and writes nothing.
   it.each([
-    ['individual', 'the Next button', makeRunningMatch, viaButton],
-    ['individual', 'the → key', makeRunningMatch, viaKey],
+    ['the Next button', viaButton],
+    ['the → key', viaKey],
+  ])('individual editor: %s right after a tap keeps the tap and writes nothing', async (_via, goNext) => {
+    let view;
+    const onNext = vi.fn(() => view.unmount());
+    view = renderModal(makeRunningMatch(), { nextMatch: neighbour, onNext });
+    await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
+    await act(goNext);
+    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    expect(onNext).toHaveBeenCalledTimes(1);
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
+    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
+  });
+
+  it.each([
     ['team', 'the Next button', makeTeamMatch, viaButton],
     ['team', 'the → key', makeTeamMatch, viaKey],
   ])('%s editor: %s within 300ms of a tap writes the tap', async (_kind, _via, match, goNext) => {
@@ -1672,23 +1575,20 @@ describe('bc-dhas: an edit owed at unmount keeps a newer row', () => {
 // than it). The tap records the shown match's stamp as `seenModifiedAt`,
 // which recordScore floors the stamp by and never sends.
 describe('bc-hlck: an autosave carries the stamp of the match as it was at the tap', () => {
-  it('records the stamp shown at the tap, not one that arrived before the send, and a later tap records the newer one', async () => {
+  // bc-evts stage 3: a tap is stamped when it is made, floored by the match
+  // the board showed then (recordTap's `match` argument).
+  it('a tap is floored by the match shown at the tap, and a later tap by the newer one', async () => {
     const first = makeRunningMatch({ modifiedAt: 1_000_000 });
     const { rerender } = renderModal(first);
     await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
-    // Another device's change reaches this editor inside the debounce window.
+    expect(window.API.recordTap.mock.calls[0][4].modifiedAt).toBe(1_000_000);
+    // Another device's change reaches this editor.
     const moved = { ...first, modifiedAt: 2_000_000 };
     await act(async () => {
       rerender(<ScoreEditorModal match={moved} onClose={vi.fn()} onSubmit={makeOnSubmit(moved)} password="" />);
     });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    expect(window.API.recordScore.mock.calls[0][2].seenModifiedAt).toBe(1_000_000);
-    // A tap made now was made against the newer match.
     await act(async () => { fireEvent.click(screen.getAllByText('K')[0]); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    expect(window.API.recordScore).toHaveBeenCalledTimes(2);
-    expect(window.API.recordScore.mock.calls[1][2].seenModifiedAt).toBe(2_000_000);
+    expect(window.API.recordTap.mock.calls[1][4].modifiedAt).toBe(2_000_000);
   });
 });
 

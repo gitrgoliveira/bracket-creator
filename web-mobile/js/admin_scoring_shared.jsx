@@ -11,6 +11,7 @@ import {
   writeDidNotLand, writeRetryable, decisionWord,
   attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED, downstreamKnockoutReopenedNotice,
   courtBusyMessage, HELD_WRITE_DISCARD_LABEL, heldWriteDiscardConfirm, queuedNotice,
+  tapNotAppliedText,
 } from './write_result.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { sideWord, sideWithColour } from './side_cell.jsx';
@@ -95,6 +96,35 @@ export function useClearPendingWhenNothingHeld(compId, matchId, pendingWrite, on
     if (pendingWrite && held === false) onClear();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingWrite, held]);
+}
+
+// The refusals a tap gets while the server holds the match as not running
+// (operator S7 a): the server's sentence is shown next to the board.
+const TAP_NOT_RUNNING_REASONS = new Set(['match_not_started', 'match_sent_back']);
+
+// useTapOutcomeNote (bc-evts stage 3): what the outbox reported about a tap of
+// this editor's match the server did not apply (API.subscribeTapOutcome).
+// `note` is the quiet line (tapNotAppliedText); `refusal` the server's sentence
+// for a tap refused because the match is not running. `clear()` drops both,
+// called as the operator taps again.
+export function useTapOutcomeNote(compId, matchId) {
+  const [state, setState] = useStateA({ note: null, refusal: null });
+  useEffectA(() => {
+    setState({ note: null, refusal: null });
+    const api = window.API;
+    if (!api || typeof api.subscribeTapOutcome !== 'function') return undefined;
+    return api.subscribeTapOutcome(compId, matchId, (o) => {
+      const text = tapNotAppliedText(o);
+      if (!text) return;
+      if (o && TAP_NOT_RUNNING_REASONS.has(o.reason)) setState((s) => ({ ...s, refusal: text }));
+      else setState((s) => ({ ...s, note: text }));
+    });
+  }, [compId, matchId]);
+  const clearRef = useRefA(null);
+  if (!clearRef.current) {
+    clearRef.current = () => setState((s) => (s.note || s.refusal ? { note: null, refusal: null } : s));
+  }
+  return { note: state.note, refusal: state.refusal, clear: clearRef.current };
 }
 
 // HeldWriteNotice: the pending banner's line, worded for where the held

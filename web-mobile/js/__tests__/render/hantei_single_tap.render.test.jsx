@@ -2,6 +2,12 @@ import React from 'react';
 import { render, fireEvent, act, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { beforeEach as beforeEachTest } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
+
+// bc-evts stage 3: a running individual match is scored by taps handed to
+// the outbox (API.recordTap); each test gets a fresh fake of that surface.
+beforeEachTest(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });
 import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
 import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
 import { pointerTap, keyboardClick } from '../helpers/tap_events.js';
@@ -133,6 +139,8 @@ describe('hantei side buttons only pick (bc-htsd)', () => {
   });
 
   it('the running autosave patch never carries the hantei verdict', async () => {
+    // bc-evts stage 3: a running match writes taps, never a running score
+    // write, and no tap carries the verdict: the pick waits for Finish.
     vi.useFakeTimers();
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(<ScoreEditorModal match={tied({ ipponsA: [], ipponsB: [] })} onClose={vi.fn()} onSubmit={onSubmit} password="" />);
@@ -141,11 +149,8 @@ describe('hantei side buttons only pick (bc-htsd)', () => {
     await click(add('shiro', 'K'));
     await armAndPick('scoring-modal-hantei-aka');
     await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    expect(onSubmit).toHaveBeenCalled();
-    for (const [patch] of onSubmit.mock.calls) {
-      expect(patch.status).toBe('running');
-      expect(patch.decidedByHantei).not.toBe(true);
-    }
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(window.API.recordTap.mock.calls.map((c) => c[2].kind)).toEqual(['ippon.add', 'ippon.add']);
   });
 
   it('Enter commits only the picked side', async () => {

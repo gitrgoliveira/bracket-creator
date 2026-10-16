@@ -2,6 +2,12 @@ import React from 'react';
 import { render, fireEvent, act, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { beforeEach as beforeEachTest } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
+
+// bc-evts stage 3: a running individual match is scored by taps handed to
+// the outbox (API.recordTap); each test gets a fresh fake of that surface.
+beforeEachTest(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });
 
 // OPERATOR RULING: a scoring result must read the SAME on every surface, and
 // reopening a match to edit changes only that match's result, for every
@@ -149,12 +155,10 @@ describe('the editor shows the verdict the server holds', () => {
   });
 
   it('keeps UNSAVED operator edits rather than overwriting them', async () => {
-    // The limit of the rule: an editor with work in it is not refreshed out
-    // from under the operator. Their edits are not ours to discard — and note
-    // the server ORDERS stamped writes but does not ARBITRATE a two-operator
-    // conflict: whoever saves last wins, deliberately, because more than one
-    // person may legitimately be scoring a court. So this keeps a REAL conflict
-    // visible to the human who owns it rather than resolving it silently.
+    // The limit of the rule: a tap of the operator's is never refreshed out
+    // from under them. bc-evts stage 3: on a running match the tap is in the
+    // outbox, and the board is the server's copy with it folded on top, so a
+    // server copy that moved meanwhile shows both: its change and the tap.
     const { rerender, container } = render(
       <ScoreEditorModal
         match={tiedRunningMatch({ ipponsA: [], ipponsB: [] })}
@@ -168,13 +172,13 @@ describe('the editor shows the verdict the server holds', () => {
 
     await act(async () => { rerender(
       <ScoreEditorModal
-        match={tiedRunningMatch({ ipponsA: ['K', 'K'], ipponsB: ['D'] })}
+        match={tiedRunningMatch({ ipponsA: ['K'], ipponsB: ['D'] })}
         onClose={vi.fn()} onSubmit={vi.fn()} password=""
       />
     ); });
     const cells = [...container.querySelectorAll('.sb-slot')].map(s => s.textContent);
-    expect(cells, 'the operator\u2019s unsaved men must survive').toContain('M');
-    expect(cells).not.toContain('D');
+    expect(cells, 'the operator’s pending men must survive').toContain('M');
+    expect(cells, 'and the server’s change shows').toEqual(expect.arrayContaining(['K', 'D']));
   });
 
   it('cannot be finished past a verdict without ruling on it', async () => {

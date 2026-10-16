@@ -17,6 +17,12 @@ import React from 'react';
 import { render, act, fireEvent, screen, cleanup } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { beforeEach as beforeEachTest } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
+
+// bc-evts stage 3: a running individual match is scored by taps handed to
+// the outbox (API.recordTap); each test gets a fresh fake of that surface.
+beforeEachTest(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });
 import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
 
 // Every patch recordScore was handed, in order.
@@ -113,7 +119,6 @@ const daihyosenEncho = (p) => (p.subResults || []).find((s) => s.position === -1
 
 describe('the overtime count is saved on its own, like a point', () => {
   it.each([
-    ['individual match', individual, matchEncho],
     ['team match', team, matchEncho],
     ['team match with a daihyosen', teamWithDaihyosen, daihyosenEncho],
   ])('%s: ticking Encho and adding a period each write the count', async (_kind, make, enchoOf) => {
@@ -132,15 +137,27 @@ describe('the overtime count is saved on its own, like a point', () => {
     expect(enchoOf(writes[1])).toEqual({ periodCount: 2 });
   });
 
+  // bc-evts stage 3: a running individual match is scored by taps, the
+  // overtime count among them: one encho.add per period, as it is made.
+  it('individual match: ticking Encho and adding a period are each an encho.add tap', async () => {
+    await mount(individual());
+    await startOvertime();
+    await addOvertimePeriod();
+    expect(window.API.recordTap.mock.calls.map((c) => c[2])).toEqual([
+      { kind: 'encho.add', pos: 0 },
+      { kind: 'encho.add', pos: 0 },
+    ]);
+    await settle();
+    expect(writes).toHaveLength(0);
+  });
+
   it.each([
-    ['individual match', individual],
     ['team match', team],
-  ])('%s: a change and then the page going away is written at once, durably', async (_kind, make) => {
+  ])('%s: a change and then the page going away is written at once', async (_kind, make) => {
     await mount(make());
     await startOvertime();
     await pageHide();
     expect(writes).toHaveLength(1);
-    expect(writes[0].durable).toBe(true);
     expect(writes[0].status).toBe('running');
     expect(writes[0].encho).toEqual({ periodCount: 1 });
     // The flush took the timer with it: nothing more when it would have fired.
@@ -180,44 +197,39 @@ describe('a team editor keeps an overtime tap its own save has not caught up wit
 describe('a rep pick on a running tie-break bout is saved on its own', () => {
   // A team competition's pool tie-break bout is scored in the individual
   // editor, with a picker per side for the fighter each team sends.
+  // bc-evts stage 3: on a running bout each pick is a pool.rep tap.
   const repBout = () => ({
     ...individual(), id: 'Pool 1-DH-1',
     sideA: { id: 'team-kyoto', name: 'Kyoto' }, sideB: { id: 'team-osaka', name: 'Osaka' },
     repIsTeam: true, repRosterA: ['Kato', 'Mori'], repRosterB: ['Sato', 'Ito'],
   });
   const pick = (testId, value) => act(async () => { fireEvent.change(screen.getByTestId(testId), { target: { value } }); });
+  const taps = () => window.API.recordTap.mock.calls.map((c) => c[2]);
 
-  it('each pick writes the fighter, with nothing else entered', async () => {
+  it('each pick is a pool.rep tap naming the fighter, with nothing else written', async () => {
     await mount(repBout());
     await pick('rep-shiro-select', 'Sato');
-    await settle();
-    expect(writes).toHaveLength(1);
-    expect(writes[0].status).toBe('running');
-    expect(writes[0].repPlayerB).toBe('Sato');
-
     await pick('rep-aka-select', 'Mori');
     await settle();
-    expect(writes).toHaveLength(2);
-    expect(writes[1]).toMatchObject({ repPlayerA: 'Mori', repPlayerB: 'Sato' });
+    expect(taps()).toEqual([
+      { kind: 'pool.rep', pos: 0, side: 'b', name: 'Sato' },
+      { kind: 'pool.rep', pos: 0, side: 'a', name: 'Mori' },
+    ]);
+    expect(writes).toHaveLength(0);
   });
 
-  // Each pick is saved now, so each comes back from the server a moment later,
-  // and the editor followed the server's pick whatever it held.
   const shownPick = (testId) => screen.getByTestId(testId).value;
 
-  it('a second pick made before the first one\'s save comes back stands', async () => {
+  it('a second pick made before the first one comes back stands', async () => {
     const { rerender } = await mount(repBout());
     await pick('rep-shiro-select', 'Sato');
-    await settle();
     await pick('rep-shiro-select', 'Ito');
-    // The first save comes back while the second is still held.
+    // The first pick comes back from the server while the second is pending.
     await act(async () => { rerender(editorFor({ ...repBout(), repPlayerB: 'Sato' })); });
     expect(shownPick('rep-shiro-select')).toBe('Ito');
-    await settle();
-    expect(writes.map((p) => p.repPlayerB)).toEqual(['Sato', 'Ito']);
   });
 
-  it('a pick still being saved on one side does not stop the other side following the server', async () => {
+  it('a pick pending on one side does not stop the other side following the server', async () => {
     const { rerender } = await mount(repBout());
     await pick('rep-shiro-select', 'Ito');
     await act(async () => { rerender(editorFor({ ...repBout(), repPlayerA: 'Mori' })); });
@@ -231,6 +243,7 @@ describe('a rep pick on a running tie-break bout is saved on its own', () => {
     expect(shownPick('rep-shiro-select')).toBe('Sato');
     await settle();
     expect(writes).toHaveLength(0);
+    expect(taps()).toEqual([]);
   });
 });
 

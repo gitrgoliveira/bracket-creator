@@ -209,6 +209,16 @@ export const FORBIDDEN = [
     re: /\b(needs_winner|default_win_stands)\b/,
     why: 'reads a retired held reason; the server answers match_closed (writeMatchClosed, write_result.jsx)',
   },
+  {
+    // bc-evts stage 3 (S6): the individual editor scores a RUNNING match by
+    // tap events (API.recordTap), so it has no autosave to debounce or land
+    // and no unsaved running edit for an adopt to keep. Widened to the engi
+    // editor in stage 4 and the team editor in stage 5.
+    name: 'individual-editor-taps',
+    re: /\b(useDebouncedRunningWrite|landedAutosave)\b|keepLocalEdits:\s*true/,
+    only: ['admin_scoring_individual.jsx'],
+    why: 'autosaves or keeps a running edit in the individual editor; a running match is scored by taps (API.recordTap) and its board is the server\'s with this device\'s pending taps folded on',
+  },
 ];
 
 // Scanned against the WHOLE comment-stripped file (scanWholeFile) rather

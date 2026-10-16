@@ -18,6 +18,12 @@ import React from 'react';
 import { render, act, fireEvent, screen, cleanup } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { beforeEach as beforeEachTest } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
+
+// bc-evts stage 3: a running individual match is scored by taps handed to
+// the outbox (API.recordTap); each test gets a fresh fake of that surface.
+beforeEachTest(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });
 import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
 import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
 import { pointerTap } from '../helpers/tap_events.js';
@@ -108,28 +114,31 @@ const finish = async (label = 'Finish') => {
 };
 
 describe('individual editor', () => {
-  it('a point names the points alone', async () => {
+  // bc-evts stage 3: a running individual match is scored by taps (the
+  // outbox's recordTap), never by a running score write; the groups a write
+  // names are the Finish's (or a correction's), worked out from the board the
+  // editor shows: the server's copy with this device's pending taps.
+  const taps = () => window.API.recordTap.mock.calls.map((c) => c[2]);
+
+  it('a point is a tap, not a write; Finish names the result, and the points it has not seen stored', async () => {
     await mount(individual());
     await pointerTap(ipponBtn('aka', 'M'));
     await settle();
-    expect(writes).toHaveLength(1);
-    expect(lastWrite().changed).toEqual(['points']);
-  });
-
-  it('overtime names overtime alone', async () => {
-    await mount(individual());
-    await startOvertime();
-    await settle();
-    expect(lastWrite().changed).toEqual(['encho']);
-  });
-
-  it('Finish names the result, and the points it has not seen stored', async () => {
-    await mount(individual());
-    await pointerTap(ipponBtn('aka', 'M'));
-    await settle();
+    expect(writes).toHaveLength(0);
+    expect(taps()).toEqual([expect.objectContaining({ kind: 'ippon.add', side: 'a', letter: 'M' })]);
     await finish();
     expect(lastWrite().status).toBe('completed');
     expect(lastWrite().changed).toEqual(['points', 'result']);
+  });
+
+  it('overtime is a tap; Finish names it with the result', async () => {
+    await mount(individual({ ipponsA: ['M'] }));
+    await startOvertime();
+    await settle();
+    expect(writes).toHaveLength(0);
+    expect(taps()).toEqual([{ kind: 'encho.add', pos: 0 }]);
+    await finish();
+    expect(lastWrite().changed).toEqual(['result', 'encho']);
   });
 
   it('Finish on a scoreline already stored names the result alone', async () => {
@@ -142,9 +151,9 @@ describe('individual editor', () => {
     await mount(individual());
     await click(screen.getByTestId('scoring-modal-mark-draw'));
     await settle();
-    // The draw rides only the finishing write, so the running save it
-    // schedules changes nothing.
-    expect(writes.every((w) => w.changed.length === 0)).toBe(true);
+    // The draw rides only the finishing write: nothing is sent before it.
+    expect(writes).toHaveLength(0);
+    expect(taps()).toEqual([]);
     await finish();
     expect(lastWrite().score.type).toBe('hikiwake');
     expect(lastWrite().changed).toEqual(['result']);
@@ -157,32 +166,25 @@ describe('individual editor', () => {
     expect(lastWrite().changed).toEqual(['result']);
   });
 
-  it('an autosave does not name a group the match moved on while the editor held an edit', async () => {
-    // A point is struck, and before its save goes out another device records
-    // overtime. The editor keeps its unsaved board (it does not re-seed over
-    // an edit), so it still shows no overtime: its save must not put "no
-    // overtime" back.
+  it('Finish does not name a group the match moved on elsewhere while a tap was pending', async () => {
+    // A point is struck, and before the server has it another device records
+    // overtime. The board is the server's copy with the pending tap on top,
+    // so it shows that overtime, and the Finish does not put "no overtime" back.
     const { rerender } = await mount(individual());
     await pointerTap(ipponBtn('shiro', 'K'));
     await act(async () => { rerender(editorFor(individual({ encho: { periodCount: 1 } }))); });
-    await settle();
-    expect(writes).toHaveLength(1);
-    expect(lastWrite().encho).toBeUndefined();
-    expect(lastWrite().changed).toEqual(['points']);
+    await finish();
+    expect(lastWrite().encho).toEqual({ periodCount: 1 });
+    expect(lastWrite().changed).toEqual(['points', 'result']);
   });
 
-  it('a reopen moves only the result the editor agrees with: a held edit still names no other group', async () => {
-    // The server marks the match reopened while a point is unsaved, and another
-    // device has recorded overtime. The editor takes the reopened result as
-    // agreed (so ending it again says the result changed) and nothing else: its
-    // save must not put "no overtime" back.
+  it('a reopen marked while a tap is pending: the Finish names the result and its points, nothing else', async () => {
     const { rerender } = await mount(individual());
     await pointerTap(ipponBtn('shiro', 'K'));
     await act(async () => { rerender(editorFor(individual({ reopenPending: true, encho: { periodCount: 1 } }))); });
-    await settle();
-    expect(writes).toHaveLength(1);
-    expect(lastWrite().encho).toBeUndefined();
-    expect(lastWrite().changed).toEqual(['points']);
+    await finish();
+    expect(lastWrite().encho).toEqual({ periodCount: 1 });
+    expect(lastWrite().changed).toEqual(['points', 'result']);
   });
 
   // A reopen the server makes WITH a correction's reason (a downstream reopen, a
@@ -218,47 +220,32 @@ describe('individual editor', () => {
     expect(lastWrite().changed).toContain('result');
   });
 
-  it('an editor that followed a change elsewhere does not name it back', async () => {
-    // Nothing unsaved: the editor re-seeds to the overtime recorded
-    // elsewhere, and its next point names the points alone.
+  it('a point the server already holds is not named by the Finish', async () => {
+    // The tap reached the server and its push came back: the board and the
+    // match agree on the points, so the Finish names the result alone.
     const { rerender } = await mount(individual());
-    await act(async () => { rerender(editorFor(individual({ encho: { periodCount: 1 } }))); });
-    await pointerTap(ipponBtn('shiro', 'K'));
-    await settle();
-    expect(lastWrite().encho).toEqual({ periodCount: 1 });
-    expect(lastWrite().changed).toEqual(['points']);
+    await pointerTap(ipponBtn('aka', 'M'));
+    const { id } = window.API.recordTap.mock.results[0].value;
+    await act(async () => { rerender(editorFor(individual({ ipponsA: ['M'], markIds: { a: [id], b: [] }, scoreVersion: 1 }))); });
+    await finish();
+    expect(lastWrite().changed).toEqual(['result']);
   });
 
-  it('a point taken back before the first write comes back still names the points', async () => {
-    await mount(individual());
+  it('a point taken back before the server has it: the Finish names nothing of it', async () => {
+    await mount(individual({ ipponsB: ['K'] }));
     await pointerTap(ipponBtn('aka', 'M'));
-    await settle();
-    expect(lastWrite().changed).toEqual(['points']);
-    // The copy the editor renders from has not caught up with the write: it
-    // still reads 0-0, exactly what the board reads once the M is removed.
     await pointerTap(slotWith('Aka', 'M'));
-    await settle();
-    expect(writes).toHaveLength(2);
+    expect(taps().map((e) => e.kind)).toEqual(['ippon.add', 'ippon.remove']);
+    await finish();
     expect(lastWrite().ipponsA).toEqual([]);
-    expect(lastWrite().changed).toEqual(['points']);
+    expect(lastWrite().changed).toEqual(['result']);
   });
 
   it('a placeholder slot the stored scoreline holds is not a change', async () => {
     // The server may hold an empty slot as "•"; the editor holds no slot.
     await mount(individual({ ipponsA: ['M', '•'] }));
-    await startOvertime();
-    await settle();
-    expect(lastWrite().changed).toEqual(['encho']);
-  });
-
-  it('after its own write comes back, an untouched group stays unnamed', async () => {
-    const { rerender } = await mount(individual());
-    await pointerTap(ipponBtn('aka', 'M'));
-    await settle();
-    await act(async () => { rerender(editorFor(individual({ ipponsA: ['M'] }))); });
-    await startOvertime();
-    await settle();
-    expect(lastWrite().changed).toEqual(['encho']);
+    await finish();
+    expect(lastWrite().changed).toEqual(['result']);
   });
 });
 
@@ -331,39 +318,44 @@ describe('a write applied in part', () => {
   // The server applied the write but kept some of its groups in the match's
   // history, because a newer change to them was recorded first. The editor's
   // flow carries on; a quiet note names what was kept.
+  // bc-evts stage 3: the individual editor's write is its Finish (a running
+  // match's points are taps), so its cases below finish the match.
   const note = () => screen.queryByTestId('kept-in-history-note');
 
-  it('an autosave applied in part shows the note, and the next clean save clears it', async () => {
+  it('a Finish applied in part shows the note', async () => {
     window.API.recordScore.mockImplementation((_c, _m, patch) => {
       writes.push(patch);
-      return Promise.resolve(writes.length === 1 ? { id: 'm-ind', status: 'running', heldGroups: ['points'] } : { id: 'm-ind', status: 'running' });
+      return Promise.resolve({ id: 'm-ind', status: 'completed', heldGroups: ['points'] });
     });
     await mount(individual());
     await pointerTap(ipponBtn('aka', 'M'));
-    await settle();
+    await finish();
     expect(note()?.textContent).toBe("Kept in the match's history, not applied: points. A newer change to the same thing was recorded first.");
-    await startOvertime();
-    await settle();
-    expect(note()).toBeNull();
   });
 
-  it('a team autosave applied in part names the bout', async () => {
+  it('a team autosave applied in part names the bout, and the next clean save clears it', async () => {
     window.API.recordScore.mockImplementation((_c, _m, patch) => {
       writes.push(patch);
-      return Promise.resolve({ id: 'm-team', status: 'running', heldGroups: ['bout:2', 'encho'] });
+      return Promise.resolve(writes.length === 1
+        ? { id: 'm-team', status: 'running', heldGroups: ['bout:2', 'encho'] }
+        : { id: 'm-team', status: 'running' });
     });
     await mount({
       id: 'm-team', compId: 'comp1', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A',
       compKind: 'team', teamSize: 3,
       sideA: { id: 'team-kyoto', name: 'Kyoto' }, sideB: { id: 'team-osaka', name: 'Osaka' },
     });
-    const row = [...document.querySelectorAll('.team-sub-match')][1];
-    await pointerTap([...row.querySelectorAll('.team-sub-match__side--shiro button.ipt-btn')].find((b) => b.textContent === 'K'));
+    const row = () => [...document.querySelectorAll('.team-sub-match')][1];
+    await pointerTap([...row().querySelectorAll('.team-sub-match__side--shiro button.ipt-btn')].find((b) => b.textContent === 'K'));
     await settle();
     expect(note()?.textContent).toBe("Kept in the match's history, not applied: bout 2 and overtime. A newer change to the same thing was recorded first.");
+    await wait(TAP_BOUNCE_MS + 50);
+    await pointerTap([...row().querySelectorAll('.team-sub-match__side--aka button.ipt-btn')].find((b) => b.textContent === 'M'));
+    await settle();
+    expect(note()).toBeNull();
   });
 
-  // The closed-match rule (2026-10-15): a point added after the match was
+  // The closed-match rule (2026-10-15): a change made after the match was
   // finished is not applied, and the note says to use Correct result,
   // whether the rest of the write applied or not.
   it.each([
@@ -376,14 +368,14 @@ describe('a write applied in part', () => {
     });
     await mount(individual());
     await pointerTap(ipponBtn('aka', 'M'));
-    await settle();
+    await finish();
     expect(note()?.textContent).toBe(
       "Kept in the match's history, not applied: points. The match is finished: to change the result, use Correct result.");
   });
 
-  // An earlier-made finish that moved this later change to the history
-  // answers APPLIED with displacedGroups and the match_closed reason: the
-  // note says "Saved", never "not applied".
+  // An earlier-made finish that moved a later change to the history answers
+  // APPLIED with displacedGroups and the match_closed reason: the note says
+  // "Saved", never "not applied".
   it('a write that moved a later change to the history says Saved', async () => {
     window.API.recordScore.mockImplementation((_c, _m, patch) => {
       writes.push(patch);
@@ -391,7 +383,7 @@ describe('a write applied in part', () => {
     });
     await mount(individual());
     await pointerTap(ipponBtn('aka', 'M'));
-    await settle();
+    await finish();
     expect(note()?.textContent).toBe(
       "Saved. A later change to points was made after the match was finished, so it was moved to the match's history.");
   });
@@ -401,11 +393,11 @@ describe('a write applied in part', () => {
   it('a write that moved a later change to the history for no winner reason says only that', async () => {
     window.API.recordScore.mockImplementation((_c, _m, patch) => {
       writes.push(patch);
-      return Promise.resolve({ id: 'm-ind', status: 'running', displacedGroups: ['repPickB'] });
+      return Promise.resolve({ id: 'm-ind', status: 'completed', displacedGroups: ['repPickB'] });
     });
     await mount(individual());
     await pointerTap(ipponBtn('aka', 'M'));
-    await settle();
+    await finish();
     expect(note()?.textContent).toBe(
       "Saved. A later change to Shiro's pick for the representative bout was moved to the match's history.");
   });
@@ -417,7 +409,7 @@ describe('a write applied in part', () => {
     });
     await mount(individual());
     await pointerTap(ipponBtn('aka', 'M'));
-    await settle();
+    await finish();
     expect(note()).toBeNull();
   });
 });
@@ -433,11 +425,14 @@ describe('a write applied in part', () => {
 // A value the editor HELD over a newer server value is neither (the existing tests above).
 describe('an adopted value is agreed, never re-sent', () => {
   it('individual: a point adopted from another device and then taken back here is named (B)', async () => {
-    const { rerender } = await mount(individual());
-    await act(async () => { rerender(editorFor(individual({ ipponsB: ['K'] }))); });
+    // bc-evts stage 3: on a running individual match taking a point back is a
+    // removal tap naming its mark; the Finish then names the points.
+    const { rerender } = await mount(individual({ ipponsA: ['M'], markIds: { a: ['x.1'], b: [] } }));
+    await act(async () => { rerender(editorFor(individual({ ipponsA: ['M'], ipponsB: ['K'], markIds: { a: ['x.1'], b: ['y.1'] } }))); });
     expect(slotWith('Shiro', 'K'), 'the point recorded elsewhere is shown').toBeTruthy();
     await pointerTap(slotWith('Shiro', 'K'));
-    await settle();
+    expect(window.API.recordTap.mock.calls.map((c) => c[2])).toEqual([{ kind: 'ippon.remove', pos: 0, side: 'b', target: 'y.1' }]);
+    await finish();
     expect(lastWrite().ipponsB).toEqual([]);
     expect(lastWrite().changed, 'the server keeps the other device\'s point unless the write names the points').toContain('points');
   });
@@ -445,23 +440,22 @@ describe('an adopted value is agreed, never re-sent', () => {
   it('individual: an unrelated edit after a point was adopted does not name the points (F)', async () => {
     const { rerender } = await mount(individual());
     await pointerTap(ipponBtn('aka', 'M'));
-    await settle();
-    // Its own write comes back, then another device scores Shiro's point; both
-    // copies are stamped after the tap, as the server's are (bc-ltap: a copy
-    // stamped before the operator's last edit never replaces the board).
-    await act(async () => { rerender(editorFor(individual({ ipponsA: ['M'], modifiedAt: Date.now() }))); });
-    await act(async () => { rerender(editorFor(individual({ ipponsA: ['M'], ipponsB: ['K'], modifiedAt: Date.now() + 1 }))); });
+    const { id } = window.API.recordTap.mock.results[0].value;
+    // Its own tap comes back, then another device scores Shiro's point.
+    await act(async () => { rerender(editorFor(individual({ ipponsA: ['M'], markIds: { a: [id], b: [] }, scoreVersion: 1 }))); });
+    await act(async () => { rerender(editorFor(individual({ ipponsA: ['M'], ipponsB: ['K'], markIds: { a: [id], b: ['y.1'] }, scoreVersion: 2 }))); });
     expect(slotWith('Shiro', 'K'), 'the point recorded elsewhere is shown').toBeTruthy();
     await startOvertime();
-    await settle();
-    expect(lastWrite().changed).toEqual(['encho']);
+    await finish();
+    expect(lastWrite().changed).toEqual(['result', 'encho']);
   });
 
   it('individual: an overtime count adopted and then switched off here is named (B)', async () => {
-    const { rerender } = await mount(individual());
-    await act(async () => { rerender(editorFor(individual({ encho: { periodCount: 1 } }))); });
+    const { rerender } = await mount(individual({ ipponsA: ['M'] }));
+    await act(async () => { rerender(editorFor(individual({ ipponsA: ['M'], encho: { periodCount: 1 } }))); });
     await click(screen.getByTestId('scoring-modal-encho-checkbox'));
-    await settle();
+    expect(window.API.recordTap.mock.calls.map((c) => c[2])).toEqual([{ kind: 'encho.remove', pos: 0 }]);
+    await finish();
     expect(lastWrite().encho).toBeUndefined();
     expect(lastWrite().changed).toContain('encho');
   });
@@ -487,49 +481,54 @@ describe('an adopted value is agreed, never re-sent', () => {
     const unplaced = (over = {}) => individual({ decidedByHantei: true, ...over });
 
     it('a hantei adopted while a point is still being saved: taking the point back is named (B)', async () => {
+      // bc-evts stage 3: the point is a pending tap when the verdict arrives.
       const { rerender } = await mount(individual());
       await pointerTap(ipponBtn('aka', 'M'));
-      await settle();
-      expect(lastWrite().changed).toEqual(['points']);
-      // Another device's verdict arrives before the write's answer, then the point lands.
+      const { id } = window.API.recordTap.mock.results[0].value;
+      // Another device's verdict arrives before the tap's echo, then the point lands.
       await act(async () => { rerender(editorFor(unplaced())); });
-      await act(async () => { rerender(editorFor(unplaced({ ipponsA: ['M'] }))); });
+      await act(async () => { rerender(editorFor(unplaced({ ipponsA: ['M'], markIds: { a: [id], b: [] }, scoreVersion: 1 }))); });
       // The armed verdict locks the slots: cancel it, then take the point back.
       await click(screen.getByTestId('scoring-modal-hantei-cancel'));
       await pointerTap(slotWith('Aka', 'M'));
-      await settle();
+      expect(window.API.recordTap.mock.calls.at(-1)[2]).toEqual({ kind: 'ippon.remove', pos: 0, side: 'a', target: id });
+      // 0-0 can only finish as a draw.
+      await click(screen.getByTestId('scoring-modal-mark-draw'));
+      await finish();
       expect(lastWrite().ipponsA).toEqual([]);
       expect(lastWrite().changed, 'the server keeps the point unless the write names the points').toContain('points');
     });
 
     describe('the two picks of a representative bout are one group', () => {
+      // bc-evts stage 3: on a running bout each pick is a pool.rep tap.
       const repBout = (over = {}) => individual({
         id: 'Pool 1-DH-1', sideA: { id: 'team-kyoto', name: 'Kyoto' }, sideB: { id: 'team-osaka', name: 'Osaka' },
         repIsTeam: true, repRosterA: ['Kato', 'Mori'], repRosterB: ['Sato', 'Ito'], ...over,
       });
       const pick = (testId, value) => act(async () => { fireEvent.change(screen.getByTestId(testId), { target: { value } }); });
 
-      it('a pick adopted on one side while the other side\'s pick is still being saved: putting it back is named (B)', async () => {
+      it('a pick put back on one side while the other side follows the server is its own tap (B)', async () => {
         const { rerender } = await mount(repBout({ repPlayerB: 'Sato' }));
         await pick('rep-shiro-select', 'Ito');
-        await settle();
-        expect(lastWrite().repPlayerB).toBe('Ito');
         await act(async () => { rerender(editorFor(repBout({ repPlayerA: 'Mori', repPlayerB: 'Sato' }))); });
         await act(async () => { rerender(editorFor(repBout({ repPlayerA: 'Mori', repPlayerB: 'Ito' }))); });
         await pick('rep-shiro-select', 'Sato');
-        await settle();
-        expect(lastWrite()).toMatchObject({ repPlayerA: 'Mori', repPlayerB: 'Sato' });
-        expect(lastWrite().changed, 'the server keeps Ito unless the write names the picks').toContain('rep');
+        expect(window.API.recordTap.mock.calls.map((c) => c[2])).toEqual([
+          { kind: 'pool.rep', pos: 0, side: 'b', name: 'Ito' },
+          { kind: 'pool.rep', pos: 0, side: 'b', name: 'Sato' },
+        ]);
+        expect(screen.getByTestId('rep-aka-select').value).toBe('Mori');
+        expect(screen.getByTestId('rep-shiro-select').value).toBe('Sato');
       });
 
-      it('both picks adopted in one update are agreed: an unrelated edit does not name them (F)', async () => {
+      it('both picks adopted in one update are agreed: the Finish does not name them (F)', async () => {
         const { rerender } = await mount(repBout({ repPlayerA: 'Kato', repPlayerB: 'Sato' }));
         await act(async () => { rerender(editorFor(repBout({ repPlayerA: 'Mori', repPlayerB: 'Ito' }))); });
         expect(screen.getByTestId('rep-aka-select').value).toBe('Mori');
         expect(screen.getByTestId('rep-shiro-select').value).toBe('Ito');
         await pointerTap(ipponBtn('aka', 'M'));
-        await settle();
-        expect(lastWrite().changed).toEqual(['points']);
+        await finish();
+        expect(lastWrite().changed).not.toContain('rep');
       });
     });
   });

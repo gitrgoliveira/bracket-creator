@@ -41,6 +41,16 @@ export function writeDidNotLand(res) {
     return !!res && (res.queued === true || res.applied === false);
 }
 
+// writePending: the write is the OUTBOX's (bc-evts stage 3): handed over in
+// the same tick, sent strictly in its match's order, and the host carries on
+// at once. `res.settled` is the server's answer when it comes. A pending
+// answer is not "did not land" (writeDidNotLand is false for it), so every
+// host closes or advances on it as on a landed write; a refusal later is
+// told by the outbox's alert, or by the caller that claimed it (onRefusal).
+export function writePending(res) {
+    return !!res && res.pending === true;
+}
+
 // writeKeepsEditorOpen: does a score editor's host leave the editor open after
 // this write (bc-plcl)? Every host asks it, so none hand-writes its own answer
 // (the Pools tab once closed on every write and the bracket panel on a
@@ -456,6 +466,12 @@ export function heldWriteWhat(held) {
         case 'decision': return 'decision';
         case 'override': return 'winner set by hand';
         case 'lineup': return 'team lineup';
+        case 'evt': return 'tap';
+        case 'reopen': return 'reopen';
+        case 'requeue': return 'reopen';
+        case 'revert': return 'send back to queue';
+        case 'daihyosen': return 'representative bout change';
+        case 'kachinuki': return 'bout removal';
         default: return held && held.terminal ? 'finished result' : 'score update';
     }
 }
@@ -951,15 +967,61 @@ export function downstreamKnockoutReopenedNotice(matches) {
 // thrown error carries `.downstreamKnockoutPlayedCancelled = true` so the
 // caller can pick DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED instead of the generic
 // error copy.
-export async function attemptScoreWrite({ recordScore, confirmDialog, compId, matchId, result, password, match }) {
-    try {
-        return await recordScore(compId, matchId, result, password, match);
-    } catch (e) {
+export async function attemptScoreWrite({
+    recordScore, confirmDialog, compId, matchId, result, password, match, onRefusal, onDownstreamReopened,
+}) {
+    // bc-evts: an outbox door answers pending at once and its refusal arrives
+    // later, through `settled`. The downstream-knockout-played 409 is CLAIMED
+    // here (the flush then raises no alert for it): the confirm is shown, and
+    // on OK the forced write is handed to the outbox in its turn, never
+    // awaited. The forceDownstreamReopen guard on `result` stops a second
+    // refusal (a genuine race between two operators) from looping the
+    // confirm: only the first attempt for a given patch is offered it.
+    // Any other refusal goes to the caller's onRefusal (true = claimed).
+    const claimOther = (e) => typeof onRefusal === 'function' && onRefusal(e) === true;
+    const confirmThenForce = async (e, refusal) => {
+        const { message, confirmLabel, danger } = downstreamKnockoutPlayedConfirm(refusal);
+        let ok = false;
+        try { ok = await confirmDialog({ message, confirmLabel, danger }); } catch { ok = false; }
+        if (!ok) {
+            e.downstreamKnockoutPlayedCancelled = true;
+            claimOther(e);
+            return;
+        }
+        let forced;
+        try {
+            forced = await attemptScoreWrite({
+                recordScore, confirmDialog, compId, matchId,
+                result: { ...result, forceDownstreamReopen: true },
+                password, match, onRefusal, onDownstreamReopened,
+            });
+        } catch (err) {
+            claimOther(err);
+            return;
+        }
+        // Say what the confirmation DID, taken from the SERVER: the forced
+        // write's answer carries reopenedMatches, what it actually reopened.
+        if (writePending(forced)) {
+            forced.settled.then((body) => {
+                if (body && body.reopenedMatches && body.reopenedMatches.length
+                    && typeof onDownstreamReopened === 'function') onDownstreamReopened(body.reopenedMatches);
+            }, () => {});
+        }
+    };
+    const claim = (e) => {
         const refusal = downstreamKnockoutPlayedRefusal(e);
-        // The forceDownstreamReopen guard on `result` stops a second refusal
-        // (e.g. a genuine race between two operators) from looping the confirm
-        // dialog: only the first attempt for a given patch is offered the
-        // override; a refusal on the forced retry is treated like any other error.
+        if (refusal && !result.forceDownstreamReopen) {
+            confirmThenForce(e, refusal);
+            return true;
+        }
+        return claimOther(e);
+    };
+    try {
+        return await recordScore(compId, matchId, result, password, match, { onRefusal: claim });
+    } catch (e) {
+        // A write that still answers directly (a running score write) throws
+        // its refusal: the same confirm, awaited, as before the outbox.
+        const refusal = downstreamKnockoutPlayedRefusal(e);
         if (!refusal || result.forceDownstreamReopen) throw e;
         const { message, confirmLabel, danger } = downstreamKnockoutPlayedConfirm(refusal);
         const ok = await confirmDialog({ message, confirmLabel, danger });
@@ -967,15 +1029,9 @@ export async function attemptScoreWrite({ recordScore, confirmDialog, compId, ma
             const applied = await attemptScoreWrite({
                 recordScore, confirmDialog, compId, matchId,
                 result: { ...result, forceDownstreamReopen: true },
-                password, match,
+                password, match, onRefusal, onDownstreamReopened,
             });
-            // Say what the confirmation DID, not just that it went through,
-            // and take that from the SERVER: the write's response carries
-            // reopenedMatchIds, which is what it actually reopened. Reusing the
-            // refusal's ids here (as the first cut did) reported the server's
-            // INTENTION -- "m-r2-0 was reopened" because the dialog named it,
-            // whether or not anything was. Absent field means the server
-            // reopened nothing, and nothing is claimed.
+            // Absent field means the server reopened nothing, and nothing is claimed.
             if (applied && typeof applied === 'object' && !writeDidNotLand(applied)
                 && applied.reopenedMatches && applied.reopenedMatches.length) {
                 applied.downstreamReopened = applied.reopenedMatches;

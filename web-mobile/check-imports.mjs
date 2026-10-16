@@ -83,6 +83,11 @@ const CHECK_MODULES = [
   'admin_participants.jsx',
   'viewer_match.jsx',
   'app.jsx',
+  // bc-evts: the outbox imports the reload rule (app_version.jsx), the tap
+  // outcome codes (score_events.jsx) and its words (write_result.jsx); the
+  // one new-build banner imports app_version.jsx.
+  'api_client.jsx',
+  'version_banner.jsx',
   'ui.jsx',
   'admin_shiaijo.jsx',
   // The result-mark placement leaf (sideMarks, placeMarks, winnerSideLR,

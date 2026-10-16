@@ -540,8 +540,8 @@ describe('AdminShiaijoPage render-smoke', () => {
       await act(async () => { utils.getByRole('button', { name: 'Carol' }).click(); });
       await act(async () => { utils.getByRole('button', { name: /record & make startable/i }).click(); });
       expect(overrideBracketWinner).toHaveBeenCalledTimes(2);
-      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-0', 'Alice', expect.anything(), false, 1_700_000_000_000);
-      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-1', 'Carol', expect.anything());
+      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-0', 'Alice', expect.anything(), false, 1_700_000_000_000, expect.objectContaining({ onRefusal: expect.any(Function) }));
+      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-1', 'Carol', expect.anything(), false, expect.anything(), expect.objectContaining({ onRefusal: expect.any(Function) }));
     } finally {
       window.API.overrideBracketWinner = prevOverride;
     }
@@ -654,9 +654,9 @@ describe('AdminShiaijoPage render-smoke', () => {
 
       // The refused feeder is retried with the force flag; the untouched
       // feeder is never offered it.
-      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-0', 'Alice', expect.anything());
-      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-0', 'Alice', expect.anything(), true);
-      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-1', 'Carol', expect.anything());
+      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-0', 'Alice', expect.anything(), false, expect.anything(), expect.objectContaining({ onRefusal: expect.any(Function) }));
+      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-0', 'Alice', expect.anything(), true, expect.anything(), expect.objectContaining({ onRefusal: expect.any(Function) }));
+      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-1', 'Carol', expect.anything(), false, expect.anything(), expect.objectContaining({ onRefusal: expect.any(Function) }));
       expect(overrideBracketWinner).toHaveBeenCalledTimes(3);
     } finally {
       window.API.overrideBracketWinner = prevOverride;
@@ -1241,7 +1241,7 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
       await act(async () => { awardBtn.click(); });
       expect(recordDecision).toHaveBeenCalledWith('c1', 'm-barred', {
         decision: 'fusensho', decisionBy: 'shiro', decisionReason: 'auto: Yama withdrawn',
-      }, '');
+      }, '', expect.objectContaining({ onRefusal: expect.any(Function) }));
     } finally {
       window.API.recordDecision = prevRD;
     }
@@ -1633,7 +1633,7 @@ describe('Send back to queue keeps the score and is always offered (bc-sbq)', ()
       const confirm = [...c.utils.container.querySelectorAll('.shiaijo-move-confirm button')]
         .find((b) => /send back to queue/i.test(b.textContent));
       await act(async () => { confirm.click(); });
-      expect(window.API.revertMatchToQueue).toHaveBeenCalledWith('c1', 'm1', '');
+      expect(window.API.revertMatchToQueue).toHaveBeenCalledWith('c1', 'm1', '', expect.objectContaining({ onRefusal: expect.any(Function) }));
     } finally { c.restore(); }
   });
 

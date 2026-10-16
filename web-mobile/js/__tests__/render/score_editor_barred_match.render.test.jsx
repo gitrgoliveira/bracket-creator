@@ -79,7 +79,7 @@ describe('the Scores tab and a barred match (bc-cse)', () => {
     await act(async () => { btn.click(); });
     expect(window.API.recordDecision).toHaveBeenCalledWith('c1', 'm-barred', {
       decision: 'fusensho', decisionBy: 'shiro', decisionReason: 'auto: Yama withdrawn',
-    }, 'pw');
+    }, 'pw', expect.objectContaining({ onRefusal: expect.any(Function) }));
   });
 
   it('nextActiveMatch (Finish + Start Next) skips the barred match and advances to the next fightable one', async () => {

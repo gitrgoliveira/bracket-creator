@@ -29,6 +29,7 @@ import {
     attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, OVERRIDE_HELD_NOTICE,
     startWhileCorrectingMessage, startWhileStartingMessage, startWasBlockedByStartMessage,
     correctWhileRunningMessage, wasToasted, BRONZE_MATCH_ID,
+    withinDeadline, TIMED_OUT, FETCH_TIMEOUT_MS,
 } from './write_result.jsx';
 // What a Start came back with (a clock_skew refusal, a thrown 409) is
 // start_match.jsx's to classify, shared with the Scores tab's own automatic
@@ -352,11 +353,14 @@ export function shiaijoScoreCell(m) {
 // the confirm+retry loop (bc-kcdg). The feeder's stamp as this device has it
 // rides last when there is one, so the assertion is never stamped older than
 // the feeder it names (bc-hlck); with none, the call is as it always was.
-function recordOverrideWinner(compId, matchId, result, pw) {
+function recordOverrideWinner(compId, matchId, result, pw, _match, opts) {
     const args = [compId, matchId, result.winnerName, pw];
     const seen = Number(result.seenModifiedAt) || 0;
-    if (result.forceDownstreamReopen || seen > 0) args.push(!!result.forceDownstreamReopen);
-    if (seen > 0) args.push(seen);
+    // bc-evts: the outbox's refusal claim (attemptScoreWrite's downstream
+    // confirm) rides last, after the positional force and stamp.
+    if (result.forceDownstreamReopen || seen > 0 || opts) args.push(!!result.forceDownstreamReopen);
+    if (seen > 0 || opts) args.push(seen);
+    if (opts) args.push(opts);
     return window.API.overrideBracketWinner(...args);
 }
 
@@ -1534,8 +1538,16 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // silently 409 the defer. If the revert fails we surface a toast and
             // must NOT start the pick.
             if (!window.API || typeof window.API.revertMatchToQueue !== "function") return;
+            // bc-evts: the send back is the outbox's. The pick's start is a
+            // write of ANOTHER match that goes straight to the server, so it
+            // waits for the server's answer to the send back (the court is
+            // busy until then); the start itself waits on the network anyway.
+            // Bounded like any request: past the deadline the pick is not
+            // started (the send back stays queued and lands in its turn).
             try {
-                await window.API.revertMatchToQueue(cur.compId, cur.id, password);
+                const sent = await window.API.revertMatchToQueue(cur.compId, cur.id, password);
+                const answered = sent && sent.settled ? await withinDeadline(sent.settled, FETCH_TIMEOUT_MS) : sent;
+                if (answered === TIMED_OUT) throw new Error("Could not defer the current bout: the server did not answer");
             } catch (e) {
                 if (showToast) showToast((e && e.message) || "Could not defer the current bout", "error");
                 return;
@@ -1725,7 +1737,15 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const { compId, matchId, label } = pendingRevert;
         setReverting(true);
         try {
-            await window.API.revertMatchToQueue(compId, matchId, password);
+            // bc-evts: the outbox's, never awaited: the console moves on at
+            // once, and a refusal the server gives later is toasted.
+            await window.API.revertMatchToQueue(compId, matchId, password, {
+                onRefusal: (e) => {
+                    if (!mountedRef.current || !showToast) return false;
+                    showToast((e && e.message) || "Could not send match back to queue", "error");
+                    return true;
+                },
+            });
             if (!mountedRef.current) return;
             if (showToast) showToast(`${label} sent back to queue`);
             setPendingRevert(null);

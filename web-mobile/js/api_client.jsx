@@ -46,8 +46,11 @@ import {
     CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, CLOCK_SKEW_UNHEALED_ADVICE,
     downstreamKnockoutPlayedQueueDrop, downstreamKnockoutRunningMessage, downstreamKnockoutRunningReopenMessage,
     downstreamKnockoutRunningQueueDrop, courtBusyMessage,
-    FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, noAnswerSentence,
+    FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, noAnswerSentence, tapOutcomeQuiet,
 } from './write_result.jsx';
+// bc-evts S2: the build this page runs against the server's, and the reload rule.
+import { noteServerBuild, setOutboxIdleProbe, setBeforeReload, noteOutboxDrained } from './app_version.jsx';
+import { CLOCK_SKEW as TAP_CLOCK_SKEW } from './score_events.jsx';
 
 // ---------------------------------------------------------------------------
 // F1: fetch with per-request timeout via AbortController
@@ -73,7 +76,18 @@ import {
 function fetchWithTimeout(url, opts, ms = FETCH_TIMEOUT_MS) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), ms);
-    return fetch(url, { ...opts, signal: controller.signal }).finally(() => clearTimeout(timer));
+    return fetch(url, { ...opts, signal: controller.signal })
+        .then((res) => { _noteBuildOf(res); return res; })
+        .finally(() => clearTimeout(timer));
+}
+
+// S2: every answer names the server's build (X-App-Build); a different one
+// than this page's asks for the reload (app_version.jsx owns the rule).
+function _noteBuildOf(res) {
+    try {
+        const b = res && res.headers && typeof res.headers.get === 'function' ? res.headers.get('X-App-Build') : null;
+        if (b) noteServerBuild(b);
+    } catch (_e) { /* a stubbed response: nothing to read */ }
 }
 
 // _refusalText is the words a refused request is thrown with: the refusal's
@@ -103,8 +117,11 @@ function _refusalError(body, fallback) {
 // of the BLOCKING match, which applyReopenFailure (admin_scoring_team.jsx) reads
 // to re-offer the requeue remedy when a court is busy. One builder so a new
 // server field is threaded once, not per endpoint. Async: it awaits the body.
-async function reopenFailureError(res) {
-    const err = await res.json().catch(() => ({}));
+// _reopenRefusal: the Error a refused reopen (or requeue-and-reopen) answers
+// with, built from the refusal body; the outbox rejects a reopen's `settled`
+// with it, exactly what the direct call used to throw.
+function _reopenRefusal(err) {
+    err = err || {};
     // A later knockout match already has its own result: the same refusal a
     // knockout correction gets, parsed by the same helper, so the caller asks
     // downstreamKnockoutPlayedRefusal(e) and confirms before retrying with force.
@@ -667,7 +684,7 @@ const QUEUE_STORAGE_KEY = 'bc_write_queue';
 // /api/competitions/…: so a tampered or corrupted bc_write_queue entry can't be
 // flushed into some other endpoint or HTTP method. Used by both rehydrate (load)
 // and flush, kept in one place so the two checks can't drift apart.
-const _ALLOWED_QUEUE_METHODS = ['PUT', 'POST'];
+const _ALLOWED_QUEUE_METHODS = ['PUT', 'POST', 'DELETE'];
 function _isAllowedTerminalRequest(method, url) {
     if (!_ALLOWED_QUEUE_METHODS.includes(method) || typeof url !== 'string' || !url) return false;
     // Defense-in-depth: localStorage is tamperable. Resolve the URL against our own
@@ -683,7 +700,11 @@ function _isAllowedTerminalRequest(method, url) {
     } catch (_e) {
         return false;
     }
-    return u.origin === origin && u.pathname.startsWith('/api/competitions/');
+    if (u.origin !== origin || !u.pathname.startsWith('/api/competitions/')) return false;
+    // A DELETE is queued for exactly two doors: the representative bout's
+    // remove and a kachinuki bout's removal (bc-evts).
+    if (method === 'DELETE') return /\/(daihyosen|kachinuki-bout)$/.test(u.pathname);
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -807,8 +828,14 @@ function _persistQueue() {
         // rather than at the read side so there is one place to reason about,
         // and so an entry written by an older build behaves identically to a
         // rehydrated one: no anchor, wall-clock reconstruction only.
+        // A downstream confirmation (forceDownstreamReopen) is the operator's
+        // answer to a dialog on THIS page: it is sent, but never stored, so a
+        // reload or another tab never replays a confirmation nobody gave.
         const entries = [...merged.entries()].map(
-            ([k, d]) => [k, { ...d, perfAtEnqueue: undefined }]
+            ([k, d]) => [k, {
+                ...d, perfAtEnqueue: undefined,
+                ...(d.payload && d.payload.forceDownstreamReopen ? { payload: _withoutDownstreamConfirmation(d.payload) } : {}),
+            }]
         );
         localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(entries));
         // Only once the write has landed: a failed one must still prune these
@@ -853,11 +880,15 @@ function _markSettled(key, descriptor) {
 // mid-flush), and marks it settled so the next persist drops it from storage
 // too. A bare _writeQueue.delete would leave the stored copy for the merge to
 // keep, and the write would be replayed on the next load.
-function _dequeue(key, descriptor) {
+function _dequeue(key, descriptor, outcome) {
     const d = _writeQueue.get(key);
     if (!d || (descriptor && d !== descriptor)) return false;
     _writeQueue.delete(key);
     _markSettled(key, d);
+    // Every entry that leaves settles its door's promise: with the answer the
+    // flush passes, else as discarded (a discard, another tab sending it).
+    _settleKey(key, outcome || { value: { discarded: true } });
+    if (d.kind === 'evt') _publishPendingTaps(_baseOf(key));
     return true;
 }
 
@@ -920,8 +951,17 @@ function _newEntryKey(base) {
 // (when the operator made the change, server-relative), or, for a write with
 // none (a lineup), when it was queued.
 function _entryStamp(d) {
-    const s = Number(d && d.payload && d.payload.modifiedAt);
+    const p = d && d.payload;
+    const s = Number(p && p.modifiedAt);
     if (Number.isFinite(s) && s > 0) return s;
+    // A tap carries its stamp as `stamp`; a door whose body has no stamp of
+    // its own (reopen, requeue, send back, a kachinuki bout removal) keeps its
+    // place in its match's order on the descriptor, in server time like the
+    // rest, never the local wall clock.
+    const t = Number(p && p.stamp);
+    if (Number.isFinite(t) && t > 0) return t;
+    const o = Number(d && d.sortStamp);
+    if (Number.isFinite(o) && o > 0) return o;
     return Number(d && d.enqueuedAt) || 0;
 }
 
@@ -940,6 +980,184 @@ function _entriesFor(base) {
         if (d && _baseOf(k) === base) out.push([k, d]);
     }
     return out.sort(_byEntryOrder);
+}
+
+// ---------------------------------------------------------------------------
+// bc-evts stage 3: the outbox. EVERY rule-bound write (a tap, a Finish, a
+// decision, a reopen, a send back, override-winner, the representative bout's
+// add and remove, a kachinuki bout removal) is put in the persisted queue in
+// the SAME TICK it is made and the caller carries on at once: nothing in front
+// of an editor waits on the network (operator rule, 2026-10-16). Each match's
+// entries are then sent strictly in order (_flushQueue, F1), so a write never
+// overtakes one made before it on this device.
+// ---------------------------------------------------------------------------
+
+function _randomId() {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+// The device's EVENT session: random per page load. Not _revSession, which
+// orders running snapshot writes: a tap's id is `${session}.${seq}` and the
+// server counts the session's seqs to report the taps it never got (gaps).
+const _eventSession = _randomId();
+const TAP_BATCH_MAX = 64;
+const BASIS_OWN_MAX = 1024;
+const WRITE_ID_MAX = 128;
+let _writeIdSeq = 0;
+// A microtask flush is already kicked for the taps of this tick.
+let _tapFlushKicked = false;
+// Per match (base): the last seq this session queued, and the last stamp this
+// device gave any write of that match, so a later write is never stamped
+// before an earlier one (the replay orders by stamp).
+const _tapSeq = new Map();
+const _lastStampFor = new Map();
+// Per match: the newest derived match a score-events answer handed back (the
+// broadcast copy, with markIds and scoreVersion).
+const _latestDerived = new Map();
+const _derivedListeners = new Map();
+const _pendingTapListeners = new Map();
+const _tapOutcomeListeners = new Map();
+// Per queue key: the promise a door handed out and the refusal claims of the
+// callers. In memory only (never persisted): a function does not survive a
+// reload, and a rehydrated entry has nobody waiting on it.
+const _entryHooks = new Map();
+
+function _newWriteId() {
+    _writeIdSeq++;
+    return `${_eventSession}.w${_writeIdSeq.toString(36)}`.slice(0, WRITE_ID_MAX);
+}
+
+// _afterOwnStamp: this device's next stamp for the match, never at or before
+// the last one it gave a write of that match.
+function _afterOwnStamp(base, stamp) {
+    const last = _lastStampFor.get(base) || 0;
+    const s = stamp > last ? stamp : last + 1;
+    _lastStampFor.set(base, s);
+    return s;
+}
+
+function _listenOn(map, base, fn) {
+    if (typeof fn !== 'function') return () => {};
+    let set = map.get(base);
+    if (!set) { set = new Set(); map.set(base, set); }
+    set.add(fn);
+    return () => {
+        set.delete(fn);
+        if (set.size === 0 && map.get(base) === set) map.delete(base);
+    };
+}
+function _emitOn(map, base, value) {
+    const set = map.get(base);
+    if (!set) return;
+    for (const fn of set) {
+        try { fn(value); } catch (_e) { /* swallow */ }
+    }
+}
+
+// The taps this device holds for a match, in the order they are sent.
+function _tapEntriesFor(base) {
+    return _entriesFor(base).filter(([, d]) => d.kind === 'evt');
+}
+function _pendingTapsFor(base) {
+    return _tapEntriesFor(base).map(([, d]) => ({ ...d.payload }));
+}
+function _publishPendingTaps(base) {
+    if (!_pendingTapListeners.has(base)) return;
+    _emitOn(_pendingTapListeners, base, _pendingTapsFor(base));
+}
+
+// _noteDerived keeps the newest derived match per base, by scoreVersion (it
+// only grows), and tells whoever follows that match.
+function _noteDerived(base, match) {
+    if (!match || typeof match !== 'object') return;
+    const prev = _latestDerived.get(base);
+    const v = Number(match.scoreVersion) || 0;
+    if (prev && (Number(prev.scoreVersion) || 0) > v) return;
+    _latestDerived.set(base, match);
+    _emitOn(_derivedListeners, base, match);
+}
+
+// _basisFor: what a rule-bound write was made against (S3d). `seen` is the
+// score log line count the screen showed (the match's scoreVersion, else the
+// newest derived copy); `own` the ids of this device's taps for the match
+// still queued or in flight; `seq` the last seq this session queued for it,
+// so the server's seq arm counts the device's own taps (operator S8 b).
+function _basisFor(base, seen) {
+    const derived = _latestDerived.get(base);
+    const s = Number(seen) > 0 ? Number(seen) : (Number(derived && derived.scoreVersion) || 0);
+    const own = _tapEntriesFor(base).map(([, d]) => d.payload && d.payload.id).filter(Boolean);
+    return {
+        seen: s,
+        own: own.length > BASIS_OWN_MAX ? own.slice(own.length - BASIS_OWN_MAX) : own,
+        seq: _tapSeq.get(base) || 0,
+    };
+}
+
+// _tagWrite: writeId (kept on the payload, so a resend reuses it), basis and
+// session on a rule-bound write's payload.
+function _tagWrite(payload, base, seen) {
+    if (!payload.writeId) payload.writeId = _newWriteId();
+    payload.session = _eventSession;
+    payload.basis = _basisFor(base, seen);
+    return payload;
+}
+
+// _openSettlement: the `settled` promise of a queue key. A write that takes
+// the place of a queued one (_placeWrite reuses its key) shares its promise,
+// so the first caller learns the answer of the write that replaced its own.
+function _openSettlement(key, onRefusal) {
+    let h = _entryHooks.get(key);
+    if (!h) {
+        let resolve, reject;
+        const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+        // A caller that never awaits it must not raise an unhandled rejection;
+        // one that does still receives the rejection.
+        promise.catch(() => {});
+        h = { promise, resolve, reject, claims: [] };
+        _entryHooks.set(key, h);
+    }
+    if (typeof onRefusal === 'function') h.claims.push(onRefusal);
+    return h.promise;
+}
+function _settleKey(key, outcome) {
+    const h = _entryHooks.get(key);
+    if (!h) return;
+    _entryHooks.delete(key);
+    if (outcome && 'error' in outcome) h.reject(outcome.error);
+    else h.resolve(outcome ? outcome.value : undefined);
+}
+// _claimRefusal: does a caller take this refusal on itself (onRefusal
+// returned true)? Then the flush raises no alert for it.
+function _claimRefusal(key, err) {
+    const h = _entryHooks.get(key);
+    if (!h) return false;
+    let claimed = false;
+    for (const fn of h.claims) {
+        try { if (fn(err) === true) claimed = true; } catch (_e) { /* swallow */ }
+    }
+    return claimed;
+}
+
+// The pending answer every outbox door gives: the write is the outbox's now.
+function _pendingAnswer(key, settled) {
+    const answer = { applied: true, pending: true, key, settled };
+    if (!_lastEnqueuePersisted) answer.persisted = false;
+    return answer;
+}
+
+// _outboxWrite: the ONE way a rule-bound door hands a write over. Builds the
+// descriptor synchronously, tags it (writeId, basis, session), stamps its
+// place in the match's order, enqueues it durably and kicks the flush.
+function _outboxWrite({ kind, compID, matchID, method, url, payload, password, seen, onRefusal }) {
+    const base = _revKey(compID, matchID);
+    _tagWrite(payload, base, seen);
+    const descriptor = { compID, matchID, payload, password, kind, terminal: true, method, url, enqueuedAt: Date.now() };
+    const stamped = Number(payload.modifiedAt);
+    if (Number.isFinite(stamped) && stamped > 0) payload.modifiedAt = _afterOwnStamp(base, stamped);
+    else descriptor.sortStamp = _afterOwnStamp(base, _serverNowMs());
+    let settled = null;
+    const key = _commitEnqueue(base, descriptor, (k) => { settled = _openSettlement(k, onRefusal); });
+    return _pendingAnswer(key, settled);
 }
 
 // _coalesceTarget: the one entry a new write may take the place of, or null
@@ -1008,7 +1226,11 @@ function _storedEntryProblem(descriptor) {
     // Defense-in-depth: localStorage is tamperable. Reject terminal entries
     // whose method/url fall outside the queue allowlist (PUT/POST to
     // /api/competitions/…) before they can ever reach fetch on replay.
-    if (descriptor.terminal && !_isAllowedTerminalRequest(descriptor.method, descriptor.url)) return 'unreadable';
+    if ((descriptor.terminal || descriptor.kind === 'evt')
+        && !_isAllowedTerminalRequest(descriptor.method, descriptor.url)) return 'unreadable';
+    // A tap is sent to the score-events door and nowhere else.
+    if (descriptor.kind === 'evt' && (descriptor.method !== 'POST'
+        || !String(descriptor.url).split('?')[0].endsWith('/score-events'))) return 'unreadable';
     return null;
 }
 
@@ -1190,7 +1412,9 @@ function _hasServerErroringQueued() {
 // pill reports as "Not saving" and the operator may discard
 // (API.discardFailingHeldWrites).
 function _keepsFailing(d) {
-    return !!d && (Number(d.attempts) || 0) >= SERVER_REJECTION_NOTICE_THRESHOLD;
+    // A parked batch of taps the server refused (400) can only go by an
+    // operator's discard, so it reads as failing at once.
+    return !!d && (!!d.parked || (Number(d.attempts) || 0) >= SERVER_REJECTION_NOTICE_THRESHOLD);
 }
 // The one discard of a held write (API.discardHeldWrite and the editors'
 // API.discardFailingHeldWrites): only a write the server keeps refusing.
@@ -1200,6 +1424,13 @@ function _discardIfFailing(key, d) {
 function _afterDiscard() {
     _persistQueue();
     _recomputeSyncStatus();
+    // A discarded write may have been holding back its match's later writes
+    // (strict order, F1): send them now rather than on an unrelated trigger.
+    if (_writeQueue.size > 0) {
+        if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
+        _flushAttempt = 0;
+        _flushQueue();
+    }
 }
 
 /**
@@ -1254,26 +1485,29 @@ function _deriveSyncStatus() {
 // pill shows it as Syncing...), so the pill and the topbar can disagree for
 // that moment; that is correct, not a drift to fix.
 const _unsentListeners = new Set();
-let _lastUnsent = { total: 0, terminal: 0, authBlocked: 0, failing: 0 };
+let _lastUnsent = { total: 0, terminal: 0, authBlocked: 0, failing: 0, held: 0 };
 // `failing` counts the held writes past the server-error threshold
 // (_keepsFailing), so a SECOND write crossing it is published even though the
 // sync status is already "server-error" and no other count moves: the
 // editors' notice and Discard and the topbar's list re-read on it.
 function _unsentCounts() {
-    let total = 0, terminal = 0, authBlocked = 0, failing = 0;
+    let total = 0, terminal = 0, authBlocked = 0, failing = 0, held = 0;
     for (const d of _writeQueue.values()) {
         if (!d) continue;
+        // One item per entry, a tap included (D5).
         total++;
         if (d.terminal) terminal++;
         if (d.authBlocked) authBlocked++;
         if (_keepsFailing(d)) failing++;
+        if (d.held) held++;
     }
-    return { total, terminal, authBlocked, failing };
+    return { total, terminal, authBlocked, failing, held };
 }
 function _publishUnsentWrites() {
     const next = _unsentCounts();
     if (next.total === _lastUnsent.total && next.terminal === _lastUnsent.terminal
-        && next.authBlocked === _lastUnsent.authBlocked && next.failing === _lastUnsent.failing) return;
+        && next.authBlocked === _lastUnsent.authBlocked && next.failing === _lastUnsent.failing
+        && next.held === _lastUnsent.held) return;
     _lastUnsent = next;
     for (const fn of _unsentListeners) {
         try { fn({ ...next }); } catch (_e) { /* swallow */ }
@@ -1419,26 +1653,24 @@ function _restampFor(enqueuedAt, perfAtEnqueue) {
 async function _flushQueue() {
     if (_flushInProgress) { _flushRequested = true; return; }
     _flushInProgress = true;
-    // Superseded FINISHED scores dropped during this flush. Counted across the
-    // whole call (including the do/while rerun) and announced once at the end,
-    // so a court reconnecting with several dead results gets one alert stating
-    // how many, not N toasts overwriting each other. lastSupersededMatch is
-    // carried only so a single-drop alert can still name its match.
-    let supersededThisPass = 0;
-    let lastSupersededMatch = null;
-    // Whether any of them was turned away because the match was finished
-    // (writeMatchClosed) or the next round depends on its result: the alert
-    // then says to use Correct result.
-    let matchClosedThisPass = false;
-    // Held finishes that landed and moved a LATER change of their match to
-    // its history (writeDisplacedGroups): told once per pass, like 'sent'.
-    let displacedThisPass = 0;
-    // bc-offl: HELD finished results that landed in this flush, counted the
-    // same way and announced once at the end ('sent'), so the operator who saw
-    // them held is told they arrived. A terminal write enters the queue only
-    // when its direct send failed, so an ordinary online write never reaches
-    // this count and never raises the toast (operator decision 2026-09-27).
-    let sentThisPass = 0;
+    // What this pass has to tell, counted across the whole call (the do/while
+    // rerun included) and announced ONCE at the end, so a court reconnecting
+    // with several held writes gets one alert stating how many, not N toasts
+    // overwriting each other.
+    //   superseded/lastSuperseded/matchClosed: writes kept in their match's
+    //     history (writeMatchClosed: the alert then says to use Correct result).
+    //   displaced: held finishes that landed and moved a LATER change of their
+    //     match to its history (writeDisplacedGroups).
+    //   sent: HELD writes that landed (bc-offl). A write is held only once a
+    //     pass has left it unsettled (or it came back from storage), so an
+    //     ordinary online Finish never reaches this count (operator decision
+    //     2026-09-27).
+    //   notApplied: taps the server did not apply (bc-evts, one alert a pass).
+    const pass = {
+        superseded: 0, lastSuperseded: null, matchClosed: false,
+        displaced: 0, sent: 0, notApplied: 0, lastNotApplied: null, parkedTaps: 0,
+        anyFailed: false, networkFailed: false,
+    };
     try {
         do {
             _flushRequested = false;
@@ -1453,425 +1685,43 @@ async function _flushQueue() {
                 continue;
             }
             _recomputeSyncStatus();
-            // Snapshot the current entries. Each descriptor is the object reference
-            // stored in the map at the time of the snapshot. After an await, we check
-            // identity before deleting so a newer write (a fresh object literal set
-            // under the same key by enqueueRunningWrite) is not accidentally removed.
-            //
-            // bc-mrgc: in replay order (_byEntryOrder), each entry on its own.
-            // One that does not settle in this pass (offline, a 5xx, parked,
-            // its page-hide copy still being sent, re-stamped for a clock
-            // refusal) holds back nothing after it: the server orders a match
-            // write by its stamp, not by when it arrives, so holding a later
-            // write back only made one failing write stop every write after it.
-            const entries = [..._writeQueue.entries()].sort(_byEntryOrder);
+            pass.anyFailed = false;      // any failure → keep in queue + backoff
+            pass.networkFailed = false;  // fetch rejected → connection down → "offline"
             const gen = _queueGen; // clearQueue() bumps this to cancel an in-flight flush
-            let anyFailed = false;      // any failure → keep in queue + backoff
-            let networkFailed = false;  // fetch rejected → connection down → "offline"
-            for (const [key, descriptor] of entries) {
+            // bc-evts F1 (reversing bc-mrgc C2): per match (base), in the ONE
+            // replay order, _byEntryOrder, and strictly in order: the first entry
+            // of a match that does not settle in this pass (offline, a 5xx,
+            // parked, held by an open fetch, re-stamped for a clock refusal) ends
+            // THAT match's turn; the other matches go on. A write made after
+            // another on this device never reaches the server before it.
+            const byBase = new Map();
+            for (const entry of [..._writeQueue.entries()].sort(_byEntryOrder)) {
+                const base = _baseOf(entry[0]);
+                if (!byBase.has(base)) byBase.set(base, []);
+                byBase.get(base).push(entry);
+            }
+            for (const [base, list] of byBase) {
                 // If clearQueue() ran during a prior await (logout / password_reset →
                 // credential revocation), abort before sending anything else with the
                 // now-revoked password/header.
                 if (gen !== _queueGen) break;
-                // Skip entries removed or superseded since the snapshot was taken.
-                if (_writeQueue.get(key) !== descriptor) continue;
-                // bc-qttl: a write parked on 401 carries the password captured at
-                // enqueue time, so retrying it can only reproduce the same auth failure
-                // until API.resumeAfterAuth() re-stamps it. Skip it here (it stays
-                // QUEUED, it is not dropped) so a parked entry costs no requests and
-                // cannot hold the flush loop in a retry cycle it can never win.
-                if (descriptor.authBlocked) continue;
-                // The page-hide copy of a running write whose own fetch is still
-                // open: that fetch lands it or queues it anew, so sending the copy
-                // too would send the write twice.
-                if (_heldByOpenFetch(key, descriptor)) continue;
-                // Out of the queue AND out of storage at once, not at the end of
-                // the pass: a page that goes away while a later entry is still
-                // out (a reload, the tab closed) would leave this one stored, and
-                // the next load would send it again. A Finish sent twice is
-                // refused the second time (an equal stamp over a finished match
-                // asks for a correction reason), so the operator would be told a
-                // recorded result was not.
-                const leaveQueue = () => {
-                    if (!_dequeue(key, descriptor)) return false;
-                    _persistQueue();
-                    return true;
-                };
-                const { compID, matchID, payload, password, terminal, kind, method, url } = descriptor;
-                // Running score writes (terminal=false) don't store method/url and
-                // always PUT to the score endpoint. Terminal entries carry their own
-                // method+url, which may have been rehydrated from (tamperable)
-                // localStorage: validate against the allowlist (PUT/POST to
-                // /api/competitions/…) and DROP anything outside it rather than flush
-                // to an unexpected route or method.
-                let effectiveMethod, effectiveUrl;
-                if (terminal) {
-                    if (!_isAllowedTerminalRequest(method, url)) {
-                        console.warn(`[sync] dropping terminal ${kind || ''} write with disallowed method/url:`, method, url);
-                        _notifyTerminalWriteFailed({ compID, matchID, kind, status: 0, reason: 'corrupted queue entry' });
-                        // Undeliverable by construction: there is no valid request to
-                        // replay, so this is the one drop class no amount of retrying
-                        // could rescue. Announce it globally anyway - the editor-scoped
-                        // channel above only reaches an operator who happens to have
-                        // this exact match open.
-                        _notifyQueueAlert({ kind: 'unreadable', count: 1, terminalCount: 1, compID, matchID });
-                        leaveQueue();
-                        continue;
-                    }
-                    effectiveMethod = method;
-                    effectiveUrl = url;
-                } else {
-                    effectiveMethod = 'PUT';
-                    effectiveUrl = `/api/competitions/${compID}/matches/${matchID}/score`;
-                }
-                try {
-                    // Bounded, the body read included (_fetchJson): this loop is
-                    // single-flight, so one replay whose body never completed
-                    // would stop every later flush. Past the deadline it is a
-                    // network failure like any other (the catch below): kept and
-                    // retried, and the answer each branch reads is `body`.
-                    const { res, body } = await _fetchJson(effectiveUrl, {
-                        method: effectiveMethod,
-                        headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
-                        // Never a replayed confirmation, whatever the entry holds:
-                        // see _withoutDownstreamConfirmation.
-                        body: JSON.stringify(_withoutDownstreamConfirmation(payload)),
-                    });
-                    if (res.ok) {
-                        // Success (HTTP 200/201, including a write the server kept in the
-                        // match's history instead of applying, applied:false): remove
-                        // from queue only if no newer write has replaced this descriptor.
-                        if (terminal && (kind === 'override' || kind === 'score' || kind === 'decision')) {
-                            // All three endpoints answer a timestamp-guard drop the same
-                            // way: 200 {"applied": false}, with NO SSE broadcast. What
-                            // that means to the operator differs, so they are announced
-                            // differently.
-                            //
-                            // 'decision' is live: /decision carries the client's stamp
-                            // (RecordDecisionTx's variadic modifiedAt), so a queued
-                            // decision can come back superseded or refused for clock
-                            // skew like a score. Without the kind here that answer
-                            // would be swallowed - the entry deleted as delivered,
-                            // nothing said - which is the exact failure bc-lww1 was.
-                            if (writeWasRefusedForClock(body)) {
-                                // bc-cse: NOT a supersede. The server refused this
-                                // replay because the stamp it carries is in the
-                                // server's future, so nothing newer won and there is
-                                // nothing for the operator to go and check: the entry
-                                // is still the only record of their result. Heal the
-                                // offset and RECONSTRUCT the stamp, then retry once.
-                                if (descriptor.skewRetried) {
-                                    // Refused a second time, with a stamp built from a
-                                    // freshly learned offset. This device's frame cannot
-                                    // be reconciled, and a third attempt would just
-                                    // poison-loop the queue behind an entry that can
-                                    // never land. Drop it - loudly, on both channels:
-                                    // the editor-scoped one for an operator still on
-                                    // this match, the alert for one who has moved court.
-                                    console.warn(`[sync] dropping queued ${kind} write refused twice for clock skew (serverNowMs=${body.serverNowMs}); the device clock cannot be reconciled`);
-                                    _notifyTerminalWriteFailed({ compID, matchID, kind, status: 200, reason: CLOCK_SKEW_FAIL_REASON, advice: CLOCK_SKEW_UNHEALED_ADVICE });
-                                    _notifyQueueAlert({
-                                        kind: 'rejected', count: 1, terminalCount: 1, compID, matchID,
-                                        detail: CLOCK_SKEW_FAIL_REASON,
-                                    });
-                                    // An override assertion additionally leaves any
-                                    // optimistic local advance standing on a write that
-                                    // will now never land, so ask for a refetch as well.
-                                    // Unlike the supersede case this is BOTH channels:
-                                    // there the drop is benign (a newer result won and
-                                    // the server state is right), here it is a failure
-                                    // AND the local bracket is wrong.
-                                    if (kind === 'override') _notifyBracketResync({ compID, matchID, reason: CLOCK_SKEW_REASON });
-                                    leaveQueue();
-                                    continue;
-                                }
-                                await _restampQueuedEntryForSkew(descriptor);
-                                // Leave it QUEUED and ask for an immediate rerun of the
-                                // loop (the same mechanism a concurrent trigger uses), so
-                                // the corrected write goes out now rather than waiting on
-                                // a backoff timer.
-                                _flushRequested = true;
-                                continue;
-                            }
-                            if (body && body.applied === false) {
-                                // bc-cse: covers both kinds - either way the server
-                                // says our stamp lost, so re-check our clock frame.
-                                _relearnClockThrottled();
-                                if (kind === 'override') {
-                                    // A queued feeder-winner ASSERTION the server dropped. Any
-                                    // optimistic local advance from it is stale, so ask listeners to
-                                    // refetch. Benign, NOT a write failure: do not use the
-                                    // terminal-fail channel (which surfaces a "not saved" error).
-                                    _notifyBracketResync({ compID, matchID, reason: 'lww_dropped' });
-                                    // bc-mrgc phase 3: the assertion is the
-                                    // operator's own entry, kept in the match's
-                                    // history, not applied. Told like a held
-                                    // finished score: in the pass's one
-                                    // superseded alert, so it is never silent.
-                                    if (_writeQueue.get(key) === descriptor) {
-                                        supersededThisPass++;
-                                        lastSupersededMatch = { compID, matchID };
-                                    }
-                                } else {
-                                    // bc-lww1: a queued FINISHED score, which is the operator's own
-                                    // entered result. It is gone, and this is the last moment
-                                    // anything can say so — the entry leaves the queue on the next
-                                    // line and the sync pill goes back to "Synced".
-                                    //
-                                    // The editor-targeted half fires per match (each one names a
-                                    // different match, so they do not collapse). The ALERT half is
-                                    // counted and emitted once for the whole pass: a court that has
-                                    // been offline can flush several of these at once, and one
-                                    // toast per drop would simply overwrite itself down to a single
-                                    // singular-worded message naming no match at all.
-                                    // Only if THIS descriptor is still the queued write.
-                                    // A newer local write can replace it during the await
-                                    // above, and that newer entry is what will actually be
-                                    // delivered — so announcing "not saved" here would
-                                    // report the loss of a payload the operator has already
-                                    // superseded themselves, and send them to check a
-                                    // recorded result that is about to change again.
-                                    // Announcing nothing is right: if the replacement also
-                                    // loses, it announces on its own pass.
-                                    if (_writeQueue.get(key) === descriptor) {
-                                        _notifyScoreSupersededEditor(compID, matchID, body);
-                                        supersededThisPass++;
-                                        if (_heldForClosedMatch(body)) matchClosedThisPass = true;
-                                        lastSupersededMatch = { compID, matchID };
-                                    }
-                                }
-                            }
-                        } else if (!terminal && kind === 'score') {
-                            // bc-cse MEDIUM-2. A RUNNING score replay is normally
-                            // fire-and-forget: res.ok is taken as delivered and the
-                            // entry is deleted without a look at the answer. That is
-                            // right for every body this endpoint can return EXCEPT
-                            // the clock-skew refusal,
-                            // where res.ok means the exact opposite of delivered -
-                            // nothing was written, and deleting the entry throws the
-                            // snapshot away. Most of what it carried is level-triggered
-                            // state the next autosave will restate, but
-                            // kachinukiBoutFinal is an EDGE-TRIGGERED command (see the
-                            // carry-forward in enqueueRunningWrite): lose the entry that
-                            // holds it and the winner-stays sequence stalls until the
-                            // operator presses Record bout again.
-                            //
-                            // So this arm reads the body for that ONE case. Every other
-                            // body - a plain 200, reason 'superseded' (an older
-                            // revision of this board, or older than a stored change:
-                            // either way kept in the match's history by the server),
-                            // no reason at all - falls straight through to the same
-                            // delete-as-delivered below, byte-identically to before.
-                            const refusedForClock = writeWasRefusedForClock(body);
-                            if (refusedForClock && !descriptor.skewRetried) {
-                                await _restampQueuedEntryForSkew(descriptor);
-                                _flushRequested = true;
-                                continue;
-                            }
-                            if (refusedForClock) {
-                                // Refused again on a stamp built from a freshly learned
-                                // offset. Dropped exactly as the delivered path below
-                                // drops it, with NO banner: running state is
-                                // level-triggered and the next autosave supersedes it, so
-                                // an alert here would fire on a transient the operator
-                                // cannot act on. The warn is for devtools - and it names
-                                // the risk, because if this entry was the one carrying
-                                // kachinukiBoutFinal the advancement command dies with it
-                                // and the operator must press Record bout again.
-                                console.warn(`[sync] dropping queued running write for ${matchID} refused twice for clock skew (serverNowMs=${body.serverNowMs}); a pending kachinuki advancement may need re-pressing`);
-                            }
-                        }
-                        // A change turned away because the match was finished
-                        // (writeMatchClosed) is the operator's to correct, never
-                        // routine noise, so it is said whatever the write: a
-                        // queued Finish applied in part, or a running write. A
-                        // superseded Finish was counted above. Never a displaced
-                        // answer: that finish was recorded (writeDisplacedGroups,
-                        // the 'displaced' alert).
-                        if (kind === 'score' && writeMatchClosed(body) && !(terminal && writeWasSuperseded(body))
-                            && _writeQueue.get(key) === descriptor) {
-                            _notifyScoreSupersededEditor(compID, matchID, body);
-                            supersededThisPass++;
-                            matchClosedThisPass = true;
-                            lastSupersededMatch = { compID, matchID };
-                        }
-                        if (leaveQueue()) {
-                            // A result kept in the match's history did not land
-                            // (announced above). writeWasSuperseded is every
-                            // applied:false answer, a clock-skew refusal included
-                            // (which never reaches here: the arms above continue).
-                            if (terminal && !writeWasSuperseded(body)) sentThisPass++;
-                            if (terminal && writeDisplacedGroups(body).length > 0) {
-                                displacedThisPass++;
-                            }
-                            // A confirmed terminal score write needs no further rev
-                            // tracking: drop its counter (mirrors recordScore's online
-                            // completed path) so _matchRevCounters doesn't grow for the
-                            // tab's lifetime now that completed writes are queued.
-                            if (terminal && kind === 'score') _matchRevCounters.delete(_revKey(compID, matchID));
-                        }
-                    } else if (res.status >= 500 || res.status === 429 || res.status === 403) {
-                        // Server is up but erroring: keep in queue and retry with
-                        // backoff. This is NOT "offline" (the connection is fine).
-                        //
-                        // 403 belongs HERE, not with 401. On this server 403 is never
-                        // a bad credential (that is 401, "invalid tournament
-                        // password"): it means the tournament record itself is not
-                        // usable yet, "tournament not configured yet" or "tournament
-                        // misconfigured: password is not set" from the auth middleware.
-                        // No amount of signing in fixes either, so parking it behind a
-                        // "sign in again" prompt would send the operator down a dead
-                        // end. It is a server-side state that an admin can repair at
-                        // any moment with no action at this tablet, and a plain retry
-                        // is exactly what discovers the repair.
-                        //
-                        // bc-qttl: the entry is NEVER dropped here. Only a confirmed
-                        // write leaves the queue, and "the backend is broken" is the
-                        // case where holding the operator's result matters most. On
-                        // crossing the notice threshold we announce once and let
-                        // _recomputeSyncStatus move the pill onto 'server-error', so a
-                        // persistently-failing write is visible instead of masquerading
-                        // as an ordinary "Syncing…".
-                        //
-                        // The identity checks above compare object references, so
-                        // mutating the live descriptor is safe: a superseding write
-                        // installs a fresh object and naturally resets the count.
-                        const rejections = (Number(descriptor.attempts) || 0) + 1;
-                        descriptor.attempts = rejections;
-                        // Fire ON the crossing (=== not >=) so one wedged write
-                        // announces once, not on every retry after it.
-                        if (rejections === SERVER_REJECTION_NOTICE_THRESHOLD) {
-                            console.warn(`[sync] queued ${kind || 'running'} write still failing after ${rejections} server rejections (${res.status}); keeping it queued:`, body);
-                            _notifyQueueAlert({
-                                kind: 'server_error',
-                                count: 1,
-                                terminalCount: terminal ? 1 : 0,
-                                compID, matchID,
-                                detail: body.reasonHuman || body.error || `HTTP ${res.status}`,
-                            });
-                            // Published at once (the failing count moved), so this
-                            // match's editor and the topbar's list offer the
-                            // discard now, not at the end of the pass.
-                            _recomputeSyncStatus();
-                        }
-                        anyFailed = true;
-                    } else if (res.status === 401) {
-                        // bc-qttl: an auth failure PARKS the write, it does not drop it.
-                        // 401 is precisely "invalid admin password", the one 4xx
-                        // where a later retry can genuinely succeed: the tournament
-                        // password can be rotated mid-event, or the operator can simply
-                        // sign in again. Discarding here would throw away a finished
-                        // result over a recoverable credential problem.
-                        //
-                        // Parked entries are SKIPPED by the flush loop (see the
-                        // authBlocked guard above) rather than retried on backoff,
-                        // because the descriptor carries the password captured at
-                        // enqueue time: retrying it can only reproduce the same 401
-                        // until API.resumeAfterAuth() re-stamps it with the new
-                        // credential. So this branch deliberately does NOT set
-                        // anyFailed: with nothing else queued the flush goes quiet
-                        // instead of burning a retry every 8s indefinitely.
-                        if (!descriptor.authBlocked) {
-                            console.warn(`[sync] parking queued ${kind || 'running'} write pending re-auth (${res.status}):`, body);
-                            descriptor.authBlocked = true;
-                            _notifyQueueAlert({
-                                kind: 'auth_required',
-                                count: 1,
-                                terminalCount: terminal ? 1 : 0,
-                                compID, matchID,
-                                detail: body.reasonHuman || body.error || `HTTP ${res.status}`,
-                            });
-                        }
-                    } else if (terminal && kind === 'decision' && res.status === 409) {
-                        // A queued decision the server refused on replay. Every 409 is
-                        // REPORTED, never taken as success (bc-mrgc phase 3, "Nothing
-                        // should be dropped"). A 409 such as already_ineligible
-                        // used to be swallowed on the theory that an earlier send whose
-                        // answer was lost had landed; the server now answers that exact
-                        // replay (same decision, side and stamp) as recorded
-                        // (engine.exactDecisionReplay), so a 409 here is a real refusal
-                        // the operator has to see. Same human copy as the score path's
-                        // flush-loop drop below (a later match played before this
-                        // replay ran, say): there is no operator here for
-                        // attemptScoreWrite's confirm dialog to prompt, and nothing sets
-                        // forceDownstreamReopen automatically.
-                        //
-                        // The direct recordDecision call path always throws on 409 so the
-                        // score editor shows the refusal.
-                        console.warn(`[sync] queued decision write rejected (409):`, body);
-                        const refusal = _replayRefusal(body, 'conflict (409)');
-                        _notifyTerminalWriteFailed({ compID, matchID, kind, status: 409, ...refusal });
-                        _notifyQueueAlert({
-                            kind: 'rejected', count: 1, terminalCount: 1, compID, matchID,
-                            detail: refusal.reason,
-                            ...(refusal.sentence ? { sentence: true } : {}),
-                        });
-                        leaveQueue();
-                    } else {
-                        // Non-retryable response: 400 validation, 413, generic 409
-                        // conflict, etc. NOTE neither auth-ish status reaches here any
-                        // more (bc-qttl): 401 parks for re-auth and 403 retries as a
-                        // server-config state, both above. What is left is a write the
-                        // server has refused on its merits and would refuse identically
-                        // forever.
-                        //
-                        // This is the one place a queued write is still discarded
-                        // without being confirmed, and it is a deliberate exception to
-                        // "only a confirmed write empties the queue": there is no
-                        // credential to fix and no outage to wait out, so holding it
-                        // would only wedge the queue behind a write that can never
-                        // land. The operator MUST be told, which is why the drop now
-                        // raises a global alert as well as the editor-scoped failure:
-                        // the latter reaches only an operator with this exact match
-                        // open, which is precisely not the case when a queued write
-                        // fails minutes later on a different court.
-                        console.warn(`[sync] queued ${kind || 'running'} write rejected (${res.status}):`, body);
-                        // bc-cse: a queued knockout correction (score OR decision) can
-                        // land here too -- offline, or during a transient-5xx retry run,
-                        // the later match got played before this replay ran, so the
-                        // server answers the SAME 409 downstream_knockout_played the live
-                        // confirm dialog handles. There is no operator at this device's
-                        // screen for the flush loop to prompt (attemptScoreWrite's dialog
-                        // has nothing to show a tap into), so this write is dropped
-                        // exactly like any other non-retryable 4xx below -- but with
-                        // downstreamKnockoutPlayedQueueDrop's words instead of the bare
-                        // "downstream_knockout_played" token, which is what an operator
-                        // reading this alert used to see with no way to understand it or
-                        // move forward.
-                        const refusal = _replayRefusal(body, `HTTP ${res.status}`);
-                        if (terminal) {
-                            _notifyTerminalWriteFailed({ compID, matchID, kind, status: res.status, ...refusal });
-                        }
-                        _notifyQueueAlert({
-                            kind: 'rejected', count: 1, terminalCount: terminal ? 1 : 0, compID, matchID,
-                            detail: refusal.reason,
-                            ...(refusal.sentence ? { sentence: true } : {}),
-                        });
-                        leaveQueue();
-                    }
-                } catch (_) {
-                    // fetch rejected (network down), or the request or its body
-                    // was given up at the deadline (_fetchJson).
-                    anyFailed = true;
-                    networkFailed = true;
-                }
+                await _flushBase(base, list, pass, gen);
             }
             _persistQueue();
             if (_writeQueue.size === 0) {
                 _flushAttempt = 0;
                 _offlineFlag = false;
                 _recomputeSyncStatus();
-            } else if (!anyFailed) {
+            } else if (!pass.anyFailed) {
                 // bc-qttl: entries remain but nothing failed this pass, which is the
                 // all-parked case (a parked write is skipped, so it can neither
                 // succeed nor fail). Republish so the pill leaves "Syncing…" for the
                 // parked state, and schedule NO backoff timer: a parked write cannot
-                // progress until resumeAfterAuth(), so retrying it would only burn
-                // requests reproducing the same 401.
+                // progress until resumeAfterAuth() or a discard.
                 _offlineFlag = false;
                 _recomputeSyncStatus();
             } else {
-                _offlineFlag = networkFailed;
+                _offlineFlag = pass.networkFailed;
                 _recomputeSyncStatus();
                 if (!_flushRequested) {
                     // Schedule a backoff retry only if no immediate rerun is already
@@ -1890,15 +1740,447 @@ async function _flushQueue() {
         // 'sent' goes FIRST: the toast keeps a visible error over a later
         // success, so a pass with both still ends on the error, and a pass with
         // no error shows the confirmation.
-        if (sentThisPass > 0) _notifyQueueAlert({ kind: 'sent', count: sentThisPass, terminalCount: sentThisPass });
-        if (displacedThisPass > 0) _notifyQueueAlert({ kind: 'displaced', count: displacedThisPass, terminalCount: displacedThisPass });
+        if (pass.sent > 0) _notifyQueueAlert({ kind: 'sent', count: pass.sent, terminalCount: pass.sent });
+        if (pass.displaced > 0) _notifyQueueAlert({ kind: 'displaced', count: pass.displaced, terminalCount: pass.displaced });
         _notifyScoreSupersededAlert(
-            supersededThisPass,
-            lastSupersededMatch ? lastSupersededMatch.compID : undefined,
-            lastSupersededMatch ? lastSupersededMatch.matchID : undefined,
-            matchClosedThisPass,
+            pass.superseded,
+            pass.lastSuperseded ? pass.lastSuperseded.compID : undefined,
+            pass.lastSuperseded ? pass.lastSuperseded.matchID : undefined,
+            pass.matchClosed,
         );
+        if (pass.notApplied > 0) {
+            _notifyQueueAlert({
+                kind: 'not_applied', count: pass.notApplied, terminalCount: 0,
+                ...(pass.lastNotApplied ? { outcome: pass.lastNotApplied } : {}),
+            });
+        }
+        if (pass.parkedTaps > 0) _notifyQueueAlert({ kind: 'taps_parked', count: pass.parkedTaps, terminalCount: 0 });
+        // S2: a new build waits for the outbox to drain before it reloads.
+        if (_outboxIdle()) noteOutboxDrained();
     }
+}
+
+// The outbox is idle when nothing is queued and no write is in flight.
+function _outboxIdle() {
+    return _writeQueue.size === 0 && _inflightRunning === 0 && !_flushInProgress;
+}
+
+// _flushBase: one match's turn in a pass. Consecutive taps of ONE session go
+// in one POST of at most TAP_BATCH_MAX; every other entry on its own. The
+// first entry that does not settle ends the turn, and every entry the turn
+// leaves behind is marked held (persisted), so its later landing is told.
+async function _flushBase(base, list, pass, gen) {
+    let i = 0;
+    let outcome = 'settled';
+    while (i < list.length) {
+        if (gen !== _queueGen) return;
+        const [key, d] = list[i];
+        // Skip entries removed or replaced since the snapshot was taken.
+        if (_writeQueue.get(key) !== d) { i++; continue; }
+        // bc-qttl: a write parked on 401 carries the password captured at
+        // enqueue time, so retrying it can only reproduce the same auth failure
+        // until API.resumeAfterAuth() re-stamps it. A batch of taps the server
+        // refused (400) is parked until an operator discards it (operator S5 b).
+        // The page-hide copy of a running write whose own fetch is still open:
+        // that fetch lands it or queues it anew. Each of these holds its match.
+        if (d.authBlocked || d.parked || _heldByOpenFetch(key, d)) { outcome = 'kept'; break; }
+        if (d.kind === 'evt') {
+            const session = d.payload && d.payload.session;
+            const batch = [];
+            while (i < list.length && batch.length < TAP_BATCH_MAX) {
+                const [k2, d2] = list[i];
+                if (_writeQueue.get(k2) !== d2) { i++; continue; }
+                if (d2.kind !== 'evt' || d2.authBlocked || d2.parked
+                    || (d2.payload && d2.payload.session) !== session) break;
+                batch.push(list[i]);
+                i++;
+            }
+            outcome = await _sendTapBatch(base, batch, pass);
+        } else {
+            outcome = await _sendEntry(key, d, pass);
+            i++;
+        }
+        if (outcome !== 'settled') break;
+    }
+    if (outcome === 'settled') return;
+    let marked = false;
+    for (const [key, d] of list) {
+        if (_writeQueue.get(key) === d && !d.held && outcome === 'kept') { d.held = true; marked = true; }
+    }
+    if (marked) _recomputeSyncStatus();
+}
+
+// The value a door's `settled` resolves with: the shape the direct call used
+// to return.
+function _doorValue(d, body) {
+    switch (d && d.kind) {
+        case 'override':
+            return {
+                applied: !!body && body.applied !== false, reason: body && body.reason, message: body && body.message,
+                ...(body && Array.isArray(body.heldGroups) ? { heldGroups: body.heldGroups } : {}),
+            };
+        case 'revert': return true;
+        case 'kachinuki': return (body && body.result) ?? body;
+        case 'daihyosen': return _daihyosenOutcome(body || {});
+        default: return body;
+    }
+}
+
+// The Error a door's `settled` rejects with: the one the direct call threw.
+function _doorRefusal(d, status, body) {
+    const b = body || {};
+    const ineligible = b.error === 'ineligible_competitor' || b.error === 'already_ineligible';
+    switch (d && d.kind) {
+        case 'score':
+            if (ineligible) return new Error(b.reasonHuman || b.reason || b.error || 'Failed to record score');
+            return _courtBusyError(b) || _downstreamRefusalError(b) || new Error(_refusalText(b, 'Failed to record score'));
+        case 'decision':
+            if (ineligible) return new Error(b.reasonHuman || b.reason || b.error || 'Failed to record decision');
+            return _downstreamRefusalError(b) || new Error(b.error || 'Failed to record decision');
+        case 'override':
+            return _downstreamRefusalError(b) || new Error(b.error || 'Failed to override winner');
+        case 'reopen':
+        case 'requeue':
+            return _reopenRefusal(b);
+        case 'revert':
+            return new Error(b.error || 'Failed to send match back to queue');
+        case 'kachinuki':
+            return new Error(b.error || 'Failed to remove bout');
+        case 'daihyosen':
+            return new Error(_refusalText(b, d.method === 'DELETE' ? REP_BOUT_NOT_REMOVED : REP_BOUT_NOT_ADDED));
+        default:
+            return new Error(_refusalText(b, `HTTP ${status}`));
+    }
+}
+
+// _sendEntry: one queued write (not a tap). 'settled' when it left the queue
+// (sent, or refused for good), 'restamped' when it was re-stamped for a clock
+// refusal and goes again at once, 'kept' when it waits for a later pass.
+async function _sendEntry(key, descriptor, pass) {
+    // Out of the queue AND out of storage at once, not at the end of the
+    // pass: a page that goes away while a later entry is still out (a reload,
+    // the tab closed) would leave this one stored, and the next load would
+    // send it again. The door's promise settles with it (outcome).
+    const leaveQueue = (outcome) => {
+        if (!_dequeue(key, descriptor, outcome)) return false;
+        _persistQueue();
+        return true;
+    };
+    const { compID, matchID, payload, password, terminal, kind, method, url } = descriptor;
+    // Running score writes (terminal=false) don't store method/url and
+    // always PUT to the score endpoint. Terminal entries carry their own
+    // method+url, which may have been rehydrated from (tamperable)
+    // localStorage: validate against the allowlist and DROP anything outside
+    // it rather than flush to an unexpected route or method.
+    let effectiveMethod, effectiveUrl;
+    if (terminal) {
+        if (!_isAllowedTerminalRequest(method, url)) {
+            console.warn(`[sync] dropping terminal ${kind || ''} write with disallowed method/url:`, method, url);
+            _notifyTerminalWriteFailed({ compID, matchID, kind, status: 0, reason: 'corrupted queue entry' });
+            // Undeliverable by construction: announced globally as well, since
+            // the editor-scoped channel only reaches an operator on this match.
+            _notifyQueueAlert({ kind: 'unreadable', count: 1, terminalCount: 1, compID, matchID });
+            leaveQueue({ error: new Error('corrupted queue entry') });
+            return 'settled';
+        }
+        effectiveMethod = method;
+        effectiveUrl = url;
+    } else {
+        effectiveMethod = 'PUT';
+        effectiveUrl = `/api/competitions/${compID}/matches/${matchID}/score`;
+    }
+    let res, body;
+    try {
+        // Bounded, the body read included (_fetchJson): this loop is
+        // single-flight, so one replay whose body never completed would stop
+        // every later flush. Past the deadline it is a network failure.
+        ({ res, body } = await _fetchJson(effectiveUrl, {
+            method: effectiveMethod,
+            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
+            // Sent as the entry holds it: a downstream confirmation rides only
+            // on the in-memory copy of a write confirmed on this page
+            // (_persistQueue never stores one).
+            body: JSON.stringify(payload),
+        }));
+    } catch (_) {
+        // fetch rejected (network down), or the request or its body was given
+        // up at the deadline (_fetchJson).
+        pass.anyFailed = true;
+        pass.networkFailed = true;
+        return 'kept';
+    }
+    body = body || {};
+    if (res.ok) {
+        // Success (HTTP 200/201, including a write the server kept in the
+        // match's history instead of applying, applied:false).
+        if (terminal && kind !== 'lineup') {
+            if (writeWasRefusedForClock(body)) {
+                // bc-cse: NOT a supersede. The stamp this replay carries is in
+                // the server's future; nothing newer won. Heal the offset and
+                // RECONSTRUCT the stamp, then retry once.
+                if (descriptor.skewRetried) {
+                    // Refused a second time on a stamp built from a freshly
+                    // learned offset: this device's frame cannot be reconciled.
+                    // Dropped loudly, on both channels.
+                    console.warn(`[sync] dropping queued ${kind} write refused twice for clock skew (serverNowMs=${body.serverNowMs}); the device clock cannot be reconciled`);
+                    _notifyTerminalWriteFailed({ compID, matchID, kind, status: 200, reason: CLOCK_SKEW_FAIL_REASON, advice: CLOCK_SKEW_UNHEALED_ADVICE });
+                    _notifyQueueAlert({
+                        kind: 'rejected', count: 1, terminalCount: 1, compID, matchID,
+                        detail: CLOCK_SKEW_FAIL_REASON,
+                    });
+                    // An override additionally leaves an optimistic local advance
+                    // standing on a write that will never land: ask for a refetch.
+                    if (kind === 'override') _notifyBracketResync({ compID, matchID, reason: CLOCK_SKEW_REASON });
+                    leaveQueue({ value: _doorValue(descriptor, body) });
+                    return 'settled';
+                }
+                await _restampQueuedEntryForSkew(descriptor);
+                // Left QUEUED, with an immediate rerun of the loop, so the
+                // corrected write goes out now rather than on a backoff timer.
+                _flushRequested = true;
+                return 'restamped';
+            }
+            if (body.applied === false) {
+                // bc-cse: our stamp lost either way, so re-check our clock frame.
+                _relearnClockThrottled();
+                if (_writeQueue.get(key) === descriptor) {
+                    if (kind === 'override') {
+                        // A feeder-winner ASSERTION the server held: any optimistic
+                        // local advance from it is stale, so ask listeners to
+                        // refetch; told in the pass's one superseded alert.
+                        _notifyBracketResync({ compID, matchID, reason: 'lww_dropped' });
+                    } else {
+                        // bc-lww1: the operator's own entry, kept in the match's
+                        // history, not applied. The editor-targeted half fires per
+                        // match; the alert half is counted for the pass.
+                        _notifyScoreSupersededEditor(compID, matchID, body);
+                        if (_heldForClosedMatch(body)) pass.matchClosed = true;
+                    }
+                    pass.superseded++;
+                    pass.lastSuperseded = { compID, matchID };
+                }
+            }
+        } else if (!terminal && kind === 'score') {
+            // bc-cse MEDIUM-2: a RUNNING replay is fire-and-forget except for the
+            // clock-skew refusal, where res.ok means nothing was written; the
+            // entry may hold an edge-triggered kachinukiBoutFinal.
+            const refusedForClock = writeWasRefusedForClock(body);
+            if (refusedForClock && !descriptor.skewRetried) {
+                await _restampQueuedEntryForSkew(descriptor);
+                _flushRequested = true;
+                return 'restamped';
+            }
+            if (refusedForClock) {
+                console.warn(`[sync] dropping queued running write for ${matchID} refused twice for clock skew (serverNowMs=${body.serverNowMs}); a pending kachinuki advancement may need re-pressing`);
+            }
+        }
+        // A change turned away because the match was finished (writeMatchClosed)
+        // is the operator's to correct, never routine noise, so it is said
+        // whatever the write (a superseded Finish was counted above; never a
+        // displaced answer: that finish was recorded).
+        if (kind === 'score' && writeMatchClosed(body) && !(terminal && writeWasSuperseded(body))
+            && _writeQueue.get(key) === descriptor) {
+            _notifyScoreSupersededEditor(compID, matchID, body);
+            pass.superseded++;
+            pass.matchClosed = true;
+            pass.lastSuperseded = { compID, matchID };
+        }
+        const wasHeld = !!descriptor.held;
+        if (leaveQueue({ value: _doorValue(descriptor, body) })) {
+            // A held result that landed (writeWasSuperseded is every
+            // applied:false answer; those were announced above).
+            if (terminal && wasHeld && !writeWasSuperseded(body)) pass.sent++;
+            if (terminal && writeDisplacedGroups(body).length > 0) pass.displaced++;
+            // A confirmed terminal score write needs no further rev tracking.
+            if (terminal && kind === 'score') _matchRevCounters.delete(_revKey(compID, matchID));
+        } else if (_writeQueue.has(key)) {
+            // A later write took this one's place while it was out (the same
+            // key, _placeWrite): it goes before anything queued after it.
+            _flushRequested = true;
+            return 'restamped';
+        }
+        return 'settled';
+    }
+    if (res.status >= 500 || res.status === 429 || res.status === 403) {
+        // Server is up but erroring: keep in queue and retry with backoff. NOT
+        // "offline". 403 is never a bad credential on this server (that is
+        // 401): it is the tournament record not usable yet, which an admin can
+        // repair at any moment, so a plain retry is what discovers the repair.
+        // bc-qttl: NEVER dropped here; on crossing the notice threshold we
+        // announce once and the pill moves onto 'server-error'.
+        const rejections = (Number(descriptor.attempts) || 0) + 1;
+        descriptor.attempts = rejections;
+        if (rejections === SERVER_REJECTION_NOTICE_THRESHOLD) {
+            console.warn(`[sync] queued ${kind || 'running'} write still failing after ${rejections} server rejections (${res.status}); keeping it queued:`, body);
+            _notifyQueueAlert({
+                kind: 'server_error', count: 1, terminalCount: terminal ? 1 : 0, compID, matchID,
+                detail: body.reasonHuman || body.error || `HTTP ${res.status}`,
+            });
+            // Published at once (the failing count moved), so this match's
+            // editor and the topbar's list offer the discard now.
+            _recomputeSyncStatus();
+        }
+        pass.anyFailed = true;
+        return 'kept';
+    }
+    if (res.status === 401) {
+        // bc-qttl: an auth failure PARKS the write, it does not drop it; a
+        // parked entry is skipped until API.resumeAfterAuth() re-stamps it, so
+        // this branch deliberately does NOT set anyFailed.
+        if (!descriptor.authBlocked) {
+            console.warn(`[sync] parking queued ${kind || 'running'} write pending re-auth (${res.status}):`, body);
+            descriptor.authBlocked = true;
+            _notifyQueueAlert({
+                kind: 'auth_required', count: 1, terminalCount: terminal ? 1 : 0, compID, matchID,
+                detail: body.reasonHuman || body.error || `HTTP ${res.status}`,
+            });
+        }
+        return 'kept';
+    }
+    // Non-retryable: 400 validation, 413, a 409 conflict. A write the server
+    // refused on its merits and would refuse identically forever, so it leaves
+    // the queue (the one unconfirmed exit) and the refusal is REPORTED, never
+    // taken as success (bc-mrgc phase 3): a decision's 409 too, since the
+    // server answers an exact replay of a recorded decision as recorded
+    // (engine.exactDecisionReplay). A caller that claims the refusal
+    // (onRefusal, e.g. the downstream confirm in attemptScoreWrite) shows it
+    // itself; otherwise the editor-scoped channel and the global alert carry
+    // it, with downstreamKnockoutPlayedQueueDrop's words for a knockout
+    // correction whose later match was played meanwhile.
+    console.warn(`[sync] queued ${kind || 'running'} write rejected (${res.status}):`, body);
+    const err = _doorRefusal(descriptor, res.status, body);
+    if (!_claimRefusal(key, err)) {
+        const refusal = _replayRefusal(body, kind === 'decision' && res.status === 409 ? 'conflict (409)' : `HTTP ${res.status}`);
+        if (terminal) _notifyTerminalWriteFailed({ compID, matchID, kind, status: res.status, ...refusal });
+        _notifyQueueAlert({
+            kind: 'rejected', count: 1, terminalCount: terminal ? 1 : 0, compID, matchID,
+            detail: refusal.reason,
+            ...(refusal.sentence ? { sentence: true } : {}),
+        });
+    }
+    if (!leaveQueue({ error: err }) && _writeQueue.has(key)) {
+        _flushRequested = true;
+        return 'restamped';
+    }
+    return 'settled';
+}
+
+// _sendTapBatch: consecutive taps of one session for one match, in one POST
+// to the score-events door. Each event settles on its own outcome: a quiet
+// one (applied, recorded, duplicate) leaves the queue; a clock_skew one is
+// re-stamped once and goes again with the same id; any other outcome leaves
+// the queue and is told (one 'not_applied' alert a pass, and to the match's
+// open editor through subscribeTapOutcome). A 400 for the batch PARKS its taps
+// (operator S5 b); 5xx and network keep them; 401 parks for re-auth.
+async function _sendTapBatch(base, batch, pass) {
+    const [, first] = batch[0];
+    const { compID, matchID, password, url } = first;
+    const session = first.payload && first.payload.session;
+    if (!_isAllowedTerminalRequest('POST', url)) {
+        for (const [k, d] of batch) {
+            if (_dequeue(k, d, { value: { discarded: true } })) _persistQueue();
+        }
+        _notifyQueueAlert({ kind: 'unreadable', count: batch.length, terminalCount: 0, compID, matchID });
+        return 'settled';
+    }
+    let res, body;
+    try {
+        ({ res, body } = await _fetchJson(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
+            body: JSON.stringify({ session, events: batch.map(([, d]) => d.payload) }),
+        }));
+    } catch (_) {
+        pass.anyFailed = true;
+        pass.networkFailed = true;
+        return 'kept';
+    }
+    body = body || {};
+    if (res.ok) {
+        if (body.match) _noteDerived(base, body.match);
+        const byId = new Map((Array.isArray(body.outcomes) ? body.outcomes : []).map((o) => [o && o.id, o]));
+        let result = 'settled';
+        for (const [k, d] of batch) {
+            if (_writeQueue.get(k) !== d) continue;
+            const o = byId.get(d.payload && d.payload.id);
+            if (!o) { if (result === 'settled') result = 'kept'; continue; }
+            if (o.outcome === TAP_CLOCK_SKEW && !d.skewRetried) {
+                await _restampQueuedTapForSkew(d);
+                _flushRequested = true;
+                if (result === 'settled') result = 'restamped';
+                continue;
+            }
+            if (result !== 'settled') continue; // keep strict order behind it
+            if (_dequeue(k, d, { value: o })) _persistQueue();
+            if (!tapOutcomeQuiet(o)) {
+                pass.notApplied++;
+                pass.lastNotApplied = o;
+                _emitOn(_tapOutcomeListeners, base, {
+                    id: o.id, outcome: o.outcome, reason: o.reason, message: o.message,
+                });
+            }
+        }
+        // S6 b: the server is missing taps of this session for the match; send
+        // the ones the outbox still holds at once (a duplicate is harmless).
+        if (Array.isArray(body.gaps) && body.gaps.length > 0) {
+            const missing = new Set(body.gaps.map(Number));
+            const held = _tapEntriesFor(base).some(([, d]) => d.payload && d.payload.session === session
+                && missing.has(Number(d.payload.seq)));
+            if (held) _flushRequested = true;
+        }
+        _recomputeSyncStatus();
+        return result;
+    }
+    if (res.status >= 500 || res.status === 429 || res.status === 403) {
+        let crossed = false;
+        for (const [, d] of batch) {
+            d.attempts = (Number(d.attempts) || 0) + 1;
+            if (d.attempts === SERVER_REJECTION_NOTICE_THRESHOLD) crossed = true;
+        }
+        if (crossed) {
+            _notifyQueueAlert({
+                kind: 'server_error', count: batch.length, terminalCount: 0, compID, matchID,
+                detail: body.reasonHuman || body.error || `HTTP ${res.status}`,
+            });
+            _recomputeSyncStatus();
+        }
+        pass.anyFailed = true;
+        return 'kept';
+    }
+    if (res.status === 401) {
+        let fresh = false;
+        for (const [, d] of batch) { if (!d.authBlocked) { d.authBlocked = true; fresh = true; } }
+        if (fresh) {
+            _notifyQueueAlert({
+                kind: 'auth_required', count: batch.length, terminalCount: 0, compID, matchID,
+                detail: body.reasonHuman || body.error || `HTTP ${res.status}`,
+            });
+        }
+        return 'kept';
+    }
+    // 400 (a shape fault) or another refusal for the whole batch: PARKED, not
+    // dropped (operator S5 b). The taps stay in the held-writes list, hold
+    // back the match's later writes, and go only when an operator discards
+    // them (they count as failing, so HeldWriteDiscard and HeldWritesPanel
+    // offer it).
+    console.warn(`[sync] parking ${batch.length} tap(s) the server refused (${res.status}):`, body);
+    const refusal = _replayRefusal(body, `HTTP ${res.status}`);
+    for (const [, d] of batch) d.parked = { status: res.status, reason: refusal.reason };
+    pass.parkedTaps += batch.length;
+    _persistQueue();
+    _recomputeSyncStatus();
+    return 'kept';
+}
+
+// A tap refused for clock skew keeps its id and is re-stamped once, by the
+// same take-the-older rule as a queued write (_restampFor), never before the
+// match it was made against.
+async function _restampQueuedTapForSkew(d) {
+    await _learnServerClockOffset();
+    const enqueuedAt = Number.isFinite(d.enqueuedAt) ? d.enqueuedAt : Date.now();
+    d.payload.stamp = _stampAfterSeen(_restampFor(enqueuedAt, d.perfAtEnqueue), d.seenModifiedAt);
+    d.skewRetried = true;
+    _persistQueue();
 }
 
 // Shared post-enqueue tail for every queue path: place the write in its
@@ -1906,7 +2188,7 @@ async function _flushQueue() {
 // an entry of its own), persist, republish sync status, reset the backoff
 // counter (a fresh user write must not inherit a stale max-backoff delay from
 // a prior failure run), and kick a flush. Returns the entry's key.
-function _commitEnqueue(base, descriptor) {
+function _commitEnqueue(base, descriptor, beforeFlush) {
     // bc-cse: the monotonic half of the clock-skew re-stamp. performance.now()
     // is immune to wall-clock steps, so the difference between this reading and
     // one taken at flush time is the write's TRUE age even if the OS corrects
@@ -1924,6 +2206,8 @@ function _commitEnqueue(base, descriptor) {
     // Read BEFORE the flush is kicked: the flush's synchronous part can
     // persist again, and it is THIS write's persist the answer reports.
     _lastEnqueuePersisted = _persistQueue();
+    // The door's promise exists before anything can settle it.
+    if (typeof beforeFlush === 'function') beforeFlush(key);
     _recomputeSyncStatus();
     if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
     _flushAttempt = 0;
@@ -2155,6 +2439,7 @@ function _onStoredQueueChanged(oldRaw, newRaw) {
         const held = _writeQueue.get(k);
         if (held && !_enqueuedAfter(d, held.enqueuedAt)) continue;
         if (_storedEntryProblem(d)) continue;
+        if (d.payload && d.payload.forceDownstreamReopen) d.payload = _withoutDownstreamConfirmation(d.payload);
         _writeQueue.set(k, d);
         _adopted.add(d);
         changed = adopted = true;
@@ -2285,6 +2570,14 @@ if (typeof fetch === 'function') {
             if (_storedEntryProblem(descriptor)) { dropUnreadable(key, descriptor); continue; }
             // Only restore if not already superseded by a same-session write.
             if (!_writeQueue.has(key)) {
+                // A write a previous page left behind has already waited: it
+                // is held, and its landing is told (the 'sent' alert).
+                descriptor.held = true;
+                // A confirmation an older build stored is never replayed: it
+                // answered a dialog on a page that is gone.
+                if (descriptor.payload && descriptor.payload.forceDownstreamReopen) {
+                    descriptor.payload = _withoutDownstreamConfirmation(descriptor.payload);
+                }
                 _writeQueue.set(key, descriptor);
                 anyLoaded = true;
             }
@@ -2482,6 +2775,8 @@ function _ensureConnected() {
                 _relearnClockThrottled();
             }
         }
+        // S2: the stream's first frame names the server's build.
+        if (parsed && parsed.type === 'heartbeat' && parsed.hello) noteServerBuild(parsed.build);
         _noteEventId(event.lastEventId, parsed);
         for (const sub of _subscribers) {
             try { sub.callback(parsed); } catch (err) { console.error('SSE callback failed:', err); }
@@ -2581,6 +2876,7 @@ async function _fetchJson(url, opts, ms = FETCH_TIMEOUT_MS) {
     aborted.catch(() => {});
     try {
         const res = await Promise.race([fetch(url, { ...opts, signal: controller.signal }), aborted]);
+        _noteBuildOf(res);
         const body = await Promise.race([
             Promise.resolve().then(() => res.json()).catch((e) => {
                 if (controller.signal.aborted) throw e;
@@ -2609,23 +2905,17 @@ async function _fetchJson(url, opts, ms = FETCH_TIMEOUT_MS) {
 // makes of a change the server did make after all. A refusal shows the
 // server's own sentence when it sends one (_refusalText), e.g. a finished
 // match's.
-async function _daihyosenRequest(method, compID, matchID, password, notDone, seenModifiedAt) {
-    let res;
-    let body;
-    try {
-        ({ res, body } = await _fetchJson(`/api/competitions/${compID}/matches/${matchID}/daihyosen`, {
-            method,
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tournament-Password': password
-            },
-            body: JSON.stringify(_stampPayload({}, _serverNowMs(), seenModifiedAt)),
-        }));
-    } catch (_e) {
-        throw new Error(noAnswerSentence(notDone));
-    }
-    if (!res.ok) throw new Error(_refusalText(body, notDone));
-    return _daihyosenOutcome(body);
+function _daihyosenRequest(method, compID, matchID, password, seenModifiedAt, opts = {}) {
+    // bc-evts: the representative bout's add (POST) and remove (DELETE) are
+    // the outbox's like every rule-bound write. `settled` resolves the stored
+    // match (_daihyosenOutcome: a refusal body when it was held), or rejects
+    // with the not-added/not-removed sentence (_doorRefusal).
+    return _outboxWrite({
+        kind: 'daihyosen', compID, matchID, method,
+        url: `/api/competitions/${compID}/matches/${matchID}/daihyosen`,
+        payload: _stampPayload({}, _serverNowMs(), seenModifiedAt), password,
+        seen: opts && opts.seen, onRefusal: opts && opts.onRefusal,
+    });
 }
 
 // What a lineup removal leaves undone when it does not land.
@@ -3103,7 +3393,7 @@ const API = {
             }
         };
     },
-    async recordScore(compID, matchID, result, password, match) {
+    async recordScore(compID, matchID, result, password, match, opts = {}) {
         const payload = toBackendMatchResult(result, match || result);
         // mp-y3nk: stamp in server-relative time for last-write-wins reconciliation.
         // An autosave is stamped with the time of the EDIT it carries, not of
@@ -3155,6 +3445,9 @@ const API = {
             }
             payload.rev = _nextRev(compID, matchID);
             payload.revSession = _revSession;
+            // S3d: a running write carries writeId, basis and session too; it
+            // stays on the direct path until stages 4-5 move its editors to taps.
+            _tagWrite(payload, base, match && match.scoreVersion);
         }
         // The record of this running write while its fetch is open. Kept by
         // reference: a later running write for the match replaces the map's
@@ -3181,7 +3474,10 @@ const API = {
         // are stripped so internal write-ordering metadata is not propagated
         // to the display tab.
         const _broadcastPatch = (fields) => {
-            const { rev: _r, revSession: _rs, changed: _ch, ...rest } = fields || {};
+            const {
+                rev: _r, revSession: _rs, changed: _ch,
+                writeId: _w, basis: _b, session: _s, forceDownstreamReopen: _f, ...rest
+            } = fields || {};
             const court = (match && match.court) || '';
             // Do not emit an unscoped (court-less) broadcast: a display can only
             // safely apply a patch it can attribute to its court, and the display
@@ -3216,153 +3512,64 @@ const API = {
             return _queuedAnswer();
         }
 
-        // Everything a 2xx can mean, in one place, because bc-cse gave this
-        // response TWO producers: the first attempt, and the clock-skew resend
-        // below. `allowSkewRetry` is what stops the two from ping-ponging - the
-        // resend passes false, so a second clock_skew refusal is terminal.
-        const _handleOkBody = async (body, allowSkewRetry) => {
+        // bc-evts: a Finish, a correction, a scheduled write: the outbox's, at
+        // once (the governing rule). The editor carries on with the pending
+        // answer; `settled` is the server's answer when it comes, and a refusal
+        // nobody claims (opts.onRefusal) is told like a replay's. The display
+        // overlay is the optimistic result, as an offline write's always was.
+        if (!isRunning) {
+            const answer = _outboxWrite({
+                kind: 'score', compID, matchID, method: 'PUT', url: scoreUrl, payload, password,
+                seen: match && match.scoreVersion, onRefusal: opts && opts.onRefusal,
+            });
+            _broadcastPatch(payload);
+            return answer;
+        }
+
+        // From here on the write is RUNNING (an autosave, Start match, Record
+        // bout): it still goes straight to the server until stages 4-5 move
+        // its editors to taps. Everything a 2xx can mean for it, in one place.
+        const _handleOkBody = (body) => {
             // A write that REACHED the server takes the place of the running
             // score write queued for this match whose groups it claimed
             // (claimedEntry, the union above): drain that one entry now, and
             // only it. Never a queued Finish or decision: those are entries of
-            // their own and replay in order (bc-mrgc phase 3; the old drain
-            // took whatever the match's one queue slot held). Deferred from
-            // pre-flight on purpose: if the PUT fails outright (e.g. Finish
-            // while offline) the queued snapshot stays and the failed write is
-            // queued in its place.
-            //
-            // A completed write drains PRE-OUTCOME: on any 2xx, before this
-            // function reads what the body decided, so a clock_skew refusal (a
-            // 200 that stored NOTHING) drains the snapshot too. That is not a
-            // loss - the queued snapshot was stamped by the same unreconciled
-            // clock as the write just refused, so it would be refused in its
-            // turn, and the completed write is retried here with a corrected
-            // stamp anyway. A RUNNING write refused for clock skew is not
-            // resent, so it drains nothing.
-            if (claimedEntry && (!isRunning || !writeWasRefusedForClock(body))
+            // their own and are sent in order. A write refused for clock skew
+            // stored nothing, so it drains nothing.
+            if (claimedEntry && !writeWasRefusedForClock(body)
                 && _dequeue(claimedEntry[0], claimedEntry[1])) {
                 _persistQueue();
                 _recomputeSyncStatus();
             }
-            if (!isRunning) _matchRevCounters.delete(_revKey(compID, matchID));
-            // mp-9ukk: echo the operator's patch to the court display
-            // peer-to-peer so the board keeps updating when the SSE link is
-            // slow or down. This is an OPTIMISTIC overlay, not the
-            // authoritative source: the request payload already carries the
-            // display-critical fields (id, side ids, winner, scores, status)
-            // in the same envelope every other broadcast path uses, and the
-            // fully server-normalized state arrives via SSE (or the reconnect
-            // full refetch), which replaces the overlay. Broadcasting the
-            // request payload (not the server `data`) keeps one consistent
-            // shape across the confirmed and offline paths. A write that was
-            // not applied (clock_skew, or superseded: kept in the match's
-            // history) is never pushed, below.
-            // bc-cse: refused for clock skew. NOT a supersede - nothing newer is
-            // stored and there is nothing for the operator to go and check; the
-            // stamp we sent was simply in the server's future. Heal and resend
-            // instead of reporting anything.
+            // bc-cse: refused for clock skew. Deliberately SILENT for an
+            // autosave: relearn (throttled) and let the next edit's autosave
+            // carry the corrected stamp. A banner here would fire on every tap
+            // of a skewed device.
             if (writeWasRefusedForClock(body)) {
-                if (isRunning) {
-                    // Autosave. Deliberately SILENT: relearn (throttled) and let
-                    // the next edit's autosave carry the corrected stamp ~300ms
-                    // later. A banner here would fire on every keystroke of a
-                    // skewed device, and the running state it describes is
-                    // transient anyway.
-                    _relearnClockThrottled();
-                    return body;
-                }
-                if (allowSkewRetry) return await _resendAfterClockSkew();
-                // Refused twice, the second time with a stamp taken from a
-                // freshly learned offset. Do NOT enqueue: a queue entry carrying
-                // a stamp this device cannot get right would poison-loop the
-                // flush. Tell the operator instead, with advice that names the
-                // clock - "re-enter the result" alone would send them round the
-                // same refusal with no idea why.
-                console.warn(`[score] write refused twice for clock skew (serverNowMs=${body.serverNowMs}); the device clock cannot be reconciled`);
-                _notifyTerminalWriteFailed({ compID, matchID, kind: 'score', status: 200, reason: CLOCK_SKEW_FAIL_REASON, advice: CLOCK_SKEW_UNHEALED_ADVICE });
-                return body;
-            }
-            // bc-lww1: 200 {applied:false} is the timestamp guard's drop — a
-            // NEWER result is already stored and nothing was written. Skip the
-            // broadcast for the same reason `stale` does: pushing this payload to
-            // the court display would overwrite the newer state already there.
-            if (body && body.applied === false) {
-                // bc-cse: the superseded banner tells the operator to re-enter
-                // the result. Kick off a relearn - fire-and-forget, so it does
-                // not gate this response and carries no promise that the
-                // re-entry wins (a genuinely newer stored result still should
-                // beat it). What it buys is narrower and sufficient: a re-entry
-                // moments from now carries a CORRECTED stamp instead of losing
-                // again to this device's own uncorrected skew.
                 _relearnClockThrottled();
-                // A running write turned away because the match was finished
-                // is told by the editor that sent it (useKeptInHistoryNote
-                // reads writeMatchClosed), and an
-                // explicit tap by notLandedBanner.
-                if (!isRunning) _notifyScoreSuperseded(compID, matchID, body);
                 return body;
             }
+            // 200 {applied:false}: kept in the match's history, not applied.
+            // Never pushed to the display (it would overwrite the newer state
+            // there); the editor that sent it reads writeMatchClosed and an
+            // explicit tap notLandedBanner.
+            if (body && body.applied === false) {
+                _relearnClockThrottled();
+                return body;
+            }
+            // mp-9ukk: echo the operator's patch to the court display
+            // peer-to-peer (an OPTIMISTIC overlay the SSE push replaces).
             _broadcastPatch(payload);
             return body;
-        };
-
-        // bc-cse: the completed-write heal. AWAITS a real learn (not the
-        // throttled wrapper, which may legitimately decide to do nothing) because
-        // the re-stamp is only correct once the new offset is in hand; the learn
-        // is single-flighted, so a concurrent background one is joined rather
-        // than duplicated. _serverNowMs() and not enqueuedAt-arithmetic: this
-        // write is happening NOW, in front of the operator, so now is its real
-        // time - unlike a queue replay, whose age is genuine and must be kept.
-        //
-        // Non-clock_skew outcomes are handled exactly as they would have been on
-        // the first attempt (that is the point of routing through _handleOkBody),
-        // including the offline enqueue: by this point the payload carries a
-        // corrected stamp, so queuing it is safe.
-        const _resendAfterClockSkew = async () => {
-            await _learnServerClockOffset();
-            _stampPayload(payload, _serverNowMs(), seen);
-            let retryRes;
-            let retryBody;
-            try {
-                ({ res: retryRes, body: retryBody } = await _fetchJson(scoreUrl, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
-                    body: JSON.stringify(payload),
-                }));
-            } catch (_networkErr) {
-                _enqueueTerminalWrite(
-                    _revKey(compID, matchID), 'score', 'PUT', scoreUrl,
-                    payload, password, compID, matchID
-                );
-                _broadcastPatch(payload);
-                return _queuedAnswer();
-            }
-            if (retryRes.ok) return await _handleOkBody(retryBody, false);
-            if (retryRes.status >= 500 || retryRes.status === 429) {
-                _enqueueTerminalWrite(
-                    _revKey(compID, matchID), 'score', 'PUT', scoreUrl,
-                    payload, password, compID, matchID
-                );
-                _broadcastPatch(payload);
-                return _queuedAnswer();
-            }
-            if (retryBody.error === "ineligible_competitor" || retryBody.error === "already_ineligible") {
-                throw new Error(retryBody.reasonHuman || retryBody.reason || retryBody.error || "Failed to record score");
-            }
-            throw _courtBusyError(retryBody) || _downstreamRefusalError(retryBody) || new Error(_refusalText(retryBody, "Failed to record score"));
         };
 
         let res;
         let data;
         try {
             try {
-                // F1: bounded (12 s), the body read included (_fetchJson), so
-                // neither a stalled request nor a body that never completes
-                // holds the editor that awaits this write. Past the deadline it
-                // is a network failure: queued below and replayed, which is
-                // safe even if the server did store it, because the replay
-                // carries the same stamp (and rev) and the write guard is
-                // last-write-wins with an equal stamp re-applying.
+                // F1: bounded (12 s), the body read included (_fetchJson). Past
+                // the deadline it is a network failure: queued below and
+                // replayed with the same stamp (and rev).
                 ({ res, body: data } = await _fetchJson(scoreUrl, {
                     method: 'PUT',
                     headers: {
@@ -3372,94 +3579,47 @@ const API = {
                     body: JSON.stringify(payload)
                 }));
             } catch (_networkErr) {
-                // Network failure or timeout abort. For running-status writes,
-                // queue for retry: last-write-wins semantics so only the latest state
-                // is ever flushed.
-                // F5: completed (terminal) writes are now also queued on transient
-                // failures so they are not silently lost on a wifi gap.
-                if (isRunning) {
-                    enqueueRunningWrite(compID, matchID, payload, password);
-                    // mp-9ukk: broadcast even on enqueue so the display tab gets
-                    // the optimistic overlay while the server is unreachable.
-                    _broadcastPatch(payload);
-                    // Return a DISCRIMINATED { queued: true } result. The write was
-                    // NOT confirmed by the server: only enqueued for async delivery
-                    // via _flushQueue (last-write-wins). Fire-and-forget callers
-                    // (debounced autosave) ignore the value. Any caller that awaits a
-                    // running write as a HARD PREREQUISITE for a dependent request
-                    // MUST branch on `.queued` and treat it as "not yet persisted"
-                    // rather than success: see the daihyosen pre-save in
-                    // admin_scoring_modal.jsx, which aborts on a queued save so it
-                    // never runs recordDaihyosen against stale server-side scores.
-                    return _queuedAnswer();
-                }
-                // F5: completed score: enqueue as terminal and return {queued:true}.
-                // It takes the place of the score write queued last for the
-                // match, if any (_coalesceTarget), and of nothing else.
-                _enqueueTerminalWrite(
-                    _revKey(compID, matchID), 'score', 'PUT', scoreUrl,
-                    payload, password, compID, matchID
-                );
-                // mp-9ukk: broadcast the terminal write for offline display update.
+                // Network failure or timeout abort: queued for retry
+                // (last-write-wins, so only the latest state is ever flushed),
+                // and broadcast so the display tab gets the optimistic overlay.
+                // A DISCRIMINATED { queued: true }: not server-confirmed; a
+                // caller that awaits a running write as a HARD PREREQUISITE must
+                // branch on it (writeDidNotLand), see the daihyosen pre-save.
+                enqueueRunningWrite(compID, matchID, payload, password);
                 _broadcastPatch(payload);
                 return _queuedAnswer();
             }
         } finally {
-            if (isRunning) {
-                _inflightRunning--;
-                // Settled: landed, or its failure path above queued it. A later
-                // write for the match may have taken the slot; leave that one.
-                // A copy page-hide queued of this write goes with it, whether
-                // or not a later write has taken the slot since (inflightRecord
-                // is this write's own record): an answer settles it here, a
-                // failure has already replaced it in the queue (and the
-                // retryable-status path below queues it anew).
-                const key = _revKey(compID, matchID);
-                if (inflightRecord && _inflightRunningWrites.get(key) === inflightRecord) {
-                    _inflightRunningWrites.delete(key);
-                }
-                const heldCopy = inflightRecord && inflightRecord.kept;
-                if (heldCopy && _dequeue(inflightRecord.keptKey, heldCopy)) _persistQueue();
-                _recomputeSyncStatus();
-                // While the copy was held, the flush passed over it, and an
-                // entry queued meanwhile may be waiting on a backoff timer.
-                // When the fetch has answered, the connection is up: send what
-                // is left now rather than wait for an unrelated trigger. (A
-                // failed fetch has queued its write, which kicked a flush.)
-                // Deferred a microtask: the answer below first drains the
-                // queued write this one claimed (_handleOkBody), which the
-                // flush would otherwise send a second time.
-                if (heldCopy && res && _writeQueue.size > 0) {
-                    if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
-                    _flushAttempt = 0;
-                    queueMicrotask(() => { if (_writeQueue.size > 0) _flushQueue(); });
-                }
+            _inflightRunning--;
+            // Settled: landed, or its failure path above queued it. A later
+            // write for the match may have taken the slot; leave that one. A
+            // copy page-hide queued of this write goes with it, whether or not
+            // a later write has taken the slot since (inflightRecord is this
+            // write's own record).
+            const key = _revKey(compID, matchID);
+            if (inflightRecord && _inflightRunningWrites.get(key) === inflightRecord) {
+                _inflightRunningWrites.delete(key);
             }
+            const heldCopy = inflightRecord && inflightRecord.kept;
+            if (heldCopy && _dequeue(inflightRecord.keptKey, heldCopy)) _persistQueue();
+            _recomputeSyncStatus();
+            // While the copy was held, the flush passed over it (and held back
+            // its match behind it). When the fetch has answered, the
+            // connection is up: send what is left now. Deferred a microtask:
+            // the answer below first drains the queued write this one claimed.
+            if (heldCopy && res && _writeQueue.size > 0) {
+                if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
+                _flushAttempt = 0;
+                queueMicrotask(() => { if (_writeQueue.size > 0) _flushQueue(); });
+            }
+            if (_outboxIdle()) noteOutboxDrained();
         }
 
-        if (res.ok) return await _handleOkBody(data, true);
-        // A running write that failed with a RETRYABLE server error (5xx / 429)
-        // is queued for offline-style retry. Without this the inflight counter
-        // drops to 0 and the pill flips back to "Synced" even though the latest
-        // score never reached the server (the autosave caller swallows the
-        // throw). Queuing keeps the pill on syncing/offline and re-delivers the
-        // latest state.
-        if (isRunning && (res.status >= 500 || res.status === 429)) {
+        if (res.ok) return _handleOkBody(data);
+        // A RETRYABLE server error (5xx / 429) is queued for retry, so the pill
+        // stays on syncing/offline and the latest state is re-delivered.
+        if (res.status >= 500 || res.status === 429) {
             enqueueRunningWrite(compID, matchID, payload, password);
-            // mp-9ukk: broadcast the queued state for offline display update.
-            _broadcastPatch(payload);
-            // Discriminated { queued: true }: not server-confirmed; see the
-            // network-error branch above for the full caller contract.
-            return _queuedAnswer();
-        }
-        // F5: completed score, transient server error: enqueue as terminal.
-        // 4xx on completed scores are non-retryable and throw (below).
-        if (!isRunning && (res.status >= 500 || res.status === 429)) {
-            _enqueueTerminalWrite(
-                _revKey(compID, matchID), 'score', 'PUT', scoreUrl,
-                payload, password, compID, matchID
-            );
-            // mp-9ukk: broadcast the queued terminal state for offline display.
             _broadcastPatch(payload);
             return _queuedAnswer();
         }
@@ -3468,17 +3628,10 @@ const API = {
         if (data.error === "ineligible_competitor" || data.error === "already_ineligible") {
             throw new Error(data.reasonHuman || data.reason || data.error || "Failed to record score");
         }
-        // bc-rawm: 409 court_busy (the shiaijo this match wants is running a
-        // different match) is built into an operator sentence naming the
-        // shiaijo and the blocking match, never the bare "court_busy" token;
-        // see _courtBusyError above.
+        // bc-rawm: 409 court_busy is built into an operator sentence naming the
+        // shiaijo and the blocking match (_courtBusyError).
         const courtBusy = _courtBusyError(data);
         if (courtBusy) throw courtBusy;
-        // bc-kcdg: 409 downstream_knockout_played (correcting a completed
-        // knockout match whose later round already played) is parsed into a
-        // structured error rather than a plain message; see
-        // _downstreamKnockoutPlayedError and write_result.jsx's
-        // downstreamKnockoutPlayedRefusal.
         // Otherwise the refusal's sentence when it carries one (_refusalText).
         throw _downstreamRefusalError(data) || new Error(_refusalText(data, "Failed to record score"));
     },
@@ -3494,104 +3647,24 @@ const API = {
     // on the DIRECT call) always throw: the score editor relies on a thrown 409
     // to show the refusal. A queued replay's 409 is reported too
     // (_flushQueue), never taken as success (bc-mrgc phase 3).
-    async recordDecision(compID, matchID, body, password) {
+    async recordDecision(compID, matchID, body, password, opts = {}) {
         const decisionUrl = `/api/competitions/${compID}/matches/${matchID}/decision`;
-        // Stamp in server-relative time, exactly as recordScore does (mp-y3nk).
-        // Stamped BEFORE the send so a queued replay carries the time the
-        // operator acted, not the time the network came back. Without it a
-        // match closed while still `scheduled` - a queue row's Record default
-        // win - was the one completion carrying no time at all, so no surface
-        // could order it against the bouts around it (mp-jnvl).
-        // `seenModifiedAt` in the body is the match the decision was recorded
-        // on (bc-hlck): it floors the stamp and is never sent.
+        // Stamp in server-relative time, exactly as recordScore does (mp-y3nk),
+        // when the operator acted, so a queued replay carries that time (a
+        // match closed while still `scheduled` has no earlier write to inherit
+        // one from, mp-jnvl). `seenModifiedAt` in the body is the match the
+        // decision was recorded on (bc-hlck): it floors the stamp and is never
+        // sent.
         const { seenModifiedAt: seen, ...rest } = body || {};
         const payload = _stampPayload({ ...rest }, _serverNowMs(), seen);
-        // Sent straight to the server even when a write of this device for
-        // the match is still queued (bc-mrgc): the server orders the two by
-        // their stamps, so a withdrawal still stands on the scoreline it was
-        // declared over whichever arrives first.
-        let res;
-        let data;
-        try {
-            // F1: abort after 12 s, the body read included (_fetchJson, as
-            // recordScore); past it the decision is queued as a network failure.
-            ({ res, body: data } = await _fetchJson(decisionUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Tournament-Password': password
-                },
-                body: JSON.stringify(payload)
-            }));
-        } catch (_networkErr) {
-            // F5: network failure or timeout: enqueue as terminal for retry.
-            _enqueueTerminalWrite(
-                _revKey(compID, matchID), 'decision', 'POST', decisionUrl,
-                payload, password, compID, matchID
-            );
-            return _queuedAnswer();
-        }
-        if (!res.ok) {
-            // F5: transient server error: enqueue for retry.
-            if (res.status >= 500 || res.status === 429) {
-                _enqueueTerminalWrite(
-                    _revKey(compID, matchID), 'decision', 'POST', decisionUrl,
-                    payload, password, compID, matchID
-                );
-                return _queuedAnswer();
-            }
-            // 4xx (including a 409): throw immediately so the UI
-            // can surface the error (a queued replay's refusal is reported by
-            // _flushQueue the same way).
-            // bc-rawm: the eligibility gate (mp-dc52 Phase 3) refuses a
-            // decision exactly as it refuses a score write -- 409
-            // ineligible_competitor / already_ineligible carrying a full
-            // operator sentence in reasonHuman -- so prefer it the same way
-            // recordScore does below: reasonHuman, then reason, then the bare
-            // code. Checked BEFORE the downstream parse: neither downstream
-            // helper matches these two codes, so without this branch the
-            // fallback `new Error(data.error ...)` would have thrown the raw
-            // machine token instead of the server's sentence.
-            if (data.error === "ineligible_competitor" || data.error === "already_ineligible") {
-                throw new Error(data.reasonHuman || data.reason || data.error || "Failed to record decision");
-            }
-            // bc-cse: 409 downstream_knockout_played (a kiken/fusenpai/daihyosen
-            // decision that corrects a completed knockout match whose later
-            // round already played) gets the SAME structured parse as the
-            // score/override-winner paths, via the one shared helper -- see
-            // _downstreamKnockoutPlayedError above. Without this the SPA threw
-            // the bare "downstream_knockout_played" token and dropped the
-            // server's message, and nothing could set forceDownstreamReopen on
-            // a decision retry (submitDecisionRequest, admin_scoring_shared.jsx,
-            // is what now reads .downstreamKnockoutPlayed off this error via
-            // attemptScoreWrite).
-            throw _downstreamRefusalError(data) || new Error(data.error || "Failed to record decision");
-        }
-        // bc-cse, LIVE since mp-jnvl: the /decision handler maps a superseded
-        // write to 200 {"applied": false}, and a decision now carries a real
-        // modifiedAt (stamped above, exactly as recordScore stamps its own
-        // payload) that reaches RecordDecisionTx through its variadic
-        // modifiedAt parameter, which the handler always passes. So
-        // ApplyByTimestamp's LWW guard runs on a decision exactly as it does
-        // on a score write, and the server can genuinely emit this body for
-        // either reason (superseded or clock_skew) -- this is no longer a
-        // defence against a shape the server cannot send. Handled for the
-        // same reason bc-lww1 exists at all: a 200 the caller reads as
-        // success while nothing was stored would leave the operator looking
-        // at a verdict the disk never held.
-        //
-        // ONE verdict for every applied:false here, unlike the terminal SCORE
-        // path's split: that path earns its clock-specific copy by healing
-        // the offset and RETRYING once before reporting. This path does not
-        // attempt that heal-and-resend, so a decision refused for either
-        // reason is reported with the plain superseded copy rather than the
-        // dedicated clock-skew one. The offset is still relearned either way,
-        // since a skewed device is worth correcting for the next write.
-        if (writeWasSuperseded(data)) {
-            _relearnClockThrottled();
-            _notifyScoreSuperseded(compID, matchID, data);
-        }
-        return data;
+        // bc-evts: the outbox's, at once, behind this device's earlier writes
+        // for the match. `opts.seen` is the score log line count the screen
+        // showed (the match's scoreVersion): a correction over a finished match
+        // carries the basis that says it saw the result (I1).
+        return _outboxWrite({
+            kind: 'decision', compID, matchID, method: 'POST', url: decisionUrl, payload, password,
+            seen: opts && opts.seen, onRefusal: opts && opts.onRefusal,
+        });
     },
     // T098: competitor eligibility statuses produced by kiken/fusenpai
     // decisions. Endpoint is read-only and unauthenticated: same contract as
@@ -3669,110 +3742,22 @@ const API = {
     // match(es) for re-entry rather than silently repainting them.
     // seenModifiedAt (optional): the match's stamp as this device last had
     // it, which the stamp is never older than (bc-hlck).
-    async overrideBracketWinner(compID, matchID, winnerName, password, forceDownstreamReopen, seenModifiedAt) {
+    async overrideBracketWinner(compID, matchID, winnerName, password, forceDownstreamReopen, seenModifiedAt, opts = {}) {
         const url = `/api/competitions/${compID}/matches/${matchID}/override-winner`;
-        // mp-y3nk: stamp in server-relative time for last-write-wins reconciliation.
+        // mp-y3nk: stamp in server-relative time, never older than the feeder
+        // it names (bc-hlck).
         const payload = _stampPayload({ winnerName }, _serverNowMs(), seenModifiedAt);
         if (forceDownstreamReopen) payload.forceDownstreamReopen = true;
-        // Sent straight to the server even when an earlier assertion of this
-        // device about the feeder is still queued: the server orders the two
-        // by their stamps (bc-mrgc).
-        let res;
-        let body;
-        try {
-            // Bounded, the body read included (_fetchJson), so a stalled
-            // request or body is treated as offline rather than hanging the
-            // "Run now" flow.
-            ({ res, body } = await _fetchJson(url, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Tournament-Password': password
-                },
-                body: JSON.stringify(payload)
-            }));
-        } catch (_networkErr) {
-            // mp-y3nk Phase 4: offline / timeout. An operator's feeder-winner
-            // assertion (the "Run now" recovery) must survive an update outage
-            // like a score does, so queue it as a terminal write. It replays on
-            // reconnect; the server then propagates it into the dependent final's
-            // sides. Keyed distinctly from score writes ("override:…") so an
-            // assertion and a score for the same match id never collide under the
-            // queue's last-write-wins-per-key rule. On a later non-retryable 4xx
-            // (e.g. the feeder resolved differently server-side) _flushQueue
-            // surfaces it via the terminal-write-failed channel rather than
-            // silently applying, preserving bracket integrity.
-            _enqueueTerminalWrite(`override:${compID}:${matchID}`, 'override', 'PUT', url, payload, password, compID, matchID);
-            return _queuedAnswer();
-        }
-        if (!res.ok) {
-            // bc-kcdg: 409 downstream_knockout_played (this feeder's assertion
-            // would repaint a later match that already played on the current
-            // winner) is parsed into the same structured error recordScore
-            // throws, so a caller can offer the same confirm+retry loop
-            // (write_result.jsx's attemptScoreWrite) rather than a plain message.
-            // bc-rfsw: 409 downstream_knockout_running (that later match is
-            // being fought now) throws the operator's sentence, not confirmable.
-            throw _downstreamRefusalError(body) || new Error(body.error || "Failed to override winner");
-        }
-        // Backend replies 200 {"applied": <bool>} (mp-y3nk). applied=false means
-        // the timestamp guard dropped this assertion because a newer/equal result
-        // already exists for the feeder, so the server kept a different outcome and
-        // the caller must NOT trust its optimistic pick. An older server (or any
-        // absent body) yields {} here; default applied=true so back-compat callers
-        // keep advancing exactly as before.
-        let applied = body.applied !== false;
-        // The body that produced the FINAL verdict, which the resend below may
-        // replace. bc-cse: the reason travels back out to the caller, because a
-        // refusal and a supersede need opposite things said about them and the
-        // caller cannot re-derive which it got from `applied` alone. Purely
-        // additive: absent fields are undefined and every existing caller reads
-        // only `.applied`.
-        let verdict = body;
-        if (!applied && body.reason === CLOCK_SKEW_REASON) {
-            // bc-cse: refused because our stamp is in the server's future, not
-            // because a newer result won. Nothing about the bracket has changed,
-            // so heal the offset (AWAITED - the re-stamp depends on it) and send
-            // the same assertion once more, now stamped in the server's frame.
-            // Re-stamped with _serverNowMs() rather than the original stamp: the
-            // operator is asserting this winner right now, still never older
-            // than the feeder it names (bc-hlck).
-            await _learnServerClockOffset();
-            _stampPayload(payload, _serverNowMs(), seenModifiedAt);
-            let retryRes;
-            let retryBody;
-            try {
-                ({ res: retryRes, body: retryBody } = await _fetchJson(url, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
-                    body: JSON.stringify(payload),
-                }));
-            } catch (_networkErr) {
-                // Same durability rule as the first attempt: queue it and say so.
-                _enqueueTerminalWrite(`override:${compID}:${matchID}`, 'override', 'PUT', url, payload, password, compID, matchID);
-                return _queuedAnswer();
-            }
-            if (!retryRes.ok) {
-                throw new Error(retryBody.error || "Failed to override winner");
-            }
-            applied = retryBody.applied !== false;
-            verdict = retryBody;
-            // Refused twice: never a third attempt. The caller already treats
-            // applied:false as "do not trust the optimistic pick", which is the
-            // correct outcome either way, so this reports rather than escalates.
-            if (!applied) console.warn('[override] assertion refused twice for clock skew; the device clock cannot be reconciled');
-        } else if (!applied) {
-            // bc-cse: a dropped assertion is the same clock-skew signal as a dropped
-            // score - relearn so the operator's next "Run now" carries a live stamp.
-            _relearnClockThrottled();
-        }
-        // heldGroups (bc-mrgc phase 3): a held assertion was kept in the
-        // match's history, named by the group it held, like a superseded score
-        // (write_result.jsx writeHeldGroups).
-        return {
-            applied, reason: verdict.reason, message: verdict.message,
-            ...(Array.isArray(verdict.heldGroups) ? { heldGroups: verdict.heldGroups } : {}),
-        };
+        // bc-evts: an operator's feeder-winner assertion (the "Run now"
+        // recovery) is the outbox's like every rule-bound write, on its MATCH's
+        // base (it was `override:…`; an entry an older build queued there
+        // replays unchanged, F3). `settled` resolves `{ applied, reason,
+        // message, heldGroups? }`; a held assertion asks the bracket to resync
+        // (_sendEntry), so a caller may advance its local bracket at once.
+        return _outboxWrite({
+            kind: 'override', compID, matchID, method: 'PUT', url, payload, password,
+            seen: opts && opts.seen, onRefusal: opts && opts.onRefusal,
+        });
     },
     async resetOverrides(compID, password) {
         const res = await fetch(`/api/competitions/${compID}/overrides`, {
@@ -3888,16 +3873,14 @@ const API = {
         }
         return true;
     },
-    async revertMatchToQueue(compID, matchID, password) {
-        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/revert-to-queue`, {
-            method: 'POST',
-            headers: { 'X-Tournament-Password': password }
+    async revertMatchToQueue(compID, matchID, password, opts = {}) {
+        // bc-evts: the outbox's, with a JSON body carrying writeId, basis and
+        // session; `settled` resolves true, or rejects with the refusal.
+        return _outboxWrite({
+            kind: 'revert', compID, matchID, method: 'POST',
+            url: `/api/competitions/${compID}/matches/${matchID}/revert-to-queue`,
+            payload: {}, password, seen: opts && opts.seen, onRefusal: opts && opts.onRefusal,
         });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to send match back to queue");
-        }
-        return true;
     },
     // mp-gmcg: reopen a COMPLETED kachinuki team match, or (bc-tmfn) any
     // completed match a withdrawal decided: status back to running,
@@ -3931,17 +3914,14 @@ const API = {
     // conflict, and a busy court would be a dead end (kachinuki reopen is the
     // ONLY way to fix a bout log). The server broadcasts match_updated on
     // success.
-    async reopenMatch(compID, matchID, password, { reason = "", force = false } = {}) {
-        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/reopen`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tournament-Password': password
-            },
-            body: JSON.stringify(reopenBody(reason, force))
+    async reopenMatch(compID, matchID, password, { reason = "", force = false, seen, onRefusal } = {}) {
+        // bc-evts: the outbox's; `settled` resolves the server body or rejects
+        // with reopenFailureError's error (court_busy, downstream, ...).
+        return _outboxWrite({
+            kind: 'reopen', compID, matchID, method: 'POST',
+            url: `/api/competitions/${compID}/matches/${matchID}/reopen`,
+            payload: reopenBody(reason, force), password, seen, onRefusal,
         });
-        if (!res.ok) throw await reopenFailureError(res);
-        return res.json().catch(() => ({}));
     },
     // mp-gmcg (review A4): atomically requeue the match holding the court AND
     // reopen the target, in ONE server call under one court lock — replaces the
@@ -3950,34 +3930,28 @@ const API = {
     // as reopenMatch, so the panel re-offers the remedy when a DIFFERENT match
     // has since taken the court. opts as reopenMatch's: the remedy carries the
     // same reason and confirmation the reopen it retries did.
-    async requeueBlockerAndReopen(targetComp, targetMatch, blockerComp, blockerMatch, password, { reason = "", force = false } = {}) {
-        const res = await fetch(`/api/competitions/${targetComp}/matches/${targetMatch}/requeue-blocker-and-reopen`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tournament-Password': password
-            },
-            body: JSON.stringify({ blockerCompId: blockerComp, blockerMatchId: blockerMatch, ...reopenBody(reason, force) })
+    async requeueBlockerAndReopen(targetComp, targetMatch, blockerComp, blockerMatch, password, { reason = "", force = false, seen, onRefusal } = {}) {
+        // bc-evts: the outbox's, on the TARGET match's base (the one reopened).
+        return _outboxWrite({
+            kind: 'requeue', compID: targetComp, matchID: targetMatch, method: 'POST',
+            url: `/api/competitions/${targetComp}/matches/${targetMatch}/requeue-blocker-and-reopen`,
+            payload: { blockerCompId: blockerComp, blockerMatchId: blockerMatch, ...reopenBody(reason, force) },
+            password, seen, onRefusal,
         });
-        if (!res.ok) throw await reopenFailureError(res);
-        return res.json().catch(() => ({}));
     },
     // mp-gmcg: remove a trailing UNSCORED kachinuki bout appended by mistake
     // ([Record bout] / [Add next bout]). Kachinuki-only; targets a numbered
     // bout, never a daihyosen. Returns the updated MatchResult (envelope
     // unwrapped, like removeDaihyosen). A 409 ("no unscored bout to remove" /
     // "match is not running") surfaces as the thrown Error's message.
-    async removeKachinukiBout(compID, matchID, password) {
-        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/kachinuki-bout`, {
-            method: 'DELETE',
-            headers: { 'X-Tournament-Password': password }
+    async removeKachinukiBout(compID, matchID, password, opts = {}) {
+        // bc-evts: the outbox's; `settled` resolves the stored match the
+        // server answered with (body.result), or rejects with the refusal.
+        return _outboxWrite({
+            kind: 'kachinuki', compID, matchID, method: 'DELETE',
+            url: `/api/competitions/${compID}/matches/${matchID}/kachinuki-bout`,
+            payload: {}, password, seen: opts && opts.seen, onRefusal: opts && opts.onRefusal,
         });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to remove bout");
-        }
-        const body = await res.json().catch(() => ({}));
-        return body.result ?? body;
     },
     async importCompetitions(formData, password) {
         const res = await fetch('/api/tournament/import', {
@@ -4306,16 +4280,16 @@ const API = {
     // Stamped like recordDecision (bc-dhas), so the add competes on
     // timestamps: see _daihyosenOutcome for what comes back.
     // seenModifiedAt (optional): the match as the sheet showed it (bc-hlck).
-    async recordDaihyosen(compID, matchID, password, seenModifiedAt) {
-        return _daihyosenRequest('POST', compID, matchID, password, REP_BOUT_NOT_ADDED, seenModifiedAt);
+    async recordDaihyosen(compID, matchID, password, seenModifiedAt, opts = {}) {
+        return _daihyosenRequest('POST', compID, matchID, password, seenModifiedAt, opts);
     },
     // T141: remove an unscored daihyosen placeholder from a knockout team match.
     // Returns the updated MatchResult on 200. Throws on 404 (no daihyosen or
     // match not found) or 409 (daihyosen already scored: clear scores first).
     // Stamped like the add, in a JSON body (the handler binds one on DELETE
     // too).
-    async removeDaihyosen(compID, matchID, password, seenModifiedAt) {
-        return _daihyosenRequest('DELETE', compID, matchID, password, REP_BOUT_NOT_REMOVED, seenModifiedAt);
+    async removeDaihyosen(compID, matchID, password, seenModifiedAt, opts = {}) {
+        return _daihyosenRequest('DELETE', compID, matchID, password, seenModifiedAt, opts);
     },
     // T190-T193 (US13: Swiss format). Generate the next Swiss round.
     // Backend pre-conditions: format=swiss; all matches in the current
@@ -4669,7 +4643,67 @@ const API = {
     // one does and goes when none is left, landed or discarded
     // (useMatchHeldWrite, admin_scoring_shared.jsx).
     hasHeldWrite(compID, matchID) {
-        return _entriesFor(_revKey(compID, matchID)).length > 0;
+        // Only a write that already failed a pass (or came back from storage)
+        // is held: a Finish on its first send is not "Not sent yet" (bc-evts).
+        return _entriesFor(_revKey(compID, matchID)).some(([, d]) => d.held);
+    },
+
+    // bc-evts S3a: one scoring tap, as an event for the score-events door.
+    // SYNCHRONOUS: the tap is in the persisted outbox when this returns, and
+    // the send is kicked a microtask later, so taps made in one tick go in one
+    // batch. `ev` is a score_events.jsx makeEvent() shape (kind, pos, side,
+    // letter, target, value, memberId, name); `match` is the match as shown
+    // (its modifiedAt floors the stamp, bc-hlck). Never coalesced: each tap is
+    // its own entry (_coalesceTarget names only score and lineup writes).
+    recordTap(compID, matchID, ev, password, match) {
+        const base = _revKey(compID, matchID);
+        const seq = (_tapSeq.get(base) || 0) + 1;
+        _tapSeq.set(base, seq);
+        const id = `${_eventSession}.${seq}`;
+        const seen = Number(match && match.modifiedAt) || 0;
+        const stamp = _afterOwnStamp(base, _stampAfterSeen(_serverNowMs(), seen));
+        const payload = { ...ev, id, session: _eventSession, seq, stamp };
+        const key = `${base}${QUEUE_ENTRY_SEP}evt:${id}`;
+        const descriptor = {
+            compID, matchID, payload, password: password || '', kind: 'evt', terminal: false,
+            method: 'POST', url: `/api/competitions/${compID}/matches/${matchID}/score-events`,
+            enqueuedAt: Date.now(), perfAtEnqueue: _perfNow(),
+            ...(seen > 0 ? { seenModifiedAt: seen } : {}),
+        };
+        _writeQueue.set(key, descriptor);
+        _lastEnqueuePersisted = _persistQueue();
+        _recomputeSyncStatus();
+        _publishPendingTaps(base);
+        if (!_tapFlushKicked) {
+            _tapFlushKicked = true;
+            queueMicrotask(() => {
+                _tapFlushKicked = false;
+                if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
+                _flushAttempt = 0;
+                _flushQueue();
+            });
+        }
+        return { id, stamp, seq };
+    },
+    // The taps this device still holds for a match, in send order (event
+    // payloads), for an editor's board and the same-device TV overlay.
+    pendingTaps(compID, matchID) {
+        return _pendingTapsFor(_revKey(compID, matchID));
+    },
+    subscribePendingTaps(compID, matchID, fn) {
+        return _listenOn(_pendingTapListeners, _revKey(compID, matchID), fn);
+    },
+    // The newest derived match a score-events answer handed back (broadcast
+    // copy with markIds and scoreVersion; kept by the larger scoreVersion).
+    latestDerivedMatch(compID, matchID) {
+        return _latestDerived.get(_revKey(compID, matchID)) || null;
+    },
+    subscribeDerivedMatch(compID, matchID, fn) {
+        return _listenOn(_derivedListeners, _revKey(compID, matchID), fn);
+    },
+    // A tap the server did not apply: fn({ id, outcome, reason, message }).
+    subscribeTapOutcome(compID, matchID, fn) {
+        return _listenOn(_tapOutcomeListeners, _revKey(compID, matchID), fn);
     },
     heldWriteKeepsFailing(compID, matchID) {
         return _entriesFor(_revKey(compID, matchID)).some(([, d]) => _keepsFailing(d));
@@ -4701,9 +4735,17 @@ const API = {
             terminal: !!d.terminal,
             keepsFailing: _keepsFailing(d),
             authBlocked: !!d.authBlocked,
+            held: !!d.held,
+            ...(d.parked ? { parked: true } : {}),
             ...(d.kind === 'lineup' && d.payload
                 ? { teamId: d.payload.teamId || '', round: d.payload.round } : {}),
         }));
+    },
+
+    // The version banner's Reload stores the outbox once more before the
+    // page goes (S2); every entry is stored as it is made anyway.
+    persistQueue() {
+        return _persistQueue();
     },
     // Discards ONE held write, by the key heldWrites gave, and only while the
     // server keeps refusing it (a write waiting for the connection is never
@@ -4855,6 +4897,8 @@ const API = {
         // is revoked, so nothing of the merge's is kept.
         _writeQueue.clear();
         _settled.clear();
+        for (const k of _entryHooks.keys()) _settleKey(k, { value: { discarded: true } });
+        for (const b of _pendingTapListeners.keys()) _publishPendingTaps(b);
         try { localStorage.removeItem(QUEUE_STORAGE_KEY); } catch (_e) { /* ignore */ }
         if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
         _flushAttempt = 0;
@@ -4875,6 +4919,11 @@ export {
     // queue rather than the arithmetic. No production consumer outside this file.
     _restampFor,
 };
+
+// S2: a new build reloads the page only once the outbox is idle, and the
+// queue is persisted first.
+setOutboxIdleProbe(_outboxIdle);
+setBeforeReload(() => { _persistQueue(); });
 
 if (typeof window !== 'undefined') {
     window.API = API;

@@ -17,6 +17,14 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { API } from '../api_client.jsx';
 import { downstreamKnockoutPlayedRefusal } from '../write_result.jsx';
 
+
+// bc-evts: these doors are the outbox's now. A refusal is logged as the queue
+// drops it ("[sync] ... rejected"); only those logs are taken off the record.
+afterEach(() => {
+  const calls = (console.warn && console.warn.mock && console.warn.mock.calls) || [];
+  if (calls.length && calls.every((a) => String(a[0]).startsWith('[sync]'))) console.warn.mockClear();
+});
+
 describe('API.recordScore: downstream_knockout_played (bc-kcdg)', () => {
   let originalFetch;
   afterEach(() => { if (originalFetch) global.fetch = originalFetch; });
@@ -35,7 +43,7 @@ describe('API.recordScore: downstream_knockout_played (bc-kcdg)', () => {
       }),
     });
 
-    const err = await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw').then(
+    const err = await (await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw')).settled.then(
       () => { throw new Error('expected a rejection'); },
       (e) => e,
     );
@@ -64,7 +72,7 @@ describe('API.recordScore: downstream_knockout_played (bc-kcdg)', () => {
       json: async () => ({ error: 'ineligible_competitor', reasonHuman: 'That competitor is ineligible.' }),
     });
 
-    const err = await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw').then(
+    const err = await (await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw')).settled.then(
       () => { throw new Error('expected a rejection'); },
       (e) => e,
     );
@@ -80,7 +88,7 @@ describe('API.recordScore: downstream_knockout_played (bc-kcdg)', () => {
       json: async () => ({ id: 'm1', status: 'completed' }),
     });
 
-    await API.recordScore('c1', 'm1', { status: 'completed', forceDownstreamReopen: true }, 'pw');
+    await (await API.recordScore('c1', 'm1', { status: 'completed', forceDownstreamReopen: true }, 'pw')).settled;
 
     const [url, opts] = global.fetch.mock.calls[0];
     expect(url).toBe('/api/competitions/c1/matches/m1/score');
@@ -96,7 +104,7 @@ describe('API.recordScore: downstream_knockout_played (bc-kcdg)', () => {
       json: async () => ({ id: 'm1', status: 'completed' }),
     });
 
-    await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw');
+    await (await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw')).settled;
 
     const [, opts] = global.fetch.mock.calls[0];
     const sentBody = JSON.parse(opts.body);
@@ -127,7 +135,7 @@ describe('API.overrideBracketWinner: downstream_knockout_played (bc-kcdg)', () =
       }),
     });
 
-    const err = await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw').then(
+    const err = await (await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw')).settled.then(
       () => { throw new Error('expected a rejection'); },
       (e) => e,
     );
@@ -155,7 +163,7 @@ describe('API.overrideBracketWinner: downstream_knockout_played (bc-kcdg)', () =
       json: async () => ({ error: 'match not found' }),
     });
 
-    const err = await API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw').then(
+    const err = await (await API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw')).settled.then(
       () => { throw new Error('expected a rejection'); },
       (e) => e,
     );
@@ -171,7 +179,7 @@ describe('API.overrideBracketWinner: downstream_knockout_played (bc-kcdg)', () =
       json: async () => ({ applied: true }),
     });
 
-    await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw', true);
+    await (await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw', true)).settled;
 
     const [url, opts] = global.fetch.mock.calls[0];
     expect(url).toBe('/api/competitions/c1/matches/m-r2-0/override-winner');
@@ -187,7 +195,7 @@ describe('API.overrideBracketWinner: downstream_knockout_played (bc-kcdg)', () =
       json: async () => ({ applied: true }),
     });
 
-    await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw');
+    await (await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw')).settled;
 
     const [, opts] = global.fetch.mock.calls[0];
     const sentBody = JSON.parse(opts.body);
@@ -220,7 +228,7 @@ describe('API.recordDecision: downstream_knockout_played (bc-cse)', () => {
       }),
     });
 
-    const err = await API.recordDecision('c1', 'm1', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'pw').then(
+    const err = await (await API.recordDecision('c1', 'm1', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'pw')).settled.then(
       () => { throw new Error('expected a rejection'); },
       (e) => e,
     );
@@ -248,7 +256,7 @@ describe('API.recordDecision: downstream_knockout_played (bc-cse)', () => {
       json: async () => ({ error: 'already_ineligible' }),
     });
 
-    const err = await API.recordDecision('c1', 'm1', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'pw').then(
+    const err = await (await API.recordDecision('c1', 'm1', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'pw')).settled.then(
       () => { throw new Error('expected a rejection'); },
       (e) => e,
     );
@@ -264,7 +272,7 @@ describe('API.recordDecision: downstream_knockout_played (bc-cse)', () => {
       json: async () => ({ id: 'm1', status: 'completed' }),
     });
 
-    await API.recordDecision('c1', 'm1', { decision: 'kiken-voluntary', decisionBy: 'aka', forceDownstreamReopen: true }, 'pw');
+    await (await API.recordDecision('c1', 'm1', { decision: 'kiken-voluntary', decisionBy: 'aka', forceDownstreamReopen: true }, 'pw')).settled;
 
     const [url, opts] = global.fetch.mock.calls[0];
     expect(url).toBe('/api/competitions/c1/matches/m1/decision');
@@ -290,7 +298,7 @@ describe('API.recordDecision: ineligible_competitor / already_ineligible (bc-raw
       json: async () => ({ error: code, reason: 'raw reason', reasonHuman: 'Tanaka Ichiro is already ineligible: withdrew earlier in Pool A.' }),
     });
 
-    const err = await API.recordDecision('c1', 'm1', { decision: 'fusensho', decisionBy: 'aka' }, 'pw').then(
+    const err = await (await API.recordDecision('c1', 'm1', { decision: 'fusensho', decisionBy: 'aka' }, 'pw')).settled.then(
       () => { throw new Error('expected a rejection'); },
       (e) => e,
     );
@@ -305,7 +313,7 @@ describe('API.recordDecision: ineligible_competitor / already_ineligible (bc-raw
       status: 409,
       json: async () => ({ error: 'already_ineligible', reason: 'raw reason only' }),
     });
-    const err = await API.recordDecision('c1', 'm1', { decision: 'fusensho', decisionBy: 'aka' }, 'pw').then(
+    const err = await (await API.recordDecision('c1', 'm1', { decision: 'fusensho', decisionBy: 'aka' }, 'pw')).settled.then(
       () => { throw new Error('expected a rejection'); },
       (e) => e,
     );
@@ -319,7 +327,7 @@ describe('API.recordDecision: ineligible_competitor / already_ineligible (bc-raw
       status: 409,
       json: async () => ({ error: 'already_ineligible' }),
     });
-    const err = await API.recordDecision('c1', 'm1', { decision: 'fusensho', decisionBy: 'aka' }, 'pw').then(
+    const err = await (await API.recordDecision('c1', 'm1', { decision: 'fusensho', decisionBy: 'aka' }, 'pw')).settled.then(
       () => { throw new Error('expected a rejection'); },
       (e) => e,
     );
@@ -342,7 +350,7 @@ describe('API.recordScore: court_busy (bc-rawm)', () => {
       status: 409,
       json: async () => ({ error: 'court_busy', court: 'A', matchId: 'm-blk', compId: 'c1', label: 'Pool A · Match 2' }),
     });
-    const err = await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw').then(
+    const err = await (await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw')).settled.then(
       () => { throw new Error('expected a rejection'); },
       (e) => e,
     );
@@ -384,7 +392,7 @@ describe('pool corrections that move a qualifier', () => {
         blockingMatches: [{ id: 'm-r1-0', number: 1 }], displaced: 'A1', qualifierChange: qc, message: 'x',
       }),
     });
-    const err = await API.recordScore('c1', 'Pool A-0', { status: 'completed' }, 'pw').then(
+    const err = await (await API.recordScore('c1', 'Pool A-0', { status: 'completed' }, 'pw')).settled.then(
       () => { throw new Error('expected a rejection'); },
       (e) => e,
     );
@@ -392,11 +400,11 @@ describe('pool corrections that move a qualifier', () => {
   });
 
   it.each([
-    ['recordScore', () => API.recordScore('c1', 'Pool A-0', { status: 'completed' }, 'pw')],
-    ['recordDecision', () => API.recordDecision('c1', 'Pool A-0', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'pw')],
+    ['recordScore', async () => (await API.recordScore('c1', 'Pool A-0', { status: 'completed' }, 'pw')).settled],
+    ['recordDecision', async () => (await API.recordDecision('c1', 'Pool A-0', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'pw')).settled],
     // bc-rfsw: an override (ResolveFeedersModal) whose winner would change a
     // side of a later match being fought now gets the same sentence.
-    ['overrideBracketWinner', () => API.overrideBracketWinner('c1', 'Pool A-0', 'Alice', 'pw')],
+    ['overrideBracketWinner', async () => (await API.overrideBracketWinner('c1', 'Pool A-0', 'Alice', 'pw')).settled],
   ])('%s throws the running refusal as the operator copy, never confirmable', async (_door, send) => {
     originalFetch = global.fetch;
     global.fetch = vi.fn().mockResolvedValue({

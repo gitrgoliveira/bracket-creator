@@ -91,7 +91,7 @@ describe('a scheduled barred match shows BarredMatchNotice instead of Start (bc-
     await act(async () => { fireEvent.click(btn); });
     expect(window.API.recordDecision).toHaveBeenCalledWith('comp1', 'm-r1-0', {
       decision: 'fusensho', decisionBy: 'shiro', decisionReason: 'auto: Tanaka withdrawn',
-    }, 'secret');
+    }, 'secret', expect.objectContaining({ onRefusal: expect.any(Function) }));
   });
 
   // bc-hlck: the default win is never stamped older than the match as shown:
@@ -103,7 +103,7 @@ describe('a scheduled barred match shows BarredMatchNotice instead of Start (bc-
     expect(window.API.recordDecision).toHaveBeenCalledWith('comp1', 'm-r1-0', {
       decision: 'fusensho', decisionBy: 'shiro', decisionReason: 'auto: Tanaka withdrawn',
       seenModifiedAt: 1_700_000_000_000,
-    }, 'secret');
+    }, 'secret', expect.objectContaining({ onRefusal: expect.any(Function) }));
   });
 
   // bc-cse: BarredMatchNotice is a full-width block, lifted above
@@ -181,7 +181,7 @@ describe('both sides barred (bc-cse)', () => {
     await act(async () => { fireEvent.click(btn); });
     expect(window.API.recordDecision).toHaveBeenCalledWith('comp1', 'Pool 1-0', {
       decision: 'hikiwake', decisionReason: 'auto: Kyoto and Osaka withdrawn',
-    }, 'secret');
+    }, 'secret', expect.objectContaining({ onRefusal: expect.any(Function) }));
   });
 
   it('individual editor (knockout): no action at all, and the note says to correct the draw', async () => {

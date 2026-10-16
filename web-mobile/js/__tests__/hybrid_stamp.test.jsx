@@ -217,9 +217,11 @@ describe('every stamped write is floored the same way', () => {
             sent.push({ url: String(url), body: JSON.parse(opts.body) });
             return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ id: 'r1-m1', status: 'running' }) });
         });
-        await API.recordDaihyosen('c1', 'r1-m1', 'pw', seen);
-        await API.removeDaihyosen('c1', 'r1-m1', 'pw', seen);
-        expect(sent.map((r) => r.body.modifiedAt)).toEqual([seen + 1, seen + 1]);
+        await (await API.recordDaihyosen('c1', 'r1-m1', 'pw', seen)).settled;
+        await (await API.removeDaihyosen('c1', 'r1-m1', 'pw', seen)).settled;
+        // bc-evts: a later write of this device for the match is never stamped
+        // at or before its earlier one (the outbox sends them in that order).
+        expect(sent.map((r) => r.body.modifiedAt)).toEqual([seen + 1, seen + 2]);
     });
 });
 
@@ -263,9 +265,9 @@ describe('a queued write keeps its floor when it is re-stamped', () => {
 });
 
 describe('a write resent after a clock_skew refusal keeps its floor', () => {
-    // The direct resend (not the queue's) re-stamps with this device's time
-    // once the offset is relearned; it stays after what the write was made
-    // against.
+    // bc-evts: every rule-bound write is the outbox's, so the resend is the
+    // queue's re-stamp (_restampQueuedEntryForSkew) once the offset is
+    // relearned; it stays after what the write was made against.
     function skewOnce() {
         const sent = [];
         let call = 0;
@@ -286,7 +288,7 @@ describe('a write resent after a clock_skew refusal keeps its floor', () => {
     it('a finished result', async () => {
         const seen = Date.now() + 3000;
         const sent = skewOnce();
-        await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A', ipponsA: ['M', 'M'] }, 'pw', { id: 'm1', compId: 'c1', status: 'running', modifiedAt: seen });
+        await (await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A', ipponsA: ['M', 'M'] }, 'pw', { id: 'm1', compId: 'c1', status: 'running', modifiedAt: seen })).settled;
         expect(sent).toHaveLength(2);
         expect(sent[1].modifiedAt).toBe(seen + 1);
     });
@@ -294,7 +296,7 @@ describe('a write resent after a clock_skew refusal keeps its floor', () => {
     it('a hand-set winner', async () => {
         const seen = Date.now() + 3000;
         const sent = skewOnce();
-        await API.overrideBracketWinner('c1', 'r1-m1', 'Team A', 'pw', false, seen);
+        await (await API.overrideBracketWinner('c1', 'r1-m1', 'Team A', 'pw', false, seen)).settled;
         expect(sent).toHaveLength(2);
         expect(sent[1].modifiedAt).toBe(seen + 1);
     });

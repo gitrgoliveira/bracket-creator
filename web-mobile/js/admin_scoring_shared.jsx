@@ -505,8 +505,14 @@ function buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCoun
 // since both are plain objects the server reads the same field off.
 function submitDecisionRequest(compId, matchId, kind, decisionPayload, enchoPeriodCount, password, opts = {}) {
   const body = buildDecisionBody(kind, decisionPayload, enchoPeriodCount, opts);
+  // bc-evts: the decision is the outbox's; `seenScoreVersion` is the score
+  // log line count the editor showed, so a correction over a finished match
+  // carries a basis that says it saw the result (I1).
+  const seen = Number(opts.seenScoreVersion) || 0;
   return attemptScoreWrite({
-    recordScore: (cId, mId, result, pwd) => window.API.recordDecision(cId, mId, result, pwd),
+    recordScore: (cId, mId, result, pwd, _match, o) => window.API.recordDecision(
+      cId, mId, result, pwd, { ...o, ...(seen > 0 ? { seen } : {}) },
+    ),
     confirmDialog: window.confirmDialog,
     compId, matchId, result: body, password: resolveDecisionPassword(password),
   });
@@ -555,7 +561,7 @@ function makeSubmitDecision({
     try {
       const updated = await submitDecisionRequest(
         match.compId, match.id, kind, { decisionBy, decisionReason }, enchoPeriodCount, password,
-        { seenModifiedAt: match.modifiedAt || 0 },
+        { seenModifiedAt: match.modifiedAt || 0, seenScoreVersion: match.scoreVersion || 0 },
       );
       if (!mountedRef.current) return;
       // A decision that did not land must not advance ANYTHING below this
@@ -1491,8 +1497,21 @@ function useMatchReopen({ match, password, isComplete }) {
     setErr(msg);
   };
 
-  const run = (call, reason, force) => attemptScoreWrite({
-    recordScore: (_compId, _matchId, result, pw) => call(pw, { reason, force: !!result.forceDownstreamReopen }),
+  // bc-evts: a reopen (and the requeue remedy) is the outbox's: the panel
+  // reads it as landed at once, and a refusal arriving later through the
+  // outbox (court busy, a downstream match, anything else) is claimed here
+  // (`onRefusal`) and put back on the panel, so nothing waits on the network.
+  const noteReopened = (ids) => {
+    const n = downstreamKnockoutReopenedNotice(ids);
+    if (n && mountedRef.current) setNotice(n);
+  };
+  const run = (call, reason, force, onRefusal) => attemptScoreWrite({
+    recordScore: (_compId, _matchId, result, pw, _match, o) => call(pw, {
+      reason, force: !!result.forceDownstreamReopen,
+      seen: match.scoreVersion || 0, onRefusal: o && o.onRefusal,
+    }),
+    onRefusal,
+    onDownstreamReopened: noteReopened,
     confirmDialog: async (opts) => {
       const ok = await window.confirmDialog(opts);
       if (ok) confirmedRef.current = true;
@@ -1519,8 +1538,16 @@ function useMatchReopen({ match, password, isComplete }) {
     setNotice("");
     confirmedRef.current = false;
     setBusy(true);
+    // A refusal the outbox brings back later puts the panel back as it was.
+    const refused = (e) => {
+      if (!mountedRef.current) return false;
+      setLanded(false);
+      applyFailure(e, reason);
+      setBusy(false);
+      return true;
+    };
     try {
-      const res = await run((pw, opts) => window.API.reopenMatch(match.compId, match.id, pw, opts), reason, false);
+      const res = await run((pw, opts) => window.API.reopenMatch(match.compId, match.id, pw, opts), reason, false, refused);
       if (!mountedRef.current) return;
       finish(res);
     } catch (e) {
@@ -1539,10 +1566,17 @@ function useMatchReopen({ match, password, isComplete }) {
     if (!c || busy || landed) return;
     setErr("");
     setBusy(true);
+    const refused = (e) => {
+      if (!mountedRef.current) return false;
+      setLanded(false);
+      applyFailure(e, c.reason);
+      setBusy(false);
+      return true;
+    };
     try {
       const res = await run(
         (pw, opts) => window.API.requeueBlockerAndReopen(match.compId, match.id, c.compId, c.matchId, pw, opts),
-        c.reason, c.force,
+        c.reason, c.force, refused,
       );
       if (!mountedRef.current) return;
       setConflict(null);

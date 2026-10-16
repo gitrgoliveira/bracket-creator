@@ -115,14 +115,14 @@ describe('a write that replaces a queued one claims both writes\' groups', () =>
         const direct = sent.find((b) => b.rev === 2);
         expect(direct).toBeTruthy();
         expect(direct.changed).toEqual(['points', 'encho']);
-    });
-
-    it('a Finish sent past a queued autosave names the autosave\'s groups too', async () => {
+    });    // bc-evts: the Finish is the outbox's; it takes the queued autosave's
+    // place (_coalesceTarget) and is sent in its turn.
+    it('a Finish that takes a queued autosave\'s place names the autosave\'s groups too', async () => {
         online = false;
         installFetch();
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'], ipponsB: [], changed: ['points'] }, 'pw', null);
         online = true;
-        await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A', ipponsA: ['M'], ipponsB: [], changed: ['result'] }, 'pw', null);
+        await (await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A', ipponsA: ['M'], ipponsB: [], changed: ['result'] }, 'pw', null)).settled;
         const finish = sent.find((b) => b.status === 'completed');
         expect(finish.changed).toEqual(['points', 'result']);
     });
@@ -146,12 +146,11 @@ describe('a write that replaces a queued one claims both writes\' groups', () =>
         await flushMicrotasks();
         mod.enqueueRunningWrite('c1', 'm1', { status: 'running', ipponsA: ['M'], changed: ['bout:2'] }, 'pw');
         expect(storedEntries()[0].payload.changed).toEqual(['points', 'bout:2']);
-    });
-
-    it('a Finish whose send fails after another write was queued meanwhile names both', async () => {
-        // The Finish is in flight when an autosave from another editor for the
-        // same match fails and is queued; the Finish then fails too and takes
-        // that entry's place in the queue.
+    });    // bc-evts: the Finish is the outbox's from the start. A running write
+    // queued while it is out never takes its place (a running write never
+    // replaces a queued Finish): it is its own entry behind it, and each keeps
+    // the groups it names.
+    it('a running write queued while the Finish is out is its own entry behind it', async () => {
         installFetch();
         const mod = await import('../api_client.jsx');
         let failFinish;
@@ -166,11 +165,9 @@ describe('a write that replaces a queued one claims both writes\' groups', () =>
         mod.enqueueRunningWrite('c1', 'm1', { status: 'running', ipponsA: ['M'], encho: { periodCount: 1 }, changed: ['encho'] }, 'pw');
         await flushMicrotasks();
         failFinish();
-        await finishing;
+        await finishing;        await flushMicrotasks();
         const entries = storedEntries();
-        expect(entries).toHaveLength(1);
-        expect(entries[0].terminal).toBe(true);
-        expect(entries[0].payload.changed).toEqual(['encho', 'result']);
+        expect(entries.map((d) => [d.terminal, d.payload.changed])).toEqual([[true, ['result']], [false, ['encho']]]);
     });
 
     it('a queued write that named no groups ("every group") makes the survivor name none', async () => {

@@ -669,10 +669,13 @@ describe('subscribeSyncStatus: state transitions', () => {
 // dependent final). A real 4xx (e.g. the feeder is not yet playable) still throws
 // so the operator sees the rejection instead of a silent no-op.
 describe('overrideBracketWinner: offline durability (Phase 4)', () => {
-    it('returns { queued: true } and enqueues on network failure', async () => {
+    // bc-evts: the assertion is the outbox's at once, whatever the network.
+    it('answers pending and keeps the assertion queued on network failure', async () => {
         mockFetch(() => Promise.reject(new TypeError('network error')));
         const result = await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw');
-        expect(result).toMatchObject({ queued: true });
+        expect(result).toMatchObject({ pending: true });
+        await flushMicrotasks();
+        expect(API.unsentWrites().total).toBe(1);
     });
 
     it('replays the queued assertion to the override-winner endpoint on reconnect', async () => {
@@ -691,14 +694,16 @@ describe('overrideBracketWinner: offline durability (Phase 4)', () => {
         expect(JSON.parse(replay[1].body)).toMatchObject({ winnerName: 'Alice' });
     });
 
-    it('throws on a non-retryable 4xx (feeder not ready to override) so the operator sees it', async () => {
+    it('rejects on a non-retryable 4xx (feeder not ready to override) so the operator sees it', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         mockFetch(() => Promise.resolve({
             ok: false, status: 400,
             json: () => Promise.resolve({ error: 'knockout match not ready to override' }),
         }));
         await expect(
-            API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw')
+            (await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw')).settled
         ).rejects.toThrow('not ready to override');
+        warnSpy.mockRestore();
     });
 
     // mp-y3nk: the backend replies 200 {"applied": <bool>}. The client must
@@ -709,7 +714,7 @@ describe('overrideBracketWinner: offline durability (Phase 4)', () => {
         mockFetch(() => Promise.resolve({
             ok: true, status: 200, json: () => Promise.resolve({ applied: false }),
         }));
-        const r = await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw');
+        const r = await (await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw')).settled;
         expect(r).toEqual({ applied: false });
     });
 
@@ -717,7 +722,7 @@ describe('overrideBracketWinner: offline durability (Phase 4)', () => {
         mockFetch(() => Promise.resolve({
             ok: true, status: 200, json: () => Promise.resolve({ applied: true }),
         }));
-        const r = await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw');
+        const r = await (await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw')).settled;
         expect(r).toEqual({ applied: true });
     });
 
@@ -725,7 +730,7 @@ describe('overrideBracketWinner: offline durability (Phase 4)', () => {
         mockFetch(() => Promise.resolve({
             ok: true, status: 200, json: () => Promise.reject(new SyntaxError('Unexpected end of JSON input')),
         }));
-        const r = await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw');
+        const r = await (await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw')).settled;
         expect(r).toEqual({ applied: true });
     });
 });
@@ -799,14 +804,14 @@ describe('recordScore: queues running writes on network failure', () => {
     });
 
     it('queues completed writes on network failure (F5: terminal durability)', async () => {
-        // F5: completed writes are now queued for durable re-delivery on transient
-        // failures (network error, abort, 5xx, 429) instead of throwing. The caller
-        // receives { queued: true } so the UI can show a "not yet saved" state.
-        // 4xx errors on the direct call still throw (no retry possible).
+        // bc-evts: a completed write is the outbox's at once (pending); a
+        // network failure keeps it queued for durable re-delivery.
         mockFetch(() => Promise.reject(new TypeError('network error')));
 
         const result = await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', null);
-        expect(result).toMatchObject({ queued: true });
+        expect(result).toMatchObject({ pending: true });
+        await flushMicrotasks();
+        expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(true);
     });
 
     it('throws on 409 for running writes (real operator errors must not be swallowed)', async () => {
@@ -846,8 +851,9 @@ describe('recordScore: queues running writes on network failure', () => {
 
     // A participant's finish that still carries a representative bout another
     // device removed is refused (a running write only loses the row). The
-    // finish is not queued: the sentence is thrown for the public page to show.
-    it('throws the sentence of a finish refused for a removed representative bout', async () => {
+    // finish leaves the queue: its `settled` rejects with the sentence.
+    it('rejects with the sentence of a finish refused for a removed representative bout', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const message = "This match's representative bout was removed on another device. Check the scores and finish again.";
         mockFetch(() => Promise.resolve({
             ok: false,
@@ -856,8 +862,9 @@ describe('recordScore: queues running writes on network failure', () => {
         }));
 
         await expect(
-            API.recordScore('c1', 'm1', { status: 'completed' }, '', null)
+            (await API.recordScore('c1', 'm1', { status: 'completed' }, '', null)).settled
         ).rejects.toThrow(message);
+        warnSpy.mockRestore();
     });
 
     it('queues a running 5xx as "syncing" (server up, not "offline" or falsely "synced")', async () => {
@@ -960,7 +967,7 @@ describe('recordScore: completed write drains queued running autosave', () => {
         // Step 2: completed write while offline → queued as terminal (not a throw).
         // The terminal entry supersedes the running entry for the same key.
         const completedQueued = await API.recordScore('c1', 'm_keep', { status: 'completed', winner: 'Alice' }, 'pw', null);
-        expect(completedQueued).toMatchObject({ queued: true });
+        expect(completedQueued).toMatchObject({ pending: true }); // the outbox's (bc-evts)
 
         // Step 3: connection returns; only the terminal completed write flushes.
         online = true;
@@ -976,7 +983,7 @@ describe('clearQueue: drops queued writes + persisted store (logout / password_r
     it('empties the queue, removes bc_write_queue, and resets sync status to synced', async () => {
         mockFetch(() => Promise.reject(new TypeError('offline')));
         const queued = await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null);
-        expect(queued).toMatchObject({ queued: true });
+        expect(queued).toMatchObject({ pending: true }); // the outbox's (bc-evts)
         expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(true);
         expect(localStorage.getItem('bc_write_queue')).not.toBeNull();
 
@@ -1484,7 +1491,7 @@ describe('_flushQueue: LWW-dropped queued override triggers bracketResync (mp-y3
         // Enqueue an override while offline.
         mockFetch(() => Promise.reject(new TypeError('network error')));
         const queued = await API.overrideBracketWinner('c1', 'm-f1-0', 'Alice', 'pw');
-        expect(queued).toMatchObject({ queued: true });
+        expect(queued).toMatchObject({ pending: true }); // the outbox's (bc-evts)
         await flushMicrotasks();
 
         // Reconnect: server LWW-drops the write (applied: false).
@@ -1972,7 +1979,8 @@ describe('recordScore: a superseded write is announced, not reported as saved (b
         const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
 
         mockFetch(() => Promise.resolve(supersededResponse()));
-        const res = await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', null);
+        // bc-evts: the Finish is the outbox's; its answer comes through `settled`.
+        const res = await (await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', null)).settled;
         await flushMicrotasks();
         unsubFail();
         unsubAlert();
@@ -2015,12 +2023,14 @@ describe('recordScore: a superseded write is announced, not reported as saved (b
         expect(alerts.filter((a) => a.kind === 'superseded').length).toBe(0);
     });
 
-    it('does not push the discarded result to the court display', async () => {
+    // bc-evts: a Finish is the outbox's and the operator's board shows it at
+    // once, so the same-device display gets it at once too (operator S1: it
+    // shows what the operator's board shows); it is published once, when it
+    // is handed over, and never again when the server's answer comes back.
+    // Accepted: a Finish the server then keeps in the history stays on that
+    // display until its next refetch or push.
+    it('pushes the Finish to the court display once, when it is handed over', async () => {
         const published = [];
-        // The bridge publishes court-scoped patches to the display tab. A
-        // superseded payload must not go out: the display already shows the
-        // newer state, and overwriting it is the same harm as the SSE broadcast
-        // the server no longer emits.
         const origBC = global.BroadcastChannel;
         global.BroadcastChannel = class {
             constructor() { this.onmessage = null; }
@@ -2035,7 +2045,7 @@ describe('recordScore: a superseded write is announced, not reported as saved (b
         await flushMicrotasks();
 
         global.BroadcastChannel = origBC;
-        expect(published.length).toBe(0);
+        expect(published.length).toBe(1);
     });
 });
 
@@ -2053,7 +2063,7 @@ describe('_flushQueue: a superseded queued score is announced before the entry d
         // Score while offline: the completed write is queued as terminal.
         mockFetch(() => Promise.reject(new TypeError('network error')));
         const queued = await API.recordScore('c1', 'mq', { status: 'completed' }, 'pw', null);
-        expect(queued).toMatchObject({ queued: true });
+        expect(queued).toMatchObject({ pending: true }); // the outbox's (bc-evts)
         await flushMicrotasks();
 
         // Reconnect: the server has a newer result and drops this one.
@@ -2233,7 +2243,10 @@ describe('_enqueueTerminalWrite: a queued write never carries the downstream con
     it.each([
         ['score', () => API.recordScore('c1', 'mforce', { status: 'completed', winner: 'A', forceDownstreamReopen: true }, 'pw', null)],
         ['decision', () => API.recordDecision('c1', 'mforce', { decision: 'kiken-voluntary', decisionBy: 'aka', forceDownstreamReopen: true }, 'pw')],
-    ])('%s: the live try sends it, the queued replay does not', async (_kind, send) => {
+    ])('%s: this page sends it, a stored copy replayed after a reload does not', async (_kind, send) => {
+        // bc-evts: the confirmation is the operator's answer to a dialog on
+        // THIS page. The write is the outbox's: its in-memory copy is sent with
+        // it, its stored copy never holds it, so a reload replays without it.
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const live = [];
         mockFetch((_url, opts) => {
@@ -2241,12 +2254,14 @@ describe('_enqueueTerminalWrite: a queued write never carries the downstream con
             return Promise.resolve({ ok: false, status: 503, json: () => Promise.resolve({ error: 'unavailable' }) });
         });
         const res = await send();
-        expect(res).toEqual({ queued: true });
+        expect(res).toMatchObject({ pending: true });
+        await flushMicrotasks();
         expect(live[0].forceDownstreamReopen).toBe(true);
+        const stored = JSON.parse(localStorage.getItem('bc_write_queue'));
+        expect(stored.find(([key]) => key.includes('mforce'))[1].payload).not.toHaveProperty('forceDownstreamReopen');
 
+        // A reload: a fresh module rehydrates the stored entry and replays it.
         const replays = [];
-        const failures = [];
-        const unsubFail = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
         mockFetch((_url, opts) => {
             replays.push(JSON.parse(opts.body));
             return Promise.resolve({
@@ -2262,14 +2277,17 @@ describe('_enqueueTerminalWrite: a queued write never carries the downstream con
                 }),
             });
         });
-        window.dispatchEvent(new Event('online'));
+        vi.resetModules();
+        const m = await import('../api_client.jsx');
+        const failures = [];
+        const unsubFail = m.subscribeTerminalWriteFailed((info) => failures.push(info));
         await tick(50);
         unsubFail();
         warnSpy.mockRestore();
 
         expect(replays.length).toBeGreaterThanOrEqual(1);
         for (const body of replays) expect(body).not.toHaveProperty('forceDownstreamReopen');
-        expect(API.hasPendingTerminalWrite('c1', 'mforce')).toBe(false);
+        expect(m.API.hasPendingTerminalWrite('c1', 'mforce')).toBe(false);
         expect(failures[0].reason).toContain('Match 9');
     });
 
@@ -2315,7 +2333,7 @@ describe('_enqueueTerminalWrite: a queued write never carries the downstream con
         const res = await API.recordScore('c1', 'mclear',
             { status: 'completed', winner: 'A', ipponsA: ['M'], ipponsB: [], correctionReason: 'Entry error', clearWithdrawal: true },
             'pw', null);
-        expect(res).toEqual({ queued: true });
+        expect(res).toMatchObject({ pending: true }); // the outbox's (bc-evts)
         expect(live[0].clearWithdrawal).toBe(true);
         const stored = JSON.parse(localStorage.getItem('bc_write_queue'));
         expect(stored.find(([key]) => key.includes('mclear'))[1].payload.clearWithdrawal).toBe(true);
@@ -2431,7 +2449,7 @@ describe('bc-sync: pending edits and durable running writes', () => {
 
     it('the flag does not change a completed write', async () => {
         mockFetch(() => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }));
-        await API.recordScore('c1', 'm1', { status: 'completed', durable: true }, 'pw', null);
+        await (await API.recordScore('c1', 'm1', { status: 'completed', durable: true }, 'pw', null)).settled;
         expect(writeCallCount()).toBe(1);
         expect(localStorage.getItem('bc_write_queue')).toBeNull();
     });
@@ -2791,8 +2809,11 @@ describe('bc-sync: an autosave is stamped with the time of its edit (operator ru
 describe('bc-offl: subscribeUnsentWrites, the held-writes count', () => {
     const offline = () => Promise.reject(new TypeError('offline'));
     const landed = () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
-    const ZERO = { total: 0, terminal: 0, authBlocked: 0, failing: 0 };
-    const ONE_RESULT = { total: 1, terminal: 1, authBlocked: 0, failing: 0 };
+    const ZERO = { total: 0, terminal: 0, authBlocked: 0, failing: 0, held: 0 };
+    const ONE_RESULT = { total: 1, terminal: 1, authBlocked: 0, failing: 0, held: 0 };
+    // bc-evts: a write is HELD once a pass has left it unsent (or it came back
+    // from storage); the count says so, so "Not sent yet" shows only then.
+    const ONE_HELD = { ...ONE_RESULT, held: 1 };
     const entry = (matchID) => [`c1:${matchID}`, {
         compID: 'c1', matchID, payload: { status: 'completed', winner: matchID }, password: 'pw',
         kind: 'score', terminal: true, method: 'PUT', url: `/api/competitions/c1/matches/${matchID}/score`,
@@ -2809,7 +2830,7 @@ describe('bc-offl: subscribeUnsentWrites, the held-writes count', () => {
         window.dispatchEvent(new Event('online'));
         await tick(50);
         unsub();
-        expect(seen).toEqual([ZERO, ONE_RESULT, ZERO]);
+        expect(seen).toEqual([ZERO, ONE_RESULT, ONE_HELD, ZERO]);
     });
 
     it('does not fire on a scoring tap (API.notePendingEdit recomputes the status per tap)', () => {
@@ -2830,7 +2851,7 @@ describe('bc-offl: subscribeUnsentWrites, the held-writes count', () => {
         const m = await import('../api_client.jsx');
         const seen = [];
         m.subscribeUnsentWrites((c) => seen.push(c));
-        expect(seen).toEqual([ONE_RESULT]);
+        expect(seen).toEqual([ONE_HELD]);
     });
 
     it('fires when this tab takes up a write another tab stored', async () => {
@@ -2842,7 +2863,8 @@ describe('bc-offl: subscribeUnsentWrites, the held-writes count', () => {
         }));
         await flushMicrotasks();
         unsub();
-        expect(seen).toEqual([ZERO, ONE_RESULT]);
+        // Taken up, then held once its first send fails (offline).
+        expect(seen).toEqual([ZERO, ONE_RESULT, ONE_HELD]);
     });
 });
 

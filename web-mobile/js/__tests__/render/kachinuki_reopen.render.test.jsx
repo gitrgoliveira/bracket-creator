@@ -132,7 +132,7 @@ describe('kachinuki [Reopen match] is one tap', () => {
     expect(window.API.reopenMatch).toHaveBeenCalledTimes(1);
     // No reason and no downstream confirmation: a reason here would mean the
     // operator was asked for one.
-    expect(window.API.reopenMatch).toHaveBeenCalledWith('comp1', 'm1', 'secret', { reason: '', force: false });
+    expect(window.API.reopenMatch).toHaveBeenCalledWith('comp1', 'm1', 'secret', expect.objectContaining({ reason: '', force: false }));
     // The editor follows the match to running in place, as Clear withdrawal
     // and reopen does, so what the reopen reports can still be read here.
     await waitFor(() => expect(screen.getByTestId('kachinuki-reopen-button').textContent).toBe('Reopened'));
@@ -221,7 +221,7 @@ describe('kachinuki reopen: a later knockout match already fought', () => {
     expect(confirmLabel).toBe('Reopen both');
 
     await waitFor(() => expect(window.API.reopenMatch).toHaveBeenCalledTimes(2));
-    expect(window.API.reopenMatch.mock.calls[1][3]).toEqual({ reason: '', force: true });
+    expect(window.API.reopenMatch.mock.calls[1][3]).toEqual(expect.objectContaining({ reason: '', force: true }));
     await waitFor(() => expect(screen.getByTestId('kachinuki-reopen-notice').textContent)
       .toBe('Match 3 was reopened with its points kept: check them, then finish it again.'));
     expect(onClose).not.toHaveBeenCalled();
@@ -361,7 +361,7 @@ describe('kachinuki reopen: a busy court gets a remedy, not a dead end', () => {
 
     // ONE server call: target=(comp1, m1), blocker=(comp1, m-r1-1). No second
     // reopenMatch call — the requeue and reopen commit together server-side.
-    expect(window.API.requeueBlockerAndReopen).toHaveBeenCalledWith('comp1', 'm1', 'comp1', 'm-r1-1', 'secret', { reason: '', force: false });
+    expect(window.API.requeueBlockerAndReopen).toHaveBeenCalledWith('comp1', 'm1', 'comp1', 'm-r1-1', 'secret', expect.objectContaining({ reason: '', force: false }));
     expect(window.API.reopenMatch).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByTestId('kachinuki-reopen-conflict')).toBeNull());
     expect(onClose).not.toHaveBeenCalled();
@@ -414,7 +414,7 @@ describe('kachinuki reopen: a busy court gets a remedy, not a dead end', () => {
 
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-requeue-button')); });
     expect(window.API.requeueBlockerAndReopen).toHaveBeenLastCalledWith(
-      'comp1', 'm1', 'comp1', 'm-r1-2', 'secret', { reason: '', force: false },
+      'comp1', 'm1', 'comp1', 'm-r1-2', 'secret', expect.objectContaining({ reason: '', force: false }),
     );
   });
 

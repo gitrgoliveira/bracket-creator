@@ -1000,15 +1000,16 @@ describe('API Utils', () => {
       const data = await API.startCompetition('c1', 'pw');
       expect(data.id).toBe('c1');
       expect(data.pools).toEqual([]);
-    });
-
-    it('recordScore should throw with default message if json fails', async () => {
+    });    // bc-evts: a Finish is the outbox's; its refusal comes through `settled`
+    // (a 403 is retried there as a server state, so a 400 refuses here).
+    it('recordScore settles with the default message if json fails', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         global.fetch = vi.fn().mockResolvedValue({
           ok: false,
-          status: 403,
+          status: 400,
           json: async () => { throw new Error('parse error'); }
-        });
-        await expect(API.recordScore('c1', 'm1', {}, 'pw')).rejects.toThrow('Failed to record score');
+        });        await expect((await API.recordScore('c1', 'm1', {}, 'pw')).settled).rejects.toThrow('Failed to record score');
+        warn.mockRestore();
       });
 
     describe('moveMatchCourt', () => {
@@ -1056,7 +1057,7 @@ describe('API Utils', () => {
           ok: true,
           json: async () => ({ result: { id: 'm1', subResults: [{ position: 1 }] } }),
         });
-        const result = await API.removeKachinukiBout('comp1', 'm1', 'secret');
+        const result = await (await API.removeKachinukiBout('comp1', 'm1', 'secret')).settled;
         expect(result).toEqual({ id: 'm1', subResults: [{ position: 1 }] });
         expect(global.fetch).toHaveBeenCalledWith(
           '/api/competitions/comp1/matches/m1/kachinuki-bout',
@@ -1071,9 +1072,10 @@ describe('API Utils', () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: false,
           json: async () => ({ error: 'no unscored bout to remove; only an empty appended bout can be removed' }),
-        });
-        await expect(API.removeKachinukiBout('c1', 'm1', 'pw'))
+        });        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        await expect((await API.removeKachinukiBout('c1', 'm1', 'pw')).settled)
           .rejects.toThrow('no unscored bout to remove');
+        warn.mockRestore();
       });
     });
 
@@ -1224,16 +1226,14 @@ describe('API Utils', () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: true, status: 200,
           json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
-        });
-        await expect(API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw'))
+        });        await expect((await API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw')).settled)
           .resolves.toEqual({ applied: true });
       });
 
       it('surfaces { applied: false } when the server drops a stale replay', async () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: true, status: 200, json: async () => ({ applied: false }),
-        });
-        await expect(API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw'))
+        });        await expect((await API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw')).settled)
           .resolves.toEqual({ applied: false });
       });
 
@@ -1241,9 +1241,10 @@ describe('API Utils', () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: false,
           json: async () => ({ error: 'match not found' }),
-        });
-        await expect(API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw'))
+        });        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        await expect((await API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw')).settled)
           .rejects.toThrow('match not found');
+        warn.mockRestore();
       });
     });
 

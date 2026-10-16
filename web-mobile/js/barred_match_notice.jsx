@@ -64,7 +64,17 @@ export function BarredMatchNotice({ match, password, onDone }) {
     try {
       // Never stamped older than the match as shown (bc-hlck).
       const seen = match.modifiedAt || 0;
-      const res = await window.API.recordDecision(match.compId, match.id, seen > 0 ? { ...body, seenModifiedAt: seen } : body, pw);
+      // bc-evts: the decision is the outbox's and reads as landed at once; a
+      // refusal the outbox brings back later is put back on this notice.
+      const res = await window.API.recordDecision(match.compId, match.id, seen > 0 ? { ...body, seenModifiedAt: seen } : body, pw, {
+        seen: match.scoreVersion || 0,
+        onRefusal: (e) => {
+          if (!mountedRef.current) return false;
+          setLanded(false);
+          setErr(e?.message || "Failed to record the decision");
+          return true;
+        },
+      });
       if (!mountedRef.current) return;
       // bc-cse: notLandedBanner, not writeWasSuperseded alone -- a clock_skew
       // refusal used to read "a newer result for this match is already

@@ -108,43 +108,49 @@ describe('a later running write never replaces a queued Finish', () => {
         expect(localStorage.getItem('bc_write_queue')).toBeNull();
     });
 
-    it('a Finish that keeps failing holds back nothing: the later write is sent in the same pass and lands', async () => {
-        const s = server({ status: (url, body) => (body.status === 'completed' ? 503 : 200) });
+    // bc-evts F1 (reversing bc-mrgc C2): a match's writes go strictly in
+    // order, so a Finish that keeps failing holds back the writes made after
+    // it for THAT match; other matches still flow.
+    it('a Finish that keeps failing holds back its match\'s later writes, not other matches\'', async () => {
+        const s = server({ status: (url, body) => (url.includes('/m1/') && body.status === 'completed' ? 503 : 200) });
         await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null);
         vi.advanceTimersByTime(1000);
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
+        const other = await API.recordScore('c1', 'm2', { status: 'completed', winner: 'A' }, 'pw', null);
         await settleOfflinePass();
         s.online();
         await tick(50);
         // The Finish was refused with a retryable 503 and stays queued; the
-        // later running write is still sent after it in the pass and lands.
-        expect(s.sent.map((w) => w.body.status)).toEqual(['completed', 'running']);
-        expect(storedEntries().map(([, d]) => d.payload.status)).toEqual(['completed']);
+        // running write made after it waits behind it; m2's Finish lands.
+        expect(s.sent.filter((w) => w.url.includes('/m1/')).map((w) => w.body.status)).toEqual(['completed']);
+        expect(storedEntries().map(([, d]) => d.payload.status)).toEqual(['completed', 'running']);
+        await expect(other.settled).resolves.toEqual({});
     });
 
-    it('with a Finish stuck on the server, a new write goes straight to the server instead of queuing behind it', async () => {
+    it('with a Finish stuck on the server, a decision for the match waits behind it; another match\'s write goes', async () => {
         const s = server({ status: (url, body) => (body.status === 'completed' ? 500 : 200) });
         s.online();
         await flushMicrotasks();
         const finish = await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null);
-        expect(finish).toEqual({ queued: true });
+        expect(finish.pending).toBe(true);
         await tick(50);
         const before = s.sent.length;
-        // A later point, a decision and a feeder winner, each made while the
-        // Finish keeps failing: each reaches the server at once and lands.
+        // A RUNNING write still goes straight to the server (the editors move
+        // to taps in stages 4-5), so it is not held behind the Finish.
         const running = await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
         const decision = await API.recordDecision('c1', 'm1', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'pw');
         const override = await API.overrideBracketWinner('c1', 'm2', 'Alice', 'pw');
         expect(running).not.toEqual(expect.objectContaining({ queued: true }));
-        expect(decision).not.toEqual(expect.objectContaining({ queued: true }));
-        expect(override).toEqual(expect.objectContaining({ applied: true }));
+        expect(decision.pending).toBe(true);
+        await expect(override.settled).resolves.toEqual(expect.objectContaining({ applied: true }));
         const after = s.sent.slice(before).map((w) => w.url.split('/').pop() + (w.body.status ? `:${w.body.status}` : ''));
-        expect(after).toEqual(expect.arrayContaining(['score:running', 'decision', 'override-winner']));
-        // Only the stuck Finish is still queued.
-        expect(storedEntries().map(([, d]) => d.payload.status)).toEqual(['completed']);
+        expect(after).toEqual(expect.arrayContaining(['score:running', 'override-winner']));
+        expect(after).not.toContain('decision');
+        // The stuck Finish and the decision behind it are still queued.
+        expect(storedEntries().map(([, d]) => d.kind)).toEqual(['score', 'decision']);
     });
 
-    it('Retry on a stuck Finish sends it to the server at once and, when it now lands, clears the queued copy', async () => {
+    it('Retry on a stuck Finish restates the queued one, sends it at once and, when it now lands, clears it', async () => {
         let refuse = true;
         const s = server({ status: (url, body) => (body.status === 'completed' && refuse ? 503 : 200) });
         s.online();
@@ -155,9 +161,12 @@ describe('a later running write never replaces a queued Finish', () => {
         expect(storedEntries()).toHaveLength(1);
         refuse = false;
         const before = s.sent.length;
+        vi.advanceTimersByTime(10);
         const res = await API.recordScore('c1', 'm1', { ...finish }, 'pw', null);
-        // Sent, not queued behind the copy it restates, and it landed.
-        expect(res).not.toEqual(expect.objectContaining({ queued: true }));
+        // It takes the place of the copy it restates and goes now, not on the
+        // backoff timer.
+        expect(storedEntries()).toHaveLength(1);
+        await res.settled;
         expect(s.sent.length).toBe(before + 1);
         expect(localStorage.getItem('bc_write_queue')).toBeNull();
         expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(false);
@@ -198,7 +207,7 @@ describe('the editor\'s Retry of a queued Finish', () => {
         // "Retry now" re-invokes the same submit while still offline: a later
         // Finish of the same result, which takes the queued one's place.
         const res = await API.recordScore('c1', 'm1', { ...finish }, 'pw', null);
-        expect(res).toEqual({ queued: true });
+        expect(res.pending).toBe(true); // the outbox's (bc-evts)
         expect(storedEntries()).toHaveLength(1);
         s.online();
         await tick(50);
@@ -225,7 +234,7 @@ describe('a decision and a score for the same match are both kept', () => {
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
         vi.advanceTimersByTime(1000);
         const res = await API.recordDecision('c1', 'm1', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'pw');
-        expect(res).toEqual({ queued: true });
+        expect(res.pending).toBe(true); // the outbox's (bc-evts)
         expect(storedEntries()).toHaveLength(2);
         await settleOfflinePass();
         s.online();
@@ -290,7 +299,7 @@ describe('override-winner: a held assertion is surfaced like a superseded score'
         const s = server({ answer: () => ({ applied: false, reason: 'superseded', heldGroups: ['result'] }) });
         s.online();
         await flushMicrotasks();
-        const res = await API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw');
+        const res = await (await API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw')).settled;
         expect(res).toMatchObject({ applied: false, reason: 'superseded', heldGroups: ['result'] });
     });
 
@@ -376,19 +385,21 @@ describe('nothing is dropped for its age', () => {
 });
 
 describe('the queued answer says whether the write reached browser storage', () => {
-    it('stored: { queued: true }', async () => {
+    it('stored: pending, with no persisted: false', async () => {
         server();
         const res = await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null);
-        expect(res).toEqual({ queued: true });
+        expect(res.pending).toBe(true);
+        expect(res).not.toHaveProperty('persisted');
     });
 
-    it('storage full: { queued: true, persisted: false } for a score, a decision and a lineup', async () => {
+    it('storage full: persisted: false for a score, a decision and a lineup', async () => {
         server();
         global.localStorage.setItem = () => { throw new Error('QuotaExceededError'); };
+        // bc-evts: a Finish and a decision are the outbox's (pending).
         expect(await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null))
-            .toEqual({ queued: true, persisted: false });
+            .toMatchObject({ pending: true, persisted: false });
         expect(await API.recordDecision('c1', 'm2', { decision: 'fusenpai', decisionBy: 'aka' }, 'pw'))
-            .toEqual({ queued: true, persisted: false });
+            .toMatchObject({ pending: true, persisted: false });
         expect(await API.putMatchLineup('c1', 'team-A', 'm3', { 1: 'Aoki' }, 'pw'))
             .toEqual({ queued: true, persisted: false });
     });
@@ -444,7 +455,9 @@ describe('the page-hide copy of a write still being sent', () => {
         expect(localStorage.getItem('bc_write_queue')).toBeNull();
     });
 
-    it('when the held copy settles, a write that failed meanwhile is sent at once, not on its backoff timer', async () => {
+    // bc-evts F1: the write queued behind the page-hide copy waits for that
+    // copy's fetch (strict order per match), then goes at once.
+    it('when the held copy settles, the write queued behind it is sent at once, not on its backoff timer', async () => {
         const srv = heldServer();
         const answerM = holdNextRequest(srv);
         const pM = API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
@@ -456,13 +469,13 @@ describe('the page-hide copy of a write still being sent', () => {
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M', 'K'], durable: true }, 'pw', null);
         await flushMicrotasks();
         const kSends = () => srv.calls.filter((c) => c.body.ipponsA.join('') === 'MK').length;
-        expect(kSends()).toBe(1);
+        expect(kSends()).toBe(0);
         // The connection is back and M's fetch answers.
         srv.setNetDown(false);
         answerM();
         await pM;
         await tick(0); // no timer advanced past the backoff
-        expect(kSends()).toBe(2);
+        expect(kSends()).toBe(1);
         expect(localStorage.getItem('bc_write_queue')).toBeNull();
     });
 
@@ -521,7 +534,7 @@ describe('signing in again re-stamps every write carrying the refused password',
         API.resumeAfterAuth('new');
         await tick(50);
         expect(sent.slice(before).map((r) => r.password)).toEqual(['new', 'new']);
-        expect(API.unsentWrites()).toEqual({ total: 0, terminal: 0, authBlocked: 0, failing: 0 });
+        expect(API.unsentWrites()).toEqual({ total: 0, terminal: 0, authBlocked: 0, failing: 0, held: 0 });
         warnSpy.mockRestore();
     });
 
@@ -569,7 +582,7 @@ describe('the way past a held write the server keeps refusing', () => {
         await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null);
         await tick(60_000); // well past the server-error notice threshold
         // A second match's result made while m1 keeps failing lands.
-        await API.recordScore('c1', 'm2', { status: 'completed', winner: 'B' }, 'pw', null);
+        await (await API.recordScore('c1', 'm2', { status: 'completed', winner: 'B' }, 'pw', null)).settled;
         const statuses = [];
         const unsub = mod.subscribeSyncStatus((st) => statuses.push(st));
         expect(statuses.at(-1)).toBe('server-error');

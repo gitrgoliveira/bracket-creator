@@ -1651,7 +1651,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // Only a running sheet with an edit still owed is saved first, so the
       // DELETE does not race it; there is nothing else to protect.
       preSave: m.status === "running" && (hadPending || isDirty),
-      send: () => window.API.removeDaihyosen(m.compId, m.id, resolveDecisionPassword(password), m.modifiedAt || 0),
+      // bc-evts: the remove is the outbox's; this editor keeps its adopt until
+      // stage 5 by waiting for the answer, bounded as the direct call was.
+      send: async () => {
+        const sent = await window.API.removeDaihyosen(m.compId, m.id, resolveDecisionPassword(password), m.modifiedAt || 0);
+        const r = sent && sent.settled ? await withinDeadline(sent.settled, FETCH_TIMEOUT_MS) : sent;
+        if (r === TIMED_OUT) throw new Error(noAnswerSentence(REP_BOUT_NOT_REMOVED));
+        return r;
+      },
       refusals: REP_BOUT_REMOVE_REFUSALS,
       notDone: REP_BOUT_NOT_REMOVED,
     });
@@ -3018,7 +3025,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     setRemoveBoutErr("");
     setRemovingBout(true);
     try {
-      const updated = await window.API.removeKachinukiBout(m.compId, m.id, resolveDecisionPassword(password));
+      // bc-evts: the removal is the outbox's; waited for (bounded) so this
+      // editor keeps adopting the shorter log until stage 5.
+      const sent = await window.API.removeKachinukiBout(m.compId, m.id, resolveDecisionPassword(password));
+      const updated = sent && sent.settled ? await withinDeadline(sent.settled, FETCH_TIMEOUT_MS) : sent;
+      if (updated === TIMED_OUT) throw new Error("Bout not removed: the server did not answer. Check the connection and try again.");
       // The parent won't refresh this snapshot for an out-of-band mutation, so
       // adopt the shorter log locally (server truth if returned, else drop the
       // removed position) and trim the matching local row.
@@ -5094,7 +5105,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               // finished match is judged as stored: a running write there is
               // answered stale.
               preSave: m.status !== "completed",
-              send: () => window.API.recordDaihyosen(m.compId, m.id, resolveDecisionPassword(password), m.modifiedAt || 0),
+              // bc-evts: the add is the outbox's; waited for (bounded) so this
+              // editor keeps its adopt until stage 5.
+              send: async () => {
+                const sent = await window.API.recordDaihyosen(m.compId, m.id, resolveDecisionPassword(password), m.modifiedAt || 0);
+                const r = sent && sent.settled ? await withinDeadline(sent.settled, FETCH_TIMEOUT_MS) : sent;
+                if (r === TIMED_OUT) throw new Error(noAnswerSentence(REP_BOUT_NOT_ADDED));
+                return r;
+              },
               refusals: REP_BOUT_ADD_REFUSALS,
               notDone: REP_BOUT_NOT_ADDED,
             });

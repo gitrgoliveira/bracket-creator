@@ -147,7 +147,7 @@ describe.each([
     expect(document.querySelector('.reason-prompt')).toBeNull();
     expect(window.API.reopenMatch).toHaveBeenCalledTimes(1);
     expect(window.API.reopenMatch).toHaveBeenCalledWith(
-      'comp1', fixture().id, 'secret', { reason: '', force: false },
+      'comp1', fixture().id, 'secret', expect.objectContaining({ reason: '', force: false }),
     );
     expect(window.API.recordScore).not.toHaveBeenCalled();
 
@@ -178,7 +178,7 @@ describe.each([
     expect(window.confirmDialog.mock.calls[0][0].message).toContain('Reopening this match also reopens Match 2');
     expect(window.confirmDialog.mock.calls[0][0].message.toLowerCase()).not.toContain('correction');
     expect(window.confirmDialog.mock.calls[0][0].confirmLabel).toBe('Reopen both');
-    expect(window.API.reopenMatch.mock.calls[1][3]).toEqual({ reason: '', force: true });
+    expect(window.API.reopenMatch.mock.calls[1][3]).toEqual(expect.objectContaining({ reason: '', force: true }));
 
     // bc-tmfn R3: the notice is read AFTER the match is running again, which
     // is when the operator looks for it. It used to live inside
@@ -220,7 +220,7 @@ describe.each([
     expect(screen.getByTestId('withdrawal-reopen-conflict-warning').textContent).toMatch(/keeps any score already entered/);
     await act(async () => { fireEvent.click(screen.getByTestId('withdrawal-reopen-requeue-button')); });
     expect(window.API.requeueBlockerAndReopen).toHaveBeenCalledWith(
-      'comp1', fixture().id, 'comp1', 'm-blk', 'secret', { reason: '', force: false },
+      'comp1', fixture().id, 'comp1', 'm-blk', 'secret', expect.objectContaining({ reason: '', force: false }),
     );
   });
 
@@ -297,7 +297,7 @@ describe('kachinuki: a withdrawal reopens through Clear withdrawal and reopen', 
     expect(window.API.reopenMatch).not.toHaveBeenCalled();
     await clearWithdrawal();
     expect(window.API.reopenMatch).toHaveBeenCalledWith(
-      'comp1', 'm-pool-1', 'secret', { reason: '', force: false },
+      'comp1', 'm-pool-1', 'secret', expect.objectContaining({ reason: '', force: false }),
     );
     await act(async () => { flip(REOPENED); });
     expect(onClose).not.toHaveBeenCalled();
@@ -565,7 +565,7 @@ describe('a match-level fusensho (bc-rawm)', () => {
     await mountLive(defaultWin(), onClose);
     await clearWithdrawal();
     expect(window.API.reopenMatch).toHaveBeenCalledWith(
-      'comp1', defaultWin().id, 'secret', { reason: '', force: false },
+      'comp1', defaultWin().id, 'secret', expect.objectContaining({ reason: '', force: false }),
     );
     await act(async () => { flip(REOPENED); });
     expect(onClose).not.toHaveBeenCalled();

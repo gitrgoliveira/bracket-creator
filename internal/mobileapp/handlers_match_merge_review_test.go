@@ -153,6 +153,65 @@ func TestScoreHandler_HeldForADefaultWinSaysSo(t *testing.T) {
 	assert.Equal(t, mgAlice, m.Winner)
 }
 
+// bc-evts stage 2b, operator decision 2026-10-16 (I1): the FIRST recorded
+// result stands. A Finish stamped after a recorded kiken from a device that
+// never saw it (no correction reason, no clearWithdrawal) is refused as
+// match_closed in the 200 superseded shape the queue keys on, never the 400
+// "missing correction reason" a queued replay would loop on; the withdrawal
+// stands and its competitor stays barred. The decision arriving AFTER the
+// finish stamped later gives the same match, in either order.
+func TestScoreHandler_ALaterFinishThatNeverSawTheKikenIsMatchClosed(t *testing.T) {
+	finish := func(now int64) map[string]any {
+		return map[string]any{
+			"sideA": mgAlice, "sideB": mgBob, "status": "completed", "winner": mgBob,
+			"ipponsA": []string{}, "ipponsB": []string{"M"},
+			"changed": []string{"points", "result"}, "modifiedAt": now - 10_000,
+		}
+	}
+	decision := func(now int64) map[string]any {
+		return map[string]any{"decision": "kiken-voluntary", "decisionBy": "shiro", "modifiedAt": now - 20_000}
+	}
+	for _, order := range []string{"decision first", "finish first"} {
+		t.Run(order, func(t *testing.T) {
+			compID := "merge-r5-i1-" + map[string]string{"decision first": "a", "finish first": "b"}[order]
+			r, store := mergeServer(t, compID)
+			now := time.Now().UnixMilli()
+			sendDecision := func() int {
+				w := serveJSON(r, "POST", "/api/competitions/"+compID+"/matches/Pool A-0/decision", decision(now))
+				return w.Code
+			}
+			var out map[string]any
+			var code int
+			if order == "decision first" {
+				require.Equal(t, http.StatusOK, sendDecision())
+				code, out = mergeReviewPut(t, r, compID, finish(now))
+				require.Equal(t, http.StatusOK, code, "a queued replay must not be refused 400: %v", out)
+				assert.Equal(t, false, out["applied"])
+				assert.Equal(t, "superseded", out["reason"])
+				assert.Equal(t, state.HeldReasonMatchClosed, out["heldReason"])
+				assert.Equal(t, MatchClosedMessage, out["message"])
+			} else {
+				code, out = mergeReviewPut(t, r, compID, finish(now))
+				require.Equal(t, http.StatusOK, code, out)
+				require.Equal(t, http.StatusOK, sendDecision())
+			}
+			m := mergeStored(t, store, compID)
+			assert.Equal(t, state.MatchStatusCompleted, m.Status)
+			assert.Equal(t, "kiken-voluntary", m.Decision, "the first recorded result stands")
+			assert.Equal(t, mgAlice, m.Winner)
+			statuses, err := store.LoadCompetitorStatus(compID)
+			require.NoError(t, err)
+			barred := 0
+			for _, s := range statuses {
+				if !s.Eligible {
+					barred++
+				}
+			}
+			assert.Equal(t, 1, barred, "the withdrawer stays barred")
+		})
+	}
+}
+
 // The other arrival order of the same two writes: the recount arrives first,
 // then the finish made before it. In stamp order the recount could not apply
 // after the finish, so the finish is applied on its own count and the

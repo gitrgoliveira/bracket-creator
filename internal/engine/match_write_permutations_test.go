@@ -44,6 +44,9 @@ const (
 	pmRes = "result" // a finish or a decision: closes the match
 	pmTap = "tap"    // a scoring write: refused once an earlier result is stored
 	pmEv  = "event"  // a tap on the score-events door
+	// pmCorr is a result from a screen that showed the recorded one (a
+	// correction reason, clearWithdrawal): the newer one stands, as before.
+	pmCorr = "correction"
 )
 
 func pmState(h mmHome, t *testing.T) string {
@@ -311,6 +314,15 @@ type pmCase struct {
 	want []string
 	// where limits the case to "pool" or "ko" (empty means both).
 	where string
+	// landsAfter marks a team match closed by a match-level default-win
+	// decision (operator decision 2026-10-16, T1): the bouts a device that
+	// never saw it scored keep their scores, whichever way they arrive, so
+	// a bout row or tap stamped after the decision LANDS.
+	landsAfter bool
+	// causal lists pairs [i, j] of steps where j was made on a screen that
+	// showed i (a correction after the result it corrects), so j never
+	// arrives before i.
+	causal [][2]int
 }
 
 // pmHome is a fresh match for a case: a team knockout gets the same next round
@@ -355,27 +367,47 @@ func pmHome(t *testing.T, c pmCase, ko bool) mmHome {
 // pmArrivalCheck is the one predicate for a write's own answer: it asks what
 // has arrived already, and by the stamps alone says whether the write is
 // turned away.
-func pmArrivalCheck(s pmStep, arrived []pmStep, ans string) string {
-	closed, newerResult := false, false
+func pmArrivalCheck(c pmCase, s pmStep, arrived []pmStep, ans string) string {
+	closed := false
+	var results []pmStep
 	for _, a := range arrived {
-		if a.role != pmRes {
+		if !pmIsResult(a) {
 			continue
 		}
 		closed = closed || a.at < s.at
-		newerResult = newerResult || a.at > s.at
+		results = append(results, a)
 	}
 	switch s.role {
 	case pmEv:
+		// A team match closed by a default-win decision keeps the bouts a
+		// device that never saw it scored (landsAfter): the tap lands.
+		if c.landsAfter {
+			if ans != "ev:"+domain.ScoreOutcomeApplied {
+				return fmt.Sprintf("a tap stamped %d (landsAfter) answered %q", s.at, ans)
+			}
+			break
+		}
 		if closed != (ans == "ev:"+domain.ScoreOutcomeMatchClosed) {
 			return fmt.Sprintf("a tap stamped %d with a result before it arrived=%v answered %q", s.at, closed, ans)
 		}
 	case pmTap:
+		if c.landsAfter {
+			if ans != "applied" {
+				return fmt.Sprintf("a bout row stamped %d (landsAfter) answered %q", s.at, ans)
+			}
+			break
+		}
 		if closed != (ans == "superseded:"+state.HeldReasonMatchClosed) {
 			return fmt.Sprintf("a scoring write stamped %d with a result before it arrived=%v answered %q", s.at, closed, ans)
 		}
-	case pmRes:
-		if newerResult != (strings.HasPrefix(ans, "superseded") || strings.HasPrefix(ans, "partial")) {
-			return fmt.Sprintf("a result stamped %d with a newer result arrived=%v answered %q", s.at, newerResult, ans)
+	case pmRes, pmCorr:
+		// The FIRST recorded result stands (I1): in stamp order a later
+		// result from a device that did not see it is refused; only a
+		// correction that saw it replaces it.
+		stands := pmStanding(append(results, s))
+		refused := strings.HasPrefix(ans, "superseded") || strings.HasPrefix(ans, "partial")
+		if (stands.at == s.at && stands.role == s.role) == refused {
+			return fmt.Sprintf("a result stamped %d arriving after %d result(s): standing=%v answered %q", s.at, len(results), stands.at == s.at, ans)
 		}
 	}
 	return ""
@@ -391,13 +423,16 @@ func pmFinalCheck(c pmCase, h mmHome) []string {
 		}
 		closed, later := false, false
 		for _, a := range c.steps {
-			if a.role == pmRes {
+			if pmIsResult(a) {
 				closed = closed || a.at < s.at
 				later = later || a.at > s.at
 			}
 		}
 		got := outs[s.id]
 		switch {
+		case c.landsAfter && got != domain.ScoreOutcomeApplied && got != domain.ScoreOutcomeRecorded:
+			bad = append(bad, fmt.Sprintf("tap %s (landsAfter) should end applied or recorded, ended %q", s.id, got))
+		case c.landsAfter:
 		case closed && got != domain.ScoreOutcomeMatchClosed:
 			bad = append(bad, fmt.Sprintf("tap %s should end matchClosed, ended %q", s.id, got))
 		case !closed && later && got != domain.ScoreOutcomeApplied && got != domain.ScoreOutcomeRecorded && got != domain.ScoreOutcomeBeforeBaseline:
@@ -423,7 +458,7 @@ func pmBeforeResultOutcomes(c pmCase, h mmHome) map[string]string {
 		}
 		closed, later := false, false
 		for _, a := range c.steps {
-			if a.role == pmRes {
+			if pmIsResult(a) {
 				closed = closed || a.at < s.at
 				later = later || a.at > s.at
 			}
@@ -433,6 +468,55 @@ func pmBeforeResultOutcomes(c pmCase, h mmHome) map[string]string {
 		}
 	}
 	return got
+}
+
+// pmIsResult is a step that records a finish or a decision.
+func pmIsResult(s pmStep) bool { return s.role == pmRes || s.role == pmCorr }
+
+// pmCausal reports whether an arrival order keeps every causal pair: a
+// correction made on a screen that showed a result never arrives before it.
+func pmCausal(c pmCase, order []int) bool {
+	for _, pair := range c.causal {
+		if slices.Index(order, pair[0]) > slices.Index(order, pair[1]) {
+			return false
+		}
+	}
+	return true
+}
+
+// pmStanding is the result that stands among results (the first recorded in
+// stamp order, a correction that saw it replacing it): the closed-match rule's
+// "first recorded result stands" (operator decision 2026-10-16, I1).
+func pmStanding(results []pmStep) pmStep {
+	rs := slices.Clone(results)
+	slices.SortStableFunc(rs, func(a, b pmStep) int { return int(a.at - b.at) })
+	stands := rs[0]
+	for _, r := range rs[1:] {
+		if r.role == pmCorr {
+			stands = r
+		}
+	}
+	return stands
+}
+
+// pmDecC is a decision from a screen that showed the recorded result: it
+// carries a correction reason, so it is an explicit correction, not a rival.
+func pmDecC(at int64, d, by string) pmStep {
+	return pmStep{at: at, role: pmCorr, run: func(h mmHome) string {
+		res, _, e := h.eng.RecordDecisionWithOptions(h.compID, h.matchID, d, by, "", nil, ForceOptions{ReopenReason: "operator correction"}, at)
+		return pmWriteAnswer(res, e)
+	}}
+}
+
+// pmFinC is a finish from a screen that showed the recorded result: it
+// carries a correction reason (and, with clear, clearWithdrawal).
+func pmFinC(at int64, win string, a, b []string, clear bool) pmStep {
+	return pmStep{at: at, role: pmCorr, run: func(h mmHome) string {
+		w := mmRunning(h, at, state.GroupPoints, state.GroupResult)
+		w.Status, w.Winner, w.IpponsA, w.IpponsB = state.MatchStatusCompleted, win, a, b
+		w.CorrectionReason, w.ClearsWithdrawal = "operator correction", clear
+		return pmWrite(h, w)
+	}}
 }
 
 // pmAssertAdvanced checks the knockout winner is in the next match.
@@ -485,6 +569,9 @@ func TestMatchWritePermutationsConverge(t *testing.T) {
 				states := map[string][]string{}
 				tapOuts := map[string]string{}
 				for _, p := range pmPerms(len(c.steps)) {
+					if !pmCausal(c, p) {
+						continue
+					}
 					h := pmHome(t, c, ko)
 					if c.pre.run != nil {
 						require.Equal(t, "applied", c.pre.run(h), "pre")
@@ -495,7 +582,7 @@ func TestMatchWritePermutationsConverge(t *testing.T) {
 						s := c.steps[i]
 						ans := s.run(h)
 						answers += ans + ";"
-						if why := pmArrivalCheck(s, arrived, ans); why != "" {
+						if why := pmArrivalCheck(c, s, arrived, ans); why != "" {
 							t.Errorf("order %v: %s", p, why)
 						}
 						arrived = append(arrived, s)
@@ -590,14 +677,14 @@ func pmCases() []pmCase {
 		{name: "dai aka T1 / pt M-K T2 (tie)", steps: []pmStep{pmDec(t1, "daihyosen", "aka"), pmPt(t2, M, K)}, refused: []int{1}, want: []string{`st=completed`, `d="daihyosen" by="aka"`}},
 		{name: "dai aka T1 / pt 0-0 T2", steps: []pmStep{pmDec(t1, "daihyosen", "aka"), pmPt(t2, nil, nil)}, refused: []int{1}, want: []string{`st=completed`, `d="daihyosen" by="aka"`}},
 		// A newer finish over an older decision, and the other way round: the newer one stands.
-		{name: "dai aka T1 / fin Ryu M-0 T2", steps: []pmStep{pmDec(t1, "daihyosen", "aka"), pmFin(t2, wrTeamA, M, nil)}, want: []string{`st=completed`, ryu, `d="" by=""`, `A=[M] B=[]`}},
-		{name: "fin Ryu M-0 T1 / dai aka T2", steps: []pmStep{pmFin(t1, wrTeamA, M, nil), pmDec(t2, "daihyosen", "aka")}, want: []string{`st=completed`, `d="daihyosen" by="aka"`}},
+		{name: "dai aka T1 / fin Ryu M-0 T2", steps: []pmStep{pmDec(t1, "daihyosen", "aka"), pmFin(t2, wrTeamA, M, nil)}, refused: []int{1}, want: []string{`st=completed`, `w="Tora"`, `d="daihyosen" by="aka"`}},
+		{name: "fin Ryu M-0 T1 / dai aka T2", steps: []pmStep{pmFin(t1, wrTeamA, M, nil), pmDec(t2, "daihyosen", "aka")}, refused: []int{1}, want: []string{`st=completed`, ryu, `d="" by=""`, `A=[M] B=[]`}},
 		{name: "pt M-0 T1 / dai aka T2", steps: []pmStep{pmPt(t1, M, nil), pmDec(t2, "daihyosen", "aka")}, want: []string{`st=completed`, `d="daihyosen" by="aka"`}},
 		// A withdrawal closes the match: points after it are refused.
 		{name: "kiken aka T1 / pt 0-M T2", steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmPt(t2, nil, M)}, refused: []int{1}, want: []string{`st=completed`, `w="Tora" d="kiken-voluntary" by="aka"`, `cs=[`}},
 		{name: "kiken aka T1 / pt M-0 T2", steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmPt(t2, M, nil)}, refused: []int{1}, want: []string{`st=completed`, `w="Tora" d="kiken-voluntary" by="aka"`}},
 		{name: "fusensho aka T1 / pt M-0 T2", steps: []pmStep{pmDec(t1, "fusensho", "aka"), pmPt(t2, M, nil)}, refused: []int{1}, want: []string{`st=completed`, `w="Tora" d="fusensho" by="aka"`}},
-		{name: "fin Ryu M-0 T1 / fusensho shiro T2", steps: []pmStep{pmFin(t1, wrTeamA, M, nil), pmDec(t2, "fusensho", "shiro")}, want: []string{`st=completed`, `w="Ryu" d="fusensho" by="shiro"`}},
+		{name: "fin Ryu M-0 T1 / fusensho shiro T2", steps: []pmStep{pmFin(t1, wrTeamA, M, nil), pmDec(t2, "fusensho", "shiro")}, refused: []int{1}, want: []string{`st=completed`, ryu, `d="" by=""`, `A=[M] B=[]`}},
 		{name: "hik T1 / pt M-0 T2", steps: []pmStep{pmHik(t1), pmPt(t2, M, nil)}, refused: []int{1}, want: tie, where: "pool"},
 		{name: "hik T1 / pt M-K T2", steps: []pmStep{pmHik(t1), pmPt(t2, M, K)}, refused: []int{1}, want: tie, where: "pool"},
 		{name: "fin Ht-0 T1 / pt 0-0 T2", steps: []pmStep{pmFin(t1, wrTeamA, []string{"Ht"}, nil), pmPt(t2, nil, nil)}, refused: []int{1}, want: []string{`st=completed`, ryu}},
@@ -606,21 +693,29 @@ func pmCases() []pmCase {
 		{name: "team dai aka T1 / bout1 A M T2", team: true, steps: []pmStep{pmDec(t1, "daihyosen", "aka"), pmBout(t2, 1, M, nil, wrTeamA)}, refused: []int{1}, want: []string{`st=completed`, `d="daihyosen" by="aka"`}},
 		{name: "team dai shiro T1 / bout1 B M T2", team: true, steps: []pmStep{pmDec(t1, "daihyosen", "shiro"), pmBout(t2, 1, nil, M, wrTeamB)}, refused: []int{1}, want: []string{`st=completed`, `d="daihyosen" by="shiro"`}},
 		{name: "team bouts favour B, dai shiro T1 / bout3 B T2", team: true, pre: preTeam, steps: []pmStep{pmDec(t1, "daihyosen", "shiro"), pmBout(t2, 3, nil, K, wrTeamB)}, refused: []int{1}, want: []string{`st=completed`, `d="daihyosen" by="shiro"`}},
-		{name: "team kiken aka T1 / bout1 B T2", team: true, steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmBout(t2, 1, nil, M, wrTeamB)}, refused: []int{1}, want: []string{`st=completed`, `d="kiken-voluntary" by="aka"`}},
-		{name: "team kiken aka T1 / bout1 A T2", team: true, steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmBout(t2, 1, M, nil, wrTeamA)}, refused: []int{1}, want: []string{`st=completed`, `d="kiken-voluntary" by="aka"`}},
+		// Operator decision 2026-10-16 (T1), a team match closed by a match-level
+		// default-win decision merges BY BOUT: a bout scored on a device that never
+		// saw the decision keeps its score, the decision credits the bouts still
+		// without a result and decides the match.
+		{name: "team kiken aka T1 / bout1 B T2 (the bout lands)", team: true, landsAfter: true, steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmBout(t2, 1, nil, M, wrTeamB)}, want: []string{`st=completed`, `w="Tora" d="kiken-voluntary" by="aka"`, `[1 []-[M] w="Tora" d=""]`}},
+		{name: "team kiken aka T1 / bout1 A T2 (the bout lands)", team: true, landsAfter: true, steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmBout(t2, 1, M, nil, wrTeamA)}, want: []string{`st=completed`, `w="Tora" d="kiken-voluntary" by="aka"`, `[1 [M]-[] w="Ryu" d=""]`}},
+		{name: "team kiken aka T1 / b1 A T2 / b2 B T3 (both bouts land)", team: true, landsAfter: true, steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmBout(t2, 1, M, nil, wrTeamA), pmBout(t3, 2, nil, M, wrTeamB)}, want: []string{`st=completed`, `w="Tora" d="kiken-voluntary" by="aka"`, `[1 [M]-[] w="Ryu" d=""]`, `[2 []-[M] w="Tora" d=""]`}},
+		{name: "team kiken aka T1 / teamFin Ryu(b1 A) T2 (result refused, bout lands)", team: true, landsAfter: true, steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmTeamFin(t2, wrTeamA, nil, b(1, M, nil, wrTeamA))}, want: []string{`st=completed`, `w="Tora" d="kiken-voluntary" by="aka"`, `[1 [M]-[] w="Ryu" d=""]`}},
+		{name: "team fusenpai aka T1 / teamFin Ryu(b1 A, b2 A) T2", team: true, landsAfter: true, steps: []pmStep{pmDec(t1, "fusenpai", "aka"), pmTeamFin(t2, wrTeamA, nil, b(1, M, nil, wrTeamA), b(2, M, nil, wrTeamA))}, want: []string{`st=completed`, `w="Tora" d="fusenpai" by="aka"`, `[1 [M]-[] w="Ryu" d=""]`, `[2 [M]-[] w="Ryu" d=""]`}},
+		{name: "team kiken aka T1 / teamFin Tora(b1 B) T2", team: true, landsAfter: true, steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmTeamFin(t2, wrTeamB, nil, b(1, nil, M, wrTeamB))}, want: []string{`st=completed`, `w="Tora" d="kiken-voluntary" by="aka"`, `[1 []-[M] w="Tora" d=""]`}},
 		{name: "team fin Ryu(b1 A) T1 / b2 B T2", team: true, steps: []pmStep{pmTeamFin(t1, wrTeamA, nil, b(1, M, nil, wrTeamA)), pmBout(t2, 2, nil, M, wrTeamB)}, refused: []int{1}, want: []string{`st=completed`, ryu}},
 		{name: "team fin Ryu(b1 A) T1 / b1 B T2 flip", team: true, steps: []pmStep{pmTeamFin(t1, wrTeamA, nil, b(1, M, nil, wrTeamA)), pmBout(t2, 1, nil, K, wrTeamB)}, refused: []int{1}, want: []string{`st=completed`, ryu}},
 		{name: "team pre b1A b2B; fin Ryu(dec only) T1 / b3 B T2", team: true, pre: preTeam, steps: []pmStep{pmTeamFin(t1, wrTeamA, nil), pmBout(t2, 3, nil, K, wrTeamB)}, refused: []int{1}, want: []string{`st=completed`, ryu}},
-		{name: "team fusensho aka T1 / b1 A T2", team: true, steps: []pmStep{pmDec(t1, "fusensho", "aka"), pmBout(t2, 1, M, nil, wrTeamA)}, refused: []int{1}, want: []string{`st=completed`, `d="fusensho" by="aka"`}},
+		{name: "team fusensho aka T1 / b1 A T2 (the bout lands)", team: true, landsAfter: true, steps: []pmStep{pmDec(t1, "fusensho", "aka"), pmBout(t2, 1, M, nil, wrTeamA)}, want: []string{`st=completed`, `w="Tora" d="fusensho" by="aka"`, `[1 [M]-[] w="Ryu" d=""]`}},
 		// Two results: the newer one stands, whichever arrives first.
-		{name: "kiken aka T1 -> dai shiro T2", steps: []pmStep{pmDec(t1, "kiken-injury", "aka"), pmDec(t2, "daihyosen", "shiro")}, want: []string{`st=completed`, `d="daihyosen" by="shiro"`, `cs=[]`}},
-		{name: "dai shiro T1 -> dai aka T2 (correction)", steps: []pmStep{pmDec(t1, "daihyosen", "shiro"), pmDec(t2, "daihyosen", "aka")}, want: []string{`st=completed`, `d="daihyosen" by="aka"`}},
-		{name: "team kiken aka T1 -> dai shiro T2", team: true, steps: []pmStep{pmDec(t1, "kiken-injury", "aka"), pmDec(t2, "daihyosen", "shiro")}, want: []string{`st=completed`, `d="daihyosen" by="shiro"`, `cs=[]`}},
+		{name: "kiken aka T1 -> dai shiro T2", steps: []pmStep{pmDec(t1, "kiken-injury", "aka"), pmDec(t2, "daihyosen", "shiro")}, refused: []int{1}, want: []string{`st=completed`, `d="kiken-injury" by="aka"`, `cs=[`}},
+		{name: "dai shiro T1 -> dai aka T2 (correction, saw it)", steps: []pmStep{pmDec(t1, "daihyosen", "shiro"), pmDecC(t2, "daihyosen", "aka")}, causal: [][2]int{{0, 1}}, want: []string{`st=completed`, `d="daihyosen" by="aka"`}},
+		{name: "team kiken aka T1 -> dai shiro T2", team: true, steps: []pmStep{pmDec(t1, "kiken-injury", "aka"), pmDec(t2, "daihyosen", "shiro")}, refused: []int{1}, want: []string{`st=completed`, `d="kiken-injury" by="aka"`, `cs=[`}},
 		// The older decision arriving after the newer one (round-4 finding 8).
-		{name: "kiken aka T2 / dai shiro T1 (stale dai)", steps: []pmStep{pmDec(t1, "daihyosen", "shiro"), pmDec(t2, "kiken-injury", "aka")}, want: []string{`st=completed`, `d="kiken-injury" by="aka"`, `cs=[`}},
-		{name: "dai shiro T2 / dai aka T1 (stale)", steps: []pmStep{pmDec(t1, "daihyosen", "aka"), pmDec(t2, "daihyosen", "shiro")}, want: []string{`st=completed`, `d="daihyosen" by="shiro"`}},
-		{name: "team kiken aka T2 / dai shiro T1 (stale dai)", team: true, steps: []pmStep{pmDec(t1, "daihyosen", "shiro"), pmDec(t2, "kiken-injury", "aka")}, want: []string{`st=completed`, `d="kiken-injury" by="aka"`, `cs=[`}},
-		{name: "team dai shiro T2 / dai aka T1 (stale)", team: true, steps: []pmStep{pmDec(t1, "daihyosen", "aka"), pmDec(t2, "daihyosen", "shiro")}, want: []string{`st=completed`, `d="daihyosen" by="shiro"`}},
+		{name: "kiken aka T2 / dai shiro T1 (the first stands)", steps: []pmStep{pmDec(t1, "daihyosen", "shiro"), pmDec(t2, "kiken-injury", "aka")}, refused: []int{1}, want: []string{`st=completed`, `d="daihyosen" by="shiro"`, `cs=[]`}},
+		{name: "dai shiro T2 / dai aka T1 (the first stands)", steps: []pmStep{pmDec(t1, "daihyosen", "aka"), pmDec(t2, "daihyosen", "shiro")}, refused: []int{1}, want: []string{`st=completed`, `d="daihyosen" by="aka"`}},
+		{name: "team kiken aka T2 / dai shiro T1 (the first stands)", team: true, steps: []pmStep{pmDec(t1, "daihyosen", "shiro"), pmDec(t2, "kiken-injury", "aka")}, refused: []int{1}, want: []string{`st=completed`, `d="daihyosen" by="shiro"`, `cs=[]`}},
+		{name: "team dai shiro T2 / dai aka T1 (the first stands)", team: true, steps: []pmStep{pmDec(t1, "daihyosen", "aka"), pmDec(t2, "daihyosen", "shiro")}, refused: []int{1}, want: []string{`st=completed`, `d="daihyosen" by="aka"`}},
 
 		// ---- Mixed: taps through the score-events door and finishes or
 		// decisions that carry a basis, the production mix after stage 3. ----
@@ -630,7 +725,7 @@ func pmCases() []pmCase {
 		{name: "mix team dai shiro T1 / e b1 a:M T2 / e b2 b:K T3", team: true, rows: true, steps: []pmStep{pmDec(t1, "daihyosen", "shiro"), pmEvent("e1", "d1", 1, t2, 1, "a", "M"), pmEvent("e2", "d1", 2, t3, 2, "b", "K")}, refused: []int{1, 2}, want: []string{`st=completed`, `d="daihyosen" by="shiro"`}},
 		{name: "mix ind kiken aka T1 / e a:M T2", steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmEvent("e1", "d1", 1, t2, 0, "a", "M")}, refused: []int{1}, want: []string{`st=completed`, `d="kiken-voluntary" by="aka"`, `cs=[`}},
 		{name: "mix ind fusensho shiro T1 / e a:M T2", steps: []pmStep{pmDec(t1, "fusensho", "shiro"), pmEvent("e1", "d1", 1, t2, 0, "a", "M")}, refused: []int{1}, want: []string{`st=completed`, `d="fusensho" by="shiro"`}},
-		{name: "mix team kiken aka T1 / e b1 a:M T2", team: true, rows: true, steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmEvent("e1", "d1", 1, t2, 1, "a", "M")}, refused: []int{1}, want: []string{`st=completed`, `d="kiken-voluntary" by="aka"`}},
+		{name: "mix team kiken aka T1 / e b1 a:M T2 (the bout lands)", team: true, rows: true, landsAfter: true, steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmEvent("e1", "d1", 1, t2, 1, "a", "M")}, want: []string{`st=completed`, `w="Tora" d="kiken-voluntary" by="aka"`, `[1 [M]-[] w="Ryu" d=""]`}},
 		{name: "mix ind e a:M T1 / kiken aka T2 / e b:M T3", steps: []pmStep{pmEvent("e1", "d1", 1, t1, 0, "a", "M"), pmDec(t2, "kiken-voluntary", "aka"), pmEvent("e2", "d2", 1, t3, 0, "b", "M")}, refused: []int{2}, want: []string{`st=completed`, `d="kiken-voluntary" by="aka"`}},
 		{name: "mix ind e a:M T1 / fusensho shiro T2", steps: []pmStep{pmEvent("e1", "d1", 1, t1, 0, "a", "M"), pmDec(t2, "fusensho", "shiro")}, want: []string{`st=completed`, `d="fusensho" by="shiro"`}},
 		// Findings 4 and 5: taps around a finish.
@@ -670,9 +765,9 @@ func pmCases() []pmCase {
 		{name: "mix team e1 b1 a:M T1, bareFin Ryu T2 own e1, e2 b2 b:M T3, e3 b3 b:K T4", team: true, rows: true, steps: []pmStep{
 			pmEvent("e1", "d1", 1, t1, 1, "a", "M"), pmTeamFin(t2, wrTeamA, []string{"e1"}), pmEvent("e2", "d2", 1, t3, 2, "b", "M"), pmEvent("e3", "d2", 2, t4, 3, "b", "K")},
 			refused: []int{2, 3}, want: []string{`st=completed`, ryu, `[1 [M]-[]`}},
-		{name: "mix team kiken aka T1, e b1 a:M T2, e b2 b:M T3", team: true, rows: true, steps: []pmStep{
+		{name: "mix team kiken aka T1, e b1 a:M T2, e b2 b:M T3 (both bouts land)", team: true, rows: true, landsAfter: true, steps: []pmStep{
 			pmDec(t1, "kiken-voluntary", "aka"), pmEvent("e1", "d1", 1, t2, 1, "a", "M"), pmEvent("e2", "d1", 2, t3, 2, "b", "M")},
-			refused: []int{1, 2}, want: []string{`st=completed`, `d="kiken-voluntary" by="aka"`}},
+			want: []string{`st=completed`, `w="Tora" d="kiken-voluntary" by="aka"`, `[1 [M]-[] w="Ryu" d=""]`, `[2 []-[M] w="Tora" d=""]`}},
 		{name: "mix team dai shiro T1, e b1 a:M T2, e b2 b:M T3", team: true, rows: true, steps: []pmStep{
 			pmDec(t1, "daihyosen", "shiro"), pmEvent("e1", "d1", 1, t2, 1, "a", "M"), pmEvent("e2", "d1", 2, t3, 2, "b", "M")},
 			refused: []int{1, 2}, want: []string{`st=completed`, `d="daihyosen" by="shiro"`}},
@@ -684,7 +779,26 @@ func pmCases() []pmCase {
 		{name: "mix ind e b:M T1 / dai shiro T2 (loser's tap)", steps: []pmStep{pmEvent("e1", "d1", 1, t1, 0, "b", "M"), pmDec(t2, "daihyosen", "shiro")}, want: []string{`st=completed`, `d="daihyosen" by="shiro"`}},
 		{name: "mix ind e a:M T1 / dai shiro T2 (winner's tap)", steps: []pmStep{pmEvent("e1", "d1", 1, t1, 0, "a", "M"), pmDec(t2, "daihyosen", "shiro")}, want: []string{`st=completed`, `d="daihyosen" by="shiro"`}},
 		// Two results with a tap between them.
-		{name: "mix ind kiken aka T1 / e b:M T2 / dai shiro T3", steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmEvent("e1", "d2", 1, t2, 0, "b", "M"), pmDec(t3, "daihyosen", "shiro")}, refused: []int{1}, want: []string{`st=completed`, `d="daihyosen" by="shiro"`, `cs=[]`}},
+		// Operator decision 2026-10-16 (I1): the FIRST recorded result stands. A
+		// finish or decision stamped after it from a device that did not see it
+		// is refused (match_closed) and kept in the history, in every arrival
+		// order. A write that saw the result (a correction) replaces it as before.
+		{name: "I1 kiken aka T1 / fin Ryu M-0 T2", steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmFin(t2, wrTeamA, M, nil)}, refused: []int{1}, want: []string{`st=completed`, `w="Tora" d="kiken-voluntary" by="aka"`, `cs=[`}},
+		{name: "I1 kiken aka T1 / fin Tora 0-M T2", steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmFin(t2, wrTeamB, nil, M)}, refused: []int{1}, want: []string{`st=completed`, `w="Tora" d="kiken-voluntary" by="aka"`, `cs=[`}},
+		{name: "I1 fusenpai aka T1 / fin Ryu M-0 T2", steps: []pmStep{pmDec(t1, "fusenpai", "aka"), pmFin(t2, wrTeamA, M, nil)}, refused: []int{1}, want: []string{`st=completed`, `w="Tora" d="fusenpai" by="aka"`, `cs=[`}},
+		{name: "I1 fusensho aka T1 / fin Ryu M-0 T2", steps: []pmStep{pmDec(t1, "fusensho", "aka"), pmFin(t2, wrTeamA, M, nil)}, refused: []int{1}, want: []string{`st=completed`, `w="Tora" d="fusensho" by="aka"`}},
+		{name: "I1 fusensho shiro T1 / fin Tora 0-M T2", steps: []pmStep{pmDec(t1, "fusensho", "shiro"), pmFin(t2, wrTeamB, nil, M)}, refused: []int{1}, want: []string{`st=completed`, `w="Ryu" d="fusensho" by="shiro"`}},
+		{name: "I1 fin Ryu M-0 T1 / fin Tora 0-M T2 (two finishes)", steps: []pmStep{pmFin(t1, wrTeamA, M, nil), pmFin(t2, wrTeamB, nil, M)}, refused: []int{1}, want: []string{`st=completed`, ryu, `A=[M] B=[]`}},
+		{name: "I1 fin Ryu M-0 T1 / fin Ryu MK-0 T2 (same winner)", steps: []pmStep{pmFin(t1, wrTeamA, M, nil), pmFin(t2, wrTeamA, MK, nil)}, refused: []int{1}, want: []string{`st=completed`, ryu, `A=[M] B=[]`}},
+		{name: "I1 kiken aka T1 / e b:K T1.5 / fin Ryu M-0 T2", steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmEvent("e1", "d1", 1, half(1), 0, "b", "K"), pmFin(t2, wrTeamA, M, nil)}, refused: []int{1, 2}, want: []string{`st=completed`, `w="Tora" d="kiken-voluntary" by="aka"`, `cs=[`}},
+		{name: "I1 e a:M T0.5 / kiken aka T1 / e b:K T1.5 / fin Ryu M-0 T2", steps: []pmStep{pmEvent("e0", "d0", 1, mmT0+30_000, 0, "a", "M"), pmDec(t1, "kiken-voluntary", "aka"), pmEvent("e1", "d1", 1, half(1), 0, "b", "K"), pmFin(t2, wrTeamA, M, nil)}, refused: []int{2, 3}, want: []string{`st=completed`, `w="Tora" d="kiken-voluntary" by="aka"`, `A=[M]`}},
+		{name: "I1 kiken aka T1 / fin Ryu M-0 T2 / pt M-K T3", steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmFin(t2, wrTeamA, M, nil), pmPt(t3, M, K)}, refused: []int{1, 2}, want: []string{`st=completed`, `w="Tora" d="kiken-voluntary" by="aka"`, `cs=[`}},
+		{name: "I1 kiken aka T1 / correction fin Ryu M-0 T2 keeps the kiken", steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmFinC(t2, wrTeamA, M, nil, false)}, causal: [][2]int{{0, 1}}, want: []string{`st=completed`, `w="Tora" d="kiken-voluntary" by="aka"`, `cs=[`}},
+		{name: "I1 kiken aka T1 / correction fin Ryu M-0 clearWithdrawal T2 replaces it", steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmFinC(t2, wrTeamA, M, nil, true)}, causal: [][2]int{{0, 1}}, want: []string{`st=completed`, ryu, `d="" by=""`, `cs=[]`}},
+		{name: "I1 fin Ryu M-0 T1 / correction fin Tora 0-M T2", steps: []pmStep{pmFin(t1, wrTeamA, M, nil), pmFinC(t2, wrTeamB, nil, M, false)}, causal: [][2]int{{0, 1}}, want: []string{`st=completed`, `w="Tora"`, `A=[] B=[M]`}},
+		{name: "I1 team fin Ryu(b1 A) T1 / teamFin Tora(b2 B) T2 (a finish closes the bouts)", team: true, steps: []pmStep{pmTeamFin(t1, wrTeamA, nil, b(1, M, nil, wrTeamA)), pmTeamFin(t2, wrTeamB, nil, b(2, nil, M, wrTeamB))}, refused: []int{1}, want: []string{`st=completed`, ryu}},
+		{name: "T1 team pre b1 A; kiken aka T1 / b2 B T2", team: true, landsAfter: true, pre: preB1, steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmBout(t2, 2, nil, M, wrTeamB)}, want: []string{`st=completed`, `w="Tora" d="kiken-voluntary" by="aka"`, `[1 [M]-[] w="Ryu" d=""]`, `[2 []-[M] w="Tora" d=""]`}},
+		{name: "mix ind kiken aka T1 / e b:M T2 / dai shiro T3", steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmEvent("e1", "d2", 1, t2, 0, "b", "M"), pmDec(t3, "daihyosen", "shiro")}, refused: []int{1, 2}, want: []string{`st=completed`, `d="kiken-voluntary" by="aka"`, `cs=[`}},
 	}
 }
 

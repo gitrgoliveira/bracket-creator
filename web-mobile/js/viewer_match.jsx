@@ -444,7 +444,15 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
       onClose: () => setIsScoring(false),
       onSubmit: async (patch) => {
         try {
-          const res = await window.API.recordScore(compId, match.id, patch, "", match);
+          // bc-evts: the write is the outbox's and the answer here is the
+          // pending one (never waited on). A refusal the server sends later
+          // comes through onRefusal, told by this page's one fallback, as a
+          // direct refusal is below, and claimed so no second alert is raised.
+          const onRefusal = (e) => {
+            window.alert(e && e.message ? e.message : "Couldn't save the result. Please try again.");
+            return true;
+          };
+          const res = await window.API.recordScore(compId, match.id, patch, "", match, { onRefusal });
           // Close only when a landed write ends the match (writeKeepsEditorOpen,
           // the rule every closing host asks). Start, an autosave, or a write
           // that did not land keeps the editor open; the last shows its

@@ -544,3 +544,44 @@ describe('bc-dtfn: the engi Save is a two-tap guard, as Finish is in the other e
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 });
+
+// bc-evts stage 3: the save is the outbox's, so the host hands back the pending
+// answer at once and the editor never waits on the server. When the answer
+// comes and was refused (clock_skew, superseded), the editor shows its
+// not-saved banner and gives the controls back, as it did when it awaited a
+// direct answer; one that landed says nothing.
+describe('EngiScoreEditorModal reads a pending save\'s answer when it comes', () => {
+  const pending = () => {
+    const out = {};
+    out.settled = new Promise((resolve) => { out.resolve = resolve; });
+    out.answer = { applied: true, pending: true, key: 'k', settled: out.settled };
+    return out;
+  };
+
+  it('a refused answer raises the not-saved banner and disarms Save', async () => {
+    const p = pending();
+    const onSubmit = vi.fn().mockReturnValue(Promise.resolve(p.answer));
+    render(<EngiScoreEditorModal match={makeMatch({ flagsA: 3, flagsB: 0, status: 'running', compId: 'c', id: 'm' })} onClose={() => {}} onSubmit={onSubmit} />);
+    fireEvent.click(screen.getByTestId('engi-submit'));
+    fireEvent.click(screen.getByTestId('engi-submit'));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(/Not saved/)).toBeNull();
+
+    await act(async () => { p.resolve({ applied: false, reason: 'clock_skew' }); await p.settled; });
+    expect(screen.getByText(/Not saved/)).toBeTruthy();
+    const submit = screen.getByTestId('engi-submit');
+    expect(submit.disabled).toBe(false);
+    expect(submit.textContent).not.toContain('Tap again');
+  });
+
+  it('a landed answer says nothing', async () => {
+    const p = pending();
+    const onSubmit = vi.fn().mockReturnValue(Promise.resolve(p.answer));
+    render(<EngiScoreEditorModal match={makeMatch({ flagsA: 3, flagsB: 0, status: 'running', compId: 'c', id: 'm' })} onClose={() => {}} onSubmit={onSubmit} />);
+    fireEvent.click(screen.getByTestId('engi-submit'));
+    fireEvent.click(screen.getByTestId('engi-submit'));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await act(async () => { p.resolve({ status: 'completed', flagsA: 3, flagsB: 0 }); await p.settled; });
+    expect(screen.queryByText(/Not saved/)).toBeNull();
+  });
+});

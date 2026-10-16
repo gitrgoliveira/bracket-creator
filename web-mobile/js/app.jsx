@@ -370,8 +370,13 @@ export function queueAlertMessage(alert) {
       // A refusal that is a whole sentence (`sentence`, api_client.jsx
       // _replayRefusal) says what to do, so it closes the alert as it is:
       // "Re-enter it." after it could contradict it ("Check the scores and finish again").
-      if (alert.sentence && alert.detail) return `A result was refused by the server and cannot be saved. ${alert.detail}`;
-      return `A result was refused by the server${detail} and cannot be saved. Re-enter it.`;
+      // A running score write (terminalCount 0, bc-evts: it is the outbox's
+      // too) is a score update, not a result.
+      {
+        const what = Number(alert.terminalCount) > 0 ? "A result" : "A score update";
+        if (alert.sentence && alert.detail) return `${what} was refused by the server and cannot be saved. ${alert.detail}`;
+        return `${what} was refused by the server${detail} and cannot be saved. Re-enter it.`;
+      }
     // bc-lww1. Deliberately NOT folded into "rejected": that message ends in
     // "Re-enter it", which here would tell the operator to overwrite the newer
     // result that just won. A supersede is the one drop where re-entering is the

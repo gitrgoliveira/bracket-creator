@@ -1,7 +1,7 @@
 // Score editor components extracted from admin_schedule.jsx (mp-d7tl).
 // ScoreEditCourtBtn (local), AdminScoreEditor, AdminScoreEditorPage.
 
-import { writeDidNotLand, writeKeepsEditorOpen, startWhileStartingMessage, startWasBlockedByStartMessage, wasToasted } from './write_result.jsx';
+import { writeDidNotLand, writeKeepsEditorOpen, writePending, startWhileStartingMessage, startWasBlockedByStartMessage, wasToasted } from './write_result.jsx';
 import { matchMentions } from './competitor_search.jsx';
 import { SideCell } from './side_cell.jsx';
 import { allMatchesCompleted } from './admin_schedule_utils.jsx';
@@ -226,8 +226,23 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
     }
     if (mountedRef.current) setStartRefusal(null);
     try {
-      const outcome = classifyStartOutcome(await onEditScore(next.compId, next.id, startPatch(), next));
-      if (outcome.ok) return true;
+      // bc-evts: the start is the outbox's, so the answer here is the pending
+      // one and the advance never waits on the server. A refusal comes later:
+      // thrown on the flush (onRefusal, claimed so the outbox raises no second
+      // alert) or as the settled answer (clock_skew, a held result). Both are
+      // told on the refused match as a direct refusal is.
+      const onRefusal = (e) => { refuseStart(next, startFailureMessage(e)); return true; };
+      const res = await onEditScore(next.compId, next.id, startPatch(), next, { onRefusal });
+      const outcome = classifyStartOutcome(res);
+      if (outcome.ok) {
+        if (writePending(res)) {
+          res.settled.then((body) => {
+            const late = classifyStartOutcome(body);
+            if (!late.ok) refuseStart(next, late.msg);
+          }, () => {});
+        }
+        return true;
+      }
       refuseStart(next, outcome.msg);
       return false;
     } catch (e) {

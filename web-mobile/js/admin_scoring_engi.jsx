@@ -31,7 +31,7 @@ import { useEscapeToClose, confirmDialog } from './ui.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { SideCell } from './side_cell.jsx';
 import { useArmedConfirm, useOpenedTapGuard } from './tap_guard.jsx';
-import { terminalFailureBanner, notSavedText, writeWasRefused, writeRetryable } from './write_result.jsx';
+import { terminalFailureBanner, notSavedText, notLandedBanner, writeWasRefused, writeRetryable, writePending } from './write_result.jsx';
 
 const MAX_FLAGS = 5;
 // Valid totals: 1, 3, 5 (odd, guarantees a winner).
@@ -281,6 +281,25 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
     } catch (e) {
       if (mountedRef.current) { setErr(e?.message || "Save failed"); setSubmitting(false); }
       return;
+    }
+    // bc-evts: a save the outbox holds answers `pending` at once; the server's
+    // answer is read when it comes, through a callback, never waited for. A
+    // refused one then raises the not-saved banner (notLandedBanner) and
+    // gives the controls back, as a direct refusal does below.
+    if (writePending(res)) {
+      res.settled.then((body) => {
+        keptInHistory.noteFromWrite(body);
+        if (!writeWasRefused(body) || !mountedRef.current) return;
+        setSubmitting(false);
+        setSaveArmed(false);
+        const banner = notLandedBanner(body);
+        if (banner) setWriteFailed(banner);
+      }, () => {
+        // A refusal on the flush: the terminal-fail subscription below raises
+        // its banner; the controls come back here.
+        if (mountedRef.current) { setSubmitting(false); setSaveArmed(false); }
+      });
+      return res;
     }
     keptInHistory.noteFromWrite(res);
     // A refused save (writeWasRefused: the host reported it and handed back

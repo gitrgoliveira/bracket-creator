@@ -662,3 +662,33 @@ describe('the self-run editor stays open through running writes (bc-dhas)', () =
     }
   });
 });
+
+// bc-evts stage 3: the participant's write is the outbox's. The submit returns
+// the pending answer at once (never waiting on settled), and a refusal the
+// server sends later reaches the participant through onRefusal, told by the
+// page's one fallback (window.alert) as a direct refusal was.
+describe('the self-run editor is told of a refusal the outbox receives', () => {
+  it('passes an onRefusal that alerts the sentence and claims it, and never waits on settled', async () => {
+    let opts = null;
+    const write = vi.fn((_c, _m, _p, _pw, _match, o) => {
+      opts = o;
+      return Promise.resolve({ applied: true, pending: true, key: 'k', settled: new Promise(() => {}) });
+    });
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const recordScore = window.API.recordScore;
+    window.API.recordScore = write;
+    try {
+      await mountSelfRun();
+      await act(async () => { await probe.props.onSubmit({ status: 'running', ipponsA: ['M'] }); });
+      expect(opts && typeof opts.onRefusal, 'the write carries an onRefusal').toBe('function');
+      expect(alert).not.toHaveBeenCalled();
+      expect(opts.onRefusal(new Error('The match is finished. Use Correct result.'))).toBe(true);
+      expect(alert).toHaveBeenCalledWith('The match is finished. Use Correct result.');
+      expect(opts.onRefusal(null)).toBe(true);
+      expect(alert).toHaveBeenLastCalledWith("Couldn't save the result. Please try again.");
+    } finally {
+      window.API.recordScore = recordScore;
+      alert.mockRestore();
+    }
+  });
+});

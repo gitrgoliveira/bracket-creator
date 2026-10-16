@@ -143,6 +143,15 @@ type pmStep struct {
 	role string
 	id   string // the tap's id, for pmEv
 	run  func(h mmHome) string
+	// ev is the tap itself (pmEv): the group it changes and its side decide
+	// the one outcome the rule gives it before a result (pmWantOutcome).
+	ev domain.ScoreEvent
+	// For a result (pmRes, pmCorr): the groups it sets, the events its basis
+	// holds, and (a decision) the side that lost, "aka" or "shiro".
+	sets []string
+	own  []string
+	by   string
+	dec  bool
 }
 
 // pmAnswer names what a write was answered with.
@@ -182,7 +191,7 @@ func pmPt(at int64, a, b []string) pmStep {
 }
 
 func pmFin(at int64, win string, a, b []string, own ...string) pmStep {
-	return pmStep{at: at, role: pmRes, run: func(h mmHome) string {
+	return pmStep{at: at, role: pmRes, own: own, sets: []string{state.GroupPoints, state.GroupResult}, run: func(h mmHome) string {
 		w := mmRunning(h, at, state.GroupPoints, state.GroupResult)
 		w.Status, w.Winner, w.IpponsA, w.IpponsB = state.MatchStatusCompleted, win, a, b
 		if own != nil {
@@ -194,7 +203,7 @@ func pmFin(at int64, win string, a, b []string, own ...string) pmStep {
 
 // pmBareInd is a finish whose payload carries the points but names result alone.
 func pmBareInd(at int64, win string, a, b []string) pmStep {
-	return pmStep{at: at, role: pmRes, run: func(h mmHome) string {
+	return pmStep{at: at, role: pmRes, sets: []string{state.GroupResult}, run: func(h mmHome) string {
 		w := mmRunning(h, at, state.GroupResult)
 		w.Status, w.Winner, w.IpponsA, w.IpponsB = state.MatchStatusCompleted, win, a, b
 		return pmWrite(h, w)
@@ -204,7 +213,7 @@ func pmBareInd(at int64, win string, a, b []string) pmStep {
 // pmBareFin is a finish that names result alone and carries no scoreline: it
 // stands on the taps in its basis.
 func pmBareFin(at int64, win string, own ...string) pmStep {
-	return pmStep{at: at, role: pmRes, run: func(h mmHome) string {
+	return pmStep{at: at, role: pmRes, own: own, sets: []string{state.GroupResult}, run: func(h mmHome) string {
 		w := mmRunning(h, at, state.GroupResult)
 		w.Status, w.Winner = state.MatchStatusCompleted, win
 		w.Basis = &state.ScoreBasis{Own: own}
@@ -214,7 +223,7 @@ func pmBareFin(at int64, win string, own ...string) pmStep {
 
 // pmBareTeam is a team finish whose payload carries bouts but names result alone.
 func pmBareTeam(at int64, win string, subs ...state.SubMatchResult) pmStep {
-	return pmStep{at: at, role: pmRes, run: func(h mmHome) string {
+	return pmStep{at: at, role: pmRes, sets: []string{state.GroupResult}, run: func(h mmHome) string {
 		w := mmRunning(h, at, state.GroupResult)
 		w.Status, w.Winner, w.SubResults = state.MatchStatusCompleted, win, subs
 		return pmWrite(h, w)
@@ -222,18 +231,41 @@ func pmBareTeam(at int64, win string, subs ...state.SubMatchResult) pmStep {
 }
 
 func pmDec(at int64, d, by string) pmStep {
-	return pmStep{at: at, role: pmRes, run: func(h mmHome) string {
-		res, _, e := h.eng.RecordDecision(h.compID, h.matchID, d, by, "", nil, at)
-		return pmWriteAnswer(res, e)
-	}}
+	return pmStep{at: at, role: pmRes, dec: true, by: by,
+		sets: []string{state.GroupPoints, state.GroupResult, state.GroupEncho, pmAnyBout},
+		run: func(h mmHome) string {
+			res, _, e := h.eng.RecordDecision(h.compID, h.matchID, d, by, "", nil, at)
+			return pmWriteAnswer(res, e)
+		}}
 }
 
 func pmHik(at int64) pmStep {
-	return pmStep{at: at, role: pmRes, run: func(h mmHome) string {
+	return pmStep{at: at, role: pmRes, sets: []string{state.GroupResult}, run: func(h mmHome) string {
 		return pmAnswer(h.write(&state.MatchResult{ID: h.matchID, SideA: wrTeamA, SideB: wrTeamB, SideAID: wrTeamAID, SideBID: wrTeamBID,
 			Status: state.MatchStatusCompleted, Decision: "hikiwake", ModifiedAt: at,
 			Changed: []string{state.GroupResult}, WriteDoor: DoorDecision}))
 	}}
+}
+
+// pmEngiFin is an engi finish: the flag count and the verdict it decides.
+func pmEngiFin(at int64, flagsA, flagsB int, own ...string) pmStep {
+	return pmStep{at: at, role: pmRes, own: own, sets: []string{state.GroupResult, state.GroupFlags}, run: func(h mmHome) string {
+		w := mmEngiFinish(h, at, flagsA, flagsB)
+		if own != nil {
+			w.Basis = &state.ScoreBasis{Own: own}
+		}
+		return pmWrite(h, w)
+	}}
+}
+
+// pmMarkID is the id the server's match gives side A's first mark now: what a
+// device's answer shows it, and what a later removal names.
+func pmMarkID(h mmHome) string {
+	m, err := h.eng.lookupExistingResult(h.store, h.compID, h.matchID)
+	if err != nil || m.MarkIDs == nil || len(m.MarkIDs.A) == 0 {
+		return "no-mark"
+	}
+	return m.MarkIDs.A[0]
 }
 
 func pmBout(at int64, pos int, a, b []string, win string) pmStep {
@@ -257,12 +289,12 @@ func pmSeq(steps ...pmStep) pmStep {
 }
 
 func pmTeamFin(at int64, win string, own []string, subs ...state.SubMatchResult) pmStep {
-	return pmStep{at: at, role: pmRes, run: func(h mmHome) string {
-		ch := []string{state.GroupResult}
-		for _, s := range subs {
-			ch = append(ch, state.BoutGroup(s.Position))
-		}
-		w := mmRunning(h, at, ch...)
+	sets := []string{state.GroupResult}
+	for _, s := range subs {
+		sets = append(sets, state.BoutGroup(s.Position))
+	}
+	return pmStep{at: at, role: pmRes, own: own, sets: sets, run: func(h mmHome) string {
+		w := mmRunning(h, at, sets...)
 		w.Status, w.Winner, w.SubResults = state.MatchStatusCompleted, win, subs
 		if own != nil {
 			w.Basis = &state.ScoreBasis{Own: own}
@@ -273,12 +305,17 @@ func pmTeamFin(at int64, win string, own []string, subs ...state.SubMatchResult)
 
 // pmEvent is one ippon tap through the score-events door.
 func pmEvent(id, sess string, seq int64, at int64, pos int, side, letter string) pmStep {
-	return pmStep{at: at, role: pmEv, id: id, run: func(h mmHome) string {
-		ev := domain.ScoreEvent{ID: id, Session: sess, Seq: seq, Stamp: at, Kind: domain.ScoreIpponAdd, Pos: pos, Side: side, Letter: letter}
+	return pmEventOf(domain.ScoreEvent{ID: id, Session: sess, Seq: seq, Stamp: at, Kind: domain.ScoreIpponAdd, Pos: pos, Side: side, Letter: letter})
+}
+
+// pmEventOf is a tap of any kind on the score-events door; its stamp is the
+// step's.
+func pmEventOf(ev domain.ScoreEvent) pmStep {
+	return pmStep{at: ev.Stamp, role: pmEv, id: ev.ID, ev: ev, run: func(h mmHome) string {
 		if err := ev.Validate(); err != nil {
 			return "invalid:" + err.Error()
 		}
-		r, err := h.eng.RecordScoreEvents(h.compID, h.matchID, ScoreEventsRequest{Session: sess, Events: []domain.ScoreEvent{ev}})
+		r, err := h.eng.RecordScoreEvents(h.compID, h.matchID, ScoreEventsRequest{Session: ev.Session, Events: []domain.ScoreEvent{ev}})
 		if err != nil {
 			return "error:" + err.Error()
 		}
@@ -328,6 +365,11 @@ type pmCase struct {
 	// showed i (a correction after the result it corrects), so j never
 	// arrives before i.
 	causal [][2]int
+	// engi runs the case in an engi (flag-scored) competition.
+	engi bool
+	// outs pins the final replay outcome of named taps, on top of the rule
+	// pmWantOutcome derives for every tap.
+	outs map[string]string
 }
 
 // pmHome is a fresh match for a case: a team knockout gets the same next round
@@ -335,9 +377,12 @@ type pmCase struct {
 // match may start with its bout rows drawn.
 func pmHome(t *testing.T, c pmCase, ko bool) mmHome {
 	var h mmHome
-	if c.team {
+	switch {
+	case c.team:
 		h = mmTeam(t, ko)
-	} else {
+	case c.engi:
+		h = mmEngi(t, ko)
+	default:
 		h = mmIndividual(t, ko)
 	}
 	if c.team && ko {
@@ -387,7 +432,11 @@ func pmArrivalCheck(c pmCase, s pmStep, arrived []pmStep, ans string) string {
 		// A team match closed by a default-win decision keeps the bouts a
 		// device that never saw it scored (landsAfter): the tap lands.
 		if c.landsAfter {
-			if ans != "ev:"+domain.ScoreOutcomeApplied {
+			// On a team match with no bout rows drawn yet, a tap that comes
+			// before the withdrawal has no bout to land on (noTarget); the
+			// withdrawal then pads the rows and the replay lands it.
+			beforeAnyResult := len(results) == 0 && !c.rows && ans == "ev:"+domain.ScoreOutcomeNoTarget
+			if ans != "ev:"+domain.ScoreOutcomeApplied && !beforeAnyResult {
 				return fmt.Sprintf("a tap stamped %d (landsAfter) answered %q", s.at, ans)
 			}
 			break
@@ -410,7 +459,7 @@ func pmArrivalCheck(c pmCase, s pmStep, arrived []pmStep, ans string) string {
 		// result from a device that did not see it is refused; only a
 		// correction that saw it replaces it.
 		stands := pmStanding(append(results, s))
-		refused := strings.HasPrefix(ans, "superseded") || strings.HasPrefix(ans, "partial")
+		refused := ans == "superseded:"+state.HeldReasonMatchClosed || strings.HasPrefix(ans, "partial")
 		if (stands.at == s.at && stands.role == s.role) == refused {
 			return fmt.Sprintf("a result stamped %d arriving after %d result(s): standing=%v answered %q", s.at, len(results), stands.at == s.at, ans)
 		}
@@ -426,27 +475,132 @@ func pmFinalCheck(c pmCase, h mmHome) []string {
 		if s.role != pmEv {
 			continue
 		}
-		closed, later := false, false
-		for _, a := range c.steps {
-			if pmIsResult(a) {
-				closed = closed || a.at < s.at
-				later = later || a.at > s.at
+		want := pmWantOutcome(c, s)
+		if pinned, ok := c.outs[s.id]; ok {
+			// The case's own table: it states the rule's outcome for a tap
+			// whose kind has a target of its own (noTarget) and must agree
+			// with the derived one everywhere else.
+			if pinned != want && pinned != domain.ScoreOutcomeNoTarget {
+				bad = append(bad, fmt.Sprintf("tap %s: the case pins %s, the rule gives %s", s.id, pinned, want))
+			}
+			want = pinned
+		}
+		if got := outs[s.id]; got != want {
+			bad = append(bad, fmt.Sprintf("tap %s should end %s, ended %q", s.id, want, got))
+		}
+	}
+	return bad
+}
+
+// pmAnyBout stands for every numbered bout's group in a result's sets: a team
+// decision pads whichever bouts have no result.
+const pmAnyBout = "*bout"
+
+// pmWantOutcome is the ONE outcome the rule gives a tap, whichever order the
+// writes arrive in. The FIRST recorded result (by stamp) governs it: stamped
+// before the tap, it closes the match (matchClosed; a team match closed by a
+// withdrawal keeps the bouts scored elsewhere, landsAfter, so the tap is
+// applied). A tap stamped before it, in a group the result does not set, stands
+// (applied). In a group it sets: around a decision the loser's own side is kept
+// (recorded) and the winner's is replaced (beforeBaseline); otherwise the
+// result's basis decides (recorded when it holds the tap, else beforeBaseline).
+func pmWantOutcome(c pmCase, tap pmStep) string {
+	var first *pmStep
+	for i := range c.steps {
+		if a := &c.steps[i]; pmIsResult(*a) && (first == nil || a.at < first.at) {
+			first = a
+		}
+	}
+	if first == nil {
+		return domain.ScoreOutcomeApplied
+	}
+	if first.at < tap.at {
+		if c.landsAfter {
+			return domain.ScoreOutcomeApplied
+		}
+		return domain.ScoreOutcomeMatchClosed
+	}
+	g := ScoreEventGroup(&tap.ev)
+	sets := slices.Contains(first.sets, g) || (strings.HasPrefix(g, "bout:") && slices.Contains(first.sets, pmAnyBout))
+	if !sets {
+		return domain.ScoreOutcomeApplied
+	}
+	if first.dec && g == state.GroupPoints && (tap.ev.Side == domain.ScoreSideA || tap.ev.Side == domain.ScoreSideB) {
+		loser := map[string]string{"aka": domain.ScoreSideA, "shiro": domain.ScoreSideB}[first.by]
+		if loser != "" {
+			if tap.ev.Side == loser {
+				return domain.ScoreOutcomeRecorded
+			}
+			return domain.ScoreOutcomeBeforeBaseline
+		}
+	}
+	if slices.Contains(first.own, tap.id) {
+		return domain.ScoreOutcomeRecorded
+	}
+	return domain.ScoreOutcomeBeforeBaseline
+}
+
+// pmHistoryCheck asserts the match's history after one arrival order: every
+// stamped write left a line of its own (the door, its outcome, its reason), an
+// event's lines chain from its answer to its final outcome with one line per
+// move, and a matchClosed line always carries the closed-match reason.
+func pmHistoryCheck(c pmCase, h mmHome, t *testing.T, order []int, answers []string) []string {
+	entries := h.history(t)
+	outs := pmOutcomes(h)
+	var bad []string
+	for n, i := range order {
+		s, ans := c.steps[i], answers[n]
+		if s.at == 0 {
+			continue
+		}
+		var mine []state.MatchHistoryEntry
+		for _, e := range entries {
+			switch {
+			case s.role == pmEv && e.Event != nil && e.Event.ID == s.id:
+				mine = append(mine, e)
+			case s.role != pmEv && e.Event == nil && e.Stamp == s.at:
+				mine = append(mine, e)
 			}
 		}
-		got := outs[s.id]
+		if len(mine) == 0 {
+			bad = append(bad, fmt.Sprintf("step %d (stamp %d) left no history line, answered %q", i, s.at, ans))
+			continue
+		}
+		if s.role == pmEv {
+			if e := mine[0]; !strings.HasSuffix(ans, ":"+e.EventOutcome) || e.Door != DoorEvent {
+				bad = append(bad, fmt.Sprintf("tap %s answered %q but its first line reads door=%s outcome=%s", s.id, ans, e.Door, e.EventOutcome))
+			}
+			if last := mine[len(mine)-1]; last.EventOutcome != outs[s.id] {
+				bad = append(bad, fmt.Sprintf("tap %s ended %q but its last history line reads %q (%d lines)", s.id, outs[s.id], last.EventOutcome, len(mine)))
+			}
+			for k := 1; k < len(mine); k++ {
+				if mine[k].EventOutcome == mine[k-1].EventOutcome {
+					bad = append(bad, fmt.Sprintf("tap %s has two lines in a row reading %q", s.id, mine[k].EventOutcome))
+				}
+			}
+			for _, e := range mine {
+				if e.EventOutcome == domain.ScoreOutcomeMatchClosed && e.Reason != state.HeldReasonMatchClosed {
+					bad = append(bad, fmt.Sprintf("tap %s has a matchClosed line with reason %q, want %q", s.id, e.Reason, state.HeldReasonMatchClosed))
+				}
+			}
+			continue
+		}
+		refused := ans == "superseded:"+state.HeldReasonMatchClosed
+		applied, echoed, why := false, false, true
+		for _, e := range mine {
+			for _, o := range e.Outcomes {
+				applied = applied || o == state.HistoryOutcomeApplied
+				echoed = echoed || o == state.HistoryOutcomeUnchanged
+			}
+			why = why && e.Reason != ""
+		}
 		switch {
-		case c.landsAfter && got != domain.ScoreOutcomeApplied && got != domain.ScoreOutcomeRecorded:
-			bad = append(bad, fmt.Sprintf("tap %s (landsAfter) should end applied or recorded, ended %q", s.id, got))
-		case c.landsAfter:
-		case closed && got != domain.ScoreOutcomeMatchClosed:
-			bad = append(bad, fmt.Sprintf("tap %s should end matchClosed, ended %q", s.id, got))
-		case !closed && later && got != domain.ScoreOutcomeApplied && got != domain.ScoreOutcomeRecorded && got != domain.ScoreOutcomeBeforeBaseline:
-			// Before the result: in a group it sets, the basis decides
-			// (recorded, or beforeBaseline); in one it leaves alone, the tap
-			// stands (applied).
-			bad = append(bad, fmt.Sprintf("tap %s should end applied, recorded or beforeBaseline, ended %q", s.id, got))
-		case !closed && !later && got != domain.ScoreOutcomeApplied:
-			bad = append(bad, fmt.Sprintf("tap %s should end applied, ended %q", s.id, got))
+		case refused && applied:
+			bad = append(bad, fmt.Sprintf("step %d (stamp %d) was refused (%q) but its history line reads applied", i, s.at, ans))
+		case refused && !why:
+			bad = append(bad, fmt.Sprintf("step %d (stamp %d) was refused (%q) and its history line gives no reason", i, s.at, ans))
+		case ans == "applied" && !applied && !echoed:
+			bad = append(bad, fmt.Sprintf("step %d (stamp %d) was applied but its history line reads held", i, s.at))
 		}
 	}
 	return bad
@@ -543,7 +697,7 @@ func pmAssertAdvanced(t *testing.T, h mmHome, order []int) {
 
 func TestMatchWritePermutationsConverge(t *testing.T) {
 	cases, perms := 0, 0
-	for _, c := range pmCases() {
+	for _, c := range append(pmCases(), pmKindCases()...) {
 		require.NotEmpty(t, c.want, "%s: a case asserts its outcome", c.name)
 		for _, ko := range []bool{false, true} {
 			if (c.where == "pool" && ko) || (c.where == "ko" && !ko) {
@@ -583,10 +737,12 @@ func TestMatchWritePermutationsConverge(t *testing.T) {
 					}
 					var arrived []pmStep
 					answers := ""
+					var answerList []string
 					for _, i := range p {
 						s := c.steps[i]
 						ans := s.run(h)
 						answers += ans + ";"
+						answerList = append(answerList, ans)
 						if why := pmArrivalCheck(c, s, arrived, ans); why != "" {
 							t.Errorf("order %v: %s", p, why)
 						}
@@ -598,6 +754,9 @@ func TestMatchWritePermutationsConverge(t *testing.T) {
 					}
 					for _, bad := range pmFinalCheck(c, h) {
 						t.Errorf("order %v: %s", p, bad)
+					}
+					for _, bad := range pmHistoryCheck(c, h, t, p, answerList) {
+						t.Errorf("order %v: history: %s", p, bad)
 					}
 					// A tap stamped before the result has ONE outcome, whichever
 					// order the writes arrive in.
@@ -804,6 +963,90 @@ func pmCases() []pmCase {
 		{name: "I1 team fin Ryu(b1 A) T1 / teamFin Tora(b2 B) T2 (a finish closes the bouts)", team: true, steps: []pmStep{pmTeamFin(t1, wrTeamA, nil, b(1, M, nil, wrTeamA)), pmTeamFin(t2, wrTeamB, nil, b(2, nil, M, wrTeamB))}, refused: []int{1}, want: []string{`st=completed`, ryu}},
 		{name: "T1 team pre b1 A; kiken aka T1 / b2 B T2", team: true, landsAfter: true, pre: preB1, steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmBout(t2, 2, nil, M, wrTeamB)}, want: []string{`st=completed`, `w="Tora" d="kiken-voluntary" by="aka"`, `[1 [M]-[] w="Ryu" d=""]`, `[2 []-[M] w="Tora" d=""]`}},
 		{name: "mix ind kiken aka T1 / e b:M T2 / dai shiro T3", steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), pmEvent("e1", "d2", 1, t2, 0, "b", "M"), pmDec(t3, "daihyosen", "shiro")}, refused: []int{1, 2}, want: []string{`st=completed`, `d="kiken-voluntary" by="aka"`, `cs=[`}},
+	}
+}
+
+// pmKindCases are the matrix cases for every kind of tap beyond a strike
+// (ippon.remove by mark id, foul, overtime, engi flag, team bout decision), each
+// around a finish or alone, plus the cases of review round 6: a mark's id
+// across arrival orders and a tap that reaches a match with no bout rows
+// before the withdrawal that pads them.
+func pmKindCases() []pmCase {
+	M := []string{"M"}
+	b := func(pos int, a, bb []string, w string) state.SubMatchResult {
+		return state.SubMatchResult{Position: pos, SideA: fmt.Sprintf("A%d", pos), SideB: fmt.Sprintf("B%d", pos), IpponsA: a, IpponsB: bb, Winner: w}
+	}
+	t1, t2, t3 := mmT1, mmT2, mmT3
+	e := func(id string, seq, at int64, kind domain.ScoreEventKind, pos int, side, letter, target, value string) pmStep {
+		return pmEventOf(domain.ScoreEvent{ID: id, Session: "d1", Seq: seq, Stamp: at, Kind: kind, Pos: pos, Side: side, Letter: letter, Target: target, Value: value})
+	}
+	ryu := `w="Ryu"`
+	seen := new(string)
+	markA := pmStep{at: t2, role: pmTap, run: func(h mmHome) string {
+		a := pmPt(t2, M, nil).run(h)
+		*seen = pmMarkID(h)
+		return a
+	}}
+	removeSeen := func(at int64) pmStep {
+		ev := domain.ScoreEvent{ID: "r1", Session: "d2", Seq: 1, Stamp: at, Kind: domain.ScoreIpponRemove, Target: "unset"}
+		s := pmEventOf(ev)
+		s.run = func(h mmHome) string {
+			ev := ev
+			ev.Target = *seen
+			return pmEventOf(ev).run(h)
+		}
+		return s
+	}
+	return []pmCase{
+		// ippon.remove by the id of a mark.
+		{name: "kind ind e1 add a:M T1, e2 remove e1 T2", steps: []pmStep{e("e1", 1, t1, domain.ScoreIpponAdd, 0, "a", "M", "", ""), e("e2", 2, t2, domain.ScoreIpponRemove, 0, "", "", "e1", "")},
+			want: []string{`st=running`, `A=[] B=[]`}, outs: map[string]string{"e1": "applied", "e2": "applied"}},
+		{name: "kind ind e1 add a:M T1, e2 remove e1 T2, fin Ryu M-0 T3 own e1 e2", steps: []pmStep{e("e1", 1, t1, domain.ScoreIpponAdd, 0, "a", "M", "", ""), e("e2", 2, t2, domain.ScoreIpponRemove, 0, "", "", "e1", ""), pmFin(t3, wrTeamA, M, nil, "e1", "e2")},
+			want: []string{`st=completed`, ryu, `A=[M]`}, outs: map[string]string{"e1": "recorded", "e2": "recorded"}},
+		{name: "kind ind e1 add a:M T1, e2 remove e1 T2, fin Ryu M-0 T3 (no basis)", steps: []pmStep{e("e1", 1, t1, domain.ScoreIpponAdd, 0, "a", "M", "", ""), e("e2", 2, t2, domain.ScoreIpponRemove, 0, "", "", "e1", ""), pmFin(t3, wrTeamA, M, nil)},
+			want: []string{`st=completed`, ryu, `A=[M]`}, outs: map[string]string{"e1": "beforeBaseline", "e2": "beforeBaseline"}},
+		{name: "kind ind fin Ryu M-0 T1, e1 add a:K T2, e2 remove e1 T3", steps: []pmStep{pmFin(t1, wrTeamA, M, nil), e("e1", 1, t2, domain.ScoreIpponAdd, 0, "a", "K", "", ""), e("e2", 2, t3, domain.ScoreIpponRemove, 0, "", "", "e1", "")},
+			refused: []int{1, 2}, want: []string{`st=completed`, ryu, `A=[M] B=[]`}, outs: map[string]string{"e1": "matchClosed", "e2": "matchClosed"}},
+		// A mark's id is the same in every arrival order, so a removal made
+		// from the screen that showed it finds it even when an OLDER save of
+		// the same mark arrives later.
+		{name: "kind ind pt M T1 / pt M T2 / remove the mark T3 by its id", steps: []pmStep{pmPt(t1, M, nil), markA, removeSeen(t3)},
+			causal: [][2]int{{1, 2}}, want: []string{`st=running`, `A=[] B=[]`}, outs: map[string]string{"r1": "applied"}},
+		// Fouls.
+		{name: "kind ind e1 foul a T1, e2 foul a T2 (a second foul), fin Ryu M-0 T3 own e1 e2", steps: []pmStep{e("e1", 1, t1, domain.ScoreFoulAdd, 0, "a", "", "", ""), e("e2", 2, t2, domain.ScoreFoulAdd, 0, "a", "", "", ""), pmFin(t3, wrTeamA, M, nil, "e1", "e2")},
+			want: []string{`st=completed`, ryu}, outs: map[string]string{"e1": "recorded", "e2": "recorded"}},
+		{name: "kind ind fin Ryu M-0 T1, foul a T2, foul remove a T3", steps: []pmStep{pmFin(t1, wrTeamA, M, nil), e("e1", 1, t2, domain.ScoreFoulAdd, 0, "a", "", "", ""), e("e2", 2, t3, domain.ScoreFoulRemove, 0, "a", "", "", "")},
+			refused: []int{1, 2}, want: []string{`st=completed`, ryu, `A=[M] B=[]`}},
+		{name: "kind ind foul a T1, foul remove a T2, foul a T3", steps: []pmStep{e("e1", 1, t1, domain.ScoreFoulAdd, 0, "a", "", "", ""), e("e2", 2, t2, domain.ScoreFoulRemove, 0, "a", "", "", ""), e("e3", 3, t3, domain.ScoreFoulAdd, 0, "a", "", "", "")},
+			want: []string{`st=running`}, outs: map[string]string{"e1": "applied", "e2": "applied", "e3": "applied"}},
+		// Two fouls land an H on the opponent and reset the count, so a removal
+		// after them has no outstanding foul to take off.
+		{name: "kind ind foul a T1, foul a T2 (a second foul: H to b), foul remove a T3", steps: []pmStep{e("e1", 1, t1, domain.ScoreFoulAdd, 0, "a", "", "", ""), e("e2", 2, t2, domain.ScoreFoulAdd, 0, "a", "", "", ""), e("e3", 3, t3, domain.ScoreFoulRemove, 0, "a", "", "", "")},
+			want: []string{`st=running`, `B=[H]`}, outs: map[string]string{"e1": "applied", "e2": "applied", "e3": "noTarget"}},
+		// Overtime.
+		{name: "kind ind encho add T1, fin Ryu M-0 T2 (overtime is not the finish's)", steps: []pmStep{e("e1", 1, t1, domain.ScoreEnchoAdd, 0, "", "", "", ""), pmFin(t2, wrTeamA, M, nil)},
+			want: []string{`st=completed`, ryu}, outs: map[string]string{"e1": "applied"}},
+		{name: "kind ind fin Ryu M-0 T1, encho add T2, encho remove T3", steps: []pmStep{pmFin(t1, wrTeamA, M, nil), e("e1", 1, t2, domain.ScoreEnchoAdd, 0, "", "", "", ""), e("e2", 2, t3, domain.ScoreEnchoRemove, 0, "", "", "", "")},
+			refused: []int{1, 2}, want: []string{`st=completed`, ryu}},
+		{name: "kind ind encho add T1, encho add T2, encho remove T3", steps: []pmStep{e("e1", 1, t1, domain.ScoreEnchoAdd, 0, "", "", "", ""), e("e2", 2, t2, domain.ScoreEnchoAdd, 0, "", "", "", ""), e("e3", 3, t3, domain.ScoreEnchoRemove, 0, "", "", "", "")},
+			want: []string{`st=running`}},
+		// Engi flags.
+		{name: "kind engi flag a T1, flag a T2, fin 3-0 T3 own e1 e2", engi: true, steps: []pmStep{e("e1", 1, t1, domain.ScoreFlagAdd, 0, "a", "", "", ""), e("e2", 2, t2, domain.ScoreFlagAdd, 0, "a", "", "", ""), pmEngiFin(t3, 3, 0, "e1", "e2")},
+			want: []string{`st=completed`, ryu}, outs: map[string]string{"e1": "recorded", "e2": "recorded"}},
+		{name: "kind engi fin 3-0 T1, flag b T2, flag remove a T3", engi: true, steps: []pmStep{pmEngiFin(t1, 3, 0), e("e1", 1, t2, domain.ScoreFlagAdd, 0, "b", "", "", ""), e("e2", 2, t3, domain.ScoreFlagRemove, 0, "a", "", "", "")},
+			refused: []int{1, 2}, want: []string{`st=completed`, ryu}},
+		// Team bout decisions.
+		{name: "kind team e1 hikiwake b1 T1, e2 fusensho b2 T2, fin Ryu(b1 b2) T3 own e1 e2", team: true, rows: true, steps: []pmStep{
+			e("e1", 1, t1, domain.ScoreBoutDecision, 1, "", "", "", domain.BoutDecisionHikiwake), e("e2", 2, t2, domain.ScoreBoutDecision, 2, "b", "", "", domain.BoutDecisionFusensho), pmTeamFin(t3, wrTeamA, []string{"e1", "e2"}, b(1, M, nil, "A1"), b(2, M, nil, "A2"))},
+			want: []string{`st=completed`, ryu}, outs: map[string]string{"e1": "recorded", "e2": "recorded"}},
+		{name: "kind team fin Ryu(b1) T1, hikiwake b2 T2, clear b2 T3", team: true, rows: true, steps: []pmStep{
+			pmTeamFin(t1, wrTeamA, nil, b(1, M, nil, "A1")), e("e1", 1, t2, domain.ScoreBoutDecision, 2, "", "", "", domain.BoutDecisionHikiwake), e("e2", 2, t3, domain.ScoreBoutDecision, 2, "", "", "", domain.BoutDecisionClear)},
+			refused: []int{1, 2}, want: []string{`st=completed`, ryu}},
+		// A tap stamped after a team withdrawal reaches a match whose bout rows
+		// are not drawn yet: it lands whichever arrives first, and the history
+		// says so.
+		{name: "kind team kiken aka T1 / e b1 a:M T2 (no rows drawn)", team: true, landsAfter: true, steps: []pmStep{pmDec(t1, "kiken-voluntary", "aka"), e("e1", 1, t2, domain.ScoreIpponAdd, 1, "a", "M", "", "")},
+			want: []string{`st=completed`, `w="Tora" d="kiken-voluntary" by="aka"`, `[1 [M]-[] w="Ryu" d=""]`}, outs: map[string]string{"e1": "applied"}},
 	}
 }
 

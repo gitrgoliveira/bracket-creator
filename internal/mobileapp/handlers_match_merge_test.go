@@ -31,7 +31,15 @@ const (
 // plus a second match on the same court.
 func mergeServer(t *testing.T, compID string) (http.Handler, *state.Store) {
 	t.Helper()
-	r, store, _, _, _ := setupTestRouter(t)
+	r, store, _ := mergeServerDir(t, compID)
+	return r, store
+}
+
+// mergeServerDir is mergeServer that also names the store's data folder, for
+// a test that damages a file in it.
+func mergeServerDir(t *testing.T, compID string) (http.Handler, *state.Store, string) {
+	t.Helper()
+	r, store, _, _, dir := setupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Name: compID, Kind: "individual", Format: state.CompFormatLeague,
@@ -45,7 +53,7 @@ func mergeServer(t *testing.T, compID string) (http.Handler, *state.Store) {
 		{ID: "Pool A-0", SideA: mgAlice, SideAID: mgAliceID, SideB: mgBob, SideBID: mgBobID, Court: "A", Status: state.MatchStatusRunning},
 		{ID: "Pool A-1", SideA: mgBob, SideAID: mgBobID, SideB: mgAlice, SideBID: mgAliceID, Court: "A", Status: state.MatchStatusScheduled},
 	}))
-	return r, store
+	return r, store, dir
 }
 
 func mergeScore(t *testing.T, r http.Handler, compID string, body map[string]any) map[string]any {

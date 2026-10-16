@@ -214,6 +214,37 @@ describe('score events: applyPending', () => {
     expect(sched.outcomes).toEqual({ y: NOT_STARTED });
   });
 
+  // G1: a push that arrives before a tap's own answer already holds the tap;
+  // a foul that lands no H and an overtime period leave no mark id, so the
+  // server copy says per session the highest seq its log holds (eventSeqs).
+  it('a tap the server copy holds by seq (eventSeqs) is a duplicate: a foul and an overtime period count once', () => {
+    const server = running({ hansokuB: 1, encho: { periodCount: 1 }, eventSeqs: { dev: 2, other: 9 } });
+    const pending = [
+      { ...ev({ id: 'f1', kind: FOUL_ADD, side: SIDE_B }), session: 'dev', seq: 1 },
+      { ...ev({ id: 'x1', kind: ENCHO_ADD }), session: 'dev', seq: 2 },
+    ];
+    const r = applyPending(server, pending);
+    expect(r.outcomes).toEqual({ f1: DUPLICATE, x1: DUPLICATE });
+    expect(r.match.hansokuB).toBe(1);
+    expect(r.match.encho).toEqual({ periodCount: 1 });
+  });
+
+  it('only taps at or below their own session\'s seq are skipped', () => {
+    const server = running({ hansokuB: 1, eventSeqs: { dev: 1 } });
+    const pending = [
+      { ...ev({ id: 'f1', kind: FOUL_ADD, side: SIDE_B }), session: 'dev', seq: 1 },
+      { ...ev({ id: 'x1', kind: ENCHO_ADD }), session: 'dev', seq: 2 },
+      { ...ev({ id: 'f2', kind: FOUL_ADD, side: SIDE_A }), session: 'elsewhere', seq: 1 },
+      { ...ev({ id: 'f3', kind: FOUL_ADD, side: SIDE_A }) },
+    ];
+    const r = applyPending(server, pending);
+    expect(r.outcomes).toEqual({ f1: DUPLICATE, x1: APPLIED, f2: APPLIED, f3: APPLIED });
+    expect(r.match.hansokuB).toBe(1);
+    // f2 and f3, two fouls by side A: the second lands an H for side B.
+    expect(r.match.ipponsB).toEqual(['H']);
+    expect(r.match.encho).toEqual({ periodCount: 1 });
+  });
+
   it('never mutates the server match or the pending list', () => {
     const server = running({ ipponsA: ['M'], markIds: { a: ['b:0:a:M:0'] }, encho: { periodCount: 1 } });
     const pending = [ev({ kind: IPPON_REMOVE, target: 'b:0:a:M:0' }), ev({ kind: ENCHO_ADD }), ev({ kind: FOUL_ADD, side: SIDE_A })];

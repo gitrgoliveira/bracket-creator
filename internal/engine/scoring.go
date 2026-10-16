@@ -962,7 +962,7 @@ func applyPoolWriteLog(stored, result *state.MatchResult, policy matchWritePolic
 		result.SubResultsRaw = ""
 		result.SubResultsUnreadable = false
 	}
-	prior := derivedScoreOf(stored.IpponsA, stored.IpponsB, stored.MarkIDs, stored.SubResults, stored.ScoreVersion)
+	prior := derivedScoreOf(stored.IpponsA, stored.IpponsB, stored.MarkIDs, stored.SubResults, stored.ScoreVersion, stored.EventSeqs)
 	*stored = *result
 	// The write's own merge inputs and report stay on the incoming result for
 	// the caller; the stored copy must not carry them to a later writer.
@@ -977,13 +977,17 @@ func applyPoolWriteLog(stored, result *state.MatchResult, policy matchWritePolic
 	switch {
 	case policy == matchWriteRestore:
 		stored.MarkIDs = result.MarkIDs.Clone()
+		stored.EventSeqs = state.CloneGroupStamps(result.EventSeqs)
 	case result.WriteDoor == DoorEvent:
 		stored.MarkIDs = result.MarkIDs.Clone()
 		stored.ScoreVersion = max(prior.version, result.ScoreVersion)
+		stored.EventSeqs = mergeEventSeqs(prior.eventSeqs, result.EventSeqs)
 	default:
 		stored.MarkIDs = prior.carry(stored.IpponsA, stored.IpponsB, stored.SubResults)
 		stored.ScoreVersion = prior.version
+		stored.EventSeqs = state.CloneGroupStamps(prior.eventSeqs)
 		result.MarkIDs, result.ScoreVersion = stored.MarkIDs.Clone(), stored.ScoreVersion
+		result.EventSeqs = state.CloneGroupStamps(stored.EventSeqs)
 	}
 	return false, false, inherited, nil
 }
@@ -2676,10 +2680,12 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	switch {
 	case policy == matchWriteRestore:
 		bm.MarkIDs, bm.ScoreVersion = result.MarkIDs.Clone(), result.ScoreVersion
+		bm.EventSeqs = state.CloneGroupStamps(result.EventSeqs)
 	case result.WriteDoor == DoorEvent:
 		bm.MarkIDs, bm.ScoreVersion = result.MarkIDs.Clone(), max(bm.ScoreVersion, result.ScoreVersion)
+		bm.EventSeqs = mergeEventSeqs(bm.EventSeqs, result.EventSeqs)
 	default:
-		d := derivedScoreOf(bm.IpponsA, bm.IpponsB, bm.MarkIDs, bm.SubResults, bm.ScoreVersion)
+		d := derivedScoreOf(bm.IpponsA, bm.IpponsB, bm.MarkIDs, bm.SubResults, bm.ScoreVersion, bm.EventSeqs)
 		prior = &d
 	}
 	// The verdict rides in the ippons about to be rendered; forward writes
@@ -2735,7 +2741,9 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	if prior != nil {
 		bm.MarkIDs = prior.carry(bm.IpponsA, bm.IpponsB, bm.SubResults)
 		bm.ScoreVersion = prior.version
+		bm.EventSeqs = state.CloneGroupStamps(prior.eventSeqs)
 		result.MarkIDs, result.ScoreVersion = bm.MarkIDs.Clone(), bm.ScoreVersion
+		result.EventSeqs = state.CloneGroupStamps(bm.EventSeqs)
 	}
 	// Echo the persisted scheduling fields back into result so the caller (and
 	// the SSE broadcast) sees the full match state rather than the empty

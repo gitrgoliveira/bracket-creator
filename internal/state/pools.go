@@ -166,6 +166,7 @@ func (s *Store) copyMatchResults(results []MatchResult) []MatchResult {
 		res[i].Encho = r.Encho.Clone()
 		res[i].GroupStamps = CloneGroupStamps(r.GroupStamps)
 		res[i].MarkIDs = r.MarkIDs.Clone()
+		res[i].EventSeqs = CloneGroupStamps(r.EventSeqs)
 		// The write's own transient inputs and outputs never travel on a
 		// stored copy: a writer that builds its result from one (the
 		// daihyosen add, `u := *match`) must state its own.
@@ -709,6 +710,36 @@ var poolMatchColumns = []poolMatchColumn{
 		take: func(m *MatchResult, cell string) {
 			if v, err := strconv.Atoi(cell); err == nil && v > 0 {
 				m.ScoreVersion = v
+			}
+		}},
+	// Per event session, the highest seq of its taps the score log holds
+	// (bc-evts), JSON {"<session>":<seq>}, appended after ScoreVersion. A
+	// corrupt cell reads as none: the next tap's replay derives it again.
+	{name: "EventSeqs",
+		put: func(r *MatchResult) string {
+			if len(r.EventSeqs) == 0 {
+				return ""
+			}
+			b, err := json.Marshal(r.EventSeqs)
+			if err != nil {
+				slog.Error("state: pool match EventSeqs marshal failed; writing empty cell",
+					"matchID", r.ID, "error", err)
+				return ""
+			}
+			return string(b)
+		},
+		take: func(m *MatchResult, cell string) {
+			if cell == "" {
+				return
+			}
+			var seqs map[string]int64
+			if err := json.Unmarshal([]byte(cell), &seqs); err != nil {
+				slog.Error("state: pool match EventSeqs cell corrupt; reading as none",
+					"matchID", m.ID, "error", err)
+				return
+			}
+			if len(seqs) > 0 {
+				m.EventSeqs = seqs
 			}
 		}},
 }

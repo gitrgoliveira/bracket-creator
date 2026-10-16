@@ -93,6 +93,7 @@ func bracketMatchAsResult(bm *state.BracketMatch) *state.MatchResult {
 		// (bc-evts), so a restore puts back the ids the marks really had.
 		MarkIDs:      bm.MarkIDs.Clone(),
 		ScoreVersion: bm.ScoreVersion,
+		EventSeqs:    state.CloneGroupStamps(bm.EventSeqs),
 	}
 }
 

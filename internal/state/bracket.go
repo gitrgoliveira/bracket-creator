@@ -211,6 +211,7 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 			res.Rounds[i][j].SubResults = CloneSubResults(round[j].SubResults)
 			res.Rounds[i][j].GroupStamps = CloneGroupStamps(round[j].GroupStamps)
 			res.Rounds[i][j].MarkIDs = round[j].MarkIDs.Clone()
+			res.Rounds[i][j].EventSeqs = CloneGroupStamps(round[j].EventSeqs)
 			if round[j].Feeders != nil {
 				res.Rounds[i][j].Feeders = append([]string(nil), round[j].Feeders...)
 			}
@@ -231,6 +232,7 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 		tpm.SubResults = CloneSubResults(b.ThirdPlaceMatch.SubResults)
 		tpm.GroupStamps = CloneGroupStamps(b.ThirdPlaceMatch.GroupStamps)
 		tpm.MarkIDs = b.ThirdPlaceMatch.MarkIDs.Clone()
+		tpm.EventSeqs = CloneGroupStamps(b.ThirdPlaceMatch.EventSeqs)
 		if b.ThirdPlaceMatch.Feeders != nil {
 			tpm.Feeders = append([]string(nil), b.ThirdPlaceMatch.Feeders...)
 		}

@@ -881,12 +881,14 @@ func (e *Engine) takeReplayDerived(h state.StoreTx, compID, matchID string, inPo
 	if inPool {
 		_, err = h.UpdatePoolMatchByID(compID, matchID, func(r *state.MatchResult) error {
 			r.ScoreVersion = derived.ScoreVersion
+			r.EventSeqs = state.CloneGroupStamps(derived.EventSeqs)
 			takeDerivedMarks(&r.MarkIDs, r.SubResults, derived)
 			return nil
 		})
 	} else {
 		_, err = h.UpdateBracketMatchByID(compID, matchID, func(bm *state.BracketMatch) {
 			bm.ScoreVersion = derived.ScoreVersion
+			bm.EventSeqs = state.CloneGroupStamps(derived.EventSeqs)
 			takeDerivedMarks(&bm.MarkIDs, bm.SubResults, derived)
 		})
 	}

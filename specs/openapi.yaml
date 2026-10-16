@@ -350,7 +350,7 @@ paths:
         The first data frame is the stream's hello: a heartbeat (no `id:`, no
         seq consumed) carrying `hello: true`, the server's `nowMs` and its
         `build` (the `X-App-Build` value). A `match_updated` frame's `result`
-        carries the match's `markIds` and `scoreVersion` (see MatchResult).
+        carries the match's `markIds`, `scoreVersion` and `eventSeqs` (see MatchResult).
 
         Event types (canonical set defined in `internal/mobileapp/hub.go`):
         - `match_updated`: a match's score/court/scheduledAt changed.
@@ -6868,6 +6868,22 @@ components:
             no log yet). It only grows, so of two copies of a running match the
             one with the higher version is the newer. Derived by the server;
             a value a write carries is ignored.
+        eventSeqs:
+          type: object
+          readOnly: true
+          additionalProperties:
+            type: integer
+            format: int64
+          description: >
+            Per device event session (the `session` of
+            POST /api/competitions/{id}/matches/{mid}/score-events), the highest
+            `seq` of that session's tap events the match's score event log
+            holds, whatever each tap's outcome. A device folding its own taps
+            not yet answered onto this copy skips a tap whose `seq` is at or
+            below its session's entry: the copy already holds it. Only
+            sessions that logged an event with a `seq` appear, one entry each,
+            at most 32 (the sessions that tapped latest are kept). Absent when
+            none. Derived by the server; a value a write carries is ignored.
         groupStamps:
           type: object
           readOnly: true
@@ -7434,6 +7450,13 @@ components:
           type: integer
           readOnly: true
           description: See MatchResult.scoreVersion.
+        eventSeqs:
+          type: object
+          readOnly: true
+          additionalProperties:
+            type: integer
+            format: int64
+          description: See MatchResult.eventSeqs.
         placeholderA:
           type: string
           readOnly: true

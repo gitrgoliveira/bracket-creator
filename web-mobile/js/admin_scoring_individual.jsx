@@ -123,7 +123,7 @@ function seedBoard(src) {
 // The scoring fields a board takes from the newest copy the outbox holds.
 const DERIVED_BOARD_FIELDS = {
   ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, encho: null, markIds: undefined,
-  scoreVersion: 0, modifiedAt: 0,
+  scoreVersion: 0, modifiedAt: 0, eventSeqs: undefined,
 };
 
 // tapBoardOf (bc-evts stage 3, S6): the board of a RUNNING match. Its base is

@@ -121,12 +121,13 @@ func BaselineFromMatch(m *state.MatchResult, id, door string, stamp int64, group
 
 // derivedScore is what a stored match holds that only the replay derives
 // (bc-evts): the mark ids of its scoreline and of each bout, and the event-log
-// version, with the ippons each set of ids names.
+// version and per-session seqs, with the ippons each set of ids names.
 type derivedScore struct {
 	ipponsA, ipponsB []string
 	marks            *state.MarkIDs
 	bouts            map[int]derivedBout
 	version          int
+	eventSeqs        map[string]int64
 }
 
 type derivedBout struct {
@@ -134,9 +135,9 @@ type derivedBout struct {
 	marks            *state.MarkIDs
 }
 
-func derivedScoreOf(ipponsA, ipponsB []string, marks *state.MarkIDs, subs []state.SubMatchResult, version int) derivedScore {
+func derivedScoreOf(ipponsA, ipponsB []string, marks *state.MarkIDs, subs []state.SubMatchResult, version int, eventSeqs map[string]int64) derivedScore {
 	d := derivedScore{ipponsA: slices.Clone(ipponsA), ipponsB: slices.Clone(ipponsB), marks: marks.Clone(),
-		bouts: make(map[int]derivedBout, len(subs)), version: version}
+		bouts: make(map[int]derivedBout, len(subs)), version: version, eventSeqs: state.CloneGroupStamps(eventSeqs)}
 	for _, row := range subs {
 		d.bouts[row.Position] = derivedBout{ipponsA: slices.Clone(row.IpponsA), ipponsB: slices.Clone(row.IpponsB), marks: row.MarkIDs.Clone()}
 	}
@@ -144,11 +145,12 @@ func derivedScoreOf(ipponsA, ipponsB []string, marks *state.MarkIDs, subs []stat
 }
 
 // carry settles the derived fields of a write that is not the replay's
-// (DoorEvent): the mark ids and the version are never taken from a write,
+// (DoorEvent): the mark ids, the version and the seqs are never taken from a write,
 // which a client builds and may fill with anything. A scoreline (the match's,
 // or a bout's) the write left as it was keeps the ids it had; one it changed
 // has none until the replay names its marks again. It returns the match-level
-// ids and rewrites each row's in subs; the version is d.version.
+// ids and rewrites each row's in subs; the version is d.version and the seqs
+// d.eventSeqs.
 func (d derivedScore) carry(ipponsA, ipponsB []string, subs []state.SubMatchResult) *state.MarkIDs {
 	for i := range subs {
 		row := &subs[i]
@@ -230,6 +232,55 @@ func ScoreLogGaps(lines []state.ScoreLogLine) map[string][]int64 {
 				out[session] = append(out[session], s)
 			}
 		}
+	}
+	return out
+}
+
+// ScoreLogEventSeqs is, per event session, the highest Seq of that session's
+// events in a match's log (MatchResult.EventSeqs): every logged tap counts,
+// whatever the replay made of it (applied, a duplicate mark, not allowed,
+// turned away by a finished match), since each is held by the server and a
+// board must not fold it again. Events with no session or no Seq are not
+// counted; nil when none is. Past state.MaxEventSeqSessions sessions, the ones
+// whose last event was logged latest are kept.
+func ScoreLogEventSeqs(lines []state.ScoreLogLine) map[string]int64 {
+	top := map[string]int64{}
+	last := map[string]int{}
+	for i, l := range lines {
+		e := l.Event
+		if e == nil || e.Seq <= 0 || e.Session == "" {
+			continue
+		}
+		top[e.Session] = max(top[e.Session], e.Seq)
+		last[e.Session] = i
+	}
+	if len(top) == 0 {
+		return nil
+	}
+	if len(top) > state.MaxEventSeqSessions {
+		sessions := make([]string, 0, len(top))
+		for s := range top {
+			sessions = append(sessions, s)
+		}
+		slices.SortFunc(sessions, func(a, b string) int { return cmp.Compare(last[b], last[a]) })
+		for _, s := range sessions[state.MaxEventSeqSessions:] {
+			delete(top, s)
+		}
+	}
+	return top
+}
+
+// mergeEventSeqs settles the seqs of the replay's derived write (DoorEvent) on
+// a stored match: the replay read the whole log, so its sessions are the ones
+// kept, each never lower than the stored one (the seqs only grow, as the
+// version does). A derived write with none keeps the stored ones.
+func mergeEventSeqs(stored, derived map[string]int64) map[string]int64 {
+	if len(derived) == 0 {
+		return state.CloneGroupStamps(stored)
+	}
+	out := state.CloneGroupStamps(derived)
+	for s, seq := range out {
+		out[s] = max(seq, stored[s])
 	}
 	return out
 }
@@ -345,6 +396,7 @@ func cloneMatchForReplay(m state.MatchResult) state.MatchResult {
 	c.SubResults = state.CloneSubResults(m.SubResults)
 	c.Encho = m.Encho.Clone()
 	c.MarkIDs = m.MarkIDs.Clone()
+	c.EventSeqs = state.CloneGroupStamps(m.EventSeqs)
 	c.GroupStamps = state.CloneGroupStamps(m.GroupStamps)
 	return c
 }
@@ -480,6 +532,7 @@ func replayScoring(current *state.MatchResult, lines []state.ScoreLogLine, shape
 		out.Match.ModifiedAt = max(out.Match.ModifiedAt, s)
 	}
 	out.Match.ScoreVersion = len(lines)
+	out.Match.EventSeqs = ScoreLogEventSeqs(lines)
 	for i, l := range lines {
 		if l.Event != nil {
 			out.Outcomes = append(out.Outcomes, EventOutcome{ID: l.Event.ID, Line: i, Outcome: rp.outcome[i]})

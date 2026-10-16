@@ -86,6 +86,10 @@ export function serverFold(match, events) {
     outcomes[e.id] = outcome;
     if (outcome !== NOT_STARTED) {
       m = { ...m, scoreVersion: (Number(m.scoreVersion) || 0) + 1, modifiedAt: Math.max(Number(m.modifiedAt) || 0, Number(e.stamp) || 0) };
+      // The highest seq logged per session (engine.ScoreLogEventSeqs).
+      if (e.session && e.seq > 0) {
+        m.eventSeqs = { ...(m.eventSeqs || {}), [e.session]: Math.max(Number((m.eventSeqs || {})[e.session]) || 0, e.seq) };
+      }
     }
   }
   return { match: m, outcomes };

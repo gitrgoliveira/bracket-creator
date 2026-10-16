@@ -319,15 +319,24 @@ const markIdSet = (m) => new Set([...((m.markIds && m.markIds.a) || []), ...((m.
 // matchClosed and one on a scheduled match notStarted (both change nothing),
 // and a tap whose mark the server match already carries (its id is a mark id)
 // is a duplicate, so an echo that lands before the outbox's answer does not
-// show the point twice. scoreVersion and modifiedAt stay the server's: the
+// show the point twice. A tap that leaves no mark id (a foul that lands no H,
+// an overtime period, a removal) is told apart by its seq: the server copy
+// names, per event session, the highest seq its log holds (eventSeqs), and a
+// tap at or below its own session's is in the copy already, whatever the
+// server made of it. scoreVersion and modifiedAt stay the server's: the
 // board is not a newer copy of the match than the one the server confirmed.
 // Neither argument is changed.
 export function applyPending(serverMatch, pending, opts = {}) {
   let match = copy(serverMatch);
   const outcomes = {};
+  const held = (serverMatch && serverMatch.eventSeqs) || {};
   for (const e of pending || []) {
     if (match.status === 'completed') { outcomes[e.id] = MATCH_CLOSED; continue; }
     if (match.status === 'scheduled') { outcomes[e.id] = NOT_STARTED; continue; }
+    if (e.session && e.seq > 0 && Number(held[e.session]) >= e.seq) {
+      outcomes[e.id] = DUPLICATE;
+      continue;
+    }
     if ((e.kind === IPPON_ADD || e.kind === FOUL_ADD) && markIdSet(match).has(e.id)) {
       outcomes[e.id] = DUPLICATE;
       continue;
@@ -448,6 +457,28 @@ function setGroup(m, g, v) {
   throw new Error(`score_events: group ${g} is folded from stage 5`);
 }
 
+// logEventSeqs mirrors engine.ScoreLogEventSeqs: per event session, the
+// highest seq the log holds, whatever each tap's outcome; null when none, and
+// past MAX_EVENT_SEQ_SESSIONS the sessions logged latest are kept.
+const MAX_EVENT_SEQ_SESSIONS = 32;
+function logEventSeqs(log) {
+  const top = {};
+  const last = {};
+  log.forEach((l, i) => {
+    const e = l && l.event;
+    if (!e || !(e.seq > 0) || !e.session) return;
+    top[e.session] = Math.max(top[e.session] || 0, e.seq);
+    last[e.session] = i;
+  });
+  const sessions = Object.keys(top);
+  if (sessions.length === 0) return null;
+  if (sessions.length > MAX_EVENT_SEQ_SESSIONS) {
+    sessions.sort((a, b) => last[b] - last[a]);
+    for (const s of sessions.slice(MAX_EVENT_SEQ_SESSIONS)) delete top[s];
+  }
+  return top;
+}
+
 // replayHead is engine.replayScoring for a log of individual or engi lines:
 // `match` is the stored match (the cache, the match AFTER every line) and the
 // log is head followed by lines, in that order of arrival (a line's index in
@@ -550,6 +581,9 @@ export function replayHead(match, head, lines, opts = {}) {
     delete cur.groupStamps;
   }
   cur.scoreVersion = log.length;
+  const seqs = logEventSeqs(log);
+  if (seqs) cur.eventSeqs = seqs;
+  else delete cur.eventSeqs;
   const outcomes = [];
   log.forEach((l, i) => { if (l.event) outcomes.push({ id: l.event.id, line: i, outcome: outcome[i] }); });
   return { match: cur, outcomes };

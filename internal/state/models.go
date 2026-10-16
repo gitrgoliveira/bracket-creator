@@ -1781,7 +1781,20 @@ type MatchResult struct {
 	// their stamps: a late older event changes a match without moving its
 	// ModifiedAt. 0 for a match with no log. Persisted after MarkIDs.
 	ScoreVersion int `json:"scoreVersion,omitempty" yaml:"-"`
+	// EventSeqs is, per device event session, the highest Seq of that
+	// session's tap events the match's score log holds (bc-evts), whatever
+	// each tap's outcome: a board folding its own pending taps over this copy
+	// skips a tap whose seq is at or below it, since the server copy already
+	// holds it (an echo that lands before the tap's own answer). Only sessions
+	// with a seq'd event, at most MaxEventSeqSessions of them (the latest
+	// logged). Derived by engine.ReplayScoring like ScoreVersion; persisted
+	// after ScoreVersion.
+	EventSeqs map[string]int64 `json:"eventSeqs,omitempty" yaml:"-"`
 }
+
+// MaxEventSeqSessions bounds MatchResult.EventSeqs: one entry per device
+// session that tapped on the match, the most recent ones kept.
+const MaxEventSeqSessions = 32
 
 // MarkIDs carries one id per entry of a side's ippon slice, index for index
 // (A names IpponsA[i], B names IpponsB[i]; "" for a placeholder slot).
@@ -2083,10 +2096,11 @@ type BracketMatch struct {
 	// last applied change to each group of this match, persisted in
 	// bracket.json. nil on a legacy match (every group reads ModifiedAt).
 	GroupStamps map[string]int64 `json:"groupStamps,omitempty"`
-	// MarkIDs and ScoreVersion mirror MatchResult.MarkIDs/ScoreVersion
-	// (bc-evts), persisted in bracket.json.
-	MarkIDs      *MarkIDs `json:"markIds,omitempty"`
-	ScoreVersion int      `json:"scoreVersion,omitempty"`
+	// MarkIDs, ScoreVersion and EventSeqs mirror MatchResult's (bc-evts),
+	// persisted in bracket.json.
+	MarkIDs      *MarkIDs         `json:"markIds,omitempty"`
+	ScoreVersion int              `json:"scoreVersion,omitempty"`
+	EventSeqs    map[string]int64 `json:"eventSeqs,omitempty"`
 	// PlaceholderA / PlaceholderB / PlaceholderWinner record what SideA / SideB /
 	// Winner held at DRAW time, before any pool resolved. They are written once,
 	// by engine.buildBracketFromDraw, for a pool-fed (mixed) knockout whose

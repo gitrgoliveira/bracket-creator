@@ -54,10 +54,56 @@ const DOOR_WORDS = {
     // A match that was not reopened but had a side seated again by a correction to an
     // earlier match (a feeder's winner changed), for a line of its own.
     'reseat': 'Side given another team by a correction to an earlier match',
+    // bc-evts: one tap from a score editor (the score-events door), and the
+    // lines the server keeps the stored match in step with its score log by.
+    'event': 'Tap',
+    'migrate': 'Score log started',
+    'drift': 'Stored match brought in line with its score log',
+    'repair': 'Competitor ids filled in',
 };
 
 export function historyDoorWords(door) {
     return DOOR_WORDS[door] || 'Updated';
+}
+
+// A tap's words (door "event"): the side ("a" is Aka, "b" is Shiro), what it
+// did, and the mark for a point added.
+const EVENT_KIND_WORDS = {
+    'ippon.remove': 'point taken off',
+    'foul.add': 'foul added',
+    'foul.remove': 'foul taken off',
+    'encho.add': 'overtime added',
+    'encho.remove': 'overtime taken off',
+    'flag.add': 'flag added',
+    'flag.remove': 'flag taken off',
+    'bout.decision': 'bout decision',
+    'bout.fighter': 'fighter named',
+    'rep.pick': 'representative picked',
+    'pool.rep': 'representative picked',
+    'daihyosen.verdict': 'representative bout decided',
+};
+function eventWords(ev) {
+    if (!ev || typeof ev !== 'object') return historyDoorWords('event');
+    const side = ev.side === 'a' ? `${sideWord('aka')} ` : ev.side === 'b' ? `${sideWord('shiro')} ` : '';
+    const what = ev.kind === 'ippon.add' ? `${ev.letter || 'point'} added` : (EVENT_KIND_WORDS[ev.kind] || 'change');
+    const bout = ev.pos > 0 ? ` on bout ${ev.pos}` : ev.pos < 0 ? ' on the representative bout' : '';
+    return `${historyDoorWords('event')}: ${side}${what}${bout}`;
+}
+// Why a tap was not applied (the server's outcome for it).
+const EVENT_OUTCOME_WORDS = {
+    capped: 'the bout was already decided',
+    beforeBaseline: 'a result recorded since already covered it',
+    noTarget: 'the mark it took off was already gone',
+    notAllowed: 'this match does not take that change',
+    matchClosed: 'the match was already finished',
+};
+function eventReason(entry) {
+    const o = entry.eventOutcome;
+    if (!o || o === 'applied' || o === 'recorded' || o === 'duplicate') return null;
+    // The server's reason is a sentence for a few outcomes and a code for
+    // others; a code is not shown.
+    const said = typeof entry.reason === 'string' && /\s/.test(entry.reason) ? entry.reason : null;
+    return `Not applied: ${said || EVENT_OUTCOME_WORDS[o] || 'the server did not apply it'}`;
 }
 
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -162,10 +208,12 @@ export function historyEntryView(entry, resolve) {
     // Why the whole write was kept rather than applied, when one rule did that
     // (bc-mrgc phase 3): the server's own words ("older revision of this
     // board" for a save the same device had already followed with a newer one).
-    const reason = typeof entry.reason === 'string' && entry.reason ? `${moved ? 'Moved to history' : 'Not applied'}: ${entry.reason}` : null;
+    const isTap = entry.door === 'event';
+    const reason = isTap ? eventReason(entry)
+        : typeof entry.reason === 'string' && entry.reason ? `${moved ? 'Moved to history' : 'Not applied'}: ${entry.reason}` : null;
     return {
         time: historyTime(entry),
-        door: historyDoorWords(entry.door),
+        door: isTap ? eventWords(entry.event) : historyDoorWords(entry.door),
         changed: changed.length ? `changed ${changed.join(', ')}` : 'changed nothing',
         held,
         cleared,

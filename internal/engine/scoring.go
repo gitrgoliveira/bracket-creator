@@ -2791,10 +2791,10 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 			// The result lock (K1, result_lock.go): an older finish that did
 			// not see the stored result is held, never refused, once the next
 			// match was played or started.
-			if policy == matchWriteForward && rivalDisplacesResult(rep) {
+			if policy == matchWriteForward && rivalDisplacesResult(rep, lines) {
 				if code := downstreamLockCode(bracket, rIdx, mIdx); code != "" {
 					result.Merge = rep
-					holdAsLocked(result, code)
+					holdAsLocked(result, nil, code)
 					return nil, false, nil, ErrMatchSuperseded
 				}
 			}

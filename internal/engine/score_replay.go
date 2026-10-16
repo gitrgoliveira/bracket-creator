@@ -739,7 +739,7 @@ func (rp *replayer) rivalResult(line int, b *state.ScoreBaseline) bool {
 	if !governed || inForce == line || b.Informed || baselineResultStatus(b) != state.MatchStatusCompleted {
 		return false
 	}
-	if b.BasisSent && inForce < b.Basis.Seen {
+	if b.BasisSent && basisHoldsLine(&b.Basis, inForce) {
 		return false
 	}
 	// A result that says what the match already holds, in every group it
@@ -810,12 +810,22 @@ func BasisSawResult(lines []state.ScoreLogLine, basis *state.ScoreBasis) bool {
 	if basis == nil {
 		return false
 	}
-	for i := 0; i < min(basis.Seen, len(lines)); i++ {
-		if b := lines[i].Baseline; b != nil && baselineResultStatus(b) == state.MatchStatusCompleted {
+	for i, l := range lines {
+		if !basisHoldsLine(basis, i) {
+			break
+		}
+		if b := l.Baseline; b != nil && baselineResultStatus(b) == state.MatchStatusCompleted {
 			return true
 		}
 	}
 	return false
+}
+
+// basisHoldsLine reports whether a write's basis holds the log line at index
+// line: the one reading of "this write saw that line", shared by the replay's
+// rivalResult (the line of the result in force) and BasisSawResult.
+func basisHoldsLine(basis *state.ScoreBasis, line int) bool {
+	return line < basis.Seen
 }
 
 // absorb settles event i, which baseline b's group value now holds or replaces:

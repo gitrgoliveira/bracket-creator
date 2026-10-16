@@ -252,8 +252,13 @@ func mergeMatchWrite(stored, incoming *state.MatchResult, policy matchWritePolic
 	// An engi finish is atomic with its count (HoldReasonEngiAtomic): a
 	// verdict older than the stored one (a reopen made after it) holds the
 	// count with it, rather than landing the count under a running match.
+	// A finish older than a stored FINISH is no such case: the first recorded
+	// result stands (I1), so the replay orders the two like any other finish
+	// and the atomic hold after it (engiFinishHeld) keeps flags and verdict
+	// together.
 	engiAtomic := mc.comp != nil && mc.comp.Engi && inChanged[state.GroupResult] && hold[state.GroupResult] &&
-		completesMatch(incoming, mc) && state.GroupDiffers(stored, incoming, state.GroupResult)
+		completesMatch(incoming, mc) && state.GroupDiffers(stored, incoming, state.GroupResult) &&
+		stored.Status != state.MatchStatusCompleted
 	holdWhole = holdWhole || engiAtomic
 	// A previous build's running write older than one its own board already
 	// sent (a lower revision of the same session than one the log holds,

@@ -2983,19 +2983,14 @@ type seenResultCheck struct {
 // see the result (the engine reads that log as empty too), so it reaches the
 // engine and ends in the match's history. Every read error is logged here,
 // naming the file and line when the error carries them.
-func (c *seenResultCheck) sawResult(basis *state.ScoreBasis) bool {
+// readable says whether the log could be read at all, from the same one read.
+func (c *seenResultCheck) sawResult(basis *state.ScoreBasis) (saw, readable bool) {
 	lines, err := c.stx.LoadScoreLog(c.compID, c.matchID)
 	if err != nil {
 		log.Printf("mobileapp: ERROR: match %s/%s: score log not read: %v", c.compID, c.matchID, err)
-		return false
+		return false, false
 	}
-	return engine.BasisSawResult(lines, basis)
-}
-
-// logReadable reports whether the match's score log can be read at all.
-func (c *seenResultCheck) logReadable() bool {
-	_, err := c.stx.LoadScoreLog(c.compID, c.matchID)
-	return err == nil
+	return engine.BasisSawResult(lines, basis), true
 }
 
 func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult, comp *state.Competition, score *seenResultCheck) correctionCheck {
@@ -3040,8 +3035,8 @@ func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult, comp *state
 				// not see the result: the engine reads it as empty too, and the
 				// write then ends in the match's history, which is a separate
 				// file, instead of being dropped before it gets there.
-				if !score.sawResult(r.Basis) {
-					if !score.logReadable() {
+				if saw, readable := score.sawResult(r.Basis); !saw {
+					if !readable {
 						// The engine reads this log as empty, so a basis naming lines of
 						// it means nothing: the write is judged, and logged, as one that
 						// sent none.

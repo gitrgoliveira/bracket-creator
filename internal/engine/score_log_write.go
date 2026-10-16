@@ -442,6 +442,11 @@ func (e *Engine) recordLandedWriteHistory(h state.StoreTx, compID, matchID strin
 // result) still leaves its baseline in the score log, as it was sent: it
 // closes the match for everything stamped after it.
 func (e *Engine) recordSupersededWriteHistory(h state.StoreTx, compID, matchID string, result *state.MatchResult) {
+	if result.Merge != nil && result.Merge.ResultLocked != "" {
+		// Held by the result lock (K1): kept once, whatever the resends.
+		e.recordLockedHoldHistory(h, compID, matchID, result)
+		return
+	}
 	e.recordWriteHistory(h, compID, matchID, result)
 	rep := result.Merge
 	if rep == nil || result.WriteDoor == DoorEvent || sentBaseline(rep) == nil {

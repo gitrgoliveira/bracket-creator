@@ -164,10 +164,31 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		if lerr != nil {
 			return nil, lerr
 		}
+		engiLines := e.snapshotScoreLog(tx, compID, matchID, &state.MatchResult{WriteDoor: doorEngi}, matchWriteForward)
+		engiRival := false
+		// The values a held pool finish keeps in the history: the finish as
+		// the merge judged it (flags and the verdict they decide).
+		var engiValues *state.MatchResult
 		if engiValidTotal(result.FlagsA, result.FlagsB) {
-			if engiFinishHeld(engiPrior, result, comp, !inPool, e.snapshotScoreLog(tx, compID, matchID, &state.MatchResult{WriteDoor: doorEngi}, matchWriteForward)) {
+			if engiFinishHeld(engiPrior, result, comp, !inPool, engiLines) {
 				e.recordWriteHistory(tx, compID, matchID, result)
 				return nil, supersededBy(result)
+			}
+			// The result lock (K1, result_lock.go): an engi finish that
+			// displaced the stored result without having seen it is held, never
+			// refused, once the next knockout match was played or started. A
+			// pool finish is judged by the requalification below.
+			engiRival = rivalDisplacesResult(result.Merge, engiLines)
+			if engiRival {
+				probe := engiFinishProbe(engiPrior, result)
+				engiValues = &probe
+				if !inPool {
+					if code := e.knockoutLockCode(tx, compID, matchID); code != "" {
+						holdAsLocked(result, engiValues, code)
+						e.recordSupersededWriteHistory(tx, compID, matchID, result)
+						return nil, supersededBy(result)
+					}
+				}
 			}
 		}
 		if comp.Format != state.CompFormatMixed || !IsPoolMatchID(matchID) {
@@ -196,7 +217,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		// entry staged ahead of that would claim "applied" for a write that
 		// was, in the end, refused (bc-cse). The displaced-history behaviour
 		// recordWriteHistory already carries rides along at its new site.
-		if err := e.requalifyMixedPoolWrite(tx, compID, comp, matchID, rec, engiPrior, fo); err != nil {
+		if err := e.requalifyMixedPoolWriteLocked(tx, compID, comp, matchID, rec, engiPrior, result, engiValues, fo, engiRival && inPool); err != nil {
 			return nil, err
 		}
 		e.recordLandedWriteHistory(tx, compID, matchID, result)
@@ -274,16 +295,12 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// fought now refuses the write. Any refusal restores prior first. Runs for
 	// every pool write, a first completion included: it only ever acts on a
 	// slot that is already occupied, and ignores a pool that is not complete.
-	if err := e.requalifyMixedPoolWrite(tx, compID, comp, matchID, result, prior, fo); err != nil {
-		// The result lock (K1, result_lock.go): a pool result that did not see
-		// the stored one, refused only because a seated knockout match was
-		// played or started, is held (the refusal rolled the match back), not
-		// refused.
-		if code := lockedByRequalification(err); code != "" && rivalDisplacesResult(result.Merge) {
-			holdAsLocked(result, code)
-			e.recordSupersededWriteHistory(tx, compID, matchID, result)
-			return nil, supersededBy(result)
-		}
+	//
+	// The result lock (K1, result_lock.go): a pool result that displaced the
+	// stored one without having seen it is held, never refused or forced,
+	// when a seated knockout match was played or started (the refusal rolls
+	// the match back); force belongs to an explicit correction only.
+	if err := e.requalifyMixedPoolWriteLocked(tx, compID, comp, matchID, result, prior, result, nil, fo, e.rivalDisplacesNow(tx, compID, matchID, result)); err != nil {
 		return nil, err
 	}
 
@@ -1085,8 +1102,13 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	}
 	// bc-rfsw: a decision reaching a later match already being fought is
 	// refused outright (terminal, not confirmable).
-	if err := refuseDecisionReachingRunningMatch(tx, compID, matchID, decisionBy, prior); err != nil {
-		return nil, nil, err
+	// A decision that is a RIVAL displacing the stored result is not refused
+	// here: the result lock holds it when the next match is under way
+	// (applyBracketResultIn), kept in the history, where this 409 lost it.
+	if !rivalDisplacesResult(decisionProbeMerge(comp, prior, result, matchID, probeCtx), probeCtx.lines) {
+		if err := refuseDecisionReachingRunningMatch(tx, compID, matchID, decisionBy, prior); err != nil {
+			return nil, nil, err
+		}
 	}
 	// kcdgOpts is the caller's own bc-kcdg authorization (confirming the
 	// clearing of an already-played later match). RecordDecisionTx passes an
@@ -1175,21 +1197,27 @@ func buildDecisionResult(prior *state.MatchResult, matchID, decision, decisionBy
 // the history entry when it would. It is the merge's own rule, not a second
 // statement of it: the write itself is judged by the same mergeMatchWrite.
 func decisionHeldByMerge(comp *state.Competition, prior, result *state.MatchResult, matchID string, mc mergeCtx) bool {
-	// Judged as the real write will be: shaped as it is (the default-win bout
-	// padding is part of what the decision writes), so a decision older than
-	// the stored result is answered superseded only when it changes nothing.
-	probe := *result
-	probe.SubResults = state.CloneSubResults(result.SubResults)
-	probe.Changed = slices.Clone(result.Changed)
-	if err := shapeScoreWrite(comp, prior, &probe, matchID); err != nil {
-		return false
-	}
-	rep := mergeMatchWrite(prior, &probe, matchWriteForward, mc)
-	if !rep.Superseded() {
+	rep := decisionProbeMerge(comp, prior, result, matchID, mc)
+	if rep == nil || !rep.Superseded() {
 		return false
 	}
 	result.Merge = rep
 	return true
+}
+
+// decisionProbeMerge asks the merge how the decision would land, on a copy,
+// judged as the real write will be: shaped as it is (the default-win bout
+// padding is part of what the decision writes), so a decision older than the
+// stored result is answered superseded only when it changes nothing. nil when
+// the write cannot be shaped.
+func decisionProbeMerge(comp *state.Competition, prior, result *state.MatchResult, matchID string, mc mergeCtx) *state.MergeReport {
+	probe := *result
+	probe.SubResults = state.CloneSubResults(result.SubResults)
+	probe.Changed = slices.Clone(result.Changed)
+	if err := shapeScoreWrite(comp, prior, &probe, matchID); err != nil {
+		return nil
+	}
+	return mergeMatchWrite(prior, &probe, matchWriteForward, mc)
 }
 
 // exactDecisionReplay reports a decision write the stored match already

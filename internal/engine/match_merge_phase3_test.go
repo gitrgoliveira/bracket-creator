@@ -344,40 +344,36 @@ func TestMerge_EngiRecountAfterTheFinishIsNeverADraw(t *testing.T) {
 // apply that must be undone atomically), which never happens here.
 func TestMerge_EngiStaleFinishOverACompletedMatchIsHeldWhole(t *testing.T) {
 	bothBranches(t, func(t *testing.T, knockout bool) {
-		t.Run("a different winner is held whole, not just the losing group", func(t *testing.T) {
+		t.Run("an older finish with a different winner is the first recorded result (I1)", func(t *testing.T) {
 			h := mmEngi(t, knockout)
 			require.NoError(t, h.write(mmEngiFinish(h, mmT3, 3, 0)), "Ryu's finish completes the match")
 
 			// A queued finish made BEFORE that one, delivered late (an
 			// offline board's Save result), with a different, also-valid
-			// count that would make Tora the winner instead.
-			err := h.write(mmEngiFinish(h, mmT2, 1, 2))
-			require.ErrorIs(t, err, ErrMatchSuperseded, "every group the stale finish changes is held")
+			// count that makes Tora the winner. The first recorded result
+			// stands (operator decision 2026-10-16, I1): it replaces the
+			// later one, which goes to the history, flags and verdict
+			// together.
+			require.NoError(t, h.write(mmEngiFinish(h, mmT2, 1, 2)))
 
 			m := h.load(t)
-			assert.Equal(t, state.MatchStatusCompleted, m.Status, "the recorded finish stands")
-			assert.Equal(t, wrTeamA, m.Winner, "Ryu's 3-0, not the stale finish's 1-2")
-			assert.Equal(t, 3, m.FlagsA)
-			assert.Equal(t, 0, m.FlagsB)
-			assert.Equal(t, mmT3, m.GroupStamp(state.GroupResult), "the stale finish moves no stamp")
-			assert.Equal(t, mmT3, m.GroupStamp(state.GroupFlags))
+			assert.Equal(t, state.MatchStatusCompleted, m.Status)
+			assert.Equal(t, wrTeamB, m.Winner, "Tora's 1-2, the first recorded result")
+			assert.Equal(t, 1, m.FlagsA)
+			assert.Equal(t, 2, m.FlagsB)
+			assert.Equal(t, mmT2, m.GroupStamp(state.GroupResult))
+			assert.Equal(t, mmT2, m.GroupStamp(state.GroupFlags))
 
-			entries := h.history(t)
-			last := entries[len(entries)-1]
-			assert.Equal(t, doorEngi, last.Door)
-			assert.Equal(t, mmT2, last.Stamp, "the stale finish's own stamp")
-			assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupResult], "the result is held, not just the flags")
-			assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupFlags])
-			assert.Contains(t, string(last.Held[state.GroupFlags]), `"flagsA":1`, "the stale finish's own attempted count is kept with its values")
-			// The engi finish is atomic with its count: the older finish's
-			// flags and the winner they decide are kept together.
-			assert.Equal(t, HoldReasonEngiAtomic, last.Reason)
-
-			if knockout {
-				b, err := h.store.LoadBracket(h.compID)
-				require.NoError(t, err)
-				assert.Equal(t, wrTeamA, b.Rounds[1][0].SideA, "Ryu stays advanced; the stale finish never reaches the bracket")
+			var displaced *state.MatchHistoryEntry
+			for _, e := range h.history(t) {
+				e := e
+				if e.Door == DoorDisplaced && e.Stamp == mmT3 {
+					displaced = &e
+				}
 			}
+			require.NotNil(t, displaced, "the later finish is kept in the history")
+			assert.Equal(t, state.HistoryOutcomeHeld, displaced.Outcomes[state.GroupResult])
+			assert.Contains(t, string(displaced.Held[state.GroupFlags]), `"flagsA":3`, "with its own count")
 		})
 
 		// The variant where the stale finish carries the SAME count already

@@ -698,9 +698,9 @@ was made, not when it arrived; the app is one binary that keeps its data in file
 The score event log is the source of truth for match scoring, while the match result stored in
 `pool-matches.csv` or `bracket.json` acts as a materialized cache derived by the replay. This
 differs from the match history in `history/`: the score log records the raw events and baselines
-that construct the score, whereas the match history documents every HTTP request and write that
-reached the match, recording whether each change was applied or held, the door it came through,
-and the audit reasons. Both the score log append and the history entry are written in the same
+that construct the score, whereas the match history keeps one line for every write that reached
+the match, recording whether each change was applied or held, the door it came through, and the
+reason when one was held. Both the score log append and the history entry are written in the same
 transaction as the match through the write ahead log, ensuring they land together. A log line
 with an unknown format version is refused on load naming the file and line, because the log is the
 truth and an unrecognized line is never skipped or guessed at.

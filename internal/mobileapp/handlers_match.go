@@ -2110,7 +2110,7 @@ func holdSelfReportedWriteUnderTx(compID, matchID string, snap matchSnapshot, fo
 		// a write that will land, so they have nothing to do here. Any
 		// resend that differs where it would land is no such replay and is
 		// refused as before.
-		if engine.ExactScoreReplay(snap.Stored, result, comp, !snap.InBracket, score.probeLines()) {
+		if engine.ExactScoreReplay(snap.Stored, result, comp, !snap.InBracket, score.probeLines(snap, result)) {
 			return nil
 		}
 		return errResultFinalized
@@ -2998,8 +2998,13 @@ func (c *seenResultCheck) log() ([]state.ScoreLogLine, error) {
 }
 
 // probeLines is the log for the exact-resend probe: a log that cannot be read
-// is probed as empty, as the engine's own read (snapshotScoreLog) does.
-func (c *seenResultCheck) probeLines() []state.ScoreLogLine {
+// is probed as empty, as the engine's own read (snapshotScoreLog) does. Only a
+// write stamped exactly as the stored result can be such a resend, so no
+// other write pays the read (the probe declines it before reading lines).
+func (c *seenResultCheck) probeLines(snap matchSnapshot, r *state.MatchResult) []state.ScoreLogLine {
+	if r.ModifiedAt <= 0 || r.ModifiedAt != snap.ResultStamp {
+		return nil
+	}
 	lines, err := c.log()
 	if err != nil {
 		return nil
@@ -3045,7 +3050,7 @@ func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult, comp *state
 		// write that differs where it would land is a correction, and still
 		// needs its reason. comp tells the probe a kachinuki or engi write,
 		// which the write path shapes before the merge.
-		if engine.ExactScoreReplay(snap.Stored, r, comp, !snap.InBracket, score.probeLines()) {
+		if engine.ExactScoreReplay(snap.Stored, r, comp, !snap.InBracket, score.probeLines(snap, r)) {
 			return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision}
 		}
 		if r.CorrectionReason == "" {

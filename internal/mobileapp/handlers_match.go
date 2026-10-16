@@ -2096,7 +2096,7 @@ var errRepBoutAdded = &selfRunRefusal{
 // error rather than allowing the write (matchSnapshotOrErr). A match in neither
 // store (found false) passes on purpose: the write that follows under the same
 // lock refuses it (the engine's errMatchNotFound), so nothing can land on it.
-func holdSelfReportedWriteUnderTx(compID, matchID string, snap matchSnapshot, found bool, result *state.MatchResult, comp *state.Competition, startOnly bool) error {
+func holdSelfReportedWriteUnderTx(compID, matchID string, snap matchSnapshot, found bool, result *state.MatchResult, comp *state.Competition, startOnly bool, score *seenResultCheck) error {
 	if !found {
 		return nil
 	}
@@ -2110,7 +2110,7 @@ func holdSelfReportedWriteUnderTx(compID, matchID string, snap matchSnapshot, fo
 		// a write that will land, so they have nothing to do here. Any
 		// resend that differs where it would land is no such replay and is
 		// refused as before.
-		if engine.ExactScoreReplay(snap.Stored, result, comp, !snap.InBracket) {
+		if engine.ExactScoreReplay(snap.Stored, result, comp, !snap.InBracket, score.probeLines()) {
 			return nil
 		}
 		return errResultFinalized
@@ -2976,6 +2976,35 @@ type correctionCheck struct {
 type seenResultCheck struct {
 	stx             state.StoreTx
 	compID, matchID string
+	// The match's score log, read once for every judge of the write that
+	// asks it (log): the exact-resend probe and the reason check read the
+	// same lines the engine's merge does.
+	read  bool
+	lines []state.ScoreLogLine
+	err   error
+}
+
+// log reads the match's score log once. A nil check (bulk-score, or a judge
+// called with none) holds no log: nil lines.
+func (c *seenResultCheck) log() ([]state.ScoreLogLine, error) {
+	if c == nil {
+		return nil, nil
+	}
+	if !c.read {
+		c.read = true
+		c.lines, c.err = c.stx.LoadScoreLog(c.compID, c.matchID)
+	}
+	return c.lines, c.err
+}
+
+// probeLines is the log for the exact-resend probe: a log that cannot be read
+// is probed as empty, as the engine's own read (snapshotScoreLog) does.
+func (c *seenResultCheck) probeLines() []state.ScoreLogLine {
+	lines, err := c.log()
+	if err != nil {
+		return nil
+	}
+	return lines
 }
 
 // sawResult reports whether basis holds a recorded result. A log that cannot be
@@ -2985,7 +3014,7 @@ type seenResultCheck struct {
 // naming the file and line when the error carries them.
 // readable says whether the log could be read at all, from the same one read.
 func (c *seenResultCheck) sawResult(stored *state.MatchResult, comp *state.Competition, knockout bool, stamp int64, basis *state.ScoreBasis) (saw, readable bool) {
-	lines, err := c.stx.LoadScoreLog(c.compID, c.matchID)
+	lines, err := c.log()
 	if err != nil {
 		log.Printf("mobileapp: ERROR: match %s/%s: score log not read: %v", c.compID, c.matchID, err)
 		return false, false
@@ -3016,7 +3045,7 @@ func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult, comp *state
 		// write that differs where it would land is a correction, and still
 		// needs its reason. comp tells the probe a kachinuki or engi write,
 		// which the write path shapes before the merge.
-		if engine.ExactScoreReplay(snap.Stored, r, comp, !snap.InBracket) {
+		if engine.ExactScoreReplay(snap.Stored, r, comp, !snap.InBracket, score.probeLines()) {
 			return correctionCheck{StoredStatus: snap.Status, StoredDecision: snap.Decision}
 		}
 		if r.CorrectionReason == "" {
@@ -3586,8 +3615,10 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// lock, so concurrent anonymous submissions cannot race it. It
 				// may rewrite result's representative bout before the write.
 				selfReported := resultSource == "self-reported"
+				// The score log, read at most once for the judges below.
+				score := &seenResultCheck{stx: stx, compID: id, matchID: mid}
 				if selfReported {
-					if err := holdSelfReportedWriteUnderTx(id, mid, snap, found, result, comp, body.StartOnly); err != nil {
+					if err := holdSelfReportedWriteUnderTx(id, mid, snap, found, result, comp, body.StartOnly, score); err != nil {
 						engErr = err
 						return nil
 					}
@@ -3608,7 +3639,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// runs inside the tx so the is-completed read is race-free (same
 				// lock), over the snapshot read above, and the status it returns
 				// is reused by the start gate below.
-				check := applyCorrectionReason(snap, result, comp, &seenResultCheck{stx: stx, compID: id, matchID: mid})
+				check := applyCorrectionReason(snap, result, comp, score)
 				existingStatus := check.StoredStatus
 				if check.Reject != nil {
 					engErr = check.Reject

@@ -168,6 +168,10 @@ func (e *Engine) recordLockedHoldHistory(h state.StoreTx, compID, matchID string
 // sameHeldLine reports whether a history line is the line a locked hold would
 // add: the same door, session, stamp, reason, groups and held values (two
 // devices sending the same value are two writes; a device's resend is one).
+// An anonymous self-run caller has no session (its RevSession is blanked
+// before the write, enforceSelfRunPolicy), so two anonymous devices sending
+// the same values under the same stamp read as one resend and keep one line:
+// accepted, as the line kept says everything the second would.
 func sameHeldLine(p state.MatchHistoryEntry, rep *state.MergeReport, door, session string) bool {
 	if p.Door != door || p.Session != session || p.Stamp != rep.Stamp || p.Reason != rep.HoldReason ||
 		!slices.Equal(p.Changed, rep.Changed) || len(p.Held) != len(rep.HeldValues) {

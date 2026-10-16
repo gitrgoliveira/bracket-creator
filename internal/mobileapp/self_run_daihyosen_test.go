@@ -819,7 +819,7 @@ func TestHoldSelfReportedWriteUnderTx(t *testing.T) {
 
 			snap, found, err := matchSnapshotOrErr(store, "c1", "B1", "test")
 			require.NoError(t, err)
-			err = holdSelfReportedWriteUnderTx("c1", "B1", snap, found, result, nil, tc.startOnly)
+			err = holdSelfReportedWriteUnderTx("c1", "B1", snap, found, result, nil, tc.startOnly, nil)
 			if tc.want != nil {
 				var refusal *selfRunRefusal
 				require.ErrorAs(t, err, &refusal)

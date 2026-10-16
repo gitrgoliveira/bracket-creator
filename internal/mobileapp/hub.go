@@ -304,6 +304,11 @@ func (h *Hub) subscribeWithReplay(since int64) (ch chan historyEntry, entries []
 // for all new subscribers and Broadcast becomes a no-op observable to
 // clients (no live channels remain).
 func (h *Hub) Close() {
+	// Stop the held running pushes first, outside h.mu: a trailing send
+	// already under way broadcasts, which takes h.mu.
+	if h.heldPushes != nil {
+		h.heldPushes.Close()
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closed {

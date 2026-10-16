@@ -32,6 +32,9 @@ func setupTestRouter(t testing.TB) (*gin.Engine, *state.Store, *engine.Engine, *
 
 	eng := engine.New(store)
 	hub := NewHub()
+	// Registered after the temp dir's removal, so it runs first: no trailing
+	// push timer of this router's coalescer outlives the test.
+	t.Cleanup(hub.Close)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

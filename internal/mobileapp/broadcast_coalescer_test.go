@@ -38,17 +38,20 @@ func sentNow(c *matchBroadcastCoalescer, key string, running bool) bool {
 func TestMatchBroadcastCoalescer_Submit(t *testing.T) {
 	t.Run("first push goes out at once", func(t *testing.T) {
 		c := newMatchBroadcastCoalescer()
+		t.Cleanup(c.Close)
 		assert.True(t, sentNow(c, "m1", true))
 	})
 
 	t.Run("second running push within the window is held", func(t *testing.T) {
 		c := newMatchBroadcastCoalescer()
+		t.Cleanup(c.Close)
 		assert.True(t, sentNow(c, "m1", true))
 		assert.False(t, sentNow(c, "m1", true), "held within 250ms")
 	})
 
 	t.Run("a push after the window goes out at once", func(t *testing.T) {
 		c := newMatchBroadcastCoalescer()
+		t.Cleanup(c.Close)
 		assert.True(t, sentNow(c, "m1", true))
 		// Force the last timestamp to be old.
 		k := c.lock("m1")
@@ -59,12 +62,14 @@ func TestMatchBroadcastCoalescer_Submit(t *testing.T) {
 
 	t.Run("non-running pushes always go out regardless of window", func(t *testing.T) {
 		c := newMatchBroadcastCoalescer()
+		t.Cleanup(c.Close)
 		assert.True(t, sentNow(c, "m1", false))
 		assert.True(t, sentNow(c, "m1", false), "completed writes must never be held")
 	})
 
 	t.Run("different matches have independent windows", func(t *testing.T) {
 		c := newMatchBroadcastCoalescer()
+		t.Cleanup(c.Close)
 		assert.True(t, sentNow(c, "m1", true))
 		assert.False(t, sentNow(c, "m1", true)) // m1 held
 		assert.True(t, sentNow(c, "m2", true))  // m2 independent
@@ -73,6 +78,7 @@ func TestMatchBroadcastCoalescer_Submit(t *testing.T) {
 
 	t.Run("competition-scoped keys are independent", func(t *testing.T) {
 		c := newMatchBroadcastCoalescer()
+		t.Cleanup(c.Close)
 		// Same bare match id "Pool A-1" in two different competitions must not
 		// share a coalesce window, the call site keys by compID:matchID.
 		assert.True(t, sentNow(c, "comp1:Pool A-1", true))
@@ -82,6 +88,7 @@ func TestMatchBroadcastCoalescer_Submit(t *testing.T) {
 
 	t.Run("a non-running push prunes the match entry (bounded map)", func(t *testing.T) {
 		c := newMatchBroadcastCoalescer()
+		t.Cleanup(c.Close)
 		assert.True(t, sentNow(c, "m1", true)) // running push records the entry
 		_, present := c.keys.Load("m1")
 		require.True(t, present, "running broadcast must record an entry")
@@ -104,6 +111,7 @@ func TestMatchBroadcastCoalescer_TrailingSendCarriesTheLastState(t *testing.T) {
 	seen := func() []string { mu.Lock(); defer mu.Unlock(); return append([]string(nil), got...) }
 
 	c := newMatchBroadcastCoalescer()
+	t.Cleanup(c.Close)
 	c.Submit("m1", true, stillRunning(send("first")))
 	c.Submit("m1", true, stillRunning(send("second")))
 	c.Submit("m1", true, stillRunning(send("third")))
@@ -118,6 +126,7 @@ func TestMatchBroadcastCoalescer_TrailingSendCarriesTheLastState(t *testing.T) {
 	got = nil
 	mu.Unlock()
 	c2 := newMatchBroadcastCoalescer()
+	t.Cleanup(c2.Close)
 	c2.Submit("m2", true, stillRunning(send("a")))
 	c2.Submit("m2", true, stillRunning(send("b")))
 	c2.Submit("m2", false, stillRunning(send("done")))
@@ -214,9 +223,11 @@ func TestScoreHandler_C3Coalescer(t *testing.T) {
 	// calls on a contended CI runner lets the window lapse, the second write
 	// legitimately broadcasts, and the count==1 assertion can never pass
 	// (observed twice on CI; second flake on PR #349 run 29166974332).
+	// The clock is this router's own coalescer's, set before any write, so no
+	// other test's trailing timer can read it.
 	frozen := time.Now()
-	coalescerNow = func() time.Time { return frozen }
-	defer func() { coalescerNow = time.Now }()
+	require.NotNil(t, hub.heldPushes)
+	hub.heldPushes.now = func() time.Time { return frozen }
 
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c3", Courts: []string{"A"}}))

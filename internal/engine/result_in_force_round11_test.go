@@ -186,3 +186,30 @@ func TestResultInForceAgreesWithTheMergeAfterARepair(t *testing.T) {
 		assert.Equal(t, ResultInForce{InForce: true, Line: 1}, handler, "drift, seen=%d: the drift line is in force and unseen", seen)
 	}
 }
+
+// The rival test caps a basis by the log's own line count, not by the lines
+// the replay holds: on an empty log the merge mints the stored match as its
+// migration baseline, which no device saw, so a later finish claiming to have
+// seen lines is still a rival (bc-evts review round 11). The merge also caps
+// the basis it logs; this pins the replay's own cap without it.
+func TestRivalResultCapsTheBasisByTheLogsOwnLines(t *testing.T) {
+	stored := state.MatchResult{ID: "Pool A-0", SideA: "Ryu", SideB: "Tora", SideAID: "pa", SideBID: "pb",
+		Status: state.MatchStatusCompleted, Winner: "Ryu", WinnerID: "pa", IpponsA: []string{"M"}, ModifiedAt: mmT1}
+	mb := MigrationBaseline(&stored, MigrationDoor+"-0", mmT1)
+	rival := stored
+	rival.Winner, rival.WinnerID, rival.IpponsA, rival.IpponsB = "Tora", "pb", nil, []string{"K"}
+	bl := BaselineFromMatch(&rival, "s1", DoorScore, mmT2, []string{state.GroupPoints, state.GroupResult}, state.ScoreBasis{Seen: 5})
+	bl.BasisSent = true
+	all := []state.ScoreLogLine{{Baseline: &mb}, {Baseline: &bl}}
+	shape := ReplayShape{Comp: &state.Competition{}}
+
+	got := ReplayScoring(&stored, all, shape.withLogLines(0))
+	assert.Equal(t, "Ryu", got.Match.Winner, "the first recorded result stands")
+	h, held := got.Held[1]
+	require.True(t, held, "a basis cannot have seen a line the log does not hold")
+	assert.True(t, h.MatchClosed)
+
+	// Without the log's own count, the minted baseline reads as seen.
+	open := ReplayScoring(&stored, all, shape)
+	assert.Equal(t, "Tora", open.Match.Winner, "control: counting every line lets the basis see the minted one")
+}

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -105,5 +106,67 @@ func BenchmarkReplayScoring150(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		ReplayScoring(m, lines, shape)
+	}
+}
+
+// BenchmarkScoreWriteOverLog150 is one /score write (a stamped running point)
+// through the engine onto a knockout match whose score log already holds 150
+// lines: the write's log reads and replays (bc-evts review round 11: the
+// /score path read the log twice). Each iteration starts from the same files.
+func BenchmarkScoreWriteOverLog150(b *testing.B) {
+	seedDir := b.TempDir()
+	store, err := state.NewStore(seedDir)
+	if err != nil {
+		b.Fatal(err)
+	}
+	const compID, matchID = "c", "m-r1-0"
+	if err := store.SaveCompetition(&state.Competition{ID: compID, Name: "C", Kind: "individual", Status: state.CompStatusKnockout}); err != nil {
+		b.Fatal(err)
+	}
+	t0 := time.Now().UnixMilli() - 3_600_000
+	if err := store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{{{
+		ID: matchID, SideA: "Ryu", SideAID: "pa", SideB: "Tora", SideBID: "pb",
+		Status: state.MatchStatusRunning, ModifiedAt: t0, MatchNumber: 1,
+	}}}}); err != nil {
+		b.Fatal(err)
+	}
+	write := func(eng *Engine, at int64, a []string) error {
+		w := &state.MatchResult{ID: matchID, SideA: "Ryu", SideB: "Tora", Status: state.MatchStatusRunning,
+			ModifiedAt: at, Changed: []string{state.GroupPoints}, WriteDoor: DoorScore, IpponsA: a, IpponsB: []string{}}
+		_, err := eng.RecordMatchResultWithIneligibility(compID, matchID, w)
+		return err
+	}
+	eng := New(store)
+	for i := range 150 {
+		a := []string{}
+		if i%2 == 0 {
+			a = []string{"M"}
+		}
+		if err := write(eng, t0+int64(i+1)*1000, a); err != nil {
+			b.Fatal(err)
+		}
+	}
+	lines, err := store.LoadScoreLog(compID, matchID)
+	if err != nil || len(lines) < 150 {
+		b.Fatalf("seeded %d lines: %v", len(lines), err)
+	}
+	seed := os.DirFS(seedDir)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		dir := filepath.Join(b.TempDir(), "d")
+		if err := os.CopyFS(dir, seed); err != nil {
+			b.Fatal(err)
+		}
+		s, err := state.NewStore(dir)
+		if err != nil {
+			b.Fatal(err)
+		}
+		e := New(s)
+		b.StartTimer()
+		if err := write(e, t0+200_000, []string{"M", "K"}); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

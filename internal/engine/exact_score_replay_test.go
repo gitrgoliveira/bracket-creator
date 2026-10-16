@@ -52,9 +52,9 @@ func TestExactScoreReplay(t *testing.T) {
 			s, w := stored(), resend()
 			tc.change(s, w)
 			before := *w
-			assert.Equal(t, tc.want, ExactScoreReplay(s, w, nil, true))
+			assert.Equal(t, tc.want, ExactScoreReplay(s, w, nil, true, nil))
 			assert.Equal(t, before, *w, "the write is judged on a copy")
 		})
 	}
-	assert.False(t, ExactScoreReplay(nil, resend(), nil, true))
+	assert.False(t, ExactScoreReplay(nil, resend(), nil, true, nil))
 }

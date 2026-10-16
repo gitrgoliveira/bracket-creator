@@ -37,10 +37,24 @@ import (
 // nothing, so the map is bounded by the set of currently-RUNNING matches.
 type matchBroadcastCoalescer struct {
 	keys sync.Map // matchKey -> *coalescerKey
+	// now is the coalescer's clock, time.Now unless a test builds its own
+	// instance with a frozen one. It is per instance, never a package
+	// variable: a trailing-send timer from one coalescer reads it on its own
+	// goroutine, so swapping a shared clock raced with another test's timer.
+	now func() time.Time
+
+	// mu guards closed and the Add of inflight, so no timer is armed once
+	// Close has begun waiting.
+	mu     sync.Mutex
+	closed bool
+	// inflight counts armed trailing-send timers: Done when one is stopped
+	// before it fires, or when its send has finished.
+	inflight sync.WaitGroup
 }
 
 // coalescerKey is one match's serialization point.
 type coalescerKey struct {
+	c       *matchBroadcastCoalescer
 	mu      sync.Mutex
 	dead    bool // dropped from the map; a holder that finds it retries
 	last    time.Time
@@ -55,13 +69,50 @@ type coalescerKey struct {
 
 const matchCoalesceWindow = 250 * time.Millisecond
 
-// coalescerNow is a test seam: TestScoreHandler_C3Coalescer pins it to a
-// fixed instant so the 250ms window cannot lapse between two writes on a
-// contended CI runner. Production code never reassigns it.
-var coalescerNow = time.Now
-
 func newMatchBroadcastCoalescer() *matchBroadcastCoalescer {
-	return &matchBroadcastCoalescer{}
+	return newMatchBroadcastCoalescerWithClock(time.Now)
+}
+
+// newMatchBroadcastCoalescerWithClock is the constructor with the clock given:
+// TestScoreHandler_C3Coalescer and the window tests pin it so the 250ms window
+// cannot lapse between two writes on a contended CI runner.
+func newMatchBroadcastCoalescerWithClock(now func() time.Time) *matchBroadcastCoalescer {
+	return &matchBroadcastCoalescer{now: now}
+}
+
+// Close stops every armed trailing-send timer and waits for any whose send is
+// already under way. A push submitted after Close is sent at once (nothing is
+// held, so nothing is left behind). Idempotent; called from Hub.Close at
+// shutdown and from tests' cleanup.
+func (c *matchBroadcastCoalescer) Close() {
+	c.mu.Lock()
+	c.closed = true
+	c.mu.Unlock()
+	c.keys.Range(func(key, v any) bool {
+		k := v.(*coalescerKey)
+		k.mu.Lock()
+		if k.dead {
+			k.mu.Unlock()
+			return true
+		}
+		k.cancelLocked()
+		k.hasLast = false
+		c.release(key.(string), k)
+		return true
+	})
+	c.inflight.Wait()
+}
+
+// armLocked reserves a slot for a trailing-send timer; false once Close has
+// begun, when the caller sends at once instead.
+func (c *matchBroadcastCoalescer) armLocked() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return false
+	}
+	c.inflight.Add(1)
+	return true
 }
 
 // lock returns the key's state, locked. matchKey is the competition-scoped key
@@ -69,7 +120,7 @@ func newMatchBroadcastCoalescer() *matchBroadcastCoalescer {
 // sharing a match id would share a window.
 func (c *matchBroadcastCoalescer) lock(matchKey string) *coalescerKey {
 	for {
-		v, _ := c.keys.LoadOrStore(matchKey, &coalescerKey{})
+		v, _ := c.keys.LoadOrStore(matchKey, &coalescerKey{c: c})
 		k := v.(*coalescerKey)
 		k.mu.Lock()
 		if !k.dead {
@@ -84,7 +135,11 @@ func (k *coalescerKey) cancelLocked() {
 	k.gen++
 	k.pending = nil
 	if k.timer != nil {
-		k.timer.Stop()
+		if k.timer.Stop() {
+			// Stopped before it fired: its callback never runs, so it
+			// cannot release its own inflight slot.
+			k.c.inflight.Done()
+		}
 		k.timer = nil
 	}
 }
@@ -97,7 +152,7 @@ func (k *coalescerKey) allowLocked(isRunning bool) bool {
 		k.hasLast = false
 		return true
 	}
-	now := coalescerNow()
+	now := k.c.now()
 	if k.hasLast && now.Sub(k.last) < matchCoalesceWindow {
 		return false
 	}
@@ -146,9 +201,16 @@ func (c *matchBroadcastCoalescer) Submit(matchKey string, isRunning bool, send f
 	if k.timer != nil {
 		return
 	}
-	delay := max(matchCoalesceWindow-coalescerNow().Sub(k.last), time.Millisecond)
+	if !c.armLocked() {
+		// Closed: no timer outlives Close, so this push goes out at once.
+		k.pending = nil
+		k.sentLocked(send())
+		return
+	}
+	delay := max(matchCoalesceWindow-c.now().Sub(k.last), time.Millisecond)
 	gen := k.gen
 	k.timer = time.AfterFunc(delay, func() {
+		defer c.inflight.Done()
 		var wg sync.WaitGroup
 		safeGo(&wg, nil, func() { c.flushPending(matchKey, k, gen) })
 		wg.Wait()
@@ -174,7 +236,7 @@ func (c *matchBroadcastCoalescer) flushPending(matchKey string, k *coalescerKey,
 	}
 	send := k.pending
 	k.pending, k.timer = nil, nil
-	k.last, k.hasLast = coalescerNow(), true
+	k.last, k.hasLast = c.now(), true
 	k.sentLocked(send())
 }
 

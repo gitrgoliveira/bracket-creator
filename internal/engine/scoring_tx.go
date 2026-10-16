@@ -248,8 +248,13 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// stores: a start's own representative-bout row is discarded above, and a
 	// winner derived from it would stand beside a stored bout that says
 	// otherwise.
+	//
+	// The score log is read ONCE here and carried to the write below, which
+	// the merge replays from (bc-evts review round 11: a second read cost a
+	// full LoadScoreLog per /score write).
+	lines := e.snapshotScoreLog(tx, compID, matchID, result, matchWriteForward)
 	if !replayedWrite {
-		if err := shapeScoreWrite(comp, prior, result, matchID, e.snapshotScoreLog(tx, compID, matchID, result, matchWriteForward)); err != nil {
+		if err := shapeScoreWrite(comp, prior, result, matchID, lines); err != nil {
 			return nil, err
 		}
 	}
@@ -266,7 +271,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		return nil, err
 	}
 
-	sideMismatch, reopened, inheritedRuling, err := e.writeToPoolOrBracket(tx, compID, matchID, result, matchWriteForward, fo.Force, comp)
+	sideMismatch, reopened, inheritedRuling, err := e.writeToPoolOrBracketLog(tx, compID, matchID, result, matchWriteForward, fo.Force, comp, lines)
 	if errors.Is(err, ErrMatchSuperseded) {
 		// Every change this write makes is outranked by a newer stored one:
 		// nothing of it lands on the match, and all of it is kept in the
@@ -1345,19 +1350,26 @@ func shapeScoreWrite(comp *state.Competition, prior, result *state.MatchResult, 
 // still needs its reason. comp names a kachinuki or engi competition (nil
 // for neither); nilSubsClear is the branch's (true for a pool match, false
 // for a knockout one, see mergeCtx).
-func ExactScoreReplay(stored, incoming *state.MatchResult, comp *state.Competition, nilSubsClear bool) bool {
-	_, ok := exactScoreReplayProbe(stored, incoming, comp, nilSubsClear)
+func ExactScoreReplay(stored, incoming *state.MatchResult, comp *state.Competition, nilSubsClear bool, lines []state.ScoreLogLine) bool {
+	_, ok := exactScoreReplayProbe(stored, incoming, comp, nilSubsClear, lines)
 	return ok
+}
+
+// mayBeExactScoreReplay is the probe's cheap precondition: a stamped finish
+// over a finished match, stamped exactly as the stored result. Only a write
+// that passes it costs the probe its read of the score log.
+func mayBeExactScoreReplay(stored, incoming *state.MatchResult) bool {
+	return stored != nil && incoming != nil && incoming.ModifiedAt > 0 &&
+		incoming.Status == state.MatchStatusCompleted &&
+		stored.Status == state.MatchStatusCompleted &&
+		incoming.ModifiedAt == stored.GroupStamp(state.GroupResult)
 }
 
 // exactScoreReplayProbe is ExactScoreReplay's judgement, handing back the
 // write as the merge would land it (a copy: incoming is not changed), its
 // MergeReport on probe.Merge, which the replay's history entry records.
-func exactScoreReplayProbe(stored, incoming *state.MatchResult, comp *state.Competition, nilSubsClear bool) (*state.MatchResult, bool) {
-	if stored == nil || incoming == nil || incoming.ModifiedAt <= 0 ||
-		incoming.Status != state.MatchStatusCompleted ||
-		stored.Status != state.MatchStatusCompleted ||
-		incoming.ModifiedAt != stored.GroupStamp(state.GroupResult) {
+func exactScoreReplayProbe(stored, incoming *state.MatchResult, comp *state.Competition, nilSubsClear bool, lines []state.ScoreLogLine) (*state.MatchResult, bool) {
+	if !mayBeExactScoreReplay(stored, incoming) {
 		return nil, false
 	}
 	probe := *incoming
@@ -1383,7 +1395,7 @@ func exactScoreReplayProbe(stored, incoming *state.MatchResult, comp *state.Comp
 		if applyHansokuIppons(&probe) != nil {
 			return nil, false
 		}
-		if shapeScoreWrite(comp, stored, &probe, stored.ID, nil) != nil {
+		if shapeScoreWrite(comp, stored, &probe, stored.ID, lines) != nil {
 			return nil, false
 		}
 		if reconcileSides(&probe, storedSides{A: stored.SideA, B: stored.SideB, AID: stored.SideAID, BID: stored.SideBID}) {
@@ -1402,7 +1414,7 @@ func exactScoreReplayProbe(stored, incoming *state.MatchResult, comp *state.Comp
 	sent := probe
 	sent.IpponsA, sent.IpponsB = slices.Clone(probe.IpponsA), slices.Clone(probe.IpponsB)
 	sent.SubResults = state.CloneSubResults(probe.SubResults)
-	rep := mergeMatchWrite(stored, &probe, matchWriteForward, mergeCtx{comp: comp, knockout: !nilSubsClear, nilSubsClear: nilSubsClear})
+	rep := mergeMatchWrite(stored, &probe, matchWriteForward, mergeCtx{comp: comp, knockout: !nilSubsClear, nilSubsClear: nilSubsClear, lines: lines})
 	if rep == nil || !slices.Contains(rep.Applied, state.GroupResult) || len(rep.Displaced) > 0 {
 		return nil, false
 	}
@@ -1432,7 +1444,13 @@ func (e *Engine) answerExactScoreReplay(tx state.StoreTx, compID, matchID string
 	if err != nil {
 		return false, err
 	}
-	probe, ok := exactScoreReplayProbe(prior, result, comp, inPool)
+	if !mayBeExactScoreReplay(prior, result) {
+		return false, nil
+	}
+	// The probe replays the match's own log, as the write would (bc-evts
+	// review round 11: it replayed onto the stored match alone).
+	lines := e.snapshotScoreLog(tx, compID, matchID, result, matchWriteForward)
+	probe, ok := exactScoreReplayProbe(prior, result, comp, inPool, lines)
 	if !ok {
 		return false, nil
 	}

@@ -51,6 +51,18 @@ import (
 type ReplayShape struct {
 	Comp     *state.Competition
 	Knockout bool
+	// logLines, once logKnown, is how many of the replayed lines the log
+	// really holds: those after it (a migration, drift or repair line, the
+	// write's own baseline) were minted by the write being replayed, and no
+	// basis can have seen them (rivalResult). Not known, every line counts.
+	logLines int
+	logKnown bool
+}
+
+// withLogLines is the shape with the log's own line count known.
+func (s ReplayShape) withLogLines(n int) ReplayShape {
+	s.logLines, s.logKnown = n, true
+	return s
 }
 
 // EventOutcome is what the replay made of one event line: Line is its index
@@ -339,12 +351,15 @@ func cloneMatchForReplay(m state.MatchResult) state.MatchResult {
 
 // replayer carries one replay's state.
 type replayer struct {
-	lines   []state.ScoreLogLine
-	shape   ReplayShape
-	cur     *replayMatch
-	stamps  map[string]int64
-	govern  map[string]int   // group -> line of the baseline that last set it
-	applied map[string][]int // group -> event lines folded into it since
+	lines  []state.ScoreLogLine
+	shape  ReplayShape
+	cur    *replayMatch
+	stamps map[string]int64
+	govern map[string]int // group -> line of the baseline that last set it
+	// resultBy is the line that set the result group, as govern[result]
+	// except that a repair line (ids only) never takes it over.
+	resultBy int
+	applied  map[string][]int // group -> event lines folded into it since
 	// covered names every group some baseline of the log sets. An event on
 	// such a group ordered before the first baseline that sets it is never
 	// folded: the replay starts from the stored cache, the match AFTER every
@@ -686,6 +701,14 @@ func (rp *replayer) applyBaselineGroups(line int, b *state.ScoreBaseline, groups
 		}
 		rp.applied[g], rp.early[g] = kept, nil
 		rp.govern[g] = line
+		// The line that SET the result (resultInForce). A repair line fills
+		// ids a load-time repair added to a result the log already holds: the
+		// verdict it carries is that result, so the line a device saw is still
+		// the one that set it (bc-evts review round 11). A drift line is a
+		// write the log missed and does set it.
+		if g == state.GroupResult && (b.Door != DoorRepair || !governed) {
+			rp.resultBy = line
+		}
 	}
 }
 
@@ -706,8 +729,8 @@ func (rp *replayer) closed() bool {
 // it left is finished. A reopen or a send back to the queue is such a baseline
 // leaving the match open, so it clears the result.
 func (rp *replayer) resultInForce() (line int, ok bool) {
-	line, governed := rp.govern[state.GroupResult]
-	return line, governed && rp.cur.m.Status == state.MatchStatusCompleted
+	_, governed := rp.govern[state.GroupResult]
+	return rp.resultBy, governed && rp.cur.m.Status == state.MatchStatusCompleted
 }
 
 func (rp *replayer) judgeOverFinished(line int, b *state.ScoreBaseline, groups []string) *BaselineHold {
@@ -759,7 +782,11 @@ func (rp *replayer) rivalResult(line int, b *state.ScoreBaseline) bool {
 	if !ok || inForce == line || b.Informed || baselineResultStatus(b) != state.MatchStatusCompleted {
 		return false
 	}
-	if b.BasisSent && basisSawLine(&b.Basis, len(rp.lines), inForce) {
+	logLines := len(rp.lines)
+	if rp.shape.logKnown {
+		logLines = rp.shape.logLines
+	}
+	if b.BasisSent && basisSawLine(&b.Basis, logLines, inForce) {
 		return false
 	}
 	// A result that says what the match already holds, in every group it
@@ -837,6 +864,12 @@ func resultInForceIn(stored *state.MatchResult, lines []state.ScoreLogLine, shap
 	if rp == nil {
 		return ResultInForce{}
 	}
+	return rp.inForce(basis, lineCount)
+}
+
+// inForce is what the replay rp holds of the result in force, and whether
+// basis (capped to lineCount) saw the line that set it.
+func (rp *replayer) inForce(basis *state.ScoreBasis, lineCount int) ResultInForce {
 	line, ok := rp.resultInForce()
 	if !ok {
 		return ResultInForce{}
@@ -852,15 +885,19 @@ func resultInForceIn(stored *state.MatchResult, lines []state.ScoreLogLine, shap
 // the stored match as its migration baseline.
 func ResultInForceAt(stored *state.MatchResult, lines []state.ScoreLogLine, comp *state.Competition, knockout bool, stamp int64, basis *state.ScoreBasis) ResultInForce {
 	count := len(lines)
-	if count == 0 {
-		mb := MigrationBaseline(stored, MigrationDoor+"-0", 0)
-		lines = []state.ScoreLogLine{{Baseline: &mb}}
+	shape := ReplayShape{Comp: comp, Knockout: knockout}
+	// The log as the merge reads it (replayLines): the migration baseline of
+	// an empty log, a drift or repair line appended. It is not logged here;
+	// the write that follows logs it.
+	all, _, found := replayLines(stored, lines, shape, 0, false)
+	if stamp <= 0 && found != nil {
+		return found.inForce(basis, count)
 	}
 	var stopAt *replayItem
 	if stamp > 0 {
 		stopAt = &replayItem{stamp: stamp, baseline: true}
 	}
-	return resultInForceIn(stored, lines, ReplayShape{Comp: comp, Knockout: knockout}, stopAt, basis, count)
+	return resultInForceIn(stored, all, shape, stopAt, basis, count)
 }
 
 // writesAsRival reports whether a write is a rival of the stored result (the

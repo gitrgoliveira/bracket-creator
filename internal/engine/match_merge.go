@@ -493,17 +493,15 @@ func mergeByReplay(stored, incoming *state.MatchResult, changed []string, stamp 
 	rep := &state.MergeReport{Stamp: stamp, Changed: changed, Replayed: true}
 	shape := ReplayShape{Comp: mc.comp, Knockout: mc.knockout}
 	now := serverNowMs()
-	lines := mc.lines
-	if len(lines) > 0 {
+	if len(mc.lines) > 0 {
 		rep.Prior = priorMatch(stored)
 	}
-	if len(lines) == 0 {
-		mb := MigrationBaseline(stored, MigrationDoor+"-0", now)
-		lines = []state.ScoreLogLine{{Baseline: &mb}}
-		rep.LogPrefix = lines
-	} else if drift := driftBaseline(stored, lines, shape, now); drift != nil {
-		lines = append(slices.Clone(lines), *drift)
-		rep.LogPrefix = []state.ScoreLogLine{*drift}
+	// The lines the write is replayed against (the one owner, replayLines);
+	// found is the replay of exactly the log as found, when nothing was added
+	// to it, which the result lock below reads instead of replaying again.
+	lines, prefix, found := replayLines(stored, mc.lines, shape, now, true)
+	if prefix != nil {
+		rep.LogPrefix = prefix
 	}
 	// The write's own stamps are never a client's: every group it changes is
 	// dated by the write. An unstamped one is ordered after everything the
@@ -571,7 +569,10 @@ func mergeByReplay(stored, incoming *state.MatchResult, changed []string, stamp 
 	bl.BasisSent = incoming.Basis != nil
 	rep.Baseline = &bl
 	all := append(slices.Clone(lines), state.ScoreLogLine{Baseline: &bl})
-	after := ReplayScoring(stored, all, shape)
+	// The lines past the log as found were minted by this write: a basis
+	// cannot have seen them (rivalResult caps by the log's own count, not
+	// leaning on the cap above).
+	after := ReplayScoring(stored, all, shape.withLogLines(len(mc.lines)))
 	final := &after.Match
 
 	// Every group takes what the replay gives; one the replay left as the
@@ -681,7 +682,12 @@ func mergeByReplay(stored, incoming *state.MatchResult, changed []string, stamp 
 		if bl.BasisSent {
 			sentBasis = &bl.Basis
 		}
-		r := resultInForceIn(stored, lines, shape, nil, sentBasis, len(mc.lines))
+		var r ResultInForce
+		if found != nil {
+			r = found.inForce(sentBasis, len(mc.lines))
+		} else {
+			r = resultInForceIn(stored, lines, shape, nil, sentBasis, len(mc.lines))
+		}
 		rep.StoredResultInForce, rep.StoredResultSeen = r.InForce, r.Saw
 	}
 	rep.ResultChanged = state.GroupDiffers(stored, final, state.GroupResult)

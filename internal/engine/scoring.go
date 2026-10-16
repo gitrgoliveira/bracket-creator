@@ -764,6 +764,13 @@ func firstForceOptions(opts []ForceOptions) ForceOptions {
 // force (bc-kcdg) reaches ONLY the bracket branch's downstream-knockout-
 // correction guard; the pool branch has no equivalent concept and ignores it.
 func (e *Engine) writeToPoolOrBracket(h state.StoreTx, compId, matchId string, result *state.MatchResult, policy matchWritePolicy, force bool, comp *state.Competition) (mismatch bool, reopened []ReopenedMatch, inherited bool, err error) {
+	return e.writeToPoolOrBracketLog(h, compId, matchId, result, policy, force, comp, e.snapshotScoreLog(h, compId, matchId, result, policy))
+}
+
+// writeToPoolOrBracketLog is writeToPoolOrBracket with the match's score log
+// already read (snapshotScoreLog), for a caller that needed it before the
+// write (the /score path's shapeScoreWrite): one read per write.
+func (e *Engine) writeToPoolOrBracketLog(h state.StoreTx, compId, matchId string, result *state.MatchResult, policy matchWritePolicy, force bool, comp *state.Competition, lines []state.ScoreLogLine) (mismatch bool, reopened []ReopenedMatch, inherited bool, err error) {
 	// The merge needs the competition to judge the write (engi, team,
 	// kachinuki), so a
 	// forward write whose caller did not load it loads it here.
@@ -773,7 +780,6 @@ func (e *Engine) writeToPoolOrBracket(h state.StoreTx, compId, matchId string, r
 		}
 	}
 	var superseded bool
-	lines := e.snapshotScoreLog(h, compId, matchId, result, policy)
 	perr := e.withPoolMatch(h, compId, matchId, func(r *state.MatchResult) error {
 		// The POOL branch of the path POST /score and the bulk-score endpoint
 		// actually take — the site the hand-copied merge once missed.

@@ -370,6 +370,9 @@ type pmCase struct {
 	// outs pins the final replay outcome of named taps, on top of the rule
 	// pmWantOutcome derives for every tap.
 	outs map[string]string
+	// drift marks a case whose fault the drift net logs: its log holds one
+	// drift line, which pmReplay reports.
+	drift bool
 }
 
 // pmHome is a fresh match for a case: a team knockout gets the same next round
@@ -697,7 +700,7 @@ func pmAssertAdvanced(t *testing.T, h mmHome, order []int) {
 
 func TestMatchWritePermutationsConverge(t *testing.T) {
 	cases, perms := 0, 0
-	for _, c := range append(pmCases(), pmKindCases()...) {
+	for _, c := range slices.Concat(pmCases(), pmKindCases(), pmRepairCases()) {
 		require.NotEmpty(t, c.want, "%s: a case asserts its outcome", c.name)
 		for _, ko := range []bool{false, true} {
 			if (c.where == "pool" && ko) || (c.where == "ko" && !ko) {
@@ -749,7 +752,7 @@ func TestMatchWritePermutationsConverge(t *testing.T) {
 						arrived = append(arrived, s)
 					}
 					perms++
-					if r := pmReplay(h, t); r != "" {
+					if r := pmReplay(h, t); r != "" && (!c.drift || r != " DRIFT") {
 						t.Errorf("order %v: stored match differs from a replay of its log: %s", p, r)
 					}
 					for _, bad := range pmFinalCheck(c, h) {

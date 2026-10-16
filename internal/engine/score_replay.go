@@ -649,7 +649,8 @@ func (rp *replayer) applyBaselineGroups(line int, b *state.ScoreBaseline, groups
 			// log has since moved (an earlier-stamped result that arrived
 			// later and displaced the one it repaired) it would put that
 			// displaced value back. It is skipped there (bc-evts review
-			// round 12).
+			// round 12). Nothing is lost: the load repair refills the ids, and the next
+			// drift check mints a fresh repair line.
 			continue
 		}
 		if g == state.GroupPoints && governed && b.Door == DoorDecision {

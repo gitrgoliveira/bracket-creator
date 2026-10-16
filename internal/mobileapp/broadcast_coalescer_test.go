@@ -134,6 +134,30 @@ func TestMatchBroadcastCoalescer_TrailingSendCarriesTheLastState(t *testing.T) {
 	assert.Equal(t, []string{"a", "done"}, seen())
 }
 
+// Close sends at once the push a window still holds (bc-evts review round 12):
+// it is the match's last running scoreline, and shutting down must not drop it.
+func TestMatchBroadcastCoalescer_CloseSendsTheHeldPush(t *testing.T) {
+	var mu sync.Mutex
+	var got []string
+	send := func(s string) func() {
+		return func() { mu.Lock(); got = append(got, s); mu.Unlock() }
+	}
+	frozen := time.Now()
+	c := newMatchBroadcastCoalescerWithClock(func() time.Time { return frozen })
+	c.Submit("m1", true, stillRunning(send("first")))
+	c.Submit("m1", true, stillRunning(send("held")))
+	c.Submit("m2", true, stillRunning(send("other")))
+	c.Close()
+	mu.Lock()
+	assert.ElementsMatch(t, []string{"first", "held", "other"}, got, "the held push goes out at Close, once")
+	mu.Unlock()
+	c.Close()
+	time.Sleep(2 * matchCoalesceWindow)
+	mu.Lock()
+	assert.Len(t, got, 3, "a second Close sends nothing, and no timer fires after Close")
+	mu.Unlock()
+}
+
 // ---------------------------------------------------------------------------
 // BenchmarkScoreWrite_TwoCourts, measures per-comp-lock serialisation when
 // two courts of the SAME competition write running-status scores concurrently.
@@ -214,20 +238,21 @@ func BenchmarkScoreWrite_TwoCourts(b *testing.B) {
 // do not broadcast but completed writes always do.
 // ---------------------------------------------------------------------------
 func TestScoreHandler_C3Coalescer(t *testing.T) {
-	r, store, _, hub, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
 	// Pin the coalescer clock to a fixed instant so both running writes land
 	// at the same coalescer-time and the second is ALWAYS inside the 250ms
 	// window. Without this, >250ms of wall time between the two ServeHTTP
 	// calls on a contended CI runner lets the window lapse, the second write
 	// legitimately broadcasts, and the count==1 assertion can never pass
 	// (observed twice on CI; second flake on PR #349 run 29166974332).
-	// The clock is this router's own coalescer's, set before any write, so no
-	// other test's trailing timer can read it.
+	// The clock is this router's own coalescer's, built with it
+	// (newMatchBroadcastCoalescerWithClock, through the hub's pushClock), so
+	// no field is written after construction.
 	frozen := time.Now()
+	pinned := NewHub()
+	pinned.pushClock = func() time.Time { return frozen }
+	r, store, _, hub, tempDir := setupTestRouterWithHub(t, pinned)
+	defer os.RemoveAll(tempDir)
 	require.NotNil(t, hub.heldPushes)
-	hub.heldPushes.now = func() time.Time { return frozen }
 
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c3", Courts: []string{"A"}}))

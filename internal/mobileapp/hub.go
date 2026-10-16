@@ -194,6 +194,10 @@ type Hub struct {
 	// broadcastMatchNow reaches it (through pushMatchNow) from the handlers
 	// that broadcast a match_updated of their own. Set once at registration, before serving.
 	heldPushes *matchBroadcastCoalescer
+	// pushClock is the clock RegisterMatchHandlers builds that coalescer
+	// with (newMatchBroadcastCoalescerWithClock); nil is time.Now. Set
+	// before registration, never after, so no timer reads it as it changes.
+	pushClock func() time.Time
 }
 
 // pushMatchNow runs send under the attached coalescer's lock for matchKey

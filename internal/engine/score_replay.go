@@ -643,6 +643,15 @@ func (rp *replayer) applyBaselineGroups(line int, b *state.ScoreBaseline, groups
 			}
 		}
 		value := b.Values[g]
+		if b.Door == DoorRepair && governed && !rp.repairFillsIDs(g, value) {
+			// A repair line fills ids only: stamped at the stored match's
+			// group stamps, it carries the whole group, so over a value the
+			// log has since moved (an earlier-stamped result that arrived
+			// later and displaced the one it repaired) it would put that
+			// displaced value back. It is skipped there (bc-evts review
+			// round 12).
+			continue
+		}
 		if g == state.GroupPoints && governed && b.Door == DoorDecision {
 			value = rp.keepLoserPoints(b, value)
 		}
@@ -701,15 +710,26 @@ func (rp *replayer) applyBaselineGroups(line int, b *state.ScoreBaseline, groups
 		}
 		rp.applied[g], rp.early[g] = kept, nil
 		rp.govern[g] = line
-		// The line that SET the result (resultInForce). A repair line fills
-		// ids a load-time repair added to a result the log already holds: the
-		// verdict it carries is that result, so the line a device saw is still
-		// the one that set it (bc-evts review round 11). A drift line is a
-		// write the log missed and does set it.
+		// The line that SET the result (resultInForce). A repair line only
+		// fills ids on the result the replay holds at its point (it is
+		// skipped otherwise, above), so the line a device saw is still the
+		// one that set it (bc-evts review round 11). A drift line is a write
+		// the log missed and does set it, unless I1 holds it (rivalResult).
 		if g == state.GroupResult && (b.Door != DoorRepair || !governed) {
 			rp.resultBy = line
 		}
 	}
+}
+
+// repairFillsIDs reports whether a repair line's value of group g differs from
+// the value the replay holds at that point in filled ids alone (the rule
+// driftOf minted it by, repairFillsIDsOnly).
+func (rp *replayer) repairFillsIDs(g string, value json.RawMessage) bool {
+	repaired := cloneMatchForReplay(rp.cur.m)
+	if err := state.SetGroupFromValue(&repaired, g, value); err != nil {
+		return false
+	}
+	return repairFillsIDsOnly(&repaired, &rp.cur.m, g)
 }
 
 // judgeOverFinished decides a baseline item that sets scoring but not the
@@ -775,6 +795,11 @@ func (rp *replayer) judgeOverFinished(line int, b *state.ScoreBaseline, groups [
 func (rp *replayer) rivalResult(line int, b *state.ScoreBaseline) bool {
 	switch b.Door {
 	case DoorScore, doorEngi, DoorDecision:
+	case DoorDrift:
+		// A drift line (a fault: the stored match says what no line
+		// explains) is judged like a result from a device: its basis is
+		// the lines it was minted over, so a first-by-stamp result logged
+		// after it is one it did not see (bc-evts review round 12).
 	default:
 		return false
 	}
@@ -786,7 +811,7 @@ func (rp *replayer) rivalResult(line int, b *state.ScoreBaseline) bool {
 	if rp.shape.logKnown {
 		logLines = rp.shape.logLines
 	}
-	if b.BasisSent && basisSawLine(&b.Basis, logLines, inForce) {
+	if (b.BasisSent || b.Door == DoorDrift) && basisSawLine(&b.Basis, logLines, inForce) {
 		return false
 	}
 	// A result that says what the match already holds, in every group it

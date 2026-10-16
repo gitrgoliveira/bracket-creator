@@ -80,7 +80,8 @@ func newMatchBroadcastCoalescerWithClock(now func() time.Time) *matchBroadcastCo
 	return &matchBroadcastCoalescer{now: now}
 }
 
-// Close stops every armed trailing-send timer and waits for any whose send is
+// Close stops every armed trailing-send timer, sends at once the push each one
+// held (the match's last running scoreline), and waits for any whose send is
 // already under way. A push submitted after Close is sent at once (nothing is
 // held, so nothing is left behind). Idempotent; called from Hub.Close at
 // shutdown and from tests' cleanup.
@@ -95,7 +96,16 @@ func (c *matchBroadcastCoalescer) Close() {
 			k.mu.Unlock()
 			return true
 		}
+		send := k.pending
 		k.cancelLocked()
+		if send != nil {
+			// The held push is the match's last running scoreline: it goes
+			// out now, as its timer would have sent it (bc-evts review
+			// round 12), under the key's lock as flushPending sends.
+			var wg sync.WaitGroup
+			safeGo(&wg, nil, func() { send() })
+			wg.Wait()
+		}
 		k.hasLast = false
 		c.release(key.(string), k)
 		return true

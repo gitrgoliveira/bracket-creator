@@ -400,6 +400,9 @@ type writeBaseline struct {
 	// (MergeReport.Prior): the outcomes the earlier events had then are the
 	// ones a move is recorded against. Nil reads them off the written match.
 	prior *state.MatchResult
+	// replay is the merge's own read and replay of the log
+	// (MergeReport.Replay); nil reads the log and replays it here.
+	replay *mergeReplay
 }
 
 // baselineNote is what noteWriteBaseline appended: the replayed match (the
@@ -408,6 +411,34 @@ type writeBaseline struct {
 type baselineNote struct {
 	match      state.MatchResult
 	notApplied []string
+}
+
+// mergeReplay is what mergeByReplay read and replayed (MergeReport.Replay),
+// for noteWriteBaseline to reuse instead of reading and replaying the log
+// again (bc-evts review round 12).
+type mergeReplay struct {
+	// found is the log as the merge read it.
+	found []state.ScoreLogLine
+	// lines counts the lines the write was replayed on (found and the
+	// prefix replayLines appended).
+	lines int
+	// after is the replay of those lines with the write's baseline.
+	after Replay
+}
+
+func newMergeReplay(found []state.ScoreLogLine, lines int, after Replay) *mergeReplay {
+	kept := after
+	kept.Match = cloneMatchForReplay(after.Match)
+	return &mergeReplay{found: found, lines: lines, after: kept}
+}
+
+// mergeReplayOf is the merge's replay a report carries, nil when it has none.
+func mergeReplayOf(rep *state.MergeReport) *mergeReplay {
+	if rep == nil {
+		return nil
+	}
+	mr, _ := rep.Replay.(*mergeReplay)
+	return mr
 }
 
 // recordLandedWriteHistory is recordWriteHistory for a write that LANDED on the
@@ -423,7 +454,7 @@ func (e *Engine) recordLandedWriteHistory(h state.StoreTx, compID, matchID strin
 		door: doorOf(result), stamp: rep.Stamp, named: rep.Applied,
 		writeID: result.WriteID, basis: result.Basis,
 		prefix: rep.LogPrefix, revSession: result.RevSession, rev: result.Rev,
-		sent: sentBaseline(rep), prior: rep.Prior,
+		sent: sentBaseline(rep), prior: rep.Prior, replay: mergeReplayOf(rep),
 	})
 	if note == nil {
 		return
@@ -458,12 +489,16 @@ func (e *Engine) recordSupersededWriteHistory(h state.StoreTx, compID, matchID s
 	// A match whose log has not begun has nothing the turned-away result could
 	// close: the stored match is its only baseline, and the write leaves no
 	// footprint in the match file.
-	if lines, err := h.LoadScoreLog(compID, matchID); err != nil || len(lines) == 0 {
-		return
+	mr := mergeReplayOf(rep)
+	if mr == nil || len(mr.found) == 0 {
+		if lines, err := h.LoadScoreLog(compID, matchID); err != nil || len(lines) == 0 {
+			return
+		}
 	}
 	e.noteWriteBaseline(h, compID, matchID, writeBaseline{
 		door: doorOf(result), stamp: rep.Stamp, writeID: result.WriteID, basis: result.Basis,
 		prefix: rep.LogPrefix, revSession: result.RevSession, rev: result.Rev, sent: sentBaseline(rep),
+		replay: mr,
 	})
 }
 
@@ -493,10 +528,17 @@ func sentBaseline(rep *state.MergeReport) *state.ScoreBaseline {
 // seen every line logged: the write was judged against the match those lines
 // made. A failure here never fails the write, which has landed: it is logged.
 func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb writeBaseline) *baselineNote {
-	lines, err := h.LoadScoreLog(compID, matchID)
-	if err != nil {
-		log.Printf("engine: ERROR: match %s/%s: score event log not read, the %s write leaves no baseline: %v", compID, matchID, wb.door, err)
-		return nil
+	var lines []state.ScoreLogLine
+	if wb.replay != nil && len(wb.replay.found) > 0 {
+		// The log the merge read under this write's lock: a log it could not
+		// read reached it as none, so only a log with lines is taken from it.
+		lines = slices.Clone(wb.replay.found)
+	} else {
+		var err error
+		if lines, err = h.LoadScoreLog(compID, matchID); err != nil {
+			log.Printf("engine: ERROR: match %s/%s: score event log not read, the %s write leaves no baseline: %v", compID, matchID, wb.door, err)
+			return nil
+		}
 	}
 	if len(wb.prefix) > 0 {
 		if err := h.AppendScoreLog(compID, matchID, wb.prefix...); err != nil {
@@ -537,7 +579,13 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 		return nil
 	}
 	shape := ReplayShape{Comp: comp, Knockout: !inPool}
-	before := ReplayScoring(post, lines, shape)
+	// The log before the write's line, read only where it is used: the groups
+	// an unjudged write sets, and the outcomes a move is recorded against
+	// when no prior was kept.
+	var before Replay
+	if wb.sent == nil || wb.prior == nil {
+		before = ReplayScoring(post, lines, shape)
+	}
 	movedReason := ""
 	basis := state.ScoreBasis{Seen: len(lines)}
 	if wb.basis != nil {
@@ -559,7 +607,15 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 			bl.RevSession, bl.Rev = wb.revSession, wb.rev
 		}
 		line = state.ScoreLogLine{Baseline: &bl}
-		after = ReplayScoring(post, append(slices.Clone(lines), line), shape)
+		if mr := wb.replay; mr != nil && mr.lines == len(lines) && len(replayGroupsDiffer(post, &mr.after.Match)) == 0 {
+			// The merge replayed these same lines with this same baseline
+			// (its id, write id and revision aside, which the replay does not
+			// read), and the match as stored is what it gave.
+			after = mr.after
+			after.Match = cloneMatchForReplay(mr.after.Match)
+		} else {
+			after = ReplayScoring(post, append(slices.Clone(lines), line), shape)
+		}
 		if diff := replayGroupsDiffer(post, &after.Match); len(diff) > 0 {
 			// The write pipeline still shapes what it stores after the merge
 			// (a hantei mark a running match cannot hold is dropped): a group

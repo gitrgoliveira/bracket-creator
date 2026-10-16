@@ -140,7 +140,9 @@ func TestMatchBroadcastCoalescer_CancelledTimerCannotFlushALaterPendingEarly(t *
 
 // Close stops an armed trailing-send timer, so no send from it runs after
 // Close returns, and a push submitted after Close goes out at once rather
-// than arming a timer nothing would wait for (bc-evts review round 11).
+// than arming a timer nothing would wait for (bc-evts review round 11). The
+// push the timer held is sent by Close itself (review round 12): it is the
+// match's last running scoreline.
 func TestMatchBroadcastCoalescer_CloseStopsTimersAndSendsLaterPushesAtOnce(t *testing.T) {
 	frozen := time.Now()
 	rec := &recorder{}
@@ -148,12 +150,13 @@ func TestMatchBroadcastCoalescer_CloseStopsTimersAndSendsLaterPushesAtOnce(t *te
 	c.Submit("m", true, stillRunning(rec.send("a")))
 	c.Submit("m", true, stillRunning(rec.send("b"))) // held behind a timer
 	c.Close()
+	assert.Equal(t, []string{"a", "b"}, rec.seen(), "Close sends the held push at once")
 	time.Sleep(2 * matchCoalesceWindow)
-	assert.Equal(t, []string{"a"}, rec.seen(), "the held push's timer is stopped by Close")
+	assert.Equal(t, []string{"a", "b"}, rec.seen(), "and its stopped timer sends nothing")
 
 	c.Submit("m", true, stillRunning(rec.send("c")))
 	c.Submit("m", true, stillRunning(rec.send("d"))) // inside the window, but closed: sent at once
-	assert.Equal(t, []string{"a", "c", "d"}, rec.seen())
+	assert.Equal(t, []string{"a", "b", "c", "d"}, rec.seen())
 	c.Close() // idempotent
 }
 

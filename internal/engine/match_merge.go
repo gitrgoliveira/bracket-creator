@@ -573,6 +573,7 @@ func mergeByReplay(stored, incoming *state.MatchResult, changed []string, stamp 
 	// cannot have seen them (rivalResult caps by the log's own count, not
 	// leaning on the cap above).
 	after := ReplayScoring(stored, all, shape.withLogLines(len(mc.lines)))
+	rep.Replay = newMergeReplay(mc.lines, len(lines), after)
 	final := &after.Match
 
 	// Every group takes what the replay gives; one the replay left as the

@@ -802,6 +802,11 @@ type MergeReport struct {
 	// a move the write causes (a tap that found no bout row, and finds one
 	// the write pads) is recorded.
 	Prior *MatchResult `json:"-"`
+	// Replay is the engine's own record of the replay that decided the write
+	// (the log it read, and the replay of it with the write's baseline),
+	// which the door that logs the baseline reuses rather than reading and
+	// replaying the log again. Opaque here.
+	Replay any `json:"-"`
 	// ResultLocked, when set, is the wire code (HeldReasonDownstreamPlayed or
 	// HeldReasonDownstreamRunning) of a finish or decision held because the
 	// next knockout match had already been played or started (operator decision

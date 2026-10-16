@@ -96,7 +96,7 @@ func holdAsLocked(result, from *state.MatchResult, code string) {
 	}
 	rep.Applied, rep.Unchanged, rep.Displaced = nil, nil, nil
 	rep.ResultChanged, rep.MatchClosed, rep.Replayed = false, false, false
-	rep.Baseline, rep.LogPrefix, rep.Prior = nil, nil, nil
+	rep.Baseline, rep.LogPrefix, rep.Prior, rep.Replay = nil, nil, nil, nil
 	rep.HoldReason, rep.ResultLocked = lockReason(code), code
 }
 

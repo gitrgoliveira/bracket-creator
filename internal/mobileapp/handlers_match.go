@@ -2971,11 +2971,16 @@ type correctionCheck struct {
 // status instead.
 // seenResultCheck lets applyCorrectionReason ask the match's score log whether a
 // reason-less finish's basis holds the line of the result in force at its stamp (engine.ResultInForceAt).
-// Only the score door passes one: bulk-score is an organiser's tool and is never
-// the rival of a result, so it keeps asking every overwrite for its reason.
+// The score door passes a full one. Bulk-score passes a probeOnly one: it is an
+// organiser's tool and is never the rival of a result, so it keeps asking every
+// overwrite for its reason, but its exact-resend probe replays the match's real
+// log, as the engine's own probe does (bc-evts review round 12).
 type seenResultCheck struct {
 	stx             state.StoreTx
 	compID, matchID string
+	// probeOnly holds the log for the exact-resend probe alone: the
+	// reason-less rival bypass is the score door's.
+	probeOnly bool
 	// The match's score log, read once for every judge of the write that
 	// asks it (log): the exact-resend probe and the reason check read the
 	// same lines the engine's merge does.
@@ -3065,7 +3070,7 @@ func applyCorrectionReason(snap matchSnapshot, r *state.MatchResult, comp *state
 			// changing its own finish) or with no stamp of its own (the
 			// server's, which the replay never turns away) still needs its
 			// reason.
-			if score != nil && r.ModifiedAt > snap.ResultStamp && !r.ClearsWithdrawal {
+			if score != nil && !score.probeOnly && r.ModifiedAt > snap.ResultStamp && !r.ClearsWithdrawal {
 				// A log that cannot be read is judged as one whose basis did
 				// not see the result: the engine reads it as empty too, and the
 				// write then ends in the match's history, which is a separate
@@ -3122,7 +3127,8 @@ func applyCorrectionReasonUnderTx(stx state.StoreTx, compID, matchID string, r *
 	if err != nil {
 		return correctionCheck{}, matchSnapshot{}, err
 	}
-	return applyCorrectionReason(snap, r, comp, nil), snap, nil
+	probe := &seenResultCheck{stx: stx, compID: compID, matchID: matchID, probeOnly: true}
+	return applyCorrectionReason(snap, r, comp, probe), snap, nil
 }
 
 // missingCorrectionReasonError is the refusal for overwriting a completed
@@ -3364,7 +3370,11 @@ func withHeldGroups(body gin.H, rep *state.MergeReport) gin.H {
 func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store CompetitionStore, tx CompetitionTransactor, hub Broadcaster, verifier PasswordVerifier, tl TournamentLoader) {
 	// C3: coalesce high-frequency "running" match_updated broadcasts to ≤4/s
 	// per match. Completed writes always proceed (isRunning=false).
-	coalescer := newMatchBroadcastCoalescer()
+	clock := time.Now
+	if h, ok := hub.(*Hub); ok && h.pushClock != nil {
+		clock = h.pushClock
+	}
+	coalescer := newMatchBroadcastCoalescerWithClock(clock)
 	// The decision, requeue, reopen, start and representative-bout broadcasts
 	// reach it through the hub to discard a push it still holds.
 	if h, ok := hub.(*Hub); ok {

@@ -635,7 +635,9 @@ func TestScoreEventsDoor_NonRefusalWriteFaultIs500(t *testing.T) {
 	const compID = "se-fault"
 	_, store, hub, _ := seServer(t, compID)
 	g := gin.New()
-	registerScoreEventsHandler(g.Group("/api"), faultyScoreEvents{engine.New(store)}, store, store, hub, NewFileVerifier(store), store, newMatchBroadcastCoalescer())
+	c := newMatchBroadcastCoalescer()
+	t.Cleanup(c.Close)
+	registerScoreEventsHandler(g.Group("/api"), faultyScoreEvents{engine.New(store)}, store, store, hub, NewFileVerifier(store), store, c)
 	w := serveJSON(g, http.MethodPost, sePath(compID, seMatch), map[string]any{"session": "evs",
 		"events": []map[string]any{seTap("f1", 1, time.Now().UnixMilli()-1000, "a", "M")}})
 	assert.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())

@@ -610,7 +610,10 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 		if mr := wb.replay; mr != nil && mr.lines == len(lines) && len(replayGroupsDiffer(post, &mr.after.Match)) == 0 {
 			// The merge replayed these same lines with this same baseline
 			// (its id, write id and revision aside, which the replay does not
-			// read), and the match as stored is what it gave.
+			// read), and the match as stored is what it gave. The merge's replay is told
+			// the log's length (withLogLines) and a fresh uncapped one is not, yet they
+			// agree: the merge clamps the incoming basis (match_merge.go) and a logged
+			// line's Seen is bounded by the log's length when it is written.
 			after = mr.after
 			after.Match = cloneMatchForReplay(mr.after.Match)
 		} else {

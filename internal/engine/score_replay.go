@@ -791,7 +791,8 @@ func (rp *replayer) judgeOverFinished(line int, b *state.ScoreBaseline, groups [
 // that leaves the match open), a direct writer's result (override-winner, the
 // engine's own callers, bulk and quick score: an organiser acting on what the
 // screen shows) is no rival either. Only a finish or a decision from the
-// score, engi or decision doors is.
+// score, engi or decision doors is, and a drift line that carries a result is
+// judged by the same rule (see the DoorDrift arm below).
 func (rp *replayer) rivalResult(line int, b *state.ScoreBaseline) bool {
 	switch b.Door {
 	case DoorScore, doorEngi, DoorDecision:

@@ -1405,6 +1405,11 @@ func exactScoreReplayProbe(stored, incoming *state.MatchResult, comp *state.Comp
 			return nil, false
 		}
 	}
+	// A reasoned correction over a kept kiken or fusenpai lands with the
+	// stored ruling inherited (applyPoolWrite and the bracket twin do this
+	// after the merge), so the result group is compared as it would land: the
+	// resend of one is the finish already recorded (bc-evts review round 13).
+	preserveWithdrawalRuling(rulingOfMatch(stored), &probe, matchWriteForward)
 	// The merge owner decides which groups of the write would land: a group
 	// whose stored stamp is newer is held and lands nothing (a later point
 	// from another board, or one stamped after the result), and every

@@ -10,6 +10,7 @@ import {
   attemptScoreWrite,
   downstreamKnockoutReopenedNotice,
   writeKeepsEditorOpen,
+  writePending,
   markToasted,
 } from './write_result.jsx';
 import { keptInHistoryNote } from './match_groups.jsx';
@@ -306,13 +307,23 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // editor bodies. attemptScoreWrite above owns the downstream-knockout
   // confirm+retry loop; wiring it here means every host and both editors
   // get it for free.
-  const editMatchScore = async (compId, matchId, result, match) => {
+  const editMatchScore = async (compId, matchId, result, match, opts = {}) => {
+    // bc-kcdg: say what the confirmation actually did. The operator agreed to
+    // reopen specific later matches; without this the only evidence is the
+    // board. The forced write's server answer names what it reopened
+    // (attemptScoreWrite hands it here when it comes, the outbox's answer).
+    const toastReopened = (ids) => {
+      const notice = downstreamKnockoutReopenedNotice(ids);
+      if (notice) showToast(notice);
+    };
     let saveRes;
     try {
       saveRes = await attemptScoreWrite({
         recordScore: window.API.recordScore,
         confirmDialog: window.confirmDialog,
         compId, matchId, result, password, match,
+        onRefusal: opts && opts.onRefusal,
+        onDownstreamReopened: toastReopened,
       });
     } catch (e) {
       // Every error toasted here is marked, so a host that catches it to show
@@ -327,13 +338,20 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       showToast(e.message, "error");
       throw markToasted(e);
     }
-    // bc-kcdg: say what the confirmation actually did. The operator agreed to
-    // reopen specific later matches; without this the only evidence is the
-    // board. attemptScoreWrite attaches the ids the refusal named, so the
-    // notice names the same matches the dialog did.
-    if (saveRes && saveRes.downstreamReopened) {
-      const notice = downstreamKnockoutReopenedNotice(saveRes.downstreamReopened);
-      if (notice) showToast(notice);
+    // A collaborator that still answers directly attaches the ids itself.
+    if (saveRes && saveRes.downstreamReopened) toastReopened(saveRes.downstreamReopened);
+    // bc-evts: the outbox has the write. Nothing is on the server yet, so the
+    // editor gets the pending answer at once (never held behind a refetch),
+    // and what the server answered is read when it comes: the kept-in-history
+    // note, then the refresh, as for a write that answered directly.
+    if (writePending(saveRes)) {
+      saveRes.settled.then((body) => {
+        if (!body || body.discarded) return;
+        const late = closingHistoryToast(result, body);
+        if (late) showToast(late);
+        refreshCompsBestEffort("Score");
+      }, () => {});
+      return saveRes;
     }
     const keptNote = closingHistoryToast(result, saveRes);
     if (keptNote) showToast(keptNote);

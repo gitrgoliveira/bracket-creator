@@ -1643,8 +1643,29 @@ describe('Send back to queue keeps the score and is always offered (bc-sbq)', ()
       const startNext = c.utils.getAllByRole('button').find((b) => /^start/i.test(b.textContent.trim()));
       expect(startNext, 'the Up Next card offers Start for m2').toBeTruthy();
       await act(async () => { startNext.click(); });
-      expect(window.API.revertMatchToQueue).toHaveBeenCalledWith('c1', 'm1', '');
+      expect(window.API.revertMatchToQueue.mock.calls[0].slice(0, 3)).toEqual(['c1', 'm1', '']);
       expect(c.showToast).not.toHaveBeenCalledWith('Finish or correct the bout in progress first', 'error');
+    } finally { c.restore(); }
+  });
+
+  // bc-evts (the governing rule): the send back is the outbox's and nothing
+  // waits for its answer. The pick's start is queued at once, after it
+  // (`after`: the send back's queue key), so the outbox sends the start only
+  // once the send back has settled, and the console moves on at once.
+  it('the pick does not wait for the send back: the start is queued after it at once', async () => {
+    const onEditScore = vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k-start', settled: new Promise(() => {}) });
+    const c = await mountCourt([courtMatch('m1', 'running', { ipponsA: ['M'] }), courtMatch('m2', 'scheduled')], { onEditScore });
+    window.API.revertMatchToQueue = vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k-back', settled: new Promise(() => {}) });
+    try {
+      const startNext = c.utils.getAllByRole('button').find((b) => /^start/i.test(b.textContent.trim()));
+      await act(async () => { startNext.click(); });
+      await act(async () => {});
+      expect(window.API.revertMatchToQueue).toHaveBeenCalledTimes(1);
+      // The send back's answer never came; the start went to the outbox anyway,
+      // naming the send back it follows.
+      expect(onEditScore).toHaveBeenCalledTimes(1);
+      expect(onEditScore.mock.calls[0][1]).toBe('m2');
+      expect(onEditScore.mock.calls[0][2].after).toBe('k-back');
     } finally { c.restore(); }
   });
 });

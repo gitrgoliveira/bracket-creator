@@ -314,6 +314,9 @@ describe('a queued write that takes another\'s place keeps the later floor', () 
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'], seenModifiedAt: high }, 'pw', null);
         await flushMicrotasks();
         vi.advanceTimersByTime(5000);
+        // The backoff retry the clock set off fails too: the entry is not out
+        // when the next write comes (one being sent is never replaced).
+        await flushMicrotasks();
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M', 'K'], seenModifiedAt: low }, 'pw', null);
         await flushMicrotasks();
         const stored = JSON.parse(localStorage.getItem('bc_write_queue'));

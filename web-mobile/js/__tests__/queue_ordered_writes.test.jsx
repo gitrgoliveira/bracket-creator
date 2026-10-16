@@ -2,10 +2,10 @@
 // All events must be ordered."): the offline queue keeps, per match, a list
 // of pending writes. A later running write never replaces a queued Finish or
 // a decision, a decision and a score for the same match are two entries, and
-// a flush pass sends the entries in the order of the stamps they carry. Each
-// entry is sent on its own: one that keeps failing holds back nothing after
-// it, and a new write goes straight to the server whatever is queued, because
-// the server orders a match write by its stamp, not by when it arrives. A
+// a flush pass sends the entries in the order of the stamps they carry. Since
+// bc-evts (F1) every write is an outbox entry, a running one included, and a
+// match's entries go strictly in order: one that keeps failing holds back the
+// writes made after it for that match, and other matches still flow. A
 // queue persisted by the previous build (one entry per match, keyed by the
 // match itself) loads and replays as it is.
 //
@@ -83,7 +83,7 @@ const storedEntries = () => JSON.parse(localStorage.getItem('bc_write_queue') ||
 
 // Let a flush pass started while offline end (its sends fail at once), so
 // the pass `online()` starts holds every queued entry, in replay order.
-const settleOfflinePass = () => tick(0);
+const settleOfflinePass = async () => { for (let i = 0; i < 4; i++) await tick(0); };
 
 describe('a later running write never replaces a queued Finish', () => {
     it('keeps the Finish and sends both, the Finish first', async () => {
@@ -95,7 +95,7 @@ describe('a later running write never replaces a queued Finish', () => {
         // The editor stayed open (queued keeps it open) and the operator
         // tapped again: a running write, made after the Finish.
         const res = await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M', 'K'], ipponsB: ['D'] }, 'pw', null);
-        expect(res).toEqual({ queued: true });
+        expect(res.pending).toBe(true); // the outbox's (bc-evts), after the Finish
         expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(true); // the Finish is still queued
         expect(storedEntries()).toHaveLength(2);
 
@@ -135,19 +135,20 @@ describe('a later running write never replaces a queued Finish', () => {
         expect(finish.pending).toBe(true);
         await tick(50);
         const before = s.sent.length;
-        // A RUNNING write still goes straight to the server (the editors move
-        // to taps in stages 4-5), so it is not held behind the Finish.
+        // A RUNNING write is the outbox's too (bc-evts, the governing rule), so
+        // it waits behind the Finish like the decision does.
         const running = await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
         const decision = await API.recordDecision('c1', 'm1', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'pw');
         const override = await API.overrideBracketWinner('c1', 'm2', 'Alice', 'pw');
-        expect(running).not.toEqual(expect.objectContaining({ queued: true }));
+        expect(running.pending).toBe(true);
         expect(decision.pending).toBe(true);
         await expect(override.settled).resolves.toEqual(expect.objectContaining({ applied: true }));
         const after = s.sent.slice(before).map((w) => w.url.split('/').pop() + (w.body.status ? `:${w.body.status}` : ''));
-        expect(after).toEqual(expect.arrayContaining(['score:running', 'override-winner']));
+        expect(after).toContain('override-winner');
+        expect(after).not.toContain('score:running');
         expect(after).not.toContain('decision');
-        // The stuck Finish and the decision behind it are still queued.
-        expect(storedEntries().map(([, d]) => d.kind)).toEqual(['score', 'decision']);
+        // The stuck Finish and the writes behind it are still queued, in order.
+        expect(storedEntries().map(([, d]) => d.kind + (d.payload.status ? `:${d.payload.status}` : ''))).toEqual(['score:completed', 'score:running', 'decision']);
     });
 
     it('Retry on a stuck Finish restates the queued one, sends it at once and, when it now lands, clears it', async () => {
@@ -174,18 +175,30 @@ describe('a later running write never replaces a queued Finish', () => {
 
     it('running writes still coalesce with the running write queued just before them, never across the Finish', async () => {
         const s = server();
+        // Each offline send (and each backoff retry the clock moving sets off)
+        // fails at once (settleOfflinePass), so the entry is no longer out when
+        // the next write comes: one already being sent is never replaced
+        // (bc-evts).
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
+        await settleOfflinePass();
         vi.advanceTimersByTime(1000);
+        await settleOfflinePass();
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M', 'K'] }, 'pw', null);
+        await settleOfflinePass();
         expect(storedEntries()).toHaveLength(1);
         vi.advanceTimersByTime(1000);
+        await settleOfflinePass();
         await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A', ipponsA: ['M', 'K'] }, 'pw', null);
+        await settleOfflinePass();
         // A Finish takes the place of the running write it follows (it carries
         // the later state and claims its groups), as it always did.
         expect(storedEntries()).toHaveLength(1);
         vi.advanceTimersByTime(1000);
+        await settleOfflinePass();
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M', 'K'], ipponsB: ['D'] }, 'pw', null);
+        await settleOfflinePass();
         vi.advanceTimersByTime(1000);
+        await settleOfflinePass();
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M', 'K'], ipponsB: ['D', 'K'] }, 'pw', null);
         // The two running writes after the Finish fold into one; the Finish
         // stays its own entry.
@@ -203,7 +216,9 @@ describe('the editor\'s Retry of a queued Finish', () => {
         const s = server();
         const finish = { status: 'completed', winner: 'A', ipponsA: ['M', 'K'] };
         await API.recordScore('c1', 'm1', { ...finish }, 'pw', null);
+        await settleOfflinePass();
         vi.advanceTimersByTime(1000);
+        await settleOfflinePass();
         // "Retry now" re-invokes the same submit while still offline: a later
         // Finish of the same result, which takes the queued one's place.
         const res = await API.recordScore('c1', 'm1', { ...finish }, 'pw', null);
@@ -219,6 +234,7 @@ describe('the editor\'s Retry of a queued Finish', () => {
         server();
         await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null);
         vi.advanceTimersByTime(1000);
+        await settleOfflinePass();
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
         // Exactly two entries, the Finish first (stamp order): the running
         // write took nobody's place.
@@ -249,7 +265,7 @@ describe('a decision and a score for the same match are both kept', () => {
         await API.recordDecision('c1', 'm1', { decision: 'fusenpai', decisionBy: 'shiro' }, 'pw');
         vi.advanceTimersByTime(1000);
         const res = await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
-        expect(res).toEqual({ queued: true });
+        expect(res.pending).toBe(true);
         expect(storedEntries()).toHaveLength(2);
         await settleOfflinePass();
         s.online();

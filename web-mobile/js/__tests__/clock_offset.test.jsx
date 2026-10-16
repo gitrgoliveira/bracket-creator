@@ -308,7 +308,9 @@ describe('server-clock offset: a superseded write relearns the offset', () => {
         await flushMicrotasks();
         expect(server.timeCalls).toBe(2);
 
-        // The operator re-enters the result: it now carries a corrected stamp.
+        // The operator re-enters the result: it now carries a corrected stamp
+        // (once the relearn's answer is in: the write went through the outbox).
+        await flushMicrotasks();
         server.writeReply = () => ({});
         expect(await stampOffset(API, server, 'm1')).toBe(SKEW_MS);
     });
@@ -651,7 +653,10 @@ describe('clock_skew recovery: a live completed write', () => {
         unsub();
     });
 
-    it('a running autosave is healed silently: no banner, one attempt', async () => {
+    // bc-evts: a running autosave is an outbox entry, so a clock refusal is
+    // handled as a queued running write's is (J below): re-stamped once and
+    // resent, silently.
+    it('a running autosave is healed silently: no banner, re-stamped and resent once', async () => {
         const server = makeServer({ timeOk: true });
         const mod = await loadModWith(server);
         const API = mod.API;
@@ -660,13 +665,14 @@ describe('clock_skew recovery: a live completed write', () => {
         const failures = [];
         const unsub = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
 
-        server.writeReply = () => skewRefusal();
+        server.writeReply = replies(skewRefusal(), {});
         await API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null);
         await flushMicrotasks();
+        await tick(50);
 
-        // No resend: the next keystroke's autosave (~300ms) carries the
-        // corrected stamp, and a banner here would fire on every one of them.
-        expect(server.payloads.length).toBe(1);
+        // One resend with the corrected stamp, and no banner: one here would
+        // fire on every autosave of a skewed device.
+        expect(server.payloads.length).toBe(2);
         expect(failures).toEqual([]);
         // But the heal still happens.
         expect(server.timeCalls).toBe(2);
@@ -904,7 +910,7 @@ describe('clock_skew recovery: a queued running write on the flush path', () => 
         server.online = false;
         const enqueuedAt = Date.now();
         expect(await API.recordScore('c1', 'mk', { status: 'running', kachinukiBoutFinal: true }, 'pw', null))
-            .toMatchObject({ queued: true });
+            .toMatchObject({ pending: true });
         await flushMicrotasks();
         expect(server.payloads.length).toBe(0);
 
@@ -1554,9 +1560,10 @@ describe('a score write whose answer never completes is queued, not held', () =>
         expect(outcome && 'value' in outcome, 'settled with the answer').toBe(true);
     });
 
-    // A RUNNING score is still the direct path: given up at 12 s, it is
-    // queued ({queued:true}) and replayed with the same stamp.
-    it('a running score is given up at 12 s, queued, and replayed with the same stamp', async () => {
+    // A RUNNING score is the outbox's too (bc-evts): answered pending at once;
+    // its send, given up at 12 s, stays queued and is replayed with the same
+    // stamp and rev.
+    it('a running score is given up at 12 s, kept queued, and replayed with the same stamp', async () => {
         const server = makeServer({ timeOk: true });
         const API = await loadWith(server);
         const answering = server.fetch;
@@ -1566,21 +1573,25 @@ describe('a score write whose answer never completes is queued, not held', () =>
             sent.push(JSON.parse(opts.body));
             return sent.length === 1 ? stalledBody() : answered();
         });
+        const answer = await API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null);
+        expect(answer).toMatchObject({ applied: true, pending: true });
+        expect(writeDidNotLand(answer)).toBe(false);
         let outcome = null;
-        API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null)
-            .then((res) => { outcome = { res }; }, (error) => { outcome = { error }; });
+        answer.settled.then((value) => { outcome = { value }; }, (error) => { outcome = { error }; });
 
         await tick(11000);
         expect(outcome, 'still reading inside the 12 s').toBeNull();
-        await tick(1500);
-        expect(outcome && outcome.res, 'given up and queued, not thrown').toEqual({ queued: true });
-        expect(writeDidNotLand(outcome.res)).toBe(true);
+        await tick(1100);
+        expect(outcome, 'given up on, but not answered').toBeNull();
+        expect(API.unsentWrites().total, 'kept queued, not thrown').toBe(1);
+        expect(sent).toHaveLength(1);
 
         await tick(1000);
         expect(sent).toHaveLength(2);
         expect(sent[1].modifiedAt).toBe(sent[0].modifiedAt);
         expect(sent[1].rev).toBe(sent[0].rev);
         expect(API.unsentWrites().total, 'delivered and out of the queue').toBe(0);
+        expect(outcome && 'value' in outcome, 'settled with the answer').toBe(true);
     });
 
     // The replay loop is single-flight: one replay whose body never completed

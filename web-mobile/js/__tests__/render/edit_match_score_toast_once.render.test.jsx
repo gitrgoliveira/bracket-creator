@@ -12,7 +12,7 @@ import React from 'react';
 import { render, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, wasToasted } from '../../write_result.jsx';
+import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, wasToasted, downstreamKnockoutReopenedNotice } from '../../write_result.jsx';
 
 const probe = { props: null };
 
@@ -90,5 +90,36 @@ describe('editMatchScore marks every error it toasts', () => {
     expect(caught).toBe(refusal);
     expect(showToast.mock.calls).toEqual([[DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED]]);
     expect(wasToasted(caught)).toBe(true);
+  });
+});
+
+// bc-evts: a Finish is the outbox's, so the downstream-knockout-played refusal
+// arrives through `settled` and is claimed by attemptScoreWrite, which shows
+// the confirm and queues the forced write. What the forced write reopened is
+// in ITS server answer, when it comes: editMatchScore toasts it then, in the
+// same words as before the outbox (downstreamKnockoutReopenedNotice).
+describe('editMatchScore says what a confirmed downstream reopen did', () => {
+  it('toasts the reopened matches named by the forced write\'s server answer', async () => {
+    const { showToast, onEditScore } = await mountScoresView();
+    const refusal = Object.assign(new Error('a later match was played'), {
+      downstreamKnockoutPlayed: { blockingMatchId: 'm9', blockingMatches: [], displaced: [] },
+    });
+    window.API.recordScore.mockImplementation((_c, _m, result, _pw, _match, opts) => {
+      if (!result.forceDownstreamReopen) {
+        queueMicrotask(() => { opts.onRefusal(refusal); });
+        return Promise.resolve({ applied: true, pending: true, key: 'k1', settled: new Promise(() => {}) });
+      }
+      return Promise.resolve({ applied: true, pending: true, key: 'k2', settled: Promise.resolve({ applied: true, reopenedMatches: ['m9'] }) });
+    });
+    window.confirmDialog.mockResolvedValue(true);
+
+    let res;
+    await act(async () => { res = await onEditScore('c1', 'm1', { status: 'completed' }, { id: 'm1' }); });
+    expect(res.pending, 'the editor got the pending answer at once').toBe(true);
+    await act(async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); });
+
+    expect(window.API.recordScore).toHaveBeenCalledTimes(2);
+    expect(window.API.recordScore.mock.calls[1][2].forceDownstreamReopen).toBe(true);
+    expect(showToast).toHaveBeenCalledWith(downstreamKnockoutReopenedNotice(['m9']));
   });
 });

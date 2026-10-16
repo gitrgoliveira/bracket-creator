@@ -889,6 +889,12 @@ function _dequeue(key, descriptor, outcome) {
     // flush passes, else as discarded (a discard, another tab sending it).
     _settleKey(key, outcome || { value: { discarded: true } });
     if (d.kind === 'evt') _publishPendingTaps(_baseOf(key));
+    // An entry another match's write follows (`after`) has left: that write
+    // goes now, in this flush (a rerun) or in one kicked for it.
+    if ([..._writeQueue.values()].some((e) => e.after === key)) {
+        if (_flushInProgress) _flushRequested = true;
+        else queueMicrotask(() => { if (_writeQueue.size > 0) _flushQueue(); });
+    }
     return true;
 }
 
@@ -1148,10 +1154,18 @@ function _pendingAnswer(key, settled) {
 // _outboxWrite: the ONE way a rule-bound door hands a write over. Builds the
 // descriptor synchronously, tags it (writeId, basis, session), stamps its
 // place in the match's order, enqueues it durably and kicks the flush.
-function _outboxWrite({ kind, compID, matchID, method, url, payload, password, seen, onRefusal }) {
+function _outboxWrite({ kind, compID, matchID, method, url, payload, password, seen, onRefusal, terminal = true, after }) {
     const base = _revKey(compID, matchID);
     _tagWrite(payload, base, seen);
-    const descriptor = { compID, matchID, payload, password, kind, terminal: true, method, url, enqueuedAt: Date.now() };
+    // A running score write (terminal false) carries no method/url: it is
+    // always PUT to /score (_sendEntry), the shape older builds queued too.
+    const descriptor = terminal
+        ? { compID, matchID, payload, password, kind, terminal: true, method, url, enqueuedAt: Date.now() }
+        : _runningDescriptor(compID, matchID, payload, password, Date.now());
+    // `after`: the queue key of ANOTHER match's entry this write must follow
+    // (the court console's start after its send back). Persisted with the
+    // entry; the flush holds this one back while that entry is still queued.
+    if (typeof after === 'string' && after) descriptor.after = after;
     const stamped = Number(payload.modifiedAt);
     if (Number.isFinite(stamped) && stamped > 0) payload.modifiedAt = _afterOwnStamp(base, stamped);
     else descriptor.sortStamp = _afterOwnStamp(base, _serverNowMs());
@@ -1171,18 +1185,19 @@ function _outboxWrite({ kind, compID, matchID, method, url, payload, password, s
 // same result restated, not a second one). A LINEUP save joins the queued save
 // of the same lineup (the base names the lineup): _placeWrite makes the one
 // entry say what both changed. A decision or an override is never replaced,
-// and nothing coalesces across one. The page-hide copy of a write still being
-// sent (_keepInflightRunning) is its own entry until its fetch settles.
+// and nothing coalesces across one, nor into an entry already being sent.
 function _coalesceTarget(base, descriptor) {
     if (!descriptor) return null;
     const list = _entriesFor(base);
     const last = list.length ? list[list.length - 1] : null;
     if (!last) return null;
-    const [key, prev] = last;
+    const [, prev] = last;
     // A lineup has one entry in the queue: a later save of it joins the queued one.
     if (descriptor.kind === 'lineup') return prev && prev.kind === 'lineup' ? last : null;
     if (descriptor.kind !== 'score') return null;
-    if (!prev || prev.kind !== 'score' || _heldByOpenFetch(key, prev)) return null;
+    // Never an entry already being sent: its answer settles it, and a write
+    // made since goes after it (_inFlight, set by _sendEntry).
+    if (!prev || prev.kind !== 'score' || _inFlight.has(prev)) return null;
     if (prev.terminal && !descriptor.terminal) return null;
     if (_entryStamp(descriptor) < _entryStamp(prev)) return null;
     return last;
@@ -1254,15 +1269,12 @@ function _parkStoredEntries() {
 let _syncStatus = /** @type {SyncStatusValue} */ ('synced');
 const _syncListeners = new Set();
 
-// Count of in-flight running writes (online path). Drives the syncing pill
-// even when the queue is empty (i.e. the write succeeded and was removed from
-// the queue but the fetch hasn't resolved yet).
-let _inflightRunning = 0;
-// bc-sync: the running writes being sent right now, keyed like the queue: the
-// latest per match, with the time it was sent. Until its fetch settles nothing
-// else holds such a write, and a page going away cancels that fetch, so the
-// page-hide handler below keeps what is here (_keepInflightRunning).
-const _inflightRunningWrites = new Map(); // queue key → {compID, matchID, payload, password, sentAt}
+// bc-evts: the queued entries being sent right now (_sendEntry). Every write is
+// an outbox entry, stored before it is sent and leaving storage only once it
+// settles, so a page going away mid-send leaves it for the next load; this set
+// only stops a later write taking the place of one already out
+// (_coalesceTarget). Never persisted.
+const _inFlight = new WeakSet();
 // bc-sync: the stage BEFORE a running write exists. A score editor holds each
 // edit for its autosave debounce (AUTOSAVE_DEBOUNCE_MS) and registers a token
 // here for that window (API.notePendingEdit), so the pill reads "Syncing..."
@@ -1462,7 +1474,7 @@ function _deriveSyncStatus() {
     if (_offlineFlag && _writeQueue.size > 0) return 'offline';
     if (_hasAuthBlockedQueued()) return 'auth-required';
     if (_hasServerErroringQueued()) return 'server-error';
-    return (_inflightRunning > 0 || _writeQueue.size > 0 || _pendingEdits.size > 0) ? 'syncing' : 'synced';
+    return (_writeQueue.size > 0 || _pendingEdits.size > 0) ? 'syncing' : 'synced';
 }
 
 // bc-offl: the held-writes COUNT channel, for the admin topbar's indicator
@@ -1762,7 +1774,7 @@ async function _flushQueue() {
 
 // The outbox is idle when nothing is queued and no write is in flight.
 function _outboxIdle() {
-    return _writeQueue.size === 0 && _inflightRunning === 0 && !_flushInProgress;
+    return _writeQueue.size === 0 && !_flushInProgress;
 }
 
 // _flushBase: one match's turn in a pass. Consecutive taps of ONE session go
@@ -1781,9 +1793,13 @@ async function _flushBase(base, list, pass, gen) {
         // enqueue time, so retrying it can only reproduce the same auth failure
         // until API.resumeAfterAuth() re-stamps it. A batch of taps the server
         // refused (400) is parked until an operator discards it (operator S5 b).
-        // The page-hide copy of a running write whose own fetch is still open:
-        // that fetch lands it or queues it anew. Each of these holds its match.
-        if (d.authBlocked || d.parked || _heldByOpenFetch(key, d)) { outcome = 'kept'; break; }
+        // Each of these holds its match.
+        if (d.authBlocked || d.parked) { outcome = 'kept'; break; }
+        // A write that follows another match's entry (`after`) waits while that
+        // entry is queued; once it settles or is discarded, this one goes and
+        // the server judges it. Waiting is not failing: not marked held, and
+        // the settle that frees it reruns the flush (_dequeue).
+        if (d.after && _writeQueue.has(d.after)) { outcome = 'after'; break; }
         if (d.kind === 'evt') {
             const session = d.payload && d.payload.session;
             const batch = [];
@@ -1890,6 +1906,7 @@ async function _sendEntry(key, descriptor, pass) {
         effectiveUrl = `/api/competitions/${compID}/matches/${matchID}/score`;
     }
     let res, body;
+    _inFlight.add(descriptor);
     try {
         // Bounded, the body read included (_fetchJson): this loop is
         // single-flight, so one replay whose body never completed would stop
@@ -1908,6 +1925,8 @@ async function _sendEntry(key, descriptor, pass) {
         pass.anyFailed = true;
         pass.networkFailed = true;
         return 'kept';
+    } finally {
+        _inFlight.delete(descriptor);
     }
     body = body || {};
     if (res.ok) {
@@ -1972,6 +1991,11 @@ async function _sendEntry(key, descriptor, pass) {
             }
             if (refusedForClock) {
                 console.warn(`[sync] dropping queued running write for ${matchID} refused twice for clock skew (serverNowMs=${body.serverNowMs}); a pending kachinuki advancement may need re-pressing`);
+            } else if (body.applied === false) {
+                // Kept in the match's history, not applied: our stamp lost, so
+                // re-check our clock frame. The editor that sent it reads the
+                // answer from `settled`; no alert (an autosave's would repeat).
+                _relearnClockThrottled();
             }
         }
         // A change turned away because the match was finished (writeMatchClosed)
@@ -2252,6 +2276,8 @@ function _placeWrite(base, descriptor) {
         && payload && !payload.kachinukiBoutFinal) {
         payload = { ...payload, kachinukiBoutFinal: true };
     }
+    // Whatever the replaced write had to follow, this one follows too.
+    if (prev.after && !descriptor.after) descriptor.after = prev.after;
     descriptor.payload = payload;
     return key;
 }
@@ -2278,8 +2304,6 @@ function enqueueRunningWrite(compID, matchID, payload, password) {
     _commitEnqueue(_revKey(compID, matchID), _runningDescriptor(compID, matchID, payload, password, Date.now()));
 }
 
-// The queue entry for a running write. Shared with the page-hide copy of a
-// write still being sent (_keepInflightRunning).
 // _claimingQueuedGroups (bc-mrgc): a score write that takes the place of a
 // queued score write for the same match carries the later state, so it must
 // also claim every group the one it replaces changed, or that change would
@@ -2295,6 +2319,7 @@ function _claimingQueuedGroups(prev, payload) {
     return changed === undefined ? rest : { ...rest, changed };
 }
 
+// The queue entry for a running score write.
 function _runningDescriptor(compID, matchID, payload, password, enqueuedAt) {
     return {
         compID, matchID, payload, password,
@@ -2349,64 +2374,6 @@ function _enqueueTerminalWrite(key, kind, method, url, payload, password, compID
         method, url,
         enqueuedAt: Date.now(),
     });
-}
-
-// bc-sync: a page going away (a reload, a closed tab, the iPad locking or
-// switching app) cancels every fetch still open, so a running write already
-// sent but not yet answered, up to fetchWithTimeout's 12s on bad Wi-Fi, would
-// be lost with it. A copy of each goes into the persisted outbox now, so the
-// next load sends it. A copy of a write that did land is harmless there: the
-// server orders an equal stamp again, and keeps an older revision of this board
-// in the match's history. The copy is an entry of its own (bc-mrgc phase 3):
-// it never replaces what is queued for the match (a failed later edit, or a
-// queued Finish), and nothing coalesces into it; it replays in its place in
-// the match's order. The editors' own page-hide flush of a pending edit runs
-// after this one (their listeners are added later), so its newer write is
-// queued after it.
-function _keepInflightRunning() {
-    let kept = false;
-    for (const [base, w] of _inflightRunningWrites) {
-        // Already kept by an earlier hide event, and still queued.
-        if (w.kept && _writeQueue.get(w.keptKey) === w.kept) continue;
-        // Dated when it was sent, as the clock-skew re-stamp needs: hide time
-        // would date it up to the fetch timeout later than it was made.
-        w.kept = _runningDescriptor(w.compID, w.matchID, w.payload, w.password, w.sentAt);
-        w.kept.perfAtEnqueue = w.perfAtSend;
-        if (_payloadSeen.has(w.payload)) w.kept.seenModifiedAt = _payloadSeen.get(w.payload);
-        w.keptKey = _newEntryKey(base);
-        _writeQueue.set(w.keptKey, w.kept);
-        kept = true;
-    }
-    // Stored, not sent: the fetch holding each copy is still open, so the
-    // flush leaves the copy alone (_heldByOpenFetch) and the fetch's own
-    // outcome removes or replaces it (recordScore). A page that goes away takes
-    // the fetch with it and leaves the copy for the next load; a tab that was
-    // only hidden and comes back never sends the write twice.
-    if (kept) {
-        _persistQueue();
-        _recomputeSyncStatus();
-    }
-}
-
-// A queue entry that is the page-hide copy of a running write whose fetch is
-// still open (_keepInflightRunning): the flush skips it.
-function _heldByOpenFetch(key, descriptor) {
-    return _inflightRunningWrites.get(_baseOf(key))?.kept === descriptor;
-}
-
-// Remove-then-add for the same reason as the online handler below.
-if (typeof window !== 'undefined') {
-    if (window.__bcKeepInflightHandlers) {
-        window.removeEventListener('pagehide', window.__bcKeepInflightHandlers.pagehide);
-        document.removeEventListener('visibilitychange', window.__bcKeepInflightHandlers.visibility);
-    }
-    const handlers = {
-        pagehide: _keepInflightRunning,
-        visibility: () => { if (document.visibilityState === 'hidden') _keepInflightRunning(); },
-    };
-    window.__bcKeepInflightHandlers = handlers;
-    window.addEventListener('pagehide', handlers.pagehide);
-    document.addEventListener('visibilitychange', handlers.visibility);
 }
 
 // bc-sync: another tab changed the stored queue. Each tab sends only what it
@@ -3400,7 +3367,9 @@ const API = {
         // its sending (operator ruling 2026-09-27): a tap made before another
         // device finished the match stays older than that finish however late
         // the autosave goes out (its debounce, or the editor going away).
-        // Never older than the match it was made against (bc-hlck).
+        // Never older than the match it was made against (bc-hlck), nor than
+        // this device's last write of the match (_outboxWrite, _afterOwnStamp),
+        // so the outbox's order and the stamps agree.
         const seen = _seenOfScore(result, match);
         _stampPayload(payload, _serverNowMs() - _editAge(result), seen);
 
@@ -3408,58 +3377,9 @@ const API = {
         // rev-guard can hold out-of-order deliveries (e.g. from reconnect flush).
         // Completed writes do not need a rev: the guard is gated on status=running.
         const isRunning = payload?.status === 'running';
-        const base = _revKey(compID, matchID);
-
-        // bc-mrgc: the running score write queued last for this match (the one
-        // this write would take the place of in the queue, _coalesceTarget) is
-        // superseded by this one whichever way it goes (a landed write drains
-        // it, a failed one takes its place in the queue), so this write carries
-        // the later state and must claim every group the queued one changed
-        // too. A queued Finish or decision is never such a write: it stays, and
-        // is sent in its own right; this write goes to the server now, and the
-        // server orders the two by their stamps (bc-mrgc).
-        const claimedEntry = _coalesceTarget(base, { kind: 'score', terminal: !isRunning, payload });
-        const queuedScore = claimedEntry ? claimedEntry[1] : null;
-        if (queuedScore && queuedScore.payload) {
-            const claimed = unionChanged(queuedScore.payload.changed, payload.changed);
-            if (claimed === undefined) delete payload.changed;
-            else payload.changed = claimed;
-        }
-        // bc-sync: a running write the editor marks `durable` (the page is
-        // being hidden or unloaded) is queued, not fetched (below), so it is
-        // never in flight. The flag is read from the patch and never sent:
-        // toBackendMatchResult copies named fields only.
-        const durable = isRunning && result.durable === true;
         if (isRunning) {
-            // Absorb a pending kachinukiBoutFinal from a QUEUED flagged running
-            // write for this match: when connectivity returns mid-backoff, this
-            // direct write succeeds with a newer rev, and the queued flagged
-            // entry would later be rev-guard dropped as stale, silently losing
-            // the advancement command (the queue-to-queue carry in
-            // enqueueRunningWrite cannot see direct sends). Safe to re-deliver:
-            // MaybeAdvanceKachinuki bails without a scored last bout or on a
-            // completed match.
-            if (queuedScore && queuedScore.payload && queuedScore.payload.kachinukiBoutFinal
-                && !payload.kachinukiBoutFinal) {
-                payload.kachinukiBoutFinal = true;
-            }
             payload.rev = _nextRev(compID, matchID);
             payload.revSession = _revSession;
-            // S3d: a running write carries writeId, basis and session too; it
-            // stays on the direct path until stages 4-5 move its editors to taps.
-            _tagWrite(payload, base, match && match.scoreVersion);
-        }
-        // The record of this running write while its fetch is open. Kept by
-        // reference: a later running write for the match replaces the map's
-        // entry while this one is still in flight, and this write's own
-        // page-hide copy (`kept`) must still be settled by THIS fetch's
-        // outcome (the finally below), or it is left in the queue unheld.
-        let inflightRecord = null;
-        if (isRunning && !durable) {
-            _inflightRunning++;
-            inflightRecord = { compID, matchID, payload, password, sentAt: Date.now(), perfAtSend: _perfNow(), kept: null, keptKey: null };
-            _inflightRunningWrites.set(base, inflightRecord);
-            _recomputeSyncStatus();
         }
 
         // mp-9ukk Phase 2: broadcast helper. Publishes a match patch on the
@@ -3496,144 +3416,26 @@ const API = {
             });
         };
 
-        const scoreUrl = `/api/competitions/${compID}/matches/${matchID}/score`;
-
-        // bc-sync: a durable running write (the page is being hidden or
-        // unloaded) goes straight into the persisted outbox rather than a
-        // fetch the browser would cancel with the page. It is exactly the
-        // state a failed fetch leaves: persisted synchronously by
-        // _commitEnqueue, replayed on reconnect or on the next load, with the
-        // rev guard and the clock-skew re-stamp applying. It lands only if
-        // the editor's host reaches this line before the page goes, i.e. with
-        // no await on I/O in front of recordScore.
-        if (durable) {
-            enqueueRunningWrite(compID, matchID, payload, password);
-            _broadcastPatch(payload);
-            return _queuedAnswer();
-        }
-
-        // bc-evts: a Finish, a correction, a scheduled write: the outbox's, at
-        // once (the governing rule). The editor carries on with the pending
-        // answer; `settled` is the server's answer when it comes, and a refusal
-        // nobody claims (opts.onRefusal) is told like a replay's. The display
-        // overlay is the optimistic result, as an offline write's always was.
-        if (!isRunning) {
-            const answer = _outboxWrite({
-                kind: 'score', compID, matchID, method: 'PUT', url: scoreUrl, payload, password,
-                seen: match && match.scoreVersion, onRefusal: opts && opts.onRefusal,
-            });
-            _broadcastPatch(payload);
-            return answer;
-        }
-
-        // From here on the write is RUNNING (an autosave, Start match, Record
-        // bout): it still goes straight to the server until stages 4-5 move
-        // its editors to taps. Everything a 2xx can mean for it, in one place.
-        const _handleOkBody = (body) => {
-            // A write that REACHED the server takes the place of the running
-            // score write queued for this match whose groups it claimed
-            // (claimedEntry, the union above): drain that one entry now, and
-            // only it. Never a queued Finish or decision: those are entries of
-            // their own and are sent in order. A write refused for clock skew
-            // stored nothing, so it drains nothing.
-            if (claimedEntry && !writeWasRefusedForClock(body)
-                && _dequeue(claimedEntry[0], claimedEntry[1])) {
-                _persistQueue();
-                _recomputeSyncStatus();
-            }
-            // bc-cse: refused for clock skew. Deliberately SILENT for an
-            // autosave: relearn (throttled) and let the next edit's autosave
-            // carry the corrected stamp. A banner here would fire on every tap
-            // of a skewed device.
-            if (writeWasRefusedForClock(body)) {
-                _relearnClockThrottled();
-                return body;
-            }
-            // 200 {applied:false}: kept in the match's history, not applied.
-            // Never pushed to the display (it would overwrite the newer state
-            // there); the editor that sent it reads writeMatchClosed and an
-            // explicit tap notLandedBanner.
-            if (body && body.applied === false) {
-                _relearnClockThrottled();
-                return body;
-            }
-            // mp-9ukk: echo the operator's patch to the court display
-            // peer-to-peer (an OPTIMISTIC overlay the SSE push replaces).
-            _broadcastPatch(payload);
-            return body;
-        };
-
-        let res;
-        let data;
-        try {
-            try {
-                // F1: bounded (12 s), the body read included (_fetchJson). Past
-                // the deadline it is a network failure: queued below and
-                // replayed with the same stamp (and rev).
-                ({ res, body: data } = await _fetchJson(scoreUrl, {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Tournament-Password': password
-                    },
-                    body: JSON.stringify(payload)
-                }));
-            } catch (_networkErr) {
-                // Network failure or timeout abort: queued for retry
-                // (last-write-wins, so only the latest state is ever flushed),
-                // and broadcast so the display tab gets the optimistic overlay.
-                // A DISCRIMINATED { queued: true }: not server-confirmed; a
-                // caller that awaits a running write as a HARD PREREQUISITE must
-                // branch on it (writeDidNotLand), see the daihyosen pre-save.
-                enqueueRunningWrite(compID, matchID, payload, password);
-                _broadcastPatch(payload);
-                return _queuedAnswer();
-            }
-        } finally {
-            _inflightRunning--;
-            // Settled: landed, or its failure path above queued it. A later
-            // write for the match may have taken the slot; leave that one. A
-            // copy page-hide queued of this write goes with it, whether or not
-            // a later write has taken the slot since (inflightRecord is this
-            // write's own record).
-            const key = _revKey(compID, matchID);
-            if (inflightRecord && _inflightRunningWrites.get(key) === inflightRecord) {
-                _inflightRunningWrites.delete(key);
-            }
-            const heldCopy = inflightRecord && inflightRecord.kept;
-            if (heldCopy && _dequeue(inflightRecord.keptKey, heldCopy)) _persistQueue();
-            _recomputeSyncStatus();
-            // While the copy was held, the flush passed over it (and held back
-            // its match behind it). When the fetch has answered, the
-            // connection is up: send what is left now. Deferred a microtask:
-            // the answer below first drains the queued write this one claimed.
-            if (heldCopy && res && _writeQueue.size > 0) {
-                if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
-                _flushAttempt = 0;
-                queueMicrotask(() => { if (_writeQueue.size > 0) _flushQueue(); });
-            }
-            if (_outboxIdle()) noteOutboxDrained();
-        }
-
-        if (res.ok) return _handleOkBody(data);
-        // A RETRYABLE server error (5xx / 429) is queued for retry, so the pill
-        // stays on syncing/offline and the latest state is re-delivered.
-        if (res.status >= 500 || res.status === 429) {
-            enqueueRunningWrite(compID, matchID, payload, password);
-            _broadcastPatch(payload);
-            return _queuedAnswer();
-        }
-        // mp-dc52 Phase 3: the simultaneity gate returns 409 ineligible_competitor
-        // with a human-readable reason; prefer reasonHuman, then reason, then code.
-        if (data.error === "ineligible_competitor" || data.error === "already_ineligible") {
-            throw new Error(data.reasonHuman || data.reason || data.error || "Failed to record score");
-        }
-        // bc-rawm: 409 court_busy is built into an operator sentence naming the
-        // shiaijo and the blocking match (_courtBusyError).
-        const courtBusy = _courtBusyError(data);
-        if (courtBusy) throw courtBusy;
-        // Otherwise the refusal's sentence when it carries one (_refusalText).
-        throw _downstreamRefusalError(data) || new Error(_refusalText(data, "Failed to record score"));
+        // bc-evts (the governing rule): EVERY score write is the outbox's, at
+        // once, a running one (an autosave, Start match, Record bout) included:
+        // stored in this tick on the match's base and sent strictly after what
+        // the match already holds. A running write takes the place of the
+        // match's last entry only when that is a running score write not yet
+        // out (_coalesceTarget), claiming its groups and carrying a pending
+        // kachinukiBoutFinal (_placeWrite). The caller carries on with the
+        // pending answer; `settled` is the server's answer when it comes, and a
+        // refusal nobody claims (opts.onRefusal) is told like a replay's.
+        // `result.after` (request-only, like editedPerf: toBackendMatchResult
+        // copies named fields only) names another match's queued entry this
+        // write must follow. The display overlay is the optimistic result.
+        const answer = _outboxWrite({
+            kind: 'score', compID, matchID, method: 'PUT',
+            url: `/api/competitions/${compID}/matches/${matchID}/score`,
+            payload, password, terminal: !isRunning, after: result && result.after,
+            seen: match && match.scoreVersion, onRefusal: opts && opts.onRefusal,
+        });
+        _broadcastPatch(payload);
+        return answer;
     },
     // T093–T095: kiken / fusenpai / fusensho / daihyosen: server auto-fills
     // scoreline and Winner from {decision, decisionBy, encho}. Body shape is

@@ -29,7 +29,7 @@ import {
     attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, OVERRIDE_HELD_NOTICE,
     startWhileCorrectingMessage, startWhileStartingMessage, startWasBlockedByStartMessage,
     correctWhileRunningMessage, wasToasted, BRONZE_MATCH_ID,
-    withinDeadline, TIMED_OUT, FETCH_TIMEOUT_MS,
+    writePending,
 } from './write_result.jsx';
 // What a Start came back with (a clock_skew refusal, a thrown 409) is
 // start_match.jsx's to classify, shared with the Scores tab's own automatic
@@ -1403,9 +1403,19 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // does pin it).
     // `pick` is the pickingRef entry pickMatch made for THIS start, if it is one:
     // that pick is the start itself, not a start in flight against it.
-    const startMatch = async (m, { pick = null } = {}) => {
+    const startMatch = async (m, { pick = null, after = null } = {}) => {
         const key = matchKey(m);
         const refusalFor = (msg) => ({ key, compId: m.compId, msg });
+        // bc-evts: the start is the outbox's (a running score write), answered
+        // pending at once; a refusal arrives later, through `settled`. It is
+        // stored on the refused match and toasted once, here, as a refusal the
+        // start came back with always was, and claimed so the queue's own
+        // alert does not toast it a second time.
+        const refusedLater = (msg) => {
+            if (mountedRef.current) setStartError(refusalFor(msg));
+            if (showToast) showToast(msg, "error");
+        };
+        const onRefusal = (e) => { refusedLater(startFailureMessage(e)); return true; };
         const inFlight = startingRef.current || (pickingRef.current && pickingRef.current !== pick ? pickingRef.current : null);
         if (inFlight) {
             // One start at a time. An advance (Finish + Start Next, or the one
@@ -1424,7 +1434,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         try {
             // Starting makes the match running; the scoring panel shows
             // running[0], so it picks the match up on the next refetch.
-            const res = await onEditScore(m.compId, m.id, startPatch(), m);
+            // A pick's start follows its send back of the running bout (`after`,
+            // request-only: never sent, deferAndStart).
+            const res = await onEditScore(m.compId, m.id, after ? { ...startPatch(), after } : startPatch(), m, { onRefusal });
             // A clock_skew answer, or a superseded one that held the result
             // group, means the server stored NOTHING of the start and, unlike a
             // queued start, nothing will land later, so returning true here would
@@ -1455,6 +1467,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // made it) reads this, whichever record it holds.
             started.landed = true;
             if (pick) pick.landed = true;
+            if (writePending(res)) {
+                res.settled.then((body) => {
+                    const late = classifyStartOutcome(body);
+                    if (!late.ok) refusedLater(late.msg);
+                }, () => {});
+            }
             return true;
         } catch (e) {
             const msg = startFailureMessage(e);
@@ -1529,6 +1547,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const deferAndStart = async (m, pick) => {
         const cur = running[0] || null;
         const isSame = cur && matchKey(cur) === matchKey(m);
+        // The queue key of the send back the start must follow, if any.
+        let after = null;
         if (cur && !isSame) {
             // Send the current bout back to the queue, otherwise the pick below
             // would leave the court with two running bouts. Route through the
@@ -1538,24 +1558,29 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // silently 409 the defer. If the revert fails we surface a toast and
             // must NOT start the pick.
             if (!window.API || typeof window.API.revertMatchToQueue !== "function") return;
-            // bc-evts: the send back is the outbox's. The pick's start is a
-            // write of ANOTHER match that goes straight to the server, so it
-            // waits for the server's answer to the send back (the court is
-            // busy until then); the start itself waits on the network anyway.
-            // Bounded like any request: past the deadline the pick is not
-            // started (the send back stays queued and lands in its turn).
-            try {
-                const sent = await window.API.revertMatchToQueue(cur.compId, cur.id, password);
-                const answered = sent && sent.settled ? await withinDeadline(sent.settled, FETCH_TIMEOUT_MS) : sent;
-                if (answered === TIMED_OUT) throw new Error("Could not defer the current bout: the server did not answer");
-            } catch (e) {
+            // bc-evts (the governing rule): the send back is the outbox's and
+            // nothing waits for its answer. The pick's start is queued right
+            // after it, naming it (`after`), so the outbox sends the start only
+            // once the send back has settled: this device never asks the
+            // server to start a bout while its own send back of the running
+            // one is still out. A send back the server refuses is said here
+            // (claimed, so the queue raises no second alert), and the start
+            // then goes and the server judges it.
+            const deferFailed = (e) => {
                 if (showToast) showToast((e && e.message) || "Could not defer the current bout", "error");
+                return true;
+            };
+            try {
+                const sent = await window.API.revertMatchToQueue(cur.compId, cur.id, password, { onRefusal: deferFailed });
+                after = (sent && typeof sent.key === "string" && sent.key) || null;
+            } catch (e) {
+                deferFailed(e);
                 return;
             }
             if (!mountedRef.current) return;
         }
         if (m.status === "scheduled") {
-            const ok = await startMatch(m, { pick });
+            const ok = await startMatch(m, { pick, after });
             if (!ok || !mountedRef.current) return;
             // bc-strt: the editor treats this snapshot as running, so a point
             // struck before the refetch shows it running saves at once.

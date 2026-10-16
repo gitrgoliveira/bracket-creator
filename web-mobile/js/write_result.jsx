@@ -534,35 +534,15 @@ export function heldWritesText(status, counts) {
 }
 
 
-// dependentActionBlocked: the sentence for a queued write that was only a
-// PRE-SAVE gating a second action, the team editor's Add/Remove
-// representative bout (saveRunningSheet). notLandedBanner rightly says
-// nothing about a queued write at the three explicit-tap sites it was written
-// for (Start match in both editors, Record bout in the team one), where the
-// editor's queued/offline surface reports it. Here that surface says the
-// scores did not send, not why the Add or Remove tap did nothing.
-//
-// A refusal (applied:false) is left to notLandedBanner: the caller already
-// shows its banner, so a second message would only repeat it.
-export function dependentActionBlocked(res) {
-    if (writeRetryable(res)) {
-        return "Couldn't save the current scores (offline or server busy). Try again once the connection is back.";
-    }
-    return null;
-}
-
 // FETCH_TIMEOUT_MS: how long a bounded request is waited on before it is
 // reported as not answered. api_client.jsx gives it to every fetchWithTimeout
-// and to _fetchJson (headers AND body there), and the team editor gives it to
-// the save it makes before a representative-bout add or remove, so the hold
-// that save runs under ends too (admin_scoring_team.jsx runRepBoutChange).
+// and to _fetchJson (headers AND body there).
 export const FETCH_TIMEOUT_MS = 12000;
 
 // withinDeadline: a promise's outcome, or TIMED_OUT once `ms` has passed with
 // none. Only the wait ends: the promise itself runs on. It gives a wait that is
-// not a request of its own (the team editor's save before a representative-bout
-// change, the read of a side's lineup that a pick on a side never read makes) the
-// same bound.
+// not a request of its own (the read of a side's lineup that a pick on a side
+// never read makes) the same bound.
 export const TIMED_OUT = Symbol("timed out");
 export function withinDeadline(promise, ms) {
     let timer;
@@ -572,8 +552,7 @@ export function withinDeadline(promise, ms) {
 
 // What a representative-bout add or remove leaves undone when it does not
 // land, and the sentence for one the server never answered, or answered with
-// a body that never completed. The team editor shows it as it is, whichever
-// half (the save before the request, or the request) went unanswered.
+// a body that never completed. The team editor shows it as it is.
 export const REP_BOUT_NOT_ADDED = 'The representative bout was not added';
 export const REP_BOUT_NOT_REMOVED = 'The representative bout was not removed';
 export function noAnswerSentence(notDone) {

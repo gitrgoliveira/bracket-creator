@@ -47,10 +47,26 @@ function assignCourt(matchIdx, courts) {
 }
 
 function mergeMatchPatch(existing, patch) {
+  // bc-evts S5: a RUNNING push older by the server's scoreVersion than the
+  // running match held (two pushes answered out of order) changes nothing.
+  if (existing && patch && existing.status === "running" && patch.status === "running"
+      && olderByScoreVersion(patch, existing) === true) return existing;
   const merged = { ...existing, ...patch };
   if (patch.court === "" || patch.court == null) merged.court = existing.court;
   if (patch.scheduledAt === "" || patch.scheduledAt == null) merged.scheduledAt = existing.scheduledAt;
   return merged;
+}
+
+// olderByScoreVersion: whether copy `a` is older than copy `b` by the server's
+// scoreVersion (the match's score-log line count, which only grows and reads
+// no device's clock): true or false when both carry one, null when either
+// does not, so the caller falls back to its stamp rule. The ONE reading of
+// the field; patch.jsx isOlderRunningCopy asks it too.
+function olderByScoreVersion(a, b) {
+  const va = Number(a && a.scoreVersion) || 0;
+  const vb = Number(b && b.scoreVersion) || 0;
+  if (va <= 0 || vb <= 0) return null;
+  return va < vb;
 }
 
 function makePlayer(i, prefix, seed) {
@@ -474,7 +490,7 @@ export {
   buildPools, poolLetterName, simulatePools, computeStandings, poolWinners,
   buildEmptyCompetition, applyFormat, buildCompetition,
   buildTournament, competitionStatus, SAMPLE_TOURNAMENTS, parseParticipantLines,
-  assignCourt, arraysEqual, mergeMatchPatch, normalizeParticipantName, checkinPid, checkinApiPid,
+  assignCourt, arraysEqual, mergeMatchPatch, olderByScoreVersion, normalizeParticipantName, checkinPid, checkinApiPid,
 };
 
 if (typeof window !== 'undefined') {

@@ -932,7 +932,7 @@ function holdsAnswer(stamp, at) {
 // answer the override holds, which a changed log must not clear: it is the
 // match from before that write. It is keepNewerMatches' rule (patch.jsx).
 function predatesAnswer(match, override) {
-  return override.at > 0 && !!match && isOlderRunningCopy(match, override.match.status, override.at);
+  return override.at > 0 && !!match && isOlderRunningCopy(match, override.match.status, override.at, override.match.scoreVersion);
 }
 
 // What a pick is answered with when its side's lineup was never read and the

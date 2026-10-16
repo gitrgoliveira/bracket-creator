@@ -171,8 +171,11 @@ function toBackendMatchResult(patch, match) {
         // mark on the sub winner's side; the field itself never reaches the
         // wire. Subs echoed verbatim from the server already carry the mark
         // inside their ippons and pass through untouched.
-        result.subResults = patch.subResults.map((sub) => {
-            if (typeof sub.decidedByHantei !== "boolean") return sub;
+        // A bout row read from the server carries its own markIds (bc-evts):
+        // they name the marks for the score-events door and are never sent.
+        result.subResults = patch.subResults.map((row) => {
+            const { markIds: _markIds, ...sub } = row || {};
+            if (typeof sub.decidedByHantei !== "boolean") return row && row.markIds !== undefined ? sub : row;
             const { decidedByHantei, ...rest } = sub;
             let a = stripHt(rest.ipponsA), b = stripHt(rest.ipponsB);
             if (decidedByHantei) {

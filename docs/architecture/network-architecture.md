@@ -60,8 +60,14 @@ flowchart TB
     hub ==>|SSE id + data frames| sse
 ```
 
-- **REST**: score/decision/lineup writes, config, participants. Auth through the
-  `X-Tournament-Password` header (two modes, §5).
+- **REST**: score, decision, and lineup writes, config, and participants. Scoring taps flow
+  through `POST /api/competitions/{id}/matches/{mid}/score-events` (one event per tap,
+  replayed in timestamp order, returning 200 with per-event outcomes), alongside the full
+  `PUT /api/competitions/{id}/matches/{mid}/score` route for snapshots and finishes. Auth is
+  handled through the `X-Tournament-Password` header (two modes, §5; self-run mode allows
+  unauthenticated scoring). Every response carries the `X-App-Build` header naming the git
+  commit of the server build (or `unknown`), allowing clients to detect when a new server build
+  is running.
 - **SSE**: one stream per client carrying `match_updated`, `competition_started/completed`,
   `competitor_status_updated`, `draw_generated`, `schedule_updated`, plus the resilience control
   events `resync_required` and `heartbeat`. Every real event is stamped with a monotonic `seq`

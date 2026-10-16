@@ -254,6 +254,7 @@ classDiagram
         +bool ReopenPending
         +long ModifiedAt
         +map GroupStamps
+        +MarkIDs MarkIDs
         +int ScoreVersion (score-log line count)
         +map EventSeqs (per device session, the highest logged tap seq)
     }
@@ -339,6 +340,7 @@ classDiagram
         +bool DecidedByHantei (legacy, read-only)
         +long ModifiedAt
         +map GroupStamps
+        +MarkIDs MarkIDs
         +int ScoreVersion (score-log line count)
         +map EventSeqs (per device session, the highest logged tap seq)
     }
@@ -510,6 +512,11 @@ classDiagram
         every write that reached the match
         applied or held, with held values
     }
+    class events_dir["events/"] {
+        <<JSON lines, one file per match>>
+        append-only score event log
+        event and baseline lines ("v": 1)
+    }
     class wal[".wal/"] {
         <<pending transactions>>
         replayed on startup
@@ -537,6 +544,7 @@ classDiagram
     config_md --> team_members_yaml
     config_md --> overrides_json
     config_md --> history_dir
+    config_md --> events_dir
     team_members_yaml --> lineups_yaml : positions reference members
 ```
 
@@ -547,6 +555,7 @@ Markdown, CSV, and JSON or YAML each earn their place:
 | Markdown with YAML front matter | tournament and competition settings | Human readable and editable, and the body can hold notes |
 | CSV | participants, seeds, pools, pool and league matches | Opens in a spreadsheet; one row per record diffs cleanly |
 | JSON and YAML | bracket, eligibility, lineups, overrides | Tree shaped data that does not fit a row |
+| JSON lines (JSONL) | match history and per-match score event logs | Append-only audit trail and event sourcing stream; one line per write or event |
 
 A competitor list must exist before a seed can be set: a seed ranks a participant, so a rank
 with nobody to attach it to is refused, not stored. Clearing a seeding is exempt, since that
@@ -574,9 +583,12 @@ from cache while holding it, so two writes to the same competition cannot interl
 
 **Multi file changes are transactional.** Some actions touch several files at once, for
 example recording a withdrawal writes the match result, the competitor eligibility record
-and the updated bracket. Those run as a transaction: the intended writes are collected,
-committed to a write ahead log, and only then applied. If the process stops midway the log
-is replayed at the next startup, so the group either lands completely or not at all.
+and the updated bracket. Similarly, match writes, their append-only score event logs in
+`events/<matchId>.jsonl`, and their audit trail in `history/<matchId>.jsonl` are staged in the
+same transaction as the match result (in `pool-matches.csv` or `bracket.json`). Those run as a
+transaction: the intended writes are collected, committed to a write ahead log, and only then
+applied. If the process stops midway the log is replayed at the next startup, so the group
+either lands completely or not at all.
 One write sits outside this: a participant edit lands by atomic rename rather than through the
 log, so it is crash safe on its own but is not rolled back if the rest of the group fails.
 
@@ -674,10 +686,30 @@ overriding a winner and the other server actions that change a result write thei
 The history goes with its competition, and with a discarded draw, since a draw generated again
 reuses the match ids.
 
+**Score events use per-match event sourcing.** Each match has an append only score event log
+stored at `competitions/<id>/events/<matchId>.jsonl`. The log consists of JSON lines, each
+stamped with format version `"v": 1`, containing either an event line (a scoring tap such as
+an ippon, foul, encho, or flag) or a baseline line (the state left by a non-tap write such as
+a finish, decision, correction, or migration). The pattern is explicitly per-match event sourcing
+(the match is rebuilt by replaying its log in timestamp order) with a client-side transactional
+outbox. No message broker is used: offline tablets hold the queue; order comes from when a tap
+was made, not when it arrived; the app is one binary that keeps its data in files.
+
+The score event log is the source of truth for match scoring, while the match result stored in
+`pool-matches.csv` or `bracket.json` acts as a materialized cache derived by the replay. This
+differs from the match history in `history/`: the score log records the raw events and baselines
+that construct the score, whereas the match history documents every HTTP request and write that
+reached the match, recording whether each change was applied or held, the door it came through,
+and the audit reasons. Both the score log append and the history entry are written in the same
+transaction as the match through the write ahead log, ensuring they land together. A log line
+with an unknown format version is refused on load naming the file and line, because the log is the
+truth and an unrecognized line is never skipped or guessed at.
+
 The merge needs the time of each stored change to compare against, so it only works where
-those times are saved. They are saved for every match, in both files (the last column of the
-results file, and the bracket file), which is what makes the rule the same wherever a match
-happens to be in the competition. A match saved before the per group times existed has only
+those times are saved. They are saved for every match, in both files (`GroupStamps` in the
+results file at column index 29, followed by `MarkIDs` at index 30 and `ScoreVersion` at index 31,
+and in the bracket file), which is what makes the rule the same wherever a match happens to be
+in the competition. A match saved before the per group times existed has only
 one time for the whole result, and every group reads as changed then, so it is compared exactly
 as before. A running save from a client that does not send a time counts as unstamped and
 always applies: the merge discriminates only when both sides carry a stamp, so it can never
@@ -816,12 +848,14 @@ Appending columns and leaving some fields unwritten are the two consequences tha
 
 * Column position is the contract. New fields are appended, and a file written by an older
   version stays readable because the reader leaves each missing trailing column at its
-  documented default, empty for most and `-1` for the round number, which means unknown.
-* Some fields are useful only in flight and are not written at all. Client revision markers
-  used to discard out of order writes are one example: they exist to order writes within one
-  session and carry no meaning once the result has landed. A match's queue position is
-  another. It is derived from court, status and scheduled time each time a match list is
-  served, so the queue shrinks as matches finish. Persisting it would let a stale copy
+  documented default, empty for most (including `MarkIDs` at column index 30 and `ScoreVersion`
+  at index 31 defaulting to empty and 0) and `-1` for the round number, which means unknown.
+* Some fields are useful only in flight and are not written at all. Transient client revision
+  markers used to discard out of order writes within a single session are one example, whereas
+  the log-derived `ScoreVersion` is persisted in `pool-matches.csv` and `bracket.json` so readers
+  can order running match updates against incoming events. A match's queue position is
+  another in-flight field. It is derived from court, status and scheduled time each time a match
+  list is served, so the queue shrinks as matches finish. Persisting it would let a stale copy
   disagree with the schedule it was drawn from, so it is
   excluded from `pool-matches.csv` by name, on top of carrying a tag that already keeps it out
   of the YAML-marshalled forms.

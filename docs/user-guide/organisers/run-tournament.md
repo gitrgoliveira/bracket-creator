@@ -295,6 +295,8 @@ Tournament state is stored as plain files inside the data folder you specified w
 - `competitions/<id>/config.md`: YAML front-matter with competition kind, format, pool settings, and courts.
 - `competitions/<id>/participants.csv`: one participant per line with name, optional display name (zekken), dojo, and optional dan grade.
 
+The per-match score logs in `competitions/<id>/events/` are append-only logs replayed by the engine and must not be hand-edited during play.
+
 Refer to [Data model](../../architecture/data-model.md) for every file in the folder and what each holds.
 
 !!! warning

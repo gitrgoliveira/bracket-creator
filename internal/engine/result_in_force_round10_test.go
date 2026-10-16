@@ -43,22 +43,21 @@ func r10Setup(t *testing.T, ko, requeue bool) r10Scene {
 		ms[0].ModifiedAt = base
 		require.NoError(t, h.store.SavePoolMatches(h.compID, ms))
 	}
-	var err error
-	if ko {
-		// A knockout match has no reopen once it is finished: the walk is a
-		// point, then the match sent back to the queue.
-		require.Equal(t, "applied", pmPt(base+60_000, []string{"M"}, nil).run(h))
+	// A recorded fusensho, then the match reopened (a knockout match can be
+	// reopened while its decision is kiken, fusenpai or fusensho and the next
+	// round is unplayed, checkTargetReopenable), and on request sent back
+	// to the queue as well. Before round 11 the knockout walk was a point and a
+	// send back to the queue, so it never had a result in force at all.
+	require.Equal(t, "applied", pmDec(base+60_000, "fusensho", "aka").run(h))
+	_, err := h.eng.ReopenMatch(h.compID, h.matchID, "")
+	require.NoError(t, err)
+	if requeue {
 		require.NoError(t, h.eng.RevertMatchToQueue(h.compID, h.matchID))
-	} else {
-		require.Equal(t, "applied", pmDec(base+60_000, "fusensho", "aka").run(h))
-		_, err = h.eng.ReopenMatch(h.compID, h.matchID, "")
-		require.NoError(t, err)
-		if requeue {
-			require.NoError(t, h.eng.RevertMatchToQueue(h.compID, h.matchID))
-		}
 	}
+	require.NotEqual(t, state.MatchStatusCompleted, h.load(t).Status, "ko=%v requeue=%v: the walk must leave the match open", ko, requeue)
 	lines, err := h.store.LoadScoreLog(h.compID, h.matchID)
 	require.NoError(t, err)
+	require.NotEmpty(t, lines, "the fusensho must be in the log before the reopen")
 	return r10Scene{h: h, logLen: len(lines), reopen: time.Now().UnixMilli()}
 }
 
@@ -99,46 +98,61 @@ func (s r10Scene) settled(t *testing.T) string {
 }
 
 // TestMatchWriteReopenSequencesConverge is the permutation matrix's reopen
-// block: a result, the match reopened or sent back to the queue, then three
-// devices (a finish at +3s with no basis, a point at +5s, a finish at +7s whose
-// basis saw the reopen and nothing after it) in every arrival order, on both
-// branches. The first recorded result by stamp stands whichever way the three
-// arrive; nothing is answered with a downstream refusal, because no result is
-// in force to lock; the stored match is what its log replays to.
+// block: a fusensho, the match reopened (and on request sent back to the
+// queue), then three devices in every arrival order, on both branches, for two
+// sets of devices: a finish at +3s with no basis, a point at +5s and a finish at
+// +7s whose basis saw the reopen and nothing after it; and the same with the
+// basis on the earlier finish instead. The first recorded result by stamp
+// stands whichever way the three arrive; nothing is answered with a downstream
+// refusal, because no result is in force to lock; the stored match is what its
+// log replays to. The kachinuki row is TestMatchWriteReopenSequencesConverge_Kachinuki.
 func TestMatchWriteReopenSequencesConverge(t *testing.T) {
 	M, K := []string{"M"}, []string{"K"}
-	for _, ko := range []bool{false, true} {
-		for _, requeue := range []bool{false, true} {
-			if ko && requeue {
-				continue // the knockout walk always ends in the queue
-			}
-			seen := map[string][]string{}
-			for _, p := range pmPerms(3) {
-				s := r10Setup(t, ko, requeue)
-				steps := []pmStep{
-					s.finish(3000, wrTeamA, M, nil, 0),
-					s.point(5000, nil, K),
-					s.finish(7000, wrTeamB, nil, K, s.logLen),
+	// Two sets of devices: the earliest finish sent no basis (the later one
+	// saw the reopen), and the earliest finish sent a basis that saw the
+	// reopen (the later one sent none). Either way the earliest stands.
+	sets := []struct {
+		name  string
+		steps func(s r10Scene) []pmStep
+		want  string
+	}{
+		{"first finish without basis", func(s r10Scene) []pmStep {
+			return []pmStep{s.finish(3000, wrTeamA, M, nil, 0), s.point(5000, nil, K), s.finish(7000, wrTeamB, nil, K, s.logLen)}
+		}, "st=completed win=" + wrTeamA + " A=[M] B=[]"},
+		{"first finish with basis", func(s r10Scene) []pmStep {
+			return []pmStep{s.finish(3000, wrTeamB, nil, K, s.logLen), s.point(5000, M, nil), s.finish(7000, wrTeamA, M, nil, 0)}
+		}, "st=completed win=" + wrTeamB + " A=[] B=[K]"},
+	}
+	runs := 0
+	for _, set := range sets {
+		for _, ko := range []bool{false, true} {
+			for _, requeue := range []bool{false, true} {
+				seen := map[string][]string{}
+				for _, p := range pmPerms(3) {
+					runs++
+					s := r10Setup(t, ko, requeue)
+					steps := set.steps(s)
+					var answers []string
+					for _, i := range p {
+						a := steps[i].run(s.h)
+						answers = append(answers, a)
+						assert.NotContains(t, a, "downstream_knockout", "%s ko=%v requeue=%v order=%v: no result is in force to lock", set.name, ko, requeue, p)
+					}
+					if r := pmReplay(s.h, t); r != "" {
+						t.Errorf("%s ko=%v requeue=%v order=%v: stored match differs from a replay of its log: %s", set.name, ko, requeue, p, r)
+					}
+					got := s.settled(t)
+					seen[got] = append(seen[got], fmt.Sprint(p))
+					assert.Equal(t, set.want, strings.SplitN(got, " kept", 2)[0],
+						"%s ko=%v requeue=%v order=%v answers=%v: the first recorded result stands", set.name, ko, requeue, p, answers)
 				}
-				var answers []string
-				for _, i := range p {
-					a := steps[i].run(s.h)
-					answers = append(answers, a)
-					assert.NotContains(t, a, "downstream_knockout", "ko=%v requeue=%v order=%v: no result is in force to lock", ko, requeue, p)
+				if len(seen) != 1 {
+					t.Errorf("%s ko=%v requeue=%v: arrival order changed the outcome: %v", set.name, ko, requeue, seen)
 				}
-				if r := pmReplay(s.h, t); r != "" {
-					t.Errorf("ko=%v requeue=%v order=%v: stored match differs from a replay of its log: %s", ko, requeue, p, r)
-				}
-				got := s.settled(t)
-				seen[got] = append(seen[got], fmt.Sprint(p))
-				assert.Equal(t, "st=completed win="+wrTeamA+" A=[M] B=[]", strings.SplitN(got, " kept", 2)[0],
-					"ko=%v requeue=%v order=%v answers=%v: the first recorded result stands", ko, requeue, p, answers)
-			}
-			if len(seen) != 1 {
-				t.Errorf("ko=%v requeue=%v: arrival order changed the outcome: %v", ko, requeue, seen)
 			}
 		}
 	}
+	t.Logf("reopen matrix: %d runs", runs)
 }
 
 // poolScene is the mixed-pool form of the same walk: a fusensho in Pool A, the

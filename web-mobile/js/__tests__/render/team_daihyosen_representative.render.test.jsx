@@ -7,9 +7,9 @@ import React from 'react';
 import { render, act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 import { toBackendMatchResult } from '../../api_serializers.jsx';
 import { FETCH_TIMEOUT_MS } from '../../write_result.jsx';
-import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
 
 const SQUADS = {
   t1: [{ id: 'm1a', name: 'Alice', index: 1 }, { id: 'm2a', name: 'Brenda', index: 2 }],
@@ -44,6 +44,7 @@ const STUBBED_GLOBALS = {
 };
 
 let restoreGlobals;
+let outbox;
 let ScoreEditorModal;
 
 beforeAll(async () => {
@@ -58,6 +59,11 @@ beforeAll(async () => {
 afterAll(() => restoreGlobals());
 
 beforeEach(() => {
+  // bc-evts stage 5: a running team match is scored by taps handed to the
+  // outbox (API.recordTap), a representative pick among them; each test gets a
+  // fresh fake of that surface, whose pending taps the board folds on.
+  outbox = makeFakeOutbox();
+  Object.assign(window.API, outbox.api);
   window.API.fetchSquads.mockReset().mockResolvedValue(SQUADS);
   window.API.fetchLineupInForce.mockReset().mockResolvedValue({ saved: false, positions: {} });
   window.API.recordScore.mockClear();
@@ -139,10 +145,9 @@ async function clickFinishTwice() {
   await act(async () => { fireEvent.click(screen.getByText('Tap again to finish')); });
 }
 
-// The FINISH write: the one onSubmit call whose patch completes the match. A pick
-// arms the editor's autosave, a RUNNING write sent through the same onSubmit, and
-// its debounce is real time: under load it can land between the pick and Finish.
-// So a test that means the finish cannot read calls[0] or count every call.
+// The FINISH write: the one onSubmit call whose patch completes the match (a
+// running match's picks and points are taps, bc-evts stage 5, so it is the only
+// one there; a match that is not running writes nothing else either).
 function finishPatchOf(onSubmit) {
   const finishes = onSubmit.mock.calls.map(([patch]) => patch).filter((patch) => patch.status === 'completed');
   expect(finishes).toHaveLength(1);
@@ -254,24 +259,20 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     expect(window.API.putMatchLineup).not.toHaveBeenCalled();
   });
 
-  it('R6b: a typed representative whose add never lands is taken off the row, so no write names it (stage 3 review 4, G1)', async () => {
+  it('R6b: a typed representative is a rep.pick naming the member its add mints (the outbox takes the id off one that never lands)', async () => {
+    // What happens to the queued pick when the add never lands is the outbox's
+    // (mintedStrip, pinned by minted_member_permutations.test.jsx): the sheet
+    // hands it over as made.
     window.API.addTeamMember.mockResolvedValue({ id: 'm9', name: 'Eve', index: 3 });
     const match = makeMatch({ subResults: [DH_EMPTY] });
-    const { onSubmit } = await mount(match);
+    await mount(match);
     const input = dhInput('SHIRO');
     await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Eve' } }); });
     const add = await screen.findByText(/Add “Eve”/);
     await act(async () => { fireEvent.click(add.closest('button')); });
     await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalled());
-    await act(async () => {
-      window.dispatchEvent(new CustomEvent('team-member-dropped', { detail: { competitionId: 'comp1', teamId: 't2', memberId: 'm9' } }));
-    });
-    await clickFinishTwice();
-    const dh = dhEntryOf(finishPatchOf(onSubmit));
-    expect(dh.sideBMemberId || '', 'the pick of a member that never was is cleared').toBe('');
-    expect(dh.sideB).toBe('Team B');
+    await waitFor(() => expect(taps()).toEqual([{ kind: 'rep.pick', pos: -1, side: 'b', memberId: 'm9' }]));
   });
-
   it('R7: under selfReport the representative picker is offered while the match runs', async () => {
     await mount(makeMatch({ subResults: [DH_EMPTY] }), { selfReport: true });
     await waitFor(() => expect(dhInputs().length).toBe(2));
@@ -613,17 +614,14 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  // The representative row follows the server per PART: the score and each side's pick
-  // are separate edits (bc-mrgc orders the picks apart from the bout row).
+  // The representative row's score and each side's pick are separate events
+  // (rep.pick per side, the scoring on bout -1), so neither holds the other.
   const dhRow = () => [...document.querySelectorAll('.team-sub-match')].pop();
   const dhIppon = (color, letter) => [...dhRow().querySelectorAll(`.team-sub-match__side--${color} button.ipt-btn`)].find((b) => b.textContent === letter);
   const dhMarks = (color) => [...dhRow().querySelectorAll(`.tsm-center-pts--${color} button.editor-side__pt`)].map((b) => b.textContent.trim());
-  const pastDebounce = () => act(async () => { await new Promise((r) => setTimeout(r, AUTOSAVE_DEBOUNCE_MS + 150)); });
-  const lastSubmitted = (onSubmit) => {
-    expect(onSubmit).toHaveBeenCalled();
-    const calls = onSubmit.mock.calls;
-    return calls[calls.length - 1][0];
-  };
+  // Long past the 300 ms debounce the sheet used to have: nothing is written after it.
+  const pastDebounce = () => act(async () => { await new Promise((r) => setTimeout(r, 450)); });
+  const taps = () => window.API.recordTap.mock.calls.map((c) => c[2]);
 
   it('R26: a pick made here does not hold another device\'s point on the bout, and a point struck here does not drop the pick', async () => {
     const { onSubmit, rerenderWith } = await mount(makeMatch({ subResults: [DH_EMPTY] }));
@@ -632,20 +630,19 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     // Another device scores Shiro's point. The pick has not landed there, so the push carries none.
     await rerenderWith(makeMatch({ modifiedAt: Date.now() + 60000, subResults: [{ ...DH_EMPTY, ipponsB: ['M'] }] }));
     expect(dhMarks('shiro'), 'the point scored elsewhere is shown').toContain('M');
-    expect(dhInput('AKA').value, 'the pick is still the operator\'s until the server holds it').toBe('Alice');
-    // Strike Aka's point here: the write carries both points and the pick, and names both groups.
+    expect(dhInput('AKA').value, 'the pick is still on the board until the server holds it').toBe('Alice');
+    // Strike Aka's point here: a tap on the bout, beside the pick, which is its own.
     await act(async () => { fireEvent.click(dhIppon('aka', 'M')); });
     await pastDebounce();
-    const patch = lastSubmitted(onSubmit);
-    const dh = dhEntryOf(patch);
-    expect(dh.ipponsB, 'Shiro\'s point is not written over').toEqual(['M']);
-    expect(dh.ipponsA).toEqual(['M']);
-    expect(dh.sideAMemberId).toBe('m1a');
-    expect(patch.changed).toContain('bout:-1');
-    expect(patch.changed).toContain('repPickA');
-    expect(patch.changed, 'Shiro\'s side was not picked here').not.toContain('repPickB');
+    expect(taps()).toEqual([
+      { kind: 'rep.pick', pos: -1, side: 'a', memberId: 'm1a' },
+      { kind: 'ippon.add', pos: -1, side: 'a', letter: 'M' },
+    ]);
+    expect(dhMarks('shiro')).toContain('M');
+    expect(dhMarks('aka')).toContain('M');
+    expect(dhInput('AKA').value).toBe('Alice');
+    expect(onSubmit).not.toHaveBeenCalled();
   });
-
   it('R27: a pick adopted from another device and then cleared here is named in the next write', async () => {
     // The editor MUST mount before the pick exists (R4 mounts with it, so its mount-time
     // baseline already holds the pick and the clear is a change against it).
@@ -678,24 +675,19 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     expect(patch.changed, 'the side adopted from the server is not a change').not.toContain('repPickB');
   });
 
-  it('R33: a pick adopted for one side is not named again by a point struck here afterwards', async () => {
+  it('R33: a pick adopted for one side is not put back by a point struck here afterwards', async () => {
     const { onSubmit, rerenderWith } = await mount(makeMatch({ subResults: [DH_EMPTY] }));
-    // The editor's first write: a point struck on the representative bout.
     await act(async () => { fireEvent.click(dhIppon('aka', 'M')); });
-    await pastDebounce();
-    expect(lastSubmitted(onSubmit).changed).toEqual(['bout:-1']);
     // Another device picks Carol for Shiro; the point struck here has not come back yet.
     await rerenderWith(makeMatch({ modifiedAt: Date.now() + 60000, subResults: [{ ...DH_EMPTY, sideBMemberId: 'm1b' }] }));
     expect(dhInput('SHIRO').value, 'the pick made elsewhere is shown').toBe('Carol');
-    // A second point struck here: the pick is the other device's, adopted and not changed here, so
-    // the write must not put it back under a newer stamp.
+    // A second point struck here is a tap of its own: nothing restates the pick.
     await act(async () => { fireEvent.click(dhIppon('shiro', 'K')); });
     await pastDebounce();
-    const patch = lastSubmitted(onSubmit);
-    expect(dhEntryOf(patch).sideBMemberId, 'the pick rides the row as it is').toBe('m1b');
-    expect(patch.changed).toEqual(['bout:-1']);
+    expect(taps().map((e) => e.kind)).toEqual(['ippon.add', 'ippon.add']);
+    expect(dhInput('SHIRO').value).toBe('Carol');
+    expect(onSubmit).not.toHaveBeenCalled();
   });
-
   // PR #463 round 15 (G): Remove <decision> then Undo puts the whole board back to the
   // server's, the representative picks included, so the editor agrees with the picks
   // the server holds (useWithdrawalRemoval's onUndo). The agreement matters when a
@@ -794,47 +786,42 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('R30: the dropped pick takes its edit stamp with it: a pick another device makes for the new team is followed even when its push is stamped before the dropped pick', async () => {
+  it('R30: a pick made for the old team stays queued and the server refuses it; then the new team\'s pick from another device shows', async () => {
+    // Q4 (bc-evts stage 5): a pick on a running match is a rep.pick tap, so one
+    // made before the side was given another team is the outbox's; the server
+    // refuses it (team_member_not_in_team) and it leaves the board.
     window.API.fetchSquads.mockResolvedValue({ ...SQUADS, t3: [{ id: 'm1c', name: 'Erin', index: 1 }] });
     const { rerenderWith } = await mount(makeMatch({ subResults: [DH_EMPTY] }));
     await pickFromDh('AKA', 'Alice');
-    const pickedAt = Date.now();
-    await rerenderWith(makeMatch({ sideA: { id: 't3', name: 'Team C' }, subResults: [DH_EMPTY] }));
+    expect(taps()).toEqual([{ kind: 'rep.pick', pos: -1, side: 'a', memberId: 'm1a' }]);
+    const seated = makeMatch({ sideA: { id: 't3', name: 'Team C' }, subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1c' }] });
+    await rerenderWith(seated);
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-    expect(dhInput('AKA').value).toBe('');
-    // The correction that seated team t3 reached this device late: the other device's pick for t3
-    // was made after it but before the pick dropped here, so its stamp is older than that pick's.
-    await rerenderWith(makeMatch({ modifiedAt: pickedAt - 500, sideA: { id: 't3', name: 'Team C' }, subResults: [{ ...DH_EMPTY, sideAMemberId: 'm1c' }] }));
+    const [sent] = outbox.taps('comp1', 'm-ko-1');
+    await act(async () => { outbox.ack('comp1', 'm-ko-1', null, { [sent.id]: { outcome: 'refused', reason: 'team_member_not_in_team' } }); });
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     expect(dhInput('AKA').value).toBe('Erin');
   });
-
-  it('R31: a pick on a representative bout nobody has scored names the pick alone and leaves the bout\'s scoreline unstated', async () => {
-    // A pick is its own change group (repPickB). Naming bout:-1 as well would stamp the
-    // bout at the pick, so a device that had not yet seen a point struck elsewhere would
-    // send its stale scoreline under the newer stamp and erase that point.
+  it('R31: a pick on a representative bout nobody has scored is a rep.pick alone: nothing states the bout\'s scoreline', async () => {
+    // A pick is its own change (rep.pick, the repPickB group on the server):
+    // nothing stamps the bout, so a point struck elsewhere is never written over.
     const { onSubmit } = await mount(makeMatch({ subResults: [DH_ADDED] }));
     await pickFromDh('SHIRO', 'Carol');
     await pastDebounce();
-    const patch = lastSubmitted(onSubmit);
-    const dh = dhEntryOf(patch);
-    expect(patch.changed, 'the pick is the only change').toEqual(['repPickB']);
-    expect(dh.sideBMemberId).toBe('m1b');
-    expect('ipponsA' in dh, 'the untouched bout states no scoreline').toBe(false);
-    expect('ipponsB' in dh, 'the untouched bout states no scoreline').toBe(false);
+    expect(taps()).toEqual([{ kind: 'rep.pick', pos: -1, side: 'b', memberId: 'm1b' }]);
+    expect(onSubmit).not.toHaveBeenCalled();
   });
-
-  it('R32: a point struck here on the same bout is still named with the pick, and carries the scoreline', async () => {
+  it('R32: a point struck here on the same bout and a pick are two taps, each its own', async () => {
     const { onSubmit } = await mount(makeMatch({ subResults: [DH_ADDED] }));
     await act(async () => { fireEvent.click(dhIppon('aka', 'M')); });
     await pickFromDh('SHIRO', 'Carol');
     await pastDebounce();
-    const patch = lastSubmitted(onSubmit);
-    const dh = dhEntryOf(patch);
-    expect(patch.changed).toContain('bout:-1');
-    expect(patch.changed).toContain('repPickB');
-    expect(patch.changed, 'Aka\'s side was not picked here').not.toContain('repPickA');
-    expect(dh.ipponsA).toEqual(['M']);
-    expect(dh.sideBMemberId).toBe('m1b');
+    expect(taps()).toEqual([
+      { kind: 'ippon.add', pos: -1, side: 'a', letter: 'M' },
+      { kind: 'rep.pick', pos: -1, side: 'b', memberId: 'm1b' },
+    ]);
+    expect(dhMarks('aka')).toContain('M');
+    expect(dhInput('SHIRO').value).toBe('Carol');
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });

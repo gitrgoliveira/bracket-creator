@@ -150,7 +150,7 @@ describe('the tap-outcome and retired-reason rules', () => {
     expect(trips(r, 'if (!tapOutcomeQuiet(o)) note(tapNotAppliedText(o));')).toBe(false);
     expect(r.exempt).toEqual(expect.arrayContaining(['write_result.jsx', 'api_client.jsx', 'score_events.jsx']));
   });
-  it('the individual and engi editors score a running match by taps: no autosave, no kept local edit', () => {
+  it('the individual, engi and team editors score a running match by taps: no autosave, no kept local edit', () => {
     // bc-evts stage 4 widened it to the engi editor; stage 5 adds the team one.
     const r = rule('editor-taps');
     expect(r).toBeTruthy();

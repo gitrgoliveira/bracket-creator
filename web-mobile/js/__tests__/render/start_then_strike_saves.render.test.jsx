@@ -159,11 +159,11 @@ describe('a point struck right after Start match saves at once (bc-strt)', () =>
     await tapStart();
     expect(onSubmit.mock.calls[0][0].status, 'precondition: Start match wrote running').toBe('running');
 
+    // bc-evts stage 5: the point is a tap on the running match, sent without
+    // waiting for the list.
     await strikeKachinukiAkaMen();
-    const saves = autosaves(onSubmit);
-    expect(saves.length, 'the point is autosaved without waiting for the list').toBe(1);
-    const bout1 = (saves[0].subResults || []).find((s) => s.position === 1);
-    expect(bout1 && bout1.ipponsA).toEqual(['M']);
+    expect(window.API.recordTap.mock.calls.map((c) => c[2]), 'the point is a tap without waiting for the list')
+      .toEqual([{ kind: 'ippon.add', pos: 1, side: 'a', letter: 'M' }]);
   });
 
   // The court is busy or a competitor is withdrawn: the server answers with

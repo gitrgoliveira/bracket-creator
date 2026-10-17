@@ -18,6 +18,7 @@
 import React from 'react';
 import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { SUPERSEDED_REASON, SUPERSEDED_ADVICE } from '../../write_result.jsx';
 
@@ -186,9 +187,11 @@ describe('team editor inline error surface', () => {
     expect(screen.queryByTestId('team-editor-error')).toBeNull();
   });
 
+  // Only a queued (scheduled) match is saved before an add, to start it
+  // (bc-evts stage 5: a running sheet's taps are already ahead of the add).
   it('a superseded pre-save on Add shows the not-saved banner; the add was already handed over', async () => {
     const onSubmit = vi.fn().mockResolvedValue(SUPERSEDED);
-    await renderEditor({ match: noDaihyosenYet(), onSubmit });
+    await renderEditor({ match: { ...noDaihyosenYet(), status: 'scheduled' }, onSubmit });
     await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
     await waitFor(() => {
       expect(failedBannerText()).toBe(`Not applied: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
@@ -196,14 +199,24 @@ describe('team editor inline error surface', () => {
     expect(onSubmit.mock.invocationCallOrder[0]).toBeLessThan(window.API.recordDaihyosen.mock.invocationCallOrder[0]);
   });
 
-  it('a superseded pre-save on Remove shows the not-saved banner; the remove was already handed over', async () => {
-    const onSubmit = vi.fn().mockResolvedValue(SUPERSEDED);
+  // A remove saves no sheet first: the point struck before it is a tap, ahead
+  // of the remove in the outbox (bc-evts stage 5). The match holds no row for
+  // bout 2 yet, so the one write is that row's (and bout 3's), ahead of the tap.
+  it('a point struck right before Remove is a tap ahead of the remove, and no sheet is saved first', async () => {
+    const onSubmit = vi.fn().mockResolvedValue({ applied: true });
     await renderEditor({ onSubmit });
     await act(async () => { fireEvent.click(ipponButton(subMatchRows()[1], 'shiro', 'M')); });
     await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
-    await waitFor(() => {
-      expect(failedBannerText()).toBe(`Not applied: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
-    });
-    expect(onSubmit.mock.invocationCallOrder[0]).toBeLessThan(window.API.removeDaihyosen.mock.invocationCallOrder[0]);
+    await waitFor(() => expect(window.API.removeDaihyosen).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0].changed).toEqual(['bout:2', 'bout:3']);
+    expect(onSubmit.mock.invocationCallOrder[0]).toBeLessThan(window.API.recordTap.mock.invocationCallOrder[0]);
+    expect(window.API.recordTap.mock.invocationCallOrder[0]).toBeLessThan(window.API.removeDaihyosen.mock.invocationCallOrder[0]);
   });
 });
+
+// bc-evts stage 5: a running team match is scored by taps handed to the outbox
+// (API.recordTap); each test gets a fresh fake of that surface, whose pending
+// taps the board folds on. Registered last, so it lands on the API the hooks
+// above set up.
+beforeEach(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });

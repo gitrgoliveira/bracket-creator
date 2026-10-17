@@ -1,18 +1,15 @@
 // Every scoring edit on a running match is saved on its own, the overtime
-// count and a tie-break bout's rep pick included, and a key that changes
-// nothing saves nothing.
+// count, a tie-break bout's rep pick and a representative bout's verdict
+// included, and a key that changes nothing saves nothing.
 //
-// useDebouncedRunningWrite (admin_scoring_autosave.jsx) writes a running match
-// only after an operator handler calls markDirty. Both kendo editors handed the
-// overtime control (EnchoControl) the bare state setter, so an overtime change
-// reached the server only with the next point, a close or Prev/Next: never on
-// its own, and never across a reload, because the page-hide flush writes only
-// an edit whose timer is armed. The rep pickers of a team pool tie-break bout
-// had the same gap. The engi editor had the opposite one: a key pressed at a
-// bound armed the timer with no change, and a running write stamped now went
-// out for nothing (bc-rvfx: such a write can beat another device's older
-// queued result); its running counts are taps since bc-evts stage 4, pinned
-// in engi_editor_taps.render.test.jsx.
+// The editors once wrote a running match through a debounced autosave that
+// only an operator handler armed. Both kendo editors handed the overtime
+// control (EnchoControl) the bare state setter, so an overtime change reached
+// the server only with the next point, a close or Prev/Next: never on its own,
+// and never across a reload. The rep pickers of a team pool tie-break bout had
+// the same gap. Since bc-evts (stage 3 individual, stage 4 engi, stage 5 team)
+// each such change is a tap handed to the outbox as it is made; the engi
+// editor's counts are pinned in engi_editor_taps.render.test.jsx.
 
 import React from 'react';
 import { render, act, fireEvent, screen, cleanup } from '@testing-library/react';
@@ -24,7 +21,7 @@ import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 // bc-evts stage 3: a running individual match is scored by taps handed to
 // the outbox (API.recordTap); each test gets a fresh fake of that surface.
 beforeEachTest(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });
-import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
+import { serverFold } from '../helpers/fake_outbox.js';
 
 // Every patch recordScore was handed, in order.
 let writes;
@@ -43,7 +40,6 @@ const STUBBED_GLOBALS = {
     removeDaihyosen: vi.fn(),
     putMatchLineup: vi.fn(),
     recordDecision: vi.fn(),
-    notePendingEdit: vi.fn(),
   },
   AdminLineupHelpers: { rosterFor: vi.fn().mockReturnValue([]) },
   compMatches: () => [],
@@ -69,7 +65,6 @@ beforeEach(() => {
     writes.push(patch);
     return Promise.resolve({ applied: true });
   });
-  window.API.notePendingEdit.mockReset();
   vi.useFakeTimers();
 });
 
@@ -87,8 +82,10 @@ async function mount(match) {
 }
 
 const click = (el) => act(async () => { fireEvent.click(el); });
-const settle = () => act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+// Long past the 300 ms debounce there used to be: nothing is written after it.
+const settle = () => act(async () => { vi.advanceTimersByTime(350); });
 const pageHide = () => act(async () => { window.dispatchEvent(new Event('pagehide')); });
+const taps = () => window.API.recordTap.mock.calls.map((c) => c[2]);
 
 // Opens the collapsed Overtime pill and ticks "Encho started": 0 to 1 period.
 async function startOvertime() {
@@ -102,38 +99,31 @@ const individual = () => ({
   sideA: { id: 'p1', name: 'Yamada' }, sideB: { id: 'p2', name: 'Tanaka' },
 });
 const team = () => ({
-  id: 'tm-run', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A',
+  id: 'tm-run', compId: 'comp1', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A',
   compKind: 'team', teamSize: 3,
   sideA: { id: 'team-kyoto', name: 'Kyoto' }, sideB: { id: 'team-osaka', name: 'Osaka' },
+  subResults: [1, 2, 3].map((position) => ({ position, sideA: '', sideB: '', ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, winner: '', decision: '' })),
 });
 // A knockout encounter with a representative bout: the overtime count then
 // belongs to that bout (daihyosenEnchoFields), not to the match.
 const teamWithDaihyosen = () => ({
   ...team(), id: 'tm-dh', phase: 'bracket', round: 'Final',
-  subResults: [{ position: -1, sideA: 'Kyoto', sideB: 'Osaka', ipponsA: [], ipponsB: [], winner: '', decision: 'daihyosen' }],
+  subResults: [...team().subResults, { position: -1, sideA: 'Kyoto', sideB: 'Osaka', ipponsA: [], ipponsB: [], winner: '', decision: 'daihyosen' }],
 });
 
-const matchEncho = (p) => p.encho;
-const daihyosenEncho = (p) => (p.subResults || []).find((s) => s.position === -1)?.encho;
-
 describe('the overtime count is saved on its own, like a point', () => {
+  // bc-evts stage 5: the team editor's count is a tap per period too, on the
+  // encounter (pos 0) or, once a representative bout exists, on that bout.
   it.each([
-    ['team match', team, matchEncho],
-    ['team match with a daihyosen', teamWithDaihyosen, daihyosenEncho],
-  ])('%s: ticking Encho and adding a period each write the count', async (_kind, make, enchoOf) => {
+    ['team match', team, 0],
+    ['team match with a daihyosen', teamWithDaihyosen, -1],
+  ])('%s: ticking Encho and adding a period are each an encho.add tap', async (_kind, make, pos) => {
     await mount(make());
     await startOvertime();
-    // Held for the debounce window, as a point is.
-    expect(writes).toHaveLength(0);
-    await settle();
-    expect(writes).toHaveLength(1);
-    expect(writes[0].status).toBe('running');
-    expect(enchoOf(writes[0])).toEqual({ periodCount: 1 });
-
     await addOvertimePeriod();
+    expect(taps()).toEqual([{ kind: 'encho.add', pos }, { kind: 'encho.add', pos }]);
     await settle();
-    expect(writes).toHaveLength(2);
-    expect(enchoOf(writes[1])).toEqual({ periodCount: 2 });
+    expect(writes).toHaveLength(0);
   });
 
   // bc-evts stage 3: a running individual match is scored by taps, the
@@ -152,36 +142,35 @@ describe('the overtime count is saved on its own, like a point', () => {
 
   it.each([
     ['team match', team],
-  ])('%s: a change and then the page going away is written at once', async (_kind, make) => {
+  ])('%s: a change is in the outbox as it is made, so the page going away owes nothing', async (_kind, make) => {
     await mount(make());
     await startOvertime();
+    expect(taps()).toEqual([{ kind: 'encho.add', pos: 0 }]);
     await pageHide();
-    expect(writes).toHaveLength(1);
-    expect(writes[0].status).toBe('running');
-    expect(writes[0].encho).toEqual({ periodCount: 1 });
-    // The flush took the timer with it: nothing more when it would have fired.
     await settle();
-    expect(writes).toHaveLength(1);
+    expect(writes).toHaveLength(0);
   });
 });
 
-describe('a team editor keeps an overtime tap its own save has not caught up with', () => {
-  // Every overtime tap is saved now, so each one comes back from the server a
-  // moment later. The team editor followed the server's count whatever it
-  // held, so the save of the first tap, arriving after a second tap, put the
-  // count back to one and the second save sent one again.
+describe('a team editor keeps an overtime tap the server has not caught up with', () => {
+  // Every overtime tap is sent at once, so each one comes back from the server
+  // a moment later. The team editor once followed the server's count whatever
+  // it held, so the save of the first tap, arriving after a second tap, put the
+  // count back to one. Now the board is the server's copy with the pending taps
+  // folded on, and a copy holding a tap counts it once.
   const shownCount = () => document.querySelector('.encho-row__count')?.textContent;
 
-  it('a second tap made before the first one\'s save comes back stands', async () => {
+  it('a second tap made before the first one comes back stands', async () => {
     const { rerender } = await mount(team());
     await startOvertime();
-    await settle();
+    const first = window.API.pendingTaps('comp1', 'tm-run')[0];
     await addOvertimePeriod();
-    // The first save comes back while the second is still held.
-    await act(async () => { rerender(editorFor({ ...team(), encho: { periodCount: 1 } })); });
+    // The server's copy holding the first tap comes back while the second is pending.
+    const echoed = serverFold(team(), [first], { team: true }).match;
+    await act(async () => { rerender(editorFor(echoed)); });
     expect(shownCount()).toBe('×2');
-    await settle();
-    expect(writes.map((p) => p.encho)).toEqual([{ periodCount: 1 }, { periodCount: 2 }]);
+    expect(taps()).toEqual([{ kind: 'encho.add', pos: 0 }, { kind: 'encho.add', pos: 0 }]);
+    expect(writes).toHaveLength(0);
   });
 
   it('an editor nobody touched still follows a count recorded elsewhere, and writes nothing', async () => {
@@ -251,14 +240,12 @@ describe('a rep pick on a running tie-break bout is saved on its own', () => {
 // engi_editor_taps.render.test.jsx pins that such a key sends nothing.
 
 describe('a daihyosen verdict on a running encounter is saved on its own', () => {
-  // Picking a side, and withdrawing it, ride the running write like a point,
-  // so leaving the editor or reloading keeps them. The server keeps a verdict
-  // on a running encounter's representative bout (validateSubBout has no
-  // status gate). The arm alone is a mode and writes nothing.
-  const dhRow = (p) => (p.subResults || []).find((s) => s.position === -1);
+  // Picking a side, and withdrawing it, are taps like a point (bc-evts stage 5,
+  // Q11), so leaving the editor or reloading keeps them and the TV board shows
+  // them at once. The arm alone is a mode and writes nothing.
   const recorded = () => ({
     ...teamWithDaihyosen(),
-    subResults: [{ position: -1, sideA: 'Kyoto', sideB: 'Osaka', ipponsA: [], ipponsB: ['Ht'], winner: 'Osaka', decision: 'daihyosen', decidedByHantei: true }],
+    subResults: [...team().subResults, { position: -1, sideA: 'Kyoto', sideB: 'Osaka', ipponsA: [], ipponsB: ['Ht'], winner: 'Osaka', decision: 'daihyosen', decidedByHantei: true }],
   });
   const arm = () => click(screen.getByTestId('team-daihyosen-hantei-arm'));
   const pick = (side) => click(screen.getByTestId(`team-daihyosen-hantei-${side}`));
@@ -270,30 +257,31 @@ describe('a daihyosen verdict on a running encounter is saved on its own', () =>
     expect(screen.getByTestId('team-daihyosen-hantei-shiro').textContent).toBe('SHIRO (White) wins');
     expect(screen.getByTestId('team-daihyosen-hantei-aka').textContent).toBe('AKA (Red) wins');
     await pick('shiro');
+    expect(taps()).toEqual([{ kind: 'daihyosen.verdict', pos: -1, side: 'b' }]);
+    expect(screen.getByTestId('team-daihyosen-ht-shiro')).toBeTruthy();
     await settle();
-    expect(writes).toHaveLength(1);
-    expect(writes[0].status).toBe('running');
-    expect(dhRow(writes[0])).toMatchObject({ decidedByHantei: true, winner: 'Osaka' });
+    expect(writes).toHaveLength(0);
   });
 
   it('Cancel writes the withdrawal', async () => {
     await mount(recorded());
     await click(screen.getByTestId('team-daihyosen-hantei-cancel'));
+    expect(taps()).toEqual([{ kind: 'daihyosen.verdict', pos: -1, value: 'clear' }]);
     await settle();
-    expect(writes).toHaveLength(1);
-    expect(dhRow(writes[0]).decidedByHantei).toBe(false);
+    expect(writes).toHaveLength(0);
   });
 
-  it('a second pick made before the first one\'s save comes back stands', async () => {
+  it('a second pick made before the first one comes back stands', async () => {
     const { rerender } = await mount(teamWithDaihyosen());
     await arm();
     await pick('shiro');
-    await settle();
+    const first = window.API.pendingTaps('comp1', 'tm-dh')[0];
     await pick('aka');
-    // The first save comes back while the second is still held.
-    await act(async () => { rerender(editorFor(recorded())); });
-    await settle();
-    expect(writes.map((p) => dhRow(p).winner)).toEqual(['Osaka', 'Kyoto']);
+    // The server's copy holding the first pick comes back while the second is pending.
+    const echoed = serverFold(teamWithDaihyosen(), [first], { team: true }).match;
+    await act(async () => { rerender(editorFor(echoed)); });
+    expect(screen.getByTestId('team-daihyosen-hantei-aka').className).toContain('btn--primary');
+    expect(taps().map((e) => e.side)).toEqual(['b', 'a']);
   });
 
   it('an editor nobody touched still follows a verdict recorded elsewhere, and writes nothing', async () => {

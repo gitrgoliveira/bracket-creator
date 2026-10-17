@@ -12,10 +12,12 @@
 import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
+// Long past the 300 ms debounce the sheet used to have: nothing is written after it.
+const WAIT_MS = 350;
 import { toBackendMatchResult } from '../../api_serializers.jsx';
 
 const STUBBED_GLOBALS = {
@@ -73,7 +75,6 @@ beforeEach(() => {
     recordDaihyosen: vi.fn(async () => ({ ...knockoutTeamMatch(), subResults: [...FOUGHT, REP_BOUT] })),
     removeDaihyosen: vi.fn(async () => ({ ...knockoutTeamMatch(), subResults: FOUGHT })),
     hasPendingTerminalWrite: () => false,
-    notePendingEdit: () => () => {},
   };
 });
 
@@ -126,11 +127,11 @@ describe('a participant runs the representative bout of a tied knockout team mat
     expect(screen.queryByTestId('team-daihyosen-hantei-arm'), 'no hantei is offered').toBeNull();
     expect(screen.queryByText(/hantei/i)).toBeNull();
 
+    // bc-evts stage 5: the point is a tap, with the public page's empty password.
     await act(async () => { fireEvent.click(ipponButton(repBoutRow(), 'aka', 'M')); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await act(async () => { vi.advanceTimersByTime(WAIT_MS); });
     await settle();
-    const scored = repBoutOf(lastWire());
-    expect(scored).toMatchObject({ decision: 'daihyosen', ipponsA: ['M'], ipponsB: [] });
+    expect(window.API.recordTap.mock.calls.map((c) => [c[2], c[3]])).toEqual([[{ kind: 'ippon.add', pos: -1, side: 'a', letter: 'M' }, '']]);
     expect(screen.queryByTestId('team-daihyosen-hantei-row'), 'nothing is left to offer once it is scored').toBeNull();
 
     await act(async () => { fireEvent.click(screen.getByText('Finish')); });
@@ -213,23 +214,21 @@ describe('a participant runs the representative bout of a tied knockout team mat
     expect(screen.queryByTestId('team-daihyosen-hantei-row')).toBeNull();
   });
 
-  it('removes it right after a scoring tap: the save made first lands, then the remove', async () => {
+  it('removes it right after a scoring tap: the taps go first, then the remove', async () => {
     await openEditor(knockoutTeamMatch());
     await addRepBout();
     window.API.recordScore.mockClear();
 
-    // A point struck and taken back off: the edit is still owed when Remove is tapped.
+    // A point struck and taken back off, then Remove: two taps, then the remove,
+    // in the outbox's order; no sheet is saved first (bc-evts stage 5).
     await act(async () => { fireEvent.click(ipponButton(repBoutRow(), 'aka', 'M')); });
     await act(async () => { fireEvent.click(markSlot(repBoutRow(), 'aka', 'M')); });
     await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
     await settle();
 
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    // The row is back to what the server holds, so the editor has nothing to
-    // say about its points and may leave them out; it still sends the row.
-    const saved = repBoutOf(lastWire());
-    expect(saved, 'the save made first carries the representative bout').toMatchObject({ decision: 'daihyosen' });
-    expect([...(saved.ipponsA || []), ...(saved.ipponsB || [])]).toEqual([]);
+    expect(window.API.recordScore).not.toHaveBeenCalled();
+    expect(window.API.recordTap.mock.calls.map((c) => c[2].kind)).toEqual(['ippon.add', 'ippon.remove']);
+    expect(window.API.recordTap.mock.invocationCallOrder[1]).toBeLessThan(window.API.removeDaihyosen.mock.invocationCallOrder[0]);
     expect(window.API.removeDaihyosen).toHaveBeenCalledWith('c1', 'm1', '', 0, expect.objectContaining({ onRefusal: expect.any(Function) }));
     expect(window.alert).not.toHaveBeenCalled();
     expect(document.querySelector('[data-testid="team-editor-error"]'), 'no refusal is shown').toBeNull();
@@ -268,7 +267,7 @@ describe('a hantei stays the organiser\'s on the public score sheet (bc-dhas)', 
     expect(screen.queryByTestId('team-daihyosen-hantei-cancel')).toBeNull();
     expect(screen.queryByTestId('scoring-modal-encho-pill'), 'nor its overtime').toBeNull();
     await act(async () => { fireEvent.click(chip); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await act(async () => { vi.advanceTimersByTime(WAIT_MS); });
     await settle();
     expect(window.API.recordScore).not.toHaveBeenCalled();
   });
@@ -276,7 +275,7 @@ describe('a hantei stays the organiser\'s on the public score sheet (bc-dhas)', 
   // The server takes a participant's write only when it sends the recorded
   // verdict back as it is (internal/mobileapp/self_run_daihyosen_test.go,
   // "sending it back as it is", pins the same row shape).
-  it('takes up the organiser\'s verdict while the sheet is open, and a later tap elsewhere saves it back', async () => {
+  it('takes up the organiser\'s verdict while the sheet is open, and a later tap elsewhere leaves it be', async () => {
     const tournament = { mode: 'self-run', competitions: [{ id: 'c1', squads: {} }] };
     let view;
     await act(async () => {
@@ -297,13 +296,14 @@ describe('a hantei stays the organiser\'s on the public score sheet (bc-dhas)', 
     expect(screen.queryByTestId('scoring-modal-encho-pill'), 'nor its overtime').toBeNull();
 
     const bout1 = [...document.querySelectorAll('.team-sub-match')][0];
+    // bc-evts stage 5: the foul is a tap of its own; no write restates the
+    // representative bout, so the verdict stays as recorded.
     await act(async () => { fireEvent.click(bout1.querySelector('[aria-label="Add a SHIRO foul"]')); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await act(async () => { vi.advanceTimersByTime(WAIT_MS); });
     await settle();
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    expect(repBoutOf(lastWire()), 'the verdict goes back as it was recorded').toMatchObject({
-      sideA: 'Kodokan', sideB: 'Mumeishi', winner: 'Kodokan', ipponsA: ['Ht'], ipponsB: [], decision: 'daihyosen',
-    });
+    expect(window.API.recordTap.mock.calls.map((c) => [c[2], c[3]])).toEqual([[{ kind: 'foul.add', pos: 1, side: 'b' }, '']]);
+    expect(window.API.recordScore).not.toHaveBeenCalled();
+    expect(screen.getByTestId('team-daihyosen-decided-note').textContent).toBe(DECIDED_NOTE);
     expect(window.alert).not.toHaveBeenCalled();
   });
 
@@ -319,3 +319,9 @@ describe('a hantei stays the organiser\'s on the public score sheet (bc-dhas)', 
       .toBe('Needs a winner: fight encho, then ask the organizer for a hantei if still tied.');
   });
 });
+
+// bc-evts stage 5: a running team match is scored by taps handed to the outbox
+// (API.recordTap); each test gets a fresh fake of that surface, whose pending
+// taps the board folds on. Registered last, so it lands on the API the hooks
+// above set up.
+beforeEach(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });

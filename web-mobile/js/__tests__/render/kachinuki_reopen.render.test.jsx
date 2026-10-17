@@ -18,6 +18,7 @@
 import React from 'react';
 import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 
 const STUBBED_GLOBALS = {
@@ -648,13 +649,14 @@ describe('kachinuki [× Remove this bout] undoes a bout added by mistake', () =>
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByTestId('kachinuki-record-hint')).not.toBeNull());
 
-    // Shiro men on the appended bout: the autosave that carries it was made
-    // against the match as the answer left it. (Record bout itself is an
-    // explicit tap, floored by the match the host hands recordScore, so it
-    // carries no seenModifiedAt of its own.)
+    // Shiro men on the appended bout: the tap is made against the match as the
+    // answer left it (bc-evts stage 5: recordTap's `match`, which floors its
+    // stamp). (Record bout itself is an explicit write, floored by the match
+    // the host hands recordScore.)
     await act(async () => { fireEvent.keyDown(window, { key: 'm' }); });
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2), { timeout: 3000 });
-    expect(onSubmit.mock.calls[1][0].seenModifiedAt).toBe(7_777);
+    await waitFor(() => expect(window.API.recordTap).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(window.API.recordTap.mock.calls[0][2]).toMatchObject({ kind: 'ippon.add', pos: 2, side: 'b', letter: 'M' });
+    expect(window.API.recordTap.mock.calls[0][4].modifiedAt).toBe(7_777);
   });
 
   // bc-cse: the common case, with NO prior [Remove this bout] -- the override
@@ -679,11 +681,11 @@ describe('kachinuki [× Remove this bout] undoes a bout added by mistake', () =>
     // There is no prior override here, so the parent's `match` prop (never
     // rerendered by this harness, same as the test above) is still what the
     // editor shows -- the point of this test is that the stamp still reaches
-    // the autosave's floor even so, through _recordBoutAnswerStampRef rather
-    // than the override adoption.
+    // the tap's floor even so, through recordBoutStampRef rather than the
+    // override adoption.
     await act(async () => { fireEvent.keyDown(window, { key: 'm' }); });
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2), { timeout: 3000 });
-    expect(onSubmit.mock.calls[1][0].seenModifiedAt).toBe(7_777);
+    await waitFor(() => expect(window.API.recordTap).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(window.API.recordTap.mock.calls[0][4].modifiedAt).toBe(7_777);
   });
 
   // mp-gmcg review F4: the local override that hides the removed bout must
@@ -1053,3 +1055,9 @@ describe('kachinuki End match never sends a match-level encho', () => {
     expect(patch.encho).toBeUndefined();
   });
 });
+
+// bc-evts stage 5: a running team match is scored by taps handed to the outbox
+// (API.recordTap); each test gets a fresh fake of that surface, whose pending
+// taps the board folds on. Registered last, so it lands on the API the hooks
+// above set up.
+beforeEach(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });

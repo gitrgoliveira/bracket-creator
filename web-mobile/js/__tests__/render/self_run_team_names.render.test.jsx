@@ -10,6 +10,7 @@
 import React from 'react';
 import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { answered } from '../helpers/team_members.js';
 import { lineupPutStubByTeam } from '../helpers/lineup_server.js';
@@ -163,10 +164,12 @@ describe('a participant names a later kachinuki bout\'s fighter (bc-dhas)', () =
     expect(window.API.renameTeamMember).toHaveBeenCalledWith('c1', 'team-B', 'b3', 'Ito', '', expect.any(Object));
     expect(window.API.putMatchLineup, 'a later kachinuki bout is not a lineup position').not.toHaveBeenCalled();
     noError();
+    // bc-evts stage 5: the fighter is a bout.fighter tap, with the public
+    // page's empty password.
     await waitFor(() => {
-      const sent = window.API.recordScore.mock.calls.map((c) => c[2]).pop();
-      const bout2 = (sent && sent.subResults || []).find((s) => s.position === 2);
-      expect(bout2).toMatchObject({ sideB: 'Ito', sideBMemberId: 'b3' });
+      const sent = window.API.recordTap.mock.calls.at(-1);
+      expect(sent[2]).toEqual({ kind: 'bout.fighter', pos: 2, side: 'b', name: 'Ito', memberId: 'b3' });
+      expect(sent[3]).toBe('');
     }, { timeout: 3000 });
   });
 
@@ -211,3 +214,9 @@ describe('a participant names a later kachinuki bout\'s fighter (bc-dhas)', () =
     expect(warning.textContent).toBe(`"Ito" was used for this bout, but the team member could not be renamed. ${sentence}`);
   });
 });
+
+// bc-evts stage 5: a running team match is scored by taps handed to the outbox
+// (API.recordTap); each test gets a fresh fake of that surface, whose pending
+// taps the board folds on. Registered last, so it lands on the API the hooks
+// above set up.
+beforeEach(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });

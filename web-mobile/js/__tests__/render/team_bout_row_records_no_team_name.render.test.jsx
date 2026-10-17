@@ -19,8 +19,10 @@
 import React from 'react';
 import { render, act, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
+// Long past the 300 ms debounce the editors used to have: nothing is written after it.
+const WAIT_MS = 350;
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -96,10 +98,10 @@ async function scoreAndCapture(match) {
   // Let the debounce window elapse before reading the calls: a cancel that
   // doSubmit lost would fire its "running" write only now, and the last-write
   // assertion below exists to see it.
-  await act(() => new Promise((r) => setTimeout(r, AUTOSAVE_DEBOUNCE_MS + 50)));
+  await act(() => new Promise((r) => setTimeout(r, WAIT_MS)));
   // Select the FINISH write by its status rather than asserting a total call
   // count. The strike above marks the editor dirty, which schedules a 300ms
-  // debounced autosave (AUTOSAVE_DEBOUNCE_MS, admin_scoring_autosave.jsx)
+  // debounced autosave (WAIT_MS, admin_scoring_autosave.jsx)
   // writing status "running". doSubmit cancels that timer -- but only if the
   // two Finish taps land inside those 300ms.
   //
@@ -171,3 +173,9 @@ describe('a fixed-order bout row records no team name', () => {
     expect(dh.sideB).toBe('Osaka');
   });
 });
+
+// bc-evts stage 5: a running team match is scored by taps handed to the outbox
+// (API.recordTap); each test gets a fresh fake of that surface, whose pending
+// taps the board folds on. Registered last, so it lands on the API the hooks
+// above set up.
+beforeEach(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });

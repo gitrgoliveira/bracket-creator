@@ -11,6 +11,7 @@
 import React from 'react';
 import { render, act, cleanup, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { answered } from '../helpers/team_members.js';
 import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
@@ -153,3 +154,9 @@ describe.each([
     expect(marks('shiro')).toEqual(['D']);
   });
 });
+
+// bc-evts stage 5: a running team match is scored by taps handed to the outbox
+// (API.recordTap); each test gets a fresh fake of that surface, whose pending
+// taps the board folds on. Registered last, so it lands on the API the hooks
+// above set up.
+beforeEach(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });

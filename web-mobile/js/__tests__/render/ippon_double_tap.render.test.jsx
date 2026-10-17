@@ -152,6 +152,9 @@ describe('bc-dtip: individual editor', () => {
 });
 
 describe('bc-dtip: team bout rows', () => {
+  // bc-evts stage 5: a running team match is scored by taps too; each test gets
+  // a fresh fake of the outbox, so no tap of an earlier test is on its board.
+  beforeEach(() => { Object.assign(window.API, makeFakeOutbox().api); });
   const teamMatch = () => ({
     id: 'm-team', compId: 'comp1', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A',
     compKind: 'team', teamSize: 3,

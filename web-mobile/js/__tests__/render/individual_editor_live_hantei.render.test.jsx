@@ -463,8 +463,11 @@ describe('the team editor shows the bout scoreline the server holds', () => {
     for (let i = 0; i < 2 && finish(); i++) { await act(async () => { fireEvent.click(finish()); }); }
 
     // The display half is not the whole rule: buildPatch sends the FULL board,
-    // so a row the editor dropped is a row it overwrites.
-    const b1 = (onSubmit.mock.calls[0]?.[0]?.subResults || []).find(s => s.position === 1);
+    // so a row the editor dropped is a row it overwrites. (The one write before
+    // it is the rows the match did not hold yet, written ahead of the first
+    // tap, bc-evts stage 5; the Finish is the completed one.)
+    const finished = onSubmit.mock.calls.map((c) => c[0]).find((p) => p.status === 'completed');
+    const b1 = (finished?.subResults || []).find(s => s.position === 1);
     expect(b1 && { ipponsA: b1.ipponsA, ipponsB: b1.ipponsB, decision: b1.decision })
       .toEqual({ ipponsA: [], ipponsB: ['M', 'K'], decision: '' });
   });
@@ -485,16 +488,16 @@ describe('the team editor shows the bout scoreline the server holds', () => {
     const { rerender, container } = open(teamMatch([]));
     await scoreOneForKyoto(container);
 
-    // Their autosave lands: the server now holds exactly what they typed, so
-    // nothing is unsaved any more. With a mount-frozen baseline the editor
-    // stays dirty here forever, and every later adopt is skipped.
-    await reopenWith(rerender, teamMatch([{ ...bout(2, 'a'), ipponsA: ['M'] }]));
+    // Their tap lands: the server now holds exactly what they tapped, and its
+    // copy says so (the tap's mark id and its session's seq, bc-evts), so the
+    // board counts it once. With a mount-frozen baseline the editor stayed
+    // dirty here forever, and every later adopt was skipped.
+    const tapId = window.API.recordTap.mock.results[0].value.id;
+    const landed = { ...bout(2, 'a'), ipponsA: ['M'], markIds: { a: [tapId] } };
+    await reopenWith(rerender, teamMatch([landed], { eventSeqs: { dev1: 1 } }));
 
     // Device B then scores bout 1. This must still arrive.
-    await reopenWith(rerender, teamMatch([
-      { ...bout(2, 'a'), ipponsA: ['M'] },
-      bout(1, 'b'),
-    ]));
+    await reopenWith(rerender, teamMatch([landed, bout(1, 'b')], { eventSeqs: { dev1: 1 } }));
 
     expect(totalsBySide(container), "Osaka's bout must arrive after the operator's own save")
       .toEqual({ [AKA]: 'IV: 1 · PW: 1', [SHIRO]: 'IV: 1 · PW: 2' });
@@ -528,7 +531,8 @@ describe('the team editor shows the bout scoreline the server holds', () => {
 
     const finishBtn = () => [...container.querySelectorAll('button')].find(b => /finish/i.test(b.textContent));
     for (let i = 0; i < 2 && finishBtn(); i++) { await act(async () => { fireEvent.click(finishBtn()); }); }
-    expect((onSubmit.mock.calls[0]?.[0]?.subResults || []).map(s => s.position),
+    const finished = onSubmit.mock.calls.map((c) => c[0]).find((p) => p.status === 'completed');
+    expect((finished?.subResults || []).map(s => s.position),
       'a 3-person team never has a bout 4').toEqual([1, 2, 3]);
   });
 

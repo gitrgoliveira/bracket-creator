@@ -8,7 +8,8 @@ import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 // bc-evts stage 3: a running individual match is scored by taps handed to
 // the outbox (API.recordTap); each test gets a fresh fake of that surface.
 beforeEachTest(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });
-import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
+// Long past the 300 ms debounce the editors used to have: nothing is written after it.
+const WAIT_MS = 350;
 import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
 import { pointerTap, keyboardClick } from '../helpers/tap_events.js';
 
@@ -148,7 +149,7 @@ describe('hantei side buttons only pick (bc-htsd)', () => {
     await click(add('aka', 'M'));
     await click(add('shiro', 'K'));
     await armAndPick('scoring-modal-hantei-aka');
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await act(async () => { vi.advanceTimersByTime(WAIT_MS); });
     expect(onSubmit).not.toHaveBeenCalled();
     expect(window.API.recordTap.mock.calls.map((c) => c[2].kind)).toEqual(['ippon.add', 'ippon.add']);
   });

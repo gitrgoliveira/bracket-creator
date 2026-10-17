@@ -20,7 +20,8 @@
 
 import React from 'react';
 import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach, beforeEach } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { FORMAT_PHASES, IMPOSSIBLE_FORMAT_PHASES, cellKey, NAGINATA, KENDO_SET, NAGINATA_SET } from './score_editor_matrix_axes.js';
 
@@ -725,3 +726,9 @@ describe('TeamScoreEditorModal: a fixed-order row with no roster metadata still 
     expect(akaLabels).toEqual(['T1.1', 'T1.2', 'T1.3', 'T1.4', 'T1.5']);
   });
 });
+
+// bc-evts stage 5: a running team match is scored by taps handed to the outbox
+// (API.recordTap); each test gets a fresh fake of that surface, whose pending
+// taps the board folds on. Registered last, so it lands on the API the hooks
+// above set up.
+beforeEach(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });

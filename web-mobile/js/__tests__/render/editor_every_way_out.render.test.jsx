@@ -21,7 +21,8 @@ import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 // bc-evts stage 3: a running individual match is scored by taps handed to
 // the outbox (API.recordTap); each test gets a fresh fake of that surface.
 beforeEachTest(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });
-import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
+// Long past the 300 ms debounce the editors used to have: nothing is written after it.
+const WAIT_MS = 350;
 
 // Every patch recordScore was handed, in order.
 let writes;
@@ -113,24 +114,22 @@ async function mount(match, { editor = 'kendo', ...props } = {}) {
 }
 
 const click = (el) => act(async () => { fireEvent.click(el); });
-const settle = () => act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+const settle = () => act(async () => { vi.advanceTimersByTime(WAIT_MS); });
 const teamRow = (i) => [...document.querySelectorAll('.team-sub-match')][i];
 const teamPoint = (i, side, letter) => [...teamRow(i).querySelectorAll(`.team-sub-match__side--${side} button.ipt-btn`)]
   .find((b) => b.textContent === letter);
 
-describe('the unmount writes a tap still inside the autosave window', () => {
-  it.each([
-    ['team', () => team(), 'kendo', () => teamPoint(0, 'shiro', 'K')],
-  ])('%s editor: the host moving on by itself still saves it', async (_kind, make, editor, target) => {
-    const { view } = await mount(make(), { editor });
-    await click(target());
-    expect(writes).toHaveLength(0);
+describe('the host moving on by itself owes nothing: a tap is in the outbox as it is made', () => {
+  // bc-evts stage 5: the team editor has no autosave window either (the unmount
+  // used to write a tap still inside it).
+  it('team editor: the host moving on by itself writes nothing, and the tap stands', async () => {
+    const rows = [1, 2, 3].map((position) => ({ position, sideA: '', sideB: '', ipponsA: [], ipponsB: [], winner: '', decision: '' }));
+    const { view } = await mount(team({ subResults: rows }));
+    await click(teamPoint(0, 'shiro', 'K'));
+    expect(window.API.recordTap.mock.calls.map((c) => c[2])).toEqual([{ kind: 'ippon.add', pos: 1, side: 'b', letter: 'K' }]);
     await act(async () => { view.unmount(); });
-    expect(writes).toHaveLength(1);
-    expect(writes[0].status).toBe('running');
-    // Written once: the unmount took the timer with it.
     await settle();
-    expect(writes).toHaveLength(1);
+    expect(writes).toHaveLength(0);
   });
 
   // bc-evts stages 3 and 4: the individual and engi editors have no autosave
@@ -242,14 +241,18 @@ describe('the team re-seed follows every untouched bout, whatever else the updat
   const played = (position, ipponsA, winner) => ({ position, sideA: '', sideB: '', ipponsA, ipponsB: [], winner, decision: '' });
   const blank = (position) => ({ position, sideA: '', sideB: '', ipponsA: [], ipponsB: [], winner: '', decision: '' });
 
-  it('another device recording a bout and overtime in one save: the next autosave carries the bout', async () => {
+  // bc-evts stage 5: on a running match the sheet is the board, the server's
+  // copy with the pending taps folded on, so an update is shown whole and a tap
+  // after it is a tap; no write carries the board back.
+  it('another device recording a bout and overtime in one save: the sheet shows it, and the next tap is a tap', async () => {
     const start = team({ subResults: [blank(1), blank(2), blank(3)] });
     const { rerender } = await mount(start);
     await rerender(team({ encho: { periodCount: 1 }, subResults: [blank(1), played(2, ['M', 'M'], 'Kyoto'), blank(3)] }));
     await click(teamPoint(0, 'shiro', 'K'));
     await settle();
-    expect(writes).toHaveLength(1);
-    const bout2 = writes[0].subResults.find((s) => s.position === 2);
-    expect(bout2.ipponsA).toEqual(['M', 'M']);
+    const akaMarks = [...teamRow(1).querySelectorAll('.tsm-center-pts--aka button.editor-side__pt')].map((b) => b.textContent);
+    expect(akaMarks.filter((t) => t === 'M')).toHaveLength(2);
+    expect(window.API.recordTap.mock.calls.map((c) => c[2])).toEqual([{ kind: 'ippon.add', pos: 1, side: 'b', letter: 'K' }]);
+    expect(writes).toHaveLength(0);
   });
 });

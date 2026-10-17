@@ -2,24 +2,29 @@
 // surface while the encounter runs, and only a Tie tap makes it a draw (the
 // tie-marking rule: an empty row is not a tie).
 //
-// The bug this pins: the team editor's running autosave wrote every bout with
-// no winner as decision "hikiwake", untouched ones included. Every surface
+// The bug this pins: the team editor's running autosave once wrote every bout
+// with no winner as decision "hikiwake", untouched ones included. Every surface
 // reads a stored "hikiwake" as a draw, so after the first point the TV board
 // and the public match card showed X on every bout still to come, and the
 // score sheet, opened again, showed them as "✓ Tie (hikiwake)", where a Tie
-// tap then turned the draw OFF. buildPatch now writes such a bout with
-// decision "" (admin_scoring_team.jsx, subBoutHasBeenPlayed).
+// tap then turned the draw OFF. buildPatch writes such a bout with decision ""
+// (admin_scoring_team.jsx, subBoutHasBeenPlayed), and since bc-evts stage 5 a
+// running match's points are taps the server folds the same way (an unplayed
+// bout's decision stays "", engine.writeBoutRow).
 //
-// The test goes the whole way round: the sheet scores the first point, its
-// write is what the server stores, and the sheet (opened again), the TV board
-// and the public match card all render that stored match. So reverting the
+// The test goes the whole way round: the sheet scores the first point (the
+// encounter holds no rows yet, so the sheet writes them first, then taps), the
+// server folds the tap onto those rows, and the sheet (opened again), the TV
+// board and the public match card all render that stored match. So reverting the
 // write rule reddens the display assertions too, not only the wire one
 // (team_finish_refuses_unfought_bouts.render.test.jsx pins the wire alone).
 
 import React from 'react';
 import { render, act, fireEvent, cleanup } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { serverFold } from '../helpers/fake_outbox.js';
 
 let writes;
 
@@ -92,19 +97,24 @@ async function mountSheet(match) {
   return view;
 }
 
-// The sheet scores the encounter's first point; the unmount writes it at
-// once (the autosave's every-way-out rule), and that write is what the server
-// stores for the match.
+// The sheet scores the encounter's first point: the encounter holds no bout
+// rows, so the sheet writes them first (the one running write), then the point
+// is a tap; the server folds the tap onto the rows, and that is the match it
+// stores.
+const taps = () => window.API.recordTap.mock.calls.map((c) => c[2]);
 async function storedAfterFirstPoint() {
   const view = await mountSheet(MATCH);
   await click(sheetPoint(0, 'shiro', 'M'));
   await act(async () => { view.unmount(); });
   expect(writes).toHaveLength(1);
-  const patch = writes[0];
-  expect(patch.status).toBe('running');
+  const rowsWrite = writes[0];
+  expect(rowsWrite.status).toBe('running');
+  expect(numbered(rowsWrite.subResults).map((s) => s.decision)).toEqual(['', '', '']);
+  const sent = window.API.pendingTaps('c1', MATCH.id);
+  expect(taps()).toEqual([{ kind: 'ippon.add', pos: 1, side: 'b', letter: 'M' }]);
   cleanup();
   writes = [];
-  return { ...MATCH, subResults: patch.subResults };
+  return serverFold({ ...MATCH, subResults: rowsWrite.subResults }, sent, { team: true }).match;
 }
 
 const numbered = (subs) => subs.filter((s) => s.position > 0);
@@ -134,10 +144,9 @@ describe('an unfought bout of a running team encounter', () => {
     await click(tie);
     expect(document.querySelector('.tsm-draw')?.textContent).toBe('X');
     expect(document.body.textContent).toContain('✓ Tie (hikiwake)');
+    expect(taps().slice(-1)).toEqual([{ kind: 'bout.decision', pos: 2, value: 'hikiwake' }]);
+    expect(writes, 'the tie is a tap, not a write').toHaveLength(0);
     cleanup();
-    expect(writes.length).toBeGreaterThan(0);
-    const last = writes[writes.length - 1];
-    expect(numbered(last.subResults).map((s) => s.decision)).toEqual(['', 'hikiwake', '']);
   });
 
   it('reads unfought on the public match card: no X in any bout centre', async () => {
@@ -164,3 +173,9 @@ describe('an unfought bout of a running team encounter', () => {
     expect(centres).not.toContain('X');
   });
 });
+
+// bc-evts stage 5: a running team match is scored by taps handed to the outbox
+// (API.recordTap); each test gets a fresh fake of that surface, whose pending
+// taps the board folds on. Registered last, so it lands on the API the hooks
+// above set up.
+beforeEach(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });

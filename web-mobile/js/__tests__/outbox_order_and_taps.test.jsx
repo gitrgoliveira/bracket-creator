@@ -198,3 +198,28 @@ describe('M4: a tap alert names taps', () => {
         expect(alerts.filter((a) => a.kind === 'auth_required')).toEqual([expect.objectContaining({ count: 2, taps: true })]);
     });
 });
+
+describe('M1: the re-stamp floor counts only writes the server ordered', () => {
+    it('a tap dropped after a second clock refusal does not floor a later re-stamp into the future', async () => {
+        await load();
+        // The first tap (M) is refused every time; the second (K) only once.
+        const sends = {};
+        const batches = eventServer({
+            outcome: (e) => {
+                sends[e.letter] = (sends[e.letter] || 0) + 1;
+                return e.letter === 'M' || sends[e.letter] === 1 ? { outcome: 'clock_skew' } : { outcome: 'applied' };
+            },
+        });
+        API.recordTap('c1', 'm1', tap('M'), 'pw', { id: 'm1', modifiedAt: Date.now() + 4000 });
+        await tick(0);
+        await tick(0);
+        expect(API.pendingTaps('c1', 'm1')).toEqual([]);
+        const now = Date.now();
+        API.recordTap('c1', 'm1', tap('K'), 'pw', { id: 'm1' });
+        await tick(0);
+        await tick(0);
+        const k = batches.flatMap((b) => b.body.events).filter((e) => e.letter === 'K');
+        expect(k.length).toBe(2);
+        expect(k[1].stamp).toBeLessThanOrEqual(now + 1000);
+    });
+});

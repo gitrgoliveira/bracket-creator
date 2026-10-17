@@ -880,14 +880,25 @@ function _markSettled(key, descriptor) {
 // mid-flush), and marks it settled so the next persist drops it from storage
 // too. A bare _writeQueue.delete would leave the stored copy for the merge to
 // keep, and the write would be replayed on the next load.
+// _unorderedValue: an entry left the queue with a value the server never
+// ordered by its stamp: a discard, or a clock refusal (a tap's outcome, or a
+// write's answer).
+function _unorderedValue(v) {
+    if (!v || typeof v !== 'object') return false;
+    return v.discarded === true || v.outcome === TAP_CLOCK_SKEW || writeWasRefusedForClock(v);
+}
+
 function _dequeue(key, descriptor, outcome) {
     const d = _writeQueue.get(key);
     if (!d || (descriptor && d !== descriptor)) return false;
     _writeQueue.delete(key);
     _markSettled(key, d);
     // The server answered it: a clock-skew re-stamp of a later write of the
-    // match is never stamped below it (_afterSettledStamp).
-    if (outcome && 'value' in outcome) {
+    // match is never stamped below it (_afterSettledStamp). Not a discard, and
+    // not a write dropped after a second clock refusal: the server never
+    // ordered those, and that stamp is in its future, so it would floor every
+    // later re-stamp of the match into the future too.
+    if (outcome && 'value' in outcome && !_unorderedValue(outcome.value)) {
         const base = _baseOf(key);
         const s = _entryStamp(d);
         if (s > (_lastSettledStamp.get(base) || 0)) _lastSettledStamp.set(base, s);

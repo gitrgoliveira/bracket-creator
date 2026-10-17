@@ -879,6 +879,12 @@ const _writeQueue = new Map(); // queue key → pending write descriptor
 // _persistQueue prunes them from storage, which it otherwise leaves to the
 // tabs that wrote them.
 const _settled = new Map();
+// _takenFromLegacy: every entry this tab took over from the key an older build
+// uses (_takeOverLegacyQueue), its key to the `enqueuedAt` it was taken with,
+// kept for the tab's life so none is taken over, and sent, twice (G5). A later
+// write an older build stores under the same key (before bc-mrgc phase 3 a key
+// named only its match) is newer, and is taken.
+const _takenFromLegacy = new Map();
 
 // Descriptors this tab took up from another tab's write to the stored queue
 // (_onStoredQueueChanged) rather than queued itself.
@@ -2833,11 +2839,18 @@ function _takeOverLegacyQueue(raw) {
     let taken = false;
     for (const [key, d] of stored) {
         if (!d || typeof d !== 'object' || _storedEntryProblem(d)) continue;
-        d.held = true;
-        if (d.payload && d.payload.forceDownstreamReopen) d.payload = _withoutDownstreamConfirmation(d.payload);
         const at = _migratedLegacyLineup(key, d) || key;
         if (_writeQueue.has(at)) continue;
+        // G5: an entry this tab already took over is never taken again: an
+        // older tab that has not yet read the "[]" handed back stores its list
+        // again, and the entry it still holds is one this tab has sent (or an
+        // operator discarded). Nor one this tab settled since its last persist.
+        if (_takenFromLegacy.has(at) && !_enqueuedAfter(d, _takenFromLegacy.get(at))) continue;
+        if (_settled.has(at) && !_enqueuedAfter(d, _settled.get(at))) continue;
+        d.held = true;
+        if (d.payload && d.payload.forceDownstreamReopen) d.payload = _withoutDownstreamConfirmation(d.payload);
         _writeQueue.set(at, d);
+        _takenFromLegacy.set(at, typeof d.enqueuedAt === 'number' ? d.enqueuedAt : Infinity);
         _noteOwnStamp(at, d);
         _noteOwnTapSeq(at, d);
         taken = true;

@@ -105,6 +105,32 @@ describe('the outbox\'s own storage key (F4)', () => {
         expect(_lsStore[OLD_KEY]).toBe('[]');
     });
 
+    it('never takes over again an entry this tab already took over and sent (G5)', async () => {
+        // One module instance only: a second load would leave the first one's
+        // listeners and queue running beside it.
+        await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw');
+        const left = read(NEW_KEY);
+        API.clearQueue();
+        const sent = server();
+        const write = (value) => {
+            const before = _lsStore[OLD_KEY] ?? null;
+            _lsStore[OLD_KEY] = value;
+            window.dispatchEvent(Object.assign(new Event('storage'), { key: OLD_KEY, oldValue: before, newValue: value }));
+        };
+        write(JSON.stringify(left));
+        await tick(0);
+        await reconnect();
+        expect(sent).toHaveLength(1);
+        expect(read(NEW_KEY)).toEqual([]);
+        // The older tab, which has not yet read the "[]" handed back, stores
+        // its list again with the entry this tab has already sent.
+        write(JSON.stringify(left));
+        await tick(0);
+        await reconnect();
+        expect(sent, 'sent once, not again').toHaveLength(1);
+        expect(read(NEW_KEY)).toEqual([]);
+    });
+
     it('a storage event that empties the old key takes nothing', async () => {
         await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw');
         window.dispatchEvent(Object.assign(new Event('storage'), { key: OLD_KEY, oldValue: '[]', newValue: null }));

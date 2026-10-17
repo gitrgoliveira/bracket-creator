@@ -280,6 +280,8 @@ export function useOwnStatus(feedMatch) {
     settle: (token, res, opts = {}) => {
       if (!res) { answer(token, OWN_REFUSED); return; }
       if (writePending(res)) {
+        // A pending answer with no settlement says nothing more.
+        if (!res.settled || typeof res.settled.then !== "function") return;
         res.settled.then((body) => {
           if (body && body.discarded === true) { answer(token, OWN_DISCARDED); return; }
           const out = classifyStartOutcome(body);

@@ -100,6 +100,8 @@ export function useChangedGroups(match) {
     Promise.resolve(res).then((r) => {
       if (!r) { notLanded(); return; }
       if (writePending(r)) {
+        // A pending answer with no settlement says nothing more.
+        if (!r.settled || typeof r.settled.then !== "function") return;
         r.settled.then((body) => { if (!body || body.discarded === true || writeWasRefused(body)) notLanded(); }, notLanded);
         return;
       }

@@ -2626,9 +2626,11 @@ async function _sendTapBatch(base, batch, pass) {
     const { compID, matchID, password, url } = first;
     const session = first.payload && first.payload.session;
     if (!_isAllowedTerminalRequest('POST', url)) {
+        let dequeued = false;
         for (const [k, d] of batch) {
-            if (_dequeue(k, d, { value: { discarded: true } })) _persistQueue();
+            if (_dequeue(k, d, { value: { discarded: true } })) dequeued = true;
         }
+        if (dequeued) _persistQueue();
         _notifyQueueAlert({ kind: 'unreadable', count: batch.length, terminalCount: 0, compID, matchID });
         return 'settled';
     }
@@ -2652,6 +2654,10 @@ async function _sendTapBatch(base, batch, pass) {
         // Taps the server provably did not log (refused clock_skew, re-stamped
         // below): each may need a fresh seq (_reseqUnheldTap).
         const unheld = [];
+        // Every settled tap leaves the queue in this loop, and the stored
+        // queue is written once after it, not once per tap (J2, stage 3
+        // review 6): a long queue drained a tap at a time was quadratic.
+        let dequeued = false;
         for (const [k, d] of batch) {
             if (_writeQueue.get(k) !== d) continue;
             const o = byId.get(d.payload && d.payload.id);
@@ -2671,7 +2677,7 @@ async function _sendTapBatch(base, batch, pass) {
                 continue;
             }
             if (result !== 'settled') continue; // keep strict order behind it
-            if (_dequeue(k, d, { value: o })) _persistQueue();
+            if (_dequeue(k, d, { value: o })) dequeued = true;
             if (!tapOutcomeQuiet(o)) {
                 pass.notApplied++;
                 pass.lastNotApplied = o;
@@ -2685,7 +2691,8 @@ async function _sendTapBatch(base, batch, pass) {
         for (const [k, d] of unheld) {
             if (_writeQueue.get(k) === d && _reseqUnheldTap(base, d, heldSeqs)) reseq = true;
         }
-        if (reseq) { _persistQueue(); _publishPendingTaps(base); }
+        if (dequeued || reseq) _persistQueue();
+        if (reseq) _publishPendingTaps(base);
         // S6 b: the server is missing taps of this session for the match; send
         // the ones the outbox still holds at once (a duplicate is harmless).
         if (Array.isArray(body.gaps) && body.gaps.length > 0) {

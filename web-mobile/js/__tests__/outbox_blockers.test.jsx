@@ -561,3 +561,20 @@ describe('a tap batch ends at the first tap that waits (J1, stage 3 review 6)', 
         });
     }
 });
+
+describe('settling a tap batch stores the queue once (J2, stage 3 review 6)', () => {
+    it('writes the stored queue a bounded number of times, whatever the batch size', async () => {
+        for (let i = 0; i < 40; i++) API.recordTap('c1', 'm1', { kind: 'encho.add', pos: 0 }, 'pw', MATCH);
+        await flushMicrotasks();
+        expect(stored()).toHaveLength(40);
+        let writes = 0;
+        const { setItem, removeItem } = global.localStorage;
+        global.localStorage.setItem = (k, v) => { if (k === 'bc_write_queue_v2') writes++; setItem(k, v); };
+        global.localStorage.removeItem = (k) => { if (k === 'bc_write_queue_v2') writes++; removeItem(k); };
+        const sent = server((req) => answer(200, { outcomes: req.body.events.map((e) => ({ id: e.id, outcome: 'applied' })) }));
+        await reconnect();
+        expect(sent, 'the 40 taps go in one POST').toHaveLength(1);
+        expect(stored(), 'all settled').toEqual([]);
+        expect(writes, 'one store for the batch, not one per tap').toBeLessThanOrEqual(2);
+    });
+});

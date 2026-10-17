@@ -551,6 +551,29 @@ describe('a start the outbox answers later', () => {
     expect(showToast).toHaveBeenCalledTimes(1);
   });
 
+  // bc-evts stage 3 review 11, X1: the start is queued after the finish or the
+  // decision it follows, never ahead of it.
+  it('Finish + Start Next queues the start after the finish', async () => {
+    const start = pendingStart();
+    const onEditScore = vi.fn(async (_c, id, patch) => (id === 'm-2' && patch.startOnly
+      ? start.answer : { applied: true, pending: true, key: 'k-finish', settled: new Promise(() => {}) }));
+    await mountAndOpenRunning(onEditScore, vi.fn());
+    await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed' }); });
+    const startCall = onEditScore.mock.calls.find((c) => c[1] === 'm-2');
+    expect(startCall[2].after).toBe('k-finish');
+  });
+
+  it('the start after a decision is queued after the decision', async () => {
+    const start = pendingStart();
+    const onEditScore = vi.fn(async (_c, id, patch) => (id === 'm-2' && patch.startOnly ? start.answer : { status: 'ok' }));
+    await mountAndOpenRunning(onEditScore, vi.fn());
+    await act(async () => {
+      await probe.props.onAfterDecision({ applied: true, pending: true, key: 'k-decision', settled: new Promise(() => {}) });
+    });
+    const startCall = onEditScore.mock.calls.find((c) => c[1] === 'm-2');
+    expect(startCall[2].after).toBe('k-decision');
+  });
+
   it('a settled answer that landed says nothing', async () => {
     const start = pendingStart();
     const onEditScore = vi.fn(async (_c, id, patch) => (id === 'm-2' && patch.startOnly ? start.answer : { status: 'ok' }));

@@ -29,7 +29,7 @@ import {
     attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, OVERRIDE_HELD_NOTICE,
     startWhileCorrectingMessage, startWhileStartingMessage, startWasBlockedByStartMessage,
     correctWhileRunningMessage, wasToasted, BRONZE_MATCH_ID,
-    writePending,
+    writePending, writeWasRefused, writeQueueKey,
 } from './write_result.jsx';
 // What a Start came back with (a clock_skew refusal, a thrown 409) is
 // start_match.jsx's to classify, shared with the Scores tab's own automatic
@@ -130,6 +130,17 @@ const matchKey = (m) => `${m.compId}:${m.id}`;
 function _bracketSideName(side) {
     if (!side) return "";
     return typeof side === "object" ? (side.name || "") : side;
+}
+
+// finishedHereHolds: whether the console still reads match `m` as finished
+// here (the finishedHere entry `f`, X3). Not once the feed shows it completed
+// or no longer holds it, and not once the server has answered the finish and
+// the feed's copy is stamped otherwise (a later change, e.g. a reopen made
+// elsewhere). Before that answer the copy may move under this device's own
+// earlier writes landing, which the finish follows, so the stamp is not read.
+function finishedHereHolds(f, m) {
+    if (!f || !m || m.status === "completed") return false;
+    return !(f.landed && m.modifiedAt !== f.at);
 }
 
 const _WINNER_OF_RE = /^Winner of r(\d+)-m(\d+)$/;
@@ -653,6 +664,30 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const wname = _bracketSideName(w);
         if (wname) applyLocalBracketWin(match.compId, match.id, wname);
     }, [applyLocalBracketWin]);
+    // markFinishedHere: the outbox holds a finish or a decision of `match`
+    // (its pending answer `res`), so the console reads the match as finished
+    // here until the feed shows it (finishedHere, X3). The server's answer, a
+    // callback and never a wait, ends it on a refusal or a discard and marks it
+    // landed otherwise.
+    const markFinishedHere = (match, winner, res) => {
+        if (!match || match.status === "completed" || !writePending(res)) return;
+        const key = matchKey(match);
+        setFinishedHere((prev) => ({ ...prev, [key]: { at: match.modifiedAt, winner: winner || null, landed: false } }));
+        const end = (landed) => {
+            if (!mountedRef.current) return;
+            setFinishedHere((prev) => {
+                if (!prev[key]) return prev;
+                const next = { ...prev };
+                if (landed) next[key] = { ...prev[key], landed: true };
+                else delete next[key];
+                return next;
+            });
+        };
+        res.settled.then(
+            (body) => end(!!body && !body.discarded && !writeWasRefused(body)),
+            () => end(false),
+        );
+    };
     // The last Start the server refused, or the console refused for a start still
     // out that has since landed, as { key, compId, msg } for the match it was
     // refused for (null = none). It belongs to that match: it shows on that
@@ -854,6 +889,16 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // The match pickMatch started, and the scheduled snapshot it started
     // from: see ScoreEditorModal's `started` (bc-strt).
     const [startedFrom, setStartedFrom] = useStateSh(null);
+    // The matches this console finished (a finish or a decision the outbox
+    // holds, answered pending), by matchKey: { at, winner, landed } (bc-evts
+    // stage 3 review 11, X3). The twin of startedFrom: until the court's feed
+    // shows the match completed, the console reads it as finished here, so the
+    // panel moves on at once, offline included, for a pool match as for a
+    // knockout one. `at` is the match's stamp when it was finished: once the
+    // server answered the write (`landed`), a running copy stamped otherwise is
+    // a later change (a reopen elsewhere) and ends it. A refused or discarded
+    // write ends it too, so the match is back on the panel.
+    const [finishedHere, setFinishedHere] = useStateSh({});
     // The COMPLETED match the operator has opened to correct in place (parity
     // with the Scores page's "Correct" button). Kept separate from pickedKey so
     // it takes priority over the running bout WITHOUT disturbing it, and so it
@@ -925,7 +970,31 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             : [],
         [courtCompetitions, tournament.courts, court]
     );
-    const allMatches = useMemoSh(() => courtMatchesRaw.filter(hasBothSides), [courtMatchesRaw]);
+    // A match finished here reads completed, with the winner it was finished
+    // with, until the feed says so itself (finishedHere, X3): every list below
+    // (running, Up next, allDone, the advance target) agrees on it.
+    const allMatches = useMemoSh(
+        () => courtMatchesRaw.filter(hasBothSides).map((m) => {
+            const f = finishedHere[matchKey(m)];
+            if (!finishedHereHolds(f, m)) return m;
+            return { ...m, status: "completed", ...(f.winner ? { winner: f.winner } : {}) };
+        }),
+        [courtMatchesRaw, finishedHere]
+    );
+    // An entry ends once the feed shows the match completed (or gone), or, once
+    // the server has answered the finish, shows it changed since.
+    useEffectSh(() => {
+        const keys = Object.keys(finishedHere);
+        if (keys.length === 0) return;
+        const byKey = new Map(courtMatchesRaw.map((m) => [matchKey(m), m]));
+        const ended = keys.filter((k) => !finishedHereHolds(finishedHere[k], byKey.get(k)));
+        if (ended.length === 0) return;
+        setFinishedHere((prev) => {
+            const next = { ...prev };
+            for (const k of ended) delete next[k];
+            return next;
+        });
+    }, [courtMatchesRaw, finishedHere]);
     // Scheduled knockout bouts still waiting on a "Winner of rX-mY" feeder
     // (mp-y3nk). Kept SEPARATE from allMatches / filteredScheduled so they never
     // become upNext, never enter moveMatch reordering, and never carry a Start
@@ -1468,6 +1537,16 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // made it) reads this, whichever record it holds.
             started.landed = true;
             if (pick) pick.landed = true;
+            // The started match is the court's live bout from here, before any
+            // push or refetch shows it running (bc-strt; X3: an advance after a
+            // finish or a decision too, not only a pick): the editor treats this
+            // snapshot as running, so a point struck at once saves at once. A
+            // start that answered direct came back after its refresh, which
+            // already shows it; a pick pins itself (deferAndStart).
+            if (mountedRef.current && (pick || writePending(res))) {
+                setStartedFrom({ key, at: m.modifiedAt });
+                if (!pick) setPickedKey(key);
+            }
             if (writePending(res)) {
                 res.settled.then((body) => {
                     const late = classifyStartOutcome(body);
@@ -1574,7 +1653,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             };
             try {
                 const sent = await window.API.revertMatchToQueue(cur.compId, cur.id, password, { onRefusal: deferFailed, seen: cur.scoreVersion });
-                after = (sent && typeof sent.key === "string" && sent.key) || null;
+                after = writeQueueKey(sent);
             } catch (e) {
                 deferFailed(e);
                 return;
@@ -1582,11 +1661,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             if (!mountedRef.current) return;
         }
         if (m.status === "scheduled") {
+            // A start that went out pins the panel and its started snapshot
+            // itself (startMatch, bc-strt).
             const ok = await startMatch(m, { pick, after });
             if (!ok || !mountedRef.current) return;
-            // bc-strt: the editor treats this snapshot as running, so a point
-            // struck before the refetch shows it running saves at once.
-            setStartedFrom({ key: matchKey(m), at: m.modifiedAt });
         }
         setPickedKey(matchKey(m));
     };
@@ -2253,6 +2331,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             // them to go and check. A queued write still advances (it
                                             // reconciles on reconnect); see writeWasSuperseded.
                                             if (!writeWasSuperseded(res)) maybeAdvanceLocal(selectedMatch, patch);
+                                            // A finish the outbox holds: the panel moves on at once (X3).
+                                            if (patch && patch.status === "completed") markFinishedHere(selectedMatch, patch.winner, res);
                                             // What the write came back with, so the editor shows the
                                             // not-saved banner for one that did not land (queued, F5; or
                                             // superseded by a newer stored result, bc-lww1) and tells a
@@ -2271,6 +2351,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             // advance the local bracket on a winner the server discarded.
                                             if (!writeWasSuperseded(res)) maybeAdvanceLocal(selectedMatch, patch);
                                             if (!mountedRef.current) return res;
+                                            if (patch && patch.status === "completed") markFinishedHere(selectedMatch, patch.winner, res);
                                             // A write that did not land must NOT advance: the match is
                                             // still running and still holds the court, so starting the
                                             // next one here just earns a court_busy on top of the
@@ -2279,7 +2360,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             // Finish + start the next scheduled match, which then
                                             // becomes the running match the panel shows.
                                             if (next && next.status === "scheduled") {
-                                                await startMatch(next);
+                                                // Queued after the finish (X1): the server never
+                                                // sees this start while the finish is still out.
+                                                await startMatch(next, { after: writeQueueKey(res) });
                                             }
                                         } catch (_e) { /* keep panel */ }
                                         // The finish write's answer, as the editor needs it (a partial
@@ -2297,12 +2380,15 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         if (selectedMatch && selectedMatch.phase === "bracket" && winnerName) {
                                             applyLocalBracketWin(selectedMatch.compId, selectedMatch.id, winnerName);
                                         }
+                                        // A decision the outbox holds: the panel moves on at once (X3).
+                                        markFinishedHere(selectedMatch, result && result.winner, result);
                                         // Then start the next scheduled match so the panel advances
                                         // (mirrors onSubmitAndNext), passing over the matches of a
                                         // competitor a withdrawal or no-show has just barred.
                                         const next = nextActiveAfter(selectedMatch, sideBarredByDecision(result, selectedMatch));
                                         if (next && next.status === "scheduled") {
-                                            await startMatch(next);
+                                            // Queued after the decision (X1).
+                                            await startMatch(next, { after: writeQueueKey(result) });
                                         }
                                     }}
                                     password={password}

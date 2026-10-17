@@ -11,7 +11,7 @@ import {
   writeDidNotLand, writeRetryable, decisionWord,
   attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED, downstreamKnockoutReopenedNotice,
   courtBusyMessage, heldWriteDiscardLabel, heldWriteDiscardConfirm, queuedNotice,
-  tapNotAppliedText,
+  tapNotAppliedText, writePending,
 } from './write_result.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { sideWord, sideWithColour } from './side_cell.jsx';
@@ -577,6 +577,19 @@ function submitDecisionRequest(compId, matchId, kind, decisionPayload, enchoPeri
 //     match is not a correction (item 7: starts next match), else falls back
 //     to onClose.
 // Call it fresh each render so it captures the current enchoPeriodCount/password.
+// withLocalDecision: what a host's onAfterDecision reads (bc-evts stage 3
+// review 11, X3). The outbox's pending answer carries nothing of the decision,
+// so the decision as recorded here rides on it: its kind, the side it names
+// (the side that withdrew, did not appear or is barred) and the winner that
+// gives, for the hosts' local advance and their skip of the barred
+// competitor's other matches. A direct answer is the stored match already.
+function withLocalDecision(res, match, kind, decisionBy) {
+  if (!writePending(res)) return res;
+  const lost = withdrawnSideKey({ decisionBy });
+  const winner = lost === "a" ? match.sideB : lost === "b" ? match.sideA : null;
+  return { ...res, decision: kind, decisionBy, ...(winner ? { winner } : {}) };
+}
+
 function makeSubmitDecision({
   match,
   enchoPeriodCount,
@@ -654,7 +667,7 @@ function makeSubmitDecision({
         // (winner/status) so an offline host can also advance the LOCAL
         // bracket for a decision-completed bout (mp-y3nk), matching the
         // score path's maybeAdvanceLocal.
-        await onAfterDecision(updated);
+        await onAfterDecision(withLocalDecision(updated, match, kind, decisionBy));
       } else {
         onClose();
       }

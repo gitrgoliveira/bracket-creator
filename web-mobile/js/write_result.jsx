@@ -51,6 +51,14 @@ export function writePending(res) {
     return !!res && res.pending === true;
 }
 
+// writeQueueKey: the outbox's queue key a pending answer carries, for a write
+// that must follow it (`after`: the court console's and the Scores tab's
+// automatic start after a finish or a decision, the start after a send back),
+// else null (an answer that came back direct). bc-evts stage 3 review 11, X1.
+export function writeQueueKey(res) {
+    return (writePending(res) && typeof res.key === 'string' && res.key) || null;
+}
+
 // writeHeldOnDeviceOnly: browser storage refused the write (`persisted:
 // false`): the outbox holds it in this page's memory alone, so a host says so
 // (queuedNotice) rather than calling it saved.

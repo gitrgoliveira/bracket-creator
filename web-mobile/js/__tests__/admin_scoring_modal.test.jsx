@@ -1187,6 +1187,25 @@ describe('item 7: non-points decisions advance to next match', () => {
       expect(onClose).not.toHaveBeenCalled();
     });
 
+    // bc-evts stage 3 review 11, X3: the outbox answers a decision pending,
+    // with nothing of the decision in it. The host still reads what was
+    // recorded (the kind, the side it names, the winner it gives) and the
+    // queue key its automatic start follows.
+    it('hands a pending decision to onAfterDecision with the decision as recorded here', async () => {
+      const settled = new Promise(() => {});
+      window.API.recordDecision = vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k-dec', settled });
+      const onAfterDecision = vi.fn().mockResolvedValue(undefined);
+      const match = makeMatch('m-pend');
+      const submit = makeSubmitDecision({
+        match, enchoPeriodCount: 0, password: 'pw',
+        ...makeSetters(), onClose: vi.fn(), onAfterDecision, isComplete: false,
+      });
+      await submit('fusenpai', { decisionBy: 'shiro', decisionReason: '' });
+      const got = onAfterDecision.mock.calls[0][0];
+      expect(got).toMatchObject({ pending: true, key: 'k-dec', decision: 'fusenpai', decisionBy: 'shiro' });
+      expect(got.winner).toEqual(match.sideA);
+    });
+
     // mp-y3nk: onAfterDecision must receive the resolved result (winner/status),
     // so an offline shiaijo host can advance the LOCAL bracket for a decision-
     // completed bout the same way the score path does. Passing no args left a

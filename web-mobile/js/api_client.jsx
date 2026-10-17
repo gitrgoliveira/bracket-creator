@@ -4043,9 +4043,20 @@ function _payloadMemberIds(payload) {
 // add still queued (not yet seen landing) follows that team's last member
 // write (`after`), so the member exists when the write reaches the server
 // (stage 3 review 4, G1). The ONE place for every door: a lineup save, a score
-// write's representative pick or a numbered row's fighter alike. A write on
-// the team's own base already goes after it, in strict order.
+// write's representative pick or a numbered row's fighter alike, and the one
+// place a match's lineup save follows its team's member writes at all (K4).
+// A write on the team's own base already goes after it, in strict order.
 function _followMintedMembers(base, descriptor) {
+    // A match's lineup save follows every member write of its team, a rename
+    // or a cleared name too, not only an add (stage 3 review 7, K4): it may
+    // place a member by the name a queued rename gives them, which the server
+    // reads only once the rename has landed.
+    if (descriptor && descriptor.kind === 'lineup' && descriptor.payload && descriptor.payload.matchId) {
+        const teamId = _teamIdOf(descriptor);
+        if (teamId && _membersBase(descriptor.compID, teamId) !== base) {
+            _addAfter(descriptor, _lastMemberEntryKey(descriptor.compID, teamId));
+        }
+    }
     const ids = _payloadMemberIds(descriptor && descriptor.payload);
     if (ids.size === 0) return;
     for (const [key, e] of _writeQueue) {
@@ -5139,8 +5150,8 @@ const API = {
         // writeId, session and basis ride along; the lineup PUT reads none.
         // R1: it follows the team's member writes queued before it (`after`
         // their last entry, strict order on their base), so a member it names
-        // by a minted id is added before the lineup that places it.
-        const after = _lastMemberEntryKey(compID, teamId);
+        // by a minted id is added, and a rename lands, before the lineup that
+        // places them: _followMintedMembers, as it is queued (K4).
         return _outboxWrite({
             kind: 'lineup', compID, matchID: matchId, method: 'PUT',
             url: `/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`,
@@ -5149,7 +5160,6 @@ const API = {
                 ...(memberIds ? { memberIds } : {}), ...(changed ? { changed } : {}),
             },
             password, onRefusal: opts && opts.onRefusal,
-            ...(after ? { after } : {}),
         });
     },
     // Removes the match's own lineup. Bounded like every sibling write

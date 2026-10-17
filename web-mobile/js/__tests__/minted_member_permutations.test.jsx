@@ -112,6 +112,11 @@ const S = {
     selfRunDiscardNotKept: { pw: '', add: () => 'r500', discard: 'between' },
     selfRunDiscardKept: { pw: '', add: (n) => (n === 1 ? 'commit500' : 'r500'), discard: 'between' },
     authThenResume: { add: (n) => (n === 1 ? 'r401' : 'commit201'), resume: true },
+    // Browser storage refuses every write once the add is made: nothing is
+    // shared, and nothing stalls (one tab only: two tabs share nothing then).
+    storageRefusedOk: { add: () => 'commit201', refuseStorage: true, oneTab: true },
+    storageRefusedLimit: { add: () => 'r409limit', refuseStorage: true, oneTab: true },
+    storageRefusedDiscard: { add: () => 'r500', discard: 'between', refuseStorage: true, oneTab: true },
 };
 const REFUSAL = {
     r409dup: { error: 'member_name_taken', message: 'That name is taken.' },
@@ -124,6 +129,7 @@ async function runOne(scName, w, timing, twoTab) {
     const sc = S[scName];
     const pw = sc.pw === undefined ? 'pw' : sc.pw;
     let ls = {};
+    let refuse = false;
     const tabs = {};
     // A storage event goes to every OTHER tab, in the order the writes were made.
     const deliver = (k, oldValue, newValue) => {
@@ -136,7 +142,10 @@ async function runOne(scName, w, timing, twoTab) {
     };
     global.localStorage = {
         getItem: (k) => (k in ls ? ls[k] : null),
-        setItem: (k, v) => { const o = k in ls ? ls[k] : null; ls[k] = String(v); deliver(k, o, ls[k]); },
+        setItem: (k, v) => {
+            if (refuse) throw new DOMException('full', 'QuotaExceededError');
+            const o = k in ls ? ls[k] : null; ls[k] = String(v); deliver(k, o, ls[k]);
+        },
         removeItem: (k) => { const o = k in ls ? ls[k] : null; delete ls[k]; deliver(k, o, null); },
         clear: () => { ls = {}; },
     };
@@ -223,6 +232,7 @@ async function runOne(scName, w, timing, twoTab) {
         if (member.settled) member.settled.catch(() => {});
         mintedId = member.id;
         if (sc.serverHasIdAlready) members.add(mintedId);
+        if (sc.refuseStorage) refuse = true;
         if (timing === 'T1') fire(A);
         await tick(10);
         if (sc.offlineFirst) { online.a = true; tabs.a.onOnline(); await tick(10); }
@@ -315,7 +325,7 @@ for (const sc of Object.keys(S)) {
     }
 }
 for (const sc of Object.keys(S)) {
-    if (sc === 'offlineThenOk') continue; // the other tab is the one that sends
+    if (sc === 'offlineThenOk' || S[sc].oneTab) continue; // the other tab is the one that sends
     for (const w of Object.keys(WRITES)) {
         ALL.push([sc, w, 'T1', true]);
         if (S[sc].discard) ALL.push([sc, w, 'T2', true]);

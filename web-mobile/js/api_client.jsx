@@ -47,6 +47,7 @@ import {
     downstreamKnockoutPlayedQueueDrop, downstreamKnockoutRunningMessage, downstreamKnockoutRunningReopenMessage,
     downstreamKnockoutRunningQueueDrop, courtBusyMessage,
     FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, noAnswerSentence, tapOutcomeQuiet,
+    isFinishedResultWrite,
 } from './write_result.jsx';
 // bc-evts S2: the build this page runs against the server's, and the reload rule.
 import { noteServerBuild, setOutboxIdleProbe, setBeforeReload, noteOutboxDrained } from './app_version.jsx';
@@ -767,8 +768,10 @@ function _notifyQueueAlert(alert) {
 // because "3 results were lost" and "3 writes were lost" are different claims
 // to an operator, and only the terminal ones are finished work.
 function _countTerminalQueued() {
+    // Finished results only (isFinishedResultWrite, R5): an entry's `terminal`
+    // says how it is sent, not that it is a result.
     let n = 0;
-    for (const d of _writeQueue.values()) { if (d && d.terminal) n++; }
+    for (const d of _writeQueue.values()) { if (isFinishedResultWrite(d)) n++; }
     return n;
 }
 
@@ -1627,7 +1630,9 @@ function _unsentCounts() {
         if (!d) continue;
         // One item per entry, a tap included (D5).
         total++;
-        if (d.terminal) terminal++;
+        // `terminal` here counts finished results (R5), never every entry
+        // carrying its own method and url.
+        if (isFinishedResultWrite(d)) terminal++;
         if (d.authBlocked) authBlocked++;
         if (_keepsFailing(d)) failing++;
         if (d.held) held++;
@@ -1998,6 +2003,16 @@ function _doorRefusal(d, status, body) {
 // _sendEntry: one queued write (not a tap). 'settled' when it left the queue
 // (sent, or refused for good), 'restamped' when it was re-stamped for a clock
 // refusal and goes again at once, 'kept' when it waits for a later pass.
+// _answersMatchWrite: whether an entry sent with its own method and url is a
+// MATCH write, whose answer can be a refusal body (`applied: false`, a clock
+// refusal) read by the branch it gates in _sendEntry. A lineup save, a team
+// member write, a lineup removal and a reinstatement answer their own records,
+// never a match write's refusal shape.
+const _NOT_MATCH_WRITE_KINDS = new Set(['lineup', 'lineup-remove', 'member', 'reinstate']);
+function _answersMatchWrite(d) {
+    return !!d && !!d.terminal && !_NOT_MATCH_WRITE_KINDS.has(d.kind);
+}
+
 async function _sendEntry(key, descriptor, pass) {
     // Out of the queue AND out of storage at once, not at the end of the
     // pass: a page that goes away while a later entry is still out (a reload,
@@ -2021,7 +2036,7 @@ async function _sendEntry(key, descriptor, pass) {
             _notifyTerminalWriteFailed({ compID, matchID, kind, status: 0, reason: 'corrupted queue entry' });
             // Undeliverable by construction: announced globally as well, since
             // the editor-scoped channel only reaches an operator on this match.
-            _notifyQueueAlert({ kind: 'unreadable', count: 1, terminalCount: 1, compID, matchID });
+            _notifyQueueAlert({ kind: 'unreadable', count: 1, terminalCount: isFinishedResultWrite(descriptor) ? 1 : 0, compID, matchID });
             leaveQueue({ error: new Error('corrupted queue entry') });
             return 'settled';
         }
@@ -2058,7 +2073,7 @@ async function _sendEntry(key, descriptor, pass) {
     if (res.ok) {
         // Success (HTTP 200/201, including a write the server kept in the
         // match's history instead of applying, applied:false).
-        if (terminal && kind !== 'lineup') {
+        if (_answersMatchWrite(descriptor)) {
             if (writeWasRefusedForClock(body)) {
                 // bc-cse: NOT a supersede. The stamp this replay carries is in
                 // the server's future; nothing newer won. Heal the offset and
@@ -2070,7 +2085,7 @@ async function _sendEntry(key, descriptor, pass) {
                     console.warn(`[sync] dropping queued ${kind} write refused twice for clock skew (serverNowMs=${body.serverNowMs}); the device clock cannot be reconciled`);
                     _notifyTerminalWriteFailed({ compID, matchID, kind, status: 200, reason: CLOCK_SKEW_FAIL_REASON, advice: CLOCK_SKEW_UNHEALED_ADVICE });
                     _notifyQueueAlert({
-                        kind: 'rejected', count: 1, terminalCount: 1, compID, matchID,
+                        kind: 'rejected', count: 1, terminalCount: isFinishedResultWrite(descriptor) ? 1 : 0, compID, matchID,
                         detail: CLOCK_SKEW_FAIL_REASON,
                     });
                     // An override additionally leaves an optimistic local advance
@@ -2141,8 +2156,10 @@ async function _sendEntry(key, descriptor, pass) {
         if (leaveQueue({ value: _doorValue(descriptor, body) })) {
             // A held result that landed (writeWasSuperseded is every
             // applied:false answer; those were announced above).
-            if (terminal && wasHeld && !writeWasSuperseded(body)) pass.sent++;
-            if (terminal && writeDisplacedGroups(body).length > 0) pass.displaced++;
+            // Counted as results only when it is one (isFinishedResultWrite, R5):
+            // a held court move or lineup save that lands is no "result sent".
+            if (isFinishedResultWrite(descriptor) && wasHeld && !writeWasSuperseded(body)) pass.sent++;
+            if (isFinishedResultWrite(descriptor) && writeDisplacedGroups(body).length > 0) pass.displaced++;
             // A confirmed terminal score write needs no further rev tracking.
             if (terminal && kind === 'score') _matchRevCounters.delete(_revKey(compID, matchID));
         } else if (_writeQueue.has(key)) {
@@ -2165,7 +2182,7 @@ async function _sendEntry(key, descriptor, pass) {
         if (rejections === SERVER_REJECTION_NOTICE_THRESHOLD) {
             console.warn(`[sync] queued ${kind || 'running'} write still failing after ${rejections} server rejections (${res.status}); keeping it queued:`, body);
             _notifyQueueAlert({
-                kind: 'server_error', count: 1, terminalCount: terminal ? 1 : 0, compID, matchID,
+                kind: 'server_error', count: 1, terminalCount: isFinishedResultWrite(descriptor) ? 1 : 0, compID, matchID,
                 detail: body.reasonHuman || body.error || `HTTP ${res.status}`,
             });
             // Published at once (the failing count moved), so this match's
@@ -2183,7 +2200,7 @@ async function _sendEntry(key, descriptor, pass) {
             console.warn(`[sync] parking queued ${kind || 'running'} write pending re-auth (${res.status}):`, body);
             descriptor.authBlocked = true;
             _notifyQueueAlert({
-                kind: 'auth_required', count: 1, terminalCount: terminal ? 1 : 0, compID, matchID,
+                kind: 'auth_required', count: 1, terminalCount: isFinishedResultWrite(descriptor) ? 1 : 0, compID, matchID,
                 detail: body.reasonHuman || body.error || `HTTP ${res.status}`,
             });
         }
@@ -2205,7 +2222,7 @@ async function _sendEntry(key, descriptor, pass) {
         const refusal = _replayRefusal(body, kind === 'decision' && res.status === 409 ? 'conflict (409)' : `HTTP ${res.status}`);
         if (terminal) _notifyTerminalWriteFailed({ compID, matchID, kind, status: res.status, ...refusal });
         _notifyQueueAlert({
-            kind: 'rejected', count: 1, terminalCount: terminal ? 1 : 0, compID, matchID,
+            kind: 'rejected', count: 1, terminalCount: isFinishedResultWrite(descriptor) ? 1 : 0, compID, matchID,
             detail: refusal.reason,
             ...(refusal.sentence ? { sentence: true } : {}),
         });
@@ -2700,7 +2717,7 @@ if (typeof fetch === 'function') {
         // of storage: the merge otherwise keeps what this tab did not write.
         const dropUnreadable = (key, d) => {
             unreadable++;
-            if (d && d.terminal) unreadableTerminal++;
+            if (isFinishedResultWrite(d)) unreadableTerminal++;
             if (key) _markSettled(key, d);
         };
         for (const item of entries) {

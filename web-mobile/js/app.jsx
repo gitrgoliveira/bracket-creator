@@ -347,14 +347,6 @@ function parseCourtFromSearch() {
   return raw.toLowerCase() === 'all' ? 'ALL' : raw.toUpperCase();
 }
 
-// heldWritesNoun: what a held-write alert counts, in the operator's words: taps
-// (a tap batch's alert says `taps`), else finished results, else score updates.
-function heldWritesNoun(alert, one) {
-  if (alert.taps) return one ? "tap" : "taps";
-  if (Number(alert.terminalCount) > 0) return one ? "result" : "results";
-  return one ? "score update" : "score updates";
-}
-
 // bc-qttl: turn a queue alert from api_client.jsx into operator-facing prose.
 //
 // The queue holds writes that have not reached the server. Every alert below but
@@ -364,11 +356,14 @@ function heldWritesNoun(alert, one) {
 // finished results that have now landed, a success toast (queueAlertToastType).
 //
 // Counts are reported as FINISHED RESULTS when the alert carries any, falling
-// back to raw writes otherwise: an operator counts results, and a queued running
-// autosave is not one (queuedWritesNoun, write_result.jsx). Exported for test.
+// back to changes (or taps) otherwise: an operator counts results, and a queued
+// running autosave, a court move or a lineup save is not one (queuedWritesNoun,
+// isFinishedResultWrite, write_result.jsx, the one owner of both). Exported for test.
 export function queueAlertMessage(alert) {
   if (!alert) return null;
   const { n, one, noun } = queuedWritesNoun(alert.terminalCount, alert.count);
+  // The held-write wording: "result", "tap" or "change", never "finished".
+  const held = queuedWritesNoun(alert.terminalCount, alert.count, { finished: false, taps: !!alert.taps }).noun;
   if (n <= 0 && alert.kind !== "storage_full") return null;
   const detail = alert.detail ? ` (${alert.detail})` : "";
   switch (alert.kind) {
@@ -378,10 +373,10 @@ export function queueAlertMessage(alert) {
       // A refusal that is a whole sentence (`sentence`, api_client.jsx
       // _replayRefusal) says what to do, so it closes the alert as it is:
       // "Re-enter it." after it could contradict it ("Check the scores and finish again").
-      // A running score write (terminalCount 0, bc-evts: it is the outbox's
-      // too) is a score update, not a result.
+      // Any other change (terminalCount 0: a running score write, a court move,
+      // a lineup save) is a change, not a result (R5).
       {
-        const what = Number(alert.terminalCount) > 0 ? "A result" : "A score update";
+        const what = Number(alert.terminalCount) > 0 ? "A result" : "A change";
         if (alert.sentence && alert.detail) return `${what} was refused by the server and cannot be saved. ${alert.detail}`;
         return `${what} was refused by the server${detail} and cannot be saved. Re-enter it.`;
       }
@@ -398,12 +393,11 @@ export function queueAlertMessage(alert) {
       // match and the topbar's held-writes list offer to discard it
       // (HeldWriteDiscard, HeldWritesPanel). Taps are named as taps.
       {
-        const held = heldWritesNoun(alert, one);
         const what = one ? `a queued ${held}` : `${n} queued ${held}`;
         return `The server keeps refusing ${what}${detail}. ${one ? "It is" : "They are"} still being retried, and later changes to that match wait until ${one ? "it lands or is" : "they land or are"} discarded. If ${one ? "it never goes" : "they never go"} through, open that match, discard the held ${held} and enter ${one ? "it" : "them"} again.`;
       }
     case "auth_required":
-      return `Sign in again to save ${n} pending ${heldWritesNoun(alert, one)}. ${one ? "It is" : "They are"} still queued.`;
+      return `Sign in again to save ${n} pending ${held}. ${one ? "It is" : "They are"} still queued.`;
     case "storage_full":
       return "Browser storage is full, so unsaved results can no longer be kept safely. Let them sync before reloading this tab.";
     case "discarded":
@@ -1417,12 +1411,10 @@ function App() {
       ? window.API.unsentWrites()
       : { total: 0, terminal: 0, authBlocked: 0 };
     if (unsent.total > 0) {
-      const n = unsent.terminal > 0 ? unsent.terminal : unsent.total;
-      const one = n === 1;
-      const noun = unsent.terminal > 0
-        ? (one ? "finished result has" : "finished results have")
-        : (one ? "score update has" : "score updates have");
-      let message = `${n} ${noun} not reached the server yet. Signing out discards ${one ? "it" : "them"} permanently. Stay signed in until the sync indicator shows everything saved.`;
+      // Worded by the one owner (queuedWritesNoun): finished results when any
+      // are held (unsentWrites().terminal counts only those), else changes.
+      const { n, one, noun } = queuedWritesNoun(unsent.terminal, unsent.total);
+      let message = `${n} ${noun} ${one ? "has" : "have"} not reached the server yet. Signing out discards ${one ? "it" : "them"} permanently. Stay signed in until the sync indicator shows everything saved.`;
       if (unsent.authBlocked > 0) {
         message += ` Use "Sign in to save" instead to keep them and save them with the current password.`;
       }

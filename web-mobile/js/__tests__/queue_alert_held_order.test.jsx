@@ -14,9 +14,9 @@ describe('a write the server keeps refusing', () => {
         expect(msg).toMatch(/discard the held result and enter it again/i);
     });
 
-    it('a score update is named as one', () => {
+    it('a running score update is named as a change', () => {
         const msg = queueAlertMessage({ kind: 'server_error', count: 1, terminalCount: 0, detail: 'HTTP 500' });
-        expect(msg).toMatch(/keeps refusing a queued score update \(HTTP 500\)/);
+        expect(msg).toMatch(/keeps refusing a queued change \(HTTP 500\)/);
         expect(msg).not.toMatch(/result/i);
     });
 
@@ -36,9 +36,9 @@ describe('signing in again', () => {
             .toBe('Sign in again to save 1 pending tap. It is still queued.');
     });
 
-    it('names a score update as one, and a result as a result', () => {
+    it('names a running score update a change, and a result as a result', () => {
         expect(queueAlertMessage({ kind: 'auth_required', count: 1, terminalCount: 0 }))
-            .toBe('Sign in again to save 1 pending score update. It is still queued.');
+            .toBe('Sign in again to save 1 pending change. It is still queued.');
         expect(queueAlertMessage({ kind: 'auth_required', count: 2, terminalCount: 2 }))
             .toBe('Sign in again to save 2 pending results. They are still queued.');
     });

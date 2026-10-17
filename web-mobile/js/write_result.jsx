@@ -481,7 +481,7 @@ export function heldWriteWhat(held) {
         case 'kachinuki': return 'bout removal';
         case 'court': return 'court move';
         case 'time': return 'match time change';
-        default: return held && held.terminal ? 'finished result' : 'score update';
+        default: return isFinishedResultWrite(held) ? 'finished result' : 'score update';
     }
 }
 
@@ -511,19 +511,39 @@ export function heldWriteLine(held) {
 
 // queuedWritesNoun: the ONE rule for how held writes are counted to the
 // operator. An operator counts results, and a held running autosave is not
-// one, so a count that includes any finished result (a completed score, a
-// decision, a lineup, a Run now winner) names only those; otherwise it names
-// score updates. Returns { n, one, noun }. `finished` qualifies a result as
+// one, so a count that includes any finished result (isFinishedResultWrite
+// below) names only those; otherwise it names changes, or taps when `taps`
+// says the count is a tap batch's. Returns { n, one, noun }. `finished` qualifies a result as
 // "finished result" where the message wants it (the queue alerts, the sent
 // toast); the topbar's agreed wording says "1 result not sent" and passes false.
-export function queuedWritesNoun(terminal, total, { finished = true } = {}) {
-    const term = Number(terminal) || 0;
+export function queuedWritesNoun(results, total, { finished = true, taps = false } = {}) {
+    const term = Number(results) || 0;
     const n = term > 0 ? term : (Number(total) || 0);
     const one = n === 1;
-    const noun = term > 0
-        ? `${finished ? 'finished ' : ''}${one ? 'result' : 'results'}`
-        : (one ? 'score update' : 'score updates');
+    let noun;
+    if (term > 0) noun = `${finished ? 'finished ' : ''}${one ? 'result' : 'results'}`;
+    else if (taps) noun = one ? 'tap' : 'taps';
+    else noun = one ? 'change' : 'changes';
     return { n, one, noun };
+}
+
+// isFinishedResultWrite: the ONE answer to "is this queued write a finished
+// result" (bc-evts stage 3 review 2, R5): a finished score write, a decision,
+// a winner set by hand, or a representative bout change. Every count and alert
+// that speaks of results asks it (api_client.jsx: the pass's sent and
+// displaced counts, `unsentWrites().terminal`, every alert's `terminalCount`).
+// An entry's own `terminal` flag says only how it is SENT (its own method and
+// url, never the running score PUT), so a court move, a time change, a lineup
+// or member save, a reopen or a send back to the queue carries it and is still
+// no result: those are worded as changes. An entry an older build stored with
+// no kind was a score write.
+export function isFinishedResultWrite(d) {
+    if (!d) return false;
+    switch (d.kind) {
+        case 'decision': case 'override': case 'daihyosen': return true;
+        case 'score': case undefined: case null: case '': return !!d.terminal;
+        default: return false;
+    }
 }
 
 // heldWritesText: the admin topbar's held-writes indicator (bc-offl), shown

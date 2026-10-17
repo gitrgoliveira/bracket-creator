@@ -45,13 +45,13 @@ describe('queueAlertMessage', () => {
     });
 
     // bc-evts: a running score write is the outbox's too, so a refused one is
-    // told by this alert (terminalCount 0). It is a score update, not a result.
-    it('names a refused running score write a score update, not a result', () => {
+    // told by this alert (terminalCount 0). It is a change, not a result (R5).
+    it('names a refused running score write a change, not a result', () => {
         expect(queueAlertMessage({ kind: 'rejected', count: 1, terminalCount: 0, detail: 'conflict' }))
-            .toBe('A score update was refused by the server (conflict) and cannot be saved. Re-enter it.');
+            .toBe('A change was refused by the server (conflict) and cannot be saved. Re-enter it.');
         const sentence = 'The match is finished. Use Correct result to change it.';
         expect(queueAlertMessage({ kind: 'rejected', count: 1, terminalCount: 0, detail: sentence, sentence: true }))
-            .toBe(`A score update was refused by the server and cannot be saved. ${sentence}`);
+            .toBe(`A change was refused by the server and cannot be saved. ${sentence}`);
     });
 
     it('pluralises a superseded batch', () => {

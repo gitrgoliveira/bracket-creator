@@ -218,13 +218,13 @@ describe('AdminTopbar: held results', () => {
     expect(held()).toHaveTextContent('Offline: 2 results not sent');
   });
 
-  it('a held running update alone is a score update, and while sending it says so', async () => {
+  it('a held running update alone is a change, and while sending it says so', async () => {
     renderTopbar();
     await act(async () => {
       unsentBus.set({ total: 1, terminal: 0, authBlocked: 0 });
       bus.set('syncing');
     });
-    expect(held()).toHaveTextContent('Sending 1 score update…');
+    expect(held()).toHaveTextContent('Sending 1 change…');
     expect(held().className).not.toContain('topbar__held--offline');
     // Only the write status 'offline' moves the pill.
     expect(screen.getByText('Connected')).toBeTruthy();

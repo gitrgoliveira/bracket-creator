@@ -5162,12 +5162,10 @@ const API = {
             password, onRefusal: opts && opts.onRefusal,
         });
     },
-    // Removes the match's own lineup. Bounded like every sibling write
-    // (_fetchJson: the deadline covers the body), and answered in a plain sentence
-    // when the server cannot be reached, never the browser's "Failed to fetch". It
-    // is not queued: the editor shows what the match carries without the lineup
-    // only once the server has confirmed the removal. A lineup that is not there
-    // is removed already (404).
+    // Removes the match's own lineup: an outbox entry of the match (kind
+    // `lineup-remove`, R1), answered at once and sent in the match's order like
+    // every write of it; `settled` resolves once the server has removed it. A
+    // lineup that is not there is removed already (a 404 settles as done).
     async deleteMatchLineup(compID, teamId, matchId, password, opts = {}) {
         // R1: an entry of the MATCH, after every write of it queued before it
         // (a save of the lineup included, so no wait for one is needed), and

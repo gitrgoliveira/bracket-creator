@@ -21,6 +21,10 @@ import { withdrawnSideKey } from './ineligible_match.jsx';
 import { isTeamDefaultWinDecision } from './team_default_credit.jsx';
 import { struckIppons } from './result_slot.jsx';
 import { acceptTap } from './tap_guard.jsx';
+// bc-evts: the board of a running match (tapBoardOf) is the server's copy with
+// this device's pending taps folded on, by the JS replay port.
+import { applyPending, APPLIED } from './score_events.jsx';
+import { isOlderRunningCopy } from './patch.jsx';
 // BarredMatchNotice is a separate leaf (imports only ineligible_match.jsx +
 // write_result.jsx): re-exported below, see that file's header for why.
 import { BarredMatchNotice } from './barred_match_notice.jsx';
@@ -139,6 +143,77 @@ export function useTapOutcomeNote(compId, matchId) {
     clearRef.current = () => setState((s) => (s.note || s.refusal ? { note: null, refusal: null } : s));
   }
   return { note: state.note, refusal: state.refusal, clear: clearRef.current };
+}
+
+// The scoring fields a board takes from the newest copy the outbox holds. The
+// flags are an engi match's: the server leaves a count of 0 out, so a missing
+// count is left missing (an individual match must not gain flags the TV board
+// would show) and the engi editor reads it as 0.
+const DERIVED_BOARD_FIELDS = {
+  ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, encho: null, markIds: undefined,
+  flagsA: undefined, flagsB: undefined, scoreVersion: 0, modifiedAt: 0, eventSeqs: undefined,
+};
+
+// sameSides: whether the copy a score-events answer handed back is of the
+// match the host renders, by its competitors (bc-evts stage 3 review 11, X4).
+// Match ids are name slugs, so a competition made again under the same name
+// reuses them; a copy whose side ids differ is the old match. A side with no
+// id on either copy (a legacy row) decides nothing.
+function sideIdOf(x, key) {
+  const flat = x[`side${key}Id`];
+  if (flat) return flat;
+  const side = x[`side${key}`];
+  return (side && typeof side === "object" && side.id) || "";
+}
+function sameSides(m, derived) {
+  for (const key of ["A", "B"]) {
+    const a = sideIdOf(m, key);
+    const b = sideIdOf(derived, key);
+    if (a && b && a !== b) return false;
+  }
+  return true;
+}
+
+// tapBoardOf (bc-evts stage 3, S6): the board of a RUNNING match, for the
+// individual and engi editors alike (stage 4). Its base is the newer of the
+// match the host renders and the newest copy a score-events answer handed back
+// (API.latestDerivedMatch), by isOlderRunningCopy's rule (scoreVersion first,
+// then the stamp); this device's pending taps are folded on top (applyPending,
+// `opts` its fold options: {engi: true} for an engi match, whose flag taps the
+// fold refuses otherwise). `base` is what the taps were made against.
+export function tapBoardOf(m, opts) {
+  const api = window.API || {};
+  const derived = typeof api.latestDerivedMatch === "function" ? api.latestDerivedMatch(m.compId, m.id) : null;
+  let base = m;
+  if (derived && sameSides(m, derived) && isOlderRunningCopy(m, derived.status, derived.modifiedAt, derived.scoreVersion)) {
+    base = { ...m };
+    for (const [f, none] of Object.entries(DERIVED_BOARD_FIELDS)) base[f] = derived[f] ?? none;
+    // A rep pick the answer does not carry is the one the host renders.
+    if (derived.repPlayerA !== undefined) base.repPlayerA = derived.repPlayerA;
+    if (derived.repPlayerB !== undefined) base.repPlayerB = derived.repPlayerB;
+  }
+  const pending = (typeof api.pendingTaps === "function" && api.pendingTaps(m.compId, m.id)) || [];
+  const folded = applyPending(base, pending, opts);
+  // `moving`: the pending taps that still change the board (a tap the base
+  // already holds, or one with nothing left to take, changes nothing).
+  const moving = pending.filter((e) => folded.outcomes[e.id] === APPLIED);
+  return { base, match: folded.match, pending, moving };
+}
+
+// useTapBoard re-renders the editor when this device's pending taps for the
+// match or the newest derived copy move, and answers the board while `on`.
+export function useTapBoard(m, on, opts) {
+  const [, setTick] = useStateA(0);
+  useEffectA(() => {
+    const api = window.API || {};
+    if (!on) return undefined;
+    const bump = () => setTick((t) => t + 1);
+    const offs = [];
+    if (typeof api.subscribePendingTaps === "function") offs.push(api.subscribePendingTaps(m.compId, m.id, bump));
+    if (typeof api.subscribeDerivedMatch === "function") offs.push(api.subscribeDerivedMatch(m.compId, m.id, bump));
+    return () => { for (const off of offs) if (typeof off === "function") off(); };
+  }, [m.compId, m.id, on]);
+  return on ? tapBoardOf(m, opts) : null;
 }
 
 // HeldWriteNotice: the pending banner's line, worded for where the held

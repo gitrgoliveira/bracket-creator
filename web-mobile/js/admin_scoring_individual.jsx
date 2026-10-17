@@ -19,11 +19,11 @@ import { notLandedBanner, terminalFailureBanner, notSavedText, writeWasRefused, 
 import { useArmedConfirm, useOpenedTapGuard, acceptTap, clearTap } from './tap_guard.jsx';
 // bc-evts stage 3: a running match is scored by tap events (the outbox's
 // recordTap); the board is the server's copy with this device's pending taps
-// folded on (applyPending, the JS replay port).
+// folded on (tapBoardOf, admin_scoring_shared.jsx, which the engi editor
+// shares).
 import {
-  makeEvent, applyPending, APPLIED, IPPON_ADD, IPPON_REMOVE, FOUL_ADD, FOUL_REMOVE, ENCHO_ADD, ENCHO_REMOVE, POOL_REP,
+  makeEvent, IPPON_ADD, IPPON_REMOVE, FOUL_ADD, FOUL_REMOVE, ENCHO_ADD, ENCHO_REMOVE, POOL_REP,
 } from './score_events.jsx';
-import { isOlderRunningCopy } from './patch.jsx';
 import { publishBoardOverlay } from './court_bridge.jsx';
 
 import {
@@ -59,6 +59,8 @@ import {
   HeldWriteNotice,
   useClearPendingWhenNothingHeld,
   useTapOutcomeNote,
+  tapBoardOf,
+  useTapBoard,
 } from './admin_scoring_shared.jsx';
 // bc-cse: a SCHEDULED match a competitor is barred from must never offer a
 // Start the server would refuse; isBarredMatch (ineligible_match.jsx) is the
@@ -120,56 +122,6 @@ function seedBoard(src) {
   };
 }
 
-// The scoring fields a board takes from the newest copy the outbox holds.
-const DERIVED_BOARD_FIELDS = {
-  ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, encho: null, markIds: undefined,
-  scoreVersion: 0, modifiedAt: 0, eventSeqs: undefined,
-};
-
-// tapBoardOf (bc-evts stage 3, S6): the board of a RUNNING match. Its base is
-// the newer of the match the host renders and the newest copy a score-events
-// answer handed back (API.latestDerivedMatch), by isOlderRunningCopy's rule
-// (scoreVersion first, then the stamp); this device's pending taps are folded
-// on top (applyPending). `base` is what the taps were made against.
-// sameSides: whether the copy a score-events answer handed back is of the
-// match the host renders, by its competitors (bc-evts stage 3 review 11, X4).
-// Match ids are name slugs, so a competition made again under the same name
-// reuses them; a copy whose side ids differ is the old match. A side with no
-// id on either copy (a legacy row) decides nothing.
-function sideIdOf(x, key) {
-  const flat = x[`side${key}Id`];
-  if (flat) return flat;
-  const side = x[`side${key}`];
-  return (side && typeof side === "object" && side.id) || "";
-}
-function sameSides(m, derived) {
-  for (const key of ["A", "B"]) {
-    const a = sideIdOf(m, key);
-    const b = sideIdOf(derived, key);
-    if (a && b && a !== b) return false;
-  }
-  return true;
-}
-
-function tapBoardOf(m) {
-  const api = window.API || {};
-  const derived = typeof api.latestDerivedMatch === "function" ? api.latestDerivedMatch(m.compId, m.id) : null;
-  let base = m;
-  if (derived && sameSides(m, derived) && isOlderRunningCopy(m, derived.status, derived.modifiedAt, derived.scoreVersion)) {
-    base = { ...m };
-    for (const [f, none] of Object.entries(DERIVED_BOARD_FIELDS)) base[f] = derived[f] ?? none;
-    // A rep pick the answer does not carry is the one the host renders.
-    if (derived.repPlayerA !== undefined) base.repPlayerA = derived.repPlayerA;
-    if (derived.repPlayerB !== undefined) base.repPlayerB = derived.repPlayerB;
-  }
-  const pending = (typeof api.pendingTaps === "function" && api.pendingTaps(m.compId, m.id)) || [];
-  const folded = applyPending(base, pending);
-  // `moving`: the pending taps that still change the board (a tap the base
-  // already holds, or one with nothing left to take, changes nothing).
-  const moving = pending.filter((e) => folded.outcomes[e.id] === APPLIED);
-  return { base, match: folded.match, pending, moving };
-}
-
 // The mark id beside each point a side's slots show, index for index with
 // seedBoard's pts ("" for a point that carries none, e.g. a legacy row).
 function shownMarkIds(match, key) {
@@ -198,22 +150,6 @@ function startedScore(patch) {
     hansokuA: patch.hansokuA || 0, hansokuB: patch.hansokuB || 0,
     encho: patch.encho || null,
   };
-}
-
-// useTapBoard re-renders the editor when this device's pending taps for the
-// match or the newest derived copy move.
-function useTapBoard(m, on) {
-  const [, setTick] = useStateA(0);
-  useEffectA(() => {
-    const api = window.API || {};
-    if (!on) return undefined;
-    const bump = () => setTick((t) => t + 1);
-    const offs = [];
-    if (typeof api.subscribePendingTaps === "function") offs.push(api.subscribePendingTaps(m.compId, m.id, bump));
-    if (typeof api.subscribeDerivedMatch === "function") offs.push(api.subscribeDerivedMatch(m.compId, m.id, bump));
-    return () => { for (const off of offs) if (typeof off === "function") off(); };
-  }, [m.compId, m.id, on]);
-  return on ? tapBoardOf(m) : null;
 }
 
 export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, onAfterDecision, started = false, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true }) {

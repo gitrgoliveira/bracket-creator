@@ -112,6 +112,19 @@ describe('batching', () => {
         expect(stored()).toEqual([]);
     });
 
+    // bc-evts stage 4: the public self-run sheet scores with the EMPTY
+    // password, an engi match by flag taps; the header is sent empty, never
+    // left out, so the server reads the caller as a participant.
+    it('a participant\'s flag taps send the password header empty, never omitted', async () => {
+        const batches = eventServer();
+        API.recordTap('c1', 'm1', { kind: 'flag.add', pos: 0, side: 'b' }, '', { id: 'm1' });
+        API.recordTap('c1', 'm1', { kind: 'flag.remove', pos: 0, side: 'b' }, undefined, { id: 'm1' });
+        await tick(0);
+        expect(batches).toHaveLength(1);
+        expect(batches[0].password).toBe('');
+        expect(batches[0].body.events.map((e) => `${e.kind}:${e.side}`)).toEqual(['flag.add:b', 'flag.remove:b']);
+    });
+
     it('one batch per session: taps an earlier page left behind go apart from this page\'s', async () => {
         const old = [1, 2].map((seq) => [`c1:m1\u001fevt:oldsess.${seq}`, {
             compID: 'c1', matchID: 'm1', password: 'pw', kind: 'evt', terminal: false, method: 'POST',

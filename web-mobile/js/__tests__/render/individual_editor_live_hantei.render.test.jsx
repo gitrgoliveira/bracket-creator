@@ -297,9 +297,11 @@ describe('the team editor shows the daihyosen verdict the server holds', () => {
 // device's result turns up.
 // The third editor body. All four hosts mount ScoreEditorModal, which dispatches
 // to this one for an engi competition, so a channel missing here is missing on
-// every surface an engi match can be scored from. It has no autosave (flags are
-// entered in one go), which makes the divergence window WIDER than the kendo
-// editors', not narrower: nothing it holds reaches the server until submit.
+// every surface an engi match can be scored from. On a running match each flag
+// is a tap (bc-evts stage 4) and the board is the server's count with this
+// device's pending taps on top; before the start, nothing it holds reaches the
+// server until submit, which makes that divergence window WIDER than a running
+// match's, not narrower.
 describe('the engi editor shows the flag count the server holds', () => {
   const engiMatch = (over = {}) => ({
     id: 'e1', status: 'running', phase: 'pool', court: 'A',
@@ -328,15 +330,30 @@ describe('the engi editor shows the flag count the server holds', () => {
     expect(counts(container), 'the server holds 3-2, so this editor shows 3-2').toEqual({ aka: '3', shiro: '2' });
   });
 
-  it('keeps the operator\'s unsaved flags rather than overwriting them', async () => {
-    // A pair of flag counts is ONE reading of ONE performance: no seam to merge
-    // along, so an operator mid-entry keeps everything they typed.
+  it('keeps the operator\'s pending flag on top of a count recorded elsewhere', async () => {
+    // A running match: the flag is a tap in the outbox, and the board is the
+    // server's count with it folded on, so neither is lost.
     const { rerender, container } = openEngi(engiMatch());
     await act(async () => { fireEvent.click(container.querySelector('[data-testid="engi-aka-inc"]')); });
     expect(counts(container)).toEqual({ aka: '1', shiro: '0' });
 
     await act(async () => { rerender(
       <ScoreEditorModal match={engiMatch({ flagsA: 3, flagsB: 2 })} onClose={vi.fn()} onSubmit={vi.fn()} password="" />
+    ); });
+
+    expect(counts(container), "the server's count with the operator's pending flag on it").toEqual({ aka: '4', shiro: '2' });
+  });
+
+  it('keeps the operator\'s unsaved draft rather than overwriting it', async () => {
+    // Before the start: a pair of flag counts is ONE reading of ONE
+    // performance, no seam to merge along, so an operator mid-entry keeps
+    // everything they typed.
+    const { rerender, container } = openEngi(engiMatch({ status: 'scheduled' }));
+    await act(async () => { fireEvent.click(container.querySelector('[data-testid="engi-aka-inc"]')); });
+    expect(counts(container)).toEqual({ aka: '1', shiro: '0' });
+
+    await act(async () => { rerender(
+      <ScoreEditorModal match={engiMatch({ status: 'scheduled', flagsA: 3, flagsB: 2 })} onClose={vi.fn()} onSubmit={vi.fn()} password="" />
     ); });
 
     expect(counts(container), "the operator's own entry survives").toEqual({ aka: '1', shiro: '0' });

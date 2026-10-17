@@ -121,7 +121,6 @@ const teamPoint = (i, side, letter) => [...teamRow(i).querySelectorAll(`.team-su
 describe('the unmount writes a tap still inside the autosave window', () => {
   it.each([
     ['team', () => team(), 'kendo', () => teamPoint(0, 'shiro', 'K')],
-    ['engi', () => engi(), 'engi', () => screen.getByTestId('engi-aka-inc')],
   ])('%s editor: the host moving on by itself still saves it', async (_kind, make, editor, target) => {
     const { view } = await mount(make(), { editor });
     await click(target());
@@ -134,12 +133,15 @@ describe('the unmount writes a tap still inside the autosave window', () => {
     expect(writes).toHaveLength(1);
   });
 
-  // bc-evts stage 3: the individual editor has no autosave window. A tap is
-  // in the outbox the moment it is made, stamped then, so the host moving on
-  // by itself owes nothing and writes nothing.
-  it('individual editor: a tap is in the outbox as it is made, so the unmount writes nothing', async () => {
-    const { view } = await mount(individual());
-    await click(screen.getAllByText('M')[0]);
+  // bc-evts stages 3 and 4: the individual and engi editors have no autosave
+  // window. A tap is in the outbox the moment it is made, stamped then, so the
+  // host moving on by itself owes nothing and writes nothing.
+  it.each([
+    ['individual', () => individual(), 'kendo', () => screen.getAllByText('M')[0]],
+    ['engi', () => engi({ compId: 'comp1' }), 'engi', () => screen.getByTestId('engi-aka-inc')],
+  ])('%s editor: a tap is in the outbox as it is made, so the unmount writes nothing', async (_kind, make, editor, target) => {
+    const { view } = await mount(make(), { editor });
+    await click(target());
     expect(window.API.recordTap).toHaveBeenCalledTimes(1);
     await act(async () => { view.unmount(); });
     await settle();

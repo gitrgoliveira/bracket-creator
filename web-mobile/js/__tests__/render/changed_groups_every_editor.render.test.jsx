@@ -291,20 +291,38 @@ describe('team editor', () => {
 });
 
 describe('engi editor', () => {
-  const engi = () => ({
+  // bc-evts stage 4: a running engi match is scored by flag taps (the
+  // outbox's recordTap), never by a running score write; Save names what its
+  // board holds that the server copy it agreed with does not.
+  const engi = (over = {}) => ({
     id: 'm-engi', compId: 'comp1', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A',
     compEngi: true,
     sideA: { id: 'p1', name: 'Ito - Abe' }, sideB: { id: 'p2', name: 'Ono - Sato' },
+    ...over,
   });
+  const taps = () => window.API.recordTap.mock.calls.map((c) => c[2]);
 
-  it('a flag names the flags alone', async () => {
+  it('a flag is a tap, not a write; Save names the flags and the result', async () => {
     await act(async () => {
       render(<EngiScoreEditorModal match={engi()} onClose={vi.fn()} onSubmit={onSubmit} />);
     });
     await click(screen.getByTestId('engi-aka-inc'));
     await settle();
-    expect(writes).toHaveLength(1);
-    expect(lastWrite().changed).toEqual(['flags']);
+    expect(writes).toHaveLength(0);
+    expect(taps()).toEqual([{ kind: 'flag.add', pos: 0, side: 'a' }]);
+    await finish('Save result');
+    expect(lastWrite()).toMatchObject({ flagsA: 1, flagsB: 0, status: 'completed' });
+    expect([...lastWrite().changed].sort()).toEqual(['flags', 'result']);
+  });
+
+  it('flags the server already holds are not named by the Save', async () => {
+    const view = (m) => <EngiScoreEditorModal match={m} onClose={vi.fn()} onSubmit={onSubmit} />;
+    let utils;
+    await act(async () => { utils = render(view(engi())); });
+    await act(async () => { utils.rerender(view(engi({ flagsA: 1 }))); });
+    await finish('Save result');
+    expect(lastWrite()).toMatchObject({ flagsA: 1, flagsB: 0, status: 'completed' });
+    expect(lastWrite().changed).toEqual(['result']);
   });
 });
 
@@ -534,20 +552,24 @@ describe('an adopted value is agreed, never re-sent', () => {
   });
 
   it('engi: flags adopted from another device and then set back here are named (B)', async () => {
+    // A draft (the match not running: a running one is scored by taps, bc-evts
+    // stage 4): counts adopted from another device, then set back here to the
+    // ones the editor opened with, are a change the Save names.
     const engiMatch = (over = {}) => ({
-      id: 'm-engi', compId: 'comp1', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A',
-      compEngi: true,
+      id: 'm-engi', compId: 'comp1', status: 'scheduled', phase: 'pool', poolName: 'Pool 1', court: 'A',
+      compEngi: true, flagsA: 2, flagsB: 1,
       sideA: { id: 'p1', name: 'Ito - Abe' }, sideB: { id: 'p2', name: 'Ono - Sato' },
       ...over,
     });
     const view = (m) => <EngiScoreEditorModal match={m} onClose={vi.fn()} onSubmit={onSubmit} />;
     let utils;
     await act(async () => { utils = render(view(engiMatch())); });
-    await act(async () => { utils.rerender(view(engiMatch({ flagsA: 1 }))); });
+    await act(async () => { utils.rerender(view(engiMatch({ flagsA: 1, flagsB: 2 }))); });
     expect(screen.getByTestId('engi-aka-count').textContent, 'the count recorded elsewhere is shown').toBe('1');
-    await click(screen.getByTestId('engi-aka-dec'));
-    await settle();
-    expect(lastWrite().flagsA).toBe(0);
+    await click(screen.getByTestId('engi-aka-inc'));
+    await click(screen.getByTestId('engi-shiro-dec'));
+    await finish('Save result');
+    expect(lastWrite()).toMatchObject({ flagsA: 2, flagsB: 1 });
     expect(lastWrite().changed).toContain('flags');
   });
 

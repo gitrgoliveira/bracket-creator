@@ -1,5 +1,5 @@
 // A fake of the outbox's tap surface (api_client.jsx, bc-evts stage 3), for
-// render tests of the individual score editor: recordTap queues an event,
+// render tests of the individual and engi score editors: recordTap queues an event,
 // pendingTaps/subscribePendingTaps read and follow the queue,
 // latestDerivedMatch/subscribeDerivedMatch the newest match an answer handed
 // back, subscribeTapOutcome a tap the server did not apply. `ack` plays the
@@ -69,8 +69,10 @@ export function makeFakeOutbox({ session = 'dev1' } = {}) {
 
 // serverFold: a fake server holding `match`, applying `events` in order with
 // the JS replay port; scoreVersion counts every event logged. Returns the new
-// match and each event's outcome, as the score-events answer does.
-export function serverFold(match, events) {
+// match and each event's outcome, as the score-events answer does. `opts` are
+// the fold's ({engi: true} for an engi match, whose flag taps it refuses
+// otherwise).
+export function serverFold(match, events, opts) {
   let m = { ...match };
   const outcomes = {};
   for (const e of events) {
@@ -79,7 +81,7 @@ export function serverFold(match, events) {
     else if (m.status === 'scheduled') outcome = NOT_STARTED;
     else if ((e.kind === IPPON_ADD || e.kind === FOUL_ADD) && markIdSet(m).has(e.id)) outcome = DUPLICATE;
     else {
-      const r = foldEvent(m, e);
+      const r = foldEvent(m, e, opts);
       m = r.match;
       outcome = r.outcome;
     }

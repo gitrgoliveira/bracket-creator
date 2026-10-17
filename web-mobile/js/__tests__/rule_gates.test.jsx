@@ -150,10 +150,11 @@ describe('the tap-outcome and retired-reason rules', () => {
     expect(trips(r, 'if (!tapOutcomeQuiet(o)) note(tapNotAppliedText(o));')).toBe(false);
     expect(r.exempt).toEqual(expect.arrayContaining(['write_result.jsx', 'api_client.jsx', 'score_events.jsx']));
   });
-  it('the individual editor scores a running match by taps: no autosave, no kept local edit', () => {
-    const r = rule('individual-editor-taps');
+  it('the individual and engi editors score a running match by taps: no autosave, no kept local edit', () => {
+    // bc-evts stage 4 widened it to the engi editor; stage 5 adds the team one.
+    const r = rule('editor-taps');
     expect(r).toBeTruthy();
-    expect(r.only).toEqual(['admin_scoring_individual.jsx']);
+    expect(r.only).toEqual(['admin_scoring_individual.jsx', 'admin_scoring_engi.jsx']);
     expect(trips(r, 'const { markDirty } = useDebouncedRunningWrite({ isRunningRef });')).toBe(true);
     expect(trips(r, '_ref.current = landedAutosave(onSubmit, seqRef, onLanded);')).toBe(true);
     expect(trips(r, 'useAdoptFromServer({ signature, apply, keepLocalEdits: true, isDirty });')).toBe(true);

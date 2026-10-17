@@ -14,16 +14,23 @@
 // corrections, Escape-to-close with a dirty-state confirm) so an operator
 // moving between a kendo and an Engi match on the same court sees one
 // consistent editor, not two different products. While the match is running
-// the flags are saved as they are entered (operator ruling 2026-09-26), through
-// the same debounced running write and SyncStatusPill the kendo editors use, so
-// a match sent back to the queue or switched away from keeps them. It skips
-// the kendo editor's PRE-MATCH pill and keyboard scoring shortcuts.
+// the flags are saved as they are entered (operator ruling 2026-09-26): each
+// flag + or − is a tap (bc-evts stage 4), an outbox entry in the tick it is
+// made, as the individual editor's strikes are, so a match sent back to the
+// queue or switched away from keeps them. It skips the kendo editor's
+// PRE-MATCH pill and keyboard scoring shortcuts.
 
 const { useState: useStateE, useEffect: useEffectE, useRef: useRefE } = React;
 
-import { ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer, HeldWriteDiscard, HeldWriteNotice, useClearPendingWhenNothingHeld } from './admin_scoring_shared.jsx';
-import { SyncStatusPill, useDebouncedRunningWrite, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote, landedAutosave } from './admin_scoring_autosave.jsx';
-import { serverNowMs } from './server_clock.jsx';
+import {
+  ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer, HeldWriteDiscard, HeldWriteNotice, useClearPendingWhenNothingHeld,
+  tapBoardOf, useTapBoard, useTapOutcomeNote,
+} from './admin_scoring_shared.jsx';
+import { SyncStatusPill, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
+// bc-evts stage 4: a running match is scored by flag events (the outbox's
+// recordTap); MAX_FLAGS is the fold's cap, domain.MaxEngiFlags in Go.
+import { makeEvent, FLAG_ADD, FLAG_REMOVE, MAX_FLAGS } from './score_events.jsx';
+import { publishBoardOverlay } from './court_bridge.jsx';
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
 import { GROUP_FLAGS } from './match_groups.jsx';
 import { useEscapeToClose, confirmDialog } from './ui.jsx';
@@ -33,7 +40,9 @@ import { SideCell } from './side_cell.jsx';
 import { useArmedConfirm, useOpenedTapGuard } from './tap_guard.jsx';
 import { terminalFailureBanner, notSavedText, notLandedBanner, writeWasRefused, writeRetryable, writePending } from './write_result.jsx';
 
-const MAX_FLAGS = 5;
+// The fold options of an engi match's board (applyPending refuses a flag tap
+// without them).
+const ENGI_FOLD = { engi: true };
 // Valid totals: 1, 3, 5 (odd, guarantees a winner).
 const VALID_TOTALS = new Set([1, 3, 5]);
 
@@ -102,8 +111,10 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   const isComplete = m.status === "completed";
   const initialFlagsA = m.flagsA || 0;
   const initialFlagsB = m.flagsB || 0;
-  const [flagsA, setFlagsA] = useStateE(initialFlagsA);
-  const [flagsB, setFlagsB] = useStateE(initialFlagsB);
+  // The counts of a match that is NOT running (before its start, or a
+  // correction of a finished one), kept here until Save sends them.
+  const [draftA, setDraftA] = useStateE(initialFlagsA);
+  const [draftB, setDraftB] = useStateE(initialFlagsB);
   const [submitting, setSubmitting] = useStateE(false);
   const [err, setErr] = useStateE("");
   // Audit reason collected when correcting a completed match, mirroring
@@ -126,63 +137,42 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   const pendingFnRef = useRefE(null);
   const [writeFailed, setWriteFailed] = useStateE(null); // { reason, advice? } | null
 
-  // Flags saved as they are entered while the match is running: the refs are
-  // refreshed every render (below) so the debounce never reads a stale closure.
-  const autosaveIsRunningRef = useRefE(false);
-  const autosaveBuildPatchRef = useRefE(null);
-  const autosaveOnSubmitRef = useRefE(null);
-  const autosaveSeenStampRef = useRefE(0);
   // bc-mrgc: what a write applied only in part kept in the match's history.
   const keptInHistory = useKeptInHistoryNote();
-  const { markDirty, cancelDebounce } = useDebouncedRunningWrite({
-    isRunningRef: autosaveIsRunningRef,
-    buildPatchRef: autosaveBuildPatchRef,
-    onSubmitRef: autosaveOnSubmitRef,
-    onWriteResult: keptInHistory.noteFromWrite,
-    seenStampRef: autosaveSeenStampRef,
-  });
-  autosaveIsRunningRef.current = m.status === "running";
-  autosaveSeenStampRef.current = m.modifiedAt || 0;
-  autosaveBuildPatchRef.current = (status) => claimChanged({ flagsA, flagsB, status });
-  // When the operator last changed a count here, in the server's clock frame;
-  // undefined once the board holds the server's copy again. A server copy
-  // stamped before it cannot know that edit, so the adopt below keeps the
-  // counts: comparing values alone reads a tap taken back during a save as
-  // untouched, and that save's echo then wipes it (bc-ltap, bc-kclr). The seq
-  // counts edits so landedAutosave clears the stamp only for a save built after
-  // the latest one. The stamp is taken only while the match is running: only then
-  // is the edit autosaved, and only a landed autosave clears the stamp.
-  const flagsEditedAtRef = useRefE(undefined);
-  const flagsEditSeqRef = useRefE(0);
-  // A REFUSED autosave stores and broadcasts nothing, so no later copy would re-run the
-  // adopt: with no edit since the save was built, the counts take the server's current
-  // copy now (takeServerFlagsRef holds the latest render's adopt, not this one's).
-  const takeServerFlagsRef = useRefE(null);
-  autosaveOnSubmitRef.current = landedAutosave(onSubmit, flagsEditSeqRef, (seq) => {
-    if (flagsEditSeqRef.current === seq) flagsEditedAtRef.current = undefined;
-  }, (seq) => {
-    // The stamp must still be set: the seq counts only RUNNING edits, so a correction tapped
-    // after the match finished elsewhere (the status effect cleared the stamp, the seq did
-    // not move) would otherwise be wiped by a refusal that arrives late.
-    if (flagsEditSeqRef.current === seq && flagsEditedAtRef.current !== undefined && takeServerFlagsRef.current) takeServerFlagsRef.current();
-  });
-  // The match left running (finished, or sent back to the queue, elsewhere) inside the
-  // debounce: the write is dropped with no callback, so no landed save clears the stamp.
-  useEffectE(() => { if (m.status !== "running") flagsEditedAtRef.current = undefined; }, [m.status]);
-  // An operator change to either count: the value, then the save it schedules.
-  // A count adopted from the server does not come through here. A key pressed
-  // at a bound (a/s at MAX_FLAGS, Backspace at 0; the buttons are disabled
-  // there) changes nothing, so it must not write either: a running write
-  // stamped now can beat another device's older queued result (bc-rvfx).
-  const changeFlags = (side, n) => {
-    const next = clamp(n);
-    if (next === (side === "a" ? flagsA : flagsB)) return;
-    (side === "a" ? setFlagsA : setFlagsB)(next);
-    if (m.status === "running") {
-      flagsEditedAtRef.current = serverNowMs();
-      flagsEditSeqRef.current += 1;
+
+  // bc-evts stage 4: a RUNNING match is scored by taps. Each flag + or − is one
+  // flag.add / flag.remove event for its side, handed to the outbox
+  // (API.recordTap) in the tick it is made, and the board is the server's
+  // match with this device's pending taps folded on (tapBoardOf, shared with
+  // the individual editor), so there is no autosave to debounce, to write on
+  // the way out or to adopt back, and no echo can take a tap off the board.
+  const tapMode = m.status === "running";
+  const tapBoard = useTapBoard(m, tapMode, ENGI_FOLD);
+  const flagsA = tapMode ? (tapBoard.match.flagsA || 0) : draftA;
+  const flagsB = tapMode ? (tapBoard.match.flagsB || 0) : draftB;
+  // A tap of this match the server did not apply (the quiet note), and a tap
+  // refused because the server holds the match as not running (the server's
+  // sentence, next to the board).
+  const tapNote = useTapOutcomeNote(m.compId, m.id);
+  // stepFlags: one operator change, `delta` +1 or -1, to a side's count,
+  // clamped 0..MAX_FLAGS. On a running match it is read against the board as
+  // it is NOW (tapBoardOf, not this render's copy) and sent as one event, made
+  // against the board's base (the match whose stamp floors the tap's), so a
+  // quick double tap is two flags (never guarded: CLAUDE.md "A double tap is
+  // two complete clicks") and a key pressed at a bound (the buttons are
+  // disabled there) sends nothing (bc-rvfx). Nothing waits on the outbox: the
+  // board shows the tap at once. The public self-run sheet passes the empty
+  // password.
+  const stepFlags = (side, delta) => {
+    if (tapMode) {
+      const board = tapBoardOf(m, ENGI_FOLD);
+      const cur = (side === "a" ? board.match.flagsA : board.match.flagsB) || 0;
+      if (clamp(cur + delta) === cur) return;
+      tapNote.clear();
+      window.API.recordTap(m.compId, m.id, makeEvent({ pos: 0, kind: delta > 0 ? FLAG_ADD : FLAG_REMOVE, side }), password, board.base);
+      return;
     }
-    markDirty();
+    (side === "a" ? setDraftA : setDraftB)((n) => clamp(n + delta));
   };
 
   const total = flagsA + flagsB;
@@ -192,53 +182,72 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // needs only isValidTotal, not a separate non-null check.
   const winnerSide = deriveWinner(flagsA, flagsB);
   const canSubmit = isValidTotal && !submitting;
-  const isDirty = flagsA !== initialFlagsA || flagsB !== initialFlagsB;
+  // Only a draft can be unsaved: a running match's counts are taps.
+  const isDirty = !tapMode && (draftA !== initialFlagsA || draftB !== initialFlagsB);
   // Follow a flag count recorded on another device — the same rule the kendo
   // editors follow, because this is the same rule: an engi match has ONE result
   // and every surface asking for it shows the same one, and while this editor
   // is open the viewer card, the board and the export are all already showing
-  // whatever the server holds.
+  // whatever the server holds. On a running match the board IS the server's
+  // copy (plus this device's taps); the draft follows it too, so it starts from
+  // the server's count once the match stops running.
   //
-  // keepLocalEdits, like the individual editor's scoreline and unlike the team
-  // board: a pair of flag counts is ONE reading of ONE kata performance, so
-  // there is no per-row seam to merge along. An operator with unsaved flags
-  // keeps all of them. isDirty is value-only, so it cannot see a tap taken
-  // back to the server's value while a save is out; the apply holds the
-  // counts against a server copy stamped before the last edit (flagsEditedAtRef)
-  // and, once it does take one, clears the stamp.
-  //
-  // Until the match is running nothing this editor holds reaches the server
-  // before the operator submits, so a stale reading can sit in front of them
-  // for as long as the match is open.
+  // A draft keeps the operator's counts (keepLocalEdits off running), like the
+  // individual editor's: a pair of flag counts is ONE reading of ONE kata
+  // performance, so there is no per-row seam to merge along. Until the match
+  // is running nothing this editor holds reaches the server before the
+  // operator submits, so a stale reading can sit in front of them for as long
+  // as the match is open.
   const takeServerFlags = () => {
-    flagsEditedAtRef.current = undefined;
-    setFlagsA(initialFlagsA);
-    setFlagsB(initialFlagsB);
+    setDraftA(initialFlagsA);
+    setDraftB(initialFlagsB);
     claimChanged.agree(GROUP_FLAGS);
   };
-  takeServerFlagsRef.current = takeServerFlags;
   useAdoptFromServer({
     signature: `${initialFlagsA}:${initialFlagsB}`,
-    apply: () => {
-      const editedAt = flagsEditedAtRef.current;
-      if (editedAt !== undefined && (m.modifiedAt || 0) < editedAt) return;
-      takeServerFlags();
-    },
-    keepLocalEdits: true,
+    apply: takeServerFlags,
+    keepLocalEdits: !tapMode,
     isDirty,
   });
+  // The match leaves running (finished, or sent back to the queue, here or
+  // elsewhere): the draft starts from the server's count, never from one a
+  // draft held before the match started (the adopt above keeps a draft it last
+  // saw unsaved, and it does not watch the draft while the match runs).
+  const wasTapModeRef = useRefE(tapMode);
+  useEffectE(() => {
+    if (wasTapModeRef.current && !tapMode) takeServerFlags();
+    wasTapModeRef.current = tapMode;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tapMode]);
+
+  // A display of this court on the same device (another tab, the HDMI output)
+  // shows exactly this board, pending taps included (operator S1 a): it is
+  // published on every tap and every outcome, each of which moves the board.
+  // The counts are said even at 0 (the server leaves a 0 out), so a flag taken
+  // back clears on the display.
+  const overlaySig = tapMode ? JSON.stringify([flagsA, flagsB, tapBoard.match.scoreVersion]) : "";
+  useEffectE(() => {
+    if (!tapMode) return;
+    // Once a finished result of the match is queued the board is no longer
+    // the match: its running copy would show a finish as running again on the
+    // display (stage 3 review 11, Y1).
+    const api = window.API || {};
+    if (typeof api.hasPendingTerminalWrite === "function" && api.hasPendingTerminalWrite(m.compId, m.id)) return;
+    publishBoardOverlay({ ...tapBoard.match, flagsA, flagsB });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlaySig]);
 
   // Every way out that is not a write, Close and Prev/Next alike (operator
   // ruling 2026-09-27: Prev/Next ask as Close does).
   const leaveEditor = async (go) => {
     if (submitting) return;
-    // A running match's flags are saved as entered, and the unmount writes a
-    // change still inside the autosave window, so there is nothing to discard.
+    // A running match's flags are taps, already in the outbox, so there is
+    // nothing to discard.
     if (m.status === "running") {
       go();
       return;
     }
-    // Not running, so nothing is autosaved and nothing waits to be written.
+    // Not running, so the counts are a draft nothing has sent.
     if (isDirty && !(await confirmDialog({ message: "Discard unsaved scoring changes?", confirmLabel: "Discard changes", danger: true }))) return;
     go();
   };
@@ -269,7 +278,6 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // doSubmit takes a submit CLOSURE (like ScoreEditorModal) so the caller picks
   // onSubmit vs onSubmitAndNext; F5 retry re-invokes the same closure.
   const doSubmit = async (fn) => {
-    cancelDebounce(); // the explicit save supersedes a pending autosave
     setSubmitting(true);
     setErr("");
     // Clear any prior pending/failed state when the operator explicitly retries.
@@ -386,7 +394,13 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // once confirmed via ReasonPrompt, so a retry after a failed first attempt
   // (operator clicks "Save correction" again without reopening the prompt) must
   // still carry it: otherwise the retry silently drops the audit reason.
-  const buildPayload = () => claimChanged({ flagsA, flagsB, status: "completed", ...(correctionReason ? { correctionReason } : {}) });
+  // On a running match the save is a rule-bound write over the board: it
+  // names the server copy the board showed (`seenScoreVersion`, request-only,
+  // never sent: the outbox turns it into the write's basis, beside this
+  // device's pending taps of the match and the writeId), so a finish never
+  // claims a result its screen did not show.
+  const boardSeen = tapMode ? { seenScoreVersion: Number(tapBoard.base.scoreVersion) || 0 } : {};
+  const buildPayload = () => claimChanged({ flagsA, flagsB, status: "completed", ...boardSeen, ...(correctionReason ? { correctionReason } : {}) });
   const handleSubmit = () => {
     if (!canSubmit) return;
     if (isComplete && !correctionReason) {
@@ -416,7 +430,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // fresh state via kbRef. Escape stays owned by useEscapeToClose above.
   const kbRef = useRefE(null);
   const lastSideRef = useRefE(null); // "a" | "s" | null: which side Backspace undoes
-  kbRef.current = { submitting, canSubmit, showCorrectionPrompt, flagsA, flagsB, changeFlags, handleSubmit, onPrev, onNext, goPrev, goNext, prevMatch, nextMatch };
+  kbRef.current = { submitting, canSubmit, showCorrectionPrompt, stepFlags, handleSubmit, onPrev, onNext, goPrev, goNext, prevMatch, nextMatch };
   useEffectE(() => {
     const onKeyDown = (ev) => {
       const s = kbRef.current;
@@ -442,13 +456,13 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
       }
       switch (ev.key) {
         case "a": case "A":
-          ev.preventDefault(); s.changeFlags("a", s.flagsA + 1); lastSideRef.current = "a"; break;
+          ev.preventDefault(); s.stepFlags("a", 1); lastSideRef.current = "a"; break;
         case "s": case "S":
-          ev.preventDefault(); s.changeFlags("b", s.flagsB + 1); lastSideRef.current = "s"; break;
+          ev.preventDefault(); s.stepFlags("b", 1); lastSideRef.current = "s"; break;
         case "Backspace": case "Delete":
           ev.preventDefault();
-          if (lastSideRef.current === "a") s.changeFlags("a", s.flagsA - 1);
-          else if (lastSideRef.current === "s") s.changeFlags("b", s.flagsB - 1);
+          if (lastSideRef.current === "a") s.stepFlags("a", -1);
+          else if (lastSideRef.current === "s") s.stepFlags("b", -1);
           break;
         default: break;
       }
@@ -517,7 +531,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
               <button
                 type="button"
                 className="btn engi-counter__btn"
-                onClick={() => changeFlags("b", flagsB - 1)}
+                onClick={() => stepFlags("b", -1)}
                 disabled={flagsB <= 0}
                 aria-label="Shiro minus one flag"
                 data-testid="engi-shiro-dec"
@@ -526,7 +540,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
               <button
                 type="button"
                 className="btn engi-counter__btn"
-                onClick={() => changeFlags("b", flagsB + 1)}
+                onClick={() => stepFlags("b", 1)}
                 disabled={flagsB >= MAX_FLAGS}
                 aria-label="Shiro plus one flag"
                 data-testid="engi-shiro-inc"
@@ -557,7 +571,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
               <button
                 type="button"
                 className="btn engi-counter__btn"
-                onClick={() => changeFlags("a", flagsA - 1)}
+                onClick={() => stepFlags("a", -1)}
                 disabled={flagsA <= 0}
                 aria-label="Aka minus one flag"
                 data-testid="engi-aka-dec"
@@ -566,7 +580,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
               <button
                 type="button"
                 className="btn engi-counter__btn"
-                onClick={() => changeFlags("a", flagsA + 1)}
+                onClick={() => stepFlags("a", 1)}
                 disabled={flagsA >= MAX_FLAGS}
                 aria-label="Aka plus one flag"
                 data-testid="engi-aka-inc"
@@ -587,6 +601,12 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
               ? `Total: ${total}, ${winnerSide === "a" ? "Aka wins" : "Shiro wins"}`
               : `Total: ${total}, must be 1, 3, or 5 (odd)`}
         </div>
+
+        {/* Operator S7 a: a tap refused because the server holds the match
+            as not running, in the server's own sentence, next to the board. */}
+        {tapNote.refusal && (
+          <div className="sb-hint" role="status" data-testid="tap-refusal">{tapNote.refusal}</div>
+        )}
 
         {/* Error */}
         {err && <div className="score-editor__err" role="alert">{err}</div>}
@@ -624,6 +644,11 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
           </div>
         )}
         <KeptInHistoryNote note={keptInHistory.note} />
+        {/* bc-evts: a tap the server did not apply, said quietly
+            (tapNotAppliedText); the server kept it in the match's history. */}
+        {tapNote.note && (
+          <div className="sb-hint" role="status" data-testid="tap-not-applied-note">{tapNote.note}</div>
+        )}
         {/* bc-mrgc: every write that reached this match, kept or applied.
             The organiser's view, so not on a self-run participant's sheet. */}
         <MatchHistoryDisclosure match={m} password={password} hidden={!!selfReport} />

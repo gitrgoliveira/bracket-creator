@@ -422,7 +422,9 @@ export const bridge = openBridge();
 // ANOTHER device shows a tap once the server has it (its push), one round
 // trip later: the known limit of a board kept by the server.
 // -----------------------------------------------------------------------
-const OVERLAY_FIELDS = ['status', 'ipponsA', 'ipponsB', 'hansokuA', 'hansokuB', 'markIds', 'scoreVersion', 'modifiedAt', 'repPlayerA', 'repPlayerB'];
+// flagsA/flagsB are an engi board's (bc-evts stage 4); an individual board
+// carries none, so a display of it gains none.
+const OVERLAY_FIELDS = ['status', 'ipponsA', 'ipponsB', 'hansokuA', 'hansokuB', 'flagsA', 'flagsB', 'markIds', 'scoreVersion', 'modifiedAt', 'repPlayerA', 'repPlayerB'];
 
 // boardOverlayResult: the match_updated `result` a board publishes, or null
 // for a match no display can place (no id or no court).

@@ -11,7 +11,8 @@
 // had the same gap. The engi editor had the opposite one: a key pressed at a
 // bound armed the timer with no change, and a running write stamped now went
 // out for nothing (bc-rvfx: such a write can beat another device's older
-// queued result).
+// queued result); its running counts are taps since bc-evts stage 4, pinned
+// in engi_editor_taps.render.test.jsx.
 
 import React from 'react';
 import { render, act, fireEvent, screen, cleanup } from '@testing-library/react';
@@ -52,13 +53,11 @@ const STUBBED_GLOBALS = {
 
 let restoreGlobals;
 let ScoreEditorModal;
-let EngiScoreEditorModal;
 
 beforeAll(async () => {
   restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../../admin_scoring_modal.jsx');
   ScoreEditorModal = window.ScoreEditorModal;
-  ({ EngiScoreEditorModal } = await import('../../admin_scoring_engi.jsx'));
 });
 
 afterAll(() => restoreGlobals());
@@ -247,43 +246,9 @@ describe('a rep pick on a running tie-break bout is saved on its own', () => {
   });
 });
 
-describe('an engi key that changes no flag count writes nothing', () => {
-  const engi = (flags) => ({
-    id: 'e-run', status: 'running', court: 'A',
-    sideA: { id: 'pa', name: 'Aka One - Aka Two' }, sideB: { id: 'pb', name: 'Shiro One - Shiro Two' },
-    ...flags,
-  });
-  async function mountEngi(match) {
-    await act(async () => {
-      render(<EngiScoreEditorModal match={match} onClose={vi.fn()} onSubmit={onSubmitFor(match)} />);
-    });
-  }
-  const key = (k) => act(async () => { fireEvent.keyDown(window, { key: k }); });
-
-  it('an add key at the most flags a side can hold', async () => {
-    await mountEngi(engi({ flagsA: 5, flagsB: 0 }));
-    await key('a');
-    await settle();
-    expect(writes).toHaveLength(0);
-    // A key that does change a count still saves.
-    await key('s');
-    await settle();
-    expect(writes).toHaveLength(1);
-    expect(writes[0]).toEqual({ flagsA: 5, flagsB: 1, status: 'running', editedPerf: expect.any(Number), seenModifiedAt: 0, changed: ['flags'] });
-  });
-
-  it('Backspace with no flag left to take back', async () => {
-    await mountEngi(engi({ flagsA: 0, flagsB: 0 }));
-    await key('a');
-    await settle();
-    await key('Backspace');
-    await settle();
-    expect(writes.map((p) => p.flagsA)).toEqual([1, 0]);
-    await key('Backspace');
-    await settle();
-    expect(writes).toHaveLength(2);
-  });
-});
+// The engi editor's half (a key at a bound wrote a running save) moved with
+// its autosave in bc-evts stage 4: a running engi match is scored by taps, and
+// engi_editor_taps.render.test.jsx pins that such a key sends nothing.
 
 describe('a daihyosen verdict on a running encounter is saved on its own', () => {
   // Picking a side, and withdrawing it, ride the running write like a point,

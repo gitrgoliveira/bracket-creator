@@ -5,6 +5,7 @@ import { EngiScoreEditorModal } from '../../admin_scoring_engi.jsx';
 import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
 import { QUEUED_NOTICE } from '../../write_result.jsx';
 import { pointerTap } from '../helpers/tap_events.js';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 
 // Regression coverage for a real orientation bug: sideB is Shiro and sideA is
 // Aka everywhere else in the app (bracket.jsx PlayerLine, admin_pools.jsx,
@@ -411,74 +412,61 @@ describe('bc-kbhn: engi ←/→ need a neighbour match', () => {
 });
 
 // Operator ruling 2026-09-26: engi flags are saved as they are entered, so a
-// match sent back to the queue or switched away from keeps them. While the
-// match is running each change rides the same debounced running write the
-// kendo editors use; before it starts nothing is written until the result is.
+// match sent back to the queue or switched away from keeps them. Since
+// bc-evts stage 4 each change on a running match is a tap, an outbox entry in
+// the tick it is made (engi_editor_taps.render.test.jsx has the board's
+// rules); before it starts nothing is written until the result is.
 describe('EngiScoreEditorModal saves flags as they are entered', () => {
-  beforeEach(() => { vi.useFakeTimers(); });
-  afterEach(() => { vi.useRealTimers(); });
+  let outbox;
+  let savedAPI;
+  beforeEach(() => {
+    savedAPI = window.API;
+    outbox = makeFakeOutbox();
+    window.API = outbox.api;
+  });
+  afterEach(() => { window.API = savedAPI; });
+  const running = (o = {}) => makeMatch({ status: 'running', compId: 'c', id: 'm', modifiedAt: 1_000_000, ...o });
 
-  it('a running match saves each change as a running write', async () => {
-    const onSubmit = vi.fn().mockResolvedValue({ status: 'running' });
-    // Stamped: the write carries the shown match's stamp from the tap
-    // (bc-hlck), which recordScore floors the stamp by and never sends.
-    render(<EngiScoreEditorModal match={makeMatch({ status: 'running', modifiedAt: 1_000_000 })} onClose={() => {}} onSubmit={onSubmit} />);
+  it('a running match sends each change as a tap, in the tick it is made', () => {
+    const onSubmit = vi.fn();
+    render(<EngiScoreEditorModal match={running()} onClose={() => {}} onSubmit={onSubmit} password="pw" />);
     fireEvent.click(screen.getByTestId('engi-aka-inc'));
     fireEvent.click(screen.getByTestId('engi-shiro-inc'));
-    await act(async () => { vi.advanceTimersByTime(400); });
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 1, status: 'running', editedPerf: expect.any(Number), seenModifiedAt: 1_000_000, changed: ['flags'] });
-  });
-
-  it('a keyboard change saves too', async () => {
-    const onSubmit = vi.fn().mockResolvedValue({ status: 'running' });
-    render(<EngiScoreEditorModal match={makeMatch({ status: 'running' })} onClose={() => {}} onSubmit={onSubmit} />);
-    await act(async () => { fireEvent.keyDown(window, { key: 's' }); });
-    await act(async () => { vi.advanceTimersByTime(400); });
-    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 0, flagsB: 1, status: 'running', editedPerf: expect.any(Number), seenModifiedAt: 0, changed: ['flags'] });
-  });
-
-  it('a match not yet started writes nothing until the result is saved', async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
-    render(<EngiScoreEditorModal match={makeMatch({ status: 'scheduled' })} onClose={() => {}} onSubmit={onSubmit} />);
-    fireEvent.click(screen.getByTestId('engi-aka-inc'));
-    await act(async () => { vi.advanceTimersByTime(400); });
+    expect(outbox.taps('c', 'm').map((e) => `${e.kind}:${e.side}`)).toEqual(['flag.add:a', 'flag.add:b']);
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('closing a running match with a change still pending saves it and asks nothing', async () => {
-    const onSubmit = vi.fn().mockResolvedValue({ status: 'running' });
-    // Closing unmounts the editor, as every host does; the unmount writes it.
-    let view;
-    const onClose = vi.fn(() => view.unmount());
-    view = render(<EngiScoreEditorModal match={makeMatch({ status: 'running' })} onClose={onClose} onSubmit={onSubmit} />);
-    fireEvent.click(screen.getByTestId('engi-aka-inc'));
-    await act(async () => { fireEvent.click(screen.getByTestId('engi-close-btn')); });
-    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 0, status: 'running', editedPerf: expect.any(Number), seenModifiedAt: 0, changed: ['flags'] });
-    expect(onClose).toHaveBeenCalled();
+  it('a keyboard change is a tap too', () => {
+    render(<EngiScoreEditorModal match={running()} onClose={() => {}} onSubmit={vi.fn()} />);
+    act(() => { fireEvent.keyDown(window, { key: 's' }); });
+    expect(outbox.taps('c', 'm').map((e) => `${e.kind}:${e.side}`)).toEqual(['flag.add:b']);
   });
-});
 
-describe('a flag change inside the autosave window survives Prev/Next', () => {
-  beforeEach(() => { vi.useFakeTimers(); });
-  afterEach(() => { vi.useRealTimers(); });
+  it('a match not yet started writes nothing until the result is saved', () => {
+    const onSubmit = vi.fn();
+    render(<EngiScoreEditorModal match={makeMatch({ status: 'scheduled', compId: 'c', id: 'm' })} onClose={() => {}} onSubmit={onSubmit} />);
+    fireEvent.click(screen.getByTestId('engi-aka-inc'));
+    expect(outbox.taps('c', 'm')).toEqual([]);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
 
   it.each([
+    ['Close', () => fireEvent.click(screen.getByTestId('engi-close-btn'))],
     ['the Next button', () => fireEvent.click(screen.getByText('Next →'))],
     ['the → key', () => fireEvent.keyDown(window, { key: 'ArrowRight' })],
-  ])('%s within 300ms of a change saves it', async (_via, goNext) => {
-    const onSubmit = vi.fn().mockResolvedValue({ status: 'running' });
-    let view;
-    const onNext = vi.fn(() => view.unmount());
-    view = render(<EngiScoreEditorModal
-      match={makeMatch({ status: 'running' })} onClose={() => {}} onSubmit={onSubmit}
+  ])('leaving a running match by %s right after a tap asks nothing and writes nothing more', async (_via, leave) => {
+    const onSubmit = vi.fn();
+    const onClose = vi.fn();
+    const onNext = vi.fn();
+    render(<EngiScoreEditorModal
+      match={running()} onClose={onClose} onSubmit={onSubmit}
       nextMatch={{ sideA: { name: 'Z' }, sideB: { name: 'W' } }} onNext={onNext}
     />);
     fireEvent.click(screen.getByTestId('engi-aka-inc'));
-    await act(async () => { goNext(); });
-    await act(async () => { vi.advanceTimersByTime(400); });
-    expect(onNext).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenCalledWith({ flagsA: 1, flagsB: 0, status: 'running', editedPerf: expect.any(Number), seenModifiedAt: 0, changed: ['flags'] });
+    await act(async () => { leave(); });
+    expect(onClose.mock.calls.length + onNext.mock.calls.length).toBe(1);
+    expect(outbox.taps('c', 'm')).toHaveLength(1);
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });
 

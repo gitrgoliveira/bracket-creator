@@ -2145,8 +2145,33 @@ func TestMatchHandlers_Extended(t *testing.T) {
 		req, _ := http.NewRequest("PUT", "/api/competitions/nonexistent/matches/m1/court", bytes.NewBufferString(`{"court": "A"}`))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Equal(t, http.StatusNotFound, w.Code)
 	})
+}
+
+// TestCourtAndTime_UnknownMatchIsNotFound pins that a court move or a time
+// change for a match the competition does not hold answers 404, never a 500:
+// both are outbox entries (bc-evts stage 3), and the outbox retries a 5xx
+// forever, holding back every later write of that match behind it.
+func TestCourtAndTime_UnknownMatchIsNotFound(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+	comp := state.Competition{ID: "c1", Status: "setup", Courts: []string{"A"}}
+	require.NoError(t, store.SaveCompetition(&comp))
+	require.NoError(t, store.SavePoolMatches("c1", []state.MatchResult{{ID: "PoolA-1", SideA: "P1", SideB: "P2"}}))
+
+	for _, tc := range []struct{ path, body string }{
+		{"/api/competitions/c1/matches/nope/court", `{"court": "A"}`},
+		{"/api/competitions/c1/matches/nope/time", `{"scheduledAt": "10:00"}`},
+		{"/api/competitions/nonexistent/matches/m1/court", `{"court": "A"}`},
+		{"/api/competitions/nonexistent/matches/m1/time", `{"scheduledAt": "10:00"}`},
+	} {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", tc.path, bytes.NewBufferString(tc.body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equalf(t, http.StatusNotFound, w.Code, "%s body=%s", tc.path, w.Body.String())
+	}
 }
 
 // TestOverrideWinner_ErrorStatusMapping pins that the override-winner handler

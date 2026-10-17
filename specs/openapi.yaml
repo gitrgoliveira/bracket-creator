@@ -3450,6 +3450,13 @@ paths:
       responses:
         '200':
           description: Court updated.
+        '400':
+          description: Body malformed or the court label too long.
+        '404':
+          description: >
+            The competition holds no match with this id. Never a 500: the
+            app's offline queue retries a 5xx forever, and this refusal would
+            never change.
 
   /api/competitions/{id}/matches/{mid}/history:
     get:
@@ -3676,6 +3683,10 @@ paths:
       responses:
         '200':
           description: Time updated.
+        '400':
+          description: Body malformed or the time too long.
+        '404':
+          description: The competition holds no match with this id (as for the court move).
 
   /api/competitions/{id}/matches/bulk-score:
     post:

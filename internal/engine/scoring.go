@@ -3497,9 +3497,20 @@ func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string
 	if !errors.Is(err, errMatchNotFound) {
 		return err
 	}
-	return e.withBracketMatch(e.store, compId, matchId, func(m *state.BracketMatch) {
+	return matchNotFoundAsNotFound(compId, matchId, e.withBracketMatch(e.store, compId, matchId, func(m *state.BracketMatch) {
 		m.Court = newCourt
-	})
+	}))
+}
+
+// matchNotFoundAsNotFound turns the pool-then-bracket fall-through's final
+// errMatchNotFound into a *NotFoundError, so a handler answers 404 for a match
+// the competition does not hold rather than a 500 the outbox would retry
+// forever (bc-evts stage 3 review 2, R3). Any other error is returned as is.
+func matchNotFoundAsNotFound(compId, matchId string, err error) error {
+	if errors.Is(err, errMatchNotFound) {
+		return notFoundErrorf("match %s not found in competition %s", matchId, compId)
+	}
+	return err
 }
 
 // setBracketOverrideWinner sets m's Winner name AND (bc-pnum review finding
@@ -3783,9 +3794,9 @@ func (e *Engine) UpdateMatchTime(compId string, matchId string, scheduledAt stri
 	if !errors.Is(err, errMatchNotFound) {
 		return err
 	}
-	return e.withBracketMatch(e.store, compId, matchId, func(m *state.BracketMatch) {
+	return matchNotFoundAsNotFound(compId, matchId, e.withBracketMatch(e.store, compId, matchId, func(m *state.BracketMatch) {
 		m.ScheduledAt = scheduledAt
-	})
+	}))
 }
 
 // RevertMatchToQueue reverts a running match back to the scheduled (queued)

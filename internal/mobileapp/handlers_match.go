@@ -1340,7 +1340,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 
 		if err := eng.UpdateMatchCourt(id, mid, req.Court); err != nil {
-			internalError(c, err)
+			// A match the competition does not hold is a 404, never a 500:
+			// the outbox retries a 5xx forever and holds the match's later
+			// writes behind it (bc-evts stage 3 review 2, R3).
+			respondEngineError(c, err)
 			return
 		}
 
@@ -1905,7 +1908,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 
 		if err := eng.UpdateMatchTime(id, mid, req.ScheduledAt); err != nil {
-			internalError(c, err)
+			respondEngineError(c, err) // 404 for an unknown match, as the court move (R3)
 			return
 		}
 

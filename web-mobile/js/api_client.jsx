@@ -560,6 +560,15 @@ const CLOCK_SKEW_FAIL_REASON = 'the device clock could not be reconciled with th
 // accepted, not after the first result has already been refused.
 const CLOCK_TRIPWIRE_MS = 3000;
 
+// The scoreline fields a start-only write never publishes on the court bridge
+// (bc-evts stage 4 review 2, G1): what engine.keepQueuedScore keeps from the
+// stored match, plus the editors' `score` summary. _broadcastPatch is the one
+// reader.
+const START_BROADCAST_DROPS = Object.freeze([
+    'ipponsA', 'ipponsB', 'hansokuA', 'hansokuB', 'encho', 'subResults',
+    'flagsA', 'flagsB', 'repPlayerA', 'repPlayerB', 'score',
+]);
+
 const _matchRevCounters = new Map(); // compID:matchID → int
 function _nextRev(compID, matchID) {
     const key = _revKey(compID, matchID);
@@ -4724,11 +4733,28 @@ const API = {
         // rev/revSession, and the groups the write names (`changed`, bc-mrgc),
         // are stripped so internal write-ordering metadata is not propagated
         // to the display tab.
+        //
+        // bc-evts stage 4 review 2 (G1): a start only starts. The server keeps
+        // the score a sent-back match holds (engine.keepQueuedScore), so a
+        // start-only write publishes no scoreline field at all (a key present
+        // as undefined would still wipe the display's copy in the merge), and
+        // states the flag counts the match it starts already holds: the
+        // display reads a result naming a status that omits a count as 0
+        // (mergeMatchPatch), which turned a kept 2-1 into 0-0. `startOnly`
+        // itself is request-only and stays off the display's copy.
         const _broadcastPatch = (fields) => {
             const {
                 rev: _r, revSession: _rs, changed: _ch,
-                writeId: _w, basis: _b, session: _s, forceDownstreamReopen: _f, ...rest
+                writeId: _w, basis: _b, session: _s, forceDownstreamReopen: _f,
+                startOnly, ...rest
             } = fields || {};
+            if (startOnly) {
+                for (const k of START_BROADCAST_DROPS) delete rest[k];
+                if (match && (match.flagsA != null || match.flagsB != null)) {
+                    rest.flagsA = match.flagsA ?? 0;
+                    rest.flagsB = match.flagsB ?? 0;
+                }
+            }
             const court = (match && match.court) || '';
             // Do not emit an unscoped (court-less) broadcast: a display can only
             // safely apply a patch it can attribute to its court, and the display

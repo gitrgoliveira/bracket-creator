@@ -7,7 +7,7 @@
 // that leaves a flag count out says 0 for a match that carries flags.
 import React from 'react';
 import { render, act } from '@testing-library/react';
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { installIndividualEditor, resetOutbox, engiBout, counts, NOW } from '../helpers/engi_editor.js';
 import { applyPatch } from '../../patch.jsx';
 import { applyPatchToTree } from '../../court_bridge.jsx';
@@ -59,5 +59,87 @@ describe('a push that omits a count which fell to 0', () => {
     const merged = mergeMatchPatch(plain, { id: 'm1', status: 'completed' });
     expect('flagsA' in merged).toBe(false);
     expect('flagsB' in merged).toBe(false);
+  });
+});
+
+// bc-evts stage 4 review 2 (G1): a start only starts. A match sent back to the
+// queue keeps its score on the server (bc-sbq), and starting it again sends
+// startPatch (startOnly, no score). The court console's recordScore publishes
+// the write on the court bridge, and a display of that court merges it: the
+// rule above (a result naming a status that omits a count says 0) turned a
+// kept 2-1 into 0-0 there. The one owner is _broadcastPatch (api_client.jsx):
+// a start-only write publishes no score field, and its patch is not a full
+// result.
+describe('a start broadcast over a kept score', () => {
+  let published;
+  let saved;
+  let realAPI;
+  let startPatch;
+  beforeEach(async () => {
+    published = [];
+    saved = { BC: global.BroadcastChannel, fetch: global.fetch };
+    global.BroadcastChannel = class {
+      constructor() { this.onmessage = null; }
+      postMessage(msg) { published.push(msg); }
+      addEventListener() {}
+      removeEventListener() {}
+      close() {}
+    };
+    global.fetch = vi.fn(() => new Promise(() => {}));
+    vi.resetModules();
+    ({ API: realAPI } = await import('../../api_client.jsx'));
+    ({ startPatch } = await import('../../start_match.jsx'));
+  });
+  afterEach(() => {
+    global.BroadcastChannel = saved.BC;
+    global.fetch = saved.fetch;
+    vi.resetModules();
+  });
+
+  const startOn = async (held) => {
+    await realAPI.recordScore('c1', held.id, startPatch(), 'pw', held);
+    const msgs = published.filter((m) => m && m.type === 'patch');
+    expect(msgs.length).toBe(1);
+    return applyPatchToTree({ competitions: [tree(held)] }, msgs[0]).competitions[0].poolMatches[0];
+  };
+
+  it('an engi match that kept 2-1 shows 2-1, running', async () => {
+    const shown = await startOn(engiBout({ status: 'scheduled', flagsA: 2, flagsB: 1 }));
+    expect(shown.status).toBe('running');
+    expect([shown.flagsA, shown.flagsB]).toEqual([2, 1]);
+  });
+
+  it('an individual match that kept its points and a foul shows them, running', async () => {
+    const held = {
+      id: 'm1', compId: 'c1', status: 'scheduled', phase: 'pool', poolName: 'Pool 1', court: 'A',
+      sideA: { id: 'p1', name: 'Aka' }, sideB: { id: 'p2', name: 'Shiro' },
+      ipponsA: ['M'], ipponsB: ['K'], hansokuA: 1, hansokuB: 0, modifiedAt: NOW, scoreVersion: 3,
+    };
+    const shown = await startOn(held);
+    expect(shown.status).toBe('running');
+    expect(shown.ipponsA).toEqual(['M']);
+    expect(shown.ipponsB).toEqual(['K']);
+    expect(shown.hansokuA).toBe(1);
+  });
+
+  it('a match whose copy still reads decided by hantei keeps its points too', async () => {
+    const held = {
+      id: 'm1', compId: 'c1', status: 'scheduled', phase: 'pool', poolName: 'Pool 1', court: 'A',
+      sideA: { id: 'p1', name: 'Aka' }, sideB: { id: 'p2', name: 'Shiro' }, decidedByHantei: true,
+      ipponsA: ['M'], ipponsB: ['K'], hansokuA: 0, hansokuB: 0, modifiedAt: NOW, scoreVersion: 3,
+    };
+    const shown = await startOn(held);
+    expect(shown.ipponsA).toEqual(['M']);
+    expect(shown.ipponsB).toEqual(['K']);
+  });
+
+  it('the start publishes no scoreline field but the counts the match holds, and no startOnly', async () => {
+    await realAPI.recordScore('c1', 'm1', startPatch(), 'pw', engiBout({ status: 'scheduled', flagsA: 2, flagsB: 1 }));
+    const result = published.find((m) => m && m.type === 'patch').payload.result;
+    for (const k of ['ipponsA', 'ipponsB', 'hansokuA', 'hansokuB', 'encho', 'subResults', 'score', 'startOnly']) {
+      expect(k in result).toBe(false);
+    }
+    expect([result.flagsA, result.flagsB]).toEqual([2, 1]);
+    expect(result.status).toBe('running');
   });
 });

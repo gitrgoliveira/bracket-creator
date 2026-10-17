@@ -9502,6 +9502,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   color: var(--ink-1);
 }
 .version-banner__reload { flex-shrink: 0; }
+/* The outbox could not be stored when Reload was pressed (K3): the page stays. */
+.version-banner__note { display: block; margin-top: 2px; font-weight: 400; }
 
 /* Vlist row with inline padding override */
 .vlist-item--row-padded { padding: 0 12px 12px; }

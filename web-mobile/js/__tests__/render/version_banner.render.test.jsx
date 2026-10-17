@@ -66,4 +66,30 @@ describe('VersionBanner', () => {
     expect(reload).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('version-banner')).toBeNull();
   });
+
+  // Stage 3 review 7, K3: browser storage can refuse the outbox (full); the
+  // writes the page holds are then in its memory only, and a reload loses them.
+  it('Reload does not reload while the outbox cannot be stored, and says to keep the page open', async () => {
+    const { QUEUED_UNSAVED_NOTICE } = await import('../../write_result.jsx');
+    const reload = vi.fn();
+    V.setReloader(reload);
+    const close = V.registerOpenEditor();
+    const hadAPI = 'API' in window;
+    const prevAPI = window.API;
+    let stores = false;
+    window.API = { persistQueue: () => stores };
+    try {
+      render(<VersionBanner />);
+      act(() => { V.noteServerBuild('build-b'); });
+      fireEvent.click(screen.getByRole('button', { name: V.VERSION_RELOAD_LABEL }));
+      expect(reload, 'nothing reloads while the writes are held in memory only').not.toHaveBeenCalled();
+      expect(screen.getByTestId('version-banner').textContent).toContain(QUEUED_UNSAVED_NOTICE);
+      stores = true;
+      fireEvent.click(screen.getByRole('button', { name: V.VERSION_RELOAD_LABEL }));
+      expect(reload, 'once storage takes the outbox, Reload reloads').toHaveBeenCalledTimes(1);
+    } finally {
+      if (hadAPI) window.API = prevAPI; else delete window.API;
+      act(() => { close(); });
+    }
+  });
 });

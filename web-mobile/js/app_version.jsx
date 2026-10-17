@@ -122,6 +122,12 @@ export function setReloader(fn) {
     _reload = typeof fn === 'function' ? fn : () => { location.reload(); };
 }
 
+// reloadApp: the operator's Reload on the banner (version_banner.jsx), through
+// the same reloader the automatic reload uses.
+export function reloadApp() {
+    _reload();
+}
+
 // noteOutboxDrained: the outbox has emptied; a stale page may reload now.
 export function noteOutboxDrained() {
     checkVersion();

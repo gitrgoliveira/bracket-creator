@@ -1894,7 +1894,10 @@ paths:
         '200':
           description: >
             Rank override saved, or a writeId this door already applied
-            answered as recorded (nothing recorded, `reopenedMatches` empty). In a mixed competition a new order that
+            answered as recorded (nothing recorded, `reopenedMatches` empty even when the
+            first request reopened knockout matches, so a client whose first
+            answer was lost is not told which ones; the broadcast went out and
+            the knockout shows them reopened). In a mixed competition a new order that
             moves who holds one of the pool's qualifying places repaints the
             knockout slots that place feeds; `reopenedMatches` names the
             knockout matches a confirmed override reopened (empty otherwise).
@@ -4422,7 +4425,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CompetitorStatus'
+                oneOf:
+                  - $ref: '#/components/schemas/CompetitorStatus'
+                  - type: object
+                    description: >
+                      The answer to a writeId this door already applied.
+                    required: [playerId]
+                    properties:
+                      playerId:
+                        type: string
         '400':
           $ref: '#/components/responses/BadRequest'
         '409':

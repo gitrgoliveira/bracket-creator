@@ -14,11 +14,12 @@
 //
 // The page's own build is the <meta name="app-build"> the server writes into
 // the page it serves (internal/mobileapp/index_meta.go, appBuildMeta; the
-// operator's decision S2 a). The modules under /dist/ are served no-cache with
-// their ETag (internal/mobileapp/server.go, staticCacheControl), so a reload
-// revalidates every module and the page and its code are always one build
-// (review 2, R7). As a backstop against a loop all the same (a cache that
-// ignores no-cache), a page reloads ONCE for a given server build
+// operator's decision S2 a). The page (no-store) names its modules under the
+// build's own directory, /dist/<content hash>/, served immutable
+// (internal/mobileapp/server.go, staticCacheControlScoped; review 3, F3), so a
+// reload brings the page and its code from one build (review 2, R7) without
+// asking for a module it holds. As a backstop against a loop all the same (a
+// cache that serves an old page), a page reloads ONCE for a given server build
 // (_RELOADED_FOR, in sessionStorage), and a page still behind it after that
 // shows the banner; a tab that cannot note the reload shows the banner too.
 

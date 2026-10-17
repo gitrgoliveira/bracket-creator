@@ -26,13 +26,28 @@ const defaultAppTitle = "Bracket Creator Mobile"
 // index.html is intentionally served uncached here: the injected tags depend on
 // mutable tournament state (name, venue, logo), so a renamed tournament must not
 // keep surfacing a stale preview.
-func serveIndexHTML(c *gin.Context, indexHTML []byte, store *state.Store) {
-	page := injectPreviewMeta(string(indexHTML), store, requestBaseURL(c))
+func serveIndexHTML(c *gin.Context, indexHTML []byte, store *state.Store, assetPrefix string) {
+	page := withAssetPrefix(injectPreviewMeta(string(indexHTML), store, requestBaseURL(c)), assetPrefix)
 	// no-store (not no-cache): the injected tags depend on mutable tournament
 	// state, so no intermediary should store this response at all, not merely
 	// revalidate it, or a crawler could be served a stale preview from a proxy.
+	// It also names the build's module directory (withAssetPrefix), so a reload
+	// always brings the page of the build the server runs.
 	c.Header("Cache-Control", "no-store")
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(page))
+}
+
+// withAssetPrefix names every module the page loads under the build's own
+// directory, /dist/<prefix>/ (bc-evts stage 3 review 3, F3; see
+// staticCacheControlScoped). Only script sources are rewritten: every import
+// inside a module is relative, so it resolves under the same prefix by itself.
+// An empty prefix (the content hash could not be made) leaves the page as it
+// is, served from the plain /dist/ paths.
+func withAssetPrefix(page, prefix string) string {
+	if prefix == "" {
+		return page
+	}
+	return strings.ReplaceAll(page, `src="/dist/`, `src="/dist/`+prefix+`/`)
 }
 
 // injectPreviewMeta rewrites the <title> and inserts link-preview meta tags into
@@ -108,9 +123,9 @@ func injectPreviewMeta(pageHTML string, store *state.Store, base string) string 
 // decision: the server writes its build into the served page): the value the
 // X-App-Build header and the SSE hello carry (AppBuild, "unknown" without a
 // commit), so the bundle can tell a server running a newer build than the one
-// it was served with and reload (web-mobile/js/app_version.jsx). The modules
-// under /dist/ are no-cache (setStaticCacheHeaders), so a reload brings the
-// modules of the build this page names.
+// it was served with and reload (web-mobile/js/app_version.jsx). The page names
+// its modules under the build's own directory (withAssetPrefix), so a reload
+// brings the modules of the build this page names.
 func appBuildMeta(build string) string {
 	return `    <meta name="app-build" content="` + html.EscapeString(build) + `">` + "\n"
 }

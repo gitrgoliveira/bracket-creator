@@ -81,25 +81,27 @@
     <script type="module" src="/dist/patch.jsx"></script>
     <script type="module" src="/dist/router.js"></script>
     <!-- NO tag here carries a "?v=N" query, and that is deliberate.
-         /dist/ is served with "Cache-Control: no-cache" plus an ETag derived
-         from the CONTENT of the embedded assets (internal/mobileapp/server.go,
-         staticCacheControl): every load asks for every module, and the ETag
-         turns each answer into a 0-byte 304 unless the bundle actually
-         changed. The version queries predated that and were busting a cache
-         that did not exist: measured before the change, a page load
+         The server names every module this page loads under the build's own
+         directory: it rewrites each script source /dist/X below to
+         /dist/<hash>/X, where <hash> is the CONTENT hash of the embedded
+         front-end (internal/mobileapp/server.go, staticCacheControlScoped,
+         and index_meta.go, withAssetPrefix), and serves that directory
+         "immutable" with an ETag. Every import inside a module is relative,
+         so it resolves under the same directory. A load therefore asks
+         nothing for a module it already holds, and a new build is a new
+         directory. The version queries predated all of this and were busting
+         a cache that did not exist: measured before the change, a page load
          transferred 1.17 MB across 69 files with NONE served from cache,
          versioned and unversioned alike.
 
          What that means for a DEPLOY, since this comment is what you are
          reading before you reach for "?v=N" again: index.html is no-store and
          names the server's build (<meta name="app-build">, which the version
-         reload reads, app_version.jsx), and the modules revalidate on every
-         load, so a reload after an upgrade brings the page and its modules
-         from the one new build. (They used to be cached for five minutes
-         without asking, so for that long a reload could pair fresh HTML with
-         the previous build's modules; that window is gone.) A "?v=N" would not
-         help anyway: it busts one tag while every IMPORT of that same module
-         keeps its own unversioned URL, which is how the double-load below
+         reload reads, app_version.jsx) and the build's module directory, so a
+         reload after an upgrade brings the page and its modules from the one
+         new build, and a directory of an older build answers 404. A "?v=N"
+         would not help anyway: it busts one tag while every IMPORT of that
+         same module keeps its own URL, which is how the double-load below
          started.
 
          They were also actively harmful on three tags: bracket, ui and qr had

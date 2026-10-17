@@ -261,8 +261,24 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 			// file server so the static bytes are never served bare.
 			if filePath == "index.html" {
 				if data, rerr := fs.ReadFile(subFS, "index.html"); rerr == nil {
-					serveIndexHTML(c, data, store)
+					serveIndexHTML(c, data, store, assetPrefix(assetETag()))
 					return
+				}
+			}
+
+			// A module under a build's own directory, /dist/<prefix>/ (see
+			// staticCacheControlScoped): the current build's is served from
+			// dist/ with the prefix stripped, and any other is a 404, never the
+			// page, which a module import cannot use.
+			scoped := false
+			if rest, ok := strings.CutPrefix(filePath, "dist/"); ok {
+				if seg, tail, found := strings.Cut(rest, "/"); found && isAssetPrefixSegment(seg) {
+					if current := assetPrefix(assetETag()); current == "" || seg != current {
+						c.String(http.StatusNotFound, "Not found")
+						return
+					}
+					filePath, scoped = "dist/"+tail, true
+					c.Request.URL.Path = "/" + filePath
 				}
 			}
 
@@ -272,7 +288,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 				// File exists, serve it. http.ServeContent honours the ETag we
 				// set here against the request's If-None-Match, so an unchanged
 				// build answers 304 without a body.
-				setStaticCacheHeaders(c, assetETag(), filePath)
+				setStaticCacheHeaders(c, assetETag(), filePath, scoped)
 				fileServer := http.FileServer(http.FS(subFS))
 				fileServer.ServeHTTP(c.Writer, c.Request)
 				return
@@ -290,7 +306,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 			if strings.HasPrefix(filePath, "dist/") && strings.HasSuffix(filePath, ".jsx") {
 				rewritten := strings.TrimSuffix(filePath, ".jsx") + ".js"
 				if _, err := fs.Stat(subFS, rewritten); err == nil {
-					setStaticCacheHeaders(c, assetETag(), rewritten)
+					setStaticCacheHeaders(c, assetETag(), rewritten, scoped)
 					c.Request.URL.Path = "/" + rewritten
 					http.FileServer(http.FS(subFS)).ServeHTTP(c.Writer, c.Request)
 					return
@@ -303,7 +319,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 			if ext == "" || ext == ".html" {
 				data, err := fs.ReadFile(subFS, "index.html")
 				if err == nil {
-					serveIndexHTML(c, data, store)
+					serveIndexHTML(c, data, store, assetPrefix(assetETag()))
 					return
 				}
 			}
@@ -327,8 +343,9 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 // Computed once per process, lazily, on the first /dist/ request: one walk and
 // SHA-256 over ~1.2 MB, single-digit milliseconds, off the startup path.
 //
-// Paired with Cache-Control: no-cache (see staticCacheControl): every load
-// revalidates, and the ETag turns a re-download into a 0-byte 304.
+// It also names the build's own module directory (assetPrefix), served
+// immutable (staticCacheControlScoped); the ETag turns any revalidation into a
+// 0-byte 304.
 //
 // Before this, http.FileServer over embed.FS emitted no Cache-Control, no ETag
 // and no Last-Modified (embed's zero modtime makes ServeContent omit it), so a
@@ -362,36 +379,70 @@ func buildAssetETag(subFS fs.FS) string {
 	return fmt.Sprintf("%q", hex.EncodeToString(h.Sum(nil))[:16])
 }
 
-// staticCacheControl is the caching policy for a compiled asset under /dist/:
-// "no-cache", stored but never reused WITHOUT asking (bc-evts stage 3 review 2,
-// R7). Every page load revalidates every module, and the ETag turns each
-// re-fetch into a 0-byte 304 unless the bundle really changed.
+// staticCacheControlScoped is the caching policy for a compiled module served
+// from the build's own directory, /dist/<prefix>/, where <prefix> is the content
+// hash of the whole front-end (assetPrefix, buildAssetETag: never commit.txt,
+// which two development builds of one commit share). The page is no-store and
+// names every module there (withAssetPrefix), and every import inside a module
+// is relative, so a module's imports resolve under the same prefix: a module at
+// such a path never changes, and a load makes no request for one it holds
+// (bc-evts stage 3 review 3, F3). That keeps both rulings: the page and its code
+// always come from one build (operator decision S2 a; within the old five-minute
+// window a reload paired the new page with the previous build's modules, review
+// 2 R7), and a load costs no round of conditional requests (mp-6o1a, 34d358a2:
+// "no-cache" made one per module, 69 per load, on a slow link). A prefix that is
+// not the current build's is a 404 (NewRouterWithHub), never the page.
 //
-// It was "public, max-age=300", a five-minute window in which a returning
-// client made no request at all, to spare a slow link one conditional request
-// per module per load. That window paired the served page with the modules of
-// the build BEFORE an upgrade: the page names the server's build (appBuildMeta)
-// and app_version.jsx reloads onto a new build, so within the window a reload
-// ran the old code under a page naming the new build. With no-cache the page
-// and its modules always come from one build. The cost is a round of 304s on
-// each load, which the operator's rule (the version reload, decision S2 a)
-// takes over the window. Content-hashed filenames plus "immutable" would remove
-// both, but esbuild here runs without --bundle and does not rewrite import
-// specifiers, so hashing the names would break every `./x.jsx` import.
+// staticCacheControlUnscoped is the policy for a plain /dist/ path, which only a
+// page whose content hash could not be made names: the old five-minute window.
 
-// setStaticCacheHeaders applies the revalidation policy to a compiled asset.
+// setStaticCacheHeaders applies the caching policy to a compiled asset: scoped
+// when it was asked for under the build's own directory.
 // Only /dist/ is covered: index.html is deliberately no-store (it carries
 // server-rendered meta tags), and uploaded branding/sponsor images set their
 // own policy in their handlers.
-func setStaticCacheHeaders(c *gin.Context, etag, filePath string) {
+func setStaticCacheHeaders(c *gin.Context, etag, filePath string, scoped bool) {
 	if !strings.HasPrefix(filePath, "dist/") {
 		return
 	}
 	if etag == "" {
 		return
 	}
-	c.Header("Cache-Control", staticCacheControl)
+	if scoped {
+		c.Header("Cache-Control", staticCacheControlScoped)
+	} else {
+		c.Header("Cache-Control", staticCacheControlUnscoped)
+	}
 	c.Header("ETag", etag)
 }
 
-const staticCacheControl = "no-cache"
+// assetPrefixSegmentLen is the length of a build-scoped module directory's
+// name: buildAssetETag's 16 hex characters.
+const assetPrefixSegmentLen = 16
+
+// assetPrefix is the name of the build's own module directory, /dist/<prefix>/:
+// the content hash of the compiled front-end (buildAssetETag) without its
+// quotes, "" when it could not be made.
+func assetPrefix(etag string) string {
+	return strings.Trim(etag, `"`)
+}
+
+// isAssetPrefixSegment reports whether a path segment under /dist/ has the
+// shape of a build's module directory (16 lowercase hex characters). web-mobile/dist
+// has no subdirectories of its own, so such a segment is never a real folder.
+func isAssetPrefixSegment(seg string) bool {
+	if len(seg) != assetPrefixSegmentLen {
+		return false
+	}
+	for _, r := range seg {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+const (
+	staticCacheControlScoped   = "public, max-age=31536000, immutable"
+	staticCacheControlUnscoped = "public, max-age=300"
+)

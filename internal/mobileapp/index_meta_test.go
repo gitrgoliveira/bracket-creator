@@ -139,8 +139,9 @@ func TestInjectPreviewMeta_NilStore(t *testing.T) {
 
 // bc-evts S2 a (operator decision), review 2 R7: the served page names the
 // server's build, the value X-App-Build and the SSE hello carry, so the bundle
-// knows which build it came with. /dist/ is no-cache (setStaticCacheHeaders),
-// so a reload brings the modules of the build the page names.
+// knows which build it came with. The page names its modules under the build's
+// own directory (withAssetPrefix, build_scoped_assets_test.go), so a reload
+// brings the modules of the build the page names.
 func TestInjectPreviewMeta_WritesAppBuild(t *testing.T) {
 	out := injectPreviewMeta(sampleIndexHTML, nil, "https://tora.example.org")
 	assert.Contains(t, out, `<meta name="app-build" content="`+html.EscapeString(AppBuild())+`">`)

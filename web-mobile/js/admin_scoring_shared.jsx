@@ -6,7 +6,8 @@
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA, useLayoutEffect: useLayoutEffectA } = React;
 const Icon = window.Icon;
 
-import { DAIHYOSEN_POSITION, scoreRowMatchName } from './pool_ids.jsx';
+import { DAIHYOSEN_POSITION, scoreRowMatchName, scoreRowMatchLabel } from './pool_ids.jsx';
+import { classifyStartOutcome, startFailureMessage } from './start_match.jsx';
 import {
   writeDidNotLand, writeRetryable, decisionWord,
   attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED, downstreamKnockoutReopenedNotice,
@@ -228,20 +229,26 @@ export function shownMarkIds(holder, key) {
 // DRAFT_KEPT_NOTE: what a score editor says while it keeps a draft the match
 // was started under by another device (operator decision D1 (a), 2026-10-17).
 export const DRAFT_KEPT_NOTE = "This match was started on another device. Your unsaved entries are still here: Save adds them to the match, Discard drops them.";
+// DRAFT_KEPT_REOPENED_NOTE: the same for a correction draft over a finished
+// match another device reopened (stage 5 review 3, under D1's rule).
+export const DRAFT_KEPT_REOPENED_NOTE = "This match was reopened on another device. Your unsaved entries are still here: Save adds them to the match, Discard drops them.";
 // DRAFT_DROPPED_NOTE: what it says when the match leaves running elsewhere
 // while it keeps the draft (stage 5 review 2): the draft is dropped, never
 // silently, and the editor shows the server's copy.
 export const DRAFT_DROPPED_NOTE = "This match was finished or sent back to the queue on another device. Your unsaved entries were dropped.";
 
-// useDraftKeptOnStart: the ONE owner of "another device started the match
-// while this editor held a draft" (operator decision D1 (a)). The editor
-// calls it with the status it renders, and `note(base, draft)` each render
-// with the scoring it would tap (a projection, the same shape for both: what
-// it was typed over and what it holds now). When the status goes from
-// scheduled to running and the two differ, and this editor did not start the
-// match itself (`ownStart`, called by its own Start), `held` is true until
-// `release`: the editor shows its draft and DraftKeptNotice, not the board.
-// `base` is the copy the draft was typed over, frozen when the match started,
+// useDraftKeptOnStart: the ONE owner of "another device moved the match to
+// running while this editor held a draft" (operator decision D1 (a); a
+// correction draft over a finished match another device reopened is the same
+// case, stage 5 review 3). The editor calls it with the status it renders,
+// and `note(base, draft)` each render with the scoring it would tap (a
+// projection, the same shape for both: what it was typed over and what it
+// holds now). When the status goes from scheduled or completed to running
+// and the two differ, and this editor did not make that change itself
+// (`ownStart`, called by its own Start and its own reopens), `held` is true
+// until `release`: the editor shows its draft and DraftKeptNotice (`from`
+// names the status it left, so the note says started or reopened), not the
+// board. `base` is the copy the draft was typed over, frozen at that moment,
 // so Save sends the draft's own changes and never takes away what the other
 // device scored. Judged during render (refs), so the board never shows for a
 // frame before the draft comes back.
@@ -249,38 +256,101 @@ export const DRAFT_DROPPED_NOTE = "This match was finished or sent back to the q
 // A kept draft never outlives the match leaving running elsewhere (finished,
 // or sent back to the queue): it is dropped, `dropped` counts the drops (the
 // editor resets its draft to the server's copy in an effect keyed on it), and
-// `droppedShown` holds DraftDroppedNotice up while the status stays the one
-// it was dropped at. An own Start the server refuses, or that is discarded, is
-// no own start (`ownStartFailed`): a later start by another device keeps the
-// draft as any other.
+// `droppedShown` holds DraftDroppedNotice up while the status stays the one it
+// was dropped at, until the first edit of a new draft. An own Start or reopen
+// the server refuses, or that is discarded, is no own change
+// (`ownStartFailed`): a later change by another device keeps the draft as any
+// other.
 export function useDraftKeptOnStart(status) {
-  const ref = useRefA({ prev: status, own: false, held: false, base: null, draft: null, kept: null, dropped: 0, droppedAt: null });
+  const ref = useRefA({ prev: status, own: false, held: false, base: null, draft: null, kept: null, from: null, dropped: 0, droppedAt: null, droppedReset: false });
   const [, bump] = useStateA(0);
   const st = ref.current;
   if (status !== st.prev) {
-    if (st.prev === "scheduled" && status === "running" && !st.own && st.base && st.draft
+    if ((st.prev === "scheduled" || st.prev === "completed") && status === "running" && !st.own && st.base && st.draft
       && JSON.stringify(st.base) !== JSON.stringify(st.draft)) {
       st.held = true;
       st.kept = st.base;
+      st.from = st.prev;
     }
     if (status !== "running") {
-      if (st.held) { st.dropped += 1; st.droppedAt = status; }
-      st.held = false; st.own = false; st.kept = null;
+      if (st.held) { st.dropped += 1; st.droppedAt = status; st.droppedReset = false; }
+      st.held = false; st.own = false; st.kept = null; st.from = null;
     }
     if (st.droppedAt !== null && status !== st.droppedAt) st.droppedAt = null;
     st.prev = status;
   }
   return {
     held: st.held,
-    // The copy the kept draft was typed over.
+    // The copy the kept draft was typed over, and the status it was typed at.
     base: st.kept,
+    from: st.from,
     dropped: st.dropped,
-    droppedShown: st.droppedAt !== null && status === st.droppedAt,
-    note: (base, draft) => { if (status !== "running") { st.base = base; st.draft = draft; } },
+    // Read when the note renders, after this render's `note`, so the first
+    // edit of a new draft takes it down at once.
+    get droppedShown() { return st.droppedAt !== null && status === st.droppedAt; },
+    note: (base, draft) => {
+      if (status === "running") return;
+      st.base = base;
+      st.draft = draft;
+      if (st.droppedAt === null) return;
+      // The editor's reset after a drop brings the draft back to the server's
+      // copy; an edit after that is a new draft, and the note goes.
+      const same = JSON.stringify(base) === JSON.stringify(draft);
+      if (same) st.droppedReset = true;
+      else if (st.droppedReset) st.droppedAt = null;
+    },
     ownStart: () => { st.own = true; },
     ownStartFailed: () => { st.own = false; },
-    release: () => { if (st.held) { st.held = false; st.kept = null; bump((n) => n + 1); } },
+    release: () => { if (st.held) { st.held = false; st.kept = null; st.from = null; bump((n) => n + 1); } },
   };
+}
+
+// DraftKeptNotice: the note, Save (two taps, as the editors' Finish: the
+// bounce of the arming tap cannot save) and Discard (one tap). `from` is the
+// status the match left: "completed" says it was reopened.
+export function DraftKeptNotice({ onSave, onDiscard, disabled, from }) {
+  const { armed, confirm } = useArmedConfirm();
+  return (
+    <div className="pending-write-banner" role="status" aria-live="polite" data-testid="draft-kept-notice">
+      <span>{from === "completed" ? DRAFT_KEPT_REOPENED_NOTE : DRAFT_KEPT_NOTE}</span>
+      <button type="button" className={`btn btn--sm btn--primary ${armed ? "btn--confirm" : ""}`} data-testid="draft-kept-save" disabled={disabled}
+        onClick={(ev) => { if (confirm(ev)) onSave(); }}>
+        {armed ? "Tap again to save" : "Save"}
+      </button>
+      <button type="button" className="btn btn--sm btn--ghost" data-testid="draft-kept-discard" disabled={disabled} onClick={onDiscard}>Discard</button>
+    </div>
+  );
+}
+
+// watchOwnStart: an editor's own Start the outbox holds is answered later
+// (`settled`, a callback, never a wait). A start the server refused (held as
+// superseded with its result group, refused for the clock, or turned away)
+// is handed to `onRefused` with the sentence to say (classifyStartOutcome's,
+// or the refusal's own words), and a start discarded from the held-writes
+// list with none: the editor then shows the server's status again.
+export function watchOwnStart(res, onRefused) {
+  if (!res || res.pending !== true || !res.settled) return;
+  res.settled.then((body) => {
+    if (body && body.discarded === true) { onRefused(""); return; }
+    const out = classifyStartOutcome(body);
+    if (!out.ok) onRefused(out.msg);
+  }, (e) => onRefused(startFailureMessage(e)));
+}
+
+// ownStartRefusalText: that sentence, naming the match.
+export function ownStartRefusalText(match, msg) {
+  const label = scoreRowMatchLabel(match || {});
+  return label ? `${label}: ${msg}` : msg;
+}
+
+// StartRefusedNotice: the sentence beside the board.
+export function StartRefusedNotice({ text }) {
+  if (!text) return null;
+  return (
+    <div className="pending-write-banner pending-write-banner--failed" role="alert" aria-live="assertive" data-testid="start-refused-notice">
+      <span>{text}</span>
+    </div>
+  );
 }
 
 // DraftDroppedNotice: the note a dropped draft leaves (DRAFT_DROPPED_NOTE).
@@ -288,22 +358,6 @@ export function DraftDroppedNotice() {
   return (
     <div className="pending-write-banner" role="status" aria-live="polite" data-testid="draft-dropped-notice">
       <span>{DRAFT_DROPPED_NOTE}</span>
-    </div>
-  );
-}
-
-// DraftKeptNotice: the note, Save (two taps, as the editors' Finish: the
-// bounce of the arming tap cannot save) and Discard (one tap).
-export function DraftKeptNotice({ onSave, onDiscard, disabled }) {
-  const { armed, confirm } = useArmedConfirm();
-  return (
-    <div className="pending-write-banner" role="status" aria-live="polite" data-testid="draft-kept-notice">
-      <span>{DRAFT_KEPT_NOTE}</span>
-      <button type="button" className={`btn btn--sm btn--primary ${armed ? "btn--confirm" : ""}`} data-testid="draft-kept-save" disabled={disabled}
-        onClick={(ev) => { if (confirm(ev)) onSave(); }}>
-        {armed ? "Tap again to save" : "Save"}
-      </button>
-      <button type="button" className="btn btn--sm btn--ghost" data-testid="draft-kept-discard" disabled={disabled} onClick={onDiscard}>Discard</button>
     </div>
   );
 }
@@ -1680,7 +1734,7 @@ function withdrawalInForce(m) {
 //     aware of the consequences"). What that reopened is named in `notice`;
 //     declining leaves everything as it was and says so in `err`.
 // Every other refusal is the server's sentence, shown verbatim in `err`.
-function useMatchReopen({ match, password, isComplete }) {
+function useMatchReopen({ match, password, isComplete, onOwnReopen, onOwnReopenFailed }) {
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
   const [busy, setBusy] = useStateA(false);
@@ -1787,8 +1841,12 @@ function useMatchReopen({ match, password, isComplete }) {
     setNotice("");
     confirmedRef.current = false;
     setBusy(true);
+    // The editor's own reopen: a draft it holds is not kept as if another
+    // device had reopened the match (useDraftKeptOnStart).
+    if (onOwnReopen) onOwnReopen();
     // A refusal the outbox brings back later puts the panel back as it was.
     const refused = (e) => {
+      if (onOwnReopenFailed) onOwnReopenFailed();
       if (!mountedRef.current) return false;
       setLanded(false);
       applyFailure(e, reason);
@@ -1800,6 +1858,7 @@ function useMatchReopen({ match, password, isComplete }) {
       if (!mountedRef.current) return;
       finish(res);
     } catch (e) {
+      if (onOwnReopenFailed) onOwnReopenFailed();
       if (!mountedRef.current) return;
       applyFailure(e, reason);
       setBusy(false);
@@ -1815,7 +1874,9 @@ function useMatchReopen({ match, password, isComplete }) {
     if (!c || busy || landed) return;
     setErr("");
     setBusy(true);
+    if (onOwnReopen) onOwnReopen();
     const refused = (e) => {
+      if (onOwnReopenFailed) onOwnReopenFailed();
       if (!mountedRef.current) return false;
       setLanded(false);
       applyFailure(e, c.reason);
@@ -1832,6 +1893,7 @@ function useMatchReopen({ match, password, isComplete }) {
       setConflict(null);
       finish(res);
     } catch (e) {
+      if (onOwnReopenFailed) onOwnReopenFailed();
       if (!mountedRef.current) return;
       // One atomic call, so one failure path: a DIFFERENT match that has since
       // taken the court is offered the remedy again; anything else is shown.

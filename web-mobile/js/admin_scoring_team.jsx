@@ -50,6 +50,9 @@ import {
   useDraftKeptOnStart,
   DraftKeptNotice,
   DraftDroppedNotice,
+  watchOwnStart,
+  ownStartRefusalText,
+  StartRefusedNotice,
 } from './admin_scoring_shared.jsx';
 import { teamDraftTaps } from './draft_taps.jsx';
 // bc-evts stage 5: a running team match is scored by tap events, one per
@@ -1170,7 +1173,7 @@ function useMatchLineups(compId, matchId) {
   };
 }
 
-export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, onStartLanded, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true }) {
+export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, onStartLanded, onStartRefused, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true }) {
   // mp-gmcg: a successful [× Remove this bout] shrinks the SERVER bout log, and
   // the parent may not have caught up when this render runs. matchOverride
   // shadows the prop so the removed bout disappears at once, and is cleared
@@ -1452,6 +1455,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // individual editor): it exists only so the operator sees an explanation
   // instead of a button that silently re-enables having saved nothing.
   const [writeFailed, setWriteFailed] = useStateA(null); // { reason, advice? } | null
+  // Stage 5 review 3: this editor's own Start refused when its answer comes,
+  // said beside the board (ownStartRefusalText); it goes once the match is no
+  // longer scheduled, or with the next Start. keepDraftOnFallbackRef keeps the
+  // draft the refused Start carried when the board falls back to the server's
+  // scheduled copy, which would otherwise reset it.
+  const [startRefusal, setStartRefusal] = useStateA("");
+  const keepDraftOnFallbackRef = useRefA(false);
+  useEffectA(() => { if (m.status !== "scheduled") setStartRefusal(""); }, [m.status]);
   // An explicit tap (Start match, Record bout, Finish/End) whose write was
   // only queued rather than confirmed; autosaves are left to SyncStatusPill,
   // which renders nothing once a match is finished, so without this a team
@@ -3359,7 +3370,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // remedy mandatory: a plain correction bypasses the court gate entirely, so
   // kachinuki operators, for whom reopen is the ONLY way to fix a bout log,
   // would otherwise be the one group with no way out of a busy court.
-  const reopenCtl = useMatchReopen({ match: m, password, isComplete });
+  const reopenCtl = useMatchReopen({ match: m, password, isComplete, onOwnReopen: draftKeep.ownStart, onOwnReopenFailed: draftKeep.ownStartFailed });
 
   // mp-4pc: when a daihyosen exists the encho counter belongs to that
   // sub-bout (attached per-sub in buildPatch), so suppress the top-level
@@ -4227,6 +4238,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // and stays open (operator decision 2026-09-27).
   const runRepBoutChange = ({ preSave, send, optimistic, clearsEncho, refusals, notDone }) => {
     setEditorErr("");
+    // The change puts a finished match back to running on this sheet: its own
+    // change, so no draft is kept as if another device had reopened it.
+    draftKeep.ownStart();
     // A typed representative still being named answers for the row this change moves: its
     // answer must land nothing on whatever row is then the daihyosen. Both sides' picks are
     // superseded here (the newer pick wins). Add and Remove are disabled while one is out
@@ -4395,7 +4409,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // sheet agrees with there is worked out from the pending taps (below).
       // A kept draft (D1) takes nothing either: its untouched rows stay what
       // they were typed over, so Save sends only the operator's changes.
-      if (tapMode || draftKeep.held) return;
+      // Nor does the fall back of a refused own Start: the rows the Start
+      // showed were this sheet's own draft (stage 5 review 3).
+      if (tapMode || draftKeep.held || keepDraftOnFallbackRef.current) return;
       // The previous board is read HERE, not inside the updater: a renderer
       // may run the updater a render later (React does when another adopt has
       // already queued a state change in this commit; the render tests run on
@@ -4470,6 +4486,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     if (tapModeRef.current === tapMode) return;
     tapModeRef.current = tapMode;
     if (tapMode) return;
+    // A refused own Start falls back to the server's scheduled copy with the
+    // draft it carried still on the sheet.
+    if (keepDraftOnFallbackRef.current) { keepDraftOnFallbackRef.current = false; return; }
     setSubs(serverSubs);
     setEnchoPeriodCount(initialEnchoPeriods);
     setDaihyosenHantei(recordedDaihyosenSide);
@@ -5771,7 +5790,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           {m.status === "scheduled" && isBarredMatch(m) && (
             <BarredMatchNotice match={m} password={password} />
           )}
-          {draftKeep.held && <DraftKeptNotice onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} />}
+          {draftKeep.held && <DraftKeptNotice from={draftKeep.from} onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} />}
+          <StartRefusedNotice text={startRefusal} />
           {draftKeep.droppedShown && <DraftDroppedNotice />}
           <div className="score-nav">
             {prevMatch ? (
@@ -5787,6 +5807,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   const startPatch = buildPatch("running");
                   // This sheet's own Start carries its draft: none is kept (D1).
                   draftKeep.ownStart();
+                  setStartRefusal("");
                   const res = await doSubmit(() => onSubmit(startPatch));
                   // A refused start (the court is busy, a competitor is
                   // withdrawn) stored nothing: the host reported it and
@@ -5802,13 +5823,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   // so ScoreEditorModal treats the match as running before the
                   // host's list catches up, showing the bouts the start
                   // carried (a pre-match draft rides on it).
-                  else if (typeof onStartLanded === "function") onStartLanded(startPatch);
-                  // A pending start's banner, if any, is its server answer's.
-                  if (writePending(res)) {
-                    res.settled.then((body) => {
-                      const late = mountedRef.current && notLandedBanner(body);
-                      if (late) setWriteFailed(late);
-                    }, () => {});
+                  else {
+                    if (typeof onStartLanded === "function") onStartLanded(startPatch);
+                    // Refused when its answer comes: said beside the sheet,
+                    // which falls back to the server's status with Start
+                    // offered again and the draft kept (stage 5 review 3).
+                    watchOwnStart(res, (msg) => {
+                      if (!mountedRef.current) return;
+                      keepDraftOnFallbackRef.current = true;
+                      if (typeof onStartRefused === "function") onStartRefused();
+                      draftKeep.ownStartFailed();
+                      if (msg) setStartRefusal(ownStartRefusalText(m, msg));
+                    });
                   }
                 }} disabled={submitting}>Start match</button>
               )}

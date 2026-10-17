@@ -65,6 +65,9 @@ import {
   useDraftKeptOnStart,
   DraftKeptNotice,
   DraftDroppedNotice,
+  watchOwnStart,
+  ownStartRefusalText,
+  StartRefusedNotice,
 } from './admin_scoring_shared.jsx';
 import { individualDraftTaps } from './draft_taps.jsx';
 // bc-cse: a SCHEDULED match a competitor is barred from must never offer a
@@ -302,6 +305,14 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // 4xx on retry): the write never landed, so we must show an explicit "not
   // saved" failure state rather than let the pending banner clear to "saved".
   const [writeFailed, setWriteFailed] = useStateA(null); // { reason, advice? } | null
+  // Stage 5 review 3: this editor's own Start refused when its answer comes,
+  // said beside the board (ownStartRefusalText); it goes once the match is no
+  // longer scheduled, or with the next Start. keepDraftOnFallbackRef keeps the
+  // draft the refused Start carried when the board falls back to the server's
+  // scheduled copy, which would otherwise reset it.
+  const [startRefusal, setStartRefusal] = useStateA("");
+  const keepDraftOnFallbackRef = useRefA(false);
+  useEffectA(() => { if (m.status !== "scheduled") setStartRefusal(""); }, [m.status]);
   // Naginata competitions add an extra "S" (Sune) ippon button.
   // Fetched from the competition config on open.
   const [isNaginata, setIsNaginata] = useStateA(false);
@@ -446,7 +457,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // reopened. Called unconditionally (rules of hooks: the team and engi
   // dispatch below returns after every hook).
   const recordedWithdrawal = withdrawalInForce(m);
-  const reopenCtl = useMatchReopen({ match: m, password, isComplete });
+  const reopenCtl = useMatchReopen({ match: m, password, isComplete, onOwnReopen: draftKeep.ownStart, onOwnReopenFailed: draftKeep.ownStartFailed });
   // While that withdrawal is in force, the WINNER's side holds the default-win
   // maru, which is the ruling itself: Save correction keeps it whatever is
   // sent (engine keptWithdrawalScoreline) and only the withdrawing side's
@@ -1027,7 +1038,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   useEffectA(() => {
     if (tapModeRef.current === tapMode) return;
     tapModeRef.current = tapMode;
-    if (!tapMode) applyServerScore();
+    if (tapMode) return;
+    // A refused own Start falls back to the server's scheduled copy with the
+    // draft it carried still on the board.
+    if (keepDraftOnFallbackRef.current) { keepDraftOnFallbackRef.current = false; return; }
+    applyServerScore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tapMode]);
   // Operator S1 a: a display of this court on the SAME device (another tab,
@@ -1195,7 +1210,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   }
   // Team routing: forward to TeamScoreEditorModal.
   if (isTeam) {
-    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} onAfterDecision={onAfterDecision} onStartLanded={(patch) => setStartedFrom({ at: match.modifiedAt, ...(patch ? { fields: startedTeamScore(patch) } : {}) })} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} teamMembers={teamMembers} variant={variant} canClose={canClose} />;
+    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} onAfterDecision={onAfterDecision} onStartLanded={(patch) => setStartedFrom({ at: match.modifiedAt, ...(patch ? { fields: startedTeamScore(patch) } : {}) })} onStartRefused={() => setStartedFrom(null)} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} teamMembers={teamMembers} variant={variant} canClose={canClose} />;
   }
 
   // a11y: label the dialog with the match/court context so screen readers
@@ -1642,7 +1657,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           {m.status === "scheduled" && isBarredMatch(m) && (
             <BarredMatchNotice match={m} password={password} />
           )}
-          {draftKeep.held && <DraftKeptNotice onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} />}
+          {draftKeep.held && <DraftKeptNotice from={draftKeep.from} onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} />}
+          <StartRefusedNotice text={startRefusal} />
           {draftKeep.droppedShown && <DraftDroppedNotice />}
           {/* While the correction prompt is open it owns the only Cancel/commit
               row: hide the footer's own nav+actions so the operator never sees
@@ -1667,6 +1683,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   const startPatch = buildPatch("running");
                   // This editor's own Start carries its draft: none is kept (D1).
                   draftKeep.ownStart();
+                  setStartRefusal("");
                   const res = await doSubmit(() => onSubmit(startPatch));
                   // A refused start (the court is busy, a competitor is
                   // withdrawn) stored nothing: the host reported it and
@@ -1678,7 +1695,19 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   // lives in notLandedBanner; see write_result.jsx.
                   const banner = notLandedBanner(res);
                   if (banner) { setWriteFailed(banner); draftKeep.ownStartFailed(); }
-                  else setStartedFrom({ at: match.modifiedAt, fields: startedScore(startPatch) });
+                  else {
+                    setStartedFrom({ at: match.modifiedAt, fields: startedScore(startPatch) });
+                    // Refused when its answer comes: said beside the board,
+                    // which falls back to the server's status with Start
+                    // offered again and the draft kept (stage 5 review 3).
+                    watchOwnStart(res, (msg) => {
+                      if (!mountedRef.current) return;
+                      keepDraftOnFallbackRef.current = true;
+                      setStartedFrom(null);
+                      draftKeep.ownStartFailed();
+                      if (msg) setStartRefusal(ownStartRefusalText(m, msg));
+                    });
+                  }
                 }} disabled={submitting}>
                   Start match
                 </button>

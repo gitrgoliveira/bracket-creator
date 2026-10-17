@@ -1358,6 +1358,12 @@ function _heldBy(base) {
     return key;
 }
 
+// _isFollowed: whether some queued entry names `key` in its `after`.
+function _isFollowed(key) {
+    for (const e of _writeQueue.values()) if (_afterKeys(e).includes(key)) return true;
+    return false;
+}
+
 // _coalesceTarget: the one entry a new write may take the place of, or null
 // when it is appended as an entry of its own. A SCORE write coalesces only
 // into its match's LAST entry, only when that entry is a score write too (the
@@ -1375,8 +1381,15 @@ function _coalesceTarget(base, descriptor) {
     const list = _entriesFor(base);
     const last = list.length ? list[list.length - 1] : null;
     if (!last) return null;
-    const [, prev] = last;
+    const [lastKey, prev] = last;
     if (!prev) return null;
+    // Never an entry another queued write follows (`after`: a send back
+    // follows the blocker's last write, stage 3 review 5, H1). A write taking
+    // its place would carry everything the new write follows, the send back
+    // itself among them (_heldBy), and the two would wait on each other for
+    // good; and what follows the entry would then also wait on a write made
+    // after it. The new write is queued behind it instead, in order.
+    if (_isFollowed(lastKey)) return null;
     // A lineup save joins a queued save of the SAME lineup (team, and match or
     // round) when it is the base's last entry: a match's base holds both
     // teams' lineups and the match's other writes, and a save never moves
@@ -1650,7 +1663,15 @@ function _hasServerErroringQueued() {
 // (API.discardFailingHeldWrites).
 function _keepsFailing(d) {
     // A parked batch of taps the server refused (400) can only go by an
-    // operator's discard, so it reads as failing at once.
+    // operator's discard, so it reads as failing at once; so does an entry on
+    // a wait cycle (`cycled`, _markWaitCycles), which nothing else can free.
+    return _refusedByServer(d) || (!!d && !!d.cycled);
+}
+
+// _refusedByServer: the entry is held because the SERVER keeps refusing it
+// (a parked tap batch, or past the notice threshold), not because of what
+// it waits on.
+function _refusedByServer(d) {
     return !!d && (!!d.parked || (Number(d.attempts) || 0) >= SERVER_REJECTION_NOTICE_THRESHOLD);
 }
 
@@ -1666,6 +1687,8 @@ function _heldWriteItem(key, d) {
         authBlocked: !!d.authBlocked,
         held: !!d.held,
         ...(d.parked ? { parked: true } : {}),
+        // On a wait cycle (H1): stuck, but not because the server refuses it.
+        ...(d.cycled ? { cycled: true } : {}),
         ...(d.kind === 'lineup' && d.payload
             ? { teamId: d.payload.teamId || '', round: d.payload.round } : {}),
     };
@@ -1957,6 +1980,8 @@ async function _flushQueue() {
                 if (!byBase.has(base)) byBase.set(base, []);
                 byBase.get(base).push(entry);
             }
+            // Entries that wait on each other are stuck, not waiting (H1).
+            _markWaitCycles(byBase);
             for (const [base, list] of byBase) {
                 // If clearQueue() ran during a prior await (logout / password_reset →
                 // credential revocation), abort before sending anything else with the
@@ -2047,9 +2072,10 @@ async function _flushBase(base, list, pass, gen) {
         // entry the server keeps refusing (a member add stuck on a 5xx, a
         // parked write) is held too (stage 3 review 3, F6), so this match's
         // editor shows that something it depends on is not getting through.
+        // So is one on a wait cycle (H1, _markWaitCycles), which nothing frees.
         const waitsOn = _afterKeys(d).filter((k) => _writeQueue.has(k));
         if (waitsOn.length > 0) {
-            outcome = waitsOn.some(_blockedByHeld) ? 'kept' : 'after';
+            outcome = d.cycled || waitsOn.some(_blockedByHeld) ? 'kept' : 'after';
             break;
         }
         if (d.kind === 'evt') {
@@ -2094,7 +2120,57 @@ function _blockedByHeld(key) {
 // connection: the server refused it (a 5xx, 429 or 403: `attempts`, once a pass
 // has held it), parked, or waiting on a password.
 function _isStuckEntry(d) {
-    return !!d && (!!d.parked || !!d.authBlocked || (!!d.held && (Number(d.attempts) || 0) > 0));
+    return !!d && (!!d.parked || !!d.authBlocked || !!d.cycled || (!!d.held && (Number(d.attempts) || 0) > 0));
+}
+
+// _markWaitCycles: marks `cycled` every entry on a wait cycle, and clears it
+// on every other (stage 3 review 5, H1). An entry waits on what it names in
+// `after` and on the entry before it in its own base (strict order), so a
+// cycle of any length, across any number of matches, is entries none of which
+// can ever be sent: nothing the server answers frees one. Such an entry reads
+// as stuck (_isStuckEntry, _keepsFailing), so its match's banner names it
+// and an operator's Discard breaks the cycle; the coalescing rule never makes
+// one (_coalesceTarget), but a queue an earlier build stored can hold one.
+// `byBase` is the pass's grouping, each base in replay order. Strongly
+// connected components (Tarjan); returns whether any flag moved.
+function _markWaitCycles(byBase) {
+    const prev = new Map();
+    for (const list of byBase.values()) {
+        for (let i = 1; i < list.length; i++) prev.set(list[i][0], list[i - 1][0]);
+    }
+    const next = (k) => {
+        const out = _afterKeys(_writeQueue.get(k)).filter((a) => _writeQueue.has(a));
+        if (prev.has(k)) out.push(prev.get(k));
+        return out;
+    };
+    const onCycle = new Set();
+    const order = new Map();
+    const low = new Map();
+    const stack = [];
+    const onStack = new Set();
+    let n = 0;
+    const strong = (v) => {
+        order.set(v, n); low.set(v, n); n++;
+        stack.push(v); onStack.add(v);
+        const out = next(v);
+        for (const w of out) {
+            if (!order.has(w)) { strong(w); low.set(v, Math.min(low.get(v), low.get(w))); }
+            else if (onStack.has(w)) low.set(v, Math.min(low.get(v), order.get(w)));
+        }
+        if (low.get(v) !== order.get(v)) return;
+        const component = [];
+        let w;
+        do { w = stack.pop(); onStack.delete(w); component.push(w); } while (w !== v);
+        if (component.length > 1 || out.includes(v)) component.forEach((k) => onCycle.add(k));
+    };
+    for (const k of _writeQueue.keys()) if (!order.has(k)) strong(k);
+    let changed = false;
+    for (const [k, d] of _writeQueue) {
+        if (!d) continue;
+        if (onCycle.has(k) && !d.cycled) { d.cycled = true; changed = true; }
+        else if (!onCycle.has(k) && d.cycled) { delete d.cycled; changed = true; }
+    }
+    return changed;
 }
 
 // _afterKeys: the queue keys an entry follows (`after`): one key, stored as a
@@ -2124,7 +2200,7 @@ function _blockerOf(key, stuck, seen = new Set()) {
     seen.add(key);
     const d = _writeQueue.get(key);
     if (!d) return '';
-    if (stuck(d)) return key;
+    if (stuck(d, key)) return key;
     for (const [k] of _entriesFor(_baseOf(key))) {
         if (k === key) break;
         const found = _blockerOf(k, stuck, seen);
@@ -5107,10 +5183,16 @@ const API = {
     heldWriteBlocker(compID, matchID) {
         const base = _revKey(compID, matchID);
         const own = _entriesFor(base);
-        if (own.some(([, d]) => _keepsFailing(d))) return null;
+        // The match's own write is the one the server keeps refusing: that
+        // is what the banner says, and what its Discard discards.
+        if (own.some(([, d]) => _refusedByServer(d))) return null;
+        // Otherwise the first write of ANOTHER base it waits on that keeps
+        // failing, walked through its own entries (one of them on a wait
+        // cycle, H1, is passed through to the write of the other match on it).
+        const stuck = (d, key) => _baseOf(key) !== base && _keepsFailing(d);
         for (const [key] of own) {
-            const found = _blockerOf(key, _keepsFailing);
-            if (found && _baseOf(found) !== base) return _heldWriteItem(found, _writeQueue.get(found));
+            const found = _blockerOf(key, stuck);
+            if (found) return _heldWriteItem(found, _writeQueue.get(found));
         }
         return null;
     },

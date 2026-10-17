@@ -209,3 +209,113 @@ describe('the match names the write it waits on (G2)', () => {
         expect(API.heldWriteBlocker('c1', 'm1')).toBe(null);
     });
 });
+
+
+// stage 3 review 5, H1: two entries waiting on each other are sent by nobody.
+// The wait graph: an entry waits on what it names in `after` and on the entry
+// before it in its own base (strict per-match order).
+function waitCycle(queue) {
+    const byKey = new Map(queue);
+    const base = (k) => k.split('\u001f')[0];
+    const order = new Map();
+    for (const [k, d] of queue) {
+        const b = base(k);
+        if (!order.has(b)) order.set(b, []);
+        order.get(b).push([k, d]);
+    }
+    const prev = new Map();
+    for (const list of order.values()) {
+        list.sort(([, a], [, b]) => (a.payload?.modifiedAt || a.sortStamp || 0) - (b.payload?.modifiedAt || b.sortStamp || 0)
+            || (a.enqueuedAt || 0) - (b.enqueuedAt || 0));
+        list.forEach(([k], i) => { if (i > 0) prev.set(k, list[i - 1][0]); });
+    }
+    const edges = (k) => {
+        const d = byKey.get(k);
+        const after = Array.isArray(d.after) ? d.after : (d.after ? [d.after] : []);
+        return [...after.filter((a) => byKey.has(a)), ...(prev.has(k) ? [prev.get(k)] : [])];
+    };
+    const state = new Map();
+    const visit = (k) => {
+        if (state.get(k) === 1) return true;
+        if (state.get(k) === 2) return false;
+        state.set(k, 1);
+        for (const n of edges(k)) if (visit(n)) return true;
+        state.set(k, 2);
+        return false;
+    };
+    return queue.some(([k]) => visit(k));
+}
+
+describe('no two entries ever wait on each other (H1)', () => {
+    const running = (ippons) => ({ status: 'running', ipponsA: ippons, ipponsB: [], changed: ['points'] });
+    const quiet = (r) => { if (r && r.settled) r.settled.catch(() => {}); return r; };
+
+    it('a running write of the blocker made after a send back is its own entry, sent after it', async () => {
+        quiet(await API.recordScore('c1', 'blk', running(['M']), 'pw', { id: 'blk', modifiedAt: 0 }));
+        await flushMicrotasks();
+        quiet(await API.requeueBlockerAndReopen('c1', 'tgt', 'c1', 'blk', 'pw', {}));
+        await tick(5);
+        quiet(await API.recordScore('c1', 'blk', running(['M', 'K']), 'pw', { id: 'blk', modifiedAt: 0 }));
+        await flushMicrotasks();
+        const q = stored();
+        expect(waitCycle(q), 'no entry waits on one that waits on it').toBe(false);
+        expect(q, 'the later running write does not take the place of one the send back follows').toHaveLength(3);
+
+        const sent = server(() => answer(200, { applied: true }));
+        for (let i = 0; i < 6 && stored().length > 0; i++) await reconnect();
+        expect(sent.map((r) => r.url), 'strictly in the order they were made').toEqual([
+            '/api/competitions/c1/matches/blk/score',
+            '/api/competitions/c1/matches/tgt/requeue-blocker-and-reopen',
+            '/api/competitions/c1/matches/blk/score',
+        ]);
+        expect(sent[2].body.ipponsA).toEqual(['M', 'K']);
+        expect(stored()).toEqual([]);
+    });
+});
+
+describe('a queue whose entries wait on each other is stuck, and says so (H1)', () => {
+    // A queue an earlier build stored with a cycle in it: A follows B, B
+    // follows C, C follows A. Nothing of it can ever be sent on its own.
+    async function storedCycle() {
+        for (const m of ['ma', 'mb', 'mc']) {
+            const r = await API.recordScore('c1', m, { status: 'running', ipponsA: ['M'], ipponsB: [], changed: ['points'] }, 'pw', { id: m, modifiedAt: 0 });
+            r.settled.catch(() => {});
+        }
+        await flushMicrotasks();
+        const q = stored();
+        const key = (m) => q.find(([k]) => k.startsWith(`c1:${m}\u001f`))[0];
+        for (const [k, d] of q) {
+            if (k === key('ma')) d.after = key('mb');
+            if (k === key('mb')) d.after = key('mc');
+            if (k === key('mc')) d.after = key('ma');
+        }
+        API.clearQueue();
+        _lsStore.bc_write_queue_v2 = JSON.stringify(q);
+        // The page is loaded again over what was stored.
+        await load();
+        await flushMicrotasks();
+        return key;
+    }
+
+    it('reads as stuck after a reload, names the write it waits on, and goes once that is discarded', async () => {
+        const key = await storedCycle();
+        const sent = server(() => answer(200, { applied: true }));
+        await reconnect();
+        await reconnect();
+        expect(sent.filter((r) => r.url.includes('/matches/')), 'nothing of the cycle can go').toEqual([]);
+        expect(API.hasHeldWrite('c1', 'ma'), 'held, so the editor shows its banner').toBe(true);
+        expect(API.heldWriteKeepsFailing('c1', 'ma'), 'stuck, so the editor offers Discard').toBe(true);
+        const blocker = API.heldWriteBlocker('c1', 'ma');
+        expect(blocker, 'the match names the write it waits on').toMatchObject({ key: key('mb'), matchID: 'mb' });
+        expect(API.heldWrites().some((h) => h.matchID === 'mb' && h.keepsFailing), 'the list offers it too').toBe(true);
+
+        expect(API.discardHeldWrite(blocker.key)).toBeTruthy();
+        for (let i = 0; i < 6 && stored().length > 0; i++) await reconnect();
+        expect(sent.filter((r) => r.url.includes('/matches/')).map((r) => r.url), 'the rest go, in order').toEqual([
+            '/api/competitions/c1/matches/ma/score',
+            '/api/competitions/c1/matches/mc/score',
+        ]);
+        expect(API.heldWriteKeepsFailing('c1', 'ma')).toBe(false);
+        expect(stored()).toEqual([]);
+    });
+});

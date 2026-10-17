@@ -947,6 +947,13 @@ const _mintedOutHere = new Set();
 const _mintedReadPw = new Map();
 let _mintedTimer = null;
 let _mintedTimerAt = 0;
+// Y4 (stage 3 review 11): the ids whose read the server refused for its
+// password (401/403), parked until the next sign-in (resumeAfterAuth), never
+// counted toward the re-read bound nor asked again with that password; and
+// whether a revoked password has paused every read (parkQueueForReauth).
+const _mintedAuthParked = new Set();
+let _mintedPaused = false;
+const MINTED_READ_AUTH_REFUSED = Symbol('minted read refused for its password');
 
 // The member ids this tab has said are gone (_announceDroppedMember): one
 // `team-member-dropped` per id, whether this tab proved it or heard of it from
@@ -3966,13 +3973,14 @@ function _announceUnsentMemberChange(d) {
 // member never was; a later one is timed (_rerunFlushAt).
 function _mintedSweep(d = null) {
     if (d && mintedAddId(d)) _mintedReadPw.set(mintedAddId(d), d.password || '');
-    if (_mintedReadPw.size === 0) return;
+    // A revoked password parks every read until the new sign-in (Y4).
+    if (_mintedPaused || _mintedReadPw.size === 0) return;
     // Deleting while iterating a Map is safe: each key is visited once.
     for (const id of _mintedReadPw.keys()) {
         const r = _minted.recordOf(id);
         if (!r || r.s === 'dropped' || r.s === 'kept') _mintedReadPw.delete(id);
     }
-    const due = _minted.due([..._mintedReadPw.keys()], _mintedCtx());
+    const due = _minted.due([..._mintedReadPw.keys()].filter((id) => !_mintedAuthParked.has(id)), _mintedCtx());
     for (const r of due.reads) _readMintedMembers(r, _mintedReadPw.get(r.id));
     if (due.until) _rerunFlushAt(due.until);
 }
@@ -3991,7 +3999,12 @@ function _mintedAddQueued(id) {
 
 // _mintedCtx: what this tab tells the owner of the queue it holds.
 function _mintedCtx() {
-    return { addQueued: _mintedAddQueued, addOutHere: (id) => _mintedOutHere.has(id), teamOf: _teamIdOf };
+    return {
+        addQueued: _mintedAddQueued, addOutHere: (id) => _mintedOutHere.has(id), teamOf: _teamIdOf,
+        // A read the server refused for its password, parked until the next
+        // sign-in (Y4): the writes go as made meanwhile, as after a failed read.
+        readParked: (id) => _mintedAuthParked.has(id),
+    };
 }
 
 // _mintedGate: what the owner says of the write `d` (queued under `key`)
@@ -4041,7 +4054,9 @@ function _rerunFlushAt(at) {
 // read refused (a stale organiser password's 401 included) or failed proves
 // nothing: the owner keeps the id unknown, and the writes go as they were made.
 function _readMintedMembers({ id, c, t }, password) {
-    if (_mintedReads.has(id)) return;
+    // A read refused for its password waits for a new sign-in, as does every
+    // read while a revoked password is parked (Y4, stage 3 review 11).
+    if (_mintedReads.has(id) || _mintedPaused || _mintedAuthParked.has(id)) return;
     _mintedReads.add(id);
     // This tab asked, so it asks again if the read fails (_mintedSweep),
     // however the member came to it (an add taken from another tab's queue).
@@ -4049,6 +4064,8 @@ function _readMintedMembers({ id, c, t }, password) {
     const gen = _queueGen;
     const url = password ? `/api/competitions/${c}/team-members` : `/api/viewer/competitions/${c}`;
     _fetchJson(url, { headers: { 'X-Tournament-Password': password || '' } }).then(({ res, body }) => {
+        // Refused for the password (a stale organiser sign-in): no failed try.
+        if (res.status === 401 || res.status === 403) return MINTED_READ_AUTH_REFUSED;
         const teams = res.ok && body && body.teamMembers;
         if (!teams || typeof teams !== 'object') throw new Error(`no member list (HTTP ${res.status})`);
         return Array.isArray(teams[t]) ? teams[t] : [];
@@ -4058,6 +4075,13 @@ function _readMintedMembers({ id, c, t }, password) {
     }).then((list) => {
         // A logout's wipe since: nothing of this read is kept.
         if (gen !== _queueGen) return;
+        if (list === MINTED_READ_AUTH_REFUSED) {
+            // Not counted toward the re-read bound, and not asked again with
+            // the password the server refused: parked until resumeAfterAuth.
+            console.warn(`[sync] the server refused this device's password for team ${t}'s members; asked again after the next sign-in`);
+            _mintedAuthParked.add(id);
+            return;
+        }
         if (_minted.readEnded(id, list, _mintedCtx()) === 'dropped') _learnDropped([{ id, c, t }]);
         // A read that failed is asked again later (backed off, bounded by the
         // owner): the timer for it is set here, whether or not a write names
@@ -5914,8 +5938,15 @@ const API = {
         // the server may have refused since: an organiser's reads take the new
         // one (a self-run participant's carries none and stays so), and one the
         // refusal left unread is asked for at its time (N5).
+        // A new sign-in asks again every read this tab owes, whatever the
+        // earlier tries (Y4, stage 3 review 11): the ones refused for the old
+        // password were parked, and failures counted under it may have been
+        // its own, so the bound starts again.
+        _mintedPaused = false;
         if (password) {
             for (const [id, pw] of _mintedReadPw) if (pw) _mintedReadPw.set(id, password);
+            _mintedAuthParked.clear();
+            _minted.readsResumed([..._mintedReadPw.keys()]);
             _mintedSweep();
         }
         if (resumed > 0) {
@@ -5958,6 +5989,10 @@ const API = {
             parked++;
         }
         if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
+        // The members reads too: none goes with the revoked password until
+        // the new sign-in (Y4).
+        _mintedPaused = true;
+        if (_mintedTimer !== null) { clearTimeout(_mintedTimer); _mintedTimer = null; }
         _flushAttempt = 0;
         _offlineFlag = false;
         // Every stored entry too, whether or not this tab holds any.
@@ -6002,6 +6037,8 @@ const API = {
         // What is known of the minted members goes with the queue it is for.
         _minted.clear();
         _mintedReadPw.clear();
+        _mintedAuthParked.clear();
+        _mintedPaused = false;
         if (_mintedTimer !== null) { clearTimeout(_mintedTimer); _mintedTimer = null; }
         // The copies score-events answers handed back go with the session
         // they were answered to (X4).

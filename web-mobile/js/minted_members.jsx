@@ -223,6 +223,10 @@ export function createMintedMembers({ storage, now = () => Date.now(), timeoutMs
             return { kind: 'wait', until: r.tab === tab ? 0 : outEndsAt(r) };
         }
         if (ctx.addQueued(id)) return { kind: 'wait', until: 0 };
+        // A read the server refused for its password waits for the next
+        // sign-in (ctx.readParked, stage 3 review 11, Y4): no read is due, and
+        // the writes go as they were made, as between failed reads.
+        if (ctx.readParked && ctx.readParked(id)) return { kind: 'go' };
         if (r.rf) {
             const failed = Number(r.rn) || 1;
             if (failed > MINTED_REREAD_TRIES) return { kind: 'go' };
@@ -353,8 +357,24 @@ export function createMintedMembers({ storage, now = () => Date.now(), timeoutMs
             return result;
         },
 
+        // readsResumed: a new sign-in (resumeAfterAuth). The failed reads of
+        // `ids` counted under the password it replaces start again: their
+        // count and the time of the last one are forgotten, so each is asked
+        // at once and the bound counts afresh (stage 3 review 11, Y4).
+        readsResumed(ids) {
+            for (const id of ids) {
+                change(id, (r) => {
+                    if (!r || (!r.rf && !r.rn)) return undefined;
+                    const { rf: _rf, rn: _rn, ...rest } = r;
+                    return rest;
+                });
+            }
+        },
+
         // gate: what the write `d` must do now about the ids it names.
         //   ctx.addQueued(id): this tab or storage still holds the add.
+        //   ctx.readParked(id): this tab's read of it was refused for its
+        //   password and waits for the next sign-in (optional).
         //   ctx.addOutHere(id): this tab's request for the add is out.
         //   ctx.teamOf(d): the team a write names, '' for one that names none.
         // Answers {wait, until, reads: [{id, c, t}], strip: [id], leave}.

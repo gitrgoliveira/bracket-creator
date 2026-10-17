@@ -359,7 +359,10 @@ describe('asking what holds a match back reads the queue once (H2)', () => {
             sort.mockRestore();
         }
         expect(once, 'the one question the editors ask reads it once').toBeLessThanOrEqual(2);
-    });
+    // Its own timeout (stage 3 review 11, Y6): building and storing a queue of
+    // 640 taps takes 5 to 9 s on a loaded machine, past vitest's 5 s default.
+    // The bound under test is the count of sorts, which does not depend on it.
+    }, 30000);
 });
 
 describe('a tap naming a member this device minted follows its add (H4)', () => {

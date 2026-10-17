@@ -189,6 +189,9 @@ export function tapNotAppliedText(o) {
         case 'noTarget': return "Not applied: the mark it takes off is no longer there, so it was kept in the match's history.";
         case 'notAllowed': return "Not applied: this match does not take that change, so it was kept in the match's history.";
         case 'notStarted': return 'Not applied: the match is not running. Start it to score it.';
+        // Refused again after its one re-stamp (stage 3 review 11, Y3): the
+        // device clock, which nothing recorded can fix, so it is said.
+        case 'clock_skew': return `Not applied: ${CLOCK_SKEW_REASON_TEXT}. Nothing was recorded, so make that change again.`;
         default: return 'Not applied: the server refused it.';
     }
 }

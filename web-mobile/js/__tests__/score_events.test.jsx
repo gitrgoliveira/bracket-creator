@@ -11,9 +11,10 @@ import {
   IPPON_ADD, IPPON_REMOVE, FOUL_ADD, FOUL_REMOVE, ENCHO_ADD, ENCHO_REMOVE, FLAG_ADD, FLAG_REMOVE,
   BOUT_DECISION, REP_PICK, POOL_REP, SIDE_A, SIDE_B,
   APPLIED, RECORDED, DUPLICATE, CAPPED, NO_TARGET, NOT_ALLOWED, MATCH_CLOSED, NOT_STARTED,
-  CLOCK_SKEW, QUIET_OUTCOMES, MAX_FLAGS,
+  CLOCK_SKEW, BEFORE_BASELINE, REFUSED, MAX_FLAGS,
   makeEvent, markID, assignMarks, foldEvent, applyPending,
 } from '../score_events.jsx';
+import { tapOutcomeQuiet, tapNotAppliedText } from '../write_result.jsx';
 
 let n = 0;
 const ev = (fields) => ({ ...makeEvent(fields), id: fields.id || `e${++n}`, stamp: fields.stamp || 100 + n });
@@ -39,8 +40,22 @@ describe('score events: constants and makeEvent', () => {
       .toEqual(['ippon.add', 'ippon.remove', 'foul.add', 'foul.remove', 'encho.add', 'encho.remove', 'flag.add', 'flag.remove']);
     expect([SIDE_A, SIDE_B]).toEqual(['a', 'b']);
     expect([CLOCK_SKEW, NOT_STARTED, MATCH_CLOSED]).toEqual(['clock_skew', 'notStarted', 'matchClosed']);
-    expect([...QUIET_OUTCOMES].sort()).toEqual([APPLIED, DUPLICATE, RECORDED].sort());
     expect(MAX_FLAGS).toBe(5);
+  });
+
+  // Y2 (stage 3 review 11): which outcomes need no word has ONE owner,
+  // write_result.jsx's tapOutcomeQuiet, pinned here against the codes.
+  it('the quiet outcomes are exactly applied, recorded and duplicate', () => {
+    const all = [APPLIED, RECORDED, DUPLICATE, CAPPED, BEFORE_BASELINE, MATCH_CLOSED, NO_TARGET, NOT_ALLOWED, NOT_STARTED, REFUSED, CLOCK_SKEW];
+    expect(all.filter((outcome) => tapOutcomeQuiet({ outcome })).sort()).toEqual([APPLIED, DUPLICATE, RECORDED].sort());
+  });
+
+  // Y3: a tap still refused for the device clock after its one re-stamp says
+  // it was the clock, not a bare refusal.
+  it('a clock_skew refusal names the device clock', () => {
+    const text = tapNotAppliedText({ outcome: CLOCK_SKEW });
+    expect(text).toMatch(/clock/i);
+    expect(text).not.toBe('Not applied: the server refused it.');
   });
 
   it('makeEvent keeps only the fields given, with pos 0 by default, and no id or stamp', () => {

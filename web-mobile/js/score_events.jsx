@@ -39,9 +39,6 @@ export const DAIHYOSEN_VERDICT = 'daihyosen.verdict';
 export const SIDE_A = 'a';
 export const SIDE_B = 'b';
 
-// The representative bout's position (domain.DaihyosenBoutPos).
-export const DAIHYOSEN_POS = -1;
-
 // The outcomes the replay gives a LOGGED event (they may change on a later
 // replay) ...
 export const APPLIED = 'applied';
@@ -58,9 +55,8 @@ export const NOT_ALLOWED = 'notAllowed';
 export const NOT_STARTED = 'notStarted';
 export const REFUSED = 'refused';
 export const CLOCK_SKEW = 'clock_skew';
-
-// The outcomes that need no word to the operator: the tap is in the match.
-export const QUIET_OUTCOMES = new Set([APPLIED, RECORDED, DUPLICATE]);
+// Which of them need no word to the operator has ONE owner, write_result.jsx
+// (tapOutcomeQuiet), which every reader asks (stage 3 review 11, Y2).
 
 // domain.MaxEngiFlags and domain.MaxIpponsPerSide.
 export const MAX_FLAGS = 5;

@@ -144,6 +144,10 @@ func RegisterEligibilityHandlers(r *gin.RouterGroup, store CompetitorStatusStore
 // a competitor who was withdrawn via kiken-injury (FIK Art. 30).
 // Voluntary kiken (Art. 31) and fusenpai statuses are not reinstateable.
 func RegisterReinstateHandler(r *gin.RouterGroup, eng EligibilityEngine, hub Broadcaster) {
+	// A reinstatement is ordered by arrival: one given up on at the deadline
+	// can land after the withdrawal recorded since, and would lift it. A late
+	// duplicate of one already applied is answered as recorded (writeOnce, Z3).
+	once := newWriteOnce()
 	r.POST("/competitions/:id/competitors/:pid/reinstate", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -154,15 +158,37 @@ func RegisterReinstateHandler(r *gin.RouterGroup, eng EligibilityEngine, hub Bro
 			c.JSON(http.StatusBadRequest, gin.H{"error": "playerId is required"})
 			return
 		}
+		// The optional {writeId} body, as the other doors ordered by arrival.
+		tag, ok := bindOptionalWriteTag(c)
+		if !ok {
+			return
+		}
 
-		status, err := eng.ReinstateCompetitor(id, pid)
-		if err != nil {
-			var engValErr *engine.ValidationError
-			if errors.As(err, &engValErr) {
-				c.JSON(http.StatusConflict, gin.H{"error": engValErr.Error()})
-				return
+		var status *domain.CompetitorStatus
+		applied := false
+		ran := once.do("reinstate\x1f"+id+"\x1f"+pid, tag.WriteID, func() bool {
+			var err error
+			status, err = eng.ReinstateCompetitor(id, pid)
+			if err != nil {
+				var engValErr *engine.ValidationError
+				if errors.As(err, &engValErr) {
+					c.JSON(http.StatusConflict, gin.H{"error": engValErr.Error()})
+					return false
+				}
+				internalError(c, err)
+				return false
 			}
-			internalError(c, err)
+			applied = true
+			return true
+		})
+		if !ran {
+			// A late duplicate: the competitor is not reinstated again and
+			// nothing is announced. The status they hold now is the
+			// announcements' to say, so the answer names the competitor only.
+			c.JSON(http.StatusOK, gin.H{"playerId": pid})
+			return
+		}
+		if !applied {
 			return
 		}
 

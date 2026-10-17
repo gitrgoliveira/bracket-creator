@@ -738,6 +738,11 @@ func migrateMissingNumberPrefixes(store *state.Store, eng *engine.Engine, comps 
 }
 
 func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub) {
+	// A chusen's order and a reset of the overrides are ordered by arrival: a
+	// request the outbox gave up on can land after its resend and after the
+	// next write, so a late duplicate of one already applied is answered as
+	// recorded (writeOnce, Z3).
+	poolRanksOnce := newWriteOnce()
 	r.GET("/competitions", func(c *gin.Context) {
 		comps, err := loadAllCompetitions(store)
 		if err != nil {
@@ -2719,8 +2724,15 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// and confirming reopens that match with the new qualifier seated
 			// (engine.OverridePoolRanks). Never past downstream_knockout_running.
 			ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
+			// WriteID is the client's id for the write (Z3): one already
+			// applied is answered as recorded, never applied again.
+			WriteID string `json:"writeId,omitempty"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := validWriteID(req.WriteID); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -2802,18 +2814,33 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// correction does: the same 409s, the same confirmation, the same
 		// reopen (engine.OverridePoolRanks), once, for the whole group.
 		var reopened []engine.ReopenedMatch
-		changed, err := eng.OverridePoolRanks(id, poolId, ranks, engine.ForceOptions{
-			Force:    req.ForceDownstreamReopen,
-			Reopened: &reopened,
-		})
-		if err != nil {
-			switch {
-			case respondIfDownstreamKnockoutRunning(c, err):
-			case respondIfDownstreamKnockoutPlayed(c, err):
-			case respondIfEngineWriteError(c, err):
-			default:
-				internalError(c, err)
+		var changed, applied bool
+		ran := poolRanksOnce.do(poolRanksTarget(id), req.WriteID, func() bool {
+			var err error
+			changed, err = eng.OverridePoolRanks(id, poolId, ranks, engine.ForceOptions{
+				Force:    req.ForceDownstreamReopen,
+				Reopened: &reopened,
+			})
+			if err != nil {
+				switch {
+				case respondIfDownstreamKnockoutRunning(c, err):
+				case respondIfDownstreamKnockoutPlayed(c, err):
+				case respondIfEngineWriteError(c, err):
+				default:
+					internalError(c, err)
+				}
+				return false
 			}
+			applied = true
+			return true
+		})
+		if !ran {
+			// A late duplicate of an order already applied: nothing is
+			// recorded again, nothing reopened, nothing announced.
+			c.JSON(http.StatusOK, gin.H{"reopenedMatches": blockedMatchesPayload(nil)})
+			return
+		}
+		if !applied {
 			return
 		}
 		if changed {
@@ -2898,26 +2925,43 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
-		changed, err := store.ResetOverridesChanged(id)
-		if err != nil {
-			// ResetOverridesChanged goes through modifyOverridesChanged, which
-			// LOADS the file first -- so it fails identically on the very
-			// corrupt overrides.json this endpoint exists to repair. This IS
-			// that repair door: fall back to Store.ResetOverridesForce, the
-			// load-free primitive (state/overrides.go) that writes a fresh
-			// empty value directly, and treat it as a change (an unreadable
-			// file is never "already empty"). Any OTHER load/save error still
-			// falls through to internalError below.
-			if errors.Is(err, state.ErrCorruptOverrides) {
-				if forceErr := store.ResetOverridesForce(id); forceErr != nil {
-					internalError(c, forceErr)
-					return
+		// The optional {writeId} body (Z3), ordered with the chusen's orders.
+		tag, ok := bindOptionalWriteTag(c)
+		if !ok {
+			return
+		}
+		var changed, applied bool
+		ran := poolRanksOnce.do(poolRanksTarget(id), tag.WriteID, func() bool {
+			var err error
+			changed, err = store.ResetOverridesChanged(id)
+			if err != nil {
+				// ResetOverridesChanged goes through modifyOverridesChanged, which
+				// LOADS the file first -- so it fails identically on the very
+				// corrupt overrides.json this endpoint exists to repair. This IS
+				// that repair door: fall back to Store.ResetOverridesForce, the
+				// load-free primitive (state/overrides.go) that writes a fresh
+				// empty value directly, and treat it as a change (an unreadable
+				// file is never "already empty"). Any OTHER load/save error still
+				// falls through to internalError below.
+				if errors.Is(err, state.ErrCorruptOverrides) {
+					if forceErr := store.ResetOverridesForce(id); forceErr != nil {
+						internalError(c, forceErr)
+						return false
+					}
+					changed, applied = true, true
+					return true
 				}
-				hub.Broadcast(EventTournamentUpdated, nil)
-				c.Status(http.StatusNoContent)
-				return
+				internalError(c, err)
+				return false
 			}
-			internalError(c, err)
+			applied = true
+			return true
+		})
+		if !ran {
+			c.Status(http.StatusNoContent)
+			return
+		}
+		if !applied {
 			return
 		}
 		if changed {

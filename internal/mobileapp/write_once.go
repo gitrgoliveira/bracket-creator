@@ -120,3 +120,9 @@ func (g *writeOnce) remember(target, writeID string) {
 		g.record(target + "\x1f" + writeID)
 	}
 }
+
+// poolRanksTarget names a competition's pool-rank overrides for writeOnce: a
+// chusen's order and a reset of the overrides are ordered together.
+func poolRanksTarget(compID string) string {
+	return "pool-ranks\x1f" + compID
+}

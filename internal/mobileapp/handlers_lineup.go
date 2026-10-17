@@ -487,8 +487,28 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 		if !ok {
 			return
 		}
-		if err := store.DeleteTeamLineupForMatch(compID, teamID, matchID); err != nil {
-			internalError(c, err)
+		// The optional {writeId} body (Z3): a removal is ordered by arrival
+		// like the save, so a late duplicate of one already applied is
+		// answered as recorded and takes nothing of a newer save away.
+		tag, ok := bindOptionalWriteTag(c)
+		if !ok {
+			return
+		}
+		applied := false
+		target := lineupSave{compID: compID, teamID: teamID, matchID: matchID}.target()
+		ran := once.do(target, tag.WriteID, func() bool {
+			if err := store.DeleteTeamLineupForMatch(compID, teamID, matchID); err != nil {
+				internalError(c, err)
+				return false
+			}
+			applied = true
+			return true
+		})
+		if !ran {
+			c.Status(http.StatusNoContent)
+			return
+		}
+		if !applied {
 			return
 		}
 		c.Status(http.StatusNoContent)

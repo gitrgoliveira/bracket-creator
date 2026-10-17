@@ -1749,9 +1749,18 @@ paths:
         - TournamentPassword: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                writeId:
+                  $ref: '#/components/schemas/ArrivalWriteId'
       responses:
         '204':
-          description: Overrides reset.
+          description: Overrides reset, or a writeId this door already applied answered as recorded (nothing reset).
 
 
   /api/competitions/{id}/awards:
@@ -1879,10 +1888,13 @@ paths:
                     and reopens the named knockout match(es) with the new
                     qualifier seated. Never gets past
                     `downstream_knockout_running`.
+                writeId:
+                  $ref: '#/components/schemas/ArrivalWriteId'
       responses:
         '200':
           description: >
-            Rank override saved. In a mixed competition a new order that
+            Rank override saved, or a writeId this door already applied
+            answered as recorded (nothing recorded, `reopenedMatches` empty). In a mixed competition a new order that
             moves who holds one of the pool's qualifying places repaints the
             knockout slots that place feeds; `reopenedMatches` names the
             knockout matches a confirmed override reopened (empty otherwise).
@@ -4392,9 +4404,21 @@ paths:
           schema:
             type: string
           description: Player ID of the competitor to reinstate.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                writeId:
+                  $ref: '#/components/schemas/ArrivalWriteId'
       responses:
         '200':
-          description: Competitor reinstated.
+          description: >
+            Competitor reinstated, or a writeId this door already applied
+            answered as recorded (the competitor is not reinstated again and
+            the body names `playerId` only).
           content:
             application/json:
               schema:
@@ -4671,9 +4695,18 @@ paths:
       summary: Delete team lineup for a specific match
       security:
         - TournamentPassword: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                writeId:
+                  $ref: '#/components/schemas/ArrivalWriteId'
       responses:
         '204':
-          description: Lineup deleted.
+          description: Lineup deleted, or a writeId this door already applied answered as recorded (nothing removed).
         '400':
           $ref: '#/components/responses/BadRequest'
         '500':
@@ -5858,8 +5891,9 @@ components:
       description: >
         The client's id for one write (request-only, optional) on a door the
         server orders by arrival rather than by a stamp: a court move, a time
-        change, a lineup save, a team member's rename or cleared name (bc-evts
-        stage 3 review 11, Y8). The app sends a write again under the same id
+        change, a lineup save, a match lineup's removal, a chusen's order, a
+        reset of the overrides, a reinstatement, a team member's rename or
+        cleared name (bc-evts stage 3 review 11, Y8, and review 12, Z3). The app sends a write again under the same id
         when it gave up on its request at the deadline, and the first request
         can still land after the resend and after the next write of the same
         match or team. A write this door has already applied under this id is

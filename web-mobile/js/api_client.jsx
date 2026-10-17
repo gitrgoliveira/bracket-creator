@@ -2134,6 +2134,10 @@ async function _flushBase(base, list, pass, gen) {
                 if (_writeQueue.get(k2) !== d2) { i++; continue; }
                 if (d2.kind !== 'evt' || d2.authBlocked || d2.parked
                     || (d2.payload && d2.payload.session) !== session) break;
+                // The batch ends at the first tap that waits (J1, stage 3
+                // review 6): one on a wait cycle or still following an entry
+                // that is queued goes in a later pass, after that entry.
+                if (batch.length > 0 && (d2.cycled || _afterKeys(d2).some((k) => _writeQueue.has(k)))) break;
                 batch.push(list[i]);
                 i++;
             }

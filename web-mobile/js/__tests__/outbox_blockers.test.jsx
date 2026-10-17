@@ -513,3 +513,51 @@ describe('a match that does not say its phase is not labelled (H5)', () => {
         expect(API.heldWriteBlocker('c1', 'm-2')).toMatchObject({ matchID: 'm-3', where: '' });
     });
 });
+
+describe('a tap batch ends at the first tap that waits (J1, stage 3 review 6)', () => {
+    const tapsOf = (req) => (req.body.events || []).map((e) => e.letter || e.kind);
+
+    it('two taps of one match with a send back between them go as M, the send back, then K', async () => {
+        const blk = { id: 'blk', compId: 'c1', status: 'running', court: 'A', modifiedAt: 1, sideA: { id: 'p1', name: 'Kato' }, sideB: { id: 'p2', name: 'Sato' } };
+        API.recordTap('c1', 'blk', { kind: 'ippon.add', pos: 0, side: 'a', letter: 'M' }, 'pw', blk);
+        await flushMicrotasks();
+        await tick(5);
+        const r = await API.requeueBlockerAndReopen('c1', 'tgt', 'c1', 'blk', 'pw', {});
+        if (r && r.settled) r.settled.catch(() => {});
+        await tick(5);
+        API.recordTap('c1', 'blk', { kind: 'ippon.add', pos: 0, side: 'b', letter: 'K' }, 'pw', blk);
+        await flushMicrotasks();
+        const sent = server((req) => (req.url.endsWith('/score-events')
+            ? answer(200, { outcomes: req.body.events.map((e) => ({ id: e.id, outcome: 'applied' })) })
+            : answer(200, { applied: true })));
+        for (let i = 0; i < 6 && stored().length > 0; i++) await reconnect();
+        expect(sent.map((req) => (req.url.endsWith('/score-events') ? `taps ${tapsOf(req).join('')}` : 'requeue')),
+            'the second tap is not carried past the send back it follows').toEqual(['taps M', 'requeue', 'taps K']);
+        expect(stored()).toEqual([]);
+    });
+
+    for (const refuse of [false, true]) {
+        it(`a tap naming a minted member goes after its add (add ${refuse ? 'refused' : 'landed'})`, async () => {
+            const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            API.recordTap('c1', 'm1', { kind: 'ippon.add', pos: 1, side: 'a', letter: 'M' }, 'pw', MATCH);
+            await flushMicrotasks();
+            await tick(5);
+            const member = await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw', { onRefusal: () => true });
+            if (member && member.settled) member.settled.catch(() => {});
+            await tick(5);
+            API.recordTap('c1', 'm1', { kind: 'rep.pick', pos: -1, side: 'a', memberId: member.id }, 'pw', MATCH);
+            await flushMicrotasks();
+            const sent = server((req) => {
+                if (req.url.endsWith('/score-events')) return answer(200, { outcomes: req.body.events.map((e) => ({ id: e.id, outcome: 'applied' })), match: MATCH });
+                return refuse ? answer(409, { error: 'team_member_limit', message: 'No room.' }) : answer(201, { id: req.body.id, name: req.body.name, index: 3, modifiedAt: 9 });
+            });
+            for (let i = 0; i < 6 && stored().length > 0; i++) await reconnect();
+            expect(sent.map((req) => (req.url.endsWith('/members') ? 'add' : `taps ${tapsOf(req).join(',')}`)),
+                'the pick is sent after the add').toEqual(['taps M', 'add', 'taps rep.pick']);
+            const pickReq = sent[2].body.events[0];
+            if (refuse) expect(pickReq.memberId, 'a refused add takes its id off the pick').toBeUndefined();
+            else expect(pickReq.memberId).toBe(member.id);
+            warned.mockRestore();
+        });
+    }
+});

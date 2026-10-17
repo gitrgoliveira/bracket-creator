@@ -2222,19 +2222,38 @@ function _markWaitCycles(byBase) {
     const stack = [];
     const onStack = new Set();
     let n = 0;
-    const strong = (v) => {
-        order.set(v, n); low.set(v, n); n++;
-        stack.push(v); onStack.add(v);
-        const out = next(v);
-        for (const w of out) {
-            if (!order.has(w)) { strong(w); low.set(v, Math.min(low.get(v), low.get(w))); }
-            else if (onStack.has(w)) low.set(v, Math.min(low.get(v), order.get(w)));
+    // Iterative, with an explicit stack of frames: a base's chain is as long as
+    // its queue, so recursing once per entry overflowed the call stack on a
+    // long single-match queue (J6, stage 3 review 6).
+    const strong = (root) => {
+        const frames = [];
+        const open = (v) => {
+            order.set(v, n); low.set(v, n); n++;
+            stack.push(v); onStack.add(v);
+            frames.push({ v, out: next(v), i: 0 });
+        };
+        open(root);
+        while (frames.length > 0) {
+            const f = frames[frames.length - 1];
+            const v = f.v;
+            if (f.i < f.out.length) {
+                const w = f.out[f.i++];
+                if (!order.has(w)) open(w);
+                else if (onStack.has(w)) low.set(v, Math.min(low.get(v), order.get(w)));
+                continue;
+            }
+            frames.pop();
+            if (low.get(v) === order.get(v)) {
+                const component = [];
+                let w;
+                do { w = stack.pop(); onStack.delete(w); component.push(w); } while (w !== v);
+                if (component.length > 1 || f.out.includes(v)) component.forEach((k) => onCycle.add(k));
+            }
+            if (frames.length > 0) {
+                const parent = frames[frames.length - 1].v;
+                low.set(parent, Math.min(low.get(parent), low.get(v)));
+            }
         }
-        if (low.get(v) !== order.get(v)) return;
-        const component = [];
-        let w;
-        do { w = stack.pop(); onStack.delete(w); component.push(w); } while (w !== v);
-        if (component.length > 1 || out.includes(v)) component.forEach((k) => onCycle.add(k));
     };
     for (const k of _writeQueue.keys()) if (!order.has(k)) strong(k);
     let changed = false;

@@ -716,3 +716,35 @@ describe('a refused add takes its id off every tab\'s copies, whichever copies t
         warned.mockRestore();
     });
 });
+
+describe('a long single-match queue is checked for wait cycles without deep recursion (J6)', () => {
+    it('20000 taps of one match finish a pass and none reads as on a cycle', async () => {
+        API.recordTap('c1', 'm1', { kind: 'ippon.add', pos: 0, side: 'a', letter: 'M' }, 'pw', MATCH);
+        await flushMicrotasks();
+        const [k0, d0] = stored()[0];
+        const base = k0.split('\u001f')[0];
+        const big = [];
+        for (let i = 0; i < 20000; i++) {
+            const d = { ...d0, payload: { ...d0.payload, id: `e${i}`, stamp: d0.payload.stamp + i, seq: i + 1 }, enqueuedAt: d0.enqueuedAt + i };
+            big.push([`${base}\u001fevt:e${i}`, d]);
+        }
+        API.clearQueue();
+        // Newest first: the search along the chain starts from its far end.
+        _lsStore.bc_write_queue_v2 = JSON.stringify(big.reverse());
+        await load();
+        const failures = [];
+        const onFail = (e) => failures.push(e);
+        process.on('unhandledRejection', onFail);
+        try {
+            // Offline: the pass groups and checks the queue, then every send fails.
+            await reconnect();
+            await tick(2000);
+        } finally {
+            process.off('unhandledRejection', onFail);
+        }
+        expect(failures.map(String), 'the pass did not throw').toEqual([]);
+        expect(API.heldWrites().filter((h) => h.cycled), 'a chain is not a cycle').toEqual([]);
+        expect(stored().filter(([, d]) => d.cycled)).toEqual([]);
+        expect(stored(), 'every tap still queued, in order').toHaveLength(20000);
+    }, 60000);
+});

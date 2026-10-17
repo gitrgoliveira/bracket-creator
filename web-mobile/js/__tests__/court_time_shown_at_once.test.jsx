@@ -87,3 +87,50 @@ describe('a court move and a time change show at once (R4)', () => {
         warned.mockClear();
     });
 });
+
+// Stage 3 review 8, L1: a court move discarded while its request is out puts
+// back nothing until that request ends, and nothing when it ends kept.
+describe('a court move discarded while its request is out (L1)', () => {
+    let warned = null;
+    beforeEach(() => { warned = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
+    afterEach(() => { warned.mockRestore(); });
+
+    async function discardWhileOut() {
+        const seen = [];
+        API.subscribeLocalMatchPatch((e) => seen.push(patchOf(e)));
+        const moved = await API.moveMatchCourt('c1', 'm1', 'B', 'pw', { was: { court: 'A' }, onRefusal: () => true });
+        if (moved && moved.settled) moved.settled.catch(() => {});
+        const state = { hang: false, release: null };
+        global.fetch = vi.fn((url) => {
+            if (String(url).includes('/api/time')) return Promise.reject(new TypeError('clock'));
+            if (!state.hang) return refused(500, { error: 'internal error' });
+            return new Promise((r) => { state.release = r; });
+        });
+        for (let i = 0; i < 20 && !API.heldWrites().some((h) => h.keepsFailing); i++) {
+            window.dispatchEvent(new Event('online'));
+            await tick(9000);
+        }
+        state.hang = true;
+        for (let i = 0; i < 20 && !state.release; i++) await tick(3000);
+        expect(state.release, 'the move is out again').toBeTruthy();
+        const held = API.heldWrites().find((h) => h.keepsFailing);
+        expect(API.discardHeldWrite(held.key), 'the discard is taken at once').toBeTruthy();
+        await tick(10);
+        return { seen, state };
+    }
+
+    it('a 2xx then keeps the court it moved to', async () => {
+        const { seen, state } = await discardWhileOut();
+        expect(seen.filter((p) => p && p.court === 'A'), 'nothing put back while the move is out').toEqual([]);
+        state.release(ok({ id: 'm1', court: 'B' }));
+        await tick(10);
+        expect(seen.filter((p) => p && p.court === 'A'), 'the server kept the move').toEqual([]);
+    });
+
+    it('a failure then puts back the court the match had', async () => {
+        const { seen, state } = await discardWhileOut();
+        state.release(refused(500, { error: 'internal error' }));
+        await tick(10);
+        expect(seen.filter((p) => p && p.court === 'A'), 'put back once the request has failed').toHaveLength(1);
+    });
+});

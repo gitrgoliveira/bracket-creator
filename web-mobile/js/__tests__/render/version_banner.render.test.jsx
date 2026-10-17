@@ -12,14 +12,13 @@ let VersionBanner;
 beforeEach(async () => {
   vi.resetModules();
   globalThis.React = React;
-  globalThis.__APP_BUILD__ = 'build-a';
+  document.head.innerHTML = '<meta name="app-build" content="build-a">';
   V = await import('../../app_version.jsx');
   ({ VersionBanner } = await import('../../version_banner.jsx'));
   V.resetVersionForTests();
 });
 
 afterEach(() => {
-  delete globalThis.__APP_BUILD__;
   document.head.innerHTML = '';
   vi.resetModules();
 });

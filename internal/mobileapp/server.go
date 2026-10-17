@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
@@ -328,9 +327,8 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 // Computed once per process, lazily, on the first /dist/ request: one walk and
 // SHA-256 over ~1.2 MB, single-digit milliseconds, off the startup path.
 //
-// Paired with Cache-Control: max-age (see staticAssetMaxAge) plus the ETag, so
-// the two regimes compose: inside the window a repeat load makes NO request at
-// all, and after it the ETag turns a re-download into a 0-byte 304.
+// Paired with Cache-Control: no-cache (see staticCacheControl): every load
+// revalidates, and the ETag turns a re-download into a 0-byte 304.
 //
 // Before this, http.FileServer over embed.FS emitted no Cache-Control, no ETag
 // and no Last-Modified (embed's zero modtime makes ServeContent omit it), so a
@@ -364,29 +362,22 @@ func buildAssetETag(subFS fs.FS) string {
 	return fmt.Sprintf("%q", hex.EncodeToString(h.Sum(nil))[:16])
 }
 
-// staticAssetMaxAge is how long a client may reuse a compiled asset WITHOUT
-// asking. It is the deliberate trade in this policy.
+// staticCacheControl is the caching policy for a compiled asset under /dist/:
+// "no-cache", stored but never reused WITHOUT asking (bc-evts stage 3 review 2,
+// R7). Every page load revalidates every module, and the ETag turns each
+// re-fetch into a 0-byte 304 unless the bundle really changed.
 //
-// Why not 0 (revalidate always, the safest setting): correctness would be
-// perfect, but every page load still costs one conditional request per asset —
-// 69 of them here. On a LAN that is invisible; on cellular or a hotel-grade
-// operator laptop at ~100ms round-trip over HTTP/1.1 (six connections), it is
-// roughly a dozen serialised waves before anything renders. Operators and
-// spectators reported that latency as a real problem, so the window exists to
-// remove those round trips entirely for a revisit.
-//
-// Why not hours: an asset cached under max-age is used WITHOUT asking, so a
-// server upgraded mid-event is invisible to an already-loaded client until the
-// window expires. Five minutes bounds that to something an operator would not
-// notice, while covering the cases that actually recur — a tab reopened, a
-// second console window, a spectator returning to the schedule between matches.
-//
-// The ETag still backs it: once the window lapses the client revalidates and
-// gets a 0-byte 304 unless the bundle really changed, so this never costs a
-// re-download. Content-hashed filenames plus "immutable" would remove the
-// window entirely, but esbuild here runs without --bundle and does not rewrite
-// import specifiers, so hashing the names would break every `./x.jsx` import.
-const staticAssetMaxAge = 5 * time.Minute
+// It was "public, max-age=300", a five-minute window in which a returning
+// client made no request at all, to spare a slow link one conditional request
+// per module per load. That window paired the served page with the modules of
+// the build BEFORE an upgrade: the page names the server's build (appBuildMeta)
+// and app_version.jsx reloads onto a new build, so within the window a reload
+// ran the old code under a page naming the new build. With no-cache the page
+// and its modules always come from one build. The cost is a round of 304s on
+// each load, which the operator's rule (the version reload, decision S2 a)
+// takes over the window. Content-hashed filenames plus "immutable" would remove
+// both, but esbuild here runs without --bundle and does not rewrite import
+// specifiers, so hashing the names would break every `./x.jsx` import.
 
 // setStaticCacheHeaders applies the revalidation policy to a compiled asset.
 // Only /dist/ is covered: index.html is deliberately no-store (it carries
@@ -403,7 +394,4 @@ func setStaticCacheHeaders(c *gin.Context, etag, filePath string) {
 	c.Header("ETag", etag)
 }
 
-// staticCacheControl is the header value built from staticAssetMaxAge, which is
-// a constant — so this string is fixed for the life of the binary and there is
-// nothing to format per request.
-var staticCacheControl = fmt.Sprintf("public, max-age=%d", int(staticAssetMaxAge.Seconds()))
+const staticCacheControl = "no-cache"

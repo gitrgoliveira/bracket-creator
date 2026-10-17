@@ -8,13 +8,17 @@ import {
     versionState, resetVersionForTests, VERSION_BANNER_TEXT, VERSION_RELOAD_LABEL,
 } from '../app_version.jsx';
 
-// The build the bundle was compiled for (esbuild --define:__APP_BUILD__).
+// The build the server wrote into the page (<meta name="app-build">, R7).
 function setPageBuild(build) {
-    if (build === null) delete globalThis.__APP_BUILD__;
-    else globalThis.__APP_BUILD__ = build;
+    document.head.querySelectorAll('meta[name="app-build"]').forEach((m) => m.remove());
+    if (build === null) return;
+    const meta = document.createElement('meta');
+    meta.setAttribute('name', 'app-build');
+    meta.setAttribute('content', build);
+    document.head.appendChild(meta);
 }
 
-afterAll(() => { delete globalThis.__APP_BUILD__; });
+afterAll(() => { setPageBuild(null); });
 
 let reload;
 let calls;
@@ -28,12 +32,12 @@ beforeEach(() => {
 });
 
 describe('bundleBuild', () => {
-    it('reads the bundle\'s constant once', () => {
+    it('reads the page meta once', () => {
         expect(bundleBuild()).toBe('abc');
         setPageBuild('other');
         expect(bundleBuild()).toBe('abc');
     });
-    it('is unknown without the constant', () => {
+    it('is unknown without the meta', () => {
         setPageBuild(null);
         expect(bundleBuild()).toBe('unknown');
     });

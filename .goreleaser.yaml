@@ -18,9 +18,7 @@ before:
     # and per-screen modules (glossary.jsx, reset.jsx, admin_*.jsx) were
     # added; release artifacts would 404 on /dist/reset.js (and others)
     # at runtime while local `make go/build` worked fine.
-    # __APP_BUILD__: the commit `go generate` (above) wrote for AppBuild, so the
-    # bundle names the build the server names (web-mobile/js/app_version.jsx).
-    - sh -c 'npx --yes esbuild web-mobile/js/*.jsx --outdir=web-mobile/dist --loader:.jsx=jsx --jsx-factory=React.createElement --jsx-fragment=React.Fragment --define:__APP_BUILD__="\"$(cat internal/cmd/version/commit.txt)\""'
+    - npx --yes esbuild web-mobile/js/*.jsx --outdir=web-mobile/dist --loader:.jsx=jsx --jsx-factory=React.createElement --jsx-fragment=React.Fragment
     - ./scripts/completions.sh
     - ./scripts/manpages.sh
 

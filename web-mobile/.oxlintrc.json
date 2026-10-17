@@ -10,8 +10,7 @@
     "React": "readonly",
     "ReactDOM": "readonly",
     "preact": "readonly",
-    "vi": "readonly",
-    "__APP_BUILD__": "readonly"
+    "vi": "readonly"
   },
   "rules": {
     "no-unused-vars": [

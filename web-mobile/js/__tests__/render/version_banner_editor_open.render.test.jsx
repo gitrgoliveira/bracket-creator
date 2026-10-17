@@ -11,10 +11,10 @@ import { VersionBanner } from '../../version_banner.jsx';
 let ScoreEditorModal;
 let restore;
 beforeAll(async () => { ({ ScoreEditorModal, restore } = await installIndividualEditor()); });
-afterAll(() => { restore(); delete globalThis.__APP_BUILD__; });
+afterAll(() => { restore(); document.head.innerHTML = ''; });
 beforeEach(() => {
   resetOutbox();
-  globalThis.__APP_BUILD__ = 'build-a';
+  document.head.innerHTML = '<meta name="app-build" content="build-a">';
   V.resetVersionForTests();
 });
 

@@ -212,20 +212,12 @@ vendor-frontend:
 	@curl -sL https://unpkg.com/preact@10.13.1/compat/dist/compat.umd.js -o web-mobile/vendor/compat.umd.js
 	@curl -sL https://unpkg.com/preact-router@4.1.2/dist/preact-router.umd.js -o web-mobile/vendor/preact-router.umd.js
 
-# The bundle carries the build the server names (X-App-Build): __APP_BUILD__ is
-# the commit internal/cmd/version/get_build_info.sh records in commit.txt, the
-# one file AppBuild reads, so web-mobile/js/app_version.jsx can tell when the
-# code running in a page is not the build the server runs (/dist/ is cached).
-APP_BUILD_FILE := internal/cmd/version/commit.txt
-
 esbuild-jsx: ## Pre-compile JSX files to web-mobile/dist/
 	@echo "Pre-compiling JSX files..."
 	@mkdir -p web-mobile/dist
-	go generate ./internal/cmd/version/
 	npx --yes esbuild web-mobile/js/*.jsx \
 		--outdir=web-mobile/dist --loader:.jsx=jsx \
-		--jsx-factory=React.createElement --jsx-fragment=React.Fragment \
-		--define:__APP_BUILD__="\"$$(cat $(APP_BUILD_FILE))\""
+		--jsx-factory=React.createElement --jsx-fragment=React.Fragment
 
 # go/generate is listed after esbuild-jsx so generation still runs once the
 # dist/ directory exists, matching the order when it was inline in this recipe.

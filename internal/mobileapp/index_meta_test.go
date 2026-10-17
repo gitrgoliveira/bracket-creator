@@ -2,6 +2,7 @@ package mobileapp
 
 import (
 	"crypto/tls"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -136,13 +137,19 @@ func TestInjectPreviewMeta_NilStore(t *testing.T) {
 	assert.Contains(t, out, `<meta property="og:title" content="Bracket Creator Mobile">`)
 }
 
-// bc-evts review 1, M2: the page names no build. Fresh HTML can pair with
-// modules cached under /dist/'s max-age, so the build the running code was
-// compiled for is the bundle's own (__APP_BUILD__, web-mobile/js/app_version.jsx),
-// never one written into the page.
-func TestInjectPreviewMeta_WritesNoAppBuild(t *testing.T) {
+// bc-evts S2 a (operator decision), review 2 R7: the served page names the
+// server's build, the value X-App-Build and the SSE hello carry, so the bundle
+// knows which build it came with. /dist/ is no-cache (setStaticCacheHeaders),
+// so a reload brings the modules of the build the page names.
+func TestInjectPreviewMeta_WritesAppBuild(t *testing.T) {
 	out := injectPreviewMeta(sampleIndexHTML, nil, "https://tora.example.org")
-	assert.NotContains(t, out, `name="app-build"`)
+	assert.Contains(t, out, `<meta name="app-build" content="`+html.EscapeString(AppBuild())+`">`)
+	assert.Less(t, strings.Index(out, `name="app-build"`), strings.Index(out, "</head>"), "in the head")
+}
+
+func TestAppBuildMeta_Escapes(t *testing.T) {
+	assert.Equal(t, `    <meta name="app-build" content="a&lt;b&#34;c&amp;">`+"\n", appBuildMeta(`a<b"c&`))
+	assert.Equal(t, `    <meta name="app-build" content="unknown">`+"\n", appBuildMeta("unknown"))
 }
 
 func TestReplaceTitleContent(t *testing.T) {

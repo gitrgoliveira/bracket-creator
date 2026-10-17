@@ -574,6 +574,22 @@ describe('EngiScoreEditorModal reads a pending save\'s answer when it comes', ()
     expect(submit.textContent).not.toContain('Tap again');
   });
 
+  // bc-evts stage 3 review 11, X2: the pending answer gives the controls back
+  // at once; nothing waits for the server, which offline may never answer.
+  it('the controls come back as soon as the outbox holds the save', async () => {
+    const p = pending();
+    const onSubmit = vi.fn().mockReturnValue(Promise.resolve(p.answer));
+    render(<EngiScoreEditorModal match={makeMatch({ flagsA: 3, flagsB: 0, status: 'running', compId: 'c', id: 'm' })} onClose={() => {}} onSubmit={onSubmit} />);
+    fireEvent.click(screen.getByTestId('engi-submit'));
+    fireEvent.click(screen.getByTestId('engi-submit'));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await act(async () => {});
+    const submit = screen.getByTestId('engi-submit');
+    expect(submit.disabled).toBe(false);
+    expect(submit.textContent).not.toContain('Saving');
+    expect(screen.getByTestId('engi-close-btn').disabled).toBe(false);
+  });
+
   it('a landed answer says nothing', async () => {
     const p = pending();
     const onSubmit = vi.fn().mockReturnValue(Promise.resolve(p.answer));

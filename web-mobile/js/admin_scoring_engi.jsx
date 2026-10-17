@@ -284,19 +284,22 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
     // bc-evts: a save the outbox holds answers `pending` at once; the server's
     // answer is read when it comes, through a callback, never waited for. A
     // refused one then raises the not-saved banner (notLandedBanner) and
-    // gives the controls back, as a direct refusal does below.
+    // gives the controls back, as a direct refusal does below. The controls
+    // come back at once (bc-evts stage 3 review 11, X2), as the individual
+    // and team editors' do: the save is the outbox's, and offline the server
+    // may not answer for a long time.
     if (writePending(res)) {
+      if (mountedRef.current) setSubmitting(false);
       res.settled.then((body) => {
         keptInHistory.noteFromWrite(body);
         if (!writeWasRefused(body) || !mountedRef.current) return;
-        setSubmitting(false);
         setSaveArmed(false);
         const banner = notLandedBanner(body);
         if (banner) setWriteFailed(banner);
       }, () => {
         // A refusal on the flush: the terminal-fail subscription below raises
-        // its banner; the controls come back here.
-        if (mountedRef.current) { setSubmitting(false); setSaveArmed(false); }
+        // its banner; Save is disarmed here.
+        if (mountedRef.current) setSaveArmed(false);
       });
       return res;
     }

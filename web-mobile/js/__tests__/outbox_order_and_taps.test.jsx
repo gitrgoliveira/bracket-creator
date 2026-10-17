@@ -32,6 +32,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+    // Quiesce this module instance before the real timers come back, so a
+    // flush still out never sends through a later test's fetch (sync_queue M6).
+    if (API && typeof API.clearQueue === 'function') API.clearQueue();
+    vi.clearAllTimers();
     vi.useRealTimers();
     vi.resetModules();
     global.fetch = _orig.fetch;

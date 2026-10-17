@@ -57,6 +57,17 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+    // Quiesce this test's module instance BEFORE the real timers come back. A
+    // test that ends with writes queued and a fetch still out leaves a flush
+    // running: its continuation would otherwise go on under REAL timers,
+    // schedule its backoff with a real setTimeout and, a moment later, send
+    // its writes through whichever later test's fetch mock is installed by
+    // then. Under load that landed inside the parkQueueForReauth test's window
+    // (two stray /score writes of the hasPendingTerminalWrite test, review 1
+    // M6). clearQueue empties the queue and cancels the flush (_queueGen), so
+    // nothing of this test can reach the next one.
+    if (API && typeof API.clearQueue === 'function') API.clearQueue();
+    vi.clearAllTimers();
     vi.useRealTimers();
     vi.resetModules();
     global.fetch = _origFetch;

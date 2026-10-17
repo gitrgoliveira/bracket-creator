@@ -23,6 +23,9 @@
 //      Start is current;
 //   I5 no note claims "another device" for the editor's own write, and the
 //      Start refusal note stands only over a scheduled match.
+// A second family (review 6, `runRunningRep`) drives the team sheet's
+// representative-bout add and remove on a RUNNING match, which moves no
+// status: no note at all, whatever another device does while it is out.
 import React from 'react';
 import { render, act, fireEvent, screen, cleanup } from '@testing-library/react';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -370,6 +373,67 @@ async function run(fam, sc) {
   return bad;
 }
 
+// The running sheet's representative-bout family (stage 5 review 6): an add
+// or remove on a RUNNING team match moves no status, so it is no own status
+// write, and nothing another device does to the match while it is out may
+// raise a note: the draft typed before the Start (when there is one) went
+// with the Start, which landed. Each combination of add or remove x a restamp
+// or a finish elsewhere x landed, refused, held or discarded x the answer
+// before or after the feed's move, with a draft before the Start or none,
+// holds after every step: no note at all, Start never offered, and the board
+// shows the server's bout 1.
+async function runRunningRep(sc) {
+  resetOutbox();
+  const writes = ownWriteAnswerer();
+  API.recordDaihyosen = vi.fn((_c, _m, _pw, opts) => writes.make(opts));
+  API.removeDaihyosen = vi.fn((_c, _m, _pw, _at, opts) => writes.make(opts));
+  const onSubmit = vi.fn((patch) => (patch.status === 'running' ? Promise.resolve(writes.make()) : Promise.resolve({ applied: true })));
+  let server = { status: sc.draft ? 'scheduled' : 'running', a: [], b: [], at: NOW, v: 2, knockout: true, rep: sc.kind === 'remove' };
+  const bad = [];
+  const el = () => <ScoreEditorModal match={TEAM.match(server)} onClose={vi.fn()} onSubmit={onSubmit} password="pw" variant="inline" />;
+  const r = render(el());
+  const feed = (next) => { server = { ...next, at: server.at + 10, v: server.v + 1 }; r.rerender(el()); };
+  const check = (step) => {
+    for (const id of ['draft-dropped-notice', 'draft-kept-notice', 'start-refused-notice']) {
+      if (screen.queryByTestId(id)) bad.push(`${step}: a note (${id}) over a match that lost nothing`);
+    }
+    if (button('Start match')) bad.push(`${step}: Start offered over a ${server.status} match`);
+    const shown = TEAM.shown(r.container);
+    const serverMarks = fmarks(TEAM, server);
+    if (!sameMarks(shown, serverMarks)) bad.push(`${step}: board ${JSON.stringify(shown)} is not the server's ${JSON.stringify(serverMarks)}`);
+  };
+  await flush();
+  if (sc.draft) {
+    // A tied draft on bout 1, then the operator's Start, which lands.
+    await tap(ipponBtn(r.container, 0, 'aka', 'M'));
+    await tap(ipponBtn(r.container, 0, 'shiro', 'M'));
+    await tap(button('Start match'));
+    const carried = onSubmit.mock.calls.at(-1)[0];
+    await writes.answer('landed');
+    feed(TEAM.applyStart(server, carried));
+  }
+  await flush();
+  check('running');
+  const btn = screen.queryByTestId(sc.kind === 'add' ? 'scoring-modal-daihyosen-button' : 'team-daihyosen-remove');
+  if (!btn || btn.disabled) { bad.push(`${sc.kind} not offered on the running sheet`); cleanup(); return bad; }
+  await tap(btn);
+  await flush();
+  const foreign = () => {
+    feed(sc.foreign === 'finish' ? { ...server, status: 'completed' } : { ...server });
+    check(`feed ${sc.foreign}`);
+  };
+  const answer = async () => {
+    await writes.answer(sc.outcome);
+    // The server's copy of a change that landed on the running match.
+    if (sc.outcome === 'landed' && server.status === 'running') feed({ ...server, rep: sc.kind === 'add' });
+    await flush();
+    check(`${sc.kind} ${sc.outcome}`);
+  };
+  if (sc.timing === 'before') { await answer(); foreign(); } else { foreign(); await answer(); }
+  cleanup();
+  return bad;
+}
+
 function* scenarios(fam) {
   for (const draft of [false, true]) {
     for (const final of draft ? ['save', 'discard'] : ['save']) {
@@ -417,6 +481,28 @@ function* scenarios(fam) {
 }
 
 const describeName = (sc) => `${sc.start}${sc.draft ? `+draft(${sc.final})` : ''} ${sc.writes.map((w) => `${w.kind}:${w.outcome}/${w.timing}/${w.foreign}`).join(' ') || 'no own write'} then ${[].concat(sc.after).join('+')}`;
+
+describe('the running sheet\'s representative-bout change: every combination (team)', () => {
+  it('raises no note, never offers Start and shows the server\'s board', async () => {
+    const failures = [];
+    let count = 0;
+    for (const draft of [false, true]) {
+      for (const kind of ['add', 'remove']) {
+        for (const foreign of ['restamp', 'finish']) {
+          for (const outcome of OUTCOMES) {
+            for (const timing of ['before', 'after']) {
+              const sc = { draft, kind, foreign, outcome, timing };
+              count += 1;
+              const bad = await runRunningRep(sc);
+              if (bad.length) failures.push(`${draft ? 'draft+Start' : 'running'} ${kind}:${outcome}/${timing} ${foreign}: ${bad[0]}`);
+            }
+          }
+        }
+      }
+    }
+    expect(failures, `${failures.length} of ${count} combinations failed:\n${failures.join('\n')}`).toEqual([]);
+  }, 300_000);
+});
 
 describe.each([[INDIVIDUAL], [TEAM], [ENGI]])('own status writes and the kept draft: every combination (%s)', (fam) => {
   it(`holds every invariant (${fam.name})`, async () => {

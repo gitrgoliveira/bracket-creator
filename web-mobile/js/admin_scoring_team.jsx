@@ -4247,6 +4247,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
     setEditorErr("");
     // The change puts a finished match back to running on this sheet: its own
     // status write, so no draft is kept as if another device had reopened it.
+    // On a running match it moves no status, and the owner records none
+    // (stage 5 review 6).
     const ownToken = own.begin(OWN_REP);
     // A typed representative still being named answers for the row this change moves: its
     // answer must land nothing on whatever row is then the daihyosen. Both sides' picks are

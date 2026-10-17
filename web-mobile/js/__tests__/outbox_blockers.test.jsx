@@ -1094,3 +1094,50 @@ describe('a discarded add is checked through the door its caller may read (L3)',
         expect(posts[0].events[0].memberId, 'the pick goes as it was made').toBe(member.id);
     });
 });
+
+// Stage 3 review 8, L5: what this tab settled is remembered long enough to
+// cover a stale copy another tab writes back, then forgotten; an entry with no
+// stamp is never remembered so that it blocks a later copy.
+describe('what this tab settled is remembered for a while only (L5)', () => {
+    const storageEvent = (oldValue, newValue) => window.dispatchEvent(Object.assign(new Event('storage'), { key: 'bc_write_queue_v2', oldValue, newValue }));
+    let warned = null;
+    beforeEach(() => { warned = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
+    afterEach(() => { warned.mockRestore(); });
+
+    it('a stale copy written back long after the settle is taken up as any entry', async () => {
+        API.recordTap('c1', 'm1', { kind: 'ippon.add', pos: 0, side: 'a', letter: 'M' }, 'pw', MATCH);
+        await flushMicrotasks();
+        const stale = stored();
+        global.fetch = vi.fn((url, opts) => {
+            if (String(url).includes('/api/time')) return Promise.reject(new TypeError('clock'));
+            const body = JSON.parse(opts.body);
+            return answer(200, { outcomes: body.events.map((e) => ({ id: e.id, outcome: 'applied' })) });
+        });
+        await reconnect();
+        expect(stored(), 'settled').toEqual([]);
+        global.fetch = vi.fn(() => Promise.reject(new TypeError('offline')));
+        await tick(2 * 60 * 60 * 1000);
+        const newRaw = JSON.stringify(stale);
+        _lsStore.bc_write_queue_v2 = newRaw;
+        storageEvent(JSON.stringify([]), newRaw);
+        await flushMicrotasks();
+        expect(API.unsentWrites().total, 'the record of the settle is gone').toBe(1);
+    });
+
+    it('an entry dropped with no stamp does not block a stamped copy stored later under its key', async () => {
+        API.recordTap('c1', 'm1', { kind: 'ippon.add', pos: 0, side: 'a', letter: 'M' }, 'pw', MATCH);
+        await flushMicrotasks();
+        const [[key, d]] = stored();
+        API.clearQueue();
+        const { enqueuedAt: _at, ...unstamped } = d;
+        _lsStore.bc_write_queue_v2 = JSON.stringify([[key, unstamped]]);
+        await load();
+        await flushMicrotasks();
+        expect(stored(), 'the unstamped entry is dropped as unreadable').toEqual([]);
+        const newRaw = JSON.stringify([[key, d]]);
+        _lsStore.bc_write_queue_v2 = newRaw;
+        storageEvent(JSON.stringify([]), newRaw);
+        await flushMicrotasks();
+        expect(API.unsentWrites().total, 'the stamped copy is taken up').toBe(1);
+    });
+});

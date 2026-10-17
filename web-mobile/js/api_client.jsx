@@ -917,20 +917,49 @@ const _takenFromLegacy = new Map();
 const _adopted = new WeakSet();
 
 function _markSettled(key, descriptor) {
-    const at = descriptor && typeof descriptor.enqueuedAt === 'number' ? descriptor.enqueuedAt : Infinity;
+    const stamped = descriptor && typeof descriptor.enqueuedAt === 'number' && Number.isFinite(descriptor.enqueuedAt);
+    const at = stamped ? descriptor.enqueuedAt : Infinity;
     _settled.set(key, Math.max(_settled.get(key) ?? -Infinity, at));
-    _settledHere.set(key, Math.max(_settledHere.get(key) ?? -Infinity, at));
+    // An entry with no stamp is recorded as older than every stamped copy
+    // (L5): it cannot be told from a later write stored under its key, which
+    // Infinity would then refuse for the page's life.
+    const prev = _settledHere.get(key);
+    const here = Math.max(prev ? prev.at : -Infinity, stamped ? at : -Infinity);
+    const now = Date.now();
+    // Re-inserted, so the map runs in settle order and the sweep stops at the
+    // first record still young.
+    _settledHere.delete(key);
+    _settledHere.set(key, { at: here, settledAt: now });
+    for (const [k, r] of _settledHere) {
+        if (now - r.settledAt <= SETTLED_HERE_KEEP_MS) break;
+        _settledHere.delete(k);
+    }
 }
 
 // Every entry this tab has taken out of its queue, as _settled records it,
-// but kept for the page's life (_settled is emptied by each persist): a copy
-// another tab stores again under the same key, no newer, is one this tab
-// already settled, and is never taken up again (K2, _wasSettledHere).
+// but kept past the persist that empties _settled: a copy another tab stores
+// again under the same key, no newer, is one this tab already settled, and is
+// never taken up again (K2, _wasSettledHere). Key -> { at: the newest
+// enqueuedAt settled (-Infinity for an entry that carried none), settledAt }.
 const _settledHere = new Map();
+
+// How long a settle is remembered (L5, stage 3 review 8). A stale copy comes
+// back when another tab that still held the entry writes the queue before it
+// has seen it leave storage: at its next persist, which a live tab makes
+// within moments and a tab the browser suspended makes when it wakes. An hour
+// covers a suspended tablet woken within a session; past it the copy is taken
+// up as any entry, which the server answers as the duplicate it is.
+const SETTLED_HERE_KEEP_MS = 60 * 60 * 1000;
 
 // _wasSettledHere: the stored copy `d` of `key` is one this tab settled.
 function _wasSettledHere(key, d) {
-    return _settledHere.has(key) && !_enqueuedAfter(d, _settledHere.get(key));
+    const r = _settledHere.get(key);
+    if (!r) return false;
+    if (Date.now() - r.settledAt > SETTLED_HERE_KEEP_MS) {
+        _settledHere.delete(key);
+        return false;
+    }
+    return !_enqueuedAfter(d, r.at);
 }
 
 // _dequeue: the ONE way out of the queue. Removes `key`, only while it still

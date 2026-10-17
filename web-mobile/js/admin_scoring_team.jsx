@@ -2108,10 +2108,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // outbox does not say it a second time).
       const answer = await window.API.putMatchLineup(m.compId, teamId, m.id, body.positions, password, hasMemberIds ? body.memberIds : undefined, body.changed, {
         onRefusal: (err) => {
-          if (mountedRef.current && !sideChanged()) {
-            notify("error", err?.message || "Failed to update lineup");
-            write.read(teamId).catch(() => {});
-          }
+          // Claimed only when said here (R2): a sheet that has closed, or a side
+          // given another team, says nothing, so the outbox raises its alert.
+          if (!mountedRef.current || sideChanged()) return false;
+          notify("error", err?.message || "Failed to update lineup");
+          write.read(teamId).catch(() => {});
           return true;
         },
       });
@@ -3027,8 +3028,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     let sent;
     try {
       // Its refusal is said beside the bout (below), claimed so the queue's
-      // own alerts do not say it again.
-      sent = window.API.removeKachinukiBout(m.compId, m.id, resolveDecisionPassword(password), { onRefusal: () => true, seen: m.scoreVersion });
+      // own alerts do not say it again, while this sheet can say it (R2).
+      sent = window.API.removeKachinukiBout(m.compId, m.id, resolveDecisionPassword(password), { onRefusal: () => current(), seen: m.scoreVersion });
     } catch (e) {
       setRemoveBoutErr(String(e?.message || "Could not remove that bout"));
       return;
@@ -3966,8 +3967,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       setEditorErr(msg);
     };
     // A refusal is said here, beside the change (the `settled` rejection
-    // below), and claimed so the queue's own alerts do not say it again.
-    const claim = () => true;
+    // below), and claimed so the queue's own alerts do not say it again; but
+    // only while this sheet can say it (R2): unmounted, or outdated by a later
+    // change, it is not claimed and the outbox raises its alert.
+    const claim = () => current();
     let sent;
     try {
       sent = send(claim);

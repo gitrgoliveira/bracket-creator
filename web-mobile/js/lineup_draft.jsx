@@ -421,6 +421,11 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   // has run.
   const squadRef = useRef(squad);
   squadRef.current = squad;
+  // Whether the editor is still on screen (`isMounted`): a save's refusal that
+  // arrives after it closed is not claimed by the editor, so the outbox raises
+  // its own alert and the refusal is never lost (bc-evts stage 3 review 2, R2).
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
   // The read whose answer may still be shown: another lineup, or leaving, ends it.
   const attempt = useRef(0);
   // The number, in `attempt`, of the read of the lineup that is out (the first, a Try
@@ -793,6 +798,7 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     error, setError, warning, setWarning,
     squad, changeMembers, memberRenamed, squadRef, squadUnavailable, waitForMembers: () => firstMembers.current.pending(),
     removing, dropOwnLineup, saveQueued, lineupToSave, confirmSaved,
+    isMounted: () => mountedRef.current,
   };
 }
 

@@ -321,6 +321,8 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       // not say it too).
       const updated = await window.API.putMatchLineup(compId, teamId, matchId, body.positions, password, idsOut, body.changed, {
         onRefusal: (err) => {
+          // Claimed only when said here (R2): a closed panel leaves it to the outbox.
+          if (!form.isMounted()) return false;
           setError(err?.message || "Failed to save lineup");
           form.retry();
           return true;

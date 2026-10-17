@@ -696,6 +696,8 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
       // refusal comes later: it is said here and the lineup read again, so what
       // the form showed as saved goes (claimed, so the outbox does not say it too).
       const onRefusal = (err) => {
+        // Claimed only when said here (R2): a closed page leaves it to the outbox.
+        if (!form.isMounted()) return false;
         setError(err?.message || "Failed to save lineup");
         form.retry();
         return true;

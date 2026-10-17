@@ -231,7 +231,8 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
       // thrown on the flush (onRefusal, claimed so the outbox raises no second
       // alert) or as the settled answer (clock_skew, a held result). Both are
       // told on the refused match as a direct refusal is.
-      const onRefusal = (e) => { refuseStart(next, startFailureMessage(e)); return true; };
+      // Claimed only when it was said, on the row or by the toast (R2).
+      const onRefusal = (e) => { refuseStart(next, startFailureMessage(e)); return mountedRef.current || !!showToast; };
       const res = await onEditScore(next.compId, next.id, startPatch(), next, { onRefusal });
       const outcome = classifyStartOutcome(res);
       if (outcome.ok) {

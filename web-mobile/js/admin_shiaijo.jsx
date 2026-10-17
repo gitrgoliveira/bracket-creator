@@ -1415,7 +1415,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             if (mountedRef.current) setStartError(refusalFor(msg));
             if (showToast) showToast(msg, "error");
         };
-        const onRefusal = (e) => { refusedLater(startFailureMessage(e)); return true; };
+        // Claimed only when it was said, on the row or by the (app-wide) toast (R2).
+        const onRefusal = (e) => { refusedLater(startFailureMessage(e)); return mountedRef.current || !!showToast; };
         const inFlight = startingRef.current || (pickingRef.current && pickingRef.current !== pick ? pickingRef.current : null);
         if (inFlight) {
             // One start at a time. An advance (Finish + Start Next, or the one
@@ -1568,7 +1569,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // then goes and the server judges it.
             const deferFailed = (e) => {
                 if (showToast) showToast((e && e.message) || "Could not defer the current bout", "error");
-                return true;
+                // Claimed only when said (R2): with no toast it is the outbox's.
+                return !!showToast;
             };
             try {
                 const sent = await window.API.revertMatchToQueue(cur.compId, cur.id, password, { onRefusal: deferFailed, seen: cur.scoreVersion });
@@ -1733,23 +1735,26 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const label = (m.sideB && m.sideB.name) || (m.sideA && m.sideA.name) || "Match";
         const myTime = m.scheduledAt || "";
         const neighbourTime = neighbour.scheduledAt || "";
+        // Says a refusal, and answers whether it was said (R2: an unsaid one is
+        // left for the outbox's alert).
         const failed = (e) => {
             if (showToast) showToast((e && e.message) || "Could not reorder the match", "error");
+            return !!showToast;
         };
         // A refusal of either half puts the OTHER match back to its own time, so
         // the queue isn't left half-swapped (a put-back the server refuses too
         // is toasted like any refusal).
         const putBack = (match, time) => {
             Promise.resolve(window.API.updateMatchTime(match.compId, match.id, time, password, {
-                onRefusal: (e) => { failed(e); return true; },
+                onRefusal: (e) => failed(e),
             })).catch(failed);
         };
         try {
             await window.API.updateMatchTime(m.compId, m.id, neighbourTime, password, {
-                onRefusal: (e) => { putBack(neighbour, neighbourTime); failed(e); return true; },
+                onRefusal: (e) => { putBack(neighbour, neighbourTime); return failed(e); },
             });
             await window.API.updateMatchTime(neighbour.compId, neighbour.id, myTime, password, {
-                onRefusal: (e) => { putBack(m, myTime); failed(e); return true; },
+                onRefusal: (e) => { putBack(m, myTime); return failed(e); },
             });
             if (showToast) showToast(`Moved ${label} ${direction === "up" ? "earlier" : "later"} in the queue`);
         } catch (e) {

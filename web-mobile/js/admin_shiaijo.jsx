@@ -1571,6 +1571,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             }
             if (writePending(res)) {
                 res.settled.then((body) => {
+                    // A discarded start (the operator took it off the held-writes
+                    // list) reads as ok, but the server never started the match.
+                    if (body && body.discarded) { unpin(); return; }
                     const late = classifyStartOutcome(body);
                     if (!late.ok) refusedLater(late.msg);
                 }, () => {});

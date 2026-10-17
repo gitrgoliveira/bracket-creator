@@ -203,6 +203,20 @@ describe('a start refused later takes its pin off the panel (Z1)', () => {
     expect(shownMatch()).toBe('Pool A-1');
     expect(captured.props.started).toBeFalsy();
   });
+
+  it('a start the operator DISCARDS from the held-writes list takes the pin off a match the server never started', async () => {
+    let discardStart;
+    const st = new Promise((r) => { discardStart = r; });
+    const onEditScore = vi.fn(async (_c, mid) => (mid === 'Pool A-2' ? pending(`K:${mid}`, st) : pending(`K:${mid}`)));
+    renderPage(onEditScore);
+    await act(async () => { await captured.props.onSubmitAndNext(finishPatch); });
+    expect(shownMatch()).toBe('Pool A-2');
+    expect(captured.props.started).toBe(true);
+    await act(async () => { discardStart({ discarded: true }); await st; });
+    // The finish is still out, so Pool A-1 reads as finished here and the
+    // discarded Pool A-2 is not the live bout: the panel is empty.
+    expect(shownMatch()).toBe(null);
+  });
 });
 
 describe('a finish stays read as finished until a later change, not this device\'s own earlier taps (Z2)', () => {

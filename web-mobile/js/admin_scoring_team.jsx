@@ -1326,8 +1326,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // write holds none, nor does a pairing added by hand. So the first gesture on
   // such a bout queues a running write carrying its empty row (a kachinuki first
   // bout with its lineup's fighters), naming that bout group alone, ahead of the
-  // tap in the match's order. Judged against the server's copy (mHost), never the
-  // board, and once per row for this sheet.
+  // tap in the match's order. Judged against the server's copy the board is
+  // made from (its base), never the board itself, and once per row for this
+  // sheet.
   const rowsWrittenRef = useRefA({ id: null, positions: new Set() });
   // The latest Record-bout answer's own stamp for this match (adoptRecordBoutAnswer),
   // held apart from matchOverride: with no prior [Remove this bout] there is no
@@ -1337,7 +1338,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     if (!(pos > 0) || (!isKachinuki && pos <= (Number(teamSize) || 0))) return;
     const req = rowsWrittenRef.current;
     if (req.id !== mHost.id) { req.id = mHost.id; req.positions = new Set(); }
-    const held = new Set((mHost.subResults || []).filter(Boolean).map((r) => r.position));
+    // The newest server copy the board is made from (a score-events answer
+    // newer than the host's included, and the bouts this device's own Start
+    // carried, which the host's copy shows until the feed holds the start):
+    // a row it holds is never written again (stage 5 review 1, C1).
+    const held = new Set((tapBoardOf(mHost, teamFold).base.subResults || []).filter(Boolean).map((r) => r.position));
     if (held.has(pos) || req.positions.has(pos)) return;
     const want = [pos];
     want.forEach((p) => req.positions.add(p));
@@ -3280,7 +3285,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // twice once folded again. A pairing added by hand on a running match was
     // written when it was added, so it is removed here too, and the board stops
     // showing it.
-    adoptServerSubs((mHost.subResults || []).filter(s => s.position !== pos));
+    const boardBase = tapBoardOf(mHost, teamFold).base;
+    adoptServerSubs((boardBase.subResults || []).filter(s => s.position !== pos), null, boardBase);
     if (manualBouts.includes(pos)) setManualBouts(prev => prev.filter(p => p !== pos));
     setSubsByOperator(prev => resizeSubsTo(prev, clampPositionCount(pos - 1, manualMaxPos)));
     dropNoticesFromRow(pos - 1);
@@ -4134,7 +4140,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // with; the kachinuki bout removal passes none, its answer being unstamped.
   // Returns the match the editor shows from now on, or null when there was no
   // log to adopt.
-  const adoptServerSubs = (subResults, answer) => {
+  // `from` is the server copy the change was made over (the board's base, a
+  // score-events answer newer than the prop included): the sheet shows the
+  // change over it, so the board is made from the change and not from that
+  // newer answer (stage 5 review 1, J1).
+  const adoptServerSubs = (subResults, answer, from) => {
     if (!Array.isArray(subResults)) return null;
     // From the LATEST prop, not the `match` this closure captured: the parent
     // may have re-rendered while the request was out (an SSE push racing it),
@@ -4163,9 +4173,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // team match's overtime (a remove clears it), or the next save would write
     // the prop's back. Winner and decision stay the prop's: the client shapes
     // them (normalizeMatch), and the answer carries them raw.
+    // The answer's score version and sessions go with it, so a score-events
+    // answer older than it is not what the board is made from.
     const shown = at > 0
-      ? { ...latest, subResults, encho: answer.encho, ...(answer.status ? { status: answer.status } : {}) }
-      : { ...latest, subResults };
+      ? {
+        ...latest, subResults, encho: answer.encho, ...(answer.status ? { status: answer.status } : {}),
+        ...(answer.scoreVersion != null ? { scoreVersion: answer.scoreVersion } : {}),
+        ...(answer.eventSeqs ? { eventSeqs: answer.eventSeqs } : {}),
+      }
+      : { ...latest, ...(from || {}), subResults };
     setMatchOverride({ match: shown, at });
     return shown;
   };
@@ -4235,8 +4251,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // writes the cleared overtime back.
     const latest = matchRef.current;
     // From the server's copy, never the board: the board's pending taps are
-    // folded on again over whatever the sheet shows.
-    const shown = { ...latest, subResults: optimistic(mHost.subResults || []), status: "running", ...(clearsEncho ? { encho: undefined } : {}) };
+    // folded on again over whatever the sheet shows. That copy is the one the
+    // board is made from (its base), a score-events answer newer than the
+    // prop included, whose score version the override takes with it, or the
+    // board would go on being made from that answer and never show the change
+    // (stage 5 review 1, J1).
+    const base = tapBoardOf(mHost, teamFold).base;
+    const shown = { ...latest, ...base, subResults: optimistic(base.subResults || []), status: "running", ...(clearsEncho ? { encho: undefined } : {}) };
     setMatchOverride({ match: shown, at: 0 });
     setEnchoPeriodCount(initialEnchoPeriodsForMatch(shown));
     Promise.resolve(sent).then((res) => {
@@ -5704,7 +5725,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   // _notifyScoreSuperseded (api_client.jsx) deliberately stays
                   // silent for. Start match is an explicit operator tap, not
                   // an autosave, so check the awaited result directly.
-                  const res = await doSubmit(() => onSubmit(buildPatch("running")));
+                  const startPatch = buildPatch("running");
+                  const res = await doSubmit(() => onSubmit(startPatch));
                   // A refused start (the court is busy, a competitor is
                   // withdrawn) stored nothing: the host reported it and
                   // returns nothing, so the match must not read as started.
@@ -5716,8 +5738,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   if (banner) setWriteFailed(banner);
                   // bc-strt: the start landed (or the outbox has it, bc-evts),
                   // so ScoreEditorModal treats the match as running before the
-                  // host's list catches up.
-                  else if (typeof onStartLanded === "function") onStartLanded();
+                  // host's list catches up, showing the bouts the start
+                  // carried (a pre-match draft rides on it).
+                  else if (typeof onStartLanded === "function") onStartLanded(startPatch);
                   // A pending start's banner, if any, is its server answer's.
                   if (writePending(res)) {
                     res.settled.then((body) => {

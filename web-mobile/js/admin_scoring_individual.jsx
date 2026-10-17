@@ -137,6 +137,11 @@ function pendingRepPick(pending, side) {
 
 // startedScore: the score a Start patch carried (a pre-match edit rides on
 // it), which the board shows until the feed holds the start.
+// startedTeamScore: the same for a team match, its bout rows and overtime.
+function startedTeamScore(patch) {
+  return { subResults: patch.subResults || [], encho: patch.encho || null };
+}
+
 function startedScore(patch) {
   return {
     ipponsA: patch.ipponsA || [], ipponsB: patch.ipponsB || [],
@@ -1144,7 +1149,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   }
   // Team routing: forward to TeamScoreEditorModal.
   if (isTeam) {
-    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} onAfterDecision={onAfterDecision} onStartLanded={() => setStartedFrom({ at: match.modifiedAt })} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} teamMembers={teamMembers} variant={variant} canClose={canClose} />;
+    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} onAfterDecision={onAfterDecision} onStartLanded={(patch) => setStartedFrom({ at: match.modifiedAt, ...(patch ? { fields: startedTeamScore(patch) } : {}) })} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} teamMembers={teamMembers} variant={variant} canClose={canClose} />;
   }
 
   // a11y: label the dialog with the match/court context so screen readers

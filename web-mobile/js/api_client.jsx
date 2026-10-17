@@ -2007,8 +2007,14 @@ async function _flushBase(base, list, pass, gen) {
         // A write that follows another match's entry (`after`) waits while that
         // entry is queued; once it settles or is discarded, this one goes and
         // the server judges it. Waiting is not failing: not marked held, and
-        // the settle that frees it reruns the flush (_dequeue).
-        if (d.after && _writeQueue.has(d.after)) { outcome = 'after'; break; }
+        // the settle that frees it reruns the flush (_dequeue). Waiting on an
+        // entry the server keeps refusing (a member add stuck on a 5xx, a
+        // parked write) is held too (stage 3 review 3, F6), so this match's
+        // editor shows that something it depends on is not getting through.
+        if (d.after && _writeQueue.has(d.after)) {
+            outcome = _blockedByHeld(d.after) ? 'kept' : 'after';
+            break;
+        }
         if (d.kind === 'evt') {
             const session = d.payload && d.payload.session;
             const batch = [];
@@ -2032,7 +2038,43 @@ async function _flushBase(base, list, pass, gen) {
     for (const [key, d] of list) {
         if (_writeQueue.get(key) === d && !d.held && outcome === 'kept') { d.held = true; marked = true; }
     }
+    // An entry of another base waiting on one just marked held is held with
+    // it (F6): its own base may have had its turn earlier in this pass.
+    if (marked && _markWaitersHeld()) marked = true;
     if (marked) _recomputeSyncStatus();
+}
+
+// _blockedByHeld: whether the entry `key` names in `after` is stuck: held after
+// the SERVER refused it (a 5xx, 429 or 403: `attempts`), parked, or waiting on
+// a password, directly or through the entry it in turn waits on. One held only
+// because the connection is down is not: the whole device is offline then, and
+// waiting is not failing (outbox_running_and_after.test.jsx).
+function _blockedByHeld(key) {
+    const seen = new Set();
+    for (let k = key; k && !seen.has(k); ) {
+        seen.add(k);
+        const d = _writeQueue.get(k);
+        if (!d) return false;
+        if (d.parked || d.authBlocked || (d.held && (Number(d.attempts) || 0) > 0)) return true;
+        k = d.after;
+    }
+    return false;
+}
+
+// _markWaitersHeld: marks held every queued entry that waits (`after`) on one
+// that cannot go for now (_blockedByHeld), and every entry of its base behind
+// it, as a failure of its own would. True when any was marked.
+function _markWaitersHeld() {
+    let marked = false;
+    const blockedBases = new Set();
+    for (const [key, d] of _writeQueue) {
+        if (d.after && _writeQueue.has(d.after) && _blockedByHeld(d.after)) blockedBases.add(_baseOf(key));
+    }
+    if (blockedBases.size === 0) return false;
+    for (const [key, d] of _writeQueue) {
+        if (!d.held && blockedBases.has(_baseOf(key))) { d.held = true; marked = true; }
+    }
+    return marked;
 }
 
 // The value a door's `settled` resolves with: the shape the direct call used

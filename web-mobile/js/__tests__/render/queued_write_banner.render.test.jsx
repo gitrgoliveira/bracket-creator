@@ -204,3 +204,22 @@ describe.each(EDITORS)('$name editor: a held write the server keeps refusing can
     expect(screen.getByRole('status')).toBeTruthy();
   });
 });
+
+// Stage 3 review 3, F6: a write of the match this sheet never submitted (a
+// lineup save from a name box, held behind a member add the server keeps
+// refusing) still shows the banner, so the operator sees the match holds one.
+describe('team editor: a held write of the match it did not submit', () => {
+  it('shows the pending banner', async () => {
+    window.API.hasHeldWrite = vi.fn(() => true);
+    try {
+      await act(async () => {
+        render(<ScoreEditorModal match={teamMatch} onClose={vi.fn()} onSubmit={vi.fn()} password="pw" />);
+      });
+      const banner = await screen.findByRole('status');
+      expect(banner.className).toContain('pending-write-banner');
+      expect(banner.textContent).toContain(QUEUED_NOTICE);
+    } finally {
+      delete window.API.hasHeldWrite;
+    }
+  });
+});

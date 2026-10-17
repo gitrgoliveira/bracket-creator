@@ -105,6 +105,22 @@ describe('a team member write is the outbox\'s (R1)', () => {
         expect(sent[1].body.memberIds).toEqual({ senpo: member.id });
     });
 
+    it('a lineup save waiting on a member write the server keeps failing is held, so its match shows it (F6)', async () => {
+        // Stage 3 review 3, F6: the add is stuck on a 5xx, and the match's lineup
+        // save waits for it (`after`). Waiting on a write that keeps failing is
+        // no longer only waiting: the save is held, so the match editor's
+        // pending banner (hasHeldWrite) shows the blocker.
+        const sent = server((req) => (req.method === 'POST' ? answer(503, { error: 'unavailable' })
+            : answer(200, { positions: req.body.positions, memberIds: req.body.memberIds })));
+        const member = await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw');
+        await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Ren Abe' }, 'pw', { senpo: member.id }, ['senpo']);
+        await reconnect();
+        await reconnect();
+        expect(sent.length).toBeGreaterThan(0);
+        expect(sent.every((r) => r.method === 'POST')).toBe(true);
+        expect(API.hasHeldWrite('c1', 'm1')).toBe(true);
+    });
+
     it('a rename answers at once with the new name stamped over the copy shown, and a refusal brings the old one back', async () => {
         const shown = { id: 'mem-2', index: 2, name: 'Sato', modifiedAt: 5 };
         server(() => answer(409, { error: 'member_already_named', message: 'This team member already has a name. Ask the tournament organizer to change it.' }));

@@ -42,6 +42,7 @@ import {
   HeldWriteDiscard,
   HeldWriteNotice,
   useClearPendingWhenNothingHeld,
+  useMatchHeldWrite,
 } from './admin_scoring_shared.jsx';
 // bc-cse: a SCHEDULED match a competitor is barred from must never offer a
 // Start the server would refuse; isBarredMatch (ineligible_match.jsx) is the
@@ -1683,6 +1684,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     setEndArmed(false);
   };
   useClearPendingWhenNothingHeld(m.compId, m.id, pendingWrite, dropHeldWrite);
+  // Any write this device holds for the match, the sheet's own or not: a lineup
+  // save from a name box waiting on a member add the server keeps refusing is
+  // one (stage 3 review 3, F6), and the banner below says so, though no submit
+  // of this sheet queued it.
+  const { held: matchHeld } = useMatchHeldWrite(m.compId, m.id);
 
   // Which team plays each side, and whether the sheet knows it yet. The teams'
   // roster comes from compMeta.players. rosterFor expects the team object (with
@@ -5421,7 +5427,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               needing a second copy for the inline variant. No Retry button:
               unlike the individual editor this component holds no submit
               closure to replay, so the operator re-enters and re-taps instead. */}
-          {!writeFailed && pendingWrite && (
+          {!writeFailed && (pendingWrite || matchHeld === true) && (
             <div className="pending-write-banner" role="status" aria-live="polite">
               <HeldWriteNotice compId={m.compId} matchId={m.id} res={pendingWrite} />
               <HeldWriteDiscard compId={m.compId} matchId={m.id} onDiscarded={dropHeldWrite} />

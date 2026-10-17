@@ -395,6 +395,52 @@ func TestScoreEventsDoor_SelfRunParticipantLimits(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, code)
 }
 
+// bc-evts stage 4: the engi editor scores a running match by flag taps, on the
+// public score sheet too (password ""). A participant's flag lands on a running
+// engi match and is refused once the match has finished, as a strike is.
+func TestScoreEventsDoor_SelfRunEngiFlags(t *testing.T) {
+	store := newTempStore(t)
+	seedSelfRunTournament(t, store)
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", Name: "C", Kind: "individual", Engi: true,
+		Format: state.CompFormatLeague, Status: state.CompStatusPools}))
+	require.NoError(t, store.SavePoolMatches("c1", []state.MatchResult{
+		{ID: "PoolA-0", SideA: mgAlice, SideB: mgBob, Status: state.MatchStatusRunning},
+		{ID: "PoolA-1", SideA: mgAlice, SideB: mgBob, Status: state.MatchStatusCompleted, Winner: mgAlice, FlagsA: 3, FlagsB: 0},
+	}))
+	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
+	now := time.Now().UnixMilli()
+	flag := func(id string, seq, stamp int64, kind, side string) map[string]any {
+		return map[string]any{"id": id, "seq": seq, "stamp": stamp, "kind": kind, "side": side}
+	}
+	send := func(matchID string, events ...map[string]any) seAnswer {
+		req := jsonReq(http.MethodPost, sePath("c1", matchID), map[string]any{"session": "evs", "events": events})
+		req.Header.Set("X-Tournament-Password", "")
+		w := httptestRecorder(r, req)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var out seAnswer
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
+		return out
+	}
+
+	out := send("PoolA-0", flag("f1", 1, now-1000, "flag.add", "b"), flag("f2", 2, now-900, "flag.add", "b"),
+		flag("f3", 3, now-800, "flag.add", "a"), flag("f4", 4, now-700, "flag.remove", "b"))
+	require.Len(t, out.Outcomes, 4)
+	for _, o := range out.Outcomes {
+		assert.Equal(t, domain.ScoreOutcomeApplied, o.Outcome, o.ID)
+	}
+	assert.Equal(t, 1, out.Match.FlagsA)
+	assert.Equal(t, 1, out.Match.FlagsB)
+	stored, err := store.LoadPoolMatches("c1")
+	require.NoError(t, err)
+	assert.Equal(t, [2]int{1, 1}, [2]int{stored[0].FlagsA, stored[0].FlagsB}, "the flags are stored as they are tapped")
+
+	out = send("PoolA-1", flag("f5", 5, now-600, "flag.add", "b"))
+	require.Len(t, out.Outcomes, 1)
+	assert.Equal(t, domain.ScoreOutcomeRefused, out.Outcomes[0].Outcome)
+	assert.Equal(t, "result_finalized", out.Outcomes[0].Reason)
+	assert.Equal(t, errResultFinalized.message, out.Outcomes[0].Message)
+}
+
 // The SSE stream's first data frame names the build.
 func TestSSEHelloNamesTheBuild(t *testing.T) {
 	hub := NewHub()

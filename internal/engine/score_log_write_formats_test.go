@@ -93,7 +93,15 @@ func TestScoreEvents_KachinukiAdvanceAndRemoveAreBaselines(t *testing.T) {
 	advanced, _, err = eng.MaybeAdvanceKachinuki(compID, "P1-0")
 	require.NoError(t, err)
 	require.True(t, advanced)
-	res = postIn(t, eng, compID, "P1-0", bout("k2", 4, time.Now().UnixMilli(), 3, domain.ScoreSideB, "K"))
+	// The tap is made after the advance that appended bout 3, so it is stamped
+	// after it. The advance stamps strictly after the match's ModifiedAt, so
+	// three server writes inside one millisecond put that stamp ahead of the
+	// wall clock: a tap stamped time.Now() then sorted before the bout existed
+	// (noTarget) in about one run in twenty (review 1).
+	stored, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	res = postIn(t, eng, compID, "P1-0", bout("k2", 4, max(time.Now().UnixMilli(), stored[0].ModifiedAt+1), 3, domain.ScoreSideB, "K"))
 	assert.Equal(t, domain.ScoreOutcomeApplied, res.Answers[0].Outcome, "an event lands on the bout the advance appended")
 	assertLogIsTheMatchIn(t, eng, store, compID, "P1-0")
 }

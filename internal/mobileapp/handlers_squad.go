@@ -322,8 +322,10 @@ func respondSquadWriteError(c *gin.Context, err error) {
 		return
 	}
 	if errors.Is(err, state.ErrTeamMemberIDConflict) {
-		// The id is the device's (an outbox add): another member holds it,
-		// or this team holds it under another name. Never retried.
+		// The id is the device's (an outbox add): another team's member, or a
+		// participant, holds it (F7). A resend of an add this team already
+		// holds under the id is 200 with the member as stored, whatever name it
+		// now carries (F5), so it never reaches here. Never retried.
 		c.JSON(http.StatusConflict, gin.H{"error": "member_id_conflict", "message": "Another team member already has this id. Reload the page and add the member again."})
 		return
 	}

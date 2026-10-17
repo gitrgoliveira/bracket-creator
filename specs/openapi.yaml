@@ -6919,6 +6919,10 @@ components:
           allOf:
             - $ref: '#/components/schemas/ScoreBasis'
           writeOnly: true
+        session:
+          allOf:
+            - $ref: '#/components/schemas/WriteSession'
+          writeOnly: true
         markIds:
           $ref: '#/components/schemas/MarkIDs'
         scoreVersion:

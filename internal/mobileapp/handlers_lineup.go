@@ -691,9 +691,19 @@ func saveLineup(c *gin.Context, tx CompetitionTransactor, hub Broadcaster, save 
 		}
 		// No member id the team does not hold is ever stored (stage 3 review 3,
 		// F2): the anonymous caller was refused for one by its guard, and the
-		// organiser's save keeps the position by its name alone.
-		if save.req.MemberIDs, respErr = memberIDsTheTeamHolds(judge, save.teamID, save.req.MemberIDs); respErr != nil {
+		// organiser's save keeps the position by its name alone. Only the ids
+		// the save lands are judged and stripped, those of its changed
+		// positions when it names them (memberIDsRead, stage 3 review 11, Y9):
+		// the rest of its body is not read, so it reads no members file for them.
+		read := save.req.memberIDsRead()
+		var kept map[domain.Position]string
+		if kept, respErr = memberIDsTheTeamHolds(judge, save.teamID, read); respErr != nil {
 			return nil
+		}
+		for pos, id := range read {
+			if kept[pos] != id {
+				delete(save.req.MemberIDs, pos)
+			}
 		}
 		var lineup domain.TeamLineup
 		if lineup, respErr = save.lineupToStore(stx, comp); respErr != nil {

@@ -2125,13 +2125,32 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 	if err != nil {
 		return err
 	}
+	// The teams the roster holds. Every one of them has members (seeded on
+	// load, by upgradeSquadsFromMetadataLocked before this, and on every
+	// roster save), so a roster team that holds none is one whose seeding
+	// failed: its ids are left as they are (stage 3 review 11, Y9). A roster
+	// that cannot be read says no team is on it for sure, so no team with no
+	// members is judged.
+	rosterTeams, rosterKnown := map[string]bool{}, true
+	if players, rerr := roster.rosterPlayers(); rerr != nil {
+		rosterKnown = false
+	} else {
+		for _, p := range players {
+			if p.ID != "" {
+				rosterTeams[p.ID] = true
+			}
+		}
+	}
 	changed := false
 	for key, l := range lineups {
-		// Every team on the roster has members (seeded on load, by
-		// upgradeSquadsFromMetadataLocked before this, and on every roster
-		// save), so a lineup whose team holds none is one no team member is
-		// on: its ids are judged like any other (stage 3 review 4, G7).
+		// A lineup whose team is NOT on the roster and holds no members is one
+		// no team member is on: its ids are judged like any other (stage 3
+		// review 4, G7).
 		members := squads[l.TeamID]
+		judgeIDs := len(members) > 0 || (rosterKnown && !rosterTeams[l.TeamID])
+		if !judgeIDs && len(l.MemberIDs) > 0 {
+			log.Printf("state: lineup repair for %s: team %s is on the roster but holds no members (its seeding failed?); its lineup's member ids are left as they are", compID, l.TeamID)
+		}
 		lineupChanged := false
 		// The ids this lineup ALREADY fields, so no member ends up at two
 		// positions -- neither one carried over from disk, nor one this pass
@@ -2173,7 +2192,7 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 		}
 		for _, pos := range slices.SortedFunc(maps.Keys(l.MemberIDs), domain.ComparePositions) {
 			id := l.MemberIDs[pos]
-			if id == "" || !IsClientMemberID(id) {
+			if !judgeIDs || id == "" || !IsClientMemberID(id) {
 				continue
 			}
 			if _, held := heldIDs[id]; !held {

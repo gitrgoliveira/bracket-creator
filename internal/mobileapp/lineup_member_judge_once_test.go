@@ -97,6 +97,31 @@ func TestLineupSave_OrganiserRefusedWhenTheTeamMembersCannotBeRead(t *testing.T)
 	assert.Contains(t, w.Body.String(), "team_members_unreadable")
 }
 
+// A save that names the positions it changed is judged on those alone (stage 3
+// review 11, Y9): the member ids its body carries at positions it did not
+// change are not read, so a save changing a position by name alone reads no
+// members file, and the unchanged positions' ids are neither judged nor
+// stripped (the server lands only the changed ones).
+func TestLineupSave_JudgesOnlyTheChangedPositions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	f := newTeamWritesFixture(t, false)
+	r := gin.New()
+	RegisterLineupHandlers(r.Group("/api"), f.store, f.store, unreadableSquadsTransactor{f.store}, stubBroadcaster{}, f.store, NewFileVerifier(f.store))
+
+	changed := []domain.Position{domain.PosSenpo}
+	body := LineupRequest{
+		Positions: map[domain.Position]string{domain.PosSenpo: "Sato", domain.PosJiho: "Kato"},
+		MemberIDs: map[domain.Position]string{domain.PosJiho: f.namedA},
+		Changed:   &changed,
+	}
+	req := jsonReq(http.MethodPut, f.lineupPath("PoolA-0"), body)
+	req.Header.Set("X-Tournament-Password", "main-pw")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+}
+
 // teamHoldingMembers saves one team on compID's roster and records each of
 // `members` (id, a lowercase UUID v4, to name) as one of its members, so a
 // lineup save naming those ids names members the team holds: a save keeps only

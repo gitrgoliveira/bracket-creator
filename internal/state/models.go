@@ -2213,12 +2213,13 @@ func (m *MatchResult) ClearRequestFields() {
 }
 
 // ClearDerivedScoreFields drops what only the score replay derives (bc-evts):
-// the mark ids, the match's and every bout's, and the event-log version. The
-// HTTP doors that bind a whole MatchResult from a body (/score, each
-// bulk-score entry) call it as they bind, so no client can name a mark or
-// claim a version; the engine stores them only from the replay's own write.
+// the mark ids, the match's and every bout's, the event-log version and the
+// highest event seq the log holds per device session. The HTTP doors that
+// bind a whole MatchResult from a body (/score, each bulk-score entry) call it
+// as they bind, so no client can name a mark or claim a version or a seq; the
+// engine stores them only from the replay's own write.
 func (m *MatchResult) ClearDerivedScoreFields() {
-	m.MarkIDs, m.ScoreVersion = nil, 0
+	m.MarkIDs, m.ScoreVersion, m.EventSeqs = nil, 0, nil
 	for i := range m.SubResults {
 		m.SubResults[i].MarkIDs = nil
 	}

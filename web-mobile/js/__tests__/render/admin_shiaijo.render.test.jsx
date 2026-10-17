@@ -1648,6 +1648,28 @@ describe('Send back to queue keeps the score and is always offered (bc-sbq)', ()
     } finally { c.restore(); }
   });
 
+  // bc-evts review 1, minor 7: a send back names what the console showed
+  // (`seen`, the match's scoreVersion), as every rule-bound write does.
+  it('Send back to queue says what the console showed', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { ipponsA: ['M'], scoreVersion: 5 })]);
+    try {
+      await tapSendBack(c);
+      const confirm = [...c.utils.container.querySelectorAll('.shiaijo-move-confirm button')]
+        .find((b) => /send back to queue/i.test(b.textContent));
+      await act(async () => { confirm.click(); });
+      expect(window.API.revertMatchToQueue.mock.calls.at(-1)[3]).toEqual(expect.objectContaining({ seen: 5 }));
+    } finally { c.restore(); }
+  });
+
+  it('the send back of a pick says what the console showed', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { ipponsA: ['M'], scoreVersion: 6 }), courtMatch('m2', 'scheduled')]);
+    try {
+      const startNext = c.utils.getAllByRole('button').find((b) => /^start/i.test(b.textContent.trim()));
+      await act(async () => { startNext.click(); });
+      expect(window.API.revertMatchToQueue.mock.calls.at(-1)[3]).toEqual(expect.objectContaining({ seen: 6 }));
+    } finally { c.restore(); }
+  });
+
   // bc-evts (the governing rule): the send back is the outbox's and nothing
   // waits for its answer. The pick's start is queued at once, after it
   // (`after`: the send back's queue key), so the outbox sends the start only

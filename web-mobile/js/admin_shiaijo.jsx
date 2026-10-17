@@ -1571,7 +1571,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 return true;
             };
             try {
-                const sent = await window.API.revertMatchToQueue(cur.compId, cur.id, password, { onRefusal: deferFailed });
+                const sent = await window.API.revertMatchToQueue(cur.compId, cur.id, password, { onRefusal: deferFailed, seen: cur.scoreVersion });
                 after = (sent && typeof sent.key === "string" && sent.key) || null;
             } catch (e) {
                 deferFailed(e);
@@ -1764,7 +1764,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // score (operator ruling 2026-09-26, bc-sbq): starting it again carries on
     // from it, and the operator removes a wrong mark themselves.
     const requestRevert = (m) => {
-        setPendingRevert({ compId: m.compId, matchId: m.id, label: confirmMatchLabel(m) });
+        setPendingRevert({ compId: m.compId, matchId: m.id, label: confirmMatchLabel(m), seen: m.scoreVersion });
     };
     const confirmRevert = async () => {
         if (!pendingRevert || reverting) return;
@@ -1775,6 +1775,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // bc-evts: the outbox's, never awaited: the console moves on at
             // once, and a refusal the server gives later is toasted.
             await window.API.revertMatchToQueue(compId, matchId, password, {
+                seen: pendingRevert.seen,
                 onRefusal: (e) => {
                     if (!mountedRef.current || !showToast) return false;
                     showToast((e && e.message) || "Could not send match back to queue", "error");

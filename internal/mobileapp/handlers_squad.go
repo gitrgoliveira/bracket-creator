@@ -66,6 +66,11 @@ import (
 // Rename keeps them.
 type SquadMemberRequest struct {
 	Name string `json:"name"`
+	// ID is the member's id as the device minted it, on POST only and
+	// optional (bc-evts stage 3 review 2, R1): a lowercase UUID v4
+	// (state.IsClientMemberID). The add is an outbox entry, so a lineup save
+	// naming the member is queued behind it with the id it will have.
+	ID string `json:"id,omitempty"`
 }
 
 // RegisterSquadHandlers wires the GET/POST/PUT/DELETE squad endpoints under
@@ -115,17 +120,28 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		if !validMemberName(c, req.Name) {
 			return
 		}
+		if req.ID != "" && !state.IsClientMemberID(req.ID) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": state.ErrInvalidMemberID.Error()})
+			return
+		}
 		// A participant's add is bounded and refused once the competition
-		// has finished, both judged by the store under its lock.
+		// has finished, both judged by the store under its lock. A resend of
+		// an add that landed (the same client id and name) is answered 200
+		// with the member as stored, and announces nothing new.
 		var member domain.TeamMember
+		var created bool
 		var err error
 		if anonymous {
-			member, err = store.AddTeamMemberUpTo(compID, teamID, req.Name, selfRunMemberLimit(comp.TeamSize))
+			member, created, err = store.AddTeamMemberAsUpTo(compID, teamID, req.ID, req.Name, selfRunMemberLimit(comp.TeamSize))
 		} else {
-			member, err = store.AddTeamMember(compID, teamID, req.Name)
+			member, created, err = store.AddTeamMemberAs(compID, teamID, req.ID, req.Name)
 		}
 		if err != nil {
 			respondSquadWriteError(c, err)
+			return
+		}
+		if !created {
+			c.JSON(http.StatusOK, member)
 			return
 		}
 		c.JSON(http.StatusCreated, member)
@@ -302,6 +318,16 @@ func respondSquadWriteError(c *gin.Context, err error) {
 	}
 	if errors.Is(err, state.ErrTeamMemberNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, state.ErrTeamMemberIDConflict) {
+		// The id is the device's (an outbox add): another member holds it,
+		// or this team holds it under another name. Never retried.
+		c.JSON(http.StatusConflict, gin.H{"error": "member_id_conflict", "message": "Another team member already has this id. Reload the page and add the member again."})
+		return
+	}
+	if errors.Is(err, state.ErrInvalidMemberID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if errors.Is(err, state.ErrTeamMemberLimit) {

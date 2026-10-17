@@ -468,12 +468,49 @@ func squadDuplicateNameCheck(candidateName string, otherNames []string) error {
 // by overwriting it; a squad member is not, which is why the two diverge.
 // See requireTeamParticipantLocked below.
 func (s *Store) AddTeamMember(compID, teamID, name string) (domain.TeamMember, error) {
-	return s.addTeamMember(compID, teamID, name, 0, false)
+	member, _, err := s.addTeamMember(compID, teamID, "", name, 0, false)
+	return member, err
+}
+
+// AddTeamMemberAs is the organiser's AddTeamMember with the member's id made
+// by the caller (memberID; "" mints one): a device that queues the add mints
+// it, so a lineup save naming the member can be queued behind the add
+// (bc-evts stage 3 review 2, R1). created is false when the team already held
+// that id under that name: a resend of an add that landed, answered as stored.
+// The id held by another member, or under another name, is
+// ErrTeamMemberIDConflict; one that is not a lowercase UUID v4,
+// ErrInvalidMemberID.
+func (s *Store) AddTeamMemberAs(compID, teamID, memberID, name string) (domain.TeamMember, bool, error) {
+	return s.addTeamMember(compID, teamID, memberID, name, 0, false)
+}
+
+// AddTeamMemberAsUpTo is AddTeamMemberUpTo (the participant's add, bounded and
+// refused once the competition has finished) with a client-made id, as
+// AddTeamMemberAs. A resend of an add that landed is answered as stored before
+// the limit and the finished competition are judged: it adds nothing.
+func (s *Store) AddTeamMemberAsUpTo(compID, teamID, memberID, name string, limit int) (domain.TeamMember, bool, error) {
+	return s.addTeamMember(compID, teamID, memberID, name, limit, true)
 }
 
 // ErrTeamMemberLimit is AddTeamMemberUpTo's refusal: the squad already holds
 // limit members.
 var ErrTeamMemberLimit = errors.New("team already holds as many members as allowed")
+
+// ErrTeamMemberIDConflict refuses an add whose client-made id (AddTeamMemberAs)
+// another member already holds, in any team, or that this team holds under
+// another name: never a second member under one id (bc-evts stage 3 review 2).
+var ErrTeamMemberIDConflict = errors.New("another team member already has this id")
+
+// ErrInvalidMemberID refuses a client-made member id that is not a lowercase
+// UUID v4 (IsClientMemberID).
+var ErrInvalidMemberID = errors.New("a team member id must be a lowercase UUID v4")
+
+// IsClientMemberID reports whether id is a member id a device may choose: a
+// lowercase canonical UUID whose version is 4 (helper.IsUUIDv4 checks the
+// shape alone).
+func IsClientMemberID(id string) bool {
+	return helper.IsUUIDv4(id) && id[14] == '4'
+}
 
 // ErrCompetitionFinished refuses a participant's team-member write
 // (AddTeamMemberUpTo, NameUnnamedTeamMember) once the competition is
@@ -486,7 +523,8 @@ var ErrCompetitionFinished = errors.New("competition has finished")
 // the same lock as the write, the lock a competition's completion also takes,
 // so requests racing each other or the finish cannot pass them.
 func (s *Store) AddTeamMemberUpTo(compID, teamID, name string, limit int) (domain.TeamMember, error) {
-	return s.addTeamMember(compID, teamID, name, limit, true)
+	member, _, err := s.addTeamMember(compID, teamID, "", name, limit, true)
+	return member, err
 }
 
 // requireCompetitionOpen is ErrCompetitionFinished's check, on a record read
@@ -508,11 +546,14 @@ func (s *Store) requireCompetitionOpenLocked(compID string) error {
 	return requireCompetitionOpen(comp)
 }
 
-func (s *Store) addTeamMember(compID, teamID, name string, limit int, participant bool) (domain.TeamMember, error) {
+func (s *Store) addTeamMember(compID, teamID, memberID, name string, limit int, participant bool) (domain.TeamMember, bool, error) {
 	if err := ValidateCompetitionID(compID); err != nil {
-		return domain.TeamMember{}, err
+		return domain.TeamMember{}, false, err
 	}
 	name = strings.TrimSpace(name)
+	if memberID != "" && !IsClientMemberID(memberID) {
+		return domain.TeamMember{}, false, ErrInvalidMemberID
+	}
 
 	mu := s.getCompLock(compID)
 	mu.Lock()
@@ -520,21 +561,40 @@ func (s *Store) addTeamMember(compID, teamID, name string, limit int, participan
 
 	comp, err := s.requireTeamParticipantLocked(compID, teamID)
 	if err != nil {
-		return domain.TeamMember{}, err
-	}
-	if participant {
-		if err := requireCompetitionOpen(comp); err != nil {
-			return domain.TeamMember{}, err
-		}
+		return domain.TeamMember{}, false, err
 	}
 
 	squads, err := s.loadSquadsLocked(compID)
 	if err != nil {
-		return domain.TeamMember{}, err
+		return domain.TeamMember{}, false, err
+	}
+	// A client-made id (bc-evts stage 3 review 2, R1): the add is an outbox
+	// entry, so it can arrive twice when its answer was lost. The member this
+	// team already holds under that id and name IS that add: answered as
+	// stored, nothing written, and judged before the limit and the finished
+	// competition, which a resend never crosses. Any other holder of the id
+	// is a conflict, never a second member under one id.
+	if memberID != "" {
+		for team, members := range squads {
+			for _, m := range members {
+				if m.ID != memberID {
+					continue
+				}
+				if team == teamID && strings.TrimSpace(m.Name) == name {
+					return m, false, nil
+				}
+				return domain.TeamMember{}, false, ErrTeamMemberIDConflict
+			}
+		}
+	}
+	if participant {
+		if err := requireCompetitionOpen(comp); err != nil {
+			return domain.TeamMember{}, false, err
+		}
 	}
 	existing := squads[teamID]
 	if limit > 0 && len(existing) >= limit {
-		return domain.TeamMember{}, ErrTeamMemberLimit
+		return domain.TeamMember{}, false, ErrTeamMemberLimit
 	}
 
 	otherNames := make([]string, 0, len(existing))
@@ -542,7 +602,7 @@ func (s *Store) addTeamMember(compID, teamID, name string, limit int, participan
 		otherNames = append(otherNames, m.Name)
 	}
 	if err := squadDuplicateNameCheck(name, otherNames); err != nil {
-		return domain.TeamMember{}, err
+		return domain.TeamMember{}, false, err
 	}
 
 	nextIndex := 1
@@ -551,14 +611,18 @@ func (s *Store) addTeamMember(compID, teamID, name string, limit int, participan
 			nextIndex = m.Index + 1
 		}
 	}
-	member := domain.TeamMember{ID: newParticipantID(), Index: nextIndex, Name: name}
+	id := memberID
+	if id == "" {
+		id = newParticipantID()
+	}
+	member := domain.TeamMember{ID: id, Index: nextIndex, Name: name}
 	s.stampMember(&member)
 	squads[teamID] = append(existing, member)
 
 	if err := s.saveSquadsLocked(compID, squads, s.directWrite); err != nil {
-		return domain.TeamMember{}, err
+		return domain.TeamMember{}, false, err
 	}
-	return member, nil
+	return member, true, nil
 }
 
 // RenameTeamMember keeps memberID's id and index and replaces its Name.

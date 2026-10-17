@@ -236,12 +236,15 @@ type LineupEngine interface {
 // handlers_squad.go (bc-tmid pass 1, clearing added bc-pnum): a team's
 // squad, the people on it, each with a stable id and a display index
 // (domain.TeamMember), kept in its own per-competition file rather than in
-// Player.Metadata. Mirrors the LoadSquads / AddTeamMember /
+// Player.Metadata. Mirrors the LoadSquads / AddTeamMemberAs /
 // RenameTeamMember / ClearTeamMemberName methods on *state.Store.
 type SquadStore interface {
 	LoadSquads(compID string) (map[string][]domain.TeamMember, error)
-	AddTeamMember(compID, teamID, name string) (domain.TeamMember, error)
-	AddTeamMemberUpTo(compID, teamID, name string, limit int) (domain.TeamMember, error)
+	// The adds take the member's id the device minted ("" mints one) and
+	// report whether they created it: false for a resend of an add that
+	// landed, answered as stored (bc-evts stage 3 review 2, R1).
+	AddTeamMemberAs(compID, teamID, memberID, name string) (domain.TeamMember, bool, error)
+	AddTeamMemberAsUpTo(compID, teamID, memberID, name string, limit int) (domain.TeamMember, bool, error)
 	// The three name writers answer with the member as written, carrying the
 	// server stamp that write gave it (domain.TeamMember.ModifiedAt).
 	RenameTeamMember(compID, teamID, memberID, newName string) (domain.TeamMember, error)

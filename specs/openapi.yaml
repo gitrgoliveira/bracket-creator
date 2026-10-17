@@ -4748,6 +4748,14 @@ paths:
         two members (409 `team_member_limit`), since a member is never removed;
         the organiser adds past both. A password that is sent but wrong gets
         401 before the body is read.
+
+        The app sends the add from its offline queue without waiting for it,
+        so it mints the member's `id` itself (a lowercase UUID v4) and a lineup
+        save naming the member can be queued behind the add. A resend of an
+        add that landed (the same `id` and `name` for the same team) is
+        answered 200 with the member as stored, writes nothing and is judged
+        before the limit and the finished competition. With no `id` the server
+        mints one, as before.
       security:
         - TournamentPassword: []
       requestBody:
@@ -4755,8 +4763,26 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TeamMemberName'
+              allOf:
+                - $ref: '#/components/schemas/TeamMemberName'
+                - type: object
+                  properties:
+                    id:
+                      type: string
+                      format: uuid
+                      description: >
+                        The member's id as the device minted it, a lowercase
+                        UUID v4. Optional; the server mints one without it.
+                      example: 6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b
       responses:
+        '200':
+          description: >
+            A resend of an add that landed: the team already holds this `id`
+            under this `name`. The member as stored; nothing is written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamMember'
         '201':
           description: Member added.
           content:
@@ -4764,7 +4790,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/TeamMember'
         '400':
-          description: The body is not a JSON object, or `name` is empty or longer than 100 bytes.
+          description: >
+            The body is not a JSON object, `name` is empty or longer than 100
+            bytes, or `id` is not a lowercase UUID v4.
           content:
             application/json:
               schema:
@@ -4787,7 +4815,9 @@ paths:
         '409':
           description: >
             Another member of the team already has this name (`error` only).
-            Or, self-run with an empty password, the competition has finished
+            Or another member, of this team or another, already has this `id`,
+            or this team has it under another name (`member_id_conflict`, with
+            a `message`). Or, self-run with an empty password, the competition has finished
             (`competition_finished`) or the team is at its limit
             (`team_member_limit`), each with a `message` to show.
           content:

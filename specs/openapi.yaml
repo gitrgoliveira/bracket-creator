@@ -3447,9 +3447,11 @@ paths:
                   type: string
                   maxLength: 32
                   example: A
+                writeId:
+                  $ref: '#/components/schemas/ArrivalWriteId'
       responses:
         '200':
-          description: Court updated.
+          description: Court updated, or a writeId this door already applied answered as recorded (nothing moved).
         '400':
           description: Body malformed or the court label too long.
         '404':
@@ -3680,9 +3682,11 @@ paths:
                   maxLength: 32
                   description: HH:MM scheduled time.
                   example: "14:30"
+                writeId:
+                  $ref: '#/components/schemas/ArrivalWriteId'
       responses:
         '200':
-          description: Time updated.
+          description: Time updated, or a writeId this door already applied answered as recorded (nothing changed).
         '400':
           description: Body malformed or the time too long.
         '404':
@@ -4950,6 +4954,16 @@ paths:
         The answer is the member as stored, with its new `modifiedAt` stamp.
       security:
         - TournamentPassword: []
+      requestBody:
+        required: false
+        description: Optional; an empty body is the one-tap shape.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                writeId:
+                  $ref: '#/components/schemas/ArrivalWriteId'
       responses:
         '200':
           description: Name cleared.
@@ -5838,6 +5852,23 @@ components:
         The client's id for one write (request-only). A write whose id the
         match's score event log already holds is answered as recorded, with
         nothing written and no history line.
+    ArrivalWriteId:
+      type: string
+      maxLength: 128
+      description: >
+        The client's id for one write (request-only, optional) on a door the
+        server orders by arrival rather than by a stamp: a court move, a time
+        change, a lineup save, a team member's rename or cleared name (bc-evts
+        stage 3 review 11, Y8). The app sends a write again under the same id
+        when it gave up on its request at the deadline, and the first request
+        can still land after the resend and after the next write of the same
+        match or team. A write this door has already applied under this id is
+        answered 200 as recorded, with the value as stored where the door
+        answers one, and nothing is applied again, so a late duplicate never
+        puts an older value back. The ids are kept in memory for 15 minutes
+        (at most 16384); a restart ends every request it held. A write the door
+        refused is not recorded, so its resend is judged again. Absent: applied
+        every time, as before.
     WriteSession:
       type: string
       maxLength: 256
@@ -7748,6 +7779,12 @@ components:
         name:
           type: string
           description: The member's name; must not be empty.
+        writeId:
+          allOf:
+            - $ref: '#/components/schemas/ArrivalWriteId'
+          description: >
+            On a rename (PUT) only; see ArrivalWriteId. The add (POST) needs
+            none: its member `id` already makes a resend an echo.
 
     TeamMember:
       type: object
@@ -7833,6 +7870,8 @@ components:
                 a non-empty name, or an empty name with a `memberIds` entry (a member
                 with no name yet), places a fighter there; an empty name with no
                 `memberIds` entry clears the position.
+            writeId:
+              $ref: '#/components/schemas/ArrivalWriteId'
 
     TeamLineupRead:
       description: >

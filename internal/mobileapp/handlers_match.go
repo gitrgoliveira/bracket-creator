@@ -683,6 +683,9 @@ const bulkScorePushEachMax = 50
 // implementation of `ScoringEngine` so the `tryAutoCompletePools` and
 // score endpoint paths can already accept the interface today.
 func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store CompetitionStore, tx CompetitionTransactor, hub *Hub, verifier PasswordVerifier, tl TournamentLoader) {
+	// The court move and the time change are ordered by arrival: a late
+	// duplicate of one is answered as recorded (writeOnce, Y8).
+	once := newWriteOnce()
 	r.POST("/competitions/:id/matches/bulk-score", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
 		if !ok {
@@ -1324,6 +1327,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 
 		var req struct {
 			Court string `json:"court"`
+			// The client's id for the move (Y8): one already applied is
+			// answered as recorded, never applied again.
+			WriteID string `json:"writeId,omitempty"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -1338,12 +1344,30 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if err := validWriteID(req.WriteID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 
-		if err := eng.UpdateMatchCourt(id, mid, req.Court); err != nil {
-			// A match the competition does not hold is a 404, never a 500:
-			// the outbox retries a 5xx forever and holds the match's later
-			// writes behind it (bc-evts stage 3 review 2, R3).
-			respondEngineError(c, err)
+		applied := false
+		ran := once.do("match\x1f"+id+"\x1f"+mid, req.WriteID, func() bool {
+			if err := eng.UpdateMatchCourt(id, mid, req.Court); err != nil {
+				// A match the competition does not hold is a 404, never a 500:
+				// the outbox retries a 5xx forever and holds the match's later
+				// writes behind it (bc-evts stage 3 review 2, R3).
+				respondEngineError(c, err)
+				return false
+			}
+			applied = true
+			return true
+		})
+		if !ran {
+			// A late duplicate of a move already applied: recorded, nothing
+			// moves and nothing is announced.
+			c.Status(http.StatusOK)
+			return
+		}
+		if !applied {
 			return
 		}
 
@@ -1897,6 +1921,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		mid := c.Param("mid")
 		var req struct {
 			ScheduledAt string `json:"scheduledAt"`
+			// The client's id for the change (Y8), as the court move's.
+			WriteID string `json:"writeId,omitempty"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -1906,9 +1932,26 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		if err := validWriteID(req.WriteID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 
-		if err := eng.UpdateMatchTime(id, mid, req.ScheduledAt); err != nil {
-			respondEngineError(c, err) // 404 for an unknown match, as the court move (R3)
+		applied := false
+		ran := once.do("match\x1f"+id+"\x1f"+mid, req.WriteID, func() bool {
+			if err := eng.UpdateMatchTime(id, mid, req.ScheduledAt); err != nil {
+				respondEngineError(c, err) // 404 for an unknown match, as the court move (R3)
+				return false
+			}
+			applied = true
+			return true
+		})
+		if !ran {
+			// A late duplicate of a change already applied: recorded.
+			c.Status(http.StatusOK)
+			return
+		}
+		if !applied {
 			return
 		}
 

@@ -71,6 +71,11 @@ type SquadMemberRequest struct {
 	// (state.IsClientMemberID). The add is an outbox entry, so a lineup save
 	// naming the member is queued behind it with the id it will have.
 	ID string `json:"id,omitempty"`
+	// WriteID is the client's id for a rename (bc-evts stage 3 review 11,
+	// Y8): one the door applied is answered with the member as stored, never
+	// applied again, so a late duplicate puts no older name back. The add
+	// needs none: its member id already makes a resend an echo.
+	WriteID string `json:"writeId,omitempty"`
 }
 
 // RegisterSquadHandlers wires the GET/POST/PUT/DELETE squad endpoints under
@@ -83,6 +88,9 @@ type SquadMemberRequest struct {
 // the add's and the rename's guards and so that a wrong password on either
 // write is 401.
 func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps CompetitionStore, hub Broadcaster, tl TournamentLoader, verifier PasswordVerifier) {
+	// A rename and a cleared name are ordered by arrival: a late duplicate of
+	// one is answered as recorded (writeOnce, Y8).
+	once := newWriteOnce()
 	r.GET("/competitions/:id/team-members", func(c *gin.Context) {
 		compID, ok := requireValidCompID(c)
 		if !ok {
@@ -185,13 +193,28 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		if anonymous {
 			rename = store.NameUnnamedTeamMember
 		}
-		member, err := rename(compID, teamID, memberID, req.Name)
-		if err != nil {
-			respondSquadWriteError(c, err)
+		if err := validWriteID(req.WriteID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, member)
-		hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, ""))
+		applied := false
+		ran := once.do(memberTarget(compID, teamID, memberID), req.WriteID, func() bool {
+			member, err := rename(compID, teamID, memberID, req.Name)
+			if err != nil {
+				respondSquadWriteError(c, err)
+				return false
+			}
+			c.JSON(http.StatusOK, member)
+			applied = true
+			return true
+		})
+		if !ran {
+			answerStoredMember(c, store, compID, teamID, memberID)
+			return
+		}
+		if applied {
+			hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, ""))
+		}
 	})
 
 	// DELETE is the operator's "removal": it clears the member's Name back
@@ -214,14 +237,53 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 			c.JSON(http.StatusBadRequest, gin.H{"error": "member ID is required"})
 			return
 		}
-		member, err := store.ClearTeamMemberName(compID, teamID, memberID)
-		if err != nil {
-			respondSquadWriteError(c, err)
+		// The optional {writeId} body (Y8), as the rename's.
+		tag, ok := bindOptionalWriteTag(c)
+		if !ok {
 			return
 		}
-		c.JSON(http.StatusOK, member)
-		hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, ""))
+		applied := false
+		ran := once.do(memberTarget(compID, teamID, memberID), tag.WriteID, func() bool {
+			member, err := store.ClearTeamMemberName(compID, teamID, memberID)
+			if err != nil {
+				respondSquadWriteError(c, err)
+				return false
+			}
+			c.JSON(http.StatusOK, member)
+			applied = true
+			return true
+		})
+		if !ran {
+			answerStoredMember(c, store, compID, teamID, memberID)
+			return
+		}
+		if applied {
+			hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, ""))
+		}
 	})
+}
+
+// memberTarget names a member for writeOnce: its renames and its cleared name
+// are ordered together.
+func memberTarget(compID, teamID, memberID string) string {
+	return "member\x1f" + compID + "\x1f" + teamID + "\x1f" + memberID
+}
+
+// answerStoredMember answers a late duplicate of a member write the door
+// already applied (Y8): 200 with the member as stored, nothing written.
+func answerStoredMember(c *gin.Context, store SquadStore, compID, teamID, memberID string) {
+	squads, err := store.LoadSquads(compID)
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+	for _, m := range squads[teamID] {
+		if m.ID == memberID {
+			c.JSON(http.StatusOK, m)
+			return
+		}
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": state.ErrTeamMemberNotFound.Error()})
 }
 
 // requireValidCompIDAndTeam extracts (compID, teamID) from the URL, 400ing

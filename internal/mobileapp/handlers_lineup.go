@@ -96,6 +96,10 @@ type LineupRequest struct {
 	Positions map[domain.Position]string `json:"positions"`
 	MemberIDs map[domain.Position]string `json:"memberIds,omitempty"`
 	Changed   *[]domain.Position         `json:"changed,omitempty"`
+	// WriteID is the client's id for the save (bc-evts stage 3 review 11,
+	// Y8): a save this door has applied under it is answered as recorded,
+	// never applied again (writeOnce), so a late duplicate puts nothing back.
+	WriteID string `json:"writeId,omitempty"`
 }
 
 // changedPositions are the positions the save names as changed, and whether it
@@ -131,6 +135,10 @@ func (r LineupRequest) memberIDsRead() map[domain.Position]string {
 // ones of a partial save (the rest of its body is ignored). Both lineup PUTs ask
 // it, as both store the names they are sent.
 func validLineupRequest(c *gin.Context, req LineupRequest) bool {
+	if err := validWriteID(req.WriteID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return false
+	}
 	changed, partial := req.changedPositions()
 	if partial && len(changed) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": domain.ErrLineupNoChangedPositions.Error()})
@@ -375,6 +383,9 @@ func findRoundLineup(lineups map[string]domain.TeamLineup, teamID string, round 
 // `tl`/`verifier` tell an anonymous caller apart (selfRunAnonymous), who may
 // not change the lineup of a match that has finished (see the PUT).
 func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore, tx CompetitionTransactor, hub Broadcaster, tl TournamentLoader, verifier PasswordVerifier) {
+	// A lineup save is ordered by arrival: a late duplicate of one is
+	// answered as recorded (writeOnce, Y8).
+	once := newWriteOnce()
 	r.PUT("/competitions/:id/teams/:tid/lineups/:round", func(c *gin.Context) {
 		compID, teamID, round, ok := parseLineupParams(c)
 		if !ok {
@@ -397,7 +408,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 
-		save := lineupSave{compID: compID, teamID: teamID, round: round, req: req}
+		save := lineupSave{compID: compID, teamID: teamID, round: round, req: req, once: once}
 		saveLineup(c, tx, hub, save, nil, func(lineups map[string]domain.TeamLineup) (domain.TeamLineup, bool) {
 			return findRoundLineup(lineups, teamID, round)
 		})
@@ -438,7 +449,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 
-		save := lineupSave{compID: compID, teamID: teamID, matchID: matchID, req: req}
+		save := lineupSave{compID: compID, teamID: teamID, matchID: matchID, req: req, once: once}
 		// An anonymous self-run caller writes from the public score sheet,
 		// so the score path's rule holds: the match must exist and hold the
 		// team by id (errTeamNotInMatch), and once it has finished its lineup
@@ -585,6 +596,14 @@ type lineupSave struct {
 	matchID        string
 	round          int
 	req            LineupRequest
+	// once records the writeIds the lineup door applied (Y8): a late
+	// duplicate of a save is answered with the lineup as stored.
+	once *writeOnce
+}
+
+// target names the lineup a save writes, for writeOnce.
+func (s lineupSave) target() string {
+	return "lineup\x1f" + s.compID + "\x1f" + s.teamID + "\x1f" + s.matchID + "\x1f" + strconv.Itoa(s.round)
 }
 
 // lineupToStore is the lineup this save stores, built under the write's lock.
@@ -659,6 +678,7 @@ func saveLineup(c *gin.Context, tx CompetitionTransactor, hub Broadcaster, save 
 	compID := save.compID
 	var respErr *txResponse
 	var persistedLineup domain.TeamLineup
+	duplicate := false
 	txErr := tx.WithTransaction(compID, func(stx state.StoreTx) error {
 		// TeamSize is competition-level: a 3-person team and a 5-person team
 		// cannot coexist in the same competition. We need it here to drive
@@ -678,6 +698,24 @@ func saveLineup(c *gin.Context, tx CompetitionTransactor, hub Broadcaster, save 
 			respErr = &txResponse{
 				status: http.StatusBadRequest,
 				body:   gin.H{"error": "competition is not configured for team play (teamSize must be > 0)"},
+			}
+			return nil
+		}
+		// A late duplicate of a save this door applied (Y8): answered with
+		// the lineup as stored, judged under the competition's lock so it
+		// is ordered after the save it duplicates and anything since.
+		if save.once.seenAt(save.target(), save.req.WriteID) {
+			duplicate = true
+			lineups, err := stx.LoadTeamLineups(compID)
+			if err != nil {
+				log.Printf("mobileapp: PUT %s: LoadTeamLineups: %v", c.Request.URL.Path, err)
+				respErr = &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
+				return nil
+			}
+			if stored, ok := find(lineups); ok {
+				persistedLineup = stored
+			} else {
+				persistedLineup = domain.TeamLineup{TeamID: save.teamID, CompetitionID: compID, Round: save.round, MatchID: save.matchID, Positions: map[domain.Position]string{}}
 			}
 			return nil
 		}
@@ -745,6 +783,12 @@ func saveLineup(c *gin.Context, tx CompetitionTransactor, hub Broadcaster, save 
 		return
 	}
 	c.JSON(http.StatusOK, persistedLineup)
+	if duplicate {
+		return
+	}
+	// Recorded once the save has committed: a save the door refused, or one
+	// whose commit failed, is judged again when it is sent again.
+	save.once.remember(save.target(), save.req.WriteID)
 	hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, save.teamID, save.matchID))
 }
 

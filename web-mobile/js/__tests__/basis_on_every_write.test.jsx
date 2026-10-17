@@ -214,3 +214,28 @@ describe('the answer\'s copy of a match is forgotten with its competition', () =
         expect(API.latestDerivedMatch('c2', 'm1')).toBeNull();
     });
 });
+
+// bc-evts stage 3 review 11, Y8: the doors the server orders by arrival (a
+// court move, a time change, a lineup save, a member's rename or cleared name)
+// answer a writeId they have applied as recorded, so a late duplicate of a
+// request given up on puts nothing back. Each of them carries its writeId, and
+// a resend the same one.
+describe('the doors ordered by arrival send their writeId', () => {
+    const DOORS = [
+        ['court', () => API.moveMatchCourt('c1', 'm1', 'B', 'pw')],
+        ['time', () => API.updateMatchTime('c1', 'm1', '10:00', 'pw')],
+        ['match-lineups', () => API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Sato' }, 'pw', {}, ['senpo'])],
+        ['lineups/0', () => API.putTeamLineup('c1', 't1', 0, { senpo: 'Sato' }, 'pw', {}, ['senpo'])],
+        ['rename', () => API.renameTeamMember('c1', 't1', 'mem1', 'Ren', 'pw')],
+        ['clear', () => API.clearTeamMember('c1', 't1', 'mem1', 'pw')],
+    ];
+    it.each(DOORS)('%s', async (_name, send) => {
+        await send();
+        await flushMicrotasks();
+        const sent = global.fetch.mock.calls.filter(([u]) => !isClock(u));
+        expect(sent.length).toBeGreaterThan(0);
+        const body = JSON.parse(sent[0][1].body);
+        expect(typeof body.writeId).toBe('string');
+        expect(body.writeId.length).toBeGreaterThan(0);
+    });
+});

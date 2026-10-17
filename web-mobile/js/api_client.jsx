@@ -3637,7 +3637,13 @@ function _memberWrite({ compID, teamId, method, url, payload, password, member, 
 
 // _lastMemberEntryKey: the key of the team's last queued member write, '' when none.
 function _lastMemberEntryKey(compID, teamId) {
-    const members = _entriesFor(_membersBase(compID, teamId)).filter(([, d]) => d.kind === 'member');
+    return _lastMemberEntryKeyOfBase(_membersBase(compID, teamId));
+}
+
+// _lastMemberEntryKeyOfBase: the same answer for a base already in hand (the
+// ONE meaning of "the team's last member write", J3, stage 3 review 6).
+function _lastMemberEntryKeyOfBase(base) {
+    const members = _entriesFor(base).filter(([, d]) => d.kind === 'member');
     return members.length ? members[members.length - 1][0] : '';
 }
 
@@ -3757,7 +3763,7 @@ function _followMintedMembers(base, descriptor) {
         if (e === descriptor || !ids.has(_memberAddId(e))) continue;
         const addBase = _baseOf(key);
         if (addBase === base) continue;
-        _addAfter(descriptor, _lastEntryKey(addBase));
+        _addAfter(descriptor, _lastMemberEntryKeyOfBase(addBase));
     }
 }
 

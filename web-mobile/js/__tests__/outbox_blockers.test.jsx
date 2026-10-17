@@ -578,3 +578,19 @@ describe('settling a tap batch stores the queue once (J2, stage 3 review 6)', ()
         expect(writes, 'one store for the batch, not one per tap').toBeLessThanOrEqual(2);
     });
 });
+
+describe('a write naming a minted member follows the team\'s last member write (J3)', () => {
+    it('not the team\'s last entry, which may be a starting lineup save', async () => {
+        const member = await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw');
+        const lineup = await API.putTeamLineup('c1', 't1', 0, { senpo: 'Sato' }, 'pw', undefined, ['senpo']);
+        if (lineup && lineup.settled) lineup.settled.catch(() => {});
+        const res = await API.recordScore('c1', 'm1', scoreWithRepPick(member.id), 'pw', MATCH);
+        res.settled.catch(() => {});
+        await flushMicrotasks();
+        const q = stored();
+        const add = q.find(([, d]) => d.kind === 'member');
+        const score = q.find(([, d]) => d.kind === 'score' || (d.url || '').endsWith('/score'));
+        expect(q.some(([, d]) => d.kind === 'lineup'), 'the team lineup save is queued in the same base').toBe(true);
+        expect(score[1].after, 'the score write follows the add, the team\'s last member write').toBe(add[0]);
+    });
+});

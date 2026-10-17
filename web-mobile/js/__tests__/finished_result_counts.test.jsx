@@ -77,6 +77,15 @@ describe('the outbox counts only finished results as results (R5)', () => {
         expect(counts.terminal).toBe(0);
     });
 
+    it('a match holding only a court move, a time change or a lineup save has no pending finished result', async () => {
+        API.moveMatchCourt('c1', 'm1', 'B', 'pw');
+        API.updateMatchTime('c1', 'm1', '10:00', 'pw');
+        API.putMatchLineup('c1', 't1', 'm1', { senpo: 'A' }, 'pw', undefined, ['senpo']);
+        expect(API.hasPendingTerminalWrite('c1', 'm1'), 'the editors would show a held result banner').toBe(false);
+        API.recordDecision('c1', 'm1', { decision: 'fusensho', decisionBy: 'a' }, 'pw');
+        expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(true);
+    });
+
     it('a held court move that lands raises no "results sent" alert', async () => {
         const alerts = [];
         mod.subscribeQueueAlert((a) => alerts.push(a));

@@ -4748,7 +4748,10 @@ const API = {
     // Exposed as API.hasPendingTerminalWrite / window.API.hasPendingTerminalWrite.
     // -------------------------------------------------------------------------
     hasPendingTerminalWrite(compID, matchID) {
-        return _entriesFor(_revKey(compID, matchID)).some(([, d]) => d.terminal);
+        // A finished result of the match (isFinishedResultWrite, R5): the
+        // editors' held-result banner reads it, so a queued court move, time
+        // change or lineup save of the match is not one.
+        return _entriesFor(_revKey(compID, matchID)).some(([, d]) => isFinishedResultWrite(d));
     },
 
     // The way past a held write the server keeps refusing (a 5xx on every

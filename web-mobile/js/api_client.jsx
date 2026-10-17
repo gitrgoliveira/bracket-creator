@@ -20,7 +20,7 @@
 // reconnect replay the server dropped.
 //
 // Empty-body methods (overridePoolRanks,
-// resetOverrides, updateMatchTime, moveMatchCourt,
+// updateMatchTime, moveMatchCourt,
 // deleteCompetition) deliberately return `true`
 // rather than `res.json()`: calling res.json() on a 200/204 with no
 // body throws SyntaxError per the Fetch spec, which used to surface as
@@ -1160,9 +1160,8 @@ function _baseOf(key) {
 
 
 // _poolRanksBase: the queue base of a competition's pool-rank writes (a
-// chusen's order, overridePoolRanks; a reset of the overrides,
-// resetOverrides; stage 3 review 11, Y7), so they are sent strictly in the
-// order they were made. They belong to no match.
+// chusen's order, overridePoolRanks; stage 3 review 11, Y7), so they are sent
+// strictly in the order they were made. They belong to no match.
 function _poolRanksBase(compID) {
     return `pool-ranks:${compID}`;
 }
@@ -2618,8 +2617,6 @@ function _doorRefusal(d, status, body) {
             if (refusal && refusal.downstreamKnockoutPlayed) refusal.downstreamKnockoutPlayed.ranking = true;
             return refusal || new Error(b.error || 'Failed to override rank');
         }
-        case 'overrides-reset':
-            return new Error(b.error || 'Failed to reset overrides');
         default:
             return new Error(_refusalText(b, `HTTP ${status}`));
     }
@@ -2633,7 +2630,7 @@ function _doorRefusal(d, status, body) {
 // refusal) read by the branch it gates in _sendEntry. A lineup save, a team
 // member write, a lineup removal and a reinstatement answer their own records,
 // never a match write's refusal shape.
-const _NOT_MATCH_WRITE_KINDS = new Set(['lineup', 'lineup-remove', 'member', 'reinstate', 'pool-ranks', 'overrides-reset']);
+const _NOT_MATCH_WRITE_KINDS = new Set(['lineup', 'lineup-remove', 'member', 'reinstate', 'pool-ranks']);
 function _answersMatchWrite(d) {
     return !!d && !!d.terminal && !_NOT_MATCH_WRITE_KINDS.has(d.kind);
 }
@@ -4889,16 +4886,6 @@ const API = {
         return _outboxWrite({
             kind: 'override', compID, matchID, method: 'PUT', url, payload, password,
             seen: opts && opts.seen, onRefusal: opts && opts.onRefusal,
-        });
-    },
-    resetOverrides(compID, password, opts = {}) {
-        // Y7: an outbox entry after every chusen order of the competition
-        // still queued (the same base), answered pending at once.
-        return _outboxWrite({
-            kind: 'overrides-reset', compID, matchID: '', method: 'DELETE',
-            url: `/api/competitions/${compID}/overrides`,
-            payload: {}, password, onRefusal: opts && opts.onRefusal,
-            base: _poolRanksBase(compID),
         });
     },
     async updateMatchTime(compID, matchID, scheduledAt, password, opts = {}) {

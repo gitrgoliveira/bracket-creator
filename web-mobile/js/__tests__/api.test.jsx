@@ -1263,44 +1263,6 @@ describe('API Utils', () => {
       });
     });
 
-    describe('resetOverrides (an outbox entry, 204 No Content)', () => {
-      beforeEach(() => { API.clearQueue(); });
-      it('answers pending at once', async () => {
-        const held = [];
-        global.fetch = vi.fn(() => new Promise((resolve) => { held.push(resolve); }));
-        const res = await API.resetOverrides('c1', 'pw');
-        expect(res).toMatchObject({ applied: true, pending: true });
-        for (let i = 0; i < 5 && held.length > 0; i++) {
-          for (const r of held.splice(0)) r({ ok: true, status: 204, json: async () => ({}) });
-          await res.settled.catch(() => {});
-        }
-      });
-
-      it('settles on 204 with no body', async () => {
-        global.fetch = vi.fn().mockResolvedValue({
-          ok: true,
-          status: 204,
-          json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
-        });
-        await expect((await API.resetOverrides('c1', 'pw')).settled).resolves.toBeTruthy();
-      });
-
-      it('DELETEs the overrides endpoint with auth header', async () => {
-        global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 204 });
-        await (await API.resetOverrides('comp1', 'secret')).settled;
-        const call = global.fetch.mock.calls.find(([u]) => u === '/api/competitions/comp1/overrides');
-        expect(call[1]).toMatchObject({ method: 'DELETE', headers: expect.objectContaining({ 'X-Tournament-Password': 'secret' }) });
-      });
-
-      it('rejects settled with the server error message on failure', async () => {
-        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 409, json: async () => ({ error: 'permission denied' }) });
-        await expect((await API.resetOverrides('c1', 'pw', { onRefusal: () => true })).settled)
-          .rejects.toThrow('permission denied');
-        warn.mockRestore();
-      });
-    });
-
     // T190–T193 (US13; FR-050a / FR-050d / FR-050e): Swiss endpoint
     // wrappers. The generate-round call carries auth and returns the
     // new round payload; the 409 / round_incomplete contract carries

@@ -14,7 +14,6 @@ describe('organiser writes send the admin password only', () => {
     ['discardDraw', () => API.discardDraw('c1', 'main'), 'DELETE', '/api/competitions/c1/draw'],
     ['quarantineBracket', () => API.quarantineBracket('c1', 'main'), 'POST', '/api/competitions/c1/bracket/quarantine'],
     ['completeCompetition', () => API.completeCompetition('c1', 'main'), 'POST', '/api/competitions/c1/complete'],
-    ['resetOverrides', () => API.resetOverrides('c1', 'main'), 'DELETE', '/api/competitions/c1/overrides'],
     ['addParticipant', () => API.addParticipant('c1', { name: 'X', dojo: 'D' }, 'main'), 'POST', '/api/competitions/c1/participants'],
     ['replaceParticipant', () => API.replaceParticipant('c1', 'p1', { name: 'X', dojo: 'D' }, 'main'), 'PUT', '/api/competitions/c1/participants/p1'],
     ['updateCompetitionAwards', () => API.updateCompetitionAwards('c1', [], 'main'), 'PUT', '/api/competitions/c1/awards'],

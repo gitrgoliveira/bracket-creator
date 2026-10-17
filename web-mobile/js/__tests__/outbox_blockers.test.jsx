@@ -639,3 +639,80 @@ describe('a regenerated or discarded draw forgets the match labels learned for i
         }
     });
 });
+
+describe('a refused add takes its id off every tab\'s copies, whichever copies the tab held (J5)', () => {
+    const DROPPED_KEY = 'bc_dropped_member_ids_v1';
+    const storageEvent = (key, oldValue, newValue) => window.dispatchEvent(Object.assign(new Event('storage'), { key, oldValue, newValue }));
+
+    it('this tab refuses the add before it adopts the other tab\'s write naming the id', async () => {
+        const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        // The other tab's write, as it is stored (a score write naming a placeholder).
+        const s = await API.recordScore('c1', 'm1', scoreWithRepPick('PLACEHOLDER'), 'pw', MATCH);
+        s.settled.catch(() => {});
+        await flushMicrotasks();
+        const [aKey, aEntry] = stored()[0];
+        API.clearQueue();
+        const member = await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw', { onRefusal: () => true });
+        await flushMicrotasks();
+        const addKey = stored().find(([, d]) => d.kind === 'member')[0];
+        const theirs = JSON.parse(JSON.stringify(aEntry).replace('PLACEHOLDER', member.id));
+        theirs.after = addKey;
+        const before = _lsStore.bc_write_queue_v2;
+        // Stored by the other tab; this tab has not heard of it yet.
+        _lsStore.bc_write_queue_v2 = JSON.stringify([...stored(), [aKey, theirs]]);
+        const sent = server((req) => (req.method === 'POST' ? answer(409, { error: 'team_member_limit', message: 'No room.' }) : answer(200, { ...MATCH })));
+        await reconnect();
+        expect(sent.some((r) => r.method === 'POST'), 'the add went and was refused').toBe(true);
+        // Now the other tab's write reaches this tab.
+        storageEvent('bc_write_queue_v2', before, _lsStore.bc_write_queue_v2);
+        await flushMicrotasks();
+        await reconnect();
+        expect(sent.filter((r) => r.method === 'POST'), 'the refused add is not sent again').toHaveLength(1);
+        const put = sent.find((r) => r.method === 'PUT');
+        expect(put, 'the other tab\'s score write goes').toBeTruthy();
+        expect(repRow(put).sideAMemberId || '', 'without an id that names nobody').toBe('');
+        warned.mockRestore();
+    });
+
+    it('this tab holds the write and hears of the refusal as the stored list and a dropped-ids note', async () => {
+        const member = await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw');
+        const res = await API.recordScore('c1', 'm1', scoreWithRepPick(member.id), 'pw', MATCH);
+        res.settled.catch(() => {});
+        await flushMicrotasks();
+        const oldRaw = _lsStore.bc_write_queue_v2;
+        // The other tab refused the add before it held this write: the stored copy is unstripped.
+        const note = JSON.stringify([{ id: member.id, at: Date.now(), competitionId: 'c1', teamId: 't1' }]);
+        _lsStore[DROPPED_KEY] = note;
+        const newRaw = JSON.stringify(JSON.parse(oldRaw).filter(([, d]) => d.kind !== 'member'));
+        _lsStore.bc_write_queue_v2 = newRaw;
+        const dropped = [];
+        const onDrop = (e) => dropped.push(e.detail);
+        window.addEventListener('team-member-dropped', onDrop);
+        try {
+            storageEvent(DROPPED_KEY, null, note);
+            storageEvent('bc_write_queue_v2', oldRaw, newRaw);
+            await flushMicrotasks();
+        } finally {
+            window.removeEventListener('team-member-dropped', onDrop);
+        }
+        expect(dropped).toEqual([{ competitionId: 'c1', teamId: 't1', memberId: member.id }]);
+        const sent = server(() => answer(200, { ...MATCH }));
+        await reconnect();
+        expect(repRow(sent.find((r) => r.method === 'PUT')).sideAMemberId || '').toBe('');
+    });
+
+    it('a note is pruned once nothing names its id and it has been kept a while', async () => {
+        const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const member = await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw', { onRefusal: () => true });
+        server(() => answer(409, { error: 'team_member_limit', message: 'No room.' }));
+        await reconnect();
+        expect(JSON.parse(_lsStore[DROPPED_KEY] || '[]').map((n) => n.id), 'the refusal leaves a note').toEqual([member.id]);
+        await tick(11 * 60 * 1000);
+        server((req) => answer(201, { id: req.body.id, name: req.body.name, index: 3, modifiedAt: 9 }));
+        const late = await API.addTeamMember('c1', 't1', 'Aya Ito', 'pw');
+        late.settled.catch(() => {});
+        await flushMicrotasks();
+        expect(_lsStore[DROPPED_KEY], 'old and unnamed: gone').toBeUndefined();
+        warned.mockRestore();
+    });
+});

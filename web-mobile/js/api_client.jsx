@@ -830,6 +830,13 @@ function _persistQueue() {
         for (const [k, d] of _writeQueue) {
             if (!_enqueuedAfter(merged.get(k), d.enqueuedAt)) merged.set(k, d);
         }
+        // An id noted as dropped (J5) comes off the stored copies of writes
+        // this tab does not hold too, or writing the list back would keep them.
+        const notes = _droppedMemberNotes();
+        if (notes.length > 0) {
+            _pruneDroppedMemberNotes(notes, merged);
+            for (const n of notes) _stripMemberIdIn(merged.values(), n.id);
+        }
         if (merged.size === 0) {
             localStorage.removeItem(QUEUE_STORAGE_KEY);
             _settled.clear();
@@ -2023,6 +2030,9 @@ async function _flushQueue() {
                 _recomputeSyncStatus();
                 continue;
             }
+            // A member another tab's refused add left a note for comes off
+            // every write here before any is sent (J5).
+            _applyDroppedMembers();
             _recomputeSyncStatus();
             pass.anyFailed = false;      // any failure → keep in queue + backoff
             pass.networkFailed = false;  // fetch rejected → connection down → "offline"
@@ -3013,7 +3023,10 @@ function _onStoredQueueChanged(oldRaw, newRaw) {
         const id = _memberAddId(add);
         const strippedThere = after !== null && [..._writeQueue].some(([k, e]) => after.has(k)
             && _payloadMemberIds(e.payload).has(id) && !_payloadMemberIds((after.get(k) || {}).payload).has(id));
-        if (!strippedThere) continue;
+        // The note the refusing tab left (J5) tells a refused add from one
+        // that landed whichever copies this tab held.
+        const noted = _droppedMemberNotes().some((n) => n.id === id);
+        if (!strippedThere && !noted) continue;
         if (_stripMemberId(id)) changed = true;
         _announceMemberDropped(add, id);
     }
@@ -3042,6 +3055,9 @@ function _onStoredQueueChanged(oldRaw, newRaw) {
         _adopted.add(d);
         changed = adopted = true;
     }
+    // A write taken up may name an id a tab refused the add of (J5): off it
+    // before anything is sent, and stored so.
+    if (adopted && _applyDroppedMembers()) migrated = true;
     if (migrated) _persistQueue();
     if (!changed) return;
     _recomputeSyncStatus();
@@ -3119,6 +3135,13 @@ if (typeof window !== 'undefined') {
     if (window.__bcStoredQueueHandler) window.removeEventListener('storage', window.__bcStoredQueueHandler);
     const onStorage = (e) => {
         if (e.key === QUEUE_STORAGE_KEY) _onStoredQueueChanged(e.oldValue, e.newValue);
+        // Another tab refused (or discarded) a member add: its id comes off
+        // the writes this tab holds that name it, and the stored list is
+        // written without it (J5).
+        if (e.key === DROPPED_MEMBERS_KEY && _applyDroppedMembers()) {
+            _persistQueue();
+            _recomputeSyncStatus();
+        }
         // An older tab wrote what it queues under the old key: take it over (F4).
         if (e.key === LEGACY_QUEUE_STORAGE_KEY && e.newValue && _takeOverLegacyQueue(e.newValue)) {
             _recomputeSyncStatus();
@@ -3680,6 +3703,8 @@ function _memberAddId(d) {
 function _dropMemberThatNeverWas(d) {
     const id = _memberAddId(d);
     if (!id) return;
+    // Noted first, so a tab that hears of the add leaving already finds it.
+    _noteDroppedMember(d, id);
     if (_stripMemberId(id)) _persistQueue();
     _announceMemberDropped(d, id);
 }
@@ -3688,8 +3713,14 @@ function _dropMemberThatNeverWas(d) {
 // it; whether any did. Shared by the refusal here and by another tab's
 // (_onStoredQueueChanged, stage 3 review 5, H3).
 function _stripMemberId(id) {
+    return _stripMemberIdIn(_writeQueue.values(), id);
+}
+
+// _stripMemberIdIn: the same strip over any entries (the ones in the stored
+// queue this tab does not hold included, J5).
+function _stripMemberIdIn(entries, id) {
     let changed = false;
-    for (const [, e] of _writeQueue) {
+    for (const e of entries) {
         const payload = e && e.payload;
         if (!payload || typeof payload !== 'object') continue;
         const ids = payload.memberIds;
@@ -3725,6 +3756,58 @@ function _stripMemberId(id) {
         }
     }
     return changed;
+}
+
+// The ids of members whose add was refused or discarded, kept in browser
+// storage beside the queue so EVERY tab takes them off the writes naming them,
+// whichever copies of those writes it held when the add left (J5, stage 3
+// review 6): a tab that refuses an add before it has adopted another tab's
+// write naming the id would otherwise leave that write, stored, with a
+// dangling id. A note is applied to a tab's own entries before each pass, to
+// every entry taken up from storage and to the stored list as it is written,
+// and is pruned once nothing names its id and it has been kept a while.
+const DROPPED_MEMBERS_KEY = 'bc_dropped_member_ids_v1';
+const DROPPED_MEMBER_NOTE_KEEP_MS = 10 * 60 * 1000;
+
+// _droppedMemberNotes: [{id, at, competitionId, teamId}]; unreadable storage reads as none.
+function _droppedMemberNotes() {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(DROPPED_MEMBERS_KEY) || '[]');
+        return Array.isArray(parsed) ? parsed.filter((n) => n && typeof n.id === 'string' && n.id) : [];
+    } catch (_e) {
+        return [];
+    }
+}
+
+function _writeDroppedMemberNotes(notes) {
+    try {
+        if (notes.length === 0) localStorage.removeItem(DROPPED_MEMBERS_KEY);
+        else localStorage.setItem(DROPPED_MEMBERS_KEY, JSON.stringify(notes));
+    } catch (_e) { /* the strip below still covers this tab */ }
+}
+
+function _noteDroppedMember(d, id) {
+    const teamId = (String(d.url || '').match(/\/teams\/([^/]+)\/members$/) || [])[1] || '';
+    const notes = _droppedMemberNotes().filter((n) => n.id !== id);
+    notes.push({ id, at: Date.now(), competitionId: d.compID || '', teamId: decodeURIComponent(teamId) });
+    _writeDroppedMemberNotes(notes);
+}
+
+// _applyDroppedMembers: takes every noted id off this tab's queued writes.
+function _applyDroppedMembers() {
+    let changed = false;
+    for (const n of _droppedMemberNotes()) if (_stripMemberId(n.id)) changed = true;
+    return changed;
+}
+
+// _pruneDroppedMemberNotes: forgets the notes nothing names any more (no entry
+// of `entries`) that have been kept a while.
+function _pruneDroppedMemberNotes(notes, entries) {
+    const named = new Set();
+    for (const e of entries.values()) for (const id of _payloadMemberIds(e && e.payload)) named.add(id);
+    const now = Date.now();
+    const kept = notes.filter((n) => named.has(n.id) || now - (Number(n.at) || 0) < DROPPED_MEMBER_NOTE_KEEP_MS);
+    if (kept.length !== notes.length) _writeDroppedMemberNotes(kept);
 }
 
 // _announceMemberDropped: the `team-member-dropped` event for the member add
@@ -5562,6 +5645,8 @@ const API = {
         try { localStorage.removeItem(QUEUE_STORAGE_KEY); } catch (_e) { /* ignore */ }
         // An older build's queue carries the same revoked password (F4).
         try { localStorage.removeItem(LEGACY_QUEUE_STORAGE_KEY); } catch (_e) { /* ignore */ }
+        // The dropped-member notes go with the queue they belong to (J5).
+        try { localStorage.removeItem(DROPPED_MEMBERS_KEY); } catch (_e) { /* ignore */ }
         if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
         _flushAttempt = 0;
         _offlineFlag = false;

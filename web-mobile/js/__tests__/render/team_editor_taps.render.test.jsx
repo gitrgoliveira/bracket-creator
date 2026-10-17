@@ -6,12 +6,13 @@
 // fold), so a tap shows at once and a push carrying it never counts it twice.
 import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import {
   installIndividualEditor, resetOutbox, API, teamBout, kachinukiBout, boutRow,
   marks, markSlots, ipponBtn, fusenshoBtn, tieBtn, foulBtn, byTestId,
 } from '../helpers/team_editor.js';
 import { serverFold } from '../helpers/fake_outbox.js';
+import { bridge, applyPatchToTree } from '../../court_bridge.jsx';
 
 let ScoreEditorModal;
 let restore;
@@ -264,5 +265,55 @@ describe('a running kachinuki encounter is scored by taps', () => {
     expect(patch.changed).toEqual(['bout:2']);
     expect(patch.subResults).toEqual([expect.objectContaining({ position: 2, ipponsA: [], ipponsB: [] })]);
     expect(API.recordTap).not.toHaveBeenCalled();
+  });
+});
+
+describe('a same-device display shows the team board', () => {
+  let publish;
+  beforeEach(() => { publish = vi.spyOn(bridge, 'publish').mockImplementation(() => {}); });
+  afterEach(() => { publish.mockRestore(); delete API.hasPendingTerminalWrite; });
+  const patches = () => publish.mock.calls.filter((c) => c[0] === 'patch').map((c) => c[3].result);
+
+  it('each tap publishes the board, its bout rows with the pending tap, and IV and PW to work out again', async () => {
+    const r = render(el(teamBout()));
+    publish.mockClear();
+    await tap(ipponBtn(r.container, 0, 'aka', 'M'));
+    const last = patches().at(-1);
+    expect(last).toMatchObject({ id: 'tm1', status: 'running', teamResult: null });
+    expect(last.subResults.find((s) => s.position === 1)).toMatchObject({ ipponsA: ['M'], winner: 'Kyoto' });
+    // A display holding the server's earlier copy takes it whole.
+    const comp = { id: 'c1', poolMatches: [{ ...teamBout(), phase: 'pool' }] };
+    const payload = publish.mock.calls.filter((c) => c[0] === 'patch').at(-1)[3];
+    const shown = applyPatchToTree({ competitions: [comp] }, { type: 'patch', court: 'A', compId: 'c1', payload }).competitions[0].poolMatches[0];
+    expect(shown.subResults.find((s) => s.position === 1).ipponsA).toEqual(['M']);
+  });
+
+  it('nothing is published once a finished result of the match is queued', async () => {
+    API.hasPendingTerminalWrite = () => true;
+    const r = render(el(teamBout()));
+    publish.mockClear();
+    await tap(ipponBtn(r.container, 0, 'aka', 'M'));
+    expect(patches()).toEqual([]);
+  });
+
+  it('a match that is not running publishes nothing', async () => {
+    const r = render(el(teamBout({ status: 'scheduled' })));
+    publish.mockClear();
+    await tap(ipponBtn(r.container, 0, 'aka', 'M'));
+    expect(patches()).toEqual([]);
+  });
+});
+
+describe('Record bout carries the copy the board showed', () => {
+  it('its running write names the board\'s scoreVersion, after the taps on the bout', async () => {
+    const onSubmit = vi.fn(pending);
+    const r = render(el(kachinukiBout({ scoreVersion: 9 }), { onSubmit }));
+    await tap(ipponBtn(r.container, 0, 'aka', 'M'));
+    await tap([...r.container.querySelectorAll('button')].find((b) => b.textContent === 'Record bout'));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    const patch = onSubmit.mock.calls[0][0];
+    expect(patch).toMatchObject({ status: 'running', kachinukiBoutFinal: true, seenScoreVersion: 9 });
+    expect(patch.subResults.find((s) => s.position === 1).ipponsA).toEqual(['M']);
+    expect(API.recordTap.mock.invocationCallOrder[0]).toBeLessThan(onSubmit.mock.invocationCallOrder[0]);
   });
 });

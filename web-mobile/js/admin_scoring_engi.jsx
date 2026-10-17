@@ -24,7 +24,7 @@ const { useState: useStateE, useEffect: useEffectE, useRef: useRefE } = React;
 
 import {
   ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer, HeldWriteDiscard, HeldWriteNotice, useClearPendingWhenNothingHeld,
-  tapBoardOf, useTapBoard, useTapOutcomeNote, useDraftKeptOnStart, DraftKeptNotice,
+  tapBoardOf, useTapBoard, useTapOutcomeNote, useDraftKeptOnStart, DraftKeptNotice, DraftDroppedNotice,
 } from './admin_scoring_shared.jsx';
 import { engiDraftTaps } from './draft_taps.jsx';
 import { SyncStatusPill, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
@@ -224,6 +224,13 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // (draft_taps.jsx), against the counts they were typed over; Discard drops
   // them. Either way the board shows from now on.
   const leaveKeptDraft = () => { takeServerFlags(); draftKeep.release(); };
+  // A kept draft the match left running under (finished or sent back
+  // elsewhere) is dropped: the editor shows the server's counts, and
+  // DraftDroppedNotice says so (stage 5 review 2).
+  useEffectE(() => {
+    if (draftKeep.dropped > 0) takeServerFlags();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKeep.dropped]);
   const saveKeptDraft = () => {
     const board = tapBoardOf(m, ENGI_FOLD);
     for (const ev of engiDraftTaps(draftKeep.base, { a: draftA, b: draftB })) {
@@ -693,6 +700,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
             Cancels and two commit buttons at the highest-stakes moment
             (amending a recorded result). Mirrors ScoreEditorModal. */}
         {draftKeep.held && <DraftKeptNotice onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} />}
+        {draftKeep.droppedShown && <DraftDroppedNotice />}
         {!(isComplete && showCorrectionPrompt) && (
           <div className="score-nav">
             {prevMatch ? (

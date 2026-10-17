@@ -228,6 +228,10 @@ export function shownMarkIds(holder, key) {
 // DRAFT_KEPT_NOTE: what a score editor says while it keeps a draft the match
 // was started under by another device (operator decision D1 (a), 2026-10-17).
 export const DRAFT_KEPT_NOTE = "This match was started on another device. Your unsaved entries are still here: Save adds them to the match, Discard drops them.";
+// DRAFT_DROPPED_NOTE: what it says when the match leaves running elsewhere
+// while it keeps the draft (stage 5 review 2): the draft is dropped, never
+// silently, and the editor shows the server's copy.
+export const DRAFT_DROPPED_NOTE = "This match was finished or sent back to the queue on another device. Your unsaved entries were dropped.";
 
 // useDraftKeptOnStart: the ONE owner of "another device started the match
 // while this editor held a draft" (operator decision D1 (a)). The editor
@@ -241,8 +245,16 @@ export const DRAFT_KEPT_NOTE = "This match was started on another device. Your u
 // so Save sends the draft's own changes and never takes away what the other
 // device scored. Judged during render (refs), so the board never shows for a
 // frame before the draft comes back.
+//
+// A kept draft never outlives the match leaving running elsewhere (finished,
+// or sent back to the queue): it is dropped, `dropped` counts the drops (the
+// editor resets its draft to the server's copy in an effect keyed on it), and
+// `droppedShown` holds DraftDroppedNotice up while the status stays the one
+// it was dropped at. An own Start the server refuses, or that is discarded, is
+// no own start (`ownStartFailed`): a later start by another device keeps the
+// draft as any other.
 export function useDraftKeptOnStart(status) {
-  const ref = useRefA({ prev: status, own: false, held: false, base: null, draft: null, kept: null });
+  const ref = useRefA({ prev: status, own: false, held: false, base: null, draft: null, kept: null, dropped: 0, droppedAt: null });
   const [, bump] = useStateA(0);
   const st = ref.current;
   if (status !== st.prev) {
@@ -251,17 +263,33 @@ export function useDraftKeptOnStart(status) {
       st.held = true;
       st.kept = st.base;
     }
-    if (status !== "running") { st.held = false; st.own = false; st.kept = null; }
+    if (status !== "running") {
+      if (st.held) { st.dropped += 1; st.droppedAt = status; }
+      st.held = false; st.own = false; st.kept = null;
+    }
+    if (st.droppedAt !== null && status !== st.droppedAt) st.droppedAt = null;
     st.prev = status;
   }
   return {
     held: st.held,
     // The copy the kept draft was typed over.
     base: st.kept,
+    dropped: st.dropped,
+    droppedShown: st.droppedAt !== null && status === st.droppedAt,
     note: (base, draft) => { if (status !== "running") { st.base = base; st.draft = draft; } },
     ownStart: () => { st.own = true; },
+    ownStartFailed: () => { st.own = false; },
     release: () => { if (st.held) { st.held = false; st.kept = null; bump((n) => n + 1); } },
   };
+}
+
+// DraftDroppedNotice: the note a dropped draft leaves (DRAFT_DROPPED_NOTE).
+export function DraftDroppedNotice() {
+  return (
+    <div className="pending-write-banner" role="status" aria-live="polite" data-testid="draft-dropped-notice">
+      <span>{DRAFT_DROPPED_NOTE}</span>
+    </div>
+  );
 }
 
 // DraftKeptNotice: the note, Save (two taps, as the editors' Finish: the

@@ -49,6 +49,7 @@ import {
   shownMarkIds,
   useDraftKeptOnStart,
   DraftKeptNotice,
+  DraftDroppedNotice,
 } from './admin_scoring_shared.jsx';
 import { teamDraftTaps } from './draft_taps.jsx';
 // bc-evts stage 5: a running team match is scored by tap events, one per
@@ -1354,10 +1355,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     const want = [pos];
     want.forEach((p) => req.positions.add(p));
     const fields = buildPatchFields("running");
-    const rows = (fields.subResults || []).filter((s) => want.includes(s.position));
-    for (const p of want) {
-      if (!rows.some((r) => r.position === p)) rows.push({ position: p, sideA: "", sideB: "", ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, winner: "", decision: "" });
-    }
+    // The row is the bout as the server would hold it with nothing scored: its
+    // position and its fighters (a kachinuki first bout's from the lineup),
+    // never a point, a foul or a result from the sheet. The sheet can be a
+    // draft (a kept draft's Save, D1), whose scoring goes as taps after this
+    // write: carried here too, it would count twice (stage 5 review 2).
+    const emptyRow = (p, from = {}) => ({
+      position: p, sideA: from.sideA || "", sideB: from.sideB || "",
+      ...(from.sideAMemberId ? { sideAMemberId: from.sideAMemberId } : {}),
+      ...(from.sideBMemberId ? { sideBMemberId: from.sideBMemberId } : {}),
+      ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, winner: "", decision: "",
+    });
+    const rows = want.map((p) => emptyRow(p, (fields.subResults || []).find((s) => s.position === p)));
     rows.sort((x, y) => x.position - y.position);
     doSubmit(() => onSubmit({ ...fields, subResults: rows, changed: want.map(boutGroup), ...boardSeen }));
   };
@@ -4322,11 +4331,23 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // (draft_taps.jsx), each through emitBoutTap, in order, a removal naming the
   // board's mark; Discard drops it. Either way the board shows from now on,
   // and the draft starts from the server's copy.
-  const leaveKeptDraft = () => {
+  const takeServerDraft = () => {
     setSubs(serverSubs);
     setEnchoPeriodCount(initialEnchoPeriods);
+    setDaihyosenHantei(recordedDaihyosenSide);
+    setDaihyosenHanteiArmed(daihyosenHanteiRecorded);
+  };
+  const leaveKeptDraft = () => {
+    takeServerDraft();
     draftKeep.release();
   };
+  // A kept draft the match left running under (finished or sent back
+  // elsewhere) is dropped: the sheet shows the server's copy, and
+  // DraftDroppedNotice says so (stage 5 review 2).
+  useEffectA(() => {
+    if (draftKeep.dropped > 0) takeServerDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKeep.dropped]);
   const saveKeptDraft = () => {
     const board = tapBoardOf(mHost, teamFold).match;
     const shownRows = {};
@@ -5751,6 +5772,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             <BarredMatchNotice match={m} password={password} />
           )}
           {draftKeep.held && <DraftKeptNotice onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} />}
+          {draftKeep.droppedShown && <DraftDroppedNotice />}
           <div className="score-nav">
             {prevMatch ? (
               <button className="btn btn--sm score-nav__prev" onClick={goPrev} disabled={submitting || repTyping}>← Prev</button>
@@ -5768,13 +5790,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   const res = await doSubmit(() => onSubmit(startPatch));
                   // A refused start (the court is busy, a competitor is
                   // withdrawn) stored nothing: the host reported it and
-                  // returns nothing, so the match must not read as started.
-                  if (!res) return;
+                  // returns nothing, so the match must not read as started,
+                  // and it is not this sheet's start (D1, review 2).
+                  if (!res) { draftKeep.ownStartFailed(); return; }
                   // bc-cse: which not-saved banner, if any. The clock-vs-
                   // supersede ordering (and the silence on a queued write)
                   // lives in notLandedBanner; see write_result.jsx.
                   const banner = notLandedBanner(res);
-                  if (banner) setWriteFailed(banner);
+                  if (banner) { setWriteFailed(banner); draftKeep.ownStartFailed(); }
                   // bc-strt: the start landed (or the outbox has it, bc-evts),
                   // so ScoreEditorModal treats the match as running before the
                   // host's list catches up, showing the bouts the start

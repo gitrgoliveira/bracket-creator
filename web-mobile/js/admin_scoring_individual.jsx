@@ -64,6 +64,7 @@ import {
   shownMarkIds,
   useDraftKeptOnStart,
   DraftKeptNotice,
+  DraftDroppedNotice,
 } from './admin_scoring_shared.jsx';
 import { individualDraftTaps } from './draft_taps.jsx';
 // bc-cse: a SCHEDULED match a competitor is barred from must never offer a
@@ -987,12 +988,22 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // (draft_taps.jsx), each through emitTap, in order; a removal names the
   // board's mark. Discard drops it. Either way the board shows from now on,
   // and the local board starts from the server's copy.
-  const leaveKeptDraft = () => {
+  const takeServerDraft = () => {
     applyServerScore();
     setRepPlayerA(m.repPlayerA || "");
     setRepPlayerB(m.repPlayerB || "");
+  };
+  const leaveKeptDraft = () => {
+    takeServerDraft();
     draftKeep.release();
   };
+  // A kept draft the match left running under (finished or sent back
+  // elsewhere) is dropped: the editor shows the server's copy, and
+  // DraftDroppedNotice says so (stage 5 review 2).
+  useEffectA(() => {
+    if (draftKeep.dropped > 0) takeServerDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKeep.dropped]);
   const saveKeptDraft = () => {
     const board = tapBoardOf(m).match;
     const seen = seedBoard(board);
@@ -1632,6 +1643,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
             <BarredMatchNotice match={m} password={password} />
           )}
           {draftKeep.held && <DraftKeptNotice onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} />}
+          {draftKeep.droppedShown && <DraftDroppedNotice />}
           {/* While the correction prompt is open it owns the only Cancel/commit
               row: hide the footer's own nav+actions so the operator never sees
               two Cancels and two commit buttons at the highest-stakes moment
@@ -1658,13 +1670,14 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   const res = await doSubmit(() => onSubmit(startPatch));
                   // A refused start (the court is busy, a competitor is
                   // withdrawn) stored nothing: the host reported it and
-                  // returns nothing, so the match must not read as started.
-                  if (!res) return;
+                  // returns nothing, so the match must not read as started,
+                  // and it is not this editor's start (D1, review 2).
+                  if (!res) { draftKeep.ownStartFailed(); return; }
                   // bc-cse: which not-saved banner, if any. The clock-vs-
                   // supersede ordering (and the silence on a queued write)
                   // lives in notLandedBanner; see write_result.jsx.
                   const banner = notLandedBanner(res);
-                  if (banner) setWriteFailed(banner);
+                  if (banner) { setWriteFailed(banner); draftKeep.ownStartFailed(); }
                   else setStartedFrom({ at: match.modifiedAt, fields: startedScore(startPatch) });
                 }} disabled={submitting}>
                   Start match

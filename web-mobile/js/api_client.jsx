@@ -475,19 +475,18 @@ function _perfNow() {
 //
 // What "as seen" is belongs to the caller: the match the operator acted on
 // (`match.modifiedAt` for a tap, `seenModifiedAt` in a decision's body or
-// a representative bout's or a hand-set winner's argument), and for an
-// autosave the match as it was at the TAP (`seenModifiedAt` on the patch,
-// recorded beside editedPerf by useDebouncedRunningWrite), never the match
-// at the send: a tap made before another device finished the match stays
-// older than that finish (operator ruling 2026-09-27). 0 or absent: no floor.
+// a representative bout's or a hand-set winner's argument, or on a score
+// write's patch), never the match at the send: a tap made before another
+// device finished the match stays older than that finish (operator ruling
+// 2026-09-27). 0 or absent: no floor.
 const HLC_FLOOR_MAX_AHEAD_MS = 4000;
 function _stampAfterSeen(stamp, seen) {
     const s = Number(seen);
     if (!Number.isFinite(s) || s <= 0 || stamp > s) return stamp;
     return Math.max(stamp, Math.min(s + 1, _serverNowMs() + HLC_FLOOR_MAX_AHEAD_MS));
 }
-// What a score write was made against: the autosave's tap-time snapshot when
-// it carries one (even 0: the tap saw no stamp), else the match handed in.
+// What a score write was made against: the `seenModifiedAt` its patch carries
+// (even 0: the editor saw no stamp), else the match handed in.
 function _seenOfScore(result, match) {
     if (result && result.seenModifiedAt !== undefined) return Number(result.seenModifiedAt) || 0;
     return Number(match && match.modifiedAt) || 0;
@@ -501,15 +500,6 @@ function _stampPayload(payload, stamp, seen) {
     const s = Number(seen);
     if (Number.isFinite(s) && s > 0) _payloadSeen.set(payload, s);
     return payload;
-}
-
-// _editAge: how long ago the edit a score editor's autosave carries was made,
-// from the monotonic reading of its last tap (`editedPerf` on the patch, set
-// by useDebouncedRunningWrite and never sent: toBackendMatchResult copies
-// named fields only). Monotonic, so a wall clock stepped in between cannot
-// skew it. Zero for every other write.
-function _editAge(result) {
-    return (result && _perfAgeMs(result.editedPerf)) || 0;
 }
 
 // _perfAgeMs: whole milliseconds since a monotonic reading, or null when there
@@ -1701,11 +1691,6 @@ const _syncListeners = new Set();
 // only stops a later write taking the place of one already out
 // (_coalesceTarget). Never persisted.
 const _inFlight = new WeakSet();
-// bc-sync: the stage BEFORE a running write exists. A score editor holds each
-// edit for its autosave debounce (AUTOSAVE_DEBOUNCE_MS) and registers a token
-// here for that window (API.notePendingEdit), so the pill reads "Syncing..."
-// from the first tap rather than "Synced" over an edit nothing has sent yet.
-const _pendingEdits = new Set();
 // Set to true ONLY when a flush attempt ends with at least one true NETWORK
 // failure (fetch rejected: connection down). A non-2xx server response (e.g. a
 // transient 5xx/429) keeps the write queued for retry but is NOT "offline": the
@@ -1979,9 +1964,8 @@ function _afterDiscard() {
  *   auth-required : a queued write is parked awaiting re-authentication
  *   server-error  : a queued write has passed the server-rejection notice
  *                   threshold; it is STILL QUEUED and still being retried
- *   syncing       : any in-flight running write, the queue is non-empty, OR an
- *                   edit is still waiting in an editor's autosave window
- *                   (API.notePendingEdit, bc-sync)
+ *   syncing       : any in-flight running write, or the queue (taps
+ *                   included) is non-empty
  *   synced        : otherwise
  *
  * bc-qttl: the two middle states exist because writes are no longer discarded
@@ -2002,7 +1986,7 @@ function _deriveSyncStatus() {
     if (_offlineFlag && _writeQueue.size > 0) return 'offline';
     if (_hasAuthBlockedQueued()) return 'auth-required';
     if (_hasServerErroringQueued()) return 'server-error';
-    return (_writeQueue.size > 0 || _pendingEdits.size > 0) ? 'syncing' : 'synced';
+    return _writeQueue.size > 0 ? 'syncing' : 'synced';
 }
 
 // bc-offl: the held-writes COUNT channel, for the admin topbar's indicator
@@ -2014,8 +1998,8 @@ function _deriveSyncStatus() {
 // Published from _recomputeSyncStatus, which every queue mutation reaches
 // (enqueue, the flush pass, rehydrate, the storage-event take-up, the page-hide
 // keep, re-auth, park, clear), and ONLY when a count changed: a score editor
-// recomputes on every tap (API.notePendingEdit), and an undeduped emit would
-// fire per tap. Not from _persistQueue, which a rehydrate that dropped nothing
+// enqueues a tap per scoring gesture, and an undeduped emit would fire per
+// tap. Not from _persistQueue, which a rehydrate that dropped nothing
 // never calls; subscribing also replays the queue as it is NOW, so a reload
 // with a held queue shows its count at once.
 //
@@ -4703,15 +4687,13 @@ const API = {
         _noteShownMatch(compID, match);
         const payload = toBackendMatchResult(result, match || result);
         // mp-y3nk: stamp in server-relative time for last-write-wins reconciliation.
-        // An autosave is stamped with the time of the EDIT it carries, not of
-        // its sending (operator ruling 2026-09-27): a tap made before another
-        // device finished the match stays older than that finish however late
-        // the autosave goes out (its debounce, or the editor going away).
+        // Stamped when it is made (a running match's scoring is taps, each
+        // stamped at its own tap, so no score write carries an older edit).
         // Never older than the match it was made against (bc-hlck), nor than
         // this device's last write of the match (_outboxWrite, _afterOwnStamp),
         // so the outbox's order and the stamps agree.
         const seen = _seenOfScore(result, match);
-        _stampPayload(payload, _serverNowMs() - _editAge(result), seen);
+        _stampPayload(payload, _serverNowMs(), seen);
 
         // C2: stamp monotonic rev on running-status writes so the server's
         // rev-guard can hold out-of-order deliveries (e.g. from reconnect flush).
@@ -4782,7 +4764,7 @@ const API = {
         // kachinukiBoutFinal (_placeWrite). The caller carries on with the
         // pending answer; `settled` is the server's answer when it comes, and a
         // refusal nobody claims (opts.onRefusal) is told like a replay's.
-        // `result.after` (request-only, like editedPerf: toBackendMatchResult
+        // `result.after` (request-only, like seenModifiedAt: toBackendMatchResult
         // copies named fields only) names another match's queued entry this
         // write must follow. The display overlay is the optimistic result.
         const answer = _outboxWrite({
@@ -5910,19 +5892,6 @@ const API = {
     // they are made and again when a refusal puts the old value back.
     subscribeLocalMatchPatch(cb) {
         return subscribeLocalMatchPatch(cb);
-    },
-
-    /**
-     * bc-sync: register (on=true) or release (on=false) an edit that a score
-     * editor is still holding in its autosave debounce, so the sync status
-     * reads 'syncing' until the write it becomes has been sent.
-     * @param {object} token  one per editor instance
-     * @param {boolean} on
-     */
-    notePendingEdit(token, on) {
-        if (on) _pendingEdits.add(token);
-        else _pendingEdits.delete(token);
-        _recomputeSyncStatus();
     },
 
     /**

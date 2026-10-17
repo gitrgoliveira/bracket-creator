@@ -66,10 +66,10 @@ test.beforeAll(async ({ browser, serverForFile }, testInfo) => {
 // written as well.
 test.afterAll(() => audit.flush());
 
-// Let the running bout's autosave land. The pill reads "Syncing…" from the tap
-// until the write has landed (bc-sync: the tap's handler registers the edit
-// with API.notePendingEdit, and the pill has re-rendered by the time tap()
-// returns), so "Synced" after a tap means the write went out and came back.
+// Let the running bout's taps land. The pill reads "Syncing…" from the tap
+// until it has landed (each tap is an outbox entry in the tick it is made, and
+// the pill has re-rendered by the time tap() returns), so "Synced" after a tap
+// means the write went out and came back.
 async function settle(page, root = INLINE_EDITOR) {
   await expect(syncState(page, root)).toHaveText('Synced');
 }

@@ -2407,34 +2407,12 @@ describe('_enqueueTerminalWrite: a queued write never carries the downstream con
     });
 });
 
-// bc-sync: an edit a score editor is still holding in its autosave debounce is
-// unsent work, so the pill must not read "Synced" over it; and when the page is
-// going away that edit must reach the persisted outbox synchronously, because a
-// fetch started from pagehide dies with the document before its failure path
-// could queue it.
-describe('bc-sync: pending edits and durable running writes', () => {
-    it('a pending edit reads as syncing until it is released', () => {
-        const states = [];
-        subscribeSyncStatus((s) => states.push(s));
-        const token = {};
-        API.notePendingEdit(token, true);
-        expect(states[states.length - 1]).toBe('syncing');
-        API.notePendingEdit(token, false);
-        expect(states[states.length - 1]).toBe('synced');
-    });
-
-    it('two editors hold separate pending edits', () => {
-        let status;
-        subscribeSyncStatus((s) => { status = s; });
-        const a = {}, b = {};
-        API.notePendingEdit(a, true);
-        API.notePendingEdit(b, true);
-        API.notePendingEdit(a, false);
-        expect(status).toBe('syncing');
-        API.notePendingEdit(b, false);
-        expect(status).toBe('synced');
-    });
-
+// bc-sync: when the page is going away a write must reach the persisted outbox
+// synchronously, because a fetch started from pagehide dies with the document
+// before its failure path could queue it. (A score editor holds no edit of its
+// own to report since bc-evts stage 5: every scoring gesture is a tap, an
+// outbox entry in the tick it is made.)
+describe('bc-sync: durable running writes', () => {
     // bc-evts: every running write is the outbox's (the `durable` flag an
     // older editor sets asks for nothing more, and is never sent).
     it('a running write is persisted to the outbox before any fetch answers', async () => {
@@ -2779,27 +2757,8 @@ describe('bc-sync: a running write still being sent when the page goes away is k
     });
 });
 
-describe('bc-sync: an autosave is stamped with the time of its edit (operator ruling 2026-09-27)', () => {
-    it('takes the edit\'s age off the stamp, and never sends the reading itself', async () => {
-        let body;
-        mockFetch((url, opts) => { body = JSON.parse(opts.body); return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }); });
-        const realPerformance = global.performance;
-        // The last tap was 250.5 ms ago on the monotonic clock, which reads in
-        // fractions of a millisecond, as a browser's does.
-        global.performance = { now: () => 1250.7 };
-        try {
-            await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'], editedPerf: 1000.2 }, 'pw', null);
-        } finally {
-            global.performance = realPerformance;
-        }
-        // Whole milliseconds (the server reads an int64 and refuses a
-        // fraction with a 400), the age rounded up so the stamp is never later
-        // than the tap.
-        expect(body.modifiedAt).toBe(Date.now() - 251);
-        expect(body).not.toHaveProperty('editedPerf');
-    });
-
-    it('a write without the reading is stamped now', async () => {
+describe('a score write is stamped when it is made', () => {
+    it('a write is stamped now', async () => {
         let body;
         mockFetch((url, opts) => { body = JSON.parse(opts.body); return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }); });
         await API.recordScore('c1', 'm1', { status: 'completed', ipponsA: ['M', 'M'], winner: 'A' }, 'pw', null);
@@ -2834,17 +2793,6 @@ describe('bc-offl: subscribeUnsentWrites, the held-writes count', () => {
         await tick(50);
         unsub();
         expect(seen).toEqual([ZERO, ONE_RESULT, ONE_HELD, ZERO]);
-    });
-
-    it('does not fire on a scoring tap (API.notePendingEdit recomputes the status per tap)', () => {
-        const seen = [];
-        const unsub = mod.subscribeUnsentWrites((c) => seen.push(c));
-        const token = {};
-        API.notePendingEdit(token, true);
-        API.notePendingEdit(token, false);
-        API.notePendingEdit(token, true);
-        unsub();
-        expect(seen).toEqual([ZERO]);
     });
 
     it('a reload with a held result shows its count at once (the rehydrate dropped nothing)', async () => {

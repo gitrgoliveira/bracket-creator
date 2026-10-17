@@ -19,11 +19,7 @@ import {
   resolveLineupTeamId,
 } from './admin_scoring_team.jsx';
 
-import {
-  AUTOSAVE_DEBOUNCE_MS,
-  SyncStatusPill,
-  useDebouncedRunningWrite,
-} from './admin_scoring_autosave.jsx';
+import { SyncStatusPill } from './admin_scoring_autosave.jsx';
 
 import {
   MAX_IPPONS_PER_SIDE,
@@ -64,9 +60,7 @@ window.EngiScoreEditorModal = withOpenEditorRegistered(EngiScoreEditorModal);
 
 export {
   EngiScoreEditorModal,
-  useDebouncedRunningWrite,
   SyncStatusPill,
-  AUTOSAVE_DEBOUNCE_MS,
   resolveDecisionPassword,
   buildDecisionBody,
   submitDecisionRequest,

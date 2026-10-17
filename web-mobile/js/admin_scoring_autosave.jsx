@@ -4,11 +4,9 @@
 
 import { toBackendMatchResult, matchWire } from './api_serializers.jsx';
 import { changedGroups, statedGroupsOf, groupMatches, keptInHistoryNote, GROUP_RESULT } from './match_groups.jsx';
-import { writeDidNotLand, writeWasRefused, writeWasRefusedForClock, writePending } from './write_result.jsx';
+import { writeDidNotLand } from './write_result.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
-
-export const AUTOSAVE_DEBOUNCE_MS = 300;
 
 // ---------------------------------------------------------------------------
 // useChangedGroups (bc-mrgc): every score write an editor builds names the
@@ -136,60 +134,10 @@ export function useKeptInHistoryNote() {
   return { note, noteFromWrite: noteFromWriteRef.current };
 }
 
-// landedAutosave: an editor's autosave submit, wrapped so `onLanded(seq)` runs when a save
-// LANDED (not queued, not refused), with `seq` the value of the editor's edit counter
-// (`seqRef`) when the save was handed over. The patch is built in the same tick, so a save
-// carries every edit counted up to `seq` and none after it: the edit stamps the editor
-// keeps to hold its board against an older server copy (bc-kclr, bc-ltap) clear only for
-// edits at or before it, never for a tap made while the save was out. The individual
-// editor's board stamp and the engi editor's flags stamp are gone (both score by taps):
-// the team sheet's row and pick stamps are its only caller.
-//
-// `onRefused(seq)`, optional, runs instead when the save came back REFUSED
-// (writeWasRefused: nothing handed back, or applied:false), with the same `seq`. A refused
-// save stores nothing and broadcasts nothing, so no later server copy would ever bring
-// the board back: the stamp it left set would hold the operator's value for good while the
-// server and every other surface show the server's. The callback is for the editor to
-// compare `seq` with its counter (an edit made since is still owed and keeps its stamp),
-// then drop the stamp and take the server's CURRENT copy. A PENDING answer (the outbox has
-// the save, bc-evts) calls neither until its `settled` answer comes, which then decides as
-// above (a rejection is a refusal); a QUEUED answer calls neither: that write will land, so
-// the stamp stays. So does a clock_skew answer (writeWasRefusedForClock): the outbox
-// re-stamps and resends it once, and one refused twice leaves the tap on the board for the
-// NEXT save, so taking the server's copy here would wipe a tap that is still owed.
-export function landedAutosave(submit, seqRef, onLanded, onRefused) {
-  // The server's answer, judged once it is known. A save the outbox has taken
-  // (bc-evts) answers pending at once: its SETTLED answer decides, through a
-  // callback, never a wait. A refusal there (`settled` rejecting) handed
-  // nothing back, as a host reports a thrown one; a discarded entry calls
-  // neither (nothing was stored, and the operator chose to drop it).
-  const judge = (seq, res) => {
-    if (writeWasRefusedForClock(res)) return;
-    if (res && res.discarded === true) return;
-    if (writeWasRefused(res)) { if (onRefused) onRefused(seq); }
-    else if (!writeDidNotLand(res)) onLanded(seq);
-  };
-  return (patch) => {
-    const seq = seqRef.current;
-    const p = submit(patch);
-    if (p && typeof p.then === "function") {
-      p.then((res) => {
-        if (writePending(res)) res.settled.then((body) => judge(seq, body), () => judge(seq, undefined));
-        else judge(seq, res);
-      }, () => {});
-    }
-    return p;
-  };
-}
-
 export function KeptInHistoryNote({ note }) {
   if (!note) return null;
   return <div className="sb-hint" role="status" data-testid="kept-in-history-note">{note}</div>;
 }
-
-// The monotonic clock an edit is read on, or null where there is none (the
-// write is then stamped when it is sent).
-const perfNow = () => (typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : null);
 
 // ---------------------------------------------------------------------------
 // C2: SyncStatusPill
@@ -198,9 +146,7 @@ const perfNow = () => (typeof performance !== "undefined" && typeof performance.
 // running. Subscribes to the write-queue sync status from api_client.jsx
 // (via window.subscribeSyncStatus) and reflects:
 //   synced        : last write landed; no queue pending
-//   syncing       : an edit waiting in the autosave window
-//                   (useDebouncedRunningWrite registers it, bc-sync), or a
-//                   write in flight / in queue
+//   syncing       : a write (a tap included) in flight / in queue
 //   offline       : network down; queue retrying with backoff
 //   auth-required : write refused with 401; parked, still queued, needs the
 //                   operator to sign in again to save (403 is a different
@@ -272,154 +218,4 @@ export function SyncStatusPill({ isRunning }) {
       <span className="sync-pill__label">{c.label}</span>
     </span>
   );
-}
-
-// useDebouncedRunningWrite: the running-match autosave. Every edit is held
-// for AUTOSAVE_DEBOUNCE_MS and then written as one status:"running" PUT.
-//
-// bc-sync: that held edit exists nowhere but this hook's timer, so it is
-// REPORTED and KEPT. Reported: markDirty registers a pending-edit token with
-// api_client (API.notePendingEdit), so the sync pill reads "Syncing..." from
-// the first tap instead of "Synced" over unsent work, and the token is
-// released only once the write has been handed to onSubmit (by then it is an
-// outbox entry, bc-evts). Kept when the editor goes away: the unmount writes
-// it. Kept when the page goes away: on pagehide, or the tab being hidden, a
-// pending edit is written at once, and the outbox stores it in that tick.
-// Every write carries the time of the edit it saves (editedPerf), so however
-// late it goes out, it is never newer than a result recorded after the tap.
-//
-// seenStampRef, optional, holds the stamp (modifiedAt) of the match the editor
-// shows, refreshed every render. Each tap records it beside editedPerf, and
-// the write carries it as `seenModifiedAt` (never on the wire), so the stamp
-// is never older than the match the tap was made against (bc-hlck,
-// api_client.jsx _stampAfterSeen), while a match another device changed
-// after the tap does not move it.
-//
-// onWriteResult, optional, is handed the server's answer to each running
-// write (a pending answer's `settled`, when it comes: the editors'
-// kept-in-history note, useKeptInHistoryNote). Read through a ref, so a new
-// function each render is fine.
-export function useDebouncedRunningWrite({ isRunningRef, buildPatchRef, onSubmitRef, onWriteResult, seenStampRef }) {
-  const onWriteResultRef = useRefA(onWriteResult);
-  onWriteResultRef.current = onWriteResult;
-  const timerRef = useRefA(null);
-  // The monotonic reading of the last edit, sent on the patch as `editedPerf`
-  // (never on the wire) so recordScore stamps the write with the time of that
-  // edit, not of its sending (api_client.jsx _editAge).
-  const editPerfRef = useRefA(null);
-  // The shown match's stamp at that edit (seenStampRef above).
-  const editSeenRef = useRefA(undefined);
-  // One token per editor instance, so two open editors never release each
-  // other's pending edit.
-  const pendingTokenRef = useRefA({});
-  // Existing test stubs of window.API predate notePendingEdit, so ask first.
-  const notePending = (on) => {
-    const api = window.API;
-    if (api && typeof api.notePendingEdit === "function") api.notePendingEdit(pendingTokenRef.current, on);
-  };
-
-  // clearTimer: stop the debounce timer and nothing else. The pending edit
-  // stays registered; whoever clears the timer decides when it is released.
-  const clearTimer = () => {
-    if (timerRef.current === null) return false;
-    clearTimeout(timerRef.current);
-    timerRef.current = null;
-    return true;
-  };
-
-  // cancelDebounce: call this before any explicit submit (Start / Finish /
-  // Hantei / Decision) so the queued timer can't fire afterward, and before
-  // closing on the operator's Discard, so the unmount does not write what they
-  // threw away. Nothing of this hook's is left pending then, so the pending
-  // edit is released too. Returns whether an edit was owed, so a caller can
-  // tell a save is still due.
-  const cancelDebounce = () => {
-    const owed = clearTimer();
-    if (owed) notePending(false);
-    return owed;
-  };
-
-  // The running write itself, shared by the debounce timer, the unmount and
-  // the page-hide flush so they can never apply different gates. The write is
-  // the outbox's (bc-evts): stored in the same tick, so one made as the page
-  // goes away is kept for the next load, and sent after whatever this device
-  // already queued for the match (a representative-bout add or remove
-  // included), so nothing here waits for any request.
-  const fireRunningWrite = () => {
-    try {
-      // gate 3: re-check running at FIRE time. If the match was completed
-      // during the debounce window (this operator's Finish cancels the timer,
-      // but an SSE update or another operator can complete it out from under
-      // us), isRunningRef has flipped false on re-render: sending a
-      // status:"running" autosave now would regress the completed result.
-      if (!isRunningRef.current) return;
-      // Fire-and-forget: errors swallowed; operator's explicit Finish is
-      // the authoritative write. The pending edit is released only AFTER the
-      // write is handed over (the finally below), so the status stays
-      // "syncing" through the hand-over instead of flickering to "synced".
-      try {
-        const patch = { ...buildPatchRef.current("running"), editedPerf: editPerfRef.current };
-        if (editSeenRef.current !== undefined) patch.seenModifiedAt = editSeenRef.current;
-        const p = onSubmitRef.current(patch);
-        if (p && typeof p.then === "function") {
-          // The answer the editor notes (a partial apply's held groups) is the
-          // server's: a pending one's `settled`, when it comes.
-          const note = (res) => { const cb = onWriteResultRef.current; if (cb) cb(res); };
-          p.then((res) => {
-            if (writePending(res)) res.settled.then(note, () => {});
-            else note(res);
-          }).catch(() => {});
-        }
-      } catch (_) { /* swallow */ }
-    } finally {
-      notePending(false);
-    }
-  };
-
-  // Unmount writes an edit still inside the window, whatever unmounted the
-  // editor (operator ruling 2026-09-27): Close, Prev/Next or their keys,
-  // another match picked, a correction opened, a court switch, or the host
-  // moving on by itself because another device finished the match. That last
-  // one is why the write carries the time of the tap (editedPerf): the tap is
-  // older than that finish, so the server keeps the finish. Discarding is the
-  // one way out that saves nothing: the editor cancels first (cancelDebounce).
-  //
-  // bc-sync: the page going away (a reload, a closed tab, the iPad locking or
-  // switching app) or the tab being hidden writes an edit still in the window
-  // NOW: the outbox stores it in the same tick, where a timer would die with
-  // the document. Everything the closures read is a ref, so the mount-time
-  // closure is safe.
-  useEffectA(() => {
-    const flushNow = () => { if (clearTimer()) fireRunningWrite(); };
-    const onPageHide = () => flushNow();
-    const onVisibility = () => { if (document.visibilityState === "hidden") flushNow(); };
-    window.addEventListener("pagehide", onPageHide);
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      window.removeEventListener("pagehide", onPageHide);
-      document.removeEventListener("visibilitychange", onVisibility);
-      flushNow();
-    };
-  }, []);
-
-  // markDirty: call from every user-driven mutation handler (addPt,
-  // removePt, foul increment/decrement, draw toggle, encho change, team
-  // sub-bout edits). Do NOT call from prop/SSE-driven state writes. An edit
-  // that does not call it is not saved by the unmount or the page-hide flush.
-  const markDirty = () => {
-    if (!isRunningRef.current) return; // gate 1: never auto-start a scheduled match
-    // Re-arm WITHOUT releasing the pending edit (not cancelDebounce): the edit
-    // is still pending, and a release here would publish synced-then-syncing
-    // on every tap inside the window.
-    clearTimer();
-    notePending(true);
-    editPerfRef.current = perfNow();
-    if (seenStampRef) editSeenRef.current = Number(seenStampRef.current) || 0;
-    timerRef.current = setTimeout(() => {
-      timerRef.current = null;
-      fireRunningWrite();
-    }, AUTOSAVE_DEBOUNCE_MS);
-  };
-
-  return { markDirty, cancelDebounce };
 }

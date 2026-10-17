@@ -2970,6 +2970,11 @@
      "modifiedAt": 20,
      "groupStamps": {
       "flags": 20
+     },
+     "eventSeqs": {
+      "s-a1": 1,
+      "s-a2": 1,
+      "s-b1": 1
      }
     },
     "outcomes": {

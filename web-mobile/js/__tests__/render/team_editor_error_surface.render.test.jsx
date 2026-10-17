@@ -201,16 +201,14 @@ describe('team editor inline error surface', () => {
 
   // A remove saves no sheet first: the point struck before it is a tap, ahead
   // of the remove in the outbox (bc-evts stage 5). The match holds no row for
-  // bout 2 yet, so the one write is that row's (and bout 3's), ahead of the tap.
+  // bout 2 yet, and the tap makes it on the server, so nothing else is written.
   it('a point struck right before Remove is a tap ahead of the remove, and no sheet is saved first', async () => {
     const onSubmit = vi.fn().mockResolvedValue({ applied: true });
     await renderEditor({ onSubmit });
     await act(async () => { fireEvent.click(ipponButton(subMatchRows()[1], 'shiro', 'M')); });
     await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
     await waitFor(() => expect(window.API.removeDaihyosen).toHaveBeenCalledTimes(1));
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit.mock.calls[0][0].changed).toEqual(['bout:2', 'bout:3']);
-    expect(onSubmit.mock.invocationCallOrder[0]).toBeLessThan(window.API.recordTap.mock.invocationCallOrder[0]);
+    expect(onSubmit).not.toHaveBeenCalled();
     expect(window.API.recordTap.mock.invocationCallOrder[0]).toBeLessThan(window.API.removeDaihyosen.mock.invocationCallOrder[0]);
   });
 });

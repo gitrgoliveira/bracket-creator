@@ -28,6 +28,8 @@ const foldOpts = (shape) => ({
   engi: shape.kind === 'engi',
   team: shape.kind === 'team' || shape.kind === 'kachinuki',
   kachinuki: shape.kind === 'kachinuki',
+  // goldenShape (score_replay_golden_test.go): every team shape has three.
+  teamSize: shape.kind === 'team' || shape.kind === 'kachinuki' ? 3 : 0,
 });
 
 // emptyToNil reads an empty array as null, so a golden [] matches a field the

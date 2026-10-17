@@ -546,10 +546,32 @@ function reconcileWinnerMemberId(row) {
 // foldBout folds a tap on bout `e.pos` of a team match (engine.foldBout).
 // `ctx.bouts` keeps each bout's score between taps of one fold, the
 // fusensho snapshot with it; `ctx.stamps` is the replay's group stamps.
+// createsMissingRow says an event on bout pos may make the row when the match
+// holds none (engine.ReplayShape.createsMissingRow): a numbered bout of a
+// fixed-order team match, within its team size (`opts.teamSize`).
+function createsMissingRow(opts, pos) {
+  return !!opts.team && !opts.kachinuki && pos >= 1 && pos <= (Number(opts.teamSize) || 0);
+}
+
+// withEmptyBoutRow is rows with an empty row at pos, the numbered rows in
+// position order ahead of the representative bout (engine.withEmptyBoutRow).
+function withEmptyBoutRow(rows, pos) {
+  const empty = { position: pos, sideA: '', sideB: '', ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, winner: '', decision: '' };
+  const at = rows.findIndex((r) => r && (r.position < 0 || r.position > pos));
+  return at < 0 ? [...rows, empty] : [...rows.slice(0, at), empty, ...rows.slice(at)];
+}
+
 function foldBout(m, e, opts, ctx) {
-  const rows = m.subResults || [];
-  const idx = rows.findIndex((r) => r && r.position === e.pos);
-  if (idx < 0) return NO_TARGET;
+  let rows = m.subResults || [];
+  let idx = rows.findIndex((r) => r && r.position === e.pos);
+  if (idx < 0) {
+    // A fixed-order bout the match holds no row for yet (a match started from
+    // the queue holds none): the row is made, and kept only if the event
+    // applies (m.subResults is set only then).
+    if (!createsMissingRow(opts, e.pos)) return NO_TARGET;
+    rows = withEmptyBoutRow(rows, e.pos);
+    idx = rows.findIndex((r) => r && r.position === e.pos);
+  }
   const before = rows[idx];
   const row = { ...before };
   let b = ctx.bouts.has(e.pos) ? cloneBout(ctx.bouts.get(e.pos)) : boutScoreOf(before);

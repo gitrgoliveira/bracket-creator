@@ -61,20 +61,17 @@ describe('a running team match is scored by taps', () => {
     expect(events().map((e) => e.letter)).toEqual(['M', 'K']);
   });
 
-  it('a match started from the queue holds no bout rows: the first tap writes them first, then is a tap', async () => {
+  it('a match started from the queue holds no bout rows: the first tap is a tap alone, the server makes the row', async () => {
     const onSubmit = vi.fn(pending);
     const r = render(el(teamBout({ subResults: [] }), { onSubmit }));
     await tap(ipponBtn(r.container, 1, 'aka', 'K'));
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    const rows = onSubmit.mock.calls[0][0];
-    expect(rows.status).toBe('running');
-    expect(rows.changed).toEqual(['bout:1', 'bout:2', 'bout:3']);
-    expect(rows.subResults.map((s) => [s.position, s.ipponsA, s.ipponsB])).toEqual([[1, [], []], [2, [], []], [3, [], []]]);
+    expect(onSubmit, 'no score write ahead of the tap (engine.createsMissingRow)').not.toHaveBeenCalled();
     expect(events()).toEqual([{ kind: 'ippon.add', pos: 2, side: 'a', letter: 'K' }]);
     expect(marks(r.container, 1, 'aka'), 'the tap shows before the server holds the row').toEqual(['K']);
     await tap(ipponBtn(r.container, 0, 'shiro', 'M'));
-    expect(onSubmit, 'the rows are written once').toHaveBeenCalledTimes(1);
+    expect(onSubmit).not.toHaveBeenCalled();
     expect(events().length).toBe(2);
+    expect(marks(r.container, 0, 'shiro')).toEqual(['M']);
   });
 
   it('a foul is one foul.add, and its removal one foul.remove; the second foul lands the H in the fold', async () => {

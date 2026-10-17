@@ -13,8 +13,8 @@
 // bout's decision stays "", engine.writeBoutRow).
 //
 // The test goes the whole way round: the sheet scores the first point (the
-// encounter holds no rows yet, so the sheet writes them first, then taps), the
-// server folds the tap onto those rows, and the sheet (opened again), the TV
+// encounter holds no rows yet; the tap makes its bout's row on the server,
+// engine.createsMissingRow), the server folds the tap, and the sheet (opened again), the TV
 // board and the public match card all render that stored match. So reverting the
 // write rule reddens the display assertions too, not only the wire one
 // (team_finish_refuses_unfought_bouts.render.test.jsx pins the wire alone).
@@ -98,23 +98,19 @@ async function mountSheet(match) {
 }
 
 // The sheet scores the encounter's first point: the encounter holds no bout
-// rows, so the sheet writes them first (the one running write), then the point
-// is a tap; the server folds the tap onto the rows, and that is the match it
-// stores.
+// rows, and the point is a tap alone, which makes its bout's row on the server;
+// the server folds it, and that is the match it stores.
 const taps = () => window.API.recordTap.mock.calls.map((c) => c[2]);
 async function storedAfterFirstPoint() {
   const view = await mountSheet(MATCH);
   await click(sheetPoint(0, 'shiro', 'M'));
   await act(async () => { view.unmount(); });
-  expect(writes).toHaveLength(1);
-  const rowsWrite = writes[0];
-  expect(rowsWrite.status).toBe('running');
-  expect(numbered(rowsWrite.subResults).map((s) => s.decision)).toEqual(['', '', '']);
+  expect(writes, 'no score write ahead of the tap').toHaveLength(0);
   const sent = window.API.pendingTaps('c1', MATCH.id);
   expect(taps()).toEqual([{ kind: 'ippon.add', pos: 1, side: 'b', letter: 'M' }]);
   cleanup();
   writes = [];
-  return serverFold({ ...MATCH, subResults: rowsWrite.subResults }, sent, { team: true }).match;
+  return serverFold(MATCH, sent, { team: true, teamSize: 3 }).match;
 }
 
 const numbered = (subs) => subs.filter((s) => s.position > 0);
@@ -123,9 +119,9 @@ describe('an unfought bout of a running team encounter', () => {
   it('is written with no result, not as a draw', async () => {
     const stored = await storedAfterFirstPoint();
     const rows = numbered(stored.subResults);
-    expect(rows).toHaveLength(3);
+    expect(rows.map((s) => s.position), 'only the bout tapped has a row').toEqual([1]);
     expect(rows[0].ipponsB).toEqual(['M']);
-    expect(rows.slice(1).map((s) => s.decision)).toEqual(['', '']);
+    expect(rows[0].decision).toBe('');
   });
 
   it('reads unfought on the score sheet opened again, and a Tie tap marks it a draw', async () => {

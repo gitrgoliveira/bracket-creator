@@ -171,6 +171,25 @@ func (d derivedScore) carry(ipponsA, ipponsB []string, subs []state.SubMatchResu
 // stays as its tombstone, ordered at the match's ModifiedAt. It has seen
 // nothing of the log, which is empty when it is written.
 func MigrationBaseline(current *state.MatchResult, id string, receivedAt int64) state.ScoreBaseline {
+	return migrationBaselineCovering(current, id, receivedAt, nil)
+}
+
+// MigrationBaselineFor is MigrationBaseline for a match of shape: it also
+// covers every bout an event may make the row of (createsMissingRow), a
+// bout with no row as its "null" at stamp 0, so the replay folds such an
+// event from no row rather than onto the stored match, which already holds
+// what the event made (it would count twice).
+func MigrationBaselineFor(current *state.MatchResult, id string, receivedAt int64, shape ReplayShape) state.ScoreBaseline {
+	var extra []int
+	if shape.team() && !shape.kachinuki() {
+		for p := 1; p <= shape.Comp.TeamSize; p++ {
+			extra = append(extra, p)
+		}
+	}
+	return migrationBaselineCovering(current, id, receivedAt, extra)
+}
+
+func migrationBaselineCovering(current *state.MatchResult, id string, receivedAt int64, extra []int) state.ScoreBaseline {
 	positions := state.SubPositions(current.SubResults)
 	stamps := state.MaterializedGroupStamps(current.GroupStamps, current.ModifiedAt, positions)
 	groups := append(slices.Clone(state.ScalarGroups), state.ServerGroups...)
@@ -178,7 +197,7 @@ func MigrationBaseline(current *state.MatchResult, id string, receivedAt int64) 
 	for _, g := range groups {
 		seen[g] = true
 	}
-	for _, p := range positions {
+	for _, p := range append(slices.Clone(positions), extra...) {
 		if g := state.BoutGroup(p); !seen[g] {
 			seen[g] = true
 			groups = append(groups, g)
@@ -462,6 +481,32 @@ func ReplayScoring(current *state.MatchResult, lines []state.ScoreLogLine, shape
 // replayScoring is ReplayScoring, stopping before the first item that does not
 // sort before stopAt (nil: the whole log), and handing back the replayer so a
 // caller can ask what it held at that point (resultInForce).
+// startMadeRowsEmpty starts from no row every bout an event may make the row
+// of (createsMissingRow) when no baseline of the log sets that bout: its row in
+// the stored match (the replay's start) can only be one events made, and the
+// events are folded again, so starting from the row would count each of them
+// twice. A log begun by MigrationBaselineFor covers these bouts; one begun
+// before it did not.
+func (rp *replayer) startMadeRowsEmpty() {
+	done := map[string]bool{}
+	for _, l := range rp.lines {
+		e := l.Event
+		if e == nil || !rp.shape.createsMissingRow(e.Pos) {
+			continue
+		}
+		g := rp.groupOf(e)
+		if pos, ok := state.ParseBoutGroup(g); !ok || pos != e.Pos || rp.covered[g] || done[g] {
+			continue
+		}
+		done[g] = true
+		m := &rp.cur.m
+		if i := boutRowIndex(m.SubResults, e.Pos); i >= 0 {
+			m.SubResults = slices.Delete(slices.Clone(m.SubResults), i, i+1)
+		}
+		delete(rp.stamps, g)
+	}
+}
+
 func replayScoring(current *state.MatchResult, lines []state.ScoreLogLine, shape ReplayShape, stopAt *replayItem) (Replay, *replayer) {
 	if len(lines) == 0 {
 		return Replay{Match: cloneMatchForReplay(*current)}, nil
@@ -500,6 +545,7 @@ func replayScoring(current *state.MatchResult, lines []state.ScoreLogLine, shape
 			}
 		}
 	}
+	rp.startMadeRowsEmpty()
 	slices.SortFunc(items, compareReplayItems)
 	for _, it := range items {
 		if stopAt != nil && compareReplayItems(it, *stopAt) >= 0 {
@@ -1392,13 +1438,60 @@ func boutScoreOf(row state.SubMatchResult) domain.BoutScore {
 // pairing Record bout has not appended, or one removed, is noTarget.
 func foldBout(r *replayMatch, e *domain.ScoreEvent, shape ReplayShape, stamps map[string]int64) string {
 	m := &r.m
-	idx := -1
-	for i := range m.SubResults {
-		if m.SubResults[i].Position == e.Pos {
-			idx = i
-			break
+	if boutRowIndex(m.SubResults, e.Pos) >= 0 || !shape.createsMissingRow(e.Pos) {
+		return foldBoutRow(r, e, shape, stamps)
+	}
+	// A fixed-order bout the match holds no row for yet (a match started from
+	// the queue holds none): the event's row is made, empty, and kept only if
+	// the event applies to it.
+	prior := m.SubResults
+	m.SubResults = withEmptyBoutRow(prior, e.Pos)
+	out := foldBoutRow(r, e, shape, stamps)
+	if out != domain.ScoreOutcomeApplied {
+		m.SubResults = prior
+	}
+	return out
+}
+
+// createsMissingRow says an event on bout pos may make the row when the match
+// holds none: a numbered bout of a fixed-order team match, within its team
+// size. A kachinuki bout, a representative bout and a bout added by hand
+// beyond the team size are written by a score write first.
+func (shape ReplayShape) createsMissingRow(pos int) bool {
+	return shape.team() && !shape.kachinuki() && pos >= 1 && pos <= shape.Comp.TeamSize
+}
+
+// boutRowIndex is the index of the row at pos, -1 when there is none.
+func boutRowIndex(subs []state.SubMatchResult, pos int) int {
+	for i := range subs {
+		if subs[i].Position == pos {
+			return i
 		}
 	}
+	return -1
+}
+
+// withEmptyBoutRow is subs with an empty row at pos, the numbered rows in
+// position order ahead of the representative bout. subs is not changed.
+func withEmptyBoutRow(subs []state.SubMatchResult, pos int) []state.SubMatchResult {
+	out := make([]state.SubMatchResult, 0, len(subs)+1)
+	placed := false
+	for _, s := range subs {
+		if !placed && (s.Position < 0 || s.Position > pos) {
+			out = append(out, state.SubMatchResult{Position: pos})
+			placed = true
+		}
+		out = append(out, s)
+	}
+	if !placed {
+		out = append(out, state.SubMatchResult{Position: pos})
+	}
+	return out
+}
+
+func foldBoutRow(r *replayMatch, e *domain.ScoreEvent, shape ReplayShape, stamps map[string]int64) string {
+	m := &r.m
+	idx := boutRowIndex(m.SubResults, e.Pos)
 	if idx < 0 {
 		return domain.ScoreOutcomeNoTarget
 	}

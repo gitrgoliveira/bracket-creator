@@ -3963,6 +3963,162 @@
      ]
     }
    }
+  },
+  {
+   "name": "a fixed-order event on a bout the match holds no row for makes the row, within the team size",
+   "jsMirror": true,
+   "shape": {
+    "kind": "team",
+    "knockout": true
+   },
+   "match": {
+    "id": "r0-m0",
+    "sideA": "Kyoto",
+    "sideB": "Osaka",
+    "sideAId": "ta",
+    "sideBId": "tb",
+    "winner": "",
+    "ipponsA": [],
+    "ipponsB": [],
+    "hansokuA": 0,
+    "hansokuB": 0,
+    "decision": "",
+    "status": "running",
+    "court": "A",
+    "round": 0,
+    "scheduledAt": ""
+   },
+   "head": [
+    {
+     "v": 1,
+     "baseline": {
+      "id": "m0",
+      "door": "migrate",
+      "stamp": 10,
+      "values": {
+       "bout:1": null,
+       "bout:2": null,
+       "bout:3": null
+      },
+      "stamps": {
+       "bout:1": 0,
+       "bout:2": 0,
+       "bout:3": 0
+      },
+      "basis": {
+       "seen": 0
+      }
+     }
+    }
+   ],
+   "lines": [
+    {
+     "v": 1,
+     "event": {
+      "id": "a2",
+      "session": "s-a",
+      "seq": 1,
+      "stamp": 20,
+      "kind": "ippon.add",
+      "pos": 2,
+      "side": "a",
+      "letter": "M"
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "f3",
+      "session": "s-b",
+      "seq": 1,
+      "stamp": 21,
+      "kind": "foul.add",
+      "pos": 3,
+      "side": "b"
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "k4",
+      "session": "s-c",
+      "seq": 1,
+      "stamp": 22,
+      "kind": "ippon.add",
+      "pos": 4,
+      "side": "a",
+      "letter": "K"
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "x1",
+      "session": "s-d",
+      "seq": 1,
+      "stamp": 23,
+      "kind": "bout.fighter",
+      "pos": 1,
+      "side": "a",
+      "name": "Aoki"
+     }
+    }
+   ],
+   "want": {
+    "match": {
+     "subResults": [
+      {
+       "position": 2,
+       "sideA": "",
+       "sideB": "",
+       "ipponsA": [
+        "M"
+       ],
+       "ipponsB": [],
+       "hansokuA": 0,
+       "hansokuB": 0,
+       "winner": "Kyoto",
+       "decision": "",
+       "markIds": {
+        "a": [
+         "a2"
+        ]
+       }
+      },
+      {
+       "position": 3,
+       "sideA": "",
+       "sideB": "",
+       "ipponsA": [],
+       "ipponsB": [],
+       "hansokuA": 0,
+       "hansokuB": 1,
+       "winner": "",
+       "decision": "hikiwake"
+      }
+     ],
+     "scoreVersion": 5,
+     "modifiedAt": 21,
+     "groupStamps": {
+      "bout:2": 20,
+      "bout:3": 21
+     }
+    },
+    "outcomes": {
+     "a2": [
+      "applied"
+     ],
+     "f3": [
+      "applied"
+     ],
+     "k4": [
+      "noTarget"
+     ],
+     "x1": [
+      "notAllowed"
+     ]
+    }
+   }
   }
  ]
 }

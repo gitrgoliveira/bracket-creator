@@ -1287,6 +1287,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const teamFold = {
     team: true,
     kachinuki: isKachinuki,
+    // A tap on a numbered fixed-order bout makes its row (createsMissingRow).
+    teamSize: Number(teamSize) || 0,
     prepare: (base) => padBoutRows(base, padPositions),
   };
   const tapBoard = useTapBoard(mHost, tapMode, teamFold);
@@ -1316,14 +1318,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     setOperatorEditSeq((n) => n + 1);
     setFusenshoRefusal("");
   };
-  // ensureServerRows: the ONE owner of "a bout row the server does not hold is
-  // written before the first tap on it". A bout tap lands only on a row the
-  // server's copy holds (engine.foldBout), and a team match started from the
-  // queue (a start-only write) holds none; nor does a kachinuki encounter's first
-  // bout before its first write, nor a pairing added by hand. So the first gesture
-  // on such a bout queues a running write carrying the empty rows (a fixed-order
-  // match's missing positions together, a kachinuki bout alone; a kachinuki first
-  // bout with its lineup's fighters), naming those bout groups alone, ahead of the
+  // ensureServerRows: the ONE owner of "a bout row the server does not make is
+  // written before the first tap on it". A tap on a numbered fixed-order bout
+  // within the team size makes its row on the server (engine.createsMissingRow),
+  // so nothing is written for it. Any other bout tap lands only on a row the
+  // server's copy holds: a kachinuki encounter's first bout before its first
+  // write holds none, nor does a pairing added by hand. So the first gesture on
+  // such a bout queues a running write carrying its empty row (a kachinuki first
+  // bout with its lineup's fighters), naming that bout group alone, ahead of the
   // tap in the match's order. Judged against the server's copy (mHost), never the
   // board, and once per row for this sheet.
   const rowsWrittenRef = useRefA({ id: null, positions: new Set() });
@@ -1332,12 +1334,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // override to adopt it into, and the next tap must still be floored by it.
   const recordBoutStampRef = useRefA({ id: null, at: 0 });
   const ensureServerRows = (pos) => {
-    if (!(pos > 0)) return;
+    if (!(pos > 0) || (!isKachinuki && pos <= (Number(teamSize) || 0))) return;
     const req = rowsWrittenRef.current;
     if (req.id !== mHost.id) { req.id = mHost.id; req.positions = new Set(); }
     const held = new Set((mHost.subResults || []).filter(Boolean).map((r) => r.position));
     if (held.has(pos) || req.positions.has(pos)) return;
-    const want = (isKachinuki ? [pos] : [...new Set([...padPositions, pos])]).filter((p) => p > 0 && !held.has(p) && !req.positions.has(p));
+    const want = [pos];
     want.forEach((p) => req.positions.add(p));
     const fields = buildPatchFields("running");
     const rows = (fields.subResults || []).filter((s) => want.includes(s.position));

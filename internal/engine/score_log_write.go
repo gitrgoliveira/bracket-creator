@@ -564,10 +564,16 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 		log.Printf("engine: ERROR: match %s/%s: written match not read for its baseline: %v", compID, matchID, err)
 		return nil
 	}
+	comp, err := h.LoadCompetition(compID)
+	if err != nil {
+		log.Printf("engine: ERROR: match %s/%s: competition not read for its baseline: %v", compID, matchID, err)
+		return nil
+	}
+	shape := ReplayShape{Comp: comp, Knockout: !inPool}
 	if len(lines) == 0 {
 		// A write with an id a resend must find begins the log: the match
 		// as written is its first baseline, and the write's own follows.
-		mb := MigrationBaseline(post, MigrationDoor+"-0", serverNowMs())
+		mb := MigrationBaselineFor(post, MigrationDoor+"-0", serverNowMs(), shape)
 		first := state.ScoreLogLine{Baseline: &mb}
 		if err := h.AppendScoreLog(compID, matchID, first); err != nil {
 			log.Printf("engine: ERROR: match %s/%s: the %s write's log not begun: %v", compID, matchID, wb.door, err)
@@ -575,12 +581,6 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 		}
 		lines = []state.ScoreLogLine{first}
 	}
-	comp, err := h.LoadCompetition(compID)
-	if err != nil {
-		log.Printf("engine: ERROR: match %s/%s: competition not read for its baseline: %v", compID, matchID, err)
-		return nil
-	}
-	shape := ReplayShape{Comp: comp, Knockout: !inPool}
 	// The log before the write's line, read only where it is used: the groups
 	// an unjudged write sets, and the outcomes a move is recorded against
 	// when no prior was kept.
@@ -787,7 +787,7 @@ func logDrift(stored *state.MatchResult, line *state.ScoreLogLine, diff []string
 // logIt says the drift or repair once, from the write that logs it.
 func replayLines(stored *state.MatchResult, lines []state.ScoreLogLine, shape ReplayShape, now int64, logIt bool) (all, prefix []state.ScoreLogLine, found *replayer) {
 	if len(lines) == 0 {
-		mb := MigrationBaseline(stored, MigrationDoor+"-0", now)
+		mb := MigrationBaselineFor(stored, MigrationDoor+"-0", now, shape)
 		prefix = []state.ScoreLogLine{{Baseline: &mb}}
 		return prefix, prefix, nil
 	}

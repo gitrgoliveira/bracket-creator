@@ -15,7 +15,7 @@
 // match's own lineup up. The editors keep their layouts and their save bodies.
 //
 // The rules for the team's members (mergeMembers, the one rule a list that arrives is
-// merged by, and newMembersWait, the wait for a team's first list) are exported too:
+// merged by, and newMembersWait, whether a team's first list has been read) are exported too:
 // the team score sheet writes members from its bout rows and keeps its own lists, and
 // asks the same owner what a list that arrives does to them.
 //
@@ -25,10 +25,10 @@
 // global at call time, as tap_guard.jsx does.
 import {
   changedLineupPositions, lineupFields, lineupSourceOf, lineupSourceLabel, isOwnLineup, resolveMatchLineup,
-  previousLineupConfirm, PREVIOUS_LINEUP_LABEL, SAVE_QUEUED_REASON, REMOVED_UNREAD_NOTICE, STARTING_ROUND,
+  previousLineupConfirm, PREVIOUS_LINEUP_LABEL, REMOVED_UNREAD_NOTICE, STARTING_ROUND,
   lineupReadFailure,
 } from './lineup_resolver.jsx';
-import { FETCH_TIMEOUT_MS, TIMED_OUT, withinDeadline } from './write_result.jsx';
+import { FETCH_TIMEOUT_MS, withinDeadline, writePending } from './write_result.jsx';
 
 const STORAGE_PREFIX = 'bc.lineupDraft.v1:';
 // A draft older than this is never offered: the operator has moved on.
@@ -272,42 +272,24 @@ export function mergeMembers(shown, arriving) {
   return [...kept.values()].sort((a, b) => (a.index || 0) - (b.index || 0));
 }
 
-// The first list of a team's members that a read shows, and the wait for it. A name
-// typed before one is shown is resolved against no members: a new name is minted where
-// the member's seeded slot is free, and the name of a member the team already has is
-// refused by the server as a second member of that name. `listed` says a READ's list has
-// been shown for the team (a change an editor made itself is not one). `pending()` is
-// null when there is nothing out to wait for (a list is shown, or the read failed: the
-// editor goes on without one, as it always did), else a promise that ends when a list
-// is shown, when the read fails or at the deadline of any bounded request, and says
-// whether a list was shown by then: when none was, the editor owns up to going on
-// without (the members-unavailable warning). The deadline ends the wait for good: a read
-// that hangs holds up the first name typed and no other, which goes on at once, and
-// `onTimeout` lets the editor flag the members as unavailable for it as it does when
-// the read fails. A list that arrives later is still shown (`show`). Another team starts
-// a new wait.
-export function newMembersWait(onTimeout) {
-  let settle;
-  const done = new Promise((resolve) => { settle = resolve; });
-  const end = () => {
-    wait.ended = true;
-    settle();
-  };
+// The first list of a team's members that a read shows. A name typed before one is
+// shown is resolved against no members: a new name would be minted where the member's
+// seeded slot is free, and the name of a member the team already has would be refused
+// by the server as a second member of that name. So an editor resolves a typed name
+// only once `listed` says a READ's list has been shown for the team (a change an editor
+// made itself is not one); before that it saves the name alone, with the
+// members-unavailable warning, and never waits for the read (bc-evts stage 3 review 2,
+// R1: "ALL goes to the outbox ... but never blocks the UI"). `show` marks a list shown,
+// `fail` a read that failed (`ended` either way). Another team starts a new one.
+export function newMembersWait() {
   const wait = {
     listed: false,
     ended: false,
     show: () => {
       wait.listed = true;
-      end();
+      wait.ended = true;
     },
-    fail: end,
-    pending: () => (wait.ended ? null : withinDeadline(done, FETCH_TIMEOUT_MS).then((outcome) => {
-      if (outcome === TIMED_OUT) {
-        end();
-        if (onTimeout) onTimeout();
-      }
-      return wait.listed;
-    })),
+    fail: () => { wait.ended = true; },
   };
   return wait;
 }
@@ -329,8 +311,6 @@ export function newMembersWait(onTimeout) {
 //   draft               useLineupDraft's answer for it
 //   error, warning      the editor's own refusal and its after-save notice, here
 //                       so that giving a lineup up clears both
-//   removing            a removal is out
-//   saveQueued          a save of this lineup is still waiting to be sent
 //   squad               the team's members as the API answers them: every list
 //                       that arrives, a read's or an editor's own write's, is
 //                       merged with the one shown by member id and the server's
@@ -359,14 +339,17 @@ export function newMembersWait(onTimeout) {
 //   dropOwnLineup()       confirm, then remove a match's own lineup, so the match
 //                         carries its team's previous one, and show that one
 //   retry()               read again ("Try again")
-//   waitForMembers()      what an editor awaits before it resolves a typed name:
-//                         null when nothing is out to wait for (a list of the team's
-//                         members that was read is shown, or the read failed), else
-//                         a promise that ends when one is shown, when the read fails
-//                         or at the deadline of any bounded request, and says whether
-//                         one was shown (newMembersWait). Against no list the name
-//                         would be minted where the member's seeded slot is free, or
-//                         where the team already has the member
+//   membersListed()       whether a read of the team's members has shown a list
+//   membersReadOver()     whether that read is over (shown, or failed): an editor
+//                         resolves a typed name only then, never waiting for it
+//                         (bc-evts stage 3 review 2, R1). Against no list while the
+//                         read is out the name would be minted where the member's
+//                         seeded slot is free, or where the team already has the
+//                         member, so then it is saved by name alone (or refused, on
+//                         the Lineups page), with the members-unavailable warning;
+//                         after a read that failed it goes on without them, as it
+//                         always did
+//   isMounted()           whether the editor is still on screen (R2)
 // A lineup change announced for the competition (the lineup-updated event) is
 // followed: the lineup is read again and shown, unless the form has edits or a
 // removal is out (one announced while a read of the lineup is out waits for that
@@ -404,7 +387,6 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   const [loadError, setLoadError] = useState('');
   const [error, setError] = useState('');
   const [warning, setWarning] = useState('');
-  const [removing, setRemoving] = useState(false);
   // The team's members. The read made when the editor opens that fails leaves the
   // list as it is and flags that it could not be read, unless a read's list is shown
   // for the team by then: a lineup is still read and saved without it. A read made
@@ -446,13 +428,11 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   // is merged into no list of another team.
   const teamKey = `${compId}/${teamId}`;
   const squadTeam = useRef(teamKey);
-  // Whether a read's list is shown for this team, and the wait for it (see
-  // newMembersWait): what an editor's typed name and the failure of the read made as
-  // the editor opened both ask. Another team starts it again. A wait the deadline ended
-  // flags the members as unavailable, as a read that failed does, so the names typed
-  // after it say so too.
+  // Whether a read's list is shown for this team (see newMembersWait): what an
+  // editor's typed name and the failure of the read made as the editor opened both
+  // ask. Another team starts it again.
   const firstMembers = useRef(null);
-  const newWait = () => newMembersWait(() => setSquadUnavailable(true));
+  const newWait = () => newMembersWait();
   if (firstMembers.current === null) firstMembers.current = newWait();
 
   // The ONE door every list of the team's members comes through: showMembers, below,
@@ -565,15 +545,6 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     }
   };
 
-  // A save of this lineup that is still queued (offline, or refused for now)
-  // replays after anything sent now: removing the lineup would be undone by it.
-  // The API answers whether one is queued, which is all that matters here.
-  const queuedNow = () => {
-    const api = window.API;
-    return !!(api && typeof api.queuedLineupSave === 'function' && compId && teamId
-      && api.queuedLineupSave(compId, teamId, matchId ? { matchId } : { round: STARTING_ROUND }));
-  };
-
   const read = loadedKey === draftKey;
   const current = { positions: values, memberIds };
   const dirty = changedLineupPositions(baseline, current, positionKeys).length > 0;
@@ -621,7 +592,7 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   // The effects below key on the lineup alone and call these as of the render they
   // run in.
   const live = useRef(null);
-  live.current = { load, follow, readMembersAgain, queuedNow, touched: dirty || removing };
+  live.current = { load, follow, readMembersAgain, touched: dirty };
 
   useEffect(() => {
     if (!compId || !teamId) {
@@ -698,18 +669,6 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     load();
   };
 
-  const [saveQueued, setSaveQueued] = useState(queuedNow);
-  useEffect(() => {
-    const refresh = () => {
-      const now = live.current.queuedNow();
-      setSaveQueued((was) => (was === now ? was : now));
-    };
-    refresh();
-    const offs = [];
-    if (typeof window.subscribeSyncStatus === 'function') offs.push(window.subscribeSyncStatus(refresh));
-    if (typeof window.subscribeUnsentWrites === 'function') offs.push(window.subscribeUnsentWrites(refresh));
-    return () => offs.forEach((off) => { if (typeof off === 'function') off(); });
-  }, [compId, teamId, matchId]);
 
   // Unsaved picks survive a reload, the app's Back and closing the editor; a
   // restored draft is only shown, never saved.
@@ -755,38 +714,49 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     draft.resolved();
   };
 
-  // Removes the match's own lineup, then shows what the match carries without it. A
-  // removal the server refuses changes nothing. Once it is done the draft goes
-  // (it was made against the lineup that has just gone), and a read of what is
-  // carried now that fails leaves an empty form that cannot be saved, never the
-  // removed lineup shown as the match's own.
+  // Removes the match's own lineup, then shows what the match carries without it.
+  // The removal is an entry of the match's outbox (bc-evts stage 3 review 2, R1),
+  // after any save of the lineup queued before it, so it needs no wait for one and
+  // nothing waits for it: the draft goes at once (it was made against the lineup
+  // that is going), and what the match carries is read once the removal has
+  // landed (a read before would still find it). A removal the server refuses
+  // changes nothing and is said here. A read of what is carried that fails leaves
+  // an empty form that cannot be saved, never the removed lineup shown as the
+  // match's own.
   const dropOwnLineup = async () => {
-    if (saveQueued) return;
     const ok = await window.confirmDialog(previousLineupConfirm(matchLabel, teamName));
     if (!ok) return;
-    setRemoving(true);
     setError('');
     setWarning('');
     // A read begun before the removal would answer with the lineup that is going.
     attempt.current += 1;
+    const failed = (e) => setError(e?.message || "Failed to use the previous match's lineup");
+    let removed;
     try {
-      try {
-        await window.API.deleteMatchLineup(compId, teamId, matchId, password);
-      } catch (e) {
-        setError(e?.message || "Failed to use the previous match's lineup");
-        return;
-      }
-      removeDraft(draftKey);
-      draft.resolved();
+      removed = await window.API.deleteMatchLineup(compId, teamId, matchId, password, {
+        onRefusal: (e) => {
+          if (!mountedRef.current) return false;
+          failed(e);
+          return true;
+        },
+      });
+    } catch (e) {
+      failed(e);
+      return;
+    }
+    removeDraft(draftKey);
+    draft.resolved();
+    const showCarried = async () => {
+      if (!mountedRef.current) return;
       try {
         adopt(await readLineup());
       } catch (_e) {
         forget();
         setLoadError(REMOVED_UNREAD_NOTICE);
       }
-    } finally {
-      setRemoving(false);
-    }
+    };
+    if (writePending(removed)) removed.settled.then(showCarried, () => {});
+    else showCarried();
   };
 
   return {
@@ -796,8 +766,9 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     // A form that holds nothing read has no draft to offer back or discard.
     draft: read ? draft : { ...draft, restored: false, stale: null },
     error, setError, warning, setWarning,
-    squad, changeMembers, memberRenamed, squadRef, squadUnavailable, waitForMembers: () => firstMembers.current.pending(),
-    removing, dropOwnLineup, saveQueued, lineupToSave, confirmSaved,
+    squad, changeMembers, memberRenamed, squadRef, squadUnavailable, membersListed: () => firstMembers.current.listed,
+    membersReadOver: () => firstMembers.current.ended,
+    dropOwnLineup, lineupToSave, confirmSaved,
     isMounted: () => mountedRef.current,
   };
 }
@@ -818,12 +789,9 @@ export function LineupSourceLine({ form, matchId, allMatches, busy, testId }) {
       </span>
       {own && (
         <button type="button" className="btn btn--sm lineup-source__use"
-          onClick={form.dropOwnLineup} disabled={busy || form.removing || form.saveQueued}>
+          onClick={form.dropOwnLineup} disabled={busy}>
           {PREVIOUS_LINEUP_LABEL}
         </button>
-      )}
-      {own && form.saveQueued && (
-        <div className="lineup-source__why" role="status">{SAVE_QUEUED_REASON}</div>
       )}
     </div>
   );
@@ -836,7 +804,7 @@ export function LineupProblem({ form, testId }) {
   return (
     <div className="alert alert--error lineup-problem" role="alert" data-testid={testId}>
       <span>{form.loadError}</span>
-      <button type="button" className="btn btn--sm" onClick={form.retry} disabled={form.removing}>Try again</button>
+      <button type="button" className="btn btn--sm" onClick={form.retry}>Try again</button>
     </div>
   );
 }

@@ -67,7 +67,7 @@ describe('resolveMemberIdsForPositions', () => {
     const { memberIds, squad } = await resolveMemberIdsForPositions(
       'comp1', 'team1', { taisho: 'Yamada' }, SQUAD, 'pw'
     );
-    expect(addTeamMember).toHaveBeenCalledWith('comp1', 'team1', 'Yamada', 'pw');
+    expect(addTeamMember).toHaveBeenCalledWith('comp1', 'team1', 'Yamada', 'pw', expect.any(Object));
     expect(memberIds).toEqual({ taisho: 'mem-new' });
     expect(squad).toEqual([...SQUAD, minted]);
   });
@@ -163,7 +163,7 @@ describe('resolveMemberIdsForPositions', () => {
     const { memberIds, squad } = await resolveMemberIdsForPositions(
       'comp1', 'team1', { senpo: 'Sato' }, BLANK_SQUAD, 'pw'
     );
-    expect(renameTeamMember).toHaveBeenCalledWith('comp1', 'team1', 'm1', 'Sato', 'pw');
+    expect(renameTeamMember).toHaveBeenCalledWith('comp1', 'team1', 'm1', 'Sato', 'pw', expect.any(Object));
     expect(addTeamMember).not.toHaveBeenCalled();
     expect(memberIds).toEqual({ senpo: 'm1' });
     expect(squad.find(m => m.id === 'm1').name).toBe('Sato');
@@ -197,7 +197,7 @@ describe('resolveMemberIdsForPositions', () => {
     const { memberIds, squad } = await resolveMemberIdsForPositions(
       'comp1', 'team1', { '2': 'Ito' }, BLANK_SQUAD, 'pw'
     );
-    expect(renameTeamMember).toHaveBeenCalledWith('comp1', 'team1', 'm2', 'Ito', 'pw');
+    expect(renameTeamMember).toHaveBeenCalledWith('comp1', 'team1', 'm2', 'Ito', 'pw', expect.any(Object));
     expect(addTeamMember).not.toHaveBeenCalled();
     expect(memberIds).toEqual({ '2': 'm2' });
     expect(squad.find(m => m.id === 'm2').name).toBe('Ito');
@@ -213,7 +213,7 @@ describe('resolveMemberIdsForPositions', () => {
       'comp1', 'team1', { senpo: 'Sato' }, squad, 'pw'
     );
     expect(renameTeamMember).not.toHaveBeenCalled();
-    expect(addTeamMember).toHaveBeenCalledWith('comp1', 'team1', 'Sato', 'pw');
+    expect(addTeamMember).toHaveBeenCalledWith('comp1', 'team1', 'Sato', 'pw', expect.any(Object));
     expect(memberIds).toEqual({ senpo: 'mem-new' });
   });
 
@@ -272,7 +272,7 @@ describe('resolveMemberIdsForPositions', () => {
     const { memberIds, squad: nextSquad } = await resolveMemberIdsForPositions(
       'comp1', 'team1', { senpo: 'Picked Name' }, squad, 'pw', { senpo: 'm6' }
     );
-    expect(renameTeamMember).toHaveBeenCalledWith('comp1', 'team1', 'm6', 'Picked Name', 'pw');
+    expect(renameTeamMember).toHaveBeenCalledWith('comp1', 'team1', 'm6', 'Picked Name', 'pw', expect.any(Object));
     expect(addTeamMember).not.toHaveBeenCalled();
     expect(memberIds).toEqual({ senpo: 'm6' });
     expect(nextSquad.find(m => m.id === 'm6').name).toBe('Picked Name');

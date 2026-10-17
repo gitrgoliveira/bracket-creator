@@ -175,7 +175,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     addBtn.props.onClick();
     await flush();
 
-    expect(global.window.API.addTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'Ito', 'pw');
+    expect(global.window.API.addTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'Ito', 'pw', expect.any(Object));
 
     // The minted member is now selected in that same position.
     const tree3 = runtime.currentTree();
@@ -207,7 +207,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     expect(opts.message).toContain('Tora A');
     // Called BEFORE the mint, not after: declining must prevent the write
     // (pinned by the next test), which only holds if confirmation gates it.
-    expect(global.window.API.addTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'Ito', 'pw');
+    expect(global.window.API.addTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'Ito', 'pw', expect.any(Object));
   });
 
   it('operation 2 (ADD): declining the confirmation never mints a member', async () => {
@@ -259,7 +259,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     expect(opts.message).toContain('Sato');
     expect(opts.message).not.toContain('as a new member of');
 
-    expect(global.window.API.renameTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'm1', 'Sato', 'pw');
+    expect(global.window.API.renameTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'm1', 'Sato', 'pw', expect.any(Object));
     expect(global.window.API.addTeamMember).not.toHaveBeenCalled();
 
     // The renamed (still m1) member is now selected in that position.
@@ -293,7 +293,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     const [opts] = global.window.confirmDialog.mock.calls.at(-1);
     expect(opts.message).toContain('as a new member of');
 
-    expect(global.window.API.addTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'Ito', 'pw');
+    expect(global.window.API.addTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'Ito', 'pw', expect.any(Object));
     expect(global.window.API.renameTeamMember).not.toHaveBeenCalled();
 
     const tree3 = runtime.currentTree();
@@ -323,7 +323,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     buttonNamed(rowMidRename, 'Save').props.onClick();
     await flush();
 
-    expect(global.window.API.renameTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'sq-sato', 'Sato-Renamed', 'pw');
+    expect(global.window.API.renameTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'sq-sato', 'Sato-Renamed', 'pw', expect.any(Object));
     // The member the server answered is what the page shows: the members are not read
     // again after the write (the server announces it to every device instead).
     expect(global.window.API.fetchSquads).toHaveBeenCalledTimes(1);
@@ -395,7 +395,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
       buttonNamed(squadRow(tree2, 'sq-sato'), 'Clear name').props.onClick();
       await flush();
 
-      expect(global.window.API.clearTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'sq-sato', 'pw');
+      expect(global.window.API.clearTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'sq-sato', 'pw', expect.any(Object));
       expect(global.window.API.fetchSquads, 'the members are not read again after the write').toHaveBeenCalledTimes(1);
 
       const tree3 = runtime.currentTree();

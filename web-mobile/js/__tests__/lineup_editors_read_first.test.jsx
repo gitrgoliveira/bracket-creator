@@ -173,7 +173,7 @@ describe('MatchLineupSideEditor (the at-court panel)', () => {
     await flush();
     tree = runtime.currentTree();
 
-    expect(api.deleteMatchLineup).toHaveBeenCalledWith('comp-1', 'uuid-grouped', 'Pool D-1', 'pw');
+    expect(api.deleteMatchLineup).toHaveBeenCalledWith('comp-1', 'uuid-grouped', 'Pool D-1', 'pw', expect.any(Object));
     expect(allText(tree)).toContain('Removed. The lineup this match now uses could not be read: try again.');
     expect(allText(tree)).not.toContain('Lineup for this match');
     expect(pickers(tree).map((p) => p.props.value)).toEqual(['', '', '']);

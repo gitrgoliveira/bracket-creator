@@ -481,6 +481,9 @@ export function heldWriteWhat(held) {
         case 'kachinuki': return 'bout removal';
         case 'court': return 'court move';
         case 'time': return 'match time change';
+        case 'member': return 'team member change';
+        case 'lineup-remove': return 'lineup removal';
+        case 'reinstate': return 'reinstatement';
         default: return isFinishedResultWrite(held) ? 'finished result' : 'score update';
     }
 }

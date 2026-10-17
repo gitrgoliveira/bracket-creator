@@ -185,7 +185,7 @@ describe('bc-dnst: kachinuki row beyond teamSize routes name picks off the lineu
     await act(async () => { await Promise.resolve(); });
 
     expect(putMatchLineup).not.toHaveBeenCalled();
-    expect(window.API.renameTeamMember.mock.calls).toEqual([['comp1', 'team-A', 'm-blank', 'Ito', 'secret']]);
+    expect(window.API.renameTeamMember.mock.calls).toEqual([['comp1', 'team-A', 'm-blank', 'Ito', 'secret', expect.any(Object)]]);
     expect(akaSide().textContent).toContain('T5.7');
   });
 

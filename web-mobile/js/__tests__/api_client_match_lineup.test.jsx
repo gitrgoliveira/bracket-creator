@@ -288,106 +288,10 @@ describe('API.putMatchLineup: memberIds (bc-pnum gap closure)', () => {
   });
 });
 
-describe('API.deleteMatchLineup', () => {
-  let originalFetch;
-  beforeEach(() => { originalFetch = global.fetch; });
-  afterEach(() => { global.fetch = originalFetch; });
+// API.deleteMatchLineup is an outbox entry of the match since bc-evts stage 3
+// review 2 (R1): pinned in member_writes_outbox.test.jsx (order behind a queued
+// save, a 404 as the outcome asked for, a refusal in the server's own words).
 
-  it('sends DELETE to the correct URL and returns true on 204', async () => {
-    global.fetch = vi.fn(() => Promise.resolve({ ok: true, status: 204 }));
-    const result = await API.deleteMatchLineup('c1', 't1', 'm1', 'pw');
-    const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe('/api/competitions/c1/teams/t1/match-lineups/m1');
-    expect(opts.method).toBe('DELETE');
-    expect(opts.headers['X-Tournament-Password']).toBe('pw');
-    expect(result).toBe(true);
-  });
-
-  it('returns true on 404 (idempotent delete)', async () => {
-    global.fetch = vi.fn(() => Promise.resolve({ ok: false, status: 404 }));
-    const result = await API.deleteMatchLineup('c1', 't1', 'm1', 'pw');
-    expect(result).toBe(true);
-  });
-
-  it('throws on non-404 error responses', async () => {
-    global.fetch = vi.fn(() =>
-      Promise.resolve({
-        ok: false,
-        status: 500,
-        json: () => Promise.resolve({ error: 'internal error' }),
-      })
-    );
-    await expect(API.deleteMatchLineup('c1', 't1', 'm1', 'pw'))
-      .rejects.toThrow('internal error');
-  });
-});
-
-// A removal is bounded like every sibling write (the deadline covers the body
-// too), and answers in a plain sentence when the server cannot be reached: the
-// editor shows it as it is, never the browser's "Failed to fetch".
-describe('removing a lineup when the server does not answer', () => {
-  const NOT_REMOVED = 'The lineup was not removed: the server did not answer. Check the connection and try again.';
-  const removals = [
-    ['deleteMatchLineup', () => API.deleteMatchLineup('c1', 't1', 'm1', 'pw')],
-  ];
-  let originalFetch;
-  beforeEach(() => { originalFetch = global.fetch; });
-  afterEach(() => { global.fetch = originalFetch; vi.useRealTimers(); });
-
-  it.each(removals)('%s rejects with a plain sentence when the connection is down', async (_name, remove) => {
-    global.fetch = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')));
-    const err = await remove().catch((e) => e);
-    expect(err.message).toBe(NOT_REMOVED);
-    expect(err.message).not.toMatch(/Failed to fetch/);
-  });
-
-  it.each(removals)('%s sends its request with an abort signal, so it can be given up on', async (_name, remove) => {
-    global.fetch = vi.fn(() => Promise.resolve({ ok: true, status: 204 }));
-    await remove();
-    const [, opts] = global.fetch.mock.calls[0];
-    expect(opts.method).toBe('DELETE');
-    expect(opts.signal).toBeInstanceOf(AbortSignal);
-  });
-
-  it.each(removals)('%s gives up on a request that is never answered, at the deadline', async (_name, remove) => {
-    vi.useFakeTimers();
-    global.fetch = vi.fn((_url, { signal }) => new Promise((_resolve, reject) => {
-      signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
-    }));
-    let settled = false;
-    const pending = remove().catch((e) => e).finally(() => { settled = true; });
-    await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS - 1);
-    expect(settled).toBe(false);
-    await vi.advanceTimersByTimeAsync(2);
-    expect((await pending).message).toBe(NOT_REMOVED);
-  });
-
-  it.each(removals)('%s gives up on an answer whose body never completes, too', async (_name, remove) => {
-    vi.useFakeTimers();
-    global.fetch = vi.fn(() => Promise.resolve({ ok: false, status: 500, json: () => new Promise(() => {}) }));
-    const pending = remove().catch((e) => e);
-    await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS + 1);
-    expect((await pending).message).toBe(NOT_REMOVED);
-  });
-
-  it.each(removals)('%s still says a refusal in the server\'s own words, and a missing lineup is removed already', async (_name, remove) => {
-    global.fetch = vi.fn(() => Promise.resolve({
-      ok: false, status: 409, json: () => Promise.resolve({ error: 'locked', message: 'The competition has finished.' }),
-    }));
-    const err = await remove().catch((e) => e);
-    expect(err.message).toBe('The competition has finished.');
-    expect(err.code).toBe('locked');
-
-    global.fetch = vi.fn(() => Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({ error: 'not found' }) }));
-    expect(await remove()).toBe(true);
-  });
-});
-
-// Is a save of this lineup still queued? A queued save replays after anything sent
-// now, so a removal made meanwhile would be undone by it: the editors hold "Use the
-// previous match's lineup" until it has gone out. That is all the answer is for:
-// a new save of the lineup joins the queued one and names what it changed, so
-// nothing is composed on what is queued (lineup_save_queue.test.jsx).
 describe('API.queuedLineupSave', () => {
   let originalFetch;
   beforeEach(() => {

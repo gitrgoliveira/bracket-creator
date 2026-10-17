@@ -58,6 +58,10 @@ import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice } fro
 
 const { useState: useStateA, useMemo: useMemoA } = React;
 
+// The Lineups page's add before a read of the team's members has shown a list:
+// refused at once, never waited for (bc-evts stage 3 review 2, R1).
+const MEMBERS_NOT_READ_NOTICE = "The team's members are still being read. Add the name again once the list shows.";
+
 // Term: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and this module doesn't matter (both
 // are type="module" and execute asynchronously). U1 / glossary.md.
@@ -303,15 +307,25 @@ function typedNameTarget(members, posKey, name, ids) {
 // Returns { memberIds, squad, failures }: `squad` is handed back (possibly
 // extended by a mint, or with a member renamed) so the caller can cache it
 // without a second fetch. `failures` is `[{ position, name, reason, code }]`,
-// one entry per position whose rename/mint failed; `reason` is the refusal's
-// own words and `code` its code, when it carries one (API.renameTeamMember/
-// addTeamMember throw them, api_client.jsx _refusalError) -- never a raw
-// Error object or a stack. This function never throws.
-async function resolveMemberIdsForPositions(compId, teamId, positions, squad, password, currentIds) {
+// one entry per position whose rename/mint could not even be handed to the
+// outbox; `reason` is the refusal's own words and `code` its code, when it
+// carries one (api_client.jsx _refusalError) -- never a raw Error object or a
+// stack. Since the member writes are outbox entries (bc-evts stage 3 review 2,
+// R1) a refusal comes later, in the same failure shape, through the optional
+// `onMemberRefusal`. This function never throws and never waits on the network.
+async function resolveMemberIdsForPositions(compId, teamId, positions, squad, password, currentIds, { onMemberRefusal } = {}) {
   let currentSquad = Array.isArray(squad) ? squad : [];
   const memberIds = {};
   const failures = [];
   const ids = currentIds || {};
+  // bc-evts stage 3 review 2, R1: every rename and add is an outbox entry,
+  // answered at once with the member as this device shows it (a minted id
+  // for an add), so nothing here waits on the network. A refusal the server
+  // gives later goes to `onMemberRefusal(failure, error)` (true claims it,
+  // so the outbox's alert does not say it again).
+  const claimFor = (posKey, name) => (e) => (typeof onMemberRefusal === "function"
+    ? onMemberRefusal(memberWriteFailure(posKey, name, e), e) === true
+    : false);
   for (const [posKey, rawName] of Object.entries(positions || {})) {
     const name = (rawName || "").trim();
     if (!name) continue;
@@ -322,9 +336,9 @@ async function resolveMemberIdsForPositions(compId, teamId, positions, squad, pa
     }
     if (write === "rename") {
       try {
-        // The member as the server answered it, stamped: what the lists merge by. A copy
-        // built from the name typed carries no stamp and would lose to every list.
-        const renamed = await window.API.renameTeamMember(compId, teamId, target.id, name, password);
+        // The member as shown, renamed and stamped now: what the lists merge by.
+        const renamed = await window.API.renameTeamMember(compId, teamId, target.id, name, password,
+          { member: target, onRefusal: claimFor(posKey, name) });
         currentSquad = currentSquad.map(mem => (mem === target ? renamed : mem));
         memberIds[posKey] = target.id;
       } catch (e) {
@@ -333,7 +347,10 @@ async function resolveMemberIdsForPositions(compId, teamId, positions, squad, pa
       continue;
     }
     try {
-      const member = await window.API.addTeamMember(compId, teamId, name, password);
+      // The next number the team would give it, shown until the server's copy comes.
+      const index = currentSquad.reduce((mx, mem) => Math.max(mx, Number(mem && mem.index) || 0), 0) + 1;
+      const member = await window.API.addTeamMember(compId, teamId, name, password,
+        { index, onRefusal: claimFor(posKey, name) });
       currentSquad = [...currentSquad, member];
       memberIds[posKey] = member.id;
     } catch (e) {
@@ -441,7 +458,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
   } = form;
   const [saving, setSaving] = useStateA(false);
   // A removal of the match's own lineup is in flight.
-  const busy = saving || form.removing;
+  const busy = saving;
   // The pickers are for a lineup that was read: until then Save is off too, and
   // the problem line says why. A match the team is no longer seated in
   // (`notInMatch`) has no lineup to edit, and the notice below says so.
@@ -458,19 +475,17 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
   // Operation 3 (RENAME): which squad member (by id) is being renamed.
   const [renamingId, setRenamingId] = useStateA(null);
   const [renamingName, setRenamingName] = useStateA("");
-  const [renameBusy, setRenameBusy] = useStateA(false);
 
-  // CLEAR: which squad member (by id), if any, has a clear in flight. This
-  // page is now the one home for a team's people (bc-dnst, operator
+  // CLEAR: this page is the one home for a team's people (bc-dnst, operator
   // decision 2026-09-15): "Clear name" used to live on the competition
   // Settings page's now-removed Squad members section, and moved here
-  // alongside Rename rather than being duplicated on both.
-  const [clearingId, setClearingId] = useStateA(null);
+  // alongside Rename rather than being duplicated on both. A member write is an
+  // outbox entry shown at once (bc-evts stage 3 review 2, R1), so none is "out"
+  // here and no control waits for one.
 
-  // A change to a team member is out. The save waits for it, and while a save (or a
-  // removal) is out the controls that make one are off: a rename made then would be
-  // written over by the save, and an add finished then would not be placed.
-  const memberBusy = addBusy || renameBusy || clearingId !== null;
+  // An add being placed (its confirm open, or its resolve running): the save waits
+  // for it, since an add finished after a save would not be placed.
+  const memberBusy = addBusy;
 
   const squadSorted = useMemoA(() => squadMemberOptions(squad), [squad]);
 
@@ -544,18 +559,16 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
     const posKey = addingPos;
     const name = addingName.trim();
     if (!posKey || !name) { setAddingPos(null); setAddingName(""); return; }
-    // The name is judged against the team's members, so they must have been
-    // read: against none, a member the team has would be added again (and the
-    // server would refuse it as a second member of that name), and a position
-    // whose seeded slot is free would mint rather than name it. Members that
-    // cannot be read, or not in time, go without, as they always did. What is
-    // judged is the list and the placements as they are once the wait is over,
-    // not the ones this handler closed over.
-    const waiting = form.waitForMembers();
-    if (waiting) {
-      setAddBusy(true);
-      await waiting;
-      setAddBusy(false);
+    // The name is judged against the team's members, so a read of them must have
+    // shown a list: against none, a member the team has would be added again (and
+    // the server would refuse it as a second member of that name), and a position
+    // whose seeded slot is free would mint rather than name it. Nothing waits for
+    // that read (bc-evts stage 3 review 2, R1): before it, the add is refused at
+    // once and the typed name kept, so it can be added again as soon as the list
+    // shows. A read that failed for good goes without the list, as it always did.
+    if (!form.membersReadOver()) {
+      setError(MEMBERS_NOT_READ_NOTICE);
+      return;
     }
     const members = form.squadRef.current;
     const placed = memberIdsRef.current;
@@ -590,7 +603,15 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
     setAddBusy(true);
     setError("");
     try {
-      const resolved = await resolveMemberIdsForPositions(compId, teamId, { [posKey]: name }, members, password, placed);
+      // The rename or add is an outbox entry, shown at once; a refusal the server
+      // gives later is said here and puts the member back as it was.
+      const onMemberRefusal = (failure, e) => {
+        if (!form.isMounted()) return false;
+        if (e && e.revertMember) form.memberRenamed(e.revertMember);
+        setError(failure.reason || "Failed to add team member");
+        return true;
+      };
+      const resolved = await resolveMemberIdsForPositions(compId, teamId, { [posKey]: name }, members, password, placed, { onMemberRefusal });
       const failure = (resolved.failures || []).find(f => f.position === posKey);
       if (failure) {
         setError(failure.reason || "Failed to add team member");
@@ -625,16 +646,19 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
     const id = renamingId;
     const name = renamingName.trim();
     if (!id || !name) { setRenamingId(null); setRenamingName(""); return; }
-    setRenameBusy(true);
     setError("");
+    // bc-evts stage 3 review 2, R1: an outbox entry, shown at once and never
+    // awaited; a refusal the server gives later is said here and puts the member
+    // back as it was (revertMember).
+    const shown = (form.squadRef.current || []).find((mem) => mem && mem.id === id) || { id };
     try {
-      form.memberRenamed(await window.API.renameTeamMember(compId, teamId, id, name, password));
+      form.memberRenamed(await window.API.renameTeamMember(compId, teamId, id, name, password, {
+        member: shown, onRefusal: memberRefusal("Failed to rename team member"),
+      }));
       setRenamingId(null);
       setRenamingName("");
     } catch (e) {
       setError(e?.message || "Failed to rename team member");
-    } finally {
-      setRenameBusy(false);
     }
   };
 
@@ -649,16 +673,26 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
   // after this page loaded its squad -- surfaced via `error`, never
   // swallowed.
   const clearMember = async (member) => {
-    setClearingId(member.id);
     setError("");
     try {
-      form.memberRenamed(await window.API.clearTeamMember(compId, teamId, member.id, password));
+      form.memberRenamed(await window.API.clearTeamMember(compId, teamId, member.id, password, {
+        member, onRefusal: memberRefusal("Failed to clear the name"),
+      }));
     } catch (e) {
       setError(e?.message || "Failed to clear the name");
-    } finally {
-      setClearingId(null);
     }
   };
+
+  // A member write's refusal, said here while the page is open, with the member
+  // put back as it was (R1; claimed only when said, R2).
+  function memberRefusal(fallback) {
+    return (e) => {
+      if (!form.isMounted()) return false;
+      if (e && e.revertMember) form.memberRenamed(e.revertMember);
+      setError(e?.message || fallback);
+      return true;
+    };
+  }
 
   const save = async () => {
     // Nothing is written before the lineup was read, or while it holds no change:
@@ -915,10 +949,10 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
                     onChange: setRenamingName,
                     onCommit: commitRename,
                     onCancel: cancelRename,
-                    busy: renameBusy,
+                    busy: false,
                     ariaLabel: `Rename ${m.name || squadSlotLabel(teamNumber, m.index)}`,
                     inputStyle: { flex: 1 },
-                    disabled: renameBusy || busy,
+                    disabled: busy,
                   }) : (
                     <>
                       <span style={{ fontSize: 13, color: "var(--ink-3)", minWidth: 44 }}>
@@ -936,10 +970,10 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
                           type="button"
                           className="btn btn--ghost btn--sm"
                           onClick={() => clearMember(m)}
-                          disabled={busy || renameBusy || clearingId !== null || started}
+                          disabled={busy || started}
                           title={started ? "Names cannot be cleared once the competition has started" : undefined}
                         >
-                          {clearingId === m.id ? "Clearing…" : "Clear name"}
+                          Clear name
                         </button>
                       )}
                     </>

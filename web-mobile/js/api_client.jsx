@@ -46,7 +46,7 @@ import {
     CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, CLOCK_SKEW_UNHEALED_ADVICE,
     downstreamKnockoutPlayedQueueDrop, downstreamKnockoutRunningMessage, downstreamKnockoutRunningReopenMessage,
     downstreamKnockoutRunningQueueDrop, courtBusyMessage,
-    FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, noAnswerSentence, tapOutcomeQuiet,
+    FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, tapOutcomeQuiet,
     isFinishedResultWrite,
 } from './write_result.jsx';
 // bc-evts S2: the build this page runs against the server's, and the reload rule.
@@ -702,9 +702,13 @@ function _isAllowedTerminalRequest(method, url) {
         return false;
     }
     if (u.origin !== origin || !u.pathname.startsWith('/api/competitions/')) return false;
-    // A DELETE is queued for exactly two doors: the representative bout's
-    // remove and a kachinuki bout's removal (bc-evts).
-    if (method === 'DELETE') return /\/(daihyosen|kachinuki-bout)$/.test(u.pathname);
+    // A DELETE is queued for four doors: the representative bout's remove, a
+    // kachinuki bout's removal (bc-evts), a team member's name cleared and a
+    // match's own lineup removed (review 2, R1).
+    if (method === 'DELETE') {
+        return /\/(daihyosen|kachinuki-bout)$/.test(u.pathname)
+            || /\/teams\/[^/]+\/(members|match-lineups)\/[^/]+$/.test(u.pathname);
+    }
     return true;
 }
 
@@ -1037,7 +1041,7 @@ export function subscribeLocalMatchPatch(cb) {
 function _emitLocalMatchPatch(compID, matchID, fields) {
     if (!compID || !matchID || !fields || Object.keys(fields).length === 0) return;
     const event = { type: 'match_updated', local: true, data: { competitionId: compID, matchId: matchID, result: { id: matchID, ...fields } } };
-    for (const cb of [..._localPatchListeners]) {
+    for (const cb of _localPatchListeners) {
         try { cb(event); } catch (err) { console.error('local match patch listener failed:', err); }
     }
 }
@@ -2041,6 +2045,7 @@ function _doorValue(d, body) {
                 ...(body && Array.isArray(body.heldGroups) ? { heldGroups: body.heldGroups } : {}),
             };
         case 'revert': return true;
+        case 'lineup-remove': return true;
         case 'kachinuki': return (body && body.result) ?? body;
         case 'daihyosen': return _daihyosenOutcome(body || {});
         default: return body;
@@ -2075,6 +2080,19 @@ function _doorRefusal(d, status, body) {
             return new Error(b.error || 'Failed to move match court');
         case 'time':
             return new Error(b.error || 'Failed to update match time');
+        case 'member': {
+            // R1: the member as it was comes back with the refusal, stamped
+            // after the change it undoes, so an editor that showed the change
+            // puts it back (mergeMembers keeps the later stamp).
+            const err = _refusalError(b, d.method === 'POST' ? TEAM_MEMBER_NOT_ADDED
+                : d.method === 'DELETE' ? TEAM_MEMBER_NOT_CLEARED : TEAM_MEMBER_NOT_RENAMED);
+            if (d.was && typeof d.was === 'object') err.revertMember = { ...d.was, modifiedAt: _serverNowMs() };
+            return err;
+        }
+        case 'lineup-remove':
+            return _refusalError(b, LINEUP_NOT_REMOVED);
+        case 'reinstate':
+            return new Error(b.error || 'Failed to reinstate competitor');
         default:
             return new Error(_refusalText(b, `HTTP ${status}`));
     }
@@ -2248,6 +2266,11 @@ async function _sendEntry(key, descriptor, pass) {
             _flushRequested = true;
             return 'restamped';
         }
+        return 'settled';
+    }
+    if (res.status === 404 && kind === 'lineup-remove') {
+        // Nothing saved to remove: the outcome the removal asked for (R1).
+        leaveQueue({ value: true });
         return 'settled';
     }
     if (res.status >= 500 || res.status === 429 || res.status === 403) {
@@ -3184,16 +3207,9 @@ async function _fetchJson(url, opts, ms = FETCH_TIMEOUT_MS) {
     }
 }
 
-// The daihyosen add (POST) or remove (DELETE), stamped like recordDecision.
-// Bounded like every other write, and the whole of it, body included
-// (_fetchJson): the team editor holds each autosave on the court until this
-// request settles, so a request left hanging on a half-open connection would
-// stop all saving there. No answer is reported as not done, in a sentence the
-// editor shows as it is (noAnswerSentence); the held write then goes out as
-// the sheet stood before the request, and the score path decides what it
-// makes of a change the server did make after all. A refusal shows the
-// server's own sentence when it sends one (_refusalText), e.g. a finished
-// match's.
+// The daihyosen add (POST) or remove (DELETE), stamped like recordDecision,
+// an entry of its match's outbox. A refusal shows the server's own sentence
+// when it sends one (_refusalText), e.g. a finished match's.
 function _daihyosenRequest(method, compID, matchID, password, seenModifiedAt, opts = {}) {
     // bc-evts: the representative bout's add (POST) and remove (DELETE) are
     // the outbox's like every rule-bound write. `settled` resolves the stored
@@ -3232,35 +3248,58 @@ const TEAM_MEMBER_NOT_ADDED = 'The team member was not added';
 const TEAM_MEMBER_NOT_RENAMED = 'The team member was not renamed';
 const TEAM_MEMBER_NOT_CLEARED = 'The team member\'s name was not cleared';
 
-// _memberWrite: a team member's POST (add), PUT (rename) or DELETE (cleared name). The
-// team score sheet holds every name box disabled, and the side's lineup announcements
-// back, until the write settles, so it is bounded like every sibling request
-// (_fetchJson: the deadline covers the body) and answered in a plain sentence when the
-// server cannot be reached or does not answer, never the browser's "Failed to fetch".
-// `payload` is the JSON body, none for a clear. Resolves to { res, body }.
-async function _memberWrite(url, method, password, notDone, payload) {
-    const headers = { 'X-Tournament-Password': password };
-    const opts = { method, headers };
-    if (payload !== undefined) {
-        headers['Content-Type'] = 'application/json';
-        opts.body = JSON.stringify(payload);
-    }
-    try {
-        return await _fetchJson(url, opts);
-    } catch (_e) {
-        throw new Error(noAnswerSentence(notDone));
-    }
+// _memberWrite: a team member's POST (add), PUT (rename) or DELETE (cleared name), as an
+// outbox entry (R1). `payload` is the JSON body, none for a clear; `member` the member as
+// this device shows it once the write is made.
+function _memberWrite({ compID, teamId, method, url, payload, password, member, opts }) {
+    // bc-evts stage 3 review 2, R1: a team member write is an outbox entry
+    // under the team's own base (the starting lineup's, so a starting lineup
+    // save made after it follows it), answered at once and never awaited. The
+    // member comes back as this device will show it (`member`, merged by its
+    // stamp, mergeMembers): `settled` (not enumerable, so a list holding the
+    // member never carries it) resolves with the member as the server stored
+    // it, or rejects with the refusal, whose `revertMember` puts the member as
+    // it was back, stamped later than the change it undoes.
+    const answer = _outboxWrite({
+        kind: 'member', compID, matchID: '', method, url, payload, password,
+        onRefusal: opts && opts.onRefusal,
+        base: _membersBase(compID, teamId),
+        ...(opts && opts.was ? { was: opts.was } : {}),
+    });
+    const shown = { ...member };
+    Object.defineProperty(shown, 'settled', { value: answer.settled, enumerable: false });
+    Object.defineProperty(shown, 'pending', { value: true, enumerable: false });
+    if (answer.persisted === false) Object.defineProperty(shown, 'persisted', { value: false, enumerable: false });
+    return shown;
 }
 
-// _answeredMember: the member a write answers, which the server has stamped
-// (`modifiedAt`): what an editor merges in by that stamp, so it is the answer and not a
-// copy built from what was typed, which carries no stamp and would lose to every list.
-// _fetchJson reads an unreadable body as {}, which cannot be told from a member the
-// server sent: an answer with no id is no member, and the write is a failed one.
-function _answeredMember(res, body, failure, notDone) {
-    if (!res.ok) throw _refusalError(body, failure);
-    if (!body.id) throw new Error(noAnswerSentence(notDone));
-    return body;
+// _lastMemberEntryKey: the key of the team's last queued member write, '' when none.
+function _lastMemberEntryKey(compID, teamId) {
+    const members = _entriesFor(_membersBase(compID, teamId)).filter(([, d]) => d.kind === 'member');
+    return members.length ? members[members.length - 1][0] : '';
+}
+
+// _membersBase: the outbox base of a team's member writes, the base of its
+// starting lineup: a starting lineup save made after a member write follows
+// it, and a match's lineup save names its last entry in `after` (R1).
+function _membersBase(compID, teamId) {
+    return _lineupKey(compID, teamId, { round: 0 });
+}
+
+// _newMemberId: a member id this device mints, a lowercase UUID v4 (the
+// server's state.IsClientMemberID).
+function _newMemberId() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID().toLowerCase();
+    const hex = (n) => Array.from({ length: n }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+    const variant = (8 + Math.floor(Math.random() * 4)).toString(16);
+    return `${hex(8)}-${hex(4)}-4${hex(3)}-${variant}${hex(3)}-${hex(12)}`;
+}
+
+// The member as this device shows it after its own write: stamped now, in
+// server time, so it stands over the copy the lists hold until the server's
+// own copy comes (stamped when it lands).
+function _shownMember(member, fields) {
+    return { ...member, ...fields, modifiedAt: _serverNowMs() };
 }
 
 const API = {
@@ -3800,18 +3839,16 @@ const API = {
         const data = await res.json();
         return data.statuses || [];
     },
-    async reinstateCompetitor(compID, playerID, password) {
-        const res = await fetch(`/api/competitions/${compID}/competitors/${playerID}/reinstate`, {
-            method: 'POST',
-            headers: {
-                'X-Tournament-Password': password
-            }
+    async reinstateCompetitor(compID, playerID, password, opts = {}) {
+        // R1: an outbox entry under the competitor's own base, answered at
+        // once; `settled` resolves with the status the server stored, or
+        // rejects with its refusal (`opts.onRefusal` may claim it).
+        return _outboxWrite({
+            kind: 'reinstate', compID, matchID: '', method: 'POST',
+            url: `/api/competitions/${compID}/competitors/${playerID}/reinstate`,
+            payload: {}, password, onRefusal: opts && opts.onRefusal,
+            base: `competitor:${compID}:${playerID}`,
         });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to reinstate competitor");
-        }
-        return res.json();
     },
     // overridePoolRanks records a whole group of pool ranks, a chusen's order,
     // as ONE write: ranks is [{ playerId, rank }], and the server records
@@ -4207,22 +4244,43 @@ const API = {
         const data = await res.json();
         return data.teamMembers || {};
     },
-    // Mints the new member's id and display index server-side in one step
-    // (operator ruling: assigned automatically as members are added) and
-    // returns the created {id, index, name, modifiedAt}, 201. clearTeamMember
-    // below is the nearest counterpart and only blanks a name: an index, once
-    // minted, is never freed. Every member write answers the member with the
-    // stamp the server gave it (_answeredMember), and the server announces the
-    // change (lineup_updated, with the team) to every device.
-    async addTeamMember(compID, teamId, name, password) {
-        const { res, body } = await _memberWrite(`/api/competitions/${compID}/teams/${teamId}/members`, 'POST', password, TEAM_MEMBER_NOT_ADDED, { name });
-        return _answeredMember(res, body, "Failed to add team member", TEAM_MEMBER_NOT_ADDED);
+    // The server gives the new member its display index (operator ruling:
+    // assigned automatically as members are added); clearTeamMember below is
+    // the nearest counterpart and only blanks a name: an index, once minted, is
+    // never freed. Every member write's `settled` resolves with the member as
+    // the server stamped it, and the server announces the change
+    // (lineup_updated, with the team) to every device.
+    async addTeamMember(compID, teamId, name, password, opts = {}) {
+        // R1: the id is minted here, so the lineup save naming the member is
+        // queued behind the add (putMatchLineup's `after`) with the id it will
+        // have; a resend of the add is answered as stored. The member shown
+        // carries no stamp: nothing holds it yet, and the server's copy, when
+        // a list brings it, stands over it.
+        const id = _newMemberId();
+        const trimmed = String(name || '').trim();
+        return _memberWrite({
+            compID, teamId, method: 'POST',
+            url: `/api/competitions/${compID}/teams/${teamId}/members`,
+            payload: { id, name: trimmed }, password,
+            member: { ...(opts.index ? { index: opts.index } : {}), id, name: trimmed },
+            opts,
+        });
     },
     // Keeps memberId's id and index; only the display name changes. Answers 200
     // with the member, stamped.
-    async renameTeamMember(compID, teamId, memberId, name, password) {
-        const { res, body } = await _memberWrite(`/api/competitions/${compID}/teams/${teamId}/members/${memberId}`, 'PUT', password, TEAM_MEMBER_NOT_RENAMED, { name });
-        return _answeredMember(res, body, "Failed to rename team member", TEAM_MEMBER_NOT_RENAMED);
+    async renameTeamMember(compID, teamId, memberId, name, password, opts = {}) {
+        // R1: an outbox entry; `opts.member` is the member as shown, which the
+        // answer keeps (its number) with the new name, and which a refusal
+        // puts back (`revertMember`).
+        const trimmed = String(name || '').trim();
+        const before = opts.member || { id: memberId };
+        return _memberWrite({
+            compID, teamId, method: 'PUT',
+            url: `/api/competitions/${compID}/teams/${teamId}/members/${memberId}`,
+            payload: { name: trimmed }, password,
+            member: _shownMember(before, { id: memberId, name: trimmed }),
+            opts: { ...opts, was: before },
+        });
     },
     // The operator's "removal": blanks memberId's Name back to "" and
     // leaves the id and display index untouched, so a bout already fought
@@ -4231,9 +4289,16 @@ const API = {
     // once the competition has started (state.ErrTeamMemberClearAfterStart);
     // the server's own message is operator-facing, so it is surfaced verbatim
     // rather than remapped here.
-    async clearTeamMember(compID, teamId, memberId, password) {
-        const { res, body } = await _memberWrite(`/api/competitions/${compID}/teams/${teamId}/members/${memberId}`, 'DELETE', password, TEAM_MEMBER_NOT_CLEARED);
-        return _answeredMember(res, body, "Failed to clear team member", TEAM_MEMBER_NOT_CLEARED);
+    async clearTeamMember(compID, teamId, memberId, password, opts = {}) {
+        // R1: an outbox entry, as renameTeamMember; the member shows unnamed at once.
+        const before = opts.member || { id: memberId };
+        return _memberWrite({
+            compID, teamId, method: 'DELETE',
+            url: `/api/competitions/${compID}/teams/${teamId}/members/${memberId}`,
+            payload: {}, password,
+            member: _shownMember(before, { id: memberId, name: '' }),
+            opts: { ...opts, was: before },
+        });
     },
     // mp-825 / mp-bkg: per-match lineup endpoints. Match ID takes the
     // place of the round key: successive encounters between the same
@@ -4285,6 +4350,10 @@ const API = {
         // match's 409 carries its code in `error` and its sentence in
         // `message`, kept by _refusalError); `opts.onRefusal` may claim it.
         // writeId, session and basis ride along; the lineup PUT reads none.
+        // R1: it follows the team's member writes queued before it (`after`
+        // their last entry, strict order on their base), so a member it names
+        // by a minted id is added before the lineup that places it.
+        const after = _lastMemberEntryKey(compID, teamId);
         return _outboxWrite({
             kind: 'lineup', compID, matchID: matchId, method: 'PUT',
             url: `/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`,
@@ -4293,6 +4362,7 @@ const API = {
                 ...(memberIds ? { memberIds } : {}), ...(changed ? { changed } : {}),
             },
             password, onRefusal: opts && opts.onRefusal,
+            ...(after ? { after } : {}),
         });
     },
     // Removes the match's own lineup. Bounded like every sibling write
@@ -4301,19 +4371,16 @@ const API = {
     // is not queued: the editor shows what the match carries without the lineup
     // only once the server has confirmed the removal. A lineup that is not there
     // is removed already (404).
-    async deleteMatchLineup(compID, teamId, matchId, password) {
-        let res;
-        let body;
-        try {
-            ({ res, body } = await _fetchJson(`/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`, {
-                method: 'DELETE',
-                headers: { 'X-Tournament-Password': password },
-            }));
-        } catch (_e) {
-            throw new Error(noAnswerSentence(LINEUP_NOT_REMOVED));
-        }
-        if (!res.ok && res.status !== 404) throw _refusalError(body, "Failed to delete match lineup");
-        return true;
+    async deleteMatchLineup(compID, teamId, matchId, password, opts = {}) {
+        // R1: an entry of the MATCH, after every write of it queued before it
+        // (a save of the lineup included, so no wait for one is needed), and
+        // answered at once. A 404 (nothing saved to remove) is the outcome
+        // asked for. `settled` resolves true, or rejects with the refusal.
+        return _outboxWrite({
+            kind: 'lineup-remove', compID, matchID: matchId, method: 'DELETE',
+            url: `/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`,
+            payload: {}, password, onRefusal: opts && opts.onRefusal,
+        });
     },
     // Whether a save of this lineup is still queued. `target` is { matchId } for a
     // match's own lineup or { round } for a team's Lineups-page round (0: its

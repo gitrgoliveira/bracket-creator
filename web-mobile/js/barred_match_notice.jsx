@@ -109,7 +109,17 @@ export function BarredMatchNotice({ match, password, onDone }) {
     setErr("");
     setBusy(true);
     try {
-      const res = await window.API.reinstateCompetitor(match.compId, id, pw);
+      // bc-evts stage 3 review 2, R1: the reinstatement is the outbox's and reads
+      // as landed at once; a refusal the outbox brings back later is put back on
+      // this notice (claimed only while it is shown, R2).
+      const res = await window.API.reinstateCompetitor(match.compId, id, pw, {
+        onRefusal: (e) => {
+          if (!mountedRef.current) return false;
+          setLanded(false);
+          setErr(e?.message || "Failed to reinstate the competitor");
+          return true;
+        },
+      });
       if (!mountedRef.current) return;
       setLanded(true);
       if (typeof onDone === "function") onDone(res);

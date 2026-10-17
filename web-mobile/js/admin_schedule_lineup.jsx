@@ -81,7 +81,6 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // so a correction needs this explicit door.
   const [renamingKey, setRenamingKey] = useStateA(null);
   const [renamingName, setRenamingName] = useStateA("");
-  const [renameBusy, setRenameBusy] = useStateA(false);
   const [saving, setSaving] = useStateA(false);
 
   // bc-pnum: the suggestion list reads the SQUAD, because that is where a
@@ -160,15 +159,24 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     const id = memberIds[posKey];
     const name = renamingName.trim();
     if (!id || !name) { cancelRename(); return; }
-    setRenameBusy(true);
     setError("");
+    // bc-evts stage 3 review 2, R1: the rename is an outbox entry, shown at once
+    // and never awaited. A refusal the server gives later is said here and puts
+    // the member back as it was (revertMember), while the panel is open.
+    const shown = squad.find((mem) => mem && mem.id === id) || { id };
     try {
-      form.memberRenamed(await window.API.renameTeamMember(compId, teamId, id, name, password));
+      form.memberRenamed(await window.API.renameTeamMember(compId, teamId, id, name, password, {
+        member: shown,
+        onRefusal: (e) => {
+          if (!form.isMounted()) return false;
+          if (e && e.revertMember) form.memberRenamed(e.revertMember);
+          setError(e?.message || "Failed to rename team member");
+          return true;
+        },
+      }));
       cancelRename();
     } catch (e) {
       setError(e?.message || "Failed to rename team member");
-    } finally {
-      setRenameBusy(false);
     }
   };
   // What a Save carries is the positions the operator changed and nothing else
@@ -227,16 +235,15 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
           positionsForResolver[key] = v;
         }
       });
-      // A typed name is resolved against the team's members, so they must have been
-      // read: against none, a new name is minted where the position's seeded slot is
-      // free, and the name of a member the team has is refused by the server as a
-      // second one. Members that cannot be read, or not in time, go without, as they
-      // always did, and the warning below says so.
-      let membersUnavailable = squadUnavailable;
-      if (Object.keys(positionsForResolver).length > 0) {
-        const waiting = form.waitForMembers();
-        if (waiting && !(await waiting)) membersUnavailable = true;
-      }
+      // A typed name is resolved against the team's members only once the read of them
+      // is over: while it is out, against no list, a new name would be minted where the
+      // position's seeded slot is free, and the name of a member the team has would be
+      // refused by the server as a second one. Nothing waits for that read (bc-evts
+      // stage 3 review 2, R1): while it is out the typed names are saved by name alone;
+      // after a read that failed they go on without the members, as they always did.
+      // The warning below says so either way.
+      const listed = form.membersReadOver();
+      const membersUnavailable = squadUnavailable || (Object.keys(positionsForResolver).length > 0 && !listed);
       // The member the resolver will put each typed name on, asked of the list the
       // resolver is given (the team's members as the Save's read of them left them) through
       // the resolver's own decision (typedNameTarget). A minted member collides with
@@ -286,11 +293,19 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       // `memberFailures` carries it through to the warning shown below on
       // a successful save.
       let memberFailures = [];
-      if (Object.keys(positionsForResolver).length > 0) {
+      if (Object.keys(positionsForResolver).length > 0 && listed) {
         try {
           const resolver = window.AdminLineupHelpers?.resolveMemberIdsForPositions;
           if (typeof resolver === "function") {
-            const resolved = await resolver(compId, teamId, positionsForResolver, form.squadRef.current, password, composedIds);
+            // A member write the server refuses later puts the member back and says so.
+            const onMemberRefusal = (failure, e) => {
+              if (!form.isMounted()) return false;
+              if (e && e.revertMember) form.memberRenamed(e.revertMember);
+              const composer = window.AdminLineupHelpers?.memberIdentityWarning;
+              if (typeof composer === "function") setLineupWarning(composer([failure], false));
+              return true;
+            };
+            const resolved = await resolver(compId, teamId, positionsForResolver, form.squadRef.current, password, composedIds, { onMemberRefusal });
             Object.assign(memberIdsOut, resolved.memberIds);
             memberFailures = resolved.failures || [];
             changeMembers(resolved.squad);
@@ -373,12 +388,12 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     doSave();
   };
 
-  const busy = saving || form.removing;
+  const busy = saving;
   // The boxes are for a lineup that was read: until then Save is off too, and the
   // problem line below says why.
   const locked = busy || !form.read;
   // A write of this editor's own that is out keeps Escape from closing the panel.
-  const writing = busy || renameBusy;
+  const writing = busy;
   useEffectA(() => (writing ? holdOpen() : undefined), [writing]);
 
   if (form.loading) return <div style={{ fontSize: 12, color: "var(--ink-3)" }}>Loading lineup…</div>;
@@ -427,7 +442,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
                   to the row (see the chip note above). */}
               {namedMemberAt(p.key) && renamingKey !== p.key ? (
                 <button type="button" className="btn btn--ghost btn--sm lineup-rename-btn"
-                  onClick={() => startRename(p.key)} disabled={busy || renameBusy}
+                  onClick={() => startRename(p.key)} disabled={busy}
                   aria-label={`Rename ${p.label} player`}>Rename</button>
               ) : null}
             </span>
@@ -438,7 +453,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
               onChange: setRenamingName,
               onCommit: commitRename,
               onCancel: cancelRename,
-              busy: renameBusy,
+              busy: false,
               // A rename made while the lineup is being saved would be written over
               // by the save, which carries the old spelling.
               disabled: busy,
@@ -491,7 +506,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         <button type="button"
           className="btn btn--primary btn--sm"
           onClick={save}
-          disabled={busy || renameBusy || !form.canSave}
+          disabled={busy || !form.canSave}
           title={form.saveTitle}
         >
           {saving ? "Saving…" : "Save lineup"}

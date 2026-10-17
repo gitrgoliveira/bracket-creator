@@ -255,7 +255,7 @@ describe('MatchLineupSideEditor shows the lineup in force, where it came from, a
     await flush();
 
     tree = runtime.currentTree();
-    expect(global.window.API.renameTeamMember).toHaveBeenCalledWith('comp-1', 'uuid-grouped', 'mem-1', 'Aoki Jr', 'pw');
+    expect(global.window.API.renameTeamMember).toHaveBeenCalledWith('comp-1', 'uuid-grouped', 'mem-1', 'Aoki Jr', 'pw', expect.any(Object));
     expect(pickerValues(tree)[0]).toBe('Aoki Jr');
     expect(saveButton(tree).props.disabled).toBe(true);
     expect(allText(tree)).toContain('Same as Pool D · Match 1');

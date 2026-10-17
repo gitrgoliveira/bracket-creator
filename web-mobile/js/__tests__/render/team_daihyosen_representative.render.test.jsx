@@ -246,7 +246,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Eve' } }); });
     const add = await screen.findByText(/Add “Eve”/);
     await act(async () => { fireEvent.click(add.closest('button')); });
-    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Eve', ''));
+    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Eve', '', expect.any(Object)));
     await clickFinishTwice();
     const dh = dhEntryOf(finishPatchOf(onSubmit));
     expect(dh.sideBMemberId).toBe('m9');
@@ -272,7 +272,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Frank' } }); });
     const add = await screen.findByText(/Add “Frank”/);
     await act(async () => { fireEvent.click(add.closest('button')); });
-    await waitFor(() => expect(window.API.renameTeamMember).toHaveBeenCalledWith('comp1', 't2', 'm3b', 'Frank', ''));
+    await waitFor(() => expect(window.API.renameTeamMember).toHaveBeenCalledWith('comp1', 't2', 'm3b', 'Frank', '', expect.any(Object)));
     expect(window.API.addTeamMember).not.toHaveBeenCalled();
     await clickFinishTwice();
     const dh = dhEntryOf(finishPatchOf(onSubmit));
@@ -290,7 +290,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Eve' } }); });
     const add = await screen.findByText(/Add “Eve”/);
     await act(async () => { fireEvent.click(add.closest('button')); });
-    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Eve', ''));
+    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Eve', '', expect.any(Object)));
     await waitFor(() => expect(screen.getByTestId('team-editor-lineup-warning').textContent).toContain('may have been added as a new team member'));
     expect(screen.getByTestId('team-editor-lineup-warning').getAttribute('data-tone')).toBe('warn');
     expect(screen.getByTestId('team-editor-lineup-warning').textContent).not.toContain('Lineup saved');
@@ -330,7 +330,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Frank' } }); });
     const addFrank = await screen.findByText(/Add “Frank”/);
     await act(async () => { fireEvent.click(addFrank.closest('button')); });
-    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Frank', ''));
+    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Frank', '', expect.any(Object)));
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     // The older name answers last.
     await act(async () => { resolveEve({ id: 'm-eve', name: 'Eve', index: 4 }); });
@@ -350,7 +350,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Eve' } }); });
     const add = await screen.findByText(/Add “Eve”/);
     await act(async () => { fireEvent.click(add.closest('button')); });
-    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Eve', ''));
+    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Eve', '', expect.any(Object)));
     // The member POST is still out. Finish or Close now would send or drop the pick
     // while the member may already exist on the server, so both wait for it.
     expect(screen.getByText('Finish').closest('button').disabled).toBe(true);
@@ -433,7 +433,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Eve' } }); });
     const add = await screen.findByText(/Add “Eve”/);
     await act(async () => { fireEvent.click(add.closest('button')); });
-    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Eve', ''));
+    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Eve', '', expect.any(Object)));
     expect(screen.getByTestId('team-daihyosen-remove').disabled).toBe(true);
     await act(async () => { answerEve({ id: 'm9', name: 'Eve', index: 3 }); });
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
@@ -450,7 +450,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Eve' } }); });
     const add = await screen.findByText(/Add “Eve”/);
     await act(async () => { fireEvent.click(add.closest('button')); });
-    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Eve', ''));
+    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Eve', '', expect.any(Object)));
     // leaveEditor does nothing while the member POST is out, so the buttons must not look available.
     expect(screen.getByText('← Prev').closest('button').disabled).toBe(true);
     expect(screen.getByText('Next →').closest('button').disabled).toBe(true);
@@ -557,7 +557,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Eve' } }); });
     const add = await screen.findByText(/Add “Eve”/);
     await act(async () => { fireEvent.click(add.closest('button')); });
-    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Eve', ''));
+    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Eve', '', expect.any(Object)));
     // Another device removes the representative bout: the row is gone from the sheet.
     await rerenderWith(makeMatch({ modifiedAt: t0 + 1000 }));
     expect(dhInputs(), 'the representative row has left the sheet').toHaveLength(0);
@@ -584,7 +584,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Eve' } }); });
     const add = await screen.findByText(/Add “Eve”/);
     await act(async () => { fireEvent.click(add.closest('button')); });
-    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Eve', ''));
+    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 't2', 'Eve', '', expect.any(Object)));
     await rerenderWith(makeMatch({ modifiedAt: t0 + 1000 }));
     await rerenderWith(makeMatch({ modifiedAt: t0 + 2000, subResults: [DH_EMPTY] }));
     // The POST answers only now, with the new representative bout already on the sheet.

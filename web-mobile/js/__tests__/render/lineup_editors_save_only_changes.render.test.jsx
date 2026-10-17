@@ -23,7 +23,8 @@
 //    belongs to, else the unnamed member the position holds), so a Save the resolver
 //    would place without a clash is not refused;
 //  - while a Save waits for its write nothing that changes the lineup or the team's
-//    members is usable, and Save waits while one of those is out;
+//    members is usable; a rename, a cleared name and a removal are outbox entries
+//    answered at once, so Save never waits for one (bc-evts stage 3 review 2);
 //  - a lineup followed from another device is shown with the team's members read
 //    again, so a member created elsewhere is not shown as an empty slot; a change
 //    announced makes an edited form read them too, so a name typed for a member created
@@ -337,7 +338,7 @@ describe('the at-court panel', () => {
     await click(panelRow(utils, 3).getByRole('button', { name: 'Rename 3 player' }));
     await act(async () => { fireEvent.change(panelRow(utils, 3).getByLabelText('Rename 3 player'), { target: { value: 'Itoh' } }); });
     await click(panelRow(utils, 3).getByRole('button', { name: 'Save' }));
-    expect(api.renameTeamMember).toHaveBeenCalledWith('comp-1', 'team-a', 'mem-3', 'Itoh', 'pw');
+    expect(api.renameTeamMember).toHaveBeenCalledWith('comp-1', 'team-a', 'mem-3', 'Itoh', 'pw', expect.any(Object));
     // The read begun before it answers now, with the old name.
     await act(async () => { older.resolve({ 'team-a': SQUAD }); });
     await flush();
@@ -631,7 +632,7 @@ describe('the at-court panel', () => {
       expect(asked).toEqual({ 3: 'Kato' });
       expect(idsGiven, 'what the lineup places counts').toEqual({ 1: 'mem-1', 2: 'mem-3', 3: '' });
       expect(api.renameTeamMember, 'the member at position 2 keeps its place and its blank name').not.toHaveBeenCalled();
-      expect(api.addTeamMember).toHaveBeenCalledWith('comp-1', 'team-a', 'Kato', 'pw');
+      expect(api.addTeamMember).toHaveBeenCalledWith('comp-1', 'team-a', 'Kato', 'pw', expect.any(Object));
       expect(putOf(api.putMatchLineup.mock.calls[0])).toEqual({ positions: { 3: 'Kato' }, memberIds: { 3: 'mem-minted' } });
     });
   });
@@ -684,23 +685,19 @@ describe('the at-court panel', () => {
     });
   });
 
-  it('keeps Save off while a rename is out, and on again once it has landed', async () => {
+  // bc-evts stage 3 review 2, R1: a rename is an outbox entry, answered at once
+  // with the member renamed: nothing waits for the server, Save included.
+  it('keeps Save on through a rename: the rename is the outbox\'s and shows at once', async () => {
     const utils = await mountPanel();
     await typeName(utils, 2, 'Mori');
     await click(panelRow(utils, 1).getByRole('button', { name: 'Rename 1 player' }));
     await act(async () => { fireEvent.change(panelRow(utils, 1).getByLabelText('Rename 1 player'), { target: { value: 'Aoki-san' } }); });
-    const renamed = deferred();
-    api.renameTeamMember.mockReturnValue(renamed.promise);
 
     await click(panelRow(utils, 1).getByRole('button', { name: 'Save' }));
 
     expect(api.renameTeamMember).toHaveBeenCalledTimes(1);
-    expect(saveButton(utils).disabled, 'a rename is out').toBe(true);
-
-    await act(async () => { renamed.resolve(renamedAs('mem-1', 'Aoki-san')); });
-    await flush();
-
-    expect(saveButton(utils).disabled, 'the rename has landed, and the lineup is still unsaved').toBe(false);
+    expect(saveButton(utils).disabled, 'the lineup is still unsaved, and nothing is out to wait for').toBe(false);
+    expect(utils.getByLabelText('1 player').value).toBe('Aoki-san');
   });
 });
 
@@ -937,56 +934,46 @@ describe('the Lineups page while a Save waits for its write', () => {
     expect(utils.getByLabelText('Rename Sato').disabled).toBe(false);
   });
 
-  it('turns them off for a removal as well: nothing that changes the lineup or its members while it is out', async () => {
+  // R1: a removal is an entry of the match's outbox, after what the match has
+  // queued: nothing waits for it.
+  it('leaves them on through a removal: the removal is the outbox\'s, nothing waits for it', async () => {
     api.fetchLineupInForce.mockResolvedValueOnce({ ...CARRIED, sourceMatchId: 'Pool A-2' }).mockResolvedValue(CARRIED);
     const removal = deferred();
-    api.deleteMatchLineup = vi.fn().mockReturnValue(removal.promise);
+    api.deleteMatchLineup = vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k', settled: removal.promise });
     const utils = await mountPage(DRAWN_COMP);
     await chooseTarget(utils, 'Pool A-2');
     await click(utils.getByRole('button', { name: /Use the previous match/ }));
 
     expect(api.deleteMatchLineup).toHaveBeenCalledTimes(1);
-    expect(memberRow(utils, 'mem-1').getByRole('button', { name: 'Rename' }).disabled).toBe(true);
-    expect(memberRow(utils, 'mem-1').getByRole('button', { name: 'Clear name' }).disabled).toBe(true);
+    expect(memberRow(utils, 'mem-1').getByRole('button', { name: 'Rename' }).disabled).toBe(false);
+    expect(memberRow(utils, 'mem-1').getByRole('button', { name: 'Clear name' }).disabled).toBe(false);
 
     await act(async () => { removal.resolve(true); });
     await flush();
     expect(memberRow(utils, 'mem-1').getByRole('button', { name: 'Rename' }).disabled).toBe(false);
   });
 
-  it('keeps Save off while a rename is out, and on again once it has landed', async () => {
+  // R1: a rename and a cleared name are outbox entries, answered at once.
+  it('keeps Save on through a rename, which shows at once', async () => {
     const utils = await mountPage();
     await pick(utils, 1, 'mem-4');
     await click(memberRow(utils, 'mem-2').getByRole('button', { name: 'Rename' }));
     await act(async () => { fireEvent.change(utils.getByLabelText('Rename Sato'), { target: { value: 'Sato-san' } }); });
-    const renamed = deferred();
-    api.renameTeamMember.mockReturnValue(renamed.promise);
 
     await click(memberRow(utils, 'mem-2').getByRole('button', { name: 'Save' }));
 
     expect(api.renameTeamMember).toHaveBeenCalledTimes(1);
-    expect(saveButton(utils).disabled, 'a rename is out').toBe(true);
-
-    await act(async () => { renamed.resolve(renamedAs('mem-2', 'Sato-san')); });
-    await flush();
-
-    expect(saveButton(utils).disabled, 'the rename has landed, and the lineup is still unsaved').toBe(false);
+    expect(saveButton(utils).disabled, 'the lineup is still unsaved, and nothing is out to wait for').toBe(false);
   });
 
-  it('keeps Save off while a clear is out, and on again once it has landed', async () => {
-    const cleared = deferred();
-    api.clearTeamMember = vi.fn().mockReturnValue(cleared.promise);
+  it('keeps Save on through a cleared name, which shows at once', async () => {
+    api.clearTeamMember = vi.fn().mockImplementation((_c, _t, id) => Promise.resolve(renamedAs(id, '')));
     const utils = await mountPage(DRAWN_COMP);
     await pick(utils, 1, 'mem-4');
 
     await click(memberRow(utils, 'mem-2').getByRole('button', { name: 'Clear name' }));
 
     expect(api.clearTeamMember).toHaveBeenCalledTimes(1);
-    expect(saveButton(utils).disabled, 'a clear is out').toBe(true);
-
-    await act(async () => { cleared.resolve(renamedAs('mem-2', '')); });
-    await flush();
-
     expect(saveButton(utils).disabled).toBe(false);
   });
 

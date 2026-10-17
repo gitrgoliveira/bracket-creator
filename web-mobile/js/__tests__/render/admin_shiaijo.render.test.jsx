@@ -1470,7 +1470,7 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
       const reinstateBtn = utils.getByTestId('barred-match-reinstate');
       expect(reinstateBtn.textContent).toBe('Reinstate Yama');
       await act(async () => { reinstateBtn.click(); });
-      expect(reinstateCompetitor).toHaveBeenCalledWith('c1', 'y', '');
+      expect(reinstateCompetitor).toHaveBeenCalledWith('c1', 'y', '', expect.any(Object));
     } finally {
       window.API.reinstateCompetitor = prevR;
     }

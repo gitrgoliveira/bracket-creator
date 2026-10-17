@@ -100,7 +100,7 @@ describe.each(['fixed', 'kachinuki'])('a participant names bout 1 of a %s team m
     await openEditor(teamMatch(tmt), { 'team-A': blank('a'), 'team-B': blank('b') });
     await typeName(akaBout1(), 'Mei Ito');
 
-    expect(window.API.renameTeamMember).toHaveBeenCalledWith('c1', 'team-A', 'a1', 'Mei Ito', '');
+    expect(window.API.renameTeamMember).toHaveBeenCalledWith('c1', 'team-A', 'a1', 'Mei Ito', '', expect.any(Object));
     expect(window.API.putMatchLineup).toHaveBeenCalledWith('c1', 'team-A', 'm1', { senpo: 'Mei Ito' }, '', { senpo: 'a1' }, ['senpo'], expect.objectContaining({ onRefusal: expect.any(Function) }));
     noError();
     expect(akaBout1().value).toBe('Mei Ito');
@@ -139,7 +139,7 @@ describe('a participant fills in a fixed-order row from the list (bc-dhas)', () 
     await act(async () => { fireEvent.click(add); });
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
-    expect(window.API.addTeamMember).toHaveBeenCalledWith('c1', 'team-A', 'Jun Oda', '');
+    expect(window.API.addTeamMember).toHaveBeenCalledWith('c1', 'team-A', 'Jun Oda', '', expect.any(Object));
     expect(window.API.putMatchLineup).toHaveBeenCalledWith('c1', 'team-A', 'm1', { senpo: 'Jun Oda' }, '', { senpo: 'new-1' }, ['senpo'], expect.objectContaining({ onRefusal: expect.any(Function) }));
     noError();
     expect(akaBout1().value).toBe('Jun Oda');
@@ -160,7 +160,7 @@ describe('a participant names a later kachinuki bout\'s fighter (bc-dhas)', () =
     await act(async () => { fireEvent.click(slot); });
     await typeName(shiroNow(), 'Ito');
 
-    expect(window.API.renameTeamMember).toHaveBeenCalledWith('c1', 'team-B', 'b3', 'Ito', '');
+    expect(window.API.renameTeamMember).toHaveBeenCalledWith('c1', 'team-B', 'b3', 'Ito', '', expect.any(Object));
     expect(window.API.putMatchLineup, 'a later kachinuki bout is not a lineup position').not.toHaveBeenCalled();
     noError();
     await waitFor(() => {

@@ -124,7 +124,7 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
       // The sixth argument is the panel's own memberIds map (bc-dnst): the
       // resolver attaches a typed name to the member the position already
       // holds before falling back to the slot seeded for it.
-      .toHaveBeenCalledWith('comp-1', 'uuid-grouped', { 1: 'Sato' }, squadForTeam, 'pw', expect.any(Object));
+      .toHaveBeenCalledWith('comp-1', 'uuid-grouped', { 1: 'Sato' }, squadForTeam, 'pw', expect.any(Object), expect.any(Object));
   });
 
   it('sends the resolved memberIds to putMatchLineup', async () => {
@@ -316,7 +316,7 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
 
     expect(global.window.AdminLineupHelpers.resolveMemberIdsForPositions).toHaveBeenCalledWith(
       'comp-1', 'uuid-grouped', { '1': 'Yamada' }, SQUAD_7, 'pw',
-      expect.objectContaining({ '1': 'mem-1' }),
+      expect.objectContaining({ '1': 'mem-1' }), expect.any(Object),
     );
   });
 
@@ -422,7 +422,7 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(global.window.API.renameTeamMember).toHaveBeenCalledWith('comp-1', 'uuid-grouped', 'mem-1', 'Fighter One', 'pw');
+    expect(global.window.API.renameTeamMember).toHaveBeenCalledWith('comp-1', 'uuid-grouped', 'mem-1', 'Fighter One', 'pw', expect.any(Object));
     tree = runtime.currentTree();
     expect(findComponents(tree, 'LineupNameInput')[0].props.value).toBe('Fighter One');
 

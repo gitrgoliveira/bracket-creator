@@ -340,7 +340,7 @@ describe('Use the previous match\'s lineup', () => {
     // The confirm says what else follows.
     expect(window.confirmDialog).toHaveBeenCalledTimes(1);
     expect(window.confirmDialog.mock.calls[0][0].message).toMatch(/later match.*no lineup of their own/i);
-    expect(api.deleteMatchLineup).toHaveBeenCalledWith('comp-1', 'team-a', 'Pool A-2', 'pw');
+    expect(api.deleteMatchLineup).toHaveBeenCalledWith('comp-1', 'team-a', 'Pool A-2', 'pw', expect.any(Object));
     expect(api.fetchLineupInForce).toHaveBeenCalledTimes(2);
     expect(utils.getByText('Same as Pool A · Match 1')).toBeTruthy();
     expect(utils.queryByRole('button', { name: "Use the previous match's lineup" })).toBeNull();

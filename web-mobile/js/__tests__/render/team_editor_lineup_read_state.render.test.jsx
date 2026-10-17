@@ -29,7 +29,7 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vites
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { answered } from '../helpers/team_members.js';
 import { lineupPutStubByTeam } from '../helpers/lineup_server.js';
-import { FETCH_TIMEOUT_MS, QUEUED_NOTICE, QUEUED_UNSAVED_NOTICE } from '../../write_result.jsx';
+import { QUEUED_NOTICE, QUEUED_UNSAVED_NOTICE } from '../../write_result.jsx';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -45,7 +45,7 @@ const STUBBED_GLOBALS = {
   GlossaryHint: ({ name }) => <span title={name} />,
 };
 
-const NOT_READ = 'The lineup could not be read, so this name was not saved. Check the connection and try again.';
+const NOT_READ = 'The lineup has not been read, so this name was not saved. It is being read again: enter the name once the lineup shows.';
 
 let restoreGlobals;
 let ScoreEditorModal;
@@ -210,28 +210,24 @@ describe('team editor: a side whose lineup was not read never writes one', () =>
 
     await typeName(jihoInput(container, 'shiro'), 'Kai Mori');
 
-    expect(notices(container)[0].textContent).toMatch(/Check the connection and try again\.$/);
+    expect(notices(container)[0].textContent).toMatch(/enter the name once the lineup shows\.$/);
     expect(notices(container)[0].textContent).not.toMatch(/reopen/i);
   });
 
-  it('refuses the pick, and frees the boxes, when the read it makes is not answered in time', async () => {
+  // bc-evts stage 3 review 2, R1: nothing waits on the network and the name box is
+  // never disabled: the pick is refused at once while the read is out.
+  it('refuses the pick at once while the read is out, and never disables the boxes', async () => {
     window.API.fetchLineupInForce = vi.fn(() => new Promise(() => {}));
     const { container } = await mountFivePerson();
 
-    vi.useFakeTimers();
-    try {
-      const input = jihoInput(container, 'shiro');
-      await act(async () => {
-        fireEvent.focus(input);
-        fireEvent.change(input, { target: { value: 'Kai Mori' } });
-        fireEvent.keyDown(input, { key: 'Enter' });
-      });
-      expect(input.disabled, 'the boxes wait while the lineup is read').toBe(true);
-      await act(async () => { vi.advanceTimersByTime(FETCH_TIMEOUT_MS); });
-      await act(async () => { await Promise.resolve(); });
-    } finally {
-      vi.useRealTimers();
-    }
+    const input = jihoInput(container, 'shiro');
+    await act(async () => {
+      fireEvent.focus(input);
+      fireEvent.change(input, { target: { value: 'Kai Mori' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+    });
+    expect(input.disabled, 'the boxes never wait').toBe(false);
+    await act(async () => { await Promise.resolve(); });
 
     expect(window.API.putMatchLineup).not.toHaveBeenCalled();
     expect(notices(container)[0].textContent).toBe(NOT_READ);
@@ -243,15 +239,18 @@ describe('team editor: a side whose lineup was not read never writes one', () =>
 // the first pick on a side can come while its first read is still out, and after
 // a read that really failed nothing but a pick (or the connection returning, or
 // a change announced) reads the side again.
-describe('team editor: a pick on a side not yet read reads it first', () => {
+// bc-evts stage 3 review 2, R1: the pick no longer waits for that read. It is
+// refused at once and reads the side in the background, so the next pick goes.
+describe('team editor: a pick on a side not yet read reads it, and the next pick goes', () => {
   const OPEN = { positions: { senpo: 'Ren Abe' }, memberIds: { senpo: 'b1' } };
   const senpoInput = (container) => container.querySelectorAll('.team-sub-match')[0].querySelector('.team-sub-match__side--shiro input');
 
-  it('reads the lineup itself while the first read is still out, writes the one position, and refuses nothing', async () => {
+  it('is refused while the first read is still out, reads the lineup itself, and the next pick writes the one position', async () => {
     lineups['team-B'] = OPEN;
-    let unanswered = 2;
+    // Shiro's opening read is never answered; every later read is.
+    let unanswered = 1;
     window.API.fetchLineupInForce = vi.fn((_c, teamId) => {
-      if (unanswered > 0) {
+      if (teamId === 'team-B' && unanswered > 0) {
         unanswered -= 1;
         return new Promise(() => {});
       }
@@ -262,8 +261,12 @@ describe('team editor: a pick on a side not yet read reads it first', () => {
 
     await typeName(jihoInput(container, 'shiro'), 'Kai Mori');
 
-    expect(notices(container)).toHaveLength(0);
+    expect(notices(container)[0].textContent).toBe(NOT_READ);
     expect(readsOf('team-B'), 'and the pick asked for itself').toBe(2);
+    expect(window.API.putMatchLineup).not.toHaveBeenCalled();
+
+    await typeName(jihoInput(container, 'shiro'), 'Kai Mori');
+    expect(notices(container)).toHaveLength(0);
     expect(window.API.putMatchLineup).toHaveBeenCalledTimes(1);
     const [, teamId, matchId, positions, , memberIds, changed] = window.API.putMatchLineup.mock.calls[0];
     expect([teamId, matchId]).toEqual(['team-B', 'm1']);
@@ -286,6 +289,9 @@ describe('team editor: a pick on a side not yet read reads it first', () => {
     expect(notices(container)[0].textContent).toBe(NOT_READ);
 
     healthy = true;
+    // The read this pick makes is the one that reads the side: refused, then read.
+    await typeName(jihoInput(container, 'shiro'), 'Kai Mori');
+    expect(window.API.putMatchLineup).not.toHaveBeenCalled();
     await typeName(jihoInput(container, 'shiro'), 'Kai Mori');
 
     expect(notices(container)).toHaveLength(0);

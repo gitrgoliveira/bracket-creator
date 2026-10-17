@@ -8,7 +8,7 @@ import { describe, it, expect, vi } from 'vitest';
 // it names a pool match (in the app viewer.js evaluates it first).
 import '../viewer_utils.jsx';
 import {
-  lineupFields, lineupSourceOf, lineupSourceLabel, isOwnLineup, STARTING_ROUND, PREVIOUS_LINEUP_LABEL, SAVE_QUEUED_REASON,
+  lineupFields, lineupSourceOf, lineupSourceLabel, isOwnLineup, STARTING_ROUND, PREVIOUS_LINEUP_LABEL,
   REMOVED_UNREAD_NOTICE, LINEUP_READ_NO_ANSWER, lineupReadFailure, previousLineupConfirm,
 } from '../lineup_resolver.jsx';
 
@@ -130,8 +130,7 @@ describe('the wording for taking a match\'s own lineup away', () => {
 });
 
 describe('the other words the lineup editors share', () => {
-  it('say why the button waits for a queued save, and what a removal whose re-read failed leaves', () => {
-    expect(SAVE_QUEUED_REASON).toBe('A save of this lineup is still waiting to be sent.');
+  it('say what a removal whose re-read failed leaves', () => {
     expect(REMOVED_UNREAD_NOTICE).toBe('Removed. The lineup this match now uses could not be read: try again.');
   });
 

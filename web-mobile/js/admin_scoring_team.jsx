@@ -59,7 +59,7 @@ import { SideLabel, sideWithColour } from './side_cell.jsx';
 // Imported from the leaf, not read off `window`, for the same reason
 // admin_scoring_shared.jsx does it: write_result.jsx is import-only, and this
 // editor is ES-imported by hosts and tests that never load api_client.
-import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, writePending, writeHeldOnDeviceOnly, queuedNotice, FETCH_TIMEOUT_MS, withinDeadline, TIMED_OUT, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, decisionWord } from './write_result.jsx';
+import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, writePending, writeHeldOnDeviceOnly, queuedNotice, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, decisionWord } from './write_result.jsx';
 
 // boutMiddle is THE single source for a bout's centre value (vs/X/(E)/(DH));
 // the editor derives its per-bout middle from it rather than restating the
@@ -676,9 +676,18 @@ export async function pickManualBoutName({ sub, idx, sideKey, memberIdKey, squad
   updateSub(idx, prev => ({ ...prev, [sideKey]: value, [memberIdKey]: renames ? priorId : "" }));
   if (!renames || !teamId || typeof window.API?.renameTeamMember !== "function") return;
   try {
-    // The member as the server answered it, stamped: what the sheet's lists merge by,
-    // where a copy built from the name typed carries no stamp and would lose to every list.
-    onRenamed([await window.API.renameTeamMember(compId, teamId, priorId, typed, password)]);
+    // The member as this device shows it, renamed and stamped now (the rename is an
+    // outbox entry, bc-evts stage 3 review 2, R1): what the sheet's lists merge by. A
+    // refusal the server gives later puts the member back as it was and is told the
+    // same way as one that never reached the outbox.
+    onRenamed([await window.API.renameTeamMember(compId, teamId, priorId, typed, password, {
+      member: prior,
+      onRefusal: (e) => {
+        if (e && e.revertMember) onRenamed([e.revertMember]);
+        // Claimed only when the sheet said it (R2): false leaves it to the outbox.
+        return onRenameFailed(typed, e) !== false;
+      },
+    })]);
   } catch (e) {
     // TELL THE OPERATOR. The rename never reached the server, so the member
     // stays nameless there permanently: every later picker row, the Lineups
@@ -924,7 +933,7 @@ function predatesAnswer(match, override) {
 // What a pick is answered with when its side's lineup was never read and the
 // pick's own read fails: with no lineup held, the pick could be neither checked
 // (one member at one position) nor shown on the row.
-const LINEUP_NOT_READ_NOTICE = "The lineup could not be read, so this name was not saved. Check the connection and try again.";
+const LINEUP_NOT_READ_NOTICE = "The lineup has not been read, so this name was not saved. It is being read again: enter the name once the lineup shows.";
 
 // What a pick is answered with when another team was really seated on its side while
 // the pick was out (the feeding match corrected on another device): the name was typed
@@ -964,8 +973,9 @@ const NO_LINEUPS = { a: null, b: null };
 // the lineup held here is what the pick is checked against (one member at one
 // position) and what the rows show, so a pick on a lineup that was not read is
 // refused. A side ("a" Aka/sideA, "b" Shiro/sideB) whose first read has not landed
-// is read by the pick itself (lineupHeldFor), which is refused only when that
-// read fails; such a side is also read again when the connection returns.
+// refuses the pick at once and is read again in the background by it (nothing waits
+// on the network, bc-evts stage 3 review 2, R1); such a side is also read again when
+// the connection returns.
 // null is a successful read of "nothing in force".
 //
 // One sync per match: a read begun for another match, or after the sheet
@@ -1381,15 +1391,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // carries (mergeMembers): of a member both hold, the copy with the larger stamp
   // stands, whichever list brought it and whichever read began first.
   const membersShown = useRefA({ a: [], b: [] });
-  // And each side's wait for the first list of its team's members, which a name typed
-  // before one arrives waits for (submitInlineLineup): resolved against none, a new name
-  // is minted where the member's seeded slot is free, and the name of a member the team
-  // has is refused by the server as a second one. A side takes a list only once its team
-  // is known, so for a side the roster has not named yet the wait stays open.
+  // And whether each side has been shown the first list of its team's members
+  // (newMembersWait): a name typed before one arrives is saved by name alone, never
+  // resolved against none (where a new name would be minted on the member's seeded
+  // slot, and the name of a member the team has refused as a second one), and nothing
+  // waits for the list (bc-evts stage 3 review 2, R1). A side takes a list only once
+  // its team is known, so for a side the roster has not named yet it stays unlisted.
   const membersWait = useRefA(null);
-  // A wait the deadline ended flags the members as unavailable, as a read that failed
-  // does, so the names typed after it say so too.
-  const newSideWait = () => newMembersWait(() => setSquadUnavailable(true));
+  const newSideWait = () => newMembersWait();
   if (membersWait.current === null) membersWait.current = { a: newSideWait(), b: newSideWait() };
   // The key and team each side was last seen with (see the effect that notices a side
   // given another team). A pick writes for the team the side has when it goes on, and
@@ -1866,9 +1875,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const isKnockoutPhase = m.phase === "bracket"
     || ((compFormat === "knockout" || compFormat === "mixed") && m.phase !== "pool");
 
-  // Whether an inline position PUT is in flight (prevents double-submit).
-  const [inlineLineupSaving, setInlineLineupSaving] = useStateA(false);
-
   // lineup is this side's already-assigned positions; mergeRosterWithAssigned
   // folds any operator-added substitute (a "+ Add …" free name not in
   // team.metadata) back into the autocomplete so it reappears for the team's
@@ -2005,25 +2011,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // ruling put on it, and every typed name is written with no member id.
   }, [m.compId, compMeta, password, teamMembersKey, teamAId, teamBId, teamAKnown, teamBKnown]);
 
-  // The lineup a pick is checked against and shown on: the one this sheet holds for
-  // the side, which its own reads and writes keep (useMatchLineups, which also follows
-  // a change another device announces). The write is composed on nothing here: it
-  // names the one position it changes and the server puts it on the lineup it holds
-  // (operator decision 2026-10-07, "Only changed positions"), so what the server
-  // holds is never read again for it, and a pick made with no connection is queued as
-  // it is. A side never read holds none, so for it a read that fails refuses the pick.
-  const lineupHeldFor = async (write, teamId) => {
-    if (write.isRead()) return write.held();
-    try {
-      // The read has no deadline of its own: unanswered, the boxes would stay disabled.
-      const fresh = await withinDeadline(write.read(teamId), FETCH_TIMEOUT_MS);
-      if (fresh !== TIMED_OUT) return fresh;
-    } catch (_e) {
-      // The server cannot be asked.
-    }
-    throw new Error(LINEUP_NOT_READ_NOTICE);
-  };
-
   // Posts a lineup notice under one bout row's key (lineupNoticeKey), unless the sheet
   // has closed. Every pick path that reports into a row goes through it.
   const lineupNotifier = (noticeKey) => (tone, text) => {
@@ -2056,36 +2043,51 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     setLineupNotice(null);
     // The name is typed for the team that plays this side as the pick begins.
     const write = beginLineupWrite(side);
-    const sideChanged = sideChangedGuard(side, noticeKey);
-    setInlineLineupSaving(true);
+    // True, with SIDE_TEAM_CHANGED_NOTICE under the row, once the side has been given
+    // another team since the pick began: nothing more is written for it.
+    const sideChangedNotice = sideChangedGuard(side, noticeKey);
     try {
-      // A typed name is resolved against the side's members, so they must have been
-      // read (membersWait): against none, a new name is minted where the position's
-      // seeded slot is free, and the name of a member the team has is refused by the
-      // server as a second one. Members that cannot be read, or not in time, go
-      // without, as they always did, and the warning below says so.
-      let membersUnavailable = squadUnavailable;
-      const waiting = !member && value ? membersWait.current[side].pending() : null;
-      if (waiting && !(await waiting)) membersUnavailable = true;
-      // If the side has really been given another team since (a wait for the old team's
-      // members is let go at once when that happens), the list shown is that team's, and
-      // a write would put its member in the old team's lineup, or the old team's in a
-      // lineup the side no longer carries: nothing is written. Asked before the lineup
-      // is read, so the old team's lineup is not read back into a side that now has
-      // another team's; again once it has been, which can take as long as the wait; and
-      // again once the member writes are done. Those stay: they are what was typed for
-      // the old team, and its own members.
-      if (sideChanged()) return;
-      // The team as the sheet knows it now, not as it was when the pick began: a side
-      // that carried only a name then can have been named by the roster meanwhile (the
-      // wait above ends when it is), and its lineup and members are the participant's.
+      // bc-evts stage 3 review 2, R1 (the operator's rule: "ALL goes to the outbox
+      // ... but never blocks the UI"): nothing here waits on the network, and the
+      // name box is never disabled. A side whose lineup this sheet never read is
+      // refused at once (its rows would show empty positions that may not be, and
+      // the operator would fill over fighters they cannot see) and read again in
+      // the background, so the next pick can go.
       const teamId = sideSeen.current[side].team;
-      const current = await lineupHeldFor(write, teamId);
-      if (sideChanged()) return;
+      if (!write.isRead()) {
+        write.read(teamId).catch(() => {});
+        notify("error", LINEUP_NOT_READ_NOTICE);
+        return;
+      }
+      const current = write.held();
+      // A typed name is resolved against the side's members only once the read of them
+      // is over (membersWait): while it is out, against no list, a new name would be
+      // minted where the position's seeded slot is free, and the name of a member the
+      // team has would be refused as a second one. While it is out the name is placed
+      // by name alone, with the members-unavailable warning, and the read goes on
+      // meanwhile; once a read has failed the name goes on without the members, as it
+      // always did, and says so.
+      const readOver = !!member || !value || membersWait.current[side].ended;
+      const membersUnavailable = squadUnavailable || !readOver;
       // The list shown now, not the one this pick closed over: it can be older.
       const squad = membersShown.current[side];
-      const built = await buildInlineLineupWrite(m.compId, teamId, current, squad, posKey, value, password, member);
-      if (sideChanged()) return;
+      // A member write the server refuses later is said in this row (claimed), with
+      // the member put back as it was (revertMember), while the sheet shows the side.
+      const sideChanged = watchLineupSide(side);
+      const onMemberRefusal = (failure, err) => {
+        if (!mountedRef.current || sideChanged()) return false;
+        if (err && err.revertMember) wroteSideMembers(side, [err.revertMember]);
+        const composer = window.AdminLineupHelpers?.memberIdentityWarning;
+        const warning = typeof composer === "function" ? composer([failure], false) : "";
+        notify("warn", warning || (err && err.message) || "");
+        return true;
+      };
+      const built = await buildInlineLineupWrite(m.compId, teamId, current, squad, posKey, value, password, member,
+        { resolve: readOver, onMemberRefusal });
+      // The member writes are the outbox's and answer at once, but the side can still be
+      // given another team before they do: the lineup is then one the side no longer
+      // carries, and nothing is written for it.
+      if (sideChangedNotice()) return;
       // bc-dnst duplicate guard: buildInlineLineupWrite refuses entirely
       // (no write attempted) rather than doubling a member up across two
       // positions. Tell the operator which position already holds them and
@@ -2095,17 +2097,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         return;
       }
       const { positions: shown, memberIds: shownIds, changed, squad: nextSquad, failures } = built;
-      // What the resolver named or added, as the server answered it, with its stamp:
-      // the list it was given can be older than the one shown by now, and the stamps
+      // What the resolver named or added, as this device shows it now, stamped: the
+      // list it was given can be older than the one shown by now, and the stamps
       // decide which copy of each member stands.
       wroteSideMembers(side, nextSquad);
       const body = changedLineupSave(shown, shownIds, changed);
       const hasMemberIds = Object.keys(body.memberIds).length > 0;
       // bc-evts M5: the save is an entry of the match's outbox, answered at once
-      // (pending): nothing here waits on the network, and the box is free again as
-      // soon as it is handed over. A refusal comes later: it is said in the row and
-      // the side is read again, so the pick the sheet showed goes (claimed, so the
-      // outbox does not say it a second time).
+      // (pending), queued after the member writes it names (putMatchLineup's
+      // `after`). A refusal comes later: it is said in the row and the side is
+      // read again, so the pick the sheet showed goes (claimed, so the outbox does
+      // not say it a second time).
       const answer = await window.API.putMatchLineup(m.compId, teamId, m.id, body.positions, password, hasMemberIds ? body.memberIds : undefined, body.changed, {
         onRefusal: (err) => {
           // Claimed only when said here (R2): a sheet that has closed, or a side
@@ -2151,7 +2153,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       notify("error", e?.message || "Failed to update lineup");
     } finally {
       write.end();
-      if (mountedRef.current) setInlineLineupSaving(false);
     }
   };
 
@@ -2170,14 +2171,26 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // stale: it applies nothing and says nothing (the newer pick wins). The members the
     // resolver wrote on the server are still merged, since they exist whatever pick follows.
     const superseded = () => repPickSeq.current[side] !== seq;
-    let membersUnavailable = squadUnavailable;
-    const waiting = membersWait.current[side].pending();
-    if (waiting && !(await waiting)) membersUnavailable = true;
-    // An editor closed while the members were read (the court console moving on re-keys it)
-    // names no one: the resolver would POST a member nobody picked, and the pick lands nowhere.
+    const membersUnavailable = squadUnavailable;
+    // Nothing waits for the members (bc-evts stage 3 review 2, R1): while their read
+    // is out a typed representative is refused at once, since the pick needs the
+    // member's id and against no list the name would be minted again; once a read has
+    // failed it goes on without them, as it always did, and says so below.
+    if (!membersWait.current[side].ended) {
+      notify("error", `"${value}" could not be named: the team members are not loaded. Try again in a moment.`);
+      return;
+    }
     if (!mountedRef.current || sideChanged() || superseded()) return;
     const teamId = sideSeen.current[side].team;
-    const typed = await resolveTypedMemberName(m.compId, teamId, REPRESENTATIVE_KEY, value, membersShown.current[side], password, { [REPRESENTATIVE_KEY]: priorId });
+    // A member write the server refuses later puts the member back as it was and
+    // is said in the row (claimed), while the sheet shows the side.
+    const onMemberRefusal = (failure, err) => {
+      if (!mountedRef.current || sideChanged()) return false;
+      if (err && err.revertMember) wroteSideMembers(side, [err.revertMember]);
+      notify("error", `"${value}" was not added as a team member. ${memberRefusalNote({ code: failure?.code, reason: failure?.reason }, "Pick one from the list instead.")}`);
+      return true;
+    };
+    const typed = await resolveTypedMemberName(m.compId, teamId, REPRESENTATIVE_KEY, value, membersShown.current[side], password, { [REPRESENTATIVE_KEY]: priorId }, { onMemberRefusal });
     if (!mountedRef.current || sideChanged()) return;
     if (typed.resolverMissing) {
       if (!superseded()) notify("error", `"${value}" could not be named: the team members are not loaded. Try again in a moment.`);
@@ -4594,12 +4607,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 // A self-run competitor cannot open the Lineups page, so they are
                 // pointed at the organizer, as the server's own refusals do.
                 onRenameFailed: (typed, e) => {
-                  if (sideChangedNotice()) return;
+                  if (!mountedRef.current || sideChangedNotice()) return false;
                   setLineupNotice({
                     key: noticeKey,
                     tone: "warn",
                     text: `"${typed}" was used for this bout, but the team member could not be renamed. ${memberRefusalNote({ code: e && e.code, reason: e && e.message }, selfReport ? "Ask the tournament organizer to rename them." : "Rename them on the Lineups page.")}`,
                   });
+                  return true;
                 },
               }, value, member);
             };
@@ -4851,7 +4865,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                               value={rs.playerName || ""}
                               roster={rs.roster}
                               color={rs.color}
-                              disabled={inlineLineupSaving}
                               // A slot picked by NUMBER and not yet named is a
                               // real placement with an empty name, so the clear
                               // control's `value || clearable` gate is false and

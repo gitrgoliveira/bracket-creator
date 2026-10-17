@@ -144,7 +144,7 @@ describe('a scheduled barred match shows BarredMatchNotice instead of Start (bc-
     expect(reinstateBtn.textContent).toBe('Reinstate Kyoto');
 
     await act(async () => { fireEvent.click(reinstateBtn); });
-    expect(window.API.reinstateCompetitor).toHaveBeenCalledWith('comp1', 'team-kyoto', 'secret');
+    expect(window.API.reinstateCompetitor).toHaveBeenCalledWith('comp1', 'team-kyoto', 'secret', expect.any(Object));
   });
 
   // bc-cse: same structural rule for the team editor.

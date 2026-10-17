@@ -261,49 +261,28 @@ describe('the Lineups page, for a lineup that could not be read', () => {
   });
 });
 
+// bc-evts stage 3 review 2, R1: the removal is an entry of the match's outbox,
+// after any save of the lineup queued before it, so the button never waits for a
+// queued save: the server receives the save, then the removal.
 describe('"Use the previous match\'s lineup" while a save of that lineup is still queued', () => {
   beforeEach(() => {
     api.fetchLineupInForce.mockResolvedValue(OWN);
     api.queuedLineupSave.mockReturnValue(true);
   });
 
-  it('is disabled in the panel, with the reason as a line (a title never shows on a touchscreen)', async () => {
+  it('is offered in the panel, with no line about the save, and asks and removes', async () => {
     const utils = await mountPanel();
     const button = useButton(utils);
-    expect(button.disabled).toBe(true);
-    expect(button.hasAttribute('title')).toBe(false);
-    const line = utils.getByText(QUEUED_LINE);
-    expect(line.getAttribute('role')).toBe('status');
-    expect(api.queuedLineupSave).toHaveBeenCalledWith('comp-1', 'team-a', { matchId: 'Pool A-2' });
+    expect(button.disabled).toBe(false);
+    expect(utils.queryByText(QUEUED_LINE)).toBeNull();
     await click(button);
-    expect(window.confirmDialog).not.toHaveBeenCalled();
-    expect(api.deleteMatchLineup).not.toHaveBeenCalled();
+    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(api.deleteMatchLineup).toHaveBeenCalledTimes(1);
   });
 
-  it('is disabled on the Lineups page too', async () => {
+  it('is offered on the Lineups page too', async () => {
     const utils = await mountPage();
     await chooseTarget(utils, 'Pool A-2');
-    expect(useButton(utils).disabled).toBe(true);
-    expect(utils.getByText(QUEUED_LINE)).toBeTruthy();
-    await click(useButton(utils));
-    expect(window.confirmDialog).not.toHaveBeenCalled();
-  });
-
-  it('says nothing about a queued save on a lineup that is not the match\'s own', async () => {
-    api.fetchLineupInForce.mockResolvedValue(CARRIED);
-    const utils = await mountPanel();
-    expect(utils.queryByText(QUEUED_LINE)).toBeNull();
-  });
-
-  it('is enabled again, and the line goes, once the save has gone out', async () => {
-    const listeners = new Set();
-    window.subscribeUnsentWrites = (fn) => { listeners.add(fn); fn(); return () => listeners.delete(fn); };
-    const utils = await mountPanel();
-    expect(useButton(utils).disabled).toBe(true);
-
-    api.queuedLineupSave.mockReturnValue(false);
-    await act(async () => { listeners.forEach((fn) => fn()); });
-
     expect(useButton(utils).disabled).toBe(false);
     expect(utils.queryByText(QUEUED_LINE)).toBeNull();
   });
@@ -322,7 +301,7 @@ describe('a removal whose re-read fails', () => {
   it('leaves the panel with an empty, unread form: not the removed lineup, and nothing to save', async () => {
     const utils = await removeInPanel();
 
-    expect(api.deleteMatchLineup).toHaveBeenCalledWith('comp-1', 'team-a', 'Pool A-2', 'pw');
+    expect(api.deleteMatchLineup).toHaveBeenCalledWith('comp-1', 'team-a', 'Pool A-2', 'pw', expect.any(Object));
     expect(utils.getByText(REMOVED_UNREAD)).toBeTruthy();
     expect(utils.queryByText('Lineup for this match')).toBeNull();
     expect(useButton(utils)).toBeNull();

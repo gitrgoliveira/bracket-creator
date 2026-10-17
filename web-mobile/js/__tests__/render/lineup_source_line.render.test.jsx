@@ -72,32 +72,17 @@ describe('LineupSourceLine', () => {
     expect(matches).toHaveBeenCalledTimes(1);
   });
 
-  describe('while a save of the lineup is still queued', () => {
-    it('disables the button and says why in a line, never in a title alone', () => {
-      const form = formOf({ saveQueued: true });
-      const utils = line(form);
-      const button = utils.getByRole('button', { name: USE });
-      expect(button.disabled).toBe(true);
-      expect(button.hasAttribute('title')).toBe(false);
-      const why = utils.getByText('A save of this lineup is still waiting to be sent.');
-      expect(why.getAttribute('role')).toBe('status');
-      fireEvent.click(button);
-      expect(form.dropOwnLineup).not.toHaveBeenCalled();
-    });
-
-    it('says nothing about it where there is no button to wait', () => {
-      const utils = line(formOf({ saveQueued: true, source: { matchId: 'Pool D-0' } }));
-      expect(utils.queryByText('A save of this lineup is still waiting to be sent.')).toBeNull();
-    });
-  });
-
-  it('disables the button while a save or a removal is out, with no reason line', () => {
+  // bc-evts stage 3 review 2, R1: the removal is an entry of the match's outbox,
+  // after any save of the lineup queued before it, so the button never waits for
+  // a queued save and says nothing about one.
+  it('disables the button while a save is out, with no reason line, and never for a queued save', () => {
     const saving = line(formOf(), { busy: true });
     expect(saving.getByRole('button', { name: USE }).disabled).toBe(true);
     expect(saving.queryByRole('status')).toBeNull();
     saving.unmount();
-    const removing = line(formOf({ removing: true }));
-    expect(removing.getByRole('button', { name: USE }).disabled).toBe(true);
+    const queued = line(formOf({ saveQueued: true }));
+    expect(queued.getByRole('button', { name: USE }).disabled).toBe(false);
+    expect(queued.queryByRole('status')).toBeNull();
   });
 });
 
@@ -118,12 +103,12 @@ describe('LineupProblem', () => {
     expect(retry).toHaveBeenCalledTimes(1);
   });
 
-  it('puts Try again in a plain .btn, and holds it while a removal is out', () => {
-    const utils = render(<LineupProblem form={{ loadError: 'down', retry: vi.fn(), removing: true }} />);
+  it('puts Try again in a plain .btn', () => {
+    const utils = render(<LineupProblem form={{ loadError: 'down', retry: vi.fn() }} />);
     const button = utils.getByRole('button', { name: 'Try again' });
     expect(button.className.split(/\s+/)).toEqual(expect.arrayContaining(['btn', 'btn--sm']));
     expect(button.hasAttribute('style')).toBe(false);
-    expect(button.disabled).toBe(true);
+    expect(button.disabled).toBe(false);
   });
 });
 
@@ -142,10 +127,9 @@ describe('the stylesheet gives the source line ONE size and ONE emphasis', () =>
     expect(block('.lineup-source__label--own')).toMatch(/font-weight:\s*600/);
   });
 
-  it('pushes the button to the end of the line, and wraps the queued reason onto a line of its own', () => {
+  it('pushes the button to the end of the line, which wraps', () => {
     expect(block('.lineup-source__use')).toMatch(/margin-left:\s*auto/);
     expect(block('.lineup-source')).toMatch(/flex-wrap:\s*wrap/);
-    expect(block('.lineup-source__why')).toMatch(/flex:\s*1 0 100%/);
   });
 
   it('leaves the buttons their .btn floor: no min-height or height of their own', () => {

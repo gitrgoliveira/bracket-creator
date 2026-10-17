@@ -6458,11 +6458,6 @@ button.vsched-item:not([data-clickable]) {
 .lineup-source__use {
   margin-left: auto;
 }
-/* Why that button waits for a queued save, as a line: a title never shows on a
-   touchscreen. */
-.lineup-source__why {
-  flex: 1 0 100%;
-}
 /* Why a lineup could not be read, with Try again beside the words. Try again is a
    plain .btn, so the coarse-pointer floor reaches it. */
 .lineup-problem {

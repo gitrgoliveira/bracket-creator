@@ -2874,6 +2874,117 @@
      ]
     }
    }
+  },
+  {
+   "name": "engi flags: a fifth flag lands, the sixth is capped, a removal at 0 has no target, a repeated id counts once",
+   "jsMirror": true,
+   "shape": {
+    "kind": "engi"
+   },
+   "match": {
+    "id": "r0-m0",
+    "sideA": "Aka",
+    "sideB": "Shiro",
+    "sideAId": "pa",
+    "sideBId": "pb",
+    "winner": "",
+    "ipponsA": [],
+    "ipponsB": [],
+    "hansokuA": 0,
+    "hansokuB": 0,
+    "decision": "",
+    "status": "running",
+    "court": "A",
+    "round": 0,
+    "scheduledAt": ""
+   },
+   "head": [
+    {
+     "v": 1,
+     "baseline": {
+      "id": "m0",
+      "door": "test",
+      "stamp": 10,
+      "values": {
+       "flags": {
+        "flagsA": 4,
+        "flagsB": 0
+       }
+      },
+      "basis": {
+       "seen": 0
+      }
+     }
+    }
+   ],
+   "lines": [
+    {
+     "v": 1,
+     "event": {
+      "id": "a1",
+      "session": "s-a1",
+      "seq": 1,
+      "stamp": 20,
+      "kind": "flag.add",
+      "side": "a"
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "a1",
+      "session": "s-a1",
+      "seq": 1,
+      "stamp": 20,
+      "kind": "flag.add",
+      "side": "a"
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "a2",
+      "session": "s-a2",
+      "seq": 1,
+      "stamp": 21,
+      "kind": "flag.add",
+      "side": "a"
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "b1",
+      "session": "s-b1",
+      "seq": 1,
+      "stamp": 22,
+      "kind": "flag.remove",
+      "side": "b"
+     }
+    }
+   ],
+   "want": {
+    "match": {
+     "flagsA": 5,
+     "scoreVersion": 5,
+     "modifiedAt": 20,
+     "groupStamps": {
+      "flags": 20
+     }
+    },
+    "outcomes": {
+     "a1": [
+      "applied",
+      "duplicate"
+     ],
+     "a2": [
+      "capped"
+     ],
+     "b1": [
+      "noTarget"
+     ]
+    }
+   }
   }
  ]
 }

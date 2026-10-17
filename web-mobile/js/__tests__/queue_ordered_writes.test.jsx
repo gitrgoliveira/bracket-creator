@@ -105,7 +105,7 @@ describe('a later running write never replaces a queued Finish', () => {
         expect(s.sent.map((w) => w.body.status)).toEqual(['completed', 'running']);
         expect(s.sent[0].body.winner).toBe('A');
         expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(false);
-        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
     });
 
     // bc-evts F1 (reversing bc-mrgc C2): a match's writes go strictly in
@@ -169,7 +169,7 @@ describe('a later running write never replaces a queued Finish', () => {
         expect(storedEntries()).toHaveLength(1);
         await res.settled;
         expect(s.sent.length).toBe(before + 1);
-        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
         expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(false);
     });
 
@@ -306,7 +306,7 @@ describe('a queue persisted by the previous build', () => {
         const m1 = s.sent.filter((w) => w.url.includes('/matches/m1/')).map((w) => w.url.split('/').pop());
         expect(m1).toEqual(['decision', 'score']);
         expect(s.sent.some((w) => w.url.endsWith('/matches/m2/override-winner'))).toBe(true);
-        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
     });
 });
 
@@ -368,7 +368,7 @@ describe('a lineup save takes the place of a queued save of the same lineup', ()
         await tick(50);
         const teamA = s.sent.filter((w) => w.body.teamId === 'team-A');
         expect(teamA.map((w) => w.body.positions)).toEqual([{ 1: 'Baba' }]);
-        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
     });
 });
 
@@ -395,7 +395,7 @@ describe('nothing is dropped for its age', () => {
         unsub();
         expect(s.sent).toHaveLength(1);
         expect(s.sent[0].body).toMatchObject({ status: 'completed', winner: 'A', modifiedAt: old });
-        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
         // Nothing was announced as discarded, expired or unreadable.
         expect(alerts.filter((a) => a.kind !== 'sent')).toEqual([]);
     });
@@ -469,7 +469,7 @@ describe('the page-hide copy of a write still being sent', () => {
         await tick(0);
         const scores = srv.calls.map((c) => c.body.ipponsA.join(''));
         expect(scores).toContain('MK');
-        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
     });
 
     // bc-evts F1: the write queued behind the page-hide copy waits for that
@@ -493,7 +493,7 @@ describe('the page-hide copy of a write still being sent', () => {
         await pM;
         await tick(0); // no timer advanced past the backoff
         expect(kSends()).toBe(1);
-        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
     });
 
     it('the held copy goes when its own fetch answers, even after a later write took its place in flight', async () => {
@@ -513,7 +513,7 @@ describe('the page-hide copy of a write still being sent', () => {
         await pK;
         await tick(0);
         // M's copy did not stay behind in the outbox.
-        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
         expect(API.unsentWrites().total).toBe(0);
     });
 });
@@ -610,7 +610,7 @@ describe('the way past a held write the server keeps refusing', () => {
         unsub();
         expect(statuses.at(-1)).not.toBe('server-error');
         expect(API.unsentWrites().total).toBe(0);
-        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
         warnSpy.mockRestore();
     });
 });
@@ -741,7 +741,7 @@ describe('a queued finish that moved a later change to the history', () => {
         expect(failed).toEqual([]);
         expect(alerts.map((a) => a.kind)).toEqual(['sent', 'displaced']);
         expect(alerts.find((a) => a.kind === 'displaced')).toEqual(expect.objectContaining({ count: 1 }));
-        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
     });
 
     // A change can also be moved for another reason (a representative's pick
@@ -762,7 +762,7 @@ describe('a queued finish that moved a later change to the history', () => {
         expect(failed).toEqual([]);
         expect(alerts.map((a) => a.kind)).toEqual(['sent', 'displaced']);
         expect(alerts.find((a) => a.kind === 'displaced')).toEqual(expect.objectContaining({ count: 1 }));
-        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
     });
 });
 
@@ -803,7 +803,7 @@ describe('a write that leaves the queue leaves browser storage at once', () => {
         expect(storedEntries().map(([, d]) => d.matchID)).toEqual(['m2']);
         release();
         await tick(50);
-        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
     });
 
     it('a refused write is gone from storage while a later one is still being sent', async () => {
@@ -812,7 +812,7 @@ describe('a write that leaves the queue leaves browser storage at once', () => {
         expect(storedEntries().map(([, d]) => d.matchID)).toEqual(['m2']);
         release();
         await tick(50);
-        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
         warnSpy.mockRestore();
     });
 });

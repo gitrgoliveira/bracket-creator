@@ -131,7 +131,7 @@ describe('a save made offline replays naming only what it changed', () => {
     expect(s.own.m1.positions).toEqual({ senpo: 'Kato', jiho: 'Tanaka', taisho: 'Mori' });
     expect(s.own.m1.memberIds).toEqual({ senpo: 'mem-k', jiho: 'mem-t', taisho: 'mem-m' });
     expect(API.queuedLineupSave('c1', 't1', { matchId: 'm1' })).toBe(false);
-    expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
+    expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
   });
 
   it('keeps the names the lineup in force carried when the match has no lineup of its own', async () => {

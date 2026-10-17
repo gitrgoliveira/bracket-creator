@@ -1618,7 +1618,7 @@ describe('bc-mrgc phase 3: no queued write is dropped for its age', () => {
         expect(sent.filter((u) => u.includes('/matches/m1/'))).toHaveLength(1);
         expect(sent.filter((u) => u.includes('/matches/m2/'))).toHaveLength(1);
         expect(m.API.hasPendingTerminalWrite('c1', 'm1')).toBe(false);
-        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
         warnSpy.mockRestore();
     });
 });
@@ -2466,7 +2466,7 @@ describe('bc-sync: pending edits and durable running writes', () => {
     it('a running write that lands leaves the outbox', async () => {
         mockFetch(() => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }));
         await (await API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null)).settled;
-        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
         expect(writeCallCount()).toBe(1);
     });
 
@@ -2474,7 +2474,7 @@ describe('bc-sync: pending edits and durable running writes', () => {
         mockFetch(() => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }));
         await (await API.recordScore('c1', 'm1', { status: 'completed', durable: true }, 'pw', null)).settled;
         expect(writeCallCount()).toBe(1);
-        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
     });
 });
 
@@ -2565,7 +2565,7 @@ describe('bc-sync: the stored outbox is shared by every tab', () => {
         mockFetch(offline);
         vi.resetModules();
         await import('../api_client.jsx');
-        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
         warnSpy.mockRestore();
     });
 
@@ -2726,7 +2726,7 @@ describe('bc-sync: a running write still being sent when the page goes away is k
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
         await flushMicrotasks();
         window.dispatchEvent(new Event('pagehide'));
-        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
     });
 
     it('a tab that is only hidden does not send the write a second time', async () => {
@@ -2749,7 +2749,7 @@ describe('bc-sync: a running write still being sent when the page goes away is k
         expect(storedEntries()).toHaveLength(1);
         answer({ ok: true, status: 200, json: () => Promise.resolve({}) });
         await flushMicrotasks();
-        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
         expect(writeCallCount()).toBe(1);
     });
 
@@ -2765,7 +2765,7 @@ describe('bc-sync: a running write still being sent when the page goes away is k
         hideTab();
         await tick(10000);
         expect(m1Bodies.map((x) => x.ipponsA)).toEqual([['M'], ['M']]);
-        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
     });
 
     it('the entry is dated when the write was made, not when the tab was hidden', async () => {

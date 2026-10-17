@@ -798,6 +798,12 @@ function _countTerminalQueued() {
 // keystroke-driven autosave. Reset on the first successful persist.
 let _storageFullAnnounced = false;
 
+// True while browser storage still holds a write this tab settled, because
+// the write that takes it out was refused: the outbox is not idle then
+// (_outboxIdle), or a reload would read the write back and send it again
+// (stage 3 review 9, P2). Cleared by the next persist storage takes.
+let _settledLeftStored = false;
+
 /**
  * Persist the queue. Returns true when the queue's current state is safely on
  * disk, false when it could not be written.
@@ -808,7 +814,8 @@ let _storageFullAnnounced = false;
  * tab settled since the last persist are taken out of it (_settled), and
  * anything else, another tab's queued writes, is left alone. A whole-map overwrite dropped the other tab's entries, and an
  * empty queue removed the key under them, so a result queued in one tab was
- * lost when another tab saved or reloaded (bc-sync).
+ * lost when another tab saved or reloaded (bc-sync). An emptied queue is
+ * stored as "[]"; only clearQueue's wipe removes the key (P1, below).
  *
  * bc-qttl: the failure is no longer swallowed. A queue that cannot persist is a
  * queue that a reload will silently lose, which is precisely the durability
@@ -818,16 +825,18 @@ let _storageFullAnnounced = false;
  * @returns {boolean}
  */
 function _persistQueue() {
+    // Storage still holds a write this tab settled: if the write that takes
+    // it out is refused, a reload would read it back and send it again (P2).
+    let settledStillStored = false;
     try {
-        // Remove the key (rather than writing "[]") when the queue is empty: avoids
-        // storage churn and, critically, prevents an in-flight flush that reaches
-        // _persistQueue() after clearQueue() from re-creating an empty stored queue,
-        // which would undermine the credential-revocation intent of removing it.
         const merged = _storedQueue();
         for (const [k, at] of _settled) {
             const stored = merged.get(k);
             // A newer entry another tab wrote under the same key since is theirs.
-            if (stored && !_enqueuedAfter(stored, at)) merged.delete(k);
+            if (stored && !_enqueuedAfter(stored, at)) {
+                merged.delete(k);
+                settledStillStored = true;
+            }
         }
         // A key both hold keeps the newer write. This tab's copy can be one it
         // took from storage (on load, or from another tab), and writing it back
@@ -845,8 +854,16 @@ function _persistQueue() {
             for (const n of notes) _stripMemberIdIn(merged.values(), n.id, n);
         }
         if (merged.size === 0) {
-            localStorage.removeItem(QUEUE_STORAGE_KEY);
+            // An emptied queue is stored as "[]", never removed: the other
+            // tabs read the removal of the key as a wipe (clearQueue), which
+            // leaves each its own writes, so a tab whose write this one sent
+            // would keep it and send it again later over a newer one (stage 3
+            // review 9, P1). "[]" tells them every write they shared is gone.
+            // Only a key that is there: after clearQueue's wipe, a flush still
+            // out must not store the queue again.
+            if (localStorage.getItem(QUEUE_STORAGE_KEY) !== null) localStorage.setItem(QUEUE_STORAGE_KEY, '[]');
             _settled.clear();
+            _settledLeftStored = false;
             _storageFullAnnounced = false;
             return true;
         }
@@ -870,14 +887,20 @@ function _persistQueue() {
         // Only once the write has landed: a failed one must still prune these
         // entries next time, or a settled write would come back from storage.
         _settled.clear();
+        _settledLeftStored = false;
         _storageFullAnnounced = false;
         return true;
     } catch (_e) {
+        // What it took out stays in _settled for the next persist. While
+        // storage still holds any of it the outbox is not idle (_outboxIdle),
+        // so neither Reload nor the automatic reload goes and reads it back
+        // (stage 3 review 9, P2).
+        _settledLeftStored = settledStillStored;
         // Storage refused, but this tab holds nothing to store: nothing of
-        // its can be lost, so it answers stored and raises nothing (L2, stage
-        // 3 review 8: a reload must not wait on storage an empty outbox does
-        // not need). What it took out stays in _settled for the next persist.
-        if (_writeQueue.size === 0) return true;
+        // its can be lost, so it raises nothing, and answers stored unless a
+        // write it settled is still there (L2, stage 3 review 8: a reload
+        // must not wait on storage an empty outbox does not need).
+        if (_writeQueue.size === 0) return !settledStillStored;
         if (!_storageFullAnnounced) {
             _storageFullAnnounced = true;
             _notifyQueueAlert({
@@ -2226,7 +2249,7 @@ async function _flushQueue() {
 
 // The outbox is idle when nothing is queued and no write is in flight.
 function _outboxIdle() {
-    return _writeQueue.size === 0 && !_flushInProgress;
+    return _writeQueue.size === 0 && !_flushInProgress && !_settledLeftStored;
 }
 
 // _flushBase: one match's turn in a pass. Consecutive taps of ONE session go
@@ -3463,7 +3486,7 @@ if (typeof fetch === 'function') {
         // the alert below fires ONCE rather than on every reload forever: rehydrate
         // never used to write back, so a dropped entry stayed in localStorage
         // untouched, and each refresh would re-read, re-drop and re-announce it.
-        // With the queue now empty _persistQueue() removes the key outright.
+        // With the queue now empty _persistQueue() stores it as "[]".
         if (unreadable > 0 || migrated) _persistQueue();
         if (unreadable > 0) {
             console.warn(`[sync] discarded ${unreadable} unreadable queued write(s) on rehydration`);

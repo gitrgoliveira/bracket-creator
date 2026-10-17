@@ -53,6 +53,10 @@ import {
 import { noteServerBuild, setOutboxIdleProbe, setBeforeReload, noteOutboxDrained } from './app_version.jsx';
 import { CLOCK_SKEW as TAP_CLOCK_SKEW } from './score_events.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
+import {
+    createMintedMembers, mintedAddId, mintedIdsNamed, mintedMemberUrlId, mintedProofCovers, mintedStrip,
+    MINTED_MEMBERS_KEY,
+} from './minted_members.jsx';
 
 // ---------------------------------------------------------------------------
 // F1: fetch with per-request timeout via AbortController
@@ -216,9 +220,9 @@ function normalizeViewerCompItem(item) {
 }
 
 // _withListedMembersForgotten: a members map the server answered, after
-// forgetting every dropped-member note it proves wrong (K1).
+// telling the owner every member it holds exists (minted_members.jsx).
 function _withListedMembersForgotten(teams, competitionId) {
-    _forgetListedDroppedMembers(teams, competitionId);
+    _minted.listed(teams, competitionId);
     return teams;
 }
 
@@ -846,13 +850,9 @@ function _persistQueue() {
         for (const [k, d] of _writeQueue) {
             if (!_enqueuedAfter(merged.get(k), d.enqueuedAt)) merged.set(k, d);
         }
-        // An id noted as dropped (J5) comes off the stored copies of writes
-        // this tab does not hold too, or writing the list back would keep them.
-        const notes = _droppedMemberNotes();
-        if (notes.length > 0) {
-            _pruneDroppedMemberNotes(notes, merged);
-            for (const n of notes) _stripMemberIdIn(merged.values(), n.id, n);
-        }
+        // A member that never was comes off the stored copies of writes this
+        // tab does not hold too (minted_members.jsx).
+        _mintedOverStored(merged);
         if (merged.size === 0) {
             // An emptied queue is stored as "[]", never removed: the other
             // tabs read the removal of the key as a wipe (clearQueue), which
@@ -923,15 +923,34 @@ const _writeQueue = new Map(); // queue key → pending write descriptor
 // tabs that wrote them.
 const _settled = new Map();
 
-// The member ids whose discarded add is being checked against the server
-// (_checkMemberAdd, K1). A write naming one waits, as on an `after` still
-// queued, until the read is over (_waitsOnMemberCheck), so it goes with the id
-// only if the member is held. Declared here, before the load-time flush.
-const _memberChecks = new Set();
+// What is known of every member id this device (or another tab) minted: the
+// ONE owner, minted_members.jsx (bc-evts stage 3, M1 a), shared through
+// browser storage. Its storage is reached through this module, as every other
+// read and write of browser storage is. Declared here, before the load-time
+// flush.
+const _minted = createMintedMembers({
+    storage: {
+        get: (k) => localStorage.getItem(k),
+        set: (k, v) => localStorage.setItem(k, v),
+        remove: (k) => localStorage.removeItem(k),
+    },
+    timeoutMs: FETCH_TIMEOUT_MS,
+    tab: _randomId(),
+});
+// The members reads the owner asked for that are out (by member id), the ids
+// of the adds this tab has a request out for, and the one timer that reruns
+// the flush when a write the owner holds back may go.
+const _mintedReads = new Set();
+const _mintedOutHere = new Set();
+// The adds this tab sent or discarded whose end is not known, by id, with the
+// password to read their team's members with (_mintedSweep).
+const _mintedReadPw = new Map();
+let _mintedTimer = null;
+let _mintedTimerAt = 0;
 
 // The member ids this tab has said are gone (_announceDroppedMember): one
 // `team-member-dropped` per id, whether this tab proved it or heard of it from
-// another (K1).
+// another.
 const _announcedDropped = new Set();
 // _takenFromLegacy: every entry this tab took over from the key an older build
 // uses (_takeOverLegacyQueue), its key to the `enqueuedAt` it was taken with,
@@ -1011,16 +1030,19 @@ function _dequeue(key, descriptor, outcome) {
     if (outcome && outcome.byOperator && _inFlight.has(d)) {
         // Discarded while its request is out: the server may still keep it,
         // so what a discard undoes waits for that request to end (L1,
-        // _endDiscardWhileOut).
+        // _endDiscardWhileOut); a member add's request end is the owner's
+        // answer (_mintedAddAnswered).
         _discardWhileOut(d);
     } else if (outcome && (outcome.error || outcome.byOperator)) {
         // A court move or time change the server refused, or an operator
         // discarded, no longer shows (R4). Never for an entry another tab sent.
         _revertLocalFields(d);
-        // A member add refused or discarded may leave its minted id naming
-        // nobody (F2): taken off every queued write naming it once that is
-        // proved (K1).
-        _memberAddLeftUnlanded(d, outcome);
+        // A member add that leaves unanswered (a refusal was answered as it
+        // came, _mintedAddAnswered): the owner says what is known of its id.
+        if (mintedAddId(d)) {
+            if (_minted.discarded(d) === 'dropped') _learnDropped([_droppedOf(d)]);
+            else _mintedSweep(d);
+        }
     }
     // The server answered it: a clock-skew re-stamp of a later write of the
     // match is never stamped below it (_afterSettledStamp). Not a discard, and
@@ -2166,9 +2188,6 @@ async function _flushQueue() {
                 _recomputeSyncStatus();
                 continue;
             }
-            // A member another tab's refused add left a note for comes off
-            // every write here before any is sent (J5).
-            _applyDroppedMembers();
             _recomputeSyncStatus();
             pass.anyFailed = false;      // any failure → keep in queue + backoff
             pass.networkFailed = false;  // fetch rejected → connection down → "offline"
@@ -2283,9 +2302,14 @@ async function _flushBase(base, list, pass, gen) {
             outcome = d.cycled || waitsOn.some((k) => _blockedByHeld(k)) ? 'kept' : 'after';
             break;
         }
-        // A write naming a member whose discarded add is being checked waits
-        // for the read the same way (K1); its end reruns the flush.
-        if (_waitsOnMemberCheck(d)) { outcome = 'after'; break; }
+        // A write naming a member not known to exist waits the same way, and
+        // one naming a member that never was goes without the id, or, for a
+        // rename or a cleared name of that member, leaves unsent (the owner,
+        // minted_members.jsx; its read, the add's answer or its timer reruns
+        // the flush).
+        const minted = _mintedGate(key, d);
+        if (minted === 'wait') { outcome = 'after'; break; }
+        if (minted === 'left') { i++; continue; }
         if (d.kind === 'evt') {
             const session = d.payload && d.payload.session;
             const batch = [];
@@ -2295,13 +2319,17 @@ async function _flushBase(base, list, pass, gen) {
                 if (d2.kind !== 'evt' || d2.authBlocked || d2.parked
                     || (d2.payload && d2.payload.session) !== session) break;
                 // The batch ends at the first tap that waits (J1, stage 3
-                // review 6): one on a wait cycle or still following an entry
-                // that is queued goes in a later pass, after that entry.
-                if (batch.length > 0 && (d2.cycled || _afterKeys(d2).some((k) => _writeQueue.has(k))
-                    || _waitsOnMemberCheck(d2))) break;
+                // review 6): one on a wait cycle, still following an entry
+                // that is queued, or naming a member not known to exist goes
+                // in a later pass, after that entry.
+                if (batch.length > 0 && (d2.cycled || _afterKeys(d2).some((k) => _writeQueue.has(k)))) break;
+                const minted2 = _mintedGate(k2, d2);
+                if (minted2 === 'left') { i++; continue; }
+                if (minted2 === 'wait') break;
                 batch.push(list[i]);
                 i++;
             }
+            if (batch.length === 0) { outcome = 'after'; break; }
             outcome = await _sendTapBatch(base, batch, pass);
         } else {
             outcome = await _sendEntry(key, d, pass);
@@ -2545,7 +2573,7 @@ function _doorRefusal(d, status, body) {
             // never was (F2). Its id is the tombstone the editors drop it by.
             // Not when the refusal says the id is held (K1): the read that
             // follows tells whether this team holds it.
-            if (_memberAddId(d) && b.error !== 'member_id_conflict') err.droppedMemberId = _memberAddId(d);
+            if (mintedAddId(d) && b.error !== 'member_id_conflict') err.droppedMemberId = mintedAddId(d);
             return err;
         }
         case 'lineup-remove':
@@ -2604,12 +2632,13 @@ async function _sendEntry(key, descriptor, pass) {
         effectiveUrl = `/api/competitions/${compID}/matches/${matchID}/score`;
     }
     let res, body;
-    // A member add that has gone out may be one the server kept, whatever
-    // comes of the request: stored so, so a discard after a reload still asks
-    // the server before taking its id off anything (K1).
-    if (_memberAddId(descriptor) && !descriptor.sent) {
-        descriptor.sent = true;
-        _persistQueue();
+    // A member add that goes out may be one the server keeps, whatever comes
+    // of the request: the owner holds it out from this tab until its answer
+    // (minted_members.jsx), every tab reading it so.
+    const mintsId = mintedAddId(descriptor);
+    if (mintsId) {
+        _mintedOutHere.add(mintsId);
+        _minted.sent(descriptor);
     }
     _inFlight.add(descriptor);
     try {
@@ -2624,17 +2653,21 @@ async function _sendEntry(key, descriptor, pass) {
             // (_persistQueue never stores one).
             body: JSON.stringify(payload),
         }));
-    } catch (_) {
+    } catch (err) {
         // fetch rejected (network down), or the request or its body was given
         // up at the deadline (_fetchJson).
         pass.anyFailed = true;
         pass.networkFailed = true;
         _inFlight.delete(descriptor);
+        if (mintsId) _mintedOutHere.delete(mintsId);
+        _mintedAddAnswered(key, descriptor, null, null, !!(err && err.timedOut));
         _endDiscardWhileOut(descriptor, null, null);
         return 'kept';
     } finally {
         _inFlight.delete(descriptor);
+        if (mintsId) _mintedOutHere.delete(mintsId);
     }
+    _mintedAddAnswered(key, descriptor, res, body || {});
     // Discarded while it was out (L1): the answer settles only what the
     // discard left waiting.
     if (_endDiscardWhileOut(descriptor, res, body)) return 'settled';
@@ -3033,6 +3066,9 @@ function _commitEnqueue(base, descriptor, beforeFlush, { nextTick = false } = {}
     // whatever the write (G1): read on the payload as placed, a union with the
     // write it took the place of.
     _followMintedMembers(base, descriptor);
+    // An add's id is known to the owner before the add is stored, so a tab
+    // that takes the add up already finds it queued.
+    if (mintedAddId(descriptor)) _minted.minted(descriptor);
     _writeQueue.set(key, descriptor);
     // Read BEFORE the flush is kicked: the flush's synchronous part can
     // persist again, and it is THIS write's persist the answer reports.
@@ -3195,37 +3231,19 @@ function _onStoredQueueChanged(oldRaw, newRaw) {
     const before = _parseStoredQueue(oldRaw);
     const after = newRaw === null ? null : _parseStoredQueue(newRaw);
     let changed = false, adopted = false, migrated = false;
-    const goneAdds = [];
     // Another tab's batch can take many entries out at once: their follow-ups
-    // are done once (K6).
+    // are done once (K6). What a member add another tab took out proved is in
+    // the owner's records, which that tab wrote first (minted_members.jsx).
     _openDequeueBatch();
     try {
         for (const [k, d] of _writeQueue) {
             const gone = after === null
                 ? _adopted.has(d)
                 : !after.has(k) && before.get(k)?.enqueuedAt === d.enqueuedAt;
-            if (gone && _memberAddId(d)) goneAdds.push(d);
             if (gone && _dequeue(k, d)) changed = true;
         }
     } finally {
         _closeDequeueBatch();
-    }
-    // A member add another tab took out refused (or an operator discarded
-    // it there): that tab took the id off its copies of the writes naming it
-    // (_dropMemberThatNeverWas), which is what tells it from an add that
-    // landed, whose id stays on them. This tab takes it off its own copies
-    // too, which it keeps below, and tells its editors (stage 3 review 5, H3).
-    // Not stored again: the other tab already stored the stripped copies.
-    for (const add of goneAdds) {
-        const id = _memberAddId(add);
-        const strippedThere = after !== null && [..._writeQueue].some(([k, e]) => after.has(k)
-            && _payloadMemberIds(e.payload).has(id) && !_payloadMemberIds((after.get(k) || {}).payload).has(id));
-        // The note the refusing tab left (J5) tells a refused add from one
-        // that landed whichever copies this tab held.
-        const note = _droppedMemberNotes().find((n) => n.id === id);
-        if (!strippedThere && !note) continue;
-        if (_stripMemberId(id, strippedThere ? null : note)) changed = true;
-        _announceMemberDropped(add, id);
     }
     for (let [k, d] of after || []) {
         const held = _writeQueue.get(k);
@@ -3255,9 +3273,6 @@ function _onStoredQueueChanged(oldRaw, newRaw) {
         _adopted.add(d);
         changed = adopted = true;
     }
-    // A write taken up may name an id a tab refused the add of (J5): off it
-    // before anything is sent, and stored so.
-    if (adopted && _applyDroppedMembers()) migrated = true;
     if (migrated) _persistQueue();
     if (!changed) return;
     _recomputeSyncStatus();
@@ -3335,15 +3350,13 @@ if (typeof window !== 'undefined') {
     if (window.__bcStoredQueueHandler) window.removeEventListener('storage', window.__bcStoredQueueHandler);
     const onStorage = (e) => {
         if (e.key === QUEUE_STORAGE_KEY) _onStoredQueueChanged(e.oldValue, e.newValue);
-        // Another tab refused (or discarded) a member add: its id comes off
-        // the writes this tab holds that name it, and the stored list is
-        // written without it (J5).
-        if (e.key === DROPPED_MEMBERS_KEY) {
-            _announceNewDroppedNotes(e.oldValue, e.newValue);
-            if (_applyDroppedMembers()) {
-                _persistQueue();
-                _recomputeSyncStatus();
-            }
+        // Another tab learned something of a minted member: a member that
+        // never was comes off this tab's writes, and a write held back for one
+        // may now go (minted_members.jsx).
+        if (e.key === MINTED_MEMBERS_KEY) {
+            const { dropped, unblocks } = _minted.onStored(e.oldValue, e.newValue);
+            if (dropped.length > 0) _learnDropped(dropped);
+            else if (unblocks) _rerunFlushSoon();
         }
         // An older tab wrote what it queues under the old key: take it over (F4).
         if (e.key === LEGACY_QUEUE_STORAGE_KEY && e.newValue && _takeOverLegacyQueue(e.newValue)) {
@@ -3888,155 +3901,206 @@ function _lastMemberEntryKeyOfBase(base) {
     return members.length ? members[members.length - 1][0] : '';
 }
 
-// _memberAddId: the id a queued member add minted, '' for any other entry.
-function _memberAddId(d) {
-    return d && d.kind === 'member' && d.method === 'POST' && d.payload && typeof d.payload.id === 'string'
-        ? d.payload.id : '';
+// _droppedOf: the member add `d`'s id with the competition and team the
+// owner holds for it, for the strip and the event.
+function _droppedOf(d) {
+    const id = mintedAddId(d);
+    const r = _minted.recordOf(id);
+    return { id, c: r ? r.c : (d.compID || ''), t: r ? r.t : _teamIdOf(d) };
 }
 
-// _dropMemberThatNeverWas: a member add proved never kept (bc-evts stage 3
-// review 3, F2; the proof is _memberAddLeftUnlanded's, K1) leaves the id this
-// device minted for it naming nobody. A lineup save queued after the add (`after`) still
-// carries that id; it is taken off every queued lineup save here, before that
-// save can go (the settle reruns the flush), and the position keeps its name,
-// the shape of a name typed while the members were not loaded. The server
-// stores a position the same way when an id reaches it anyway (a save
-// already out, or one another tab holds). Then the editors are told, through
-// the `team-member-dropped` event, so they take the member that never was off
-// their lists and their positions.
-function _dropMemberThatNeverWas(d) {
-    const id = _memberAddId(d);
-    if (!id) return;
-    // Noted first, so a tab that hears of the add leaving already finds it.
-    _noteDroppedMember(d, id);
-    if (_stripMemberId(id)) _persistQueue();
-    _announceMemberDropped(d, id);
+// _mintedAddAnswered: tells the owner (minted_members.jsx) what came of a
+// member add's request: `res`/`body`, or none: no connection, or no answer by
+// the deadline (`timedOut`: a server still at work may keep the add after it,
+// so the owner waits a grace before it asks). Called before the entry leaves
+// the queue, so another tab that hears of the queue changing already finds
+// what is known of the id.
+function _mintedAddAnswered(key, d, res, body, timedOut = false) {
+    if (!mintedAddId(d)) return;
+    const status = res ? res.status : 0;
+    let outcome = 'refused';
+    if (!res) outcome = timedOut ? 'timeout' : 'retry';
+    else if (res.ok) outcome = 'kept';
+    else if (status >= 500 || status === 429 || status === 403 || status === 401) outcome = 'retry';
+    else if ((body && body.error) === 'member_id_conflict') outcome = 'held';
+    if (_minted.answered(d, outcome, _writeQueue.get(key) === d) === 'dropped') _learnDropped([_droppedOf(d)]);
+    else if (outcome !== 'kept') _mintedSweep(d);
 }
 
-// _memberAddLeftUnlanded: a member add left the queue refused or discarded
-// (stage 3 review 7, K1). Its id names nobody only when that is PROVED: the
-// server refused the add on its merits (a 4xx, except member_id_conflict,
-// which says the id is held, maybe by this very team under another name), or
-// the add never went out. An add that went out and was then discarded may be
-// one the server kept (a 500 can be a change already kept, state.ErrTxCommitted,
-// and a request given up on the way may have landed): the team's members are
-// read again (_checkMemberAdd), and only a list without the id proves it.
-function _memberAddLeftUnlanded(d, outcome) {
-    if (!_memberAddId(d)) return;
-    const refusal = outcome && outcome.error;
-    const proved = refusal ? !_memberIdHeldRefusal(refusal) : !_memberAddWentOut(d);
-    if (proved) _dropMemberThatNeverWas(d);
-    else _checkMemberAdd(d);
+// _mintedSweep: the reads this tab owes for the adds it sent or discarded
+// (`d`, one more to remember) whose end is not known, made as soon as the
+// owner allows, with no write waiting on them, so the editors hear soon that a
+// member never was; a later one is timed (_rerunFlushAt).
+function _mintedSweep(d = null) {
+    if (d && mintedAddId(d)) _mintedReadPw.set(mintedAddId(d), d.password || '');
+    if (_mintedReadPw.size === 0) return;
+    // Deleting while iterating a Map is safe: each key is visited once.
+    for (const id of _mintedReadPw.keys()) {
+        const r = _minted.recordOf(id);
+        if (!r || r.s === 'dropped') _mintedReadPw.delete(id);
+    }
+    const due = _minted.due([..._mintedReadPw.keys()], _mintedCtx());
+    for (const r of due.reads) _readMintedMembers(r, _mintedReadPw.get(r.id));
+    if (due.until) _rerunFlushAt(due.until);
+}
+
+// _mintedAddQueued: this tab, or the stored queue, still holds the add that
+// mints `id`, which then still decides what becomes of it. A stored copy of
+// one this tab took out itself is no longer queued (_wasSettledHere): the
+// next store takes it out.
+function _mintedAddQueued(id) {
+    for (const d of _writeQueue.values()) if (mintedAddId(d) === id) return true;
+    try {
+        for (const [k, d] of _storedQueue()) if (mintedAddId(d) === id && !_wasSettledHere(k, d)) return true;
+    } catch (_e) { /* storage unreadable: what this tab holds is all it knows */ }
+    return false;
+}
+
+// _mintedCtx: what this tab tells the owner of the queue it holds.
+function _mintedCtx() {
+    return { addQueued: _mintedAddQueued, addOutHere: (id) => _mintedOutHere.has(id), teamOf: _teamIdOf };
+}
+
+// _mintedGate: what the owner says of the write `d` (queued under `key`)
+// before it is sent: 'go'; 'wait', while a member it names is not known to
+// exist (the owner's read, the add's answer or its timer reruns the flush); or
+// 'left', for a rename or a cleared name of a member that never was, taken out
+// of the queue unsent (the editors were told the member is gone). A member
+// that never was comes off the write here, whichever tab queued it.
+function _mintedGate(key, d) {
+    const g = _minted.gate(d, _mintedCtx());
+    for (const r of g.reads) _readMintedMembers(r, d.password);
+    if (g.leave && !_inFlight.has(d)) {
+        if (_dequeue(key, d, { value: { discarded: true } })) _persistQueue();
+        return 'left';
+    }
+    let stripped = false;
+    for (const id of g.strip) if (mintedStrip(d, id)) stripped = true;
+    if (stripped) _persistQueue();
+    if (g.wait) {
+        if (g.until) _rerunFlushAt(g.until);
+        return 'wait';
+    }
+    return 'go';
+}
+
+// _rerunFlushAt: a flush at `at` (the owner's time for a write it holds back),
+// one timer for the earliest.
+function _rerunFlushAt(at) {
+    if (_mintedTimer !== null && _mintedTimerAt <= at) return;
+    if (_mintedTimer !== null) clearTimeout(_mintedTimer);
+    _mintedTimerAt = at;
+    _mintedTimer = setTimeout(() => {
+        _mintedTimer = null;
+        _mintedSweep();
+        _rerunFlushSoon();
+    }, Math.max(0, at - Date.now()) + 1);
+}
+
+// _readMintedMembers: the read of the team's members the owner asked for,
+// with the waiting write's password, the header sent even when empty (the
+// public page sends it empty, never omits it). A self-run participant's write
+// carries none, and the members door is main-gated, so that read is the
+// public competition payload, which carries the same `teamMembers` (L3). A
+// read refused (a stale organiser password's 401 included) or failed proves
+// nothing: the owner keeps the id unknown, and the writes go as they were made.
+function _readMintedMembers({ id, c, t }, password) {
+    if (_mintedReads.has(id)) return;
+    _mintedReads.add(id);
+    const gen = _queueGen;
+    const url = password ? `/api/competitions/${c}/team-members` : `/api/viewer/competitions/${c}`;
+    _fetchJson(url, { headers: { 'X-Tournament-Password': password || '' } }).then(({ res, body }) => {
+        const teams = res.ok && body && body.teamMembers;
+        if (!teams || typeof teams !== 'object') throw new Error(`no member list (HTTP ${res.status})`);
+        return Array.isArray(teams[t]) ? teams[t] : [];
+    }).catch((err) => {
+        console.warn(`[sync] could not read team ${t}'s members to learn whether a member added from this device was kept; the writes naming it go as they are:`, err);
+        return null;
+    }).then((list) => {
+        // A logout's wipe since: nothing of this read is kept.
+        if (gen !== _queueGen) return;
+        if (_minted.readEnded(id, list, _mintedCtx()) === 'dropped') _learnDropped([{ id, c, t }]);
+    }).finally(() => {
+        _mintedReads.delete(id);
+        _rerunFlushSoon();
+    });
+}
+
+// _learnDropped: members now known never to have been, proved here or by
+// another tab (the stored records say so). This tab tells its editors once
+// per id (`team-member-dropped`), takes the id off its own queued writes the
+// proof covers, and takes out unsent a rename or a cleared name of one.
+function _learnDropped(list) {
+    let changed = false;
+    // Inside a batch already open, its close does the follow-ups.
+    const ownBatch = !_dequeueBatch;
+    if (ownBatch) _openDequeueBatch();
+    try {
+        for (const { id, c, t } of list) {
+            if (!id) continue;
+            _announceDroppedMember({ competitionId: c, teamId: t, id });
+            for (const [k, e] of _writeQueue) {
+                if (!mintedProofCovers({ c, t }, e, _teamIdOf(e))) continue;
+                if (mintedMemberUrlId(e) === id) {
+                    if (!_inFlight.has(e) && _dequeue(k, e, { value: { discarded: true } })) changed = true;
+                } else if (mintedStrip(e, id)) {
+                    changed = true;
+                }
+            }
+        }
+    } finally {
+        if (ownBatch) _closeDequeueBatch();
+    }
+    if (changed) {
+        _persistQueue();
+        _recomputeSyncStatus();
+    }
+    _rerunFlushSoon();
+}
+
+// _mintedOverStored: what the owner knows, laid over the queue as it is
+// stored (`merged`, this tab's entries included): an id proved never to have
+// been comes off the stored copies of writes this tab does not hold too, so
+// the stored list says what will be sent, and a record nothing names any more
+// is forgotten once it has been kept a while.
+function _mintedOverStored(merged) {
+    for (const r of _minted.droppedRecords()) {
+        for (const e of merged.values()) if (mintedProofCovers(r, e, _teamIdOf(e))) mintedStrip(e, r.id);
+    }
+    const named = new Set();
+    const adds = new Set();
+    for (const e of merged.values()) {
+        for (const id of mintedIdsNamed(e)) named.add(id);
+        const add = mintedAddId(e);
+        if (add) adds.add(add);
+    }
+    _minted.prune(named, adds);
 }
 
 // The entries an operator discarded while their request was out (stage 3
 // review 8, L1): the discard took them out of the queue at once, so nothing
 // waits on them and the UI goes on, but what a discard undoes (a court or time
-// overlay put back, a minted member's id taken off the writes naming it) waits
-// for the request's end, which may be the server keeping the write.
+// overlay put back) waits for the request's end, which may be the server
+// keeping the write. A member add's end is the owner's (_mintedAddAnswered).
 const _discardedWhileOut = new WeakSet();
 
-// _discardWhileOut: `d` was discarded while out. A write naming the member a
-// discarded add mints waits until the request has ended and any read after it
-// is over (_waitsOnMemberCheck), so it never goes ahead of the proof.
+// _discardWhileOut: `d` was discarded while out.
 function _discardWhileOut(d) {
     _discardedWhileOut.add(d);
-    const id = _memberAddId(d);
-    if (id) _memberChecks.add(id);
 }
 
 // _endDiscardWhileOut: the request of an entry discarded while out ended
-// (`res` null for a request that never answered). Answers whether it was such
-// an entry, for _sendEntry to take nothing more from the answer. A 2xx is the
-// write kept: nothing is put back, and a note naming the member is forgotten.
-// Anything else is what the discard would have met had the request not been
-// out: a refusal on its merits, or a failure that proves nothing (the members
-// are read, _memberAddLeftUnlanded).
+// (`res`, or none: a network failure or the deadline). Answers true when it
+// was one, which its answer then settles nothing of. A 2xx is the write kept:
+// nothing is undone. Anything else undoes what the discard would have.
 function _endDiscardWhileOut(d, res, body) {
     if (!_discardedWhileOut.has(d)) return false;
     _discardedWhileOut.delete(d);
-    const id = _memberAddId(d);
-    if (id) _memberChecks.delete(id);
     const kept = !!res && ((res.ok && !writeWasRefusedForClock(body || {}))
         || (res.status === 404 && d.kind === 'lineup-remove'));
-    if (kept) {
-        if (id) _forgetListedDroppedMembers({ [_teamIdOf(d)]: [{ id }] }, d.compID);
-    } else {
-        const retried = !res || res.status >= 500 || res.status === 429 || res.status === 403 || res.status === 401;
-        _revertLocalFields(d);
-        _memberAddLeftUnlanded(d, retried ? { byOperator: true } : { error: _doorRefusal(d, res.status, body || {}) });
-    }
+    if (!kept) _revertLocalFields(d);
     _rerunFlushSoon();
     return true;
-}
-
-// _memberIdHeldRefusal: the add's refusal says another member holds the id.
-function _memberIdHeldRefusal(err) {
-    return !!err && err.code === 'member_id_conflict';
-}
-
-// _memberAddWentOut: the add was sent at least once (`sent`, set as it goes
-// and stored), whatever came of it.
-function _memberAddWentOut(d) {
-    return !!d && (!!d.sent || (Number(d.attempts) || 0) > 0);
-}
-
-// _checkMemberAdd: reads the team's members with the add's own password; a
-// list without the id is the proof (_dropMemberThatNeverWas), a list with it
-// forgets any note naming it, and a read that fails or is refused proves
-// nothing: the writes naming the member go as they were made and the server
-// judges them. Never awaited: nothing waits on it but those writes.
-function _checkMemberAdd(d) {
-    const id = _memberAddId(d);
-    if (!id || _memberChecks.has(id)) return;
-    _memberChecks.add(id);
-    const teamId = _teamIdOf(d);
-    // The add's own password, sent even when empty (the public page sends the
-    // header empty, never omits it). A self-run participant's add carries none,
-    // and the members door is main-gated, so that read is the public
-    // competition payload, which carries the same `teamMembers` (L3).
-    const url = d.password
-        ? `/api/competitions/${d.compID}/team-members`
-        : `/api/viewer/competitions/${d.compID}`;
-    _fetchJson(url, {
-        headers: { 'X-Tournament-Password': d.password || '' },
-    }).then(({ res, body }) => {
-        const teams = res.ok && body && body.teamMembers;
-        if (!teams || typeof teams !== 'object') throw new Error(`no member list (HTTP ${res.status})`);
-        const list = Array.isArray(teams[teamId]) ? teams[teamId] : [];
-        if (list.some((m) => m && m.id === id)) _forgetListedDroppedMembers(teams, d.compID);
-        else _dropMemberThatNeverWas(d);
-    }).catch((err) => {
-        // A refused read (a stale organiser password's 401 included) proves
-        // nothing: the writes go as they were made, and a write the server
-        // then refuses 401 is parked for the password as any other.
-        console.warn(`[sync] could not read team ${teamId}'s members after a discarded add; the writes naming it go as they are:`, err);
-    }).finally(() => {
-        _memberChecks.delete(id);
-        _rerunFlushSoon();
-    });
-}
-
-// _waitsOnMemberCheck: the entry names a member whose add is being checked.
-function _waitsOnMemberCheck(d) {
-    if (_memberChecks.size === 0) return false;
-    for (const id of _payloadMemberIds(d && d.payload)) if (_memberChecks.has(id)) return true;
-    return false;
-}
-
-// _forgetListedDroppedMembers: a member list the server answered
-// ({teamId: [member]}) holds these ids, so no note naming one stands (K1).
-function _forgetListedDroppedMembers(teams, competitionId) {
-    if (!teams || typeof teams !== 'object' || !competitionId) return;
-    const notes = _droppedMemberNotes();
-    if (notes.length === 0) return;
-    // A note is the proof for its own competition and team (_noteCovers), so
-    // only a list of that team undoes it (L4). A note naming no team is
-    // forgotten by age alone.
-    const lists = (n) => n.competitionId === competitionId && Array.isArray(teams[n.teamId])
-        && teams[n.teamId].some((m) => m && m.id === n.id);
-    const kept = notes.filter((n) => !lists(n));
-    if (kept.length !== notes.length) _writeDroppedMemberNotes(kept);
 }
 
 // _rerunFlushSoon: a flush now, or a rerun of the one under way.
@@ -4045,131 +4109,10 @@ function _rerunFlushSoon() {
     else queueMicrotask(() => { if (_writeQueue.size > 0) _flushQueue(); });
 }
 
-// _stripMemberId: takes the member id `id` off every queued write that names
-// it; whether any did. Shared by the refusal here and by another tab's
-// (_onStoredQueueChanged, stage 3 review 5, H3).
-function _stripMemberId(id, note = null) {
-    return _stripMemberIdIn(_writeQueue.values(), id, note);
-}
-
-// _stripMemberIdIn: the same strip over any entries (the ones in the stored
-// queue this tab does not hold included, J5). Given a dropped-member note, only
-// the entries it covers (_noteCovers, K1).
-function _stripMemberIdIn(entries, id, note = null) {
-    let changed = false;
-    for (const e of entries) {
-        const payload = e && e.payload;
-        if (!payload || typeof payload !== 'object') continue;
-        if (note && !_noteCovers(note, e)) continue;
-        const ids = payload.memberIds;
-        if (ids && typeof ids === 'object') {
-            for (const pos of Object.keys(ids)) {
-                if (ids[pos] === id) {
-                    delete ids[pos];
-                    changed = true;
-                }
-            }
-        }
-        // A tap naming it (H4): a fighter pick keeps its `name`, a
-        // representative pick with no member clears the pick, as the server
-        // reads an event with no `memberId`.
-        if (payload.memberId === id) {
-            delete payload.memberId;
-            changed = true;
-        }
-        // A score write carrying the id (stage 3 review 4, G1): a numbered
-        // row keeps its fighter's name and loses the id; the representative
-        // row's names are the TEAM names, so its pick is cleared. A winner
-        // named by the id goes with it: the row's names still say who won.
-        if (Array.isArray(payload.subResults)) {
-            for (const row of payload.subResults) {
-                if (!row || typeof row !== 'object') continue;
-                for (const field of _subResultMemberFields()) {
-                    if (row[field] === id) {
-                        row[field] = '';
-                        changed = true;
-                    }
-                }
-            }
-        }
-    }
-    return changed;
-}
-
-// The ids of members whose add was proved never kept (K1), kept in browser
-// storage beside the queue so EVERY tab takes them off the writes naming them,
-// whichever copies of those writes it held when the add left (J5, stage 3
-// review 6): a tab that refuses an add before it has adopted another tab's
-// write naming the id would otherwise leave that write, stored, with a
-// dangling id. A note is applied to a tab's own entries before each pass, to
-// every entry taken up from storage and to the stored list as it is written,
-// and is pruned once nothing names its id and it has been kept a while.
-const DROPPED_MEMBERS_KEY = 'bc_dropped_member_ids_v1';
-const DROPPED_MEMBER_NOTE_KEEP_MS = 10 * 60 * 1000;
-
-// _droppedMemberNotes: [{id, at, competitionId, teamId}]; unreadable storage reads as none.
-function _droppedMemberNotes() {
-    try {
-        const parsed = JSON.parse(localStorage.getItem(DROPPED_MEMBERS_KEY) || '[]');
-        return Array.isArray(parsed) ? parsed.filter((n) => n && typeof n.id === 'string' && n.id) : [];
-    } catch (_e) {
-        return [];
-    }
-}
-
-function _writeDroppedMemberNotes(notes) {
-    try {
-        if (notes.length === 0) localStorage.removeItem(DROPPED_MEMBERS_KEY);
-        else localStorage.setItem(DROPPED_MEMBERS_KEY, JSON.stringify(notes));
-    } catch (_e) { /* the strip below still covers this tab */ }
-}
-
-function _noteDroppedMember(d, id) {
-    const teamId = (String(d.url || '').match(/\/teams\/([^/]+)\/members$/) || [])[1] || '';
-    const notes = _droppedMemberNotes().filter((n) => n.id !== id);
-    notes.push({ id, at: Date.now(), competitionId: d.compID || '', teamId: decodeURIComponent(teamId) });
-    _writeDroppedMemberNotes(notes);
-}
-
-// _noteCovers: a note is the proof, at `at`, that its id names nobody; it
-// covers only a write queued by then, of its competition and, for a write that
-// names its team (a lineup or member write), of that team (K1). A write made
-// after it names the member as the editor that made it saw them, and the
-// server judges it.
-function _noteCovers(note, e) {
-    const at = Number(note.at);
-    if (Number.isFinite(at) && typeof e.enqueuedAt === 'number' && e.enqueuedAt > at) return false;
-    if (note.competitionId && e.compID && e.compID !== note.competitionId) return false;
-    const team = _teamIdOf(e);
-    return !(note.teamId && team && team !== note.teamId);
-}
-
-// _applyDroppedMembers: takes every noted id off the queued writes of this
-// tab that its note covers.
-function _applyDroppedMembers() {
-    let changed = false;
-    for (const n of _droppedMemberNotes()) if (_stripMemberId(n.id, n)) changed = true;
-    return changed;
-}
-
-// _pruneDroppedMemberNotes: forgets the notes nothing names any more (no entry
-// of `entries`) that have been kept a while.
-function _pruneDroppedMemberNotes(notes, entries) {
-    const named = new Set();
-    for (const e of entries.values()) for (const id of _payloadMemberIds(e && e.payload)) named.add(id);
-    const now = Date.now();
-    const kept = notes.filter((n) => named.has(n.id) || now - (Number(n.at) || 0) < DROPPED_MEMBER_NOTE_KEEP_MS);
-    if (kept.length !== notes.length) _writeDroppedMemberNotes(kept);
-}
-
-// _announceMemberDropped: the `team-member-dropped` event for the member add
-// `d`, so the editors take the member that never was off their lists.
-function _announceMemberDropped(d, id) {
-    const teamId = (String(d.url || '').match(/\/teams\/([^/]+)\/members$/) || [])[1] || '';
-    _announceDroppedMember({ competitionId: d.compID || '', teamId: decodeURIComponent(teamId), id });
-}
-
-// _announceDroppedMember: the event for a dropped-member note's id.
+// _announceDroppedMember: the `team-member-dropped` event, once per id per
+// tab, whether this tab proved the member never was or heard it from another,
+// so the editors take the member off their lists and the id off their
+// positions and picks (`mergeMembers` itself never removes a member).
 function _announceDroppedMember({ competitionId, teamId, id }) {
     if (!id || _announcedDropped.has(id)) return;
     _announcedDropped.add(id);
@@ -4180,56 +4123,15 @@ function _announceDroppedMember({ competitionId, teamId, id }) {
     }
 }
 
-// _announceNewDroppedNotes: another tab proved a member never was and left a
-// note (the stored notes went from `oldRaw` to `newRaw`): this tab's editors
-// are told too. That tab may have proved it only after the add had left
-// storage (a read after a discard, K1), when nothing here said so.
-function _announceNewDroppedNotes(oldRaw, newRaw) {
-    const parse = (raw) => {
-        try {
-            const v = JSON.parse(raw || '[]');
-            return Array.isArray(v) ? v.filter((n) => n && typeof n.id === 'string' && n.id) : [];
-        } catch (_e) {
-            return [];
-        }
-    };
-    const before = new Set(parse(oldRaw).map((n) => n.id));
-    for (const n of parse(newRaw)) if (!before.has(n.id)) _announceDroppedMember(n);
-}
-
-// The member-id fields of a score write's bout row. A function, so it is
-// there whenever an enqueue asks, however early in the module's evaluation.
-function _subResultMemberFields() { return ['sideAMemberId', 'sideBMemberId', 'winnerMemberId']; }
-
-// _payloadMemberIds: every member id a queued write's payload names: a lineup
-// save's positions, a score write's bout rows.
-function _payloadMemberIds(payload) {
-    const ids = new Set();
-    if (!payload || typeof payload !== 'object') return ids;
-    if (payload.memberIds && typeof payload.memberIds === 'object') {
-        for (const v of Object.values(payload.memberIds)) if (typeof v === 'string' && v) ids.add(v);
-    }
-    // A tap's payload is its event: a fighter or representative pick names
-    // the member on `memberId` (makeEvent; stage 3 review 5, H4).
-    if (typeof payload.memberId === 'string' && payload.memberId) ids.add(payload.memberId);
-    if (Array.isArray(payload.subResults)) {
-        for (const row of payload.subResults) {
-            if (!row || typeof row !== 'object') continue;
-            for (const field of _subResultMemberFields()) {
-                if (typeof row[field] === 'string' && row[field]) ids.add(row[field]);
-            }
-        }
-    }
-    return ids;
-}
-
-// _followMintedMembers: a write naming a member id this device minted for an
-// add still queued (not yet seen landing) follows that team's last member
-// write (`after`), so the member exists when the write reaches the server
-// (stage 3 review 4, G1). The ONE place for every door: a lineup save, a score
-// write's representative pick or a numbered row's fighter alike, and the one
-// place a match's lineup save follows its team's member writes at all (K4).
-// A write on the team's own base already goes after it, in strict order.
+// _followMintedMembers: a write naming a member id whose add is still queued
+// or out (the owner's record, minted_members.jsx) follows that team's last
+// member write (`after`), so the member exists when the write reaches the
+// server (stage 3 review 4, G1), and a write waiting on an add the server
+// keeps refusing is held with it (F6). The ONE place for every door: a lineup
+// save, a score write's representative pick or a numbered row's fighter, a
+// tap alike, and the one place a match's lineup save follows its team's
+// member writes at all (K4). A write on the team's own base already goes
+// after it, in strict order. What the add's end proves is the owner's gate.
 function _followMintedMembers(base, descriptor) {
     // A match's lineup save follows every member write of its team, a rename
     // or a cleared name too, not only an add (stage 3 review 7, K4): it may
@@ -4241,11 +4143,10 @@ function _followMintedMembers(base, descriptor) {
             _addAfter(descriptor, _lastMemberEntryKey(descriptor.compID, teamId));
         }
     }
-    const ids = _payloadMemberIds(descriptor && descriptor.payload);
-    if (ids.size === 0) return;
-    for (const [key, e] of _writeQueue) {
-        if (e === descriptor || !ids.has(_memberAddId(e))) continue;
-        const addBase = _baseOf(key);
+    for (const id of mintedIdsNamed(descriptor)) {
+        const r = _minted.recordOf(id);
+        if (!r || (r.s !== 'queued' && r.s !== 'out')) continue;
+        const addBase = _membersBase(r.c, r.t);
         if (addBase === base) continue;
         _addAfter(descriptor, _lastMemberEntryKeyOfBase(addBase));
     }
@@ -5226,10 +5127,8 @@ const API = {
             throw new Error(err.error || "Failed to load team members");
         }
         const data = await res.json();
-        // A member the server lists exists: no dropped-member note naming
-        // them stands (K1).
-        _forgetListedDroppedMembers(data.teamMembers, compID);
-        return data.teamMembers || {};
+        // A member the server lists exists, whatever was known of them.
+        return _withListedMembersForgotten(data.teamMembers, compID) || {};
     },
     // The server gives the new member its display index (operator ruling:
     // assigned automatically as members are added); clearTeamMember below is
@@ -6040,8 +5939,10 @@ const API = {
         try { localStorage.removeItem(QUEUE_STORAGE_KEY); } catch (_e) { /* ignore */ }
         // An older build's queue carries the same revoked password (F4).
         try { localStorage.removeItem(LEGACY_QUEUE_STORAGE_KEY); } catch (_e) { /* ignore */ }
-        // The dropped-member notes go with the queue they belong to (J5).
-        try { localStorage.removeItem(DROPPED_MEMBERS_KEY); } catch (_e) { /* ignore */ }
+        // What is known of the minted members goes with the queue it is for.
+        _minted.clear();
+        _mintedReadPw.clear();
+        if (_mintedTimer !== null) { clearTimeout(_mintedTimer); _mintedTimer = null; }
         if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
         _flushAttempt = 0;
         _offlineFlag = false;

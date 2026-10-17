@@ -398,23 +398,29 @@ describe('a tap naming a member this device minted follows its add (H4)', () => 
 
 describe('a refused add another tab sent takes its id off this tab too (H3)', () => {
     // Both tabs hold the add and the score write naming the member. The other
-    // tab sent the add, the server refused it, and that tab took the id off
-    // its copy of the score write and stored it: this tab follows.
+    // tab sent the add and wrote what came of it to the minted-member records
+    // (minted_members.jsx) first, then the queue without the add: this tab
+    // follows the records, whichever copies of the writes it holds.
+    const MINTED_KEY = 'bc_minted_members_v1';
+    const otherTabWrites = (key, raw) => {
+        const oldValue = key in _lsStore ? _lsStore[key] : null;
+        if (raw === null) delete _lsStore[key]; else _lsStore[key] = raw;
+        window.dispatchEvent(Object.assign(new Event('storage'), { key, oldValue, newValue: raw }));
+    };
     it('strips its own copy and tells its editors', async () => {
         const member = await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw');
         const res = await API.recordScore('c1', 'm1', scoreWithRepPick(member.id), 'pw', MATCH);
         res.settled.catch(() => {});
         await flushMicrotasks();
-        const oldRaw = _lsStore.bc_write_queue_v2;
-        const next = JSON.parse(oldRaw).filter(([, d]) => d.kind !== 'member');
-        for (const [, d] of next) for (const row of d.payload.subResults || []) if (row.sideAMemberId === member.id) row.sideAMemberId = '';
-        const newRaw = JSON.stringify(next);
-        _lsStore.bc_write_queue_v2 = newRaw;
         const dropped = [];
         const onDrop = (e) => dropped.push(e.detail);
         window.addEventListener('team-member-dropped', onDrop);
         try {
-            window.dispatchEvent(Object.assign(new Event('storage'), { key: 'bc_write_queue_v2', oldValue: oldRaw, newValue: newRaw }));
+            // Refused there: the record says the member never was ...
+            otherTabWrites(MINTED_KEY, JSON.stringify({ [member.id]: { c: 'c1', t: 't1', s: 'dropped', at: Date.now() } }));
+            // ... and the queue no longer holds the add (that tab's copy of
+            // the score write left as it was).
+            otherTabWrites('bc_write_queue_v2', JSON.stringify(JSON.parse(_lsStore.bc_write_queue_v2).filter(([, d]) => d.kind !== 'member')));
             await flushMicrotasks();
         } finally {
             window.removeEventListener('team-member-dropped', onDrop);
@@ -434,14 +440,13 @@ describe('a refused add another tab sent takes its id off this tab too (H3)', ()
         const res = await API.recordScore('c1', 'm1', scoreWithRepPick(member.id), 'pw', MATCH);
         res.settled.catch(() => {});
         await flushMicrotasks();
-        const oldRaw = _lsStore.bc_write_queue_v2;
-        const newRaw = JSON.stringify(JSON.parse(oldRaw).filter(([, d]) => d.kind !== 'member'));
-        _lsStore.bc_write_queue_v2 = newRaw;
         const dropped = [];
         const onDrop = (e) => dropped.push(e.detail);
         window.addEventListener('team-member-dropped', onDrop);
         try {
-            window.dispatchEvent(Object.assign(new Event('storage'), { key: 'bc_write_queue_v2', oldValue: oldRaw, newValue: newRaw }));
+            // Kept there: the record is forgotten, then the add leaves the queue.
+            otherTabWrites(MINTED_KEY, null);
+            otherTabWrites('bc_write_queue_v2', JSON.stringify(JSON.parse(_lsStore.bc_write_queue_v2).filter(([, d]) => d.kind !== 'member')));
             await flushMicrotasks();
         } finally {
             window.removeEventListener('team-member-dropped', onDrop);
@@ -449,6 +454,7 @@ describe('a refused add another tab sent takes its id off this tab too (H3)', ()
         expect(dropped).toEqual([]);
         const sent = server(() => answer(200, { ...MATCH }));
         await reconnect();
+        expect(sent.some((r) => r.method === 'GET'), 'nothing to ask: the member was kept').toBe(false);
         expect(repRow(sent.find((r) => r.method === 'PUT')).sideAMemberId).toBe(member.id);
     });
 });
@@ -680,7 +686,10 @@ describe('a regenerated or discarded draw forgets the match labels learned for i
 });
 
 describe('a refused add takes its id off every tab\'s copies, whichever copies the tab held (J5)', () => {
-    const DROPPED_KEY = 'bc_dropped_member_ids_v1';
+    // What is known of a minted member is kept in browser storage beside the
+    // queue (minted_members.jsx), so every tab gates and strips the same way.
+    const MINTED_KEY = 'bc_minted_members_v1';
+    const records = () => JSON.parse(_lsStore[MINTED_KEY] || '{}');
     const storageEvent = (key, oldValue, newValue) => window.dispatchEvent(Object.assign(new Event('storage'), { key, oldValue, newValue }));
 
     it('this tab refuses the add before it adopts the other tab\'s write naming the id', async () => {
@@ -713,22 +722,23 @@ describe('a refused add takes its id off every tab\'s copies, whichever copies t
         warned.mockRestore();
     });
 
-    it('this tab holds the write and hears of the refusal as the stored list and a dropped-ids note', async () => {
+    it('this tab holds the write and hears of the refusal as the stored records, then the stored list', async () => {
         const member = await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw');
         const res = await API.recordScore('c1', 'm1', scoreWithRepPick(member.id), 'pw', MATCH);
         res.settled.catch(() => {});
         await flushMicrotasks();
         const oldRaw = _lsStore.bc_write_queue_v2;
+        const oldRecords = _lsStore[MINTED_KEY];
         // The other tab refused the add before it held this write: the stored copy is unstripped.
-        const note = JSON.stringify([{ id: member.id, at: Date.now(), competitionId: 'c1', teamId: 't1' }]);
-        _lsStore[DROPPED_KEY] = note;
+        const recs = JSON.stringify({ [member.id]: { c: 'c1', t: 't1', s: 'dropped', at: Date.now() } });
+        _lsStore[MINTED_KEY] = recs;
         const newRaw = JSON.stringify(JSON.parse(oldRaw).filter(([, d]) => d.kind !== 'member'));
         _lsStore.bc_write_queue_v2 = newRaw;
         const dropped = [];
         const onDrop = (e) => dropped.push(e.detail);
         window.addEventListener('team-member-dropped', onDrop);
         try {
-            storageEvent(DROPPED_KEY, null, note);
+            storageEvent(MINTED_KEY, oldRecords, recs);
             storageEvent('bc_write_queue_v2', oldRaw, newRaw);
             await flushMicrotasks();
         } finally {
@@ -740,18 +750,18 @@ describe('a refused add takes its id off every tab\'s copies, whichever copies t
         expect(repRow(sent.find((r) => r.method === 'PUT')).sideAMemberId || '').toBe('');
     });
 
-    it('a note is pruned once nothing names its id and it has been kept a while', async () => {
+    it('a record is pruned once nothing names its id and it has been kept a while', async () => {
         const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const member = await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw', { onRefusal: () => true });
         server(() => answer(409, { error: 'team_member_limit', message: 'No room.' }));
         await reconnect();
-        expect(JSON.parse(_lsStore[DROPPED_KEY] || '[]').map((n) => n.id), 'the refusal leaves a note').toEqual([member.id]);
+        expect(records()[member.id], 'the refusal is recorded').toMatchObject({ s: 'dropped', c: 'c1', t: 't1' });
         await tick(11 * 60 * 1000);
         server((req) => answer(201, { id: req.body.id, name: req.body.name, index: 3, modifiedAt: 9 }));
         const late = await API.addTeamMember('c1', 't1', 'Aya Ito', 'pw');
         late.settled.catch(() => {});
         await flushMicrotasks();
-        expect(_lsStore[DROPPED_KEY], 'old and unnamed: gone').toBeUndefined();
+        expect(records()[member.id], 'old and unnamed: gone').toBeUndefined();
         warned.mockRestore();
     });
 });
@@ -911,7 +921,8 @@ describe('a settled tap is never sent again because another tab wrote the queue 
 describe('a discarded add that went out is checked against the team\'s members (K1)', () => {
     const EVENTS = '/api/competitions/c1/matches/m1/score-events';
     const TEAM_MEMBERS = '/api/competitions/c1/team-members';
-    const DROPPED_KEY = 'bc_dropped_member_ids_v1';
+    const MINTED_KEY = 'bc_minted_members_v1';
+    const records = () => JSON.parse(_lsStore[MINTED_KEY] || '{}');
     const pick = (memberId) => ({ kind: 'rep.pick', pos: -1, side: 'a', memberId });
     let warned = null;
     beforeEach(() => { warned = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
@@ -940,12 +951,12 @@ describe('a discarded add that went out is checked against the team\'s members (
         return { member, sent, add, listed };
     }
 
-    it('the server holds the member: a pick made later still names them, and no note is left', async () => {
+    it('the server holds the member: a pick made later still names them, and nothing is left recorded', async () => {
         const { member, sent, add } = await discardAfterFailures((m) => ({ t1: [{ id: m.id, name: 'Ren Abe' }] }));
         expect(API.discardHeldWrite(add.key)).toBeTruthy();
         await tick(10);
         expect(sent.some((r) => r.url === TEAM_MEMBERS), 'the team\'s members are read again').toBe(true);
-        expect(_lsStore[DROPPED_KEY], 'nothing proves the member never was').toBeUndefined();
+        expect(records()[member.id], 'the member was kept: nothing more to know').toBeUndefined();
         await tick(60 * 1000);
         API.recordTap('c1', 'm1', pick(member.id), 'pw', MATCH);
         await tick(2000);
@@ -968,10 +979,11 @@ describe('a discarded add that went out is checked against the team\'s members (
         const post = sent.find((r) => r.url === EVENTS);
         expect(post, 'the pick goes once the read is over').toBeTruthy();
         expect(post.body.events[0].memberId, 'with its id: nothing proved the member absent').toBe(member.id);
-        expect(_lsStore[DROPPED_KEY]).toBeUndefined();
+        expect(records()[member.id], 'still unknown, its read failed').toMatchObject({ s: 'unknown' });
+        expect(records()[member.id].rf).toBeGreaterThan(0);
     });
 
-    it('the read answers without the member: the waiting pick goes without the id, and a note is left', async () => {
+    it('the read answers without the member: the waiting pick goes without the id, and the member is recorded as never was', async () => {
         const { member, sent, add } = await discardAfterFailures({ t1: [{ id: 'someone-else', name: 'Sato' }] });
         API.recordTap('c1', 'm1', pick(member.id), 'pw', MATCH);
         await flushMicrotasks();
@@ -981,7 +993,7 @@ describe('a discarded add that went out is checked against the team\'s members (
         const post = sent.find((r) => r.url === EVENTS);
         expect(post, 'the pick goes once the read has answered').toBeTruthy();
         expect(post.body.events[0].memberId, 'the pick that named nobody is cleared').toBeUndefined();
-        expect(JSON.parse(_lsStore[DROPPED_KEY] || '[]').map((n) => n.id)).toEqual([member.id]);
+        expect(records()[member.id]).toMatchObject({ s: 'dropped', c: 'c1', t: 't1' });
     });
 
     it('an add refused member_id_conflict is checked too: the id is held, by this team or another', async () => {
@@ -998,41 +1010,30 @@ describe('a discarded add that went out is checked against the team\'s members (
         await reconnect();
         const post = sent.find((r) => r.url === EVENTS);
         expect(post.body.events[0].memberId, 'this team holds the id: the pick keeps it').toBe(member.id);
-        expect(_lsStore[DROPPED_KEY]).toBeUndefined();
+        expect(records()[member.id]).toBeUndefined();
     });
 
-    it('a note is applied only to writes queued before it', async () => {
-        const res = await API.recordScore('c1', 'm1', scoreWithRepPick('mem-9'), 'pw', MATCH);
-        res.settled.catch(() => {});
-        await flushMicrotasks();
-        _lsStore[DROPPED_KEY] = JSON.stringify([{ id: 'mem-9', at: Date.now() - 5000, competitionId: 'c1', teamId: 't1' }]);
-        const sent = server(() => answer(200, { ...MATCH }));
-        await reconnect();
-        expect(repRow(sent.find((r) => r.method === 'PUT')).sideAMemberId, 'made after the proof: the server judges it').toBe('mem-9');
-    });
-
-    it('a member list that carries a noted id forgets the note', async () => {
-        _lsStore[DROPPED_KEY] = JSON.stringify([
-            { id: 'mem-9', at: Date.now(), competitionId: 'c1', teamId: 't1' },
-            { id: 'mem-8', at: Date.now(), competitionId: 'c1', teamId: 't1' },
-        ]);
+    it('a member list that holds an id forgets what was known of it', async () => {
+        _lsStore[MINTED_KEY] = JSON.stringify({
+            'mem-9': { c: 'c1', t: 't1', s: 'dropped', at: Date.now() },
+            'mem-8': { c: 'c1', t: 't1', s: 'dropped', at: Date.now() },
+        });
         global.fetch = vi.fn(() => answer(200, { teamMembers: { t1: [{ id: 'mem-9', name: 'Ren Abe' }] } }));
         await API.fetchSquads('c1', 'pw');
-        expect(JSON.parse(_lsStore[DROPPED_KEY]).map((n) => n.id)).toEqual(['mem-8']);
+        expect(Object.keys(records())).toEqual(['mem-8']);
     });
 
-    // Stage 3 review 8, L4: a note is forgotten only by a list of its own
+    // Stage 3 review 8, L4: a record is forgotten only by a list of its own
     // competition and team.
-    it('a member list forgets only the notes of its own competition and team (L4)', async () => {
-        _lsStore[DROPPED_KEY] = JSON.stringify([
-            { id: 'mem-9', at: Date.now(), competitionId: 'c1', teamId: 't1' },
-            { id: 'mem-6', at: Date.now(), competitionId: 'c2', teamId: 't1' },
-            { id: 'mem-7', at: Date.now(), competitionId: 'c1', teamId: 't2' },
-        ]);
+    it('a member list forgets only the records of its own competition and team (L4)', async () => {
+        _lsStore[MINTED_KEY] = JSON.stringify({
+            'mem-9': { c: 'c1', t: 't1', s: 'dropped', at: Date.now() },
+            'mem-6': { c: 'c2', t: 't1', s: 'dropped', at: Date.now() },
+            'mem-7': { c: 'c1', t: 't2', s: 'dropped', at: Date.now() },
+        });
         global.fetch = vi.fn(() => answer(200, { teamMembers: { t1: [{ id: 'mem-9' }, { id: 'mem-6' }, { id: 'mem-7' }] } }));
         await API.fetchSquads('c1', 'pw');
-        expect(JSON.parse(_lsStore[DROPPED_KEY] || '[]').map((n) => n.id), 'another competition\'s and another team\'s notes stand')
-            .toEqual(['mem-6', 'mem-7']);
+        expect(Object.keys(records()), 'another competition\'s and another team\'s records stand').toEqual(['mem-6', 'mem-7']);
     });
 });
 
@@ -1041,7 +1042,8 @@ describe('a discarded add that went out is checked against the team\'s members (
 describe('an add discarded while its request is out is judged once the request ends (L1)', () => {
     const EVENTS = '/api/competitions/c1/matches/m1/score-events';
     const TEAM_MEMBERS = '/api/competitions/c1/team-members';
-    const DROPPED_KEY = 'bc_dropped_member_ids_v1';
+    const MINTED_KEY = 'bc_minted_members_v1';
+    const records = () => JSON.parse(_lsStore[MINTED_KEY] || '{}');
     const pick = (memberId) => ({ kind: 'rep.pick', pos: -1, side: 'a', memberId });
     let warned = null;
     let dropped = [];
@@ -1085,10 +1087,10 @@ describe('an add discarded while its request is out is judged once the request e
         return { member, sent, release: (status, body) => state.release(answer(status, body)) };
     }
 
-    it('nothing is read or noted while the add is out; a 2xx then leaves the pick its id', async () => {
+    it('nothing is read or proved while the add is out; a 2xx then leaves the pick its id', async () => {
         const { member, sent, release } = await discardWhileOut();
         expect(sent.some((r) => r.url === TEAM_MEMBERS), 'no members read while the add is out').toBe(false);
-        expect(_lsStore[DROPPED_KEY], 'no note while the add is out').toBeUndefined();
+        expect(records()[member.id], 'the add is out, every tab reading it so').toMatchObject({ s: 'out' });
         release(201, { id: member.id, name: 'Ren Abe', modifiedAt: 5 });
         await tick(10);
         await reconnect();
@@ -1096,16 +1098,16 @@ describe('an add discarded while its request is out is judged once the request e
         const post = sent.find((r) => r.url === EVENTS);
         expect(post, 'the pick goes').toBeTruthy();
         expect(post.body.events[0].memberId, 'naming the member the server kept').toBe(member.id);
-        expect(_lsStore[DROPPED_KEY]).toBeUndefined();
+        expect(records()[member.id]).toBeUndefined();
         expect(dropped).toEqual([]);
     });
 
-    it('a late 2xx forgets a note naming the member', async () => {
+    it('a late 2xx is the member kept, whatever another tab recorded meanwhile', async () => {
         const { member, release } = await discardWhileOut();
-        _lsStore[DROPPED_KEY] = JSON.stringify([{ id: member.id, at: Date.now(), competitionId: 'c1', teamId: 't1' }]);
+        _lsStore[MINTED_KEY] = JSON.stringify({ [member.id]: { c: 'c1', t: 't1', s: 'unknown', at: Date.now(), w: 1, ra: 0 } });
         release(201, { id: member.id, name: 'Ren Abe', modifiedAt: 5 });
         await tick(10);
-        expect(JSON.parse(_lsStore[DROPPED_KEY] || '[]'), 'the server holds the member').toEqual([]);
+        expect(records()[member.id], 'the server holds the member').toBeUndefined();
     });
 
     it('a 5xx after the discard: the members are read then, and the pick waits for that read', async () => {
@@ -1129,7 +1131,7 @@ describe('a discarded add is checked through the door its caller may read (L3)',
     const EVENTS = '/api/competitions/c1/matches/m1/score-events';
     const TEAM_MEMBERS = '/api/competitions/c1/team-members';
     const VIEWER = '/api/viewer/competitions/c1';
-    const DROPPED_KEY = 'bc_dropped_member_ids_v1';
+    const MINTED_KEY = 'bc_minted_members_v1';
     const pick = (memberId) => ({ kind: 'rep.pick', pos: -1, side: 'a', memberId });
     let warned = null;
     beforeEach(() => { warned = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
@@ -1177,7 +1179,7 @@ describe('a discarded add is checked through the door its caller may read (L3)',
         const reads = [];
         const { member, posts } = await discardAfterFailures('pw', reads, () => answer(401, { error: 'unauthorized' }));
         expect(reads).toEqual([[TEAM_MEMBERS, 'pw']]);
-        expect(_lsStore[DROPPED_KEY], 'a refused read proves nothing').toBeUndefined();
+        expect(JSON.parse(_lsStore[MINTED_KEY] || '{}')[member.id], 'a refused read proves nothing').toMatchObject({ s: 'unknown' });
         expect(posts[0].events[0].memberId, 'the pick goes as it was made').toBe(member.id);
     });
 });

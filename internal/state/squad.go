@@ -369,7 +369,7 @@ func (s *Store) pruneOrphanedTeamMembersLocked(compID string, comp *Competition,
 	return s.saveSquadsLocked(compID, squads, s.directWrite)
 }
 
-// requireTeamParticipantLocked refuses a teamID no participant in this
+// teamParticipantsLocked refuses a teamID no participant in this
 // competition carries. Caller MUST hold the per-competition lock.
 //
 // The check belongs HERE rather than in the handler above it because
@@ -386,15 +386,9 @@ func (s *Store) pruneOrphanedTeamMembersLocked(compID string, comp *Competition,
 // because the seed merge is irrelevant to an id comparison and would read a
 // second file. The competition record it read is returned, as
 // withZekkenNameLocked returns it, so a caller judging its status reads
-// config.md once.
-func (s *Store) requireTeamParticipantLocked(compID, teamID string) (*Competition, error) {
-	comp, _, err := s.teamParticipantsLocked(compID, teamID)
-	return comp, err
-}
-
-// teamParticipantsLocked is requireTeamParticipantLocked that also hands back
-// the competition's participants it read, for a caller that judges an id
-// against them (addTeamMember: a member may not take a participant's id).
+// config.md once, and so are the participants it read, for a caller that
+// judges an id against them (addTeamMember: a member may not take a
+// participant's id, stage 3 review 3, F7).
 func (s *Store) teamParticipantsLocked(compID, teamID string) (*Competition, []domain.Player, error) {
 	withZekken, comp, err := s.withZekkenNameLocked(compID)
 	if err != nil {
@@ -474,7 +468,7 @@ func squadDuplicateNameCheck(candidateName string, otherNames []string) error {
 // team holds could never be reached or deleted through the app, so a typo
 // would write permanent junk. A lineup keyed on a bogus id is recoverable
 // by overwriting it; a squad member is not, which is why the two diverge.
-// See requireTeamParticipantLocked below.
+// See teamParticipantsLocked below.
 func (s *Store) AddTeamMember(compID, teamID, name string) (domain.TeamMember, error) {
 	member, _, err := s.addTeamMember(compID, teamID, "", name, 0, false)
 	return member, err
@@ -791,7 +785,7 @@ func (s *Store) renameMemberInLineupsLocked(compID, memberID, name string, write
 // a clear rather than refusing on a technicality.
 //
 // Loads the competition through loadCompetitionLocked (competition.go), the
-// no-lock reader, for the same reason requireTeamParticipantLocked above
+// no-lock reader, for the same reason teamParticipantsLocked above
 // reads the roster through loadParticipantsNoLock: this function already
 // holds the per-comp lock, and LoadCompetition would re-acquire it and
 // deadlock the non-reentrant mutex.

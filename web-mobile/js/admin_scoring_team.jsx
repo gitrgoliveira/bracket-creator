@@ -2006,8 +2006,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // saved by name alone for the sheet's whole life. Its list, if it comes later,
     // is still taken.
     const read = async (opening) => {
-      const reading = window.API.fetchSquads(m.compId, password);
       try {
+        // Inside the try: a host with no members door at all fails the read here.
+        const reading = Promise.resolve(window.API.fetchSquads(m.compId, password));
         const squads = await (opening ? withinDeadline(reading, FETCH_TIMEOUT_MS) : reading);
         if (squads !== TIMED_OUT) {
           take(squads);

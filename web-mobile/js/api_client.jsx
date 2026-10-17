@@ -2598,11 +2598,18 @@ function _onStoredQueueChanged(oldRaw, newRaw) {
     }
     for (const [k, d] of after || []) {
         const held = _writeQueue.get(k);
-        if (held && !_enqueuedAfter(d, held.enqueuedAt)) continue;
+        if (held && !_enqueuedAfter(d, held.enqueuedAt)) {
+            // The same copy, but another tab may have re-seqd the tap
+            // (_reseqUnheldTap, R10): take its seq, or this tab would send the
+            // old one and its next tap could reuse the new one.
+            if (_adoptStoredTapSeq(k, held, d)) changed = true;
+            continue;
+        }
         if (_storedEntryProblem(d)) continue;
         if (d.payload && d.payload.forceDownstreamReopen) d.payload = _withoutDownstreamConfirmation(d.payload);
         _writeQueue.set(k, d);
         _noteOwnStamp(k, d);
+        _noteOwnTapSeq(k, d);
         _adopted.add(d);
         changed = adopted = true;
     }
@@ -2613,6 +2620,29 @@ function _onStoredQueueChanged(oldRaw, newRaw) {
         if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
         _flushQueue();
     }
+}
+
+// _noteOwnTapSeq: a tap of THIS tab's session taken up from storage moves the
+// tab's seq counter for its match past it, so the next tap never reuses the
+// seq (R10: another tab may have re-seqd it, _reseqUnheldTap).
+function _noteOwnTapSeq(key, d) {
+    const p = d && d.kind === 'evt' && d.payload;
+    if (!p || p.session !== _eventSession || !(Number(p.seq) > 0)) return;
+    const base = _baseOf(key);
+    if (Number(p.seq) > (_tapSeq.get(base) || 0)) _tapSeq.set(base, Number(p.seq));
+}
+
+// _adoptStoredTapSeq: the stored copy of a tap this tab holds names a higher
+// seq under the same id: another tab re-seqd it. Taken into this tab's copy
+// (and its seq counter, _noteOwnTapSeq). True when the copy changed.
+function _adoptStoredTapSeq(key, held, stored) {
+    const hp = held && held.kind === 'evt' && held.payload;
+    const sp = stored && stored.kind === 'evt' && stored.payload;
+    if (!hp || !sp || hp.id !== sp.id || !(Number(sp.seq) > Number(hp.seq))) return false;
+    hp.seq = Number(sp.seq);
+    _noteOwnTapSeq(key, held);
+    _publishPendingTaps(_baseOf(key));
+    return true;
 }
 
 // Remove-then-add for the same reason as the online handler below.

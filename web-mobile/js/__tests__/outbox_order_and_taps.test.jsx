@@ -106,6 +106,29 @@ describe('M1: a match\'s own order survives a reload and another tab', () => {
         expect(t.stamp).toBeGreaterThan(ahead);
     });
 
+    // R10 (review 2): another tab flushing this tab's taps re-seqs one the
+    // server did not log (_reseqUnheldTap) and stores it under the same key and
+    // enqueuedAt. This tab takes the new seq into its own copy and moves its
+    // seq counter past it, so its next tap never reuses that seq.
+    it('a re-seq another tab made of this tab\'s tap is adopted, and the next tap goes past it', async () => {
+        await load();
+        API.recordTap('c1', 'm1', tap('M'), 'pw', { id: 'm1' });
+        API.recordTap('c1', 'm1', tap('K'), 'pw', { id: 'm1' });
+        await tick(0);
+        const oldRaw = _lsStore.bc_write_queue;
+        const entries = JSON.parse(oldRaw);
+        expect(entries.map(([, d]) => d.payload.seq)).toEqual([1, 2]);
+        // The other tab: tap 2 landed, tap 1 was refused clock_skew behind it and re-seqd to 3.
+        const [first] = entries;
+        first[1].payload.seq = 3;
+        const newRaw = JSON.stringify([first]);
+        _lsStore.bc_write_queue = newRaw;
+        window.dispatchEvent(new StorageEvent('storage', { key: 'bc_write_queue', oldValue: oldRaw, newValue: newRaw }));
+        expect(API.pendingTaps('c1', 'm1').map((e) => e.seq)).toEqual([3]);
+        const next = API.recordTap('c1', 'm1', tap('D'), 'pw', { id: 'm1' });
+        expect(next.seq).toBe(4);
+    });
+
     it('a tap re-stamped for clock skew is stamped after the match\'s writes that already landed', async () => {
         await load();
         const batches = eventServer({

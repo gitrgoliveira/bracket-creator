@@ -77,9 +77,11 @@ export function createOwnStatus(status, at) {
   const moved = (prev, status) => {
     const p = st.pending;
     // Every own status write moves the match to running.
-    const ownMove = p && p.from === prev && status === 'running';
+    // A write whose move the feed already showed and left is no longer the
+    // one a new move could be (review 5).
+    const ownMove = p && !p.leftTarget && p.from === prev && status === 'running';
     if (status === 'running' && (prev === 'scheduled' || prev === 'completed')) {
-      if (ownMove && (p.landed || p.kind === OWN_REP)) {
+      if (ownMove && p.landed) {
         // The own write, as the feed now shows it.
         st.pending = null;
       } else if (ownMove) {
@@ -99,6 +101,17 @@ export function createOwnStatus(status, at) {
       else if (p && p.landed) st.pending = null;
       reset();
     }
+    // The feed jumped from where the own write began to somewhere it does not
+    // move the match (another device moved the match on before the feed
+    // caught up): a landed write is over, and one still unanswered is left
+    // as above, its draft said if the answer turns it down; either way the
+    // draft takes the server's copy (review 5).
+    const q = st.pending;
+    if (q && prev === q.from && status !== 'running' && status !== prev && !q.leftTarget) {
+      if (q.landed) st.pending = null;
+      else { q.leftTarget = status; q.leftDraft = draftDiffers(); }
+      reset();
+    }
     if (status !== 'scheduled') st.refusal = '';
     if (st.dropped && status !== st.dropped.at) st.dropped = null;
   };
@@ -110,12 +123,23 @@ export function createOwnStatus(status, at) {
       if (status === prev && at === st.feed.at) return;
       st.feed = { status, at };
       if (status !== prev) { moved(prev, status); return; }
-      // The same status at a new stamp. An own Start the server took that the
-      // feed never showed running (the match was sent back before the feed
-      // caught up) is over: the draft it carried is the server's now.
+      // The same status at a new stamp. An own write the server took that the
+      // feed never showed running (the match was sent back, or finished, by
+      // another device before the feed caught up) is over: retired here, so a
+      // later move by another device is never read as this one (review 5),
+      // and the draft takes the server's copy.
       const p = st.pending;
-      if (p && p.landed && p.kind === OWN_START && status === 'scheduled') {
+      if (p && p.landed && status === p.from) {
         st.pending = null;
+        reset();
+      } else if (p && !p.landed && !p.leftTarget && p.kind !== OWN_START && status === p.from) {
+        // A reopen or representative-bout change is out and another device
+        // changed the match it was made over (a correction of the finished
+        // match): the draft takes the server's copy, and is said if the write
+        // is then turned down (an own Start keeps its override until its
+        // answer, which judges the restamp itself).
+        p.leftTarget = status;
+        p.leftDraft = draftDiffers();
         reset();
       }
     },
@@ -157,6 +181,14 @@ export function createOwnStatus(status, at) {
       }
       st.pending = null;
       const now = st.feed.status;
+      if (p.leftTarget) {
+        // Another device moved the match and moved it on again before this
+        // answer: the draft the editor held was taken from the board then
+        // (the reset), and is said now.
+        if (p.leftDraft) st.dropped = { at: now, reset: true };
+        if (p.kind === OWN_START && now === 'scheduled' && msg) st.refusal = msg;
+        return;
+      }
       if (now === p.from) {
         // Nothing moved: the editor shows the server's copy again, with the
         // draft the write carried, and a refused Start says why.
@@ -166,12 +198,6 @@ export function createOwnStatus(status, at) {
       if (p.sawTarget && now === 'running') {
         // The move the feed showed was another device's.
         keepDraft(p.from);
-        return;
-      }
-      if (p.leftTarget && p.leftDraft) {
-        // Another device moved the match and moved it on again before this
-        // answer: its draft was taken from the board then, and is said now.
-        st.dropped = { at: now, reset: true };
       }
     },
 
@@ -180,7 +206,9 @@ export function createOwnStatus(status, at) {
 
     view() {
       const p = st.pending;
-      const overriding = !!(p && p.kind === OWN_START && st.feed.status === 'scheduled' && p.from === 'scheduled');
+      // Never over a feed that moved since the Start was sent (it showed the
+    // match running, someone else's or not yet known): the feed's copy shows.
+    const overriding = !!(p && p.kind === OWN_START && st.feed.status === 'scheduled' && p.from === 'scheduled' && !p.sawTarget);
       const status = st.feed.status;
       return {
         shownStatus: overriding ? 'running' : status,

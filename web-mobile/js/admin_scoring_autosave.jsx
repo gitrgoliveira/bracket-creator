@@ -4,7 +4,7 @@
 
 import { toBackendMatchResult, matchWire } from './api_serializers.jsx';
 import { changedGroups, statedGroupsOf, groupMatches, keptInHistoryNote, GROUP_RESULT } from './match_groups.jsx';
-import { writeDidNotLand } from './write_result.jsx';
+import { writeDidNotLand, writePending, writeWasRefused } from './write_result.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -41,7 +41,7 @@ export function useChangedGroups(match) {
   const finished = !!(match && match.status === "completed");
   // The editor moving to another match starts over from that match.
   if (!stateRef.current || stateRef.current.key !== keyOf(match)) {
-    stateRef.current = { key: keyOf(match), seed: matchWire(match), agreed: {}, last: {}, finished };
+    stateRef.current = { key: keyOf(match), seed: matchWire(match), agreed: {}, last: {}, finished, built: new WeakMap() };
   }
   // A reopen is a write the server makes, not one the editor builds, so no build
   // moves the result the editor agrees with off the finished one. Once the server
@@ -69,8 +69,43 @@ export function useChangedGroups(match) {
       if (groupMatches(g, next, current, next)) st.agreed[g] = current;
     }
     const changed = changedGroups(next, (g) => st.agreed[g] || st.seed, (g) => st.last[g]);
-    for (const g of stated) st.last[g] = next;
-    return { ...patch, changed };
+    const prior = {};
+    for (const g of stated) { prior[g] = st.last[g]; st.last[g] = next; }
+    const out = { ...patch, changed };
+    st.built.set(out, { next, prior });
+    return out;
+  };
+  // claim.forget(patch): the write `patch` was built for did not land (refused,
+  // held or discarded), so what it stated is not the value the editor last
+  // had for those groups: each one it still holds goes back to what it was,
+  // and the next build of the same value names it again (stage 5 review 5: a
+  // retried Start named only `result`, and the server started the match
+  // without the draft's points). A patch claim did not build is ignored.
+  claim.forget = (patch) => {
+    const st = stateRef.current;
+    const rec = patch && st.built.get(patch);
+    if (!rec) return;
+    st.built.delete(patch);
+    for (const [g, prev] of Object.entries(rec.prior)) {
+      if (st.last[g] !== rec.next) continue;
+      if (prev === undefined) delete st.last[g];
+      else st.last[g] = prev;
+    }
+  };
+  // claim.watch(res, patch): forgets `patch` when the write's answer says it
+  // did not land, read as it comes (a direct answer at once, the outbox's
+  // through `settled`, a callback, never a wait). Answers `res`.
+  claim.watch = (res, patch) => {
+    const notLanded = () => claim.forget(patch);
+    Promise.resolve(res).then((r) => {
+      if (!r) { notLanded(); return; }
+      if (writePending(r)) {
+        r.settled.then((body) => { if (!body || body.discarded === true || writeWasRefused(body)) notLanded(); }, notLanded);
+        return;
+      }
+      if (writeWasRefused(r)) notLanded();
+    }, notLanded);
+    return res;
   };
   // claim.agree(group): the editor ADOPTED the server's value for `group`, so it
   // agrees with the match as it now stands and that is the value it last had for the

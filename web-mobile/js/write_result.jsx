@@ -1023,7 +1023,7 @@ export function downstreamKnockoutReopenedNotice(matches) {
 // caller can pick DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED instead of the generic
 // error copy.
 export async function attemptScoreWrite({
-    recordScore, confirmDialog, compId, matchId, result, password, match, onRefusal, onDownstreamReopened,
+    recordScore, confirmDialog, compId, matchId, result, password, match, onRefusal, onDownstreamReopened, onForced,
 }) {
     // bc-evts: an outbox door answers pending at once and its refusal arrives
     // later, through `settled`. The downstream-knockout-played 409 is CLAIMED
@@ -1054,6 +1054,9 @@ export async function attemptScoreWrite({
             claimOther(err);
             return;
         }
+        // The forced write is the one the caller's write became: its answer is
+        // the caller's to read (a reopen's own-status token, review 5).
+        if (typeof onForced === 'function') onForced(forced);
         // Say what the confirmation DID, taken from the SERVER: the forced
         // write's answer carries reopenedMatches, what it actually reopened.
         if (writePending(forced)) {

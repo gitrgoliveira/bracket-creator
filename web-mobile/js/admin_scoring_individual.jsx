@@ -152,7 +152,7 @@ function startedScore(patch) {
   };
 }
 
-export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, onAfterDecision, started = false, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true }) {
+export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, onAfterDecision, started = false, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true }) {
   // bc-strt: a match whose start has landed is RUNNING, even while the host's
   // list still says scheduled (it refetches a moment after each save). The
   // editors send a point only for a match they see as running, so a point
@@ -176,7 +176,15 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   );
   // bc-mrgc: names the groups each write changes, against the match this
   // editor renders from (see useChangedGroups).
-  const claimChanged = useChangedGroups(m);
+  // Against the FEED's copy, never the own Start's override: an adopt there
+  // would agree with the draft the Start carried, and a retry after it was
+  // turned down would name nothing of it (stage 5 review 5).
+  const claimChanged = useChangedGroups(hostMatch);
+  // Every write built through claim is watched: one that does not land
+  // (refused, held or discarded) is forgotten, so the next build of the same
+  // value names its groups again (stage 5 review 5).
+  const onSubmit = onSubmitProp && ((patch) => claimChanged.watch(onSubmitProp(patch), patch));
+  const onSubmitAndNext = onSubmitAndNextProp && ((patch) => claimChanged.watch(onSubmitAndNextProp(patch), patch));
   const isComplete = m.status === "completed";
   // Canonical team check (matches admin_pools.jsx and the lineup panel):
   // compKind OR a positive teamSize. A team competition created with only
@@ -1182,11 +1190,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // editor is shown from the first render with no kendo-editor flash.
   // The team check is skipped for engi (engi is never a team).
   if (isEngi) {
-    return <EngiScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} variant={variant} canClose={canClose} password={password} selfReport={selfReport} />;
+    return <EngiScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmitProp} onSubmitAndNext={onSubmitAndNextProp} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} variant={variant} canClose={canClose} password={password} selfReport={selfReport} />;
   }
   // Team routing: forward to TeamScoreEditorModal.
   if (isTeam) {
-    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmit} onSubmitAndNext={onSubmitAndNext} onAfterDecision={onAfterDecision}  prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} teamMembers={teamMembers} variant={variant} canClose={canClose} />;
+    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmitProp} onSubmitAndNext={onSubmitAndNextProp} onAfterDecision={onAfterDecision}  prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} teamMembers={teamMembers} variant={variant} canClose={canClose} />;
   }
 
   // a11y: label the dialog with the match/court context so screen readers
@@ -1647,7 +1655,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
             ) : <span />}
 
             <div className="score-nav__actions">
-              {m.status === "scheduled" && !isBarredMatch(m) && (
+              {m.status === "scheduled" && own.startOffered && !isBarredMatch(m) && (
                 <button className="btn btn--sm" onClick={async () => {
                   // F5: this submits status:"running", the one shape
                   // _notifyScoreSuperseded (api_client.jsx) deliberately stays

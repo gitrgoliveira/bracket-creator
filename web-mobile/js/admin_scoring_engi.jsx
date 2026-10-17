@@ -104,11 +104,16 @@ function deriveWinner(flagsA, flagsB) {
 // EngiScoreEditorModal: full engi flag-counter editor.
 // Props mirror the individual ScoreEditorModal surface so the dispatch in
 // admin_scoring_individual.jsx can forward the same prop bag.
-export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, prevMatch, nextMatch, onPrev, onNext, variant = "modal", canClose = true, password, selfReport }) {
+export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, prevMatch, nextMatch, onPrev, onNext, variant = "modal", canClose = true, password, selfReport }) {
   const m = match;
   // bc-mrgc: names the groups each write changes, against the match this
   // editor renders from (see useChangedGroups).
   const claimChanged = useChangedGroups(m);
+  // Every write built through claim is watched: one that does not land
+  // (refused, held or discarded) is forgotten, so the next build of the same
+  // value names its groups again (stage 5 review 5).
+  const onSubmit = onSubmitProp && ((patch) => claimChanged.watch(onSubmitProp(patch), patch));
+  const onSubmitAndNext = onSubmitAndNextProp && ((patch) => claimChanged.watch(onSubmitAndNextProp(patch), patch));
   const isComplete = m.status === "completed";
   const initialFlagsA = m.flagsA || 0;
   const initialFlagsB = m.flagsB || 0;

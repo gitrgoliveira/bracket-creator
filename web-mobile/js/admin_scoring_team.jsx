@@ -1175,7 +1175,7 @@ function useMatchLineups(compId, matchId) {
   };
 }
 
-export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true }) {
+export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true }) {
   // mp-gmcg: a successful [× Remove this bout] shrinks the SERVER bout log, and
   // the parent may not have caught up when this render runs. matchOverride
   // shadows the prop so the removed bout disappears at once, and is cleared
@@ -1258,11 +1258,20 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // stage 5 review 4), with an own Start shown running, with the bouts it
   // carried, until the feed holds it or the server turns it down.
   const mFeed = matchOverride?.match || match;
-  const own = useOwnStatus(mFeed);
+  // The owner follows the HOST's copy: the sheet's own representative-bout
+  // override is its own write (OWN_REP), shown running until the answer, and
+  // its clearing after a refusal is no move of the feed (review 5).
+  const own = useOwnStatus(match);
   const mHost = own.override ? { ...mFeed, ...own.override, status: "running" } : mFeed;
   // bc-mrgc: names the groups each write changes, against the server's copy of
   // the match (see useChangedGroups).
-  const claimChanged = useChangedGroups(mHost);
+  // Against the FEED's copy, never the own Start's override (review 5).
+  const claimChanged = useChangedGroups(mFeed);
+  // Every write built through claim is watched: one that does not land
+  // (refused, held or discarded) is forgotten, so the next build of the same
+  // value names its groups again (stage 5 review 5).
+  const onSubmit = onSubmitProp && ((patch) => claimChanged.watch(onSubmitProp(patch), patch));
+  const onSubmitAndNext = onSubmitAndNextProp && ((patch) => claimChanged.watch(onSubmitAndNextProp(patch), patch));
   // T136 / T141: competition lookup so we can branch on teamMatchType
   // ("kachinuki" vs "fixed") and gate the daihyosen affordance on the
   // knockout-format precondition. Falls back to compKind/teamSize when
@@ -2400,9 +2409,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // the one-time initial seed below AND to extend the rows when the server
   // appends a kachinuki bout while the modal is open (growth effect after
   // the subs state declaration).
-  const seedSubAt = (idx) => {
+  const seedSubAt = (idx, rows = existingSub) => {
       const pos = idx === daihyosenIdx ? DAIHYOSEN_POSITION : idx + 1;
-      const existing = existingSub.find(s => s.position === pos);
+      const existing = rows.find(s => s.position === pos);
       const fusensho = fusenshoSideFromSub(existing);
       // reconcileFoulsAtOpen mirrors ScoreEditorModal: pre-fix builds
       // stored the cumulative raw foul count alongside the already-awarded
@@ -4341,14 +4350,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     || removingWithdrawal;
   // D1: what the sheet's draft would tap, as typed over and as held.
   const encounterEnchoOf = (n) => (kachinukiEncounter ? 0 : n);
-  own.note({ rows: serverSubs, encho: encounterEnchoOf(initialEnchoPeriods) }, { rows: subs, encho: encounterEnchoOf(enchoLocal) });
+  // Only while the sheet shows a draft: under its own representative-bout
+  // change the sheet shows the board, which is no draft (review 5).
+  if (!tapMode) own.note({ rows: serverSubs, encho: encounterEnchoOf(initialEnchoPeriods) }, { rows: subs, encho: encounterEnchoOf(enchoLocal) });
   // Save sends the kept draft as the taps that would have made it
   // (draft_taps.jsx), each through emitBoutTap, in order, a removal naming the
   // board's mark; Discard drops it. Either way the board shows from now on,
   // and the draft starts from the server's copy.
+  // From the HOST's copy, never a copy this sheet shows over it (its own
+  // Start's or representative-bout change's override, review 5).
   const takeServerDraft = () => {
-    setSubs(serverSubs);
-    setEnchoPeriodCount(initialEnchoPeriods);
+    setSubs(positions.map((_, idx) => seedSubAt(idx, match.subResults || [])));
+    setEnchoPeriodCount(initialEnchoPeriodsForMatch(match));
     setDaihyosenHantei(recordedDaihyosenSide);
     setDaihyosenHanteiArmed(daihyosenHanteiRecorded);
   };
@@ -5789,7 +5802,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               <button className="btn btn--sm score-nav__prev" onClick={goPrev} disabled={submitting || repTyping}>← Prev</button>
             ) : <span />}
             <div className="score-nav__actions">
-              {m.status === "scheduled" && !isBarredMatch(m) && (
+              {m.status === "scheduled" && own.startOffered && !isBarredMatch(m) && (
                 <button className="btn btn--sm" onClick={async () => {
                   // F5: submits status:"running", the shape
                   // _notifyScoreSuperseded (api_client.jsx) deliberately stays

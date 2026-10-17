@@ -1782,12 +1782,13 @@ function useMatchReopen({ match, password, isComplete, own }) {
     const n = downstreamKnockoutReopenedNotice(ids);
     if (n && mountedRef.current) setNotice(n);
   };
-  const run = (call, reason, force, onRefusal) => attemptScoreWrite({
+  const run = (call, reason, force, onRefusal, onForced) => attemptScoreWrite({
     recordScore: (_compId, _matchId, result, pw, _match, o) => call(pw, {
       reason, force: !!result.forceDownstreamReopen,
       seen: match.scoreVersion || 0, onRefusal: o && o.onRefusal,
     }),
     onRefusal,
+    onForced,
     onDownstreamReopened: noteReopened,
     confirmDialog: async (opts) => {
       const ok = await window.confirmDialog(opts);
@@ -1828,7 +1829,9 @@ function useMatchReopen({ match, password, isComplete, own }) {
       return true;
     };
     try {
-      const res = await run((pw, opts) => window.API.reopenMatch(match.compId, match.id, pw, opts), reason, false, refused);
+      // A reopen the downstream confirm sends again is settled by that write.
+      const forced = (f) => { if (own) own.settle(token, f, { rejections: false }); };
+      const res = await run((pw, opts) => window.API.reopenMatch(match.compId, match.id, pw, opts), reason, false, refused, forced);
       // Its answer, as it comes; a refusal is `refused`'s (a downstream
       // confirm may still send it again).
       if (own) own.settle(token, res, { rejections: false });
@@ -1864,7 +1867,7 @@ function useMatchReopen({ match, password, isComplete, own }) {
       const res = await run(
         (pw, opts) => window.API.requeueBlockerAndReopen(match.compId, match.id, c.compId, c.matchId, pw,
           { ...opts, match, blockerLabel: c.label }),
-        c.reason, c.force, refused,
+        c.reason, c.force, refused, (f) => { if (own) own.settle(token, f, { rejections: false }); },
       );
       if (own) own.settle(token, res, { rejections: false });
       if (!mountedRef.current) return;

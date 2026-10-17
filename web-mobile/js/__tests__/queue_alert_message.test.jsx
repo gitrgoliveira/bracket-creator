@@ -23,6 +23,21 @@ describe('queueAlertMessage', () => {
         expect(msg).not.toMatch(/^.*\bRe-enter it\.\s*$/i);
     });
 
+    // bc-evts stage 3 review 10, N4: the outbox changed writes on the judgement
+    // that a team member was never added; if it was, or a rename was left
+    // unsent, the operator is told.
+    it('tells the operator a team member judged not added was kept, and where to look', () => {
+        const msg = queueAlertMessage({ kind: 'member_kept', count: 1, terminalCount: 0 });
+        expect(msg).toBe("A team member this device treated as not added was kept by the server. Check the team's member names and lineups.");
+    });
+
+    it('tells the operator a change to a team member\'s name was not sent', () => {
+        const msg = queueAlertMessage({ kind: 'member_unsent', count: 1, terminalCount: 0 });
+        expect(msg).toMatch(/not sent/i);
+        expect(msg).toMatch(/never added/i);
+        expect(msg).not.toMatch(/\bsquad\b|\bmats?\b|default win/i);
+    });
+
     it('still tells the operator to re-enter a genuinely rejected result', () => {
         const msg = queueAlertMessage({ kind: 'rejected', count: 1, terminalCount: 1 });
         expect(msg).toMatch(/re-enter it/i);

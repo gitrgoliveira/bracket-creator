@@ -209,9 +209,13 @@ async function runOne(scName, w, timing, twoTab) {
         return resp(200, { positions: body.positions, memberIds: body.memberIds || {} });
     });
     const dropped = { a: 0, b: 0 };
+    const alerts = [];
     const load = async (name) => {
         // A fresh instance each run (vi.resetModules), under one query per tab.
-        const API = (await import(/* @vite-ignore */ `${CLIENT}?tab=${name}`)).API;
+        const mod = await import(/* @vite-ignore */ `${CLIENT}?tab=${name}`);
+        const API = mod.API;
+        // The queue alerts this tab raises (what the operator is told).
+        mod.subscribeQueueAlert((a) => alerts.push({ tab: name, kind: a.kind }));
         const onStorage = window.__bcStoredQueueHandler;
         window.removeEventListener('storage', onStorage);
         window.__bcStoredQueueHandler = undefined;
@@ -275,6 +279,12 @@ async function runOne(scName, w, timing, twoTab) {
         if (sc.resume) { await tick(3000); sender.API.resumeAfterAuth('pw'); }
         for (let i = 0; i < 40; i++) await tick(2000);
         if (twoTab && !online.a) { online.a = true; tabs.a.onOnline(); for (let i = 0; i < 20; i++) await tick(2000); }
+        // An editor opens later and reads the team's members: a member judged
+        // never to have been that the list holds is a contradiction to tell.
+        if (pw) {
+            try { await sender.API.fetchSquads('c1', pw); } catch (_e) { /* a read that fails proves nothing */ }
+            await tick(10);
+        }
     } finally {
         window.removeEventListener('team-member-dropped', onDrop);
     }
@@ -300,6 +310,8 @@ async function runOne(scName, w, timing, twoTab) {
     vi.clearAllTimers();
     return {
         sc: scName, w, timing, twoTab, held, outcome, each, queued, dropped: dropped.a,
+        kept: alerts.filter((a) => a.kind === 'member_kept').length,
+        unsent: alerts.filter((a) => a.kind === 'member_unsent').length,
         reads: reads.map((r) => `${r.tab}:${r.url.includes('viewer') ? 'viewer' : 'members'}:${JSON.stringify(r.hdr)}`),
         rule: sc.rule || '',
     };
@@ -323,8 +335,22 @@ function expectedDropped(row) {
     return row.twoTab ? 2 : 1;
 }
 
+// What the operator is told (no silent failure): a member judged never to have
+// been that the server kept after all, once per tab, only where the rule
+// accepts it; and a rename or a cleared name left unsent, at least once and at
+// most once per tab, only where no request for it was sent.
+function toldWrong(row) {
+    const kept = row.rule === 'commitAfterRead' ? (row.twoTab ? 2 : 1) : 0;
+    if (row.kept !== kept) return `KEPT_NOTICE_${row.kept}_NOT_${kept}`;
+    const left = row.each.length === 0 && namesByUrl(row.w);
+    if (left ? (row.unsent < 1 || row.unsent > (row.twoTab ? 2 : 1)) : row.unsent !== 0) return `UNSENT_NOTICE_${row.unsent}_${left ? 'EXPECTED' : 'UNEXPECTED'}`;
+    return null;
+}
+
 function wrongOf(row) {
     if (row.dropped !== expectedDropped(row)) return `DROPPED_${row.dropped}_NOT_${expectedDropped(row)}`;
+    const told = toldWrong(row);
+    if (told) return told;
     if (row.rule) return ACCEPTED[row.rule].has(row.outcome) ? null : row.outcome;
     if (!row.outcome.startsWith('OK')) return row.outcome;
     // A read is made with the header, even empty; a participant's through the

@@ -222,7 +222,8 @@ function normalizeViewerCompItem(item) {
 // _withListedMembersForgotten: a members map the server answered, after
 // telling the owner every member it holds exists (minted_members.jsx).
 function _withListedMembersForgotten(teams, competitionId) {
-    _minted.listed(teams, competitionId);
+    // A member judged never to have been that the list holds: told (N4).
+    for (const m of _minted.listed(teams, competitionId)) _announceKeptMember(m);
     return teams;
 }
 
@@ -951,6 +952,9 @@ let _mintedTimerAt = 0;
 // `team-member-dropped` per id, whether this tab proved it or heard of it from
 // another.
 const _announcedDropped = new Set();
+// The member ids this tab has told the operator the server kept after all
+// (_announceKeptMember): one alert per id.
+const _announcedKept = new Set();
 // _takenFromLegacy: every entry this tab took over from the key an older build
 // uses (_takeOverLegacyQueue), its key to the `enqueuedAt` it was taken with,
 // kept for the tab's life so none is taken over, and sent, twice (G5). A later
@@ -3353,7 +3357,8 @@ if (typeof window !== 'undefined') {
         // never was comes off this tab's writes, and a write held back for one
         // may now go (minted_members.jsx).
         if (e.key === MINTED_MEMBERS_KEY) {
-            const { dropped, unblocks } = _minted.onStored(e.oldValue, e.newValue);
+            const { dropped, kept, unblocks } = _minted.onStored(e.oldValue, e.newValue);
+            for (const m of kept) _announceKeptMember(m);
             if (dropped.length > 0) _learnDropped(dropped);
             else if (unblocks) _rerunFlushSoon();
         }
@@ -3922,8 +3927,28 @@ function _mintedAddAnswered(key, d, res, body, timedOut = false) {
     else if (res.ok) outcome = 'kept';
     else if (status >= 500 || status === 429 || status === 403 || status === 401) outcome = 'retry';
     else if ((body && body.error) === 'member_id_conflict') outcome = 'held';
-    if (_minted.answered(d, outcome, _writeQueue.get(key) === d) === 'dropped') _learnDropped([_droppedOf(d)]);
+    const verdict = _minted.answered(d, outcome, _writeQueue.get(key) === d);
+    if (verdict === 'dropped') _learnDropped([_droppedOf(d)]);
+    else if (verdict === 'contradicted') _announceKeptMember(_droppedOf(d));
     else if (outcome !== 'kept') _mintedSweep(d);
+}
+
+// _announceKeptMember: a member this device (or another tab) treated as not
+// added, and so changed the writes naming it, turned out to be held by the
+// server (a members list holds it, or its add's request was kept after all).
+// The operator is told once per id, never left to find the member's names and
+// lineups changed under them (stage 3 review 10, N4).
+function _announceKeptMember({ id, c }) {
+    if (!id || _announcedKept.has(id)) return;
+    _announcedKept.add(id);
+    _notifyQueueAlert({ kind: 'member_kept', count: 1, terminalCount: 0, compID: c || '' });
+}
+
+// _announceUnsentMemberChange: a rename or a cleared name of a member that
+// never was left the queue unsent (it settles as discarded, which the editors
+// do not show): the operator is told it was not sent (N4).
+function _announceUnsentMemberChange(d) {
+    _notifyQueueAlert({ kind: 'member_unsent', count: 1, terminalCount: 0, compID: (d && d.compID) || '' });
 }
 
 // _mintedSweep: the reads this tab owes for the adds it sent or discarded
@@ -3970,7 +3995,10 @@ function _mintedGate(key, d) {
     const g = _minted.gate(d, _mintedCtx());
     for (const r of g.reads) _readMintedMembers(r, d.password);
     if (g.leave && !_inFlight.has(d)) {
-        if (_dequeue(key, d, { value: { discarded: true } })) _persistQueue();
+        if (_dequeue(key, d, { value: { discarded: true } })) {
+            _persistQueue();
+            _announceUnsentMemberChange(d);
+        }
         return 'left';
     }
     let stripped = false;
@@ -4041,7 +4069,10 @@ function _learnDropped(list) {
             for (const [k, e] of _writeQueue) {
                 if (!mintedProofCovers({ c, t }, e, _teamIdOf(e))) continue;
                 if (mintedMemberUrlId(e) === id) {
-                    if (!_inFlight.has(e) && _dequeue(k, e, { value: { discarded: true } })) changed = true;
+                    if (!_inFlight.has(e) && _dequeue(k, e, { value: { discarded: true } })) {
+                        changed = true;
+                        _announceUnsentMemberChange(e);
+                    }
                 } else if (mintedStrip(e, id)) {
                     changed = true;
                 }

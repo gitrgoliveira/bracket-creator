@@ -118,7 +118,50 @@ describe('the states of a minted id', () => {
         m.listed({ t1: [{ id: 'm-1' }] }, 'c2');
         expect(m.recordOf('m-1')).toMatchObject({ s: 'dropped' });
         m.listed({ t1: [{ id: 'm-1' }] }, 'c1');
-        expect(m.recordOf('m-1')).toBeNull();
+        // Dropped before: kept now, and told (N4 below), not forgotten.
+        expect(m.recordOf('m-1')).toMatchObject({ s: 'kept' });
+    });
+});
+
+describe('a member judged never to have been that the server holds after all (N4)', () => {
+    it('a members list holding a dropped id is a contradiction, answered once; the record is kept for the other tabs', () => {
+        const st = memoryStorage();
+        const { m } = owner(st);
+        m.minted(add('m-1'));
+        m.sent(add('m-1'));
+        m.answered(add('m-1'), 'refused', true);
+        expect(m.listed({ t1: [{ id: 'other' }] }, 'c1'), 'a list without it contradicts nothing').toEqual([]);
+        expect(m.listed({ t1: [{ id: 'm-1' }] }, 'c2'), 'another competition\'s list says nothing').toEqual([]);
+        expect(m.listed({ t1: [{ id: 'm-1' }] }, 'c1')).toEqual([{ id: 'm-1', c: 'c1', t: 't1' }]);
+        expect(m.listed({ t1: [{ id: 'm-1' }] }, 'c1'), 'told once').toEqual([]);
+        expect(m.recordOf('m-1')).toMatchObject({ s: 'kept' });
+        expect(m.gate(pick('m-1'), ctx()), 'a kept id goes as made').toMatchObject({ wait: false, strip: [], leave: false });
+    });
+
+    it('a late 2xx of an add judged never to have been is a contradiction; an ordinary 2xx is not', () => {
+        const { m } = owner(memoryStorage());
+        m.minted(add('m-1'));
+        m.sent(add('m-1'));
+        expect(m.answered(add('m-1'), 'kept', false), 'an ordinary 2xx').toBe('');
+        m.minted(add('m-2'));
+        m.sent(add('m-2'));
+        m.answered(add('m-2'), 'refused', true);
+        expect(m.answered(add('m-2'), 'kept', false)).toBe('contradicted');
+        expect(m.recordOf('m-2')).toMatchObject({ s: 'kept' });
+    });
+
+    it('another tab hears of it through the records, once', () => {
+        const st = memoryStorage();
+        const { m: a } = owner(st, 'a');
+        const { m: b } = owner(st, 'b');
+        a.minted(add('m-1'));
+        a.sent(add('m-1'));
+        a.answered(add('m-1'), 'refused', true);
+        const dropped = st.get(MINTED_MEMBERS_KEY);
+        a.listed({ t1: [{ id: 'm-1' }] }, 'c1');
+        const kept = st.get(MINTED_MEMBERS_KEY);
+        expect(b.onStored(dropped, kept)).toMatchObject({ kept: [{ id: 'm-1', c: 'c1', t: 't1' }], dropped: [] });
+        expect(b.onStored(kept, kept).kept).toEqual([]);
     });
 });
 
@@ -146,7 +189,7 @@ describe('the records, shared and refused', () => {
         a.minted(add('m-1'));
         const before = storage.s[MINTED_MEMBERS_KEY];
         a.answered(add('m-1'), 'refused', true);
-        expect(b.onStored(before, storage.s[MINTED_MEMBERS_KEY])).toEqual({ dropped: [{ id: 'm-1', c: 'c1', t: 't1' }], unblocks: true });
+        expect(b.onStored(before, storage.s[MINTED_MEMBERS_KEY])).toEqual({ dropped: [{ id: 'm-1', c: 'c1', t: 't1' }], kept: [], unblocks: true });
         a.minted(add('m-2'));
         const queued = storage.s[MINTED_MEMBERS_KEY];
         a.sent(add('m-2'));

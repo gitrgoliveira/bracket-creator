@@ -404,6 +404,13 @@ export function queueAlertMessage(alert) {
       return `${n} unsaved ${noun} ${one ? "was" : "were"} discarded because the admin password changed.`;
     case "sent":
       return `${n} ${noun} sent.`;
+    // bc-evts stage 3 review 10, N4: a team member the outbox treated as not
+    // added (so it changed the writes naming it) was kept by the server after
+    // all, or a rename of one was left unsent.
+    case "member_kept":
+      return "A team member this device treated as not added was kept by the server. Check the team's member names and lineups.";
+    case "member_unsent":
+      return "A change to a team member's name was not sent, because the member was never added. Add the member again if the name is still needed.";
     // Held finishes that landed and moved a later change of their match to
     // its history. Recorded, so not an error: the history has the change.
     case "displaced":

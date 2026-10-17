@@ -17,6 +17,10 @@
 //   unknown --no tab has the add out, the grace after a timeout over--> read
 //          --the list holds the id--> kept; --it does not--> dropped
 //          --the read fails--> unknown, and the writes go as they were made
+//   dropped --a members list holding the id, or the add's 2xx, later--> kept
+//          (a record kept a while, so every tab tells its operator once that
+//          the member was kept after all: its writes were changed on the
+//          judgement that it never was)
 //
 // gate(write): every id it names (its payload, and the member a rename or a
 // cleared name is addressed to) that is queued, out or unknown holds the write
@@ -187,6 +191,11 @@ export function createMintedMembers({ storage, now = () => Date.now(), timeoutMs
         return { c: (d && d.compID) || '', t: decodeURIComponent(team), s: 'queued', at: now() };
     };
     const dropped = (r) => ({ c: r.c, t: r.t, s: 'dropped', at: now() });
+    // A member judged never to have been that the server turned out to hold
+    // (a members list with the id, or a late 2xx of its add): kept, but not
+    // forgotten, so every tab hears of it once (`onStored`), and the writes
+    // already changed on that judgement are told to the operator.
+    const kept = (r) => ({ c: r.c, t: r.t, s: 'kept', at: now() });
     const unknown = (r, readAfter) => ({ c: r.c, t: r.t, s: 'unknown', at: now(), w: 1, ra: Math.max(Number(r.ra) || 0, readAfter) });
 
     // A request this record says is out is over by its deadline, whoever sent it.
@@ -204,6 +213,7 @@ export function createMintedMembers({ storage, now = () => Date.now(), timeoutMs
     //   'go'       the same, between those reads.
     function judge(id, r, ctx, t) {
         if (r.s === 'dropped') return { kind: 'dropped' };
+        if (r.s === 'kept') return { kind: 'go' };
         if (r.s === 'out' && (r.tab === tab ? ctx.addOutHere(id) : t < outEndsAt(r))) {
             return { kind: 'wait', until: r.tab === tab ? 0 : outEndsAt(r) };
         }
@@ -253,14 +263,19 @@ export function createMintedMembers({ storage, now = () => Date.now(), timeoutMs
         // deadline: a server still at work may keep it after that, so a read
         // waits a deadline more). `stillQueued`: the add is still queued, to
         // be sent again.
-        // Answers 'dropped' when the member is now known never to have been.
+        // Answers 'dropped' when the member is now known never to have been,
+        // 'contradicted' when it was judged so before and the server kept it.
         answered(d, outcome, stillQueued) {
             let result = '';
             // No record: a logout's wipe took it while the request was out
             // (`sent` made one for every add that went out).
             change(mintedAddId(d), (r) => {
                 if (!r) return undefined;
-                if (outcome === 'kept') return null;
+                if (outcome === 'kept') {
+                    if (r.s !== 'dropped') return null;
+                    result = 'contradicted';
+                    return kept(r);
+                }
                 if (r.s === 'dropped') return undefined;
                 if (outcome === 'refused') { result = 'dropped'; return dropped(r); }
                 const grace = outcome === 'timeout' ? now() + timeoutMs : now();
@@ -280,7 +295,7 @@ export function createMintedMembers({ storage, now = () => Date.now(), timeoutMs
             let result = '';
             change(mintedAddId(d), (known) => {
                 const r = known || { ...fresh(d), w: 1 };
-                if (r.s === 'dropped' || r.s === 'unknown') return undefined;
+                if (r.s === 'dropped' || r.s === 'unknown' || r.s === 'kept') return undefined;
                 if (r.s === 'out' && r.tab !== tab && now() < outEndsAt(r)) return undefined;
                 if (!r.w) { result = 'dropped'; return dropped(r); }
                 return unknown(r, r.s === 'out' ? outEndsAt(r) + timeoutMs : now());
@@ -290,12 +305,23 @@ export function createMintedMembers({ storage, now = () => Date.now(), timeoutMs
 
         // listed: a members list the server answered for `competitionId`
         // ({teamId: [member]}): every id it holds is kept, whatever was known.
+        // Answers the ids it held that were judged never to have been
+        // ({id, c, t}), contradicted by it.
         listed(teams, competitionId) {
-            if (!teams || typeof teams !== 'object' || !competitionId) return;
+            const contradicted = [];
+            if (!teams || typeof teams !== 'object' || !competitionId) return contradicted;
             for (const [id, r] of Object.entries(read())) {
                 const list = r.c === competitionId && Array.isArray(teams[r.t]) ? teams[r.t] : null;
-                if (list && list.some((m) => m && m.id === id)) change(id, () => null);
+                if (!list || !list.some((m) => m && m.id === id)) continue;
+                if (r.s === 'dropped') {
+                    if (change(id, (known) => (known && known.s === 'dropped' ? kept(known) : undefined))) {
+                        contradicted.push({ id, c: r.c, t: r.t });
+                    }
+                } else if (r.s !== 'kept') {
+                    change(id, () => null);
+                }
             }
+            return contradicted;
         },
 
         // readEnded: the read `gate` asked for answered `list` (the team's
@@ -375,7 +401,9 @@ export function createMintedMembers({ storage, now = () => Date.now(), timeoutMs
         },
 
         // onStored: another tab changed the records (a storage event). Answers
-        // `dropped`, the ids that became dropped there, and `unblocks`: whether
+        // `dropped`, the ids that became dropped there, `kept`, the ids it
+        // found the server holds after all (judged never to have been), and
+        // `unblocks`: whether
         // a write held back for an id may now go or ask the members (a record
         // forgotten, dropped, unknown, or whose read failed). An add sent or
         // queued again there frees nothing, so it does not hurry this tab's
@@ -384,15 +412,17 @@ export function createMintedMembers({ storage, now = () => Date.now(), timeoutMs
             const before = parseRecords(oldRaw);
             const after = parseRecords(newRaw);
             const dropped = [];
+            const heldAfterAll = [];
             let unblocks = false;
             for (const [id, r] of Object.entries(after)) {
                 const was = before[id];
                 if (r.s === 'dropped' && !(was && was.s === 'dropped')) dropped.push({ id, c: r.c, t: r.t });
+                if (r.s === 'kept' && !(was && was.s === 'kept')) heldAfterAll.push({ id, c: r.c, t: r.t });
                 if (r.s === 'unknown' && (!was || was.s !== 'unknown' || was.rf !== r.rf)) unblocks = true;
             }
             for (const id of Object.keys(before)) if (!after[id]) unblocks = true;
             read();
-            return { dropped, unblocks: unblocks || dropped.length > 0 };
+            return { dropped, kept: heldAfterAll, unblocks: unblocks || dropped.length > 0 };
         },
 
         // prune: forgets a settled record nothing names (`named`: every id a

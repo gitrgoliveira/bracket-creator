@@ -629,6 +629,43 @@ describe('a regenerated or discarded draw forgets the match labels learned for i
         });
     }
 
+    // Stage 3 review 7, K8: an import (the competitions a bundle brings) or a
+    // reset clears every competition's labels. Another device's import is
+    // heard only as tournament_updated; a reset as password_reset.
+    for (const type of ['tournament_updated', 'password_reset']) {
+        it(`the ${type} push clears every competition's labels (K8)`, async () => {
+            let es;
+            global.EventSource = class FakeES { constructor() { es = this; this.close = () => {}; } };
+            global.EventSource.OPEN = 1;
+            await load();
+            const off = API.subscribeToEvents(() => {});
+            await labelled();
+            es.onmessage({ data: JSON.stringify({ type, data: null }), lastEventId: '' });
+            expect(whereOf('mb')).toBe('');
+            const c2 = API.heldWrites().find((h) => h.compID === 'c2' || h.compId === 'c2');
+            expect(c2 && c2.where, 'no competition keeps its labels').toBe('');
+            if (typeof off === 'function') off();
+        });
+    }
+
+    it('an import or a reset from this device clears every competition\'s labels (K8)', async () => {
+        const calls = [
+            [/\/api\/tournament\/import$/, (a) => a.importCompetitions(new FormData(), 'pw')],
+            [/\/api\/tournament\/reset$/, (a) => a.resetPassword('new-pw', 'tab-1')],
+        ];
+        for (const [route, call] of calls) {
+            global.fetch = vi.fn((url) => (route.test(String(url))
+                ? Promise.resolve({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ results: [] }) })
+                : Promise.reject(new TypeError('offline'))));
+            await labelled();
+            await call(API);
+            expect(whereOf('mb')).toBe('');
+            const c2 = API.heldWrites().find((h) => h.compID === 'c2' || h.compId === 'c2');
+            expect(c2 && c2.where).toBe('');
+            API.clearQueue();
+        }
+    });
+
     it('generating and discarding a draw from this device clears them too', async () => {
         for (const call of [(a) => a.generateDraw('c1', 'pw'), (a) => a.discardDraw('c1', 'pw')]) {
             // The draw calls answer; the queued writes stay queued (offline).

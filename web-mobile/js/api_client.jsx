@@ -1800,6 +1800,16 @@ function _forgetShownMatches(compID) {
     for (const k of _shownMatchLabels.keys()) if (k.startsWith(prefix)) _shownMatchLabels.delete(k);
 }
 
+// _forgetAllShownMatches: the tournament's competitions may have been replaced
+// (an import) or the client was told of a reset, so no learned match label is
+// trusted (stage 3 review 7, K8). Another device's import is heard only as a
+// `tournament_updated` push, which also follows other tournament-wide changes:
+// a label is learned again as soon as its match is shown, and an entry keeps
+// the label it was queued with.
+function _forgetAllShownMatches() {
+    _shownMatchLabels.clear();
+}
+
 function _noteMatchLabel(compID, matchID, label) {
     if (compID && matchID && typeof label === 'string' && label.trim()) _shownMatchLabels.set(_revKey(compID, matchID), label.trim());
 }
@@ -3611,6 +3621,7 @@ function _ensureConnected() {
         if (parsed && (parsed.type === 'draw_generated' || parsed.type === 'draw_discarded')) {
             _forgetShownMatches(parsed.data && parsed.data.competitionId);
         }
+        if (parsed && (parsed.type === 'tournament_updated' || parsed.type === 'password_reset')) _forgetAllShownMatches();
         _noteEventId(event.lastEventId, parsed);
         for (const sub of _subscribers) {
             try { sub.callback(parsed); } catch (err) { console.error('SSE callback failed:', err); }
@@ -4220,6 +4231,8 @@ const API = {
             if (err.code) e.code = err.code;
             throw e;
         }
+        // A reset: no learned match label is trusted (K8).
+        _forgetAllShownMatches();
         // Backend returns 204 No Content: calling .json() on an empty
         // body throws SyntaxError per the Fetch spec (same pattern as
         // overridePoolRanks etc. above).
@@ -4971,6 +4984,9 @@ const API = {
             const body = await res.json().catch(() => ({}));
             throw new Error(body.error || 'Import failed');
         }
+        // An import brings competitions whose matches may reuse ids a label
+        // was learned for: none is trusted (K8).
+        _forgetAllShownMatches();
         return res.json();
     },
     // Deleting a competition asks for the password again: `confirmPassword` is

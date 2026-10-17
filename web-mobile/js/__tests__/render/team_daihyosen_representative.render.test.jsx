@@ -254,6 +254,24 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     expect(window.API.putMatchLineup).not.toHaveBeenCalled();
   });
 
+  it('R6b: a typed representative whose add never lands is taken off the row, so no write names it (stage 3 review 4, G1)', async () => {
+    window.API.addTeamMember.mockResolvedValue({ id: 'm9', name: 'Eve', index: 3 });
+    const match = makeMatch({ subResults: [DH_EMPTY] });
+    const { onSubmit } = await mount(match);
+    const input = dhInput('SHIRO');
+    await act(async () => { fireEvent.focus(input); fireEvent.change(input, { target: { value: 'Eve' } }); });
+    const add = await screen.findByText(/Add “Eve”/);
+    await act(async () => { fireEvent.click(add.closest('button')); });
+    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalled());
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('team-member-dropped', { detail: { competitionId: 'comp1', teamId: 't2', memberId: 'm9' } }));
+    });
+    await clickFinishTwice();
+    const dh = dhEntryOf(finishPatchOf(onSubmit));
+    expect(dh.sideBMemberId || '', 'the pick of a member that never was is cleared').toBe('');
+    expect(dh.sideB).toBe('Team B');
+  });
+
   it('R7: under selfReport the representative picker is offered while the match runs', async () => {
     await mount(makeMatch({ subResults: [DH_EMPTY] }), { selfReport: true });
     await waitFor(() => expect(dhInputs().length).toBe(2));

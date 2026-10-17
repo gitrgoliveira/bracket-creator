@@ -935,7 +935,7 @@ function _dequeue(key, descriptor, outcome) {
     if (d.kind === 'evt') _publishPendingTaps(_baseOf(key));
     // An entry another match's write follows (`after`) has left: that write
     // goes now, in this flush (a rerun) or in one kicked for it.
-    if ([..._writeQueue.values()].some((e) => e.after === key)) {
+    if ([..._writeQueue.values()].some((e) => _afterKeys(e).includes(key))) {
         if (_flushInProgress) _flushRequested = true;
         else queueMicrotask(() => { if (_writeQueue.size > 0) _flushQueue(); });
     }
@@ -1653,6 +1653,23 @@ function _keepsFailing(d) {
     // operator's discard, so it reads as failing at once.
     return !!d && (!!d.parked || (Number(d.attempts) || 0) >= SERVER_REJECTION_NOTICE_THRESHOLD);
 }
+
+// _heldWriteItem: one held write as API.heldWrites() lists it.
+function _heldWriteItem(key, d) {
+    return {
+        key,
+        compID: d.compID || '',
+        matchID: d.matchID || '',
+        kind: d.kind || 'score',
+        terminal: !!d.terminal,
+        keepsFailing: _keepsFailing(d),
+        authBlocked: !!d.authBlocked,
+        held: !!d.held,
+        ...(d.parked ? { parked: true } : {}),
+        ...(d.kind === 'lineup' && d.payload
+            ? { teamId: d.payload.teamId || '', round: d.payload.round } : {}),
+    };
+}
 // The one discard of a held write (API.discardHeldWrite and the editors'
 // API.discardFailingHeldWrites): only a write the server keeps refusing.
 function _discardIfFailing(key, d) {
@@ -2030,8 +2047,9 @@ async function _flushBase(base, list, pass, gen) {
         // entry the server keeps refusing (a member add stuck on a 5xx, a
         // parked write) is held too (stage 3 review 3, F6), so this match's
         // editor shows that something it depends on is not getting through.
-        if (d.after && _writeQueue.has(d.after)) {
-            outcome = _blockedByHeld(d.after) ? 'kept' : 'after';
+        const waitsOn = _afterKeys(d).filter((k) => _writeQueue.has(k));
+        if (waitsOn.length > 0) {
+            outcome = waitsOn.some(_blockedByHeld) ? 'kept' : 'after';
             break;
         }
         if (d.kind === 'evt') {
@@ -2069,15 +2087,54 @@ async function _flushBase(base, list, pass, gen) {
 // because the connection is down is not: the whole device is offline then, and
 // waiting is not failing (outbox_running_and_after.test.jsx).
 function _blockedByHeld(key) {
-    const seen = new Set();
-    for (let k = key; k && !seen.has(k); ) {
-        seen.add(k);
-        const d = _writeQueue.get(k);
-        if (!d) return false;
-        if (d.parked || d.authBlocked || (d.held && (Number(d.attempts) || 0) > 0)) return true;
-        k = d.after;
+    return !!_blockerOf(key, _isStuckEntry);
+}
+
+// _isStuckEntry: an entry that cannot go for now for a reason other than the
+// connection: the server refused it (a 5xx, 429 or 403: `attempts`, once a pass
+// has held it), parked, or waiting on a password.
+function _isStuckEntry(d) {
+    return !!d && (!!d.parked || !!d.authBlocked || (!!d.held && (Number(d.attempts) || 0) > 0));
+}
+
+// _afterKeys: the queue keys an entry follows (`after`): one key, stored as a
+// string, or several (a score write naming two teams' new members), stored as
+// an array.
+function _afterKeys(d) {
+    if (!d) return [];
+    if (Array.isArray(d.after)) return d.after.filter((k) => typeof k === 'string' && k);
+    return typeof d.after === 'string' && d.after ? [d.after] : [];
+}
+
+// _addAfter: makes the entry follow `key` as well as what it already follows.
+function _addAfter(d, key) {
+    if (!d || typeof key !== 'string' || !key) return;
+    const keys = _afterKeys(d);
+    if (keys.includes(key)) return;
+    keys.push(key);
+    d.after = keys.length === 1 ? keys[0] : keys;
+}
+
+// _blockerOf: the key of the entry that holds `key` back and matches `stuck`:
+// the entry itself, an earlier entry of its own base (strict order: it goes
+// only after them, stage 3 review 4, G3), or anything an entry on that path
+// follows (`after`), followed as far as it goes; '' when none.
+function _blockerOf(key, stuck, seen = new Set()) {
+    if (!key || seen.has(key)) return '';
+    seen.add(key);
+    const d = _writeQueue.get(key);
+    if (!d) return '';
+    if (stuck(d)) return key;
+    for (const [k] of _entriesFor(_baseOf(key))) {
+        if (k === key) break;
+        const found = _blockerOf(k, stuck, seen);
+        if (found) return found;
     }
-    return false;
+    for (const k of _afterKeys(d)) {
+        const found = _blockerOf(k, stuck, seen);
+        if (found) return found;
+    }
+    return '';
 }
 
 // _markWaitersHeld: marks held every queued entry that waits (`after`) on one
@@ -2087,7 +2144,7 @@ function _markWaitersHeld() {
     let marked = false;
     const blockedBases = new Set();
     for (const [key, d] of _writeQueue) {
-        if (d.after && _writeQueue.has(d.after) && _blockedByHeld(d.after)) blockedBases.add(_baseOf(key));
+        if (_afterKeys(d).some((k) => _writeQueue.has(k) && _blockedByHeld(k))) blockedBases.add(_baseOf(key));
     }
     if (blockedBases.size === 0) return false;
     for (const [key, d] of _writeQueue) {
@@ -2590,11 +2647,13 @@ function _commitEnqueue(base, descriptor, beforeFlush, { nextTick = false } = {}
     if (_payloadSeen.has(descriptor.payload)) descriptor.seenModifiedAt = _payloadSeen.get(descriptor.payload);
     // A write of a match another match's queued write also belongs to (a send
     // back to the queue frees this match's court) follows that write.
-    if (!descriptor.after) {
-        const holder = _heldBy(base);
-        if (holder) descriptor.after = holder;
-    }
+    const holder = _heldBy(base);
+    if (holder) _addAfter(descriptor, holder);
     const key = _placeWrite(base, descriptor);
+    // A write naming a member this device minted follows that member's add,
+    // whatever the write (G1): read on the payload as placed, a union with the
+    // write it took the place of.
+    _followMintedMembers(base, descriptor);
     _writeQueue.set(key, descriptor);
     // Read BEFORE the flush is kicked: the flush's synchronous part can
     // persist again, and it is THIS write's persist the answer reports.
@@ -2647,7 +2706,7 @@ function _placeWrite(base, descriptor) {
         payload = { ...payload, kachinukiBoutFinal: true };
     }
     // Whatever the replaced write had to follow, this one follows too.
-    if (prev.after && !descriptor.after) descriptor.after = prev.after;
+    for (const k of _afterKeys(prev)) _addAfter(descriptor, k);
     descriptor.payload = payload;
     return key;
 }
@@ -3419,12 +3478,30 @@ function _dropMemberThatNeverWas(d) {
     if (!id) return;
     let changed = false;
     for (const [, e] of _writeQueue) {
-        const ids = e && e.kind === 'lineup' && e.payload && e.payload.memberIds;
-        if (!ids || typeof ids !== 'object') continue;
-        for (const pos of Object.keys(ids)) {
-            if (ids[pos] === id) {
-                delete ids[pos];
-                changed = true;
+        const payload = e && e.payload;
+        if (!payload || typeof payload !== 'object') continue;
+        const ids = payload.memberIds;
+        if (ids && typeof ids === 'object') {
+            for (const pos of Object.keys(ids)) {
+                if (ids[pos] === id) {
+                    delete ids[pos];
+                    changed = true;
+                }
+            }
+        }
+        // A score write carrying the id (stage 3 review 4, G1): a numbered
+        // row keeps its fighter's name and loses the id; the representative
+        // row's names are the TEAM names, so its pick is cleared. A winner
+        // named by the id goes with it: the row's names still say who won.
+        if (Array.isArray(payload.subResults)) {
+            for (const row of payload.subResults) {
+                if (!row || typeof row !== 'object') continue;
+                for (const field of _subResultMemberFields()) {
+                    if (row[field] === id) {
+                        row[field] = '';
+                        changed = true;
+                    }
+                }
             }
         }
     }
@@ -3434,6 +3511,46 @@ function _dropMemberThatNeverWas(d) {
         window.dispatchEvent(new CustomEvent('team-member-dropped', {
             detail: { competitionId: d.compID || '', teamId: decodeURIComponent(teamId), memberId: id },
         }));
+    }
+}
+
+// The member-id fields of a score write's bout row. A function, so it is
+// there whenever an enqueue asks, however early in the module's evaluation.
+function _subResultMemberFields() { return ['sideAMemberId', 'sideBMemberId', 'winnerMemberId']; }
+
+// _payloadMemberIds: every member id a queued write's payload names: a lineup
+// save's positions, a score write's bout rows.
+function _payloadMemberIds(payload) {
+    const ids = new Set();
+    if (!payload || typeof payload !== 'object') return ids;
+    if (payload.memberIds && typeof payload.memberIds === 'object') {
+        for (const v of Object.values(payload.memberIds)) if (typeof v === 'string' && v) ids.add(v);
+    }
+    if (Array.isArray(payload.subResults)) {
+        for (const row of payload.subResults) {
+            if (!row || typeof row !== 'object') continue;
+            for (const field of _subResultMemberFields()) {
+                if (typeof row[field] === 'string' && row[field]) ids.add(row[field]);
+            }
+        }
+    }
+    return ids;
+}
+
+// _followMintedMembers: a write naming a member id this device minted for an
+// add still queued (not yet seen landing) follows that team's last member
+// write (`after`), so the member exists when the write reaches the server
+// (stage 3 review 4, G1). The ONE place for every door: a lineup save, a score
+// write's representative pick or a numbered row's fighter alike. A write on
+// the team's own base already goes after it, in strict order.
+function _followMintedMembers(base, descriptor) {
+    const ids = _payloadMemberIds(descriptor && descriptor.payload);
+    if (ids.size === 0) return;
+    for (const [key, e] of _writeQueue) {
+        if (e === descriptor || !ids.has(_memberAddId(e))) continue;
+        const addBase = _baseOf(key);
+        if (addBase === base) continue;
+        _addAfter(descriptor, _lastEntryKey(addBase));
     }
 }
 
@@ -4978,13 +5095,34 @@ const API = {
         return _listenOn(_tapOutcomeListeners, _revKey(compID, matchID), fn);
     },
     heldWriteKeepsFailing(compID, matchID) {
-        return _entriesFor(_revKey(compID, matchID)).some(([, d]) => _keepsFailing(d));
+        return _entriesFor(_revKey(compID, matchID)).some(([, d]) => _keepsFailing(d))
+            || API.heldWriteBlocker(compID, matchID) !== null;
+    },
+    // heldWriteBlocker: the write of ANOTHER base this match's writes wait on
+    // that the server keeps refusing (stage 3 review 4, G2: a member add a
+    // lineup save or a representative pick follows), as a heldWrites() item;
+    // null when the match's own writes keep failing (those are its own to
+    // say), or when nothing it waits on does. Found through what each entry
+    // follows and what its own base sends before it (_blockerOf).
+    heldWriteBlocker(compID, matchID) {
+        const base = _revKey(compID, matchID);
+        const own = _entriesFor(base);
+        if (own.some(([, d]) => _keepsFailing(d))) return null;
+        for (const [key] of own) {
+            const found = _blockerOf(key, _keepsFailing);
+            if (found && _baseOf(found) !== base) return _heldWriteItem(found, _writeQueue.get(found));
+        }
+        return null;
     },
     discardFailingHeldWrites(compID, matchID) {
         let discarded = 0;
+        // What holds the match back from another base (G2), when its own
+        // writes are not the ones failing; asked before anything goes.
+        const blocker = API.heldWriteBlocker(compID, matchID);
         for (const [key, d] of _entriesFor(_revKey(compID, matchID))) {
             if (_discardIfFailing(key, d)) discarded++;
         }
+        if (blocker && _discardIfFailing(blocker.key, _writeQueue.get(blocker.key))) discarded++;
         if (discarded > 0) _afterDiscard();
         return discarded;
     },
@@ -4999,19 +5137,7 @@ const API = {
     // without a way to discard it: it will land on its own.
     heldWrites() {
         const all = [..._writeQueue.entries()].filter(([, d]) => !!d).sort(_byEntryOrder);
-        return all.map(([key, d]) => ({
-            key,
-            compID: d.compID || '',
-            matchID: d.matchID || '',
-            kind: d.kind || 'score',
-            terminal: !!d.terminal,
-            keepsFailing: _keepsFailing(d),
-            authBlocked: !!d.authBlocked,
-            held: !!d.held,
-            ...(d.parked ? { parked: true } : {}),
-            ...(d.kind === 'lineup' && d.payload
-                ? { teamId: d.payload.teamId || '', round: d.payload.round } : {}),
-        }));
+        return all.map(([key, d]) => _heldWriteItem(key, d));
     },
 
     // The version banner's Reload stores the outbox once more before the

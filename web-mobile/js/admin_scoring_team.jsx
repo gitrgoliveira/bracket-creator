@@ -2050,6 +2050,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // ruling put on it, and every typed name is written with no member id.
   }, [m.compId, compMeta, password, teamMembersKey, teamAId, teamBId, teamAKnown, teamBKnown]);
 
+  // Set every render below, beside updateSub (the rows' picks of a dropped member).
+  const dropMemberPicksRef = useRefA(null);
   // A member whose add never landed (refused, or discarded by an operator; stage 3
   // review 3, F2) was shown under the id this device minted. The outbox says so
   // (team-member-dropped) and the side's list loses it, so it is never offered
@@ -2065,6 +2067,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         const list = membersShown.current[side];
         if (list.some((x) => x.id === d.memberId)) showMembers(side, list.filter((x) => x.id !== d.memberId));
       });
+      if (typeof dropMemberPicksRef.current === "function") dropMemberPicksRef.current(d.memberId);
     };
     window.addEventListener("team-member-dropped", onDropped);
     return () => window.removeEventListener("team-member-dropped", onDropped);
@@ -2482,6 +2485,22 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // row's fusensho and its draw, except taking a mark off the side the
   // fusensho went against, a correction that keeps it.
   const updateSubScore = (idx, fn) => updateSub(idx, prev => applyBoutScoreEdit(prev, fn(prev)));
+
+  // A member whose add never landed (team-member-dropped, stage 3 review 4, G1)
+  // is taken off every row that picked it here: a representative pick is
+  // cleared, a numbered row keeps its fighter's name and loses the id, as the
+  // outbox takes it off the queued score writes. Read through a ref, so the
+  // listener (registered above, for the side lists) sees this render's rows.
+  dropMemberPicksRef.current = (memberId) => {
+    subs.forEach((row, idx) => {
+      if (!row) return;
+      for (const side of ["a", "b"]) {
+        if (row[`${side}MemberIdOverride`] !== memberId) continue;
+        if (idx === daihyosenIdx) pickDaihyosenRepresentative({ idx, side, updateSub }, null);
+        else updateSub(idx, prev => ({ ...prev, [`${side}MemberIdOverride`]: "" }));
+      }
+    });
+  };
 
   // T096/FR-031: per-bout Fusensho: award a default win to the present
   // side; the other side keeps what it had struck (applyFusenshoToggle).

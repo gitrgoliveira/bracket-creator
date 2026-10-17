@@ -730,7 +730,7 @@ describe('a long single-match queue is checked for wait cycles without deep recu
         }
         API.clearQueue();
         // Newest first: the search along the chain starts from its far end.
-        _lsStore.bc_write_queue_v2 = JSON.stringify(big.reverse());
+        _lsStore.bc_write_queue_v2 = JSON.stringify(big.toReversed());
         await load();
         const failures = [];
         const onFail = (e) => failures.push(e);

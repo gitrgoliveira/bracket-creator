@@ -1736,7 +1736,7 @@ function _noteShownMatch(compID, m) {
 function _forgetShownMatches(compID) {
     if (!compID) return;
     const prefix = `${compID}:`;
-    for (const k of [..._shownMatchLabels.keys()]) if (k.startsWith(prefix)) _shownMatchLabels.delete(k);
+    for (const k of _shownMatchLabels.keys()) if (k.startsWith(prefix)) _shownMatchLabels.delete(k);
 }
 
 function _noteMatchLabel(compID, matchID, label) {

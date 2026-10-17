@@ -151,7 +151,7 @@ describe('the monotonic anchor never reaches localStorage (bc-cse)', () => {
         global.performance = { now: () => 12_345 };
         _enqueueRunningWrite('c1', 'm1', { status: 'running' }, 'pw');
 
-        const raw = global.localStorage.getItem('bc_write_queue');
+        const raw = global.localStorage.getItem('bc_write_queue_v2');
         expect(raw, 'the entry must actually have been persisted').toBeTruthy();
         expect(raw).not.toContain('perfAtEnqueue');
 

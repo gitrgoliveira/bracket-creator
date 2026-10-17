@@ -48,7 +48,7 @@ const writes = () => global.fetch.mock.calls.filter(([u]) => !isClock(u));
 const bodyOf = (call) => JSON.parse(call[1].body);
 const ok = (body) => Promise.resolve({ ok: true, status: 200, json: async () => body });
 const status = (code, body) => Promise.resolve({ ok: false, status: code, json: async () => body });
-const stored = () => JSON.parse(_lsStore.bc_write_queue || '[]');
+const stored = () => JSON.parse(_lsStore.bc_write_queue_v2 || '[]');
 // A fetch the test answers by hand, one per call.
 function heldFetches() {
     const held = [];

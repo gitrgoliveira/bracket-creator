@@ -581,7 +581,7 @@ describe('clock_skew recovery: a live completed write', () => {
         // It landed, so nothing is reported and nothing is left queued.
         expect(await res.settled).toEqual({});
         expect(failures).toEqual([]);
-        expect(_lsStore.bc_write_queue).toBeUndefined();
+        expect(_lsStore.bc_write_queue_v2).toBeUndefined();
         unsub();
     });
 
@@ -647,7 +647,7 @@ describe('clock_skew recovery: a live completed write', () => {
         expect(failures[0].advice).toMatch(/clock/i);
         // Out of the queue: an entry stamped by a device that cannot get the
         // stamp right would poison-loop the flush.
-        expect(_lsStore.bc_write_queue).toBeUndefined();
+        expect(_lsStore.bc_write_queue_v2).toBeUndefined();
         expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/clock skew/i));
         warnSpy.mockRestore();
         unsub();
@@ -719,7 +719,7 @@ describe('clock_skew recovery: a queued write on the flush path', () => {
         expect(server.payloads[1].modifiedAt).toBe(enqueuedAt + SKEW_MS + 20000);
         expect(server.payloads[1].modifiedAt).toBeLessThan(Date.now() + SKEW_MS + 20000);
         // Landed, so the queue is empty again.
-        expect(_lsStore.bc_write_queue).toBeUndefined();
+        expect(_lsStore.bc_write_queue_v2).toBeUndefined();
     });
 
     it('refused twice: dropped, reported on both channels, never a third attempt', async () => {
@@ -752,7 +752,7 @@ describe('clock_skew recovery: a queued write on the flush path', () => {
         // ...and the alert channel, for one who has moved to another court.
         expect(alerts.some((a) => a.kind === 'rejected' && /clock/i.test(a.detail || ''))).toBe(true);
         // Dropped rather than left to poison-loop the flush.
-        expect(_lsStore.bc_write_queue).toBeUndefined();
+        expect(_lsStore.bc_write_queue_v2).toBeUndefined();
         expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/clock skew/i));
         warnSpy.mockRestore();
         unsubFail();
@@ -880,7 +880,7 @@ describe('clock_skew recovery: a queued override assertion', () => {
         expect(resyncs.length).toBe(1);
         expect(resyncs[0]).toMatchObject({ compID: 'c1', matchID: 'm-r2-0', reason: 'clock_skew' });
         expect(failures.length).toBe(1);
-        expect(_lsStore.bc_write_queue).toBeUndefined();
+        expect(_lsStore.bc_write_queue_v2).toBeUndefined();
         expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/clock skew/i));
         warnSpy.mockRestore();
         unsubResync();
@@ -933,7 +933,7 @@ describe('clock_skew recovery: a queued running write on the flush path', () => 
         // The whole point: the command survived the refusal.
         expect(server.payloads[1].kachinukiBoutFinal).toBe(true);
         // Landed on the retry, so the entry leaves the queue.
-        expect(_lsStore.bc_write_queue).toBeUndefined();
+        expect(_lsStore.bc_write_queue_v2).toBeUndefined();
     });
 
     it('refused twice: dropped exactly as a delivered entry is, with no banner', async () => {
@@ -962,7 +962,7 @@ describe('clock_skew recovery: a queued running write on the flush path', () => 
         expect(server.payloads.length).toBe(2);
         expect(failures).toEqual([]);
         expect(alerts).toEqual([]);
-        expect(_lsStore.bc_write_queue).toBeUndefined();
+        expect(_lsStore.bc_write_queue_v2).toBeUndefined();
         expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/clock skew/i));
         warnSpy.mockRestore();
         unsubFail();
@@ -987,7 +987,7 @@ describe('clock_skew recovery: a queued running write on the flush path', () => 
         await tick(50);
 
         expect(server.payloads.length).toBe(1);
-        expect(_lsStore.bc_write_queue).toBeUndefined();
+        expect(_lsStore.bc_write_queue_v2).toBeUndefined();
         // The 'online' event relearns on its own (change E), so exactly one extra
         // call is expected and nothing more: the delivered body added none. Read
         // past the relearn throttle window, so a wrongly-fired relearn cannot be
@@ -1024,7 +1024,7 @@ describe('clock_skew recovery: a queued running write on the flush path', () => 
 
         expect(server.payloads.length).toBe(1);
         expect(server.payloads[0].modifiedAt).toBe(enqueuedAt + SKEW_MS);
-        expect(_lsStore.bc_write_queue).toBeUndefined();
+        expect(_lsStore.bc_write_queue_v2).toBeUndefined();
         expect(failures).toEqual([]);
         expect(alerts).toEqual([]);
         // The 'online' event relearns on its own (change E), so one extra call is
@@ -1061,7 +1061,7 @@ describe('clock_skew recovery: the retried-once mark is persisted', () => {
         await tick(50);
 
         expect(server.payloads.length).toBe(1);
-        const persisted = JSON.parse(_lsStore.bc_write_queue);
+        const persisted = JSON.parse(_lsStore.bc_write_queue_v2);
         expect(persisted).toHaveLength(1);
         expect(persisted[0][1].skewRetried).toBe(true);
 
@@ -1084,7 +1084,7 @@ describe('clock_skew recovery: the retried-once mark is persisted', () => {
         expect(server2.payloads.length).toBe(1);
         expect(failures.length).toBe(1);
         expect(failures[0]).toMatchObject({ compID: 'c1', matchID: 'mq', kind: 'score' });
-        expect(_lsStore.bc_write_queue).toBeUndefined();
+        expect(_lsStore.bc_write_queue_v2).toBeUndefined();
         expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/clock skew/i));
         warnSpy.mockRestore();
         unsub();

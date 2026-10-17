@@ -237,7 +237,7 @@ describe('a queued write keeps its floor when it is re-stamped', () => {
         global.fetch = vi.fn(() => Promise.reject(new TypeError('offline')));
         await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A', ipponsA: ['M', 'M'] }, 'pw', { id: 'm1', compId: 'c1', status: 'running', modifiedAt: seen });
         await flushMicrotasks();
-        const stored = JSON.parse(localStorage.getItem('bc_write_queue'));
+        const stored = JSON.parse(localStorage.getItem('bc_write_queue_v2'));
         expect(stored[0][1].seenModifiedAt).toBe(seen);
         // Back online, the server refuses the first replay for clock skew
         // (its clock is behind this device's); the re-stamp is floored.
@@ -319,7 +319,7 @@ describe('a queued write that takes another\'s place keeps the later floor', () 
         await flushMicrotasks();
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M', 'K'], seenModifiedAt: low }, 'pw', null);
         await flushMicrotasks();
-        const stored = JSON.parse(localStorage.getItem('bc_write_queue'));
+        const stored = JSON.parse(localStorage.getItem('bc_write_queue_v2'));
         expect(stored).toHaveLength(1);
         expect(stored[0][1].seenModifiedAt).toBe(high);
     });

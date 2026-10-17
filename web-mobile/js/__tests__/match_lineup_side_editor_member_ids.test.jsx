@@ -46,7 +46,9 @@ const errorBanner = (tree) =>
 
 // A Save reads the lineup again before it writes (operator decision 2026-10-05),
 // so the write lands a few microtask hops after the tap.
-const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
+// The members read is bounded (withinDeadline, stage 3 review 3, F1), which takes a few
+// more microtasks to settle than a bare fetch.
+const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
 
 describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap closure)', () => {
   let runtime, MatchLineupSideEditor;
@@ -103,9 +105,7 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     runtime.mount(MatchLineupSideEditor, {
       comp: COMP, team: TEAM, match: MATCH, allMatches: [MATCH], password: 'pw', showToast: vi.fn(),
     });
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve(); // let the squad-load effect settle too
+    await flush(); // let the squad-load effect settle too
     return runtime.currentTree();
   }
 

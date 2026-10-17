@@ -45,7 +45,7 @@ function mockFetch(impl) {
 const writes = () => global.fetch.mock.calls.filter(([u]) => !isClock(u));
 const ok = (body) => Promise.resolve({ ok: true, status: 200, json: async () => body });
 const status = (code, body) => Promise.resolve({ ok: false, status: code, json: async () => body });
-const stored = () => JSON.parse(_lsStore.bc_write_queue || '[]');
+const stored = () => JSON.parse(_lsStore.bc_write_queue_v2 || '[]');
 // The refusal paths log a console.warn on purpose: take them off the record.
 function expectWarned() { expect(console.warn).toHaveBeenCalled(); console.warn.mockClear(); }
 const finish = { status: 'completed', winner: 'A', ipponsA: ['M', 'M'], ipponsB: [] };

@@ -45,7 +45,7 @@ afterEach(() => {
 
 async function flushMicrotasks() { for (let i = 0; i < 30; i++) await Promise.resolve(); }
 async function tick(ms = 0) { await vi.advanceTimersByTimeAsync(ms); await flushMicrotasks(); }
-const stored = () => JSON.parse(_lsStore.bc_write_queue || '[]');
+const stored = () => JSON.parse(_lsStore.bc_write_queue_v2 || '[]');
 const answer = (status, body) => Promise.resolve({
     ok: status >= 200 && status < 300, status, headers: { get: () => null },
     json: async () => body, text: async () => JSON.stringify(body),

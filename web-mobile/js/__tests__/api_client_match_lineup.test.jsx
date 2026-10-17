@@ -243,7 +243,7 @@ describe('API.putMatchLineup: memberIds (bc-pnum gap closure)', () => {
   let originalFetch;
   beforeEach(() => {
     originalFetch = global.fetch;
-    localStorage.removeItem('bc_write_queue');
+    localStorage.removeItem('bc_write_queue_v2');
   });
   afterEach(async () => {
     global.fetch = originalFetch;
@@ -273,7 +273,7 @@ describe('API.putMatchLineup: memberIds (bc-pnum gap closure)', () => {
     global.fetch = vi.fn(() => Promise.reject(new TypeError('network error')));
     const result = await API.putMatchLineup('c1', 't-queue', 'm-queue', { senpo: 'Bob' }, 'pw', { senpo: 'mem-9' });
     expect(result.pending).toBe(true);
-    const raw = localStorage.getItem('bc_write_queue');
+    const raw = localStorage.getItem('bc_write_queue_v2');
     expect(raw).not.toBeNull();
     const entries = JSON.parse(raw);
     const found = entries.find(([key]) => key.includes('m-queue'));
@@ -296,7 +296,7 @@ describe('API.queuedLineupSave', () => {
   let originalFetch;
   beforeEach(() => {
     originalFetch = global.fetch;
-    localStorage.removeItem('bc_write_queue');
+    localStorage.removeItem('bc_write_queue_v2');
     API.clearQueue();
   });
   afterEach(async () => {
@@ -348,19 +348,19 @@ describe('API.queuedLineupSave', () => {
   it('asks about the very queue entry a save is queued under: an entry of its match (bc-evts M5)', async () => {
     offline();
     await API.putMatchLineup('c1', 't-q', 'm-q', { senpo: 'Bob' }, 'pw');
-    const keys = JSON.parse(localStorage.getItem('bc_write_queue')).map(([key]) => key);
+    const keys = JSON.parse(localStorage.getItem('bc_write_queue_v2')).map(([key]) => key);
     expect(keys.some((key) => key.startsWith('c1:m-q\u001f'))).toBe(true);
   });
 
   it('still sees a save a build before bc-evts M5 queued under the lineup\'s own base', async () => {
     offline();
-    localStorage.setItem('bc_write_queue', JSON.stringify([['lineup:c1:t-q:match:m-q', {
+    localStorage.setItem('bc_write_queue_v2', JSON.stringify([['lineup:c1:t-q:match:m-q', {
       compID: 'c1', matchID: 'm-q', kind: 'lineup', terminal: true, method: 'PUT', enqueuedAt: Date.now(),
       url: '/api/competitions/c1/teams/t-q/match-lineups/m-q', password: 'pw',
       payload: { teamId: 't-q', competitionId: 'c1', matchId: 'm-q', positions: { senpo: 'Bob' } },
     }]]));
     window.dispatchEvent(new StorageEvent('storage', {
-      key: 'bc_write_queue', oldValue: null, newValue: localStorage.getItem('bc_write_queue'),
+      key: 'bc_write_queue_v2', oldValue: null, newValue: localStorage.getItem('bc_write_queue_v2'),
     }));
     expect(API.queuedLineupSave('c1', 't-q', { matchId: 'm-q' })).toBe(true);
   });

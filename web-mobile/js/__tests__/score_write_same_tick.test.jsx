@@ -47,7 +47,7 @@ describe('API.recordTap stores the tap in the same tick', () => {
       expect(out).not.toBeInstanceOf(Promise);
       expect(out.seq).toBe(1);
       expect(typeof out.id).toBe('string');
-      const stored = JSON.parse(store.bc_write_queue);
+      const stored = JSON.parse(store.bc_write_queue_v2);
       expect(stored).toHaveLength(1);
       expect(stored[0][1].payload).toMatchObject({ id: out.id, seq: 1, stamp: out.stamp, kind: 'ippon.add' });
     } finally {

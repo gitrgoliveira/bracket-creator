@@ -70,7 +70,7 @@ function installFetch() {
     });
 }
 
-const storedEntries = () => JSON.parse(_lsStore.bc_write_queue || '[]').map(([, d]) => d);
+const storedEntries = () => JSON.parse(_lsStore.bc_write_queue_v2 || '[]').map(([, d]) => d);
 
 describe('`changed` survives the queue', () => {
     it('persisted, rehydrated after a reload, and replayed', async () => {

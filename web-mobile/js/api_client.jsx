@@ -678,7 +678,14 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
  * `method`/`url` are present only on terminal entries; running entries omit them.
  */
 
-const QUEUE_STORAGE_KEY = 'bc_write_queue';
+// The outbox's own key (bc-evts stage 3 review 3, F4). It was 'bc_write_queue',
+// which a tab of an older build open across the upgrade shares: that tab read
+// this build's entries (tap events it does not know), rewrote them into its own
+// score writes and pruned the shared key on a 4xx, so new taps went out of
+// order or were lost. What an older build leaves under the old key is taken
+// over (_takeOverLegacyQueue), on load and whenever an older tab writes it.
+const QUEUE_STORAGE_KEY = 'bc_write_queue_v2';
+const LEGACY_QUEUE_STORAGE_KEY = 'bc_write_queue';
 
 // Defense-in-depth allowlist for terminal-write replay. The queue only ever
 // holds score/decision/lineup writes, which are ALWAYS PUT/POST to
@@ -806,7 +813,7 @@ function _persistQueue() {
     try {
         // Remove the key (rather than writing "[]") when the queue is empty: avoids
         // storage churn and, critically, prevents an in-flight flush that reaches
-        // _persistQueue() after clearQueue() from re-creating an empty bc_write_queue,
+        // _persistQueue() after clearQueue() from re-creating an empty stored queue,
         // which would undermine the credential-revocation intent of removing it.
         const merged = _storedQueue();
         for (const [k, at] of _settled) {
@@ -1461,6 +1468,9 @@ function _storedEntryProblem(descriptor) {
 // persisting this tab's scrubbed queue alone would leave the revoked
 // plaintext password in storage under the other tab's entries.
 function _parkStoredEntries() {
+    // What an older build still holds under the old key carries the revoked
+    // password too: taken over first, so it is parked with the rest (F4).
+    try { _takeOverLegacyQueue(localStorage.getItem(LEGACY_QUEUE_STORAGE_KEY)); } catch (_e) { /* unreadable storage */ }
     const stored = _storedQueue();
     if (stored.size === 0) return;
     for (const d of stored.values()) {
@@ -2799,11 +2809,48 @@ function _adoptStoredTapSeq(key, held, stored) {
     return true;
 }
 
+// _takeOverLegacyQueue: takes over the entries an older build stored under the
+// old key (`raw`, its serialized list), F4. Each is taken as the rehydrate
+// takes a stored one (held, checked, an old match lineup moved onto its match),
+// unless this tab holds that key already, and stored under this build's key;
+// once that has landed the old key is handed back EMPTY. Empty, not removed: a
+// tab of an older build drops every entry of its own that the stored list no
+// longer holds (as sent by another tab), so it stops sending what was taken
+// over, where a removal only makes it drop what it took up from other tabs.
+// An entry it has out at that moment can be sent by both, which the server
+// answers as it answers any resend. The new owner sends them in the one replay
+// order of their match (_byEntryOrder). If this build's key cannot be written,
+// the old key is left as it is, so nothing is lost. True when any was taken.
+function _takeOverLegacyQueue(raw) {
+    const stored = _parseStoredQueue(raw);
+    if (stored.size === 0) return false;
+    let taken = false;
+    for (const [key, d] of stored) {
+        if (!d || typeof d !== 'object' || _storedEntryProblem(d)) continue;
+        d.held = true;
+        if (d.payload && d.payload.forceDownstreamReopen) d.payload = _withoutDownstreamConfirmation(d.payload);
+        const at = _migratedLegacyLineup(key, d) || key;
+        if (_writeQueue.has(at)) continue;
+        _writeQueue.set(at, d);
+        _noteOwnStamp(at, d);
+        _noteOwnTapSeq(at, d);
+        taken = true;
+    }
+    if (!_persistQueue()) return taken;
+    try { localStorage.setItem(LEGACY_QUEUE_STORAGE_KEY, '[]'); } catch (_e) { /* the next load tries again */ }
+    return taken;
+}
+
 // Remove-then-add for the same reason as the online handler below.
 if (typeof window !== 'undefined') {
     if (window.__bcStoredQueueHandler) window.removeEventListener('storage', window.__bcStoredQueueHandler);
     const onStorage = (e) => {
         if (e.key === QUEUE_STORAGE_KEY) _onStoredQueueChanged(e.oldValue, e.newValue);
+        // An older tab wrote what it queues under the old key: take it over (F4).
+        if (e.key === LEGACY_QUEUE_STORAGE_KEY && e.newValue && _takeOverLegacyQueue(e.newValue)) {
+            _recomputeSyncStatus();
+            _flushQueue();
+        }
     };
     window.__bcStoredQueueHandler = onStorage;
     window.addEventListener('storage', onStorage);
@@ -2951,6 +2998,17 @@ if (typeof fetch === 'function') {
             _flushQueue();
         }
     } catch (_e) { /* private-browsing / malformed JSON: silently skip */ }
+}());
+
+// After this build's own queue: what an older build left under the old key
+// (F4). A key both hold keeps this build's entry.
+;(function _takeOverLegacyQueueOnLoad() {
+    try {
+        if (_takeOverLegacyQueue(localStorage.getItem(LEGACY_QUEUE_STORAGE_KEY))) {
+            _recomputeSyncStatus();
+            _flushQueue();
+        }
+    } catch (_e) { /* private-browsing: nothing to take over */ }
 }());
 
 // ---------------------------------------------------------------------------
@@ -4913,9 +4971,9 @@ const API = {
     },
 
     // mp-gpra (security): clearQueue: drop all queued writes (in-memory + the
-    // persisted bc_write_queue) and reset sync state. Called on logout /
+    // persisted queue, an older build's key included) and reset sync state. Called on logout /
     // password_reset so a stale plaintext password and any pending writes don't
-    // linger in localStorage past credential revocation: bringing bc_write_queue
+    // linger in localStorage past credential revocation: bringing the stored queue
     // to the same lifecycle as bc_password. Pending offline writes are discarded:
     // on a password_reset they would 401 on retry anyway, and logout is explicit.
     /**
@@ -5062,6 +5120,8 @@ const API = {
         for (const k of _entryHooks.keys()) _settleKey(k, { value: { discarded: true } });
         for (const b of _pendingTapListeners.keys()) _publishPendingTaps(b);
         try { localStorage.removeItem(QUEUE_STORAGE_KEY); } catch (_e) { /* ignore */ }
+        // An older build's queue carries the same revoked password (F4).
+        try { localStorage.removeItem(LEGACY_QUEUE_STORAGE_KEY); } catch (_e) { /* ignore */ }
         if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
         _flushAttempt = 0;
         _offlineFlag = false;

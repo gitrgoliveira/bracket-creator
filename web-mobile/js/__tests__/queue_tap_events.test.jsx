@@ -42,7 +42,7 @@ afterEach(() => {
 async function flushMicrotasks() { for (let i = 0; i < 30; i++) await Promise.resolve(); }
 async function tick(ms = 0) { await vi.advanceTimersByTimeAsync(ms); await flushMicrotasks(); }
 const isClock = (url) => String(url).includes('/api/time');
-const stored = () => JSON.parse(_lsStore.bc_write_queue || '[]');
+const stored = () => JSON.parse(_lsStore.bc_write_queue_v2 || '[]');
 const tap = (letter = 'M', side = 'a') => ({ kind: 'ippon.add', pos: 0, side, letter });
 
 // A fake score-events door: answers each event with `outcome(ev)` (applied by
@@ -118,7 +118,7 @@ describe('batching', () => {
             url: '/api/competitions/c1/matches/m1/score-events', enqueuedAt: Date.now() - 1000,
             payload: { kind: 'ippon.add', pos: 0, side: 'a', letter: 'M', id: `oldsess.${seq}`, session: 'oldsess', seq, stamp: Date.now() - 1000 + seq },
         }]);
-        _lsStore.bc_write_queue = JSON.stringify(old);
+        _lsStore.bc_write_queue_v2 = JSON.stringify(old);
         const batches = eventServer();
         await load();
         API.recordTap('c1', 'm1', tap(), 'pw', { id: 'm1' });
@@ -261,7 +261,7 @@ describe('pending taps', () => {
             payload: { kind: 'ippon.add', pos: 0, side: 'b', letter: 'D', id: 'other.1', session: 'other', seq: 1, stamp: Date.now() },
         }];
         window.dispatchEvent(new StorageEvent('storage', {
-            key: 'bc_write_queue', oldValue: null, newValue: JSON.stringify([entry]),
+            key: 'bc_write_queue_v2', oldValue: null, newValue: JSON.stringify([entry]),
         }));
         await tick(0);
         expect(batches.map((b) => b.body.events[0].id)).toEqual(['other.1']);

@@ -54,7 +54,7 @@ async function tick(ms = 0) {
   await flushMicrotasks();
 }
 
-const storedEntries = () => JSON.parse(localStorage.getItem('bc_write_queue') || '[]');
+const storedEntries = () => JSON.parse(localStorage.getItem('bc_write_queue_v2') || '[]');
 const queuedPayloads = () => storedEntries().map(([, d]) => untagged(d.payload));
 
 // The contract server behind the fetch the API sees; the background clock poll
@@ -131,7 +131,7 @@ describe('a save made offline replays naming only what it changed', () => {
     expect(s.own.m1.positions).toEqual({ senpo: 'Kato', jiho: 'Tanaka', taisho: 'Mori' });
     expect(s.own.m1.memberIds).toEqual({ senpo: 'mem-k', jiho: 'mem-t', taisho: 'mem-m' });
     expect(API.queuedLineupSave('c1', 't1', { matchId: 'm1' })).toBe(false);
-    expect(localStorage.getItem('bc_write_queue')).toBeNull();
+    expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
   });
 
   it('keeps the names the lineup in force carried when the match has no lineup of its own', async () => {
@@ -227,7 +227,7 @@ describe('a save a previous build queued', () => {
   ];
 
   async function reload() {
-    localStorage.setItem('bc_write_queue', JSON.stringify([oldEntry]));
+    localStorage.setItem('bc_write_queue_v2', JSON.stringify([oldEntry]));
     vi.resetModules();
     API = (await import('../api_client.jsx')).API;
   }
@@ -270,7 +270,7 @@ describe('a save a previous build queued', () => {
         url: '/api/competitions/c1/matches/m1/court', payload: { court: 'B' },
       },
     ];
-    localStorage.setItem('bc_write_queue', JSON.stringify([court, oldEntry]));
+    localStorage.setItem('bc_write_queue_v2', JSON.stringify([court, oldEntry]));
     const sent = [];
     global.fetch = vi.fn((url, opts) => {
       if (String(url).includes('/api/time')) return Promise.reject(new TypeError('clock'));

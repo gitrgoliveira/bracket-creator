@@ -1002,12 +1002,12 @@ describe('recordScore: completed write drains queued running autosave', () => {
 // (security), hasPendingTerminalWrite contract (banner re-hydrate).
 
 describe('clearQueue: drops queued writes + persisted store (logout / password_reset)', () => {
-    it('empties the queue, removes bc_write_queue, and resets sync status to synced', async () => {
+    it('empties the queue, removes bc_write_queue_v2, and resets sync status to synced', async () => {
         mockFetch(() => Promise.reject(new TypeError('offline')));
         const queued = await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null);
         expect(queued).toMatchObject({ pending: true }); // the outbox's (bc-evts)
         expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(true);
-        expect(localStorage.getItem('bc_write_queue')).not.toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).not.toBeNull();
 
         let status;
         const unsub = subscribeSyncStatus((s) => { status = s; });
@@ -1015,7 +1015,7 @@ describe('clearQueue: drops queued writes + persisted store (logout / password_r
         unsub();
 
         expect(API.hasPendingTerminalWrite('c1', 'm1')).toBe(false);
-        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
         expect(status).toBe('synced');
     });
 });
@@ -1030,7 +1030,7 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
             kind: 'decision', terminal: true, method: 'POST',
             url: 'https://evil.example/steal', enqueuedAt: Date.now(),
         }]];
-        localStorage.setItem('bc_write_queue', JSON.stringify(evil));
+        localStorage.setItem('bc_write_queue_v2', JSON.stringify(evil));
         mockFetch(() => Promise.reject(new TypeError('offline')));
         vi.resetModules();
         const m = await import('../api_client.jsx');
@@ -1046,7 +1046,7 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
             kind: 'decision', terminal: true, method: 'POST',
             url: '/api/competitions/c1/matches/m2/decision', enqueuedAt: Date.now(),
         }]];
-        localStorage.setItem('bc_write_queue', JSON.stringify(ok));
+        localStorage.setItem('bc_write_queue_v2', JSON.stringify(ok));
         mockFetch(() => Promise.reject(new TypeError('offline')));
         vi.resetModules();
         const m = await import('../api_client.jsx');
@@ -1060,7 +1060,7 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
             kind: 'decision', terminal: true, method: 'POST',
             url: '/api/admin/secrets', enqueuedAt: Date.now(),
         }]];
-        localStorage.setItem('bc_write_queue', JSON.stringify(bad));
+        localStorage.setItem('bc_write_queue_v2', JSON.stringify(bad));
         mockFetch(() => Promise.reject(new TypeError('offline')));
         vi.resetModules();
         const m = await import('../api_client.jsx');
@@ -1076,7 +1076,7 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
             kind: 'decision', terminal: true, method: 'DELETE',
             url: '/api/competitions/c1/matches/m4/decision', enqueuedAt: Date.now(),
         }]];
-        localStorage.setItem('bc_write_queue', JSON.stringify(bad));
+        localStorage.setItem('bc_write_queue_v2', JSON.stringify(bad));
         mockFetch(() => Promise.reject(new TypeError('offline')));
         vi.resetModules();
         const m = await import('../api_client.jsx');
@@ -1094,7 +1094,7 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
             kind: 'score', terminal: true, method: 'PUT',
             url: '/api/competitions/../../api/admin/secrets', enqueuedAt: Date.now(),
         }]];
-        localStorage.setItem('bc_write_queue', JSON.stringify(bad));
+        localStorage.setItem('bc_write_queue_v2', JSON.stringify(bad));
         mockFetch(() => Promise.reject(new TypeError('offline')));
         vi.resetModules();
         const m = await import('../api_client.jsx');
@@ -1110,7 +1110,7 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
             kind: 'score', terminal: true, method: 'PUT',
             url: '//evil.example.com/api/competitions/c1/matches/m6/score', enqueuedAt: Date.now(),
         }]];
-        localStorage.setItem('bc_write_queue', JSON.stringify(bad));
+        localStorage.setItem('bc_write_queue_v2', JSON.stringify(bad));
         mockFetch(() => Promise.reject(new TypeError('offline')));
         vi.resetModules();
         const m = await import('../api_client.jsx');
@@ -1125,7 +1125,7 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
             kind: 'score', terminal: true, method: 'PUT',
             url: '/api/competitions/c1/matches/m7/score', enqueuedAt: Date.now(),
         }]];
-        localStorage.setItem('bc_write_queue', JSON.stringify(good));
+        localStorage.setItem('bc_write_queue_v2', JSON.stringify(good));
         mockFetch(() => Promise.reject(new TypeError('offline')));
         vi.resetModules();
         const m = await import('../api_client.jsx');
@@ -1141,7 +1141,7 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
             kind: 'score', terminal: true, method: 'PUT',
             url: '/api/competitions/c1/matches/m8/score', enqueuedAt: 'not-a-number',
         }]];
-        localStorage.setItem('bc_write_queue', JSON.stringify(bad));
+        localStorage.setItem('bc_write_queue_v2', JSON.stringify(bad));
         mockFetch(() => Promise.reject(new TypeError('offline')));
         vi.resetModules();
         const m = await import('../api_client.jsx');
@@ -1165,7 +1165,7 @@ describe('rehydrate: tampered terminal url from localStorage is rejected (securi
                 url: '/api/competitions/c1/matches/good/decision', enqueuedAt: Date.now(),
             }],
         ];
-        localStorage.setItem('bc_write_queue', JSON.stringify(mixed));
+        localStorage.setItem('bc_write_queue_v2', JSON.stringify(mixed));
         mockFetch(() => Promise.reject(new TypeError('offline')));
         vi.resetModules();
         const m = await import('../api_client.jsx');
@@ -1222,8 +1222,8 @@ describe('clearQueue: cancels an in-flight flush (no sends with a revoked passwo
         expect(API.hasPendingTerminalWrite('c1', 'mA')).toBe(false);
         expect(API.hasPendingTerminalWrite('c1', 'mB')).toBe(false);
         // The in-flight flush's post-loop _persistQueue() must NOT re-create an
-        // empty bc_write_queue after clearQueue() removed it (credential revocation).
-        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+        // empty bc_write_queue_v2 after clearQueue() removed it (credential revocation).
+        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
     });
 });
 
@@ -1588,7 +1588,7 @@ describe('bc-mrgc phase 3: no queued write is dropped for its age', () => {
 
     it('entries 11 hours, 13 hours and 3 days old all survive rehydration', async () => {
         const hour = 60 * 60 * 1000;
-        localStorage.setItem('bc_write_queue', JSON.stringify([
+        localStorage.setItem('bc_write_queue_v2', JSON.stringify([
             entryAged('c1:m1', 'm1', 11 * hour),
             entryAged('c1:m2', 'm2', 13 * hour),
             entryAged('c1:m3', 'm3', 72 * hour),
@@ -1603,7 +1603,7 @@ describe('bc-mrgc phase 3: no queued write is dropped for its age', () => {
 
     it('an old entry raises no alert on load and is sent, then leaves the queue once it lands', async () => {
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        localStorage.setItem('bc_write_queue', JSON.stringify([
+        localStorage.setItem('bc_write_queue_v2', JSON.stringify([
             entryAged('c1:m1', 'm1', 13 * 60 * 60 * 1000),
             entryAged('c1:m2', 'm2', 13 * 60 * 60 * 1000, false),
         ]));
@@ -1618,7 +1618,7 @@ describe('bc-mrgc phase 3: no queued write is dropped for its age', () => {
         expect(sent.filter((u) => u.includes('/matches/m1/'))).toHaveLength(1);
         expect(sent.filter((u) => u.includes('/matches/m2/'))).toHaveLength(1);
         expect(m.API.hasPendingTerminalWrite('c1', 'm1')).toBe(false);
-        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
         warnSpy.mockRestore();
     });
 });
@@ -1633,7 +1633,7 @@ describe('bc-qttl: queue alerts raised before any subscriber exists are buffered
             kind: 'score', terminal: true, method: 'PUT',
             url: '/api/admin/secrets', enqueuedAt: Date.now(),
         }]];
-        localStorage.setItem('bc_write_queue', JSON.stringify(entries));
+        localStorage.setItem('bc_write_queue_v2', JSON.stringify(entries));
         mockFetch(() => Promise.reject(new TypeError('offline')));
         vi.resetModules();
         const m = await import('../api_client.jsx');
@@ -1909,7 +1909,7 @@ describe('bc-qttl: API.parkQueueForReauth (password_reset no longer destroys que
         // This is the security property clearQueue() used to provide: the
         // parked write is still on disk (it was NOT destroyed), but the dead
         // credential it carried must not linger anywhere within it.
-        const raw = localStorage.getItem('bc_write_queue');
+        const raw = localStorage.getItem('bc_write_queue_v2');
         expect(raw).not.toBeNull();
         expect(raw).not.toContain('super-secret-pw');
         const persisted = JSON.parse(raw);
@@ -2279,7 +2279,7 @@ describe('_enqueueTerminalWrite: a queued write never carries the downstream con
         expect(res).toMatchObject({ pending: true });
         await flushMicrotasks();
         expect(live[0].forceDownstreamReopen).toBe(true);
-        const stored = JSON.parse(localStorage.getItem('bc_write_queue'));
+        const stored = JSON.parse(localStorage.getItem('bc_write_queue_v2'));
         expect(stored.find(([key]) => key.includes('mforce'))[1].payload).not.toHaveProperty('forceDownstreamReopen');
 
         // A reload: a fresh module rehydrates the stored entry and replays it.
@@ -2324,7 +2324,7 @@ describe('_enqueueTerminalWrite: a queued write never carries the downstream con
             password: 'pw', kind: 'score', terminal: true, method: 'PUT',
             url: '/api/competitions/c1/matches/mold/score', enqueuedAt: Date.now(),
         }]];
-        localStorage.setItem('bc_write_queue', JSON.stringify(stale));
+        localStorage.setItem('bc_write_queue_v2', JSON.stringify(stale));
         const replays = [];
         mockFetch((url, opts) => {
             if (String(url).includes('/matches/mold/')) replays.push(JSON.parse(opts.body));
@@ -2357,7 +2357,7 @@ describe('_enqueueTerminalWrite: a queued write never carries the downstream con
             'pw', null);
         expect(res).toMatchObject({ pending: true }); // the outbox's (bc-evts)
         expect(live[0].clearWithdrawal).toBe(true);
-        const stored = JSON.parse(localStorage.getItem('bc_write_queue'));
+        const stored = JSON.parse(localStorage.getItem('bc_write_queue_v2'));
         expect(stored.find(([key]) => key.includes('mclear'))[1].payload.clearWithdrawal).toBe(true);
 
         // A reload: a fresh module rehydrates the stored entry and replays it.
@@ -2442,7 +2442,7 @@ describe('bc-sync: pending edits and durable running writes', () => {
         mockFetch(() => new Promise(() => {}));
         const p = API.recordScore('c1', 'm1', { status: 'running', durable: true }, 'pw', null);
         // Synchronously, before anything is awaited.
-        const stored = localStorage.getItem('bc_write_queue');
+        const stored = localStorage.getItem('bc_write_queue_v2');
         expect(stored).not.toBeNull();
         expect(stored).toContain('m1');
         expect(stored).not.toContain('durable');
@@ -2466,7 +2466,7 @@ describe('bc-sync: pending edits and durable running writes', () => {
     it('a running write that lands leaves the outbox', async () => {
         mockFetch(() => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }));
         await (await API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null)).settled;
-        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
         expect(writeCallCount()).toBe(1);
     });
 
@@ -2474,7 +2474,7 @@ describe('bc-sync: pending edits and durable running writes', () => {
         mockFetch(() => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }));
         await (await API.recordScore('c1', 'm1', { status: 'completed', durable: true }, 'pw', null)).settled;
         expect(writeCallCount()).toBe(1);
-        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
     });
 });
 
@@ -2489,7 +2489,7 @@ describe('bc-sync: the stored outbox is shared by every tab', () => {
     // either would make tab B save its own queue again and hide what A did.
     const hang = () => new Promise(() => {});
     const landed = () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
-    const stored = () => JSON.parse(localStorage.getItem('bc_write_queue') || '[]').map(([, d]) => d);
+    const stored = () => JSON.parse(localStorage.getItem('bc_write_queue_v2') || '[]').map(([, d]) => d);
     const storedMatchIds = () => stored().map((d) => d.matchID).sort();
 
     async function openTabB() {
@@ -2557,7 +2557,7 @@ describe('bc-sync: the stored outbox is shared by every tab', () => {
 
     it('an unreadable entry dropped on load leaves storage, so it is announced once', async () => {
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        localStorage.setItem('bc_write_queue', JSON.stringify([['c1:m1', {
+        localStorage.setItem('bc_write_queue_v2', JSON.stringify([['c1:m1', {
             compID: 'c1', matchID: 'm1', payload: {}, password: 'pw',
             kind: 'score', terminal: true, method: 'PUT',
             url: '/api/competitions/c1/matches/m1/score', enqueuedAt: 'not-a-time',
@@ -2565,7 +2565,7 @@ describe('bc-sync: the stored outbox is shared by every tab', () => {
         mockFetch(offline);
         vi.resetModules();
         await import('../api_client.jsx');
-        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
         warnSpy.mockRestore();
     });
 
@@ -2614,7 +2614,7 @@ describe('bc-sync: a tab follows the writes other tabs store', () => {
         enqueuedAt: Date.now(), ...over,
     }];
     const otherTabSaved = (oldValue, newValue) => window.dispatchEvent(
-        new StorageEvent('storage', { key: 'bc_write_queue', oldValue, newValue }));
+        new StorageEvent('storage', { key: 'bc_write_queue_v2', oldValue, newValue }));
 
     it('takes up and sends a write another tab queued', async () => {
         // The other tab queued a Finish while offline and was then closed.
@@ -2654,7 +2654,7 @@ describe('bc-sync: a tab follows the writes other tabs store', () => {
         await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', null);
         // The other tab holds an older copy of THIS write (the same queue
         // entry, so the same key) and saves it.
-        const [[ownKey]] = JSON.parse(localStorage.getItem('bc_write_queue'));
+        const [[ownKey]] = JSON.parse(localStorage.getItem('bc_write_queue_v2'));
         const [, older] = entry('m1', { payload: { status: 'completed', winner: 'stale' }, enqueuedAt: Date.now() - 1000 });
         otherTabSaved(null, JSON.stringify([[ownKey, older]]));
         const sent = [];
@@ -2690,7 +2690,7 @@ describe('bc-sync: a tab follows the writes other tabs store', () => {
 // Wi-Fi) leaves it in storage for the next load, with no page-hide copy.
 describe('bc-sync: a running write still being sent when the page goes away is kept', () => {
     const hang = () => new Promise(() => {});
-    const storedEntries = () => JSON.parse(localStorage.getItem('bc_write_queue') || '[]').map(([, d]) => d);
+    const storedEntries = () => JSON.parse(localStorage.getItem('bc_write_queue_v2') || '[]').map(([, d]) => d);
     const hideTab = () => {
         Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
         document.dispatchEvent(new Event('visibilitychange'));
@@ -2726,7 +2726,7 @@ describe('bc-sync: a running write still being sent when the page goes away is k
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
         await flushMicrotasks();
         window.dispatchEvent(new Event('pagehide'));
-        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
     });
 
     it('a tab that is only hidden does not send the write a second time', async () => {
@@ -2749,7 +2749,7 @@ describe('bc-sync: a running write still being sent when the page goes away is k
         expect(storedEntries()).toHaveLength(1);
         answer({ ok: true, status: 200, json: () => Promise.resolve({}) });
         await flushMicrotasks();
-        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
         expect(writeCallCount()).toBe(1);
     });
 
@@ -2765,7 +2765,7 @@ describe('bc-sync: a running write still being sent when the page goes away is k
         hideTab();
         await tick(10000);
         expect(m1Bodies.map((x) => x.ipponsA)).toEqual([['M'], ['M']]);
-        expect(localStorage.getItem('bc_write_queue')).toBeNull();
+        expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();
     });
 
     it('the entry is dated when the write was made, not when the tab was hidden', async () => {
@@ -2848,7 +2848,7 @@ describe('bc-offl: subscribeUnsentWrites, the held-writes count', () => {
     });
 
     it('a reload with a held result shows its count at once (the rehydrate dropped nothing)', async () => {
-        localStorage.setItem('bc_write_queue', JSON.stringify([entry('m1')]));
+        localStorage.setItem('bc_write_queue_v2', JSON.stringify([entry('m1')]));
         mockFetch(offline);
         vi.resetModules();
         const m = await import('../api_client.jsx');
@@ -2862,7 +2862,7 @@ describe('bc-offl: subscribeUnsentWrites, the held-writes count', () => {
         const seen = [];
         const unsub = mod.subscribeUnsentWrites((c) => seen.push(c));
         window.dispatchEvent(new StorageEvent('storage', {
-            key: 'bc_write_queue', oldValue: null, newValue: JSON.stringify([entry('mB')]),
+            key: 'bc_write_queue_v2', oldValue: null, newValue: JSON.stringify([entry('mB')]),
         }));
         await flushMicrotasks();
         unsub();

@@ -90,7 +90,7 @@ function eventServer({ outcome = () => ({ outcome: 'applied' }), version = () =>
 describe('M1: a match\'s own order survives a reload and another tab', () => {
     it('a tap after a reload is stamped after the taps the previous page left queued', async () => {
         const ahead = Date.now() + 2000;
-        _lsStore.bc_write_queue = JSON.stringify([storedTap('old.1', 'old', 1, ahead)]);
+        _lsStore.bc_write_queue_v2 = JSON.stringify([storedTap('old.1', 'old', 1, ahead)]);
         await load();
         const t = API.recordTap('c1', 'm1', { kind: 'ippon.remove', pos: 0, side: 'a', target: 'old.1' }, 'pw', { id: 'm1' });
         expect(t.stamp).toBeGreaterThan(ahead);
@@ -100,7 +100,7 @@ describe('M1: a match\'s own order survives a reload and another tab', () => {
         await load();
         const ahead = Date.now() + 2000;
         window.dispatchEvent(new StorageEvent('storage', {
-            key: 'bc_write_queue', oldValue: null, newValue: JSON.stringify([storedTap('other.1', 'other', 1, ahead)]),
+            key: 'bc_write_queue_v2', oldValue: null, newValue: JSON.stringify([storedTap('other.1', 'other', 1, ahead)]),
         }));
         const t = API.recordTap('c1', 'm1', tap('K'), 'pw', { id: 'm1' });
         expect(t.stamp).toBeGreaterThan(ahead);
@@ -115,15 +115,15 @@ describe('M1: a match\'s own order survives a reload and another tab', () => {
         API.recordTap('c1', 'm1', tap('M'), 'pw', { id: 'm1' });
         API.recordTap('c1', 'm1', tap('K'), 'pw', { id: 'm1' });
         await tick(0);
-        const oldRaw = _lsStore.bc_write_queue;
+        const oldRaw = _lsStore.bc_write_queue_v2;
         const entries = JSON.parse(oldRaw);
         expect(entries.map(([, d]) => d.payload.seq)).toEqual([1, 2]);
         // The other tab: tap 2 landed, tap 1 was refused clock_skew behind it and re-seqd to 3.
         const [first] = entries;
         first[1].payload.seq = 3;
         const newRaw = JSON.stringify([first]);
-        _lsStore.bc_write_queue = newRaw;
-        window.dispatchEvent(new StorageEvent('storage', { key: 'bc_write_queue', oldValue: oldRaw, newValue: newRaw }));
+        _lsStore.bc_write_queue_v2 = newRaw;
+        window.dispatchEvent(new StorageEvent('storage', { key: 'bc_write_queue_v2', oldValue: oldRaw, newValue: newRaw }));
         expect(API.pendingTaps('c1', 'm1').map((e) => e.seq)).toEqual([3]);
         const next = API.recordTap('c1', 'm1', tap('D'), 'pw', { id: 'm1' });
         expect(next.seq).toBe(4);
@@ -220,7 +220,7 @@ describe('minor taps rules', () => {
         await tick(0);
         global.fetch = vi.fn(() => Promise.reject(new TypeError('offline')));
         const fin = await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', { id: 'm1', scoreVersion: 3 });
-        const [, entry] = JSON.parse(_lsStore.bc_write_queue).find(([k]) => k === fin.key);
+        const [, entry] = JSON.parse(_lsStore.bc_write_queue_v2).find(([k]) => k === fin.key);
         expect(entry.payload.basis.seen).toBe(7);
     });
 });

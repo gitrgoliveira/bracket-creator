@@ -47,7 +47,7 @@ afterEach(() => {
 async function flushMicrotasks() { for (let i = 0; i < 30; i++) await Promise.resolve(); }
 async function tick(ms = 0) { await vi.advanceTimersByTimeAsync(ms); await flushMicrotasks(); }
 const isClock = (url) => String(url).includes('/api/time');
-const stored = () => JSON.parse(_lsStore.bc_write_queue || '[]');
+const stored = () => JSON.parse(_lsStore.bc_write_queue_v2 || '[]');
 const path = (url) => String(url).replace(/^\/api\/competitions\/c1\//, '');
 
 // Records every request; `answer(path, n)` returns {status, body} or null to

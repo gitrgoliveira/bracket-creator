@@ -80,7 +80,7 @@ describe('the basis says what this device has sent', () => {
         // A tap of ANOTHER match is no part of this one's basis.
         API.recordTap('c1', 'm2', { kind: 'ippon.add', pos: 0, side: 'a', letter: 'D' }, 'pw', { id: 'm2' });
         const fin = await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', { ...SHOWN, id: 'm1' });
-        const finBody = JSON.parse(localStorage.getItem('bc_write_queue'))
+        const finBody = JSON.parse(localStorage.getItem('bc_write_queue_v2'))
             .find(([k]) => k === fin.key)[1].payload;
         expect(finBody.basis).toEqual({ seen: 7, own: [a.id, b.id], seq: 2 });
         expect(a.id.startsWith(`${finBody.session}.`)).toBe(true);

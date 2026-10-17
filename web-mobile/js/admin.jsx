@@ -1,7 +1,7 @@
 // Admin side: single tournament. Tournament has multiple Competitions.
 // Top-level: Tournament dashboard (all competitions), per-competition pages.
 
-import { applyPatch as patchCompetitionData, checkSeqGap, keepNewerDetail } from './patch.jsx';
+import { applyPatch as patchCompetitionData, checkSeqGap, keepNewerDetail, matchInComp } from './patch.jsx';
 import { createTimerPool } from './timer_pool.jsx';
 // Imported from the leaf, not read off `window`: write_result.jsx is
 // import-only (see its header) and every consumer ES-imports it directly.
@@ -178,6 +178,25 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
+  // R4 (bc-evts stage 3 review 2): a court move or time change this device
+  // makes shows at once, as a push would, and a refusal puts the old value back
+  // (both told by the outbox, subscribeLocalMatchPatch). Applied to the
+  // competition the admin shows and to the tournament every admin page reads.
+  // tRef moves with each patch, so two in one tick (a swap) both stand.
+  useEffectA(() => {
+    if (!window.API || typeof window.API.subscribeLocalMatchPatch !== "function") return undefined;
+    return window.API.subscribeLocalMatchPatch((event) => {
+      const cid = event && event.data && event.data.competitionId;
+      if (!cid) return;
+      setAdminCompData((prev) => (prev && prev.config && prev.config.id === cid ? patchCompetitionData(prev, event) : prev));
+      if (!tRef.current) return;
+      const next = mergeCompetitionsIntoTournament(tRef.current,
+        (comps) => comps.map((c) => (c.id === cid ? patchCompetitionData(c, event) : c)));
+      tRef.current = next;
+      onUpdateRef.current(next);
+    });
+  }, []);
+
   // Best-effort post-mutation refresh. Several mutation handlers below
   // (moveMatchCourt, editMatchScore, addCompetition,
   // startCompetition) used to wrap the mutation AND the follow-up
@@ -294,10 +313,13 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // here) or it is discarded, so a caller can tell the two apart without
   // waiting on the network.
   const moveMatchCourt = async (compId, matchId, newCourt) => {
+    // The court it had, put back if the server refuses the move (R4).
+    const shown = matchInComp((tRef.current?.competitions || []).find((c) => c.id === compId), matchId);
     let answer;
     try {
       answer = await window.API.moveMatchCourt(compId, matchId, newCourt, password, {
         onRefusal: (e) => { showToast(e.message, "error"); return true; },
+        ...(shown ? { was: { court: shown.court || "" } } : {}),
       });
     } catch (e) {
       showToast(e.message, "error");

@@ -896,6 +896,9 @@ function _dequeue(key, descriptor, outcome) {
     if (!d || (descriptor && d !== descriptor)) return false;
     _writeQueue.delete(key);
     _markSettled(key, d);
+    // A court move or time change the server refused, or an operator
+    // discarded, no longer shows (R4). Never for an entry another tab sent.
+    if (outcome && (outcome.error || outcome.byOperator)) _revertLocalFields(d);
     // The server answered it: a clock-skew re-stamp of a later write of the
     // match is never stamped below it (_afterSettledStamp). Not a discard, and
     // not a write dropped after a second clock refusal: the server never
@@ -1007,6 +1010,80 @@ function _entriesFor(base) {
         if (d && _baseOf(k) === base) out.push([k, d]);
     }
     return out.sort(_byEntryOrder);
+}
+
+// ---------------------------------------------------------------------------
+// bc-evts stage 3 review 2, R4: a court move and a time change show at once.
+// ---------------------------------------------------------------------------
+// They are outbox entries like every write, and what this device shows follows
+// them as it follows a score write: the ONE owner is here. The new value is
+// told to the local listeners in the tick the change is made
+// (`subscribeLocalMatchPatch`: an SSE-shaped `match_updated`, `local: true`,
+// that the hosts apply as they apply a push, applyPatch); every match a fetch
+// answers carries the value a court or time entry still queued for it holds
+// (`_overlayPendingFields`), so a refetch made before the change lands never
+// shows the old one; and a refusal, or an operator's discard, puts back what
+// the match had (`was`, which the caller hands over and the entry keeps), or
+// the value an entry still queued after it holds.
+const _LOCAL_FIELD = { court: 'court', time: 'scheduledAt' };
+const _localPatchListeners = new Set();
+
+export function subscribeLocalMatchPatch(cb) {
+    if (typeof cb !== 'function') return () => {};
+    _localPatchListeners.add(cb);
+    return () => { _localPatchListeners.delete(cb); };
+}
+
+function _emitLocalMatchPatch(compID, matchID, fields) {
+    if (!compID || !matchID || !fields || Object.keys(fields).length === 0) return;
+    const event = { type: 'match_updated', local: true, data: { competitionId: compID, matchId: matchID, result: { id: matchID, ...fields } } };
+    for (const cb of [..._localPatchListeners]) {
+        try { cb(event); } catch (err) { console.error('local match patch listener failed:', err); }
+    }
+}
+
+// The court and time entries still queued for a match hold, the later winning.
+function _pendingMatchFields(compID, matchID) {
+    const out = {};
+    for (const [, d] of _entriesFor(_revKey(compID, matchID))) {
+        const f = _LOCAL_FIELD[d.kind];
+        if (f && d.payload && f in d.payload) out[f] = d.payload[f];
+    }
+    return out;
+}
+
+// An entry left with a refusal or an operator's discard: the match shows what
+// it had, unless a later entry of the same field is still queued.
+function _revertLocalFields(d) {
+    const f = d && _LOCAL_FIELD[d.kind];
+    if (!f || !d.was || typeof d.was !== 'object' || !(f in d.was)) return;
+    const still = _pendingMatchFields(d.compID, d.matchID);
+    _emitLocalMatchPatch(d.compID, d.matchID, { [f]: f in still ? still[f] : d.was[f] });
+}
+
+// _overlayPendingFields: a fetched competition (a list item or a detail) with
+// the court and time this device still has queued for its matches put on.
+function _overlayPendingFields(comp, compID) {
+    const id = compID || (comp && (comp.id || (comp.config && comp.config.id)));
+    if (!comp || !id) return comp;
+    const byMatch = new Map();
+    for (const d of _writeQueue.values()) {
+        if (d && _LOCAL_FIELD[d.kind] && d.compID === id && d.matchID && !byMatch.has(d.matchID)) {
+            byMatch.set(d.matchID, _pendingMatchFields(id, d.matchID));
+        }
+    }
+    if (byMatch.size === 0) return comp;
+    const put = (m) => (m && byMatch.has(m.id) ? { ...m, ...byMatch.get(m.id) } : m);
+    const out = { ...comp };
+    if (Array.isArray(comp.poolMatches)) out.poolMatches = comp.poolMatches.map(put);
+    if (Array.isArray(comp.pools)) {
+        out.pools = comp.pools.map((p) => (p && Array.isArray(p.matches) ? { ...p, matches: p.matches.map(put) } : p));
+    }
+    if (comp.bracket && Array.isArray(comp.bracket.rounds)) {
+        out.bracket = { ...comp.bracket, rounds: comp.bracket.rounds.map((r) => (Array.isArray(r) ? r.map(put) : r)) };
+        if (comp.bracket.thirdPlaceMatch) out.bracket.thirdPlaceMatch = put(comp.bracket.thirdPlaceMatch);
+    }
+    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -1212,7 +1289,7 @@ function _pendingAnswer(key, settled) {
 // _outboxWrite: the ONE way a rule-bound door hands a write over. Builds the
 // descriptor synchronously, tags it (writeId, basis, session), stamps its
 // place in the match's order, enqueues it durably and kicks the flush.
-function _outboxWrite({ kind, compID, matchID, method, url, payload, password, seen, onRefusal, terminal = true, after, base: ownBase, holds }) {
+function _outboxWrite({ kind, compID, matchID, method, url, payload, password, seen, onRefusal, terminal = true, after, base: ownBase, holds, was }) {
     // `base`: the queue base when it is not the match's own (a team's starting
     // lineup, `lineup:…`).
     const base = ownBase || _revKey(compID, matchID);
@@ -1230,6 +1307,9 @@ function _outboxWrite({ kind, compID, matchID, method, url, payload, password, s
     // back to the queue frees its blocker's court): a later write of one of
     // them follows it (_commitEnqueue). Persisted.
     if (Array.isArray(holds) && holds.length > 0) descriptor.holds = holds.filter((b) => typeof b === 'string' && b);
+    // `was`: what a court move or time change replaces, put back on a refusal
+    // (R4, _revertLocalFields). Persisted.
+    if (was && typeof was === 'object') descriptor.was = was;
     const stamped = Number(payload.modifiedAt);
     if (Number.isFinite(stamped) && stamped > 0) payload.modifiedAt = _afterOwnStamp(base, stamped);
     else descriptor.sortStamp = _afterOwnStamp(base, _serverNowMs());
@@ -1553,7 +1633,7 @@ function _keepsFailing(d) {
 // The one discard of a held write (API.discardHeldWrite and the editors'
 // API.discardFailingHeldWrites): only a write the server keeps refusing.
 function _discardIfFailing(key, d) {
-    return _keepsFailing(d) && _dequeue(key, d);
+    return _keepsFailing(d) && _dequeue(key, d, { value: { discarded: true }, byOperator: true });
 }
 function _afterDiscard() {
     _persistQueue();
@@ -3280,7 +3360,7 @@ const API = {
             // _fetchJson reads an unreadable body as {}: never hand that on as
             // the competitions.
             if (!Array.isArray(body)) throw new Error('Failed to fetch competitions (unreadable answer)');
-            return body.map(normalizeViewerCompItem);
+            return body.map((c) => _overlayPendingFields(normalizeViewerCompItem(c)));
         }
         const res = await fetch('/api/viewer/competitions');
         if (!res.ok) {
@@ -3289,7 +3369,8 @@ const API = {
         }
         const comps = await res.json();
         if (!Array.isArray(comps)) return comps;
-        return comps.map(normalizeViewerCompItem);
+        // A court or time this device still has queued shows (R4).
+        return comps.map((c) => _overlayPendingFields(normalizeViewerCompItem(c)));
     },
 
     // fetchCourtMatches returns the court-scoped match feed: only the
@@ -3307,7 +3388,7 @@ const API = {
         }
         const data = await res.json();
         const comps = Array.isArray(data.competitions) ? data.competitions : [];
-        return comps.map(normalizeViewerCompItem);
+        return comps.map((c) => _overlayPendingFields(normalizeViewerCompItem(c)));
     },
     async fetchCompetitionDetails(id) {
         const res = await fetch(`/api/viewer/competitions/${id}`);
@@ -3316,7 +3397,7 @@ const API = {
             throw new Error(err.error || `Failed to fetch competition details (Status ${res.status})`);
         }
         const data = await res.json();
-        return normalizeCompetitionDetail(data);
+        return _overlayPendingFields(normalizeCompetitionDetail(data), id);
     },
     // Bootstrap a fresh tournament. In file mode the call is
     // unauthenticated (the AuthMiddleware's uninitialized-bootstrap
@@ -3818,11 +3899,14 @@ const API = {
     async updateMatchTime(compID, matchID, scheduledAt, password, opts = {}) {
         // bc-evts M5: an entry of the match, in its order, answered at once;
         // a refusal comes through `settled` or `opts.onRefusal`.
-        return _outboxWrite({
+        // R4: shown at once, and `opts.was` (the time it had) put back on a refusal.
+        const answer = _outboxWrite({
             kind: 'time', compID, matchID, method: 'PUT',
             url: `/api/competitions/${compID}/matches/${matchID}/time`,
-            payload: { scheduledAt }, password, onRefusal: opts && opts.onRefusal,
+            payload: { scheduledAt }, password, onRefusal: opts && opts.onRefusal, was: opts && opts.was,
         });
+        _emitLocalMatchPatch(compID, matchID, { scheduledAt });
+        return answer;
     },
     // Stateless hypothetical estimate against GET /api/schedule/estimate. The
     // free-form estimator PANEL was removed (per-competition estimates on
@@ -3899,11 +3983,15 @@ const API = {
     async moveMatchCourt(compID, matchID, court, password, opts = {}) {
         // bc-evts M5: an entry of the match, in its order, answered at once;
         // a refusal comes through `settled` or `opts.onRefusal`.
-        return _outboxWrite({
+        // R4: shown at once (_emitLocalMatchPatch), and `opts.was` (the
+        // court it had) is put back on a refusal.
+        const answer = _outboxWrite({
             kind: 'court', compID, matchID, method: 'PUT',
             url: `/api/competitions/${compID}/matches/${matchID}/court`,
-            payload: { court }, password, onRefusal: opts && opts.onRefusal,
+            payload: { court }, password, onRefusal: opts && opts.onRefusal, was: opts && opts.was,
         });
+        _emitLocalMatchPatch(compID, matchID, { court });
+        return answer;
     },
     async revertMatchToQueue(compID, matchID, password, opts = {}) {
         // bc-evts: the outbox's, with a JSON body carrying writeId, basis and
@@ -4726,6 +4814,12 @@ const API = {
      */
     unsentWrites() {
         return _unsentCounts();
+    },
+
+    // R4: the court moves and time changes this device makes, told in the tick
+    // they are made and again when a refusal puts the old value back.
+    subscribeLocalMatchPatch(cb) {
+        return subscribeLocalMatchPatch(cb);
     },
 
     /**

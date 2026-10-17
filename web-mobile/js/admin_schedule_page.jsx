@@ -262,7 +262,8 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
   const timeRefused = (e) => { alert("Failed to update time: " + e.message); return true; };
   const saveMatchTime = async (m, newTime) => {
     try {
-      await window.API.updateMatchTime(m.compId, m.id, newTime, password, { onRefusal: timeRefused });
+      // Shown at once; a refusal shows the time it had again (R4).
+      await window.API.updateMatchTime(m.compId, m.id, newTime, password, { onRefusal: timeRefused, was: { scheduledAt: m.scheduledAt || "" } });
     } catch (e) {
       alert("Failed to update time: " + e.message);
     }
@@ -295,7 +296,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
         for (const m of list.sort((a, b) => (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99"))) {
           // Handed to the outbox at once (no wait on the network); a refusal
           // the server gives later is said then.
-          await window.API.updateMatchTime(m.compId, m.id, window.addMinutes("00:00", Math.round(cursor)), password, { onRefusal: timeRefused });
+          await window.API.updateMatchTime(m.compId, m.id, window.addMinutes("00:00", Math.round(cursor)), password, { onRefusal: timeRefused, was: { scheduledAt: m.scheduledAt || "" } });
           cursor += safeMatchMinutes;
         }
       }

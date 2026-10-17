@@ -13,7 +13,7 @@
 // local-only UI (per the brief; backend persistence is a follow-up).
 
 import { createTimerPool } from './timer_pool.jsx';
-import { applyPatch, keepNewerCompetitions } from './patch.jsx';
+import { applyPatch, keepNewerCompetitions, matchInComp } from './patch.jsx';
 import { SideCell, WinnerTick } from './side_cell.jsx';
 import { useOpenedTapGuard, acceptTap } from './tap_guard.jsx';
 import { useDialogFocus } from './dialog_focus.jsx';
@@ -534,17 +534,6 @@ function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOpt
 }
 
 // The match with id in one competition of the court feed, pool or knockout.
-function matchInComp(comp, id) {
-    const pool = (comp.poolMatches || []).find((m) => m.id === id);
-    if (pool) return pool;
-    const b = comp.bracket;
-    if (!b) return null;
-    for (const round of b.rounds || []) {
-        const m = round.find((x) => x.id === id);
-        if (m) return m;
-    }
-    return b.thirdPlaceMatch && b.thirdPlaceMatch.id === id ? b.thirdPlaceMatch : null;
-}
 
 // confirmMatchLabel: how a confirm names the match it acts on. BOTH
 // competitors, never one: "Ito Rin leaves Shiaijo A" read as a person moving,
@@ -585,6 +574,17 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // outlives renders.
     const courtCompsRef = useRefSh(null);
     courtCompsRef.current = courtComps;
+    // R4 (bc-evts stage 3 review 2): a court move or time change this device
+    // makes shows in the court feed at once, as a push would, and a refusal
+    // puts the old value back (told by the outbox, subscribeLocalMatchPatch).
+    useEffectSh(() => {
+        if (!window.API || typeof window.API.subscribeLocalMatchPatch !== "function") return undefined;
+        return window.API.subscribeLocalMatchPatch((event) => {
+            const cid = event && event.data && event.data.competitionId;
+            if (!cid) return;
+            setCourtComps((prev) => (Array.isArray(prev) ? prev.map((c) => (c.id === cid ? applyPatch(c, event) : c)) : prev));
+        });
+    }, []);
     // True while a manual "Refresh" is in flight (button feedback only).
     const [refreshing, setRefreshing] = useStateSh(false);
     // Refetch this court's live feed. Hoisted (not an effect-local closure) so
@@ -1744,17 +1744,21 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         // A refusal of either half puts the OTHER match back to its own time, so
         // the queue isn't left half-swapped (a put-back the server refuses too
         // is toasted like any refusal).
-        const putBack = (match, time) => {
+        // Both halves show at once and a refused one shows its old time again
+        // (`was`, R4); the put-back of the other half does the same.
+        const putBack = (match, time, shown) => {
             Promise.resolve(window.API.updateMatchTime(match.compId, match.id, time, password, {
-                onRefusal: (e) => failed(e),
+                onRefusal: (e) => failed(e), was: { scheduledAt: shown },
             })).catch(failed);
         };
         try {
             await window.API.updateMatchTime(m.compId, m.id, neighbourTime, password, {
-                onRefusal: (e) => { putBack(neighbour, neighbourTime); return failed(e); },
+                onRefusal: (e) => { putBack(neighbour, neighbourTime, myTime); return failed(e); },
+                was: { scheduledAt: myTime },
             });
             await window.API.updateMatchTime(neighbour.compId, neighbour.id, myTime, password, {
-                onRefusal: (e) => { putBack(m, myTime); return failed(e); },
+                onRefusal: (e) => { putBack(m, myTime, neighbourTime); return failed(e); },
+                was: { scheduledAt: neighbourTime },
             });
             if (showToast) showToast(`Moved ${label} ${direction === "up" ? "earlier" : "later"} in the queue`);
         } catch (e) {

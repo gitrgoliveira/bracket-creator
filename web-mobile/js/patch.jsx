@@ -577,7 +577,24 @@ function keepNewerTournament(held, fetched) {
     return held ? { ...fetched, competitions: keepNewerCompetitions(held.competitions, fetched.competitions) } : fetched;
 }
 
+// matchInComp: a competition's match by id, a pool match, a knockout round's
+// or the 3rd-place match, or null. Shared by the court console and the admin
+// host, which reads a match's court or time before changing it (R4, `was`).
+function matchInComp(comp, id) {
+    if (!comp) return null;
+    const pool = (comp.poolMatches || []).find((m) => m.id === id);
+    if (pool) return pool;
+    const b = comp.bracket;
+    if (!b) return null;
+    for (const round of b.rounds || []) {
+        const m = round.find((x) => x.id === id);
+        if (m) return m;
+    }
+    return b.thirdPlaceMatch && b.thirdPlaceMatch.id === id ? b.thirdPlaceMatch : null;
+}
+
 export {
     applyPatch, applyPatchOrdered, checkSeqGap, recomputeQueuePositions, recomputeBracketQueuePositions,
     keepNewerMatches, keepNewerDetail, keepNewerCompetitions, keepNewerTournament, isOlderRunningCopy,
+    matchInComp,
 };

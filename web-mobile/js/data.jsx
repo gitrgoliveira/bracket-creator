@@ -54,6 +54,15 @@ function mergeMatchPatch(existing, patch) {
   const merged = { ...existing, ...patch };
   if (patch.court === "" || patch.court == null) merged.court = existing.court;
   if (patch.scheduledAt === "" || patch.scheduledAt == null) merged.scheduledAt = existing.scheduledAt;
+  // bc-evts stage 4 review 1 (F1): the server leaves a 0 flag count out of a
+  // match (`omitempty`), so the spread above kept the old count. A full match
+  // result (it names a status; a court or time patch names none) that omits a
+  // count says 0, for a match that carries flags: the presence of a count is
+  // how a match is known to be engi, so the server cannot always send one.
+  if (patch.status != null && (existing.flagsA != null || existing.flagsB != null)) {
+    merged.flagsA = patch.flagsA ?? 0;
+    merged.flagsB = patch.flagsB ?? 0;
+  }
   return merged;
 }
 

@@ -4234,13 +4234,22 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // to the outbox in this tick, ahead of the add, so it is sent first; nothing
   // waits for it (bc-evts).
   const saveRunningSheet = () => {
-    const sent = doSubmit(() => onSubmit(buildPatch("running")));
+    const startPatch = buildPatch("running");
+    // An own Start like the Start button's (stage 5 review 7): the owner shows
+    // it with the bouts it carries and reads its answer, so the move to
+    // running it makes is never read as another device's, whatever the add
+    // after it is answered.
+    const ownStart = own.begin(OWN_START, { subResults: startPatch.subResults || [], encho: startPatch.encho || null });
+    const sent = doSubmit(() => onSubmit(startPatch));
+    Promise.resolve(sent).then((res) => own.settle(ownStart, res), () => own.answer(ownStart, OWN_REFUSED));
     // A save the server turns away says so beside the change, when its answer
     // comes (a callback, never a wait).
     Promise.resolve(sent).then((res) => (writePending(res) ? res.settled : res)).then((body) => {
       const banner = mountedRef.current && notLandedBanner(body);
       if (banner) setWriteFailed(banner);
     }, () => {});
+    // What it carried, for the change made after it.
+    return startPatch;
   };
 
   // runRepBoutChange: the representative-bout add and remove, one sequence
@@ -4284,7 +4293,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
     // change at once; the server's answer is adopted when it comes, unless a
     // later change has been made since (the token), and a refusal puts the
     // server's sheet back.
-    if (preSave) saveRunningSheet();
+    const presaved = preSave ? saveRunningSheet() : null;
     const token = ++repChangeTokenRef.current;
     const current = () => mountedRef.current && repChangeTokenRef.current === token;
     const refused = (msg) => {
@@ -4319,8 +4328,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
     // prop included, whose score version the override takes with it, or the
     // board would go on being made from that answer and never show the change
     // (stage 5 review 1, J1).
+    // A queued sheet's change goes after its pre-save Start, so it is made
+    // over the rows that Start carries, the draft on the board, never over
+    // the host's queued copy, which would hide them (stage 5 review 7).
     const base = tapBoardOf(mHost, teamFold).base;
-    const shown = { ...latest, ...base, subResults: optimistic(base.subResults || []), status: "running", ...(clearsEncho ? { encho: undefined } : {}) };
+    const rows = presaved ? (presaved.subResults || []) : (base.subResults || []);
+    const shown = { ...latest, ...base, subResults: optimistic(rows), status: "running", ...(clearsEncho ? { encho: undefined } : {}) };
     setMatchOverride({ match: shown, at: 0 });
     setEnchoPeriodCount(initialEnchoPeriodsForMatch(shown));
     Promise.resolve(sent).then((res) => {

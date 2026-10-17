@@ -471,6 +471,139 @@ async function runRunningRep(sc) {
   return bad;
 }
 
+// runChain (stage 5 review 7): two own status writes over ONE move to
+// running, the second made before the first is answered or shown: a Start and
+// then a representative-bout add (`startRep`), the queued sheet's add with the
+// pre-save Start it sends first (`presave`), and a finished sheet's add and
+// then remove (`addRemove`). The move is the editor's own while either write
+// has landed or is still out, so in no order of the answers and the feed does
+// a note claim another device, a kept draft offer to send the draft again, or
+// a stale draft come back over a move that landed; while the writes are out a
+// queued sheet still shows its draft.
+async function runChain(sc) {
+  resetOutbox();
+  const writes = ownWriteAnswerer();
+  API.recordDaihyosen = vi.fn((_c, _m, _pw, _at, opts) => writes.make(opts));
+  API.removeDaihyosen = vi.fn((_c, _m, _pw, _at, opts) => writes.make(opts));
+  const onSubmit = vi.fn((patch) => (patch.status === 'running' ? Promise.resolve(writes.make()) : Promise.resolve({ applied: true })));
+  const queued = sc.family !== 'addRemove';
+  let server = { status: queued ? 'scheduled' : 'completed', a: [], b: [], at: NOW, v: 2, knockout: true };
+  const bad = [];
+  const el = () => <ScoreEditorModal match={TEAM.match(server)} onClose={vi.fn()} onSubmit={onSubmit} password="pw" variant="inline" />;
+  const r = render(el());
+  const feed = (next) => { server = { ...next, at: server.at + 10, v: server.v + 1 }; r.rerender(el()); };
+  const draftMarks = { a: ['M'], b: [] };
+  const check = (step) => {
+    for (const id of ['draft-dropped-notice', 'draft-kept-notice']) {
+      if (screen.queryByTestId(id)) bad.push(`${step}: a note (${id}) over the editor's own move`);
+    }
+    if (refusedNote() && server.status !== 'scheduled') bad.push(`${step}: the Start refusal note stands over a ${server.status} match`);
+    if (TEAM.draftCount(server) > 1) bad.push(`${step}: the draft's point is on the server ${TEAM.draftCount(server)} times`);
+  };
+  await flush();
+  if (sc.draft) await tap(ipponBtn(r.container, 0, 'aka', 'M'));
+  const tapTestId = async (id, label) => {
+    const b = screen.queryByTestId(id);
+    if (!b || b.disabled) { bad.push(`${label} not offered`); return false; }
+    await tap(b);
+    await flush();
+    return true;
+  };
+  if (sc.family === 'startRep') {
+    if (!button('Start match')) { bad.push('Start not offered'); cleanup(); return bad; }
+    await tap(button('Start match'));
+    await flush();
+    if (!(await tapTestId('scoring-modal-daihyosen-button', 'add'))) { cleanup(); return bad; }
+  } else if (sc.family === 'presave') {
+    if (!(await tapTestId('scoring-modal-daihyosen-button', 'add'))) { cleanup(); return bad; }
+  } else {
+    if (!(await tapTestId('scoring-modal-daihyosen-button', 'add'))) { cleanup(); return bad; }
+    if (!(await tapTestId('team-daihyosen-remove', 'remove'))) { cleanup(); return bad; }
+  }
+  if (writes.writes.length !== 2) { bad.push(`${writes.writes.length} writes sent, not 2`); cleanup(); return bad; }
+  const carried = queued ? onSubmit.mock.calls.at(-1)[0] : null;
+  check('both sent');
+  if (queued && sc.draft && !sameMarks(TEAM.shown(r.container), draftMarks)) {
+    bad.push(`both sent: the draft is not on the board while its Start is out (${JSON.stringify(TEAM.shown(r.container))})`);
+  }
+  // What the server holds once the writes that landed are applied.
+  let next = { ...server };
+  if (queued) {
+    if (sc.o1 === 'landed') next = TEAM.applyStart(next, carried);
+    if (sc.o2 === 'landed') next = { ...next, status: 'running', rep: true };
+  } else {
+    if (sc.o1 === 'landed') next = { ...next, status: 'running', rep: true };
+    if (sc.o2 === 'landed') next = { ...next, status: 'running', rep: false };
+  }
+  const anyLanded = sc.o1 === 'landed' || sc.o2 === 'landed';
+  const answerAt = async (i, outcome) => {
+    const w = writes.writes[i];
+    w.answered = true;
+    await act(async () => {
+      if (outcome === 'landed') w.resolve({ applied: true });
+      else if (outcome === 'held') w.resolve(SUP);
+      else if (outcome === 'discarded') w.resolve({ discarded: true });
+      else {
+        const e = new Error('The match could not be changed.');
+        if (w.onRefusal) w.onRefusal(e);
+        w.reject(e);
+      }
+      await Promise.resolve();
+    });
+    await flush();
+    check(`write ${i + 1} ${outcome}`);
+  };
+  // The pre-save Start is sent first, then the add: write 1 and write 2.
+  const order = sc.order === 'firstFirst' ? [[0, sc.o1], [1, sc.o2]] : [[1, sc.o2], [0, sc.o1]];
+  const showFeed = () => { if (anyLanded) { feed(next); check('feed'); } };
+  if (sc.feed === 'before') showFeed();
+  for (const [i, o] of order) await answerAt(i, o);
+  if (sc.feed === 'after') showFeed();
+  await flush();
+  check('end');
+  const shown = TEAM.shown(r.container);
+  if (anyLanded && !sameMarks(shown, fmarks(TEAM, server))) {
+    bad.push(`end: board ${JSON.stringify(shown)} is not the server's ${JSON.stringify(fmarks(TEAM, server))}`);
+  }
+  if (!anyLanded && queued && sc.draft && !sameMarks(shown, draftMarks)) {
+    bad.push(`end: nothing landed and the draft is gone (board ${JSON.stringify(shown)})`);
+  }
+  if (queued && sc.draft && sc.o1 === 'landed' && TEAM.draftCount(server) !== 1) {
+    bad.push(`end: the draft's point reached the server ${TEAM.draftCount(server)} times`);
+  }
+  cleanup();
+  return bad;
+}
+
+describe('two own status writes over one move: every combination (team)', () => {
+  it('never reads the editor\'s own move as another device\'s', async () => {
+    const failures = [];
+    let count = 0;
+    for (const family of ['startRep', 'presave', 'addRemove']) {
+      for (const draft of [false, true]) {
+        for (const o1 of OUTCOMES) {
+          for (const o2 of OUTCOMES) {
+            // The second write lands only on what the first made: an add after
+            // a Start that did not land, or a remove after an add that did
+            // not, is refused by the server.
+            if (o1 !== 'landed' && o2 === 'landed') continue;
+            for (const feed of ['before', 'after']) {
+              for (const order of ['firstFirst', 'secondFirst']) {
+                const sc = { family, draft, o1, o2, feed, order };
+                count += 1;
+                const bad = await runChain(sc);
+                if (bad.length) failures.push(`${family}${draft ? '+draft' : ''} ${o1}/${o2} feed ${feed} ${order}: ${bad[0]}`);
+              }
+            }
+          }
+        }
+      }
+    }
+    expect({ summary: `${count} combinations, ${failures.length} failing`, first: failures.slice(0, 10) })
+      .toEqual({ summary: `${count} combinations, 0 failing`, first: [] });
+  }, 600_000);
+});
+
 function* scenarios(fam) {
   for (const draft of [false, true]) {
     for (const final of draft ? ['save', 'discard'] : ['save']) {

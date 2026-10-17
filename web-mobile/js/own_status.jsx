@@ -47,7 +47,15 @@ export function createOwnStatus(status, at) {
   const st = {
     feed: { status, at },
     token: 0,
-    // The current own write: {token, kind, from, fields, landed, sawTarget}.
+    // The own writes out or landed over one move, a CHAIN (stage 5 review 7):
+    // {from, entries: [{token, kind, fields, landed}], sawTarget, leftTarget,
+    // leftDraft}. Every own status write moves the match to running, so a
+    // write begun while an earlier one from the same status is still open
+    // (the team sheet's pre-save Start and its representative-bout add, a
+    // Start and an add made before the feed shows it, an add and a remove)
+    // claims the SAME move: the move is the editor's own while any entry has
+    // landed or is still out, and only an empty chain makes it another
+    // device's. A write that does not land takes only its own entry off.
     pending: null,
     // The refusal sentence of the last own Start, said while the match is
     // scheduled.
@@ -62,6 +70,8 @@ export function createOwnStatus(status, at) {
     resetSeq: 0,
   };
 
+  const anyLanded = (p) => !!(p && p.entries.some((e) => e.landed));
+  const hasStart = (p) => !!(p && p.entries.some((e) => e.kind === OWN_START));
   const draftDiffers = () => !!(st.base && st.draft && !same(st.base, st.draft));
   const keepDraft = (from) => {
     if (draftDiffers()) st.kept = { base: st.base, from };
@@ -71,7 +81,8 @@ export function createOwnStatus(status, at) {
   // replaced (a reopen, a representative-bout change) goes with it, so no
   // draft noted before it can surface later, e.g. as a draft "dropped" when a
   // later own write meets a move elsewhere before the editor notes again
-  // (stage 5 review 6).
+  // (stage 5 review 6). The whole chain is over with it: its other entries
+  // claimed the same move, and their answers act on nothing.
   const retireLanded = () => {
     st.pending = null;
     st.base = null;
@@ -83,20 +94,20 @@ export function createOwnStatus(status, at) {
     st.dropped = { at: status, reset: false };
   };
 
-  // A status change the feed shows, judged against the current own write.
+  // A status change the feed shows, judged against the chain of own writes.
   const moved = (prev, status) => {
     const p = st.pending;
     // Every own status write moves the match to running.
-    // A write whose move the feed already showed and left is no longer the
+    // A chain whose move the feed already showed and left is no longer the
     // one a new move could be (review 5).
     const ownMove = p && !p.leftTarget && p.from === prev && status === 'running';
     if (status === 'running' && (prev === 'scheduled' || prev === 'completed')) {
-      if (ownMove && p.landed) {
+      if (ownMove && anyLanded(p)) {
         // The own write, as the feed now shows it.
         retireLanded();
       } else if (ownMove) {
-        // The feed shows the move before the own write's answer: whose it is
-        // waits for that answer (answer below).
+        // The feed shows the move before any own write's answer: whose it is
+        // waits for the answers (answer below).
         p.sawTarget = true;
       } else {
         keepDraft(prev);
@@ -104,21 +115,21 @@ export function createOwnStatus(status, at) {
     }
     if (prev === 'running' && status !== 'running') {
       dropKept(status);
-      // A move the feed showed while the own write was unanswered, now left:
-      // the answer still says whose it was (a refused one drops the draft
+      // A move the feed showed while the own writes were unanswered, now
+      // left: the answers still say whose it was (refused ones drop the draft
       // with the note there).
-      if (p && p.sawTarget && !p.landed) { p.leftTarget = status; p.leftDraft = draftDiffers(); }
-      else if (p && p.landed) retireLanded();
+      if (p && p.sawTarget && !anyLanded(p)) { p.leftTarget = status; p.leftDraft = draftDiffers(); }
+      else if (p && anyLanded(p)) retireLanded();
       reset();
     }
-    // The feed jumped from where the own write began to somewhere it does not
-    // move the match (another device moved the match on before the feed
-    // caught up): a landed write is over, and one still unanswered is left
-    // as above, its draft said if the answer turns it down; either way the
+    // The feed jumped from where the own writes began to somewhere they do
+    // not move the match (another device moved the match on before the feed
+    // caught up): a landed write is over, and unanswered ones are left as
+    // above, the draft said if the answers turn them down; either way the
     // draft takes the server's copy (review 5).
     const q = st.pending;
     if (q && prev === q.from && status !== 'running' && status !== prev && !q.leftTarget) {
-      if (q.landed) retireLanded();
+      if (anyLanded(q)) retireLanded();
       else { q.leftTarget = status; q.leftDraft = draftDiffers(); }
       reset();
     }
@@ -139,15 +150,15 @@ export function createOwnStatus(status, at) {
       // later move by another device is never read as this one (review 5),
       // and the draft takes the server's copy.
       const p = st.pending;
-      if (p && p.landed && status === p.from) {
+      if (p && anyLanded(p) && status === p.from) {
         retireLanded();
         reset();
-      } else if (p && !p.landed && !p.leftTarget && p.kind !== OWN_START && status === p.from) {
+      } else if (p && !p.leftTarget && !hasStart(p) && status === p.from) {
         // A reopen or representative-bout change is out and another device
         // changed the match it was made over (a correction of the finished
-        // match): the draft takes the server's copy, and is said if the write
-        // is then turned down (an own Start keeps its override until its
-        // answer, which judges the restamp itself).
+        // match): the draft takes the server's copy, and is said if the
+        // writes are then turned down (an own Start keeps its override until
+        // its answer, which judges the restamp itself).
         p.leftTarget = status;
         p.leftDraft = draftDiffers();
         reset();
@@ -167,18 +178,23 @@ export function createOwnStatus(status, at) {
       else if (st.dropped.reset) st.dropped = null;
     },
 
-    // begin: an own status write is sent; its token. A write begun while an
-    // earlier one is unanswered replaces it: that one's answer is stale.
+    // begin: an own status write is sent; its token. A write begun while the
+    // chain from the same status is open joins it (they claim one move); one
+    // begun from another status, or over a chain whose move the feed already
+    // left, starts a new chain, and the old chain's answers are stale.
     begin(kind, fields) {
       st.token += 1;
       // Every own status write moves the match to running: a write begun
       // while the feed shows the match running (the team sheet's
       // representative-bout change on a running match) moves no status and is
-      // none. No pending write is recorded, so a restamp or a move elsewhere
-      // while it is out is judged as any foreign one, and its answer acts on
-      // nothing (stage 5 review 6).
+      // none. Nothing is recorded, so a restamp or a move elsewhere while it
+      // is out is judged as any foreign one, and its answer acts on nothing
+      // (stage 5 review 6).
       if (st.feed.status === 'running') return st.token;
-      st.pending = { token: st.token, kind, from: st.feed.status, fields: fields || null, landed: false, sawTarget: false, leftTarget: null, leftDraft: false };
+      const entry = { token: st.token, kind, fields: fields || null, landed: false };
+      const p = st.pending;
+      if (p && p.from === st.feed.status && !p.leftTarget) p.entries.push(entry);
+      else st.pending = { from: st.feed.status, entries: [entry], sawTarget: false, leftTarget: null, leftDraft: false };
       st.refusal = '';
       st.dropped = null;
       return st.token;
@@ -188,27 +204,35 @@ export function createOwnStatus(status, at) {
     // HELD or DISCARDED (`msg`, the sentence to say for a refused Start).
     answer(token, outcome, msg) {
       const p = st.pending;
-      if (!p || p.token !== token) return;
+      const e = p && p.entries.find((x) => x.token === token);
+      if (!e) return;
       if (outcome === LANDED) {
-        p.landed = true;
+        e.landed = true;
         // The feed already showed the move: it was this write.
         if (p.sawTarget || p.leftTarget) retireLanded();
         return;
       }
-      st.pending = null;
+      // This write did not land: only its own entry goes.
+      p.entries = p.entries.filter((x) => x !== e);
       const now = st.feed.status;
+      // A turned-down Start says why, unless a newer Start of the chain is
+      // still open (its answer is the one that counts).
+      if (e.kind === OWN_START && now === 'scheduled' && msg && !p.leftTarget && !hasStart(p)) st.refusal = msg;
+      // Another write of the chain landed or is still out: the move is still
+      // the editor's own, and that write decides it.
+      if (p.entries.length > 0) return;
+      st.pending = null;
       if (p.leftTarget) {
         // Another device moved the match and moved it on again before this
         // answer: the draft the editor held was taken from the board then
         // (the reset), and is said now.
         if (p.leftDraft) st.dropped = { at: now, reset: true };
-        if (p.kind === OWN_START && now === 'scheduled' && msg) st.refusal = msg;
+        if (e.kind === OWN_START && now === 'scheduled' && msg) st.refusal = msg;
         return;
       }
       if (now === p.from) {
         // Nothing moved: the editor shows the server's copy again, with the
         // draft the write carried, and a refused Start says why.
-        if (p.kind === OWN_START && now === 'scheduled' && msg) st.refusal = msg;
         return;
       }
       if (p.sawTarget && now === 'running') {
@@ -222,20 +246,23 @@ export function createOwnStatus(status, at) {
 
     view() {
       const p = st.pending;
+      // The latest own Start shows what it carried.
+      let start = null;
+      if (p) for (const x of p.entries) if (x.kind === OWN_START) start = x;
       // Never over a feed that moved since the Start was sent (it showed the
-    // match running, someone else's or not yet known): the feed's copy shows.
-    const overriding = !!(p && p.kind === OWN_START && st.feed.status === 'scheduled' && p.from === 'scheduled' && !p.sawTarget);
+      // match running, someone else's or not yet known): the feed's copy shows.
+      const overriding = !!(start && st.feed.status === 'scheduled' && p.from === 'scheduled' && !p.sawTarget);
       const status = st.feed.status;
       return {
         shownStatus: overriding ? 'running' : status,
-        override: overriding ? (p.fields || {}) : null,
-        startOffered: status === 'scheduled' && !(p && p.kind === OWN_START),
+        override: overriding ? (start.fields || {}) : null,
+        startOffered: status === 'scheduled' && !start,
         refusal: status === 'scheduled' ? st.refusal : '',
         kept: status === 'running' && st.kept ? st.kept : null,
         droppedShown: !!(st.dropped && status === st.dropped.at),
         resetSeq: st.resetSeq,
-        // Testing aid: an own write is out.
-        pendingKind: p ? p.kind : null,
+        // Testing aid: the latest own write still open.
+        pendingKind: p && p.entries.length ? p.entries[p.entries.length - 1].kind : null,
       };
     },
   };

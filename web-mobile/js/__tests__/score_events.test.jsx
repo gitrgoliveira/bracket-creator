@@ -186,9 +186,121 @@ describe('score events: the fold (engi)', () => {
   });
 });
 
-describe('score events: team bouts are not folded yet', () => {
-  it('throws rather than misfold a team match', () => {
-    expect(() => foldEvent(running(), ev({ kind: IPPON_ADD, pos: 1, side: SIDE_A, letter: 'M' }), { team: true })).toThrow(/team/);
+describe('score events: a team match folds on its bouts (stage 5)', () => {
+  const TEAM = { team: true };
+  const KACHI = { team: true, kachinuki: true };
+  const row = (position, over = {}) => ({ position, sideA: '', sideB: '', ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, winner: '', decision: '', ...over });
+  const team = (rows, over = {}) => running({ sideA: 'Kyoto', sideB: 'Osaka', subResults: rows, ...over });
+  // Folds with one fold state, as applyPending and the replay do.
+  const foldTeam = (match, events, opts) => {
+    const ctx = { bouts: new Map(), stamps: {} };
+    let m = match;
+    const outs = [];
+    for (const e of events) {
+      const r = foldEvent(m, e, opts, ctx);
+      m = r.match;
+      outs.push(r.outcome);
+    }
+    return { m, outs };
+  };
+
+  it('scores a bout row, never the match level, and a bout that is not there is no target', () => {
+    const { m, outs } = fold(team([row(1)]), [
+      ev({ id: 'm', kind: IPPON_ADD, pos: 1, side: SIDE_B, letter: 'M' }),
+      ev({ kind: IPPON_ADD, pos: 0, side: SIDE_A, letter: 'K' }),
+      ev({ kind: IPPON_ADD, pos: 2, side: SIDE_A, letter: 'K' }),
+    ], TEAM);
+    expect(outs).toEqual([APPLIED, NOT_ALLOWED, NO_TARGET]);
+    expect(m.subResults[0]).toMatchObject({ ipponsB: ['M'], winner: 'Osaka', decision: '', markIds: { b: ['m'] } });
+    expect(m.ipponsA).toEqual([]);
+  });
+
+  it('a second foul lands an H for the other side, named by the foul; a removal at 0 has no target', () => {
+    const { m, outs } = fold(team([row(1)]), [
+      ev({ kind: FOUL_ADD, pos: 1, side: SIDE_A }),
+      ev({ id: 'f2', kind: FOUL_ADD, pos: 1, side: SIDE_A }),
+      ev({ kind: FOUL_REMOVE, pos: 1, side: SIDE_A }),
+    ], TEAM);
+    expect(outs).toEqual([APPLIED, APPLIED, NO_TARGET]);
+    expect(m.subResults[0]).toMatchObject({ ipponsB: ['H'], hansokuA: 0, winner: 'Osaka', markIds: { b: ['f2'] } });
+  });
+
+  it('a hikiwake is a tie a strike then ends; clear takes the tie off an unplayed bout', () => {
+    const tied = fold(team([row(1)]), [ev({ kind: BOUT_DECISION, pos: 1, value: 'hikiwake' })], TEAM);
+    expect(tied.m.subResults[0].decision).toBe('hikiwake');
+    const cleared = fold(tied.m, [ev({ kind: BOUT_DECISION, pos: 1, value: 'clear' })], TEAM);
+    expect(cleared.m.subResults[0].decision).toBe('');
+    const struck = fold(tied.m, [ev({ kind: IPPON_ADD, pos: 1, side: SIDE_A, letter: 'K' })], TEAM);
+    expect(struck.m.subResults[0]).toMatchObject({ decision: '', winner: 'Kyoto' });
+  });
+
+  it('a fusensho keeps the other side\'s point, and clearing it within one fold gives back the fouls it set aside', () => {
+    const { m, outs } = foldTeam(team([row(1)]), [
+      ev({ kind: IPPON_ADD, pos: 1, side: SIDE_B, letter: 'M' }),
+      ev({ kind: FOUL_ADD, pos: 1, side: SIDE_A }),
+      ev({ id: 'fz', kind: BOUT_DECISION, pos: 1, side: SIDE_A, value: 'fusensho' }),
+    ], TEAM);
+    expect(outs).toEqual([APPLIED, APPLIED, APPLIED]);
+    expect(m.subResults[0]).toMatchObject({ ipponsA: ['○', '○'], ipponsB: ['M'], hansokuA: 0, decision: 'fusensho', winner: 'Kyoto', markIds: { a: ['fz', 'fz:1'] } });
+    const ctx = { bouts: new Map(), stamps: {} };
+    let step = foldEvent(team([row(1)]), ev({ kind: FOUL_ADD, pos: 1, side: SIDE_A }), TEAM, ctx).match;
+    step = foldEvent(step, ev({ kind: BOUT_DECISION, pos: 1, side: SIDE_B, value: 'fusensho' }), TEAM, ctx).match;
+    step = foldEvent(step, ev({ kind: BOUT_DECISION, pos: 1, value: 'clear' }), TEAM, ctx).match;
+    expect(step.subResults[0]).toMatchObject({ ipponsA: [], ipponsB: [], hansokuA: 1, decision: 'hikiwake' });
+  });
+
+  it('a fusensho against the side that won the bout is not allowed, nor on the representative bout', () => {
+    const won = team([row(1, { ipponsB: ['M', 'K'], winner: 'Osaka' }), row(-1, { sideA: 'Kyoto', sideB: 'Osaka', decision: 'daihyosen' })]);
+    const { outs } = fold(won, [
+      ev({ kind: BOUT_DECISION, pos: 1, side: SIDE_A, value: 'fusensho' }),
+      ev({ kind: BOUT_DECISION, pos: -1, side: SIDE_A, value: 'fusensho' }),
+    ], TEAM);
+    expect(outs).toEqual([NOT_ALLOWED, NOT_ALLOWED]);
+  });
+
+  it('encounter overtime is a fixed-order team\'s, never a kachinuki encounter\'s', () => {
+    expect(fold(team([row(1)]), [ev({ kind: ENCHO_ADD })], TEAM).m.encho).toEqual({ periodCount: 1 });
+    expect(fold(team([row(1)]), [ev({ kind: ENCHO_ADD })], KACHI).outs).toEqual([NOT_ALLOWED]);
+    const onBout = fold(team([row(1)]), [ev({ kind: ENCHO_ADD, pos: 1 }), ev({ kind: ENCHO_REMOVE, pos: 1 }), ev({ kind: ENCHO_REMOVE, pos: 1 })], KACHI);
+    expect(onBout.outs).toEqual([APPLIED, APPLIED, NO_TARGET]);
+  });
+
+  it('a kachinuki fighter is the lineup\'s on the first bout and the bout\'s on a later one; the winner follows it', () => {
+    const k = team([row(1, { sideA: 'K1', sideB: 'O1' }), row(2, { sideA: 'K1', sideB: '' })]);
+    const { m, outs } = fold(k, [
+      ev({ kind: 'bout.fighter', pos: 1, side: SIDE_B, name: 'O9', memberId: 'o9' }),
+      ev({ kind: 'bout.fighter', pos: 2, side: SIDE_B, name: 'O2', memberId: 'o2' }),
+      ev({ kind: IPPON_ADD, pos: 2, side: SIDE_B, letter: 'D' }),
+    ], KACHI);
+    expect(outs).toEqual([NOT_ALLOWED, APPLIED, APPLIED]);
+    expect(m.subResults[1]).toMatchObject({ sideB: 'O2', sideBMemberId: 'o2', winner: 'O2', winnerMemberId: 'o2' });
+    expect(fold(k, [ev({ kind: 'bout.fighter', pos: 2, side: SIDE_B, name: 'O2' })], TEAM).outs).toEqual([NOT_ALLOWED]);
+  });
+
+  it('a representative pick lands on the representative bout and its verdict only on a level score', () => {
+    const dh = team([row(-1, { sideA: 'Kyoto', sideB: 'Osaka', decision: 'daihyosen' })]);
+    const { m, outs } = fold(dh, [
+      ev({ kind: REP_PICK, pos: -1, side: SIDE_B, memberId: 'o3' }),
+      ev({ id: 'v', kind: 'daihyosen.verdict', pos: -1, side: SIDE_B }),
+    ], TEAM);
+    expect(outs).toEqual([APPLIED, APPLIED]);
+    expect(m.subResults[0]).toMatchObject({ sideBMemberId: 'o3', ipponsB: ['Ht'], winner: 'Osaka', winnerMemberId: 'o3' });
+    const cleared = fold(m, [ev({ kind: 'daihyosen.verdict', pos: -1, value: 'clear' })], TEAM);
+    expect(cleared.m.subResults[0]).toMatchObject({ ipponsB: [], winner: '' });
+    const ahead = fold(dh, [ev({ kind: IPPON_ADD, pos: -1, side: SIDE_A, letter: 'M' }), ev({ kind: 'daihyosen.verdict', pos: -1, side: SIDE_B })], TEAM);
+    expect(ahead.outs).toEqual([APPLIED, NOT_ALLOWED]);
+  });
+
+  it('a board counts a bout tap once when the pushed copy already holds its mark, and keeps bouts open after a team kiken', () => {
+    const tap = ev({ id: 'k', kind: IPPON_ADD, pos: 1, side: SIDE_A, letter: 'K' });
+    const pushed = team([row(1, { ipponsA: ['K'], winner: 'Kyoto', markIds: { a: ['k'] } })]);
+    const board = applyPending(pushed, [tap], TEAM);
+    expect(board.outcomes.k).toBe(DUPLICATE);
+    expect(board.match.subResults[0].ipponsA).toEqual(['K']);
+    const kiken = team([row(1)], { status: 'completed', decision: 'kiken-voluntary', winner: 'Kyoto' });
+    expect(applyPending(kiken, [tap], TEAM).outcomes.k).toBe(APPLIED);
+    expect(applyPending(kiken, [tap], { team: true, kachinuki: true }).outcomes.k).toBe(MATCH_CLOSED);
+    expect(applyPending({ ...kiken, decision: '' }, [tap], TEAM).outcomes.k).toBe(MATCH_CLOSED);
   });
 });
 

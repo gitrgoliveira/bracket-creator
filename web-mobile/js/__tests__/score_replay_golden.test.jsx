@@ -5,10 +5,11 @@
 // modifiedAt and groupStamps compared whole), want.outcomes each id's outcomes
 // sorted, and the output replayed again with the same lines changes nothing.
 //
-// Only the individual and engi cases marked jsMirror are mirrored: team bouts
-// fold in JS from stage 5, and a case whose lines hold a baseline is Go only (a
-// screen folds its taps on top of the server's last confirmed match and never
-// folds a baseline; see the table's own comment).
+// Every case marked jsMirror is mirrored, individual, engi, fixed-order team and
+// kachinuki alike (team bouts fold in JS since stage 5); a case whose lines
+// hold a baseline is Go only (a screen folds its taps on top of the server's
+// last confirmed match and never folds a baseline; see the table's own
+// comment).
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -18,8 +19,16 @@ const table = JSON.parse(
   readFileSync(resolve(__dirname, '..', '..', '..', 'internal', 'engine', 'testdata', 'score_replay.json'), 'utf8')
 );
 
-const MIRRORED_KINDS = new Set(['individual', 'engi']);
+const MIRRORED_KINDS = new Set(['individual', 'engi', 'team', 'kachinuki']);
 const cases = (table.cases || []).filter((c) => c.jsMirror && MIRRORED_KINDS.has(c.shape?.kind));
+
+// The fold's shape options for a case (the Go golden test's competition):
+// a kachinuki competition is a team one too.
+const foldOpts = (shape) => ({
+  engi: shape.kind === 'engi',
+  team: shape.kind === 'team' || shape.kind === 'kachinuki',
+  kachinuki: shape.kind === 'kachinuki',
+});
 
 // emptyToNil reads an empty array as null, so a golden [] matches a field the
 // wire omits (Go's emptyToNil); undefined reads as null too.
@@ -75,14 +84,16 @@ function byId(outcomes) {
 
 describe('score replay: the JS mirror answers the Go golden table', () => {
   // Load-bearing: it.each over an empty array silently produces zero tests.
-  it('the table holds mirrored individual and engi cases', () => {
-    expect(cases.length, 'score_replay.json has no jsMirror individual/engi case: the mirror would assert nothing').toBeGreaterThan(0);
+  it('the table holds mirrored cases of every kind', () => {
+    for (const kind of MIRRORED_KINDS) {
+      expect(cases.some((c) => c.shape.kind === kind), `score_replay.json has no jsMirror ${kind} case: the mirror would assert nothing for it`).toBe(true);
+    }
   });
 
   it.each(cases.map((c) => [c.name, c]))('%s', (_name, c) => {
     const pinned = ['scoreVersion', 'modifiedAt', 'groupStamps'];
     for (const k of pinned) expect(c.want.match, `every case pins ${k}`).toHaveProperty(k);
-    const opts = { engi: c.shape.kind === 'engi' };
+    const opts = foldOpts(c.shape);
     const wantMatch = emptyToNil(c.want.match);
     for (const order of permutations(c.lines.length)) {
       const lines = order.map((i) => c.lines[i]);
@@ -104,7 +115,7 @@ describe('score replay: the JS mirror answers the Go golden table', () => {
   it('never mutates the match or the lines it is given', () => {
     const c = cases[0];
     const before = JSON.stringify([c.match, c.head, c.lines]);
-    replayHead(c.match, c.head, c.lines, { engi: c.shape.kind === 'engi' });
+    replayHead(c.match, c.head, c.lines, foldOpts(c.shape));
     expect(JSON.stringify([c.match, c.head, c.lines])).toBe(before);
   });
 });

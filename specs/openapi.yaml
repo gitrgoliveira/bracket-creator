@@ -4464,8 +4464,9 @@ paths:
         stored when the request is handled (an empty one when none is), so a change
         another device made to any other position stays; see `TeamLineupSave`. Without
         it the body replaces the whole lineup. A member id the team does not hold is
-        not stored: the position keeps its name with no id (a team with no members
-        recorded, or a `team-members.yaml` that cannot be read, keeps the ids as sent).
+        not stored: the position keeps its name with no id. A save naming a member id
+        when the competition's `team-members.yaml` cannot be read is refused with 409
+        `team_members_unreadable` and nothing is written.
       security:
         - TournamentPassword: []
       requestBody:
@@ -4489,6 +4490,15 @@ paths:
             object, a position key is not a valid position, a position's name is
             longer than 100 bytes, `changed` is empty or names a position `positions`
             does not hold, or the saved lineup would place one member at two positions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >
+            The competition's team members could not be read to check a member id
+            the save names (`error: team_members_unreadable`, with a `message` to
+            show). Nothing is written, and the offline queue does not retry it.
           content:
             application/json:
               schema:
@@ -4583,8 +4593,9 @@ paths:
         No lineup is stored with a member id the team does not hold: the
         organiser's save keeps such a position by its name, with no id (most
         often the id the app minted for a member add the server then refused),
-        and answers the lineup as stored. A team with no members recorded, or a
-        `team-members.yaml` that cannot be read, keeps the ids as sent.
+        and answers the lineup as stored. A save naming a member id when the
+        competition's `team-members.yaml` cannot be read is refused with 409
+        `team_members_unreadable`, whoever sends it.
       security:
         - TournamentPassword: []
       requestBody:
@@ -4636,9 +4647,9 @@ paths:
         '409':
           description: |
             Self-run, an empty password: the match has finished
-            (`error: result_finalized`, with a `message` to show), or the
-            team members could not be read to check a member id
-            (`error: team_members_unreadable`, with a `message` to show).
+            (`error: result_finalized`, with a `message` to show). Any caller:
+            the team members could not be read to check a member id the save
+            names (`error: team_members_unreadable`, with a `message` to show).
           content:
             application/json:
               schema:

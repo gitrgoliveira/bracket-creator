@@ -980,12 +980,20 @@ function _dequeue(key, descriptor, outcome) {
     if (!d || (descriptor && d !== descriptor)) return false;
     _writeQueue.delete(key);
     _markSettled(key, d);
-    // A court move or time change the server refused, or an operator
-    // discarded, no longer shows (R4). Never for an entry another tab sent.
-    if (outcome && (outcome.error || outcome.byOperator)) _revertLocalFields(d);
-    // A member add refused or discarded may leave its minted id naming nobody
-    // (F2): taken off every queued write naming it once that is proved (K1).
-    if (outcome && (outcome.error || outcome.byOperator)) _memberAddLeftUnlanded(d, outcome);
+    if (outcome && outcome.byOperator && _inFlight.has(d)) {
+        // Discarded while its request is out: the server may still keep it,
+        // so what a discard undoes waits for that request to end (L1,
+        // _endDiscardWhileOut).
+        _discardWhileOut(d);
+    } else if (outcome && (outcome.error || outcome.byOperator)) {
+        // A court move or time change the server refused, or an operator
+        // discarded, no longer shows (R4). Never for an entry another tab sent.
+        _revertLocalFields(d);
+        // A member add refused or discarded may leave its minted id naming
+        // nobody (F2): taken off every queued write naming it once that is
+        // proved (K1).
+        _memberAddLeftUnlanded(d, outcome);
+    }
     // The server answered it: a clock-skew re-stamp of a later write of the
     // match is never stamped below it (_afterSettledStamp). Not a discard, and
     // not a write dropped after a second clock refusal: the server never
@@ -2593,10 +2601,15 @@ async function _sendEntry(key, descriptor, pass) {
         // up at the deadline (_fetchJson).
         pass.anyFailed = true;
         pass.networkFailed = true;
+        _inFlight.delete(descriptor);
+        _endDiscardWhileOut(descriptor, null, null);
         return 'kept';
     } finally {
         _inFlight.delete(descriptor);
     }
+    // Discarded while it was out (L1): the answer settles only what the
+    // discard left waiting.
+    if (_endDiscardWhileOut(descriptor, res, body)) return 'settled';
     body = body || {};
     if (res.ok) {
         // Success (HTTP 200/201, including a write the server kept in the
@@ -3886,6 +3899,47 @@ function _memberAddLeftUnlanded(d, outcome) {
     const proved = refusal ? !_memberIdHeldRefusal(refusal) : !_memberAddWentOut(d);
     if (proved) _dropMemberThatNeverWas(d);
     else _checkMemberAdd(d);
+}
+
+// The entries an operator discarded while their request was out (stage 3
+// review 8, L1): the discard took them out of the queue at once, so nothing
+// waits on them and the UI goes on, but what a discard undoes (a court or time
+// overlay put back, a minted member's id taken off the writes naming it) waits
+// for the request's end, which may be the server keeping the write.
+const _discardedWhileOut = new WeakSet();
+
+// _discardWhileOut: `d` was discarded while out. A write naming the member a
+// discarded add mints waits until the request has ended and any read after it
+// is over (_waitsOnMemberCheck), so it never goes ahead of the proof.
+function _discardWhileOut(d) {
+    _discardedWhileOut.add(d);
+    const id = _memberAddId(d);
+    if (id) _memberChecks.add(id);
+}
+
+// _endDiscardWhileOut: the request of an entry discarded while out ended
+// (`res` null for a request that never answered). Answers whether it was such
+// an entry, for _sendEntry to take nothing more from the answer. A 2xx is the
+// write kept: nothing is put back, and a note naming the member is forgotten.
+// Anything else is what the discard would have met had the request not been
+// out: a refusal on its merits, or a failure that proves nothing (the members
+// are read, _memberAddLeftUnlanded).
+function _endDiscardWhileOut(d, res, body) {
+    if (!_discardedWhileOut.has(d)) return false;
+    _discardedWhileOut.delete(d);
+    const id = _memberAddId(d);
+    if (id) _memberChecks.delete(id);
+    const kept = !!res && ((res.ok && !writeWasRefusedForClock(body || {}))
+        || (res.status === 404 && d.kind === 'lineup-remove'));
+    if (kept) {
+        if (id) _forgetListedDroppedMembers({ [_teamIdOf(d)]: [{ id }] }, d.compID);
+    } else {
+        const retried = !res || res.status >= 500 || res.status === 429 || res.status === 403 || res.status === 401;
+        _revertLocalFields(d);
+        _memberAddLeftUnlanded(d, retried ? { byOperator: true } : { error: _doorRefusal(d, res.status, body || {}) });
+    }
+    _rerunFlushSoon();
+    return true;
 }
 
 // _memberIdHeldRefusal: the add's refusal says another member holds the id.

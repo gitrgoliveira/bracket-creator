@@ -1036,6 +1036,93 @@ describe('a discarded add that went out is checked against the team\'s members (
     });
 });
 
+// Stage 3 review 8, L1: an add discarded while its request is out may still be
+// kept by the server when that request ends, so nothing is judged until then.
+describe('an add discarded while its request is out is judged once the request ends (L1)', () => {
+    const EVENTS = '/api/competitions/c1/matches/m1/score-events';
+    const TEAM_MEMBERS = '/api/competitions/c1/team-members';
+    const DROPPED_KEY = 'bc_dropped_member_ids_v1';
+    const pick = (memberId) => ({ kind: 'rep.pick', pos: -1, side: 'a', memberId });
+    let warned = null;
+    let dropped = [];
+    const onDropped = (e) => dropped.push(e.detail);
+    beforeEach(() => {
+        warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        dropped = [];
+        window.addEventListener('team-member-dropped', onDropped);
+    });
+    afterEach(() => {
+        warned.mockRestore();
+        window.removeEventListener('team-member-dropped', onDropped);
+    });
+
+    // The add fails until it keeps failing, goes out again and hangs; it is
+    // discarded while out, and a pick naming the member is made.
+    async function discardWhileOut() {
+        const member = await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw', { onRefusal: () => true });
+        member.settled.catch(() => {});
+        const state = { hang: false, release: null };
+        const sent = server((req) => {
+            if (req.url === MEMBERS) {
+                if (!state.hang) return answer(500, { error: 'internal error' });
+                return new Promise((r) => { state.release = r; });
+            }
+            if (req.url === TEAM_MEMBERS) return answer(200, { teamMembers: { t1: [] } });
+            if (req.url === EVENTS) return answer(200, { outcomes: req.body.events.map((e) => ({ id: e.id, outcome: 'applied' })), match: MATCH });
+            return lineupOk(req);
+        });
+        for (let i = 0; i < 20 && !API.heldWrites().some((h) => h.kind === 'member' && h.keepsFailing); i++) {
+            await reconnect();
+            await tick(9000);
+        }
+        state.hang = true;
+        for (let i = 0; i < 20 && !state.release; i++) await tick(3000);
+        expect(state.release, 'the add is out again').toBeTruthy();
+        const add = API.heldWrites().find((h) => h.kind === 'member');
+        expect(API.discardHeldWrite(add.key), 'the discard is taken at once').toBeTruthy();
+        API.recordTap('c1', 'm1', pick(member.id), 'pw', MATCH);
+        await tick(10);
+        return { member, sent, release: (status, body) => state.release(answer(status, body)) };
+    }
+
+    it('nothing is read or noted while the add is out; a 2xx then leaves the pick its id', async () => {
+        const { member, sent, release } = await discardWhileOut();
+        expect(sent.some((r) => r.url === TEAM_MEMBERS), 'no members read while the add is out').toBe(false);
+        expect(_lsStore[DROPPED_KEY], 'no note while the add is out').toBeUndefined();
+        release(201, { id: member.id, name: 'Ren Abe', modifiedAt: 5 });
+        await tick(10);
+        await reconnect();
+        expect(sent.some((r) => r.url === TEAM_MEMBERS), 'an add that landed needs no read').toBe(false);
+        const post = sent.find((r) => r.url === EVENTS);
+        expect(post, 'the pick goes').toBeTruthy();
+        expect(post.body.events[0].memberId, 'naming the member the server kept').toBe(member.id);
+        expect(_lsStore[DROPPED_KEY]).toBeUndefined();
+        expect(dropped).toEqual([]);
+    });
+
+    it('a late 2xx forgets a note naming the member', async () => {
+        const { member, release } = await discardWhileOut();
+        _lsStore[DROPPED_KEY] = JSON.stringify([{ id: member.id, at: Date.now(), competitionId: 'c1', teamId: 't1' }]);
+        release(201, { id: member.id, name: 'Ren Abe', modifiedAt: 5 });
+        await tick(10);
+        expect(JSON.parse(_lsStore[DROPPED_KEY] || '[]'), 'the server holds the member').toEqual([]);
+    });
+
+    it('a 5xx after the discard: the members are read then, and the pick waits for that read', async () => {
+        const { member, sent, release } = await discardWhileOut();
+        expect(sent.some((r) => r.url === TEAM_MEMBERS), 'no members read while the add is out').toBe(false);
+        release(500, { error: 'internal error' });
+        await tick(10);
+        await reconnect();
+        const read = sent.findIndex((r) => r.url === TEAM_MEMBERS);
+        const post = sent.findIndex((r) => r.url === EVENTS);
+        expect(read, 'the members are read once the add has failed').toBeGreaterThanOrEqual(0);
+        expect(post, 'the pick goes after the read').toBeGreaterThan(read);
+        expect(sent[post].body.events[0].memberId, 'the read found no such member').toBeUndefined();
+        expect(dropped).toEqual([{ competitionId: 'c1', teamId: 't1', memberId: member.id }]);
+    });
+});
+
 // Stage 3 review 8, L3: the public page sends the password header EMPTY, never
 // omits it, and reads a team's members from the public competition payload.
 describe('a discarded add is checked through the door its caller may read (L3)', () => {

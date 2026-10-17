@@ -53,6 +53,34 @@ describe('the operator\'s board on a display of the same device', () => {
     expect(shown.competitions[0].poolMatches[0].ipponsA).toEqual(['K']);
   });
 
+  // Stage 3 review 11, Y1: a running board never puts a finished match back
+  // to running on a display, unless it is of a newer server copy (a reopen).
+  it('a display holding the match finished keeps it over a running board no newer', () => {
+    const finished = bout({ status: 'completed', winner: { id: 'p2', name: 'Tanaka' }, ipponsB: ['M', 'K'], scoreVersion: 5 });
+    for (const v of [3, 5]) {
+      const overlay = { result: { id: 'm1', status: 'running', ipponsB: ['M'], ipponsA: [], scoreVersion: v } };
+      const shown = applyPatchToTree(tree(finished), { type: 'patch', court: 'A', compId: 'c1', payload: overlay });
+      expect(shown.competitions[0].poolMatches[0].status, `a v${v} board`).toBe('completed');
+    }
+    const reopened = { result: { id: 'm1', status: 'running', ipponsB: ['M'], ipponsA: [], scoreVersion: 6 } };
+    const shown = applyPatchToTree(tree(finished), { type: 'patch', court: 'A', compId: 'c1', payload: reopened });
+    expect(shown.competitions[0].poolMatches[0].status, 'a newer server copy').toBe('running');
+  });
+
+  it('the editor stops publishing its board once a finished result of the match is queued', async () => {
+    const r = render(<ScoreEditorModal match={bout()} onClose={vi.fn()} onSubmit={vi.fn()} password="pw" variant="inline" />);
+    await act(async () => { fireEvent.click(letterBtn(shiroSide(r.container), 'M')); });
+    const before = patches().length;
+    window.API.hasPendingTerminalWrite = vi.fn(() => true);
+    try {
+      const [tap] = outbox.taps('c1', 'm1');
+      await act(async () => { outbox.ack('c1', 'm1', null, { [tap.id]: { outcome: 'capped' } }); });
+      expect(patches().length).toBe(before);
+    } finally {
+      delete window.API.hasPendingTerminalWrite;
+    }
+  });
+
   it('a match that is not running publishes nothing', async () => {
     const r = render(<ScoreEditorModal match={bout({ status: 'scheduled' })} onClose={vi.fn()} onSubmit={vi.fn()} password="pw" variant="inline" />);
     await act(async () => { fireEvent.click(letterBtn(shiroSide(r.container), 'M')); });

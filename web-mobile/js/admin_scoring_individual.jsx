@@ -1059,6 +1059,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   ]) : "";
   useEffectA(() => {
     if (!tapMode) return;
+    // Once a finished result of the match is queued the board is no longer
+    // the match: its running copy would show a finish as running again on the
+    // display (stage 3 review 11, Y1).
+    const api = window.API || {};
+    if (typeof api.hasPendingTerminalWrite === "function" && api.hasPendingTerminalWrite(m.compId, m.id)) return;
     publishBoardOverlay({ ...tapBoard.match, ...(m.repIsTeam ? { repPlayerA: repShownA, repPlayerB: repShownB } : {}) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overlaySig]);

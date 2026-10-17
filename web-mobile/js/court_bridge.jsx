@@ -34,7 +34,7 @@
 // returns a no-op handle. Behavior degrades to today's SSE-only flow with
 // no regression.
 
-import { applyPatch as _applyPatch } from './patch.jsx';
+import { applyPatch as _applyPatch, matchInComp as _matchInComp } from './patch.jsx';
 
 // freshnessMs: the amber->red dot threshold.
 // 20 s sits below the 35 s SSE silence watchdog and above the 15 s SSE
@@ -97,6 +97,21 @@ export function resolveCompId(c) {
 // and the surrounding tournament fields are preserved by shallow spread.
 // Returns the original `tournament` reference when nothing matched.
 // -----------------------------------------------------------------------
+// staleRunningOverlay: whether a running patch from this device (the
+// operator's board, publishBoardOverlay) is older than the copy a display
+// holds that is NOT running: a finished or not-started match whose server
+// scoreVersion is at least the board's (stage 3 review 11, Y1). The editor
+// keeps publishing its running board until it closes, and a board answered
+// after the finish landed would otherwise show the match running again. A
+// newer server copy (a reopen) still shows; a copy or a patch with no version
+// cannot be weighed and the patch applies as it always did.
+export function staleRunningOverlay(existing, result) {
+    if (!existing || !result || result.status !== 'running' || existing.status === 'running') return false;
+    const held = Number(existing.scoreVersion) || 0;
+    const board = Number(result.scoreVersion) || 0;
+    return held > 0 && board > 0 && held >= board;
+}
+
 export function applyPatchToTree(tournament, msg) {
     // A patch with no payload is a no-op: bail before the findIndex scan and
     // before _applyPatch can dereference a missing payload.
@@ -111,6 +126,13 @@ export function applyPatchToTree(tournament, msg) {
     if (idx === -1) return tournament;
 
     const prevComp = competitions[idx];
+    // A running board never puts back to running a match this display holds
+    // finished or not started, unless the board is of a newer server copy
+    // (staleRunningOverlay, stage 3 review 11, Y1).
+    const results = Array.isArray(msg.payload.results) ? msg.payload.results : [msg.payload.result];
+    if (results.length > 0 && results.every((r) => staleRunningOverlay(r && r.id != null ? _matchInComp(prevComp, r.id) : null, r))) {
+        return tournament;
+    }
     // Wrap the broadcast payload in a synthetic SSE match_updated envelope
     // so applyPatch (which expects {type, data}) can process it directly.
     const syntheticEvent = {

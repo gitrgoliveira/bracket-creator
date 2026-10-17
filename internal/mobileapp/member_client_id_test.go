@@ -78,19 +78,34 @@ func TestMemberPOST_ClientID(t *testing.T) {
 		assert.Len(t, f.membersOf(t, f.teamA), count)
 	})
 
-	t.Run("the same id with another name is a conflict", func(t *testing.T) {
+	t.Run("a resend after the member was renamed or cleared is answered with the member as stored", func(t *testing.T) {
+		// Stage 3 review 3, F5: the add's answer was lost, the member was renamed
+		// (or its name cleared) meanwhile, and the add is sent again. The team
+		// holds the id, so it IS that add: 200 with the member as stored, never
+		// member_id_conflict, which the outbox would take for a refused add.
 		f := newTeamWritesFixture(t, false)
 		require.Equal(t, http.StatusCreated, f.send(http.MethodPost, f.membersPath(), "main-pw", map[string]any{"id": clientMemberID, "name": "Ren Abe"}).Code)
-		w := f.send(http.MethodPost, f.membersPath(), "main-pw", map[string]any{"id": clientMemberID, "name": "Mei Ito"})
-		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
-		assert.Contains(t, w.Body.String(), `"member_id_conflict"`)
+		rename := f.send(http.MethodPut, f.membersPath()+"/"+clientMemberID, "main-pw", map[string]any{"name": "Mei Ito"})
+		require.Equal(t, http.StatusOK, rename.Code, rename.Body.String())
+		count := len(f.membersOf(t, f.teamA))
+		w := f.send(http.MethodPost, f.membersPath(), "main-pw", map[string]any{"id": clientMemberID, "name": "Ren Abe"})
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		assert.Equal(t, decodeMember(t, rename.Body.Bytes()), decodeMember(t, w.Body.Bytes()))
+		assert.Len(t, f.membersOf(t, f.teamA), count)
+
+		clear := f.send(http.MethodDelete, f.membersPath()+"/"+clientMemberID, "main-pw", nil)
+		require.Equal(t, http.StatusOK, clear.Code, clear.Body.String())
+		w = f.send(http.MethodPost, f.membersPath(), "main-pw", map[string]any{"id": clientMemberID, "name": "Ren Abe"})
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		assert.Equal(t, decodeMember(t, clear.Body.Bytes()), decodeMember(t, w.Body.Bytes()))
+		assert.Empty(t, f.memberName(t, clientMemberID), "the cleared name stays cleared")
 	})
 
-	t.Run("an id another member holds is a conflict, in this team or another", func(t *testing.T) {
+	t.Run("an id this team holds answers that member; another team's is a conflict", func(t *testing.T) {
 		f := newTeamWritesFixture(t, false)
 		w := f.send(http.MethodPost, f.membersPath(), "main-pw", map[string]any{"id": f.blankA, "name": "Ren Abe"})
-		require.Equal(t, http.StatusConflict, w.Code, "the seeded blank member's id: %s", w.Body.String())
-		assert.Contains(t, w.Body.String(), `"member_id_conflict"`)
+		require.Equal(t, http.StatusOK, w.Code, "the seeded blank member's id: %s", w.Body.String())
+		assert.Equal(t, f.blankA, decodeMember(t, w.Body.Bytes()).ID)
 		assert.Empty(t, f.memberName(t, f.blankA), "the blank member is not renamed by an add")
 
 		require.Equal(t, http.StatusCreated, f.send(http.MethodPost, f.membersPath(), "main-pw", map[string]any{"id": clientMemberID, "name": "Ren Abe"}).Code)
@@ -98,6 +113,19 @@ func TestMemberPOST_ClientID(t *testing.T) {
 		w = f.send(http.MethodPost, other, "main-pw", map[string]any{"id": clientMemberID, "name": "Ren Abe"})
 		require.Equal(t, http.StatusConflict, w.Code, "another team's member: %s", w.Body.String())
 		assert.Contains(t, w.Body.String(), `"member_id_conflict"`)
+	})
+
+	t.Run("a participant's id is a conflict", func(t *testing.T) {
+		// F7: participant ids are v4 UUIDs too, and public (the viewer payload
+		// carries them), so a device could send one as a member id.
+		f := newTeamWritesFixture(t, false)
+		count := len(f.membersOf(t, f.teamA))
+		for _, id := range []string{f.teamA, f.teamB(t)} {
+			w := f.send(http.MethodPost, f.membersPath(), "main-pw", map[string]any{"id": id, "name": "Sora Mori"})
+			require.Equal(t, http.StatusConflict, w.Code, "participant id %q: %s", id, w.Body.String())
+			assert.Contains(t, w.Body.String(), `"member_id_conflict"`)
+		}
+		assert.Len(t, f.membersOf(t, f.teamA), count)
 	})
 
 	t.Run("an id that is not a lowercase UUID v4 is refused", func(t *testing.T) {

@@ -30,10 +30,32 @@ func TestAddTeamMemberAs(t *testing.T) {
 	assert.False(t, created)
 	assert.Equal(t, m, again)
 
-	_, _, err = s.AddTeamMemberAs("c1", a, id, "Mei Ito")
-	assert.ErrorIs(t, err, ErrTeamMemberIDConflict)
+	// A resend after the member was renamed, or its name cleared, is still that
+	// add (stage 3 review 3, F5): the team holds the id, so it is answered with
+	// the member as stored, never member_id_conflict, which the outbox would
+	// read as a refusal of an add that landed.
+	renamed, err := s.RenameTeamMember("c1", a, id, "Mei Ito")
+	require.NoError(t, err)
+	again, created, err = s.AddTeamMemberAs("c1", a, id, "Ren Abe")
+	require.NoError(t, err, "a resend after a rename")
+	assert.False(t, created)
+	assert.Equal(t, renamed, again)
+	cleared, err := s.ClearTeamMemberName("c1", a, id)
+	require.NoError(t, err)
+	again, created, err = s.AddTeamMemberAs("c1", a, id, "Ren Abe")
+	require.NoError(t, err, "a resend after the name was cleared")
+	assert.False(t, created)
+	assert.Equal(t, cleared, again)
+
 	_, _, err = s.AddTeamMemberAs("c1", b, id, "Ren Abe")
 	assert.ErrorIs(t, err, ErrTeamMemberIDConflict)
+	// A participant id is a v4 UUID too, and public: a member may never take
+	// one (F7), or the id would name a team and one of its people at once.
+	require.True(t, IsClientMemberID(b))
+	_, _, err = s.AddTeamMemberAs("c1", a, b, "Sora Mori")
+	assert.ErrorIs(t, err, ErrTeamMemberIDConflict, "another team's participant id")
+	_, _, err = s.AddTeamMemberAs("c1", a, a, "Sora Mori")
+	assert.ErrorIs(t, err, ErrTeamMemberIDConflict, "the team's own participant id")
 	_, _, err = s.AddTeamMemberAs("c1", a, "not-an-id", "Mei Ito")
 	assert.ErrorIs(t, err, ErrInvalidMemberID)
 

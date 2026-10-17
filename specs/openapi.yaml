@@ -4752,10 +4752,11 @@ paths:
         The app sends the add from its offline queue without waiting for it,
         so it mints the member's `id` itself (a lowercase UUID v4) and a lineup
         save naming the member can be queued behind the add. A resend of an
-        add that landed (the same `id` and `name` for the same team) is
-        answered 200 with the member as stored, writes nothing and is judged
-        before the limit and the finished competition. With no `id` the server
-        mints one, as before.
+        add that landed (an `id` this team already holds, whatever its name
+        is now: it may have been renamed or cleared since) is answered 200
+        with the member as stored, writes nothing and is judged before the
+        limit and the finished competition. With no `id` the server mints one,
+        as before.
       security:
         - TournamentPassword: []
       requestBody:
@@ -4777,8 +4778,9 @@ paths:
       responses:
         '200':
           description: >
-            A resend of an add that landed: the team already holds this `id`
-            under this `name`. The member as stored; nothing is written.
+            A resend of an add that landed: the team already holds this `id`,
+            under this name or the one a rename or a cleared name gave it
+            since. The member as stored; nothing is written.
           content:
             application/json:
               schema:
@@ -4815,9 +4817,8 @@ paths:
         '409':
           description: >
             Another member of the team already has this name (`error` only).
-            Or another member, of this team or another, already has this `id`,
-            or this team has it under another name (`member_id_conflict`, with
-            a `message`). Or, self-run with an empty password, the competition has finished
+            Or another team's member, or a participant of the competition,
+            already has this `id` (`member_id_conflict`, with a `message`). Or, self-run with an empty password, the competition has finished
             (`competition_finished`) or the team is at its limit
             (`team_member_limit`), each with a `message` to show.
           content:

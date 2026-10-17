@@ -388,20 +388,28 @@ func (s *Store) pruneOrphanedTeamMembersLocked(compID string, comp *Competition,
 // withZekkenNameLocked returns it, so a caller judging its status reads
 // config.md once.
 func (s *Store) requireTeamParticipantLocked(compID, teamID string) (*Competition, error) {
+	comp, _, err := s.teamParticipantsLocked(compID, teamID)
+	return comp, err
+}
+
+// teamParticipantsLocked is requireTeamParticipantLocked that also hands back
+// the competition's participants it read, for a caller that judges an id
+// against them (addTeamMember: a member may not take a participant's id).
+func (s *Store) teamParticipantsLocked(compID, teamID string) (*Competition, []domain.Player, error) {
 	withZekken, comp, err := s.withZekkenNameLocked(compID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	players, err := s.loadParticipantsNoLock(compID, withZekken, LoadParticipantsOpts{WithSeeds: false})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for i := range players {
 		if players[i].ID == teamID {
-			return comp, nil
+			return comp, players, nil
 		}
 	}
-	return nil, fmt.Errorf("%w: %q", ErrTeamNotFound, teamID)
+	return nil, nil, fmt.Errorf("%w: %q", ErrTeamNotFound, teamID)
 }
 
 // squadDuplicateNameCheck runs helper.DuplicateNamesWithKeys over
@@ -476,10 +484,10 @@ func (s *Store) AddTeamMember(compID, teamID, name string) (domain.TeamMember, e
 // by the caller (memberID; "" mints one): a device that queues the add mints
 // it, so a lineup save naming the member can be queued behind the add
 // (bc-evts stage 3 review 2, R1). created is false when the team already held
-// that id under that name: a resend of an add that landed, answered as stored.
-// The id held by another member, or under another name, is
-// ErrTeamMemberIDConflict; one that is not a lowercase UUID v4,
-// ErrInvalidMemberID.
+// that id, under any name: a resend of an add that landed (renamed or cleared
+// since, perhaps), answered as stored. The id held by another team's member,
+// or by a participant, is ErrTeamMemberIDConflict; one that is not a
+// lowercase UUID v4, ErrInvalidMemberID.
 func (s *Store) AddTeamMemberAs(compID, teamID, memberID, name string) (domain.TeamMember, bool, error) {
 	return s.addTeamMember(compID, teamID, memberID, name, 0, false)
 }
@@ -497,8 +505,9 @@ func (s *Store) AddTeamMemberAsUpTo(compID, teamID, memberID, name string, limit
 var ErrTeamMemberLimit = errors.New("team already holds as many members as allowed")
 
 // ErrTeamMemberIDConflict refuses an add whose client-made id (AddTeamMemberAs)
-// another member already holds, in any team, or that this team holds under
-// another name: never a second member under one id (bc-evts stage 3 review 2).
+// another team's member already holds, or a participant of the competition
+// does: never a second member under one id, and never an id that already
+// names a team or a competitor (bc-evts stage 3 review 2, review 3 F7).
 var ErrTeamMemberIDConflict = errors.New("another team member already has this id")
 
 // ErrInvalidMemberID refuses a client-made member id that is not a lowercase
@@ -559,7 +568,7 @@ func (s *Store) addTeamMember(compID, teamID, memberID, name string, limit int, 
 	mu.Lock()
 	defer mu.Unlock()
 
-	comp, err := s.requireTeamParticipantLocked(compID, teamID)
+	comp, players, err := s.teamParticipantsLocked(compID, teamID)
 	if err != nil {
 		return domain.TeamMember{}, false, err
 	}
@@ -570,19 +579,27 @@ func (s *Store) addTeamMember(compID, teamID, memberID, name string, limit int, 
 	}
 	// A client-made id (bc-evts stage 3 review 2, R1): the add is an outbox
 	// entry, so it can arrive twice when its answer was lost. The member this
-	// team already holds under that id and name IS that add: answered as
-	// stored, nothing written, and judged before the limit and the finished
-	// competition, which a resend never crosses. Any other holder of the id
-	// is a conflict, never a second member under one id.
+	// team already holds under that id IS that add, whatever name it has now
+	// (a rename or a cleared name may have landed between the two sends,
+	// stage 3 review 3, F5): answered as stored, nothing written, and judged
+	// before the limit and the finished competition, which a resend never
+	// crosses. Another team's member under the id is a conflict, never a
+	// second member under one id, and so is a participant's id (F7): those
+	// are v4 UUIDs too, and public.
 	if memberID != "" {
 		for team, members := range squads {
 			for _, m := range members {
 				if m.ID != memberID {
 					continue
 				}
-				if team == teamID && strings.TrimSpace(m.Name) == name {
+				if team == teamID {
 					return m, false, nil
 				}
+				return domain.TeamMember{}, false, ErrTeamMemberIDConflict
+			}
+		}
+		for i := range players {
+			if players[i].ID == memberID {
 				return domain.TeamMember{}, false, ErrTeamMemberIDConflict
 			}
 		}

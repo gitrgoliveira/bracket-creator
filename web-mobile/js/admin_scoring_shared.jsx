@@ -19,7 +19,7 @@ import { sideMarks, defaultWinMaru } from './bracket.jsx';
 import { NumberedName, numberFollowsName } from './numbered_name.jsx';
 import { withdrawnSideKey } from './ineligible_match.jsx';
 import { isTeamDefaultWinDecision } from './team_default_credit.jsx';
-import { struckIppons } from './result_slot.jsx';
+import { struckIppons, realIppons } from './result_slot.jsx';
 import { acceptTap } from './tap_guard.jsx';
 // bc-evts: the board of a running match (tapBoardOf) is the server's copy with
 // this device's pending taps folded on, by the JS replay port.
@@ -175,12 +175,13 @@ function sameSides(m, derived) {
 }
 
 // tapBoardOf (bc-evts stage 3, S6): the board of a RUNNING match, for the
-// individual and engi editors alike (stage 4). Its base is the newer of the
+// individual, engi (stage 4) and team (stage 5) editors alike. Its base is the newer of the
 // match the host renders and the newest copy a score-events answer handed back
 // (API.latestDerivedMatch), by isOlderRunningCopy's rule (scoreVersion first,
 // then the stamp); this device's pending taps are folded on top (applyPending,
 // `opts` its fold options: {engi: true} for an engi match, whose flag taps the
-// fold refuses otherwise). `base` is what the taps were made against.
+// fold refuses otherwise; {team: true, kachinuki} for a team match, whose bout
+// taps it refuses otherwise). `base` is what the taps were made against.
 export function tapBoardOf(m, opts) {
   const api = window.API || {};
   const derived = typeof api.latestDerivedMatch === "function" ? api.latestDerivedMatch(m.compId, m.id) : null;
@@ -191,13 +192,29 @@ export function tapBoardOf(m, opts) {
     // A rep pick the answer does not carry is the one the host renders.
     if (derived.repPlayerA !== undefined) base.repPlayerA = derived.repPlayerA;
     if (derived.repPlayerB !== undefined) base.repPlayerB = derived.repPlayerB;
+    // A team match's bout rows (stage 5), when the answer carries them.
+    if (Array.isArray(derived.subResults)) base.subResults = derived.subResults;
   }
-  const pending = (typeof api.pendingTaps === "function" && api.pendingTaps(m.compId, m.id)) || [];
-  const folded = applyPending(base, pending, opts);
+  // `opts.prepare` lets an editor add to the base what the server has not
+  // answered for yet but taps already name (the team editor's kachinuki rows
+  // added by hand, whose add is queued ahead of those taps).
+  const all = (typeof api.pendingTaps === "function" && api.pendingTaps(m.compId, m.id)) || [];
+  const folded = applyPending(opts && opts.prepare ? opts.prepare(base) : base, all, opts);
   // `moving`: the pending taps that still change the board (a tap the base
   // already holds, or one with nothing left to take, changes nothing).
-  const moving = pending.filter((e) => folded.outcomes[e.id] === APPLIED);
-  return { base, match: folded.match, pending, moving };
+  const moving = all.filter((e) => folded.outcomes[e.id] === APPLIED);
+  return { base, match: folded.match, pending: all, moving };
+}
+
+// shownMarkIds: the mark id of each mark a side shows (realIppons order: the
+// placeholders and the hantei mark dropped) for a match or a team bout row,
+// "" where the copy names none. An ippon.remove names the mark by this id.
+export function shownMarkIds(holder, key) {
+  const raw = (key === "a" ? holder.ipponsA : holder.ipponsB) || [];
+  const ids = (holder.markIds && holder.markIds[key]) || [];
+  const out = [];
+  raw.forEach((x, i) => { if (realIppons([x]).length) out.push(ids[i] || ""); });
+  return out;
 }
 
 // useTapBoard re-renders the editor when this device's pending taps for the

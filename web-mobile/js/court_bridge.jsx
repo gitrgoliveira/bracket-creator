@@ -423,8 +423,11 @@ export const bridge = openBridge();
 // trip later: the known limit of a board kept by the server.
 // -----------------------------------------------------------------------
 // flagsA/flagsB are an engi board's (bc-evts stage 4); an individual board
-// carries none, so a display of it gains none.
-const OVERLAY_FIELDS = ['status', 'ipponsA', 'ipponsB', 'hansokuA', 'hansokuB', 'flagsA', 'flagsB', 'markIds', 'scoreVersion', 'modifiedAt', 'repPlayerA', 'repPlayerB'];
+// carries none, so a display of it gains none. subResults and teamResult are a
+// team board's (stage 5): its bout rows, and teamResult stated null so the
+// display works IV and PW out of those rows rather than keep the totals of the
+// server's last push.
+const OVERLAY_FIELDS = ['status', 'ipponsA', 'ipponsB', 'hansokuA', 'hansokuB', 'flagsA', 'flagsB', 'markIds', 'scoreVersion', 'modifiedAt', 'repPlayerA', 'repPlayerB', 'subResults', 'teamResult'];
 
 // boardOverlayResult: the match_updated `result` a board publishes, or null
 // for a match no display can place (no id or no court).

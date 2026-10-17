@@ -61,6 +61,7 @@ import {
   useTapOutcomeNote,
   tapBoardOf,
   useTapBoard,
+  shownMarkIds,
 } from './admin_scoring_shared.jsx';
 // bc-cse: a SCHEDULED match a competitor is barred from must never offer a
 // Start the server would refuse; isBarredMatch (ineligible_match.jsx) is the
@@ -122,15 +123,7 @@ function seedBoard(src) {
   };
 }
 
-// The mark id beside each point a side's slots show, index for index with
-// seedBoard's pts ("" for a point that carries none, e.g. a legacy row).
-function shownMarkIds(match, key) {
-  const raw = (key === "a" ? match.ipponsA : match.ipponsB) || [];
-  const ids = (match.markIds && match.markIds[key]) || [];
-  const out = [];
-  raw.forEach((x, i) => { if (realIppons([x]).length) out.push(ids[i] || ""); });
-  return out;
-}
+
 
 // The pick a side's last pending pool.rep names, else undefined. The replay
 // port leaves pool.rep to the server (a team competition's rep bout), so the

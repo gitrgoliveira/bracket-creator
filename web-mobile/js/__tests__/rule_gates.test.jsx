@@ -154,7 +154,7 @@ describe('the tap-outcome and retired-reason rules', () => {
     // bc-evts stage 4 widened it to the engi editor; stage 5 adds the team one.
     const r = rule('editor-taps');
     expect(r).toBeTruthy();
-    expect(r.only).toEqual(['admin_scoring_individual.jsx', 'admin_scoring_engi.jsx']);
+    expect(r.only).toEqual(['admin_scoring_individual.jsx', 'admin_scoring_engi.jsx', 'admin_scoring_team.jsx']);
     expect(trips(r, 'const { markDirty } = useDebouncedRunningWrite({ isRunningRef });')).toBe(true);
     expect(trips(r, '_ref.current = landedAutosave(onSubmit, seqRef, onLanded);')).toBe(true);
     expect(trips(r, 'useAdoptFromServer({ signature, apply, keepLocalEdits: true, isDirty });')).toBe(true);

@@ -43,17 +43,27 @@ import {
   HeldWriteNotice,
   useClearPendingWhenNothingHeld,
   useMatchHeldWrite,
+  useTapOutcomeNote,
+  tapBoardOf,
+  useTapBoard,
+  shownMarkIds,
 } from './admin_scoring_shared.jsx';
+// bc-evts stage 5: a running team match is scored by tap events, one per
+// scoring gesture, handed to the outbox (API.recordTap).
+import {
+  makeEvent, IPPON_ADD, IPPON_REMOVE, FOUL_ADD, FOUL_REMOVE, ENCHO_ADD, ENCHO_REMOVE,
+  BOUT_DECISION, BOUT_FIGHTER, REP_PICK, DAIHYOSEN_VERDICT,
+} from './score_events.jsx';
+import { publishBoardOverlay } from './court_bridge.jsx';
 // bc-cse: a SCHEDULED match a competitor is barred from must never offer a
 // Start the server would refuse; isBarredMatch (ineligible_match.jsx) is the
 // one owner of that question.
 import { isBarredMatch } from './ineligible_match.jsx';
 import { isOlderRunningCopy } from './patch.jsx';
 
-import { useDebouncedRunningWrite, SyncStatusPill, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote, landedAutosave } from './admin_scoring_autosave.jsx';
+import { SyncStatusPill, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
 import { GROUP_ENCHO, GROUP_RESULT, GROUP_REP_PICK_A, GROUP_REP_PICK_B, boutGroup } from './match_groups.jsx';
-import { serverNowMs } from './server_clock.jsx';
 import { publishHeight } from './published_height.jsx';
 import { SideLabel, sideWithColour } from './side_cell.jsx';
 
@@ -66,7 +76,7 @@ import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, 
 // the editor derives its per-bout middle from it rather than restating the
 // chain (CLAUDE.md § Match Decision Types: the middle rule lives in ONE place).
 import { boutMiddle, winnerSideLR } from './bracket.jsx';
-import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, nameOf, sideSlotOrder, attributeWinnerSide, subBoutAttribution, DEFAULT_WIN_IPPON } from './result_slot.jsx';
+import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, nameOf, sideSlotOrder, attributeWinnerSide, subBoutAttribution, DEFAULT_WIN_IPPON, hanteiDecided } from './result_slot.jsx';
 import { creditedSideKey, creditedTotals } from './team_default_credit.jsx';
 // bc-dtfn: the one owner of "is this tap the bounce of the previous one".
 import { stampTap, clearTap, acceptTap, swallowBounce, useArmedConfirm, useOpenedTapGuard } from './tap_guard.jsx';
@@ -736,51 +746,34 @@ function withoutRepPicks(row) {
   return JSON.stringify(rest);
 }
 
-// rowTakenFromServer: does the adopt take the server's copy of a bout row (true), or keep
-// the operator's (false)? The ONE rule, asked both by the updater that rebuilds the board
-// and by the pass that tells useChangedGroups which rows were taken (a row taken is a row
-// the editor then agrees with; a row kept stays the operator's edit), so the two cannot
-// drift. `editedAt` is when the operator last edited the row here and `modifiedAt` the
-// match's stamp, both in the server's clock frame. With no local row there is nothing of
-// the operator's to keep. A snapshot written BEFORE the operator's last edit to the row
-// cannot know that edit, so the row stays theirs whatever it now equals (bc-kclr: striking
-// a point and taking it back returns the row to the value the server showed before the
-// strike, which would otherwise read as untouched). Otherwise a row that still equals what
-// the server last said (`prior`) has nothing of theirs in it.
-function rowTakenFromServer(local, prior, editedAt, modifiedAt) {
+// followsServer: does the sheet of a match that is NOT running take the server's copy
+// of a bout row (true), or keep the operator's draft of it? It takes it when the
+// operator never touched the row: the row shown is the server's previous copy. A
+// running match's rows are the board's (the server's copy with this device's pending
+// taps), never a draft, so nothing needs following there.
+function followsServer(local, prior) {
   if (!local) return true;
-  if (editedAt !== undefined && (modifiedAt || 0) < editedAt) return false;
   return !!prior && JSON.stringify(local) === JSON.stringify(prior);
 }
 
-// repRowTakes: which parts of the representative row the adopt takes from the server
-// (true) and which stay the operator's (false), each by the rule a whole row follows:
-// a snapshot written BEFORE the part's last edit here cannot know that edit (`stamps`,
-// in the server's clock frame, against the match's `modifiedAt`), and a part that
-// still equals what the server last said (`prior`) has nothing of the operator's in
-// it. `stamps` is { score, a, b }; a part never edited here has none. With no prior
-// row nothing is known to be untouched, so every part stays.
-function repRowTakes(local, prior, stamps, modifiedAt) {
-  const held = (stamp) => stamp !== undefined && (modifiedAt || 0) < stamp;
-  const pick = (side, key) => !held(stamps[side]) && !!prior && (local[key] || "") === (prior[key] || "");
-  return {
-    score: !held(stamps.score) && !!prior && withoutRepPicks(local) === withoutRepPicks(prior),
-    a: pick("a", REP_PICK_KEYS[0]),
-    b: pick("b", REP_PICK_KEYS[1]),
-  };
+// padBoutRows: the board's base with the numbered bout rows at `positions` that the
+// server's copy does not hold yet, empty, so a tap on such a row folds at once. The
+// row's write is queued ahead of those taps (ensureServerRows), so the server holds
+// the row before it folds them.
+function padBoutRows(base, positions) {
+  const rows = base.subResults || [];
+  const missing = positions.filter((p) => !rows.some((r) => r && r.position === p));
+  if (missing.length === 0) return base;
+  const added = missing.map((p) => ({ position: p, sideA: "", sideB: "", ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, winner: "", decision: "" }));
+  return { ...base, subResults: [...rows, ...added].sort((x, y) => (x.position < 0 ? 1e9 : x.position) - (y.position < 0 ? 1e9 : y.position)) };
 }
 
-// composeRepRow: the representative row after the adopt, each part from the server's
-// row where `takes` says so and from the operator's otherwise. Either row keeps its
-// identity when every part comes from it, so an untouched board is not rebuilt.
-function composeRepRow(local, served, takes) {
-  if (takes.score && takes.a && takes.b) return served;
-  if (!takes.score && !takes.a && !takes.b) return local;
-  return {
-    ...(takes.score ? served : local),
-    [REP_PICK_KEYS[0]]: (takes.a ? served : local)[REP_PICK_KEYS[0]],
-    [REP_PICK_KEYS[1]]: (takes.b ? served : local)[REP_PICK_KEYS[1]],
-  };
+// boardWithVerdicts: the board as the sheet reads it, each bout row's hantei verdict
+// derived from its Ht mark, as normalizeMatch derives it for a copy the host hands
+// over (the fold writes the mark and leaves the flag to the reader).
+function boardWithVerdicts(board) {
+  if (!Array.isArray(board.subResults)) return board;
+  return { ...board, subResults: board.subResults.map((s) => (s && hanteiDecided(s) ? { ...s, decidedByHantei: true } : s)) };
 }
 
 // fusenshoSideFromSub: which side ("a" / "b" / "") a persisted fusensho sub-bout
@@ -1250,11 +1243,102 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // the latest render rather than of the one that created its closure.
   const matchRef = useRefA(match);
   matchRef.current = match;
-  const m = matchOverride?.match || match;
-  // bc-mrgc: names the groups each write changes, against the match this
-  // editor renders from (see useChangedGroups).
-  const claimChanged = useChangedGroups(m);
+  // The server's copy as this sheet holds it: the host's match, or the answer of a
+  // bout change shown until the host catches up.
+  const mHost = matchOverride?.match || match;
+  // bc-mrgc: names the groups each write changes, against the server's copy of
+  // the match (see useChangedGroups).
+  const claimChanged = useChangedGroups(mHost);
+  // T136 / T141: competition lookup so we can branch on teamMatchType
+  // ("kachinuki" vs "fixed") and gate the daihyosen affordance on the
+  // knockout-format precondition. Falls back to compKind/teamSize when
+  // the fetch fails so the existing fixed-grid flow still works.
+  const [compMeta, setCompMeta] = useStateA(null);
+  // T136: kachinuki branch. Match-level teamMatchType (added by
+  // viewer.compMatches in a sibling slice) is preferred; competition
+  // fetch is the fallback. Default "fixed" preserves the legacy N×1
+  // grid behaviour.
+  const teamMatchType = mHost.teamMatchType || compMeta?.config?.teamMatchType || "fixed";
+  const isKachinuki = teamMatchType === "kachinuki";
+  // mp-gmcg: bout positions the OPERATOR added client-side ("Add next bout
+  // manually", kachinuki only). The server auto-append can only pair fighters
+  // it knows from lineups + the bout log, and team sizes are unregulated, so
+  // the operator can append the next pairing. On a running match the row is
+  // written at once (addManualBout); until the server's copy holds it, the
+  // board shows it from here.
+  const [manualBouts, setManualBouts] = useStateA([]);
+  // bc-evts stage 5: a RUNNING team match is scored by tap events. Every scoring
+  // gesture hands one to the outbox (API.recordTap, emitBoutTap below) in the tick
+  // it is made, and the sheet shows the BOARD: the server's copy with this device's
+  // pending taps folded on (tapBoardOf, shared with the individual and engi
+  // editors), with nothing held locally but modes (the hantei arm, an open
+  // correction of a fought kachinuki bout). A match that is not running (pre-match,
+  // or a correction of a finished one) keeps a local draft, sent once by Start or
+  // Save correction.
+  const tapMode = mHost.status === "running";
+  // The numbered bouts the board holds even where the server's copy has no row
+  // for them yet: a fixed-order match's team positions, a kachinuki encounter's
+  // first bout, and the pairings added by hand. A tap lands only on a row the
+  // server holds, so the first tap on such a bout queues the row's write ahead
+  // of it (ensureServerRows); the board shows the row from here meanwhile.
+  const padPositions = isKachinuki
+    ? [1, ...manualBouts]
+    : [...Array.from({ length: teamSize || 0 }, (_, i) => i + 1), ...manualBouts];
+  const teamFold = {
+    team: true,
+    kachinuki: isKachinuki,
+    prepare: (base) => padBoutRows(base, padPositions),
+  };
+  const tapBoard = useTapBoard(mHost, tapMode, teamFold);
+  // The match the sheet reads everywhere: the board while running, else the
+  // server's copy. A write that builds a new server copy (a bout change's shown
+  // answer) builds it from mHost, never from the board, or the pending taps would
+  // be folded in twice.
+  const m = tapMode ? boardWithVerdicts(tapBoard.match) : mHost;
   const isComplete = m.status === "completed";
+  // A tap the server did not apply, said beside the board (tapNotAppliedText).
+  const tapNote = useTapOutcomeNote(mHost.compId, mHost.id);
+  // emitBoutTap hands one event to the outbox, made against the board's base
+  // (the match whose stamp floors the tap's); the public self-run sheet passes
+  // the empty password. Nothing waits on it: the board shows the tap at once. It
+  // is an operator edit, so it disarms the two-tap commits (operatorEditSeq).
+  const emitBoutTap = (ev) => {
+    tapNote.clear();
+    ensureServerRows(ev.pos);
+    window.API.recordTap(mHost.compId, mHost.id, makeEvent(ev), password, tapBoardOf(mHost, teamFold).base);
+    setOperatorEditSeq((n) => n + 1);
+    setFusenshoRefusal("");
+  };
+  // ensureServerRows: the ONE owner of "a bout row the server does not hold is
+  // written before the first tap on it". A bout tap lands only on a row the
+  // server's copy holds (engine.foldBout), and a team match started from the
+  // queue (a start-only write) holds none; nor does a kachinuki encounter's first
+  // bout before its first write, nor a pairing added by hand. So the first gesture
+  // on such a bout queues a running write carrying the empty rows (a fixed-order
+  // match's missing positions together, a kachinuki bout alone; a kachinuki first
+  // bout with its lineup's fighters), naming those bout groups alone, ahead of the
+  // tap in the match's order. Judged against the server's copy (mHost), never the
+  // board, and once per row for this sheet.
+  const rowsWrittenRef = useRefA({ id: null, positions: new Set() });
+  const ensureServerRows = (pos) => {
+    if (!(pos > 0)) return;
+    const req = rowsWrittenRef.current;
+    if (req.id !== mHost.id) { req.id = mHost.id; req.positions = new Set(); }
+    const held = new Set((mHost.subResults || []).filter(Boolean).map((r) => r.position));
+    if (held.has(pos) || req.positions.has(pos)) return;
+    const want = (isKachinuki ? [pos] : [...new Set([...padPositions, pos])]).filter((p) => p > 0 && !held.has(p) && !req.positions.has(p));
+    want.forEach((p) => req.positions.add(p));
+    const fields = buildPatchFields("running");
+    const rows = (fields.subResults || []).filter((s) => want.includes(s.position));
+    for (const p of want) {
+      if (!rows.some((r) => r.position === p)) rows.push({ position: p, sideA: "", sideB: "", ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, winner: "", decision: "" });
+    }
+    rows.sort((x, y) => x.position - y.position);
+    doSubmit(() => onSubmit({ ...fields, subResults: rows, changed: want.map(boutGroup), ...boardSeen }));
+  };
+  // The live board's row at `pos`, read afresh (the outbox's pending taps, not this
+  // render's), so two gestures before a re-render judge the board as it is.
+  const liveBoardRow = (pos) => ((tapBoardOf(mHost, teamFold).match.subResults || []).find((r) => r && r.position === pos) || null);
   // Kachinuki appends bouts beyond teamSize (engine assigns Position =
   // len(SubResults)+1, up to 2*roster-1 bouts), so size the grid to cover every
   // persisted bout position: otherwise reopening a kachinuki match hides (and
@@ -1262,12 +1346,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // position past teamSize, so it is unaffected. Capped at the theoretical
   // kachinuki maximum (2*MAX_TEAM_SIZE-1) as a guard against malformed data.
   const maxSubPos = (m.subResults || []).reduce((mx, s) => (s.position > 0 && s.position > mx ? s.position : mx), 0);
-  // mp-gmcg: bout positions the OPERATOR added client-side ("Add next bout
-  // manually", kachinuki only). The server auto-append can only pair fighters
-  // it knows from lineups + the bout log, and team sizes are unregulated, so
-  // the operator can append the next pairing locally: the row rides the next
-  // score write as a regular subResult (the server merge keeps client rows).
-  const [manualBouts, setManualBouts] = useStateA([]);
   const kachinukiMaxBouts = 2 * window.MAX_TEAM_SIZE - 1;
   const manualMaxPos = manualBouts.length ? Math.max(...manualBouts) : 0;
   // The ONE clamp defining how many bout slots the grid covers: teamSize is
@@ -1299,7 +1377,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // can compare against the initial value (the function is not idempotent
   // across re-renders because m may mutate).
   const initialEnchoPeriods = initialEnchoPeriodsForMatch(m);
-  const [enchoPeriodCount, setEnchoPeriodCount] = useStateA(initialEnchoPeriods);
+  const [enchoLocal, setEnchoPeriodCount] = useStateA(initialEnchoPeriods);
+  // While running the count is the board's (its taps are in the outbox); the
+  // local count is a draft of a match that is not running.
+  const enchoPeriodCount = tapMode ? initialEnchoPeriods : enchoLocal;
   // The third verdict channel, and the one that was missing. It is a server-live
   // baseline (initialEnchoPeriods re-derives from m) feeding daihyosenVerdictDirty
   // below, so without an adopt an overtime count recorded on another device left
@@ -1307,22 +1388,21 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // discard prompt on an editor nobody touched, and would have held the re-seed
   // gate shut for the rest of the session. An untouched editor (its count equals
   // the server's) still follows the server, which covers both. It keeps a count
-  // the operator changed, as the individual editor's re-seed does, because on a
-  // running match every change is saved as it is made (changeEnchoPeriodCount,
-  // and the kachinuki Encho through updateSub): the save of one tap
-  // coming back must not undo a second tap made before it arrived. The count
-  // stays the operator's until the server holds it, as the daihyosen verdict
-  // does (its adopt below).
+  // the operator changed on a match that is not running, until Start or Save
+  // correction sends it. A running match's count is the board's (bc-evts stage 5),
+  // so it holds nothing to keep, and what it agrees with is worked out from the
+  // pending taps (the agreement effect below).
   useAdoptFromServer({
     signature: initialEnchoPeriods,
     apply: () => {
       setEnchoPeriodCount(initialEnchoPeriods);
+      if (tapMode) return;
       claimChanged.agree(GROUP_ENCHO);
       // With a representative bout the count is read off its row and written on it, so
       // taking the count is agreeing with that row too.
       agreeRepBoutIfNotHeld();
     },
-    keepLocalEdits: true,
+    keepLocalEdits: !tapMode,
     isDirty: enchoPeriodCount !== initialEnchoPeriods,
   });
   const [submitting, setSubmitting] = useStateA(false);
@@ -1477,11 +1557,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const wroteSideMembers = (side, written) => {
     showMembers(side, mergeMembers(membersShown.current[side], written));
   };
-  // T136 / T141: competition lookup so we can branch on teamMatchType
-  // ("kachinuki" vs "fixed") and gate the daihyosen affordance on the
-  // knockout-format precondition. Falls back to compKind/teamSize when
-  // the fetch fails so the existing fixed-grid flow still works.
-  const [compMeta, setCompMeta] = useStateA(null);
   // T141: error banner mapping for the daihyosen POST. Server returns
   // 400 not_tied / 400 pool_match / 409 insufficient_eligibility: see
   // handlers_daihyosen.go for the canonical strings.
@@ -1532,11 +1607,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // (409; result_finalized once it has finished), so the page does not offer
   // what would be refused. The organiser, with the password, keeps both.
   const repBoutAddRemoveOpen = !selfReport || m.status === "running";
-  const [daihyosenHantei, setDaihyosenHantei] = useStateA(recordedDaihyosenSide);
+  const [hanteiLocal, setDaihyosenHantei] = useStateA(recordedDaihyosenSide);
   // Armed follows the RECORDED flag, not the resolved side, so an
   // unattributable stored verdict still opens the panel for re-picking
   // instead of silently reading as "no hantei".
-  const [daihyosenHanteiArmed, setDaihyosenHanteiArmed] = useStateA(daihyosenHanteiRecorded);
+  const [armedLocal, setDaihyosenHanteiArmed] = useStateA(daihyosenHanteiRecorded);
+  // While running the verdict is the board's (a pick is a daihyosen.verdict tap);
+  // the arm with no side picked stays a local mode. The local pair is the draft of
+  // a match that is not running.
+  const daihyosenHantei = tapMode ? recordedDaihyosenSide : hanteiLocal;
+  const daihyosenHanteiArmed = tapMode ? (armedLocal || daihyosenHanteiRecorded) : armedLocal;
   // ADOPT a verdict recorded on another device, so this editor cannot sit
   // showing an un-armed hantei panel while the viewer, the bracket, the TV
   // board and the export all show the Ht. It touches the verdict only, so the
@@ -1550,21 +1630,22 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // on something in front of them, which is what let buildPatch's hanteiKnown
   // guard go away entirely.
   //
-  // It keeps a side the operator picked until the server holds it: a pick is
-  // saved as it is made (pickDaihyosenHantei), so the save of one pick coming
-  // back must not undo a second made before it arrived. An arm with no side is
+  // On a match that is not running it keeps a side the operator picked until
+  // Save correction sends it. While running the verdict is the board's, a tap of
+  // its own (pickDaihyosenHantei), so nothing is held. An arm with no side is
   // a mode, not an edit, and does not hold the verdict back.
   useAdoptFromServer({
     signature: JSON.stringify([daihyosenHanteiRecorded, recordedDaihyosenSide]),
     apply: () => {
       setDaihyosenHanteiArmed(daihyosenHanteiRecorded);
       setDaihyosenHantei(recordedDaihyosenSide);
+      if (tapMode) return;
       // The verdict is the Ht mark on the representative bout's row and the winner the
       // match gets from it, so adopting it is agreeing with both groups.
       agreeRepBoutIfNotHeld();
       claimChanged.agree(GROUP_RESULT);
     },
-    keepLocalEdits: true,
+    keepLocalEdits: !tapMode,
     isDirty: daihyosenHantei !== recordedDaihyosenSide,
   });
   // Shared by daihyosenTouched (buildPatch) and isDirty: whether the operator
@@ -1598,64 +1679,40 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     enchoPeriodCount !== initialEnchoPeriods ||
     daihyosenHantei !== recordedDaihyosenSide ||
     daihyosenHanteiArmed !== daihyosenHanteiRecorded;
-  // The daihyosen verdict is saved like a point (bc-sync): picking a side,
-  // re-picking, and withdrawing it (clearHantei, the ONE undo, shared by the
-  // Ht chip and the panel Cancel so the two paths cannot drift) each schedule
-  // the autosave, so on a running match the verdict rides the running write
-  // and leaving the editor keeps it. A cancel then a re-pick inside the
-  // debounce window is one write; further apart, two writes that land in the
-  // order they were made. The ARM alone is a mode and saves nothing. On a
-  // completed match nothing autosaves: the verdict rides Save correction.
+  // The daihyosen verdict is a tap like a point (bc-evts stage 5, Q11): on a
+  // running match picking a side is one daihyosen.verdict event for that side,
+  // and withdrawing it (clearHantei, the ONE undo, shared by the Ht chip and the
+  // panel Cancel so the two paths cannot drift) one with value "clear", each in
+  // the outbox at once, so the TV board shows it at once. The ARM alone is a mode
+  // and sends nothing. A match that is not running keeps the verdict as a draft:
+  // it rides Save correction.
   const pickDaihyosenHantei = (side) => {
+    if (tapMode) { emitBoutTap({ kind: DAIHYOSEN_VERDICT, pos: DAIHYOSEN_POSITION, side }); return; }
     setDaihyosenHantei(side);
-    markScoringDirty();
   };
   const clearHantei = () => {
     setDaihyosenHanteiArmed(false);
+    if (tapMode) {
+      if (daihyosenHanteiRecorded) emitBoutTap({ kind: DAIHYOSEN_VERDICT, pos: DAIHYOSEN_POSITION, value: "clear" });
+      return;
+    }
     setDaihyosenHantei("");
-    markScoringDirty();
   };
   // Same teardown-race guard as ScoreEditorModal: covers external/
   // parent-driven unmount during in-flight save.
   const mountedRef = useRefA(true);
 
-  // C1: debounced autosave refs (same pattern as ScoreEditorModal).
-  // Updated after buildPatch is defined below.
-  const _autosaveIsRunningRef = useRefA(false);
-  const _autosaveBuildPatchRef = useRefA(null);
-  const _autosaveOnSubmitRef = useRefA(null);
-  const _autosaveSeenStampRef = useRefA(0);
-  // bc-cse: the latest Record-bout answer's own stamp, held independently of
-  // matchOverride. The common case (no prior [Remove this bout] leaving an
-  // override to adopt it into) left this answer's modifiedAt unseen until the
-  // SSE push caught up, so a tap on the freshly-appended bout in the meantime
-  // was floored by the PRE-advance stamp instead. Reset on a match switch so a
-  // stale answer from a PREVIOUS match never floors a write on this one.
-  const _recordBoutAnswerStampRef = useRefA(0);
-  useEffectA(() => { _recordBoutAnswerStampRef.current = 0; }, [match?.id]);
   // bc-mrgc: what a write applied only in part kept in the match's history.
   const keptInHistory = useKeptInHistoryNote();
-  const {
-    markDirty: markScoringDirty,
-    cancelDebounce: cancelScoringDebounce,
-  } = useDebouncedRunningWrite({
-    isRunningRef: _autosaveIsRunningRef,
-    buildPatchRef: _autosaveBuildPatchRef,
-    onSubmitRef: _autosaveOnSubmitRef,
-    onWriteResult: keptInHistory.noteFromWrite,
-    seenStampRef: _autosaveSeenStampRef,
-  });
   // T141: remove an unscored daihyosen placeholder. Defined at component
   // level so both the hantei row and any other affordance can call it.
   const onRemoveDaihyosen = () => {
-    // Taken first: whether an edit is owed decides whether the sheet is saved
-    // before the DELETE.
-    const hadPending = cancelScoringDebounce();
     return runRepBoutChange({
-      // Only a running sheet with an edit still owed is saved first, so the
-      // DELETE does not race it; there is nothing else to protect.
-      preSave: m.status === "running" && (hadPending || isDirty),
-      // bc-evts: the remove is the outbox's, queued after the pre-save; the
+      // Nothing is saved first: a running sheet's taps are already ahead of the
+      // remove in the outbox (bc-evts stage 5), and a sheet that is not running
+      // holds no edit the remove could race.
+      preSave: false,
+      // bc-evts: the remove is the outbox's, queued after the taps; the
       // sheet drops the row at once and adopts the answer when it comes.
       send: (claim) => window.API.removeDaihyosen(m.compId, m.id, resolveDecisionPassword(password), m.modifiedAt || 0, { onRefusal: claim, seen: m.scoreVersion }),
       optimistic: (subs) => subs.filter((s) => s.position !== DAIHYOSEN_POSITION),
@@ -1779,13 +1836,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // updateSub): no operator-edit stamp, no dirty mark, no autosave, and an armed Finish
     // stays armed, since the operator changed nothing. A pick the server holds arrives
     // cleared by the push that seats the new team, in the same update, so the board
-    // already agrees. A pick made HERE and not yet written is one the server never
-    // received and cannot clear, so this is the only place it goes. Either way the side's
-    // pick-part edit stamp goes with it: whatever was edited was about the old team, and
-    // the adopt takes the server's value for the side again.
-    lastRepPickEditRef.current[side] = undefined;
-    repPickEditSeqRef.current[side] = undefined;
-    if (daihyosenIdx >= 0 && subs[daihyosenIdx]?.[`${side}MemberIdOverride`]) {
+    // already agrees. A pick made HERE on a match that is not running is a draft the
+    // server never received and cannot clear, so this is the only place it goes. On a
+    // running match a pick is a rep.pick tap: one still queued names the old team's
+    // member, and the server refuses it (team_member_not_in_team), said by the tap note.
+    if (!tapMode && daihyosenIdx >= 0 && subs[daihyosenIdx]?.[`${side}MemberIdOverride`]) {
       const memberKey = `${side}MemberIdOverride`;
       setSubs(prev => reconcileRowsToPositions(prev, serverSubs).map((s, i) => i === daihyosenIdx ? { ...s, [memberKey]: "" } : s));
     }
@@ -1852,12 +1907,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     return () => { cancelled = true; };
   }, [m.compId, m.id, sideAKey, sideBKey]);
 
-  // T136: kachinuki branch. Match-level teamMatchType (added by
-  // viewer.compMatches in a sibling slice) is preferred; competition
-  // fetch is the fallback. Default "fixed" preserves the legacy N×1
-  // grid behaviour.
-  const teamMatchType = m.teamMatchType || compMeta?.config?.teamMatchType || "fixed";
-  const isKachinuki = teamMatchType === "kachinuki";
   // bc-kheb (operator ruling 2026-09-24): a kachinuki encounter never carries
   // a match-level overtime. One bout fought on in encho does not put the
   // encounter in overtime, so (E) lives on that bout's own row only. The
@@ -2266,7 +2315,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       return;
     }
     const member = typed.squad.find(mem => mem && mem.id === typed.memberId) || { id: typed.memberId };
-    pickDaihyosenRepresentative({ idx, side, updateSub }, member);
+    pickDaihyosenRepresentative({ idx, side, updateSub: pickSub }, member);
     // No lineup is saved here, so the lineup's own warning ("Lineup saved, but...")
     // would be false: say what an unread member list can actually have done.
     if (membersUnavailable) notify("warn", `"${value}" was picked, but the team member list could not be read first, so they may have been added as a new team member. ${selfReport ? "Ask the tournament organizer to check the team." : "Check the team on the Lineups page."}`);
@@ -2289,6 +2338,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // match it was recorded on.
   const submitDecision = makeSubmitDecision({
     match: m, enchoPeriodCount: encounterEnchoCount, password, mountedRef,
+    // The server copy the board showed (stage 3 m1): the score-events answer's
+    // when the board took it.
+    seenScoreVersion: tapMode ? tapBoard.base.scoreVersion : undefined,
     setDecisionSubmitting, setDecisionErr, setDecisionPromptKind,
     onClose, onAfterDecision, isComplete,
   });
@@ -2376,12 +2428,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // so the local board is reconciled against it (reconcileRowsToPositions).
   // RENDER-SYNCHRONOUS because this very render already indexes subs for the
   // new positions — an effect would run after the crash.
-  const subs = reconcileRowsToPositions(subsRaw, serverSubs);
+  // While running the rows ARE the board's (serverSubs is seeded from it): a
+  // gesture is a tap, never a local edit of a row.
+  const subs = tapMode ? serverSubs : reconcileRowsToPositions(subsRaw, serverSubs);
   // The representative bout's row is one group (bout:-1) for the score, the overtime
   // count and the Ht verdict. Taking the count or the verdict from the server agrees with
-  // that row, unless this board holds an unsaved edit of the row's score: the row follows
-  // the server per part (repRowTakes), and those adopts take no score. The per-row adopt
-  // below agrees with the row when it takes the score itself. Called from the adopts
+  // that row, unless this sheet's draft holds an unsaved edit of the row's score (those
+  // adopts take no score). The per-row adopt below agrees with the row when it takes
+  // the row itself. Called from the adopts
   // declared above, at effect time, when this render's boards are all declared.
   const agreeRepBoutIfNotHeld = () => {
     if (daihyosenIdx < 0) return;
@@ -2400,53 +2454,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // that reaches for setSubs directly is therefore visibly out of pattern.
   const [operatorEditSeq, setOperatorEditSeq] = useStateA(0);
   const setSubsByOperator = (updater) => { setSubs(updater); setOperatorEditSeq(n => n + 1); };
-  // bc-kclr: when the operator last edited each bout row (position -> ms, in
-  // the server's clock frame, server_clock.jsx), read by the per-row adopt
-  // below.
-  const lastRowEditRef = useRefA(new Map());
-  // The same, per SIDE, for the representative row's picks: a pick is an edit of that
-  // side's pick alone, so it stamps here and not on the row (updateSub's repPickSide).
-  // The row's own entry in lastRowEditRef is then the score part's.
-  const lastRepPickEditRef = useRefA({});
-  // The stamps above stand only while an edit is unsent: a point struck and taken back
-  // inside the debounce changes nothing on the server, so no write names the bout and the
-  // match's stamp may never pass the tap (the write is stamped `now - age`); a copy another
-  // device then writes stamped below it would be held off forever. Each stamp therefore
-  // carries the edit counter's value when it was made (editSeqRef; rowEditSeqRef per
-  // position, repPickEditSeqRef per side), and a save that LANDED clears the stamps of the
-  // edits it was built after (landedAutosave, clearLandedEditStamps), never a later tap's.
-  const editSeqRef = useRefA(0);
-  const rowEditSeqRef = useRefA(new Map());
-  const repPickEditSeqRef = useRefA({});
-  const clearLandedEditStamps = (seq) => {
-    for (const [pos, at] of rowEditSeqRef.current) {
-      if (at > seq) continue;
-      rowEditSeqRef.current.delete(pos);
-      lastRowEditRef.current.delete(pos);
-    }
-    for (const side of ["a", "b"]) {
-      const at = repPickEditSeqRef.current[side];
-      if (at === undefined || at > seq) continue;
-      repPickEditSeqRef.current[side] = undefined;
-      lastRepPickEditRef.current[side] = undefined;
-    }
-  };
-  // The stamps are taken only while the match is RUNNING, because only then is the edit
-  // autosaved: on a scheduled match, or a correction of a completed one, nothing is sent,
-  // no landed save would ever clear a stamp, and a net-zero fiddle would make the sheet
-  // refuse a copy from another device it would otherwise follow. When the match leaves
-  // running (another device finished it or sent it back to the queue inside the debounce)
-  // the write is dropped with no callback, so no landed save clears them either: they go
-  // here. The individual and engi editors do the same.
-  useEffectA(() => { if (m.status !== "running") clearLandedEditStamps(Infinity); }, [m.status]);
-  // A REFUSED autosave stores and broadcasts nothing, so no later copy would re-run the
-  // adopt, and the stamps it left would hold the operator's rows against the server for
-  // good. With no edit since the save was built, every row and pick it carried takes the
-  // server's current copy (assigned beside the adopt below; the ref is the latest render's).
-  const takeServerRowsRef = useRefA(null);
-  // C1: updateSub is the single choke-point for all sub-bout state
-  // mutations. Calling markScoringDirty() here captures every edit
-  // (pts add/remove, fouls, fusensho, draw) without repetition.
+  // updateSub is the single choke-point for every edit of the local draft of a
+  // match that is NOT running (pts add/remove, fouls, fusensho, draw, picks).
+  // A running match's gestures are taps (emitBoutTap) and never reach it.
   // Reconcile INSIDE the write, not in a separate commit effect. `idx` indexes
   // the board the operator is looking at, so the write has to land on the same
   // one the render produced; against a stale `prev` an append lands nowhere and
@@ -2457,27 +2467,43 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // shows from the refused tap until the operator next edits any bout row, so
   // re-entering the points that caused the refusal does not bring it back
   // untapped. The server re-seed never comes through here (it uses setSubs).
-  // `opts.repPickSide` ("a" / "b") says the edit is that side's representative pick on the
-  // representative row: it stamps the pick part, and every other edit of the row the score
-  // part, because the adopt follows the server for each part on its own.
-  const updateSub = (idx, fn, opts) => {
-    editSeqRef.current += 1;
-    // Stamped only while running: nothing else is autosaved to clear one (the effect above).
-    if (m.status === "running") {
-      if (idx === daihyosenIdx && opts?.repPickSide) {
-        lastRepPickEditRef.current[opts.repPickSide] = serverNowMs();
-        repPickEditSeqRef.current[opts.repPickSide] = editSeqRef.current;
-      } else {
-        lastRowEditRef.current.set(subs[idx]._pos, serverNowMs());
-        rowEditSeqRef.current.set(subs[idx]._pos, editSeqRef.current);
-      }
-    }
+  const updateSub = (idx, fn) => {
     setSubsByOperator(prev => {
       const rows = reconcileRowsToPositions(prev, serverSubs);
       return rows.map((s, i) => i === idx ? fn(s) : s);
     });
     setFusenshoRefusal("");
-    markScoringDirty();
+  };
+  // pickSub: the edit a fighter or representative pick makes (pickManualBoutName,
+  // pickDaihyosenRepresentative, which take it as their `updateSub`). On a running
+  // match it is a tap: the row the pick leaves, read against the row it was made on,
+  // is a rep.pick for a representative pick (`opts.repPickSide`) or a bout.fighter
+  // for a kachinuki bout's fighter. Off running it edits the draft.
+  const pickSub = (idx, fn, opts) => {
+    if (!tapMode) { updateSub(idx, fn); return; }
+    const prev = withBoardFighters(idx);
+    const next = fn(prev);
+    const pos = prev._pos;
+    if (opts?.repPickSide) {
+      const side = opts.repPickSide;
+      emitBoutTap({ kind: REP_PICK, pos: DAIHYOSEN_POSITION, side, memberId: next[`${side}MemberIdOverride`] || "" });
+      return;
+    }
+    for (const side of ["a", "b"]) {
+      const name = next[`${side}Name`] || "";
+      const memberId = next[`${side}MemberIdOverride`] || "";
+      if (name === (prev[`${side}Name`] || "") && memberId === (prev[`${side}MemberIdOverride`] || "")) continue;
+      emitBoutTap({ kind: BOUT_FIGHTER, pos, side, name, memberId });
+    }
+  };
+  // The board's row at idx with its fighters in the draft's keys (aName and
+  // aMemberIdOverride), the shape the pick helpers read and write: a rename of a
+  // blank member picked on the row starts from the member the server's row holds.
+  const withBoardFighters = (idx) => {
+    const s = subs[idx];
+    if (idx === daihyosenIdx) return s;
+    const row = existingSub.find((r) => r && r.position === s._pos) || {};
+    return { ...s, aName: row.sideA || "", bName: row.sideB || "", aMemberIdOverride: row.sideAMemberId || "", bMemberIdOverride: row.sideBMemberId || "" };
   };
 
   // updateSubScore: a scoring edit on a bout row (points, fouls, a keyboard
@@ -2491,7 +2517,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // cleared, a numbered row keeps its fighter's name and loses the id, as the
   // outbox takes it off the queued score writes. Read through a ref, so the
   // listener (registered above, for the side lists) sees this render's rows.
+  // On a running match the picks are taps: the outbox takes the id off a queued
+  // one itself (mintedStrip), so the sheet has nothing of its own to drop.
   dropMemberPicksRef.current = (memberId) => {
+    if (tapMode) return;
     subs.forEach((row, idx) => {
       if (!row) return;
       for (const side of ["a", "b"]) {
@@ -2513,12 +2542,89 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // its button stays tappable (aria-disabled, fusenshoAllowed), and the tap
   // shows the reason under that side instead (fusenshoRefusal) until the next
   // bout-row edit clears it (updateSub).
-  const setFusenshoFor = (idx, side) => updateSub(idx, prev => applyFusenshoToggle(prev, side));
+  // On a running match the toggle is one bout.decision tap: a fusensho for the side,
+  // or "clear" on the side already pressed (the undo).
+  const setFusenshoFor = (idx, side) => {
+    if (tapMode) {
+      const s = subs[idx];
+      emitBoutTap(s.fusensho === side
+        ? { kind: BOUT_DECISION, pos: s._pos, value: "clear" }
+        : { kind: BOUT_DECISION, pos: s._pos, side, value: "fusensho" });
+      return;
+    }
+    updateSub(idx, prev => applyFusenshoToggle(prev, side));
+  };
 
   // Toggle an operator-marked hikiwake (draw) for a sub-bout. Marking a draw
   // clears any fusensho; editing scores/fouls later clears the draw flag (see
-  // rowSides setters), mirroring how fusensho behaves.
-  const setDrawFor = (idx) => updateSub(idx, prev => ({ ...clearFusensho(prev), draw: !prev.draw }));
+  // rowSides setters), mirroring how fusensho behaves. On a running match it is a
+  // bout.decision tap: "hikiwake" on a bout that is not a tie, "clear" on one the
+  // tie alone makes played. A level bout with points, fouls or overtime is a
+  // hikiwake by its score (the server derives it, so the toggle reads pressed), and
+  // a clear would change nothing there, so nothing is sent.
+  const setDrawFor = (idx) => {
+    if (tapMode) {
+      const s = subs[idx];
+      if (!s.draw) { emitBoutTap({ kind: BOUT_DECISION, pos: s._pos, value: "hikiwake" }); return; }
+      if (!subBoutHasBeenPlayed({ ...s, draw: false })) emitBoutTap({ kind: BOUT_DECISION, pos: s._pos, value: "clear" });
+      return;
+    }
+    updateSub(idx, prev => ({ ...clearFusensho(prev), draw: !prev.draw }));
+  };
+
+  // The scoring gestures on a bout row. On a running match each is one tap, read
+  // against the live board (liveBoardRow), so a gesture past the cap or with
+  // nothing to take sends nothing; off running each edits the draft.
+  const addBoutPoint = (idx, side, letter) => {
+    const s = subs[idx];
+    if (tapMode) {
+      const row = liveBoardRow(s._pos);
+      if (!row) return;
+      const a = realIppons(row.ipponsA || []);
+      const b = realIppons(row.ipponsB || []);
+      if ((side === "a" ? a : b).length >= MAX_IPPONS_PER_SIDE || isBoutDecided(a, b)) return;
+      emitBoutTap({ kind: IPPON_ADD, pos: s._pos, side, letter });
+      return;
+    }
+    const key = side === "a" ? "aPts" : "bPts";
+    updateSubScore(idx, prev => (prev[key].length >= MAX_IPPONS_PER_SIDE ? prev : { ...prev, [key]: [...prev[key], letter] }));
+  };
+  const removeBoutMark = (idx, side, slot) => {
+    const s = subs[idx];
+    if (tapMode) {
+      // ippon.remove names the mark by its id; a mark the board holds no id for
+      // cannot be named, so the tap sends nothing, and a maru (a fusensho's) is
+      // never removable this way.
+      const row = liveBoardRow(s._pos);
+      if (!row) return;
+      const shown = realIppons((side === "a" ? row.ipponsA : row.ipponsB) || []);
+      const target = shownMarkIds(row, side)[slot];
+      if (!target || shown[slot] === DEFAULT_WIN_IPPON) return;
+      emitBoutTap({ kind: IPPON_REMOVE, pos: s._pos, side, target });
+      return;
+    }
+    const key = side === "a" ? "aPts" : "bPts";
+    updateSubScore(idx, prev => ({ ...prev, [key]: prev[key].filter((_, j) => j !== slot) }));
+  };
+  const addBoutFoul = (idx, side) => {
+    const s = subs[idx];
+    if (tapMode) { emitBoutTap({ kind: FOUL_ADD, pos: s._pos, side }); return; }
+    updateSubScore(idx, prev => {
+      const own = side === "a" ? "aFouls" : "bFouls";
+      const opp = side === "a" ? "bPts" : "aPts";
+      const r = applyFoulIncrement(prev[own], prev[opp], prev[side === "a" ? "aPts" : "bPts"]);
+      return { ...prev, [own]: r.fouls, [opp]: r.opponentPts };
+    });
+  };
+  const removeBoutFoul = (idx, side) => {
+    const s = subs[idx];
+    const own = side === "a" ? "aFouls" : "bFouls";
+    if (tapMode) {
+      if ((s[own] || 0) > 0) emitBoutTap({ kind: FOUL_REMOVE, pos: s._pos, side });
+      return;
+    }
+    updateSubScore(idx, prev => ({ ...prev, [own]: nextFoulOnDecrement(prev[own]) }));
+  };
 
   // Hansoku Hs are already in the pts arrays (folded in by
   // applyFoulIncrement at the 2-foul boundary), so totals are just the
@@ -2948,11 +3054,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // (subBoutDecided — a side reached 2 ippons, so scoring on could push an
     // impossible 2-2), and never append past MAX_IPPONS_PER_SIDE per side.
     if (isBoutDecided(cur.aPts, cur.bPts)) return;
-    const key = side === "a" ? "aPts" : "bPts";
-    // A fresh strike ends a pending fusensho/draw, as a tapped one does.
-    updateSubScore(kachinukiCurBoutIdx, prev => (
-      prev[key].length >= MAX_IPPONS_PER_SIDE ? prev : { ...prev, [key]: [...prev[key], waza] }
-    ));
+    // A fresh strike ends a pending fusensho/draw, as a tapped one does; on a
+    // running match it is the same ippon.add tap a button makes.
+    addBoutPoint(kachinukiCurBoutIdx, side, waza);
   };
 
   // mp-gmcg: [End match] outcome, derived from LOCAL bout state so an
@@ -3002,9 +3106,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // left alone. The guard mirrors kachinukiEnchoOffered so the
   // keyboard/programmatic path can never target a bout the encounter has
   // already advanced past.
+  // On a running match it is one encho.add tap on that bout (left unguarded
+  // against a double tap, as ruled: a bounce adds one period too many, shown as
+  // (E) on that bout, and Undo encho takes it back).
   const applyKachinukiEncho = () => {
     if (!kachinukiEnchoOffered) return;
-    updateSub(kachinukiLastScoredIdx, prev => ({ ...prev, encho: (prev.encho || 0) + 1, draw: false, _preFusensho: undefined }));
+    if (tapMode) emitBoutTap({ kind: ENCHO_ADD, pos: subs[kachinukiLastScoredIdx]._pos });
+    else updateSub(kachinukiLastScoredIdx, prev => ({ ...prev, encho: (prev.encho || 0) + 1, draw: false, _preFusensho: undefined }));
     setEndArmed(false);
   };
   // bc-kenu (operator ruling 2026-09-26: every mistake undoable in one step):
@@ -3018,6 +3126,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     && subTotals[kachinukiCurBoutIdx].aTotal === subTotals[kachinukiCurBoutIdx].bTotal;
   const undoKachinukiEncho = () => {
     if (!kachinukiEnchoUndoable) return;
+    if (tapMode) {
+      emitBoutTap({ kind: ENCHO_REMOVE, pos: subs[kachinukiCurBoutIdx]._pos });
+      setEndArmed(false);
+      return;
+    }
     updateSub(kachinukiCurBoutIdx, prev => {
       const encho = (prev.encho || 0) - 1;
       return encho > 0 ? { ...prev, encho } : { ...prev, encho: 0, draw: true };
@@ -3045,6 +3158,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     const nextPos = kachinukiNextManualPos;
     if (nextPos > kachinukiMaxBouts) return;
     setManualBouts(prev => [...prev, nextPos]);
+    // bc-evts stage 5: a tap only lands on a bout the server holds, so on a
+    // running match the new pairing is written at once, queued ahead of every
+    // tap made on it; the board shows the row from here until the server's copy
+    // holds it.
+    if (tapMode) ensureServerRows(nextPos);
     setSubsByOperator(prev => {
       const out = [...prev];
       // _pos, like every other row: a manual bout is always NUMBERED (the
@@ -3091,11 +3209,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const removeCurrentBout = () => {
     if (!kachinukiBoutRemovable || kachinukiCurBoutPos <= 0) return;
     const pos = kachinukiCurBoutPos;
-    // A manual bout the operator added but the server has NOT persisted yet
-    // (position beyond maxSubPos, the server log's high-water mark) is purely
-    // local: pop it, no round-trip. A [Record bout] append IS persisted
-    // (pos <= maxSubPos), so it must be stripped server-side.
-    if (pos > maxSubPos) {
+    // A manual bout the operator added on a match that is not running (position
+    // beyond maxSubPos, the server log's high-water mark) is purely local: pop it,
+    // no round-trip. A [Record bout] append IS persisted (pos <= maxSubPos), and so
+    // is a pairing added by hand on a running match, so it is stripped server-side.
+    if (pos > maxSubPos && !tapMode) {
       const remaining = manualBouts.filter(p => p !== pos);
       setManualBouts(remaining);
       const target = clampPositionCount(maxSubPos, remaining.length ? Math.max(...remaining) : 0);
@@ -3125,7 +3243,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       setRemoveBoutErr(String(e?.message || "Could not remove that bout"));
       return;
     }
-    adoptServerSubs((m.subResults || []).filter(s => s.position !== pos));
+    // From the server's copy, never the board, whose pending taps would be shown
+    // twice once folded again. A pairing added by hand on a running match was
+    // written when it was added, so it is removed here too, and the board stops
+    // showing it.
+    adoptServerSubs((mHost.subResults || []).filter(s => s.position !== pos));
+    if (manualBouts.includes(pos)) setManualBouts(prev => prev.filter(p => p !== pos));
     setSubsByOperator(prev => resizeSubsTo(prev, clampPositionCount(pos - 1, manualMaxPos)));
     dropNoticesFromRow(pos - 1);
     setEndArmed(false);
@@ -3189,13 +3312,22 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // kachinuki encounter sends none at all (encounterEnchoCount, bc-kheb).
   const enchoBlock = () => (encounterEnchoCount > 0 && !hasDaihyosen) ? { encho: { periodCount: encounterEnchoCount } } : {};
   // An operator change to the overtime count from EnchoControl: the value (a
-  // number, or the updater its stepper hands over), then the save it
-  // schedules, as for a point. The count rides the running write either way:
-  // the match's (enchoBlock) or, once a daihyosen exists, that bout's
+  // number, or the updater its stepper hands over). While running it is one
+  // encho.add or encho.remove tap per period it moves, on the encounter (pos 0)
+  // or, once a daihyosen exists, on that bout (pos -1); the count is read off
+  // the live board, so two steps before a re-render each move one period. Off
+  // running it is the draft, sent as the match's (enchoBlock) or that bout's
   // (daihyosenEnchoFields). The count adopted from the server does not come
   // through here. The kachinuki Encho/Undo encho never touch this count:
-  // they change the bout's own encho through updateSub.
-  const changeEnchoPeriodCount = (v) => { setEnchoPeriodCount(v); markScoringDirty(); };
+  // they change the bout's own encho.
+  const changeEnchoPeriodCount = (v) => {
+    if (!tapMode) { setEnchoPeriodCount(v); return; }
+    const cur = initialEnchoPeriodsForMatch(tapBoardOf(mHost, teamFold).match);
+    const next = Math.max(0, typeof v === "function" ? v(cur) : Number(v) || 0);
+    const pos = hasDaihyosen ? DAIHYOSEN_POSITION : 0;
+    for (let i = cur; i < next; i++) emitBoutTap({ kind: ENCHO_ADD, pos });
+    for (let i = cur; i > next; i--) emitBoutTap({ kind: ENCHO_REMOVE, pos });
+  };
 
   // Per-bout competitor names. Single choke point shared by the row
   // renderer and buildPatch (via resolveKachinukiBoutSides) so display and
@@ -3385,7 +3517,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const ipponTapRef = useRefA(null);
   const foulTapRef = useRefA(null);
   const tapIppon = (ev, rs, cc) => {
-    if (acceptTap(ipponTapRef, ev, rs.tapKey)) rs.setPts(rs.pts.length < MAX_IPPONS_PER_SIDE ? [...rs.pts, cc] : rs.pts);
+    if (acceptTap(ipponTapRef, ev, rs.tapKey)) rs.addPt(cc);
   };
   const tapFoulIncrement = (ev, rs) => {
     if (acceptTap(foulTapRef, ev, rs.tapKey)) rs.onIncrement();
@@ -3565,9 +3697,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // bc-mrgc: every patch this editor hands its host names the groups it
   // changes (useChangedGroups), worked out with the correction reason given at
   // the prompt (opts.correctionReason) as part of the write.
+  // `seenScoreVersion` (request-only, never sent): on a running match the server
+  // copy the board showed, the score-events answer's when the board took it
+  // (tapBoardOf), so the write's basis claims what this screen showed (stage 3,
+  // m1); the outbox adds this device's pending taps to it (`own`).
+  const boardSeen = tapMode ? { seenScoreVersion: Number(tapBoard.base.scoreVersion) || 0 } : {};
   const buildPatch = (targetStatus, opts = {}) => {
     const fields = buildPatchFields(targetStatus, opts);
-    return claimChanged(opts.correctionReason ? { ...fields, correctionReason: opts.correctionReason } : fields);
+    return claimChanged({ ...(opts.correctionReason ? { ...fields, correctionReason: opts.correctionReason } : fields), ...boardSeen });
   };
   const buildPatchFields = (targetStatus, opts = {}) => {
     if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], subResults: [] };
@@ -3874,18 +4011,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       ...clearWithdrawalBlock,
     };
   };
-  // C1: keep autosave refs fresh with the latest buildPatch / onSubmit /
-  // running-status for TeamScoreEditorModal.
-  _autosaveIsRunningRef.current = m.status === "running";
-  // bc-cse: floored by whichever is later, this match's own stamp or a
-  // Record-bout answer this editor has already seen for it (see
-  // _recordBoutAnswerStampRef) -- the override adoption below only covers the
-  // case where a prior [Remove this bout] left one to adopt into.
-  _autosaveSeenStampRef.current = Math.max(m.modifiedAt || 0, _recordBoutAnswerStampRef.current);
-  _autosaveBuildPatchRef.current = buildPatch;
-  _autosaveOnSubmitRef.current = landedAutosave(onSubmit, editSeqRef, clearLandedEditStamps, (seq) => {
-    if (takeServerRowsRef.current) takeServerRowsRef.current(seq);
-  });
 
   // adoptRecordBoutAnswer: what Record bout does with the server's answer to
   // its running write (the settled answer of the outbox's entry, bc-evts).
@@ -3904,15 +4029,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // With the stamp the advance gave the match (bc-hlck):
       // the sheet's next tap on the new bout is floored by
       // the match it shows, and the override is what it
-      // shows until the prop catches up. Held in
-      // _recordBoutAnswerStampRef too (bc-cse), monotonically,
-      // so the floor reaches the autosave's seen-stamp ref
-      // even in the common case where there is no prior
-      // override to adopt it into.
+      // shows until the prop catches up.
       const stamp = Number(res.modifiedAt) || 0;
-      if (stamp > 0) {
-        _recordBoutAnswerStampRef.current = Math.max(_recordBoutAnswerStampRef.current, stamp);
-      }
       setMatchOverride(prev => prev ? {
         ...prev,
         match: { ...prev.match, subResults: res.subResults, ...(stamp > 0 ? { modifiedAt: stamp } : {}) },
@@ -3932,7 +4050,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   };
 
   const doSubmit = async (fn) => {
-    cancelScoringDebounce(); // C1: cancel pending autosave before explicit submit
     setSubmitting(true);
     // Clear any prior failure banner when the operator explicitly submits
     // again: mirrors ScoreEditorModal.doSubmit.
@@ -4012,12 +4129,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     return shown;
   };
 
-  // Save the sheet first through doSubmit (it cancels the pending autosave,
-  // whose snapshot this save carries) before an add/remove changes the bout
-  // log. Handed to the outbox in this tick, ahead of the add/remove, so it is
-  // sent first; nothing waits for it (bc-evts).
+  // Start the match first (a scheduled sheet, its draft with it) before an add
+  // changes the bout log, so the add is judged on a running match and a queued
+  // match starts through the score path's court and eligibility checks. Handed
+  // to the outbox in this tick, ahead of the add, so it is sent first; nothing
+  // waits for it (bc-evts).
   const saveRunningSheet = () => {
-    const sent = doSubmit(() => _autosaveOnSubmitRef.current(_autosaveBuildPatchRef.current("running")));
+    const sent = doSubmit(() => onSubmit(buildPatch("running")));
     // A save the server turns away says so beside the change, when its answer
     // comes (a callback, never a wait).
     Promise.resolve(sent).then((res) => (writePending(res) ? res.settled : res)).then((body) => {
@@ -4075,7 +4193,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // the team match's overtime too, as the server's does, so no save after it
     // writes the cleared overtime back.
     const latest = matchRef.current;
-    const shown = { ...latest, subResults: optimistic(m.subResults || []), status: "running", ...(clearsEncho ? { encho: undefined } : {}) };
+    // From the server's copy, never the board: the board's pending taps are
+    // folded on again over whatever the sheet shows.
+    const shown = { ...latest, subResults: optimistic(mHost.subResults || []), status: "running", ...(clearsEncho ? { encho: undefined } : {}) };
     setMatchOverride({ match: shown, at: 0 });
     setEnchoPeriodCount(initialEnchoPeriodsForMatch(shown));
     Promise.resolve(sent).then((res) => {
@@ -4121,20 +4241,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // side was given another team (giveSideAnotherTeam) is no unsaved change once the
   // server board no longer holds it.
   const serverSubsSig = JSON.stringify(serverSubs);
-  const isDirty = JSON.stringify(subs) !== serverSubsSig || daihyosenVerdictDirty
+  // A running match holds no unsaved scoring: every gesture is a tap already in
+  // the outbox (bc-evts stage 5).
+  const isDirty = (!tapMode && (JSON.stringify(subs) !== serverSubsSig || daihyosenVerdictDirty))
     // A removed withdrawal is unsaved until Save correction sends it.
     || removingWithdrawal;
-  // bc-dscn: an edit the running patch would NOT carry. Under kachinuki
-  // buildPatch drops every row kachinukiRowSent does not name, so a changed
-  // row it leaves out never reaches the server by a flush. Closing would lose
-  // it, so it keeps the prompt. Since bc-kclr the current bout and the bout
-  // being corrected are always sent, so a fighter picked on the current bout
-  // or a bout cleared back to 0-0 is no longer such an edit. Same per-row
-  // server comparison isDirty makes: subs is aligned to serverSubs by
-  // reconcileRowsToPositions, so index idx is the same position.
-  const runningPatchDropsAnEdit = isKachinuki && subs.some((s, idx) =>
-    idx !== daihyosenIdx && !kachinukiRowSent(idx)
-    && JSON.stringify(s) !== JSON.stringify(serverSubs[idx]));
   // RE-SEED the bout rows when the stored result moves, PER ROW.
   //
   // Without this an editor left open kept showing the board it opened with
@@ -4160,33 +4271,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // per-MATCH, not per-bout, so it cannot merge two people's rows. That case is
   // theirs to resolve.
   const prevServerSubsRef = useRefA(serverSubs);
-  // A refused autosave (takeServerRowsRef above): the rows and picks stamped up to `seq`
-  // take the server's current copy, by the adopt's own composition (composeRepRow) and
-  // agreement (boutGroup, the pick groups). An edit since `seq` is still owed, so
-  // nothing is taken; the save that carries it decides. A row the server does not hold
-  // stays the operator's.
-  takeServerRowsRef.current = (seq) => {
-    if (editSeqRef.current !== seq) return;
-    const rows = new Set(rowEditSeqRef.current.keys());
-    const picks = { a: repPickEditSeqRef.current.a !== undefined, b: repPickEditSeqRef.current.b !== undefined };
-    clearLandedEditStamps(seq);
-    const servedByPos = new Map(serverSubs.map(s => [s._pos, s]));
-    const repServed = servedByPos.has(DAIHYOSEN_POSITION);
-    setSubs(prev => prev.map(local => {
-      const ss = servedByPos.get(local._pos);
-      if (!ss) return local;
-      if (local._pos === DAIHYOSEN_POSITION) {
-        return composeRepRow(local, ss, { score: rows.has(local._pos), a: picks.a, b: picks.b });
-      }
-      return rows.has(local._pos) ? ss : local;
-    }));
-    for (const pos of rows) if (servedByPos.has(pos)) claimChanged.agree(boutGroup(pos));
-    if (repServed && picks.a) claimChanged.agree(GROUP_REP_PICK_A);
-    if (repServed && picks.b) claimChanged.agree(GROUP_REP_PICK_B);
-  };
   useAdoptFromServer({
     signature: serverSubsSig,
     apply: () => {
+      // A running match's rows are the board itself: nothing to take. What the
+      // sheet agrees with there is worked out from the pending taps (below).
+      if (tapMode) return;
       // The previous board is read HERE, not inside the updater: a renderer
       // may run the updater a render later (React does when another adopt has
       // already queued a state change in this commit; the render tests run on
@@ -4194,50 +4284,28 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // untouched row would read as edited, keep its stale value, and be
       // written back over the server's by the next save.
       const priorByPos = new Map((prevServerSubsRef.current || []).map(s => [s._pos, s]));
-      // The representative row follows the server per PART (repRowTakes): the score
-      // and each side's pick are separate, so a pick made here does not hold another
-      // device's point on the bout, and a point struck here does not hold another
-      // device's pick. Decided HERE from the board this render showed, not inside the
-      // updater: whether a pick was taken is told to useChangedGroups below, and an
-      // updater may run a render later or twice. The kept parts are composed from the
-      // updater's own `prev` row, so a pick giveSideAnotherTeam dropped meanwhile is not
-      // put back.
-      const dhServed = daihyosenIdx >= 0 ? serverSubs[daihyosenIdx] : null;
-      const dhShown = daihyosenIdx >= 0 ? subs[daihyosenIdx] : null;
-      const repTakes = dhServed && dhShown
-        ? repRowTakes(dhShown, priorByPos.get(DAIHYOSEN_POSITION), {
-          score: lastRowEditRef.current.get(DAIHYOSEN_POSITION),
-          a: lastRepPickEditRef.current.a,
-          b: lastRepPickEditRef.current.b,
-        }, m.modifiedAt)
-        : null;
       setSubs(prev => {
         const localByPos = new Map(prev.map(s => [s._pos, s]));
         return serverSubs.map(ss => {
           const local = localByPos.get(ss._pos);
-          if (!local) return ss;
-          if (repTakes && ss._pos === DAIHYOSEN_POSITION) return composeRepRow(local, ss, repTakes);
-          // bc-kclr: a snapshot written BEFORE the operator's last edit to this row
-          // cannot know that edit, so the row stays theirs (rowTakenFromServer).
-          return rowTakenFromServer(local, priorByPos.get(ss._pos), lastRowEditRef.current.get(ss._pos), m.modifiedAt) ? ss : local;
+          return followsServer(local, priorByPos.get(ss._pos)) ? ss : local;
         });
       });
-      // What this editor took from the server it now agrees with, so an edit that puts it
-      // back to what the editor mounted with (clearing a pick or a bout another device
-      // made) is still a change and is named, and an edit of something else does not name
-      // it again. What it kept is the operator's own edit and stays one, so each row, and
-      // each side's pick, is agreed on its own. The same rule as the updater above
-      // (rowTakenFromServer, repRowTakes), asked of THIS render's board here, for the same
-      // reason as repTakes: an updater may run a render later or twice.
+      // What this sheet took from the server it now agrees with, so an edit that puts it
+      // back to what the sheet mounted with is still a change and is named, and an edit
+      // of something else does not name it again. What it kept is the operator's draft
+      // and stays one, so each row is agreed on its own, the representative bout's picks
+      // with its row. Asked of THIS render's board, since an updater may run a render
+      // later or twice.
       const shownByPos = new Map(subs.map(s => [s._pos, s]));
       for (const ss of serverSubs) {
-        const taken = repTakes && ss._pos === DAIHYOSEN_POSITION
-          ? repTakes.score
-          : rowTakenFromServer(shownByPos.get(ss._pos), priorByPos.get(ss._pos), lastRowEditRef.current.get(ss._pos), m.modifiedAt);
-        if (taken) claimChanged.agree(boutGroup(ss._pos));
+        if (!followsServer(shownByPos.get(ss._pos), priorByPos.get(ss._pos))) continue;
+        claimChanged.agree(boutGroup(ss._pos));
+        if (ss._pos === DAIHYOSEN_POSITION) {
+          claimChanged.agree(GROUP_REP_PICK_A);
+          claimChanged.agree(GROUP_REP_PICK_B);
+        }
       }
-      if (repTakes && repTakes.a) claimChanged.agree(GROUP_REP_PICK_A);
-      if (repTakes && repTakes.b) claimChanged.agree(GROUP_REP_PICK_B);
       // Keep the correction baseline in step. It snapshots who won the bout
       // being corrected so renderCorrectionWarning can say "you changed who won
       // bout N"; left alone across a re-seed it would compare the SERVER's new
@@ -4250,6 +4318,60 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // No keepLocalEdits: the merge above already keeps the operator's rows, and
     // an outer all-or-nothing gate would only stop it from running at all.
   });
+  // On a running match the sheet agrees with every group of the server's copy that
+  // no pending tap of this device still moves (a bout, a side's representative pick,
+  // the encounter's overtime), as the individual editor agrees its points and
+  // overtime: a rule-bound write built from the board then names only what the
+  // board says differently, the groups its pending taps change, which its basis
+  // covers. The correction baseline of a fought kachinuki bout opened on a running
+  // match follows the server's copy of that bout while no tap of this device moves it.
+  const hostSubsSig = tapMode ? JSON.stringify(mHost.subResults || []) : "";
+  const movingSig = tapMode ? tapBoard.moving.map((e) => e.id).join(",") : "";
+  useEffectA(() => {
+    if (!tapMode) return;
+    const moving = tapBoard.moving;
+    const movesGroup = (pos, kinds) => moving.some((e) => (e.pos || 0) === pos && (!kinds || kinds.includes(e.kind)));
+    for (const row of mHost.subResults || []) {
+      if (row && !moving.some((e) => e.kind !== REP_PICK && e.pos === row.position)) claimChanged.agree(boutGroup(row.position));
+    }
+    if (!moving.some((e) => e.kind === REP_PICK && e.side === "a")) claimChanged.agree(GROUP_REP_PICK_A);
+    if (!moving.some((e) => e.kind === REP_PICK && e.side === "b")) claimChanged.agree(GROUP_REP_PICK_B);
+    if (!movesGroup(0, [ENCHO_ADD, ENCHO_REMOVE])) claimChanged.agree(GROUP_ENCHO);
+    if (editingDoneBoutIdx >= 0 && editingDoneOriginalRef.current && !movesGroup(editingDoneBoutIdx + 1)) {
+      editingDoneOriginalRef.current = { winner: serverBoutWinner(editingDoneBoutIdx) };
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tapMode, hostSubsSig, movingSig, mHost.encho?.periodCount]);
+  // The match crossed the running line under the open sheet (finished, or sent
+  // back to the queue, elsewhere or by this sheet's Finish): its draft starts
+  // from the server's copy, not from what it held before the match ran. Into
+  // running needs nothing: the sheet shows the board.
+  const tapModeRef = useRefA(tapMode);
+  useEffectA(() => {
+    if (tapModeRef.current === tapMode) return;
+    tapModeRef.current = tapMode;
+    if (tapMode) return;
+    setSubs(serverSubs);
+    setEnchoPeriodCount(initialEnchoPeriods);
+    setDaihyosenHantei(recordedDaihyosenSide);
+    setDaihyosenHanteiArmed(daihyosenHanteiRecorded);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tapMode]);
+  // Operator S1 a: a display of this court on the SAME device (another tab, the
+  // HDMI output) shows exactly this board, pending taps included; it is published
+  // on every tap and every outcome (each moves the board). teamResult is stated
+  // null so the display works IV and PW out of the bout rows it is handed.
+  const overlaySig = tapMode ? JSON.stringify([m.subResults, m.encho, m.scoreVersion, m.status]) : "";
+  useEffectA(() => {
+    if (!tapMode) return;
+    // Once a finished result of the match is queued the board is no longer the
+    // match: its running copy would show a finish as running again on the
+    // display (stage 3 review 11, Y1).
+    const api = window.API || {};
+    if (typeof api.hasPendingTerminalWrite === "function" && api.hasPendingTerminalWrite(mHost.compId, mHost.id)) return;
+    publishBoardOverlay({ ...tapBoard.match, teamResult: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlaySig]);
   // The server board as of the PREVIOUS committed render, which is what makes
   // "did the operator touch this row?" answerable: local === prior means they
   // did not. Updated AFTER the adopt is registered, so the adopt reads the
@@ -4268,23 +4390,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // Same contract as ScoreEditorModal: never close while a save,
     // decision, or daihyosen request is mid-flight.
     if (submitting || decisionSubmitting || repTyping) return;
-    // bc-dscn: on a RUNNING match every scoring edit is autosaved, and the
-    // unmount writes one still inside the debounce window
-    // (useDebouncedRunningWrite), so leaving discards nothing and asks
-    // nothing. buildPatch("running") carries every played bout row in
-    // subResults, match-level encho, and the daihyosen verdict (encho count
-    // and hantei pick via daihyosenEnchoFields). Not carried, and handled
-    // here: a hantei ARM with no side picked is only a mode, not a result, so
-    // it is dropped with no write (the individual editor's rule too); and a
-    // kachinuki row the played-row filter drops (runningPatchDropsAnEdit)
-    // keeps the prompt.
-    if (m.status === "running" && !runningPatchDropsAnEdit) {
+    // bc-evts stage 5: on a RUNNING match every scoring gesture is a tap already
+    // in the outbox (a pairing added by hand was written when it was added), so
+    // leaving discards nothing and asks nothing. A hantei ARM with no side picked
+    // is only a mode, not a result, so it is dropped with no write (the
+    // individual editor's rule too).
+    if (tapMode) {
       go();
       return;
     }
     if (isDirty && !(await window.confirmDialog({ message: "Discard unsaved scoring changes?", confirmLabel: "Discard changes", danger: true }))) return;
-    // Discarded: the unmount must not write the edit the operator threw away.
-    cancelScoringDebounce();
     go();
   };
   // bc-dscn: a host that cannot close (the inline court console) has nothing
@@ -4679,8 +4794,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               // the new team's list nor reported in its row (submitInlineLineup's rule).
               const sideChangedNotice = sideChangedGuard(side, noticeKey);
               return pickManualBoutName({
-                sub: s, idx, sideKey: `${side}Name`, memberIdKey: `${side}MemberIdOverride`, squad, teamId,
-                compId: m.compId, password, updateSub,
+                sub: tapMode ? withBoardFighters(idx) : s, idx, sideKey: `${side}Name`, memberIdKey: `${side}MemberIdOverride`, squad, teamId,
+                compId: m.compId, password, updateSub: pickSub,
                 onRenamed: (written) => { if (!sideChangedNotice()) wroteSideMembers(side, written); },
                 // A self-run competitor cannot open the Lineups page, so they are
                 // pointed at the organizer, as the server's own refusals do.
@@ -4729,8 +4844,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // the sub, no lineup write), computed once per side so the box's
             // visibility (`forceInput`) and its handler (`onSelectName`) can
             // never disagree on it.
-            const manualPathB = isManualRow || kachinukiPastFirst || freeNameB;
-            const manualPathA = isManualRow || kachinukiPastFirst || freeNameA;
+            // bc-evts stage 5: on a running match a bout's fighter is a bout.fighter
+            // tap, which only a bout past the first takes (the first bout's fighters
+            // are the lineup's), so a free name on the FIRST row goes through the
+            // lineup there, as a roster pick does.
+            const firstRowIsLineup = tapMode && !isManualRow && idx === 0;
+            const manualPathB = !firstRowIsLineup && (isManualRow || kachinukiPastFirst || freeNameB);
+            const manualPathA = !firstRowIsLineup && (isManualRow || kachinukiPastFirst || freeNameA);
             // bc-dhrp: the representative bout's picker (submitRepresentative). It is
             // offered whenever the row is open to this viewer: a participant's sheet
             // (selfReport) offers it only while the match runs, and the judges'
@@ -4744,8 +4864,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             const pickRepresentative = (side, noticeKey, priorId) => (value, member) => {
               setLineupNotice(null);
               const seq = newRepPick(side);
-              if (member && member.id) { pickDaihyosenRepresentative({ idx, side, updateSub }, member); return; }
-              if (!value) { pickDaihyosenRepresentative({ idx, side, updateSub }, null); return; }
+              if (member && member.id) { pickDaihyosenRepresentative({ idx, side, updateSub: pickSub }, member); return; }
+              if (!value) { pickDaihyosenRepresentative({ idx, side, updateSub: pickSub }, null); return; }
               submitRepresentative({ side, noticeKey, idx, value, priorId, seq });
             };
 
@@ -4787,12 +4907,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             const rowSides = [
               {
                 key: "b", tapKey: `${idx}:b`, pts: s.bPts, fouls: s.bFouls,
-                setPts: (pts) => updateSubScore(idx, prev => ({ ...prev, bPts: pts })),
-                setFouls: (f) => updateSubScore(idx, prev => ({ ...prev, bFouls: f })),
-                onIncrement: () => updateSubScore(idx, prev => {
-                  const r = applyFoulIncrement(prev.bFouls, prev.aPts, prev.bPts);
-                  return { ...prev, bFouls: r.fouls, aPts: r.opponentPts };
-                }),
+                addPt: (cc) => addBoutPoint(idx, "b", cc),
+                removePt: (slot) => removeBoutMark(idx, "b", slot),
+                decFoul: () => removeBoutFoul(idx, "b"),
+                onIncrement: () => addBoutFoul(idx, "b"),
                 color: "shiro", label: "SHIRO",
                 // The daihyosen is a representative bout, not a lineup position:
                 // "daihyosen" is not a valid lineup key (domain/team_lineup.go
@@ -4815,12 +4933,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               },
               {
                 key: "a", tapKey: `${idx}:a`, pts: s.aPts, fouls: s.aFouls,
-                setPts: (pts) => updateSubScore(idx, prev => ({ ...prev, aPts: pts })),
-                setFouls: (f) => updateSubScore(idx, prev => ({ ...prev, aFouls: f })),
-                onIncrement: () => updateSubScore(idx, prev => {
-                  const r = applyFoulIncrement(prev.aFouls, prev.bPts, prev.aPts);
-                  return { ...prev, aFouls: r.fouls, bPts: r.opponentPts };
-                }),
+                addPt: (cc) => addBoutPoint(idx, "a", cc),
+                removePt: (slot) => removeBoutMark(idx, "a", slot),
+                decFoul: () => removeBoutFoul(idx, "a"),
+                onIncrement: () => addBoutFoul(idx, "a"),
                 color: "aka", label: "AKA",
                 // See SHIRO note above.
                 // bc-dnst: displayed name only, see the SHIRO note above.
@@ -4879,7 +4995,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                       // Taking a mark back off, then tapping the right letter,
                       // is never a bounce (bc-dtip).
                       clearTap(ipponTapRef, rs.tapKey);
-                      rs.setPts(rs.pts.filter((_, j) => j !== i));
+                      rs.removePt(i);
                     }}
                     title={isHt ? (selfReport ? "Hantei winner (judges' decision)" : "Hantei winner: click to undo") : (!mark || rowLocked) ? undefined : defaultWin ? "Awarded by fusensho: use Fusensho to undo" : "Click to remove"}>
                     {isHt ? "Ht" : (mark || "·")}
@@ -5029,7 +5145,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                         <div className="tsm-fouls" data-testid={`scoring-modal-hansoku-${rs.color}`}>
                           <span className="tsm-fouls__label">Fouls</span>
                           <div className="tsm-fouls__controls">
-                            <button className="tsm-fouls__btn" aria-label={`Remove a ${rs.label} foul`} onClick={() => rs.setFouls(nextFoulOnDecrement(rs.fouls))} disabled={rs.fouls === 0 || rowLocked}>−</button>
+                            <button className="tsm-fouls__btn" aria-label={`Remove a ${rs.label} foul`} onClick={() => rs.decFoul()} disabled={rs.fouls === 0 || rowLocked}>−</button>
                             <span className={`tsm-fouls__count ${rs.fouls >= 1 ? "tsm-fouls__count--warn" : ""}`}>{rs.fouls}</span>
                             <button className="tsm-fouls__btn" aria-label={`Add a ${rs.label} foul`} onClick={(ev) => tapFoulIncrement(ev, rs)} disabled={subBoutDecided || rowLocked}>+</button>
                           </div>
@@ -5246,12 +5362,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             const anyBoutDecided = subTotals.some(t => t.aTotal > 0 || t.bTotal > 0 || t.draw || t.winner !== null);
             const teamTied = anyBoutDecided && ivA === ivB && pwA === pwB;
             const onDaihyosen = () => runRepBoutChange({
-              // Saved first unless the match has finished, so the server judges
-              // the tie on the bouts as they stand, and a queued match starts
-              // through the score path's court and eligibility checks. A
-              // finished match is judged as stored: a running write there is
-              // answered stale.
-              preSave: m.status !== "completed",
+              // A queued match is started first, so it starts through the score
+              // path's court and eligibility checks. A running match needs no
+              // save: its taps are already ahead of the add in the outbox, so the
+              // server judges the tie on the bouts as they stand (bc-evts stage 5).
+              // A finished match is judged as stored.
+              preSave: m.status === "scheduled",
               // bc-evts: the add is the outbox's, queued after the pre-save; the
               // sheet shows the new row at once (named for the two teams, as
               // the server's is) and adopts the answer when it comes.
@@ -5511,6 +5627,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             </div>
           )}
           <KeptInHistoryNote note={keptInHistory.note} />
+          {/* bc-evts stage 5: a tap the server did not apply, said quietly
+              (tapNotAppliedText), and one refused because the server holds the
+              match as not running, in the server's own sentence; the server kept
+              both in the match's history. */}
+          {tapNote.note && (
+            <div className="sb-hint" role="status" data-testid="tap-not-applied-note">{tapNote.note}</div>
+          )}
+          {tapNote.refusal && (
+            <div className="sb-hint" role="status" data-testid="tap-refusal">{tapNote.refusal}</div>
+          )}
           {/* bc-mrgc: every write that reached this match, kept or applied.
               The organiser's view, so not on a self-run participant's sheet. */}
           <MatchHistoryDisclosure match={m} password={password} hidden={!!selfReport} members={historyMemberLabel} />

@@ -151,7 +151,7 @@ describe('Y4: a read refused for the password waits for a new sign-in', () => {
 
     it('a revoked password\'s park pauses the re-reads until the new sign-in', async () => {
         let fail = true;
-        const reads = server((pw) => (fail ? resp(500, { error: 'x' }) : resp(200, { teamMembers: { t1: [] } })));
+        const reads = server(() => (fail ? resp(500, { error: 'x' }) : resp(200, { teamMembers: { t1: [] } })));
         const { API } = await loadTab();
         const d = listenDropped();
         try {

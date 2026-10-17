@@ -105,16 +105,20 @@ func TestLateDuplicate_NoWriteIDAppliesAsBefore(t *testing.T) {
 	assert.Equal(t, "B", f.storedMatchField(t, "court"))
 }
 
-// A write that was refused is not recorded: its resend is judged again.
+// A write the store refused is not recorded: its resend is judged again, and
+// applies once what refused it has gone.
 func TestLateDuplicate_ARefusedWriteIsJudgedAgain(t *testing.T) {
 	f := newTeamWritesFixture(t, false)
+	ito, err := f.store.AddTeamMember("c1", f.teamA, "Ito")
+	require.NoError(t, err)
 	path := f.membersPath() + "/" + f.namedA
-	long := make([]byte, MaxLenPlayerName+1)
-	for i := range long {
-		long[i] = 'x'
-	}
-	require.Equal(t, http.StatusBadRequest, f.send(http.MethodPut, path, "main-pw", map[string]string{"name": string(long), "writeId": "w-member-9"}).Code)
-	require.Equal(t, http.StatusBadRequest, f.send(http.MethodPut, path, "main-pw", map[string]string{"name": string(long), "writeId": "w-member-9"}).Code)
+	body := map[string]string{"name": "Ito", "writeId": "w-member-9"}
+	require.Equal(t, http.StatusConflict, f.send(http.MethodPut, path, "main-pw", body).Code, "another member has the name")
+	_, err = f.store.RenameTeamMember("c1", f.teamA, ito.ID, "Ito Ren")
+	require.NoError(t, err)
+	w := f.send(http.MethodPut, path, "main-pw", body)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, "Ito", f.memberName(t, f.namedA), "the resend applied")
 }
 
 // The record is bounded: an id is forgotten writeOnceKeep after it was

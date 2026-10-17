@@ -2148,7 +2148,7 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 		// review 4, G7).
 		members := squads[l.TeamID]
 		judgeIDs := len(members) > 0 || (rosterKnown && !rosterTeams[l.TeamID])
-		if !judgeIDs && len(l.MemberIDs) > 0 {
+		if !judgeIDs && rosterTeams[l.TeamID] && len(l.MemberIDs) > 0 {
 			log.Printf("state: lineup repair for %s: team %s is on the roster but holds no members (its seeding failed?); its lineup's member ids are left as they are", compID, l.TeamID)
 		}
 		lineupChanged := false

@@ -312,7 +312,19 @@ const ACCEPTED = {
     commitAfterRead: new Set(['OK_STRIPPED', 'STRIPPED_EXISTING', 'OK_NOT_SENT', 'OK_WITH_ID', 'LOST']),
 };
 
+// How many tabs told their editors a member never was (`team-member-dropped`,
+// once per id per tab, whether the tab proved it or heard it from the other
+// through browser storage): every tab, for a proof; none where the member is
+// held, or where no read of the members ever answered. The late commit after a
+// read has proved the member absent is a proof the rule then contradicts.
+function expectedDropped(row) {
+    if (row.rule === 'readFails') return 0;
+    if (row.rule !== 'commitAfterRead' && row.held) return 0;
+    return row.twoTab ? 2 : 1;
+}
+
 function wrongOf(row) {
+    if (row.dropped !== expectedDropped(row)) return `DROPPED_${row.dropped}_NOT_${expectedDropped(row)}`;
     if (row.rule) return ACCEPTED[row.rule].has(row.outcome) ? null : row.outcome;
     if (!row.outcome.startsWith('OK')) return row.outcome;
     // A read is made with the header, even empty; a participant's through the

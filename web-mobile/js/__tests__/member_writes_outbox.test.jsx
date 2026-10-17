@@ -122,6 +122,9 @@ describe('a team member write is the outbox\'s (R1)', () => {
     });
 
     it('a rename answers at once with the new name stamped over the copy shown, and a refusal brings the old one back', async () => {
+        // The spy is in place before the refusal can fire, so the count is the
+        // outbox's own warning and not an earlier test's.
+        const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const shown = { id: 'mem-2', index: 2, name: 'Sato', modifiedAt: 5 };
         server(() => answer(409, { error: 'member_already_named', message: 'This team member already has a name. Ask the tournament organizer to change it.' }));
         let claimed;
@@ -136,9 +139,8 @@ describe('a team member write is the outbox\'s (R1)', () => {
         expect(claimed.revertMember).toMatchObject({ id: 'mem-2', index: 2, name: 'Sato' });
         expect(claimed.revertMember.modifiedAt).toBeGreaterThanOrEqual(renamed.modifiedAt);
         // The outbox logs the refusal it hands back.
-        const warned = vi.spyOn(console, 'warn');
         expect(warned).toHaveBeenCalledTimes(1);
-        warned.mockClear();
+        warned.mockRestore();
     });
 
     it('a cleared name is a DELETE the outbox still sends after a reload', async () => {
@@ -164,15 +166,15 @@ describe('a lineup removal and a reinstatement are the outbox\'s (R1)', () => {
     });
 
     it('a removal the server refuses rejects with the server\'s own sentence, and leaves the queue', async () => {
+        const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const removed = await API.deleteMatchLineup('c1', 't1', 'm1', 'pw', { onRefusal: () => true });
         server(() => answer(409, { error: 'result_finalized', message: 'The competition has finished.' }));
         await reconnect();
         await expect(removed.settled).rejects.toThrow('The competition has finished.');
         expect(stored()).toEqual([]);
         // The outbox logs the refusal.
-        const warned = vi.spyOn(console, 'warn');
         expect(warned).toHaveBeenCalledTimes(1);
-        warned.mockClear();
+        warned.mockRestore();
     });
 
     it('a reinstatement answers at once and settles with the status the server stored', async () => {
@@ -182,5 +184,54 @@ describe('a lineup removal and a reinstatement are the outbox\'s (R1)', () => {
         await reconnect();
         expect(sent.map((r) => `${r.method} ${r.url}`)).toEqual(['POST /api/competitions/c1/competitors/p1/reinstate']);
         await expect(res.settled).resolves.toEqual({ playerId: 'p1', eligible: true });
+    });
+});
+
+// Stage 3 review 3, F8: the refusal sentences the direct member writes threw
+// (api_client_squad.test.jsx before R1), in their outbox form: `settled`
+// rejects with the server's sentence, its code beside it.
+describe('a member write the server refuses (F8)', () => {
+    const SENDS = [
+        ['add', () => API.addTeamMember('c1', 't1', 'Ito', '', { onRefusal: () => true })],
+        ['rename', () => API.renameTeamMember('c1', 't1', 'mem-1', 'Ito', '', { member: { id: 'mem-1', index: 1, name: 'Sato' }, onRefusal: () => true })],
+        ['clear', () => API.clearTeamMember('c1', 't1', 'mem-1', '', { member: { id: 'mem-1', index: 1, name: 'Sato' }, onRefusal: () => true })],
+    ];
+    let warned;
+    beforeEach(() => { warned = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
+    afterEach(() => { warned.mockRestore(); });
+
+    async function refused(send, status, body) {
+        server(() => answer(status, body));
+        const member = await send();
+        await reconnect();
+        const err = await member.settled.then(() => null, (e) => e);
+        expect(err, 'the write was refused').toBeInstanceOf(Error);
+        expect(stored(), 'and left the queue').toEqual([]);
+        return err;
+    }
+
+    it.each(SENDS)('the %s rejects with a refusal\'s sentence, not its code, and keeps the code beside it', async (_name, send) => {
+        const err = await refused(send, 409, { error: 'member_already_named', message: 'This team member already has a name. Ask the tournament organizer to change it.' });
+        expect(err.message).toBe('This team member already has a name. Ask the tournament organizer to change it.');
+        expect(err.code).toBe('member_already_named');
+    });
+
+    it.each(SENDS)('the %s leaves no code on a refusal that is only a message', async (_name, send) => {
+        const err = await refused(send, 404, { error: 'team member not found' });
+        expect(err.message).toBe('team member not found');
+        expect(err.code).toBeUndefined();
+    });
+
+    it('an add refused for a name the team already has says the server\'s message', async () => {
+        const [, add] = SENDS[0];
+        const err = await refused(add, 409, { error: 'team "t1" already has a member named "Ito"' });
+        expect(err.message).toMatch(/already has a member named "Ito"/);
+    });
+
+    it('an add refused member_id_conflict says the server\'s sentence, with the code', async () => {
+        const [, add] = SENDS[0];
+        const err = await refused(add, 409, { error: 'member_id_conflict', message: 'Another team member already has this id. Reload the page and add the member again.' });
+        expect(err.message).toBe('Another team member already has this id. Reload the page and add the member again.');
+        expect(err.code).toBe('member_id_conflict');
     });
 });

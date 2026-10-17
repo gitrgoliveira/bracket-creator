@@ -90,13 +90,21 @@ export function lineupPutStubByTeam(lineups) {
 
 const reply = (status, body) => ({ ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body) });
 
+// untagged: a body without the tags every outbox write carries (writeId, session,
+// basis, bc-evts), which the lineup routes do not read.
+export function untagged(body) {
+  if (!body || typeof body !== 'object') return body;
+  const { writeId: _w, session: _s, basis: _b, ...rest } = body;
+  return rest;
+}
+
 // makeLineupServer: the routes of one team in one competition over a fetch stub.
 //   own      the lineups saved for a match, by match id (a match's own lineup)
 //   starting the team's starting lineup (round 0), or null
 //   carried  the lineup in force at a match that has none of its own, by match id
 //   members  the answer of GET team-members
 // `offline` makes every request reject like a connection that is down. `puts` lists
-// the bodies of the PUTs that reached it, with their urls.
+// the bodies of the PUTs that reached it (untagged), with their urls.
 export function makeLineupServer({ comp = 'c1', team = 't1', own = {}, starting = null, carried = {}, members = {} } = {}) {
   const server = {
     comp, team, own: { ...own }, starting, carried: { ...carried }, members, offline: false, puts: [],
@@ -123,7 +131,7 @@ export function makeLineupServer({ comp = 'c1', team = 't1', own = {}, starting 
     }
     if (m && method === 'PUT') {
       const body = JSON.parse(opts.body);
-      server.puts.push({ url: path, body });
+      server.puts.push({ url: path, body: untagged(body) });
       const done = applyLineupPut(server.starting, body);
       if (done.status === 200) server.starting = done.body;
       return Promise.resolve(reply(done.status, done.status === 200 ? whole(done.body, { round: Number(m[1]) }) : done.body));
@@ -132,7 +140,7 @@ export function makeLineupServer({ comp = 'c1', team = 't1', own = {}, starting 
     if (m && method === 'PUT') {
       const matchId = decodeURIComponent(m[1]);
       const body = JSON.parse(opts.body);
-      server.puts.push({ url: path, body });
+      server.puts.push({ url: path, body: untagged(body) });
       const done = applyLineupPut(inForce(matchId), body);
       if (done.status === 200) server.own[matchId] = done.body;
       return Promise.resolve(reply(done.status, done.status === 200 ? whole(done.body, { matchId }) : done.body));

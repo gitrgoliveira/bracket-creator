@@ -1713,10 +1713,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // can be reordered; running/completed are stable.
     //
     // The swap is two separate updateMatchTime PUTs (no server-side swap API),
-    // so it is NOT atomic. If the second PUT fails we best-effort roll the first
-    // one back to its original time, so a partial failure doesn't leave both rows
-    // with the same/incorrect time. Times are sent as strings ("" for an unset
-    // time): never null, which the Go handler's `scheduledAt string` rejects (400).
+    // so it is NOT atomic. Each is an entry of its match's outbox, handed over at
+    // once (bc-evts M5), so nothing here waits; when the server refuses one, the
+    // other match is put back to its original time, so a partial failure doesn't
+    // leave both rows with the same/incorrect time. Times are sent as strings (""
+    // for an unset time): never null, which the Go handler's `scheduledAt string`
+    // rejects (400).
     const moveMatch = async (m, direction) => {
         if (!window.API || typeof window.API.updateMatchTime !== "function") return;
         if (m.status === "running" || m.status === "completed") return;
@@ -1731,19 +1733,27 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const label = (m.sideB && m.sideB.name) || (m.sideA && m.sideA.name) || "Match";
         const myTime = m.scheduledAt || "";
         const neighbourTime = neighbour.scheduledAt || "";
-        let firstDone = false;
+        const failed = (e) => {
+            if (showToast) showToast((e && e.message) || "Could not reorder the match", "error");
+        };
+        // A refusal of either half puts the OTHER match back to its own time, so
+        // the queue isn't left half-swapped (a put-back the server refuses too
+        // is toasted like any refusal).
+        const putBack = (match, time) => {
+            Promise.resolve(window.API.updateMatchTime(match.compId, match.id, time, password, {
+                onRefusal: (e) => { failed(e); return true; },
+            })).catch(failed);
+        };
         try {
-            await window.API.updateMatchTime(m.compId, m.id, neighbourTime, password);
-            firstDone = true;
-            await window.API.updateMatchTime(neighbour.compId, neighbour.id, myTime, password);
+            await window.API.updateMatchTime(m.compId, m.id, neighbourTime, password, {
+                onRefusal: (e) => { putBack(neighbour, neighbourTime); failed(e); return true; },
+            });
+            await window.API.updateMatchTime(neighbour.compId, neighbour.id, myTime, password, {
+                onRefusal: (e) => { putBack(m, myTime); failed(e); return true; },
+            });
             if (showToast) showToast(`Moved ${label} ${direction === "up" ? "earlier" : "later"} in the queue`);
         } catch (e) {
-            // Roll back the first swap so the queue isn't left half-swapped.
-            if (firstDone) {
-                try { await window.API.updateMatchTime(m.compId, m.id, myTime, password); }
-                catch (_rb) { /* rollback also failed; the error toast below still fires */ }
-            }
-            if (showToast) showToast((e && e.message) || "Could not reorder the match", "error");
+            failed(e);
         }
     };
 
@@ -1803,13 +1813,18 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const { compId, matchId, to } = pendingMove;
         setMovingCourt(true);
         try {
-            // The host answers true only when the move landed (the host reports
-            // its own failure and resolves false). A move that did not land
-            // leaves this console's call for the match up.
-            const landed = await onMoveCourt(compId, matchId, to);
-            // The call names the court the match is leaving, so it comes down
-            // once the move has landed (bc-cdbl).
-            if (landed === true) withdrawCall(matchKey({ compId, id: matchId }));
+            // The host hands the move to the outbox and answers at once with
+            // `{ landed }`, a promise of whether the move landed (the host
+            // reports its own failure); an older host answers the boolean. A
+            // move that did not land leaves this console's call for the match
+            // up. The call names the court the match is leaving, so it comes
+            // down once the move has landed (bc-cdbl).
+            const handed = await onMoveCourt(compId, matchId, to);
+            const withdraw = () => withdrawCall(matchKey({ compId, id: matchId }));
+            if (handed === true) withdraw();
+            else if (handed && handed.landed && typeof handed.landed.then === "function") {
+                handed.landed.then((ok) => { if (ok === true) withdraw(); });
+            }
             if (mountedRef.current) setPendingMove(null);
         } finally {
             if (mountedRef.current) setMovingCourt(false);

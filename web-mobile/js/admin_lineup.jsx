@@ -53,7 +53,7 @@ import { poolMatchNumberOf, isSupplementaryBout, scoreRowMatchLabel } from './po
 import { normalizeParticipantName } from './data.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
 import { changedLineupSave } from './lineup_save.jsx';
-import { queuedNotice } from './write_result.jsx';
+import { queuedNotice, writePending, writeHeldOnDeviceOnly } from './write_result.jsx';
 import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice } from './lineup_draft.jsx';
 
 const { useState: useStateA, useMemo: useMemoA } = React;
@@ -692,14 +692,36 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
       }
       const body = changedLineupSave(named, shownIds, changed);
       const idsOut = Object.keys(body.memberIds).length > 0 ? body.memberIds : undefined;
+      // bc-evts M5: the save is an outbox entry, answered at once (pending). A
+      // refusal comes later: it is said here and the lineup read again, so what
+      // the form showed as saved goes (claimed, so the outbox does not say it too).
+      const onRefusal = (err) => {
+        setError(err?.message || "Failed to save lineup");
+        form.retry();
+        return true;
+      };
       const updated = matchId
-        ? await window.API.putMatchLineup(compId, teamId, matchId, body.positions, password, idsOut, body.changed)
-        : await window.API.putTeamLineup(compId, teamId, STARTING_ROUND, body.positions, password, idsOut, body.changed);
-      // F5: a queued (offline/transient) write is NOT a confirmed save: don't
-      // clear the revising state or show "saved"; the write is durable and will
-      // retry. Keep the form editable and tell the operator it's pending.
+        ? await window.API.putMatchLineup(compId, teamId, matchId, body.positions, password, idsOut, body.changed, { onRefusal })
+        : await window.API.putTeamLineup(compId, teamId, STARTING_ROUND, body.positions, password, idsOut, body.changed, { onRefusal });
+      // Handed to the outbox: the form takes what it sent as saved at once, and
+      // the server's whole lineup comes with its announcement of the save, read
+      // while the form holds no new edit. A save the browser could not store is
+      // held on this device alone: said so, never "saved".
       if (updated && updated.queued) {
         if (typeof showToast === "function") showToast(queuedNotice(updated), "pending");
+        return;
+      }
+      if (writePending(updated)) {
+        form.confirmSaved({ positions: named, memberIds: shownIds });
+        if (writeHeldOnDeviceOnly(updated)) {
+          if (typeof showToast === "function") showToast(queuedNotice(updated), "pending");
+          return;
+        }
+        updated.settled.then((stored) => {
+          if (!stored || stored.discarded) return;
+          if (typeof showToast === "function") showToast("Lineup saved");
+        }, () => {});
+        setSaveWarning(memberIdentityWarning([], squadUnavailable));
         return;
       }
       // What the server answered is the whole lineup it holds now, the positions this

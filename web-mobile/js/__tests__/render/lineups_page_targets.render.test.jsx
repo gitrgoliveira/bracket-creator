@@ -231,7 +231,7 @@ describe('the starting lineup', () => {
     await pick(utils, 1, 'mem-1');
     await click(saveButton(utils));
     expect(api.putTeamLineup).toHaveBeenCalledTimes(1);
-    expect(api.putTeamLineup).toHaveBeenCalledWith('comp-1', 'team-a', 0, { 1: 'Aoki' }, 'pw', { 1: 'mem-1' }, ['1']);
+    expect(api.putTeamLineup).toHaveBeenCalledWith('comp-1', 'team-a', 0, { 1: 'Aoki' }, 'pw', { 1: 'mem-1' }, ['1'], expect.objectContaining({ onRefusal: expect.any(Function) }));
     expect(api.putMatchLineup).not.toHaveBeenCalled();
   });
 });
@@ -266,7 +266,7 @@ describe('a match', () => {
 
     expect(api.putMatchLineup).toHaveBeenCalledTimes(1);
     expect(api.putMatchLineup).toHaveBeenCalledWith(
-      'comp-1', 'team-a', 'Pool A-2', { 2: 'Mori' }, 'pw', { 2: 'mem-4' }, ['2'],
+      'comp-1', 'team-a', 'Pool A-2', { 2: 'Mori' }, 'pw', { 2: 'mem-4' }, ['2'], expect.objectContaining({ onRefusal: expect.any(Function) }),
     );
     expect(api.putTeamLineup).not.toHaveBeenCalled();
   });

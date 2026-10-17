@@ -7,7 +7,7 @@ import { scoreRowMatchLabel } from './pool_ids.jsx';
 import { squadRosterEntries, rosterWithoutPlacedElsewhere, lineupDuplicateNote, lineupPositionLabel } from './lineup_resolver.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
 import { changedLineupSave } from './lineup_save.jsx';
-import { queuedNotice } from './write_result.jsx';
+import { queuedNotice, writePending, writeHeldOnDeviceOnly } from './write_result.jsx';
 import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice } from './lineup_draft.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { useDialogFocus } from './dialog_focus.jsx';
@@ -315,13 +315,39 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       // made of it, and a cleared one goes as its empty name.
       const body = changedLineupSave(positionsOut, memberIdsOut, changed);
       const idsOut = Object.keys(body.memberIds).length > 0 ? body.memberIds : undefined;
-      const updated = await window.API.putMatchLineup(compId, teamId, matchId, body.positions, password, idsOut, body.changed);
-      // F5: a queued (offline/transient) write is NOT confirmed. Do NOT rebuild
-      // the form from updated.positions (which is absent, would clear every
-      // field) or show success; keep the operator's entered values and report
-      // pending. The write is durable and will retry.
+      // bc-evts M5: the save is an entry of the match's outbox, answered at once
+      // (pending). A refusal comes later: it is said here and the lineup read
+      // again, so what the panel showed as saved goes (claimed, so the outbox does
+      // not say it too).
+      const updated = await window.API.putMatchLineup(compId, teamId, matchId, body.positions, password, idsOut, body.changed, {
+        onRefusal: (err) => {
+          setError(err?.message || "Failed to save lineup");
+          form.retry();
+          return true;
+        },
+      });
+      // A queued answer (an older door's) is NOT confirmed: the operator's
+      // entered values stay and the panel says it is pending.
       if (updated && updated.queued) {
         if (typeof showToast === "function") showToast(queuedNotice(updated), "pending");
+        return;
+      }
+      // Handed to the outbox: the panel takes what it sent as saved at once, and
+      // the server's whole lineup comes with its announcement of the save, read
+      // while the form holds no new edit. One the browser could not store is held
+      // on this device alone: said so, never "saved".
+      if (writePending(updated)) {
+        form.confirmSaved({ positions: positionsOut, memberIds: memberIdsOut });
+        if (writeHeldOnDeviceOnly(updated)) {
+          if (typeof showToast === "function") showToast(queuedNotice(updated), "pending");
+          return;
+        }
+        updated.settled.then((stored) => {
+          if (!stored || stored.discarded) return;
+          if (typeof showToast === "function") showToast("Match lineup saved");
+        }, () => {});
+        const composer = window.AdminLineupHelpers?.memberIdentityWarning;
+        if (typeof composer === "function") setLineupWarning(composer(memberFailures, membersUnavailable));
         return;
       }
       // Reflect exactly what was persisted: the whole lineup the server holds now,

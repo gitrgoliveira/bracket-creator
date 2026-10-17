@@ -188,38 +188,47 @@ describe('reading a lineup when the server does not answer', () => {
 describe('API.putMatchLineup', () => {
   let originalFetch;
   beforeEach(() => { originalFetch = global.fetch; });
-  afterEach(() => { global.fetch = originalFetch; });
+  afterEach(() => { global.fetch = originalFetch; API.clearQueue(); });
+  const lineupCall = () => global.fetch.mock.calls.find(([url]) => String(url).includes('/match-lineups/'));
 
+  // bc-evts M5: an entry of the match's outbox, answered at once (pending);
+  // `settled` carries the server's answer.
   it('sends PUT to the correct /match-lineups/:matchId URL', async () => {
     const saved = { teamId: 't1', matchId: 'm1', positions: { senpo: 'Bob' } };
     global.fetch = mockFetch(200, saved);
     const result = await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Bob' }, 'pw');
-    const [url, opts] = global.fetch.mock.calls[0];
+    expect(result.pending).toBe(true);
+    expect(await result.settled).toEqual(saved);
+    const [url, opts] = lineupCall();
     expect(url).toBe('/api/competitions/c1/teams/t1/match-lineups/m1');
     expect(opts.method).toBe('PUT');
     expect(opts.headers['X-Tournament-Password']).toBe('pw');
     expect(JSON.parse(opts.body)).toMatchObject({ teamId: 't1', matchId: 'm1', positions: { senpo: 'Bob' } });
-    expect(result).toEqual(saved);
   });
 
-  it('throws on 400 with server message', async () => {
+  it('settles as a rejection with the server message on a 400', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     global.fetch = mockFetch(400, { error: 'missing senpo' });
-    await expect(API.putMatchLineup('c1', 't1', 'm1', {}, 'pw'))
-      .rejects.toThrow('missing senpo');
+    const result = await API.putMatchLineup('c1', 't1', 'm1', {}, 'pw', undefined, undefined, { onRefusal: () => true });
+    await expect(result.settled).rejects.toThrow('missing senpo');
+    warn.mockRestore();
   });
 
   // bc-dhas: on a self-run tournament the public score sheet may save a
   // lineup, but not once the match has finished. The refusal names the
   // reason in a sentence, which is what the editor shows, and the error
   // keeps the code beside it, as the member writes' errors do.
-  it('throws the sentence of a finished match\'s refusal, carrying its code', async () => {
+  it('settles with the sentence of a finished match\'s refusal, carrying its code', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     global.fetch = mockFetch(409, {
       error: 'result_finalized',
       message: 'This match has finished, so its lineup can no longer be changed. Contact the tournament organizer to correct it.',
     });
-    const err = await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Bob' }, '').catch((e) => e);
+    const result = await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Bob' }, '', undefined, undefined, { onRefusal: () => true });
+    const err = await result.settled.catch((e) => e);
     expect(err.message).toBe('This match has finished, so its lineup can no longer be changed. Contact the tournament organizer to correct it.');
     expect(err.code).toBe('result_finalized');
+    warn.mockRestore();
   });
 });
 
@@ -240,28 +249,30 @@ describe('API.putMatchLineup: memberIds (bc-pnum gap closure)', () => {
     global.fetch = originalFetch;
     API.clearQueue();
   });
+  const lineupBody = () => JSON.parse(global.fetch.mock.calls.find(([url]) => String(url).includes('/match-lineups/'))[1].body);
 
   it('sends memberIds in the body when provided', async () => {
     global.fetch = mockFetch(200, { teamId: 't1', matchId: 'm1', positions: { senpo: 'Bob' }, memberIds: { senpo: 'mem-1' } });
-    await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Bob' }, 'pw', { senpo: 'mem-1' });
-    const [, opts] = global.fetch.mock.calls[0];
-    const body = JSON.parse(opts.body);
-    expect(body.memberIds).toEqual({ senpo: 'mem-1' });
+    await (await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Bob' }, 'pw', { senpo: 'mem-1' })).settled;
+    expect(lineupBody().memberIds).toEqual({ senpo: 'mem-1' });
   });
 
-  it('omits the memberIds key entirely when not provided (byte-identical old body)', async () => {
+  it('omits the memberIds key entirely when not provided (the old body, beside the outbox tags)', async () => {
     global.fetch = mockFetch(200, { teamId: 't1', matchId: 'm1', positions: { senpo: 'Bob' } });
-    await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Bob' }, 'pw');
-    const [, opts] = global.fetch.mock.calls[0];
-    const body = JSON.parse(opts.body);
+    await (await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Bob' }, 'pw')).settled;
+    // writeId, session and basis tag every outbox write; the lineup PUT reads none.
+    const { writeId, session, basis, ...body } = lineupBody();
+    expect(typeof writeId).toBe('string');
+    expect(typeof session).toBe('string');
+    expect(basis).toBeTruthy();
     expect(body).toEqual({ teamId: 't1', competitionId: 'c1', matchId: 'm1', positions: { senpo: 'Bob' } });
     expect('memberIds' in body).toBe(false);
   });
 
-  it('carries memberIds into the offline-queued body on network failure', async () => {
+  it('carries memberIds into the stored outbox entry', async () => {
     global.fetch = vi.fn(() => Promise.reject(new TypeError('network error')));
     const result = await API.putMatchLineup('c1', 't-queue', 'm-queue', { senpo: 'Bob' }, 'pw', { senpo: 'mem-9' });
-    expect(result).toEqual({ queued: true });
+    expect(result.pending).toBe(true);
     const raw = localStorage.getItem('bc_write_queue');
     expect(raw).not.toBeNull();
     const entries = JSON.parse(raw);
@@ -400,7 +411,7 @@ describe('API.queuedLineupSave', () => {
 
   it('is true for the match whose own lineup save is queued, and for that match of that team only', async () => {
     offline();
-    expect(await API.putMatchLineup('c1', 't-q', 'm-q', { senpo: 'Bob' }, 'pw', undefined, ['senpo'])).toEqual({ queued: true });
+    expect((await API.putMatchLineup('c1', 't-q', 'm-q', { senpo: 'Bob' }, 'pw', undefined, ['senpo'])).pending).toBe(true);
     expect(API.queuedLineupSave('c1', 't-q', { matchId: 'm-q' })).toBe(true);
     expect(API.queuedLineupSave('c1', 't-q', { matchId: 'm-other' })).toBe(false);
     expect(API.queuedLineupSave('c1', 't-other', { matchId: 'm-q' })).toBe(false);
@@ -430,11 +441,24 @@ describe('API.queuedLineupSave', () => {
     expect(API.queuedLineupSave('c1', 't-q', { matchId: 'm-q' })).toBe(true);
   });
 
-  it('asks about the very queue entry a save is queued under: the same key the save used', async () => {
+  it('asks about the very queue entry a save is queued under: an entry of its match (bc-evts M5)', async () => {
     offline();
     await API.putMatchLineup('c1', 't-q', 'm-q', { senpo: 'Bob' }, 'pw');
     const keys = JSON.parse(localStorage.getItem('bc_write_queue')).map(([key]) => key);
-    expect(keys.some((key) => key.startsWith('lineup:c1:t-q:match:m-q'))).toBe(true);
+    expect(keys.some((key) => key.startsWith('c1:m-q\u001f'))).toBe(true);
+  });
+
+  it('still sees a save a build before bc-evts M5 queued under the lineup\'s own base', async () => {
+    offline();
+    localStorage.setItem('bc_write_queue', JSON.stringify([['lineup:c1:t-q:match:m-q', {
+      compID: 'c1', matchID: 'm-q', kind: 'lineup', terminal: true, method: 'PUT', enqueuedAt: Date.now(),
+      url: '/api/competitions/c1/teams/t-q/match-lineups/m-q', password: 'pw',
+      payload: { teamId: 't-q', competitionId: 'c1', matchId: 'm-q', positions: { senpo: 'Bob' } },
+    }]]));
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'bc_write_queue', oldValue: null, newValue: localStorage.getItem('bc_write_queue'),
+    }));
+    expect(API.queuedLineupSave('c1', 't-q', { matchId: 'm-q' })).toBe(true);
   });
 
   it('is false again once the queue is cleared', async () => {

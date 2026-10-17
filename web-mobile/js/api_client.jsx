@@ -1198,8 +1198,10 @@ function _pendingAnswer(key, settled) {
 // _outboxWrite: the ONE way a rule-bound door hands a write over. Builds the
 // descriptor synchronously, tags it (writeId, basis, session), stamps its
 // place in the match's order, enqueues it durably and kicks the flush.
-function _outboxWrite({ kind, compID, matchID, method, url, payload, password, seen, onRefusal, terminal = true, after }) {
-    const base = _revKey(compID, matchID);
+function _outboxWrite({ kind, compID, matchID, method, url, payload, password, seen, onRefusal, terminal = true, after, base: ownBase, holds }) {
+    // `base`: the queue base when it is not the match's own (a team's starting
+    // lineup, `lineup:…`).
+    const base = ownBase || _revKey(compID, matchID);
     _tagWrite(payload, base, seen);
     // A running score write (terminal false) carries no method/url: it is
     // always PUT to /score (_sendEntry), the shape older builds queued too.
@@ -1210,12 +1212,36 @@ function _outboxWrite({ kind, compID, matchID, method, url, payload, password, s
     // (the court console's start after its send back). Persisted with the
     // entry; the flush holds this one back while that entry is still queued.
     if (typeof after === 'string' && after) descriptor.after = after;
+    // `holds`: the other matches (bases) this write also belongs to (a send
+    // back to the queue frees its blocker's court): a later write of one of
+    // them follows it (_commitEnqueue). Persisted.
+    if (Array.isArray(holds) && holds.length > 0) descriptor.holds = holds.filter((b) => typeof b === 'string' && b);
     const stamped = Number(payload.modifiedAt);
     if (Number.isFinite(stamped) && stamped > 0) payload.modifiedAt = _afterOwnStamp(base, stamped);
     else descriptor.sortStamp = _afterOwnStamp(base, _serverNowMs());
     let settled = null;
     const key = _commitEnqueue(base, descriptor, (k) => { settled = _openSettlement(k, onRefusal); });
     return _pendingAnswer(key, settled);
+}
+
+// _lastEntryKey: the queue key of a base's last entry in replay order, or ''.
+function _lastEntryKey(base) {
+    const list = _entriesFor(base);
+    return list.length ? list[list.length - 1][0] : '';
+}
+
+// _heldBy: the key of the newest queued entry of ANOTHER base that names this
+// base in its `holds`, or ''. A write of this base made while one is queued
+// follows it (`after`), so it never overtakes a write that belongs to both.
+function _heldBy(base) {
+    let key = '';
+    let at = -Infinity;
+    for (const [k, d] of _writeQueue) {
+        if (!d || !Array.isArray(d.holds) || !d.holds.includes(base) || _baseOf(k) === base) continue;
+        const s = _entryStamp(d);
+        if (s >= at) { at = s; key = k; }
+    }
+    return key;
 }
 
 // _coalesceTarget: the one entry a new write may take the place of, or null
@@ -1232,33 +1258,71 @@ function _outboxWrite({ kind, compID, matchID, method, url, payload, password, s
 // and nothing coalesces across one, nor into an entry already being sent.
 function _coalesceTarget(base, descriptor) {
     if (!descriptor) return null;
+    // A save of a match's lineup a build before bc-evts M5 queued sits under the
+    // lineup's own base and replays as a whole lineup: a new save of it joins
+    // that entry, or the replay, sent after it, would put the old lineup back.
+    const legacy = _legacyLineupTarget(descriptor);
+    if (legacy) return legacy;
     const list = _entriesFor(base);
     const last = list.length ? list[list.length - 1] : null;
     if (!last) return null;
     const [, prev] = last;
-    // A lineup has one entry in the queue: a later save of it joins the queued one.
-    if (descriptor.kind === 'lineup') return prev && prev.kind === 'lineup' ? last : null;
+    if (!prev) return null;
+    // A lineup save joins a queued save of the SAME lineup (team, and match or
+    // round) when it is the base's last entry: a match's base holds both
+    // teams' lineups and the match's other writes, and a save never moves
+    // ahead of a write made before it. One already out is joined too: the
+    // joined entry takes its key, so its answer does not settle it and the
+    // flush sends the union straight after (a position sent twice lands once).
+    if (descriptor.kind === 'lineup') return _sameLineup(prev, descriptor) ? last : null;
+    // Never a score entry already being sent: its answer settles it, and a
+    // write made since goes after it (_inFlight, set by _sendEntry).
+    if (_inFlight.has(prev)) return null;
     if (descriptor.kind !== 'score') return null;
-    // Never an entry already being sent: its answer settles it, and a write
-    // made since goes after it (_inFlight, set by _sendEntry).
-    if (!prev || prev.kind !== 'score' || _inFlight.has(prev)) return null;
+    if (prev.kind !== 'score') return null;
     if (prev.terminal && !descriptor.terminal) return null;
     if (_entryStamp(descriptor) < _entryStamp(prev)) return null;
     return last;
 }
 
-// _queuedLineupSave: whether a save of this lineup (`base`) is still queued. A new
-// save of the lineup then joins that entry (_coalesceTarget, _placeWrite) rather
-// than go straight to the server: a lineup PUT carries no stamp the server could
-// order it by, so a direct save landing while the older one is still being
-// replayed could be overwritten by it. That is not waiting behind it: the joined
-// entry is the one flush the enqueue kicks sends at once. It carries both saves'
-// changes, so nothing is composed on what is queued. It is also what holds back
-// removing the lineup, which the replay would undo. Every other write goes
-// straight to the server whatever is queued (bc-mrgc: the server orders a match
-// write by its stamp).
-function _queuedLineupSave(base) {
-    return _coalesceTarget(base, { kind: 'lineup' }) !== null;
+// _legacyLineupTarget: the queued save of the same match lineup
+// under the `lineup:…:match:…` base an older build used, or null.
+function _legacyLineupTarget(descriptor) {
+    const p = descriptor && descriptor.kind === 'lineup' && descriptor.payload;
+    if (!p || !p.matchId || !descriptor.compID) return null;
+    const list = _entriesFor(_lineupKey(descriptor.compID, p.teamId, { matchId: p.matchId }));
+    const last = list.length ? list[list.length - 1] : null;
+    if (!last || !_sameLineup(last[1], descriptor)) return null;
+    return last;
+}
+
+// _sameLineup: two lineup entries save the same lineup (a probe names only
+// the team, matchId and round it asks about).
+function _sameLineup(a, b) {
+    const pa = (a && a.kind === 'lineup' && a.payload) || null;
+    const pb = (b && b.payload) || null;
+    if (!pa || !pb || pa.teamId !== pb.teamId) return false;
+    return String(pa.matchId || '') === String(pb.matchId || '')
+        && String(pa.round ?? '') === String(pb.round ?? '');
+}
+
+// _queuedLineupSave: whether a save of this lineup (a team's lineup for a match,
+// or its round) is still in the outbox, sent or not yet answered. Every lineup
+// save is an outbox entry (bc-evts M5): a match's in its match's order, a
+// starting lineup under its own `lineup:` base, and a save made while the
+// lineup's save is the base's last entry joins it (_coalesceTarget,
+// _placeWrite), since a lineup PUT carries no stamp the server could order two
+// saves by. It is what holds back removing the lineup, which the queued save
+// would undo, and what keeps a read from putting the old lineup back over the
+// pick the sheet shows.
+function _queuedLineupSave(compID, teamId, { matchId, round } = {}) {
+    const probe = { payload: { teamId, ...(matchId ? { matchId } : { round }) } };
+    // A match's lineup is an entry of its match (bc-evts M5); a build before
+    // it queued one under its own `lineup:` base, which still replays.
+    const bases = matchId
+        ? [_revKey(compID, matchId), _lineupKey(compID, teamId, { matchId })]
+        : [_lineupKey(compID, teamId, { round })];
+    return bases.some((b) => _entriesFor(b).some(([, d]) => _sameLineup(d, probe)));
 }
 
 // _lineupKey: the queue BASE of a lineup: a match's own lineup (`matchId`), or a
@@ -1909,6 +1973,12 @@ function _doorRefusal(d, status, body) {
             return new Error(b.error || 'Failed to remove bout');
         case 'daihyosen':
             return new Error(_refusalText(b, d.method === 'DELETE' ? REP_BOUT_NOT_REMOVED : REP_BOUT_NOT_ADDED));
+        case 'lineup':
+            return _refusalError(b, d.payload && d.payload.matchId ? 'Failed to save match lineup' : 'Failed to save lineup');
+        case 'court':
+            return new Error(b.error || 'Failed to move match court');
+        case 'time':
+            return new Error(b.error || 'Failed to update match time');
         default:
             return new Error(_refusalText(b, `HTTP ${status}`));
     }
@@ -2320,6 +2390,12 @@ function _commitEnqueue(base, descriptor, beforeFlush, { nextTick = false } = {}
     // bc-hlck: what the write was made against, so a re-stamped replay keeps
     // the floor its first stamp had. Persisted (it is a server-time stamp).
     if (_payloadSeen.has(descriptor.payload)) descriptor.seenModifiedAt = _payloadSeen.get(descriptor.payload);
+    // A write of a match another match's queued write also belongs to (a send
+    // back to the queue frees this match's court) follows that write.
+    if (!descriptor.after) {
+        const holder = _heldBy(base);
+        if (holder) descriptor.after = holder;
+    }
     const key = _placeWrite(base, descriptor);
     _writeQueue.set(key, descriptor);
     // Read BEFORE the flush is kicked: the flush's synchronous part can
@@ -2346,15 +2422,6 @@ function _commitEnqueue(base, descriptor, beforeFlush, { nextTick = false } = {}
 // A write held in memory alone is lost if the page goes, so its
 // editor must not tell the operator it is "saved on this device".
 let _lastEnqueuePersisted = true;
-
-// _queuedAnswer: what a write that was queued instead of sent answers its
-// caller, read straight after the enqueue. `persisted: false` only when the
-// queue could not be written to browser storage (it is full, or blocked):
-// the write is held in this page's memory alone. write_result.jsx owns what
-// an editor says for each (queuedNotice).
-function _queuedAnswer() {
-    return _lastEnqueuePersisted ? { queued: true } : { queued: true, persisted: false };
-}
 
 // _placeWrite: the key a new write about `base` goes under. When it coalesces
 // (_coalesceTarget), it takes the queued entry's key and carries what that
@@ -2440,7 +2507,7 @@ function _runningDescriptor(compID, matchID, payload, password, enqueuedAt) {
 // confirmed. So a replay that still meets the refusal gets the 409 and is
 // dropped with its queue copy (downstreamKnockoutPlayedQueueDrop).
 //
-// Applied at BOTH ends of the queue: _enqueueTerminalWrite, so the stored copy
+// Applied at BOTH ends of the queue: _persistQueue, so the stored copy
 // (and localStorage) never holds it, and _flushQueue, the one door EVERY
 // replay goes through, so an entry that already holds it cannot send it
 // either. That second call is not redundant: an entry queued by an older
@@ -2472,15 +2539,6 @@ function _withoutDownstreamConfirmation(payload) {
  * @param {string} compID     - Competition ID (for identity tracking)
  * @param {string} matchID    - Match ID (for identity tracking)
  */
-function _enqueueTerminalWrite(key, kind, method, url, payload, password, compID, matchID) {
-    return _commitEnqueue(key, {
-        compID, matchID, payload: _withoutDownstreamConfirmation(payload), password,
-        kind, terminal: true,
-        method, url,
-        enqueuedAt: Date.now(),
-    });
-}
-
 // bc-sync: another tab changed the stored queue. Each tab sends only what it
 // holds, so without this a write queued in a tab that then closed (while
 // offline, say) waited in storage for the next page load, while the tabs
@@ -3680,20 +3738,14 @@ const API = {
         // Backend returns 204 No Content: .json() would reject.
         return true;
     },
-    async updateMatchTime(compID, matchID, scheduledAt, password) {
-        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/time`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tournament-Password': password
-            },
-            body: JSON.stringify({ scheduledAt })
+    async updateMatchTime(compID, matchID, scheduledAt, password, opts = {}) {
+        // bc-evts M5: an entry of the match, in its order, answered at once;
+        // a refusal comes through `settled` or `opts.onRefusal`.
+        return _outboxWrite({
+            kind: 'time', compID, matchID, method: 'PUT',
+            url: `/api/competitions/${compID}/matches/${matchID}/time`,
+            payload: { scheduledAt }, password, onRefusal: opts && opts.onRefusal,
         });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to update match time");
-        }
-        return true;
     },
     // Stateless hypothetical estimate against GET /api/schedule/estimate. The
     // free-form estimator PANEL was removed (per-competition estimates on
@@ -3767,20 +3819,14 @@ const API = {
         }
         return res.json();
     },
-    async moveMatchCourt(compID, matchID, court, password) {
-        const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/court`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tournament-Password': password
-            },
-            body: JSON.stringify({ court })
+    async moveMatchCourt(compID, matchID, court, password, opts = {}) {
+        // bc-evts M5: an entry of the match, in its order, answered at once;
+        // a refusal comes through `settled` or `opts.onRefusal`.
+        return _outboxWrite({
+            kind: 'court', compID, matchID, method: 'PUT',
+            url: `/api/competitions/${compID}/matches/${matchID}/court`,
+            payload: { court }, password, onRefusal: opts && opts.onRefusal,
         });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to move match court");
-        }
-        return true;
     },
     async revertMatchToQueue(compID, matchID, password, opts = {}) {
         // bc-evts: the outbox's, with a JSON body carrying writeId, basis and
@@ -3840,12 +3886,17 @@ const API = {
     // has since taken the court. opts as reopenMatch's: the remedy carries the
     // same reason and confirmation the reopen it retries did.
     async requeueBlockerAndReopen(targetComp, targetMatch, blockerComp, blockerMatch, password, { reason = "", force = false, seen, onRefusal } = {}) {
-        // bc-evts: the outbox's, on the TARGET match's base (the one reopened).
+        // bc-evts: the outbox's, on the TARGET match's base (the one reopened),
+        // and ordered under the blocker's too (M5): it follows the blocker's
+        // last queued write (`after`), and a write of the blocker made after it
+        // follows it (`holds`, _heldBy), so neither overtakes the other.
+        const blockerBase = _revKey(blockerComp, blockerMatch);
         return _outboxWrite({
             kind: 'requeue', compID: targetComp, matchID: targetMatch, method: 'POST',
             url: `/api/competitions/${targetComp}/matches/${targetMatch}/requeue-blocker-and-reopen`,
             payload: { blockerCompId: blockerComp, blockerMatchId: blockerMatch, ...reopenBody(reason, force) },
             password, seen, onRefusal,
+            after: _lastEntryKey(blockerBase), holds: [blockerBase],
         });
     },
     // mp-gmcg: remove a trailing UNSCORED kachinuki bout appended by mistake
@@ -3944,56 +3995,20 @@ const API = {
     // (lineup_save.jsx builds the body: positions and memberIds for the changed
     // positions only). Omitted, the body is a whole lineup that replaces the
     // stored one.
-    async putTeamLineup(compID, teamId, round, positions, password, memberIds, changed) {
-        const lineupUrl = `/api/competitions/${compID}/teams/${teamId}/lineups/${round}`;
-        const lineupBody = {
-            teamId, competitionId: compID, round, positions,
-            ...(memberIds ? { memberIds } : {}), ...(changed ? { changed } : {}),
-        };
-        // F5: lineup queue key is distinct from score/decision keys so a lineup
-        // write doesn't collide with a concurrent score write for the same match.
-        const lineupKey = _lineupKey(compID, teamId, { round });
-        // A save of this lineup still queued is joined by this one, which the
-        // flush sends at once (_queuedLineupSave): sent straight, it could
-        // land before the queued one's replay and be overwritten by it.
-        if (_queuedLineupSave(lineupKey)) {
-            _enqueueTerminalWrite(lineupKey, 'lineup', 'PUT', lineupUrl, lineupBody, password, compID, '');
-            return _queuedAnswer();
-        }
-        let res;
-        let body;
-        try {
-            // F1: abort after 12 s on stalled wifi, the body read included
-            // (_fetchJson).
-            ({ res, body } = await _fetchJson(lineupUrl, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Tournament-Password': password
-                },
-                body: JSON.stringify(lineupBody)
-            }));
-        } catch (_networkErr) {
-            // F5: network failure or timeout: enqueue as terminal.
-            _enqueueTerminalWrite(
-                lineupKey, 'lineup', 'PUT', lineupUrl,
-                lineupBody, password, compID, ''
-            );
-            return _queuedAnswer();
-        }
-        if (!res.ok) {
-            // F5: transient server error: enqueue for retry.
-            if (res.status >= 500 || res.status === 429) {
-                _enqueueTerminalWrite(
-                    lineupKey, 'lineup', 'PUT', lineupUrl,
-                    lineupBody, password, compID, ''
-                );
-                return _queuedAnswer();
-            }
-            // 4xx: throw immediately (400 validation, etc.).
-            throw new Error(body.error || "Failed to save lineup");
-        }
-        return body;
+    async putTeamLineup(compID, teamId, round, positions, password, memberIds, changed, opts = {}) {
+        // bc-evts M5: an outbox entry under the lineup's own base (a starting
+        // lineup belongs to no match), answered at once like every write; a
+        // save made while the last one is queued joins it (_coalesceTarget).
+        return _outboxWrite({
+            kind: 'lineup', compID, matchID: '', method: 'PUT',
+            url: `/api/competitions/${compID}/teams/${teamId}/lineups/${round}`,
+            payload: {
+                teamId, competitionId: compID, round, positions,
+                ...(memberIds ? { memberIds } : {}), ...(changed ? { changed } : {}),
+            },
+            password, onRefusal: opts && opts.onRefusal,
+            base: _lineupKey(compID, teamId, { round }),
+        });
     },
     // bc-tmid pass 3: a team's squad, the actual people on it, lives in its
     // own per-competition store (team-members.yaml), keyed by the team's
@@ -4093,63 +4108,27 @@ const API = {
     // above: the squad member id half of a lineup, sent alongside the name
     // so the server can persist both together. Omitted entirely when the
     // caller passes nothing, so a caller that never adopted squad members
-    // (or an older bundle) round-trips exactly as before -- including into
-    // the offline queue: matchLineupBody (built once, below) is the SAME
-    // object fed to both the live fetch and _enqueueTerminalWrite, so a
-    // replayed lineup write carries the ids too. `changed` names the positions
+    // (or an older bundle) round-trips exactly as before; the outbox entry
+    // carries them, so a replayed lineup write carries the ids too. `changed`
+    // names the positions
     // the save changes, as for putTeamLineup above.
-    async putMatchLineup(compID, teamId, matchId, positions, password, memberIds, changed) {
-        const matchLineupBody = {
-            teamId, competitionId: compID, matchId, positions,
-            ...(memberIds ? { memberIds } : {}), ...(changed ? { changed } : {}),
-        };
-        const matchLineupUrl = `/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`;
-        // F5: a match's own lineup is queued under its own key (_lineupKey),
-        // distinct from a Lineups-page round's.
-        const matchLineupKey = _lineupKey(compID, teamId, { matchId });
-        // Joins a queued save of it, as above.
-        if (_queuedLineupSave(matchLineupKey)) {
-            _enqueueTerminalWrite(matchLineupKey, 'lineup', 'PUT', matchLineupUrl, matchLineupBody, password, compID, matchId);
-            return _queuedAnswer();
-        }
-        let res;
-        let body;
-        try {
-            // F1: abort after 12 s on stalled wifi, the body read included
-            // (_fetchJson).
-            ({ res, body } = await _fetchJson(matchLineupUrl, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Tournament-Password': password
-                },
-                body: JSON.stringify(matchLineupBody)
-            }));
-        } catch (_networkErr) {
-            // F5: network failure or timeout: enqueue as terminal.
-            _enqueueTerminalWrite(
-                matchLineupKey, 'lineup', 'PUT', matchLineupUrl,
-                matchLineupBody, password, compID, matchId
-            );
-            return _queuedAnswer();
-        }
-        if (!res.ok) {
-            // F5: transient server error: enqueue for retry.
-            if (res.status >= 500 || res.status === 429) {
-                _enqueueTerminalWrite(
-                    matchLineupKey, 'lineup', 'PUT', matchLineupUrl,
-                    matchLineupBody, password, compID, matchId
-                );
-                return _queuedAnswer();
-            }
-            // 4xx: throw immediately (400 validation, etc.). A finished
-            // match's refusal on the public page (409) carries a code in
-            // `error` and the sentence to show in `message`, as the score
-            // path's does; the thrown error keeps both, as the member
-            // writes' do.
-            throw _refusalError(body, "Failed to save match lineup");
-        }
-        return body;
+    async putMatchLineup(compID, teamId, matchId, positions, password, memberIds, changed, opts = {}) {
+        // bc-evts M5: an entry of the MATCH, sent strictly in its order with
+        // the match's other writes, and answered at once ({pending, settled}):
+        // nothing waits on the network. `settled` resolves with the whole
+        // lineup the server holds, or rejects with its refusal (a finished
+        // match's 409 carries its code in `error` and its sentence in
+        // `message`, kept by _refusalError); `opts.onRefusal` may claim it.
+        // writeId, session and basis ride along; the lineup PUT reads none.
+        return _outboxWrite({
+            kind: 'lineup', compID, matchID: matchId, method: 'PUT',
+            url: `/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`,
+            payload: {
+                teamId, competitionId: compID, matchId, positions,
+                ...(memberIds ? { memberIds } : {}), ...(changed ? { changed } : {}),
+            },
+            password, onRefusal: opts && opts.onRefusal,
+        });
     },
     // Removes the match's own lineup. Bounded like every sibling write
     // (_fetchJson: the deadline covers the body), and answered in a plain sentence
@@ -4178,7 +4157,7 @@ const API = {
     // "Use the previous match's lineup" while this is true. Nothing is composed
     // on a queued save: a new save of the lineup joins it and names what it changed.
     queuedLineupSave(compID, teamId, target) {
-        return _queuedLineupSave(_lineupKey(compID, teamId, target || {}));
+        return _queuedLineupSave(compID, teamId, target || {});
     },
     // T141: daihyosen (representative bout) appended after a knockout team
     // match ties on IV and PW. Server validates the tie + eligibility and

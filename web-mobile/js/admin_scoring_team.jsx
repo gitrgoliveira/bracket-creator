@@ -59,7 +59,7 @@ import { SideLabel, sideWithColour } from './side_cell.jsx';
 // Imported from the leaf, not read off `window`, for the same reason
 // admin_scoring_shared.jsx does it: write_result.jsx is import-only, and this
 // editor is ES-imported by hosts and tests that never load api_client.
-import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, writePending, queuedNotice, FETCH_TIMEOUT_MS, withinDeadline, TIMED_OUT, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, decisionWord } from './write_result.jsx';
+import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, writePending, writeHeldOnDeviceOnly, queuedNotice, FETCH_TIMEOUT_MS, withinDeadline, TIMED_OUT, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, decisionWord } from './write_result.jsx';
 
 // boutMiddle is THE single source for a bout's centre value (vs/X/(E)/(DH));
 // the editor derives its per-bout middle from it rather than restating the
@@ -2101,31 +2101,50 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       wroteSideMembers(side, nextSquad);
       const body = changedLineupSave(shown, shownIds, changed);
       const hasMemberIds = Object.keys(body.memberIds).length > 0;
-      const answer = await window.API.putMatchLineup(m.compId, teamId, m.id, body.positions, password, hasMemberIds ? body.memberIds : undefined, body.changed);
+      // bc-evts M5: the save is an entry of the match's outbox, answered at once
+      // (pending): nothing here waits on the network, and the box is free again as
+      // soon as it is handed over. A refusal comes later: it is said in the row and
+      // the side is read again, so the pick the sheet showed goes (claimed, so the
+      // outbox does not say it a second time).
+      const answer = await window.API.putMatchLineup(m.compId, teamId, m.id, body.positions, password, hasMemberIds ? body.memberIds : undefined, body.changed, {
+        onRefusal: (err) => {
+          if (mountedRef.current && !sideChanged()) {
+            notify("error", err?.message || "Failed to update lineup");
+            write.read(teamId).catch(() => {});
+          }
+          return true;
+        },
+      });
       if (!mountedRef.current) return;
       // A write that landed answers the whole lineup the server holds now, shown as
-      // it is. One that only reached the outbox answers none: the pick is shown on
-      // the lineup held, until the server's own announcement is read.
+      // it is. One handed to the outbox answers none: the pick is shown on the
+      // lineup held, until the server's own announcement of the save is read (a read
+      // never puts the old lineup back while the save is in the outbox).
+      const held = !!answer && (answer.queued || writePending(answer));
       write.set(
-        answer && answer.queued ? { ...current, positions: shown, memberIds: shownIds } : answer,
-        { fromServer: !(answer && answer.queued) },
+        held ? { ...current, positions: shown, memberIds: shownIds } : answer,
+        { fromServer: !held },
       );
-      // A lineup that only reached the outbox is held on this device, not saved: say
-      // so in the row, the way every held write is worded (queuedNotice also tells
-      // when the browser could not store it), and leave out the warning below, which
-      // begins "Lineup saved". The lineup editors take the same exit.
-      if (answer && answer.queued) {
+      // A lineup the browser could not store, or one an older door queued, is held
+      // on this device, not saved: say so in the row, the way every held write is
+      // worded, and leave out the warning below, which begins "Lineup saved".
+      if (answer && (answer.queued || writeHeldOnDeviceOnly(answer))) {
         notify("warn", queuedNotice(answer));
         return;
       }
-      // bc-cse gap closure: the write above succeeded (putMatchLineup did
-      // not throw), so this is the non-blocking warning tone, never the
-      // error one -- the save is done, only its squad-member identity
-      // attachment fell short.
-      const composer = window.AdminLineupHelpers?.memberIdentityWarning;
-      if (typeof composer === "function") {
+      // bc-cse gap closure: the save is done, only its squad-member identity
+      // attachment fell short, so this is the non-blocking warning tone, never
+      // the error one. Said once the save has landed: it begins "Lineup saved".
+      const warnIdentity = () => {
+        const composer = window.AdminLineupHelpers?.memberIdentityWarning;
+        if (typeof composer !== "function" || !mountedRef.current) return;
         const warning = composer(failures || [], membersUnavailable);
         if (warning) notify("warn", warning);
+      };
+      if (writePending(answer)) {
+        answer.settled.then((stored) => { if (stored && !stored.discarded) warnIdentity(); }, () => {});
+      } else {
+        warnIdentity();
       }
     } catch (e) {
       notify("error", e?.message || "Failed to update lineup");

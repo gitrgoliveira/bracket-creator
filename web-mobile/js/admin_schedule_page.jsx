@@ -257,9 +257,12 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
     return formatMinutes(Math.round(diff));
   })() : null;
 
+  // bc-evts M5: an entry of the match's outbox, handed over at once; a refusal
+  // the server gives later is said then.
+  const timeRefused = (e) => { alert("Failed to update time: " + e.message); return true; };
   const saveMatchTime = async (m, newTime) => {
     try {
-      await window.API.updateMatchTime(m.compId, m.id, newTime, password);
+      await window.API.updateMatchTime(m.compId, m.id, newTime, password, { onRefusal: timeRefused });
     } catch (e) {
       alert("Failed to update time: " + e.message);
     }
@@ -290,7 +293,9 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
         // ?? not || so "00:00" (0 minutes: midnight) doesn't fall through to 09:00.
         let cursor = timeToMinutes(autoStart) ?? 540;
         for (const m of list.sort((a, b) => (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99"))) {
-          await window.API.updateMatchTime(m.compId, m.id, window.addMinutes("00:00", Math.round(cursor)), password);
+          // Handed to the outbox at once (no wait on the network); a refusal
+          // the server gives later is said then.
+          await window.API.updateMatchTime(m.compId, m.id, window.addMinutes("00:00", Math.round(cursor)), password, { onRefusal: timeRefused });
           cursor += safeMatchMinutes;
         }
       }

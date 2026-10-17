@@ -288,17 +288,26 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   //      real outcome.
   //   2. Post-mutation refresh: best-effort via refreshCompsBestEffort.
   //      A refresh failure cannot make the mutation "look failed."
-  // Resolves true when the move landed and false when it failed (the failure is
-  // toasted here), so a caller can tell the two apart.
+  // bc-evts M5: the move is an entry of the match's outbox, handed over at once:
+  // this resolves at once with `{ landed }`, a promise that answers true when
+  // the move lands and false when the server refuses it (the refusal is toasted
+  // here) or it is discarded, so a caller can tell the two apart without
+  // waiting on the network.
   const moveMatchCourt = async (compId, matchId, newCourt) => {
+    let answer;
     try {
-      await window.API.moveMatchCourt(compId, matchId, newCourt, password);
+      answer = await window.API.moveMatchCourt(compId, matchId, newCourt, password, {
+        onRefusal: (e) => { showToast(e.message, "error"); return true; },
+      });
     } catch (e) {
       showToast(e.message, "error");
-      return false;
+      return { landed: Promise.resolve(false) };
     }
-    await refreshCompsBestEffort("Move");
-    return true;
+    const landed = writePending(answer)
+      ? answer.settled.then((v) => !(v && v.discarded), () => false)
+      : Promise.resolve(true);
+    landed.then((ok) => { if (ok) refreshCompsBestEffort("Move"); });
+    return { landed };
   };
 
   // bc-kcdg: THE single chokepoint every score-editor host (the bracket

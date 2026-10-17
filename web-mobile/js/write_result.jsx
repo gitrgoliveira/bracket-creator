@@ -51,6 +51,13 @@ export function writePending(res) {
     return !!res && res.pending === true;
 }
 
+// writeHeldOnDeviceOnly: browser storage refused the write (`persisted:
+// false`): the outbox holds it in this page's memory alone, so a host says so
+// (queuedNotice) rather than calling it saved.
+export function writeHeldOnDeviceOnly(res) {
+    return !!res && typeof res === 'object' && res.persisted === false;
+}
+
 // writeKeepsEditorOpen: does a score editor's host leave the editor open after
 // this write (bc-plcl)? Every host asks it, so none hand-writes its own answer
 // (the Pools tab once closed on every write and the bracket panel on a
@@ -472,6 +479,8 @@ export function heldWriteWhat(held) {
         case 'revert': return 'send back to queue';
         case 'daihyosen': return 'representative bout change';
         case 'kachinuki': return 'bout removal';
+        case 'court': return 'court move';
+        case 'time': return 'match time change';
         default: return held && held.terminal ? 'finished result' : 'score update';
     }
 }

@@ -356,7 +356,8 @@ describe('a lineup save takes the place of a queued save of the same lineup', ()
         await API.putMatchLineup('c1', 'team-A', 'm1', { 1: 'Aoki' }, 'pw');
         vi.advanceTimersByTime(1000);
         const res = await API.putMatchLineup('c1', 'team-A', 'm1', { 1: 'Baba' }, 'pw');
-        expect(res).toEqual({ queued: true });
+        // bc-evts M5: an entry of the match, answered at once.
+        expect(res.pending).toBe(true);
         // A different lineup is an entry of its own.
         await API.putMatchLineup('c1', 'team-B', 'm1', { 1: 'Chiba' }, 'pw');
         const stored = storedEntries().map(([, d]) => d.payload);
@@ -417,7 +418,7 @@ describe('the queued answer says whether the write reached browser storage', () 
         expect(await API.recordDecision('c1', 'm2', { decision: 'fusenpai', decisionBy: 'aka' }, 'pw'))
             .toMatchObject({ pending: true, persisted: false });
         expect(await API.putMatchLineup('c1', 'team-A', 'm3', { 1: 'Aoki' }, 'pw'))
-            .toEqual({ queued: true, persisted: false });
+            .toMatchObject({ pending: true, persisted: false });
     });
 });
 

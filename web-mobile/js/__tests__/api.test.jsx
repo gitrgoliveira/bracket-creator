@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, isHikiwake, buildPlayerMetadata, normalizeCompetitionDetail } from '../api_serializers.jsx';
 import { API } from '../api_client.jsx';
 
@@ -1012,40 +1012,46 @@ describe('API Utils', () => {
         warn.mockRestore();
       });
 
+    // bc-evts M5: an entry of the match's outbox, answered at once (pending);
+    // the server's answer, or its refusal, comes through `settled`.
     describe('moveMatchCourt', () => {
+      afterEach(() => { API.clearQueue(); });
+
       it('PUTs to the correct endpoint with court in body', async () => {
-        global.fetch = vi.fn().mockResolvedValue({ ok: true });
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
         const result = await API.moveMatchCourt('comp1', 'match42', 'B', 'secret');
-        expect(result).toBe(true);
-        expect(global.fetch).toHaveBeenCalledWith(
-          '/api/competitions/comp1/matches/match42/court',
-          expect.objectContaining({
-            method: 'PUT',
-            headers: expect.objectContaining({
-              'Content-Type': 'application/json',
-              'X-Tournament-Password': 'secret',
-            }),
-            body: JSON.stringify({ court: 'B' }),
-          })
-        );
+        expect(result.pending).toBe(true);
+        await result.settled;
+        const [url, opts] = global.fetch.mock.calls.find(([u]) => String(u).endsWith('/court'));
+        expect(url).toBe('/api/competitions/comp1/matches/match42/court');
+        expect(opts.method).toBe('PUT');
+        expect(opts.headers).toEqual(expect.objectContaining({
+          'Content-Type': 'application/json',
+          'X-Tournament-Password': 'secret',
+        }));
+        expect(JSON.parse(opts.body).court).toBe('B');
       });
 
-      it('throws with server error message on failure', async () => {
+      it('settles as a rejection with the server error message', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         global.fetch = vi.fn().mockResolvedValue({
-          ok: false,
+          ok: false, status: 400,
           json: async () => ({ error: 'court not found' }),
         });
-        await expect(API.moveMatchCourt('c1', 'm1', 'Z', 'pw'))
-          .rejects.toThrow('court not found');
+        const result = await API.moveMatchCourt('c1', 'm1', 'Z', 'pw', { onRefusal: () => true });
+        await expect(result.settled).rejects.toThrow('court not found');
+        warn.mockRestore();
       });
 
-      it('throws default message if json parse fails', async () => {
+      it('settles with the default message if the refusal has no body', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         global.fetch = vi.fn().mockResolvedValue({
-          ok: false,
+          ok: false, status: 400,
           json: async () => { throw new Error(); },
         });
-        await expect(API.moveMatchCourt('c1', 'm1', 'X', 'pw'))
-          .rejects.toThrow('Failed to move match court');
+        const result = await API.moveMatchCourt('c1', 'm1', 'X', 'pw', { onRefusal: () => true });
+        await expect(result.settled).rejects.toThrow('Failed to move match court');
+        warn.mockRestore();
       });
     });
 

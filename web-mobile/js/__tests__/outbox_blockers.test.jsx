@@ -359,3 +359,37 @@ describe('asking what holds a match back reads the queue once (H2)', () => {
         expect(once, 'the one question the editors ask reads it once').toBeLessThanOrEqual(2);
     });
 });
+
+describe('a tap naming a member this device minted follows its add (H4)', () => {
+    const EVENTS = '/api/competitions/c1/matches/m1/score-events';
+    const pick = (memberId) => ({ kind: 'rep.pick', pos: -1, side: 'a', memberId });
+
+    it('is queued after the add', async () => {
+        const member = await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw');
+        API.recordTap('c1', 'm1', pick(member.id), 'pw', MATCH);
+        await flushMicrotasks();
+        const q = stored();
+        const add = q.find(([, d]) => d.kind === 'member');
+        const tap = q.find(([, d]) => d.kind === 'evt');
+        const after = Array.isArray(tap[1].after) ? tap[1].after : [tap[1].after];
+        expect(after).toContain(add[0]);
+    });
+
+    it('a refused add takes its id off the queued tap before the tap goes', async () => {
+        const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const member = await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw', { onRefusal: () => true });
+        member.settled.catch(() => {});
+        API.recordTap('c1', 'm1', pick(member.id), 'pw', MATCH);
+        await flushMicrotasks();
+        const sent = server((req) => (req.url === MEMBERS
+            ? answer(409, { error: 'team_member_limit', message: 'This team has no room for another member.' })
+            : null));
+        await reconnect();
+        const post = sent.find((r) => r.url === EVENTS);
+        expect(post, 'the tap goes once the add has gone').toBeTruthy();
+        const events = post.body.events || [];
+        expect(events).toHaveLength(1);
+        expect(events[0].memberId, 'the pick that named nobody is cleared').toBeUndefined();
+        warned.mockRestore();
+    });
+});

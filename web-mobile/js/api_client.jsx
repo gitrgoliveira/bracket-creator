@@ -3593,6 +3593,13 @@ function _dropMemberThatNeverWas(d) {
                 }
             }
         }
+        // A tap naming it (H4): a fighter pick keeps its `name`, a
+        // representative pick with no member clears the pick, as the server
+        // reads an event with no `memberId`.
+        if (payload.memberId === id) {
+            delete payload.memberId;
+            changed = true;
+        }
         // A score write carrying the id (stage 3 review 4, G1): a numbered
         // row keeps its fighter's name and loses the id; the representative
         // row's names are the TEAM names, so its pick is cleared. A winner
@@ -3630,6 +3637,9 @@ function _payloadMemberIds(payload) {
     if (payload.memberIds && typeof payload.memberIds === 'object') {
         for (const v of Object.values(payload.memberIds)) if (typeof v === 'string' && v) ids.add(v);
     }
+    // A tap's payload is its event: a fighter or representative pick names
+    // the member on `memberId` (makeEvent; stage 3 review 5, H4).
+    if (typeof payload.memberId === 'string' && payload.memberId) ids.add(payload.memberId);
     if (Array.isArray(payload.subResults)) {
         for (const row of payload.subResults) {
             if (!row || typeof row !== 'object') continue;

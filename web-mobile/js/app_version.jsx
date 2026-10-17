@@ -12,8 +12,15 @@
 //                                                  re-checked when an editor
 //                                                  closes or the outbox drains
 //
-// The page's own build is the <meta name="app-build"> the server writes into
-// the page it serves (internal/mobileapp/index_meta.go, appBuildMeta).
+// The build the RUNNING CODE was compiled for is the bundle's own constant,
+// __APP_BUILD__, which esbuild writes in (--define) from the commit
+// internal/cmd/version/get_build_info.sh records, the same file the server
+// reads for X-App-Build (AppBuild). Not a value in the page: /dist/ is cached
+// for five minutes, so a reload can pair fresh HTML with the modules of the
+// build before, and only the code can say which build it is (review 1, M2).
+// For the same reason a reload can bring the same old modules back: a page
+// reloads ONCE for a given server build (_RELOADED_FOR, in sessionStorage),
+// and a page still behind it after that shows the banner instead of looping.
 
 export const VERSION_BANNER_TEXT = 'A new version of the app is installed. Reload to keep scoring.';
 export const VERSION_RELOAD_LABEL = 'Reload';
@@ -30,18 +37,36 @@ let _beforeReload = () => {};
 let _reload = () => { location.reload(); };
 const _subscribers = new Set();
 
-// bundleBuild is the build this page was served with, read once.
+// The server build this tab last reloaded for (sessionStorage: per tab, kept
+// across the reload).
+const _RELOADED_FOR = 'bc_app_reloaded_for_build';
+
+// bundleBuild is the build the running code was compiled for, read once:
+// __APP_BUILD__, or unknown when the bundle was compiled without it.
 export function bundleBuild() {
     if (_bundleBuild === null) {
-        let content = '';
-        try {
-            content = document.querySelector('meta[name="app-build"]')?.content || '';
-        } catch (_e) {
-            content = '';
-        }
-        _bundleBuild = content.trim() || UNKNOWN;
+        const built = typeof __APP_BUILD__ === 'string' ? __APP_BUILD__ : '';
+        _bundleBuild = built.trim() || UNKNOWN;
     }
     return _bundleBuild;
+}
+
+function _reloadedFor() {
+    try {
+        return sessionStorage.getItem(_RELOADED_FOR) || '';
+    } catch (_e) {
+        return '';
+    }
+}
+
+function _noteReloadFor(build) {
+    try {
+        sessionStorage.setItem(_RELOADED_FOR, build);
+    } catch (e) {
+        // Without the note a reload that brings the old modules back would
+        // reload again; said so, and the reload still goes.
+        console.error('app_version: could not note the reload:', e);
+    }
 }
 
 // buildsMatch: equal, or either side unknown (a binary built without a commit
@@ -121,8 +146,11 @@ export function checkVersion() {
         _setState('current');
         return _state;
     }
-    if (_openEditors === 0 && _outboxIsIdle()) {
+    // Reloaded for this server build already, and still behind it: the reload
+    // brought the cached modules back. The banner, not another reload.
+    if (_openEditors === 0 && _outboxIsIdle() && _reloadedFor() !== _serverBuild) {
         _reloaded = true;
+        _noteReloadFor(_serverBuild);
         try {
             _beforeReload();
         } catch (e) {
@@ -158,4 +186,5 @@ export function resetVersionForTests() {
     _beforeReload = () => {};
     _reload = () => { location.reload(); };
     _subscribers.clear();
+    try { sessionStorage.removeItem(_RELOADED_FOR); } catch (_e) { /* no storage in this test */ }
 }

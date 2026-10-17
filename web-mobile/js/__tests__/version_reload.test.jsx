@@ -1,21 +1,20 @@
 // bc-evts stage 3, S2: the app reloads itself onto a newer server build when
 // nothing would be lost (no score editor open, the outbox idle), and otherwise
 // shows the banner until it can. One rule for the app and every display.
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import {
     bundleBuild, noteServerBuild, buildsMatch, registerOpenEditor, setOutboxIdleProbe,
     setReloader, setBeforeReload, checkVersion, noteOutboxDrained, subscribeVersionState,
     versionState, resetVersionForTests, VERSION_BANNER_TEXT, VERSION_RELOAD_LABEL,
 } from '../app_version.jsx';
 
+// The build the bundle was compiled for (esbuild --define:__APP_BUILD__).
 function setPageBuild(build) {
-    document.head.querySelectorAll('meta[name="app-build"]').forEach((m) => m.remove());
-    if (build === null) return;
-    const meta = document.createElement('meta');
-    meta.setAttribute('name', 'app-build');
-    meta.setAttribute('content', build);
-    document.head.appendChild(meta);
+    if (build === null) delete globalThis.__APP_BUILD__;
+    else globalThis.__APP_BUILD__ = build;
 }
+
+afterAll(() => { delete globalThis.__APP_BUILD__; });
 
 let reload;
 let calls;
@@ -29,12 +28,12 @@ beforeEach(() => {
 });
 
 describe('bundleBuild', () => {
-    it('reads the page meta once', () => {
+    it('reads the bundle\'s constant once', () => {
         expect(bundleBuild()).toBe('abc');
         setPageBuild('other');
         expect(bundleBuild()).toBe('abc');
     });
-    it('is unknown without the meta', () => {
+    it('is unknown without the constant', () => {
         setPageBuild(null);
         expect(bundleBuild()).toBe('unknown');
     });

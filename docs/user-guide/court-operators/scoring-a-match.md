@@ -33,6 +33,8 @@ Starting a different match from the Upcoming list works the same way: the match 
 
 In an engi match the flags are saved as you enter them once the match has started, so they are kept too.
 
+If you are scoring a match that has not started yet and another device starts it, what you entered is kept on screen with the note "This match was started on another device. Your unsaved entries are still here: Save adds them to the match, Discard drops them." **Save** (tap it twice) adds your entries to the match as if you had scored them after the start, so the other device's points stay as they are. If both devices scored the same point it counts twice: tap the extra mark to take it back. **Discard** drops your entries and shows the match as the server holds it. Finishing the match waits until you have picked one.
+
 !!! note
     Send back to queue only works on a running, unfinished match. A completed, scored match is not affected. To fix a result that has already been recorded, use **Correct** on the match in the Completed list (refer to [Correct a completed result](#correct-a-completed-result)).
 

@@ -389,7 +389,7 @@ func TestScoreEventsDoor_SelfRunParticipantLimits(t *testing.T) {
 
 	code, out = send("PoolA-1", "main-pw", seTap("o1", 1, now-700, "b", "K"))
 	require.Equal(t, http.StatusOK, code)
-	assert.Equal(t, domain.ScoreOutcomeMatchClosed, out.Outcomes[0].Outcome, "the organiser's tap on a finished match is turned away: Correct result is the way")
+	assert.Equal(t, domain.ScoreOutcomeMatchClosed, out.Outcomes[0].Outcome, "the organiser's tap on a finished match is turned away: Correct is the way")
 
 	code, _ = send("PoolA-0", "wrong", seTap("x1", 9, now, "a", "M"))
 	assert.Equal(t, http.StatusUnauthorized, code)

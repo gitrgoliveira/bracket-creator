@@ -374,12 +374,12 @@ describe('a write applied in part', () => {
   });
 
   // The closed-match rule (2026-10-15): a change made after the match was
-  // finished is not applied, and the note says to use Correct result,
+  // finished is not applied, and the note says to tap Correct,
   // whether the rest of the write applied or not.
   it.each([
     ['applied in part', { id: 'm-ind', status: 'completed', heldGroups: ['points'], heldReason: 'match_closed' }],
     ['superseded', { applied: false, reason: 'superseded', heldGroups: ['points'], heldReason: 'match_closed' }],
-  ])('a change turned away because the match is finished (%s) says to use Correct result', async (_how, answer) => {
+  ])('a change turned away because the match is finished (%s) says to tap Correct', async (_how, answer) => {
     window.API.recordScore.mockImplementation((_c, _m, patch) => {
       writes.push(patch);
       return Promise.resolve(answer);
@@ -388,7 +388,7 @@ describe('a write applied in part', () => {
     await pointerTap(ipponBtn('aka', 'M'));
     await finish();
     expect(note()?.textContent).toBe(
-      "Kept in the match's history, not applied: points. The match is finished: to change the result, use Correct result.");
+      "Kept in the match's history, not applied: points. The match is finished: to change the result, tap Correct.");
   });
 
   // An earlier-made finish that moved a later change to the history answers

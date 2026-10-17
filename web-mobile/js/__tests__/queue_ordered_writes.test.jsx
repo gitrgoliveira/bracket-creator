@@ -686,8 +686,8 @@ describe('a second held write crossing the server-error threshold is published',
 describe('a queued change turned away because the match is finished', () => {
     // The closed-match rule (2026-10-15): the server keeps the match's recorded
     // finish and the change in its history, and says why (heldReason). The
-    // replay tells the editor and the operator to use Correct result.
-    it('the not-applied banner and the alert both say to use Correct result', async () => {
+    // replay tells the editor and the operator to tap Correct.
+    it('the not-applied banner and the alert both say to tap Correct', async () => {
         const s = server({ answer: () => ({ applied: false, reason: 'superseded', heldGroups: ['points'], heldReason: 'match_closed' }) });
         await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A', ipponsA: ['M'] }, 'pw', null);
         await settleOfflinePass();
@@ -701,7 +701,7 @@ describe('a queued change turned away because the match is finished', () => {
         unsubAlert();
         expect(failed).toHaveLength(1);
         expect(failed[0].reason).toMatch(/the match is finished/);
-        expect(failed[0].advice).toBe('To change the result, use Correct result.');
+        expect(failed[0].advice).toBe('To change the result, tap Correct.');
         expect(alerts.filter((a) => a.kind === 'superseded')).toEqual([
             expect.objectContaining({ count: 1, matchClosed: true, matchID: 'm1' }),
         ]);

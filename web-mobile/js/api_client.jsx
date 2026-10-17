@@ -1806,7 +1806,7 @@ function _notifyScoreSupersededAlert(count, compID, matchID, matchClosed = false
 
 // _heldForClosedMatch: the answer turned this write's own change away because
 // the match was finished, or because the next knockout round depends on its
-// result. One remedy either way: Correct result.
+// result. One remedy either way: Correct.
 function _heldForClosedMatch(body) {
     return writeMatchClosed(body) || writeResultLocked(body) !== null;
 }
@@ -2201,7 +2201,7 @@ async function _flushQueue() {
     // with several held writes gets one alert stating how many, not N toasts
     // overwriting each other.
     //   superseded/lastSuperseded/matchClosed: writes kept in their match's
-    //     history (writeMatchClosed: the alert then says to use Correct result).
+    //     history (writeMatchClosed: the alert then says to tap Correct).
     //   displaced: held finishes that landed and moved a LATER change of their
     //     match to its history (writeDisplacedGroups).
     //   sent: HELD writes that landed (bc-offl). A write is held only once a

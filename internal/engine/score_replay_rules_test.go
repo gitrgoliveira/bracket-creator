@@ -177,7 +177,7 @@ func TestReplay_BasisRules(t *testing.T) {
 // leave a knockout tied waits and, given nothing more, the kiken stands.
 // A withdrawal closes the match like any result (the closed-match rule): a tap
 // stamped after it, a point or an overtime period alike, is turned away and the
-// withdrawal stands. Correct result is how it is changed.
+// withdrawal stands. Correct is how it is changed.
 func TestReplay_WithdrawalRules(t *testing.T) {
 	kiken := func() *state.MatchResult {
 		m := knockoutIndividual()

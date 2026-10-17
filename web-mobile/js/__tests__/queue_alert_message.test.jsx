@@ -64,7 +64,7 @@ describe('queueAlertMessage', () => {
     it('names a refused running score write a change, not a result', () => {
         expect(queueAlertMessage({ kind: 'rejected', count: 1, terminalCount: 0, detail: 'conflict' }))
             .toBe('A change was refused by the server (conflict) and cannot be saved. Re-enter it.');
-        const sentence = 'The match is finished. Use Correct result to change it.';
+        const sentence = 'The match is finished. Tap Correct to change it.';
         expect(queueAlertMessage({ kind: 'rejected', count: 1, terminalCount: 0, detail: sentence, sentence: true }))
             .toBe(`A change was refused by the server and cannot be saved. ${sentence}`);
     });
@@ -100,8 +100,8 @@ describe('queueAlertMessage', () => {
         expect(queueAlertToastType({ kind: 'displaced', count: 2, terminalCount: 2 })).toBe('info');
     });
 
-    it('a write turned away by a finished match says to use Correct result', () => {
-        expect(queueAlertMessage({ kind: 'superseded', count: 1, terminalCount: 1, matchClosed: true })).toMatch(/use Correct result\.$/);
+    it('a write turned away by a finished match says to tap Correct', () => {
+        expect(queueAlertMessage({ kind: 'superseded', count: 1, terminalCount: 1, matchClosed: true })).toMatch(/tap Correct\.$/);
     });
 
     it('returns null for an unknown kind, so nothing is toasted', () => {

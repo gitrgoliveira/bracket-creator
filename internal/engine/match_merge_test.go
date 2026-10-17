@@ -381,7 +381,7 @@ func TestMerge_LateKikenOlderThanAPointIsHeld(t *testing.T) {
 // Points scored after a withdrawal no longer clear it (the closed-match rule,
 // 2026-10-15, replacing "points scored means the withdrawal was a mistake"):
 // the withdrawal closed the match, so the points are turned away and kept in the
-// history. Correct result is how a mistaken withdrawal is undone.
+// history. Correct is how a mistaken withdrawal is undone.
 func TestMerge_ScoringAfterAWithdrawalClearsIt(t *testing.T) {
 	bothBranches(t, func(t *testing.T, knockout bool) {
 		h := mmIndividual(t, knockout)
@@ -811,7 +811,7 @@ func TestMerge_ScoringAfterATeamWithdrawalClearsIt(t *testing.T) {
 // running, and the change is held in the history with the reason.
 // The closed-match rule (operator, 2026-10-15): a running write stamped after
 // the finish is turned away -- kept in the history, the finish and the winner
-// who advanced untouched -- whatever it would have given. Correct result is how
+// who advanced untouched -- whatever it would have given. Correct is how
 // a finished match changes.
 func TestMerge_RunningPointAfterTheFinish(t *testing.T) {
 	finish := func(t *testing.T, h mmHome) {

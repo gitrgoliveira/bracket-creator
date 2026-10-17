@@ -996,15 +996,15 @@ func (h *mergeHold) settleOrphanPicks(payloadA, payloadB string, removalWrite bo
 
 // HoldReasonMatchClosed is the history reason of a scoring write held because a
 // finish or a decision stamped before it had already closed the match (the
-// closed-match rule): Correct result is how a closed match changes.
+// closed-match rule): Correct is how a closed match changes.
 const HoldReasonMatchClosed = "the match was already finished"
 
 // MatchClosedMessage is the sentence a device is answered with when a tap or a
 // scoring write was turned away because the match was already closed, on the
 // score door and the score-events door alike. It is kept in the match's
 // history. The sentence names no button beyond the one every score editor
-// offers for a finished match, Correct result.
-const MatchClosedMessage = "Not applied: this match is already finished, so this change was kept in the match's history. To change the result, use Correct result."
+// offers for a finished match, Correct.
+const MatchClosedMessage = "Not applied: this match is already finished, so this change was kept in the match's history. To change the result, tap Correct."
 
 // HoldReasonRepBoutRemoved is the history reason of a representative picked
 // after the representative bout was removed (stamp order: the removal first,

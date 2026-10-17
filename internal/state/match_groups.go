@@ -767,7 +767,7 @@ type MergeReport struct {
 	// a decision stamped before the write had already closed the match (the
 	// closed-match rule, operator ruling 2026-10-15): the write is kept in the
 	// history and the answer carries heldReason "match_closed", so the device
-	// is told the match is finished and to use Correct result.
+	// is told the match is finished and to tap Correct.
 	MatchClosed bool
 	// Displaced are STORED changes this write moved to the history: a finish
 	// or a decision that arrives after scoring stamped later than it closes
@@ -862,7 +862,7 @@ func (r *MergeReport) DisplacedGroups() []string {
 // HeldReasonMatchClosed is the wire code (heldReason) of a scoring write held
 // because a finish or a decision stamped before it had already closed the
 // match (the closed-match rule): the write is kept in the history and the
-// device is told to use Correct result.
+// device is told to tap Correct.
 const HeldReasonMatchClosed = "match_closed"
 
 // HeldReason is the code a response carries beside heldGroups, "" when the

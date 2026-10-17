@@ -168,7 +168,7 @@ describe('writeHeldGroups / writePartlyHeld', () => {
 // The closed-match rule (operator ruling 2026-10-15): a change made after the
 // match was finished is not applied, is kept in the match's history, and the
 // server says so with heldReason "match_closed". Nothing newer won, so the
-// advice is Correct result, never the plain superseded "check the newer change".
+// advice is Correct, never the plain superseded "check the newer change".
 describe('a change turned away because the match is finished (match_closed)', () => {
     const held = { applied: false, reason: 'superseded', heldGroups: ['points'], heldReason: 'match_closed' };
 
@@ -182,28 +182,28 @@ describe('a change turned away because the match is finished (match_closed)', ()
         expect(writeMatchClosed(null)).toBe(false);
     });
 
-    it('the banner says the match is finished and to use Correct result', () => {
+    it('the banner says the match is finished and to tap Correct', () => {
         expect(notLandedBanner(held)).toEqual({ lead: SUPERSEDED_LEAD, reason: MATCH_CLOSED_REASON, advice: MATCH_CLOSED_ADVICE });
         expect(notSavedText(notLandedBanner(held))).toBe(
-            "Not applied: the match is finished, so this change was kept in the match's history. To change the result, use Correct result.");
+            "Not applied: the match is finished, so this change was kept in the match's history. To change the result, tap Correct.");
     });
 
     it("the server's sentence wins when it sends one", () => {
-        const message = 'This match is finished. To change its result, use Correct result.';
+        const message = 'This match is finished. To change its result, tap Correct.';
         expect(notLandedBanner({ ...held, message })).toEqual({ lead: SUPERSEDED_LEAD, reason: message, sentence: true });
         expect(notSavedText(notLandedBanner({ ...held, message }))).toBe(`Not applied: ${message}`);
     });
 
     it('the partial-apply note says it in place of "a newer change"', () => {
         expect(keptInHistoryNote({ id: 'm1', status: 'completed', heldGroups: ['points'], heldReason: 'match_closed' })).toBe(
-            "Kept in the match's history, not applied: points. The match is finished: to change the result, use Correct result.");
+            "Kept in the match's history, not applied: points. The match is finished: to change the result, tap Correct.");
         expect(heldGroupsNote(['points'])).toBe(
             "Kept in the match's history, not applied: points. A newer change to the same thing was recorded first.");
     });
 
     it('the queue alert says it too', () => {
-        expect(supersededAlertText(1, true, true)).toMatch(/^A result was not applied: the match is finished.*use Correct result\.$/);
-        expect(supersededAlertText(2, false, true)).toMatch(/^2 results were not applied.*use Correct result\.$/);
+        expect(supersededAlertText(1, true, true)).toMatch(/^A result was not applied: the match is finished.*tap Correct\.$/);
+        expect(supersededAlertText(2, false, true)).toMatch(/^2 results were not applied.*tap Correct\.$/);
         expect(supersededAlertText(1, true)).toMatch(/newer change/);
     });
 });
@@ -228,7 +228,7 @@ describe('a result held because the next knockout round depends on it', () => {
 
     it('the note names it', () => {
         expect(keptInHistoryNote(played)).toBe(
-            "Kept in the match's history, not applied: the result. The next round was already fought, so the recorded result stands. To change the result, use Correct result.");
+            "Kept in the match's history, not applied: the result. The next round was already fought, so the recorded result stands. To change the result, tap Correct.");
     });
 });
 
@@ -298,9 +298,9 @@ describe('the tap-outcome readers', () => {
         expect(tapNotAppliedText({ outcome: 'notStarted', reason: 'match_sent_back', message: 'The match was sent back to the queue.' }))
             .toBe('The match was sent back to the queue.');
     });
-    it('a capped tap reads that the bout was already decided; a closed match says Correct result', () => {
+    it('a capped tap reads that the bout was already decided; a closed match says Correct', () => {
         expect(tapNotAppliedText({ outcome: 'capped' })).toBe('Not applied: the bout was already decided.');
-        expect(tapNotAppliedText({ outcome: 'matchClosed' })).toMatch(/use Correct result\.$/);
+        expect(tapNotAppliedText({ outcome: 'matchClosed' })).toMatch(/tap Correct\.$/);
     });
     it('the alert counts one item per tap', () => {
         expect(tapNotAppliedAlertText(1, true, 'Not applied: the bout was already decided.')).toBe('Not applied: the bout was already decided.');

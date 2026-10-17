@@ -107,12 +107,12 @@ export const SUPERSEDED_ADVICE = 'Check the match and its history before enterin
 // `one` whether that is a single result (queuedWritesNoun), `matchClosed`
 // whether any was turned away because the match was already finished
 // (writeMatchClosed): for that one nothing newer won, and the remedy is
-// Correct result.
+// Correct.
 export function supersededAlertText(n, one, matchClosed = false) {
     if (matchClosed) {
         return one
             ? `A result was not applied: ${MATCH_CLOSED_REASON}, so nothing is lost. ${MATCH_CLOSED_ADVICE}`
-            : `${n} results were not applied because the matches were already finished or newer changes were recorded first. They were kept in each match's history, so nothing is lost. To change a finished match's result, use Correct result.`;
+            : `${n} results were not applied because the matches were already finished or newer changes were recorded first. They were kept in each match's history, so nothing is lost. To change a finished match's result, tap Correct.`;
     }
     return one
         ? "A result was not applied because a newer change to the same match was recorded first. It was kept in the match's history, so nothing is lost: check the match and its history before entering anything again."
@@ -124,7 +124,7 @@ export function supersededAlertText(n, one, matchClosed = false) {
 // after the match was finished, heldReason "match_closed", on a superseded
 // answer, on one applied in part, and beside `displacedGroups` when a finish
 // moved a later change of the match to its history. One code, one remedy:
-// Correct result. A rival result that would displace one the next knockout
+// Correct. A rival result that would displace one the next knockout
 // round already depends on is held whole with "downstream_knockout_played"
 // or "downstream_knockout_running" (writeResultLocked). The server's own
 // sentence (`message`) wins over these words when it sends one.
@@ -132,10 +132,10 @@ export const HELD_REASON_MATCH_CLOSED = 'match_closed';
 export const HELD_REASON_RESULT_LOCKED_PLAYED = 'downstream_knockout_played';
 export const HELD_REASON_RESULT_LOCKED_RUNNING = 'downstream_knockout_running';
 export const MATCH_CLOSED_REASON = "the match is finished, so this change was kept in the match's history";
-export const MATCH_CLOSED_ADVICE = 'To change the result, use Correct result.';
+export const MATCH_CLOSED_ADVICE = 'To change the result, tap Correct.';
 // The sentence the partial-apply note (heldGroupsNote) ends on instead of
 // "A newer change to the same thing was recorded first."
-export const MATCH_CLOSED_NOTE = 'The match is finished: to change the result, use Correct result.';
+export const MATCH_CLOSED_NOTE = 'The match is finished: to change the result, tap Correct.';
 export const RESULT_LOCKED_PLAYED_REASON = 'the next round was already fought, so the recorded result stands';
 export const RESULT_LOCKED_RUNNING_REASON = 'the next round has already started, so the recorded result stands';
 

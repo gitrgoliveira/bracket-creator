@@ -2769,7 +2769,7 @@ func matchSnapshotOrErr(s matchStores, compID, matchID, guardLabel string) (matc
 // write had already closed the match (the closed-match rule). It is still not
 // lost and still never wins a retry, so it keeps the same applied:false
 // superseded shape, with heldReason and its own message (messageForHeldReason)
-// telling the operator the match is finished and to use Correct result.
+// telling the operator the match is finished and to tap Correct.
 func respondSuperseded(c *gin.Context, heldGroups []string, heldReason string) {
 	// LOGGED because this is the one successful-looking response whose work
 	// an operator does not see on the match. Since bc-mrgc the held values are
@@ -2826,8 +2826,8 @@ func messageForHeldReason(heldReason string) string {
 // played or started, so the recorded result is locked (operator decision K1,
 // 2026-10-16). The write is kept in the match's history.
 const (
-	ResultLockedPlayedMessage  = "Not applied: the next round was already fought, so the recorded result stands. This result was kept in the match's history. To change the result, use Correct result."
-	ResultLockedRunningMessage = "Not applied: the next round has already started, so the recorded result stands. This result was kept in the match's history. To change the result, use Correct result."
+	ResultLockedPlayedMessage  = "Not applied: the next round was already fought, so the recorded result stands. This result was kept in the match's history. To change the result, tap Correct."
+	ResultLockedRunningMessage = "Not applied: the next round has already started, so the recorded result stands. This result was kept in the match's history. To change the result, tap Correct."
 )
 
 // writesOverFinished reports whether a write of this status, over a finished

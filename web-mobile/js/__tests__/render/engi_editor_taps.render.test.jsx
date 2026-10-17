@@ -110,10 +110,10 @@ describe('a running engi match is scored by taps', () => {
     await click(r, 'engi-shiro-inc');
     const [tap] = outbox.taps('c1', 'm1');
     await act(async () => {
-      outbox.ack('c1', 'm1', null, { [tap.id]: { outcome: 'matchClosed', reason: 'match_closed', message: 'The match is finished. Use Correct result.' } });
+      outbox.ack('c1', 'm1', null, { [tap.id]: { outcome: 'matchClosed', reason: 'match_closed', message: 'The match is finished. Tap Correct.' } });
     });
     expect(counts(r.container)).toEqual([1, 0]);
-    expect(r.container.querySelector('[data-testid="tap-not-applied-note"]').textContent).toBe('The match is finished. Use Correct result.');
+    expect(r.container.querySelector('[data-testid="tap-not-applied-note"]').textContent).toBe('The match is finished. Tap Correct.');
   });
 
   it('a tap refused because the match is not running shows the server\'s sentence next to the board', async () => {

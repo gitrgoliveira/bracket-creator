@@ -11,7 +11,7 @@
 // hantei, daihyosen, hikiwake) is recorded, any tap or scoring baseline
 // stamped AFTER it is turned away: an event's outcome is matchClosed, a
 // baseline's scoring groups are Replay.Held. Both are kept in the history and
-// the device is told the match is finished and to use Correct result. What is
+// the device is told the match is finished and to tap Correct. What is
 // stamped BEFORE the result keeps the D5 rule (recorded when the result's
 // basis holds it, else beforeBaseline). The FIRST recorded result stands: a
 // later finish or decision from a device that did not see it is turned away
@@ -1066,7 +1066,7 @@ func (rp *replayer) applyEvent(line int, e *domain.ScoreEvent) {
 	g := rp.groupOf(e)
 	// THE CLOSED-MATCH RULE: a finish or a decision the log has already
 	// recorded (in stamp order) closed the match, so a tap stamped after it
-	// is kept and changes nothing. Correct result (a baseline) or a reopen is
+	// is kept and changes nothing. Correct (a baseline) or a reopen is
 	// the only way to change it.
 	if rp.closed() && !rp.boutsStayOpen(g) {
 		rp.outcome[line] = domain.ScoreOutcomeMatchClosed

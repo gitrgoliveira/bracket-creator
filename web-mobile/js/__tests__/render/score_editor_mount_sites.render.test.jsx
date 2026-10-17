@@ -682,8 +682,8 @@ describe('the self-run editor is told of a refusal the outbox receives', () => {
       await act(async () => { await probe.props.onSubmit({ status: 'running', ipponsA: ['M'] }); });
       expect(opts && typeof opts.onRefusal, 'the write carries an onRefusal').toBe('function');
       expect(alert).not.toHaveBeenCalled();
-      expect(opts.onRefusal(new Error('The match is finished. Use Correct result.'))).toBe(true);
-      expect(alert).toHaveBeenCalledWith('The match is finished. Use Correct result.');
+      expect(opts.onRefusal(new Error('The match is finished. Tap Correct.'))).toBe(true);
+      expect(alert).toHaveBeenCalledWith('The match is finished. Tap Correct.');
       expect(opts.onRefusal(null)).toBe(true);
       expect(alert).toHaveBeenLastCalledWith("Couldn't save the result. Please try again.");
     } finally {

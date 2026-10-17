@@ -5761,8 +5761,8 @@ components:
             Present on `superseded` when the groups were held not because a
             newer change is stored but because a finish or a decision stamped
             before them had already closed the match (the closed-match rule):
-            `message` then tells the operator the match is finished and to use
-            Correct result. The change is kept in the match's history. Also
+            `message` then tells the operator the match is finished and to tap
+            Correct. The change is kept in the match's history. Also
             carried, beside `heldGroups` or `displacedGroups`, by a write
             applied in part. `downstream_knockout_played` and
             `downstream_knockout_running` say the stored result is locked: a

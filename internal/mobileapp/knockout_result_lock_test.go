@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -70,7 +71,7 @@ func TestScoreHandler_PlayedNextRoundLocksTheResult(t *testing.T) {
 	assert.Equal(t, "superseded", resp["reason"])
 	assert.Equal(t, "downstream_knockout_played", resp["heldReason"])
 	assert.Contains(t, resp["message"], "next round was already fought")
-	assert.Contains(t, resp["message"], "Correct result")
+	assert.Contains(t, resp["message"], "tap Correct.")
 	assert.Contains(t, resp["heldGroups"], "result")
 
 	b, err = store.LoadBracket(compID)
@@ -90,4 +91,19 @@ func TestScoreHandler_PlayedNextRoundLocksTheResult(t *testing.T) {
 	assert.Equal(t, "downstream_knockout_played", body(w.Body)["error"])
 	w = putScore(t, r, compID, "m-r1-0", score("Alice", []string{"M"}, []string{}, map[string]any{"modifiedAt": t3, "correctionReason": "scoresheet was misread", "forceDownstreamReopen": true}))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+}
+
+// bc-evts stage 4 review 2 (G2): every sentence that sends the operator to the
+// correction names the button as it reads, "Correct" (admin_shiaijo.jsx,
+// admin_schedule_score_editor.jsx), never "Correct result", which no button
+// says. The JS words (write_result.jsx) are pinned beside them.
+func TestRefusalSentencesNameTheCorrectButtonAsItReads(t *testing.T) {
+	for name, msg := range map[string]string{
+		"MatchClosedMessage":         MatchClosedMessage,
+		"ResultLockedPlayedMessage":  ResultLockedPlayedMessage,
+		"ResultLockedRunningMessage": ResultLockedRunningMessage,
+	} {
+		assert.True(t, strings.HasSuffix(msg, "To change the result, tap Correct."), "%s: %q", name, msg)
+		assert.NotContains(t, msg, "Correct result", name)
+	}
 }

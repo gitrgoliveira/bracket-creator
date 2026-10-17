@@ -91,7 +91,7 @@ func TestScoreHandler_StaleFinishIsHeldNotRefusedForAReason(t *testing.T) {
 
 // The closed-match rule on the wire: a recount stamped after an engi finish is
 // not applied, and the answer says why (heldReason "match_closed", with its
-// message), so the operator corrects the result with Correct result.
+// message), so the operator corrects the result with Correct.
 func TestScoreHandler_HeldForAWinnerSaysSo(t *testing.T) {
 	const compID = "merge-review-r4"
 	r, store := mergeServer(t, compID)
@@ -150,7 +150,7 @@ func TestScoreHandler_HeldForADefaultWinSaysSo(t *testing.T) {
 	assert.Equal(t, false, out["applied"])
 	assert.Equal(t, "superseded", out["reason"], "the not-retried, not-lost shape the queue keys on")
 	assert.Equal(t, state.HeldReasonMatchClosed, out["heldReason"])
-	assert.NotContains(t, out, "heldDecision", "one code, one remedy: Correct result")
+	assert.NotContains(t, out, "heldDecision", "one code, one remedy: Correct")
 	assert.Equal(t, MatchClosedMessage, out["message"])
 	assert.Equal(t, []any{"points"}, out["heldGroups"])
 

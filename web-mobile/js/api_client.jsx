@@ -4072,7 +4072,8 @@ function _rerunFlushAt(at) {
 // public page sends it empty, never omits it). A self-run participant's write
 // carries none, and the members door is main-gated, so that read is the
 // public competition payload, which carries the same `teamMembers` (L3). A
-// read refused (a stale organiser password's 401 included) or failed proves
+// read refused (a stale organiser password's 401 included, a 403 counted as a
+// failed try) or failed proves
 // nothing: the owner keeps the id unknown, and the writes go as they were made.
 function _readMintedMembers({ id, c, t }, password) {
     // A read refused for its password waits for a new sign-in, as does every
@@ -4086,7 +4087,10 @@ function _readMintedMembers({ id, c, t }, password) {
     const url = password ? `/api/competitions/${c}/team-members` : `/api/viewer/competitions/${c}`;
     _fetchJson(url, { headers: { 'X-Tournament-Password': password || '' } }).then(({ res, body }) => {
         // Refused for the password (a stale organiser sign-in): no failed try.
-        if (res.status === 401 || res.status === 403) return MINTED_READ_AUTH_REFUSED;
+        // A 403 is not that: on this server it means the tournament record is
+        // not usable yet and is retried (_sendEntry), so it is a failed try
+        // below (Z4).
+        if (res.status === 401) return MINTED_READ_AUTH_REFUSED;
         const teams = res.ok && body && body.teamMembers;
         if (!teams || typeof teams !== 'object') throw new Error(`no member list (HTTP ${res.status})`);
         return Array.isArray(teams[t]) ? teams[t] : [];

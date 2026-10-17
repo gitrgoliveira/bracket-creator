@@ -1,6 +1,6 @@
 // bc-evts stage 3 review 11, Y4 and Y5: the reads of a minted member's team
 // (minted_members.jsx, made by api_client.jsx).
-//   Y4: a read refused for the password (401/403) is no failed try: it is
+//   Y4: a read refused for the password (401; a 403 is a failed try, Z4) is no failed try: it is
 //       parked until a new sign-in, never looped and never counted toward the
 //       bound; a revoked password's park pauses the timer; a new sign-in reads
 //       again whatever the earlier tries.
@@ -120,6 +120,27 @@ describe('Y4: a read refused for the password waits for a new sign-in', () => {
             for (let i = 0; i < 10; i++) await tick(FETCH_TIMEOUT_MS / 2);
             expect(reads.at(-1).pw, 'asked again with the new sign-in').toBe('new');
             expect(d.dropped).toEqual([member.id]);
+        } finally {
+            d.stop();
+            API.clearQueue();
+        }
+    }, 60000);
+
+    // Z4 (stage 3 review 12): on this server a 403 means the tournament record
+    // is not usable yet, and is retried (the outbox's own 403 branch); only a
+    // 401 says the password was refused.
+    it('a 403 is no refusal of the password: it is a failed try, asked again with no new sign-in', async () => {
+        let usable = false;
+        const reads = server(() => (usable ? resp(200, { teamMembers: { t1: [] } }) : resp(403, { error: 'the tournament record is not usable yet' })));
+        const { API } = await loadTab();
+        const d = listenDropped();
+        try {
+            const member = await addDiscardedAfterItWentOut(API, 'pw');
+            expect(reads.length, 'the first read was answered 403').toBe(1);
+            usable = true;
+            for (let i = 0; i < 10; i++) await tick(FETCH_TIMEOUT_MS * 2);
+            expect(reads.length, 'asked again, not parked').toBeGreaterThan(1);
+            expect(d.dropped, 'and the member is judged once a read answers').toEqual([member.id]);
         } finally {
             d.stop();
             API.clearQueue();

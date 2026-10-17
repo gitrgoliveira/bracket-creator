@@ -831,8 +831,15 @@ function makeSubmitDecision({
   // the decision's basis claims it and nothing more (bc-evts stage 3 review
   // 11, m1).
   seenScoreVersion,
+  // The editor's isDirty (a ref or a thunk): a decision carries no draft
+  // points, so over unsaved entries it asks first (R1, confirmDiscardUnsaved).
+  unsaved = false,
 }) {
   const submit = async (kind, { decisionBy, decisionReason }) => {
+    if (holdsUnsaved(unsaved)) {
+      const go = await confirmDiscardUnsaved(unsaved, recordDecisionAnyway(kind));
+      if (!go || !mountedRef.current) return;
+    }
     setDecisionSubmitting(true);
     setDecisionErr('');
     // F5: clear any prior pending-write state when the operator retries.
@@ -1683,6 +1690,49 @@ function withdrawalInForce(m) {
   return m.status === "completed" && isTeamDefaultWinDecision(m.decision);
 }
 
+// The warning an editor's own action gives before it replaces entries the
+// editor holds unsaved (operator decision R1, 2026-10-17: "If I don't save it,
+// the ui should warn me it will be discarded."). The actions it guards are the
+// ones that do not carry the draft: a reopen (Clear <decision> and reopen, the
+// kachinuki Reopen match), the court-busy Queue it and reopen, a decision, and
+// the team sheet's representative-bout add or remove over a sheet it does not
+// save first. A Start carries the draft and asks nothing. `unsaved` is the
+// editor's own isDirty, the one Close asks "Discard unsaved scoring changes?"
+// on, read through a ref or a thunk because the editors work it out below the
+// hooks that take it. The prompt is the operator's own and never waits on the
+// server: Cancel sends nothing and leaves the entries on the board, Discard
+// entries goes on exactly as the action does with nothing unsaved.
+export const UNSAVED_ENTRIES_DISCARDED = "Your unsaved entries will be discarded.";
+export const REOPEN_ANYWAY = "Reopen anyway?";
+export const QUEUE_AND_REOPEN_ANYWAY = "Queue it and reopen anyway?";
+export const ADD_REP_BOUT_ANYWAY = "Add the representative bout anyway?";
+export const REMOVE_REP_BOUT_ANYWAY = "Remove the representative bout anyway?";
+export function recordDecisionAnyway(kind) {
+  return `Record the ${decisionWord(kind) || "decision"} anyway?`;
+}
+export function unsavedDiscardDialog(question = REOPEN_ANYWAY) {
+  return {
+    message: `${UNSAVED_ENTRIES_DISCARDED} ${question}`,
+    confirmLabel: "Discard entries",
+    cancelLabel: "Keep entries",
+    danger: true,
+  };
+}
+export function holdsUnsaved(unsaved) {
+  const v = typeof unsaved === "function" ? unsaved() : (unsaved && typeof unsaved === "object" && "current" in unsaved ? unsaved.current : unsaved);
+  return !!v;
+}
+// confirmDiscardUnsaved: true when the action may go on (nothing unsaved, or
+// the operator chose to discard the entries).
+export async function confirmDiscardUnsaved(unsaved, question) {
+  if (!holdsUnsaved(unsaved)) return true;
+  try {
+    return !!(await window.confirmDialog(unsavedDiscardDialog(question)));
+  } catch {
+    return false;
+  }
+}
+
 // useMatchReopen: the one client of POST .../reopen and its court-busy remedy
 // POST .../requeue-blocker-and-reopen, for every editor that reopens a match:
 // the kachinuki Reopen and Clear withdrawal and reopen in the individual and
@@ -1710,8 +1760,11 @@ function withdrawalInForce(m) {
 //     aware of the consequences"). What that reopened is named in `notice`;
 //     declining leaves everything as it was and says so in `err`.
 // Every other refusal is the server's sentence, shown verbatim in `err`.
-function useMatchReopen({ match, password, isComplete, own }) {
+function useMatchReopen({ match, password, isComplete, own, unsaved = false }) {
   const mountedRef = useRefA(true);
+  // The unsaved-entries warning is open (R1): a second tap meanwhile asks
+  // nothing more.
+  const askingRef = useRefA(false);
   useEffectA(() => () => { mountedRef.current = false; }, []);
   const [busy, setBusy] = useStateA(false);
   // The server answered success; the match prop may not have flipped yet.
@@ -1811,8 +1864,22 @@ function useMatchReopen({ match, password, isComplete, own }) {
     setLanded(true);
   };
 
-  const reopen = async (reason = "") => {
+  // R1: an action over unsaved entries asks first; with none it goes on in
+  // the same tick, as it always did.
+  // Asked only when holdsUnsaved(unsaved), so nothing else awaits.
+  const unsavedDeclined = async (question) => {
+    if (askingRef.current) return true;
+    askingRef.current = true;
+    try {
+      return !(await confirmDiscardUnsaved(unsaved, question)) || !mountedRef.current;
+    } finally {
+      askingRef.current = false;
+    }
+  };
+
+  const reopen = async (reason = "", question = REOPEN_ANYWAY) => {
     if (busy || landed) return;
+    if (holdsUnsaved(unsaved) && await unsavedDeclined(question)) return;
     setErr("");
     setConflict(null);
     setNotice("");
@@ -1854,6 +1921,7 @@ function useMatchReopen({ match, password, isComplete, own }) {
   const requeueBlocker = async () => {
     const c = conflict;
     if (!c || busy || landed) return;
+    if (holdsUnsaved(unsaved) && await unsavedDeclined(QUEUE_AND_REOPEN_ANYWAY)) return;
     setErr("");
     setBusy(true);
     const token = own ? own.begin(OWN_REQUEUE) : 0;
@@ -2281,7 +2349,7 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
               type="button"
               className="btn btn--sm"
               data-testid="clear-withdrawal-reopen"
-              onClick={() => ctl.reopen("")}
+              onClick={() => ctl.reopen("", !(clearsDefaultWin || barMovesOn) ? REOPEN_ANYWAY : `Clear the ${decisionNoun} anyway?`)}
               disabled={disabled || ctl.busy || ctl.landed || !settled}
             >
               {/* bc-cse: "Clear <decision>" -- no "and reopen" -- because a

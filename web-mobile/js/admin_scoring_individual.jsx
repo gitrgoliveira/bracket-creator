@@ -385,6 +385,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // already no-ops UI dismissal while submitting=true, so this covers
   // only external/parent-driven unmount.
   const mountedRef = useRefA(true);
+  // isDirty, worked out further down, for the actions that ask before they
+  // replace unsaved entries (R1: a reopen, a requeue, a decision).
+  const unsavedRef = useRefA(false);
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
   // bc-mrgc: what a write applied only in part kept in the match's history.
@@ -439,6 +442,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
     // F5: thread pending-write handles so the factory can show the sticky banner
     // when the decision write is only queued (offline / transient failure).
     setPendingWrite, pendingFnRef,
+    unsaved: unsavedRef,
   });
   // bc-tmfn: Clear withdrawal and reopen, the same door and component the team
   // editor uses (RecordedWithdrawal / useMatchReopen, admin_scoring_shared.jsx).
@@ -453,7 +457,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // reopened. Called unconditionally (rules of hooks: the team and engi
   // dispatch below returns after every hook).
   const recordedWithdrawal = withdrawalInForce(m);
-  const reopenCtl = useMatchReopen({ match: m, password, isComplete, own });
+  const reopenCtl = useMatchReopen({ match: m, password, isComplete, own, unsaved: unsavedRef });
   // While that withdrawal is in force, the WINNER's side holds the default-win
   // maru, which is the ruling itself: Save correction keeps it whatever is
   // sent (engine keptWithdrawalScoreline) and only the withdrawing side's
@@ -970,6 +974,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
     hanteiPick !== recordedHtKey ||
     // A removed withdrawal is unsaved until Save correction sends it.
     removingWithdrawal;
+  unsavedRef.current = isDirty;
   // The scoreline half of the same rule, declared HERE because the hook needs
   // isDirty: it reads the value from the render BEFORE the server change (see
   // useAdoptFromServer). It self-corrects: a re-seed makes the next render's

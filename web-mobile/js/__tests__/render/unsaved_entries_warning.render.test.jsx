@@ -1,0 +1,272 @@
+// Operator decision R1 (2026-10-17): "If I don't save it, the ui should warn
+// me it will be discarded." An editor's own action that does not carry the
+// draft (a reopen, the court-busy Queue it and reopen, a decision, the team
+// sheet's representative-bout add or remove over a finished match) asks first
+// while the editor holds unsaved entries: Cancel keeps them and sends nothing,
+// Discard entries sends the write exactly as before and the board shows the
+// server's copy. With nothing unsaved it asks nothing.
+//
+// The engi editor offers none of these actions (no reopen, no decision, no
+// representative bout), so it has nothing to warn on; the last case pins that.
+import React from 'react';
+import { render, act, fireEvent, screen } from '@testing-library/react';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import {
+  installIndividualEditor, resetOutbox, API, bout, letterBtn, shiroSide, marks, NOW,
+} from '../helpers/individual_editor.js';
+import { teamBout, boutRow, ipponBtn, marks as boutMarks } from '../helpers/team_editor.js';
+import { engiBout } from '../helpers/engi_editor.js';
+
+let ScoreEditorModal;
+let restore;
+beforeAll(async () => { ({ ScoreEditorModal, restore } = await installIndividualEditor()); });
+afterAll(() => restore());
+beforeEach(() => {
+  resetOutbox();
+  API.reopenMatch = vi.fn().mockResolvedValue({ applied: true });
+  API.requeueBlockerAndReopen = vi.fn().mockResolvedValue({ applied: true });
+  API.recordDecision = vi.fn().mockResolvedValue({ applied: true, status: 'completed' });
+});
+
+const el = (m) => <ScoreEditorModal match={m} onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue({ applied: true })} password="pw" variant="inline" />;
+const tap = (node) => act(async () => { fireEvent.click(node); });
+const flush = async () => { for (let i = 0; i < 5; i += 1) await act(async () => { await Promise.resolve(); }); };
+const WARNING = /^Your unsaved entries will be discarded\. /;
+const warnings = () => window.confirmDialog.mock.calls.filter(([o]) => WARNING.test(o?.message || ''));
+const answerWarning = (ok) => { window.confirmDialog = vi.fn().mockResolvedValue(ok); };
+
+// A knockout match Tanaka (Shiro) did not appear for, recorded as fusenpai.
+const withdrawal = (over = {}) => ({
+  id: 'm-r1-0', compId: 'c1', phase: 'knockout', round: 'Round 1', court: 'A',
+  sideA: { id: 'p1', name: 'Yamada' }, sideB: { id: 'p2', name: 'Tanaka' },
+  status: 'completed', ipponsA: ['○', '○'], ipponsB: [], hansokuA: 0, hansokuB: 0,
+  decision: 'fusenpai', decisionBy: 'shiro', winner: { id: 'p1', name: 'Yamada' },
+  modifiedAt: NOW, scoreVersion: 2,
+  ...over,
+});
+
+describe('individual editor: Clear fusenpai and reopen over unsaved entries', () => {
+  it('asks first; Cancel keeps the entries and sends nothing', async () => {
+    const r = render(el(withdrawal()));
+    await flush();
+    await tap(letterBtn(shiroSide(r.container), 'M'));
+    answerWarning(false);
+    await tap(screen.getByTestId('clear-withdrawal-reopen'));
+    await flush();
+    expect(warnings()).toHaveLength(1);
+    expect(warnings()[0][0]).toEqual(expect.objectContaining({
+      message: 'Your unsaved entries will be discarded. Reopen anyway?', confirmLabel: 'Discard entries', cancelLabel: 'Keep entries',
+    }));
+    expect(API.reopenMatch).not.toHaveBeenCalled();
+    expect(marks(r.container).join(' '), 'the entry is still on the board').toMatch(/M/);
+    expect(screen.getByTestId('clear-withdrawal-reopen').disabled).toBe(false);
+  });
+
+  it('asks first; Discard entries sends the reopen and the board shows the server\'s copy', async () => {
+    const r = render(el(withdrawal()));
+    await flush();
+    await tap(letterBtn(shiroSide(r.container), 'M'));
+    answerWarning(true);
+    await tap(screen.getByTestId('clear-withdrawal-reopen'));
+    await flush();
+    expect(warnings()).toHaveLength(1);
+    expect(API.reopenMatch).toHaveBeenCalledTimes(1);
+    r.rerender(el(withdrawal({ status: 'running', ipponsA: [], decision: '', decisionBy: '', winner: null, modifiedAt: NOW + 20, scoreVersion: 3 })));
+    await flush();
+    expect(marks(r.container).join(' '), 'the discarded entry is gone').not.toMatch(/M/);
+    expect(screen.queryByTestId('draft-kept-notice')).toBeNull();
+  });
+
+  it('asks nothing with no unsaved entries', async () => {
+    render(el(withdrawal()));
+    await flush();
+    await tap(screen.getByTestId('clear-withdrawal-reopen'));
+    await flush();
+    expect(warnings()).toHaveLength(0);
+    expect(API.reopenMatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('Queue it and reopen asks again over the entries the refused reopen left', async () => {
+    const r = render(el(withdrawal()));
+    await flush();
+    await tap(letterBtn(shiroSide(r.container), 'M'));
+    API.reopenMatch = vi.fn().mockRejectedValue(Object.assign(new Error('Court A already has a running match.'),
+      { code: 'court_busy', court: 'A', matchId: 'm-blk', compId: 'c1' }));
+    await tap(screen.getByTestId('clear-withdrawal-reopen'));
+    await flush();
+    const remedy = screen.getByTestId('withdrawal-reopen-requeue-button');
+    answerWarning(false);
+    await tap(remedy);
+    await flush();
+    expect(warnings()).toHaveLength(1);
+    expect(warnings()[0][0].message).toBe('Your unsaved entries will be discarded. Queue it and reopen anyway?');
+    expect(API.requeueBlockerAndReopen).not.toHaveBeenCalled();
+    expect(marks(r.container).join(' ')).toMatch(/M/);
+    answerWarning(true);
+    await tap(screen.getByTestId('withdrawal-reopen-requeue-button'));
+    await flush();
+    expect(API.requeueBlockerAndReopen).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('individual editor: a decision over unsaved entries', () => {
+  const finished = () => bout({ status: 'completed', ipponsA: ['M'], winner: { id: 'p1', name: 'Yamada' }, phase: 'knockout', round: 'Round 1' });
+  const recordKiken = async () => {
+    await tap(screen.getByTestId('scoring-modal-kiken-voluntary-button'));
+    await tap(document.querySelector('input[name="decision-side"][value="aka"]'));
+    await act(async () => { fireEvent.submit(document.querySelector('form.decision-prompt')); });
+    await flush();
+  };
+
+  it('asks first; Cancel keeps the entries and sends nothing', async () => {
+    const r = render(el(finished()));
+    await flush();
+    await tap(letterBtn(shiroSide(r.container), 'K'));
+    answerWarning(false);
+    await recordKiken();
+    expect(warnings().map(([o]) => o.message)).toEqual(['Your unsaved entries will be discarded. Record the kiken anyway?']);
+    expect(API.recordDecision).not.toHaveBeenCalled();
+    expect(marks(r.container).join(' ')).toMatch(/K/);
+  });
+
+  it('asks first; Discard entries records the decision', async () => {
+    const r = render(el(finished()));
+    await flush();
+    await tap(letterBtn(shiroSide(r.container), 'K'));
+    answerWarning(true);
+    await recordKiken();
+    expect(warnings()).toHaveLength(1);
+    expect(API.recordDecision).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks nothing with no unsaved entries', async () => {
+    render(el(finished()));
+    await flush();
+    await recordKiken();
+    expect(warnings()).toHaveLength(0);
+    expect(API.recordDecision).toHaveBeenCalledTimes(1);
+  });
+});
+
+// A finished three-bout knockout team match Osaka won; bouts 2 and 3 drawn.
+const teamFinished = (over = {}) => teamBout({
+  status: 'completed', modifiedAt: NOW, scoreVersion: 2, winner: 'Osaka',
+  subResults: [boutRow(1, { ipponsB: ['K'], winner: 'Osaka' }), boutRow(2, { decision: 'hikiwake' }), boutRow(3, { decision: 'hikiwake' })],
+  ...over,
+});
+
+describe('team editor: Add representative bout over unsaved entries', () => {
+  beforeEach(() => {
+    API.recordDaihyosen = vi.fn().mockResolvedValue({ applied: true, status: 'running' });
+  });
+
+  it('asks first; Cancel keeps the entries and sends nothing', async () => {
+    const r = render(el(teamFinished()));
+    await flush();
+    await tap(ipponBtn(r.container, 0, 'aka', 'M'));
+    answerWarning(false);
+    await tap(screen.getByTestId('scoring-modal-daihyosen-button'));
+    await flush();
+    expect(warnings().map(([o]) => o.message)).toEqual(['Your unsaved entries will be discarded. Add the representative bout anyway?']);
+    expect(API.recordDaihyosen).not.toHaveBeenCalled();
+    expect(boutMarks(r.container, 0, 'aka')).toContain('M');
+  });
+
+  it('asks first; Discard entries adds the bout and the board shows the server\'s copy', async () => {
+    const r = render(el(teamFinished()));
+    await flush();
+    await tap(ipponBtn(r.container, 0, 'aka', 'M'));
+    answerWarning(true);
+    await tap(screen.getByTestId('scoring-modal-daihyosen-button'));
+    await flush();
+    expect(warnings()).toHaveLength(1);
+    expect(API.recordDaihyosen).toHaveBeenCalledTimes(1);
+    expect(boutMarks(r.container, 0, 'aka'), 'the discarded entry is gone').not.toContain('M');
+    expect(boutMarks(r.container, 0, 'shiro')).toContain('K');
+  });
+
+  it('asks nothing with no unsaved entries', async () => {
+    render(el(teamFinished()));
+    await flush();
+    await tap(screen.getByTestId('scoring-modal-daihyosen-button'));
+    await flush();
+    expect(warnings()).toHaveLength(0);
+    expect(API.recordDaihyosen).toHaveBeenCalledTimes(1);
+  });
+
+  it('a queued sheet asks nothing: the Start before the add carries its entries', async () => {
+    const r = render(el(teamBout({ status: 'scheduled', modifiedAt: NOW, scoreVersion: 2 })));
+    await flush();
+    await tap(ipponBtn(r.container, 0, 'aka', 'M'));
+    await tap(screen.getByTestId('scoring-modal-daihyosen-button'));
+    await flush();
+    expect(warnings()).toHaveLength(0);
+    expect(API.recordDaihyosen).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('team editor: Remove representative bout over unsaved entries', () => {
+  const withRep = () => teamFinished({
+    winner: 'Osaka',
+    subResults: [boutRow(1), boutRow(2, { decision: 'hikiwake' }), boutRow(3, { decision: 'hikiwake' }),
+      // Unscored: Remove is offered only before the bout has a point.
+      boutRow(-1, { sideA: 'Kyoto', sideB: 'Osaka', decision: 'daihyosen' })],
+  });
+  beforeEach(() => {
+    API.removeDaihyosen = vi.fn().mockResolvedValue({ applied: true, status: 'running' });
+  });
+
+  it('asks first; Cancel keeps the entries and sends nothing; Discard entries removes it', async () => {
+    const r = render(el(withRep()));
+    await flush();
+    await tap(ipponBtn(r.container, 0, 'aka', 'M'));
+    answerWarning(false);
+    await tap(screen.getByTestId('team-daihyosen-remove'));
+    await flush();
+    expect(warnings().map(([o]) => o.message)).toEqual(['Your unsaved entries will be discarded. Remove the representative bout anyway?']);
+    expect(API.removeDaihyosen).not.toHaveBeenCalled();
+    expect(boutMarks(r.container, 0, 'aka')).toContain('M');
+    answerWarning(true);
+    await tap(screen.getByTestId('team-daihyosen-remove'));
+    await flush();
+    expect(API.removeDaihyosen).toHaveBeenCalledTimes(1);
+    expect(boutMarks(r.container, 0, 'aka')).not.toContain('M');
+  });
+});
+
+describe('team editor: Clear kiken and reopen over unsaved entries', () => {
+  // A finished pool team match Kyoto (Aka) withdrew from after bout 1.
+  const teamWithdrawal = () => teamBout({
+    status: 'completed', phase: 'pool', poolName: 'Pool 1', modifiedAt: NOW, scoreVersion: 2,
+    subResults: [boutRow(1, { ipponsA: ['M'], winner: 'Kyoto' }), boutRow(2), boutRow(3)],
+    decision: 'kiken-voluntary', decisionBy: 'aka', winner: { id: 'tb', name: 'Osaka' }, ipponsB: ['○', '○'],
+  });
+
+  it('asks first; Cancel keeps the entries and sends nothing; Discard entries reopens', async () => {
+    const r = render(el(teamWithdrawal()));
+    await flush();
+    await tap(ipponBtn(r.container, 1, 'shiro', 'K'));
+    answerWarning(false);
+    await tap(screen.getByTestId('clear-withdrawal-reopen'));
+    await flush();
+    expect(warnings().map(([o]) => o.message)).toEqual(['Your unsaved entries will be discarded. Reopen anyway?']);
+    expect(API.reopenMatch).not.toHaveBeenCalled();
+    expect(boutMarks(r.container, 1, 'shiro')).toContain('K');
+    answerWarning(true);
+    await tap(screen.getByTestId('clear-withdrawal-reopen'));
+    await flush();
+    expect(API.reopenMatch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('engi editor', () => {
+  it('offers no reopen, decision or representative bout, so nothing asks', async () => {
+    const r = render(el(engiBout({ status: 'completed', flagsA: 3, flagsB: 0, modifiedAt: NOW, scoreVersion: 2 })));
+    await flush();
+    await tap(r.container.querySelector('[data-testid="engi-shiro-inc"]'));
+    for (const id of ['clear-withdrawal-reopen', 'scoring-modal-kiken-voluntary-button', 'scoring-modal-daihyosen-button']) {
+      expect(screen.queryByTestId(id)).toBeNull();
+    }
+    expect([...document.querySelectorAll('button')].some((b) => /Reopen/.test(b.textContent))).toBe(false);
+  });
+});

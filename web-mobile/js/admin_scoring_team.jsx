@@ -50,6 +50,7 @@ import {
   useOwnStatus,
   OWN_START,
   OWN_REP,
+  holdsUnsaved, confirmDiscardUnsaved, ADD_REP_BOUT_ANYWAY, REMOVE_REP_BOUT_ANYWAY,
   OWN_REFUSED,
   DraftKeptNotice,
   DraftDroppedNotice,
@@ -1753,6 +1754,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // Same teardown-race guard as ScoreEditorModal: covers external/
   // parent-driven unmount during in-flight save.
   const mountedRef = useRefA(true);
+  // isDirty, worked out further down, for the actions that ask before they
+  // replace unsaved entries (R1: a reopen, a requeue, a decision, a
+  // representative-bout change the sheet does not save first).
+  const unsavedRef = useRefA(false);
+  const repDiscardAskingRef = useRefA(false);
 
   // bc-mrgc: what a write applied only in part kept in the match's history.
   const keptInHistory = useKeptInHistoryNote();
@@ -1764,6 +1770,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
       // remove in the outbox (bc-evts stage 5), and a sheet that is not running
       // holds no edit the remove could race.
       preSave: false,
+      question: REMOVE_REP_BOUT_ANYWAY,
       // bc-evts: the remove is the outbox's, queued after the taps; the
       // sheet drops the row at once and adopts the answer when it comes.
       send: (claim) => window.API.removeDaihyosen(m.compId, m.id, resolveDecisionPassword(password), m.modifiedAt || 0, { onRefusal: claim, seen: m.scoreVersion }),
@@ -2395,6 +2402,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
     seenScoreVersion: tapMode ? tapBoard.base.scoreVersion : undefined,
     setDecisionSubmitting, setDecisionErr, setDecisionPromptKind,
     onClose, onAfterDecision, isComplete,
+    unsaved: unsavedRef,
   });
 
   const existingSub = m.subResults || [];
@@ -3377,7 +3385,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // remedy mandatory: a plain correction bypasses the court gate entirely, so
   // kachinuki operators, for whom reopen is the ONLY way to fix a bout log,
   // would otherwise be the one group with no way out of a busy court.
-  const reopenCtl = useMatchReopen({ match: m, password, isComplete, own });
+  const reopenCtl = useMatchReopen({ match: m, password, isComplete, own, unsaved: unsavedRef });
 
   // mp-4pc: when a daihyosen exists the encho counter belongs to that
   // sub-bout (attached per-sub in buildPatch), so suppress the top-level
@@ -4243,7 +4251,20 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // tap made meanwhile is autosaved after the change in the outbox's order,
   // and a mounted editor adopts the server's bout log when the answer comes
   // and stays open (operator decision 2026-09-27).
-  const runRepBoutChange = ({ preSave, send, optimistic, clearsEncho, refusals, notDone }) => {
+  const runRepBoutChange = (change) => {
+    const { preSave, send, optimistic, clearsEncho, refusals, notDone } = change;
+    // R1: a change the sheet does not save first is made from the server's
+    // copy (below), so over unsaved entries it asks first; with none, or once
+    // the operator chose to discard them, it goes on as it always did.
+    if (!preSave && !change.discardConfirmed && holdsUnsaved(unsavedRef)) {
+      if (repDiscardAskingRef.current) return;
+      repDiscardAskingRef.current = true;
+      confirmDiscardUnsaved(unsavedRef, change.question).then((go) => {
+        repDiscardAskingRef.current = false;
+        if (go && mountedRef.current) runRepBoutChange({ ...change, discardConfirmed: true });
+      }, () => { repDiscardAskingRef.current = false; });
+      return;
+    }
     setEditorErr("");
     // The change puts a finished match back to running on this sheet: its own
     // status write, so no draft is kept as if another device had reopened it.
@@ -4350,6 +4371,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   const isDirty = (!tapMode && (JSON.stringify(subs) !== serverSubsSig || daihyosenVerdictDirty))
     // A removed withdrawal is unsaved until Save correction sends it.
     || removingWithdrawal;
+  unsavedRef.current = isDirty;
   // D1: what the sheet's draft would tap, as typed over and as held.
   const encounterEnchoOf = (n) => (kachinukiEncounter ? 0 : n);
   // Only while the sheet shows a draft: under its own representative-bout
@@ -5512,6 +5534,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               // server judges the tie on the bouts as they stand (bc-evts stage 5).
               // A finished match is judged as stored.
               preSave: m.status === "scheduled",
+              question: ADD_REP_BOUT_ANYWAY,
               // bc-evts: the add is the outbox's, queued after the pre-save; the
               // sheet shows the new row at once (named for the two teams, as
               // the server's is) and adopts the answer when it comes.

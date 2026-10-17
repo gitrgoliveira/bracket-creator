@@ -41,6 +41,7 @@ beforeAll(async () => { ({ ScoreEditorModal, restore } = await installIndividual
 afterAll(() => restore());
 
 const OUTCOMES = ['landed', 'refused', 'held', 'discarded'];
+const UNSAVED_WARNING = /^Your unsaved entries will be discarded\. /;
 const SUP = { applied: false, reason: 'superseded', heldGroups: ['result'] };
 
 const tap = (node) => act(async () => { fireEvent.click(node); });
@@ -192,7 +193,10 @@ async function run(fam, sc) {
   API.reopenMatch = vi.fn((_c, _m, _pw, opts) => writes.make(opts));
   API.requeueBlockerAndReopen = vi.fn((_c, _m, _bc, _bm, _pw, opts) => writes.make(opts));
   API.recordDaihyosen = vi.fn((_c, _m, _pw, opts) => writes.make(opts));
-  window.confirmDialog = vi.fn().mockResolvedValue(true);
+  // R1: the unsaved-entries warning is answered Discard entries, unless a
+  // case declines it first (declineFirst); every other confirm is agreed.
+  let declining = false;
+  window.confirmDialog = vi.fn(async (o) => !(declining && UNSAVED_WARNING.test((o && o.message) || '')));
   const onSubmit = vi.fn((patch) => (patch.status === 'running' ? Promise.resolve(writes.make()) : Promise.resolve({ applied: true })));
   let server;
   if (sc.start === 'scheduled') server = { status: 'scheduled', a: [], b: [], at: NOW, v: 2 };
@@ -241,6 +245,30 @@ async function run(fam, sc) {
     return true;
   };
 
+  // R1: an own status write over a draft asks first, and only then.
+  const warned = () => window.confirmDialog.mock.calls.filter(([o]) => UNSAVED_WARNING.test((o && o.message) || '')).length;
+  const warnedOnce = (label, before) => {
+    const n = warned() - before;
+    const want = draft && !kept() ? 1 : 0;
+    if (n !== want) bad.push(`${label}: R1 the unsaved-entries warning was asked ${n} times (draft ${draft})`);
+  };
+  const sentCount = () => writes.writes.length + API.reopenMatch.mock.calls.length
+    + API.requeueBlockerAndReopen.mock.calls.length + API.recordDaihyosen.mock.calls.length;
+  // The operator first answers Keep entries: nothing is sent and the draft
+  // stays on the board (I3, checked here with no own write out).
+  const declineFirst = async (w, label, node) => {
+    if (!w.cancelFirst || !draft) return;
+    const sent = sentCount();
+    const asked = warned();
+    declining = true;
+    await tap(node());
+    await flush();
+    declining = false;
+    if (warned() - asked !== 1) bad.push(`${label}: R1 Keep entries was never offered`);
+    if (sentCount() !== sent) bad.push(`${label}: R1 Keep entries sent the write`);
+    check(`${label} kept entries`);
+  };
+
   await flush();
   if (sc.draft) {
     await fam.typeDraft(r.container);
@@ -258,7 +286,10 @@ async function run(fam, sc) {
     } else if (w.kind === 'rep') {
       const add = screen.queryByTestId('scoring-modal-daihyosen-button');
       if (!add || add.disabled) { check(`${label} not offered`); break; }
+      await declineFirst(w, label, () => screen.queryByTestId('scoring-modal-daihyosen-button'));
+      const asked = warned();
       await tap(add);
+      warnedOnce(label, asked);
       // The sheet shows its own change running until the answer: like an own
       // Start, Start is not offered over it.
       ownStartCurrent = true;
@@ -272,10 +303,16 @@ async function run(fam, sc) {
         await flush();
         const rq = screen.queryByTestId('withdrawal-reopen-requeue-button');
         if (!rq) { bad.push(`${label}: no court-busy remedy offered`); break; }
+        await declineFirst(w, label, () => screen.queryByTestId('withdrawal-reopen-requeue-button'));
+        const asked = warned();
         await tap(rq);
+        warnedOnce(label, asked);
         API.reopenMatch = vi.fn((_c, _m, _pw, opts) => writes.make(opts));
       } else {
+        await declineFirst(w, label, () => screen.queryByTestId('clear-withdrawal-reopen'));
+        const asked = warned();
         await tap(reopen);
+        warnedOnce(label, asked);
         if (w.kind === 'confirm') {
           // The knockout's next match was played: the reopen is refused, the
           // operator confirms, and the forced reopen is the write answered.
@@ -475,12 +512,19 @@ function* scenarios(fam) {
             }
           }
         }
+        // R1: over a draft the operator first answers Keep entries, then
+        // taps again and discards them.
+        if (!draft) continue;
+        for (const outcome of OUTCOMES) {
+          const w = { kind, outcome, timing: 'before', foreign: outcome === 'landed' ? 'shown' : 'none', skip: false, cancelFirst: true };
+          for (const after of [['finish'], ['none']]) yield { start: 'completed', draft, final, writes: [w], after };
+        }
       }
     }
   }
 }
 
-const describeName = (sc) => `${sc.start}${sc.draft ? `+draft(${sc.final})` : ''} ${sc.writes.map((w) => `${w.kind}:${w.outcome}/${w.timing}/${w.foreign}`).join(' ') || 'no own write'} then ${[].concat(sc.after).join('+')}`;
+const describeName = (sc) => `${sc.start}${sc.draft ? `+draft(${sc.final})` : ''} ${sc.writes.map((w) => `${w.kind}:${w.outcome}/${w.timing}/${w.foreign}${w.cancelFirst ? '/keep-first' : ''}`).join(' ') || 'no own write'} then ${[].concat(sc.after).join('+')}`;
 
 describe('the running sheet\'s representative-bout change: every combination (team)', () => {
   it('raises no note, never offers Start and shows the server\'s board', async () => {

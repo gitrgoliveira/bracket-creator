@@ -21,7 +21,9 @@
 // asking for a module it holds. As a backstop against a loop all the same (a
 // cache that serves an old page), a page reloads ONCE for a given server build
 // (_RELOADED_FOR, in sessionStorage), and a page still behind it after that
-// shows the banner; a tab that cannot note the reload shows the banner too.
+// shows the banner. A tab whose sessionStorage refuses the note notes it on
+// the address it reloads to instead (_RELOAD_FLAG, stage 3 review 8, L2), which
+// the page it loads reads and takes off its address.
 
 export const VERSION_BANNER_TEXT = 'A new version of the app is installed. Reload to keep scoring.';
 export const VERSION_RELOAD_LABEL = 'Reload';
@@ -35,12 +37,45 @@ let _state = 'current';
 let _reloaded = false;
 let _outboxIdle = () => true;
 let _beforeReload = () => {};
-let _reload = () => { location.reload(); };
+let _reload = _reloadPage;
 const _subscribers = new Set();
+
+// _reloadPage: the reload, to `to` when given (an address noting the build,
+// _flaggedAddress), else of the page as it is.
+function _reloadPage(to) {
+    if (to) location.replace(to);
+    else location.reload();
+}
 
 // The server build this tab last reloaded for (sessionStorage: per tab, kept
 // across the reload).
 const _RELOADED_FOR = 'bc_app_reloaded_for_build';
+
+// The query parameter that notes the reload on the address when
+// sessionStorage refuses it (L2). Read once as the page loads, then taken off
+// the address, so it lasts this page's life and no further.
+const _RELOAD_FLAG = 'bc_reloaded_for';
+let _flaggedFor = _takeReloadFlag();
+
+function _takeReloadFlag() {
+    try {
+        const url = new URL(location.href);
+        const build = url.searchParams.get(_RELOAD_FLAG);
+        if (build === null) return '';
+        url.searchParams.delete(_RELOAD_FLAG);
+        history.replaceState(history.state, '', url.pathname + url.search + url.hash);
+        return build;
+    } catch (_e) {
+        return '';
+    }
+}
+
+// _flaggedAddress: this page's address, noting a reload for `build`.
+function _flaggedAddress(build) {
+    const url = new URL(location.href);
+    url.searchParams.set(_RELOAD_FLAG, build);
+    return url.toString();
+}
 
 // bundleBuild is the build this page was served with, read once from the page
 // meta the server wrote (unknown without it, which never forces a reload).
@@ -57,11 +92,12 @@ export function bundleBuild() {
     return _bundleBuild;
 }
 
-function _reloadedFor() {
+function _reloadedFor(build) {
+    if (_flaggedFor === build) return true;
     try {
-        return sessionStorage.getItem(_RELOADED_FOR) || '';
+        return sessionStorage.getItem(_RELOADED_FOR) === build;
     } catch (_e) {
-        return '';
+        return false;
     }
 }
 
@@ -69,9 +105,10 @@ function _noteReloadFor(build) {
     try {
         sessionStorage.setItem(_RELOADED_FOR, build);
     } catch (e) {
-        // Without the note nothing could stop a reload loop, so the page does
-        // not reload: it shows the banner and the operator reloads (R8).
-        console.error('app_version: could not note the reload, showing the banner instead:', e);
+        // The note then rides on the address the page reloads to (L2), so
+        // the page it loads still knows, and shows the banner rather than
+        // reloading again.
+        console.warn('app_version: could not note the reload in sessionStorage, noting it on the address:', e);
         return false;
     }
     return true;
@@ -117,9 +154,10 @@ export function setBeforeReload(fn) {
     _beforeReload = typeof fn === 'function' ? fn : () => {};
 }
 
-// setReloader replaces location.reload, for tests.
+// setReloader replaces the reload, for tests: called with the address to go to
+// (a reload noted on it, L2), or with nothing to reload the page as it is.
 export function setReloader(fn) {
-    _reload = typeof fn === 'function' ? fn : () => { location.reload(); };
+    _reload = typeof fn === 'function' ? fn : _reloadPage;
 }
 
 // reloadApp: the operator's Reload on the banner (version_banner.jsx), through
@@ -153,6 +191,12 @@ function _outboxIsIdle() {
     }
 }
 
+// outboxIsIdle: the outbox is empty and nothing is in flight, so a reload
+// loses nothing of this page's whatever browser storage answers (L2).
+export function outboxIsIdle() {
+    return _outboxIsIdle();
+}
+
 // checkVersion applies the rule above and answers the state.
 export function checkVersion() {
     if (_reloaded) return _state;
@@ -161,9 +205,18 @@ export function checkVersion() {
         return _state;
     }
     // Reloaded for this server build already, and still behind it: the banner,
-    // not another reload; nor a reload this tab cannot note (R8).
-    if (_openEditors === 0 && _outboxIsIdle() && _reloadedFor() !== _serverBuild
-        && _noteReloadFor(_serverBuild)) {
+    // not another reload (R8). `_reloaded` keeps it to one reload per page.
+    if (_openEditors === 0 && _outboxIsIdle() && !_reloadedFor(_serverBuild)) {
+        const noted = _noteReloadFor(_serverBuild);
+        let to;
+        try {
+            to = noted ? undefined : _flaggedAddress(_serverBuild);
+        } catch (e) {
+            // No address to note it on either: nothing would stop a loop.
+            console.error('app_version: could not note the reload, showing the banner instead:', e);
+            _setState('stale');
+            return _state;
+        }
         _reloaded = true;
         try {
             _beforeReload();
@@ -171,7 +224,7 @@ export function checkVersion() {
             console.error('app_version: saving before the reload failed:', e);
         }
         _setState('reloading');
-        _reload();
+        _reload(to);
         return _state;
     }
     _setState('stale');
@@ -196,9 +249,10 @@ export function resetVersionForTests() {
     _openEditors = 0;
     _state = 'current';
     _reloaded = false;
+    _flaggedFor = '';
     _outboxIdle = () => true;
     _beforeReload = () => {};
-    _reload = () => { location.reload(); };
+    _reload = _reloadPage;
     _subscribers.clear();
     try { sessionStorage.removeItem(_RELOADED_FOR); } catch (_e) { /* no storage in this test */ }
 }

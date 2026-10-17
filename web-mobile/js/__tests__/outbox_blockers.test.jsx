@@ -1228,3 +1228,21 @@ describe('what this tab settled is remembered for a while only (L5)', () => {
         expect(API.unsentWrites().total, 'the stamped copy is taken up').toBe(1);
     });
 });
+
+// Stage 3 review 8, L2: a tab whose browser storage refuses every access
+// holds nothing it could lose by an empty outbox, so it answers stored.
+it('with storage refusing every access, an empty outbox answers stored and raises no alert (L2)', async () => {
+    const kept = global.localStorage;
+    const boom = () => { throw new DOMException('denied', 'SecurityError'); };
+    global.localStorage = { getItem: boom, setItem: boom, removeItem: boom, clear: boom };
+    try {
+        await load();
+        const alerts = [];
+        const off = window.subscribeQueueAlert((a) => alerts.push(a));
+        expect(API.persistQueue(), 'nothing of this tab\'s is held').toBe(true);
+        expect(alerts.filter((a) => a.kind === 'storage_full')).toEqual([]);
+        if (typeof off === 'function') off();
+    } finally {
+        global.localStorage = kept;
+    }
+});

@@ -3,9 +3,9 @@
 // <meta name="app-build"> the server wrote into it; /dist/ is served no-cache
 // with its ETag, so a reload brings the modules of that same build. A page that
 // reloaded for a build and still reads another does not reload again in a loop:
-// it shows the banner. A tab that cannot note the reload (sessionStorage
-// refused) shows the banner instead of reloading, since nothing could then stop
-// a loop.
+// it shows the banner. A tab that cannot note the reload in sessionStorage
+// notes it on the address it reloads to (stage 3 review 8, L2), so the page it
+// loads stops the loop all the same.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 let mod;
@@ -77,19 +77,36 @@ describe('a reload never loops', () => {
         expect(reload).toHaveBeenCalledTimes(1);
     });
 
-    it('a tab that cannot note the reload shows the banner instead of reloading (R8)', async () => {
-        await freshPage('old');
+    // Stage 3 review 8, L2: with sessionStorage refused, the reload is noted
+    // on the address it goes to, so the page it loads knows it reloaded for
+    // that build and shows the banner rather than reloading again.
+    it('a tab that cannot note the reload in sessionStorage reloads once, by an address that notes it', async () => {
         const refuse = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('QuotaExceededError'); });
+        const said = vi.spyOn(console, 'warn').mockImplementation(() => {});
         try {
+            history.replaceState(null, '', '/court/A?view=queue#top');
+            await freshPage('old');
             mod.noteServerBuild('new');
+            expect(reload).toHaveBeenCalledTimes(1);
+            const to = new URL(reload.mock.calls[0][0], location.href);
+            expect(to.searchParams.get('bc_reloaded_for'), 'the address names the build').toBe('new');
+            expect(to.pathname + '?view=' + to.searchParams.get('view') + to.hash, 'and keeps the page').toBe('/court/A?view=queue#top');
+            expect(mod.versionState()).toBe('reloading');
+            // The page that address loads, storage still refused, the server still on 'new'.
+            history.replaceState(null, '', to.pathname + to.search + to.hash);
+            await freshPage('old');
+            expect(location.search, 'the note is taken off the address').toBe('?view=queue');
+            expect(location.hash).toBe('#top');
+            mod.noteServerBuild('new');
+            expect(reload, 'never a second reload for the same build').not.toHaveBeenCalled();
+            expect(mod.versionState()).toBe('stale');
+            // A later build still reloads, once.
+            mod.noteServerBuild('newer');
+            expect(reload).toHaveBeenCalledTimes(1);
         } finally {
             refuse.mockRestore();
+            said.mockRestore();
+            history.replaceState(null, '', '/');
         }
-        expect(reload).not.toHaveBeenCalled();
-        expect(mod.versionState()).toBe('stale');
-        // Said, once, in the console.
-        const said = vi.spyOn(console, 'error');
-        expect(said).toHaveBeenCalledTimes(1);
-        said.mockClear();
     });
 });

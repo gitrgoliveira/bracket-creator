@@ -4,14 +4,16 @@
 // shows while it cannot: an editor is open or a write is still unsent. One
 // banner for the whole app, displays included (operator S2 a): app.jsx mounts
 // it once, beside the App.
-import { subscribeVersionState, versionState, reloadApp, VERSION_BANNER_TEXT, VERSION_RELOAD_LABEL } from './app_version.jsx';
+import { subscribeVersionState, versionState, reloadApp, outboxIsIdle, VERSION_BANNER_TEXT, VERSION_RELOAD_LABEL } from './app_version.jsx';
 import { QUEUED_UNSAVED_NOTICE } from './write_result.jsx';
 
 // Reload stores the outbox, then reloads (the reloaded page sends what is
 // still held), but only once the outbox IS stored (stage 3 review 7, K3):
 // browser storage can refuse it (full), and then the writes this page holds
-// live only in its memory, which a reload would lose. Answers whether it
-// reloaded.
+// live only in its memory, which a reload would lose. An outbox empty and
+// idle holds nothing to lose, so Reload goes whatever storage answers (stage 3
+// review 8, L2: storage that refuses every access kept such a page on the old
+// build for good). Answers whether it reloaded.
 function reloadKeepingTheOutbox() {
   let stored = true;
   try {
@@ -19,7 +21,7 @@ function reloadKeepingTheOutbox() {
   } catch (_e) {
     stored = false;
   }
-  if (!stored) return false;
+  if (!stored && !outboxIsIdle()) return false;
   reloadApp();
   return true;
 }

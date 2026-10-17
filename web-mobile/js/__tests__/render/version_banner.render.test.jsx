@@ -78,6 +78,8 @@ describe('VersionBanner', () => {
     const prevAPI = window.API;
     let stores = false;
     window.API = { persistQueue: () => stores };
+    // Writes are held: the outbox is not idle.
+    V.setOutboxIdleProbe(() => false);
     try {
       render(<VersionBanner />);
       act(() => { V.noteServerBuild('build-b'); });
@@ -87,6 +89,27 @@ describe('VersionBanner', () => {
       stores = true;
       fireEvent.click(screen.getByRole('button', { name: V.VERSION_RELOAD_LABEL }));
       expect(reload, 'once storage takes the outbox, Reload reloads').toHaveBeenCalledTimes(1);
+    } finally {
+      if (hadAPI) window.API = prevAPI; else delete window.API;
+      act(() => { close(); });
+    }
+  });
+
+  // Stage 3 review 8, L2: storage that refuses every access must not keep a
+  // page with nothing unsent on the stale build forever.
+  it('Reload goes whenever the outbox is empty and idle, whatever storage answers', () => {
+    const reload = vi.fn();
+    V.setReloader(reload);
+    const close = V.registerOpenEditor();
+    const hadAPI = 'API' in window;
+    const prevAPI = window.API;
+    window.API = { persistQueue: () => false };
+    V.setOutboxIdleProbe(() => true);
+    try {
+      render(<VersionBanner />);
+      act(() => { V.noteServerBuild('build-b'); });
+      fireEvent.click(screen.getByRole('button', { name: V.VERSION_RELOAD_LABEL }));
+      expect(reload, 'nothing unsent: nothing to lose').toHaveBeenCalledTimes(1);
     } finally {
       if (hadAPI) window.API = prevAPI; else delete window.API;
       act(() => { close(); });

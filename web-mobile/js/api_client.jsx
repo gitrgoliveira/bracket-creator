@@ -873,6 +873,11 @@ function _persistQueue() {
         _storageFullAnnounced = false;
         return true;
     } catch (_e) {
+        // Storage refused, but this tab holds nothing to store: nothing of
+        // its can be lost, so it answers stored and raises nothing (L2, stage
+        // 3 review 8: a reload must not wait on storage an empty outbox does
+        // not need). What it took out stays in _settled for the next persist.
+        if (_writeQueue.size === 0) return true;
         if (!_storageFullAnnounced) {
             _storageFullAnnounced = true;
             _notifyQueueAlert({

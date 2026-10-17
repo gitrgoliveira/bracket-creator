@@ -62,10 +62,10 @@ const finishPatch = { status: 'completed', winner: { id: 'p1', name: 'Yamada' } 
 
 const tournament = { name: 'T', courts: ['A'], competitions: [{ id: 'c1', name: 'Cup' }] };
 
-function renderPage(onEditScore) {
-  return render(
+function pageElement(onEditScore, t = tournament) {
+  return (
     <AdminShiaijoPage
-      tournament={tournament}
+      tournament={t}
       court="A"
       onBack={vi.fn()}
       onEditScore={onEditScore}
@@ -78,6 +78,10 @@ function renderPage(onEditScore) {
       onSwitchCourt={vi.fn()}
     />
   );
+}
+
+function renderPage(onEditScore) {
+  return render(pageElement(onEditScore));
 }
 
 // The outbox's pending answer: queued, nothing from the server yet.
@@ -159,6 +163,73 @@ describe('the court console moves on at once on a pending finish (X3)', () => {
     await act(async () => { await captured.props.onSubmit(finishPatch); });
     expect(shownMatch()).toBe(null);
     await act(async () => { refuse({ applied: false, reason: 'superseded', heldGroups: ['result'] }); await settled; });
+    expect(shownMatch()).toBe('Pool A-1');
+  });
+});
+
+describe('a start refused later takes its pin off the panel (Z1)', () => {
+  it('Finish + Start Next whose start the server refuses leaves the refused match off the panel', async () => {
+    let refuseStart;
+    const startSettled = new Promise((r) => { refuseStart = r; });
+    const onEditScore = vi.fn(async (_c, mid) => (mid === 'Pool A-2' ? pending(`K:${mid}`, startSettled) : pending(`K:${mid}`)));
+    renderPage(onEditScore);
+    await act(async () => { await captured.props.onSubmitAndNext(finishPatch); });
+    expect(shownMatch()).toBe('Pool A-2');
+    await act(async () => { refuseStart({ applied: false, reason: 'clock_skew' }); await startSettled; });
+    // The finish is still out, so the console reads Pool A-1 as finished here
+    // and the refused Pool A-2 is not the live bout: the panel is empty.
+    expect(shownMatch()).toBe(null);
+  });
+
+  it('a refused finish then a start refused through onRefusal shows the match the server holds', async () => {
+    let refuseFinish, refuseStart;
+    const fin = new Promise((r) => { refuseFinish = r; });
+    const st = new Promise((_r, j) => { refuseStart = j; });
+    st.catch(() => {});
+    const onEditScore = vi.fn(async (_c, mid, _patch, _m, opts) => {
+      if (mid === 'Pool A-2') {
+        st.catch((e) => opts && opts.onRefusal && opts.onRefusal(e));
+        return pending(`K:${mid}`, st);
+      }
+      return pending(`K:${mid}`, fin);
+    });
+    renderPage(onEditScore);
+    await act(async () => { await captured.props.onSubmitAndNext(finishPatch); });
+    await act(async () => { refuseFinish({ applied: false, reason: 'superseded', heldGroups: ['result'] }); await fin; });
+    await act(async () => {
+      refuseStart(Object.assign(new Error('court busy'), { code: 'court_busy' }));
+      try { await st; } catch { /* the refusal is the point */ }
+    });
+    expect(shownMatch()).toBe('Pool A-1');
+    expect(captured.props.started).toBeFalsy();
+  });
+});
+
+describe('a finish stays read as finished until a later change, not this device\'s own earlier taps (Z2)', () => {
+  const landFinish = async (feedCopy) => {
+    tournamentMatchesSpy.mockImplementation(() => [running]);
+    let answer;
+    const settled = new Promise((resolve) => { answer = resolve; });
+    const onEditScore = vi.fn(async (_c, mid) => pending(`K:${mid}`, settled));
+    const utils = renderPage(onEditScore);
+    await act(async () => { await captured.props.onSubmit(finishPatch); });
+    expect(shownMatch()).toBe(null);
+    // The feed still shows the match running, now under another stamp, and the
+    // finish's answer comes carrying the stamp the server gave the finish.
+    tournamentMatchesSpy.mockImplementation(() => [feedCopy]);
+    await act(async () => {
+      utils.rerender(pageElement(onEditScore, { ...tournament, competitions: [{ id: 'c1', name: 'Cup' }] }));
+    });
+    await act(async () => { answer({ applied: true, modifiedAt: 200 }); await settled; });
+  };
+
+  it('a running copy stamped before the finish (this device\'s own taps) does not bring the match back', async () => {
+    await landFinish({ ...running, modifiedAt: 150 });
+    expect(shownMatch()).toBe(null);
+  });
+
+  it('a running copy stamped after the finish (a reopen elsewhere) does', async () => {
+    await landFinish({ ...running, modifiedAt: 300 });
     expect(shownMatch()).toBe('Pool A-1');
   });
 });

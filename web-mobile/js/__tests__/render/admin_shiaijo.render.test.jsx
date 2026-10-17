@@ -1690,6 +1690,27 @@ describe('Send back to queue keeps the score and is always offered (bc-sbq)', ()
       expect(onEditScore.mock.calls[0][2].after).toBe('k-back');
     } finally { c.restore(); }
   });
+
+  // Z1 (stage 3 review 12): the pick pins the panel on the match it started;
+  // a start the server refuses afterwards takes the pin back, so the console
+  // shows what the server holds and not a match that never started.
+  it('a pick whose start is refused later does not keep the panel on the refused match', async () => {
+    probe.props = null;
+    let refuse;
+    const settled = new Promise((r) => { refuse = r; });
+    const onEditScore = vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k-start', settled });
+    const c = await mountCourt([courtMatch('m1', 'running', { ipponsA: ['M'] }), courtMatch('m2', 'scheduled')], { onEditScore });
+    window.API.revertMatchToQueue = vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k-back', settled: new Promise(() => {}) });
+    try {
+      const startNext = c.utils.getAllByRole('button').find((b) => /^start/i.test(b.textContent.trim()));
+      await act(async () => { startNext.click(); });
+      await act(async () => {});
+      expect(probe.props.match?.id).toBe('m2');
+      await act(async () => { refuse({ applied: false, reason: 'clock_skew' }); await settled; });
+      await act(async () => {});
+      expect(probe.props?.match?.id).not.toBe('m2');
+    } finally { c.restore(); }
+  });
 });
 
 // bc-strt: the console opens a match its Up next card started while the court

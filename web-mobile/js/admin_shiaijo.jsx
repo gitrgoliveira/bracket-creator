@@ -135,12 +135,15 @@ function _bracketSideName(side) {
 // finishedHereHolds: whether the console still reads match `m` as finished
 // here (the finishedHere entry `f`, X3). Not once the feed shows it completed
 // or no longer holds it, and not once the server has answered the finish and
-// the feed's copy is stamped otherwise (a later change, e.g. a reopen made
-// elsewhere). Before that answer the copy may move under this device's own
+// the feed's copy is stamped after the finish's own stamp (a later change,
+// e.g. a reopen made elsewhere; Z2). Before that answer the copy may move under this device's own
 // earlier writes landing, which the finish follows, so the stamp is not read.
 function finishedHereHolds(f, m) {
     if (!f || !m || m.status === "completed") return false;
-    return !(f.landed && m.modifiedAt !== f.at);
+    if (!f.landed) return true;
+    // Answered: a copy stamped after the finish's own stamp is a later change.
+    // An answer that carried no stamp falls back to any change since the tap.
+    return f.stamp > 0 ? !(m.modifiedAt > f.stamp) : m.modifiedAt === f.at;
 }
 
 const _WINNER_OF_RE = /^Winner of r(\d+)-m(\d+)$/;
@@ -673,18 +676,22 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         if (!match || match.status === "completed" || !writePending(res)) return;
         const key = matchKey(match);
         setFinishedHere((prev) => ({ ...prev, [key]: { at: match.modifiedAt, winner: winner || null, landed: false } }));
-        const end = (landed) => {
+        // `stamp`: the server's stamp on the finish, from its answer. A copy of
+        // the match stamped at or before it is still the one before the finish
+        // (this device's own taps land between the tap and the answer), so only
+        // a later stamp is a later change (Z2).
+        const end = (landed, stamp) => {
             if (!mountedRef.current) return;
             setFinishedHere((prev) => {
                 if (!prev[key]) return prev;
                 const next = { ...prev };
-                if (landed) next[key] = { ...prev[key], landed: true };
+                if (landed) next[key] = { ...prev[key], landed: true, ...(stamp > 0 ? { stamp } : {}) };
                 else delete next[key];
                 return next;
             });
         };
         res.settled.then(
-            (body) => end(!!body && !body.discarded && !writeWasRefused(body)),
+            (body) => end(!!body && !body.discarded && !writeWasRefused(body), Number(body && body.modifiedAt)),
             () => end(false),
         );
     };
@@ -1480,7 +1487,22 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         // stored on the refused match and toasted once, here, as a refusal the
         // start came back with always was, and claimed so the queue's own
         // alert does not toast it a second time.
+        //
+        // The pending answer pins the panel on the started match at once
+        // (`startedFrom`, `pickedKey`, below); a start refused AFTER that takes
+        // its pin back, so the console shows what the server holds and a tap
+        // is not aimed at a match that never started (Z1). `refused` also
+        // covers a refusal that comes before the pin is set.
+        let refused = false;
+        const unpin = () => {
+            refused = true;
+            if (pick) pick.refused = true;
+            if (!mountedRef.current) return;
+            setStartedFrom((s) => (s && s.key === key ? null : s));
+            setPickedKey((k) => (k === key ? null : k));
+        };
         const refusedLater = (msg) => {
+            unpin();
             if (mountedRef.current) setStartError(refusalFor(msg));
             if (showToast) showToast(msg, "error");
         };
@@ -1543,7 +1565,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // snapshot as running, so a point struck at once saves at once. A
             // start that answered direct came back after its refresh, which
             // already shows it; a pick pins itself (deferAndStart).
-            if (mountedRef.current && (pick || writePending(res))) {
+            if (!refused && mountedRef.current && (pick || writePending(res))) {
                 setStartedFrom({ key, at: m.modifiedAt });
                 if (!pick) setPickedKey(key);
             }
@@ -1664,7 +1686,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // A start that went out pins the panel and its started snapshot
             // itself (startMatch, bc-strt).
             const ok = await startMatch(m, { pick, after });
-            if (!ok || !mountedRef.current) return;
+            // A start refused before this line (pick.refused) left nothing to pin.
+            if (!ok || !mountedRef.current || (pick && pick.refused)) return;
         }
         setPickedKey(matchKey(m));
     };

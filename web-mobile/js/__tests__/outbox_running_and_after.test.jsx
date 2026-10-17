@@ -1,6 +1,6 @@
 // bc-evts stage 3 (the governing rule): ALL goes to the outbox, in strict
 // order per match, and it never blocks the UI. A RUNNING score write (the team
-// and engi autosave, Start match, Record bout) is an outbox entry like every
+// editor's autosave, Start match, Record bout) is an outbox entry like every
 // other door: enqueued in the same tick on the match's base, answered pending,
 // sent after what the match already holds. A write may also name another
 // match's entry it must follow (`after`): the court console's pick of another

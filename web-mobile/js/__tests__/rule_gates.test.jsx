@@ -160,6 +160,9 @@ describe('the tap-outcome and retired-reason rules', () => {
     expect(trips(r, 'useAdoptFromServer({ signature, apply, keepLocalEdits: true, isDirty });')).toBe(true);
     expect(trips(r, 'useAdoptFromServer({ signature, apply, keepLocalEdits: keepUnsavedEdits });')).toBe(false);
     expect(trips(r, "window.API.recordTap(m.compId, m.id, makeEvent(ev), password, base);")).toBe(false);
+    // A running score write is no tap either; Save and Finish reach the outbox through the host's onSubmit.
+    expect(trips(r, "window.API.recordScore(m.compId, m, password, { changed });")).toBe(true);
+    expect(trips(r, "await onSubmit(patch);")).toBe(false);
   });
   it('the retired needs_winner and default_win_stands codes trip anywhere', () => {
     const r = rule('retired-held-reasons');

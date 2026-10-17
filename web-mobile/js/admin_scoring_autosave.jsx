@@ -142,8 +142,8 @@ export function useKeptInHistoryNote() {
 // carries every edit counted up to `seq` and none after it: the edit stamps the editor
 // keeps to hold its board against an older server copy (bc-kclr, bc-ltap) clear only for
 // edits at or before it, never for a tap made while the save was out. The individual
-// editor's board stamp, the team sheet's row and pick stamps and the engi editor's flags
-// stamp are its three callers.
+// editor's board stamp and the engi editor's flags stamp are gone (both score by taps):
+// the team sheet's row and pick stamps are its only caller.
 //
 // `onRefused(seq)`, optional, runs instead when the save came back REFUSED
 // (writeWasRefused: nothing handed back, or applied:false), with the same `seq`. A refused

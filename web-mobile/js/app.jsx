@@ -347,6 +347,14 @@ function parseCourtFromSearch() {
   return raw.toLowerCase() === 'all' ? 'ALL' : raw.toUpperCase();
 }
 
+// heldWritesNoun: what a held-write alert counts, in the operator's words: taps
+// (a tap batch's alert says `taps`), else finished results, else score updates.
+function heldWritesNoun(alert, one) {
+  if (alert.taps) return one ? "tap" : "taps";
+  if (Number(alert.terminalCount) > 0) return one ? "result" : "results";
+  return one ? "score update" : "score updates";
+}
+
 // bc-qttl: turn a queue alert from api_client.jsx into operator-facing prose.
 //
 // The queue holds writes that have not reached the server. Every alert below but
@@ -384,11 +392,18 @@ export function queueAlertMessage(alert) {
     case "superseded":
       return supersededAlertText(n, one, !!alert.matchClosed);
     case "server_error":
-      // It holds back no other write (each queued write is sent on its own),
-      // and the editor of that match offers to discard it (HeldWriteDiscard).
-      return `The server keeps refusing a queued result${detail}. It is still being retried, and later results are still sent. If it never goes through, open that match, discard the held result and enter it again.`;
+      // The outbox sends each match's writes strictly in order (bc-evts F1), so
+      // a write the server keeps refusing holds back THAT match's later changes
+      // until it lands or is discarded (other matches go on); the editor of the
+      // match and the topbar's held-writes list offer to discard it
+      // (HeldWriteDiscard, HeldWritesPanel). Taps are named as taps.
+      {
+        const held = heldWritesNoun(alert, one);
+        const what = one ? `a queued ${held}` : `${n} queued ${held}`;
+        return `The server keeps refusing ${what}${detail}. ${one ? "It is" : "They are"} still being retried, and later changes to that match wait until ${one ? "it lands or is" : "they land or are"} discarded. If ${one ? "it never goes" : "they never go"} through, open that match, discard the held ${held} and enter ${one ? "it" : "them"} again.`;
+      }
     case "auth_required":
-      return `Sign in again to save ${n} pending ${one ? "result" : "results"}. ${one ? "It is" : "They are"} still queued.`;
+      return `Sign in again to save ${n} pending ${heldWritesNoun(alert, one)}. ${one ? "It is" : "They are"} still queued.`;
     case "storage_full":
       return "Browser storage is full, so unsaved results can no longer be kept safely. Let them sync before reloading this tab.";
     case "discarded":

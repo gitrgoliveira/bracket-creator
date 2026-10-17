@@ -2295,7 +2295,7 @@ async function _sendTapBatch(base, batch, pass) {
         }
         if (crossed) {
             _notifyQueueAlert({
-                kind: 'server_error', count: batch.length, terminalCount: 0, compID, matchID,
+                kind: 'server_error', count: batch.length, terminalCount: 0, compID, matchID, taps: true,
                 detail: body.reasonHuman || body.error || `HTTP ${res.status}`,
             });
             _recomputeSyncStatus();
@@ -2308,7 +2308,7 @@ async function _sendTapBatch(base, batch, pass) {
         for (const [, d] of batch) { if (!d.authBlocked) { d.authBlocked = true; fresh = true; } }
         if (fresh) {
             _notifyQueueAlert({
-                kind: 'auth_required', count: batch.length, terminalCount: 0, compID, matchID,
+                kind: 'auth_required', count: batch.length, terminalCount: 0, compID, matchID, taps: true,
                 detail: body.reasonHuman || body.error || `HTTP ${res.status}`,
             });
         }

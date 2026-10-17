@@ -61,13 +61,13 @@ describe('queueAlertMessage', () => {
         expect(msg).toMatch(/matches/i);
     });
 
-    // A write the server keeps refusing holds back no other write any more,
-    // and its match's editor offers to discard it: the alert says both,
-    // rather than only "keep this tab open".
-    it('a write the server keeps refusing: later results still go, and how to clear it', () => {
+    // A write the server keeps refusing holds back its match's later changes
+    // (strict order, bc-evts F1), and its match's editor offers to discard it:
+    // the alert says both (queue_alert_held_order.test.jsx covers taps).
+    it('a write the server keeps refusing: that match\'s later changes wait, and how to clear it', () => {
         const msg = queueAlertMessage({ kind: 'server_error', count: 1, terminalCount: 1, detail: 'HTTP 500' });
         expect(msg).toMatch(/keeps refusing a queued result \(HTTP 500\)/);
-        expect(msg).toMatch(/later results are still sent/i);
+        expect(msg).toMatch(/later changes to that match wait until it lands or is discarded/i);
         expect(msg).toMatch(/discard the held result and enter it again/i);
     });
 

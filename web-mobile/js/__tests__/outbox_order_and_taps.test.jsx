@@ -179,3 +179,18 @@ describe('minor taps rules', () => {
         expect(entry.payload.basis.seen).toBe(7);
     });
 });
+
+describe('M4: a tap alert names taps', () => {
+    it('a batch parked for sign-in says it holds taps', async () => {
+        await load();
+        global.fetch = vi.fn((url) => (isClock(url)
+            ? Promise.reject(new TypeError('clock'))
+            : Promise.resolve({ ok: false, status: 401, json: async () => ({ error: 'auth' }) })));
+        const alerts = [];
+        mod.subscribeQueueAlert((a) => alerts.push(a));
+        API.recordTap('c1', 'm1', tap('M'), 'pw', { id: 'm1' });
+        API.recordTap('c1', 'm1', tap('K'), 'pw', { id: 'm1' });
+        await tick(0);
+        expect(alerts.filter((a) => a.kind === 'auth_required')).toEqual([expect.objectContaining({ count: 2, taps: true })]);
+    });
+});

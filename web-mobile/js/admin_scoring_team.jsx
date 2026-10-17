@@ -1129,12 +1129,30 @@ function useMatchLineups(compId, matchId) {
         if (!isRead(side)) refresh(side);
       }
     };
+    // A member whose add never landed (stage 3 review 3, F2) leaves the lineup held
+    // for its side: the position keeps its name and loses the id, as the server
+    // stores it, so no row names a member that never was.
+    const onMemberDropped = (e) => {
+      const d = (e && e.detail) || {};
+      if (!d.memberId || d.competitionId !== compId) return;
+      for (const side of LINEUP_SIDES) {
+        if (!sync.teamIds[side] || sync.teamIds[side] !== d.teamId) continue;
+        const lineup = sync.held[side];
+        const ids = lineup && lineup.memberIds;
+        if (!ids || !Object.values(ids).includes(d.memberId)) continue;
+        const kept = { ...lineup, memberIds: Object.fromEntries(Object.entries(ids).filter(([, v]) => v !== d.memberId)) };
+        sync.held[side] = kept;
+        serve(side, sync.servedSeq[side], kept);
+      }
+    };
     window.addEventListener("lineup-updated", onLineupUpdated);
     window.addEventListener("online", onOnline);
+    window.addEventListener("team-member-dropped", onMemberDropped);
     return () => {
       sync.alive = false;
       window.removeEventListener("lineup-updated", onLineupUpdated);
       window.removeEventListener("online", onOnline);
+      window.removeEventListener("team-member-dropped", onMemberDropped);
     };
   }, [compId, matchId]);
 
@@ -2030,6 +2048,26 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // row's picker offers nothing, every row loses the squad number this
     // ruling put on it, and every typed name is written with no member id.
   }, [m.compId, compMeta, password, teamMembersKey, teamAId, teamBId, teamAKnown, teamBKnown]);
+
+  // A member whose add never landed (refused, or discarded by an operator; stage 3
+  // review 3, F2) was shown under the id this device minted. The outbox says so
+  // (team-member-dropped) and the side's list loses it, so it is never offered
+  // again; a row naming it keeps the name, as the server stores it. The lists
+  // otherwise only grow (mergeMembers): this is the one way out, for a member no
+  // server ever held.
+  useEffectA(() => {
+    const onDropped = (e) => {
+      const d = (e && e.detail) || {};
+      if (!d.memberId || d.competitionId !== m.compId) return;
+      [["a", teamAId], ["b", teamBId]].forEach(([side, teamId]) => {
+        if (!teamId || teamId !== d.teamId) return;
+        const list = membersShown.current[side];
+        if (list.some((x) => x.id === d.memberId)) showMembers(side, list.filter((x) => x.id !== d.memberId));
+      });
+    };
+    window.addEventListener("team-member-dropped", onDropped);
+    return () => window.removeEventListener("team-member-dropped", onDropped);
+  }, [m.compId, teamAId, teamBId]);
 
   // Posts a lineup notice under one bout row's key (lineupNoticeKey), unless the sheet
   // has closed. Every pick path that reports into a row goes through it.

@@ -235,3 +235,68 @@ describe('a member write the server refuses (F8)', () => {
         expect(err.code).toBe('member_id_conflict');
     });
 });
+
+// Stage 3 review 3, F2: an add the server refuses, or an operator discards,
+// leaves the id this device minted for it naming nobody. A lineup save queued
+// after it would carry that id to the server; the outbox takes it off every
+// queued lineup save (the position keeps its name), says the member is gone
+// (the `team-member-dropped` event, which the editors take the member off their
+// lists by), and the refusal carries the id (`droppedMemberId`).
+describe('a member add that never lands (F2)', () => {
+    let warned;
+    let dropped;
+    const onDropped = (e) => dropped.push(e.detail);
+    beforeEach(() => {
+        warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        dropped = [];
+        window.addEventListener('team-member-dropped', onDropped);
+    });
+    afterEach(() => {
+        warned.mockRestore();
+        window.removeEventListener('team-member-dropped', onDropped);
+    });
+
+    async function queueAddAndSave(addAnswer) {
+        const sent = server((req) => (req.method === 'POST' ? addAnswer()
+            : answer(200, { positions: req.body.positions, memberIds: req.body.memberIds || {} })));
+        const member = await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw', { onRefusal: () => true });
+        await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Ren Abe', jiho: 'Sato' }, 'pw', { senpo: member.id, jiho: 'mem-2' }, ['senpo', 'jiho']);
+        return { sent, member };
+    }
+
+    it('a refused add takes its id off the queued lineup save, which keeps the name, and says the member is gone', async () => {
+        const { sent, member } = await queueAddAndSave(() => answer(409, { error: 'team "t1" already has a member named "Ren Abe"' }));
+        await reconnect();
+        const err = await member.settled.then(() => null, (e) => e);
+        expect(err.droppedMemberId).toBe(member.id);
+        const put = sent.find((r) => r.method === 'PUT');
+        expect(put, 'the lineup save still goes').toBeDefined();
+        expect(put.body.positions).toEqual({ senpo: 'Ren Abe', jiho: 'Sato' });
+        expect(put.body.memberIds, 'with no id for the member that never was').toEqual({ jiho: 'mem-2' });
+        expect(dropped).toEqual([{ competitionId: 'c1', teamId: 't1', memberId: member.id }]);
+    });
+
+    it('an add the operator discards does the same', async () => {
+        const { sent, member } = await queueAddAndSave(() => answer(503, { error: 'unavailable' }));
+        for (let i = 0; i < 12 && !API.heldWrites().some((h) => h.kind === 'member' && h.keepsFailing); i++) {
+            await reconnect();
+            await tick(60000);
+        }
+        const add = API.heldWrites().find((h) => h.kind === 'member');
+        expect(add && add.keepsFailing, 'the add keeps failing').toBe(true);
+        expect(API.discardHeldWrite(add.key)).toBe(true);
+        await tick(10);
+        const put = sent.find((r) => r.method === 'PUT');
+        expect(put, 'the lineup save goes once the add is discarded').toBeDefined();
+        expect(put.body.memberIds).toEqual({ jiho: 'mem-2' });
+        expect(dropped).toEqual([{ competitionId: 'c1', teamId: 't1', memberId: member.id }]);
+    });
+
+    it('an add that lands takes nothing off', async () => {
+        const { sent, member } = await queueAddAndSave(() => Promise.resolve(null).then(() => answer(201, { id: 'x', index: 6, name: 'Ren Abe', modifiedAt: 9 })));
+        await reconnect();
+        const put = sent.find((r) => r.method === 'PUT');
+        expect(put.body.memberIds).toEqual({ senpo: member.id, jiho: 'mem-2' });
+        expect(dropped).toEqual([]);
+    });
+});

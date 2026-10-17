@@ -910,6 +910,9 @@ function _dequeue(key, descriptor, outcome) {
     // A court move or time change the server refused, or an operator
     // discarded, no longer shows (R4). Never for an entry another tab sent.
     if (outcome && (outcome.error || outcome.byOperator)) _revertLocalFields(d);
+    // A member add refused or discarded leaves its minted id naming nobody
+    // (F2): taken off every queued lineup save before that save can go.
+    if (outcome && (outcome.error || outcome.byOperator)) _dropMemberThatNeverWas(d);
     // The server answered it: a clock-skew re-stamp of a later write of the
     // match is never stamped below it (_afterSettledStamp). Not a discard, and
     // not a write dropped after a second clock refusal: the server never
@@ -2139,6 +2142,9 @@ function _doorRefusal(d, status, body) {
             const err = _refusalError(b, d.method === 'POST' ? TEAM_MEMBER_NOT_ADDED
                 : d.method === 'DELETE' ? TEAM_MEMBER_NOT_CLEARED : TEAM_MEMBER_NOT_RENAMED);
             if (d.was && typeof d.was === 'object') err.revertMember = { ...d.was, modifiedAt: _serverNowMs() };
+            // A refused add: the member this device showed under the minted id
+            // never was (F2). Its id is the tombstone the editors drop it by.
+            if (_memberAddId(d)) err.droppedMemberId = _memberAddId(d);
             return err;
         }
         case 'lineup-remove':
@@ -3377,6 +3383,45 @@ function _memberWrite({ compID, teamId, method, url, payload, password, member, 
 function _lastMemberEntryKey(compID, teamId) {
     const members = _entriesFor(_membersBase(compID, teamId)).filter(([, d]) => d.kind === 'member');
     return members.length ? members[members.length - 1][0] : '';
+}
+
+// _memberAddId: the id a queued member add minted, '' for any other entry.
+function _memberAddId(d) {
+    return d && d.kind === 'member' && d.method === 'POST' && d.payload && typeof d.payload.id === 'string'
+        ? d.payload.id : '';
+}
+
+// _dropMemberThatNeverWas: a member add that leaves the queue refused or
+// discarded (bc-evts stage 3 review 3, F2) leaves the id this device minted
+// for it naming nobody. A lineup save queued after the add (`after`) still
+// carries that id; it is taken off every queued lineup save here, before that
+// save can go (the settle reruns the flush), and the position keeps its name,
+// the shape of a name typed while the members were not loaded. The server
+// stores a position the same way when an id reaches it anyway (a save
+// already out, or one another tab holds). Then the editors are told, through
+// the `team-member-dropped` event, so they take the member that never was off
+// their lists and their positions.
+function _dropMemberThatNeverWas(d) {
+    const id = _memberAddId(d);
+    if (!id) return;
+    let changed = false;
+    for (const [, e] of _writeQueue) {
+        const ids = e && e.kind === 'lineup' && e.payload && e.payload.memberIds;
+        if (!ids || typeof ids !== 'object') continue;
+        for (const pos of Object.keys(ids)) {
+            if (ids[pos] === id) {
+                delete ids[pos];
+                changed = true;
+            }
+        }
+    }
+    if (changed) _persistQueue();
+    const teamId = (String(d.url || '').match(/\/teams\/([^/]+)\/members$/) || [])[1] || '';
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+        window.dispatchEvent(new CustomEvent('team-member-dropped', {
+            detail: { competitionId: d.compID || '', teamId: decodeURIComponent(teamId), memberId: id },
+        }));
+    }
 }
 
 // _membersBase: the outbox base of a team's member writes, the base of its

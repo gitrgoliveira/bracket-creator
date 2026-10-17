@@ -886,6 +886,32 @@ describe('the team\'s members', () => {
   // rename, a mint): the members as the server answered the write, stamped.
   const change = (view, members) => act(async () => { view.result.current.changeMembers(members); });
 
+  // Stage 3 review 3, F2: an add the server refused (or an operator discarded) leaves
+  // a member that never was on the list this device showed it on, and its id on the
+  // positions it was placed at. The outbox says so (team-member-dropped); the form
+  // takes the member off its list and the id off its positions, keeping the names.
+  it('drop a member whose add never landed, from the list and from the positions, keeping the names', async () => {
+    const view = await mount();
+    await change(view, [NEW_MEMBER]);
+    await act(async () => {
+      view.result.current.setValues((v) => ({ ...v, 2: 'Zed' }));
+      view.result.current.setMemberIds((ids) => ({ ...ids, 2: 'mem-9' }));
+    });
+    expect(view.result.current.squad.map((m) => m.id)).toContain('mem-9');
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('team-member-dropped', { detail: { competitionId: 'c', teamId: 'u', memberId: 'mem-9' } }));
+    });
+    expect(view.result.current.squad.map((m) => m.id), 'another team\'s drop changes nothing').toContain('mem-9');
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('team-member-dropped', { detail: { competitionId: 'c', teamId: 't', memberId: 'mem-9' } }));
+    });
+    expect(view.result.current.squad.map((m) => m.id)).not.toContain('mem-9');
+    expect(view.result.current.memberIds[2]).toBeUndefined();
+    expect(view.result.current.values[2], 'the name stays').toBe('Zed');
+  });
+
   it('are read when the editor opens, for its team, with the password', async () => {
     const view = await mount();
     expect(api.fetchSquads).toHaveBeenCalledWith('c', 'pw');

@@ -255,6 +255,29 @@ describe('team editor: a name typed before the team\'s members were read never w
     expect(notices(container)[0]).toContain('team member list could not be loaded');
   });
 
+  // Stage 3 review 3, F2: a member whose add the server refused (or an operator
+  // discarded) never was. The outbox says so (team-member-dropped) and the sheet
+  // takes it off the side's list, so it is never offered again.
+  it('drops a member whose add never landed from the side\'s list', async () => {
+    const { container } = await openRead();
+    await act(async () => { liveRead().reject(new TypeError('Failed to fetch')); });
+    await flush();
+    await typeName(bout(container, 0, 'shiro'), 'Newcomer');
+    expect(window.API.addTeamMember).toHaveBeenCalled();
+    // The member is offered with its number (index 6: T2.6); a name the lineup holds
+    // that no member carries is offered as the name alone (squadRosterEntries).
+    expect((await offers(container, 0, 'shiro')).some((o) => o.includes('T2.6')), 'the add is shown at once, as a member').toBe(true);
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('team-member-dropped', { detail: { competitionId: 'comp1', teamId: 'team-B', memberId: 'new-1' } }));
+    });
+    await flush();
+
+    const after = await offers(container, 0, 'shiro');
+    expect(after.some((o) => o.includes('T2.6')), 'no member is offered under the id that never was').toBe(false);
+    expect(after.some((o) => o.includes('Newcomer')), 'the name the row holds is still offered, by name').toBe(true);
+  });
+
   it('places the name against the list shown once one has been shown, whatever read is out', async () => {
     const { container } = await open();
     await act(async () => { memberReads[0].resolve(teams(SHIRO_NAMED)); });

@@ -681,6 +681,34 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
     return () => { ended = true; };
   }, [compId, teamId, password, teamKey]);
 
+  // A member whose add never landed (the server refused it, or an operator
+  // discarded it, stage 3 review 3, F2) was shown under the id this device
+  // minted, and may sit on a position. The outbox says so (team-member-dropped,
+  // dropMemberThatNeverWas); it goes from the list, and its id from the form and
+  // the baseline, so the position keeps its name with no id, as the server
+  // stores it. mergeMembers never removes a member: this is the one way out, for
+  // a member no server ever held.
+  useEffect(() => {
+    if (!compId || !teamId) return undefined;
+    const withoutId = (ids, id) => {
+      if (!ids || !Object.values(ids).includes(id)) return ids;
+      return Object.fromEntries(Object.entries(ids).filter(([, v]) => v !== id));
+    };
+    const onDropped = (e) => {
+      const d = (e && e.detail) || {};
+      if (!d.memberId || d.competitionId !== compId || d.teamId !== teamId || squadTeam.current !== teamKey) return;
+      if (squadRef.current.some((m) => m.id === d.memberId)) {
+        const next = squadRef.current.filter((m) => m.id !== d.memberId);
+        squadRef.current = next;
+        setSquadList(next);
+      }
+      setMemberIds((ids) => withoutId(ids, d.memberId));
+      setBaseline((b) => (b && b.memberIds ? { ...b, memberIds: withoutId(b.memberIds, d.memberId) } : b));
+    };
+    window.addEventListener('team-member-dropped', onDropped);
+    return () => window.removeEventListener('team-member-dropped', onDropped);
+  }, [compId, teamId, teamKey]);
+
   const retry = () => {
     setLoadError('');
     setLoading(true);

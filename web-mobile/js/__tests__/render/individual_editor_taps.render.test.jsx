@@ -107,12 +107,16 @@ describe('each control on a running match emits its event', () => {
     expect(marks(r.container)).toHaveLength(0);
   });
 
-  it('a mark with no id is not removable by a tap (nothing is sent)', async () => {
+  it('a mark on a copy that names no ids is removed by the id the server\'s first baseline gives it', async () => {
+    // A copy with no mark ids is one whose score log has not begun: the
+    // server's first baseline names each mark from what it is
+    // (b:<pos>:<side>:<letter>:<n>, engine.MigrationBaseline), so the tap names
+    // it the same way, and the board takes it off at once (bc-evts stage 5).
     const r = await mount(bout({ ipponsA: ['M'] }));
     const label = marks(r.container)[0];
     await click(r.container.querySelector(`[aria-label="${label}"]`));
-    expect(sent()).toEqual([]);
-    expect(marks(r.container)).toHaveLength(1);
+    expect(sent()).toEqual([{ kind: 'ippon.remove', pos: 0, side: 'a', target: 'b:0:a:M:0' }]);
+    expect(marks(r.container)).toHaveLength(0);
   });
 
   it('the foul + and − are foul.add and foul.remove; a second foul lands the H on the board', async () => {

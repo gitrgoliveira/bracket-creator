@@ -23,7 +23,7 @@ import { struckIppons, realIppons } from './result_slot.jsx';
 import { acceptTap } from './tap_guard.jsx';
 // bc-evts: the board of a running match (tapBoardOf) is the server's copy with
 // this device's pending taps folded on, by the JS replay port.
-import { applyPending, APPLIED } from './score_events.jsx';
+import { applyPending, assignMarks, APPLIED } from './score_events.jsx';
 import { isOlderRunningCopy } from './patch.jsx';
 // BarredMatchNotice is a separate leaf (imports only ineligible_match.jsx +
 // write_result.jsx): re-exported below, see that file's header for why.
@@ -207,11 +207,17 @@ export function tapBoardOf(m, opts) {
 }
 
 // shownMarkIds: the mark id of each mark a side shows (realIppons order: the
-// placeholders and the hantei mark dropped) for a match or a team bout row,
-// "" where the copy names none. An ippon.remove names the mark by this id.
+// placeholders and the hantei mark dropped) for a match (pos 0) or a team bout
+// row (its position), "" where none can be named. An ippon.remove names the
+// mark by this id. A copy that names no ids for a side is one whose score log
+// has not begun (a match last written before mark ids existed): the server's
+// first baseline mints each mark's id from what the mark is
+// (b:<pos>:<side>:<letter>:<n>, engine.MigrationBaseline through assignMarks),
+// so the same ids are minted here.
 export function shownMarkIds(holder, key) {
   const raw = (key === "a" ? holder.ipponsA : holder.ipponsB) || [];
-  const ids = (holder.markIds && holder.markIds[key]) || [];
+  const named = holder.markIds && holder.markIds[key];
+  const ids = named || (holder.markIds ? [] : assignMarks([], [], raw, Number(holder.position) || 0, key));
   const out = [];
   raw.forEach((x, i) => { if (realIppons([x]).length) out.push(ids[i] || ""); });
   return out;

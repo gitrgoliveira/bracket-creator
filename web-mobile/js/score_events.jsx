@@ -672,7 +672,7 @@ const markHolder = (m, e) => ((e.pos || 0) === 0 ? m : (m.subResults || []).find
 // board is not a newer copy of the match than the one the server confirmed.
 // Neither argument is changed.
 export function applyPending(serverMatch, pending, opts = {}) {
-  let match = copy(serverMatch);
+  let match = withMintedMarkIds(copy(serverMatch));
   const outcomes = {};
   const held = (serverMatch && serverMatch.eventSeqs) || {};
   const ctx = { bouts: new Map(), stamps: {} };
@@ -692,6 +692,26 @@ export function applyPending(serverMatch, pending, opts = {}) {
     outcomes[e.id] = r.outcome;
   }
   return { match, markIds: match.markIds || null, outcomes };
+}
+
+// withMintedMarkIds: a copy that names no mark ids (for the match's points, or
+// for a bout row that holds marks) is one whose score log has not begun: the
+// server's first baseline mints each mark's id from what the mark is
+// (engine.MigrationBaseline: b:<pos>:<side>:<letter>:<n>), so the board names
+// them the same way, and a removal made against them folds here as it will
+// there. A copy that names ids keeps them. The match given is changed.
+function withMintedMarkIds(m) {
+  const mint = (holder, pos) => {
+    if (holder.markIds) return;
+    const ia = holder.ipponsA || [];
+    const ib = holder.ipponsB || [];
+    const ids = markIdsOf(ia, ib, assignMarks([], [], ia, pos, SIDE_A), assignMarks([], [], ib, pos, SIDE_B));
+    if (ids) holder.markIds = ids;
+  };
+  if (!m) return m;
+  mint(m, 0);
+  for (const r of m.subResults || []) if (r && r.position) mint(r, r.position);
+  return m;
 }
 
 // boutsStayOpen: a fixed-order team match closed by a match-level kiken,

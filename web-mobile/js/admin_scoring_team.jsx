@@ -1305,7 +1305,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const emitBoutTap = (ev) => {
     tapNote.clear();
     ensureServerRows(ev.pos);
-    window.API.recordTap(mHost.compId, mHost.id, makeEvent(ev), password, tapBoardOf(mHost, teamFold).base);
+    // The tap is floored by the match it was made against (bc-hlck), and never
+    // below the stamp a Record bout answer gave the match (bc-cse): a tap on the
+    // pairing the advance appended, stamped before it, would be older than the
+    // row it lands on.
+    const base = tapBoardOf(mHost, teamFold).base;
+    const floor = recordBoutStampRef.current;
+    const seen = floor.id === mHost.id && floor.at > (Number(base.modifiedAt) || 0) ? { ...base, modifiedAt: floor.at } : base;
+    window.API.recordTap(mHost.compId, mHost.id, makeEvent(ev), password, seen);
     setOperatorEditSeq((n) => n + 1);
     setFusenshoRefusal("");
   };
@@ -1320,6 +1327,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // tap in the match's order. Judged against the server's copy (mHost), never the
   // board, and once per row for this sheet.
   const rowsWrittenRef = useRefA({ id: null, positions: new Set() });
+  // The latest Record-bout answer's own stamp for this match (adoptRecordBoutAnswer),
+  // held apart from matchOverride: with no prior [Remove this bout] there is no
+  // override to adopt it into, and the next tap must still be floored by it.
+  const recordBoutStampRef = useRefA({ id: null, at: 0 });
   const ensureServerRows = (pos) => {
     if (!(pos > 0)) return;
     const req = rowsWrittenRef.current;
@@ -2429,8 +2440,21 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // RENDER-SYNCHRONOUS because this very render already indexes subs for the
   // new positions — an effect would run after the crash.
   // While running the rows ARE the board's (serverSubs is seeded from it): a
-  // gesture is a tap, never a local edit of a row.
-  const subs = tapMode ? serverSubs : reconcileRowsToPositions(subsRaw, serverSubs);
+  // gesture is a tap, never a local edit of a row. The one thing the board's row
+  // cannot say is the score a per-bout fusensho set aside (the server's replay
+  // keeps it, a copy of the match does not): a fusensho tapped here keeps it
+  // beside the row (fusenshoSnapsRef) while the row still holds that fusensho, so
+  // the other side's Fusensho is refused and explains itself as it did before
+  // taps (fusenshoAllowed, fusenshoButtonTitle). The losing side's points follow
+  // the row, as a mark taken off them moves the snapshot (applyBoutScoreEdit).
+  const fusenshoSnapsRef = useRefA(new Map());
+  const withFusenshoSnapshots = (rows) => rows.map((row) => {
+    const snap = fusenshoSnapsRef.current.get(`${mHost.id}\u0000${row._pos}`);
+    if (!snap || !row.fusensho || row.fusensho !== snap.side) return row;
+    const lost = snap.side === "a" ? "bPts" : "aPts";
+    return { ...row, _preFusensho: { ...snap.pre, [lost]: row[lost] } };
+  });
+  const subs = tapMode ? withFusenshoSnapshots(serverSubs) : reconcileRowsToPositions(subsRaw, serverSubs);
   // The representative bout's row is one group (bout:-1) for the score, the overtime
   // count and the Ht verdict. Taking the count or the verdict from the server agrees with
   // that row, unless this sheet's draft holds an unsaved edit of the row's score (those
@@ -2547,9 +2571,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const setFusenshoFor = (idx, side) => {
     if (tapMode) {
       const s = subs[idx];
-      emitBoutTap(s.fusensho === side
-        ? { kind: BOUT_DECISION, pos: s._pos, value: "clear" }
-        : { kind: BOUT_DECISION, pos: s._pos, side, value: "fusensho" });
+      const key = `${mHost.id}\u0000${s._pos}`;
+      if (s.fusensho === side) {
+        fusenshoSnapsRef.current.delete(key);
+        emitBoutTap({ kind: BOUT_DECISION, pos: s._pos, value: "clear" });
+        return;
+      }
+      // The score this fusensho sets aside, as applyFusenshoToggle takes it.
+      const pre = applyFusenshoToggle(s, side)._preFusensho;
+      if (pre) fusenshoSnapsRef.current.set(key, { side, pre });
+      emitBoutTap({ kind: BOUT_DECISION, pos: s._pos, side, value: "fusensho" });
       return;
     }
     updateSub(idx, prev => applyFusenshoToggle(prev, side));
@@ -3744,9 +3775,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // still blanked by a stale silent save. That is unchanged from the
     // pre-gate explicit-[] behaviour (not a regression this change
     // introduces), not a gap this gate closes.
+    // On a running match the row is the board's, so a change of it shows as a tap
+    // of this device's still pending on it (the score, the overtime or the
+    // verdict, a pick being its own group): the row is then the operator's, and
+    // stated, never left for the server to restore over the change.
+    const repBoutTapPending = tapMode && tapBoard.moving.some((e) => e.pos === DAIHYOSEN_POSITION && e.kind !== REP_PICK);
     const daihyosenTouched = hasDaihyosen && (
       withoutRepPicks(subs[daihyosenIdx]) !== withoutRepPicks(serverSubs[daihyosenIdx]) ||
-      daihyosenVerdictDirty
+      daihyosenVerdictDirty || repBoutTapPending
     );
     const daihyosenKnownLocally = hasDaihyosen && (
       daihyosenHanteiRecorded ||
@@ -4029,8 +4065,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // With the stamp the advance gave the match (bc-hlck):
       // the sheet's next tap on the new bout is floored by
       // the match it shows, and the override is what it
-      // shows until the prop catches up.
+      // shows until the prop catches up; and the floor of the next tap (bc-cse),
+      // held apart from the override for the common case with none.
       const stamp = Number(res.modifiedAt) || 0;
+      const held = recordBoutStampRef.current;
+      if (stamp > 0) recordBoutStampRef.current = { id: mHost.id, at: Math.max(held.id === mHost.id ? held.at : 0, stamp) };
       setMatchOverride(prev => prev ? {
         ...prev,
         match: { ...prev.match, subResults: res.subResults, ...(stamp > 0 ? { modifiedAt: stamp } : {}) },

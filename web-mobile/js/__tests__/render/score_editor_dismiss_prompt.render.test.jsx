@@ -2,7 +2,7 @@
 // would really discard something.
 //
 // Three ways it used to lie:
-//  - On a RUNNING match every scoring edit is autosaved (300ms debounce), so
+//  - On a RUNNING match every scoring edit was once autosaved (300ms debounce), so
 //    the autosave landed while the prompt waited and "Discard" discarded
 //    nothing. Closing now saves any edit still inside the debounce window at
 //    once and closes without asking.
@@ -12,7 +12,7 @@
 //  - On a team match the dispatcher's own Esc listener also fired and closed
 //    the editor past the team editor's prompt. It now stands aside.
 //
-// A scheduled match (no autosave) and a correction keep the prompt, and so does
+// A scheduled match (a draft) and a correction keep the prompt, and so does
 // a running individual match whose hikiwake toggle moved, because
 // buildPatch("running") does not carry the draw, and a running kachinuki match
 // with a changed unplayed row, which that patch drops. A hantei ARM alone is a
@@ -96,7 +96,7 @@ function teamMatch(status) {
 }
 
 // Closing unmounts the editor, as every host does: the unmount is what writes
-// an edit still inside the autosave window.
+// an edit not yet sent.
 function mount(match, props = {}) {
   const onSubmit = vi.fn().mockResolvedValue(undefined);
   let utils;
@@ -141,7 +141,7 @@ describe('bc-dscn: individual editor', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('a SCHEDULED match (no autosave) still prompts before discarding', async () => {
+  it('a SCHEDULED match (a draft) still prompts before discarding', async () => {
     const { onClose } = mount(individualMatch('scheduled'));
     await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
     await clickClose();

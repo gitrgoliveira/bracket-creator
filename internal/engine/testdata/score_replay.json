@@ -4119,6 +4119,241 @@
      ]
     }
    }
+  },
+  {
+   "name": "a team match's pool representative bout takes pool.rep picks, each side its own, the later by stamp winning",
+   "jsMirror": true,
+   "shape": {
+    "kind": "team",
+    "knockout": false
+   },
+   "match": {
+    "id": "Pool A-DH-1",
+    "sideA": "Kyoto",
+    "sideB": "Osaka",
+    "sideAId": "ta",
+    "sideBId": "tb",
+    "winner": "",
+    "ipponsA": [],
+    "ipponsB": [],
+    "hansokuA": 0,
+    "hansokuB": 0,
+    "decision": "",
+    "status": "running",
+    "court": "A",
+    "round": 0,
+    "scheduledAt": ""
+   },
+   "head": [
+    {
+     "v": 1,
+     "baseline": {
+      "id": "m0",
+      "door": "test",
+      "stamp": 10,
+      "values": {
+       "rep": {
+        "repPlayerA": "",
+        "repPlayerB": ""
+       }
+      },
+      "basis": {
+       "seen": 0
+      }
+     }
+    }
+   ],
+   "lines": [
+    {
+     "v": 1,
+     "event": {
+      "id": "r1",
+      "session": "s-a",
+      "seq": 1,
+      "stamp": 20,
+      "kind": "pool.rep",
+      "side": "a",
+      "name": "Aoki"
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "r2",
+      "session": "s-b",
+      "seq": 1,
+      "stamp": 21,
+      "kind": "pool.rep",
+      "side": "a",
+      "name": "Abe"
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "r3",
+      "session": "s-c",
+      "seq": 1,
+      "stamp": 22,
+      "kind": "pool.rep",
+      "side": "b",
+      "name": "Sato"
+     }
+    }
+   ],
+   "want": {
+    "match": {
+     "repPlayerA": "Abe",
+     "repPlayerB": "Sato",
+     "scoreVersion": 4,
+     "modifiedAt": 22,
+     "groupStamps": {
+      "rep": 22
+     }
+    },
+    "outcomes": {
+     "r1": [
+      "applied"
+     ],
+     "r2": [
+      "applied"
+     ],
+     "r3": [
+      "applied"
+     ]
+    }
+   }
+  },
+  {
+   "name": "two representative picks for one side at the same stamp are ordered by id",
+   "jsMirror": true,
+   "shape": {
+    "kind": "team",
+    "knockout": true
+   },
+   "match": {
+    "id": "r0-m0",
+    "sideA": "Kyoto",
+    "sideB": "Osaka",
+    "sideAId": "ta",
+    "sideBId": "tb",
+    "winner": "",
+    "ipponsA": [],
+    "ipponsB": [],
+    "hansokuA": 0,
+    "hansokuB": 0,
+    "decision": "",
+    "status": "running",
+    "court": "A",
+    "round": 0,
+    "scheduledAt": "",
+    "subResults": [
+     {
+      "position": -1,
+      "sideA": "Kyoto",
+      "sideB": "Osaka",
+      "ipponsA": [],
+      "ipponsB": [],
+      "hansokuA": 0,
+      "hansokuB": 0,
+      "winner": "",
+      "decision": "daihyosen"
+     }
+    ]
+   },
+   "head": [
+    {
+     "v": 1,
+     "baseline": {
+      "id": "m0",
+      "door": "test",
+      "stamp": 10,
+      "values": {
+       "bout:-1": {
+        "position": -1,
+        "sideA": "Kyoto",
+        "sideB": "Osaka",
+        "ipponsA": [],
+        "ipponsB": [],
+        "hansokuA": 0,
+        "hansokuB": 0,
+        "winner": "",
+        "decision": "daihyosen"
+       },
+       "repPickA": {
+        "sideAMemberId": ""
+       },
+       "repPickB": {
+        "sideBMemberId": ""
+       }
+      },
+      "basis": {
+       "seen": 0
+      }
+     }
+    }
+   ],
+   "lines": [
+    {
+     "v": 1,
+     "event": {
+      "id": "p2",
+      "session": "s-b",
+      "seq": 1,
+      "stamp": 30,
+      "kind": "rep.pick",
+      "pos": -1,
+      "side": "a",
+      "memberId": "k2"
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "p1",
+      "session": "s-a",
+      "seq": 1,
+      "stamp": 30,
+      "kind": "rep.pick",
+      "pos": -1,
+      "side": "a",
+      "memberId": "k1"
+     }
+    }
+   ],
+   "want": {
+    "match": {
+     "subResults": [
+      {
+       "position": -1,
+       "sideA": "Kyoto",
+       "sideB": "Osaka",
+       "ipponsA": [],
+       "ipponsB": [],
+       "hansokuA": 0,
+       "hansokuB": 0,
+       "winner": "",
+       "decision": "daihyosen",
+       "sideAMemberId": "k2"
+      }
+     ],
+     "scoreVersion": 3,
+     "modifiedAt": 30,
+     "groupStamps": {
+      "bout:-1": 10,
+      "repPickA": 30,
+      "repPickB": 10
+     }
+    },
+    "outcomes": {
+     "p1": [
+      "applied"
+     ],
+     "p2": [
+      "applied"
+     ]
+    }
+   }
   }
  ]
 }

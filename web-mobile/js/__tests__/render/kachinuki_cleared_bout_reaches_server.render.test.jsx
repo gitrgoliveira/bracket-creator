@@ -122,6 +122,7 @@ describe('a mark taken back on a kachinuki bout reaches the server (bc-kclr)', (
     ]);
     expect(onSubmit, 'the row the taps land on is written once, ahead of them').toHaveBeenCalledTimes(1);
     expect(onSubmit.mock.calls[0][0].changed).toEqual(['bout:1']);
+    expect(onSubmit.mock.invocationCallOrder[0], 'the row write is queued before the first tap').toBeLessThan(window.API.recordTap.mock.invocationCallOrder[0]);
     expect(filled('aka')).toBe(0);
   });
 

@@ -139,7 +139,7 @@ describe('hantei side buttons only pick (bc-htsd)', () => {
     expect(screen.getByTestId('scoring-modal-hantei-aka').className).not.toContain('btn--primary');
   });
 
-  it('the running autosave patch never carries the hantei verdict', async () => {
+  it('the running patch never carries the hantei verdict', async () => {
     // bc-evts stage 3: a running match writes taps, never a running score
     // write, and no tap carries the verdict: the pick waits for Finish.
     vi.useFakeTimers();

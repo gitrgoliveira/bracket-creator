@@ -383,11 +383,11 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     expect(dh.sideB).toBe('Team B');
   });
 
-  it('R13: a side given another team with no representative picked leaves the sheet clean: nothing is autosaved', async () => {
+  it('R13: a side given another team with no representative picked leaves the sheet clean: nothing is written', async () => {
     const match = makeMatch({ subResults: [DH_EMPTY] });
     const { onSubmit, rerenderWith } = await mount(match);
     await rerenderWith(makeMatch({ sideA: { id: 't3', name: 'Team C' }, subResults: [DH_EMPTY] }));
-    // Past the autosave debounce: a sheet the side change left dirty would be written here.
+    // A sheet the side change left dirty would be written by now.
     await act(async () => { await new Promise((r) => setTimeout(r, 500)); });
     expect(onSubmit).not.toHaveBeenCalled();
   });
@@ -409,7 +409,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     // The server's shape: the push that seats the new team has already cleared the side's pick.
     await rerenderWith(makeMatch({ sideA: { id: 't3', name: 'Team C' }, subResults: [DH_EMPTY] }));
     expect(dhInput('AKA').value).toBe('');
-    // Past the autosave debounce: a clear that marked the sheet dirty would be written here.
+    // A clear that marked the sheet dirty would be written by now.
     await act(async () => { await new Promise((r) => setTimeout(r, 500)); });
     expect(onSubmit).not.toHaveBeenCalled();
     // The board agrees with the server, so the sheet is not dirty: Close asks nothing.
@@ -583,9 +583,9 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     // The POST answers late. The pick belonged to a row that is gone, so it lands nothing.
     await act(async () => { answerEve({ id: 'm9', name: 'Eve', index: 3 }); });
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-    // Past the autosave debounce: a pick that landed (and marked the sheet dirty) would be written here.
+    // A pick that landed (and marked the sheet dirty) would be written by now.
     await act(async () => { await new Promise((r) => setTimeout(r, 500)); });
-    expect(onSubmit, 'a pick on a row that is gone arms no autosave').not.toHaveBeenCalled();
+    expect(onSubmit, 'a pick on a row that is gone writes nothing').not.toHaveBeenCalled();
     // The representative bout is added again (a fresh, empty row, stamped later).
     await rerenderWith(makeMatch({ modifiedAt: t0 + 2000, subResults: [DH_EMPTY] }));
     expect(dhInput('SHIRO').value, 'the new bout shows no pick from the old one').toBe('');
@@ -774,7 +774,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await rerenderWith(makeMatch({ sideA: { id: 't3', name: 'Team C' }, subResults: [DH_EMPTY] }));
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     expect(dhInput('AKA').value).toBe('');
-    // The pick armed an autosave that still fires; whatever it writes names no member of the old team.
+    // Whatever the sheet writes names no member of the old team.
     await pastDebounce();
     for (const [patch] of onSubmit.mock.calls) {
       expect('sideAMemberId' in (dhEntryOf(patch) || {}), 'the dropped pick is not sent').toBe(false);

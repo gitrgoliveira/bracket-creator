@@ -31,7 +31,7 @@
 //   E. The browser 'online' event relearns, queue empty or not.
 //   F. A live write refused for clock_skew: a COMPLETED one heals and resends
 //      once (and is reported, never queued, if refused again); a RUNNING
-//      autosave heals silently and does not resend.
+//      running write heals silently and does not resend.
 //   G. A queued write refused on the flush path: the stamp is RECONSTRUCTED
 //      from enqueuedAt + the freshly learned offset (so the write keeps its
 //      real age) and retried once; a second refusal drops it with both
@@ -653,10 +653,10 @@ describe('clock_skew recovery: a live completed write', () => {
         unsub();
     });
 
-    // bc-evts: a running autosave is an outbox entry, so a clock refusal is
+    // bc-evts: a running write is an outbox entry, so a clock refusal is
     // handled as a queued running write's is (J below): re-stamped once and
     // resent, silently.
-    it('a running autosave is healed silently: no banner, re-stamped and resent once', async () => {
+    it('a running write is healed silently: no banner, re-stamped and resent once', async () => {
         const server = makeServer({ timeOk: true });
         const mod = await loadModWith(server);
         const API = mod.API;
@@ -671,7 +671,7 @@ describe('clock_skew recovery: a live completed write', () => {
         await tick(50);
 
         // One resend with the corrected stamp, and no banner: one here would
-        // fire on every autosave of a skewed device.
+        // fire on every running write of a skewed device.
         expect(server.payloads.length).toBe(2);
         expect(failures).toEqual([]);
         // But the heal still happens.
@@ -896,7 +896,7 @@ describe('clock_skew recovery: a queued override assertion', () => {
 // the response backwards - nothing was stored - and deleting the entry throws
 // away the only copy of an EDGE-TRIGGERED command: kachinukiBoutFinal, which
 // tells the server to advance the winner-stays sequence. The rest of a running
-// payload is level-triggered and the next autosave restates it; that flag is
+// payload is level-triggered and the next running write restates it; that flag is
 // not, so losing the entry stalls the encounter until the operator presses
 // Record bout again.
 
@@ -937,7 +937,7 @@ describe('clock_skew recovery: a queued running write on the flush path', () => 
     });
 
     it('refused twice: dropped exactly as a delivered entry is, with no banner', async () => {
-        // Running state is level-triggered and the next autosave supersedes it,
+        // Running state is level-triggered and the next running write supersedes it,
         // so there is nothing here an operator could act on - only the devtools
         // warn, which names the kachinuki risk.
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -1148,7 +1148,7 @@ describe('the daihyosen add and remove carry the stamp', () => {
         warnSpy.mockRestore();
     });
 
-    // The team editor holds every autosave on the court until the add or
+    // The team editor holds every running write on the court until the add or
     // remove settles. bc-evts: the request is the queue's now, still bounded
     // by _fetchJson's 12 s rather than left to the browser to fail a
     // half-open connection; given up, the entry STAYS queued (a network

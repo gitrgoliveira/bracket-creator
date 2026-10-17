@@ -124,9 +124,9 @@ describe('a write that replaces a queued one claims both writes\' groups', () =>
         expect(running[0].changed).toEqual(['points', 'encho']);
     });
 
-    // bc-evts: the Finish is the outbox's; it takes the queued autosave's
+    // bc-evts: the Finish is the outbox's; it takes the queued running write's
     // place (_coalesceTarget) and is sent in its turn.
-    it('a Finish that takes a queued autosave\'s place names the autosave\'s groups too', async () => {
+    it('a Finish that takes a queued running write\'s place names its groups too', async () => {
         online = false;
         installFetch();
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'], ipponsB: [], changed: ['points'] }, 'pw', null);
@@ -138,7 +138,7 @@ describe('a write that replaces a queued one claims both writes\' groups', () =>
         expect(finish.changed).toEqual(['points', 'result']);
     });
 
-    it('a Finish queued over a queued autosave names both', async () => {
+    it('a Finish queued over a queued running write names both', async () => {
         online = false;
         installFetch();
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'], ipponsB: [], changed: ['points'] }, 'pw', null);

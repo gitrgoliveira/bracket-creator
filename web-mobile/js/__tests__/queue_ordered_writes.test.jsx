@@ -616,7 +616,7 @@ describe('the way past a held write the server keeps refusing', () => {
 });
 
 // The topbar's held-writes list (HeldWritesPanel) reaches the held writes no
-// editor offers to discard: a running autosave, a lineup save, a hand-set
+// editor offers to discard: a running write, a lineup save, a hand-set
 // winner. Each is discarded on its own, and only once the server keeps
 // refusing it; a write only waiting for the connection is never discarded.
 describe('any held write the server keeps refusing can be discarded on its own', () => {

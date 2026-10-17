@@ -60,7 +60,6 @@ beforeEach(() => {
     addTeamMember: vi.fn(async (_c, _t, name) => answered({ id: 'new-1', index: 6 }, { name })),
     recordScore: vi.fn(async () => ({ status: 'running' })),
     hasPendingTerminalWrite: () => false,
-    notePendingEdit: () => () => {},
   };
 });
 

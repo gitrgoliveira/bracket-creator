@@ -101,7 +101,6 @@ beforeEach(() => {
     removeDaihyosen: vi.fn(),
     recordDecision: vi.fn(),
     hasPendingTerminalWrite: () => false,
-    notePendingEdit: () => () => {},
   };
 });
 

@@ -95,32 +95,21 @@ async function scoreAndCapture(match) {
   const ippons = document.querySelectorAll('button.ipt-btn');
   await act(async () => { fireEvent.click(ippons[0]); });
   await finish();
-  // Let the debounce window elapse before reading the calls: a cancel that
-  // doSubmit lost would fire its "running" write only now, and the last-write
-  // assertion below exists to see it.
+  // Wait a moment before reading the calls: a running write fired late (there
+  // should be none, every running edit being a tap) would show here, and the
+  // last-write assertion below exists to see it.
   await act(() => new Promise((r) => setTimeout(r, WAIT_MS)));
   // Select the FINISH write by its status rather than asserting a total call
-  // count. The strike above marks the editor dirty, which schedules a 300ms
-  // debounced autosave (WAIT_MS, admin_scoring_autosave.jsx)
-  // writing status "running". doSubmit cancels that timer -- but only if the
-  // two Finish taps land inside those 300ms.
-  //
-  // Whether they do is decided by machine load, not by anything this file is
-  // testing: under a busy box the autosave fires first and the count is 2.
-  // Reproduced deterministically by running four suites concurrently, where
-  // this was the only failure, every time. An autosave landing between a
-  // strike and Finish is also perfectly legitimate in real use, so a count of
-  // 1 was never the contract.
-  //
-  // "Exactly one COMPLETED write" still catches the regression a count would
-  // (a double finish), without encoding the race.
+  // count: a running write ahead of the Finish (a bout row the server does not
+  // make, written before its first tap) is legitimate, so a count of 1 was
+  // never the contract. "Exactly one COMPLETED write" catches a double finish.
   const calls = window.API.recordScore.mock.calls;
   const completed = calls.filter(([, , p]) => p && p.status === "completed");
   expect(completed, "exactly one completed write").toHaveLength(1);
-  // And it is the LAST write. Selecting by status tolerates an autosave that
-  // fired BEFORE Finish; it must not tolerate one that fires AFTER, because a
+  // And it is the LAST write. Selecting by status tolerates a running write
+  // BEFORE Finish; it must not tolerate one AFTER, because a
   // "running" write landing on a finished encounter is the editor reopening
-  // the match it just closed -- the cancel in doSubmit is what prevents it.
+  // the match it just closed.
   expect(calls[calls.length - 1], "the completed write is the last one").toBe(completed[0]);
   const [, , patch] = completed[0];
   return patch.subResults || [];

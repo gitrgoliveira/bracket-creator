@@ -216,7 +216,7 @@ describe('enqueueRunningWrite: last-write-wins semantics', () => {
 
     it('preserves a queued kachinukiBoutFinal flag when a later unflagged write supersedes it', async () => {
         // "Record bout" is an edge-triggered command riding the LWW queue: a
-        // later offline autosave for the same match must not silently drop
+        // later offline running write for the same match must not silently drop
         // the pending advancement flag, else the reconnect flush delivers the
         // score but the winner-stays sequence stalls.
         let callCount = 0;
@@ -236,7 +236,7 @@ describe('enqueueRunningWrite: last-write-wins semantics', () => {
         enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 1, kachinukiBoutFinal: true }, 'pw');
         await flushMicrotasks(); // flush fails, entry retained
 
-        // A later autosave (unflagged) supersedes the queued entry.
+        // A later running write (unflagged) supersedes the queued entry.
         enqueueRunningWrite('c1', 'm1', { status: 'running', rev: 2, ipponsA: ['M'] }, 'pw');
         await flushMicrotasks(); // flush fails again
 
@@ -249,7 +249,7 @@ describe('enqueueRunningWrite: last-write-wins semantics', () => {
     });
 
     it('a later running write that takes a queued flagged one\'s place carries the kachinukiBoutFinal', async () => {
-        // Connectivity can return mid-backoff: the next autosave takes the
+        // Connectivity can return mid-backoff: the next running write takes the
         // place of the queued flagged entry (bc-evts: every running write is
         // the outbox's) and must carry the pending flag, or the advancement
         // command would be lost with the entry it replaced.
@@ -265,7 +265,7 @@ describe('enqueueRunningWrite: last-write-wins semantics', () => {
         // Offline "Record bout": flagged write fails and is queued.
         await API.recordScore('c1', 'm1', { status: 'running', kachinukiBoutFinal: true }, 'pw', null);
         await flushMicrotasks(); // its send failed; it is queued, not out
-        // Connectivity back: an unflagged autosave takes its place and lands.
+        // Connectivity back: an unflagged running write takes its place and lands.
         await API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null);
         await tick(0);
 
@@ -889,7 +889,7 @@ describe('recordScore: queues running writes on network failure', () => {
     it('queues a running 5xx as "syncing" (server up, not "offline" or falsely "synced")', async () => {
         // A 5xx (or 429) for a running write is transient: queue it for retry so
         // the sync pill reflects the unsynced state rather than flipping back to
-        // "Synced" (the autosave caller swallows throws). And because the network
+        // "Synced" (the running write's caller swallows throws). And because the network
         // is UP (the server responded), the pill must be "syncing", never
         // "offline". Non-retryable 4xx still throw; they won't succeed on retry.
         let status = 'synced';
@@ -923,7 +923,7 @@ describe('recordScore: queues running writes on network failure', () => {
 
 // 7. Completed recordScore drains a previously-queued running write
 
-describe('recordScore: completed write drains queued running autosave', () => {
+describe('recordScore: completed write drains queued running write', () => {
     it('a queued running write is removed when a completed write for the same match succeeds', async () => {
         // Step 1: enqueue a running write by failing the network call.
         let callCount = 0;
@@ -1985,7 +1985,7 @@ describe('bc-qttl: API.parkQueueForReauth (password_reset no longer destroys que
 
 // bc-lww1: the server drops a write the timestamp guard finds stale and answers
 // 200 {"applied": false}. For a FINISHED result that is the operator's own entry
-// being discarded, so it has to be announced; for a running autosave it is
+// being discarded, so it has to be announced; for a running write it is
 // routine noise and stays silent. Neither may be broadcast to the court display,
 // which already holds the newer state.
 describe('recordScore: a superseded write is announced, not reported as saved (bc-lww1)', () => {
@@ -2029,7 +2029,7 @@ describe('recordScore: a superseded write is announced, not reported as saved (b
         expect(superseded[0]).toMatchObject({ compID: 'c1', matchID: 'm1' });
     });
 
-    it('stays silent when a RUNNING autosave is superseded', async () => {
+    it('stays silent when a RUNNING write is superseded', async () => {
         const failures = [];
         const alerts = [];
         const unsubFail = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
@@ -2548,7 +2548,7 @@ describe('bc-sync: the stored outbox is shared by every tab', () => {
     });
 
     it('a tab saving an older copy keeps the newer write another tab stored under the same match', async () => {
-        // Tab B loads while tab A holds a queued autosave and takes it up; tab
+        // Tab B loads while tab A holds a queued running write and takes it up; tab
         // A then queues its Finish for the same match. Tab B's next save used
         // to write its older copy over the Finish, which was then lost if tab
         // A reloaded before sending it.
@@ -2557,12 +2557,12 @@ describe('bc-sync: the stored outbox is shared by every tab', () => {
         await flushMicrotasks();
         await openTabB();
         vi.advanceTimersByTime(1000);
-        // The backoff retry the clock set off fails too, so the autosave is not
+        // The backoff retry the clock set off fails too, so the running write is not
         // out when the Finish takes its place (bc-evts).
         await flushMicrotasks();
         await API.recordScore('c1', 'm1', { status: 'completed', ipponsA: ['M', 'M'], winner: 'A' }, 'pw', null);
         await flushMicrotasks();
-        // Tab B's retry of the autosave fails and it saves its queue; tab A's
+        // Tab B's retry of the running write fails and it saves its queue; tab A's
         // retry of the Finish hangs, so tab A never saves again to repair it.
         mockFetch((url, opts) => (JSON.parse(opts.body).status === 'running' ? offline() : hang()));
         await tick(10000);

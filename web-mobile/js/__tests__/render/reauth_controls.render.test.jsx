@@ -268,7 +268,7 @@ describe('AdminTopbar: held results', () => {
 
 // The held-writes indicator opens the list of what is held (HeldWritesPanel),
 // where a write the server keeps refusing is discarded on its own, whatever it
-// is: a running autosave, a lineup save and a hand-set winner have no editor of
+// is: a running write, a lineup save and a hand-set winner have no editor of
 // their own to offer it. A write only waiting is listed with no Discard.
 describe('AdminTopbar: the held-writes list', () => {
   let bus, unsentBus, saved;

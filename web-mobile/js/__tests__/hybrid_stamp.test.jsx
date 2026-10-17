@@ -13,7 +13,7 @@
 // The fix is a hybrid stamp: max(this device's time, the stamp of the match as
 // the operator saw it + 1). Wall-clock order holds wherever it is right (an
 // offline court's genuinely later action still wins); causality holds where
-// the clocks disagree. For an autosave the match "as seen" is the one shown at
+// the clocks disagree. For a running write the match "as seen" is the one shown at
 // the TAP, not at the send: a tap made before another device finished the
 // match stays older than that finish (operator ruling 2026-09-27).
 //
@@ -166,7 +166,7 @@ describe('wall-clock order stands where it is right', () => {
     });
 });
 
-describe('an autosave is floored by the match as it was at the tap', () => {
+describe('a running write is floored by the match as it was when made', () => {
     // The tap was made against the point stamped 3 s ahead. Before the debounce
     // sent it, another device finished the match (stamped later still), and
     // the editor's prop moved on. The write is floored by what the tap saw,
@@ -284,7 +284,7 @@ describe('a write resent after a clock_skew refusal keeps its floor', () => {
     }
 
     // Only a finished result is resent at once (a running update is left to
-    // the next autosave).
+    // the next running write).
     it('a finished result', async () => {
         const seen = Date.now() + 3000;
         const sent = skewOnce();

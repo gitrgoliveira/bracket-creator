@@ -416,7 +416,7 @@ describe('individual correction while a withdrawal is recorded', () => {
   it('a reopen made with unsaved taps on the board leaves no maru behind', async () => {
     // The editor stays open through the reopen, so its board must drop the
     // winner's maru with the ruling even when the operator had tapped
-    // something first: kept, the maru would be tappable and autosaved as
+    // something first: kept, the maru would be tappable and saved as
     // two points on a match that no longer has a withdrawal.
     await mountLive(kiken());
     const men = slots('shiro').find((b) => b.textContent === 'M');

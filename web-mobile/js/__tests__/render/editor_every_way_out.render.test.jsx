@@ -1,15 +1,15 @@
-// Every way out of a score editor keeps a tap still inside the autosave
-// window, and asks first about what the autosave does not carry (operator
+// Every way out of a score editor keeps what was tapped (a tap is in the
+// outbox when it is made), and asks first about what no tap carries (operator
 // rulings 2026-09-27).
 //
 // The unmount used to CANCEL a pending edit, and only Close and Prev/Next saved
 // it first. Every other way out dropped it: another match picked on the court
 // console, a correction opened, a court switch, or the console moving on by
-// itself. The unmount now writes it, stamped with the time of the tap
-// (editedPerf, see sync_queue.test.jsx for the stamp), so a tap made before
-// another device finished the match is older than that finish and cannot
-// reopen it. Discard is the one way out that saves nothing. Prev/Next ask
-// "Discard unsaved scoring changes?" first whenever Close would.
+// itself. Since bc-evts stages 3 to 5 a running edit is a tap, in the outbox
+// and stamped when it is made, so every way out keeps it, and a tap made
+// before another device finished the match is older than that finish and
+// cannot reopen it. Prev/Next ask "Discard unsaved scoring changes?" first
+// whenever Close would.
 
 import React from 'react';
 import { render, act, fireEvent, screen, cleanup, within } from '@testing-library/react';
@@ -41,7 +41,6 @@ const STUBBED_GLOBALS = {
     removeDaihyosen: vi.fn(),
     putMatchLineup: vi.fn(),
     recordDecision: vi.fn(),
-    notePendingEdit: vi.fn(),
   },
   AdminLineupHelpers: { rosterFor: vi.fn().mockReturnValue([]) },
   compMatches: () => [],

@@ -1,6 +1,6 @@
 // bc-plcl: whether a score editor's host keeps the editor open after a write.
 // One rule every host asks (the Pools tab, the Scores tab, the bracket panel);
-// the Pools tab once closed on every write, Start match and each autosaved
+// the Pools tab once closed on every write, Start match and each running
 // point included.
 
 import { describe, it, expect } from 'vitest';

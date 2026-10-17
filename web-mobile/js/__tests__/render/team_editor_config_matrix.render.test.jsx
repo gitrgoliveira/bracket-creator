@@ -450,7 +450,7 @@ describe('TeamScoreEditorModal kachinuki bout navigation', () => {
   });
 
   it('RUNNING: an open past-bout correction survives a same-match reload (mp-gmcg)', async () => {
-    // Autosave persists each correction as a running write that round-trips back
+    // Each correction is a running write that round-trips back
     // over SSE as a fresh `match` object with the SAME id. The editor must stay
     // open across that reload (keyed on match id, not object identity) instead of
     // collapsing after every ippon change.

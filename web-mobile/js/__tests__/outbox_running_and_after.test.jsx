@@ -1,6 +1,6 @@
 // bc-evts stage 3 (the governing rule): ALL goes to the outbox, in strict
 // order per match, and it never blocks the UI. A RUNNING score write (the team
-// editor's autosave, Start match, Record bout) is an outbox entry like every
+// team sheet's row write, Start match, Record bout) is an outbox entry like every
 // other door: enqueued in the same tick on the match's base, answered pending,
 // sent after what the match already holds. A write may also name another
 // match's entry it must follow (`after`): the court console's pick of another
@@ -77,7 +77,7 @@ describe('a running score write is an outbox entry', () => {
         await flushMicrotasks();
         expect(writes().length).toBe(1);
         // A running write made after the Finish (e.g. Start on a correction, a
-        // late autosave): while the Finish is out, nothing else of m1 is sent.
+        // late running write): while the Finish is out, nothing else of m1 is sent.
         const res = await API.recordScore('c1', 'm1', running(['M', 'K']), 'pw', { id: 'm1', modifiedAt: 0 });
         await flushMicrotasks();
         expect(res.pending).toBe(true);
@@ -138,7 +138,7 @@ describe('a running score write is an outbox entry', () => {
 
     it('carries rev, revSession, writeId and basis, and never sends the request-only fields', async () => {
         mockFetch(() => ok({ applied: true }));
-        const res = await API.recordScore('c1', 'm1', { ...running(['M']), editedPerf: 1, durable: true, after: 'x' }, 'pw', { id: 'm1', modifiedAt: 0 });
+        const res = await API.recordScore('c1', 'm1', { ...running(['M']), durable: true, after: 'x' }, 'pw', { id: 'm1', modifiedAt: 0 });
         await res.settled;
         const sent = bodyOf(writes()[0]);
         expect(sent.rev).toBeGreaterThan(0);
@@ -146,7 +146,6 @@ describe('a running score write is an outbox entry', () => {
         expect(typeof sent.writeId).toBe('string');
         expect(sent.basis).toBeTruthy();
         expect(sent.durable).toBeUndefined();
-        expect(sent.editedPerf).toBeUndefined();
         expect(sent.after).toBeUndefined();
     });
 

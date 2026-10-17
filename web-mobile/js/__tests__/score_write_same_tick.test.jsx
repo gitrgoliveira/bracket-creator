@@ -1,4 +1,4 @@
-// bc-sync: on pagehide the autosave writes a pending edit marked `durable`,
+// bc-sync (retired with the autosave): on pagehide a pending edit was written marked `durable`,
 // and recordScore puts it into the persisted outbox. That only lands if the
 // write reaches API.recordScore before the page goes. The score editor hosts
 // call editMatchScore (admin.jsx), which calls attemptScoreWrite first thing;

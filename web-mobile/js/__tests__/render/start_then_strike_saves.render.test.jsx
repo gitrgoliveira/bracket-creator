@@ -1,5 +1,5 @@
 // bc-strt: a point struck right after Start match was not saved until the
-// next edit. The editors autosave only a match they see as running, and the
+// next edit. The editors tap only a match they see as running, and the
 // court list refetches a moment after each save, so for that moment the
 // just-started match still read "scheduled" and the point stayed on this
 // board alone. A start that has landed now makes the editor treat the
@@ -79,8 +79,8 @@ const el = (match, onSubmit, props = {}) => (
 // returns nothing.
 const LANDED = { status: 'running' };
 
-// The writes after the Start match one: the autosaves.
-const autosaves = (onSubmit) => onSubmit.mock.calls.map((c) => c[0]).filter((p) => p.status === 'running').slice(1);
+// The writes after the Start: running writes (there should be none).
+const runningWrites = (onSubmit) => onSubmit.mock.calls.map((c) => c[0]).filter((p) => p.status === 'running').slice(1);
 
 const tapStart = async () => {
   await act(async () => { fireEvent.click(screen.getByText('Start match')); });
@@ -103,7 +103,7 @@ describe('a point struck right after Start match saves at once (bc-strt)', () =>
 
     // bc-evts stage 3: the point is a tap, sent without waiting for the list.
     await strikeIndividualMen();
-    expect(autosaves(onSubmit), 'no running score write').toEqual([]);
+    expect(runningWrites(onSubmit), 'no running score write').toEqual([]);
     expect(window.API.recordTap.mock.calls.map((c) => c[2])).toEqual([
       expect.objectContaining({ kind: 'ippon.add', letter: 'M' }),
     ]);
@@ -118,7 +118,7 @@ describe('a point struck right after Start match saves at once (bc-strt)', () =>
     expect(window.API.recordTap.mock.calls[0][2]).toMatchObject({ kind: 'ippon.add', letter: 'M' });
   });
 
-  it('a scheduled match nobody started still does not autosave', async () => {
+  it('a scheduled match nobody started still writes nothing', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     await act(async () => { render(el(individual(), onSubmit)); });
     await strikeIndividualMen();
@@ -131,7 +131,7 @@ describe('a point struck right after Start match saves at once (bc-strt)', () =>
     await tapStart();
     expect(onSubmit).toHaveBeenCalledTimes(1);
     await strikeIndividualMen();
-    expect(onSubmit, 'nothing was started, so nothing autosaves').toHaveBeenCalledTimes(1);
+    expect(onSubmit, 'nothing was started, so nothing is written').toHaveBeenCalledTimes(1);
   });
 
   it('a later snapshot of the match (sent back to the queue) ends it', async () => {
@@ -176,7 +176,7 @@ describe('a point struck right after Start match saves at once (bc-strt)', () =>
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(screen.getByText('Start match'), 'the operator can try again').toBeTruthy();
     await strikeIndividualMen();
-    expect(onSubmit, 'nothing was started, so nothing autosaves').toHaveBeenCalledTimes(1);
+    expect(onSubmit, 'nothing was started, so nothing is written').toHaveBeenCalledTimes(1);
   });
 
   it('kachinuki: a start the server refused with an error leaves the match scheduled', async () => {
@@ -186,6 +186,6 @@ describe('a point struck right after Start match saves at once (bc-strt)', () =>
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(screen.getByText('Start match'), 'the operator can try again').toBeTruthy();
     await strikeKachinukiAkaMen();
-    expect(onSubmit, 'nothing was started, so nothing autosaves').toHaveBeenCalledTimes(1);
+    expect(onSubmit, 'nothing was started, so nothing is written').toHaveBeenCalledTimes(1);
   });
 });

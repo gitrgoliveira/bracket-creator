@@ -41,7 +41,6 @@ const STUBBED_GLOBALS = {
     removeDaihyosen: vi.fn(),
     putMatchLineup: vi.fn(),
     recordDecision: vi.fn(),
-    notePendingEdit: vi.fn(),
     fetchMatchHistory: vi.fn(),
   },
   AdminLineupHelpers: { rosterFor: vi.fn().mockReturnValue([]) },

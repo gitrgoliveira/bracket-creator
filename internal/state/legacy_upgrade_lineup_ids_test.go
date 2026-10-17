@@ -228,6 +228,39 @@ func TestLegacyLineupUpgrade_ClearsAMemberIDTheTeamDoesNotHold(t *testing.T) {
 	assert.Equal(t, ito.ID, repaired.MemberIDs[domain.PositionNumbered(3)], "an id the team holds is kept")
 }
 
+// Stage 3 review 4, G7: a lineup whose team holds no members (no team on the
+// roster has its id: every team's members are seeded on load and on every
+// roster save) holds no member either, so a v4 id there is cleared like any
+// other the team does not hold, and its name is kept.
+func TestLegacyLineupUpgrade_ClearsAMemberIDOfATeamWithNoMembers(t *testing.T) {
+	dir, s := newLegacyUpgradeFixture(t)
+	legacyUpgradeTeams(t, s, "Tora")
+	const dead = "0d0d0d0d-0d0d-4d0d-8d0d-0d0d0d0d0d0d"
+	const goneTeam = "9a9a9a9a-9a9a-4a9a-8a9a-9a9a9a9a9a9a"
+
+	type lineupFileShape struct {
+		Lineups []domain.TeamLineup `yaml:"lineups"`
+	}
+	body, err := yaml.Marshal(&lineupFileShape{Lineups: []domain.TeamLineup{{
+		TeamID: goneTeam, Round: 0,
+		Positions: map[domain.Position]string{domain.PositionNumbered(1): "Ren Abe"},
+		MemberIDs: map[domain.Position]string{domain.PositionNumbered(1): dead},
+	}}})
+	require.NoError(t, err)
+	path := filepath.Join(dir, "competitions", "c1", "lineups.yaml")
+	require.NoError(t, os.WriteFile(path, body, 0o600))
+
+	fresh := freshLegacyUpgradeStore(t, dir)
+	fresh.EnsureLegacyUpgraded("c1")
+
+	lineups, err := fresh.LoadTeamLineups("c1")
+	require.NoError(t, err)
+	repaired, ok := roundZeroLineup(lineups, goneTeam)
+	require.True(t, ok)
+	assert.Empty(t, repaired.MemberIDs[domain.PositionNumbered(1)], "the id no member holds is cleared")
+	assert.Equal(t, "Ren Abe", repaired.Positions[domain.PositionNumbered(1)], "its name is kept")
+}
+
 // The position that keeps the id when one member is at two is the first the team
 // fields (domain.ComparePositions, the order the roster walks), not the first as
 // text: for the five named positions that is senpo before chuken, where a text

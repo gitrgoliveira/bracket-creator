@@ -446,9 +446,9 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 		// caller on the result itself). Read under the save's lock, like that
 		// check, and refused with the same result_finalized body. An
 		// organiser keeps the always-editable rule.
-		var guard func(stx state.StoreTx) *txResponse
+		var guard func(stx state.StoreTx, judge *memberJudge) *txResponse
 		if anonymous {
-			guard = func(stx state.StoreTx) *txResponse {
+			guard = func(stx state.StoreTx, judge *memberJudge) *txResponse {
 				snap, found, err := matchSnapshotOrErr(stx, compID, matchID, "lineup")
 				if err != nil {
 					log.Printf("mobileapp: PUT %s: %v", c.Request.URL.Path, err)
@@ -463,7 +463,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 				if isMatchFinalized(snap.Status) {
 					return resultFinalized("This match has finished, so its lineup can no longer be changed. Contact the tournament organizer to correct it.").response()
 				}
-				return memberIDsOutsideTeam(stx, compID, teamID, req.memberIDsRead())
+				return memberIDsOutsideTeam(judge, teamID, req.memberIDsRead())
 			}
 		}
 		saveLineup(c, tx, hub, save, guard, func(lineups map[string]domain.TeamLineup) (domain.TeamLineup, bool) {
@@ -502,8 +502,7 @@ var errTeamNotInMatch = &selfRunRefusal{
 // file that cannot be read refuses the save with errTeamMembersUnreadable (409),
 // not a 500 the offline queue retries forever; a save that names no member id
 // (a cleared position) never reads it.
-func memberIDsOutsideTeam(stx state.StoreTx, compID, teamID string, memberIDs map[domain.Position]string) *txResponse {
-	judge := &memberJudge{stx: stx, compID: compID}
+func memberIDsOutsideTeam(judge *memberJudge, teamID string, memberIDs map[domain.Position]string) *txResponse {
 	for pos, id := range memberIDs {
 		if id == "" {
 			continue
@@ -527,15 +526,17 @@ func memberIDsOutsideTeam(stx state.StoreTx, compID, teamID string, memberIDs ma
 // resolves to nothing (bc-pnum), the shape a name typed while the members were
 // not loaded already has. The anonymous self-run caller is refused for such an
 // id before this (memberIDsOutsideTeam); this is the organiser's case, which is
-// never refused for it. A team-members file that cannot be read, or a team with
-// no members recorded at all, leaves the ids as sent (the first logged by
-// memberJudge): which of them are held cannot be told, and dropping a held one
-// would lose the fighter's identity.
-func memberIDsTheTeamHolds(stx state.StoreTx, compID, teamID string, memberIDs map[domain.Position]string) map[domain.Position]string {
+// never refused for it. Every team has members recorded (seeded to its team
+// size plus reserves on load and on every roster save), so an empty list means
+// an id no team member holds. A team-members file that cannot be read refuses
+// the save with errTeamMembersUnreadable (409), as every member-id check does
+// (match-writes.md): which ids are held cannot be told, and keeping them
+// unjudged would store an id that may name nobody. The judge is the save's one
+// (memberJudge), shared with memberIDsOutsideTeam, so the file is read once.
+func memberIDsTheTeamHolds(judge *memberJudge, teamID string, memberIDs map[domain.Position]string) (map[domain.Position]string, *txResponse) {
 	if len(memberIDs) == 0 {
-		return memberIDs
+		return memberIDs, nil
 	}
-	judge := &memberJudge{stx: stx, compID: compID}
 	kept := make(map[domain.Position]string, len(memberIDs))
 	for pos, id := range memberIDs {
 		if id == "" {
@@ -544,20 +545,15 @@ func memberIDsTheTeamHolds(stx state.StoreTx, compID, teamID string, memberIDs m
 		}
 		held, err := judge.holds(teamID, id)
 		if err != nil {
-			return memberIDs
-		}
-		if len(judge.squads[teamID]) == 0 {
-			// No members are recorded for the team at all: nothing to judge an
-			// id against (the load repair leaves such a team alone too).
-			return memberIDs
+			return nil, errTeamMembersUnreadable.response()
 		}
 		if !held {
-			log.Printf("mobileapp: lineup save for team %s in %s: member %s is not one of the team's; position %q kept by its name", teamID, compID, id, pos)
+			log.Printf("mobileapp: lineup save for team %s in %s: member %s is not one of the team's; position %q kept by its name", teamID, judge.compID, id, pos)
 			continue
 		}
 		kept[pos] = id
 	}
-	return kept
+	return kept, nil
 }
 
 // teamMemberIDs is the set of member ids a team holds in squads: the one answer to
@@ -659,7 +655,7 @@ func (w lineupSave) base(stx state.StoreTx, comp *state.Competition) (domain.Tea
 // (lineupSave.lineupToStore), saves it and reads it back with find for the
 // response. The answer is written after the lock releases (txResponse), and a
 // saved lineup is broadcast so SSE clients re-fetch it.
-func saveLineup(c *gin.Context, tx CompetitionTransactor, hub Broadcaster, save lineupSave, guard func(stx state.StoreTx) *txResponse, find func(map[string]domain.TeamLineup) (domain.TeamLineup, bool)) {
+func saveLineup(c *gin.Context, tx CompetitionTransactor, hub Broadcaster, save lineupSave, guard func(stx state.StoreTx, judge *memberJudge) *txResponse, find func(map[string]domain.TeamLineup) (domain.TeamLineup, bool)) {
 	compID := save.compID
 	var respErr *txResponse
 	var persistedLineup domain.TeamLineup
@@ -685,15 +681,20 @@ func saveLineup(c *gin.Context, tx CompetitionTransactor, hub Broadcaster, save 
 			}
 			return nil
 		}
+		// ONE judge for the save, so team-members.yaml is read at most once
+		// (stage 3 review 4, G8).
+		judge := &memberJudge{stx: stx, compID: compID}
 		if guard != nil {
-			if respErr = guard(stx); respErr != nil {
+			if respErr = guard(stx, judge); respErr != nil {
 				return nil
 			}
 		}
 		// No member id the team does not hold is ever stored (stage 3 review 3,
 		// F2): the anonymous caller was refused for one by its guard, and the
 		// organiser's save keeps the position by its name alone.
-		save.req.MemberIDs = memberIDsTheTeamHolds(stx, compID, save.teamID, save.req.MemberIDs)
+		if save.req.MemberIDs, respErr = memberIDsTheTeamHolds(judge, save.teamID, save.req.MemberIDs); respErr != nil {
+			return nil
+		}
 		var lineup domain.TeamLineup
 		if lineup, respErr = save.lineupToStore(stx, comp); respErr != nil {
 			return nil

@@ -2122,15 +2122,16 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 		return nil
 	}
 	squads, err := roster.squads()
-	if err != nil || len(squads) == 0 {
+	if err != nil {
 		return err
 	}
 	changed := false
 	for key, l := range lineups {
+		// Every team on the roster has members (seeded on load, by
+		// upgradeSquadsFromMetadataLocked before this, and on every roster
+		// save), so a lineup whose team holds none is one no team member is
+		// on: its ids are judged like any other (stage 3 review 4, G7).
 		members := squads[l.TeamID]
-		if len(members) == 0 {
-			continue
-		}
 		lineupChanged := false
 		// The ids this lineup ALREADY fields, so no member ends up at two
 		// positions -- neither one carried over from disk, nor one this pass
@@ -2161,8 +2162,7 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 		// cleared and the position keeps its NAME, so nothing changes on
 		// screen; the name pass below then resolves that name like any id-less
 		// position's (bc-pnum: a record is read by its name only once it
-		// carries no id). A team with no members recorded was skipped above:
-		// there is nothing to judge an id against. Only an id of the shape a
+		// carries no id). Only an id of the shape a
 		// member id is minted in, by the server or a device (a lowercase UUID
 		// v4, IsClientMemberID), is judged: that is the shape the refused add
 		// leaves, and an id of any other shape was written by hand or by a

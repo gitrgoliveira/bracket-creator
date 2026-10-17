@@ -449,6 +449,8 @@ func TestLineupPUT_MemberIDsRoundTrip(t *testing.T) {
 	r, store, _ := setupLineupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "secret"}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+	const memberSato, memberIto = "5a705a70-5a70-4a70-8a70-5a705a705a70", "17017017-0170-4170-8170-170170170170"
+	teamA := teamHoldingMembers(t, store, "c1", [2]string{memberSato, "Sato"}, [2]string{memberIto, "Ito"})
 
 	body, _ := json.Marshal(map[string]any{
 		"positions": map[string]string{
@@ -456,12 +458,12 @@ func TestLineupPUT_MemberIDsRoundTrip(t *testing.T) {
 			"jiho":  "Ito",
 		},
 		"memberIds": map[string]string{
-			"senpo": "member-sato",
-			"jiho":  "member-ito",
+			"senpo": memberSato,
+			"jiho":  memberIto,
 		},
 	})
 	req := httptest.NewRequest(http.MethodPut,
-		"/api/competitions/c1/teams/teamA/lineups/0",
+		"/api/competitions/c1/teams/"+teamA+"/lineups/0",
 		bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")
@@ -471,17 +473,17 @@ func TestLineupPUT_MemberIDsRoundTrip(t *testing.T) {
 
 	var putResp domain.TeamLineup
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &putResp))
-	assert.Equal(t, "member-sato", putResp.MemberIDs[domain.PosSenpo], "PUT response carries memberIds")
-	assert.Equal(t, "member-ito", putResp.MemberIDs[domain.PosJiho])
+	assert.Equal(t, memberSato, putResp.MemberIDs[domain.PosSenpo], "PUT response carries memberIds")
+	assert.Equal(t, memberIto, putResp.MemberIDs[domain.PosJiho])
 
-	getReq := httptest.NewRequest(http.MethodGet, "/api/competitions/c1/teams/teamA/lineups/0", nil)
+	getReq := httptest.NewRequest(http.MethodGet, "/api/competitions/c1/teams/"+teamA+"/lineups/0", nil)
 	getW := httptest.NewRecorder()
 	r.ServeHTTP(getW, getReq)
 	require.Equal(t, http.StatusOK, getW.Code)
 	var getResp domain.TeamLineup
 	require.NoError(t, json.Unmarshal(getW.Body.Bytes(), &getResp))
-	assert.Equal(t, "member-sato", getResp.MemberIDs[domain.PosSenpo], "GET returns the persisted memberIds")
-	assert.Equal(t, "member-ito", getResp.MemberIDs[domain.PosJiho])
+	assert.Equal(t, memberSato, getResp.MemberIDs[domain.PosSenpo], "GET returns the persisted memberIds")
+	assert.Equal(t, memberIto, getResp.MemberIDs[domain.PosJiho])
 	assert.Equal(t, "Sato", getResp.Positions[domain.PosSenpo], "the name half is unaffected")
 }
 
@@ -525,17 +527,21 @@ func TestLineupPUT_MemberIDsInvalidPositionKey(t *testing.T) {
 	r, store, _ := setupLineupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "secret"}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+	// A member the team holds, so the id reaches the position check (an id it
+	// does not hold is taken off before it, memberIDsTheTeamHolds).
+	const memberX = "0e0e0e0e-0e0e-4e0e-8e0e-0e0e0e0e0e0e"
+	teamA := teamHoldingMembers(t, store, "c1", [2]string{memberX, "X"})
 
 	body, _ := json.Marshal(map[string]any{
 		"positions": map[string]string{
 			"senpo": "Sato",
 		},
 		"memberIds": map[string]string{
-			"chudan": "member-x",
+			"chudan": memberX,
 		},
 	})
 	req := httptest.NewRequest(http.MethodPut,
-		"/api/competitions/c1/teams/teamA/lineups/0",
+		"/api/competitions/c1/teams/"+teamA+"/lineups/0",
 		bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tournament-Password", "secret")

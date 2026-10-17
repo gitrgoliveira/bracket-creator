@@ -1013,19 +1013,21 @@ describe('a discarded add that went out is checked against the team\'s members (
         expect(records()[member.id]).toBeUndefined();
     });
 
-    it('a member list that holds an id forgets what was known of it', async () => {
+    // A dropped id the list holds is no longer dropped: kept (stage 3 review 10,
+    // N4), so every tab hears the operator is told, and a write goes as made.
+    it('a member list that holds a dropped id keeps it, and leaves the others', async () => {
         _lsStore[MINTED_KEY] = JSON.stringify({
             'mem-9': { c: 'c1', t: 't1', s: 'dropped', at: Date.now() },
             'mem-8': { c: 'c1', t: 't1', s: 'dropped', at: Date.now() },
         });
         global.fetch = vi.fn(() => answer(200, { teamMembers: { t1: [{ id: 'mem-9', name: 'Ren Abe' }] } }));
         await API.fetchSquads('c1', 'pw');
-        expect(Object.keys(records())).toEqual(['mem-8']);
+        expect(Object.fromEntries(Object.entries(records()).map(([id, r]) => [id, r.s]))).toEqual({ 'mem-9': 'kept', 'mem-8': 'dropped' });
     });
 
     // Stage 3 review 8, L4: a record is forgotten only by a list of its own
     // competition and team.
-    it('a member list forgets only the records of its own competition and team (L4)', async () => {
+    it('a member list keeps only the dropped ids of its own competition and team (L4)', async () => {
         _lsStore[MINTED_KEY] = JSON.stringify({
             'mem-9': { c: 'c1', t: 't1', s: 'dropped', at: Date.now() },
             'mem-6': { c: 'c2', t: 't1', s: 'dropped', at: Date.now() },
@@ -1033,7 +1035,8 @@ describe('a discarded add that went out is checked against the team\'s members (
         });
         global.fetch = vi.fn(() => answer(200, { teamMembers: { t1: [{ id: 'mem-9' }, { id: 'mem-6' }, { id: 'mem-7' }] } }));
         await API.fetchSquads('c1', 'pw');
-        expect(Object.keys(records()), 'another competition\'s and another team\'s records stand').toEqual(['mem-6', 'mem-7']);
+        expect(Object.fromEntries(Object.entries(records()).map(([id, r]) => [id, r.s])), 'another competition\'s and another team\'s records stand')
+            .toEqual({ 'mem-9': 'kept', 'mem-6': 'dropped', 'mem-7': 'dropped' });
     });
 });
 

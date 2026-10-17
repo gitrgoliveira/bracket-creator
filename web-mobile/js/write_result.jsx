@@ -440,7 +440,17 @@ export const QUEUED_UNSAVED_NOTICE = 'Not sent yet: keep this page open until th
 // is fine then, so "sent when the connection returns" would be false; the
 // editor offers to discard it beside this line (HeldWriteDiscard).
 export const QUEUED_REFUSED_NOTICE = 'Not saved yet: the server keeps refusing it. It is still being tried.';
-export function queuedNotice(res, { keepsFailing = false } = {}) {
+// queuedBlockedNotice: the held write is not refused itself: it waits for
+// another write held on this device that the server keeps refusing (a team
+// member's add a lineup or a representative pick follows; stage 3 review 4,
+// G2). The connection is fine then too, so the line names what it waits for
+// and where it can be discarded.
+export function queuedBlockedNotice(blocker) {
+    return `Not sent yet: it waits for a ${heldWriteWhat(blocker)} the server keeps refusing. `
+        + `Discard that one here or from the "${HELD_WRITES_TITLE}" list.`;
+}
+export function queuedNotice(res, { keepsFailing = false, blockedBy = null } = {}) {
+    if (blockedBy) return queuedBlockedNotice(blockedBy);
     if (keepsFailing) return QUEUED_REFUSED_NOTICE;
     return res && typeof res === 'object' && res.persisted === false ? QUEUED_UNSAVED_NOTICE : QUEUED_NOTICE;
 }
@@ -451,6 +461,11 @@ export function queuedNotice(res, { keepsFailing = false } = {}) {
 // open, so the editor's pending banner offers to discard it, and only it,
 // after this confirm. Named "result" as the operator counts it.
 export const HELD_WRITE_DISCARD_LABEL = 'Discard held result';
+// heldWriteDiscardLabel: the editor's button when what it discards is the
+// write the match waits for (a heldWrites() item), not the match's own result.
+export function heldWriteDiscardLabel(blocker) {
+    return blocker ? `Discard held ${heldWriteWhat(blocker)}` : HELD_WRITE_DISCARD_LABEL;
+}
 export function heldWriteDiscardConfirm(held) {
     // `held` (from the topbar's list) names any other kind of held write; the
     // editors' button, which discards a result, passes nothing.

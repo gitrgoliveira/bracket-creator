@@ -10,7 +10,7 @@ import { DAIHYOSEN_POSITION, scoreRowMatchName } from './pool_ids.jsx';
 import {
   writeDidNotLand, writeRetryable, decisionWord,
   attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED, downstreamKnockoutReopenedNotice,
-  courtBusyMessage, HELD_WRITE_DISCARD_LABEL, heldWriteDiscardConfirm, queuedNotice,
+  courtBusyMessage, heldWriteDiscardLabel, heldWriteDiscardConfirm, queuedNotice,
   tapNotAppliedText,
 } from './write_result.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
@@ -60,10 +60,14 @@ export function useMatchHeldWrite(compId, matchId) {
   const api = window.API;
   // `held` is null when this page has no queue to ask (the editors' render
   // tests stub window.API without one): unknown, so nothing is cleared.
+  // `blocker` is the write of another kind this match waits for that the
+  // server keeps refusing (a team member's add; stage 3 review 4, G2), or null.
   const read = () => ({
     held: api && typeof api.hasHeldWrite === 'function' && compId && matchId ? api.hasHeldWrite(compId, matchId) : null,
     stuck: !!(api && typeof api.heldWriteKeepsFailing === 'function'
       && compId && matchId && api.heldWriteKeepsFailing(compId, matchId)),
+    blocker: (api && typeof api.heldWriteBlocker === 'function' && compId && matchId
+      && api.heldWriteBlocker(compId, matchId)) || null,
   });
   const [state, setState] = useStateA(read);
   const mountedRef = useRefA(true);
@@ -72,7 +76,8 @@ export function useMatchHeldWrite(compId, matchId) {
     const refresh = () => {
       if (!mountedRef.current) return;
       const next = read();
-      setState((prev) => (prev.held === next.held && prev.stuck === next.stuck ? prev : next));
+      const blockerKey = (s) => (s.blocker ? s.blocker.key : '');
+      setState((prev) => (prev.held === next.held && prev.stuck === next.stuck && blockerKey(prev) === blockerKey(next) ? prev : next));
     };
     refresh();
     const offs = [];
@@ -131,13 +136,13 @@ export function useTapOutcomeNote(compId, matchId) {
 // write stands (queuedNotice): waiting for the connection, held in this page
 // only, or refused by the server on every attempt. The three editors render it.
 export function HeldWriteNotice({ compId, matchId, res }) {
-  const { stuck } = useMatchHeldWrite(compId, matchId);
-  return <span>{queuedNotice(res, { keepsFailing: stuck })}</span>;
+  const { stuck, blocker } = useMatchHeldWrite(compId, matchId);
+  return <span>{queuedNotice(res, { keepsFailing: stuck, blockedBy: blocker })}</span>;
 }
 
 export function HeldWriteDiscard({ compId, matchId, onDiscarded, disabled = false }) {
   const api = window.API;
-  const { stuck } = useMatchHeldWrite(compId, matchId);
+  const { stuck, blocker } = useMatchHeldWrite(compId, matchId);
   const [busy, setBusy] = useStateA(false);
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
@@ -146,9 +151,15 @@ export function HeldWriteDiscard({ compId, matchId, onDiscarded, disabled = fals
     setBusy(true);
     try {
       const ok = typeof window.confirmDialog === 'function'
-        ? await window.confirmDialog(heldWriteDiscardConfirm())
+        ? await window.confirmDialog(heldWriteDiscardConfirm(blocker || undefined))
         : false;
       if (!ok || !mountedRef.current) return;
+      if (blocker) {
+        // The write the match waits for (G2): the match's own writes stay
+        // queued and go once it is gone, so the editor keeps what it holds.
+        api.discardHeldWrite(blocker.key);
+        return;
+      }
       api.discardFailingHeldWrites(compId, matchId);
       if (typeof onDiscarded === 'function') onDiscarded();
     } finally {
@@ -163,7 +174,7 @@ export function HeldWriteDiscard({ compId, matchId, onDiscarded, disabled = fals
       disabled={disabled || busy}
       onClick={discard}
     >
-      {HELD_WRITE_DISCARD_LABEL}
+      {heldWriteDiscardLabel(blocker)}
     </button>
   );
 }

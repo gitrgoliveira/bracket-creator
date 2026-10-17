@@ -15,7 +15,7 @@ import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { QUEUED_NOTICE, QUEUED_UNSAVED_NOTICE, QUEUED_REFUSED_NOTICE, HELD_WRITE_DISCARD_LABEL } from '../../write_result.jsx';
+import { QUEUED_NOTICE, QUEUED_UNSAVED_NOTICE, QUEUED_REFUSED_NOTICE, HELD_WRITE_DISCARD_LABEL, queuedBlockedNotice } from '../../write_result.jsx';
 import { keyboardClick } from '../helpers/tap_events.js';
 
 const STUBBED_GLOBALS = {
@@ -220,6 +220,37 @@ describe('team editor: a held write of the match it did not submit', () => {
       expect(banner.textContent).toContain(QUEUED_NOTICE);
     } finally {
       delete window.API.hasHeldWrite;
+    }
+  });
+});
+
+// Stage 3 review 4, G2: the match's own write is only waiting, but what it waits
+// for (a team member's add) is a write the server keeps refusing. The banner says
+// so, not "sent when the connection returns", and offers to discard THAT write.
+describe('team editor: a held write waiting on a write the server keeps refusing', () => {
+  const blocker = { key: 'lineup:c1:t1:r0\u001fadd', kind: 'member', keepsFailing: true, compID: 'c1', matchID: '' };
+  it('names the write it waits for, and discards that one alone', async () => {
+    window.API.hasHeldWrite = vi.fn(() => true);
+    window.API.heldWriteKeepsFailing = vi.fn(() => true);
+    window.API.heldWriteBlocker = vi.fn(() => blocker);
+    window.API.discardHeldWrite = vi.fn(() => true);
+    window.API.discardFailingHeldWrites = vi.fn(() => 0);
+    window.confirmDialog = vi.fn().mockResolvedValue(true);
+    try {
+      await act(async () => {
+        render(<ScoreEditorModal match={teamMatch} onClose={vi.fn()} onSubmit={vi.fn()} password="pw" />);
+      });
+      const banner = await screen.findByRole('status');
+      expect(banner.textContent).toContain(queuedBlockedNotice(blocker));
+      expect(banner.textContent).not.toContain(QUEUED_NOTICE);
+      const button = screen.getByTestId('held-write-discard');
+      expect(button.textContent).toBe('Discard held team member change');
+      await act(async () => { fireEvent.click(button); });
+      expect(window.confirmDialog.mock.calls[0][0].message).toContain('team member change');
+      expect(window.API.discardHeldWrite).toHaveBeenCalledWith(blocker.key);
+      expect(window.API.discardFailingHeldWrites).not.toHaveBeenCalled();
+    } finally {
+      for (const k of ['hasHeldWrite', 'heldWriteKeepsFailing', 'heldWriteBlocker', 'discardHeldWrite', 'discardFailingHeldWrites']) delete window.API[k];
     }
   });
 });

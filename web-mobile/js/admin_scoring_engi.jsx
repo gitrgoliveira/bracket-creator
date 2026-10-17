@@ -24,8 +24,9 @@ const { useState: useStateE, useEffect: useEffectE, useRef: useRefE } = React;
 
 import {
   ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer, HeldWriteDiscard, HeldWriteNotice, useClearPendingWhenNothingHeld,
-  tapBoardOf, useTapBoard, useTapOutcomeNote,
+  tapBoardOf, useTapBoard, useTapOutcomeNote, useDraftKeptOnStart, DraftKeptNotice,
 } from './admin_scoring_shared.jsx';
+import { engiDraftTaps } from './draft_taps.jsx';
 import { SyncStatusPill, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
 // bc-evts stage 4: a running match is scored by flag events (the outbox's
 // recordTap); MAX_FLAGS is the fold's cap, domain.MaxEngiFlags in Go.
@@ -146,7 +147,11 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // match with this device's pending taps folded on (tapBoardOf, shared with
   // the individual editor), so there is no autosave to debounce, to write on
   // the way out or to adopt back, and no echo can take a tap off the board.
-  const tapMode = m.status === "running";
+  // Operator decision D1 (a): a draft this editor holds when ANOTHER device
+  // starts the match is kept on screen with Save and Discard (draftKeep.held);
+  // the counts stay a draft meanwhile.
+  const draftKeep = useDraftKeptOnStart(m.status);
+  const tapMode = m.status === "running" && !draftKeep.held;
   const tapBoard = useTapBoard(m, tapMode, ENGI_FOLD);
   const flagsA = tapMode ? (tapBoard.match.flagsA || 0) : draftA;
   const flagsB = tapMode ? (tapBoard.match.flagsB || 0) : draftB;
@@ -181,9 +186,11 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // always odd ({1,3,5}), so it already implies a strict winner; canSubmit
   // needs only isValidTotal, not a separate non-null check.
   const winnerSide = deriveWinner(flagsA, flagsB);
-  const canSubmit = isValidTotal && !submitting;
+  // A kept draft (D1) is saved or discarded first: no result over it.
+  const canSubmit = isValidTotal && !submitting && !draftKeep.held;
   // Only a draft can be unsaved: a running match's counts are taps.
   const isDirty = !tapMode && (draftA !== initialFlagsA || draftB !== initialFlagsB);
+  draftKeep.note({ a: initialFlagsA, b: initialFlagsB }, { a: draftA, b: draftB });
   // Follow a flag count recorded on another device — the same rule the kendo
   // editors follow, because this is the same rule: an engi match has ONE result
   // and every surface asking for it shows the same one, and while this editor
@@ -213,6 +220,18 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // elsewhere): the draft starts from the server's count, never from one a
   // draft held before the match started (the adopt above keeps a draft it last
   // saw unsaved, and it does not watch the draft while the match runs).
+  // D1: Save sends the kept counts as the flag taps that would have made them
+  // (draft_taps.jsx), against the counts they were typed over; Discard drops
+  // them. Either way the board shows from now on.
+  const leaveKeptDraft = () => { takeServerFlags(); draftKeep.release(); };
+  const saveKeptDraft = () => {
+    const board = tapBoardOf(m, ENGI_FOLD);
+    for (const ev of engiDraftTaps(draftKeep.base, { a: draftA, b: draftB })) {
+      window.API.recordTap(m.compId, m.id, makeEvent({ pos: 0, ...ev }), password, board.base);
+    }
+    tapNote.clear();
+    leaveKeptDraft();
+  };
   const wasTapModeRef = useRefE(tapMode);
   useEffectE(() => {
     if (wasTapModeRef.current && !tapMode) takeServerFlags();
@@ -243,7 +262,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
     if (submitting) return;
     // A running match's flags are taps, already in the outbox, so there is
     // nothing to discard.
-    if (m.status === "running") {
+    if (tapMode) {
       go();
       return;
     }
@@ -673,6 +692,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
             row: hide the footer's own actions so the operator never sees two
             Cancels and two commit buttons at the highest-stakes moment
             (amending a recorded result). Mirrors ScoreEditorModal. */}
+        {draftKeep.held && <DraftKeptNotice onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} />}
         {!(isComplete && showCorrectionPrompt) && (
           <div className="score-nav">
             {prevMatch ? (

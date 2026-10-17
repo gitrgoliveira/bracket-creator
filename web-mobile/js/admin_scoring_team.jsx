@@ -47,7 +47,10 @@ import {
   tapBoardOf,
   useTapBoard,
   shownMarkIds,
+  useDraftKeptOnStart,
+  DraftKeptNotice,
 } from './admin_scoring_shared.jsx';
+import { teamDraftTaps } from './draft_taps.jsx';
 // bc-evts stage 5: a running team match is scored by tap events, one per
 // scoring gesture, handed to the outbox (API.recordTap).
 import {
@@ -1275,7 +1278,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // correction of a fought kachinuki bout). A match that is not running (pre-match,
   // or a correction of a finished one) keeps a local draft, sent once by Start or
   // Save correction.
-  const tapMode = mHost.status === "running";
+  // Operator decision D1 (a): a draft this sheet holds when ANOTHER device
+  // starts the match is kept on screen with Save and Discard (draftKeep.held);
+  // the sheet stays a draft meanwhile.
+  const draftKeep = useDraftKeptOnStart(mHost.status);
+  const tapMode = mHost.status === "running" && !draftKeep.held;
   // The numbered bouts the board holds even where the server's copy has no row
   // for them yet: a fixed-order match's team positions, a kachinuki encounter's
   // first bout, and the pairings added by hand. A tap lands only on a row the
@@ -4181,7 +4188,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         ...(answer.scoreVersion != null ? { scoreVersion: answer.scoreVersion } : {}),
         ...(answer.eventSeqs ? { eventSeqs: answer.eventSeqs } : {}),
       }
-      : { ...latest, ...(from || {}), subResults };
+      : { ...latest, ...from, subResults };
     setMatchOverride({ match: shown, at });
     return shown;
   };
@@ -4308,6 +4315,33 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const isDirty = (!tapMode && (JSON.stringify(subs) !== serverSubsSig || daihyosenVerdictDirty))
     // A removed withdrawal is unsaved until Save correction sends it.
     || removingWithdrawal;
+  // D1: what the sheet's draft would tap, as typed over and as held.
+  const encounterEnchoOf = (n) => (kachinukiEncounter ? 0 : n);
+  draftKeep.note({ rows: serverSubs, encho: encounterEnchoOf(initialEnchoPeriods) }, { rows: subs, encho: encounterEnchoOf(enchoLocal) });
+  // Save sends the kept draft as the taps that would have made it
+  // (draft_taps.jsx), each through emitBoutTap, in order, a removal naming the
+  // board's mark; Discard drops it. Either way the board shows from now on,
+  // and the draft starts from the server's copy.
+  const leaveKeptDraft = () => {
+    setSubs(serverSubs);
+    setEnchoPeriodCount(initialEnchoPeriods);
+    draftKeep.release();
+  };
+  const saveKeptDraft = () => {
+    const board = tapBoardOf(mHost, teamFold).match;
+    const shownRows = {};
+    for (const r of board.subResults || []) {
+      if (!r) continue;
+      shownRows[r.position] = {
+        a: { letters: realIppons(r.ipponsA || []), ids: shownMarkIds(r, "a") },
+        b: { letters: realIppons(r.ipponsB || []), ids: shownMarkIds(r, "b") },
+      };
+    }
+    const evs = teamDraftTaps(draftKeep.base,
+      { rows: subs, encho: encounterEnchoOf(enchoLocal), enchoPos: hasDaihyosen ? DAIHYOSEN_POSITION : 0 }, shownRows);
+    for (const ev of evs) emitBoutTap({ pos: 0, ...ev });
+    leaveKeptDraft();
+  };
   // RE-SEED the bout rows when the stored result moves, PER ROW.
   //
   // Without this an editor left open kept showing the board it opened with
@@ -4338,7 +4372,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     apply: () => {
       // A running match's rows are the board itself: nothing to take. What the
       // sheet agrees with there is worked out from the pending taps (below).
-      if (tapMode) return;
+      // A kept draft (D1) takes nothing either: its untouched rows stay what
+      // they were typed over, so Save sends only the operator's changes.
+      if (tapMode || draftKeep.held) return;
       // The previous board is read HERE, not inside the updater: a renderer
       // may run the updater a render later (React does when another adopt has
       // already queued a state change in this commit; the render tests run on
@@ -5714,6 +5750,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           {m.status === "scheduled" && isBarredMatch(m) && (
             <BarredMatchNotice match={m} password={password} />
           )}
+          {draftKeep.held && <DraftKeptNotice onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} />}
           <div className="score-nav">
             {prevMatch ? (
               <button className="btn btn--sm score-nav__prev" onClick={goPrev} disabled={submitting || repTyping}>← Prev</button>
@@ -5726,6 +5763,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   // silent for. Start match is an explicit operator tap, not
                   // an autosave, so check the awaited result directly.
                   const startPatch = buildPatch("running");
+                  // This sheet's own Start carries its draft: none is kept (D1).
+                  draftKeep.ownStart();
                   const res = await doSubmit(() => onSubmit(startPatch));
                   // A refused start (the court is busy, a competitor is
                   // withdrawn) stored nothing: the host reported it and
@@ -5770,7 +5809,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 </button>
               )}
               {canClose && <button className="btn" onClick={handleDismiss} disabled={submitting || repTyping}>Cancel</button>}
-              {kachinukiBoutMode ? (
+              {draftKeep.held ? null : kachinukiBoutMode ? (
                 // Kachinuki bout mode (mp-gmcg): TWO always-visible actions.
                 // [Record bout]: a RUNNING write flagged kachinukiBoutFinal;
                 // the server appends the next pairing (winner stays, tie

@@ -225,11 +225,16 @@ describe('a match that is not running keeps a local draft', () => {
     expect(counts(r.container), 'the correction draft stands').toEqual([1, 3]);
   });
 
-  it('a draft made before the match starts gives way to the running board', async () => {
+  // Operator decision D1 (a): a draft held when another device starts the
+  // match is kept, with Save and Discard (draft_kept_when_started_elsewhere
+  // covers Save); Discard gives way to the running board.
+  it('a draft made before another device starts the match is kept until Discard gives way to the board', async () => {
     const r = render(el(engiBout({ status: 'scheduled' })));
     await click(r, 'engi-aka-inc');
     expect(counts(r.container)).toEqual([0, 1]);
     await act(async () => { r.rerender(el(engiBout({ status: 'running', flagsB: 1, scoreVersion: 4 }))); });
+    expect(counts(r.container), 'the draft is kept').toEqual([0, 1]);
+    await click(r, 'draft-kept-discard');
     expect(counts(r.container), 'the board is the server\'s running match').toEqual([1, 0]);
     await click(r, 'engi-aka-inc');
     expect(tapEvents()).toEqual([{ kind: 'flag.add', pos: 0, side: 'a' }]);

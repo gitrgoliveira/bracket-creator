@@ -20,7 +20,7 @@ import { NumberedName, numberFollowsName } from './numbered_name.jsx';
 import { withdrawnSideKey } from './ineligible_match.jsx';
 import { isTeamDefaultWinDecision } from './team_default_credit.jsx';
 import { struckIppons, realIppons } from './result_slot.jsx';
-import { acceptTap } from './tap_guard.jsx';
+import { acceptTap, useArmedConfirm } from './tap_guard.jsx';
 // bc-evts: the board of a running match (tapBoardOf) is the server's copy with
 // this device's pending taps folded on, by the JS replay port.
 import { applyPending, assignMarks, APPLIED } from './score_events.jsx';
@@ -225,6 +225,61 @@ export function shownMarkIds(holder, key) {
 
 // useTapBoard re-renders the editor when this device's pending taps for the
 // match or the newest derived copy move, and answers the board while `on`.
+// DRAFT_KEPT_NOTE: what a score editor says while it keeps a draft the match
+// was started under by another device (operator decision D1 (a), 2026-10-17).
+export const DRAFT_KEPT_NOTE = "This match was started on another device. Your unsaved entries are still here: Save adds them to the match, Discard drops them.";
+
+// useDraftKeptOnStart: the ONE owner of "another device started the match
+// while this editor held a draft" (operator decision D1 (a)). The editor
+// calls it with the status it renders, and `note(base, draft)` each render
+// with the scoring it would tap (a projection, the same shape for both: what
+// it was typed over and what it holds now). When the status goes from
+// scheduled to running and the two differ, and this editor did not start the
+// match itself (`ownStart`, called by its own Start), `held` is true until
+// `release`: the editor shows its draft and DraftKeptNotice, not the board.
+// `base` is the copy the draft was typed over, frozen when the match started,
+// so Save sends the draft's own changes and never takes away what the other
+// device scored. Judged during render (refs), so the board never shows for a
+// frame before the draft comes back.
+export function useDraftKeptOnStart(status) {
+  const ref = useRefA({ prev: status, own: false, held: false, base: null, draft: null, kept: null });
+  const [, bump] = useStateA(0);
+  const st = ref.current;
+  if (status !== st.prev) {
+    if (st.prev === "scheduled" && status === "running" && !st.own && st.base && st.draft
+      && JSON.stringify(st.base) !== JSON.stringify(st.draft)) {
+      st.held = true;
+      st.kept = st.base;
+    }
+    if (status !== "running") { st.held = false; st.own = false; st.kept = null; }
+    st.prev = status;
+  }
+  return {
+    held: st.held,
+    // The copy the kept draft was typed over.
+    base: st.kept,
+    note: (base, draft) => { if (status !== "running") { st.base = base; st.draft = draft; } },
+    ownStart: () => { st.own = true; },
+    release: () => { if (st.held) { st.held = false; st.kept = null; bump((n) => n + 1); } },
+  };
+}
+
+// DraftKeptNotice: the note, Save (two taps, as the editors' Finish: the
+// bounce of the arming tap cannot save) and Discard (one tap).
+export function DraftKeptNotice({ onSave, onDiscard, disabled }) {
+  const { armed, confirm } = useArmedConfirm();
+  return (
+    <div className="pending-write-banner" role="status" aria-live="polite" data-testid="draft-kept-notice">
+      <span>{DRAFT_KEPT_NOTE}</span>
+      <button type="button" className={`btn btn--sm btn--primary ${armed ? "btn--confirm" : ""}`} data-testid="draft-kept-save" disabled={disabled}
+        onClick={(ev) => { if (confirm(ev)) onSave(); }}>
+        {armed ? "Tap again to save" : "Save"}
+      </button>
+      <button type="button" className="btn btn--sm btn--ghost" data-testid="draft-kept-discard" disabled={disabled} onClick={onDiscard}>Discard</button>
+    </div>
+  );
+}
+
 export function useTapBoard(m, on, opts) {
   const [, setTick] = useStateA(0);
   useEffectA(() => {

@@ -62,7 +62,10 @@ import {
   tapBoardOf,
   useTapBoard,
   shownMarkIds,
+  useDraftKeptOnStart,
+  DraftKeptNotice,
 } from './admin_scoring_shared.jsx';
+import { individualDraftTaps } from './draft_taps.jsx';
 // bc-cse: a SCHEDULED match a competitor is barred from must never offer a
 // Start the server would refuse; isBarredMatch (ineligible_match.jsx) is the
 // one owner of that question.
@@ -194,7 +197,12 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // (tapBoardOf); nothing else is written while the match runs. A match that
   // is not running (pre-match, or a correction of a finished one) keeps its
   // edits local, sent by Start or Save as before.
-  const tapMode = m.status === "running" && !isTeam && !isEngi;
+  // Operator decision D1 (a): a draft this editor holds when ANOTHER device
+  // starts the match is kept on screen (draftKeep.held), with Save and
+  // Discard, until the operator picks one: the editor stays a draft editor
+  // over it meanwhile.
+  const draftKeep = useDraftKeptOnStart(m.status);
+  const tapMode = m.status === "running" && !isTeam && !isEngi && !draftKeep.held;
   const tapBoard = useTapBoard(m, tapMode);
   // The adopts of a match that is NOT running keep an unsaved local edit
   // until Start or Save sends it; a running match holds no local scoring edit
@@ -916,7 +924,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // bc-htsd: hantei is valid at 0-0, so the picked side stands in for points.
   // It needs the tied scoreline the hantei row is shown on: a recorded hantei
   // on an untied line (legacy data) cannot be finished, as before.
-  const canFinish = decidedByHantei ? (!!hanteiPick && aTotal === bTotal) : (!koTieBlocked && hasPointsOrDraw);
+  // A kept draft (D1) is saved or discarded first: no finish over it.
+  const canFinish = !draftKeep.held && (decidedByHantei ? (!!hanteiPick && aTotal === bTotal) : (!koTieBlocked && hasPointsOrDraw));
   // Why Finish is off while hantei is armed: no winner picked yet, or a
   // recorded hantei on an untied scoreline (legacy data). Shown under the
   // hantei row, since a title never shows on a touchscreen.
@@ -966,6 +975,32 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     if (!tapMode) { applyServerScore(); return; }
     if (!pointsEdited) claimChanged.agree(GROUP_POINTS);
     if (!tapBoard.moving.some((e) => e.kind === ENCHO_ADD || e.kind === ENCHO_REMOVE)) claimChanged.agree(GROUP_ENCHO);
+  };
+  // D1: what a draft would tap, as typed over and as held, for the keeper.
+  if (!isTeam && !isEngi) {
+    draftKeep.note(
+      { aPts: initialAPts, bPts: initialBPts, aFouls: initialAFouls, bFouls: initialBFouls, encho: initialEnchoPeriods, repA: m.repPlayerA || "", repB: m.repPlayerB || "" },
+      { aPts: aPtsLocal, bPts: bPtsLocal, aFouls: aFoulsLocal, bFouls: bFoulsLocal, encho: enchoLocal, repA: repPlayerA, repB: repPlayerB },
+    );
+  }
+  // Save sends the kept draft as the taps that would have made it
+  // (draft_taps.jsx), each through emitTap, in order; a removal names the
+  // board's mark. Discard drops it. Either way the board shows from now on,
+  // and the local board starts from the server's copy.
+  const leaveKeptDraft = () => {
+    applyServerScore();
+    setRepPlayerA(m.repPlayerA || "");
+    setRepPlayerB(m.repPlayerB || "");
+    draftKeep.release();
+  };
+  const saveKeptDraft = () => {
+    const board = tapBoardOf(m).match;
+    const seen = seedBoard(board);
+    const evs = individualDraftTaps(draftKeep.base,
+      { aPts: aPtsLocal, bPts: bPtsLocal, aFouls: aFoulsLocal, bFouls: bFoulsLocal, encho: enchoLocal, repA: repPlayerA, repB: repPlayerB },
+      { a: { letters: seen.aPts, ids: shownMarkIds(board, "a") }, b: { letters: seen.bPts, ids: shownMarkIds(board, "b") } });
+    for (const ev of evs) emitTap(ev);
+    leaveKeptDraft();
   };
   useAdoptFromServer({
     signature: serverScoreSig,
@@ -1596,6 +1631,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           {m.status === "scheduled" && isBarredMatch(m) && (
             <BarredMatchNotice match={m} password={password} />
           )}
+          {draftKeep.held && <DraftKeptNotice onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} />}
           {/* While the correction prompt is open it owns the only Cancel/commit
               row: hide the footer's own nav+actions so the operator never sees
               two Cancels and two commit buttons at the highest-stakes moment
@@ -1617,6 +1653,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   // button having saved nothing. Check the awaited result
                   // directly instead of relying on the broadcast.
                   const startPatch = buildPatch("running");
+                  // This editor's own Start carries its draft: none is kept (D1).
+                  draftKeep.ownStart();
                   const res = await doSubmit(() => onSubmit(startPatch));
                   // A refused start (the court is busy, a competitor is
                   // withdrawn) stored nothing: the host reported it and
@@ -1633,7 +1671,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                 </button>
               )}
               {canClose && <button className="btn" onClick={handleDismiss} disabled={submitting}>Cancel</button>}
-              {onSubmitAndNext ? (
+              {draftKeep.held ? null : onSubmitAndNext ? (
                 <button className={`btn btn--primary ${finishArmed && !isComplete ? "btn--confirm" : ""}`} onClick={(ev) => {
                   if (isComplete && !correctionReason) { askCorrectionReason(); return; }
                   if (!isComplete && !confirmFinish(ev)) return;

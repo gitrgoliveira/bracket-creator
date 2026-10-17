@@ -63,6 +63,12 @@ const WRITES = {
     }, pw, MATCH, quiet),
     repPickTap: (T, id, pw) => T.recordTap('c1', 'm1', { kind: 'rep.pick', pos: -1, side: 'a', memberId: id }, pw, MATCH),
     fighterTap: (T, id, pw) => T.recordTap('c1', 'm1', { kind: 'bout.fighter', pos: 2, side: 'a', memberId: id, name: 'Ren Abe' }, pw, MATCH),
+    // Two taps queued in one tick share one batch; the second names the member,
+    // so the gate is asked per tap INSIDE the batch (`_flushBase`'s inner loop).
+    batchTaps: (T, id, pw) => {
+        T.recordTap('c1', 'm1', { kind: 'ippon.add', pos: 1, side: 'b', letter: 'M' }, pw, MATCH);
+        return T.recordTap('c1', 'm1', { kind: 'rep.pick', pos: -1, side: 'a', memberId: id }, pw, MATCH);
+    },
     rename: (T, id, pw) => T.renameTeamMember('c1', 't1', id, 'Ren Abe Jr', pw, quiet),
     clear: (T, id, pw) => T.clearTeamMember('c1', 't1', id, pw, quiet),
 };
@@ -72,6 +78,7 @@ const isWrite = (w, r) => ({
     scoreRepPick: r.method === 'PUT' && r.url.endsWith('/score'),
     repPickTap: r.url.endsWith('/score-events') && (r.body.events || []).some((e) => e.kind === 'rep.pick'),
     fighterTap: r.url.endsWith('/score-events') && (r.body.events || []).some((e) => e.kind === 'bout.fighter'),
+    batchTaps: r.url.endsWith('/score-events') && (r.body.events || []).some((e) => e.kind === 'rep.pick'),
     rename: r.method === 'PUT' && /\/members\/[^/]+$/.test(r.url),
     clear: r.method === 'DELETE' && /\/members\/[^/]+$/.test(r.url),
 }[w]);

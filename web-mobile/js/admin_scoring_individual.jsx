@@ -1596,7 +1596,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               and will be retried automatically. Operator may still dismiss. */}
           {pendingWrite && !writeFailed && (
             <div className="pending-write-banner" role="status" aria-live="polite">
-              <HeldWriteNotice compId={m.compId} matchId={m.id} res={pendingWrite} />
+              <HeldWriteNotice compId={m.compId} matchId={m.id} match={m} res={pendingWrite} />
               {/* Only show Retry when we hold the submit closure. On a hydrated
                   re-open it can't be restored from the serialized queue: but the
                   queue still auto-retries in the background, so no button is fine. */}

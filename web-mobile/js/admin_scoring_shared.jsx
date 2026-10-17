@@ -56,8 +56,10 @@ function isBoutDecided(aPts, bPts) {
 // write crossing the threshold, a write landing, and a discard made from the
 // topbar's list all reach it. The editors' pending banner, its line
 // (HeldWriteNotice) and its Discard read it.
-export function useMatchHeldWrite(compId, matchId) {
+export function useMatchHeldWrite(compId, matchId, match = null) {
   const api = window.API;
+  // The match the editor shows names its held writes, and its teams' (H5).
+  if (match && api && compId && typeof api.noteShownMatch === 'function') api.noteShownMatch(compId, match);
   // `held` is null when this page has no queue to ask (the editors' render
   // tests stub window.API without one): unknown, so nothing is cleared.
   // `blocker` is the write of another kind this match waits for that the
@@ -142,14 +144,14 @@ export function useTapOutcomeNote(compId, matchId) {
 // HeldWriteNotice: the pending banner's line, worded for where the held
 // write stands (queuedNotice): waiting for the connection, held in this page
 // only, or refused by the server on every attempt. The three editors render it.
-export function HeldWriteNotice({ compId, matchId, res }) {
-  const { stuck, blocker } = useMatchHeldWrite(compId, matchId);
+export function HeldWriteNotice({ compId, matchId, res, match = null }) {
+  const { stuck, blocker } = useMatchHeldWrite(compId, matchId, match);
   return <span>{queuedNotice(res, { keepsFailing: stuck, blockedBy: blocker })}</span>;
 }
 
-export function HeldWriteDiscard({ compId, matchId, onDiscarded, disabled = false }) {
+export function HeldWriteDiscard({ compId, matchId, onDiscarded, disabled = false, match = null }) {
   const api = window.API;
-  const { stuck, blocker } = useMatchHeldWrite(compId, matchId);
+  const { stuck, blocker } = useMatchHeldWrite(compId, matchId, match);
   const [busy, setBusy] = useStateA(false);
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
@@ -1623,7 +1625,8 @@ function useMatchReopen({ match, password, isComplete }) {
     };
     try {
       const res = await run(
-        (pw, opts) => window.API.requeueBlockerAndReopen(match.compId, match.id, c.compId, c.matchId, pw, opts),
+        (pw, opts) => window.API.requeueBlockerAndReopen(match.compId, match.id, c.compId, c.matchId, pw,
+          { ...opts, match, blockerLabel: c.label }),
         c.reason, c.force, refused,
       );
       if (!mountedRef.current) return;

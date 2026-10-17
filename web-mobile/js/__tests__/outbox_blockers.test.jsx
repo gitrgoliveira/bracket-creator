@@ -450,3 +450,48 @@ describe('a refused add another tab sent takes its id off this tab too (H3)', ()
         expect(repRow(sent.find((r) => r.method === 'PUT')).sideAMemberId).toBe(member.id);
     });
 });
+
+describe('the write a match waits on is named by where it is (H5)', () => {
+    async function wording() {
+        return import('../write_result.jsx');
+    }
+
+    it('names another match by its label, after a reload too, and says a wait cycle is one', async () => {
+        const shown = (id, n) => ({ id, compId: 'c1', phase: 'bracket', matchNumber: n, status: 'running', modifiedAt: 0 });
+        for (const [m, n] of [['ma', 6], ['mb', 7]]) {
+            const r = await API.recordScore('c1', m, { status: 'running', ipponsA: ['M'], ipponsB: [], changed: ['points'] }, 'pw', shown(m, n));
+            r.settled.catch(() => {});
+        }
+        await flushMicrotasks();
+        const q = stored();
+        const key = (m) => q.find(([k]) => k.startsWith(`c1:${m}\u001f`))[0];
+        for (const [k, d] of q) d.after = k === key('ma') ? key('mb') : key('ma');
+        API.clearQueue();
+        _lsStore.bc_write_queue_v2 = JSON.stringify(q);
+        await load();
+        await reconnect();
+        const blocker = API.heldWriteBlocker('c1', 'ma');
+        expect(blocker).toMatchObject({ matchID: 'mb', where: 'Match 7', cycled: true });
+        const w = await wording();
+        expect(w.queuedBlockedNotice(blocker)).toContain('Match 7');
+        expect(w.queuedBlockedNotice(blocker), 'a cycle is not a refusal').not.toContain('keeps refusing');
+        expect(w.heldWriteDiscardLabel(blocker)).toBe('Discard held score update (Match 7)');
+        expect(w.heldWriteDiscardConfirm(blocker).message).toContain('score update (Match 7)');
+        expect(w.heldWriteDiscardConfirm(blocker).message).not.toContain('keeps refusing');
+    });
+
+    it('names a team\'s write by the team, from a match of that team shown on this device', async () => {
+        const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        server((req) => (req.method === 'POST' ? answer(503, { error: 'unavailable' }) : lineupOk(req)));
+        const member = await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw');
+        const res = await API.recordScore('c1', 'm1', scoreWithRepPick(member.id), 'pw', MATCH);
+        res.settled.catch(() => {});
+        for (let i = 0; i < 14 && !API.heldWrites().some((h) => h.kind === 'member' && h.keepsFailing); i++) await reconnect();
+        const blocker = API.heldWriteBlocker('c1', 'm1');
+        expect(blocker).toMatchObject({ kind: 'member', where: 'Team One' });
+        const w = await wording();
+        expect(w.queuedBlockedNotice(blocker)).toContain('team member change (Team One) the server keeps refusing');
+        expect(w.heldWriteDiscardLabel(blocker)).toBe('Discard held team member change (Team One)');
+        warned.mockRestore();
+    });
+});

@@ -52,6 +52,7 @@ import {
 // bc-evts S2: the build this page runs against the server's, and the reload rule.
 import { noteServerBuild, setOutboxIdleProbe, setBeforeReload, noteOutboxDrained } from './app_version.jsx';
 import { CLOCK_SKEW as TAP_CLOCK_SKEW } from './score_events.jsx';
+import { scoreRowMatchLabel } from './pool_ids.jsx';
 
 // ---------------------------------------------------------------------------
 // F1: fetch with per-request timeout via AbortController
@@ -1689,9 +1690,52 @@ function _heldWriteItem(key, d) {
         ...(d.parked ? { parked: true } : {}),
         // On a wait cycle (H1): stuck, but not because the server refuses it.
         ...(d.cycled ? { cycled: true } : {}),
+        // Where it is (H5): the match's label or the team's name, or ''.
+        where: _whereOf(d),
         ...(d.kind === 'lineup' && d.payload
             ? { teamId: d.payload.teamId || '', round: d.payload.round } : {}),
     };
+}
+
+// What this device has shown of a match or a team, so a held write can be
+// named by where it is (stage 3 review 5, H5): a match's label as the score
+// list labels it (scoreRowMatchLabel), and each side's name by its id, which
+// names a team's member and lineup writes. Learned from the match a door is
+// handed (recordScore, recordTap, requeueBlockerAndReopen) and from the match
+// an editor shows (API.noteShownMatch), and stamped on an entry as it is
+// queued (`label`, persisted), so a reload still names it.
+const _shownMatchLabels = new Map();
+const _shownTeamNames = new Map();
+
+function _noteShownMatch(compID, m) {
+    if (!compID || !m || typeof m !== 'object' || !m.id) return;
+    let label = '';
+    try { label = scoreRowMatchLabel(m) || ''; } catch (_e) { label = ''; }
+    if (label) _shownMatchLabels.set(_revKey(compID, m.id), label);
+    for (const side of [m.sideA, m.sideB]) {
+        if (side && typeof side === 'object' && side.id && side.name) _shownTeamNames.set(`${compID}:${side.id}`, String(side.name));
+    }
+}
+
+function _noteMatchLabel(compID, matchID, label) {
+    if (compID && matchID && typeof label === 'string' && label.trim()) _shownMatchLabels.set(_revKey(compID, matchID), label.trim());
+}
+
+// _teamIdOf: the team a team write is about (a member write's url, a lineup
+// save's payload).
+function _teamIdOf(d) {
+    if (d && d.payload && typeof d.payload.teamId === 'string' && d.payload.teamId) return d.payload.teamId;
+    const m = String((d && d.url) || '').match(/\/teams\/([^/]+)\//);
+    return m ? decodeURIComponent(m[1]) : '';
+}
+
+// _whereOf: where one queued write is, in the words above, or ''.
+function _whereOf(d) {
+    if (!d) return '';
+    if (typeof d.label === 'string' && d.label) return d.label;
+    if (d.matchID) return _shownMatchLabels.get(_revKey(d.compID, d.matchID)) || '';
+    const teamId = _teamIdOf(d);
+    return teamId ? (_shownTeamNames.get(`${d.compID}:${teamId}`) || '') : '';
 }
 // The one discard of a held write (API.discardHeldWrite and the editors'
 // API.discardFailingHeldWrites): only a write the server keeps refusing.
@@ -2749,6 +2793,11 @@ function _commitEnqueue(base, descriptor, beforeFlush, { nextTick = false } = {}
     // bc-hlck: what the write was made against, so a re-stamped replay keeps
     // the floor its first stamp had. Persisted (it is a server-time stamp).
     if (_payloadSeen.has(descriptor.payload)) descriptor.seenModifiedAt = _payloadSeen.get(descriptor.payload);
+    // Where the write is, as this device names it (H5, _whereOf). Persisted.
+    if (!descriptor.label) {
+        const where = _whereOf(descriptor);
+        if (where) descriptor.label = where;
+    }
     // A write of a match another match's queued write also belongs to (a send
     // back to the queue frees this match's court) follows that write.
     const holder = _heldBy(base);
@@ -4141,6 +4190,7 @@ const API = {
         };
     },
     async recordScore(compID, matchID, result, password, match, opts = {}) {
+        _noteShownMatch(compID, match);
         const payload = toBackendMatchResult(result, match || result);
         // mp-y3nk: stamp in server-relative time for last-write-wins reconciliation.
         // An autosave is stamped with the time of the EDIT it carries, not of
@@ -4505,11 +4555,15 @@ const API = {
     // as reopenMatch, so the panel re-offers the remedy when a DIFFERENT match
     // has since taken the court. opts as reopenMatch's: the remedy carries the
     // same reason and confirmation the reopen it retries did.
-    async requeueBlockerAndReopen(targetComp, targetMatch, blockerComp, blockerMatch, password, { reason = "", force = false, seen, onRefusal } = {}) {
+    async requeueBlockerAndReopen(targetComp, targetMatch, blockerComp, blockerMatch, password, { reason = "", force = false, seen, onRefusal, match, blockerLabel } = {}) {
         // bc-evts: the outbox's, on the TARGET match's base (the one reopened),
         // and ordered under the blocker's too (M5): it follows the blocker's
         // last queued write (`after`), and a write of the blocker made after it
         // follows it (`holds`, _heldBy), so neither overtakes the other.
+        // `match` (the target as shown) and `blockerLabel` (the blocker as the
+        // court_busy answer names it) name the two if either is held (H5).
+        _noteShownMatch(targetComp, match);
+        _noteMatchLabel(blockerComp, blockerMatch, blockerLabel);
         const blockerBase = _revKey(blockerComp, blockerMatch);
         return _outboxWrite({
             kind: 'requeue', compID: targetComp, matchID: targetMatch, method: 'POST',
@@ -5197,6 +5251,7 @@ const API = {
     // (its modifiedAt floors the stamp, bc-hlck). Never coalesced: each tap is
     // its own entry (_coalesceTarget names only score and lineup writes).
     recordTap(compID, matchID, ev, password, match) {
+        _noteShownMatch(compID, match);
         const base = _revKey(compID, matchID);
         const seq = (_tapSeq.get(base) || 0) + 1;
         _tapSeq.set(base, seq);
@@ -5237,6 +5292,12 @@ const API = {
     subscribeTapOutcome(compID, matchID, fn) {
         return _listenOn(_tapOutcomeListeners, _revKey(compID, matchID), fn);
     },
+    // noteShownMatch: the match an editor shows, so a held write of it, or of
+    // one of its teams, is named by where it is (H5, _whereOf).
+    noteShownMatch(compID, match) {
+        _noteShownMatch(compID, match);
+    },
+
     heldWriteKeepsFailing(compID, matchID) {
         return API.heldWriteState(compID, matchID).keepsFailing;
     },

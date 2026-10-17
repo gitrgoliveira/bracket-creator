@@ -446,8 +446,13 @@ export const QUEUED_REFUSED_NOTICE = 'Not saved yet: the server keeps refusing i
 // G2). The connection is fine then too, so the line names what it waits for
 // and where it can be discarded.
 export function queuedBlockedNotice(blocker) {
-    return `Not sent yet: it waits for a ${heldWriteWhat(blocker)} the server keeps refusing. `
-        + `Discard that one here or from the "${HELD_WRITES_TITLE}" list.`;
+    const what = heldWriteWhatWhere(blocker);
+    // A write on a wait cycle (stage 3 review 5, H1) is not refused: it
+    // waits on a write that waits on it, and only a discard frees them.
+    const why = blocker && blocker.cycled
+        ? `it waits for a ${what} that waits for it in turn, so neither can be sent.`
+        : `it waits for a ${what} the server keeps refusing.`;
+    return `Not sent yet: ${why} Discard that one here or from the "${HELD_WRITES_TITLE}" list.`;
 }
 export function queuedNotice(res, { keepsFailing = false, blockedBy = null } = {}) {
     if (blockedBy) return queuedBlockedNotice(blockedBy);
@@ -464,16 +469,20 @@ export const HELD_WRITE_DISCARD_LABEL = 'Discard held result';
 // heldWriteDiscardLabel: the editor's button when what it discards is the
 // write the match waits for (a heldWrites() item), not the match's own result.
 export function heldWriteDiscardLabel(blocker) {
-    return blocker ? `Discard held ${heldWriteWhat(blocker)}` : HELD_WRITE_DISCARD_LABEL;
+    return blocker ? `Discard held ${heldWriteWhatWhere(blocker)}` : HELD_WRITE_DISCARD_LABEL;
 }
 export function heldWriteDiscardConfirm(held) {
-    // `held` (from the topbar's list) names any other kind of held write; the
-    // editors' button, which discards a result, passes nothing.
-    const what = held ? heldWriteWhat(held) : 'result';
+    // `held` (from the topbar's list, or the write an editor's match waits
+    // for) names any other kind of held write, with where it is when the
+    // device knows (`where`); the editors' own button, which discards a
+    // result, passes nothing.
+    const what = held ? heldWriteWhatWhere(held) : 'result';
     const where = held && held.kind === 'lineup' ? 'the lineup' : 'the match';
+    const why = held && held.cycled
+        ? `The ${what} held on this device waits for another held write that waits for it, so neither can be sent. `
+        : `The server keeps refusing the ${what} held on this device${held ? '' : ' for this match'}, so it may never be sent. `;
     return {
-        message: `The server keeps refusing the ${what} held on this device${held ? '' : ' for this match'}, so it may never be sent. `
-            + `Discard it? Nothing else is discarded. Check ${where} afterwards, and enter it again if it is still needed.`,
+        message: `${why}Discard it? Nothing else is discarded. Check ${where} afterwards, and enter it again if it is still needed.`,
         confirmLabel: 'Discard it',
         danger: true,
     };
@@ -503,8 +512,18 @@ export function heldWriteWhat(held) {
     }
 }
 
+// heldWriteWhatWhere: the same, with the match (as the score list labels it)
+// or the team it is about when the device knows it (`where`, api_client.jsx
+// _whereOf; stage 3 review 5, H5), e.g. "reopen (Pool A · Match 3)".
+export function heldWriteWhatWhere(held) {
+    const what = heldWriteWhat(held);
+    const where = held && typeof held.where === 'string' ? held.where.trim() : '';
+    return where ? `${what} (${where})` : what;
+}
+
 // heldWriteState: where one held write stands, for the same list.
 export function heldWriteState(held) {
+    if (held && held.cycled) return 'it waits for another held write that waits for it';
     if (held && held.keepsFailing) return 'the server keeps refusing it';
     if (held && held.authBlocked) return 'waiting for you to sign in';
     return 'waiting to be sent';

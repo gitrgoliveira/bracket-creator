@@ -5501,7 +5501,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               closure to replay, so the operator re-enters and re-taps instead. */}
           {!writeFailed && (pendingWrite || matchHeld === true) && (
             <div className="pending-write-banner" role="status" aria-live="polite">
-              <HeldWriteNotice compId={m.compId} matchId={m.id} res={pendingWrite} />
+              <HeldWriteNotice compId={m.compId} matchId={m.id} match={m} res={pendingWrite} />
               <HeldWriteDiscard compId={m.compId} matchId={m.id} onDiscarded={dropHeldWrite} />
             </div>
           )}

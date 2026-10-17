@@ -254,3 +254,34 @@ describe('team editor: a held write waiting on a write the server keeps refusing
     }
   });
 });
+
+// Stage 3 review 5, H5: the write the match waits for belongs to another match
+// (a send back that frees this court) and is named by that match's label; one
+// on a wait cycle is not said to be refused. The editor tells the queue which
+// match it shows, so the queue can name it and its teams.
+describe('team editor: the write it waits for is another match\'s', () => {
+  const blocker = { key: 'c1:m9\u001fr', kind: 'requeue', keepsFailing: true, cycled: true, where: 'Pool A · Match 3', compID: 'c1', matchID: 'm9' };
+  it('names that match, says the two wait on each other, and tells the queue the match it shows', async () => {
+    window.API.hasHeldWrite = vi.fn(() => true);
+    window.API.heldWriteState = vi.fn(() => ({ keepsFailing: true, blocker }));
+    window.API.noteShownMatch = vi.fn();
+    window.API.discardHeldWrite = vi.fn(() => true);
+    window.confirmDialog = vi.fn().mockResolvedValue(true);
+    try {
+      await act(async () => {
+        render(<ScoreEditorModal match={teamMatch} onClose={vi.fn()} onSubmit={vi.fn()} password="pw" />);
+      });
+      const banner = await screen.findByRole('status');
+      expect(banner.textContent).toContain('reopen (Pool A · Match 3) that waits for it in turn');
+      expect(banner.textContent).not.toContain('keeps refusing');
+      const button = screen.getByTestId('held-write-discard');
+      expect(button.textContent).toBe('Discard held reopen (Pool A · Match 3)');
+      await act(async () => { fireEvent.click(button); });
+      expect(window.confirmDialog.mock.calls[0][0].message).toContain('reopen (Pool A · Match 3)');
+      expect(window.API.discardHeldWrite).toHaveBeenCalledWith(blocker.key);
+      expect(window.API.noteShownMatch).toHaveBeenCalledWith(teamMatch.compId, expect.objectContaining({ id: teamMatch.id }));
+    } finally {
+      for (const k of ['hasHeldWrite', 'heldWriteState', 'noteShownMatch', 'discardHeldWrite']) delete window.API[k];
+    }
+  });
+});

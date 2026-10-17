@@ -629,7 +629,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
             the operator may still retry manually while we hold the payload. */}
         {pendingWrite && !writeFailed && (
           <div className="pending-write-banner" role="status" aria-live="polite">
-            <HeldWriteNotice compId={m.compId} matchId={m.id} res={pendingWrite} />
+            <HeldWriteNotice compId={m.compId} matchId={m.id} match={m} res={pendingWrite} />
             {pendingFnRef.current && (
               <button type="button" className="btn btn--sm btn--ghost" disabled={submitting} onClick={() => doSubmit(pendingFnRef.current)}>Retry now</button>
             )}

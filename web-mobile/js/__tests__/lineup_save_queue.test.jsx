@@ -257,4 +257,33 @@ describe('a save a previous build queued', () => {
     expect('changed' in s.puts[0].body).toBe(false);
     expect(s.own.m1.positions).toEqual({ senpo: 'Kato', jiho: 'Tanaka', taisho: 'Ito' });
   });
+
+  // R9 (review 2): the old entry is moved onto its match's base when it loads,
+  // so it is sent in the match's order: behind a write of the match queued
+  // before it that the server keeps refusing, it waits.
+  it('is moved onto its match when it loads, and waits behind an earlier write of the match', async () => {
+    const court = [
+      `c1:m1\u001fold-court`,
+      {
+        enqueuedAt: Date.now() - 120_000, password: 'pw', sortStamp: Date.now() - 120_000,
+        compID: 'c1', matchID: 'm1', kind: 'court', terminal: true, method: 'PUT',
+        url: '/api/competitions/c1/matches/m1/court', payload: { court: 'B' },
+      },
+    ];
+    localStorage.setItem('bc_write_queue', JSON.stringify([court, oldEntry]));
+    const sent = [];
+    global.fetch = vi.fn((url, opts) => {
+      if (String(url).includes('/api/time')) return Promise.reject(new TypeError('clock'));
+      sent.push(`${opts.method} ${url}`);
+      return Promise.resolve({ ok: false, status: 503, headers: { get: () => null }, json: async () => ({ error: 'busy' }), text: async () => '{"error":"busy"}' });
+    });
+    vi.resetModules();
+    API = (await import('../api_client.jsx')).API;
+    await tick(50);
+    expect(sent).toEqual(['PUT /api/competitions/c1/matches/m1/court']);
+    const keys = storedEntries().map(([k]) => k);
+    expect(keys.some((k) => k.startsWith('lineup:'))).toBe(false);
+    expect(keys.filter((k) => k.startsWith('c1:m1\u001f'))).toHaveLength(2);
+    expect(API.queuedLineupSave('c1', 't1', { matchId: 'm1' })).toBe(true);
+  });
 });

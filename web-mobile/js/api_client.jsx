@@ -1272,11 +1272,6 @@ function _heldBy(base) {
 // and nothing coalesces across one, nor into an entry already being sent.
 function _coalesceTarget(base, descriptor) {
     if (!descriptor) return null;
-    // A save of a match's lineup a build before bc-evts M5 queued sits under the
-    // lineup's own base and replays as a whole lineup: a new save of it joins
-    // that entry, or the replay, sent after it, would put the old lineup back.
-    const legacy = _legacyLineupTarget(descriptor);
-    if (legacy) return legacy;
     const list = _entriesFor(base);
     const last = list.length ? list[list.length - 1] : null;
     if (!last) return null;
@@ -1299,15 +1294,20 @@ function _coalesceTarget(base, descriptor) {
     return last;
 }
 
-// _legacyLineupTarget: the queued save of the same match lineup
-// under the `lineup:…:match:…` base an older build used, or null.
-function _legacyLineupTarget(descriptor) {
+// _migratedLegacyLineup: the key a save of a MATCH's lineup an older build
+// queued under its own `lineup:…:match:…` base is moved to, or null for any
+// other entry (R9). Moved onto the match's base when it loads (rehydrate) or
+// is taken up from another tab, it is sent in the match's order with the
+// match's other writes, and a new save of the lineup joins it there
+// (_coalesceTarget) as it joins any queued save of the same lineup.
+function _migratedLegacyLineup(key, descriptor) {
+    const base = _baseOf(key);
     const p = descriptor && descriptor.kind === 'lineup' && descriptor.payload;
     if (!p || !p.matchId || !descriptor.compID) return null;
-    const list = _entriesFor(_lineupKey(descriptor.compID, p.teamId, { matchId: p.matchId }));
-    const last = list.length ? list[list.length - 1] : null;
-    if (!last || !_sameLineup(last[1], descriptor)) return null;
-    return last;
+    if (base !== _lineupKey(descriptor.compID, p.teamId, { matchId: p.matchId })) return null;
+    // Deterministic, so two tabs moving the same entry make one entry.
+    const id = String(key).split(QUEUE_ENTRY_SEP).join('.');
+    return `${_revKey(descriptor.compID, p.matchId)}${QUEUE_ENTRY_SEP}legacy.${id}`;
 }
 
 // _sameLineup: two lineup entries save the same lineup (a probe names only
@@ -1331,10 +1331,10 @@ function _sameLineup(a, b) {
 // pick the sheet shows.
 function _queuedLineupSave(compID, teamId, { matchId, round } = {}) {
     const probe = { payload: { teamId, ...(matchId ? { matchId } : { round }) } };
-    // A match's lineup is an entry of its match (bc-evts M5); a build before
-    // it queued one under its own `lineup:` base, which still replays.
+    // A match's lineup is an entry of its match (bc-evts M5; one an older
+    // build queued under its own base is moved there as it loads, R9).
     const bases = matchId
-        ? [_revKey(compID, matchId), _lineupKey(compID, teamId, { matchId })]
+        ? [_revKey(compID, matchId)]
         : [_lineupKey(compID, teamId, { round })];
     return bases.some((b) => _entriesFor(b).some(([, d]) => _sameLineup(d, probe)));
 }
@@ -2589,14 +2589,14 @@ function _withoutDownstreamConfirmation(payload) {
 function _onStoredQueueChanged(oldRaw, newRaw) {
     const before = _parseStoredQueue(oldRaw);
     const after = newRaw === null ? null : _parseStoredQueue(newRaw);
-    let changed = false, adopted = false;
+    let changed = false, adopted = false, migrated = false;
     for (const [k, d] of _writeQueue) {
         const gone = after === null
             ? _adopted.has(d)
             : !after.has(k) && before.get(k)?.enqueuedAt === d.enqueuedAt;
         if (gone && _dequeue(k, d)) changed = true;
     }
-    for (const [k, d] of after || []) {
+    for (let [k, d] of after || []) {
         const held = _writeQueue.get(k);
         if (held && !_enqueuedAfter(d, held.enqueuedAt)) {
             // The same copy, but another tab may have re-seqd the tap
@@ -2607,12 +2607,21 @@ function _onStoredQueueChanged(oldRaw, newRaw) {
         }
         if (_storedEntryProblem(d)) continue;
         if (d.payload && d.payload.forceDownstreamReopen) d.payload = _withoutDownstreamConfirmation(d.payload);
+        // An older build's match lineup goes onto its match's base (R9).
+        const moved = _migratedLegacyLineup(k, d);
+        if (moved) {
+            _markSettled(k, d);
+            migrated = true;
+            if (_writeQueue.has(moved)) continue;
+            k = moved;
+        }
         _writeQueue.set(k, d);
         _noteOwnStamp(k, d);
         _noteOwnTapSeq(k, d);
         _adopted.add(d);
         changed = adopted = true;
     }
+    if (migrated) _persistQueue();
     if (!changed) return;
     _recomputeSyncStatus();
     if (adopted) {
@@ -2743,7 +2752,7 @@ if (typeof fetch === 'function') {
         // different claims and only the terminal ones are a finished result.
         // The one class left is a corrupt entry: nothing is dropped for its age
         // (bc-mrgc phase 3).
-        let unreadable = 0, unreadableTerminal = 0;
+        let unreadable = 0, unreadableTerminal = 0, migrated = false;
         // A dropped entry is marked settled, so the persist below takes it out
         // of storage: the merge otherwise keeps what this tab did not write.
         const dropUnreadable = (key, d) => {
@@ -2770,9 +2779,16 @@ if (typeof fetch === 'function') {
                 if (descriptor.payload && descriptor.payload.forceDownstreamReopen) {
                     descriptor.payload = _withoutDownstreamConfirmation(descriptor.payload);
                 }
-                _writeQueue.set(key, descriptor);
-                _noteOwnStamp(key, descriptor);
-                anyLoaded = true;
+                // A match lineup an older build queued under its own base goes
+                // onto its match's (R9); the old key leaves storage below.
+                const moved = _migratedLegacyLineup(key, descriptor);
+                const at = moved || key;
+                if (moved) { _markSettled(key, descriptor); migrated = true; }
+                if (!_writeQueue.has(at)) {
+                    _writeQueue.set(at, descriptor);
+                    _noteOwnStamp(at, descriptor);
+                    anyLoaded = true;
+                }
             }
         }
         // Persist the pruned queue whenever anything was dropped. This is what makes
@@ -2780,7 +2796,7 @@ if (typeof fetch === 'function') {
         // never used to write back, so a dropped entry stayed in localStorage
         // untouched, and each refresh would re-read, re-drop and re-announce it.
         // With the queue now empty _persistQueue() removes the key outright.
-        if (unreadable > 0) _persistQueue();
+        if (unreadable > 0 || migrated) _persistQueue();
         if (unreadable > 0) {
             console.warn(`[sync] discarded ${unreadable} unreadable queued write(s) on rehydration`);
             _notifyQueueAlert({ kind: 'unreadable', count: unreadable, terminalCount: unreadableTerminal });

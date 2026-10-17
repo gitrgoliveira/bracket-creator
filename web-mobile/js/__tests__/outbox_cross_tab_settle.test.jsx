@@ -212,6 +212,24 @@ describe('settled writes storage would not take out keep a reload back (P2)', ()
         expect(outboxIsIdle()).toBe(true);
     });
 
+    it('a wipe takes the settled writes out of storage, so the outbox is idle again', async () => {
+        const { outboxIsIdle } = await import('../app_version.jsx');
+        const mine = await API.putMatchLineup('c1', 't1', 'm1', { 1: 'L1' }, 'pw', null, null);
+        mine.settled.catch(() => {});
+        await flushMicrotasks();
+        refuseSet = true;
+        global.fetch = vi.fn((url) => (String(url).includes('/api/time')
+            ? Promise.reject(new TypeError('clock'))
+            : answer(200, {})));
+        window.dispatchEvent(new Event('online'));
+        await tick(100);
+        await expect(mine.settled).resolves.toBeTruthy();
+        expect(outboxIsIdle(), 'the settled write is still stored').toBe(false);
+        API.clearQueue();
+        expect(store[QUEUE_KEY]).toBeUndefined();
+        expect(outboxIsIdle(), 'nothing is stored after the wipe').toBe(true);
+    });
+
     it('a write it settled that was never stored keeps an empty outbox idle (L2)', async () => {
         const { outboxIsIdle } = await import('../app_version.jsx');
         refuseSet = true;

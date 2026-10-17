@@ -6032,6 +6032,8 @@ const API = {
         // is revoked, so nothing of the merge's is kept.
         _writeQueue.clear();
         _settled.clear();
+        // The wipe takes them out of storage too (P2).
+        _settledLeftStored = false;
         _settledHere.clear();
         for (const k of _entryHooks.keys()) _settleKey(k, { value: { discarded: true } });
         for (const b of _pendingTapListeners.keys()) _publishPendingTaps(b);

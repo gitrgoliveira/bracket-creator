@@ -210,15 +210,15 @@ function normalizeViewerCompItem(item) {
         // StreamingOverlay (which consume this normalized shape via
         // tournament.competitions, app.jsx's `t.competitions = comps`) could
         // never see the squads the aggregate/court-feed payload now carries.
-        squads: _withListedMembersForgotten(item.teamMembers),
+        squads: _withListedMembersForgotten(item.teamMembers, c.id),
         players: (c.players || []).map(normalizePlayer),
     });
 }
 
 // _withListedMembersForgotten: a members map the server answered, after
 // forgetting every dropped-member note it proves wrong (K1).
-function _withListedMembersForgotten(teams) {
-    _forgetListedDroppedMembers(teams);
+function _withListedMembersForgotten(teams, competitionId) {
+    _forgetListedDroppedMembers(teams, competitionId);
     return teams;
 }
 
@@ -3880,15 +3880,25 @@ function _checkMemberAdd(d) {
     if (!id || _memberChecks.has(id)) return;
     _memberChecks.add(id);
     const teamId = _teamIdOf(d);
-    _fetchJson(`/api/competitions/${d.compID}/team-members`, {
-        headers: d.password ? { 'X-Tournament-Password': d.password } : {},
+    // The add's own password, sent even when empty (the public page sends the
+    // header empty, never omits it). A self-run participant's add carries none,
+    // and the members door is main-gated, so that read is the public
+    // competition payload, which carries the same `teamMembers` (L3).
+    const url = d.password
+        ? `/api/competitions/${d.compID}/team-members`
+        : `/api/viewer/competitions/${d.compID}`;
+    _fetchJson(url, {
+        headers: { 'X-Tournament-Password': d.password || '' },
     }).then(({ res, body }) => {
         const teams = res.ok && body && body.teamMembers;
         if (!teams || typeof teams !== 'object') throw new Error(`no member list (HTTP ${res.status})`);
         const list = Array.isArray(teams[teamId]) ? teams[teamId] : [];
-        if (list.some((m) => m && m.id === id)) _forgetListedDroppedMembers(teams);
+        if (list.some((m) => m && m.id === id)) _forgetListedDroppedMembers(teams, d.compID);
         else _dropMemberThatNeverWas(d);
     }).catch((err) => {
+        // A refused read (a stale organiser password's 401 included) proves
+        // nothing: the writes go as they were made, and a write the server
+        // then refuses 401 is parked for the password as any other.
         console.warn(`[sync] could not read team ${teamId}'s members after a discarded add; the writes naming it go as they are:`, err);
     }).finally(() => {
         _memberChecks.delete(id);
@@ -3905,15 +3915,16 @@ function _waitsOnMemberCheck(d) {
 
 // _forgetListedDroppedMembers: a member list the server answered
 // ({teamId: [member]}) holds these ids, so no note naming one stands (K1).
-function _forgetListedDroppedMembers(teams) {
-    if (!teams || typeof teams !== 'object') return;
+function _forgetListedDroppedMembers(teams, competitionId) {
+    if (!teams || typeof teams !== 'object' || !competitionId) return;
     const notes = _droppedMemberNotes();
     if (notes.length === 0) return;
-    const listed = new Set();
-    for (const list of Object.values(teams)) {
-        if (Array.isArray(list)) for (const m of list) if (m && typeof m.id === 'string') listed.add(m.id);
-    }
-    const kept = notes.filter((n) => !listed.has(n.id));
+    // A note is the proof for its own competition and team (_noteCovers), so
+    // only a list of that team undoes it (L4). A note naming no team is
+    // forgotten by age alone.
+    const lists = (n) => n.competitionId === competitionId && Array.isArray(teams[n.teamId])
+        && teams[n.teamId].some((m) => m && m.id === n.id);
+    const kept = notes.filter((n) => !lists(n));
     if (kept.length !== notes.length) _writeDroppedMemberNotes(kept);
 }
 
@@ -5106,7 +5117,7 @@ const API = {
         const data = await res.json();
         // A member the server lists exists: no dropped-member note naming
         // them stands (K1).
-        _forgetListedDroppedMembers(data.teamMembers);
+        _forgetListedDroppedMembers(data.teamMembers, compID);
         return data.teamMembers || {};
     },
     // The server gives the new member its display index (operator ruling:

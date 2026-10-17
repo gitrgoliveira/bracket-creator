@@ -1020,4 +1020,77 @@ describe('a discarded add that went out is checked against the team\'s members (
         await API.fetchSquads('c1', 'pw');
         expect(JSON.parse(_lsStore[DROPPED_KEY]).map((n) => n.id)).toEqual(['mem-8']);
     });
+
+    // Stage 3 review 8, L4: a note is forgotten only by a list of its own
+    // competition and team.
+    it('a member list forgets only the notes of its own competition and team (L4)', async () => {
+        _lsStore[DROPPED_KEY] = JSON.stringify([
+            { id: 'mem-9', at: Date.now(), competitionId: 'c1', teamId: 't1' },
+            { id: 'mem-6', at: Date.now(), competitionId: 'c2', teamId: 't1' },
+            { id: 'mem-7', at: Date.now(), competitionId: 'c1', teamId: 't2' },
+        ]);
+        global.fetch = vi.fn(() => answer(200, { teamMembers: { t1: [{ id: 'mem-9' }, { id: 'mem-6' }, { id: 'mem-7' }] } }));
+        await API.fetchSquads('c1', 'pw');
+        expect(JSON.parse(_lsStore[DROPPED_KEY] || '[]').map((n) => n.id), 'another competition\'s and another team\'s notes stand')
+            .toEqual(['mem-6', 'mem-7']);
+    });
+});
+
+// Stage 3 review 8, L3: the public page sends the password header EMPTY, never
+// omits it, and reads a team's members from the public competition payload.
+describe('a discarded add is checked through the door its caller may read (L3)', () => {
+    const EVENTS = '/api/competitions/c1/matches/m1/score-events';
+    const TEAM_MEMBERS = '/api/competitions/c1/team-members';
+    const VIEWER = '/api/viewer/competitions/c1';
+    const DROPPED_KEY = 'bc_dropped_member_ids_v1';
+    const pick = (memberId) => ({ kind: 'rep.pick', pos: -1, side: 'a', memberId });
+    let warned = null;
+    beforeEach(() => { warned = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
+    afterEach(() => { warned.mockRestore(); });
+
+    async function discardAfterFailures(password, reads, answerRead) {
+        const member = await API.addTeamMember('c1', 't1', 'Ren Abe', password, { onRefusal: () => true });
+        member.settled.catch(() => {});
+        API.recordTap('c1', 'm1', pick(member.id), password, MATCH);
+        const posts = [];
+        global.fetch = vi.fn((url, opts) => {
+            url = String(url);
+            const headers = (opts && opts.headers) || {};
+            if (url.includes('/api/time')) return Promise.reject(new TypeError('clock'));
+            if (url === MEMBERS) return answer(500, { error: 'internal error' });
+            if (url === TEAM_MEMBERS || url === VIEWER) {
+                reads.push([url, 'X-Tournament-Password' in headers ? headers['X-Tournament-Password'] : 'omitted']);
+                return answerRead(url, member);
+            }
+            const body = JSON.parse(opts.body);
+            if (url === EVENTS) posts.push(body);
+            return answer(200, { outcomes: (body.events || []).map((e) => ({ id: e.id, outcome: 'applied' })), match: MATCH });
+        });
+        for (let i = 0; i < 20 && !API.heldWrites().some((h) => h.kind === 'member' && h.keepsFailing); i++) {
+            await reconnect();
+            await tick(9000);
+        }
+        const add = API.heldWrites().find((h) => h.kind === 'member');
+        expect(API.discardHeldWrite(add.key)).toBeTruthy();
+        await tick(10);
+        await reconnect();
+        return { member, posts };
+    }
+
+    it('a self-run add is checked against the public payload, with the header sent empty', async () => {
+        const reads = [];
+        const { posts } = await discardAfterFailures('', reads, (url) => (url === VIEWER
+            ? answer(200, { id: 'c1', teamMembers: { t1: [{ id: 'mem-2', name: 'Sato' }] } })
+            : answer(401, { error: 'unauthorized' })));
+        expect(reads, 'one read, of the public payload, the header present and empty').toEqual([[VIEWER, '']]);
+        expect(posts[0].events[0].memberId, 'the public payload proves the member never was').toBeUndefined();
+    });
+
+    it('an organiser whose read is refused 401 (a stale password) strips nothing', async () => {
+        const reads = [];
+        const { member, posts } = await discardAfterFailures('pw', reads, () => answer(401, { error: 'unauthorized' }));
+        expect(reads).toEqual([[TEAM_MEMBERS, 'pw']]);
+        expect(_lsStore[DROPPED_KEY], 'a refused read proves nothing').toBeUndefined();
+        expect(posts[0].events[0].memberId, 'the pick goes as it was made').toBe(member.id);
+    });
 });

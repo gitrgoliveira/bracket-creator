@@ -751,6 +751,61 @@ describe('a long single-match queue is checked for wait cycles without deep recu
     }, 60000);
 });
 
+// Stage 3 review 7, K6: settling a batch of taps does its follow-ups (the
+// match's pending taps published, the writes following a settled one kicked)
+// once for the batch, not once per tap over the whole queue. Counted as work
+// done: reads of the entries' `after` and pending-tap publications.
+describe('settling a tap batch is linear in the queue (K6)', () => {
+    it('a long queue of taps drains with work proportional to its length', async () => {
+        const N = 640;
+        API.recordTap('c1', 'm1', { kind: 'ippon.add', pos: 0, side: 'a', letter: 'M' }, 'pw', MATCH);
+        await flushMicrotasks();
+        const [k0, d0] = stored()[0];
+        const base = k0.split('\u001f')[0];
+        const big = [];
+        for (let i = 0; i < N; i++) {
+            const d = { ...d0, payload: { ...d0.payload, id: `e${i}`, stamp: d0.payload.stamp + i, seq: i + 1 }, enqueuedAt: d0.enqueuedAt + i };
+            big.push([`${base}\u001fevt:e${i}`, d]);
+        }
+        API.clearQueue();
+        _lsStore.bc_write_queue_v2 = JSON.stringify(big);
+        // Every queued entry read from storage counts the reads of its `after`.
+        let afterReads = 0;
+        const realParse = JSON.parse;
+        const spy = vi.spyOn(JSON, 'parse').mockImplementation((s, r) => {
+            const v = realParse(s, r);
+            if (Array.isArray(v)) {
+                for (const item of v) {
+                    const d = Array.isArray(item) && item[1];
+                    if (!d || typeof d !== 'object' || d.kind !== 'evt') continue;
+                    let after = d.after;
+                    delete d.after;
+                    Object.defineProperty(d, 'after', {
+                        get() { afterReads++; return after; }, set(x) { after = x; }, enumerable: true, configurable: true,
+                    });
+                }
+            }
+            return v;
+        });
+        try {
+            await load();
+            let published = 0;
+            const off = API.subscribePendingTaps('c1', 'm1', () => { published++; });
+            const sent = server((req) => answer(200, { outcomes: req.body.events.map((e) => ({ id: e.id, outcome: 'applied' })) }));
+            afterReads = 0;
+            await reconnect();
+            await tick(2000);
+            if (typeof off === 'function') off();
+            expect(stored(), 'all settled').toEqual([]);
+            expect(sent.length, 'in batches of 64').toBe(Math.ceil(N / 64));
+            expect(published, 'the pending taps are published once per batch').toBeLessThanOrEqual(2 * sent.length + 2);
+            expect(afterReads, 'each batch reads the queue a bounded number of times').toBeLessThan(40 * N);
+        } finally {
+            spy.mockRestore();
+        }
+    }, 60000);
+});
+
 // Stage 3 review 7, K2: a tap this tab has settled is out of storage before
 // anything awaits, and is never taken up again from another tab's write.
 describe('a settled tap is never sent again because another tab wrote the queue (K2)', () => {

@@ -970,14 +970,45 @@ function _dequeue(key, descriptor, outcome) {
     // Every entry that leaves settles its door's promise: with the answer the
     // flush passes, else as discarded (a discard, another tab sending it).
     _settleKey(key, outcome || { value: { discarded: true } });
-    if (d.kind === 'evt') _publishPendingTaps(_baseOf(key));
-    // An entry another match's write follows (`after`) has left: that write
-    // goes now, in this flush (a rerun) or in one kicked for it.
-    if ([..._writeQueue.values()].some((e) => _afterKeys(e).includes(key))) {
-        if (_flushInProgress) _flushRequested = true;
-        else queueMicrotask(() => { if (_writeQueue.size > 0) _flushQueue(); });
+    // Inside a batch the follow-ups below are done once for the batch (K6).
+    if (_dequeueBatch) {
+        if (d.kind === 'evt') _dequeueBatch.bases.add(_baseOf(key));
+        _dequeueBatch.keys.add(key);
+        return true;
     }
+    if (d.kind === 'evt') _publishPendingTaps(_baseOf(key));
+    _kickFollowersOf(new Set([key]));
     return true;
+}
+
+// While many entries leave at once (a tap batch settling, _sendTapBatch;
+// another tab's removals, _onStoredQueueChanged), the follow-ups each _dequeue
+// would do over the whole queue (publishing its match's pending taps, kicking a
+// write that follows it) are gathered here and done once, so a batch costs
+// one walk of the queue, not one per entry (stage 3 review 7, K6).
+let _dequeueBatch = null;
+
+function _openDequeueBatch() {
+    if (!_dequeueBatch) _dequeueBatch = { bases: new Set(), keys: new Set() };
+}
+
+function _closeDequeueBatch() {
+    const b = _dequeueBatch;
+    _dequeueBatch = null;
+    if (!b) return;
+    for (const base of b.bases) _publishPendingTaps(base);
+    if (b.keys.size > 0) _kickFollowersOf(b.keys);
+}
+
+// _kickFollowersOf: an entry another match's write follows (`after`) has
+// left: that write goes now, in this flush (a rerun) or in one kicked for it.
+function _kickFollowersOf(keys) {
+    for (const e of _writeQueue.values()) {
+        if (_afterKeys(e).some((k) => keys.has(k))) {
+            _rerunFlushSoon();
+            return;
+        }
+    }
 }
 
 // What storage holds now, keyed. Unreadable storage reads as empty, so the
@@ -2710,8 +2741,13 @@ async function _sendTapBatch(base, batch, pass) {
     const session = first.payload && first.payload.session;
     if (!_isAllowedTerminalRequest('POST', url)) {
         let dequeued = false;
-        for (const [k, d] of batch) {
-            if (_dequeue(k, d, { value: { discarded: true } })) dequeued = true;
+        _openDequeueBatch();
+        try {
+            for (const [k, d] of batch) {
+                if (_dequeue(k, d, { value: { discarded: true } })) dequeued = true;
+            }
+        } finally {
+            _closeDequeueBatch();
         }
         if (dequeued) _persistQueue();
         _notifyQueueAlert({ kind: 'unreadable', count: batch.length, terminalCount: 0, compID, matchID });
@@ -2741,37 +2777,45 @@ async function _sendTapBatch(base, batch, pass) {
         // queue is written once after it, not once per tap (J2, stage 3
         // review 6): a long queue drained a tap at a time was quadratic.
         let dequeued = false;
-        for (const [k, d] of batch) {
-            if (_writeQueue.get(k) !== d) continue;
-            const o = byId.get(d.payload && d.payload.id);
-            if (!o) {
-                // No outcome: whether it was applied is unknown, so it may be
-                // logged. It keeps its id AND its seq (R6) and is sent again on
-                // the backoff exactly as it went, like a write a 5xx left queued.
-                pass.anyFailed = true;
-                if (result === 'settled') result = 'kept';
-                continue;
+        // The follow-ups of the taps that leave are done once for the batch,
+        // as it closes (K6).
+        _openDequeueBatch();
+        try {
+            for (const [k, d] of batch) {
+                if (_writeQueue.get(k) !== d) continue;
+                const o = byId.get(d.payload && d.payload.id);
+                if (!o) {
+                    // No outcome: whether it was applied is unknown, so it may be
+                    // logged. It keeps its id AND its seq (R6) and is sent again on
+                    // the backoff exactly as it went, like a write a 5xx left queued.
+                    pass.anyFailed = true;
+                    if (result === 'settled') result = 'kept';
+                    continue;
+                }
+                if (o.outcome === TAP_CLOCK_SKEW && !d.skewRetried) {
+                    // The taps settled so far leave storage before the clock is
+                    // read (K2): while it is out, another tab's write to the
+                    // queue would otherwise hand them back to this tab.
+                    if (dequeued) { _persistQueue(); dequeued = false; }
+                    _closeDequeueBatch();
+                    await _restampQueuedTapForSkew(d);
+                    _flushRequested = true;
+                    if (result === 'settled') result = 'restamped';
+                    unheld.push([k, d]);
+                    continue;
+                }
+                if (result !== 'settled') continue; // keep strict order behind it
+                if (_dequeue(k, d, { value: o })) dequeued = true;
+                if (!tapOutcomeQuiet(o)) {
+                    pass.notApplied++;
+                    pass.lastNotApplied = o;
+                    _emitOn(_tapOutcomeListeners, base, {
+                        id: o.id, outcome: o.outcome, reason: o.reason, message: o.message,
+                    });
+                }
             }
-            if (o.outcome === TAP_CLOCK_SKEW && !d.skewRetried) {
-                // The taps settled so far leave storage before the clock is
-                // read (K2): while it is out, another tab's write to the
-                // queue would otherwise hand them back to this tab.
-                if (dequeued) { _persistQueue(); dequeued = false; }
-                await _restampQueuedTapForSkew(d);
-                _flushRequested = true;
-                if (result === 'settled') result = 'restamped';
-                unheld.push([k, d]);
-                continue;
-            }
-            if (result !== 'settled') continue; // keep strict order behind it
-            if (_dequeue(k, d, { value: o })) dequeued = true;
-            if (!tapOutcomeQuiet(o)) {
-                pass.notApplied++;
-                pass.lastNotApplied = o;
-                _emitOn(_tapOutcomeListeners, base, {
-                    id: o.id, outcome: o.outcome, reason: o.reason, message: o.message,
-                });
-            }
+        } finally {
+            _closeDequeueBatch();
         }
         const heldSeqs = (body.match && body.match.eventSeqs) || {};
         let reseq = false;
@@ -3072,12 +3116,19 @@ function _onStoredQueueChanged(oldRaw, newRaw) {
     const after = newRaw === null ? null : _parseStoredQueue(newRaw);
     let changed = false, adopted = false, migrated = false;
     const goneAdds = [];
-    for (const [k, d] of _writeQueue) {
-        const gone = after === null
-            ? _adopted.has(d)
-            : !after.has(k) && before.get(k)?.enqueuedAt === d.enqueuedAt;
-        if (gone && _memberAddId(d)) goneAdds.push(d);
-        if (gone && _dequeue(k, d)) changed = true;
+    // Another tab's batch can take many entries out at once: their follow-ups
+    // are done once (K6).
+    _openDequeueBatch();
+    try {
+        for (const [k, d] of _writeQueue) {
+            const gone = after === null
+                ? _adopted.has(d)
+                : !after.has(k) && before.get(k)?.enqueuedAt === d.enqueuedAt;
+            if (gone && _memberAddId(d)) goneAdds.push(d);
+            if (gone && _dequeue(k, d)) changed = true;
+        }
+    } finally {
+        _closeDequeueBatch();
     }
     // A member add another tab took out refused (or an operator discarded
     // it there): that tab took the id off its copies of the writes naming it

@@ -148,8 +148,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // undefined once the board holds the server's copy again. A server copy
   // stamped before it cannot know that edit, so the adopt below keeps the
   // counts: comparing values alone reads a tap taken back during a save as
-  // untouched, and that save's echo then wipes it (bc-ltap, bc-kclr; the
-  // individual editor's boardEditedAtRef explains the rule at length). The seq
+  // untouched, and that save's echo then wipes it (bc-ltap, bc-kclr). The seq
   // counts edits so landedAutosave clears the stamp only for a save built after
   // the latest one. The stamp is taken only while the match is running: only then
   // is the edit autosaved, and only a landed autosave clears the stamp.

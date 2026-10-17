@@ -2095,8 +2095,10 @@ async function _sendEntry(key, descriptor, pass) {
                 }
             }
         } else if (!terminal && kind === 'score') {
-            // bc-cse MEDIUM-2: a RUNNING replay is fire-and-forget except for the
-            // clock-skew refusal, where res.ok means nothing was written; the
+            // bc-cse MEDIUM-2: a RUNNING write settles with the server's answer
+            // (its editor reads `settled`) and raises no alert of its own,
+            // except the clock-skew refusal, where res.ok means nothing was
+            // written: it is re-stamped and resent in its place, since the
             // entry may hold an edge-triggered kachinukiBoutFinal.
             const refusedForClock = writeWasRefusedForClock(body);
             if (refusedForClock && !descriptor.skewRetried) {

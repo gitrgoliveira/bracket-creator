@@ -86,25 +86,37 @@ describe('the basis says what this device has sent', () => {
         expect(a.id.startsWith(`${finBody.session}.`)).toBe(true);
     });
 
-    it('seen falls back to the newest derived match a score-events answer handed back', async () => {
-        global.fetch = vi.fn((url, opts) => {
-            if (isClock(url)) return Promise.reject(new TypeError('clock'));
-            if (String(url).endsWith('/score-events')) {
-                const events = JSON.parse(opts.body).events;
-                return Promise.resolve({ ok: true, status: 200, json: async () => ({
-                    outcomes: events.map((e) => ({ id: e.id, outcome: 'applied' })),
-                    match: { id: 'm1', scoreVersion: 12 },
-                }) });
-            }
-            return new Promise(() => {});
-        });
+    // bc-evts stage 3 review 11, m1: `seen` is what the screen showed, said by
+    // the caller. The copy a score-events answer handed back counts only
+    // through a board that took it (the individual editor's seenScoreVersion),
+    // never on its own: a write never claims a result its screen did not show.
+    const answerWith = (match) => vi.fn((url, opts) => {
+        if (isClock(url)) return Promise.reject(new TypeError('clock'));
+        if (String(url).endsWith('/score-events')) {
+            const events = JSON.parse(opts.body).events;
+            return Promise.resolve({ ok: true, status: 200, json: async () => ({
+                outcomes: events.map((e) => ({ id: e.id, outcome: 'applied' })), match,
+            }) });
+        }
+        return new Promise(() => {});
+    });
+
+    it('the copy a score-events answer handed back is never claimed on its own', async () => {
+        global.fetch = answerWith({ id: 'm1', status: 'completed', scoreVersion: 12 });
         API.recordTap('c1', 'm1', { kind: 'ippon.add', pos: 0, side: 'a', letter: 'M' }, 'pw', { id: 'm1' });
         await vi.advanceTimersByTimeAsync(0);
         await flushMicrotasks();
         await API.recordDecision('c1', 'm1', { decision: 'fusensho', decisionBy: 'aka' }, 'pw');
         await flushMicrotasks();
         const dec = sentBodies().find((s) => s.door === 'decision');
-        expect(dec.body.basis).toEqual({ seen: 12, own: [], seq: 1 });
+        expect(dec.body.basis).toEqual({ seen: 0, own: [], seq: 1 });
+    });
+
+    it('a score write names the copy its board showed (seenScoreVersion), never sent', async () => {
+        const fin = await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A', seenScoreVersion: 12 }, 'pw', { ...SHOWN, id: 'm1' });
+        const body = JSON.parse(localStorage.getItem('bc_write_queue_v2')).find(([k]) => k === fin.key)[1].payload;
+        expect(body.basis.seen).toBe(12);
+        expect(body).not.toHaveProperty('seenScoreVersion');
     });
 
     it('a resend keeps the writeId', async () => {
@@ -143,5 +155,62 @@ describe('the basis says what this device has sent', () => {
         expect(payload).not.toContain('writeId');
         expect(payload).not.toContain('basis');
         expect(payload).not.toContain('"session"');
+    });
+});
+
+// bc-evts stage 3 review 11, X4: match ids are name slugs, so a competition
+// deleted and made again, or imported, or drawn again, reuses them. The copy a
+// score-events answer handed back for the old match is forgotten with it, or
+// the new match's board would show the old scoreline and Finish record it.
+describe('the answer\'s copy of a match is forgotten with its competition', () => {
+    const answered = () => vi.fn((url, opts) => {
+        if (isClock(url)) return Promise.reject(new TypeError('clock'));
+        if (String(url).endsWith('/score-events')) {
+            const events = JSON.parse(opts.body).events;
+            return Promise.resolve({ ok: true, status: 200, json: async () => ({
+                outcomes: events.map((e) => ({ id: e.id, outcome: 'applied' })),
+                match: { id: 'm1', status: 'running', scoreVersion: 12 },
+            }) });
+        }
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ id: 'c1' }) });
+    });
+    async function derivedFor(comp) {
+        API.recordTap(comp, 'm1', { kind: 'ippon.add', pos: 0, side: 'a', letter: 'M' }, 'pw', { id: 'm1' });
+        await vi.advanceTimersByTimeAsync(0);
+        await flushMicrotasks();
+        expect(API.latestDerivedMatch(comp, 'm1'), 'precondition: the answer\'s copy is held').not.toBeNull();
+    }
+
+    it('when its draw is generated again, and no other competition\'s', async () => {
+        global.fetch = answered();
+        await derivedFor('c1');
+        await derivedFor('c2');
+        await API.generateDraw('c1', 'pw');
+        expect(API.latestDerivedMatch('c1', 'm1')).toBeNull();
+        expect(API.latestDerivedMatch('c2', 'm1')).not.toBeNull();
+    });
+
+    it('when its draw is discarded', async () => {
+        global.fetch = answered();
+        await derivedFor('c1');
+        await API.discardDraw('c1', 'pw');
+        expect(API.latestDerivedMatch('c1', 'm1')).toBeNull();
+    });
+
+    it('when the competition is deleted from this device', async () => {
+        global.fetch = answered();
+        await derivedFor('c1');
+        await API.deleteCompetition('c1', 'pw', 'pw');
+        expect(API.latestDerivedMatch('c1', 'm1')).toBeNull();
+    });
+
+    it('for every competition on an import, and on the logout wipe', async () => {
+        global.fetch = answered();
+        await derivedFor('c1');
+        await API.importCompetitions(new FormData(), 'pw');
+        expect(API.latestDerivedMatch('c1', 'm1')).toBeNull();
+        await derivedFor('c2');
+        API.clearQueue();
+        expect(API.latestDerivedMatch('c2', 'm1')).toBeNull();
     });
 });

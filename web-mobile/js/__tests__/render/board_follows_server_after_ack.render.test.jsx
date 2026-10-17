@@ -36,6 +36,20 @@ describe('the board follows the server once a tap is acknowledged', () => {
     expect(window.API.recordTap.mock.calls[1][2]).toEqual({ kind: 'ippon.remove', pos: 0, side: 'b', target: tap.id });
   });
 
+  // bc-evts stage 3 review 11, X4: match ids are name slugs, so a competition
+  // deleted and made again (or imported) reuses them. An answer's copy of the
+  // old match, other competitors on its sides, is never this match's board.
+  it('an answer\'s copy whose sides are other competitors is not this board', async () => {
+    outbox.ack('c1', 'm1', bout({
+      sideA: { id: 'old1', name: 'Ito' }, sideB: { id: 'old2', name: 'Ishii' },
+      sideAId: 'old1', sideBId: 'old2',
+      ipponsA: ['M', 'K'], markIds: { a: ['x.1', 'x.2'], b: [] }, scoreVersion: 9,
+    }), {});
+    let r;
+    await act(async () => { r = render(el(bout())); });
+    expect(marks(r.container), 'the old match\'s points never show').toHaveLength(0);
+  });
+
   it('a later change made elsewhere is followed, and an older answer never puts the board back', async () => {
     const r = render(el(bout()));
     await act(async () => { fireEvent.click(letterBtn(shiroSide(r.container), 'M')); });

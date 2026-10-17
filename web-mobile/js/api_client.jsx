@@ -1395,15 +1395,18 @@ function _noteDerived(base, match) {
 }
 
 // _basisFor: what a rule-bound write was made against (S3d). `seen` is the
-// score log line count the screen showed (the match's scoreVersion, else the
-// newest derived copy); `own` the ids of this device's taps for the match
+// score log line count the screen showed (the match's scoreVersion, or the
+// board's, seenScoreVersion); `own` the ids of this device's taps for the match
 // still queued or in flight; `seq` the last seq this session queued for it,
 // so the server's seq arm counts the device's own taps (operator S8 b).
 function _basisFor(base, seen) {
-    const derived = _latestDerived.get(base);
-    // The larger of what the caller says it showed and the derived match a
-    // tap's answer handed back: the board shows the newer of the two.
-    const s = Math.max(Number(seen) > 0 ? Number(seen) : 0, Number(derived && derived.scoreVersion) || 0);
+    // `seen` is what the caller's screen showed, said by the caller (bc-evts
+    // stage 3 review 11, m1). The copy a score-events answer handed back
+    // (_latestDerived) is NOT counted here: it counts only through a board
+    // that took it, the individual editor, which says so itself
+    // (seenScoreVersion), so a write never claims it saw a result its screen
+    // did not show.
+    const s = Number(seen) > 0 ? Number(seen) : 0;
     const own = _tapEntriesFor(base).map(([, d]) => d.payload && d.payload.id).filter(Boolean);
     return {
         seen: s,
@@ -1879,8 +1882,10 @@ function _noteShownMatch(compID, m) {
     }
 }
 
-// _forgetShownMatches: a competition's draw was generated or discarded, so its
-// match ids may name other matches now (a redraw reuses them). The labels this
+// _forgetShownMatches: a competition's draw was generated or discarded, or the
+// competition deleted from this device, so its match ids may name other
+// matches now (a redraw, or a competition made again under the same name,
+// reuses them). The labels this
 // device learned for them are forgotten; an entry keeps the label stamped on
 // it as it was queued (J4, stage 3 review 6). Team names stay: a team keeps its
 // id across draws.
@@ -1888,6 +1893,10 @@ function _forgetShownMatches(compID) {
     if (!compID) return;
     const prefix = `${compID}:`;
     for (const k of _shownMatchLabels.keys()) if (k.startsWith(prefix)) _shownMatchLabels.delete(k);
+    // The copies score-events answers handed back for its matches go too
+    // (X4): a match id reused by the new draw must never show the old match's
+    // scoreline on a board, nor have it recorded by a Finish.
+    for (const k of _latestDerived.keys()) if (k.startsWith(prefix)) _latestDerived.delete(k);
 }
 
 // _forgetAllShownMatches: the tournament's competitions may have been replaced
@@ -1898,6 +1907,7 @@ function _forgetShownMatches(compID) {
 // the label it was queued with.
 function _forgetAllShownMatches() {
     _shownMatchLabels.clear();
+    _latestDerived.clear();
 }
 
 function _noteMatchLabel(compID, matchID, label) {
@@ -4707,7 +4717,11 @@ const API = {
             kind: 'score', compID, matchID, method: 'PUT',
             url: `/api/competitions/${compID}/matches/${matchID}/score`,
             payload, password, terminal: !isRunning, after: result && result.after,
-            seen: match && match.scoreVersion, onRefusal: opts && opts.onRefusal,
+            // `result.seenScoreVersion` (request-only, never sent): the server
+            // copy the individual editor's board showed, the score-events
+            // answer's when the board took it (m1); else the host's match.
+            seen: result && result.seenScoreVersion !== undefined ? result.seenScoreVersion : match && match.scoreVersion,
+            onRefusal: opts && opts.onRefusal,
         });
         _broadcastPatch(payload);
         return answer;
@@ -5061,6 +5075,9 @@ const API = {
             const err = await res.json().catch(() => ({}));
             throw Object.assign(new Error(err.error || "Failed to delete competition"), { code: err.code });
         }
+        // Its match ids are free for a competition made again under the same
+        // name (X4); another device hears of it as a tournament_updated push.
+        _forgetShownMatches(id);
         return true;
     },
     // Returns the updated competition JSON (including the new `status`) so
@@ -5986,6 +6003,9 @@ const API = {
         _minted.clear();
         _mintedReadPw.clear();
         if (_mintedTimer !== null) { clearTimeout(_mintedTimer); _mintedTimer = null; }
+        // The copies score-events answers handed back go with the session
+        // they were answered to (X4).
+        _latestDerived.clear();
         if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
         _flushAttempt = 0;
         _offlineFlag = false;

@@ -615,6 +615,11 @@ function makeSubmitDecision({
   // Not provided by TeamScoreEditorModal (which has its own pending state path).
   setPendingWrite,
   pendingFnRef,
+  // The server copy the screen showed, when it is not `match`'s own (the
+  // individual editor's board, which may show a score-events answer's copy):
+  // the decision's basis claims it and nothing more (bc-evts stage 3 review
+  // 11, m1).
+  seenScoreVersion,
 }) {
   const submit = async (kind, { decisionBy, decisionReason }) => {
     setDecisionSubmitting(true);
@@ -624,7 +629,7 @@ function makeSubmitDecision({
     try {
       const updated = await submitDecisionRequest(
         match.compId, match.id, kind, { decisionBy, decisionReason }, enchoPeriodCount, password,
-        { seenModifiedAt: match.modifiedAt || 0, seenScoreVersion: match.scoreVersion || 0 },
+        { seenModifiedAt: match.modifiedAt || 0, seenScoreVersion: (seenScoreVersion !== undefined ? seenScoreVersion : match.scoreVersion) || 0 },
       );
       if (!mountedRef.current) return;
       // A decision that did not land must not advance ANYTHING below this

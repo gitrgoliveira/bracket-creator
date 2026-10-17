@@ -213,15 +213,20 @@ describe('minor taps rules', () => {
         expect(t.seq).toBe(1);
     });
 
-    it('a write\'s basis takes the newer of the caller\'s seen and the board\'s derived match (minor 6)', async () => {
+    // Minor 6, as stage 3 review 11 (m1) settled it: the board's derived
+    // match counts through the board, which names it (seenScoreVersion), never
+    // on its own, so a write claims only what its screen showed.
+    it('a write\'s basis takes the copy its board showed, never the derived match on its own (minor 6, m1)', async () => {
         await load();
         eventServer({ version: () => 7 });
         API.recordTap('c1', 'm1', tap('M'), 'pw', { id: 'm1' });
         await tick(0);
         global.fetch = vi.fn(() => Promise.reject(new TypeError('offline')));
-        const fin = await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', { id: 'm1', scoreVersion: 3 });
-        const [, entry] = JSON.parse(_lsStore.bc_write_queue_v2).find(([k]) => k === fin.key);
-        expect(entry.payload.basis.seen).toBe(7);
+        const shown = await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A', seenScoreVersion: 7 }, 'pw', { id: 'm1', scoreVersion: 3 });
+        const host = await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A' }, 'pw', { id: 'm1', scoreVersion: 3 });
+        const stored = JSON.parse(_lsStore.bc_write_queue_v2);
+        expect(stored.find(([k]) => k === shown.key)[1].payload.basis.seen).toBe(7);
+        expect(stored.find(([k]) => k === host.key)[1].payload.basis.seen).toBe(3);
     });
 });
 

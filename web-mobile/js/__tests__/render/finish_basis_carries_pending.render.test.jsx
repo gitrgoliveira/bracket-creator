@@ -34,6 +34,29 @@ describe('Finish carries the pending taps', () => {
     expect(r.container.textContent).not.toContain('Saving…');
   });
 
+  // bc-evts stage 3 review 11, m1: the finish says which server copy its board
+  // showed, the score-events answer's when the board took it, so its basis
+  // never claims a copy the screen did not show.
+  it('the finish names the server copy its board showed', async () => {
+    const onSubmit = vi.fn().mockResolvedValue({ applied: true, pending: true });
+    const r = render(<ScoreEditorModal match={bout()} onClose={vi.fn()} onSubmit={onSubmit} password="pw" />);
+    await act(async () => { fireEvent.click(letterBtn(shiroSide(r.container), 'M')); });
+    const [tap] = outbox.taps('c1', 'm1');
+    await act(async () => {
+      outbox.ack('c1', 'm1', bout({ ipponsB: ['M'], markIds: { a: [], b: [tap.id] }, scoreVersion: 4, modifiedAt: tap.stamp }), {});
+    });
+    await act(async () => { fireEvent.keyDown(window, { key: 'Enter' }); });
+    expect(onSubmit.mock.calls[0][0].seenScoreVersion).toBe(4);
+  });
+
+  it('a board that did not take the answer\'s copy names the host\'s', async () => {
+    const onSubmit = vi.fn().mockResolvedValue({ applied: true, pending: true });
+    const r = render(<ScoreEditorModal match={bout()} onClose={vi.fn()} onSubmit={onSubmit} password="pw" />);
+    await act(async () => { fireEvent.click(letterBtn(akaSide(r.container), 'K')); });
+    await act(async () => { fireEvent.keyDown(window, { key: 'Enter' }); });
+    expect(onSubmit.mock.calls[0][0].seenScoreVersion).toBe(3);
+  });
+
   it('a tap on the other side keeps its own place in the finish', async () => {
     const onSubmit = vi.fn().mockResolvedValue({ applied: true, pending: true });
     const r = render(<ScoreEditorModal match={bout()} onClose={vi.fn()} onSubmit={onSubmit} password="pw" />);

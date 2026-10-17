@@ -131,11 +131,31 @@ const DERIVED_BOARD_FIELDS = {
 // answer handed back (API.latestDerivedMatch), by isOlderRunningCopy's rule
 // (scoreVersion first, then the stamp); this device's pending taps are folded
 // on top (applyPending). `base` is what the taps were made against.
+// sameSides: whether the copy a score-events answer handed back is of the
+// match the host renders, by its competitors (bc-evts stage 3 review 11, X4).
+// Match ids are name slugs, so a competition made again under the same name
+// reuses them; a copy whose side ids differ is the old match. A side with no
+// id on either copy (a legacy row) decides nothing.
+function sideIdOf(x, key) {
+  const flat = x[`side${key}Id`];
+  if (flat) return flat;
+  const side = x[`side${key}`];
+  return (side && typeof side === "object" && side.id) || "";
+}
+function sameSides(m, derived) {
+  for (const key of ["A", "B"]) {
+    const a = sideIdOf(m, key);
+    const b = sideIdOf(derived, key);
+    if (a && b && a !== b) return false;
+  }
+  return true;
+}
+
 function tapBoardOf(m) {
   const api = window.API || {};
   const derived = typeof api.latestDerivedMatch === "function" ? api.latestDerivedMatch(m.compId, m.id) : null;
   let base = m;
-  if (derived && isOlderRunningCopy(m, derived.status, derived.modifiedAt, derived.scoreVersion)) {
+  if (derived && sameSides(m, derived) && isOlderRunningCopy(m, derived.status, derived.modifiedAt, derived.scoreVersion)) {
     base = { ...m };
     for (const [f, none] of Object.entries(DERIVED_BOARD_FIELDS)) base[f] = derived[f] ?? none;
     // A rep pick the answer does not carry is the one the host renders.
@@ -461,6 +481,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // the Finish + Start Next flow. A hantei is committed by Finish (bc-htsd).
   const submitDecision = makeSubmitDecision({
     match: m, enchoPeriodCount, password, mountedRef,
+    // The server copy the board showed (m1): the score-events answer's when
+    // the board took it.
+    seenScoreVersion: tapMode ? tapBoard.base.scoreVersion : undefined,
     setDecisionSubmitting, setDecisionErr, setDecisionPromptKind,
     onClose, onAfterDecision, isComplete,
     // F5: thread pending-write handles so the factory can show the sticky banner
@@ -638,7 +661,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // bc-mrgc: every patch this editor hands its host names the groups it
   // changes (useChangedGroups), and `extra` (a correction reason given at
   // the prompt) is part of the write those groups are worked out from.
-  const buildPatch = (targetStatus, extra) => claimChanged({ ...buildPatchFields(targetStatus), ...extra });
+  // `seenScoreVersion` (request-only, never sent): the server copy the board
+  // showed, the score-events answer's when the board took it (tapBoardOf), so
+  // the write's basis claims what this screen showed and nothing more (m1).
+  const boardSeen = tapMode ? { seenScoreVersion: Number(tapBoard.base.scoreVersion) || 0 } : {};
+  const buildPatch = (targetStatus, extra) => claimChanged({ ...buildPatchFields(targetStatus), ...boardSeen, ...extra });
   const buildPatchFields = (targetStatus) => {
     const fouls = { a: aFouls, b: bFouls };
     if (targetStatus === "scheduled") return { winner: null, status: "scheduled", score: null, ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, ...hanteiClear, ...repBlock };

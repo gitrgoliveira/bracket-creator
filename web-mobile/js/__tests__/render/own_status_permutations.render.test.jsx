@@ -241,13 +241,14 @@ async function run(fam, sc) {
     if (w.timing === 'before') { await answer(); move(); } else { move(); await answer(); }
     if (w.outcome === 'landed' && w.kind !== 'start' && draft) draft = false; // the editor's own reopen
   }
-  // A last foreign move, then Save of a kept draft.
-  const f = FOREIGN[sc.after];
-  if (f && (f.from === null || f.from === server.status)) {
+  // The last foreign moves, then Save of a kept draft.
+  for (const name of [].concat(sc.after)) {
+    const f = FOREIGN[name];
+    if (!f || (f.from !== null && f.from !== server.status)) continue;
     const prev = server.status;
     feed(f.apply(server));
     if (server.status === 'running' && prev !== 'running') lastRunningCause = 'foreign';
-    check(`after ${sc.after}`);
+    check(`after ${name}`);
   }
   if (kept()) {
     await tap(screen.getByTestId('draft-kept-save'));
@@ -262,10 +263,8 @@ async function run(fam, sc) {
 function* scenarios(fam) {
   for (const draft of [false, true]) {
     // No own write: only the feed moves.
-    for (const first of ['start', 'restamp', 'none']) {
-      for (const after of ['finish', 'sendback', 'restamp', 'none']) {
-        yield { start: 'scheduled', draft, writes: first === 'start' || first === 'restamp' ? [] : [], after: first === 'none' ? after : first, then: after };
-      }
+    for (const after of [['start'], ['start', 'finish'], ['start', 'sendback'], ['restamp'], ['none']]) {
+      yield { start: 'scheduled', draft, writes: [], after };
     }
     // One own Start, or two when the first does not land.
     for (const outcome of OUTCOMES) {
@@ -297,7 +296,7 @@ function* scenarios(fam) {
   }
 }
 
-const describeName = (sc) => `${sc.start}${sc.draft ? '+draft' : ''} ${sc.writes.map((w) => `${w.kind}:${w.outcome}/${w.timing}/${w.foreign}`).join(' ') || 'no own write'} then ${sc.after}`;
+const describeName = (sc) => `${sc.start}${sc.draft ? '+draft' : ''} ${sc.writes.map((w) => `${w.kind}:${w.outcome}/${w.timing}/${w.foreign}`).join(' ') || 'no own write'} then ${[].concat(sc.after).join('+')}`;
 
 describe.each([[INDIVIDUAL], [TEAM]])('own status writes and the kept draft: every combination (%s)', (fam) => {
   it(`holds every invariant (${fam.name})`, async () => {

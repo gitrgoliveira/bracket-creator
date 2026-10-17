@@ -1721,6 +1721,17 @@ function _noteShownMatch(compID, m) {
     }
 }
 
+// _forgetShownMatches: a competition's draw was generated or discarded, so its
+// match ids may name other matches now (a redraw reuses them). The labels this
+// device learned for them are forgotten; an entry keeps the label stamped on
+// it as it was queued (J4, stage 3 review 6). Team names stay: a team keeps its
+// id across draws.
+function _forgetShownMatches(compID) {
+    if (!compID) return;
+    const prefix = `${compID}:`;
+    for (const k of [..._shownMatchLabels.keys()]) if (k.startsWith(prefix)) _shownMatchLabels.delete(k);
+}
+
 function _noteMatchLabel(compID, matchID, label) {
     if (compID && matchID && typeof label === 'string' && label.trim()) _shownMatchLabels.set(_revKey(compID, matchID), label.trim());
 }
@@ -3451,6 +3462,9 @@ function _ensureConnected() {
         }
         // S2: the stream's first frame names the server's build.
         if (parsed && parsed.type === 'heartbeat' && parsed.hello) noteServerBuild(parsed.build);
+        if (parsed && (parsed.type === 'draw_generated' || parsed.type === 'draw_discarded')) {
+            _forgetShownMatches(parsed.data && parsed.data.competitionId);
+        }
         _noteEventId(event.lastEventId, parsed);
         for (const sub of _subscribers) {
             try { sub.callback(parsed); } catch (err) { console.error('SSE callback failed:', err); }
@@ -4080,6 +4094,7 @@ const API = {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to generate draw");
         }
+        _forgetShownMatches(id);
         const data = await res.json();
         return normalizeCompetitionDetail(data);
     },
@@ -4113,6 +4128,7 @@ const API = {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to discard draw");
         }
+        _forgetShownMatches(id);
     },
     // quarantineBracket: POST /competitions/:id/bracket/quarantine. The way out
     // of a bracket.json that will not parse, which otherwise blocks every score

@@ -594,3 +594,48 @@ describe('a write naming a minted member follows the team\'s last member write (
         expect(score[1].after, 'the score write follows the add, the team\'s last member write').toBe(add[0]);
     });
 });
+
+describe('a regenerated or discarded draw forgets the match labels learned for it (J4)', () => {
+    const shown = (id, n) => ({ id, compId: 'c1', phase: 'bracket', matchNumber: n, status: 'running', modifiedAt: 0 });
+    const whereOf = (m) => (API.heldWrites().find((h) => h.matchID === m) || {}).where;
+
+    async function labelled() {
+        // Queued with no phase, so the entry itself carries no label: only the cache can name it.
+        const r = await API.recordScore('c1', 'mb', { status: 'running', ipponsA: ['M'], ipponsB: [], changed: ['points'] }, 'pw', { id: 'mb', modifiedAt: 0 });
+        r.settled.catch(() => {});
+        const other = await API.recordScore('c2', 'mb', { status: 'running', ipponsA: ['M'], ipponsB: [], changed: ['points'] }, 'pw', { id: 'mb', modifiedAt: 0 });
+        other.settled.catch(() => {});
+        API.noteShownMatch('c1', shown('mb', 7));
+        API.noteShownMatch('c2', shown('mb', 9));
+        await flushMicrotasks();
+        expect(whereOf('mb')).toBe('Match 7');
+    }
+
+    for (const type of ['draw_generated', 'draw_discarded']) {
+        it(`the ${type} push clears that competition's labels and no other's`, async () => {
+            let es;
+            global.EventSource = class FakeES { constructor() { es = this; this.close = () => {}; } };
+            global.EventSource.OPEN = 1;
+            await load();
+            const off = API.subscribeToEvents(() => {});
+            await labelled();
+            es.onmessage({ data: JSON.stringify({ type, data: { competitionId: 'c1' } }), lastEventId: '' });
+            expect(whereOf('mb'), 'the label of a match the new draw may reuse the id of is gone').toBe('');
+            const c2 = API.heldWrites().find((h) => h.compID === 'c2' || h.compId === 'c2');
+            expect(c2 && c2.where, 'another competition keeps its label').toBe('Match 9');
+            if (typeof off === 'function') off();
+        });
+    }
+
+    it('generating and discarding a draw from this device clears them too', async () => {
+        for (const call of [(a) => a.generateDraw('c1', 'pw'), (a) => a.discardDraw('c1', 'pw')]) {
+            // The draw calls answer; the queued writes stay queued (offline).
+            global.fetch = vi.fn((url) => (/\/(generate-draw|draw)$/.test(String(url))
+                ? answer(200, {}) : Promise.reject(new TypeError('offline'))));
+            await labelled();
+            await call(API);
+            expect(whereOf('mb')).toBe('');
+            API.clearQueue();
+        }
+    });
+});

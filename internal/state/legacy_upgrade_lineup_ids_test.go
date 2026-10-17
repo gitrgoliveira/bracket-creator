@@ -176,6 +176,58 @@ func TestLegacyLineupUpgrade_RepairsADuplicateAlreadyOnDisk(t *testing.T) {
 	require.NoError(t, repaired.ValidatePositions(3))
 }
 
+// bc-evts stage 3 review 3, F2: a lineup an earlier build stored with a member id
+// the team does not hold (the id a device minted for a member add the server
+// refused, saved by the organiser before the save dropped such ids) is repaired
+// on load. The dead id is cleared and the position keeps its name; a name that
+// is one of the team's members is then resolved to that member, as any id-less
+// position is (bc-pnum: an empty id resolves to nothing, so the name is read only
+// once the record carries no id). An id the team holds is never touched.
+func TestLegacyLineupUpgrade_ClearsAMemberIDTheTeamDoesNotHold(t *testing.T) {
+	dir, s := newLegacyUpgradeFixture(t)
+	teamID := legacyUpgradeTeams(t, s, "Tora")[0]
+
+	sato, err := s.AddTeamMember("c1", teamID, "Sato")
+	require.NoError(t, err)
+	ito, err := s.AddTeamMember("c1", teamID, "Ito")
+	require.NoError(t, err)
+	const dead = "0d0d0d0d-0d0d-4d0d-8d0d-0d0d0d0d0d0d"
+	const deadToo = "0e0e0e0e-0e0e-4e0e-8e0e-0e0e0e0e0e0e"
+
+	type lineupFileShape struct {
+		Lineups []domain.TeamLineup `yaml:"lineups"`
+	}
+	body, err := yaml.Marshal(&lineupFileShape{Lineups: []domain.TeamLineup{{
+		TeamID: teamID, Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "Ren Abe",
+			domain.PositionNumbered(2): "Sato",
+			domain.PositionNumbered(3): "Ito",
+		},
+		MemberIDs: map[domain.Position]string{
+			domain.PositionNumbered(1): dead,
+			domain.PositionNumbered(2): deadToo,
+			domain.PositionNumbered(3): ito.ID,
+		},
+	}}})
+	require.NoError(t, err)
+	path := filepath.Join(dir, "competitions", "c1", "lineups.yaml")
+	require.NoError(t, os.WriteFile(path, body, 0o600))
+
+	fresh := freshLegacyUpgradeStore(t, dir)
+	fresh.EnsureLegacyUpgraded("c1")
+
+	lineups, err := fresh.LoadTeamLineups("c1")
+	require.NoError(t, err)
+	repaired, ok := roundZeroLineup(lineups, teamID)
+	require.True(t, ok)
+
+	assert.Empty(t, repaired.MemberIDs[domain.PositionNumbered(1)], "the dead id is cleared")
+	assert.Equal(t, "Ren Abe", repaired.Positions[domain.PositionNumbered(1)], "its name is kept")
+	assert.Equal(t, sato.ID, repaired.MemberIDs[domain.PositionNumbered(2)], "a name of the team's is resolved once its dead id is gone")
+	assert.Equal(t, ito.ID, repaired.MemberIDs[domain.PositionNumbered(3)], "an id the team holds is kept")
+}
+
 // The position that keeps the id when one member is at two is the first the team
 // fields (domain.ComparePositions, the order the roster walks), not the first as
 // text: for the five named positions that is senpo before chuken, where a text

@@ -60,8 +60,21 @@ func newChangedLineupFixture(t *testing.T) changedLineupFixture {
 		{ID: "PoolA-2", SideA: kuma.Name, SideAID: kuma.ID, SideB: saru.Name, SideBID: saru.ID, Status: state.MatchStatusRunning},
 	}))
 	store.EnsureLegacyUpgraded("c1")
+	// The members the saves place: a lineup never stores an id the team does not
+	// hold (stage 3 review 3, F2), so each id these tests send is a real member.
+	for id, name := range map[string]string{idIto: "Ito", idUeno: "Ueno", idBlank: ""} {
+		_, _, err := store.AddTeamMemberAs("c1", tora.ID, id, name)
+		require.NoError(t, err)
+	}
 	return changedLineupFixture{r: setupSelfRunRouter(t, store, NewFileVerifier(store)), store: store, team: tora.ID}
 }
+
+// Tora's members, added by the fixture.
+const (
+	idIto   = "1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a"
+	idUeno  = "2b2b2b2b-2b2b-4b2b-8b2b-2b2b2b2b2b2b"
+	idBlank = "3c3c3c3c-3c3c-4c3c-8c3c-3c3c3c3c3c3c"
+)
 
 func (f changedLineupFixture) matchPath(matchID string) string {
 	return "/api/competitions/c1/teams/" + f.team + "/match-lineups/" + matchID
@@ -156,13 +169,13 @@ func TestChangedLineup_LandsOnTheLineupInForce(t *testing.T) {
 	t.Run("carried from the starting lineup when no earlier match has one", func(t *testing.T) {
 		f := newChangedLineupFixture(t)
 		require.Equal(t, http.StatusOK, f.put(f.startingPath(), organiserPassword,
-			saveBody(posMap("senpo", "Ito", "jiho", "Ueno"), map[domain.Position]string{pSenpo: "m-ito", pJiho: "m-ueno"})).Code)
+			saveBody(posMap("senpo", "Ito", "jiho", "Ueno"), map[domain.Position]string{pSenpo: idIto, pJiho: idUeno})).Code)
 
 		w := f.put(f.matchPath("PoolA-0"), organiserPassword, saveBody(posMap("jiho", "Ueda"), nil, pJiho))
 
 		got := lineupFrom(t, w)
 		assert.Equal(t, posMap("senpo", "Ito", "jiho", "Ueda"), got.Positions)
-		assert.Equal(t, map[domain.Position]string{pSenpo: "m-ito"}, got.MemberIDs,
+		assert.Equal(t, map[domain.Position]string{pSenpo: idIto}, got.MemberIDs,
 			"the changed position took no id, so its carried id is gone with the name it belonged to, and the other keeps its own")
 	})
 
@@ -278,10 +291,10 @@ func TestChangedLineup_Refusals(t *testing.T) {
 	t.Run("a member at two positions is the duplicate refusal, naming both, not a silent drop", func(t *testing.T) {
 		f := newChangedLineupFixture(t)
 		require.Equal(t, http.StatusOK, f.put(f.matchPath("PoolA-0"), organiserPassword,
-			saveBody(posMap("senpo", "Ito", "jiho", "Ueno"), map[domain.Position]string{pSenpo: "m-ito", pJiho: "m-ueno"})).Code)
+			saveBody(posMap("senpo", "Ito", "jiho", "Ueno"), map[domain.Position]string{pSenpo: idIto, pJiho: idUeno})).Code)
 
 		w := f.put(f.matchPath("PoolA-0"), organiserPassword,
-			saveBody(posMap("jiho", "Ito"), map[domain.Position]string{pJiho: "m-ito"}, pJiho))
+			saveBody(posMap("jiho", "Ito"), map[domain.Position]string{pJiho: idIto}, pJiho))
 
 		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 		assert.Contains(t, w.Body.String(), "senpo", "the position the member already holds")
@@ -296,48 +309,48 @@ func TestChangedLineup_Refusals(t *testing.T) {
 func TestChangedLineup_IgnoresWhatIsNotChanged(t *testing.T) {
 	f := newChangedLineupFixture(t)
 	require.Equal(t, http.StatusOK, f.put(f.matchPath("PoolA-0"), organiserPassword,
-		saveBody(posMap("senpo", "Ito", "jiho", "Ueno"), map[domain.Position]string{pSenpo: "m-ito"})).Code)
+		saveBody(posMap("senpo", "Ito", "jiho", "Ueno"), map[domain.Position]string{pSenpo: idIto})).Code)
 	form := posMap("senpo", "Ito-stale", "jiho", "Ueno-new", "taisho", "Kato", "nonsense", "x", "fukusho", strings.Repeat("x", MaxLenPlayerName+1))
-	ids := map[domain.Position]string{pSenpo: "m-stale", pJiho: "m-ueno", "nonsense": "m-x"}
+	ids := map[domain.Position]string{pSenpo: "m-stale", pJiho: idUeno, "nonsense": "m-x"}
 
 	w := f.put(f.matchPath("PoolA-0"), organiserPassword, saveBody(form, ids, pJiho))
 
 	got := lineupFrom(t, w)
 	assert.Equal(t, posMap("senpo", "Ito", "jiho", "Ueno-new"), got.Positions,
 		"only pJiho changed: another position's stale value, a position the lineup never held, an invalid key and an overlong name are all ignored")
-	assert.Equal(t, map[domain.Position]string{pSenpo: "m-ito", pJiho: "m-ueno"}, got.MemberIDs)
+	assert.Equal(t, map[domain.Position]string{pSenpo: idIto, pJiho: idUeno}, got.MemberIDs)
 }
 
 func TestChangedLineup_ClearsAndPlacesUnnamedMembers(t *testing.T) {
 	t.Run("a changed position with no name and no id is removed from both maps", func(t *testing.T) {
 		f := newChangedLineupFixture(t)
 		require.Equal(t, http.StatusOK, f.put(f.matchPath("PoolA-0"), organiserPassword,
-			saveBody(posMap("senpo", "Ito", "jiho", "Ueno"), map[domain.Position]string{pSenpo: "m-ito", pJiho: "m-ueno"})).Code)
+			saveBody(posMap("senpo", "Ito", "jiho", "Ueno"), map[domain.Position]string{pSenpo: idIto, pJiho: idUeno})).Code)
 
 		w := f.put(f.matchPath("PoolA-0"), organiserPassword, saveBody(posMap("jiho", ""), nil, pJiho))
 
 		got := lineupFrom(t, w)
 		assert.Equal(t, posMap("senpo", "Ito"), got.Positions, "the key is gone, not kept with an empty name")
-		assert.Equal(t, map[domain.Position]string{pSenpo: "m-ito"}, got.MemberIDs)
+		assert.Equal(t, map[domain.Position]string{pSenpo: idIto}, got.MemberIDs)
 	})
 
 	t.Run("a changed position with an id and no name places an unnamed member", func(t *testing.T) {
 		f := newChangedLineupFixture(t)
 		require.Equal(t, http.StatusOK, f.put(f.matchPath("PoolA-0"), organiserPassword, saveBody(posMap("senpo", "Ito"), nil)).Code)
 
-		w := f.put(f.matchPath("PoolA-0"), organiserPassword, saveBody(posMap("chuken", ""), map[domain.Position]string{pChuken: "m-blank"}, pChuken))
+		w := f.put(f.matchPath("PoolA-0"), organiserPassword, saveBody(posMap("chuken", ""), map[domain.Position]string{pChuken: idBlank}, pChuken))
 
 		got := lineupFrom(t, w)
 		name, held := got.Positions[pChuken]
 		assert.True(t, held, "the position is held")
 		assert.Empty(t, name)
-		assert.Equal(t, "m-blank", got.MemberIDs[pChuken])
+		assert.Equal(t, idBlank, got.MemberIDs[pChuken])
 	})
 
 	t.Run("a changed position with a name and no id drops the id the position had", func(t *testing.T) {
 		f := newChangedLineupFixture(t)
 		require.Equal(t, http.StatusOK, f.put(f.matchPath("PoolA-0"), organiserPassword,
-			saveBody(posMap("senpo", "Ito"), map[domain.Position]string{pSenpo: "m-ito"})).Code)
+			saveBody(posMap("senpo", "Ito"), map[domain.Position]string{pSenpo: idIto})).Code)
 
 		w := f.put(f.matchPath("PoolA-0"), organiserPassword, saveBody(posMap("senpo", "Someone new"), nil, pSenpo))
 
@@ -363,7 +376,7 @@ func TestChangedLineup_ClearsAndPlacesUnnamedMembers(t *testing.T) {
 func TestChangedLineup_WholeReplacementWhenChangedIsAbsent(t *testing.T) {
 	f := newChangedLineupFixture(t)
 	require.Equal(t, http.StatusOK, f.put(f.matchPath("PoolA-0"), organiserPassword,
-		saveBody(posMap("senpo", "Ito", "jiho", "Ueno"), map[domain.Position]string{pSenpo: "m-ito"})).Code)
+		saveBody(posMap("senpo", "Ito", "jiho", "Ueno"), map[domain.Position]string{pSenpo: idIto})).Code)
 
 	w := f.put(f.matchPath("PoolA-0"), organiserPassword, saveBody(posMap("chuken", "Endo"), nil))
 

@@ -4463,7 +4463,9 @@ paths:
         2026-10-07), only the positions it names are written, onto the starting lineup
         stored when the request is handled (an empty one when none is), so a change
         another device made to any other position stays; see `TeamLineupSave`. Without
-        it the body replaces the whole lineup.
+        it the body replaces the whole lineup. A member id the team does not hold is
+        not stored: the position keeps its name with no id (a team with no members
+        recorded, or a `team-members.yaml` that cannot be read, keeps the ids as sent).
       security:
         - TournamentPassword: []
       requestBody:
@@ -4577,6 +4579,12 @@ paths:
         reads the file); the organiser, sending the password, keeps the always-editable
         rule above, and a password that is sent but wrong gets 401 before the
         body is read.
+
+        No lineup is stored with a member id the team does not hold: the
+        organiser's save keeps such a position by its name, with no id (most
+        often the id the app minted for a member add the server then refused),
+        and answers the lineup as stored. A team with no members recorded, or a
+        `team-members.yaml` that cannot be read, keeps the ids as sent.
       security:
         - TournamentPassword: []
       requestBody:

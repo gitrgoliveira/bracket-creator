@@ -519,6 +519,47 @@ func memberIDsOutsideTeam(stx state.StoreTx, compID, teamID string, memberIDs ma
 	return nil
 }
 
+// memberIDsTheTeamHolds is a lineup save's member ids without any id the team
+// does not hold (stage 3 review 3, F2). Such an id names nobody: most often the
+// one a device minted for a member add the server then refused, which a lineup
+// save queued after the add still carries. Stored, it would sit on the lineup as
+// a member no list holds; taken out, the position keeps its name and no id, which
+// resolves to nothing (bc-pnum), the shape a name typed while the members were
+// not loaded already has. The anonymous self-run caller is refused for such an
+// id before this (memberIDsOutsideTeam); this is the organiser's case, which is
+// never refused for it. A team-members file that cannot be read, or a team with
+// no members recorded at all, leaves the ids as sent (the first logged by
+// memberJudge): which of them are held cannot be told, and dropping a held one
+// would lose the fighter's identity.
+func memberIDsTheTeamHolds(stx state.StoreTx, compID, teamID string, memberIDs map[domain.Position]string) map[domain.Position]string {
+	if len(memberIDs) == 0 {
+		return memberIDs
+	}
+	judge := &memberJudge{stx: stx, compID: compID}
+	kept := make(map[domain.Position]string, len(memberIDs))
+	for pos, id := range memberIDs {
+		if id == "" {
+			kept[pos] = id
+			continue
+		}
+		held, err := judge.holds(teamID, id)
+		if err != nil {
+			return memberIDs
+		}
+		if len(judge.squads[teamID]) == 0 {
+			// No members are recorded for the team at all: nothing to judge an
+			// id against (the load repair leaves such a team alone too).
+			return memberIDs
+		}
+		if !held {
+			log.Printf("mobileapp: lineup save for team %s in %s: member %s is not one of the team's; position %q kept by its name", teamID, compID, id, pos)
+			continue
+		}
+		kept[pos] = id
+	}
+	return kept
+}
+
 // teamMemberIDs is the set of member ids a team holds in squads: the one answer to
 // "is this member the team's" that every member check asks.
 func teamMemberIDs(squads map[string][]domain.TeamMember, teamID string) map[string]bool {
@@ -649,6 +690,10 @@ func saveLineup(c *gin.Context, tx CompetitionTransactor, hub Broadcaster, save 
 				return nil
 			}
 		}
+		// No member id the team does not hold is ever stored (stage 3 review 3,
+		// F2): the anonymous caller was refused for one by its guard, and the
+		// organiser's save keeps the position by its name alone.
+		save.req.MemberIDs = memberIDsTheTeamHolds(stx, compID, save.teamID, save.req.MemberIDs)
 		var lineup domain.TeamLineup
 		if lineup, respErr = save.lineupToStore(stx, comp); respErr != nil {
 			return nil

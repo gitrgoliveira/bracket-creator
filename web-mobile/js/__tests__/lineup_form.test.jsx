@@ -1457,10 +1457,9 @@ describe('the team\'s members', () => {
 
   // A name typed before the first list is shown would be resolved against no members: a
   // new name minted where the member's seeded slot is free, and the name of a member the
-  // team has refused by the server as a second one. The editors that resolve a typed name
-  // wait for the list first (waitForMembers), bounded by the deadline of any request.
-  // bc-evts stage 3 review 2, R1: nothing waits for the first list. An editor asks
-  // membersListed() whether a read has shown one, and resolves a typed name only then.
+  // team has refused by the server as a second one. Nothing waits for the first list
+  // (bc-evts stage 3 review 2, R1): an editor asks membersListed() whether a read has
+  // shown one (membersReadOver() whether the read is over), and resolves only then.
   describe('whether a list has been read', () => {
     const openedWith = async (opening) => {
       api.fetchSquads.mockReturnValueOnce(opening.promise);

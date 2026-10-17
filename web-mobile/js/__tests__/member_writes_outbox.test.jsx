@@ -241,7 +241,7 @@ describe('a member write the server refuses (F8)', () => {
 // after it would carry that id to the server; the outbox takes it off every
 // queued lineup save (the position keeps its name), says the member is gone
 // (the `team-member-dropped` event, which the editors take the member off their
-// lists by), and the refusal carries the id (`droppedMemberId`).
+// lists by).
 describe('a member add that never lands (F2)', () => {
     let warned;
     let dropped;
@@ -271,7 +271,8 @@ describe('a member add that never lands (F2)', () => {
         const { sent, member } = await queueAddAndSave(() => answer(409, { error: 'team "t1" already has a member named "Ren Abe"' }));
         await reconnect();
         const err = await member.settled.then(() => null, (e) => e);
-        expect(err.droppedMemberId).toBe(member.id);
+        expect(err, 'the refusal reaches the caller').toBeInstanceOf(Error);
+        expect(err.droppedMemberId, 'the owner judges the id; the refusal does not').toBeUndefined();
         const put = sent.find((r) => r.method === 'PUT');
         expect(put, 'the lineup save still goes').toBeDefined();
         expect(put.body.positions).toEqual({ senpo: 'Ren Abe', jiho: 'Sato' });

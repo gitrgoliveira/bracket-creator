@@ -2572,11 +2572,10 @@ function _doorRefusal(d, status, body) {
             const err = _refusalError(b, d.method === 'POST' ? TEAM_MEMBER_NOT_ADDED
                 : d.method === 'DELETE' ? TEAM_MEMBER_NOT_CLEARED : TEAM_MEMBER_NOT_RENAMED);
             if (d.was && typeof d.was === 'object') err.revertMember = { ...d.was, modifiedAt: _serverNowMs() };
-            // A refused add: the member this device showed under the minted id
-            // never was (F2). Its id is the tombstone the editors drop it by.
-            // Not when the refusal says the id is held (K1): the read that
-            // follows tells whether this team holds it.
-            if (mintedAddId(d) && b.error !== 'member_id_conflict') err.droppedMemberId = mintedAddId(d);
+            // Whether a refused add's member never was is the owner's to judge
+            // (minted_members.jsx `answered`, told by _mintedAddAnswered: it
+            // reads member_id_conflict as held, not refused), and the editors
+            // hear it by `team-member-dropped`, never from the refusal (N6).
             return err;
         }
         case 'lineup-remove':
@@ -3961,7 +3960,7 @@ function _mintedSweep(d = null) {
     // Deleting while iterating a Map is safe: each key is visited once.
     for (const id of _mintedReadPw.keys()) {
         const r = _minted.recordOf(id);
-        if (!r || r.s === 'dropped') _mintedReadPw.delete(id);
+        if (!r || r.s === 'dropped' || r.s === 'kept') _mintedReadPw.delete(id);
     }
     const due = _minted.due([..._mintedReadPw.keys()], _mintedCtx());
     for (const r of due.reads) _readMintedMembers(r, _mintedReadPw.get(r.id));
@@ -4034,6 +4033,9 @@ function _rerunFlushAt(at) {
 function _readMintedMembers({ id, c, t }, password) {
     if (_mintedReads.has(id)) return;
     _mintedReads.add(id);
+    // This tab asked, so it asks again if the read fails (_mintedSweep),
+    // however the member came to it (an add taken from another tab's queue).
+    if (!_mintedReadPw.has(id)) _mintedReadPw.set(id, password || '');
     const gen = _queueGen;
     const url = password ? `/api/competitions/${c}/team-members` : `/api/viewer/competitions/${c}`;
     _fetchJson(url, { headers: { 'X-Tournament-Password': password || '' } }).then(({ res, body }) => {
@@ -4047,6 +4049,10 @@ function _readMintedMembers({ id, c, t }, password) {
         // A logout's wipe since: nothing of this read is kept.
         if (gen !== _queueGen) return;
         if (_minted.readEnded(id, list, _mintedCtx()) === 'dropped') _learnDropped([{ id, c, t }]);
+        // A read that failed is asked again later (backed off, bounded by the
+        // owner): the timer for it is set here, whether or not a write names
+        // the member (N5).
+        else if (list === null) _mintedSweep();
     }).finally(() => {
         _mintedReads.delete(id);
         _rerunFlushSoon();
@@ -5886,6 +5892,14 @@ const API = {
             if (password) d.password = password;
             d.attempts = 0;
             if (parked) resumed++;
+        }
+        // The reads the owner asked for carry the password the add had, which
+        // the server may have refused since: an organiser's reads take the new
+        // one (a self-run participant's carries none and stays so), and one the
+        // refusal left unread is asked for at its time (N5).
+        if (password) {
+            for (const [id, pw] of _mintedReadPw) if (pw) _mintedReadPw.set(id, password);
+            _mintedSweep();
         }
         if (resumed > 0) {
             _persistQueue();

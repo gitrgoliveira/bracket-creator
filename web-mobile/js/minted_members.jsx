@@ -42,6 +42,11 @@ export const MINTED_MEMBERS_KEY = 'bc_minted_members_v1';
 export const LEGACY_DROPPED_MEMBERS_KEY = 'bc_dropped_member_ids_v1';
 // A settled record nothing names is forgotten this long after its last change.
 export const MINTED_KEEP_MS = 10 * 60 * 1000;
+// A member whose read failed is asked about again a deadline later, then at
+// doubling gaps up to this long, and after this many failed reads in a row no
+// more (the writes naming it went as they were made, for the server to judge).
+export const MINTED_REREAD_MAX_MS = 5 * 60 * 1000;
+export const MINTED_REREAD_TRIES = 6;
 // Past its deadline a request still needs a moment to be given up on.
 const OUT_SLACK_MS = 1000;
 
@@ -218,7 +223,12 @@ export function createMintedMembers({ storage, now = () => Date.now(), timeoutMs
             return { kind: 'wait', until: r.tab === tab ? 0 : outEndsAt(r) };
         }
         if (ctx.addQueued(id)) return { kind: 'wait', until: 0 };
-        if (r.rf) return { kind: t - Number(r.rf) >= timeoutMs ? 'reread' : 'go' };
+        if (r.rf) {
+            const failed = Number(r.rn) || 1;
+            if (failed > MINTED_REREAD_TRIES) return { kind: 'go' };
+            const at = Number(r.rf) + Math.min(timeoutMs * 2 ** (failed - 1), MINTED_REREAD_MAX_MS);
+            return t >= at ? { kind: 'reread' } : { kind: 'go', until: at };
+        }
         // An out nobody answered ended at its deadline; the add may commit up
         // to a deadline after that.
         const readAfter = Math.max(Number(r.ra) || 0, r.s === 'out' ? outEndsAt(r) + timeoutMs : 0);
@@ -335,7 +345,7 @@ export function createMintedMembers({ storage, now = () => Date.now(), timeoutMs
                 if (!r) return undefined;
                 const v = judge(id, r, ctx, now());
                 if (v.kind !== 'read' && v.kind !== 'reread') return undefined;
-                if (list === null) return { ...r, rf: now() };
+                if (list === null) return { ...r, rf: now(), rn: (Number(r.rn) || 0) + 1 };
                 if (list.some((m) => m && m.id === id)) return null;
                 result = 'dropped';
                 return dropped(r);
@@ -388,8 +398,8 @@ export function createMintedMembers({ storage, now = () => Date.now(), timeoutMs
                 const r = recs[id];
                 if (!r) continue;
                 const v = judge(id, r, ctx, t);
-                if (v.kind === 'read') res.reads.push({ id, c: r.c, t: r.t });
-                else if (v.kind === 'wait' && v.until) res.until = res.until ? Math.min(res.until, v.until) : v.until;
+                if (v.kind === 'read' || v.kind === 'reread') res.reads.push({ id, c: r.c, t: r.t });
+                else if ((v.kind === 'wait' || v.kind === 'go') && v.until) res.until = res.until ? Math.min(res.until, v.until) : v.until;
             }
             return res;
         },

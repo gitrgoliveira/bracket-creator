@@ -751,6 +751,68 @@ describe('a long single-match queue is checked for wait cycles without deep recu
     }, 60000);
 });
 
+// Stage 3 review 7, K2: a tap this tab has settled is out of storage before
+// anything awaits, and is never taken up again from another tab's write.
+describe('a settled tap is never sent again because another tab wrote the queue (K2)', () => {
+    const storageEvent = (oldValue, newValue) => window.dispatchEvent(Object.assign(new Event('storage'), { key: 'bc_write_queue_v2', oldValue, newValue }));
+    const otherTabEntry = (list) => {
+        const [k0, d0] = list[0];
+        return [k0.split('\u001f')[0].replace('m1', 'm9') + '\u001fx',
+            { ...d0, matchID: 'm9', url: d0.url.replace('m1', 'm9'), payload: { ...d0.payload, id: 'other.1' }, enqueuedAt: d0.enqueuedAt + 5 }];
+    };
+
+    it('the taps settled before a clock_skew tap leave storage before the clock is read', async () => {
+        const t1 = API.recordTap('c1', 'm1', { kind: 'ippon.add', pos: 0, side: 'a', letter: 'M' }, 'pw', MATCH);
+        const t2 = API.recordTap('c1', 'm1', { kind: 'ippon.add', pos: 0, side: 'b', letter: 'K' }, 'pw', MATCH);
+        await flushMicrotasks();
+        let releaseTime;
+        const timeP = new Promise((r) => { releaseTime = r; });
+        const posts = [];
+        global.fetch = vi.fn((url, opts) => {
+            if (String(url).includes('/api/time')) return timeP.then(() => answer(200, { nowMs: Date.now() }));
+            const body = JSON.parse(opts.body);
+            posts.push(body.events.map((e) => e.id));
+            return answer(200, { outcomes: body.events.map((e) => ({ id: e.id, outcome: e.id === t2.id && posts.length === 1 ? 'clock_skew' : 'applied' })) });
+        });
+        window.dispatchEvent(new Event('online'));
+        await tick(10);
+        const ids = stored().map(([, d]) => d.payload && d.payload.id);
+        expect(ids, 'the settled tap is out of storage while the clock is read').not.toContain(t1.id);
+        // Another tab writes the queue meanwhile, from what storage holds.
+        const oldRaw = _lsStore.bc_write_queue_v2;
+        const list = JSON.parse(oldRaw);
+        _lsStore.bc_write_queue_v2 = JSON.stringify([...list, otherTabEntry(list)]);
+        storageEvent(oldRaw, _lsStore.bc_write_queue_v2);
+        await flushMicrotasks();
+        releaseTime();
+        for (let i = 0; i < 6; i++) await tick(2000);
+        expect(posts.filter((p) => p.includes(t1.id)), 'the settled tap is sent once').toHaveLength(1);
+    });
+
+    it('a tab writing back its stale copy of a settled tap does not make this tab send it again', async () => {
+        const t1 = API.recordTap('c1', 'm1', { kind: 'ippon.add', pos: 0, side: 'a', letter: 'M' }, 'pw', MATCH);
+        await flushMicrotasks();
+        const stale = stored();
+        const posts = [];
+        global.fetch = vi.fn((url, opts) => {
+            if (String(url).includes('/api/time')) return Promise.reject(new TypeError('clock'));
+            const body = JSON.parse(opts.body);
+            posts.push(body.events.map((e) => e.id));
+            return answer(200, { outcomes: body.events.map((e) => ({ id: e.id, outcome: 'applied' })) });
+        });
+        await reconnect();
+        expect(stored(), 'settled and stored so').toEqual([]);
+        // The other tab held a copy and writes it back with a write of its own.
+        const newRaw = JSON.stringify([...stale, otherTabEntry(stale)]);
+        _lsStore.bc_write_queue_v2 = newRaw;
+        storageEvent(JSON.stringify([]), newRaw);
+        await flushMicrotasks();
+        await reconnect();
+        expect(posts.filter((p) => p.includes(t1.id)), 'sent once, by this tab').toHaveLength(1);
+        expect(posts.some((p) => p.includes('other.1')), 'the other tab\'s own write is still taken up').toBe(true);
+    });
+});
+
 // Stage 3 review 7, K1: only a member add the server provably never kept takes
 // its id off the writes naming the member. A discard of an add that went out
 // (a 5xx can be a change the server already kept) asks the server first.

@@ -919,6 +919,18 @@ const _adopted = new WeakSet();
 function _markSettled(key, descriptor) {
     const at = descriptor && typeof descriptor.enqueuedAt === 'number' ? descriptor.enqueuedAt : Infinity;
     _settled.set(key, Math.max(_settled.get(key) ?? -Infinity, at));
+    _settledHere.set(key, Math.max(_settledHere.get(key) ?? -Infinity, at));
+}
+
+// Every entry this tab has taken out of its queue, as _settled records it,
+// but kept for the page's life (_settled is emptied by each persist): a copy
+// another tab stores again under the same key, no newer, is one this tab
+// already settled, and is never taken up again (K2, _wasSettledHere).
+const _settledHere = new Map();
+
+// _wasSettledHere: the stored copy `d` of `key` is one this tab settled.
+function _wasSettledHere(key, d) {
+    return _settledHere.has(key) && !_enqueuedAfter(d, _settledHere.get(key));
 }
 
 // _dequeue: the ONE way out of the queue. Removes `key`, only while it still
@@ -2741,6 +2753,10 @@ async function _sendTapBatch(base, batch, pass) {
                 continue;
             }
             if (o.outcome === TAP_CLOCK_SKEW && !d.skewRetried) {
+                // The taps settled so far leave storage before the clock is
+                // read (K2): while it is out, another tab's write to the
+                // queue would otherwise hand them back to this tab.
+                if (dequeued) { _persistQueue(); dequeued = false; }
                 await _restampQueuedTapForSkew(d);
                 _flushRequested = true;
                 if (result === 'settled') result = 'restamped';
@@ -3089,6 +3105,9 @@ function _onStoredQueueChanged(oldRaw, newRaw) {
             if (_adoptStoredTapSeq(k, held, d)) changed = true;
             continue;
         }
+        // A copy of an entry this tab already settled, written back by a tab
+        // that still held it: sent already, never taken up again (K2).
+        if (!held && _wasSettledHere(k, d)) continue;
         if (_storedEntryProblem(d)) continue;
         if (d.payload && d.payload.forceDownstreamReopen) d.payload = _withoutDownstreamConfirmation(d.payload);
         // An older build's match lineup goes onto its match's base (R9).
@@ -5816,6 +5835,7 @@ const API = {
         // is revoked, so nothing of the merge's is kept.
         _writeQueue.clear();
         _settled.clear();
+        _settledHere.clear();
         for (const k of _entryHooks.keys()) _settleKey(k, { value: { discarded: true } });
         for (const b of _pendingTapListeners.keys()) _publishPendingTaps(b);
         try { localStorage.removeItem(QUEUE_STORAGE_KEY); } catch (_e) { /* ignore */ }

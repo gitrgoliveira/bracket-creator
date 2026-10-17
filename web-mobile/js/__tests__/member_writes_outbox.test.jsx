@@ -258,7 +258,10 @@ describe('a member add that never lands (F2)', () => {
 
     async function queueAddAndSave(addAnswer) {
         const sent = server((req) => (req.method === 'POST' ? addAnswer()
-            : answer(200, { positions: req.body.positions, memberIds: req.body.memberIds || {} })));
+            // K1: a discarded add that went out is checked against the team's
+            // members; this server does not hold the member.
+            : req.url.endsWith('/team-members') ? answer(200, { teamMembers: { t1: [{ id: 'mem-2', name: 'Sato' }] } })
+                : answer(200, { positions: req.body.positions, memberIds: req.body.memberIds || {} })));
         const member = await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw', { onRefusal: () => true });
         await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Ren Abe', jiho: 'Sato' }, 'pw', { senpo: member.id, jiho: 'mem-2' }, ['senpo', 'jiho']);
         return { sent, member };
@@ -276,7 +279,7 @@ describe('a member add that never lands (F2)', () => {
         expect(dropped).toEqual([{ competitionId: 'c1', teamId: 't1', memberId: member.id }]);
     });
 
-    it('an add the operator discards does the same', async () => {
+    it('an add the operator discards does the same, once the team\'s members show it was never kept', async () => {
         const { sent, member } = await queueAddAndSave(() => answer(503, { error: 'unavailable' }));
         for (let i = 0; i < 12 && !API.heldWrites().some((h) => h.kind === 'member' && h.keepsFailing); i++) {
             await reconnect();

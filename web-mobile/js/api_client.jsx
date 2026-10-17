@@ -210,9 +210,16 @@ function normalizeViewerCompItem(item) {
         // StreamingOverlay (which consume this normalized shape via
         // tournament.competitions, app.jsx's `t.competitions = comps`) could
         // never see the squads the aggregate/court-feed payload now carries.
-        squads: item.teamMembers,
+        squads: _withListedMembersForgotten(item.teamMembers),
         players: (c.players || []).map(normalizePlayer),
     });
+}
+
+// _withListedMembersForgotten: a members map the server answered, after
+// forgetting every dropped-member note it proves wrong (K1).
+function _withListedMembersForgotten(teams) {
+    _forgetListedDroppedMembers(teams);
+    return teams;
 }
 
 // ---------------------------------------------------------------------------
@@ -835,7 +842,7 @@ function _persistQueue() {
         const notes = _droppedMemberNotes();
         if (notes.length > 0) {
             _pruneDroppedMemberNotes(notes, merged);
-            for (const n of notes) _stripMemberIdIn(merged.values(), n.id);
+            for (const n of notes) _stripMemberIdIn(merged.values(), n.id, n);
         }
         if (merged.size === 0) {
             localStorage.removeItem(QUEUE_STORAGE_KEY);
@@ -887,6 +894,17 @@ const _writeQueue = new Map(); // queue key → pending write descriptor
 // _persistQueue prunes them from storage, which it otherwise leaves to the
 // tabs that wrote them.
 const _settled = new Map();
+
+// The member ids whose discarded add is being checked against the server
+// (_checkMemberAdd, K1). A write naming one waits, as on an `after` still
+// queued, until the read is over (_waitsOnMemberCheck), so it goes with the id
+// only if the member is held. Declared here, before the load-time flush.
+const _memberChecks = new Set();
+
+// The member ids this tab has said are gone (_announceDroppedMember): one
+// `team-member-dropped` per id, whether this tab proved it or heard of it from
+// another (K1).
+const _announcedDropped = new Set();
 // _takenFromLegacy: every entry this tab took over from the key an older build
 // uses (_takeOverLegacyQueue), its key to the `enqueuedAt` it was taken with,
 // kept for the tab's life so none is taken over, and sent, twice (G5). A later
@@ -924,9 +942,9 @@ function _dequeue(key, descriptor, outcome) {
     // A court move or time change the server refused, or an operator
     // discarded, no longer shows (R4). Never for an entry another tab sent.
     if (outcome && (outcome.error || outcome.byOperator)) _revertLocalFields(d);
-    // A member add refused or discarded leaves its minted id naming nobody
-    // (F2): taken off every queued lineup save before that save can go.
-    if (outcome && (outcome.error || outcome.byOperator)) _dropMemberThatNeverWas(d);
+    // A member add refused or discarded may leave its minted id naming nobody
+    // (F2): taken off every queued write naming it once that is proved (K1).
+    if (outcome && (outcome.error || outcome.byOperator)) _memberAddLeftUnlanded(d, outcome);
     // The server answered it: a clock-skew re-stamp of a later write of the
     // match is never stamped below it (_afterSettledStamp). Not a discard, and
     // not a write dropped after a second clock refusal: the server never
@@ -2147,6 +2165,9 @@ async function _flushBase(base, list, pass, gen) {
             outcome = d.cycled || waitsOn.some((k) => _blockedByHeld(k)) ? 'kept' : 'after';
             break;
         }
+        // A write naming a member whose discarded add is being checked waits
+        // for the read the same way (K1); its end reruns the flush.
+        if (_waitsOnMemberCheck(d)) { outcome = 'after'; break; }
         if (d.kind === 'evt') {
             const session = d.payload && d.payload.session;
             const batch = [];
@@ -2158,7 +2179,8 @@ async function _flushBase(base, list, pass, gen) {
                 // The batch ends at the first tap that waits (J1, stage 3
                 // review 6): one on a wait cycle or still following an entry
                 // that is queued goes in a later pass, after that entry.
-                if (batch.length > 0 && (d2.cycled || _afterKeys(d2).some((k) => _writeQueue.has(k)))) break;
+                if (batch.length > 0 && (d2.cycled || _afterKeys(d2).some((k) => _writeQueue.has(k))
+                    || _waitsOnMemberCheck(d2))) break;
                 batch.push(list[i]);
                 i++;
             }
@@ -2403,7 +2425,9 @@ function _doorRefusal(d, status, body) {
             if (d.was && typeof d.was === 'object') err.revertMember = { ...d.was, modifiedAt: _serverNowMs() };
             // A refused add: the member this device showed under the minted id
             // never was (F2). Its id is the tombstone the editors drop it by.
-            if (_memberAddId(d)) err.droppedMemberId = _memberAddId(d);
+            // Not when the refusal says the id is held (K1): the read that
+            // follows tells whether this team holds it.
+            if (_memberAddId(d) && b.error !== 'member_id_conflict') err.droppedMemberId = _memberAddId(d);
             return err;
         }
         case 'lineup-remove':
@@ -2462,6 +2486,13 @@ async function _sendEntry(key, descriptor, pass) {
         effectiveUrl = `/api/competitions/${compID}/matches/${matchID}/score`;
     }
     let res, body;
+    // A member add that has gone out may be one the server kept, whatever
+    // comes of the request: stored so, so a discard after a reload still asks
+    // the server before taking its id off anything (K1).
+    if (_memberAddId(descriptor) && !descriptor.sent) {
+        descriptor.sent = true;
+        _persistQueue();
+    }
     _inFlight.add(descriptor);
     try {
         // Bounded, the body read included (_fetchJson): this loop is
@@ -3044,9 +3075,9 @@ function _onStoredQueueChanged(oldRaw, newRaw) {
             && _payloadMemberIds(e.payload).has(id) && !_payloadMemberIds((after.get(k) || {}).payload).has(id));
         // The note the refusing tab left (J5) tells a refused add from one
         // that landed whichever copies this tab held.
-        const noted = _droppedMemberNotes().some((n) => n.id === id);
-        if (!strippedThere && !noted) continue;
-        if (_stripMemberId(id)) changed = true;
+        const note = _droppedMemberNotes().find((n) => n.id === id);
+        if (!strippedThere && !note) continue;
+        if (_stripMemberId(id, strippedThere ? null : note)) changed = true;
         _announceMemberDropped(add, id);
     }
     for (let [k, d] of after || []) {
@@ -3157,9 +3188,12 @@ if (typeof window !== 'undefined') {
         // Another tab refused (or discarded) a member add: its id comes off
         // the writes this tab holds that name it, and the stored list is
         // written without it (J5).
-        if (e.key === DROPPED_MEMBERS_KEY && _applyDroppedMembers()) {
-            _persistQueue();
-            _recomputeSyncStatus();
+        if (e.key === DROPPED_MEMBERS_KEY) {
+            _announceNewDroppedNotes(e.oldValue, e.newValue);
+            if (_applyDroppedMembers()) {
+                _persistQueue();
+                _recomputeSyncStatus();
+            }
         }
         // An older tab wrote what it queues under the old key: take it over (F4).
         if (e.key === LEGACY_QUEUE_STORAGE_KEY && e.newValue && _takeOverLegacyQueue(e.newValue)) {
@@ -3709,9 +3743,9 @@ function _memberAddId(d) {
         ? d.payload.id : '';
 }
 
-// _dropMemberThatNeverWas: a member add that leaves the queue refused or
-// discarded (bc-evts stage 3 review 3, F2) leaves the id this device minted
-// for it naming nobody. A lineup save queued after the add (`after`) still
+// _dropMemberThatNeverWas: a member add proved never kept (bc-evts stage 3
+// review 3, F2; the proof is _memberAddLeftUnlanded's, K1) leaves the id this
+// device minted for it naming nobody. A lineup save queued after the add (`after`) still
 // carries that id; it is taken off every queued lineup save here, before that
 // save can go (the settle reruns the flush), and the position keeps its name,
 // the shape of a name typed while the members were not loaded. The server
@@ -3728,20 +3762,102 @@ function _dropMemberThatNeverWas(d) {
     _announceMemberDropped(d, id);
 }
 
+// _memberAddLeftUnlanded: a member add left the queue refused or discarded
+// (stage 3 review 7, K1). Its id names nobody only when that is PROVED: the
+// server refused the add on its merits (a 4xx, except member_id_conflict,
+// which says the id is held, maybe by this very team under another name), or
+// the add never went out. An add that went out and was then discarded may be
+// one the server kept (a 500 can be a change already kept, state.ErrTxCommitted,
+// and a request given up on the way may have landed): the team's members are
+// read again (_checkMemberAdd), and only a list without the id proves it.
+function _memberAddLeftUnlanded(d, outcome) {
+    if (!_memberAddId(d)) return;
+    const refusal = outcome && outcome.error;
+    const proved = refusal ? !_memberIdHeldRefusal(refusal) : !_memberAddWentOut(d);
+    if (proved) _dropMemberThatNeverWas(d);
+    else _checkMemberAdd(d);
+}
+
+// _memberIdHeldRefusal: the add's refusal says another member holds the id.
+function _memberIdHeldRefusal(err) {
+    return !!err && err.code === 'member_id_conflict';
+}
+
+// _memberAddWentOut: the add was sent at least once (`sent`, set as it goes
+// and stored), whatever came of it.
+function _memberAddWentOut(d) {
+    return !!d && (!!d.sent || (Number(d.attempts) || 0) > 0);
+}
+
+// _checkMemberAdd: reads the team's members with the add's own password; a
+// list without the id is the proof (_dropMemberThatNeverWas), a list with it
+// forgets any note naming it, and a read that fails or is refused proves
+// nothing: the writes naming the member go as they were made and the server
+// judges them. Never awaited: nothing waits on it but those writes.
+function _checkMemberAdd(d) {
+    const id = _memberAddId(d);
+    if (!id || _memberChecks.has(id)) return;
+    _memberChecks.add(id);
+    const teamId = _teamIdOf(d);
+    _fetchJson(`/api/competitions/${d.compID}/team-members`, {
+        headers: d.password ? { 'X-Tournament-Password': d.password } : {},
+    }).then(({ res, body }) => {
+        const teams = res.ok && body && body.teamMembers;
+        if (!teams || typeof teams !== 'object') throw new Error(`no member list (HTTP ${res.status})`);
+        const list = Array.isArray(teams[teamId]) ? teams[teamId] : [];
+        if (list.some((m) => m && m.id === id)) _forgetListedDroppedMembers(teams);
+        else _dropMemberThatNeverWas(d);
+    }).catch((err) => {
+        console.warn(`[sync] could not read team ${teamId}'s members after a discarded add; the writes naming it go as they are:`, err);
+    }).finally(() => {
+        _memberChecks.delete(id);
+        _rerunFlushSoon();
+    });
+}
+
+// _waitsOnMemberCheck: the entry names a member whose add is being checked.
+function _waitsOnMemberCheck(d) {
+    if (_memberChecks.size === 0) return false;
+    for (const id of _payloadMemberIds(d && d.payload)) if (_memberChecks.has(id)) return true;
+    return false;
+}
+
+// _forgetListedDroppedMembers: a member list the server answered
+// ({teamId: [member]}) holds these ids, so no note naming one stands (K1).
+function _forgetListedDroppedMembers(teams) {
+    if (!teams || typeof teams !== 'object') return;
+    const notes = _droppedMemberNotes();
+    if (notes.length === 0) return;
+    const listed = new Set();
+    for (const list of Object.values(teams)) {
+        if (Array.isArray(list)) for (const m of list) if (m && typeof m.id === 'string') listed.add(m.id);
+    }
+    const kept = notes.filter((n) => !listed.has(n.id));
+    if (kept.length !== notes.length) _writeDroppedMemberNotes(kept);
+}
+
+// _rerunFlushSoon: a flush now, or a rerun of the one under way.
+function _rerunFlushSoon() {
+    if (_flushInProgress) _flushRequested = true;
+    else queueMicrotask(() => { if (_writeQueue.size > 0) _flushQueue(); });
+}
+
 // _stripMemberId: takes the member id `id` off every queued write that names
 // it; whether any did. Shared by the refusal here and by another tab's
 // (_onStoredQueueChanged, stage 3 review 5, H3).
-function _stripMemberId(id) {
-    return _stripMemberIdIn(_writeQueue.values(), id);
+function _stripMemberId(id, note = null) {
+    return _stripMemberIdIn(_writeQueue.values(), id, note);
 }
 
 // _stripMemberIdIn: the same strip over any entries (the ones in the stored
-// queue this tab does not hold included, J5).
-function _stripMemberIdIn(entries, id) {
+// queue this tab does not hold included, J5). Given a dropped-member note, only
+// the entries it covers (_noteCovers, K1).
+function _stripMemberIdIn(entries, id, note = null) {
     let changed = false;
     for (const e of entries) {
         const payload = e && e.payload;
         if (!payload || typeof payload !== 'object') continue;
+        if (note && !_noteCovers(note, e)) continue;
         const ids = payload.memberIds;
         if (ids && typeof ids === 'object') {
             for (const pos of Object.keys(ids)) {
@@ -3777,7 +3893,7 @@ function _stripMemberIdIn(entries, id) {
     return changed;
 }
 
-// The ids of members whose add was refused or discarded, kept in browser
+// The ids of members whose add was proved never kept (K1), kept in browser
 // storage beside the queue so EVERY tab takes them off the writes naming them,
 // whichever copies of those writes it held when the add left (J5, stage 3
 // review 6): a tab that refuses an add before it has adopted another tab's
@@ -3812,10 +3928,24 @@ function _noteDroppedMember(d, id) {
     _writeDroppedMemberNotes(notes);
 }
 
-// _applyDroppedMembers: takes every noted id off this tab's queued writes.
+// _noteCovers: a note is the proof, at `at`, that its id names nobody; it
+// covers only a write queued by then, of its competition and, for a write that
+// names its team (a lineup or member write), of that team (K1). A write made
+// after it names the member as the editor that made it saw them, and the
+// server judges it.
+function _noteCovers(note, e) {
+    const at = Number(note.at);
+    if (Number.isFinite(at) && typeof e.enqueuedAt === 'number' && e.enqueuedAt > at) return false;
+    if (note.competitionId && e.compID && e.compID !== note.competitionId) return false;
+    const team = _teamIdOf(e);
+    return !(note.teamId && team && team !== note.teamId);
+}
+
+// _applyDroppedMembers: takes every noted id off the queued writes of this
+// tab that its note covers.
 function _applyDroppedMembers() {
     let changed = false;
-    for (const n of _droppedMemberNotes()) if (_stripMemberId(n.id)) changed = true;
+    for (const n of _droppedMemberNotes()) if (_stripMemberId(n.id, n)) changed = true;
     return changed;
 }
 
@@ -3833,11 +3963,35 @@ function _pruneDroppedMemberNotes(notes, entries) {
 // `d`, so the editors take the member that never was off their lists.
 function _announceMemberDropped(d, id) {
     const teamId = (String(d.url || '').match(/\/teams\/([^/]+)\/members$/) || [])[1] || '';
+    _announceDroppedMember({ competitionId: d.compID || '', teamId: decodeURIComponent(teamId), id });
+}
+
+// _announceDroppedMember: the event for a dropped-member note's id.
+function _announceDroppedMember({ competitionId, teamId, id }) {
+    if (!id || _announcedDropped.has(id)) return;
+    _announcedDropped.add(id);
     if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
         window.dispatchEvent(new CustomEvent('team-member-dropped', {
-            detail: { competitionId: d.compID || '', teamId: decodeURIComponent(teamId), memberId: id },
+            detail: { competitionId: competitionId || '', teamId: teamId || '', memberId: id },
         }));
     }
+}
+
+// _announceNewDroppedNotes: another tab proved a member never was and left a
+// note (the stored notes went from `oldRaw` to `newRaw`): this tab's editors
+// are told too. That tab may have proved it only after the add had left
+// storage (a read after a discard, K1), when nothing here said so.
+function _announceNewDroppedNotes(oldRaw, newRaw) {
+    const parse = (raw) => {
+        try {
+            const v = JSON.parse(raw || '[]');
+            return Array.isArray(v) ? v.filter((n) => n && typeof n.id === 'string' && n.id) : [];
+        } catch (_e) {
+            return [];
+        }
+    };
+    const before = new Set(parse(oldRaw).map((n) => n.id));
+    for (const n of parse(newRaw)) if (!before.has(n.id)) _announceDroppedMember(n);
 }
 
 // The member-id fields of a score write's bout row. A function, so it is
@@ -4853,6 +5007,9 @@ const API = {
             throw new Error(err.error || "Failed to load team members");
         }
         const data = await res.json();
+        // A member the server lists exists: no dropped-member note naming
+        // them stands (K1).
+        _forgetListedDroppedMembers(data.teamMembers);
         return data.teamMembers || {};
     },
     // The server gives the new member its display index (operator ruling:

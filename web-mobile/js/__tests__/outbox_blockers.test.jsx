@@ -199,7 +199,9 @@ describe('the match names the write it waits on (G2)', () => {
 
     it('discarding the match\'s failing writes discards the blocker, and the save then goes', async () => {
         await stuckAdd();
-        const sent = server((req) => (req.method === 'POST' ? answer(503, { error: 'unavailable' }) : lineupOk(req)));
+        const sent = server((req) => (req.method === 'POST' ? answer(503, { error: 'unavailable' })
+            // K1: the discarded add went out, so the team's members are read: it is not there.
+            : req.url.endsWith('/team-members') ? answer(200, { teamMembers: { t1: [] } }) : lineupOk(req)));
         expect(API.discardFailingHeldWrites('c1', 'm1')).toBe(1);
         await tick(10);
         await reconnect();
@@ -747,4 +749,121 @@ describe('a long single-match queue is checked for wait cycles without deep recu
         expect(stored().filter(([, d]) => d.cycled)).toEqual([]);
         expect(stored(), 'every tap still queued, in order').toHaveLength(20000);
     }, 60000);
+});
+
+// Stage 3 review 7, K1: only a member add the server provably never kept takes
+// its id off the writes naming the member. A discard of an add that went out
+// (a 5xx can be a change the server already kept) asks the server first.
+describe('a discarded add that went out is checked against the team\'s members (K1)', () => {
+    const EVENTS = '/api/competitions/c1/matches/m1/score-events';
+    const TEAM_MEMBERS = '/api/competitions/c1/team-members';
+    const DROPPED_KEY = 'bc_dropped_member_ids_v1';
+    const pick = (memberId) => ({ kind: 'rep.pick', pos: -1, side: 'a', memberId });
+    let warned = null;
+    beforeEach(() => { warned = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
+    afterEach(() => { warned.mockRestore(); });
+
+    // The add goes, is answered 500 until it keeps failing, and is discarded.
+    async function discardAfterFailures(members) {
+        const member = await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw', { onRefusal: () => true });
+        member.settled.catch(() => {});
+        const listed = { current: members };
+        const sent = server((req) => {
+            if (req.url === MEMBERS) return answer(500, { error: 'internal error' });
+            if (req.url === TEAM_MEMBERS) {
+                const list = typeof listed.current === 'function' ? listed.current(member) : listed.current;
+                return list === null ? null : answer(200, { teamMembers: list });
+            }
+            if (req.url === EVENTS) return answer(200, { outcomes: req.body.events.map((e) => ({ id: e.id, outcome: 'applied' })), match: MATCH });
+            return lineupOk(req);
+        });
+        for (let i = 0; i < 20 && !API.heldWrites().some((h) => h.kind === 'member' && h.keepsFailing); i++) {
+            await reconnect();
+            await tick(9000);
+        }
+        const add = API.heldWrites().find((h) => h.kind === 'member');
+        expect(add && add.keepsFailing, 'the add keeps failing').toBe(true);
+        return { member, sent, add, listed };
+    }
+
+    it('the server holds the member: a pick made later still names them, and no note is left', async () => {
+        const { member, sent, add } = await discardAfterFailures((m) => ({ t1: [{ id: m.id, name: 'Ren Abe' }] }));
+        expect(API.discardHeldWrite(add.key)).toBeTruthy();
+        await tick(10);
+        expect(sent.some((r) => r.url === TEAM_MEMBERS), 'the team\'s members are read again').toBe(true);
+        expect(_lsStore[DROPPED_KEY], 'nothing proves the member never was').toBeUndefined();
+        await tick(60 * 1000);
+        API.recordTap('c1', 'm1', pick(member.id), 'pw', MATCH);
+        await tick(2000);
+        const post = sent.find((r) => r.url === EVENTS);
+        expect(post, 'the pick goes').toBeTruthy();
+        expect(post.body.events[0].memberId, 'and names the member the server holds').toBe(member.id);
+    });
+
+    it('a write naming the member waits while the read is out; a read that fails strips nothing', async () => {
+        const { member, sent, add } = await discardAfterFailures(null);
+        API.recordTap('c1', 'm1', pick(member.id), 'pw', MATCH);
+        await flushMicrotasks();
+        expect(API.discardHeldWrite(add.key)).toBeTruthy();
+        await tick(2000);
+        expect(sent.some((r) => r.url === EVENTS), 'not sent while the read is out').toBe(false);
+        // The read that hangs is given up at its deadline: a failure, which
+        // proves nothing, so the pick goes as it was made and the server judges it.
+        await tick(15000);
+        await reconnect();
+        const post = sent.find((r) => r.url === EVENTS);
+        expect(post, 'the pick goes once the read is over').toBeTruthy();
+        expect(post.body.events[0].memberId, 'with its id: nothing proved the member absent').toBe(member.id);
+        expect(_lsStore[DROPPED_KEY]).toBeUndefined();
+    });
+
+    it('the read answers without the member: the waiting pick goes without the id, and a note is left', async () => {
+        const { member, sent, add } = await discardAfterFailures({ t1: [{ id: 'someone-else', name: 'Sato' }] });
+        API.recordTap('c1', 'm1', pick(member.id), 'pw', MATCH);
+        await flushMicrotasks();
+        expect(API.discardHeldWrite(add.key)).toBeTruthy();
+        await tick(10);
+        await reconnect();
+        const post = sent.find((r) => r.url === EVENTS);
+        expect(post, 'the pick goes once the read has answered').toBeTruthy();
+        expect(post.body.events[0].memberId, 'the pick that named nobody is cleared').toBeUndefined();
+        expect(JSON.parse(_lsStore[DROPPED_KEY] || '[]').map((n) => n.id)).toEqual([member.id]);
+    });
+
+    it('an add refused member_id_conflict is checked too: the id is held, by this team or another', async () => {
+        const member = await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw', { onRefusal: () => true });
+        member.settled.catch(() => {});
+        API.recordTap('c1', 'm1', pick(member.id), 'pw', MATCH);
+        await flushMicrotasks();
+        const sent = server((req) => {
+            if (req.url === MEMBERS) return answer(409, { error: 'member_id_conflict', message: 'Another team member already has this id.' });
+            if (req.url === TEAM_MEMBERS) return answer(200, { teamMembers: { t1: [{ id: member.id, name: 'Ren Abe-Sato' }] } });
+            return answer(200, { outcomes: req.body.events.map((e) => ({ id: e.id, outcome: 'applied' })), match: MATCH });
+        });
+        await reconnect();
+        await reconnect();
+        const post = sent.find((r) => r.url === EVENTS);
+        expect(post.body.events[0].memberId, 'this team holds the id: the pick keeps it').toBe(member.id);
+        expect(_lsStore[DROPPED_KEY]).toBeUndefined();
+    });
+
+    it('a note is applied only to writes queued before it', async () => {
+        const res = await API.recordScore('c1', 'm1', scoreWithRepPick('mem-9'), 'pw', MATCH);
+        res.settled.catch(() => {});
+        await flushMicrotasks();
+        _lsStore[DROPPED_KEY] = JSON.stringify([{ id: 'mem-9', at: Date.now() - 5000, competitionId: 'c1', teamId: 't1' }]);
+        const sent = server(() => answer(200, { ...MATCH }));
+        await reconnect();
+        expect(repRow(sent.find((r) => r.method === 'PUT')).sideAMemberId, 'made after the proof: the server judges it').toBe('mem-9');
+    });
+
+    it('a member list that carries a noted id forgets the note', async () => {
+        _lsStore[DROPPED_KEY] = JSON.stringify([
+            { id: 'mem-9', at: Date.now(), competitionId: 'c1', teamId: 't1' },
+            { id: 'mem-8', at: Date.now(), competitionId: 'c1', teamId: 't1' },
+        ]);
+        global.fetch = vi.fn(() => answer(200, { teamMembers: { t1: [{ id: 'mem-9', name: 'Ren Abe' }] } }));
+        await API.fetchSquads('c1', 'pw');
+        expect(JSON.parse(_lsStore[DROPPED_KEY]).map((n) => n.id)).toEqual(['mem-8']);
+    });
 });

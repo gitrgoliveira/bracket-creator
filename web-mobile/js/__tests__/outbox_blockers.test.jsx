@@ -393,3 +393,60 @@ describe('a tap naming a member this device minted follows its add (H4)', () => 
         warned.mockRestore();
     });
 });
+
+describe('a refused add another tab sent takes its id off this tab too (H3)', () => {
+    // Both tabs hold the add and the score write naming the member. The other
+    // tab sent the add, the server refused it, and that tab took the id off
+    // its copy of the score write and stored it: this tab follows.
+    it('strips its own copy and tells its editors', async () => {
+        const member = await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw');
+        const res = await API.recordScore('c1', 'm1', scoreWithRepPick(member.id), 'pw', MATCH);
+        res.settled.catch(() => {});
+        await flushMicrotasks();
+        const oldRaw = _lsStore.bc_write_queue_v2;
+        const next = JSON.parse(oldRaw).filter(([, d]) => d.kind !== 'member');
+        for (const [, d] of next) for (const row of d.payload.subResults || []) if (row.sideAMemberId === member.id) row.sideAMemberId = '';
+        const newRaw = JSON.stringify(next);
+        _lsStore.bc_write_queue_v2 = newRaw;
+        const dropped = [];
+        const onDrop = (e) => dropped.push(e.detail);
+        window.addEventListener('team-member-dropped', onDrop);
+        try {
+            window.dispatchEvent(Object.assign(new Event('storage'), { key: 'bc_write_queue_v2', oldValue: oldRaw, newValue: newRaw }));
+            await flushMicrotasks();
+        } finally {
+            window.removeEventListener('team-member-dropped', onDrop);
+        }
+        expect(dropped, 'this tab\'s editors take the member off too').toEqual([
+            { competitionId: 'c1', teamId: 't1', memberId: member.id },
+        ]);
+        const sent = server(() => answer(200, { ...MATCH }));
+        await reconnect();
+        const put = sent.find((r) => r.method === 'PUT');
+        expect(put, 'the score write still goes').toBeTruthy();
+        expect(repRow(put).sideAMemberId || '', 'without the id that names nobody').toBe('');
+    });
+
+    it('keeps the id when the add landed', async () => {
+        const member = await API.addTeamMember('c1', 't1', 'Ren Abe', 'pw');
+        const res = await API.recordScore('c1', 'm1', scoreWithRepPick(member.id), 'pw', MATCH);
+        res.settled.catch(() => {});
+        await flushMicrotasks();
+        const oldRaw = _lsStore.bc_write_queue_v2;
+        const newRaw = JSON.stringify(JSON.parse(oldRaw).filter(([, d]) => d.kind !== 'member'));
+        _lsStore.bc_write_queue_v2 = newRaw;
+        const dropped = [];
+        const onDrop = (e) => dropped.push(e.detail);
+        window.addEventListener('team-member-dropped', onDrop);
+        try {
+            window.dispatchEvent(Object.assign(new Event('storage'), { key: 'bc_write_queue_v2', oldValue: oldRaw, newValue: newRaw }));
+            await flushMicrotasks();
+        } finally {
+            window.removeEventListener('team-member-dropped', onDrop);
+        }
+        expect(dropped).toEqual([]);
+        const sent = server(() => answer(200, { ...MATCH }));
+        await reconnect();
+        expect(repRow(sent.find((r) => r.method === 'PUT')).sideAMemberId).toBe(member.id);
+    });
+});

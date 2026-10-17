@@ -2920,11 +2920,27 @@ function _onStoredQueueChanged(oldRaw, newRaw) {
     const before = _parseStoredQueue(oldRaw);
     const after = newRaw === null ? null : _parseStoredQueue(newRaw);
     let changed = false, adopted = false, migrated = false;
+    const goneAdds = [];
     for (const [k, d] of _writeQueue) {
         const gone = after === null
             ? _adopted.has(d)
             : !after.has(k) && before.get(k)?.enqueuedAt === d.enqueuedAt;
+        if (gone && _memberAddId(d)) goneAdds.push(d);
         if (gone && _dequeue(k, d)) changed = true;
+    }
+    // A member add another tab took out refused (or an operator discarded
+    // it there): that tab took the id off its copies of the writes naming it
+    // (_dropMemberThatNeverWas), which is what tells it from an add that
+    // landed, whose id stays on them. This tab takes it off its own copies
+    // too, which it keeps below, and tells its editors (stage 3 review 5, H3).
+    // Not stored again: the other tab already stored the stripped copies.
+    for (const add of goneAdds) {
+        const id = _memberAddId(add);
+        const strippedThere = after !== null && [..._writeQueue].some(([k, e]) => after.has(k)
+            && _payloadMemberIds(e.payload).has(id) && !_payloadMemberIds((after.get(k) || {}).payload).has(id));
+        if (!strippedThere) continue;
+        if (_stripMemberId(id)) changed = true;
+        _announceMemberDropped(add, id);
     }
     for (let [k, d] of after || []) {
         const held = _writeQueue.get(k);
@@ -3580,6 +3596,14 @@ function _memberAddId(d) {
 function _dropMemberThatNeverWas(d) {
     const id = _memberAddId(d);
     if (!id) return;
+    if (_stripMemberId(id)) _persistQueue();
+    _announceMemberDropped(d, id);
+}
+
+// _stripMemberId: takes the member id `id` off every queued write that names
+// it; whether any did. Shared by the refusal here and by another tab's
+// (_onStoredQueueChanged, stage 3 review 5, H3).
+function _stripMemberId(id) {
     let changed = false;
     for (const [, e] of _writeQueue) {
         const payload = e && e.payload;
@@ -3616,7 +3640,12 @@ function _dropMemberThatNeverWas(d) {
             }
         }
     }
-    if (changed) _persistQueue();
+    return changed;
+}
+
+// _announceMemberDropped: the `team-member-dropped` event for the member add
+// `d`, so the editors take the member that never was off their lists.
+function _announceMemberDropped(d, id) {
     const teamId = (String(d.url || '').match(/\/teams\/([^/]+)\/members$/) || [])[1] || '';
     if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
         window.dispatchEvent(new CustomEvent('team-member-dropped', {

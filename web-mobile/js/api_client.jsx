@@ -722,11 +722,13 @@ function _isAllowedTerminalRequest(method, url) {
         return false;
     }
     if (u.origin !== origin || !u.pathname.startsWith('/api/competitions/')) return false;
-    // A DELETE is queued for four doors: the representative bout's remove, a
-    // kachinuki bout's removal (bc-evts), a team member's name cleared and a
-    // match's own lineup removed (review 2, R1).
+    // A DELETE is queued for five doors: the representative bout's remove, a
+    // kachinuki bout's removal (bc-evts), a team member's name cleared, a
+    // match's own lineup removed (review 2, R1) and a competition's pool-rank
+    // overrides reset (review 11, Y7).
     if (method === 'DELETE') {
         return /\/(daihyosen|kachinuki-bout)$/.test(u.pathname)
+            || /^\/api\/competitions\/[^/]+\/overrides$/.test(u.pathname)
             || /\/teams\/[^/]+\/(members|match-lineups)\/[^/]+$/.test(u.pathname);
     }
     return true;
@@ -1154,6 +1156,15 @@ let _entrySeq = 0;
 function _baseOf(key) {
     const i = typeof key === 'string' ? key.indexOf(QUEUE_ENTRY_SEP) : -1;
     return i < 0 ? key : key.slice(0, i);
+}
+
+
+// _poolRanksBase: the queue base of a competition's pool-rank writes (a
+// chusen's order, overridePoolRanks; a reset of the overrides,
+// resetOverrides; stage 3 review 11, Y7), so they are sent strictly in the
+// order they were made. They belong to no match.
+function _poolRanksBase(compID) {
+    return `pool-ranks:${compID}`;
 }
 
 // _newEntryKey: a fresh key for one more write about `base`. Unique across
@@ -2599,6 +2610,16 @@ function _doorRefusal(d, status, body) {
             return _refusalError(b, LINEUP_NOT_REMOVED);
         case 'reinstate':
             return new Error(b.error || 'Failed to reinstate competitor');
+        case 'pool-ranks': {
+            // A chusen's order that moves a qualifier out of a knockout match
+            // already fought: the structured refusal attemptScoreWrite asks
+            // the operator about, marked as a ranking for the dialog's copy.
+            const refusal = _downstreamRefusalError(b);
+            if (refusal && refusal.downstreamKnockoutPlayed) refusal.downstreamKnockoutPlayed.ranking = true;
+            return refusal || new Error(b.error || 'Failed to override rank');
+        }
+        case 'overrides-reset':
+            return new Error(b.error || 'Failed to reset overrides');
         default:
             return new Error(_refusalText(b, `HTTP ${status}`));
     }
@@ -2612,7 +2633,7 @@ function _doorRefusal(d, status, body) {
 // refusal) read by the branch it gates in _sendEntry. A lineup save, a team
 // member write, a lineup removal and a reinstatement answer their own records,
 // never a match write's refusal shape.
-const _NOT_MATCH_WRITE_KINDS = new Set(['lineup', 'lineup-remove', 'member', 'reinstate']);
+const _NOT_MATCH_WRITE_KINDS = new Set(['lineup', 'lineup-remove', 'member', 'reinstate', 'pool-ranks', 'overrides-reset']);
 function _answersMatchWrite(d) {
     return !!d && !!d.terminal && !_NOT_MATCH_WRITE_KINDS.has(d.kind);
 }
@@ -4823,30 +4844,24 @@ const API = {
     // confirm-and-retry (write_result.jsx's attemptScoreWrite); `ranking`
     // marks the refusal as a rank change rather than a corrected result, for
     // the dialog's copy.
-    async overridePoolRanks(compID, poolID, ranks, password, forceDownstreamReopen) {
-        const body = { ranks };
-        if (forceDownstreamReopen) body.forceDownstreamReopen = true;
-        const res = await fetch(`/api/competitions/${compID}/pools/${poolID}/override-rank`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tournament-Password': password
-            },
-            body: JSON.stringify(body)
+    overridePoolRanks(compID, poolID, ranks, password, forceDownstreamReopen, opts = {}) {
+        // bc-evts stage 3 review 11, Y7 (the governing rule: "ALL goes to the
+        // outbox ... but never blocks the UI"): an outbox entry under the
+        // competition's pool-rank base, so a chusen's order and a reset of
+        // the overrides are sent strictly in the order they were made,
+        // answered pending at once. `settled` carries the server's answer, or
+        // rejects with the refusal (_doorRefusal 'pool-ranks': a downstream
+        // refusal is the structured error attemptScoreWrite reads, marked as
+        // a ranking), which `opts.onRefusal` may claim. An older server's
+        // empty 200 body is a success.
+        const payload = { ranks };
+        if (forceDownstreamReopen) payload.forceDownstreamReopen = true;
+        return _outboxWrite({
+            kind: 'pool-ranks', compID, matchID: '', method: 'PUT',
+            url: `/api/competitions/${compID}/pools/${encodeURIComponent(poolID)}/override-rank`,
+            payload, password, onRefusal: opts && opts.onRefusal,
+            base: _poolRanksBase(compID),
         });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            const refusal = _downstreamRefusalError(err);
-            if (refusal && refusal.downstreamKnockoutPlayed) refusal.downstreamKnockoutPlayed.ranking = true;
-            throw refusal || new Error(err.error || "Failed to override rank");
-        }
-        // The body ({reopenedMatches}) is deliberately not read: an older
-        // server answered 200 with an EMPTY body, and calling .json() on one
-        // throws SyntaxError per the Fetch spec, which surfaced as an
-        // alert("Failed: Unexpected end of JSON input") right after a
-        // successful save. The confirm dialog already named what a forced
-        // override reopens, and each reopened match is announced over SSE.
-        return true;
     },
     // bc-kcdg: forceDownstreamReopen is the operator's confirmed override of a
     // 409 downstream_knockout_played refusal (this match's later round already
@@ -4872,17 +4887,15 @@ const API = {
             seen: opts && opts.seen, onRefusal: opts && opts.onRefusal,
         });
     },
-    async resetOverrides(compID, password) {
-        const res = await fetch(`/api/competitions/${compID}/overrides`, {
-            method: 'DELETE',
-            headers: { 'X-Tournament-Password': password }
+    resetOverrides(compID, password, opts = {}) {
+        // Y7: an outbox entry after every chusen order of the competition
+        // still queued (the same base), answered pending at once.
+        return _outboxWrite({
+            kind: 'overrides-reset', compID, matchID: '', method: 'DELETE',
+            url: `/api/competitions/${compID}/overrides`,
+            payload: {}, password, onRefusal: opts && opts.onRefusal,
+            base: _poolRanksBase(compID),
         });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to reset overrides");
-        }
-        // Backend returns 204 No Content: .json() would reject.
-        return true;
     },
     async updateMatchTime(compID, matchID, scheduledAt, password, opts = {}) {
         // bc-evts M5: an entry of the match, in its order, answered at once;

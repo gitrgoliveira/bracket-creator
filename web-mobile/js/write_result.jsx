@@ -519,6 +519,8 @@ export function heldWriteWhat(held) {
         case 'member': return 'team member change';
         case 'lineup-remove': return 'lineup removal';
         case 'reinstate': return 'reinstatement';
+        case 'pool-ranks': return 'pool order (chusen)';
+        case 'overrides-reset': return 'pool order reset';
         default: return isFinishedResultWrite(held) ? 'finished result' : 'score update';
     }
 }

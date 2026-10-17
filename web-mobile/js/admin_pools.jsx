@@ -425,6 +425,28 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       }
       setChusenGroupErr(prev => ({ ...prev, [groupKey]: null }));
       setChusenBusy(prev => ({ ...prev, [groupKey]: true }));
+      // A refusal is told on this group, and the server's order read again:
+      // the order is the outbox's (bc-evts stage 3 review 11, Y7), answered
+      // at once and shown as entered, so a refusal arrives later, through
+      // onRefusal (claimed: the outbox raises no second alert for it), or
+      // thrown by a door that still answers directly.
+      const refused = (e) => {
+        const msg = e && e.downstreamKnockoutPlayedCancelled
+          ? DOWNSTREAM_KNOCKOUT_RANKING_CANCELLED
+          : ((e && e.message) || "Failed to record chusen result");
+        setChusenGroupErr(prev => ({ ...prev, [groupKey]: msg }));
+        // A refusal records none of the group, and a lost response may have
+        // recorded all of it. Re-fetch the candidates so the panel shows the
+        // order the server holds rather than waiting for the next SSE-driven
+        // refresh; the typed ranks are keyed by team, so they survive a
+        // reorder.
+        if (window.API && typeof window.API.chusenCandidates === "function") {
+          window.API.chusenCandidates(c.id, password)
+            .then(applyChusen)
+            .catch(() => {});
+        }
+        return true;
+      };
       try {
         // The whole order is ONE write, so the server answers for the order
         // entered and nothing else: sent one rank at a time, it passed
@@ -435,11 +457,12 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         // operator and, confirmed, resends it with forceDownstreamReopen,
         // which reopens that match.
         await attemptScoreWrite({
-          recordScore: (cId, pool, body, pwd) => window.API.overridePoolRanks(cId, pool, body.ranks, pwd, !!body.forceDownstreamReopen),
+          recordScore: (cId, pool, body, pwd, _match, o) => window.API.overridePoolRanks(cId, pool, body.ranks, pwd, !!body.forceDownstreamReopen, o),
           confirmDialog: window.confirmDialog,
           compId: c.id, matchId: poolName,
           result: { ranks: members.map((m, i) => ({ playerId: m.id, rank: effRank(m, i) })) },
           password,
+          onRefusal: refused,
         });
         if (changing) {
           // Show the new order at once and close the entry; the re-fetch
@@ -457,20 +480,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         // same pool must not have its inputs wiped here too).
         clearInputs();
       } catch (e) {
-        const msg = e && e.downstreamKnockoutPlayedCancelled
-          ? DOWNSTREAM_KNOCKOUT_RANKING_CANCELLED
-          : (e.message || "Failed to record chusen result");
-        setChusenGroupErr(prev => ({ ...prev, [groupKey]: msg }));
-        // A refusal records none of the group, and a lost response may have
-        // recorded all of it. Re-fetch the candidates so the panel shows the
-        // order the server holds rather than waiting for the next SSE-driven
-        // refresh; the typed ranks are keyed by team, so they survive a
-        // reorder.
-        if (window.API && typeof window.API.chusenCandidates === "function") {
-          window.API.chusenCandidates(c.id, password)
-            .then(applyChusen)
-            .catch(() => {});
-        }
+        refused(e);
       } finally {
         setChusenBusy(prev => ({ ...prev, [groupKey]: false }));
       }

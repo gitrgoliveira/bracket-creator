@@ -211,6 +211,20 @@ describe('a match that is not running keeps a local draft', () => {
     expect(counts(r.container)).toEqual([1, 3]);
   });
 
+  // Ported from individual_engi_refused_autosave_takes_server (retired with the
+  // engi autosave): a late answer never wipes a correction typed after the
+  // match finished elsewhere.
+  it('a tap\'s late outcome leaves a correction drafted after the match finished elsewhere', async () => {
+    const r = render(el(engiBout()));
+    await click(r, 'engi-shiro-inc');
+    await act(async () => { r.rerender(el(engiBout({ status: 'completed', flagsA: 3, flagsB: 0, winner: { id: 'p1' }, scoreVersion: 6 }))); });
+    await click(r, 'engi-shiro-inc');
+    expect(counts(r.container)).toEqual([1, 3]);
+    const [tap] = outbox.taps('c1', 'm1');
+    await act(async () => { outbox.ack('c1', 'm1', null, { [tap.id]: { outcome: 'matchClosed', reason: 'match_closed', message: 'The match is finished.' } }); });
+    expect(counts(r.container), 'the correction draft stands').toEqual([1, 3]);
+  });
+
   it('a draft made before the match starts gives way to the running board', async () => {
     const r = render(el(engiBout({ status: 'scheduled' })));
     await click(r, 'engi-aka-inc');

@@ -9,10 +9,15 @@ const Icon = window.Icon;
 import { DAIHYOSEN_POSITION, scoreRowMatchName, scoreRowMatchLabel } from './pool_ids.jsx';
 import { classifyStartOutcome, startFailureMessage } from './start_match.jsx';
 import {
+  createOwnStatus, OWN_START, OWN_REOPEN, OWN_REQUEUE, OWN_REP,
+  LANDED as OWN_LANDED, REFUSED as OWN_REFUSED, HELD as OWN_HELD, DISCARDED as OWN_DISCARDED,
+} from './own_status.jsx';
+export { OWN_START, OWN_REOPEN, OWN_REQUEUE, OWN_REP, OWN_REFUSED };
+import {
   writeDidNotLand, writeRetryable, decisionWord,
   attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED, downstreamKnockoutReopenedNotice,
   courtBusyMessage, heldWriteDiscardLabel, heldWriteDiscardConfirm, queuedNotice,
-  tapNotAppliedText, writePending,
+  tapNotAppliedText, writePending, writeWasRefused,
 } from './write_result.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { sideWord, sideWithColour } from './side_cell.jsx';
@@ -237,71 +242,55 @@ export const DRAFT_KEPT_REOPENED_NOTE = "This match was reopened on another devi
 // silently, and the editor shows the server's copy.
 export const DRAFT_DROPPED_NOTE = "This match was finished or sent back to the queue on another device. Your unsaved entries were dropped.";
 
-// useDraftKeptOnStart: the ONE owner of "another device moved the match to
-// running while this editor held a draft" (operator decision D1 (a); a
-// correction draft over a finished match another device reopened is the same
-// case, stage 5 review 3). The editor calls it with the status it renders,
-// and `note(base, draft)` each render with the scoring it would tap (a
-// projection, the same shape for both: what it was typed over and what it
-// holds now). When the status goes from scheduled or completed to running
-// and the two differ, and this editor did not make that change itself
-// (`ownStart`, called by its own Start and its own reopens), `held` is true
-// until `release`: the editor shows its draft and DraftKeptNotice (`from`
-// names the status it left, so the note says started or reopened), not the
-// board. `base` is the copy the draft was typed over, frozen at that moment,
-// so Save sends the draft's own changes and never takes away what the other
-// device scored. Judged during render (refs), so the board never shows for a
-// frame before the draft comes back.
-//
-// A kept draft never outlives the match leaving running elsewhere (finished,
-// or sent back to the queue): it is dropped, `dropped` counts the drops (the
-// editor resets its draft to the server's copy in an effect keyed on it), and
-// `droppedShown` holds DraftDroppedNotice up while the status stays the one it
-// was dropped at, until the first edit of a new draft. An own Start or reopen
-// the server refuses, or that is discarded, is no own change
-// (`ownStartFailed`): a later change by another device keeps the draft as any
-// other.
-export function useDraftKeptOnStart(status) {
-  const ref = useRefA({ prev: status, own: false, held: false, base: null, draft: null, kept: null, from: null, dropped: 0, droppedAt: null, droppedReset: false });
+// useOwnStatus: one editor's own_status.jsx owner (the ONE owner of this
+// editor's own status writes and the draft it keeps), observing `feedMatch`
+// (the host's copy of the match, the court console's `started` included, and
+// the team sheet's own representative-bout override) on every render. It
+// answers the owner's view (shownStatus, override, startOffered, refusal,
+// kept, droppedShown, resetSeq) and its doors:
+//   - note(base, draft): what the draft would tap, each render;
+//   - begin(kind, fields): an own Start (OWN_START, `fields` the score the
+//     Start carried, shown until the feed shows the start), reopen
+//     (OWN_REOPEN), requeue-and-reopen (OWN_REQUEUE) or representative-bout
+//     change (OWN_REP); its token;
+//   - settle(token, res): the write's answer, read as it comes: a direct
+//     answer at once, the outbox's through `settled` (a callback, never a
+//     wait); `{ rejections: false }` leaves a rejection to the caller's own
+//     refusal callback (answer);
+//   - answer(token, outcome, msg), release().
+export function useOwnStatus(feedMatch) {
+  const ref = useRefA(null);
+  if (!ref.current) ref.current = createOwnStatus(feedMatch.status, Number(feedMatch.modifiedAt) || 0);
+  const mountedRef = useRefA(true);
+  useEffectA(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
   const [, bump] = useStateA(0);
-  const st = ref.current;
-  if (status !== st.prev) {
-    if ((st.prev === "scheduled" || st.prev === "completed") && status === "running" && !st.own && st.base && st.draft
-      && JSON.stringify(st.base) !== JSON.stringify(st.draft)) {
-      st.held = true;
-      st.kept = st.base;
-      st.from = st.prev;
-    }
-    if (status !== "running") {
-      if (st.held) { st.dropped += 1; st.droppedAt = status; st.droppedReset = false; }
-      st.held = false; st.own = false; st.kept = null; st.from = null;
-    }
-    if (st.droppedAt !== null && status !== st.droppedAt) st.droppedAt = null;
-    st.prev = status;
-  }
+  const own = ref.current;
+  own.observe(feedMatch.status, Number(feedMatch.modifiedAt) || 0);
+  const rerender = () => { if (mountedRef.current) bump((n) => n + 1); };
+  const answer = (token, outcome, msg) => { own.answer(token, outcome, msg || ""); rerender(); };
+  const view = own.view();
   return {
-    held: st.held,
-    // The copy the kept draft was typed over, and the status it was typed at.
-    base: st.kept,
-    from: st.from,
-    dropped: st.dropped,
+    ...view,
     // Read when the note renders, after this render's `note`, so the first
     // edit of a new draft takes it down at once.
-    get droppedShown() { return st.droppedAt !== null && status === st.droppedAt; },
-    note: (base, draft) => {
-      if (status === "running") return;
-      st.base = base;
-      st.draft = draft;
-      if (st.droppedAt === null) return;
-      // The editor's reset after a drop brings the draft back to the server's
-      // copy; an edit after that is a new draft, and the note goes.
-      const same = JSON.stringify(base) === JSON.stringify(draft);
-      if (same) st.droppedReset = true;
-      else if (st.droppedReset) st.droppedAt = null;
+    get droppedShown() { return own.view().droppedShown; },
+    note: (base, draft) => own.note(base, draft),
+    begin: (kind, fields) => { const t = own.begin(kind, fields); rerender(); return t; },
+    answer,
+    settle: (token, res, opts = {}) => {
+      if (!res) { answer(token, OWN_REFUSED); return; }
+      if (writePending(res)) {
+        res.settled.then((body) => {
+          if (body && body.discarded === true) { answer(token, OWN_DISCARDED); return; }
+          const out = classifyStartOutcome(body);
+          answer(token, out.ok ? OWN_LANDED : OWN_HELD, out.ok ? "" : out.msg);
+        }, (e) => { if (opts.rejections !== false) answer(token, OWN_REFUSED, startFailureMessage(e)); });
+        return;
+      }
+      if (writeWasRefused(res)) { answer(token, OWN_REFUSED); return; }
+      answer(token, OWN_LANDED);
     },
-    ownStart: () => { st.own = true; },
-    ownStartFailed: () => { st.own = false; },
-    release: () => { if (st.held) { st.held = false; st.kept = null; st.from = null; bump((n) => n + 1); } },
+    release: () => { own.release(); rerender(); },
   };
 }
 
@@ -320,21 +309,6 @@ export function DraftKeptNotice({ onSave, onDiscard, disabled, from }) {
       <button type="button" className="btn btn--sm btn--ghost" data-testid="draft-kept-discard" disabled={disabled} onClick={onDiscard}>Discard</button>
     </div>
   );
-}
-
-// watchOwnStart: an editor's own Start the outbox holds is answered later
-// (`settled`, a callback, never a wait). A start the server refused (held as
-// superseded with its result group, refused for the clock, or turned away)
-// is handed to `onRefused` with the sentence to say (classifyStartOutcome's,
-// or the refusal's own words), and a start discarded from the held-writes
-// list with none: the editor then shows the server's status again.
-export function watchOwnStart(res, onRefused) {
-  if (!res || res.pending !== true || !res.settled) return;
-  res.settled.then((body) => {
-    if (body && body.discarded === true) { onRefused(""); return; }
-    const out = classifyStartOutcome(body);
-    if (!out.ok) onRefused(out.msg);
-  }, (e) => onRefused(startFailureMessage(e)));
 }
 
 // ownStartRefusalText: that sentence, naming the match.
@@ -1734,7 +1708,7 @@ function withdrawalInForce(m) {
 //     aware of the consequences"). What that reopened is named in `notice`;
 //     declining leaves everything as it was and says so in `err`.
 // Every other refusal is the server's sentence, shown verbatim in `err`.
-function useMatchReopen({ match, password, isComplete, onOwnReopen, onOwnReopenFailed }) {
+function useMatchReopen({ match, password, isComplete, own }) {
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
   const [busy, setBusy] = useStateA(false);
@@ -1841,12 +1815,12 @@ function useMatchReopen({ match, password, isComplete, onOwnReopen, onOwnReopenF
     setNotice("");
     confirmedRef.current = false;
     setBusy(true);
-    // The editor's own reopen: a draft it holds is not kept as if another
-    // device had reopened the match (useDraftKeptOnStart).
-    if (onOwnReopen) onOwnReopen();
+    // The editor's own reopen (useOwnStatus): a draft it holds is not kept as
+    // if another device had reopened the match.
+    const token = own ? own.begin(OWN_REOPEN) : 0;
     // A refusal the outbox brings back later puts the panel back as it was.
     const refused = (e) => {
-      if (onOwnReopenFailed) onOwnReopenFailed();
+      if (own) own.answer(token, OWN_REFUSED);
       if (!mountedRef.current) return false;
       setLanded(false);
       applyFailure(e, reason);
@@ -1855,10 +1829,13 @@ function useMatchReopen({ match, password, isComplete, onOwnReopen, onOwnReopenF
     };
     try {
       const res = await run((pw, opts) => window.API.reopenMatch(match.compId, match.id, pw, opts), reason, false, refused);
+      // Its answer, as it comes; a refusal is `refused`'s (a downstream
+      // confirm may still send it again).
+      if (own) own.settle(token, res, { rejections: false });
       if (!mountedRef.current) return;
       finish(res);
     } catch (e) {
-      if (onOwnReopenFailed) onOwnReopenFailed();
+      if (own) own.answer(token, OWN_REFUSED);
       if (!mountedRef.current) return;
       applyFailure(e, reason);
       setBusy(false);
@@ -1874,9 +1851,9 @@ function useMatchReopen({ match, password, isComplete, onOwnReopen, onOwnReopenF
     if (!c || busy || landed) return;
     setErr("");
     setBusy(true);
-    if (onOwnReopen) onOwnReopen();
+    const token = own ? own.begin(OWN_REQUEUE) : 0;
     const refused = (e) => {
-      if (onOwnReopenFailed) onOwnReopenFailed();
+      if (own) own.answer(token, OWN_REFUSED);
       if (!mountedRef.current) return false;
       setLanded(false);
       applyFailure(e, c.reason);
@@ -1889,11 +1866,12 @@ function useMatchReopen({ match, password, isComplete, onOwnReopen, onOwnReopenF
           { ...opts, match, blockerLabel: c.label }),
         c.reason, c.force, refused,
       );
+      if (own) own.settle(token, res, { rejections: false });
       if (!mountedRef.current) return;
       setConflict(null);
       finish(res);
     } catch (e) {
-      if (onOwnReopenFailed) onOwnReopenFailed();
+      if (own) own.answer(token, OWN_REFUSED);
       if (!mountedRef.current) return;
       // One atomic call, so one failure path: a DIFFERENT match that has since
       // taken the court is offered the remedy again; anything else is shown.

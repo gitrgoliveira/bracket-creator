@@ -24,7 +24,7 @@ const { useState: useStateE, useEffect: useEffectE, useRef: useRefE } = React;
 
 import {
   ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer, HeldWriteDiscard, HeldWriteNotice, useClearPendingWhenNothingHeld,
-  tapBoardOf, useTapBoard, useTapOutcomeNote, useDraftKeptOnStart, DraftKeptNotice, DraftDroppedNotice,
+  tapBoardOf, useTapBoard, useTapOutcomeNote, useOwnStatus, DraftKeptNotice, DraftDroppedNotice,
 } from './admin_scoring_shared.jsx';
 import { engiDraftTaps } from './draft_taps.jsx';
 import { SyncStatusPill, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
@@ -148,10 +148,13 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // the individual editor), so there is no autosave to debounce, to write on
   // the way out or to adopt back, and no echo can take a tap off the board.
   // Operator decision D1 (a): a draft this editor holds when ANOTHER device
-  // starts the match is kept on screen with Save and Discard (draftKeep.held);
+  // moves the match to running is kept on screen with Save and Discard
+  // (own.kept, the ONE owner of this editor's own status writes and its kept
+  // draft, own_status.jsx through useOwnStatus; this editor makes no status
+  // write of its own, so every change of the feed is another device's);
   // the counts stay a draft meanwhile.
-  const draftKeep = useDraftKeptOnStart(m.status);
-  const tapMode = m.status === "running" && !draftKeep.held;
+  const own = useOwnStatus(m);
+  const tapMode = m.status === "running" && !own.kept;
   const tapBoard = useTapBoard(m, tapMode, ENGI_FOLD);
   const flagsA = tapMode ? (tapBoard.match.flagsA || 0) : draftA;
   const flagsB = tapMode ? (tapBoard.match.flagsB || 0) : draftB;
@@ -187,10 +190,10 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // needs only isValidTotal, not a separate non-null check.
   const winnerSide = deriveWinner(flagsA, flagsB);
   // A kept draft (D1) is saved or discarded first: no result over it.
-  const canSubmit = isValidTotal && !submitting && !draftKeep.held;
+  const canSubmit = isValidTotal && !submitting && !own.kept;
   // Only a draft can be unsaved: a running match's counts are taps.
   const isDirty = !tapMode && (draftA !== initialFlagsA || draftB !== initialFlagsB);
-  draftKeep.note({ a: initialFlagsA, b: initialFlagsB }, { a: draftA, b: draftB });
+  own.note({ a: initialFlagsA, b: initialFlagsB }, { a: draftA, b: draftB });
   // Follow a flag count recorded on another device — the same rule the kendo
   // editors follow, because this is the same rule: an engi match has ONE result
   // and every surface asking for it shows the same one, and while this editor
@@ -223,28 +226,22 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   // D1: Save sends the kept counts as the flag taps that would have made them
   // (draft_taps.jsx), against the counts they were typed over; Discard drops
   // them. Either way the board shows from now on.
-  const leaveKeptDraft = () => { takeServerFlags(); draftKeep.release(); };
-  // A kept draft the match left running under (finished or sent back
-  // elsewhere) is dropped: the editor shows the server's counts, and
-  // DraftDroppedNotice says so (stage 5 review 2).
-  useEffectE(() => {
-    if (draftKeep.dropped > 0) takeServerFlags();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftKeep.dropped]);
+  const leaveKeptDraft = () => { takeServerFlags(); own.release(); };
   const saveKeptDraft = () => {
     const board = tapBoardOf(m, ENGI_FOLD);
-    for (const ev of engiDraftTaps(draftKeep.base, { a: draftA, b: draftB })) {
+    for (const ev of engiDraftTaps(own.kept.base, { a: draftA, b: draftB })) {
       window.API.recordTap(m.compId, m.id, makeEvent({ pos: 0, ...ev }), password, board.base);
     }
     tapNote.clear();
     leaveKeptDraft();
   };
-  const wasTapModeRef = useRefE(tapMode);
+  // The feed took the match out of running (finished or sent back, here or
+  // elsewhere), or a kept draft was dropped: the draft starts from the
+  // server's counts (own.resetSeq, the owner's one signal).
   useEffectE(() => {
-    if (wasTapModeRef.current && !tapMode) takeServerFlags();
-    wasTapModeRef.current = tapMode;
+    if (own.resetSeq > 0) takeServerFlags();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tapMode]);
+  }, [own.resetSeq]);
 
   // A display of this court on the same device (another tab, the HDMI output)
   // shows exactly this board, pending taps included (operator S1 a): it is
@@ -699,8 +696,8 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
             row: hide the footer's own actions so the operator never sees two
             Cancels and two commit buttons at the highest-stakes moment
             (amending a recorded result). Mirrors ScoreEditorModal. */}
-        {draftKeep.held && <DraftKeptNotice from={draftKeep.from} onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} />}
-        {draftKeep.droppedShown && <DraftDroppedNotice />}
+        {own.kept && <DraftKeptNotice from={own.kept.from} onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} />}
+        {own.droppedShown && <DraftDroppedNotice />}
         {!(isComplete && showCorrectionPrompt) && (
           <div className="score-nav">
             {prevMatch ? (

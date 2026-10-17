@@ -126,8 +126,9 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		}
 		// A participant's add is bounded and refused once the competition
 		// has finished, both judged by the store under its lock. A resend of
-		// an add that landed (the same client id and name) is answered 200
-		// with the member as stored, and announces nothing new.
+		// an add that landed (the same client id, whatever name the member
+		// holds now: a rename or a cleared name since does not refuse it, F5)
+		// is answered 200 with the member as stored, and announces nothing new.
 		var member domain.TeamMember
 		var created bool
 		var err error

@@ -319,3 +319,43 @@ describe('a queue whose entries wait on each other is stuck, and says so (H1)', 
         expect(stored()).toEqual([]);
     });
 });
+
+describe('asking what holds a match back reads the queue once (H2)', () => {
+    // Every mounted editor asks on every sync-status change; a walk that
+    // scanned and sorted the whole queue at each step cost seconds on a long
+    // offline queue. Counted by sorts: the queue is put in replay order by a
+    // sort, once per question however long the queue and the walk.
+    it('sorts the queue a bounded number of times, whatever its length', async () => {
+        const matches = [['big', 40], ...Array.from({ length: 30 }, (_, i) => [`o${i}`, 20])];
+        for (const [m, n] of matches) {
+            for (let i = 0; i < n; i++) {
+                API.recordTap('c1', m, { kind: 'encho.add', pos: 0 }, 'pw', { id: m, modifiedAt: 0, status: 'running' });
+            }
+        }
+        await flushMicrotasks();
+        // `big` waits on o0's last tap, so the walk crosses into another match.
+        const q = stored();
+        const o0 = q.filter(([k]) => k.startsWith('c1:o0\u001f')).map(([k]) => k).pop();
+        for (const [k, d] of q) if (k.startsWith('c1:big\u001f')) d.after = o0;
+        API.clearQueue();
+        _lsStore.bc_write_queue_v2 = JSON.stringify(q);
+        await load();
+        await flushMicrotasks();
+        expect(stored().length).toBe(640);
+
+        const sort = vi.spyOn(Array.prototype, 'sort');
+        API.heldWriteBlocker('c1', 'big');
+        API.heldWriteKeepsFailing('c1', 'big');
+        const both = sort.mock.calls.length;
+        sort.mockClear();
+        let once;
+        try {
+            expect(both, 'the two questions read the queue a few times, not once per step').toBeLessThanOrEqual(4);
+            API.heldWriteState('c1', 'big');
+            once = sort.mock.calls.length;
+        } finally {
+            sort.mockRestore();
+        }
+        expect(once, 'the one question the editors ask reads it once').toBeLessThanOrEqual(2);
+    });
+});

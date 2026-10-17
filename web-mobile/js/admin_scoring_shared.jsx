@@ -62,13 +62,20 @@ export function useMatchHeldWrite(compId, matchId) {
   // tests stub window.API without one): unknown, so nothing is cleared.
   // `blocker` is the write of another kind this match waits for that the
   // server keeps refusing (a team member's add; stage 3 review 4, G2), or null.
-  const read = () => ({
-    held: api && typeof api.hasHeldWrite === 'function' && compId && matchId ? api.hasHeldWrite(compId, matchId) : null,
-    stuck: !!(api && typeof api.heldWriteKeepsFailing === 'function'
-      && compId && matchId && api.heldWriteKeepsFailing(compId, matchId)),
-    blocker: (api && typeof api.heldWriteBlocker === 'function' && compId && matchId
-      && api.heldWriteBlocker(compId, matchId)) || null,
-  });
+  // `stuck` and `blocker` come from ONE read of the queue (heldWriteState,
+  // stage 3 review 5, H2); a page whose API has only the two older questions
+  // asks them.
+  const read = () => {
+    const asks = !!(api && compId && matchId);
+    const state = asks && typeof api.heldWriteState === 'function' ? api.heldWriteState(compId, matchId) : null;
+    return {
+      held: asks && typeof api.hasHeldWrite === 'function' ? api.hasHeldWrite(compId, matchId) : null,
+      stuck: state ? !!state.keepsFailing
+        : !!(asks && typeof api.heldWriteKeepsFailing === 'function' && api.heldWriteKeepsFailing(compId, matchId)),
+      blocker: (state ? state.blocker
+        : (asks && typeof api.heldWriteBlocker === 'function' && api.heldWriteBlocker(compId, matchId))) || null,
+    };
+  };
   const [state, setState] = useStateA(read);
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);

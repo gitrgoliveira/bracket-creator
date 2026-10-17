@@ -2075,7 +2075,7 @@ async function _flushBase(base, list, pass, gen) {
         // So is one on a wait cycle (H1, _markWaitCycles), which nothing frees.
         const waitsOn = _afterKeys(d).filter((k) => _writeQueue.has(k));
         if (waitsOn.length > 0) {
-            outcome = d.cycled || waitsOn.some(_blockedByHeld) ? 'kept' : 'after';
+            outcome = d.cycled || waitsOn.some((k) => _blockedByHeld(k)) ? 'kept' : 'after';
             break;
         }
         if (d.kind === 'evt') {
@@ -2112,8 +2112,8 @@ async function _flushBase(base, list, pass, gen) {
 // a password, directly or through the entry it in turn waits on. One held only
 // because the connection is down is not: the whole device is offline then, and
 // waiting is not failing (outbox_running_and_after.test.jsx).
-function _blockedByHeld(key) {
-    return !!_blockerOf(key, _isStuckEntry);
+function _blockedByHeld(key, index = _queueIndex()) {
+    return !!_blockerOf(key, _isStuckEntry, _newWalk(), index);
 }
 
 // _isStuckEntry: an entry that cannot go for now for a reason other than the
@@ -2195,22 +2195,49 @@ function _addAfter(d, key) {
 // the entry itself, an earlier entry of its own base (strict order: it goes
 // only after them, stage 3 review 4, G3), or anything an entry on that path
 // follows (`after`), followed as far as it goes; '' when none.
-function _blockerOf(key, stuck, seen = new Set()) {
-    if (!key || seen.has(key)) return '';
-    seen.add(key);
+function _blockerOf(key, stuck, walk = _newWalk(), index = _queueIndex()) {
+    if (!key || walk.seen.has(key)) return '';
+    walk.seen.add(key);
     const d = _writeQueue.get(key);
     if (!d) return '';
     if (stuck(d, key)) return key;
-    for (const [k] of _entriesFor(_baseOf(key))) {
-        if (k === key) break;
-        const found = _blockerOf(k, stuck, seen);
+    // Every earlier entry of a base is walked once per walk (stage 3 review
+    // 5, H2): what an earlier entry waits on, a later one waits on too.
+    const base = _baseOf(key);
+    const list = index.byBase.get(base) || [];
+    const at = index.pos.has(key) ? index.pos.get(key) : list.length;
+    for (let i = walk.scanned.get(base) || 0; i < at; i++) {
+        walk.scanned.set(base, i + 1);
+        const found = _blockerOf(list[i][0], stuck, walk, index);
         if (found) return found;
     }
     for (const k of _afterKeys(d)) {
-        const found = _blockerOf(k, stuck, seen);
+        const found = _blockerOf(k, stuck, walk, index);
         if (found) return found;
     }
     return '';
+}
+
+// _queueIndex / _newWalk: what one question about what holds writes back
+// reads (stage 3 review 5, H2). The index is the queue grouped by base, each
+// base in replay order with each key's place in it, built with ONE sort; a
+// walk is the entries it has visited and how far into each base it has read,
+// shared by every start of ONE question, which stops at the first blocker it
+// finds (a fresh walk per question: an entry left on a found path was not
+// fully read).
+function _queueIndex() {
+    const byBase = new Map();
+    for (const entry of [..._writeQueue.entries()].filter(([, d]) => d).sort(_byEntryOrder)) {
+        const base = _baseOf(entry[0]);
+        if (!byBase.has(base)) byBase.set(base, []);
+        byBase.get(base).push(entry);
+    }
+    const pos = new Map();
+    for (const list of byBase.values()) list.forEach(([k], i) => pos.set(k, i));
+    return { byBase, pos };
+}
+function _newWalk() {
+    return { seen: new Set(), scanned: new Map() };
 }
 
 // _markWaitersHeld: marks held every queued entry that waits (`after`) on one
@@ -2219,8 +2246,9 @@ function _blockerOf(key, stuck, seen = new Set()) {
 function _markWaitersHeld() {
     let marked = false;
     const blockedBases = new Set();
+    const index = _queueIndex();
     for (const [key, d] of _writeQueue) {
-        if (_afterKeys(d).some((k) => _writeQueue.has(k) && _blockedByHeld(k))) blockedBases.add(_baseOf(key));
+        if (_afterKeys(d).some((k) => _writeQueue.has(k) && _blockedByHeld(k, index))) blockedBases.add(_baseOf(key));
     }
     if (blockedBases.size === 0) return false;
     for (const [key, d] of _writeQueue) {
@@ -5171,8 +5199,30 @@ const API = {
         return _listenOn(_tapOutcomeListeners, _revKey(compID, matchID), fn);
     },
     heldWriteKeepsFailing(compID, matchID) {
-        return _entriesFor(_revKey(compID, matchID)).some(([, d]) => _keepsFailing(d))
-            || API.heldWriteBlocker(compID, matchID) !== null;
+        return API.heldWriteState(compID, matchID).keepsFailing;
+    },
+    // heldWriteState: both answers the editors' banner reads, from ONE read
+    // of the queue (stage 3 review 5, H2: the two asked apart scanned and
+    // sorted it at every step of the walk): `keepsFailing`, whether a write
+    // of the match or one it waits on keeps failing, and `blocker`, that
+    // write when it is another base's (heldWriteBlocker), else null.
+    heldWriteState(compID, matchID) {
+        const base = _revKey(compID, matchID);
+        const index = _queueIndex();
+        const own = index.byBase.get(base) || [];
+        // The match's own write is the one the server keeps refusing: that
+        // is what the banner says, and what its Discard discards.
+        if (own.some(([, d]) => _refusedByServer(d))) return { keepsFailing: true, blocker: null };
+        // Otherwise the first write of ANOTHER base it waits on that keeps
+        // failing, walked through its own entries (one of them on a wait
+        // cycle, H1, is passed through to the write of the other match on it).
+        const stuck = (d, key) => _baseOf(key) !== base && _keepsFailing(d);
+        const walk = _newWalk();
+        for (const [key] of own) {
+            const found = _blockerOf(key, stuck, walk, index);
+            if (found) return { keepsFailing: true, blocker: _heldWriteItem(found, _writeQueue.get(found)) };
+        }
+        return { keepsFailing: own.some(([, d]) => _keepsFailing(d)), blocker: null };
     },
     // heldWriteBlocker: the write of ANOTHER base this match's writes wait on
     // that the server keeps refusing (stage 3 review 4, G2: a member add a
@@ -5181,20 +5231,7 @@ const API = {
     // say), or when nothing it waits on does. Found through what each entry
     // follows and what its own base sends before it (_blockerOf).
     heldWriteBlocker(compID, matchID) {
-        const base = _revKey(compID, matchID);
-        const own = _entriesFor(base);
-        // The match's own write is the one the server keeps refusing: that
-        // is what the banner says, and what its Discard discards.
-        if (own.some(([, d]) => _refusedByServer(d))) return null;
-        // Otherwise the first write of ANOTHER base it waits on that keeps
-        // failing, walked through its own entries (one of them on a wait
-        // cycle, H1, is passed through to the write of the other match on it).
-        const stuck = (d, key) => _baseOf(key) !== base && _keepsFailing(d);
-        for (const [key] of own) {
-            const found = _blockerOf(key, stuck);
-            if (found) return _heldWriteItem(found, _writeQueue.get(found));
-        }
-        return null;
+        return API.heldWriteState(compID, matchID).blocker;
     },
     discardFailingHeldWrites(compID, matchID) {
         let discarded = 0;

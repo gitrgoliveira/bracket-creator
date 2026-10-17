@@ -1709,8 +1709,12 @@ const _shownTeamNames = new Map();
 
 function _noteShownMatch(compID, m) {
     if (!compID || !m || typeof m !== 'object' || !m.id) return;
+    // Only a match that says its phase: a bracket id read as a pool id
+    // ("m-3") would be labelled with the wrong number.
     let label = '';
-    try { label = scoreRowMatchLabel(m) || ''; } catch (_e) { label = ''; }
+    if (m.phase === 'pool' || m.phase === 'bracket') {
+        try { label = scoreRowMatchLabel(m) || ''; } catch (_e) { label = ''; }
+    }
     if (label) _shownMatchLabels.set(_revKey(compID, m.id), label);
     for (const side of [m.sideA, m.sideB]) {
         if (side && typeof side === 'object' && side.id && side.name) _shownTeamNames.set(`${compID}:${side.id}`, String(side.name));

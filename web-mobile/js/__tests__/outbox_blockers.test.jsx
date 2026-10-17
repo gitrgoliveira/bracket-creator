@@ -495,3 +495,21 @@ describe('the write a match waits on is named by where it is (H5)', () => {
         warned.mockRestore();
     });
 });
+
+describe('a match that does not say its phase is not labelled (H5)', () => {
+    it('names no match rather than read a bracket id as a pool match', async () => {
+        for (const m of ['m-2', 'm-3']) {
+            const r = await API.recordScore('c1', m, { status: 'running', ipponsA: ['M'], ipponsB: [], changed: ['points'] }, 'pw', { id: m, compId: 'c1', status: 'running', modifiedAt: 0 });
+            r.settled.catch(() => {});
+        }
+        await flushMicrotasks();
+        const q = stored();
+        const key = (m) => q.find(([k]) => k.startsWith(`c1:${m}\u001f`))[0];
+        for (const [k, d] of q) d.after = k === key('m-2') ? key('m-3') : key('m-2');
+        API.clearQueue();
+        _lsStore.bc_write_queue_v2 = JSON.stringify(q);
+        await load();
+        await reconnect();
+        expect(API.heldWriteBlocker('c1', 'm-2')).toMatchObject({ matchID: 'm-3', where: '' });
+    });
+});

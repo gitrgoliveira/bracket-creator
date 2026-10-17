@@ -850,9 +850,8 @@ function _persistQueue() {
         for (const [k, d] of _writeQueue) {
             if (!_enqueuedAfter(merged.get(k), d.enqueuedAt)) merged.set(k, d);
         }
-        // A member that never was comes off the stored copies of writes this
-        // tab does not hold too (minted_members.jsx).
-        _mintedOverStored(merged);
+        // A settled member record nothing names any more is forgotten.
+        _mintedPrune(merged);
         if (merged.size === 0) {
             // An emptied queue is stored as "[]", never removed: the other
             // tabs read the removal of the key as a wipe (clearQueue), which
@@ -4058,15 +4057,14 @@ function _learnDropped(list) {
     _rerunFlushSoon();
 }
 
-// _mintedOverStored: what the owner knows, laid over the queue as it is
-// stored (`merged`, this tab's entries included): an id proved never to have
-// been comes off the stored copies of writes this tab does not hold too, so
-// the stored list says what will be sent, and a record nothing names any more
-// is forgotten once it has been kept a while.
-function _mintedOverStored(merged) {
-    for (const r of _minted.droppedRecords()) {
-        for (const e of merged.values()) if (mintedProofCovers(r, e, _teamIdOf(e))) mintedStrip(e, r.id);
-    }
+// _mintedPrune: a settled record nothing names any more (no entry of the queue
+// as stored, this tab's included, names or mints its id) is forgotten once it
+// has been kept a while. The stored copies of other tabs' writes are NOT
+// stripped of an id proved never to have been: every send goes through
+// _mintedGate first (_flushBase, for the first entry and per tap in a batch),
+// in whichever tab or page loads the entry, so the strip would change nothing
+// on the wire (stage 3 review 10, N2).
+function _mintedPrune(merged) {
     const named = new Set();
     const adds = new Set();
     for (const e of merged.values()) {

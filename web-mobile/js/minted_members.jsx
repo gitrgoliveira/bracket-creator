@@ -374,11 +374,6 @@ export function createMintedMembers({ storage, now = () => Date.now(), timeoutMs
             return r ? { ...r } : null;
         },
 
-        // droppedRecords: every dropped id with its competition and team.
-        droppedRecords() {
-            return Object.entries(read()).filter(([, r]) => r.s === 'dropped').map(([id, r]) => ({ id, c: r.c, t: r.t }));
-        },
-
         // onStored: another tab changed the records (a storage event). Answers
         // `dropped`, the ids that became dropped there, and `unblocks`: whether
         // a write held back for an id may now go or ask the members (a record

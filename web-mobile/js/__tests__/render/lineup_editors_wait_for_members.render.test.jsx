@@ -19,6 +19,7 @@ import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { answered } from '../helpers/team_members.js';
 import { lineupPutStub } from '../helpers/lineup_server.js';
+import { membersNotReadNotice } from '../../lineup_draft.jsx';
 
 const TEAM_MEMBERS = [
   { id: 'mem-1', index: 1, name: 'Aoki' },
@@ -240,7 +241,7 @@ describe('the Lineups page: an add row never waits for the team\'s members', () 
     expect(api.addTeamMember, 'nothing is added').not.toHaveBeenCalled();
     expect(window.confirmDialog, 'nor asked').not.toHaveBeenCalled();
     expect(addButton(utils).disabled, 'nothing waits').toBe(false);
-    expect(utils.getByText("The team's members are still being read. Add the name again once the list shows.")).toBeTruthy();
+    expect(utils.getByText(membersNotReadNotice('Mori'))).toBeTruthy();
     expect(utils.getByLabelText('New member name for 1').value).toBe('Mori');
   });
 

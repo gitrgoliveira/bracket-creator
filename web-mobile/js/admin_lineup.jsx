@@ -54,13 +54,10 @@ import { normalizeParticipantName } from './data.jsx';
 import { renameMemberFields } from './lineup_rename.jsx';
 import { changedLineupSave } from './lineup_save.jsx';
 import { queuedNotice, writePending, writeHeldOnDeviceOnly } from './write_result.jsx';
-import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice } from './lineup_draft.jsx';
+import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice, membersNotReadNotice } from './lineup_draft.jsx';
 
 const { useState: useStateA, useMemo: useMemoA } = React;
 
-// The Lineups page's add before a read of the team's members has shown a list:
-// refused at once, never waited for (bc-evts stage 3 review 2, R1).
-const MEMBERS_NOT_READ_NOTICE = "The team's members are still being read. Add the name again once the list shows.";
 
 // Term: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and this module doesn't matter (both
@@ -566,8 +563,10 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
     // that read (bc-evts stage 3 review 2, R1): before it, the add is refused at
     // once and the typed name kept, so it can be added again as soon as the list
     // shows. A read that failed for good goes without the list, as it always did.
+    // Refused at once, never waited for (bc-evts stage 3 review 2, R1), in the one
+    // wording the team sheet uses too (membersNotReadNotice).
     if (!form.membersReadOver()) {
-      setError(MEMBERS_NOT_READ_NOTICE);
+      setError(membersNotReadNotice(name));
       return;
     }
     const members = form.squadRef.current;

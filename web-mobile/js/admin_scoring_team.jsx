@@ -60,7 +60,7 @@ import { SideLabel, sideWithColour } from './side_cell.jsx';
 // Imported from the leaf, not read off `window`, for the same reason
 // admin_scoring_shared.jsx does it: write_result.jsx is import-only, and this
 // editor is ES-imported by hosts and tests that never load api_client.
-import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, writePending, writeHeldOnDeviceOnly, queuedNotice, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, decisionWord } from './write_result.jsx';
+import { notLandedBanner, terminalFailureBanner, notSavedText, writeDidNotLand, writeWasRefused, writeRetryable, writePending, writeHeldOnDeviceOnly, queuedNotice, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, decisionWord, FETCH_TIMEOUT_MS, TIMED_OUT, withinDeadline } from './write_result.jsx';
 
 // boutMiddle is THE single source for a bout's centre value (vs/X/(E)/(DH));
 // the editor derives its per-bout middle from it rather than restating the
@@ -150,7 +150,7 @@ import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBo
 import { changedLineupSave } from './lineup_save.jsx';
 // The one owner of what a list of team members that arrives does to the members
 // shown, and of keeping a member this sheet named or added over a list that predates it.
-import { mergeMembers, newMembersWait } from './lineup_draft.jsx';
+import { mergeMembers, newMembersWait, membersNotReadNotice } from './lineup_draft.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { joinList } from './admin_helpers.jsx';
 // The shared owner of what an operator is told about unreadable data; the
@@ -1976,21 +1976,35 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // shows nothing. A later read that fails says nothing: only the read made as the
     // effect opens says the members could not be read, and not when a list has been
     // shown by then.
+    const take = (squads) => {
+      if (cancelled) return;
+      if (teamAKnown) takeSideMembers("a", (squads && squads[teamAId]) || []);
+      if (teamBKnown) takeSideMembers("b", (squads && squads[teamBId]) || []);
+      setSquadUnavailable(false);
+    };
+    // The opening read is bounded by the deadline of any request (stage 3 review 3,
+    // F1): one that is never answered ends the wait as a failure does, so a name
+    // typed after it goes on without the members, and says so, rather than being
+    // saved by name alone for the sheet's whole life. Its list, if it comes later,
+    // is still taken.
     const read = async (opening) => {
+      const reading = window.API.fetchSquads(m.compId, password);
       try {
-        const squads = await window.API.fetchSquads(m.compId, password);
-        if (cancelled) return;
-        if (teamAKnown) takeSideMembers("a", (squads && squads[teamAId]) || []);
-        if (teamBKnown) takeSideMembers("b", (squads && squads[teamBId]) || []);
-        setSquadUnavailable(false);
-      } catch (_e) {
-        // The warning speaks for the members as they are shown: the opening read failing
-        // after a list already showed the members is stale news, and says nothing.
-        if (opening && !cancelled && !membersWait.current.a.listed && !membersWait.current.b.listed) {
-          setSquadUnavailable(true);
-          membersWait.current.a.fail();
-          membersWait.current.b.fail();
+        const squads = await (opening ? withinDeadline(reading, FETCH_TIMEOUT_MS) : reading);
+        if (squads !== TIMED_OUT) {
+          take(squads);
+          return;
         }
+        reading.then(take, () => {});
+      } catch (_e) {
+        // fall through: the read failed
+      }
+      // The warning speaks for the members as they are shown: the opening read failing
+      // after a list already showed the members is stale news, and says nothing.
+      if (opening && !cancelled && !membersWait.current.a.listed && !membersWait.current.b.listed) {
+        setSquadUnavailable(true);
+        membersWait.current.a.fail();
+        membersWait.current.b.fail();
       }
     };
     read(true);
@@ -2183,7 +2197,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // member's id and against no list the name would be minted again; once a read has
     // failed it goes on without them, as it always did, and says so below.
     if (!membersWait.current[side].ended) {
-      notify("error", `"${value}" could not be named: the team members are not loaded. Try again in a moment.`);
+      notify("error", membersNotReadNotice(value));
       return;
     }
     if (!mountedRef.current || sideChanged() || superseded()) return;

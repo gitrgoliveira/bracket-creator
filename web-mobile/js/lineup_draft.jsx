@@ -28,7 +28,7 @@ import {
   previousLineupConfirm, PREVIOUS_LINEUP_LABEL, REMOVED_UNREAD_NOTICE, STARTING_ROUND,
   lineupReadFailure,
 } from './lineup_resolver.jsx';
-import { FETCH_TIMEOUT_MS, withinDeadline, writePending } from './write_result.jsx';
+import { FETCH_TIMEOUT_MS, TIMED_OUT, withinDeadline, writePending } from './write_result.jsx';
 
 const STORAGE_PREFIX = 'bc.lineupDraft.v1:';
 // A draft older than this is never offered: the operator has moved on.
@@ -292,6 +292,14 @@ export function newMembersWait() {
     fail: () => { wait.ended = true; },
   };
   return wait;
+}
+
+// The ONE wording of a typed name refused because the team's members are still being
+// read (stage 3 review 3, F1): the Lineups page's add row and the team sheet's typed
+// representative both say it, and the typed name stays where it was typed.
+export function membersNotReadNotice(name) {
+  const reason = "the team's members are still being read. Try again once the list shows.";
+  return name ? `"${name}" was not placed: ${reason}` : `T${reason.slice(1)}`;
 }
 
 // useLineupForm: the state of one lineup editor, for a team's match (`matchId`)
@@ -647,18 +655,28 @@ export function useLineupForm({ compId, teamId, matchId = '', positionKeys, pass
   // name would mint a new member instead of resolving to the one already on the
   // team. Changing the team or the password, or leaving, ends this read: it was
   // made for what no longer applies. Its failure flags the members as unavailable
-  // unless a read's list is shown for the team by then.
+  // unless a read's list is shown for the team by then, and so does a read not
+  // answered by the deadline of any bounded request (stage 3 review 3, F1): a read
+  // that never answers would otherwise leave every typed name unresolved for the
+  // editor's life. A list that arrives after the deadline is still shown.
   useEffect(() => {
     if (!compId || !teamId) return undefined;
     let ended = false;
-    readMembers(compId, teamId, password).then((members) => {
+    const reading = readMembers(compId, teamId, password);
+    withinDeadline(reading, FETCH_TIMEOUT_MS).then((members) => {
       if (ended) return;
-      if (members) {
+      if (Array.isArray(members)) {
         showMembers(teamKey, members);
-      } else if (!firstMembers.current.listed) {
+        return;
+      }
+      if (!firstMembers.current.listed) {
         setSquadUnavailable(true);
         firstMembers.current.fail();
       }
+      if (members !== TIMED_OUT) return;
+      reading.then((late) => {
+        if (!ended && Array.isArray(late)) showMembers(teamKey, late);
+      });
     });
     return () => { ended = true; };
   }, [compId, teamId, password, teamKey]);

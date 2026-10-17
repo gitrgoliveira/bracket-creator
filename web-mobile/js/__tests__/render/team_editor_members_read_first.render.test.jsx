@@ -37,6 +37,7 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vites
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { readCode } from '../helpers/source.js';
 import { lineupPutStubByTeam } from '../helpers/lineup_server.js';
+import { FETCH_TIMEOUT_MS } from '../../write_result.jsx';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -225,6 +226,31 @@ describe('team editor: a name typed before the team\'s members were read never w
     await typeName(bout(container, 0, 'shiro'), 'Newcomer');
 
     expect(window.API.addTeamMember, 'the name is added against no list, at once').toHaveBeenCalledWith('comp1', 'team-B', 'Newcomer', '', expect.any(Object));
+    expect(notices(container)).toHaveLength(1);
+    expect(notices(container)[0]).toContain('team member list could not be loaded');
+  });
+
+  // Stage 3 review 3, F1: a members read that is never answered is ended at the
+  // deadline of any bounded request, as one that fails is, so a name typed after it
+  // goes on without the members and says so, rather than being saved by name alone
+  // for the sheet's whole life.
+  it('goes on without the members once their read is not answered by its deadline, and says so', async () => {
+    vi.useFakeTimers();
+    const settle = () => act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    let container;
+    try {
+      await act(async () => {
+        ({ container } = render(<ScoreEditorModal match={teamMatch()} onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue(undefined)} password="" />));
+      });
+      await act(async () => { competition.resolve(KNOCKOUT_DETAIL); });
+      await settle();
+      await act(async () => { await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS); });
+      await type(bout(container, 0, 'shiro'), 'Newcomer');
+      await settle();
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(window.API.addTeamMember, 'the read is over: the name is added against no list').toHaveBeenCalledWith('comp1', 'team-B', 'Newcomer', '', expect.any(Object));
     expect(notices(container)).toHaveLength(1);
     expect(notices(container)[0]).toContain('team member list could not be loaded');
   });

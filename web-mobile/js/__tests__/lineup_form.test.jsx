@@ -1498,6 +1498,44 @@ describe('the team\'s members', () => {
       expect(view.result.current.squadUnavailable).toBe(true);
     });
 
+    // Stage 3 review 3, F1: a read that is never answered must not leave a typed name
+    // unresolved for the editor's life. The read made as the editor opens is ended at
+    // the deadline of any bounded request, as a failure is.
+    it('is ended at the deadline of any bounded request, saying the members could not be read', async () => {
+      vi.useFakeTimers();
+      try {
+        const view = await openedWith(deferred());
+        await act(async () => { await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS - 1); });
+        expect(view.result.current.membersReadOver(), 'the read is still out').toBe(false);
+        expect(view.result.current.squadUnavailable).toBe(false);
+        await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+        expect(view.result.current.membersReadOver()).toBe(true);
+        expect(view.result.current.membersListed()).toBe(false);
+        expect(view.result.current.squadUnavailable).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('ends at the deadline for good: a name typed next goes on, the members read as unavailable, and a list that arrives later is still shown', async () => {
+      vi.useFakeTimers();
+      try {
+        const opening = deferred();
+        const view = await openedWith(opening);
+        await act(async () => { await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS); });
+        expect(view.result.current.membersReadOver(), 'a name typed next goes on at once').toBe(true);
+        expect(view.result.current.squadUnavailable, 'and the editor says the members could not be read').toBe(true);
+
+        await act(async () => { opening.resolve({ t: MEMBERS }); });
+
+        expect(view.result.current.squad, 'the list that arrives late is shown').toEqual(MEMBERS);
+        expect(view.result.current.squadUnavailable, 'and the members are available again').toBe(false);
+        expect(view.result.current.membersListed()).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('is not made true by a member the editor wrote itself: only a read\'s list makes it', async () => {
       const opening = deferred();
       const view = await openedWith(opening);

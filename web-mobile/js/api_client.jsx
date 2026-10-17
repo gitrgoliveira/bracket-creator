@@ -2269,18 +2269,18 @@ async function _sendTapBatch(base, batch, pass) {
         if (body.match) _noteDerived(base, body.match);
         const byId = new Map((Array.isArray(body.outcomes) ? body.outcomes : []).map((o) => [o && o.id, o]));
         let result = 'settled';
-        // Taps the server answered without logging them (re-stamped for the
-        // clock, or named no outcome): each may need a fresh seq (_reseqUnheldTap).
+        // Taps the server provably did not log (refused clock_skew, re-stamped
+        // below): each may need a fresh seq (_reseqUnheldTap).
         const unheld = [];
         for (const [k, d] of batch) {
             if (_writeQueue.get(k) !== d) continue;
             const o = byId.get(d.payload && d.payload.id);
             if (!o) {
-                // No outcome: whether it was applied is unknown. It stays queued
-                // and is sent again on the backoff, like any write that failed.
+                // No outcome: whether it was applied is unknown, so it may be
+                // logged. It keeps its id AND its seq (R6) and is sent again on
+                // the backoff exactly as it went, like a write a 5xx left queued.
                 pass.anyFailed = true;
                 if (result === 'settled') result = 'kept';
-                unheld.push([k, d]);
                 continue;
             }
             if (o.outcome === TAP_CLOCK_SKEW && !d.skewRetried) {
@@ -2374,8 +2374,9 @@ async function _restampQueuedTapForSkew(d) {
 
 
 // _reseqUnheldTap (M3): the ONE rule for a queued tap the server answered
-// without logging it (a clock-skew refusal, or an answer naming no outcome for
-// it). A match copy names, per device session, the highest seq its score log
+// without logging it: a clock-skew refusal, the one answer that provably logged
+// nothing (R6: a tap the answer names no outcome for may be logged, so it keeps
+// its seq and is resent as it went). A match copy names, per device session, the highest seq its score log
 // holds (`eventSeqs`), and a screen reads a tap at or below it as already in
 // the copy (applyPending, score_events.jsx). When a later tap of the same
 // session landed, that number already covers this one, so the board would drop

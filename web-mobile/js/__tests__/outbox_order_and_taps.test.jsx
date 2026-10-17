@@ -148,6 +148,24 @@ describe('M3: a tap the server does not hold stays on the board', () => {
         expect(batches.length).toBe(2);
         expect(API.pendingTaps('c1', 'm1')).toEqual([]);
     });
+
+    // R6 (review 2): only a clock_skew refusal is provably unlogged. A tap the
+    // answer names no outcome for may be logged, so it keeps its id AND its seq
+    // and is resent as it was, exactly like one a 5xx left queued.
+    it('a tap the answer names no outcome for keeps its seq when resent, even behind an applied one', async () => {
+        await load();
+        const batches = eventServer({ outcome: (e, b) => (b === 0 && e.seq === 1 ? null : { outcome: 'applied' }) });
+        API.recordTap('c1', 'm1', tap('M'), 'pw', { id: 'm1' });
+        API.recordTap('c1', 'm1', tap('K'), 'pw', { id: 'm1' });
+        await tick(0);
+        expect(batches.length).toBe(1);
+        const first = batches[0].body.events.find((e) => e.seq === 1);
+        await tick(1000);
+        expect(batches.length).toBe(2);
+        // The applied tap behind it is resent too (strict order; a duplicate is
+        // harmless): what matters is the first one goes as it went.
+        expect(batches[1].body.events[0]).toMatchObject({ id: first.id, seq: 1 });
+    });
 });
 
 describe('minor taps rules', () => {

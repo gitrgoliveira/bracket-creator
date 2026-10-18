@@ -118,43 +118,75 @@ export async function tapNeighbour(locator, direction) {
 export async function doubleTap(locator) {
   const page = locator.page();
   const { x, y } = await centreOf(locator);
-  await page.evaluate(() => {
+  // The page records each click and touch, and whether the control under the
+  // point was disabled when the second touch ended (the first tap may disable
+  // it, which is why that touch makes no click). The listeners are removed in
+  // the finally below whatever the page saw, so none outlives this call.
+  await page.evaluate(({ px, py }) => {
     window.__clumsyClicks = [];
     window.__clumsyTouches = [];
-    for (const [type, seen] of [['click', window.__clumsyClicks], ['touchstart', window.__clumsyTouches]]) {
-      document.addEventListener(type, function rec() {
+    window.__clumsySecondDisabled = null;
+    const disabledAt = () => {
+      const el = document.elementFromPoint(px, py);
+      const control = el && el.closest('button, [role="button"], input, select, textarea');
+      return !!control && (control.disabled === true || control.getAttribute('aria-disabled') === 'true');
+    };
+    const listeners = [];
+    const ends = [];
+    for (const [type, seen] of [['click', window.__clumsyClicks], ['touchstart', window.__clumsyTouches], ['touchend', ends]]) {
+      const rec = () => {
         seen.push(Date.now());
-        if (seen.length === 2) document.removeEventListener(type, rec, true);
-      }, true);
+        // Read as the second tap ends, just before its click would come.
+        if (type === 'touchend' && seen.length === 2) window.__clumsySecondDisabled = disabledAt();
+      };
+      document.addEventListener(type, rec, true);
+      listeners.push([type, rec]);
     }
-  });
-  // The four touch events go back to back on ONE CDP session, so the second
-  // tap is queued in the page right behind the first rather than after a
-  // host round trip (two awaited touchscreen.tap calls measured over 500 ms
-  // in the page on a loaded machine). One session delivers them in order.
-  const cdp = await page.context().newCDPSession(page);
+    window.__clumsyRemove = () => {
+      for (const [type, rec] of listeners) document.removeEventListener(type, rec, true);
+      window.__clumsyRemove = null;
+    };
+  }, { px: x, py: y });
+  let seen;
   try {
-    const sent = [];
-    for (let i = 0; i < 2; i++) {
-      sent.push(cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] }));
-      sent.push(cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }));
+    // The four touch events go back to back on ONE CDP session, so the second
+    // tap is queued in the page right behind the first rather than after a
+    // host round trip (two awaited touchscreen.tap calls measured over 500 ms
+    // in the page on a loaded machine). One session delivers them in order.
+    const cdp = await page.context().newCDPSession(page);
+    try {
+      const sent = [];
+      for (let i = 0; i < 2; i++) {
+        sent.push(cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] }));
+        sent.push(cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }));
+      }
+      await Promise.all(sent);
+    } finally {
+      await cdp.detach().catch(() => {});
     }
-    await Promise.all(sent);
+    seen = await page.evaluate(() => ({
+      clicks: window.__clumsyClicks, touches: window.__clumsyTouches, secondDisabled: window.__clumsySecondDisabled,
+    }));
   } finally {
-    await cdp.detach().catch(() => {});
+    await page.evaluate(() => { if (typeof window.__clumsyRemove === 'function') window.__clumsyRemove(); }).catch(() => {});
   }
-  const { clicks, touches } = await page.evaluate(() => ({ clicks: window.__clumsyClicks, touches: window.__clumsyTouches }));
+  const { clicks, touches, secondDisabled } = seen;
   if (!Array.isArray(touches) || touches.length !== 2) {
     throw new Error(`clumsy.doubleTap: the page saw ${Array.isArray(touches) ? touches.length : 'no'} touch(es), not 2, so the row did not test the bounce guard`);
   }
   if (!Array.isArray(clicks) || clicks.length === 0 || clicks.length > 2) {
     throw new Error(`clumsy.doubleTap: the two taps produced ${Array.isArray(clicks) ? clicks.length : 'no'} click(s) in the page, so the row did not test the bounce guard`);
   }
+  // One click is a double tap only when the first tap disabled the control,
+  // so the second touch landed on a disabled one; otherwise a tap was lost.
+  if (clicks.length === 1 && secondDisabled !== true) {
+    throw new Error('clumsy.doubleTap: the two taps produced one click while the control was not disabled at the second touch, so a tap was lost and the row did not test the bounce guard');
+  }
   const gapMs = clicks.length === 2 ? clicks[1] - clicks[0] : touches[1] - touches[0];
   if (gapMs >= DOUBLE_TAP_LIMIT_MS) {
     throw new Error(`clumsy.doubleTap: the two taps were ${gapMs} ms apart (limit ${DOUBLE_TAP_LIMIT_MS} ms, the app's bounce window is ${TAP_BOUNCE_MS} ms): this machine was too slow, so the row did not test the bounce guard`);
   }
-  return { gapMs, clicks: clicks.length, withinWindow: true };
+  return { gapMs, clicks: clicks.length, withinWindow: true, secondDisabled: clicks.length === 1 };
 }
 
 // V2 (second form). Tap `locator`, then tap the same spot again while the

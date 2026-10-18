@@ -227,10 +227,15 @@ func copyTeamLineups(in map[string]domain.TeamLineup) map[string]domain.TeamLine
 	return out
 }
 
+// lineupParses counts the parses of lineups.yaml, for the test that pins one
+// parse per transaction (stage 6 review 8, m4).
+var lineupParses atomic.Int64
+
 // parseTeamLineupsBytes parses lineups.yaml from in-memory bytes.
 // Used by tx-internal read-your-own-writes (storeTx LoadTeamLineups).
 // Empty input → empty map, matching the "file does not exist" contract.
 func parseTeamLineupsBytes(data []byte) (map[string]domain.TeamLineup, error) {
+	lineupParses.Add(1)
 	if len(data) == 0 {
 		return map[string]domain.TeamLineup{}, nil
 	}

@@ -416,6 +416,13 @@ type storeTx struct {
 	// kept is the lineups kachinuki matches started with that this
 	// transaction wrote, announced once it commits (OnStartLineupKept).
 	kept []keptLineup
+	// lineups is lineups.yaml as this transaction holds it, parsed ONCE
+	// (stage 6 review 8, m4: a lineup save parsed it four to five times):
+	// every read answers a copy of it, a write through this transaction's
+	// own lineup writers replaces it with what it wrote, and any other staged
+	// write of the file (txWriteFn) drops it, to be parsed again. nil until
+	// first read.
+	lineups map[string]domain.TeamLineup
 }
 
 // IsTransactional reports whether h is a LIVE transaction handle rather than
@@ -453,9 +460,28 @@ func IsTransactional(h StoreTx) bool {
 // shim closure converts.
 func (t *storeTx) txWriteFn() writeFn {
 	walWrite := t.wal.WriteFn()
+	lineupsPath := t.store.compPath(t.compID, teamLineupFilename)
 	return func(path string, data []byte, perm os.FileMode) error {
+		if path == lineupsPath {
+			// The parsed copy no longer says what is staged (m4).
+			t.lineups = nil
+		}
 		return walWrite(path, data, perm)
 	}
+}
+
+// keepLineups records lineups as what this transaction just staged for
+// lineups.yaml (its own lineup writers, after their write), so the next read
+// answers a copy of it rather than parsing the bytes again (m4). A lineup
+// read back is the shape the file gives: Positions never nil.
+func (t *storeTx) keepLineups(lineups map[string]domain.TeamLineup) {
+	for k, l := range lineups {
+		if l.Positions == nil {
+			l.Positions = map[domain.Position]string{}
+			lineups[k] = l
+		}
+	}
+	t.lineups = lineups
 }
 
 // pendingFor returns the WAL-staged bytes for the file `filename`
@@ -612,10 +638,20 @@ func (t *storeTx) LoadTeamLineupsWithRemoved(compID string) (map[string]domain.T
 	if err := t.checkCompID(compID); err != nil {
 		return nil, err
 	}
-	if pending, ok := t.pendingFor(teamLineupFilename); ok {
-		return parseTeamLineupsBytes(pending)
+	if t.lineups == nil {
+		var parsed map[string]domain.TeamLineup
+		var err error
+		if pending, ok := t.pendingFor(teamLineupFilename); ok {
+			parsed, err = parseTeamLineupsBytes(pending)
+		} else {
+			parsed, err = t.store.loadTeamLineupsLocked(compID)
+		}
+		if err != nil {
+			return nil, err
+		}
+		t.lineups = parsed
 	}
-	return t.store.loadTeamLineupsLocked(compID)
+	return copyTeamLineups(t.lineups), nil
 }
 
 func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int) error {
@@ -625,29 +661,21 @@ func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
-	// Read-your-own-writes: if lineups.yaml is already staged, merge
-	// into the staged map instead of the on-disk version. Otherwise
-	// the staged write would be discarded on the next save.
-	if pending, ok := t.pendingFor(teamLineupFilename); ok {
-		if err := l.ValidatePositions(teamSize); err != nil {
-			return err
-		}
-		current, perr := parseTeamLineupsBytes(pending)
-		if perr != nil {
-			return perr
-		}
-		key := lineupStorageKey(l)
-		l.CompetitionID = compID
-		current[key] = l
-		if err := t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn()); err != nil {
-			return err
-		}
-		t.noteStartLineup(l)
-		return nil
-	}
-	if err := t.store.setTeamLineupLocked(compID, l, teamSize, t.txWriteFn()); err != nil {
+	if err := l.ValidatePositions(teamSize); err != nil {
 		return err
 	}
+	// Read-your-own-writes: merged into what this transaction holds (the
+	// staged map when lineups.yaml is already staged), parsed once (m4).
+	current, err := t.LoadTeamLineupsWithRemoved(compID)
+	if err != nil {
+		return err
+	}
+	l.CompetitionID = compID
+	current[lineupStorageKey(l)] = l.Clone()
+	if err := t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn()); err != nil {
+		return err
+	}
+	t.keepLineups(current)
 	t.noteStartLineup(l)
 	return nil
 }
@@ -677,11 +705,12 @@ func (t *storeTx) SetTeamLineups(compID string, ls []domain.TeamLineup, teamSize
 	}
 	for _, l := range ls {
 		l.CompetitionID = compID
-		current[lineupStorageKey(l)] = l
+		current[lineupStorageKey(l)] = l.Clone()
 	}
 	if err := t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn()); err != nil {
 		return err
 	}
+	t.keepLineups(current)
 	for _, l := range ls {
 		t.noteStartLineup(l)
 	}
@@ -713,7 +742,11 @@ func (t *storeTx) removeTeamLineup(compID, key string) error {
 	if !removeTeamLineup(current, key, LineupArrivalStamp()) {
 		return nil
 	}
-	return t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn())
+	if err := t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn()); err != nil {
+		return err
+	}
+	t.keepLineups(current)
+	return nil
 }
 
 // keptLineup names a lineup a kachinuki match started with that the

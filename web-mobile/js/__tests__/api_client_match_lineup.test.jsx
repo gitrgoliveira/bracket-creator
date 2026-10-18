@@ -300,6 +300,22 @@ describe('API.deleteMatchLineup stamps the removal when it is made', () => {
   beforeEach(() => { originalFetch = global.fetch; });
   afterEach(() => { global.fetch = originalFetch; API.clearQueue(); });
 
+  // Stage 6 review 8 (m7): a change the server kept whose carried lineups
+  // could not all follow it answers with a warning, told once to the operator.
+  it('tells the operator the warning a kept change comes back with', async () => {
+    const { subscribeQueueAlert } = await import('../api_client.jsx');
+    const alerts = [];
+    const off = subscribeQueueAlert((a) => alerts.push(a));
+    const warning = 'Lineup saved, but the lineup of P1-1 could not follow it and was left as it was (x). Check that match\'s lineup.';
+    global.fetch = vi.fn(() => Promise.resolve({ ok: true, status: 200, json: async () => ({ teamId: 't1', matchId: 'm1', positions: {}, warning }) }));
+    const res = await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Bob' }, 'pw', undefined, ['senpo']);
+    await res.settled;
+    const told = alerts.filter((a) => a.kind === 'lineup_warning');
+    expect(told).toHaveLength(1);
+    expect(told[0].detail).toBe(warning);
+    if (typeof off === 'function') off();
+  });
+
   it('sends removedAt, the stamp it was queued under', async () => {
     global.fetch = vi.fn(() => Promise.resolve({ ok: true, status: 204, json: async () => ({}) }));
     const res = await API.deleteMatchLineup('c1', 't1', 'm1', 'pw');

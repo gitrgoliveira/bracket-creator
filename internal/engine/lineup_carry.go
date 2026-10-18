@@ -29,9 +29,11 @@ package engine
 import (
 	"cmp"
 	"fmt"
+	"log"
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -220,12 +222,13 @@ func (lc *lineupCarry) carryInto(l *domain.TeamLineup, at int64) string {
 // rederive works out again every carried lineup of the team (its copies, and
 // its pins), in match order, so each reads the ones before it as they now
 // are, and answers the store keys of the ones that changed.
-func (lc *lineupCarry) rederive(teamID string) []string {
+func (lc *lineupCarry) rederive(teamID string, frozen map[string]bool) []string {
 	var keys []string
 	for k, l := range lc.lineups {
 		// A removed record is what it was when taken away: only its stamps'
 		// reads use it, through sourceAt, which works its carry out again.
-		if l.TeamID != teamID || l.IsRemoved() || (!l.IsCarriedCopy() && !l.IsStartPin()) {
+		// A frozen one stays as stored (FollowLineupSave).
+		if l.TeamID != teamID || l.IsRemoved() || (!l.IsCarriedCopy() && !l.IsStartPin()) || frozen[k] {
 			continue
 		}
 		if _, ok := lc.draw[l.MatchID]; !ok {
@@ -434,22 +437,75 @@ func (e *Engine) FollowLineupSave(h state.StoreTx, comp *state.Competition, save
 	if err != nil {
 		return nil, err
 	}
-	lc := newLineupCarry(lineups, pool, bracket, comp.IsKnockoutEnabled(), comp.TeamSize)
-	keys := lc.rederive(saved.TeamID)
-	if len(keys) == 0 {
-		return nil, nil
+	// A carried lineup the domain refuses as worked out (a position the
+	// competition's team size has no place for, kept from older data) is a
+	// refusal sending the change again would meet again: it stays as stored,
+	// the ones after it are worked out from it as stored, and the change
+	// itself is kept (stage 6 review 8, m7: failing the save held its outbox
+	// entry, and every later write of the match behind it, forever).
+	frozen := map[string]bool{}
+	var refused *DerivedLineupError
+	var lc *lineupCarry
+	var keys []string
+	for {
+		lc = newLineupCarry(maps.Clone(lineups), pool, bracket, comp.IsKnockoutEnabled(), comp.TeamSize)
+		keys = lc.rederive(saved.TeamID, frozen)
+		bad := ""
+		for _, k := range keys {
+			if verr := lc.lineups[k].ValidatePositions(comp.TeamSize); verr != nil {
+				bad = k
+				if refused == nil {
+					refused = &DerivedLineupError{Err: verr}
+				}
+				refused.MatchIDs = append(refused.MatchIDs, lc.lineups[k].MatchID)
+				break
+			}
+		}
+		if bad == "" {
+			break
+		}
+		frozen[bad] = true
 	}
-	// Every lineup that moved in ONE staged write, and a store that refuses
-	// it fails the save's transaction, as a pin that cannot be kept fails the
-	// start: what the carry worked out is never half stored.
 	moved := make([]string, 0, len(keys))
-	out := make([]domain.TeamLineup, 0, len(keys))
-	for _, k := range keys {
-		out = append(out, lc.lineups[k])
-		moved = append(moved, lc.lineups[k].MatchID)
+	if len(keys) > 0 {
+		// Every lineup that moved in ONE staged write, and a store that
+		// refuses it fails the save's transaction, as a pin that cannot be
+		// kept fails the start: what the carry worked out is never half
+		// stored.
+		out := make([]domain.TeamLineup, 0, len(keys))
+		for _, k := range keys {
+			out = append(out, lc.lineups[k])
+			moved = append(moved, lc.lineups[k].MatchID)
+		}
+		if err := h.SetTeamLineups(comp.ID, out, comp.TeamSize); err != nil {
+			return nil, fmt.Errorf("competition %s team %s: the lineups carried after a lineup save were not kept: %w", comp.ID, saved.TeamID, err)
+		}
 	}
-	if err := h.SetTeamLineups(comp.ID, out, comp.TeamSize); err != nil {
-		return nil, fmt.Errorf("competition %s team %s: the lineups carried after a lineup save were not kept: %w", comp.ID, saved.TeamID, err)
+	if refused != nil {
+		log.Printf("ERROR engine: competition %s team %s: %v", comp.ID, saved.TeamID, refused)
+		return moved, refused
 	}
 	return moved, nil
+}
+
+// DerivedLineupError reports the carried lineups a lineup change could not
+// keep as worked out, because the domain refuses them (Err): a refusal that
+// sending the change again would meet again. The change itself and every
+// other carried lineup were kept; the refused ones stay as they were stored
+// (FollowLineupSave, stage 6 review 8, m7).
+type DerivedLineupError struct {
+	MatchIDs []string
+	Err      error
+}
+
+func (d *DerivedLineupError) Error() string {
+	return fmt.Sprintf("the lineups carried at %s could not follow the change and were left as they were: %v", strings.Join(d.MatchIDs, ", "), d.Err)
+}
+
+func (d *DerivedLineupError) Unwrap() error { return d.Err }
+
+// Warning is the sentence the operator is told.
+func (d *DerivedLineupError) Warning() string {
+	return fmt.Sprintf("Lineup saved, but the lineup of %s could not follow it and was left as it was (%v). Check that match's lineup.",
+		strings.Join(d.MatchIDs, ", "), d.Err)
 }

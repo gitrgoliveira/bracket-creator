@@ -648,3 +648,36 @@ func TestLineupCarry_AFollowThatCannotBeStoredFailsTheSave(t *testing.T) {
 	require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
 	require.Equal(t, "Sato", e.at("", 1), "the removal was not kept")
 }
+
+// A carried lineup the domain refuses as worked out (here a position the
+// team size has no place for, kept from older data) is no failure of the
+// change that moved it (stage 6 review 8, m7): sending the change again would
+// meet the same refusal, so failing it held its outbox entry, and every later
+// write of the match behind it, for good. The change is kept, the refused
+// lineup stays as stored, and the answer tells the operator. A store that
+// cannot keep what was worked out still fails the change (the test above).
+func TestLineupCarry_ACarriedLineupTheDomainRefusesKeepsTheChange(t *testing.T) {
+	e := newCarryEnv(t, false)
+	p1, p2, p5 := domain.PositionNumbered(1), domain.PositionNumbered(2), domain.PositionNumbered(5)
+	require.NoError(t, e.store.SetTeamLineup(e.comp, domain.TeamLineup{TeamID: e.id["Taka"], MatchID: "P1-1",
+		Positions: map[domain.Position]string{p1: "Sato", p2: "Ueda", p5: "Endo"},
+		Stamps:    map[domain.Position]int64{p1: e.base - 1000, p2: e.base - 1000, p5: e.base + 100},
+		CopiedAt:  e.base + 100, Own: []domain.Position{p5}}, 6))
+	rec := e.do(http.MethodPut, e.lineupPath(""), map[string]any{
+		"positions": map[domain.Position]string{p2: "Doi"}, "memberIds": map[domain.Position]string{p2: e.members["Doi"]},
+		"changed": []domain.Position{p2}, "changedAt": map[domain.Position]int64{p2: e.base + 50}, "writeId": "w-start",
+	})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Contains(t, body["warning"], "P1-1", "the operator is told which lineup could not follow")
+	require.Equal(t, "Doi", e.at("", 2), "the change is kept")
+	kept, ok := e.lineup("P1-1")
+	require.True(t, ok)
+	require.Equal(t, "Ueda", kept.Positions[p2], "the refused lineup stays as stored")
+	// The removal doors the same.
+	rec = e.do(http.MethodDelete, e.lineupPath(""), map[string]any{"writeId": "rm-start", "removedAt": e.base + 60})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "warning")
+	require.Equal(t, "(none)", e.at("", 1), "the removal is kept")
+}

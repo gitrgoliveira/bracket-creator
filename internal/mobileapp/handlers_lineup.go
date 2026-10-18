@@ -404,16 +404,25 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 	// the match started with, in the save's transaction (engine.FollowLineupSave).
 	// A follow that cannot store what it worked out fails the transaction
 	// (stage 6 review 7), as a pin that cannot be kept fails the start.
-	follow := func(stx state.StoreTx, comp *state.Competition, saved domain.TeamLineup, changed []domain.Position) error {
+	// A carried lineup the domain refuses as worked out is no failure of the
+	// change (stage 6 review 8, m7): the change is kept, the refused lineup
+	// stays as stored, and the operator is told (the warning); a store that
+	// cannot keep what was worked out fails the transaction.
+	follow := func(stx state.StoreTx, comp *state.Competition, saved domain.TeamLineup, changed []domain.Position) (string, error) {
+		warning := ""
 		for _, k := range keepers {
 			if k == nil {
 				continue
 			}
 			if _, err := k.FollowLineupSave(stx, comp, saved, changed); err != nil {
-				return err
+				var derived *engine.DerivedLineupError
+				if !errors.As(err, &derived) {
+					return "", err
+				}
+				warning = derived.Warning()
 			}
 		}
-		return nil
+		return warning, nil
 	}
 	// A lineup save is ordered by arrival: a late duplicate of one is
 	// answered as recorded (writeOnce, Y8).
@@ -458,7 +467,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 		if !ok {
 			return
 		}
-		removed := false
+		removed, warning := false, ""
 		target := lineupSave{compID: compID, teamID: teamID, round: round}.target()
 		ran := once.do(target, body.WriteID, func() bool {
 			// Taken away as a change stamped when it was made, its record
@@ -475,7 +484,8 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 				if err != nil || comp == nil {
 					return err
 				}
-				return follow(stx, comp, domain.TeamLineup{TeamID: teamID, Round: round}, nil)
+				warning, err = follow(stx, comp, domain.TeamLineup{TeamID: teamID, Round: round}, nil)
+				return err
 			})
 			if txErr != nil {
 				internalError(c, txErr)
@@ -486,7 +496,11 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 		if ran && c.Writer.Written() {
 			return
 		}
-		c.Status(http.StatusNoContent)
+		if warning != "" {
+			c.JSON(http.StatusOK, gin.H{"warning": warning})
+		} else {
+			c.Status(http.StatusNoContent)
+		}
 		if ran && removed {
 			announce(compID, teamID, "")
 		}
@@ -561,7 +575,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 		if !ok {
 			return
 		}
-		applied, changed := false, false
+		applied, changed, warning := false, false, ""
 		target := lineupSave{compID: compID, teamID: teamID, matchID: matchID}.target()
 		ran := once.do(target, body.WriteID, func() bool {
 			// On a kachinuki match that has started, taking its own lineup
@@ -578,8 +592,13 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			}
 			var err error
 			if changed, err = remove(); err != nil {
-				internalError(c, err)
-				return false
+				var derived *engine.DerivedLineupError
+				if !errors.As(err, &derived) {
+					internalError(c, err)
+					return false
+				}
+				// Kept, with a carried lineup that could not follow it (m7).
+				warning = derived.Warning()
 			}
 			applied = true
 			return true
@@ -591,7 +610,11 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 		if !applied {
 			return
 		}
-		c.Status(http.StatusNoContent)
+		if warning != "" {
+			c.JSON(http.StatusOK, gin.H{"warning": warning})
+		} else {
+			c.Status(http.StatusNoContent)
+		}
 		if changed {
 			announce(compID, teamID, matchID)
 		}
@@ -859,10 +882,19 @@ func (w lineupSave) landPartial(stx state.StoreTx, comp *state.Competition, chan
 // (lineupSave.lineupToStore), saves it and reads it back with find for the
 // response. The answer is written after the lock releases (txResponse), and a
 // saved lineup is broadcast so SSE clients re-fetch it.
-func saveLineup(c *gin.Context, tx CompetitionTransactor, announce func(compID, teamID, matchID string), follow func(stx state.StoreTx, comp *state.Competition, saved domain.TeamLineup, changed []domain.Position) error, save lineupSave, guard func(stx state.StoreTx, judge *memberJudge) *txResponse, find func(map[string]domain.TeamLineup) (domain.TeamLineup, bool)) {
+// lineupAnswer is a lineup save's answer when a carried lineup could not
+// follow it (engine.DerivedLineupError, stage 6 review 8, m7): the lineup as
+// stored, and the sentence the operator is told.
+type lineupAnswer struct {
+	domain.TeamLineup
+	Warning string `json:"warning,omitempty"`
+}
+
+func saveLineup(c *gin.Context, tx CompetitionTransactor, announce func(compID, teamID, matchID string), follow func(stx state.StoreTx, comp *state.Competition, saved domain.TeamLineup, changed []domain.Position) (string, error), save lineupSave, guard func(stx state.StoreTx, judge *memberJudge) *txResponse, find func(map[string]domain.TeamLineup) (domain.TeamLineup, bool)) {
 	compID := save.compID
 	var respErr *txResponse
 	var persistedLineup domain.TeamLineup
+	warning := ""
 	duplicate := false
 	txErr := tx.WithTransaction(compID, func(stx state.StoreTx) error {
 		// TeamSize is competition-level: a 3-person team and a 5-person team
@@ -949,9 +981,11 @@ func saveLineup(c *gin.Context, tx CompetitionTransactor, announce func(compID, 
 			respErr = &txResponse{status: lineupSetStatus(err), body: gin.H{"error": err.Error()}}
 			return nil
 		}
-		if err := follow(stx, comp, lineup, changed); err != nil {
+		if warning, err = follow(stx, comp, lineup, changed); err != nil {
 			// Returned so the transaction aborts: the save is not kept
-			// without the lineups it moves (answered 500, sent again).
+			// without the lineups it moves (answered 500, sent again). A
+			// carried lineup the domain refuses is no such failure: the save
+			// is kept and the answer carries the warning (m7).
 			return err
 		}
 		// Reload after write so the response carries the persisted
@@ -984,7 +1018,11 @@ func saveLineup(c *gin.Context, tx CompetitionTransactor, announce func(compID, 
 		c.JSON(respErr.status, respErr.body)
 		return
 	}
-	c.JSON(http.StatusOK, persistedLineup)
+	if warning != "" {
+		c.JSON(http.StatusOK, lineupAnswer{TeamLineup: persistedLineup, Warning: warning})
+	} else {
+		c.JSON(http.StatusOK, persistedLineup)
+	}
 	if duplicate {
 		return
 	}

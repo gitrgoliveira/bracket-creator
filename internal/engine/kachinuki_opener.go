@@ -564,12 +564,24 @@ func (e *Engine) UsePreviousLineup(compID, teamID, matchID string) error {
 // changed.
 func (e *Engine) UsePreviousLineupAt(compID, teamID, matchID string, at int64) (bool, error) {
 	changed := false
+	var derived *DerivedLineupError
 	err := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
 		var err error
 		changed, err = e.UsePreviousLineupTx(tx, compID, teamID, matchID, at)
+		if errors.As(err, &derived) {
+			// Kept: a carried lineup that could not follow the removal stays
+			// as stored, and the caller tells the operator (m7).
+			return nil
+		}
 		return err
 	})
-	return changed, err
+	if err != nil {
+		return changed, err
+	}
+	if derived != nil {
+		return changed, derived
+	}
+	return changed, nil
 }
 
 // serverFighterEvent is whether e is one of the server's own fighter events

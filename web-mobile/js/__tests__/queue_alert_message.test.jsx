@@ -31,6 +31,11 @@ describe('queueAlertMessage', () => {
         expect(msg).toBe("A team member this device treated as not added was kept by the server. Check the team's member names and lineups.");
     });
 
+    it('tells the operator a kept lineup change whose carried lineup could not follow it (m7)', () => {
+        const detail = 'Lineup saved, but the lineup of P1-1 could not follow it and was left as it was (x). Check that match\'s lineup.';
+        expect(queueAlertMessage({ kind: 'lineup_warning', count: 1, terminalCount: 0, detail })).toBe(detail);
+    });
+
     it('tells the operator a change to a team member\'s name was not sent', () => {
         const msg = queueAlertMessage({ kind: 'member_unsent', count: 1, terminalCount: 0 });
         expect(msg).toMatch(/not sent/i);

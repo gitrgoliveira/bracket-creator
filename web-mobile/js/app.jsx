@@ -368,6 +368,10 @@ export function queueAlertMessage(alert) {
   if (n <= 0 && alert.kind !== "storage_full") return null;
   const detail = alert.detail ? ` (${alert.detail})` : "";
   switch (alert.kind) {
+    case "lineup_warning":
+      // The server's own sentence: the change was kept, and it names the
+      // carried lineup that could not follow it (stage 6 review 8, m7).
+      return alert.detail || null;
     case "unreadable":
       return `${n} queued ${one ? "write" : "writes"} could not be read and ${one ? "was" : "were"} discarded. Check the affected ${one ? "match" : "matches"}.`;
     case "rejected":

@@ -363,9 +363,15 @@ func anchorStartedCopy(h state.StoreTx, d *openerDraw, compID, matchID, teamID s
 	if err := h.SetTeamLineup(compID, own, d.comp.TeamSize); err != nil {
 		return false, fmt.Errorf("kachinuki match %s/%s: the lineup of team %s was not kept: %w", compID, matchID, teamID, err)
 	}
-	if fresh, err := h.LoadTeamLineups(compID); err == nil {
-		d.lineups = fresh
+	// The rest of the start (bout 1's seat, the team's later matches) reads
+	// the lineups as anchored: a read that fails fails the start, never
+	// leaves it working from the lineups as they were before (stage 6 review
+	// 9, G5).
+	fresh, err := h.LoadTeamLineups(compID)
+	if err != nil {
+		return false, fmt.Errorf("kachinuki match %s/%s: the lineups were not readable after the lineup of team %s was kept: %w", compID, matchID, teamID, err)
 	}
+	d.lineups = fresh
 	return true, nil
 }
 

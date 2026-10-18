@@ -11,10 +11,13 @@
 //   index key lists the match records, so a sign-out can clear them all.
 // - Each entry names the tab that noted it (`tab`). Every tab of the device
 //   sees the same copies of a match, so only one may tell a tap: the tab that
-//   noted it while that tab is alive (it writes its heartbeat to
+//   noted it while that tab is shown and alive (it writes its heartbeat to
 //   LANDED_TABS_KEY every LANDED_TAB_BEAT_MS, and as its page is hidden or
-//   shown: a hidden page is alive for LANDED_TAB_HIDDEN_LIVE_MS after its last
-//   beat, since its timers may stop), else the live tab with the lowest id. A tab that tells takes the entry out of the record first, so
+//   shown), else the shown tab with the lowest id (with none shown, a gone
+//   tab's taps go to the live tab with the lowest id). A hidden page is alive
+//   for LANDED_TAB_HIDDEN_LIVE_MS after its last beat, since its timers may
+//   stop, which keeps its entries from a sign-out and the sweep, never from
+//   being told by a shown tab (stage 6 review 10, M1). A tab that tells takes the entry out of the record first, so
 //   no later copy tells it again (one notice per tap per device). Nothing
 //   waits: a tap no tab may tell yet stays in the record for the next copy.
 // - Storage that refuses a write keeps the record in memory for that key;
@@ -55,6 +58,13 @@ function beatAlive(beat, t) {
     return t - Number(beat) < LANDED_TAB_LIVE_MS;
 }
 
+// Whether a tab's beat says it is shown and alive at t: only such a tab is
+// sure to tell its taps now, since a hidden page's timers may have stopped.
+function beatVisible(beat, t) {
+    if (beat && typeof beat === 'object') return !beat.hidden && t - Number(beat.at) < LANDED_TAB_LIVE_MS;
+    return t - Number(beat) < LANDED_TAB_LIVE_MS;
+}
+
 const SEP = '\u001f';
 
 export function landedTapsKey(compID, matchID) {
@@ -65,7 +75,7 @@ export function landedTapsKey(compID, matchID) {
  * @param {{ storage: { getItem(k: string): string|null, setItem(k: string, v: string): void, removeItem(k: string): void },
  *   now?: () => number, tab: string }} opts storage may throw on any call.
  */
-export function createLandedTaps({ storage, now = () => Date.now(), tab }) {
+export function createLandedTaps({ storage, now = () => Date.now(), tab, hidden }) {
     const memory = new Map(); // key -> object, for keys whose write storage refused
     const failed = new Set();
 
@@ -134,7 +144,8 @@ export function createLandedTaps({ storage, now = () => Date.now(), tab }) {
         return keys;
     };
 
-    // The tabs alive, by their heartbeat in storage.
+    // The tabs alive, by their heartbeat in storage: a hidden one counts, so
+    // a sign-out or the sweep never takes its entries.
     const liveTabs = () => {
         const tabs = readObj(LANDED_TABS_KEY);
         const t = now();
@@ -142,10 +153,26 @@ export function createLandedTaps({ storage, now = () => Date.now(), tab }) {
         for (const id of Object.keys(tabs)) if (beatAlive(tabs[id], t)) live.add(id);
         return live;
     };
-    const mayTell = (rec, live) => {
+    // The tabs shown and alive: the ones that tell. Hiddenness protects a
+    // tab's record, never its telling (stage 6 review 10, M1: a tap noted in a
+    // tab then hidden, its timers stopped, was told by no shown tab for up to
+    // LANDED_TAB_HIDDEN_LIVE_MS).
+    const tellingTabs = () => {
+        const tabs = readObj(LANDED_TABS_KEY);
+        const t = now();
+        const shown = new Set();
+        for (const id of Object.keys(tabs)) if (id !== tab && beatVisible(tabs[id], t)) shown.add(id);
+        if (!hiddenNow) shown.add(tab);
+        return shown;
+    };
+    const mayTell = (rec, live, shown) => {
         if (!rec.tab || rec.tab === tab) return true;
+        if (shown.has(rec.tab)) return false;
+        // Its tab is hidden or gone: the shown tab with the lowest id tells it,
+        // and with none shown, a gone tab's taps go to the live tab with the
+        // lowest id while a hidden one keeps its own.
+        if (shown.size) return [...shown].sort()[0] === tab;
         if (live.has(rec.tab)) return false;
-        // Its tab is gone: the live tab with the lowest id tells it.
         return [...live].sort()[0] === tab;
     };
 
@@ -220,8 +247,11 @@ export function createLandedTaps({ storage, now = () => Date.now(), tab }) {
     };
 
     // beat({ hidden }) says whether this tab's page is hidden; a beat with no
-    // word keeps what was said last.
-    let hiddenNow = false;
+    // word keeps what was said last. A page made in the background is hidden
+    // from its first beat (stage 6 review 10, m6).
+    let hiddenNow = typeof hidden === 'boolean'
+        ? hidden
+        : typeof document !== 'undefined' && document.visibilityState === 'hidden';
     const beat = (opts) => {
         if (opts && typeof opts.hidden === 'boolean') hiddenNow = opts.hidden;
         const tabs = readObj(LANDED_TABS_KEY);
@@ -304,10 +334,11 @@ export function createLandedTaps({ storage, now = () => Date.now(), tab }) {
             const obj = readObj(key);
             if (!Object.keys(obj).length) return [];
             const live = liveTabs();
+            const shown = tellingTabs();
             const told = [];
             for (const id of ids) {
                 const rec = obj[id];
-                if (!rec || !mayTell(rec, live)) continue;
+                if (!rec || !mayTell(rec, live, shown)) continue;
                 told.push({ id, rec });
                 delete obj[id];
             }

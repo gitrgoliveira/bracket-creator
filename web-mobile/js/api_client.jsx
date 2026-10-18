@@ -1633,10 +1633,16 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
     window.addEventListener('pagehide', () => _landed.leave());
 }
 // A hidden page's timers slow or stop: it beats as it is hidden and shown, so
-// the other tabs read it alive for longer while hidden (stage 6 review 9, F6).
+// the other tabs read it alive for longer while hidden (stage 6 review 9, F6),
+// and a page shown again tells at once what it may tell now, a hidden tab's
+// taps included (stage 6 review 10, M1).
 if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
     document.addEventListener('visibilitychange', () => {
-        _landed.beat({ hidden: document.visibilityState === 'hidden' });
+        if (document.visibilityState === 'hidden') _landed.beat({ hidden: true });
+        else {
+            _landed.beat({ hidden: false });
+            _landedBeat();
+        }
     });
 }
 // _forgetLandedTaps: on a sign-out the record goes with the operator who made

@@ -32,7 +32,7 @@ function fakeStorage() {
 const rec = (id) => ({ id, where: 'Pool A · Match 1', kind: 'ippon.add', side: 'a', pos: 1, letter: 'M' });
 
 describe('a tab in the background', () => {
-    it('keeps its taps through another tab\'s sign-out and is not told for', () => {
+    it('keeps its taps through another tab\'s sign-out', () => {
         const storage = fakeStorage();
         let t = 1_000;
         const now = () => t;
@@ -43,12 +43,70 @@ describe('a tab in the background', () => {
         b.beat({ hidden: true });
         t += LANDED_TAB_LIVE_MS * 3;
         a.beat();
-        expect(a.claim('c1', 'm1', ['x']), 'b is alive, a does not tell its tap').toEqual([]);
         a.forget();
         expect(b.has('c1', 'm1', 'y'), 'a sign-out in a leaves b\'s taps').toBe(true);
         // b comes back and tells its own.
         b.beat({ hidden: false });
+        expect(b.claim('c1', 'm1', ['y']).map((r) => r.id)).toEqual(['y']);
+    });
+
+    // Stage 6 review 10, M1: hiddenness protects a tab's record from a sign-out
+    // and the sweep, never its telling. Tap in tab b, switch to tab a (b hidden,
+    // its timers stopped), another device's Finish turns the tap away: a tells
+    // it at once, and b never tells it again.
+    it('has its taps told by a visible tab, once', () => {
+        const storage = fakeStorage();
+        let t = 1_000;
+        const now = () => t;
+        const b = createLandedTaps({ storage, now, tab: 'b' });
+        const a = createLandedTaps({ storage, now, tab: 'a' });
+        b.note('c1', 'm1', [rec('x')]);
+        b.beat({ hidden: true });
+        t += 1_000;
+        a.beat({ hidden: false });
+        expect(a.claim('c1', 'm1', ['x']).map((r) => r.id), 'the visible tab tells the hidden tab\'s tap').toEqual(['x']);
+        b.beat({ hidden: false });
+        expect(b.claim('c1', 'm1', ['x']), 'told once per device').toEqual([]);
+    });
+
+    it('leaves a gone tab\'s taps to the visible tab, not to a hidden one', () => {
+        const storage = fakeStorage();
+        const now = () => 1_000;
+        const z = createLandedTaps({ storage, now, tab: 'z' });
+        const a = createLandedTaps({ storage, now, tab: 'a' });
+        const b = createLandedTaps({ storage, now, tab: 'b' });
+        z.note('c1', 'm1', [rec('x')]);
+        z.leave();
+        a.beat({ hidden: true });
+        b.beat({ hidden: false });
+        expect(a.claim('c1', 'm1', ['x']), 'a hidden tab leaves it to the visible one').toEqual([]);
         expect(b.claim('c1', 'm1', ['x']).map((r) => r.id)).toEqual(['x']);
+    });
+
+    it('a live visible tab keeps telling its own taps', () => {
+        const storage = fakeStorage();
+        const now = () => 1_000;
+        const b = createLandedTaps({ storage, now, tab: 'b' });
+        const a = createLandedTaps({ storage, now, tab: 'a' });
+        b.note('c1', 'm1', [rec('x')]);
+        a.beat({ hidden: false });
+        expect(a.claim('c1', 'm1', ['x']), 'b is visible and alive: its own').toEqual([]);
+        expect(b.claim('c1', 'm1', ['x']).map((r) => r.id)).toEqual(['x']);
+    });
+
+    // m6: a tab opened in the background beats as hidden from its first beat.
+    it('starts hidden when its page is hidden as it is made', () => {
+        const storage = fakeStorage();
+        const desc = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+        Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+        try {
+            createLandedTaps({ storage, now: () => 1_000, tab: 'b' });
+        } finally {
+            if (desc) Object.defineProperty(document, 'visibilityState', desc);
+            else delete document.visibilityState;
+        }
+        const tabs = JSON.parse(storage.data.bc_landed_tabs_v1);
+        expect(tabs.b).toEqual({ at: 1_000, hidden: true });
     });
 
     it('is taken as gone once hidden past LANDED_TAB_HIDDEN_LIVE_MS', () => {

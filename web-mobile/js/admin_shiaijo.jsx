@@ -1022,7 +1022,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         () => courtMatchesRaw.filter(hasBothSides).map((m) => {
             const f = finishedHere[matchKey(m)];
             if (!finishedHereHolds(f, m)) return m;
-            return { ...m, ...(f.fields || {}), status: "completed", ...(f.winner ? { winner: f.winner } : {}) };
+            return { ...m, ...f.fields, status: "completed", ...(f.winner ? { winner: f.winner } : {}) };
         }),
         [courtMatchesRaw, finishedHere]
     );

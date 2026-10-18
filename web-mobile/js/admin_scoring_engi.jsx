@@ -35,7 +35,7 @@ import { makeEvent, FLAG_ADD, FLAG_REMOVE, MAX_FLAGS } from './score_events.jsx'
 import { publishBoardOverlay } from './court_bridge.jsx';
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
 import { GROUP_FLAGS } from './match_groups.jsx';
-import { useEscapeToClose, confirmDialog } from './ui.jsx';
+import { useEscapeToClose } from './ui.jsx';
 // NumberedName: single owner of the number-chip-on-the-outer-side rule.
 import { NumberedName } from './numbered_name.jsx';
 import { SideCell } from './side_cell.jsx';

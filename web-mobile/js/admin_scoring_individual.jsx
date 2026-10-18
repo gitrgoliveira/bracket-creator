@@ -978,11 +978,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // prompt that protects real work.
   // While running, the scoreline and the overtime count are not the editor's
   // to hold (every change is a tap already in the outbox): only the draw,
-  // the hantei and a removed withdrawal are local (D7).
+  // the hantei side pick and a removed withdrawal are local (D7). The hantei
+  // ARM alone is a mode there, dropped with no write, so it is no unsaved
+  // entry: Close, Prev/Next and every host exit read this one value
+  // (stage 6 review 1, "Only one behaviour allowed").
   const isDirty =
-    (!tapMode && (pointsEdited || enchoPeriodCount !== initialEnchoPeriods)) ||
+    (!tapMode && (pointsEdited || enchoPeriodCount !== initialEnchoPeriods || decidedByHantei !== hanteiRecorded)) ||
     isDrawToggled !== initialIsDrawToggled ||
-    decidedByHantei !== hanteiRecorded ||
     hanteiPick !== recordedHtKey ||
     // A removed withdrawal is unsaved until Save correction sends it.
     removingWithdrawal;
@@ -1129,16 +1131,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
     // the modal unmount would orphan the pending fetch and lose the
     // setState landing.
     if (submitting || decisionSubmitting) return;
-    // bc-evts stage 3: on a RUNNING match every scoring edit is a tap already
-    // in the outbox, so leaving discards nothing and asks nothing. The local
-    // states (D7): the hantei ARM, which is only a mode and is dropped with
-    // no write, and two results the operator entered, the hantei side pick
-    // and the hikiwake toggle, both committed only by Finish; those keep the
-    // prompt below, because leaving would lose them.
-    if (tapMode && isDrawToggled === initialIsDrawToggled && hanteiPick === recordedHtKey) {
-      go();
-      return;
-    }
+    // It asks exactly when a host exit does: isDirty, the one value the editor
+    // publishes (bc-evts stage 3: on a RUNNING match every scoring edit is a
+    // tap already in the outbox, so only the hikiwake toggle and the hantei
+    // side pick, committed by Finish alone, are lost by leaving).
     // The one warning (R1, unsaved_entries.jsx): Discard entries drops them at
     // once, as every other own action and host exit does, then leaves.
     // With nothing unsaved it leaves in the same tick (no await).

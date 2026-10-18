@@ -178,6 +178,18 @@ describe('hantei side buttons only pick (bc-htsd)', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  // Stage 6 review 1 ("Only one behaviour"): a host exit asks the editor's
+  // published thunk; it must answer exactly as Close and Prev/Next decide.
+  it('a host exit asks exactly when Close does: not for the arm alone, and for a picked side', async () => {
+    const hostUnsavedRef = { current: null };
+    render(<ScoreEditorModal match={tied()} onClose={vi.fn()} onSubmit={vi.fn()} password="" hostUnsavedRef={hostUnsavedRef} />);
+    expect(hostUnsavedRef.current()).toBe(false);
+    await click(screen.getByTestId('scoring-modal-hantei-arm'));
+    expect(hostUnsavedRef.current(), 'the arm alone is a mode: a host exit asks nothing').toBe(false);
+    await click(screen.getByTestId('scoring-modal-hantei-aka'));
+    expect(hostUnsavedRef.current(), 'a picked side is an unsaved entry').toBe(true);
+  });
+
   it('leaving a running match after picking a side prompts, and staying keeps the editor', async () => {
     const onClose = vi.fn();
     window.confirmDialog.mockClear();

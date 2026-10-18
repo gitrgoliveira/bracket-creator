@@ -41,8 +41,9 @@ import { FIGURES, openAdminPools, openViewerPools, poolBlocks, poolTeams, rowFig
 import {
   awardBoutIppon, boutNames, closeLineupPanel, currentBout, daihyosenControls, daihyosenOffer, doneRows, endMatch,
   endMatchButton, noPairingLine, openLineupFromUpNext, recordBout, recordBoutButton, startUpNextKachinuki, tieButton,
-  typeLineup,
+  typeLineup, BOUT_CHANGE,
 } from '../fixtures/kachinuki.mjs';
+import { tapOnSide } from '../fixtures/pace.mjs';
 
 const JOURNEY = 'kachinuki-pools';
 
@@ -199,7 +200,8 @@ test.describe('kachinuki in pools', () => {
     // current one and Record bout is greyed out (team-tournaments.md, "A tie
     // leaves both teams with nobody").
     await expect(recordBoutButton(page)).toBeEnabled();
-    await recordBoutButton(page).tap();
+    // Paced against the Record bout of bout 3: the two share one bounce guard.
+    await tapOnSide(page, BOUT_CHANGE, recordBoutButton(page));
     await expect(recordBoutButton(page)).toBeDisabled();
     expect(await doneRows(page).count(), 'the tied last bout stays the current bout').toBe(3);
     // Kachinuki has no representative bout in any round, so none is offered on

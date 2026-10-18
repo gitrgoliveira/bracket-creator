@@ -100,19 +100,33 @@ export async function tapNeighbour(locator, direction) {
 
 // V2. Two taps on the same spot inside the app's bounce window
 // (DOUBLE_TAP_LIMIT_MS, derived from tap_guard.jsx's TAP_BOUNCE_MS), the
-// impatient thumb. Returns { gapMs, withinWindow }, gapMs being the time from
-// the start of the first tap to the start of the second, and withinWindow
-// always true: a machine too slow to land the taps inside the window THROWS,
-// because the row would not have tested what it says. The first tap's effects
-// cannot be taken back, so the taps are not retried; the caller's test fails
-// with the message above (playwright.config.mjs sets retries to 0). Callers may assert on the outcome unconditionally.
+// impatient thumb. Returns { gapMs, withinWindow }, gapMs being the time IN
+// THE PAGE between the two clicks the taps produce (Date.now() in a capturing
+// click listener, the clock the app's guard reads), never the host-side round
+// trip of the first tap, which also counts the protocol's own latency; and
+// withinWindow always true: a machine too slow to land the taps inside the
+// window THROWS, because the row would not have tested what it says, and so do
+// taps that do not produce exactly two clicks. The first tap's effects cannot
+// be taken back, so the taps are not retried; the caller's test fails with the
+// message above (playwright.config.mjs sets retries to 0). Callers may assert
+// on the outcome unconditionally.
 export async function doubleTap(locator) {
   const page = locator.page();
   const { x, y } = await centreOf(locator);
-  const t0 = Date.now();
+  await page.evaluate(() => {
+    window.__clumsyClicks = [];
+    document.addEventListener('click', function rec() {
+      window.__clumsyClicks.push(Date.now());
+      if (window.__clumsyClicks.length === 2) document.removeEventListener('click', rec, true);
+    }, true);
+  });
   await page.touchscreen.tap(x, y);
-  const gapMs = Date.now() - t0;
   await page.touchscreen.tap(x, y);
+  const clicks = await page.evaluate(() => window.__clumsyClicks);
+  if (!Array.isArray(clicks) || clicks.length !== 2) {
+    throw new Error(`clumsy.doubleTap: the two taps produced ${Array.isArray(clicks) ? clicks.length : 'no'} click(s) in the page, not 2, so the row did not test the bounce guard`);
+  }
+  const gapMs = clicks[1] - clicks[0];
   if (gapMs >= DOUBLE_TAP_LIMIT_MS) {
     throw new Error(`clumsy.doubleTap: the two taps were ${gapMs} ms apart (limit ${DOUBLE_TAP_LIMIT_MS} ms, the app's bounce window is ${TAP_BOUNCE_MS} ms): this machine was too slow, so the row did not test the bounce guard`);
   }

@@ -92,6 +92,20 @@ import (
 // competitor-status writes made before K3, and a bracket-only restore would put
 // a downstream match back to a verdict whose competitor stays restored.
 func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, opts ...ForceOptions) (*domain.CompetitorStatus, error) {
+	door := result.WriteDoor
+	status, err := e.recordMatchResultWithIneligibilityTx(tx, compID, matchID, result, opts...)
+	// A kachinuki encounter's first fighters are the lineup's in force
+	// (operator decision K1 (c), kachinuki_opener.go), seated by the server's
+	// own events through the score-events door, which seats its own batch.
+	if err == nil && door != DoorEvent {
+		e.seatOpenerAfterWrite(tx, compID, matchID)
+	}
+	return status, err
+}
+
+// recordMatchResultWithIneligibilityTx is RecordMatchResultWithIneligibilityTx
+// before bout 1 of a kachinuki encounter is seated.
+func (e *Engine) recordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, opts ...ForceOptions) (*domain.CompetitorStatus, error) {
 	fo := firstForceOptions(opts)
 	result.ID = matchID
 	if result.WriteID == "" && fo.WriteID != "" {

@@ -1440,7 +1440,9 @@ func boutScoreOf(row state.SubMatchResult) domain.BoutScore {
 // pairing Record bout has not appended, or one removed, is noTarget.
 func foldBout(r *replayMatch, e *domain.ScoreEvent, shape ReplayShape, stamps map[string]int64) string {
 	m := &r.m
-	if boutRowIndex(m.SubResults, e.Pos) >= 0 || !shape.createsMissingRow(e.Pos) {
+	// A bout whose row a line removed keeps its stamp, a tombstone: it is not
+	// made again (Remove this bout stands).
+	if boutRowIndex(m.SubResults, e.Pos) >= 0 || !shape.createsMissingRow(e.Pos) || stamps[state.BoutGroup(e.Pos)] > 0 {
 		return foldBoutRow(r, e, shape, stamps)
 	}
 	// A numbered bout the match holds no row for yet (createsMissingRow: a
@@ -1472,20 +1474,6 @@ func (shape ReplayShape) createsMissingRow(pos int) bool {
 		return pos >= 1
 	}
 	return pos >= 1 && pos <= shape.Comp.TeamSize
-}
-
-// seatsFirstBoutFighter says a bout.fighter event on a kachinuki encounter's
-// first bout may seat its fighter on a side that holds name and member: the
-// side holds no fighter yet, or holds the same one (by member id when either
-// carries one, else by name), which a second device seats again.
-func seatsFirstBoutFighter(name, member string, e *domain.ScoreEvent) bool {
-	if name == "" && member == "" {
-		return true
-	}
-	if member != "" || e.MemberID != "" {
-		return member == e.MemberID
-	}
-	return name == e.Name
 }
 
 // boutRowIndex is the index of the row at pos, -1 when there is none.
@@ -1552,13 +1540,9 @@ func foldBoutRow(r *replayMatch, e *domain.ScoreEvent, shape ReplayShape, stamps
 		if e.Side == domain.ScoreSideB {
 			name, member = &row.SideB, &row.SideBMemberID
 		}
-		if e.Pos == lowestNumberedPosition(m.SubResults) && !seatsFirstBoutFighter(*name, *member, e) {
-			// The first bout's fighters are the lineup's (a name picked there
-			// is a lineup save): the sheet seats them as its first taps on the
-			// bout, so a side that holds none takes one and a side never has
-			// its fighter replaced here.
-			return domain.ScoreOutcomeNotAllowed
-		}
+		// On the first bout too: the lineup's fighters reach it as the
+		// server's own bout.fighter events (kachinuki_opener.go), ordered by
+		// stamp like every tap.
 		*name, *member = e.Name, e.MemberID
 		out = domain.ScoreOutcomeApplied
 	case domain.ScoreDaihyosenVerdict:

@@ -265,14 +265,18 @@ describe('score events: a team match folds on its bouts (stage 5)', () => {
     expect(onBout.outs).toEqual([APPLIED, APPLIED, NO_TARGET]);
   });
 
-  it('a kachinuki fighter is the lineup\'s on the first bout and the bout\'s on a later one; the winner follows it', () => {
+  // K1 (c): a fighter is a bout.fighter event on every bout, the first
+  // included; bout 1's are the lineup's, which the server sends as its own
+  // events (engine.openerSeatEvents), ordered by stamp like these.
+  it('a kachinuki fighter is the bout\'s on every bout, the first included; the winner follows it', () => {
     const k = team([row(1, { sideA: 'K1', sideB: 'O1' }), row(2, { sideA: 'K1', sideB: '' })]);
     const { m, outs } = fold(k, [
       ev({ kind: 'bout.fighter', pos: 1, side: SIDE_B, name: 'O9', memberId: 'o9' }),
       ev({ kind: 'bout.fighter', pos: 2, side: SIDE_B, name: 'O2', memberId: 'o2' }),
       ev({ kind: IPPON_ADD, pos: 2, side: SIDE_B, letter: 'D' }),
     ], KACHI);
-    expect(outs).toEqual([NOT_ALLOWED, APPLIED, APPLIED]);
+    expect(outs).toEqual([APPLIED, APPLIED, APPLIED]);
+    expect(m.subResults[0]).toMatchObject({ sideB: 'O9', sideBMemberId: 'o9' });
     expect(m.subResults[1]).toMatchObject({ sideB: 'O2', sideBMemberId: 'o2', winner: 'O2', winnerMemberId: 'o2' });
     expect(fold(k, [ev({ kind: 'bout.fighter', pos: 2, side: SIDE_B, name: 'O2' })], TEAM).outs).toEqual([NOT_ALLOWED]);
   });

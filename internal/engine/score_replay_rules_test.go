@@ -426,7 +426,8 @@ func TestReplay_Kachinuki(t *testing.T) {
 	require.Contains(t, string(head[0].Baseline.Values[state.GroupRecorded]), "1")
 
 	r := ReplayScoring(m, append(head, evLine("n", 20, domain.ScoreIpponAdd, 3, "a", "M")), shape)
-	assert.Equal(t, domain.ScoreOutcomeNoTarget, r.Outcome("n"), "Record bout has not appended bout 3")
+	assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("n"), "a pairing added by hand: the first tap on bout 3 makes its row")
+	assert.Len(t, r.Match.SubResults, 3)
 
 	r = ReplayScoring(m, append(head, evLine("w", 20, domain.ScoreIpponAdd, 2, "b", "D")), shape)
 	row := state.SubResultAt(r.Match.SubResults, 2)
@@ -449,9 +450,13 @@ func TestReplay_Kachinuki(t *testing.T) {
 	fighter := func(id string, pos int) state.ScoreLogLine {
 		return state.ScoreLogLine{V: 1, Event: &domain.ScoreEvent{ID: id, Stamp: 20, Kind: domain.ScoreBoutFighter, Pos: pos, Side: "a", MemberID: "k2", Name: "K2"}}
 	}
+	// A fighter is a bout.fighter event on every bout, the first included: the
+	// server seats bout 1 with the lineup's by events of its own
+	// (kachinuki_opener.go), ordered by stamp like these.
 	r = ReplayScoring(m, append(head, fighter("f2", 2), fighter("f1", 1)), shape)
 	assert.Equal(t, "K2", state.SubResultAt(r.Match.SubResults, 2).SideA)
-	assert.Equal(t, domain.ScoreOutcomeNotAllowed, r.Outcome("f1"))
+	assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("f1"))
+	assert.Equal(t, "K2", state.SubResultAt(r.Match.SubResults, 1).SideA)
 
 	r = ReplayScoring(m, append(head, evLine("x", 20, domain.ScoreEnchoAdd, 0, "", "")), shape)
 	assert.Equal(t, domain.ScoreOutcomeNotAllowed, r.Outcome("x"), "no match-level overtime on a kachinuki encounter")

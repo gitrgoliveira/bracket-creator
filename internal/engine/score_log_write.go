@@ -220,6 +220,15 @@ func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, r
 		prev = ReplayScoring(stored, lines, shape)
 	}
 	rp := ReplayScoring(stored, all, shape)
+	// Bout 1 of a kachinuki encounter takes the lineup's fighters in the same
+	// batch, as the server's own events (kachinuki_opener.go).
+	if seat := openerSeatEventsTx(tx, comp, compID, matchID, &rp.Match, all); len(seat) > 0 {
+		for i := range seat {
+			added = append(added, state.ScoreLogLine{Event: &seat[i]})
+		}
+		all = append(slices.Clone(lines), added...)
+		rp = ReplayScoring(stored, all, shape)
+	}
 
 	derived := rp.Match
 	derived.ClearRequestFields()

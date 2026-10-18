@@ -87,7 +87,7 @@ type SquadMemberRequest struct {
 // tl/verifier tell an anonymous self-run caller apart (selfRunAnonymous), for
 // the add's and the rename's guards and so that a wrong password on either
 // write is 401.
-func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps CompetitionStore, hub Broadcaster, tl TournamentLoader, verifier PasswordVerifier) {
+func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps CompetitionStore, hub Broadcaster, tl TournamentLoader, verifier PasswordVerifier, seaters ...KachinukiOpenerSeater) {
 	// A rename and a cleared name are ordered by arrival: a late duplicate of
 	// one is answered as recorded (writeOnce, Y8).
 	once := newWriteOnce()
@@ -154,7 +154,7 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 			return
 		}
 		c.JSON(http.StatusCreated, member)
-		hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, ""))
+		announceLineupChange(hub, comps, seaters, compID, teamID, "")
 	})
 
 	r.PUT("/competitions/:id/teams/:tid/members/:memberId", func(c *gin.Context) {
@@ -213,7 +213,7 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 			return
 		}
 		if applied {
-			hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, ""))
+			announceLineupChange(hub, comps, seaters, compID, teamID, "")
 		}
 	})
 
@@ -258,7 +258,7 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 			return
 		}
 		if applied {
-			hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, ""))
+			announceLineupChange(hub, comps, seaters, compID, teamID, "")
 		}
 	})
 }

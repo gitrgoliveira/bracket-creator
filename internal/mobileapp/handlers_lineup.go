@@ -382,7 +382,10 @@ func findRoundLineup(lineups map[string]domain.TeamLineup, teamID string, round 
 // sheet saves it when a competitor names a bout's fighter (bc-dhas).
 // `tl`/`verifier` tell an anonymous caller apart (selfRunAnonymous), who may
 // not change the lineup of a match that has finished (see the PUT).
-func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore, tx CompetitionTransactor, hub Broadcaster, tl TournamentLoader, verifier PasswordVerifier) {
+func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore, tx CompetitionTransactor, hub Broadcaster, tl TournamentLoader, verifier PasswordVerifier, seaters ...KachinukiOpenerSeater) {
+	announce := func(compID, teamID, matchID string) {
+		announceLineupChange(hub, comps, seaters, compID, teamID, matchID)
+	}
 	// A lineup save is ordered by arrival: a late duplicate of one is
 	// answered as recorded (writeOnce, Y8).
 	once := newWriteOnce()
@@ -409,7 +412,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 		}
 
 		save := lineupSave{compID: compID, teamID: teamID, round: round, req: req, once: once}
-		saveLineup(c, tx, hub, save, nil, func(lineups map[string]domain.TeamLineup) (domain.TeamLineup, bool) {
+		saveLineup(c, tx, announce, save, nil, func(lineups map[string]domain.TeamLineup) (domain.TeamLineup, bool) {
 			return findRoundLineup(lineups, teamID, round)
 		})
 	})
@@ -424,7 +427,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 		c.Status(http.StatusNoContent)
-		hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, ""))
+		announce(compID, teamID, "")
 	})
 
 	// Match-scoped PUT/DELETE (mp-825). Mirrors the round-scoped flow but
@@ -477,7 +480,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 				return memberIDsOutsideTeam(judge, teamID, req.memberIDsRead())
 			}
 		}
-		saveLineup(c, tx, hub, save, guard, func(lineups map[string]domain.TeamLineup) (domain.TeamLineup, bool) {
+		saveLineup(c, tx, announce, save, guard, func(lineups map[string]domain.TeamLineup) (domain.TeamLineup, bool) {
 			return findMatchLineup(lineups, teamID, matchID)
 		})
 	})
@@ -512,7 +515,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			return
 		}
 		c.Status(http.StatusNoContent)
-		hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, matchID))
+		announce(compID, teamID, matchID)
 	})
 }
 
@@ -694,7 +697,7 @@ func (w lineupSave) base(stx state.StoreTx, comp *state.Competition) (domain.Tea
 // (lineupSave.lineupToStore), saves it and reads it back with find for the
 // response. The answer is written after the lock releases (txResponse), and a
 // saved lineup is broadcast so SSE clients re-fetch it.
-func saveLineup(c *gin.Context, tx CompetitionTransactor, hub Broadcaster, save lineupSave, guard func(stx state.StoreTx, judge *memberJudge) *txResponse, find func(map[string]domain.TeamLineup) (domain.TeamLineup, bool)) {
+func saveLineup(c *gin.Context, tx CompetitionTransactor, announce func(compID, teamID, matchID string), save lineupSave, guard func(stx state.StoreTx, judge *memberJudge) *txResponse, find func(map[string]domain.TeamLineup) (domain.TeamLineup, bool)) {
 	compID := save.compID
 	var respErr *txResponse
 	var persistedLineup domain.TeamLineup
@@ -809,7 +812,29 @@ func saveLineup(c *gin.Context, tx CompetitionTransactor, hub Broadcaster, save 
 	// Recorded once the save has committed: a save the door refused, or one
 	// whose commit failed, is judged again when it is sent again.
 	save.once.remember(save.target(), save.req.WriteID)
-	hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, save.teamID, save.matchID))
+	announce(compID, save.teamID, save.matchID)
+}
+
+// announceLineupChange is the ONE announcement of a lineup or team-member
+// write: the lineup-updated event, then bout 1 of each running kachinuki match
+// of the team seated with the lineup's fighters (operator decision K1 (c),
+// engine/kachinuki_opener.go) and a match_updated for each match that moved,
+// read fresh from the store. A seat that fails is logged: the match's next
+// write seats it.
+func announceLineupChange(hub Broadcaster, comps CompetitionStore, seaters []KachinukiOpenerSeater, compID, teamID, matchID string) {
+	hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, matchID))
+	for _, seater := range seaters {
+		if seater == nil {
+			continue
+		}
+		changed, err := seater.ReseatKachinukiOpeners(compID, teamID)
+		if err != nil {
+			log.Printf("mobileapp: competition %s team %s: bout 1 not seated from the lineup: %v", compID, teamID, err)
+		}
+		for _, id := range changed {
+			broadcastMatchNow(hub, comps, compID, id, gin.H{"competitionId": compID, "matchId": id, "result": nil})
+		}
+	}
 }
 
 // lineupUpdatedPayload is the data of an EventLineupUpdated, the one place it is

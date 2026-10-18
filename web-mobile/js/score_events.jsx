@@ -531,8 +531,6 @@ function keepEntries(ippons, marks, keep) {
   return [outI, outM];
 }
 
-const lowestNumberedPosition = (rows) => rows.reduce((low, r) => (r && r.position > 0 && (low === 0 || r.position < low) ? r.position : low), 0);
-
 // reconcileWinnerMemberId: the representative row's winner id follows its
 // picks (state.SubMatchResult.ReconcileWinnerMemberID): the side its winner
 // names by name, that side's pick.
@@ -557,17 +555,6 @@ export function createsMissingRow(opts, pos) {
   return pos >= 1 && pos <= (Number(opts.teamSize) || 0);
 }
 
-// seatsFirstBoutFighter: a fighter on a kachinuki first bout seats a side that
-// holds none, or the same one again (by member id when either carries one,
-// else by name), never another (engine.seatsFirstBoutFighter).
-function seatsFirstBoutFighter(row, e) {
-  const name = e.side === SIDE_B ? row.sideB : row.sideA;
-  const member = e.side === SIDE_B ? row.sideBMemberId : row.sideAMemberId;
-  if (!name && !member) return true;
-  if (member || e.memberId) return (member || '') === (e.memberId || '');
-  return name === (e.name || '');
-}
-
 // withEmptyBoutRow is rows with an empty row at pos, the numbered rows in
 // position order ahead of the representative bout (engine.withEmptyBoutRow).
 function withEmptyBoutRow(rows, pos) {
@@ -584,7 +571,9 @@ function foldBout(m, e, opts, ctx) {
     // fixed-order bout of a match started from the queue, a kachinuki first
     // bout, a pairing added by hand): the row is made, and kept only if the
     // event applies (m.subResults is set only then).
-    if (!createsMissingRow(opts, e.pos)) return NO_TARGET;
+    // A bout whose row a line removed keeps its stamp, a tombstone: it is
+    // not made again (engine.foldBout).
+    if (!createsMissingRow(opts, e.pos) || (ctx.stamps[`bout:${e.pos}`] || 0) > 0) return NO_TARGET;
     rows = withEmptyBoutRow(rows, e.pos);
     idx = rows.findIndex((r) => r && r.position === e.pos);
   }
@@ -602,11 +591,9 @@ function foldBout(m, e, opts, ctx) {
       break;
     case BOUT_FIGHTER:
       if (!opts.kachinuki || e.pos <= 0) return NOT_ALLOWED;
-      // The first bout's fighters are the lineup's (a name picked there is a
-      // lineup save): the sheet seats them as its first taps on the bout, so a
-      // side that holds none takes one and a side never has its fighter
-      // replaced here (engine.seatsFirstBoutFighter).
-      if (e.pos === lowestNumberedPosition(rows) && !seatsFirstBoutFighter(row, e)) return NOT_ALLOWED;
+      // On the first bout too: the lineup's fighters reach it as the server's
+      // own bout.fighter events (engine.openerSeatEvents), ordered by stamp
+      // like every tap.
       if (e.side === SIDE_B) { row.sideB = e.name || ''; setOrDelete(row, 'sideBMemberId', e.memberId); }
       else { row.sideA = e.name || ''; setOrDelete(row, 'sideAMemberId', e.memberId); }
       out = APPLIED;

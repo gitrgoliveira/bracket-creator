@@ -259,6 +259,29 @@ describe('a pick on a running team match is a tap', () => {
 });
 
 describe('a running kachinuki encounter is scored by taps', () => {
+  // Operator decision K1 (c): bout 1's fighters are whatever the lineup says.
+  // The sheet shows the lineup's names on bout 1 and sends no fighter, the
+  // server seats its row with the same names, and a strike lands on bout 1.
+  it('bout 1 shows the lineup\'s fighters, the server\'s row agrees, and a strike lands on it', async () => {
+    API.fetchLineupInForce = vi.fn().mockImplementation(async (_comp, teamId) => (teamId === 'ta'
+      ? { saved: true, positions: { 1: 'Kenji' }, memberIds: { 1: 'k1' } }
+      : { saved: true, positions: { 1: 'Osamu' }, memberIds: { 1: 'o1' } }));
+    const name = (color) => {
+      const box = r.container.querySelector(`.team-sub-match .team-sub-match__side--${color}`);
+      const input = box.querySelector('input');
+      return input ? input.value : box.textContent;
+    };
+    const r = render(el(kachinukiBout({ subResults: [] })));
+    await act(async () => { await new Promise((res) => setTimeout(res, 0)); });
+    expect([name('aka'), name('shiro')]).toEqual(['Kenji', 'Osamu']);
+    await tap(ipponBtn(r.container, 0, 'aka', 'M'));
+    expect(events(), 'no fighter is sent').toEqual([{ kind: 'ippon.add', pos: 1, side: 'a', letter: 'M' }]);
+    // The server's answer: the row it made, seated with the lineup's fighters.
+    r.rerender(el(kachinukiBout({ modifiedAt: 50, scoreVersion: 4, subResults: [boutRow(1, { sideA: 'Kenji', sideB: 'Osamu', sideAMemberId: 'k1', sideBMemberId: 'o1', ipponsA: ['M'], winner: 'Kenji', winnerMemberId: 'k1' })] })));
+    await act(async () => {});
+    expect([name('aka'), name('shiro')]).toEqual(['Kenji', 'Osamu']);
+  });
+
   it('Encho on the tied live bout is one encho.add on it, and Undo encho one encho.remove', async () => {
     const tiedBout = kachinukiBout({ subResults: [boutRow(1, { sideA: 'K1', sideB: 'O1', sideAMemberId: 'k1', sideBMemberId: 'o1', decision: 'hikiwake' })] });
     const r = render(el(tiedBout));

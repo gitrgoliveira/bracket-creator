@@ -291,3 +291,11 @@ type CompetitionTransactor interface {
 	// Mirrors state.Store.WithCourtExclusivityLock.
 	WithCourtExclusivityLock(fn func() error) error
 }
+
+// KachinukiOpenerSeater seats bout 1 of a team's running kachinuki matches with
+// the fighters its lineup in force names, after a lineup or team-member write
+// (operator decision K1 (c), engine/kachinuki_opener.go), and returns the ids of
+// the matches it changed. *engine.Engine satisfies it.
+type KachinukiOpenerSeater interface {
+	ReseatKachinukiOpeners(compID, teamID string) ([]string, error)
+}

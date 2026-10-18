@@ -45,7 +45,7 @@ import { holdScoreWrites } from '../fixtures/held-write.mjs';
 import { tapSize } from '../fixtures/pointer.mjs';
 import {
   ROSTER_12, ROSTER_6, ROSTER_4_BRONZE, ROSTER_4_JOINT, ROSTER_6B, rosterOf,
-  editorSides, slotMarks, winnerOf, inlineRunning, ensureRunning, playRunningBout,
+  editorSides, slotMarks, winnerOf, inlineRunning, ensureRunning, playRunningBout, awaitSentBack,
   decisionButton, decisionPrompt, recordDecision, queuedPoolBouts, correctCompleted,
 } from '../fixtures/individual.mjs';
 
@@ -281,7 +281,7 @@ test.describe('knockout-mixed-individual', () => {
     await page.locator('.shiaijo-move-confirm[role="dialog"]').waitFor({ state: 'visible' });
     const sendBackDialogShot = await shot(page, 'send-back-dialog');
     const hasty = await hastyShiaijoConfirm(page);
-    await expect.poll(() => inlineRunning(page)).toBe(false);
+    await awaitSentBack(page);
     const idleAfter = await page.locator('.shiaijo__placeholder').isVisible().catch(() => false);
     const upNextAfterRevert = await sides(upNextCard(page)).catch(() => null);
     row({ step: 'send back', action: 'Send back to queue confirm', variant: 'V4 hastyConfirm', ...hasty,
@@ -1240,6 +1240,8 @@ test.describe('knockout-mixed-individual bead guards', () => {
     await expect(dialog).toContainText('The score already saved is kept');
     await page.unroute('**/api/**', slowReads);
     await hastyShiaijoConfirm(page);
+    // The court shows the bout queued before it is started again.
+    await awaitSentBack(page);
     // The dialog's promise holds: started again, the bout still has its point.
     const again = await ensureRunning(page);
     expect(again).toEqual(pair);

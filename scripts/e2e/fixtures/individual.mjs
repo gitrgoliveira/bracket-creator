@@ -161,6 +161,16 @@ export async function ensureRunning(page, { timeout = EXPECT_TIMEOUT_MS } = {}) 
   return editorSides(page);
 }
 
+// After a send back confirmed on a court with no other running bout: wait
+// until the court shows the bout queued (the idle placeholder, the editor
+// gone) before anything reads the court. Without it, ensureRunning could read
+// the bout still mounted as running and return it, and when the court let it
+// go a moment later a read of its board found nothing (stage 6 review 7).
+export async function awaitSentBack(page, { timeout = EXPECT_TIMEOUT_MS } = {}) {
+  await expect(courtIdle(page)).toBeVisible({ timeout });
+  await expect.poll(() => inlineRunning(page), { timeout }).toBe(false);
+}
+
 // Score the running bout on the shiaijo page for the deterministic winner (one
 // men) and Finish (+ Start Next) through the two-tap guard, which returns once
 // the write has landed and the editor has let the bout go. Returns the

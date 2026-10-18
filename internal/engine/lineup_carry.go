@@ -120,8 +120,9 @@ func (lc *lineupCarry) valueAt(l domain.TeamLineup, p domain.Position, at int64,
 		}
 		return lc.valueAt(src.Lineup, p, l.CopiedAt, depth+1)
 	}
-	// Not ok: nothing this lineup knows was set before at. What it held
-	// then is not known, and a value set later is never taken for it.
+	// Not ok: nothing this lineup holds was set before at, so it held nothing
+	// there (carryInto reads it empty), and a value set later is never taken
+	// for it.
 	return held, ok
 }
 
@@ -171,8 +172,6 @@ func (lc *lineupCarry) carryInto(l *domain.TeamLineup, at int64) string {
 		if own[p] {
 			continue
 		}
-		stored := l.Positions[p]
-		storedID, storedStamp := l.MemberIDs[p], l.Stamps[p]
 		delete(l.Positions, p)
 		delete(l.MemberIDs, p)
 		delete(l.Stamps, p)
@@ -182,13 +181,13 @@ func (lc *lineupCarry) carryInto(l *domain.TeamLineup, at int64) string {
 		if !src.Found {
 			continue
 		}
+		// Not known: the source never held the position before at (every
+		// change keeps the value it replaced in History), so it was empty
+		// then. The value the lineup stores is never kept: it may be one
+		// carried at a later stamp (a copy whose stamp moved back, a pin made
+		// a copy), which at never saw.
 		v, known := lc.valueAt(src.Lineup, p, at, 0)
-		if !known {
-			// Nothing is known of the position at that stamp: the value the
-			// lineup stores stays, and a value set later is never taken.
-			v = domain.PositionChange{Stamp: storedStamp, Name: stored, MemberID: storedID}
-		}
-		if v.Name == "" && v.MemberID == "" {
+		if !known || (v.Name == "" && v.MemberID == "") {
 			continue
 		}
 		l.Positions[p] = v.Name

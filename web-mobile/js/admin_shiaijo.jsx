@@ -171,7 +171,7 @@ export function withOwnStatusMove(m, mv) {
             else if (winner === _bracketSideName(m.sideB)) winner = m.sideB;
         }
     }
-    return { ...m, ...(finishFieldsOf(p) || {}), status: "completed", ...(winner ? { winner } : {}) };
+    return { ...m, ...finishFieldsOf(p), status: "completed", ...(winner ? { winner } : {}) };
 }
 
 // finishWinnerOf: the winner a finish names, or, for an engi finish, which

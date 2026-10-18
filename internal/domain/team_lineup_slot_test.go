@@ -109,8 +109,9 @@ func TestTeamLineupSplitAt_LineupsThatAreNotCopies(t *testing.T) {
 
 	migrated := domain.TeamLineup{TeamID: "t", MatchID: "M", Positions: map[domain.Position]string{p1: "Hara"},
 		Stamps: map[domain.Position]int64{p1: 50}}
-	_, after, hasBefore, hasAfter = migrated.SplitAt(20)
-	assert.False(t, hasBefore)
+	before, after, hasBefore, hasAfter = migrated.SplitAt(20)
+	assert.True(t, hasBefore, "a migrated lineup was in force from the beginning")
+	assert.Empty(t, before.Positions)
 	require.True(t, hasAfter)
 	assert.Equal(t, int64(50), after.CopiedAt, "a copy from its first change after the removal")
 	assert.Equal(t, []domain.Position{p1}, after.Own)

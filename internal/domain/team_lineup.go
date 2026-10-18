@@ -328,6 +328,13 @@ func (t TeamLineup) SplitAt(at int64) (before, after TeamLineup, hasBefore, hasA
 			}
 		}
 	}
+	if !t.IsCarriedCopy() && t.MatchID != "" && !t.IsStartPin() {
+		// A match's own lineup that is no copy (one the round-lineup
+		// migration gave, empty so the match shows none included) is in
+		// force from the beginning: taken away, it is a record a carry reads
+		// up to the removal, never a bare marker.
+		hasBefore = true
+	}
 	before = t.withOwnChanges(b).OwnPositionsOnly()
 	before.RemovedAt = at
 	afterBase := t

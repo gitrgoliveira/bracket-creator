@@ -17,7 +17,7 @@ describe('the tap outcome note', () => {
   let emit;
   beforeEach(() => {
     prev = window.API;
-    window.API = { ...(prev || {}), subscribeTapOutcome: (_c, _m, cb) => { emit = cb; return () => {}; } };
+    window.API = { ...prev, subscribeTapOutcome: (_c, _m, cb) => { emit = cb; return () => {}; } };
   });
   afterEach(() => { window.API = prev; });
 

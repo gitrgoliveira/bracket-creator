@@ -257,17 +257,30 @@ func startStamp(m *state.MatchResult) int64 {
 // or aborts with the write that started the match; a pin the store cannot
 // stage fails that write, rather than leave a started match silently without
 // the lineup it started with.
-func pinStartLineups(h state.StoreTx, d *openerDraw, compID string, m *state.MatchResult) error {
+func pinStartLineups(h state.StoreTx, d *openerDraw, compID string, m *state.MatchResult) ([]string, error) {
 	at := startStamp(m)
+	var anchored []string
 	for _, teamID := range []string{m.SideAID, m.SideBID} {
-		if teamID == "" || ownLineup(d.lineups, teamID, m.ID) {
+		if teamID == "" {
+			continue
+		}
+		if ownLineup(d.lineups, teamID, m.ID) {
+			// One made after the start (a save that arrived before it) is
+			// the start's pin made the operator's own: carried from the start.
+			moved, err := anchorStartedCopy(h, d, compID, m.ID, teamID, at)
+			if err != nil {
+				return nil, err
+			}
+			if moved {
+				anchored = append(anchored, teamID)
+			}
 			continue
 		}
 		if err := pinLineup(h, d, compID, m.ID, teamID, at); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return anchored, nil
 }
 
 // pinLineup keeps the lineup in force for teamID at matchID now as the lineup
@@ -311,6 +324,51 @@ func pinLineup(h state.StoreTx, d *openerDraw, compID, matchID, teamID string, a
 	return nil
 }
 
+// anchorStartedCopy moves a started kachinuki match's own lineup, a carried
+// copy made after the match started, back to the stamp the start kept its
+// lineup at (stage 6 review 8): in stamp order the start pinned the lineup in
+// force at its stamp (or a removal of the match's own lineup after the start
+// kept the one in force at that removal, keepSnapshotLineup), and a save made
+// after that turned that pin into the operator's own, carried from the same
+// point (LandMatchLineupSave). A save that arrived before the start, or kept
+// by a removal that arrived after it, made a copy carried from its own first
+// change instead. at is the start's stamp, or the removal's; a later removal
+// of the slot moves it on. It reports whether the copy moved.
+func anchorStartedCopy(h state.StoreTx, d *openerDraw, compID, matchID, teamID string, at int64) (bool, error) {
+	all, err := h.LoadTeamLineupsWithRemoved(compID)
+	if err != nil {
+		return false, fmt.Errorf("kachinuki match %s/%s: the lineups of team %s were not readable: %w", compID, matchID, teamID, err)
+	}
+	var own domain.TeamLineup
+	found := false
+	for _, l := range all {
+		if l.TeamID != teamID || l.MatchID != matchID {
+			continue
+		}
+		if l.IsRemoved() {
+			if l.RemovedAt > at {
+				at = l.RemovedAt
+			}
+			continue
+		}
+		own, found = l, true
+	}
+	if !found || !own.IsCarriedCopy() || own.CopiedAt <= at {
+		return false, nil
+	}
+	own = own.Clone()
+	own.CopiedAt = at
+	lc := newLineupCarry(all, d.pool, d.bracket, d.comp.IsKnockoutEnabled(), d.comp.TeamSize)
+	own.CopiedFrom = lc.carryInto(&own, at)
+	if err := h.SetTeamLineup(compID, own, d.comp.TeamSize); err != nil {
+		return false, fmt.Errorf("kachinuki match %s/%s: the lineup of team %s was not kept: %w", compID, matchID, teamID, err)
+	}
+	if fresh, err := h.LoadTeamLineups(compID); err == nil {
+		d.lineups = fresh
+	}
+	return true, nil
+}
+
 // openerSeatEventsTx is the server's fighter events that bring bout 1 of m (and
 // the stayer's streak from it) to what the rule says, stamped after every line
 // of the log and the match, or none when bout 1 already holds them, m has no
@@ -345,8 +403,19 @@ func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, before
 		stored, _, err := e.lookupExistingResultIn(h, compID, matchID)
 		if err == nil && stored != nil && stored.Status != state.MatchStatusScheduled {
 			if d, ok := readOpenerDraw(h, comp, compID); ok {
-				if err := pinStartLineups(h, &d, compID, stored); err != nil {
+				anchored, err := pinStartLineups(h, &d, compID, stored)
+				if err != nil {
 					return err
+				}
+				// A copy the start anchored is carried by the team's later
+				// matches: they are worked out again, as after a save.
+				for _, teamID := range anchored {
+					if _, err := e.FollowLineupSave(h, comp, domain.TeamLineup{TeamID: teamID, MatchID: matchID}, nil); err != nil {
+						var derived *DerivedLineupError
+						if !errors.As(err, &derived) {
+							return err
+						}
+					}
 				}
 			}
 		}
@@ -543,9 +612,9 @@ func (e *Engine) keepSnapshotLineup(h state.StoreTx, comp *state.Competition, co
 		return false, fmt.Errorf("kachinuki match %s/%s: lineups not readable", compID, matchID)
 	}
 	// A change of the match's own lineup made after the removal is still its
-	// own: nothing to keep.
+	// own, carried from the lineup the removal kept (anchorStartedCopy).
 	if ownLineup(d.lineups, teamID, matchID) {
-		return false, nil
+		return anchorStartedCopy(h, &d, compID, matchID, teamID, max(at, startStamp(m)))
 	}
 	// The lineup in force when the removal was made, or, for one made before
 	// the match started that arrived after the start, the one in force at the

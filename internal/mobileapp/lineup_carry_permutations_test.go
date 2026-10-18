@@ -90,11 +90,29 @@ func TestLineupCarry_AMatchLineupIsTheSameInEveryArrivalOrder(t *testing.T) {
 		{"P1-2", 2, "Doi", -300},
 		{"", 1, "Aoki", -50},
 	}
+	// The started match's own lineup: saved after the start (and after a
+	// removal of it made before the start), whatever arrives first, it is the
+	// lineup the start kept made the operator's own, carried from the start.
+	startedOwn := []carryStep{
+		{"", 2, "Doi", 25},
+		{"P1-2", 1, "Mori", 50},
+		{"P1-2", 0, "", -20},
+	}
+	// A removal of the started match's own lineup made after the start, the
+	// save of it made after that.
+	startedRemoved := []carryStep{
+		{"", 2, "Doi", 25},
+		{"P1-2", 0, "", 40},
+		{"P1-2", 1, "Mori", 60},
+		{"", 1, "Aoki", 50},
+	}
 	for _, sc := range []struct {
 		name      string
 		steps     []carryStep
 		kachinuki bool
 	}{
+		{"the started match's own lineup saved after the start", startedOwn, true},
+		{"the started match's own lineup taken away after the start, then saved", startedRemoved, true},
 		{"fixed order", fixedOrder, false}, {"kachinuki, with the start", steps, true}, {"one position changed twice", samePosition, false},
 		{"a match's lineup removed", removal, false}, {"a match's lineup removed, kachinuki, with the start", removal, true},
 		{"the starting lineup removed", removeStart, false}, {"the starting lineup removed, kachinuki, with the start", removeStart, true},

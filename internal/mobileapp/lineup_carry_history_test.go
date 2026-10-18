@@ -461,6 +461,30 @@ func TestLineupCarry_ARemovalKeepsEachChangeOnce(t *testing.T) {
 	require.Equal(t, 7, changes, "each of the seven changes kept once")
 }
 
+// A match's own lineup the round-lineup migration gave EMPTY (so the match
+// shows none, as v2.1.1 did) is a lineup in force until it is taken away: a
+// copy made while it was in force carries nothing from it, in either arrival
+// order of the copy and the removal (stage 6 review 8: its removal must keep
+// a record, never a bare marker, which no read finds in force).
+func TestLineupCarry_AnEmptyMigratedLineupStaysInForceUntilItsRemoval(t *testing.T) {
+	for _, removalFirst := range []bool{false, true} {
+		e := newCarryEnv(t, false)
+		require.NoError(t, e.store.SetTeamLineup(e.comp, domain.TeamLineup{TeamID: e.id["Taka"], MatchID: "P1-0",
+			Positions: map[domain.Position]string{}}, 3))
+		if removalFirst {
+			e.removeAt("P1-0", 0)
+		}
+		e.save("P1-1", 3, "Endo", -50)
+		if !removalFirst {
+			e.removeAt("P1-0", 0)
+		}
+		l, ok := e.lineup("P1-1")
+		require.True(t, ok)
+		_, has := l.Positions[domain.PositionNumbered(1)]
+		require.Falsef(t, has, "removal first %v: carried from the empty lineup in force then: %s", removalFirst, e.dump())
+	}
+}
+
 // Every arrival stamp is after every stamp on disk (stage 6 review 8, m5): a
 // restart, or a clock stepped back, never gives a removal an older stamp than
 // one kept, nor its record another's key.

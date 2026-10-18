@@ -788,10 +788,10 @@ func (t *storeTx) ReplaceTeamLineupSlot(compID, teamID, matchID string, round in
 	if err := t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn()); err != nil {
 		return err
 	}
+	// No pin is noted: a save never makes one (it turns one it lands on into
+	// the operator's own), and a pin it leaves untouched was announced when
+	// the start kept it.
 	t.keepLineups(current)
-	for _, l := range records {
-		t.noteStartLineup(l)
-	}
 	return nil
 }
 

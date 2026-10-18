@@ -9,7 +9,7 @@ export function createOwnStatusMoves() {
   const moves = new Map();
   const listeners = new Set();
   const key = (c, m) => `${c}:${m}`;
-  const tell = () => { for (const fn of [...listeners]) fn(); };
+  const tell = () => { for (const fn of Array.from(listeners)) fn(); };
 
   const api = {
     ownStatusMove: (c, m) => moves.get(key(c, m)) || null,

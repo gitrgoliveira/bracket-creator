@@ -397,11 +397,12 @@ func openerSeatEventsTx(h state.StoreTx, comp *state.Competition, compID, matchI
 // bout 1 is brought to what the rule says (seatOpenerAfterWrite; the
 // score-events door seats its own batch). before is the match's status before
 // the write.
-func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, before matchBefore, door string) error {
+func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, before matchBefore, door string) (string, error) {
 	comp, err := h.LoadCompetition(compID)
 	if err != nil || comp == nil || !comp.IsKachinuki() {
-		return nil
+		return "", nil
 	}
+	var warnings []string
 	// The first start only: a match sent back to the queue holds the bouts it
 	// was fought on, and a start of it again is no start (it keeps the lineup
 	// it started with, or, started before this rule, none).
@@ -411,16 +412,21 @@ func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, before
 			if d, ok := readOpenerDraw(h, comp, compID); ok {
 				anchored, err := pinStartLineups(h, &d, compID, stored)
 				if err != nil {
-					return err
+					return "", err
 				}
 				// A copy the start anchored is carried by the team's later
-				// matches: they are worked out again, as after a save.
+				// matches: they are worked out again, as after a save. A
+				// carried lineup the domain refuses as worked out stays as
+				// stored and the start stands, as for a save, and the
+				// operator is told on the write's answer (stage 6 review 9,
+				// G1; the follow logs the refusal itself).
 				for _, teamID := range anchored {
 					if _, err := e.FollowLineupSave(h, comp, domain.TeamLineup{TeamID: teamID, MatchID: matchID}, nil); err != nil {
 						var derived *DerivedLineupError
 						if !errors.As(err, &derived) {
-							return err
+							return "", err
 						}
+						warnings = append(warnings, derived.StartWarning())
 					}
 				}
 			}
@@ -429,7 +435,7 @@ func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, before
 	if door != DoorEvent {
 		e.seatOpenerAfterWrite(h, compID, matchID)
 	}
-	return nil
+	return strings.Join(warnings, " "), nil
 }
 
 // storedStatus is the match's status before a write, "" when it cannot be read

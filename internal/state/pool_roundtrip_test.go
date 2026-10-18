@@ -76,6 +76,10 @@ var notPersistedInPoolCSV = map[string]string{
 		"kept on the baseline it leaves in the score event log.",
 	"Merge": "the merge's report on THIS write (bc-mrgc), read by the history " +
 		"writer and the handlers' heldGroups; the history file keeps it.",
+	"LineupWarning": "request-only (bc-evts stage 6 review 9, G1): what the " +
+		"write's door tells the operator when a kachinuki start's kept lineup " +
+		"could not be followed by a later match's carried lineup; answered as " +
+		"`warning`, never stored.",
 	"DecidedByHantei": "LEGACY READ-ONLY compatibility channel (models.go doc " +
 		"comment above the field): the verdict is the domain.HanteiMark entry " +
 		"in the winner's IpponsA/IpponsB, and writers must never set this flag. " +

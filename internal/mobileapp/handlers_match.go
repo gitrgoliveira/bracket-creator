@@ -3371,7 +3371,7 @@ func scoreResponseWithReopened(result *state.MatchResult, reopened []engine.Reop
 		return result
 	}
 	held := result.Merge.HeldGroups()
-	if len(reopened) == 0 && len(held) == 0 && len(result.Merge.DisplacedGroups()) == 0 {
+	if len(reopened) == 0 && len(held) == 0 && len(result.Merge.DisplacedGroups()) == 0 && result.LineupWarning == "" {
 		return result
 	}
 	// Both errors below are RETURNED BY THE API and cannot be discarded
@@ -3395,6 +3395,12 @@ func scoreResponseWithReopened(result *state.MatchResult, reopened []engine.Reop
 	// identified to the user").
 	if len(reopened) > 0 {
 		merged["reopenedMatches"] = blockedMatchesPayload(reopened)
+	}
+	// A kachinuki start whose kept lineup a later match's carried lineup
+	// could not follow: the start stands, and the operator is told (G1), as
+	// the lineup doors tell it (lineupAnswer).
+	if result.LineupWarning != "" {
+		merged["warning"] = result.LineupWarning
 	}
 	return withHeldGroups(merged, result.Merge)
 }

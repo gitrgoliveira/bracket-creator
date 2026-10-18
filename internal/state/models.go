@@ -1602,7 +1602,14 @@ type MatchResult struct {
 	// newer change to them is stored), and the held values. Set on the
 	// incoming result only, read by the history writer and the handlers'
 	// heldGroups; never persisted.
-	Merge          *MergeReport     `json:"-" yaml:"-"`
+	Merge *MergeReport `json:"-" yaml:"-"`
+	// LineupWarning is what the write's door tells the operator when a
+	// kachinuki start kept the match's own lineup at the start and a later
+	// match's carried lineup could not follow it (engine.DerivedLineupError,
+	// stage 6 review 9, G1): the start stands, the refused lineup stays as
+	// stored. Set on the incoming result only, answered as `warning`; never
+	// persisted.
+	LineupWarning  string           `json:"-" yaml:"-"`
 	IpponsA        []string         `json:"ipponsA"` // waza letters M/K/D/T/H/S (naginata), or ○ (FIK default-win marker)
 	IpponsB        []string         `json:"ipponsB"`
 	HansokuA       int              `json:"hansokuA"`
@@ -2240,7 +2247,7 @@ type Announcement struct {
 // writer building its write from a stored match never inherits another
 // write's groups, door, merge report or instruction to replace a ruling.
 func (m *MatchResult) ClearRequestFields() {
-	m.Changed, m.WriteDoor, m.Merge = nil, "", nil
+	m.Changed, m.WriteDoor, m.Merge, m.LineupWarning = nil, "", nil, ""
 	m.ClearsWithdrawal = false
 	m.WriteID, m.Basis, m.WriteSession = "", nil, ""
 }

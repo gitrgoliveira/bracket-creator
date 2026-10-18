@@ -99,7 +99,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// brought to what its lineup says (operator decision K1 (c),
 	// kachinuki_opener.go), only once the write stands.
 	if err == nil {
-		err = e.afterMatchWrite(tx, compID, matchID, before, door)
+		result.LineupWarning, err = e.afterMatchWrite(tx, compID, matchID, before, door)
 	}
 	return status, err
 }

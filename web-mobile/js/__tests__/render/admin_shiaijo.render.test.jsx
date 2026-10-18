@@ -1643,6 +1643,70 @@ describe('Send back to queue keeps the score and is always offered (bc-sbq)', ()
     } finally { c.restore(); }
   });
 
+  // Stage 6 review 7 (operator rule: "never blocks the UI", "screens display
+  // what the operator changes"): a send back the outbox only holds (offline)
+  // shows at once, as a finish does: the bout leaves the live slot and the
+  // editor and shows queued; a refused or discarded one puts it back.
+  describe('a send back still queued shows at once', () => {
+    const pendingSendBack = () => {
+      let settle;
+      const settled = new Promise((resolve, reject) => { settle = { resolve, reject }; });
+      settled.catch(() => {});
+      return { res: { applied: true, pending: true, key: 'k', settled }, settle };
+    };
+    const confirmSendBack = async (c) => {
+      await tapSendBack(c);
+      const confirm = [...c.utils.container.querySelectorAll('.shiaijo-move-confirm button')]
+        .find((b) => /send back to queue/i.test(b.textContent));
+      await act(async () => { confirm.click(); });
+    };
+    const upNextText = (c) => {
+      const card = c.utils.container.querySelector('.shiaijo-upnext__card');
+      return card ? card.textContent : '';
+    };
+    for (const outcome of ['refused', 'discarded']) {
+      it(`leaves the live slot at once offline, and comes back when ${outcome}`, async () => {
+        const c = await mountCourt([courtMatch('m1', 'running', { ipponsA: ['M'], modifiedAt: 100 })]);
+        const { res, settle } = pendingSendBack();
+        window.API.revertMatchToQueue = vi.fn().mockResolvedValue(res);
+        try {
+          expect(c.editorMatch()).toBe('m1');
+          await confirmSendBack(c);
+          expect(c.editorMatch(), 'the editor no longer shows the bout').toBeNull();
+          expect(upNextText(c), 'the bout shows queued').toContain('Aka m1');
+          expect(c.utils.queryByRole('button', { name: /^send back to queue$/i })).toBeNull();
+          // The feed still says running (nothing reached the server): no change.
+          await c.refresh();
+          expect(c.editorMatch()).toBeNull();
+          await act(async () => {
+            if (outcome === 'refused') settle.reject(new Error('Not sent back: the match had finished'));
+            else settle.resolve({ discarded: true });
+          });
+          expect(c.editorMatch(), 'put back on the live slot').toBe('m1');
+          expect(upNextText(c)).not.toContain('Aka m1');
+        } finally { c.restore(); }
+      });
+    }
+    it('stays queued once landed until the feed shows it, and ends there', async () => {
+      const c = await mountCourt([courtMatch('m1', 'running', { ipponsA: ['M'], modifiedAt: 100 }), courtMatch('m2', 'scheduled')]);
+      const { res, settle } = pendingSendBack();
+      window.API.revertMatchToQueue = vi.fn().mockResolvedValue(res);
+      try {
+        await confirmSendBack(c);
+        await act(async () => { settle.resolve({ applied: true, modifiedAt: 200 }); });
+        expect(c.editorMatch()).toBeNull();
+        // The feed shows the send back: the queued copy is the feed's own.
+        c.feed.current = [courtMatch('m1', 'scheduled', { ipponsA: ['M'], modifiedAt: 200 }), courtMatch('m2', 'scheduled')];
+        await c.refresh();
+        expect(c.editorMatch()).toBeNull();
+        // A later change made elsewhere (started again on another device) shows.
+        c.feed.current = [courtMatch('m1', 'running', { ipponsA: ['M'], modifiedAt: 300 }), courtMatch('m2', 'scheduled')];
+        await c.refresh();
+        expect(c.editorMatch()).toBe('m1');
+      } finally { c.restore(); }
+    });
+  });
+
   it('picking another bout sends a scored one back to the queue and starts the pick', async () => {
     const c = await mountCourt([courtMatch('m1', 'running', { ipponsA: ['M'] }), courtMatch('m2', 'scheduled')]);
     try {
@@ -1714,7 +1778,10 @@ describe('Send back to queue keeps the score and is always offered (bc-sbq)', ()
       expect(probe.props.match?.id).toBe('m2');
       await act(async () => { refuse({ applied: false, reason: 'clock_skew' }); await settled; });
       await act(async () => {});
-      expect(probe.props?.match?.id).not.toBe('m2');
+      // The editor no longer shows the refused match (m1, whose send back is
+      // still queued, reads queued: stage 6 review 7, so the court shows no
+      // live bout and the editor is gone).
+      expect(c.editorMatch()).not.toBe('m2');
     } finally { c.restore(); }
   });
 });

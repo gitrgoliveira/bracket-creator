@@ -147,6 +147,17 @@ function finishedHereHolds(f, m) {
     return f.stamp > 0 ? !(m.modifiedAt > f.stamp) : m.modifiedAt === f.at;
 }
 
+// sentBackHereHolds: whether the console still reads match `m` as sent back to
+// the queue here (the sentBackHere entry `f`, stage 6 review 7), the twin of
+// finishedHereHolds: not once the feed shows it scheduled or no longer holds
+// it, and not once the server has answered the send back and the feed's copy
+// is stamped after the send back's own stamp (a later change made elsewhere).
+export function sentBackHereHolds(f, m) {
+    if (!f || !m || m.status === "scheduled") return false;
+    if (!f.landed) return true;
+    return f.stamp > 0 ? !(m.modifiedAt > f.stamp) : m.modifiedAt === f.at;
+}
+
 // finishWinnerOf: the winner a finish names, or, for an engi finish, which
 // names none (the server decides it from the flags, engine.engiWinnerSide),
 // the side with more flags in it. The console reads a match finished here as
@@ -976,6 +987,14 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // a later change (a reopen elsewhere) and ends it. A refused or discarded
     // write ends it too, so the match is back on the panel.
     const [finishedHere, setFinishedHere] = useStateSh({});
+    // The matches this console sent back to the queue (a send back the outbox
+    // holds, answered pending), by matchKey: { at, landed, stamp } (stage 6
+    // review 7). The twin of finishedHere: until the court's feed shows the
+    // match scheduled, the console reads it as queued, so the bout leaves the
+    // live slot and the editor at once, offline included, and no tap is made
+    // on a bout the operator sent back. A refused or discarded send back puts
+    // it back.
+    const [sentBackHere, setSentBackHere] = useStateSh({});
     // The COMPLETED match the operator has opened to correct in place (parity
     // with the Scores page's "Correct" button). Kept separate from pickedKey so
     // it takes priority over the running bout WITHOUT disturbing it, and so it
@@ -1055,12 +1074,26 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // (running, Up next, allDone, the advance target) agrees on it.
     const allMatches = useMemoSh(
         () => courtMatchesRaw.filter(hasBothSides).map((m) => {
+            // Sent back here: queued, its score kept, until the feed says so.
+            if (sentBackHereHolds(sentBackHere[matchKey(m)], m)) return { ...m, status: "scheduled" };
             const f = finishedHere[matchKey(m)];
             if (!finishedHereHolds(f, m)) return m;
             return { ...m, ...f.fields, status: "completed", ...(f.winner ? { winner: f.winner } : {}) };
         }),
-        [courtMatchesRaw, finishedHere]
+        [courtMatchesRaw, finishedHere, sentBackHere]
     );
+    useEffectSh(() => {
+        const keys = Object.keys(sentBackHere);
+        if (keys.length === 0) return;
+        const byKey = new Map(courtMatchesRaw.map((m) => [matchKey(m), m]));
+        const ended = keys.filter((k) => !sentBackHereHolds(sentBackHere[k], byKey.get(k)));
+        if (ended.length === 0) return;
+        setSentBackHere((prev) => {
+            const next = { ...prev };
+            for (const k of ended) delete next[k];
+            return next;
+        });
+    }, [courtMatchesRaw, sentBackHere]);
     // An entry ends once the feed shows the match completed (or gone), or, once
     // the server has answered the finish, shows it changed since.
     useEffectSh(() => {
@@ -1787,6 +1820,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             try {
                 const sent = await window.API.revertMatchToQueue(cur.compId, cur.id, password, { onRefusal: deferFailed, seen: cur.scoreVersion });
                 after = writeQueueKey(sent);
+                // Shown queued at once, as the Send back confirm's is.
+                if (mountedRef.current) markSentBackHere(matchKey(cur), cur.modifiedAt, sent);
             } catch (e) {
                 deferFailed(e);
                 return;
@@ -2001,7 +2036,31 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         // back, and the confirm says so (R1, the editor's local Mark draw or
         // hantei pick of a running match included).
         const unsaved = editorUnsavedFor(m.compId, m.id);
-        setPendingRevert({ compId: m.compId, matchId: m.id, label: confirmMatchLabel(m), seen: m.scoreVersion, unsaved });
+        setPendingRevert({ compId: m.compId, matchId: m.id, label: confirmMatchLabel(m), seen: m.scoreVersion, at: m.modifiedAt, key: matchKey(m), unsaved });
+    };
+    // markSentBackHere: the outbox holds a send back of the match keyed `key`
+    // (its pending answer `res`), so the console reads it as queued until the
+    // feed shows it (sentBackHere). The server's answer, a callback and never a
+    // wait, ends it on a refusal or a discard and marks it landed otherwise. A
+    // start pin of the match (startedFrom) goes with it: the bout is queued.
+    const markSentBackHere = (key, at, res) => {
+        if (!key || !writePending(res)) return;
+        setSentBackHere((prev) => ({ ...prev, [key]: { at, landed: false } }));
+        setStartedFrom((prev) => (prev && prev.key === key ? null : prev));
+        const end = (landed, stamp) => {
+            if (!mountedRef.current) return;
+            setSentBackHere((prev) => {
+                if (!prev[key]) return prev;
+                const next = { ...prev };
+                if (landed) next[key] = { ...prev[key], landed: true, ...(stamp > 0 ? { stamp } : {}) };
+                else delete next[key];
+                return next;
+            });
+        };
+        res.settled.then(
+            (body) => end(!!body && !body.discarded && !writeWasRefused(body), Number(body && body.modifiedAt)),
+            () => end(false),
+        );
     };
     const confirmRevert = async (ev) => {
         if (!pendingRevert || reverting) return;
@@ -2025,7 +2084,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         try {
             // bc-evts: the outbox's, never awaited: the console moves on at
             // once, and a refusal the server gives later is toasted.
-            await window.API.revertMatchToQueue(compId, matchId, password, {
+            const res = await window.API.revertMatchToQueue(compId, matchId, password, {
                 seen: pendingRevert.seen,
                 onRefusal: (e) => {
                     if (!mountedRef.current || !showToast) return false;
@@ -2034,6 +2093,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 },
             });
             if (!mountedRef.current) return;
+            // Queued (offline included): the bout leaves the live slot and the
+            // editor at once and shows in the queue, as a finish shows finished
+            // (finishedHere); a refused or discarded send back puts it back.
+            markSentBackHere(pendingRevert.key, pendingRevert.at, res);
             if (showToast) showToast(`${label} sent back to queue`);
             setPendingRevert(null);
             setPickedKey(null);

@@ -154,6 +154,8 @@ function Toast({ message, type, onClose }) {
 function StableInput({ value, onChange, type, autoSelect = true, ...props }) {
   const [local, setLocal] = React.useState(value);
   const timer = React.useRef(null);
+  // A change typed and not yet sent (its debounce still waiting).
+  const pending = React.useRef(false);
   const composing = React.useRef(false);
 
   // Sync local state when prop changes from outside (e.g. SSE)
@@ -183,13 +185,21 @@ function StableInput({ value, onChange, type, autoSelect = true, ...props }) {
     // Immediate local update, debounced parent update to avoid race conditions
     // during typing if the parent re-renders the whole tree.
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => onChange(val), 200);
+    pending.current = true;
+    timer.current = setTimeout(() => { pending.current = false; onChange(val); }, 200);
   };
 
+  // A blur sends only a change still waiting for its debounce: one that has
+  // already gone is not sent again (stage 6 review 7: a seed box re-sent its
+  // saved rank as Generate draw took the focus, and the copy raced the draw
+  // and was refused).
   const handleBlur = (e) => {
     composing.current = false;
     clearTimeout(timer.current);
-    onChange(local);
+    if (pending.current) {
+      pending.current = false;
+      onChange(local);
+    }
     if (props.onBlur) props.onBlur(e);
   };
 

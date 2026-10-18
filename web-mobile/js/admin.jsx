@@ -14,6 +14,7 @@ import {
   markToasted,
 } from './write_result.jsx';
 import { keptInHistoryNote } from './match_groups.jsx';
+import { normalizeCompetitionDetail } from './api_serializers.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -286,6 +287,12 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     // onUpdateRef.current vs the closure-captured onUpdate.
     onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current,
       comps => comps.map(c => c.id === cid ? { ...c, ...updatedComp } : c)));
+    // The competition page shows what was stored at once, from the PUT's own
+    // answer (stage 6 review 10, m10): the refetch below can fail, and the
+    // page then showed the old value (a seed box its old seed) until a push.
+    if (updated && mountedRef.current) {
+      setAdminCompData((prev) => storedCompetitionInDetail(prev, cid, updatedComp));
+    }
     // Best-effort detail refresh. Isolated from the rethrow above.
     // a transient failure fetching details after a successful save
     // should not make callers (AdminSettings.saveNow, AdminParticipants.apply)
@@ -932,6 +939,17 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
 // Defense-in-depth alongside the server-side fix.
 function normalizeCreatedRecord(created) {
   return { ...created, players: created.players ?? [] };
+}
+
+// storedCompetitionInDetail lays a competition PUT's answer (the competition
+// as stored, in the server's shape) on the detail the competition page shows,
+// normalized as a fetched detail is, so the page shows what was stored even
+// when the refetch after the save fails (stage 6 review 10, m10). A detail of
+// another competition, or none, is left as it is.
+function storedCompetitionInDetail(prev, cid, stored) {
+  if (!prev || !prev.config || prev.config.id !== cid || !stored) return prev;
+  const { config } = normalizeCompetitionDetail({ config: { ...prev.config, ...stored } });
+  return { ...prev, config };
 }
 
 // refreshFailureToast: what the operator is told when the refresh after an

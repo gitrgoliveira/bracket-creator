@@ -2409,7 +2409,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
     unsaved: unsavedRef,
     onDiscard: onDiscardUnsaved,
     // The server's overtime for the encounter (a kachinuki encounter has none).
-    serverEnchoPeriodCount: kachinukiEncounter ? 0 : initialEnchoPeriods,
+    // On a running match the overtime is a tap, already the board's.
+    serverEnchoPeriodCount: tapMode ? encounterEnchoCount : (kachinukiEncounter ? 0 : initialEnchoPeriods),
   });
 
   const existingSub = m.subResults || [];

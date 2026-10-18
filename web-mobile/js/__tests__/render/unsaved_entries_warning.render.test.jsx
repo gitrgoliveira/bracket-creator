@@ -414,3 +414,31 @@ describe('the editors publish their unsaved entries to the host (finding 3)', ()
     }
   });
 });
+
+describe('a decision after Discard entries on a running match (finding 2)', () => {
+  it('carries the overtime on the board, this device\'s pending tap included', async () => {
+    const m = bout({ status: 'running', modifiedAt: NOW, scoreVersion: 3, phase: 'knockout', round: 'Round 1' });
+    render(el(m));
+    await flush();
+    const pill = screen.queryByTestId('scoring-modal-encho-pill');
+    if (pill) await tap(pill);
+    const cb = screen.queryByTestId('scoring-modal-encho-checkbox');
+    if (cb) await tap(cb);
+    const inc = document.querySelector('[aria-label="Increase overtime period count"]');
+    if (inc) await tap(inc);
+    // The Mark draw toggle is local until Finish: the unsaved entry here.
+    const draw = screen.queryByTestId('scoring-modal-mark-draw');
+    if (!draw || draw.disabled) throw new Error('no Mark draw on the running board');
+    await tap(draw);
+    answerWarning(true);
+    await tap(screen.getByTestId('scoring-modal-kiken-voluntary-button'));
+    await tap(document.querySelector('input[name="decision-side"][value="aka"]'));
+    await act(async () => { fireEvent.submit(document.querySelector('form.decision-prompt')); });
+    await flush();
+    expect(warnings()).toHaveLength(1);
+    const sent = API.recordDecision.mock.calls[0][2].encho;
+    const tapped = API.recordTap.mock.calls.filter(([, , ev]) => ev && ev.kind === 'encho.add').length;
+    expect(tapped, 'the overtime went as taps').toBeGreaterThan(0);
+    expect(sent ? sent.periodCount : 0, 'the overtime the board shows').toBe(tapped);
+  });
+});

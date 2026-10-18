@@ -451,7 +451,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
     setPendingWrite, pendingFnRef,
     unsaved: unsavedRef,
     onDiscard: onDiscardUnsaved,
-    serverEnchoPeriodCount: initialEnchoPeriods,
+    // On a running match the overtime is a tap, already the board's.
+    serverEnchoPeriodCount: tapMode ? enchoPeriodCount : initialEnchoPeriods,
   });
   // bc-tmfn: Clear withdrawal and reopen, the same door and component the team
   // editor uses (RecordedWithdrawal / useMatchReopen, admin_scoring_shared.jsx).

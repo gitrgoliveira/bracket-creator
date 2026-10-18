@@ -118,6 +118,12 @@ type StoreTx interface {
 	SetTeamLineups(compID string, ls []domain.TeamLineup, teamSize int) error
 	DeleteTeamLineup(compID, teamID string, round int) error
 	DeleteTeamLineupForMatch(compID, teamID, matchID string) error
+	// RemoveTeamLineupAt takes a lineup slot away, ordered by the removal's
+	// own stamp (0: stamped as it lands); removed says a lineup was taken.
+	RemoveTeamLineupAt(compID, teamID, matchID string, round int, at int64) (bool, error)
+	// ReplaceTeamLineupSlot sets every record of one lineup slot, the live
+	// one and the removed ones, in one staged write.
+	ReplaceTeamLineupSlot(compID, teamID, matchID string, round int, records []domain.TeamLineup, teamSize int) error
 	LoadParticipants(compID string, withZekkenName bool) ([]domain.Player, error)
 	// LoadSquads is Store.LoadSquads under the held lock, read-your-own-writes
 	// over a team-members file this transaction already staged.
@@ -721,31 +727,71 @@ func (t *storeTx) SetTeamLineups(compID string, ls []domain.TeamLineup, teamSize
 // itself (an operator's, or the one the match started with), staged in the
 // transaction; nothing stored there is no error.
 func (t *storeTx) DeleteTeamLineupForMatch(compID, teamID, matchID string) error {
-	return t.removeTeamLineup(compID, teamLineupMatchKey(teamID, matchID))
+	_, err := t.RemoveTeamLineupAt(compID, teamID, matchID, 0, 0)
+	return err
 }
 
 // DeleteTeamLineup is Store.DeleteTeamLineup inside the transaction.
 func (t *storeTx) DeleteTeamLineup(compID, teamID string, round int) error {
-	return t.removeTeamLineup(compID, teamLineupKey(teamID, round))
+	_, err := t.RemoveTeamLineupAt(compID, teamID, "", round, 0)
+	return err
 }
 
-// removeTeamLineup takes the lineup at key away, keeping its record as
-// removed where a carry can read it (removeTeamLineup in team_lineup.go).
-func (t *storeTx) removeTeamLineup(compID, key string) error {
+// RemoveTeamLineupAt is Store.RemoveTeamLineupAt inside the transaction:
+// the removal ordered by its own stamp (removeTeamLineup in team_lineup.go).
+func (t *storeTx) RemoveTeamLineupAt(compID, teamID, matchID string, round int, at int64) (bool, error) {
+	if err := t.checkCompID(compID); err != nil {
+		return false, err
+	}
+	current, err := t.LoadTeamLineupsWithRemoved(compID)
+	if err != nil {
+		return false, err
+	}
+	removed, changed := removeTeamLineup(current, teamID, matchID, round, arrivalOrStamp(at))
+	if !changed {
+		return false, nil
+	}
+	if err := t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn()); err != nil {
+		return false, err
+	}
+	t.keepLineups(current)
+	return removed, nil
+}
+
+// ReplaceTeamLineupSlot sets the records of one lineup slot (a team's
+// starting lineup or a match's own lineup: the live one and the removed ones)
+// to records, in ONE staged write: what a save landed on the epochs of the
+// slot (engine.LandMatchLineupSave, stage 6 review 8, m1). A lineup the domain
+// refuses sets none of them.
+func (t *storeTx) ReplaceTeamLineupSlot(compID, teamID, matchID string, round int, records []domain.TeamLineup, teamSize int) error {
 	if err := t.checkCompID(compID); err != nil {
 		return err
+	}
+	for _, l := range records {
+		if err := l.ValidatePositions(teamSize); err != nil {
+			return err
+		}
 	}
 	current, err := t.LoadTeamLineupsWithRemoved(compID)
 	if err != nil {
 		return err
 	}
-	if !removeTeamLineup(current, key, LineupArrivalStamp()) {
-		return nil
+	for k, l := range current {
+		if l.TeamID == teamID && l.MatchID == matchID && (matchID != "" || l.Round == round) {
+			delete(current, k)
+		}
+	}
+	for _, l := range records {
+		l.CompetitionID = compID
+		current[lineupStorageKey(l)] = l.Clone()
 	}
 	if err := t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn()); err != nil {
 		return err
 	}
 	t.keepLineups(current)
+	for _, l := range records {
+		t.noteStartLineup(l)
+	}
 	return nil
 }
 

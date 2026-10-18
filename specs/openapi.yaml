@@ -4569,11 +4569,22 @@ paths:
     delete:
       tags: [competitions]
       summary: Delete team lineup for round
+      description: >
+        Takes the team's starting lineup (round 0) away, ordered by when it was
+        made (`removedAt`) like every change of a lineup, its record kept for
+        the lineups carried by stamp. The lineups carried from it are worked
+        out again only when a lineup was taken away.
       security:
         - TournamentPassword: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LineupRemoval'
       responses:
         '204':
-          description: Lineup deleted.
+          description: Lineup deleted, nothing to delete, or a writeId this door already applied answered as recorded (nothing removed).
         '400':
           $ref: '#/components/responses/BadRequest'
         '500':
@@ -4737,6 +4748,13 @@ paths:
         the lineup in force there at that moment is kept as the match's own in its
         place (read back with `saved: true`), the first bout takes its first fighter
         on every device, and a later edit of the starting lineup does not rename it.
+
+        A removal is a change ordered by when it was made (`removedAt`), like
+        every change of a lineup: what the lineup held before then is kept as a
+        record the lineups carried by stamp still read, a change of it made
+        before then that arrives later is taken away by it, and a change made
+        after then stays the match's own. A body with no `removedAt` (an older
+        build's) is ordered as it lands.
       security:
         - TournamentPassword: []
       requestBody:
@@ -4744,10 +4762,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                writeId:
-                  $ref: '#/components/schemas/ArrivalWriteId'
+              $ref: '#/components/schemas/LineupRemoval'
       responses:
         '204':
           description: Lineup deleted, or a writeId this door already applied answered as recorded (nothing removed).
@@ -5950,6 +5965,20 @@ components:
         The client's id for one write (request-only). A write whose id the
         match's score event log already holds is answered as recorded, with
         nothing written and no history line.
+    LineupRemoval:
+      type: object
+      description: The optional body of a lineup removal.
+      properties:
+        writeId:
+          $ref: '#/components/schemas/ArrivalWriteId'
+        removedAt:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >
+            When the removal was made (server-relative ms), by which it is
+            ordered against the saves of the same lineup. Never taken as later
+            than the server's time as it lands. Absent: ordered as it lands.
     ArrivalWriteId:
       type: string
       maxLength: 128

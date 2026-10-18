@@ -1769,6 +1769,13 @@ function _outboxWrite({ kind, compID, matchID, method, url, payload, password, s
     if (kind === 'lineup' && Array.isArray(payload.changed) && !payload.changedAt && descriptor.sortStamp) {
         payload.changedAt = Object.fromEntries(payload.changed.map((k) => [k, descriptor.sortStamp]));
     }
+    // A removal names when it was made too, and the server orders it by that
+    // stamp against the saves of the same lineup, like every change (stage 6
+    // review 8, m1): one made before a save another device made later never
+    // takes that save away, whichever arrives first.
+    if (kind === 'lineup-remove' && !payload.removedAt && descriptor.sortStamp) {
+        payload.removedAt = descriptor.sortStamp;
+    }
     let settled = null;
     const key = _commitEnqueue(base, descriptor, (k) => { settled = _openSettlement(k, onRefusal); });
     return _pendingAnswer(key, settled);

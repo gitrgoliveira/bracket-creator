@@ -93,3 +93,36 @@ func bindOptionalWriteTag(c *gin.Context) (writeTag, bool) {
 	}
 	return tag, true
 }
+
+// lineupRemoval is the optional body of a lineup removal (DELETE
+// match-lineups/:matchId and lineups/:round): the write's id (a late
+// duplicate is answered as recorded, Y8) and when the removal was made
+// (removedAt, server-relative ms), by which it is ordered against the saves
+// of the same lineup like every change (stage 6 review 8, m1). An older
+// build sends none: its removal is stamped as it lands.
+type lineupRemoval struct {
+	writeTag
+	RemovedAt int64 `json:"removedAt,omitempty"`
+}
+
+// bindLineupRemoval reads a lineup removal's optional body, answering 400
+// (and false) for one that is not a removal's.
+func bindLineupRemoval(c *gin.Context) (lineupRemoval, bool) {
+	var body lineupRemoval
+	if c.Request.Body == nil || c.Request.Body == http.NoBody {
+		return body, true
+	}
+	if err := c.ShouldBindJSON(&body); err != nil && !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return lineupRemoval{}, false
+	}
+	if err := body.validateTag(); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return lineupRemoval{}, false
+	}
+	if body.RemovedAt < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "removedAt must not be negative"})
+		return lineupRemoval{}, false
+	}
+	return body, true
+}

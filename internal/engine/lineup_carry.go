@@ -263,66 +263,154 @@ func sameCarried(a, b domain.TeamLineup) bool {
 		maps.Equal(a.Stamps, b.Stamps) && a.StartedFrom == b.StartedFrom && a.CopiedFrom == b.CopiedFrom
 }
 
-// LandStartingLineupSave lands a stamped partial save on a team's starting
-// lineup (its round-0 entry, start; empty when it has none): the position
-// holds its latest change by stamp (domain.TeamLineup.ApplyStampedChanges),
-// and its History keeps every value it held, with the stamp it was set at,
-// with no bound by count (stage 6 review 8, m2: a bound made a copy whose
-// first save arrived after many changes read the oldest value kept).
-func LandStartingLineupSave(start domain.TeamLineup,
-	changed []domain.Position, positions, memberIDs map[domain.Position]string, stamps map[domain.Position]int64, now int64) (domain.TeamLineup, error) {
-	return start.ApplyStampedChanges(changed, positions, memberIDs, stamps, now)
+// LandedLineup is what a lineup save left in its slot (a team's starting
+// lineup, or a match's own lineup): every record of the slot, to store whole
+// (state.StoreTx.ReplaceTeamLineupSlot), and the lineup in force there now,
+// the live one (Live false when the slot holds none: every change of the save
+// was made before a removal of the slot stamped after it).
+type LandedLineup struct {
+	Records []domain.TeamLineup
+	Lineup  domain.TeamLineup
+	Live    bool
 }
 
-// LandMatchLineupSave is the lineup a partial save of matchID's own lineup
-// for teamID stores (the lineup handler's, under the competition's lock, over
-// what its transaction loaded). The first stamped save of a match's own
-// lineup makes a carried copy: its other positions are the carry rule at its
+// slotRecords is every record of one lineup slot in lineups (the live one and
+// the removed ones), cloned, in a fixed order.
+func slotRecords(lineups map[string]domain.TeamLineup, teamID, matchID string) []domain.TeamLineup {
+	var out []domain.TeamLineup
+	for _, l := range lineups {
+		if l.TeamID == teamID && l.MatchID == matchID && (matchID != "" || l.Round == 0) {
+			out = append(out, l.Clone())
+		}
+	}
+	slices.SortFunc(out, func(a, b domain.TeamLineup) int { return cmp.Compare(a.RemovedAt, b.RemovedAt) })
+	return out
+}
+
+// landEpochs lands a save's changed positions on the records of one slot,
+// each on the epoch its stamp falls in (domain.SlotEpochAt, stage 6 review 8,
+// m1): a change made before a removal of the slot stamped after it belongs to
+// the lineup that removal took away, whenever either arrives, so it is landed
+// on that removed record, and only a change made after every removal lands on
+// the live lineup. land builds the epoch's record from its base (found false:
+// the epoch holds no lineup, a removal marker or no live one) and the
+// positions landing there, with the earliest stamp among them.
+func landEpochs(records []domain.TeamLineup, changed []domain.Position, stamps map[domain.Position]int64, now int64,
+	land func(base domain.TeamLineup, found bool, ps []domain.Position, first int64) (domain.TeamLineup, error)) (LandedLineup, error) {
+	stampOf := func(p domain.Position) int64 {
+		if s := min(stamps[p], now); s > 0 {
+			return s
+		}
+		// Every change carries a stamp: the handler stamps an unstamped one
+		// (an older build's) with the server's time as it lands.
+		return now
+	}
+	live := -1
+	for i, r := range records {
+		if !r.IsRemoved() {
+			live = i
+		}
+	}
+	groups := map[int][]domain.Position{}
+	var order []int
+	for _, p := range changed {
+		e := domain.SlotEpochAt(records, stampOf(p))
+		if e < 0 {
+			e = live
+		}
+		if _, ok := groups[e]; !ok {
+			order = append(order, e)
+		}
+		groups[e] = append(groups[e], p)
+	}
+	for _, e := range order {
+		ps := groups[e]
+		first := now
+		for _, p := range ps {
+			first = min(first, stampOf(p))
+		}
+		var base domain.TeamLineup
+		found := false
+		if e >= 0 {
+			base, found = records[e], !records[e].IsRemovalMarker()
+		}
+		out, err := land(base, found, ps, first)
+		if err != nil {
+			return LandedLineup{}, err
+		}
+		if e >= 0 {
+			// A removed record keeps what a carry reads of it (m3).
+			out.RemovedAt = records[e].RemovedAt
+			records[e] = out.OwnPositionsOnly()
+		} else {
+			live = len(records)
+			records = append(records, out)
+		}
+	}
+	res := LandedLineup{Records: records}
+	if live >= 0 {
+		res.Lineup, res.Live = records[live], true
+	}
+	return res, nil
+}
+
+// LandStartingLineupSave lands a stamped partial save on a team's starting
+// lineup (its round-0 entry; empty when it has none): the position holds its
+// latest change by stamp (domain.TeamLineup.ApplyStampedChanges), and its
+// History keeps every value it held, with the stamp it was set at, with no
+// bound by count (stage 6 review 8, m2: a bound made a copy whose first save
+// arrived after many changes read the oldest value kept). A change made
+// before a removal of the starting lineup stamped after it lands on the
+// lineup that removal took away (landEpochs, m1).
+func LandStartingLineupSave(lineups map[string]domain.TeamLineup, teamID string,
+	changed []domain.Position, positions, memberIDs map[domain.Position]string, stamps map[domain.Position]int64, now int64) (LandedLineup, error) {
+	return landEpochs(slotRecords(lineups, teamID, ""), changed, stamps, now,
+		func(base domain.TeamLineup, found bool, ps []domain.Position, _ int64) (domain.TeamLineup, error) {
+			if !found {
+				base = domain.TeamLineup{TeamID: teamID, Positions: map[domain.Position]string{}}
+			}
+			out, err := base.ApplyStampedChanges(ps, positions, memberIDs, stamps, now)
+			out.TeamID, out.MatchID, out.Round = teamID, "", 0
+			return out, err
+		})
+}
+
+// LandMatchLineupSave is what a partial save of matchID's own lineup for
+// teamID leaves (the lineup handler's, under the competition's lock, over what
+// its transaction loaded). The first stamped save of a match's own lineup
+// makes a carried copy: its other positions are the carry rule at its
 // earliest change's stamp (lineupCarry). A save over a carried copy joins its
 // own positions, and one made before its earliest change moves that point
 // back, the carried positions being worked out again there. A save over the
 // lineup a kachinuki match started with turns it into the operator's own,
 // carried from the same point. A change sent with no stamp (an older build's)
 // comes stamped with the server's time as it landed (lineupSave.landPartial),
-// so a first such save makes a copy at its arrival like any other.
+// so a first such save makes a copy at its arrival like any other. A change
+// made before a removal of the match's own lineup stamped after it lands on
+// the lineup that removal took away (landEpochs, m1).
 func LandMatchLineupSave(lineups map[string]domain.TeamLineup, pool []state.MatchResult, bracket *state.Bracket, knockout bool, teamSize int,
-	teamID, matchID string, changed []domain.Position, positions, memberIDs map[domain.Position]string, stamps map[domain.Position]int64, now int64) (domain.TeamLineup, error) {
+	teamID, matchID string, changed []domain.Position, positions, memberIDs map[domain.Position]string, stamps map[domain.Position]int64, now int64) (LandedLineup, error) {
 	lc := newLineupCarry(lineups, pool, bracket, knockout, teamSize)
-	var base domain.TeamLineup
-	found := false
-	for _, l := range lineups {
-		if l.TeamID == teamID && l.MatchID == matchID && !l.IsRemoved() {
-			base, found = l.Clone(), true
-		}
-	}
-	first := int64(0)
-	for _, p := range changed {
-		if s := min(stamps[p], now); s > 0 && (first == 0 || s < first) {
-			first = s
-		}
-	}
-	if first == 0 {
-		// Every change carries a stamp: the handler stamps an unstamped one
-		// (an older build's) with the server's time as it lands.
-		first = now
-	}
-	switch {
-	case found && base.IsStartPin():
-		base.CopiedAt, base.CopiedFrom, base.Own = base.StartedAt, base.StartedFrom, nil
-		base.StartedAt, base.StartedFrom = 0, ""
-	case !found:
-		base = domain.TeamLineup{TeamID: teamID, MatchID: matchID, Positions: map[domain.Position]string{}, CopiedAt: first}
-		base.CopiedFrom = lc.carryInto(&base, first)
-	}
-	out, err := base.ApplyStampedChanges(changed, positions, memberIDs, stamps, now)
-	if err != nil {
-		return domain.TeamLineup{}, err
-	}
-	if out.IsCarriedCopy() {
-		out.CopiedFrom = lc.carryInto(&out, out.CopiedAt)
-	}
-	out.TeamID, out.MatchID, out.Round = teamID, matchID, 0
-	return out, nil
+	return landEpochs(slotRecords(lineups, teamID, matchID), changed, stamps, now,
+		func(base domain.TeamLineup, found bool, ps []domain.Position, first int64) (domain.TeamLineup, error) {
+			switch {
+			case found && base.IsStartPin():
+				base.CopiedAt, base.CopiedFrom, base.Own = base.StartedAt, base.StartedFrom, nil
+				base.StartedAt, base.StartedFrom = 0, ""
+			case !found:
+				base = domain.TeamLineup{TeamID: teamID, MatchID: matchID, Positions: map[domain.Position]string{}, CopiedAt: first}
+				base.CopiedFrom = lc.carryInto(&base, first)
+			}
+			out, err := base.ApplyStampedChanges(ps, positions, memberIDs, stamps, now)
+			if err != nil {
+				return domain.TeamLineup{}, err
+			}
+			if out.IsCarriedCopy() {
+				out.CopiedFrom = lc.carryInto(&out, out.CopiedAt)
+			}
+			out.TeamID, out.MatchID, out.Round = teamID, matchID, 0
+			return out, nil
+		})
 }
 
 // FollowLineupSave works every carried lineup of the saved lineup's team out

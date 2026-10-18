@@ -300,6 +300,35 @@ func (w *gateWorld) earlierNow() string {
 	return ""
 }
 
+// earlierAt is the latest earlier match whose own lineup was in force at
+// stamp at: saved (every save here is stamped before at), and not taken away
+// at or before at (a removal is in force from its stamp on).
+func (w *gateWorld) earlierAt(at int64) string {
+	switch {
+	case w.arrived[opEarly1]:
+		return gateEarly1
+	case w.arrived[opEarly0]:
+		if r := w.removedAt(gateEarly0); r == 0 || r >= at {
+			return gateEarly0
+		}
+	}
+	return ""
+}
+
+// removedAt is the stamp of the latest removal of team A's own lineup of
+// match, as the store keeps it (0 for none).
+func (w *gateWorld) removedAt(match string) int64 {
+	all, err := w.store.LoadTeamLineupsWithRemoved(w.comp)
+	require.NoError(w.t, err)
+	at := int64(0)
+	for _, l := range all {
+		if l.TeamID == w.teamA && l.MatchID == match && l.IsRemoved() {
+			at = max(at, l.RemovedAt)
+		}
+	}
+	return at
+}
+
 // saveEarlier saves an earlier match's own lineup, stamped before the start.
 func (w *gateWorld) saveEarlier(match, op string) {
 	pos := domain.PositionNumbered(1)
@@ -344,12 +373,24 @@ func (w *gateWorld) step(op string) {
 	case opStart:
 		w.start(op, w.stamp(op))
 		if w.own == nil {
+			at := w.stamp(op)
 			in := w.inForce()
+			if r := w.removedAt(gateMatch); r > at {
+				// "Use the previous match's lineup" is stamped as it lands,
+				// after the start: in stamp order the match started and then
+				// kept the lineup in force at that removal as its own
+				// (stage 6 review 8, m1).
+				at = r
+				in = gateLineup{}
+				if e := w.earlierAt(at); e != "" {
+					in = gateLineup{name: gateEarlyName[e], from: e}
+				}
+			}
 			if in.from == "" {
 				// The carry rule at the start, by stamp.
-				in.name, in.stamp = w.startingAt(w.stamp(op))
+				in.name, in.stamp = w.startingAt(at)
 			}
-			w.own = &gateLineup{name: in.name, pin: true, startedAt: w.stamp(op), stamp: in.stamp, from: in.from}
+			w.own = &gateLineup{name: in.name, pin: true, startedAt: at, stamp: in.stamp, from: in.from}
 		}
 	case opEarly0:
 		w.saveEarlier(gateEarly0, op)
@@ -379,7 +420,13 @@ func (w *gateWorld) step(op string) {
 			"changed": []domain.Position{pos}, "changedAt": map[domain.Position]int64{pos: w.stamp(op)}, "writeId": w.comp + op,
 		})
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		w.own = &gateLineup{name: "Ito"}
+		// Ordered by its stamp against the removal (stage 6 review 8, m1):
+		// "Use the previous match's lineup" is stamped as it lands, after
+		// every device change here, so a save of the match's own lineup
+		// arriving after it was made before it and is taken away by it.
+		if !w.arrived[opUsePrevious] {
+			w.own = &gateLineup{name: "Ito"}
+		}
 	case opUsePrevious:
 		rec := w.do(http.MethodDelete, "/api/competitions/"+w.comp+"/teams/"+w.teamA+"/match-lineups/"+url.PathEscape(gateMatch), map[string]any{"writeId": w.comp + op})
 		require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())

@@ -148,6 +148,10 @@ func (stubTeamLineupStore) DeleteTeamLineupForMatch(string, string, string) erro
 	return nil
 }
 
+func (stubTeamLineupStore) RemoveTeamLineupAt(string, string, string, int, int64) (bool, error) {
+	return false, nil
+}
+
 // stubCompetitionTransactor is a no-op implementation of
 // CompetitionTransactor. fn runs immediately with a nil StoreTx; tests
 // that exercise the transactional path use the real *state.Store

@@ -25,7 +25,7 @@ import (
 // name it gives it, and when the change was made (ms from the start).
 type carryStep struct {
 	match string
-	pos   int // 0: the lineup is taken away (a DELETE), stamped as it lands
+	pos   int // 0: the lineup is taken away (a DELETE), at its own stamp
 	name  string
 	at    int64
 }
@@ -56,24 +56,39 @@ func TestLineupCarry_AMatchLineupIsTheSameInEveryArrivalOrder(t *testing.T) {
 		{"P1-1", 2, "Endo", -100},
 		{"P1-0", 1, "Mori", -20},
 	}
-	// A removal ("Use the previous match's lineup", stamped as it lands, so
-	// after every change here) is ordered like a change: the lineups made
-	// while the removed one was in force keep what they carried from it,
-	// whatever arrives before or after it. A save of the removed match
-	// itself is ordered by arrival against the removal (it makes the
-	// match's own lineup again), so it always arrives before it here.
+	// A removal ("Use the previous match's lineup") is a change stamped when
+	// it was made, ordered by that stamp like every change (stage 6 review 8,
+	// m1): the lineups made while the removed one was in force keep what they
+	// carried from it, a save of the removed match made before the removal
+	// is taken away by it whenever it arrives, and one made after it makes
+	// the match's own lineup again.
 	removal := []carryStep{
 		{"P1-0", 1, "Mori", -100},
 		{"P1-1", 2, "Endo", -50},
-		{"", 2, "Doi", 10},
 		{"", 1, "Aoki", -150},
-		{"P1-0", 0, "", 0},
+		{"P1-0", 0, "", -20},
+		{"P1-0", 2, "Kato", 30},
 	}
 	removeStart := []carryStep{
 		{"P1-1", 2, "Endo", -50},
 		{"", 1, "Aoki", -150},
 		{"P1-0", 2, "Doi", 10},
-		{"", 0, "", 0},
+		{"", 0, "", -20},
+		{"", 1, "Mori", 40},
+	}
+	// M1 (stage 6 review 8): a copy whose stamp moves back carries nothing
+	// from a lineup made after the earlier stamp.
+	movedBack := []carryStep{
+		{"P1-1", 1, "Mori", 10},
+		{"P1-0", 3, "Endo", 50},
+		{"P1-1", 2, "Doi", 100},
+		{"", 1, "Aoki", 70},
+	}
+	// And a kachinuki start's pin made a copy at a stamp before the start.
+	pinToCopy := []carryStep{
+		{"P1-0", 3, "Endo", -100},
+		{"P1-2", 2, "Doi", -300},
+		{"", 1, "Aoki", -50},
 	}
 	for _, sc := range []struct {
 		name      string
@@ -83,6 +98,7 @@ func TestLineupCarry_AMatchLineupIsTheSameInEveryArrivalOrder(t *testing.T) {
 		{"fixed order", fixedOrder, false}, {"kachinuki, with the start", steps, true}, {"one position changed twice", samePosition, false},
 		{"a match's lineup removed", removal, false}, {"a match's lineup removed, kachinuki, with the start", removal, true},
 		{"the starting lineup removed", removeStart, false}, {"the starting lineup removed, kachinuki, with the start", removeStart, true},
+		{"a copy's stamp moved back", movedBack, false}, {"a pin made a copy before the start", pinToCopy, true},
 	} {
 		steps, kachinuki := sc.steps, sc.kachinuki
 		t.Run(sc.name, func(t *testing.T) {
@@ -94,26 +110,21 @@ func TestLineupCarry_AMatchLineupIsTheSameInEveryArrivalOrder(t *testing.T) {
 			for i := range idx {
 				idx[i] = i
 			}
-			// The reference: every change in the order it was made, a
-			// removal (stamped as it lands) after every device's change.
+			// The reference: every change in the order it was made, a removal
+			// at its own stamp too.
 			ref := slices.Clone(idx)
 			at := func(i int) int64 {
 				if i == len(steps) {
 					return 0
 				}
-				if steps[i].pos == 0 {
-					return 1 << 40
-				}
 				return steps[i].at
 			}
 			slices.SortFunc(ref, func(a, b int) int { return int(at(a) - at(b)) })
 			want := carryRun(t, steps, kachinuki, ref)
+			t.Logf("in time: %s", want)
 			differ, total := 0, 0
 			var first []string
 			for _, order := range carryPerms(idx) {
-				if !carrySavesBeforeTheirRemoval(steps, order) {
-					continue
-				}
 				total++
 				if got := carryRun(t, steps, kachinuki, order); got != want {
 					differ++
@@ -127,24 +138,7 @@ func TestLineupCarry_AMatchLineupIsTheSameInEveryArrivalOrder(t *testing.T) {
 	}
 }
 
-// carrySavesBeforeTheirRemoval says every save of a lineup arrives before
-// that lineup's removal in order.
-func carrySavesBeforeTheirRemoval(steps []carryStep, order []int) bool {
-	removed := map[string]bool{}
-	for _, i := range order {
-		if i >= len(steps) {
-			continue
-		}
-		s := steps[i]
-		if s.pos == 0 {
-			removed[s.match] = true
-		} else if removed[s.match] {
-			return false
-		}
-	}
-	return true
-}
-
+// carryPerms is every order of xs.
 func carryPerms(xs []int) [][]int {
 	if len(xs) <= 1 {
 		return [][]int{slices.Clone(xs)}
@@ -236,7 +230,7 @@ func carryRun(t *testing.T, steps []carryStep, kachinuki bool, order []int) stri
 			path = "/api/competitions/" + comp + "/teams/" + id["Taka"] + "/match-lineups/" + url.PathEscape(s.match)
 		}
 		if s.pos == 0 {
-			rec := do(http.MethodDelete, path, map[string]any{"writeId": fmt.Sprintf("remove-%d", i)})
+			rec := do(http.MethodDelete, path, map[string]any{"writeId": fmt.Sprintf("remove-%d", i), "removedAt": base + s.at})
 			require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
 			continue
 		}

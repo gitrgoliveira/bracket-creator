@@ -122,6 +122,292 @@ type TeamLineup struct {
 // IsRemoved says the lineup is the kept record of one taken away (RemovedAt).
 func (t TeamLineup) IsRemoved() bool { return t.RemovedAt > 0 }
 
+// IsRemovalMarker says the record is a removal that took nothing away, kept
+// for its stamp alone (stage 6 review 8, m1): CopiedAt equals RemovedAt, so no
+// read is ever in force in it (a carry reads a removed record only at stamps
+// after it was made and at or before it was removed). A change stamped before
+// the removal that arrives after it lands in its epoch (SlotEpochAt), as it
+// would have had it arrived in time.
+func (t TeamLineup) IsRemovalMarker() bool { return t.RemovedAt > 0 && t.CopiedAt == t.RemovedAt }
+
+// OwnPositionsOnly is a carried copy with its own positions alone, what a
+// removed record is read for (stage 6 review 8, m3): a carry reads the
+// positions a copy carried through the lineup it carried them from, never
+// from the copy, so a removed copy keeps none of them. Any other lineup is
+// returned as it is.
+func (t TeamLineup) OwnPositionsOnly() TeamLineup {
+	if !t.IsCarriedCopy() {
+		return t
+	}
+	own := t.OwnSet()
+	out := t.Clone()
+	for p := range t.Positions {
+		if !own[p] {
+			delete(out.Positions, p)
+		}
+	}
+	for p := range t.MemberIDs {
+		if !own[p] {
+			delete(out.MemberIDs, p)
+		}
+	}
+	for p := range t.Stamps {
+		if !own[p] {
+			delete(out.Stamps, p)
+		}
+	}
+	for p := range t.History {
+		if !own[p] {
+			delete(out.History, p)
+		}
+	}
+	if len(out.MemberIDs) == 0 {
+		out.MemberIDs = nil
+	}
+	if len(out.Stamps) == 0 {
+		out.Stamps = nil
+	}
+	if len(out.History) == 0 {
+		out.History = nil
+	}
+	return out
+}
+
+// RemovalMarker is the record of a removal at stamp at of a lineup slot (a
+// match's own lineup, or a team's starting lineup) that held nothing then.
+func RemovalMarker(teamID, matchID string, round int, at int64) TeamLineup {
+	return TeamLineup{TeamID: teamID, MatchID: matchID, Round: round, Positions: map[Position]string{}, CopiedAt: at, RemovedAt: at}
+}
+
+// SlotEpochAt answers which record of one lineup slot a change stamped s
+// belongs to (records: every record of the slot, the live one and the removed
+// ones): the removed record whose removal is the first one stamped after s, as
+// an index into records, or -1 for the live one (none of the removals is after
+// s). A change stamped at a removal's own stamp comes after it.
+func SlotEpochAt(records []TeamLineup, s int64) int {
+	best := -1
+	for i, r := range records {
+		if r.IsRemoved() && r.RemovedAt > s && (best < 0 || r.RemovedAt < records[best].RemovedAt) {
+			best = i
+		}
+	}
+	return best
+}
+
+// ownChanges answers, per position the lineup changed itself (every position
+// of a lineup that is not a carried copy, the Own ones of a copy), every value
+// it held with the stamp it was set at, in stamp order, its current value last
+// of equal stamps.
+func (t TeamLineup) ownChanges() map[Position][]PositionChange {
+	out := map[Position][]PositionChange{}
+	add := func(p Position) {
+		if _, done := out[p]; done {
+			return
+		}
+		cs := slices.Clone(t.History[p])
+		_, set := t.Positions[p]
+		_, hasID := t.MemberIDs[p]
+		_, stamped := t.Stamps[p]
+		if set || hasID || stamped || len(cs) > 0 {
+			cs = append(cs, t.Held(p))
+		}
+		if len(cs) > 0 {
+			out[p] = sortHistory(cs)
+		}
+	}
+	if t.IsCarriedCopy() {
+		for _, p := range t.Own {
+			add(p)
+		}
+		return out
+	}
+	for p := range t.Positions {
+		add(p)
+	}
+	for p := range t.MemberIDs {
+		add(p)
+	}
+	for p := range t.Stamps {
+		add(p)
+	}
+	for p := range t.History {
+		add(p)
+	}
+	return out
+}
+
+// withOwnChanges is t with its own positions set from changes: each
+// position's latest change its value, the earlier ones its History. A
+// position t held of its own that changes does not name is dropped (a copy
+// then carries it). On a carried copy the positions it carried stay as they
+// were, Own lists the positions changes names, and CopiedAt is the earliest
+// change's stamp.
+func (t TeamLineup) withOwnChanges(changes map[Position][]PositionChange) TeamLineup {
+	out := t.Clone()
+	for p := range t.ownChanges() {
+		delete(out.Positions, p)
+		delete(out.MemberIDs, p)
+		delete(out.Stamps, p)
+		delete(out.History, p)
+	}
+	if out.Positions == nil {
+		out.Positions = map[Position]string{}
+	}
+	var own []Position
+	first := int64(0)
+	for p, cs := range changes {
+		if len(cs) == 0 {
+			continue
+		}
+		cur := cs[len(cs)-1]
+		out.Positions[p] = cur.Name
+		if cur.MemberID != "" {
+			if out.MemberIDs == nil {
+				out.MemberIDs = map[Position]string{}
+			}
+			out.MemberIDs[p] = cur.MemberID
+		}
+		if cur.Stamp > 0 {
+			if out.Stamps == nil {
+				out.Stamps = map[Position]int64{}
+			}
+			out.Stamps[p] = cur.Stamp
+		}
+		if len(cs) > 1 {
+			if out.History == nil {
+				out.History = map[Position][]PositionChange{}
+			}
+			out.History[p] = slices.Clone(cs[:len(cs)-1])
+		}
+		own = append(own, p)
+		if cs[0].Stamp > 0 && (first == 0 || cs[0].Stamp < first) {
+			first = cs[0].Stamp
+		}
+	}
+	if len(out.MemberIDs) == 0 {
+		out.MemberIDs = nil
+	}
+	if len(out.Stamps) == 0 {
+		out.Stamps = nil
+	}
+	if len(out.History) == 0 {
+		out.History = nil
+	}
+	if out.IsCarriedCopy() {
+		slices.SortFunc(own, ComparePositions)
+		out.Own = own
+		if first > 0 {
+			out.CopiedAt = first
+		}
+	}
+	return out
+}
+
+// SplitAt splits the lineup at stamp at, as a removal stamped at sees it
+// (stage 6 review 8, m1): before holds the changes it made before at, after
+// the ones made at or after it, each change in exactly one of the two, so a
+// History is never kept twice (m3). hasBefore says the lineup held something
+// of its own before at (a value set before at; the empty value every first
+// change keeps as "nothing from the beginning" does not count), hasAfter that
+// it changed something at or after at. A match's own lineup that is not a
+// carried copy (a migrated one) splits into its part before at and a carried
+// copy made at its first change at or after at, as a save made after the
+// removal would have made.
+func (t TeamLineup) SplitAt(at int64) (before, after TeamLineup, hasBefore, hasAfter bool) {
+	b, a := map[Position][]PositionChange{}, map[Position][]PositionChange{}
+	for p, cs := range t.ownChanges() {
+		for _, c := range cs {
+			if c.Stamp < at {
+				b[p] = append(b[p], c)
+				if c.Stamp > 0 || c.Name != "" || c.MemberID != "" {
+					hasBefore = true
+				}
+			} else {
+				a[p] = append(a[p], c)
+				hasAfter = true
+			}
+		}
+	}
+	before = t.withOwnChanges(b).OwnPositionsOnly()
+	before.RemovedAt = at
+	afterBase := t
+	if !t.IsCarriedCopy() && t.MatchID != "" && !t.IsStartPin() {
+		// A copy from the first change after the removal (withOwnChanges sets
+		// CopiedAt and Own); nothing it held before carries over.
+		afterBase = TeamLineup{TeamID: t.TeamID, CompetitionID: t.CompetitionID, MatchID: t.MatchID,
+			Positions: map[Position]string{}, CopiedAt: at}
+		for p, cs := range a {
+			afterBase.Positions[p] = cs[len(cs)-1].Name
+		}
+		afterBase.Own = slices.SortedFunc(maps.Keys(a), ComparePositions)
+	}
+	after = afterBase.withOwnChanges(a)
+	after.RemovedAt = t.RemovedAt
+	return before, after, hasBefore, hasAfter
+}
+
+// RemoveFromSlot answers the records of one lineup slot (records: every record
+// of the slot, the live one and the removed ones) after a removal of it
+// stamped at, and whether the removal took a lineup away (stage 6 review 8,
+// m1: a removal is ordered by its own stamp, like every change). The record
+// whose epoch holds at (SlotEpochAt) splits there (SplitAt): what it held of
+// its own before at is kept removed at at, what it changed at or after at
+// stays in its epoch. A removal with nothing before it in its epoch is kept as
+// a marker (RemovalMarker), so a change stamped before it that arrives later
+// is still taken away by it. A removal at a stamp a removal of the slot
+// already has is that removal (nothing changes). A kachinuki match's start
+// pin taken away at or after its start leaves no record (a pin is never
+// carried); one started after the removal stays.
+func RemoveFromSlot(records []TeamLineup, teamID, matchID string, round int, at int64) (out []TeamLineup, removed, changed bool) {
+	for _, r := range records {
+		if r.IsRemoved() && r.RemovedAt == at {
+			return records, false, false
+		}
+	}
+	out, removed = removeFromSlot(records, teamID, matchID, round, at)
+	return out, removed, true
+}
+
+func removeFromSlot(records []TeamLineup, teamID, matchID string, round int, at int64) ([]TeamLineup, bool) {
+	target := SlotEpochAt(records, at)
+	if target < 0 {
+		for i, r := range records {
+			if !r.IsRemoved() {
+				target = i
+			}
+		}
+	}
+	out := make([]TeamLineup, 0, len(records)+2)
+	for i, r := range records {
+		if i != target {
+			out = append(out, r)
+		}
+	}
+	if target < 0 {
+		return append(out, RemovalMarker(teamID, matchID, round, at)), false
+	}
+	t := records[target]
+	if t.IsStartPin() {
+		if at < t.StartedAt {
+			return append(append(out, t), RemovalMarker(teamID, matchID, round, at)), false
+		}
+		return append(out, RemovalMarker(teamID, matchID, round, at)), true
+	}
+	before, after, hasBefore, hasAfter := t.SplitAt(at)
+	if hasBefore {
+		out = append(out, before)
+	} else {
+		out = append(out, RemovalMarker(teamID, matchID, round, at))
+	}
+	switch {
+	case hasAfter:
+		out = append(out, after)
+	case t.IsRemoved():
+		out = append(out, RemovalMarker(teamID, matchID, round, t.RemovedAt))
+	}
+	return out, hasBefore
+}
+
 // PositionChange is a value a lineup position held, from Stamp (0: from
 // before any stamped change) on: a name, a member id, or neither (empty).
 type PositionChange struct {

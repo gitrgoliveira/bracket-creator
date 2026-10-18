@@ -292,6 +292,27 @@ describe('API.putMatchLineup: memberIds (bc-pnum gap closure)', () => {
 // review 2 (R1): pinned in member_writes_outbox.test.jsx (order behind a queued
 // save, a 404 as the outcome asked for, a refusal in the server's own words).
 
+// Stage 6 review 8 (m1): a removal names when it was made, so the server
+// orders it by that stamp against the saves of the same lineup, as every
+// change: the stamp the outbox gave it when it was made, sent as it went.
+describe('API.deleteMatchLineup stamps the removal when it is made', () => {
+  let originalFetch;
+  beforeEach(() => { originalFetch = global.fetch; });
+  afterEach(() => { global.fetch = originalFetch; API.clearQueue(); });
+
+  it('sends removedAt, the stamp it was queued under', async () => {
+    global.fetch = vi.fn(() => Promise.resolve({ ok: true, status: 204, json: async () => ({}) }));
+    const res = await API.deleteMatchLineup('c1', 't1', 'm1', 'pw');
+    await res.settled;
+    const call = global.fetch.mock.calls.find(([url]) => String(url).includes('/match-lineups/'));
+    expect(call[1].method).toBe('DELETE');
+    const body = JSON.parse(call[1].body);
+    expect(body.writeId).toBeTruthy();
+    expect(Number.isFinite(body.removedAt) && body.removedAt > 0).toBe(true);
+    expect(Math.abs(body.removedAt - Date.now())).toBeLessThan(60_000);
+  });
+});
+
 describe('API.queuedLineupSave', () => {
   let originalFetch;
   beforeEach(() => {

@@ -52,8 +52,10 @@ func rv5Save(t *testing.T, eng *Engine, store *state.Store, c, matchID string, n
 			require.NoError(t, err)
 			br, err := tx.LoadBracket(c)
 			require.NoError(t, err)
-			saved, err = LandMatchLineupSave(lineups, pool, br, comp.IsKnockoutEnabled(), comp.TeamSize, "ta", matchID, changed, names, ids, stamps, stamp+1_000_000)
+			landed, err := LandMatchLineupSave(lineups, pool, br, comp.IsKnockoutEnabled(), comp.TeamSize, "ta", matchID, changed, names, ids, stamps, stamp+1_000_000)
 			require.NoError(t, err)
+			require.True(t, landed.Live)
+			saved = landed.Lineup
 		}
 		saved.TeamID, saved.CompetitionID, saved.MatchID, saved.Round = "ta", c, matchID, 0
 		saved.StartedAt, saved.StartedFrom = 0, ""

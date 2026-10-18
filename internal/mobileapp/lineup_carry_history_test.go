@@ -133,6 +133,15 @@ func (e *carryEnv) remove(match string) {
 	require.Equal(e.t, http.StatusNoContent, rec.Code, rec.Body.String())
 }
 
+// removeAt takes match's own lineup away ("" the starting lineup) as a
+// removal made at at (relative to base), as this build's outbox sends it.
+func (e *carryEnv) removeAt(match string, at int64) {
+	e.t.Helper()
+	e.writes++
+	rec := e.do(http.MethodDelete, e.lineupPath(match), map[string]any{"writeId": fmt.Sprintf("remove-%d", e.writes), "removedAt": e.base + at})
+	require.Equal(e.t, http.StatusNoContent, rec.Code, rec.Body.String())
+}
+
 // start starts a match at base+at, as the court console's Start does.
 func (e *carryEnv) start(match, opp string, at int64) {
 	e.t.Helper()
@@ -395,6 +404,121 @@ func TestLineupCarry_ARemovalIsOrderedLikeAChange(t *testing.T) {
 			require.Equal(t, "Sato", in.Lineup.Positions[domain.PositionNumbered(1)])
 		})
 	}
+}
+
+// A removal is ordered by when it was made, like every change (stage 6 review
+// 8, m1): device A's removal made at 200 that arrives after device B's save
+// made at 300 takes nothing of B's change away, and a save made before the
+// removal is taken away by it whenever it arrives.
+func TestLineupCarry_ARemovalIsOrderedByItsOwnStamp(t *testing.T) {
+	for _, removalLast := range []bool{true, false} {
+		e := newCarryEnv(t, false)
+		if !removalLast {
+			e.removeAt("P1-1", 200)
+		}
+		e.save("P1-1", 2, "Endo", 300)
+		e.save("P1-1", 3, "Kato", 100)
+		if removalLast {
+			e.removeAt("P1-1", 200)
+		}
+		require.Equalf(t, "Endo", e.at("P1-1", 2), "removal last %v: %s", removalLast, e.dump())
+		require.Equal(t, "Sato", e.at("P1-1", 1), "carried as at 300")
+		l, ok := e.lineup("P1-1")
+		require.True(t, ok)
+		_, kept := l.Positions[domain.PositionNumbered(3)]
+		require.False(t, kept, "the change made before the removal is taken away by it")
+	}
+}
+
+// A removal keeps each change in one record only (stage 6 review 8, m3): the
+// record of a removed copy holds its own positions and their History, never
+// the positions it carried, and a save after it starts a lineup of its own
+// with none of the removed one's History.
+func TestLineupCarry_ARemovalKeepsEachChangeOnce(t *testing.T) {
+	e := newCarryEnv(t, false)
+	for i := range 3 {
+		at := int64(i * 100)
+		e.save("P1-0", 1, "Mori", at+10)
+		e.save("P1-0", 1, "Kato", at+20)
+		e.removeAt("P1-0", at+50)
+	}
+	e.save("P1-0", 1, "Doi", 400)
+	all, err := e.store.LoadTeamLineupsWithRemoved(e.comp)
+	require.NoError(t, err)
+	p1 := domain.PositionNumbered(1)
+	changes, records := 0, 0
+	for _, l := range all {
+		if l.MatchID != "P1-0" || (l.IsRemoved() && l.CopiedAt == l.RemovedAt) {
+			continue // a removal marker holds no change
+		}
+		records++
+		if l.IsRemoved() {
+			require.Equal(t, []domain.Position{p1}, slices.Sorted(maps.Keys(l.Positions)), "a removed record holds its own position alone: %+v", l)
+		}
+		changes += 1 + len(l.History[p1])
+	}
+	require.Equal(t, 4, records, "three removed lineups and the live one")
+	require.Equal(t, 7, changes, "each of the seven changes kept once")
+}
+
+// Every arrival stamp is after every stamp on disk (stage 6 review 8, m5): a
+// restart, or a clock stepped back, never gives a removal an older stamp than
+// one kept, nor its record another's key.
+func TestLineupCarry_ArrivalStampsComeAfterEveryStampOnDisk(t *testing.T) {
+	e := newCarryEnv(t, false)
+	ahead := time.Now().UnixMilli() + 120_000
+	p1 := domain.PositionNumbered(1)
+	require.NoError(t, e.store.SetTeamLineup(e.comp, domain.TeamLineup{TeamID: e.id["Taka"], MatchID: "P1-0",
+		Positions: map[domain.Position]string{p1: "Mori"}, Stamps: map[domain.Position]int64{p1: ahead},
+		CopiedAt: ahead, Own: []domain.Position{p1}}, 3))
+	_, err := e.store.LoadTeamLineupsWithRemoved(e.comp)
+	require.NoError(t, err)
+	require.Greater(t, state.LineupArrivalStamp(), ahead)
+	// Two removals sent with no stamp, one after the other, are two records.
+	e.remove("P1-0")
+	e.save("P1-0", 1, "Kato", 0)
+	e.remove("P1-0")
+	all, err := e.store.LoadTeamLineupsWithRemoved(e.comp)
+	require.NoError(t, err)
+	stamps := map[int64]bool{}
+	for _, l := range all {
+		if l.MatchID == "P1-0" {
+			require.True(t, l.IsRemoved())
+			require.Greater(t, l.RemovedAt, ahead)
+			require.False(t, stamps[l.RemovedAt], "a removal's stamp is its own")
+			stamps[l.RemovedAt] = true
+		}
+	}
+	require.Len(t, stamps, 2)
+}
+
+// DELETE lineups/:round takes a writeId like every lineup door: a late
+// duplicate is answered as recorded and changes nothing, and a removal that
+// takes nothing away works nothing out again (stage 6 review 8, m8).
+func TestLineupCarry_ARoundRemovalIsOnceAndFollowsOnlyWhatItTook(t *testing.T) {
+	e := newCarryEnv(t, false)
+	r := gin.New()
+	admin := r.Group("/api")
+	verifier := NewFileVerifier(e.store)
+	admin.Use(AuthMiddleware(verifier, e.store))
+	hub := NewHub()
+	t.Cleanup(hub.Close)
+	RegisterLineupHandlers(admin, e.store, e.store, e.store, hub, e.store, verifier, refusingFollow{e.eng})
+	e.r = r
+	ghost := "/api/competitions/" + e.comp + "/teams/" + e.id["Kuma"] + "/lineups/0"
+	rec := e.do(http.MethodDelete, ghost, map[string]any{"writeId": "rm-ghost"})
+	require.Equal(t, http.StatusNoContent, rec.Code, "nothing taken away, so nothing to work out again: %s", rec.Body.String())
+	rec = e.do(http.MethodDelete, e.lineupPath(""), map[string]any{"writeId": "rm-start"})
+	require.Equal(t, http.StatusInternalServerError, rec.Code, "a lineup taken away is followed (here refused)")
+	require.Equal(t, "Sato", e.at("", 1), "the refused removal was not kept")
+	// With a follow that stores, the removal lands once.
+	e2 := newCarryEnv(t, false)
+	rec = e2.do(http.MethodDelete, e2.lineupPath(""), map[string]any{"writeId": "rm-1", "removedAt": e2.base})
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	e2.save("", 1, "Aoki", 10)
+	rec = e2.do(http.MethodDelete, e2.lineupPath(""), map[string]any{"writeId": "rm-1", "removedAt": e2.base})
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	require.Equal(t, "Aoki", e2.at("", 1), "a late duplicate takes nothing away")
 }
 
 // A removal made after a kachinuki match started never reaches the lineup it

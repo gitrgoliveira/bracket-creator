@@ -203,7 +203,7 @@ sends none, and its changes are given the server's time as they land, so they ar
 their arrival. Such a release may also save a whole lineup without naming its changes: that is
 taken as a change of every position at its arrival, the positions it leaves out emptied, so it
 reaches no match lineup made before it arrived. Every lineup comes out the same whatever order
-its saves arrive in:
+its saves and removals arrive in:
 
 - A position holds its latest change by that time. A change made earlier that arrives later
   does not replace it; it is kept in the position's `history` (the values a position held, each
@@ -224,11 +224,16 @@ Two devices that change different positions of one lineup both keep their change
 later from a device that was offline included.
 
 Taking a lineup away ("Use the previous match's lineup", or removing a starting lineup) is a
-change made at the server's time as it lands. The lineup stops being in force, but its record
-is kept, marked with that time (`removedAt`), beside any lineup saved for the match afterwards,
-so a match lineup that carried positions from it while it was in force keeps them, whatever
-arrives before or after the removal. A save of the same lineup that arrives after its removal
-makes the lineup again. Discarding a draw removes these records with the draw's lineups.
+change like any other, ordered by when it was made (`removedAt`, sent by the device; a removal
+from an older release carries none and is ordered as it lands). The lineup stops being in force
+at that time, but what it held before then is kept as a record, marked with that time, beside
+any lineup saved for the match afterwards, so a match lineup that carried positions from it
+while it was in force keeps them, whatever arrives before or after the removal. Each change is
+kept in one record only: a change made before the removal belongs to the lineup it took away,
+even one that arrives after it, and a change made after it is the match's own lineup again,
+even one that arrived before it. A removal that found nothing to take away is still kept, as
+its time alone, so a change made before it that arrives later is taken away by it. Discarding a
+draw removes these records with the draw's lineups.
 
 When a kachinuki match starts, the lineup in force there for each team is kept as that match's
 own lineup record, marked with the time of the write that started it (`startedAt`) and the lineup

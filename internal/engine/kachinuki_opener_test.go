@@ -282,9 +282,11 @@ func carryTestMatchSave(t *testing.T, tx state.StoreTx, comp *state.Competition,
 	require.NoError(t, err)
 	br, err := tx.LoadBracket(comp.ID)
 	require.NoError(t, err)
-	saved, err := LandMatchLineupSave(lineups, pool, br, comp.IsKnockoutEnabled(), comp.TeamSize, teamID, matchID,
+	landed, err := LandMatchLineupSave(lineups, pool, br, comp.IsKnockoutEnabled(), comp.TeamSize, teamID, matchID,
 		[]domain.Position{p}, map[domain.Position]string{p: name}, map[domain.Position]string{p: id}, map[domain.Position]int64{p: stamp}, stamp+1_000_000)
 	require.NoError(t, err)
+	require.True(t, landed.Live)
+	saved := landed.Lineup
 	saved.CompetitionID = comp.ID
 	require.NoError(t, tx.SetTeamLineup(comp.ID, saved, comp.TeamSize))
 	return saved

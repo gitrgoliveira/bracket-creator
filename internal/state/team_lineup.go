@@ -16,6 +16,7 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -101,24 +102,51 @@ func liveTeamLineups(lineups map[string]domain.TeamLineup) map[string]domain.Tea
 	return out
 }
 
-// removeTeamLineup takes the lineup stored at key out of lineups, answering
-// whether it was there. A lineup a carry can read (a match's own lineup that
-// is not the one a kachinuki match started with, or a starting lineup) is
-// kept as a removed record stamped at (domain.TeamLineup.RemovedAt), so the
-// lineups carried by stamp that were made while it was in force keep reading
-// it (engine/lineup_carry.go).
-func removeTeamLineup(lineups map[string]domain.TeamLineup, key string, at int64) bool {
-	l, ok := lineups[key]
-	if !ok {
-		return false
+// removeTeamLineup applies a removal stamped at to one lineup slot of lineups
+// (a team's starting lineup, round 0, or a match's own lineup), by its stamp
+// like every change (domain.RemoveFromSlot, stage 6 review 8, m1): the
+// lineup's changes made before at are kept as a removed record stamped at
+// (domain.TeamLineup.RemovedAt), each in one record only (m3), so the lineups
+// carried by stamp that were made while it was in force keep reading it
+// (engine/lineup_carry.go), and a change made after at stays. removed says a
+// lineup was taken away, changed that lineups changed (a removal at a stamp
+// the slot already has a removal at is that one).
+func removeTeamLineup(lineups map[string]domain.TeamLineup, teamID, matchID string, round int, at int64) (removed, changed bool) {
+	inSlot := func(l domain.TeamLineup) bool {
+		return l.TeamID == teamID && l.MatchID == matchID && (matchID != "" || l.Round == round)
 	}
-	delete(lineups, key)
-	if !l.IsStartPin() && (l.MatchID != "" || l.Round == 0) {
-		kept := l.Clone()
-		kept.RemovedAt = at
-		lineups[lineupStorageKey(kept)] = kept
+	if matchID == "" && round != 0 {
+		// A later round's lineup (an older release's) is no lineup a carry
+		// reads: it goes, with no record.
+		key := teamLineupKey(teamID, round)
+		if _, ok := lineups[key]; !ok {
+			return false, false
+		}
+		delete(lineups, key)
+		return true, true
 	}
-	return true
+	var keys []string
+	var records []domain.TeamLineup
+	for k, l := range lineups {
+		if inSlot(l) {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		records = append(records, lineups[k])
+	}
+	out, removed, changed := domain.RemoveFromSlot(records, teamID, matchID, round, at)
+	if !changed {
+		return false, false
+	}
+	for _, k := range keys {
+		delete(lineups, k)
+	}
+	for _, l := range out {
+		lineups[lineupStorageKey(l)] = l
+	}
+	return removed, true
 }
 
 // lastLineupArrival is the last stamp LineupArrivalStamp gave.
@@ -137,6 +165,48 @@ func LineupArrivalStamp() int64 {
 			return next
 		}
 	}
+}
+
+// noteLineupStamps raises the arrival stamp past every stamp lineups holds
+// (stage 6 review 8, m5): read as the file is parsed, so an arrival stamp
+// never repeats or goes back past one on disk, whatever the clock did since
+// the last start (a restart begins the counter at 0, and a clock stepped back
+// would give a removal an older stamp than one kept, and its record the same
+// key).
+func noteLineupStamps(lineups map[string]domain.TeamLineup) {
+	top := int64(0)
+	for _, l := range lineups {
+		top = max(top, l.RemovedAt, l.CopiedAt, l.StartedAt)
+		for _, s := range l.Stamps {
+			top = max(top, s)
+		}
+		for _, cs := range l.History {
+			for _, c := range cs {
+				top = max(top, c.Stamp)
+			}
+		}
+	}
+	for {
+		last := lastLineupArrival.Load()
+		if last >= top || lastLineupArrival.CompareAndSwap(last, top) {
+			return
+		}
+	}
+}
+
+// LineupChangeStamp is the stamp a lineup change is ordered by: the device's
+// own (at) when it sent one, never after the server's time as it lands, else
+// that time (LineupArrivalStamp).
+func LineupChangeStamp(at int64) int64 { return arrivalOrStamp(at) }
+
+// arrivalOrStamp is the stamp a lineup change is ordered by: the device's own
+// when it sent one, never after the server's time as it lands, else that time.
+func arrivalOrStamp(at int64) int64 {
+	now := LineupArrivalStamp()
+	if at > 0 && at < now {
+		return at
+	}
+	return now
 }
 
 // parseTeamLineupsFile reads and parses lineups.yaml at path. A missing
@@ -247,6 +317,7 @@ func parseTeamLineupsBytes(data []byte) (map[string]domain.TeamLineup, error) {
 	for _, l := range file.Lineups {
 		out[lineupStorageKey(l)] = l
 	}
+	noteLineupStamps(out)
 	return out, nil
 }
 
@@ -262,6 +333,9 @@ func parseTeamLineupsBytes(data []byte) (map[string]domain.TeamLineup, error) {
 // recreation adopts. Creating the directory is the job of
 // saveCompetitionChangedLocked alone.
 func (s *Store) saveTeamLineupsLocked(compID string, lineups map[string]domain.TeamLineup, write writeFn) error {
+	// Every stamp written is behind the next arrival stamp, as every stamp
+	// read is (m5): a start stamped by a device a little ahead included.
+	noteLineupStamps(lineups)
 	keys := make([]string, 0, len(lineups))
 	for k := range lineups {
 		keys = append(keys, k)
@@ -424,8 +498,19 @@ func (s *Store) setTeamLineupLocked(compID string, lineup domain.TeamLineup, tea
 //
 // Returns nil when no entry exists (idempotent delete).
 func (s *Store) DeleteTeamLineup(compID, teamID string, round int) error {
+	_, err := s.RemoveTeamLineupAt(compID, teamID, "", round, 0)
+	return err
+}
+
+// RemoveTeamLineupAt takes a lineup slot away, ordered by the removal's own
+// stamp at (the device's, never after the server's time as it lands; 0 for
+// one sent with none, an older build's, which is stamped as it lands):
+// removeTeamLineup. matchID names a match's own lineup, else round the
+// team's round lineup (0: its starting lineup). removed says a lineup was
+// taken away (stage 6 review 8, m1 and m8).
+func (s *Store) RemoveTeamLineupAt(compID, teamID, matchID string, round int, at int64) (bool, error) {
 	if err := ValidateCompetitionID(compID); err != nil {
-		return err
+		return false, err
 	}
 	mu := s.getCompLock(compID)
 	mu.Lock()
@@ -433,12 +518,21 @@ func (s *Store) DeleteTeamLineup(compID, teamID string, round int) error {
 
 	current, err := s.loadTeamLineupsLocked(compID)
 	if err != nil {
-		return err
+		return false, err
 	}
-	if !removeTeamLineup(current, teamLineupKey(teamID, round), LineupArrivalStamp()) {
-		return nil
+	removed, changed := removeTeamLineup(current, teamID, matchID, round, arrivalOrStamp(at))
+	if !changed {
+		return false, nil
 	}
-	return s.saveTeamLineupsLocked(compID, current, s.directWrite)
+	if err := s.saveTeamLineupsLocked(compID, current, s.directWrite); err != nil {
+		if !removed && errors.Is(err, os.ErrNotExist) {
+			// A competition that does not exist holds no lineup, and no
+			// later change of one to take away: nothing to mark.
+			return false, nil
+		}
+		return removed, err
+	}
+	return removed, nil
 }
 
 // DeleteTeamLineupForMatch removes the match-scoped lineup for
@@ -448,19 +542,39 @@ func (s *Store) DeleteTeamLineup(compID, teamID string, round int) error {
 //
 // Returns nil when no entry exists (idempotent delete).
 func (s *Store) DeleteTeamLineupForMatch(compID, teamID, matchID string) error {
+	_, err := s.RemoveTeamLineupAt(compID, teamID, matchID, 0, 0)
+	return err
+}
+
+// ReplaceTeamLineupSlot sets every record of one lineup slot (a team's
+// starting lineup, round 0, or a match's own lineup: the live one and the
+// removed ones) to records, in one write (the transaction's
+// ReplaceTeamLineupSlot outside a transaction). A lineup the domain refuses
+// sets none of them.
+func (s *Store) ReplaceTeamLineupSlot(compID, teamID, matchID string, round int, records []domain.TeamLineup, teamSize int) error {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
+	}
+	for _, l := range records {
+		if err := l.ValidatePositions(teamSize); err != nil {
+			return err
+		}
 	}
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
-
 	current, err := s.loadTeamLineupsLocked(compID)
 	if err != nil {
 		return err
 	}
-	if !removeTeamLineup(current, teamLineupMatchKey(teamID, matchID), LineupArrivalStamp()) {
-		return nil
+	for k, l := range current {
+		if l.TeamID == teamID && l.MatchID == matchID && (matchID != "" || l.Round == round) {
+			delete(current, k)
+		}
+	}
+	for _, l := range records {
+		l.CompetitionID = compID
+		current[lineupStorageKey(l)] = l
 	}
 	return s.saveTeamLineupsLocked(compID, current, s.directWrite)
 }

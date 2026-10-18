@@ -279,16 +279,26 @@ func pinStartLineups(h state.StoreTx, d *openerDraw, compID string, m *state.Mat
 // id, so the pin always stores; what still fails is the store's own fault and
 // is the caller's error. The pin is the match's own from then on, d included.
 func pinLineup(h state.StoreTx, d *openerDraw, compID, matchID, teamID string, at int64) error {
-	pin := domain.TeamLineup{
-		TeamID: teamID, CompetitionID: compID, MatchID: matchID,
-		Positions: map[domain.Position]string{}, StartedAt: at,
-	}
 	// The carry rule at the start, by stamp (lineup_carry.go): a change made
 	// after the start is not in it, whenever it arrived, and neither is a
 	// removal made after it (the removed lineups' records are read too).
 	all, err := h.LoadTeamLineupsWithRemoved(compID)
 	if err != nil {
 		return fmt.Errorf("kachinuki match %s/%s: the lineups team %s started with were not readable: %w", compID, matchID, teamID, err)
+	}
+	// A removal of the match's own lineup made after at, that arrived before
+	// the start: in stamp order the match started, then had its own lineup
+	// taken away on a started match, which keeps the lineup in force at that
+	// removal as its own (keepSnapshotLineup). So the pin is that one (stage 6
+	// review 8, m1).
+	for _, l := range all {
+		if l.TeamID == teamID && l.MatchID == matchID && l.IsRemoved() && l.RemovedAt > at {
+			at = l.RemovedAt
+		}
+	}
+	pin := domain.TeamLineup{
+		TeamID: teamID, CompetitionID: compID, MatchID: matchID,
+		Positions: map[domain.Position]string{}, StartedAt: at,
 	}
 	lc := newLineupCarry(all, d.pool, d.bracket, d.comp.IsKnockoutEnabled(), d.comp.TeamSize)
 	pin.StartedFrom = lc.carryInto(&pin, at)
@@ -482,57 +492,84 @@ func (e *Engine) ReseatKachinukiOpeners(compID, teamID string) ([]string, error)
 // place (a pin, pinLineup, marked now), so bout 1 takes those names on every
 // device (the reseat and announcement that follow the door) and a later edit
 // of the starting lineup renames nothing there.
-func (e *Engine) UsePreviousLineupTx(h state.StoreTx, compID, teamID, matchID string) error {
-	// Taken away as a change stamped now: its record is kept, so the lineups
-	// carried by stamp that were made while it was in force keep reading it.
-	if err := h.DeleteTeamLineupForMatch(compID, teamID, matchID); err != nil {
-		return err
+func (e *Engine) UsePreviousLineupTx(h state.StoreTx, compID, teamID, matchID string, at int64) (bool, error) {
+	// Taken away as a change stamped when it was made (the device's stamp,
+	// else the server's as it lands; stage 6 review 8, m1): what the lineup
+	// held before then is kept as a removed record, so the lineups carried by
+	// stamp that were made while it was in force keep reading it, and a change
+	// of it made after then stays.
+	at = state.LineupChangeStamp(at)
+	removed, err := h.RemoveTeamLineupAt(compID, teamID, matchID, 0, at)
+	if err != nil {
+		return false, err
 	}
 	comp, err := h.LoadCompetition(compID)
 	if err != nil || comp == nil {
-		return err
+		return removed, err
 	}
+	kept := false
 	if comp.IsKachinuki() {
-		if err := e.keepSnapshotLineup(h, comp, compID, teamID, matchID); err != nil {
-			return err
+		if kept, err = e.keepSnapshotLineup(h, comp, compID, teamID, matchID, at); err != nil {
+			return removed, err
 		}
+	}
+	if !removed && !kept {
+		// Nothing in force changed (m8): no carried lineup to work out again.
+		return false, nil
 	}
 	// Every carried lineup of the team is worked out again in the same
 	// transaction, as after a save (FollowLineupSave).
 	_, err = e.FollowLineupSave(h, comp, domain.TeamLineup{TeamID: teamID, MatchID: matchID}, nil)
-	return err
+	return true, err
 }
 
 // keepSnapshotLineup keeps, on a kachinuki match that has started, the lineup
 // in force there now as its own (a pin marked now): taking a started match's
 // own lineup away is an edit of it taken as a snapshot.
-func (e *Engine) keepSnapshotLineup(h state.StoreTx, comp *state.Competition, compID, teamID, matchID string) error {
+func (e *Engine) keepSnapshotLineup(h state.StoreTx, comp *state.Competition, compID, teamID, matchID string, at int64) (bool, error) {
 	m, _, err := e.lookupExistingResultIn(h, compID, matchID)
 	var notFound *NotFoundError
 	if errors.As(err, &notFound) {
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	if m == nil || !hasStarted(m) || (m.SideAID != teamID && m.SideBID != teamID) {
-		return nil
+		return false, nil
 	}
 	d, ok := readOpenerDraw(h, comp, compID)
 	if !ok {
-		return fmt.Errorf("kachinuki match %s/%s: lineups not readable", compID, matchID)
+		return false, fmt.Errorf("kachinuki match %s/%s: lineups not readable", compID, matchID)
 	}
-	// The lineup in force NOW: every change landed so far, one landed in this
-	// same millisecond included (a carry reads the changes made before its
-	// stamp).
-	return pinLineup(h, &d, compID, matchID, teamID, max(serverNowMs(), m.ModifiedAt)+1)
+	// A change of the match's own lineup made after the removal is still its
+	// own: nothing to keep.
+	if ownLineup(d.lineups, teamID, matchID) {
+		return false, nil
+	}
+	// The lineup in force when the removal was made, or, for one made before
+	// the match started that arrived after the start, the one in force at the
+	// start, which the start would have kept.
+	return true, pinLineup(h, &d, compID, matchID, teamID, max(at, startStamp(m)))
 }
 
 // UsePreviousLineup is UsePreviousLineupTx in a transaction of its own.
 func (e *Engine) UsePreviousLineup(compID, teamID, matchID string) error {
-	return e.store.WithTransaction(compID, func(tx state.StoreTx) error {
-		return e.UsePreviousLineupTx(tx, compID, teamID, matchID)
+	_, err := e.UsePreviousLineupAt(compID, teamID, matchID, 0)
+	return err
+}
+
+// UsePreviousLineupAt is UsePreviousLineupTx in a transaction of its own, the
+// removal stamped at (0: as it lands). It reports whether anything in force
+// changed.
+func (e *Engine) UsePreviousLineupAt(compID, teamID, matchID string, at int64) (bool, error) {
+	changed := false
+	err := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+		var err error
+		changed, err = e.UsePreviousLineupTx(tx, compID, teamID, matchID, at)
+		return err
 	})
+	return changed, err
 }
 
 // serverFighterEvent is whether e is one of the server's own fighter events

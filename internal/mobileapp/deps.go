@@ -219,6 +219,9 @@ type TeamLineupStore interface {
 	// DeleteTeamLineupForMatch is the match-scoped twin added for
 	// per-match lineups (mp-825).
 	DeleteTeamLineupForMatch(compID, teamID, matchID string) error
+	// RemoveTeamLineupAt takes a lineup away ordered by the removal's own
+	// stamp (0: as it lands), reporting whether one was taken (m1, m8).
+	RemoveTeamLineupAt(compID, teamID, matchID string, round int, at int64) (bool, error)
 }
 
 // LineupEngine is the consumer-boundary view of engine.Engine used by the
@@ -307,7 +310,9 @@ type KachinukiOpenerSeater interface {
 type KachinukiLineupKeeper interface {
 	KachinukiOpenerSeater
 	FollowLineupSave(tx state.StoreTx, comp *state.Competition, saved domain.TeamLineup, changed []domain.Position) ([]string, error)
-	// UsePreviousLineup takes a match's own lineup away; on a kachinuki match
-	// that has started it keeps the lineup in force then as the match's own.
-	UsePreviousLineup(compID, teamID, matchID string) error
+	// UsePreviousLineupAt takes a match's own lineup away, ordered by the
+	// removal's own stamp (0: as it lands); on a kachinuki match that has
+	// started it keeps the lineup in force then as the match's own. It
+	// reports whether anything in force changed.
+	UsePreviousLineupAt(compID, teamID, matchID string, at int64) (bool, error)
 }

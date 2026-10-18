@@ -1443,9 +1443,10 @@ func foldBout(r *replayMatch, e *domain.ScoreEvent, shape ReplayShape, stamps ma
 	if boutRowIndex(m.SubResults, e.Pos) >= 0 || !shape.createsMissingRow(e.Pos) {
 		return foldBoutRow(r, e, shape, stamps)
 	}
-	// A fixed-order bout the match holds no row for yet (a match started from
-	// the queue holds none): the event's row is made, empty, and kept only if
-	// the event applies to it.
+	// A numbered bout the match holds no row for yet (createsMissingRow: a
+	// fixed-order bout of a match started from the queue, a kachinuki first
+	// bout, a pairing added by hand): the event's row is made, empty, and kept
+	// only if the event applies to it.
 	prior := m.SubResults
 	m.SubResults = withEmptyBoutRow(prior, e.Pos)
 	out := foldBoutRow(r, e, shape, stamps)
@@ -1457,19 +1458,18 @@ func foldBout(r *replayMatch, e *domain.ScoreEvent, shape ReplayShape, stamps ma
 
 // createsMissingRow says an event on bout pos may make the row when the match
 // holds none: a numbered bout of a fixed-order team match, within its team
-// size, and a kachinuki encounter's first bout (a match started from the
-// queue holds no row; the sheet seats the lineup's fighters there as its first
-// taps, bout.fighter). Two devices tapping such a bout at once both count:
-// nothing writes the row ahead of a tap, so no row write stamped after one
-// device's tap can turn it away. A later kachinuki pairing (Record bout
-// appends it), one added by hand and a representative bout are written by a
-// score write first.
+// size, and any numbered bout of a kachinuki encounter (its first bout, which
+// a match started from the queue holds no row for, and a pairing added by
+// hand). Two devices tapping such a bout at once both count: nothing writes
+// the row ahead of a tap, so no row write stamped after one device's tap can
+// turn it away. Only the server writes a bout row ahead of the taps on it: a
+// kachinuki pairing Record bout appends, and a representative bout.
 func (shape ReplayShape) createsMissingRow(pos int) bool {
 	if !shape.team() {
 		return false
 	}
 	if shape.kachinuki() {
-		return pos == 1
+		return pos >= 1
 	}
 	return pos >= 1 && pos <= shape.Comp.TeamSize
 }

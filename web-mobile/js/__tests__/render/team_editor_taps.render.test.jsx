@@ -239,10 +239,10 @@ describe('a pick on a running team match is a tap', () => {
   });
 
   // Stage 6: two devices striking on a kachinuki first bout at once both count.
-  // The server makes the first bout's row at its first tap, so the sheet writes
-  // no row ahead of it (a row write stamped after the other device's tap turned
-  // that tap away): the lineup's fighters go as its first taps on the bout.
-  it('a kachinuki first bout the server holds no row for: the lineup\'s fighters go as the first taps, and no row is written', async () => {
+  // The server makes the first bout's row at its first tap and reads its
+  // fighters from the match's lineup in force (operator decision K1 (c)), so
+  // the sheet writes no row and sends no fighter: the tap goes alone.
+  it('a kachinuki first bout the server holds no row for: the tap goes alone, no row and no fighter is written', async () => {
     API.fetchLineupInForce = vi.fn().mockImplementation(async (_comp, teamId) => (teamId === 'ta'
       ? { saved: true, positions: { 1: 'Kenji' }, memberIds: { 1: 'k1' } }
       : { saved: true, positions: { 1: 'Osamu' }, memberIds: { 1: 'o1' } }));
@@ -251,13 +251,9 @@ describe('a pick on a running team match is a tap', () => {
     await act(async () => { await new Promise((res) => setTimeout(res, 0)); });
     await tap(ipponBtn(r.container, 0, 'aka', 'M'));
     expect(onSubmit, 'no row write ahead of the tap').not.toHaveBeenCalled();
-    expect(events()).toEqual([
-      { kind: 'bout.fighter', pos: 1, side: 'a', name: 'Kenji', memberId: 'k1' },
-      { kind: 'bout.fighter', pos: 1, side: 'b', name: 'Osamu', memberId: 'o1' },
-      { kind: 'ippon.add', pos: 1, side: 'a', letter: 'M' },
-    ]);
+    expect(events()).toEqual([{ kind: 'ippon.add', pos: 1, side: 'a', letter: 'M' }]);
     await tap(ipponBtn(r.container, 0, 'shiro', 'K'));
-    expect(events().slice(3), 'the fighters are seated once').toEqual([{ kind: 'ippon.add', pos: 1, side: 'b', letter: 'K' }]);
+    expect(events().slice(1)).toEqual([{ kind: 'ippon.add', pos: 1, side: 'b', letter: 'K' }]);
     expect(onSubmit).not.toHaveBeenCalled();
   });
 });
@@ -272,19 +268,22 @@ describe('a running kachinuki encounter is scored by taps', () => {
     expect(events().slice(1)).toEqual([{ kind: 'encho.remove', pos: 1 }]);
   });
 
-  it('+ Add next bout manually writes the empty pairing at once, naming its group alone', async () => {
+  // Stage 6 review 1: two devices adding the same pairing by hand both count.
+  // Nothing writes the pairing's row ahead of its taps: the server makes it at
+  // the first event on it (createsMissingRow), so no row write stamped after the
+  // other device's tap can turn that tap away.
+  it('+ Add next bout manually writes nothing; the first tap on the pairing is a tap alone', async () => {
     const onSubmit = vi.fn(pending);
     const won = kachinukiBout({ subResults: [boutRow(1, { sideA: 'K1', sideB: 'O1', sideAMemberId: 'k1', sideBMemberId: 'o1', ipponsA: ['M', 'K'], winner: 'K1', winnerMemberId: 'k1', recorded: true })] });
     const r = render(el(won, { onSubmit }));
     const add = byTestId(r.container, 'kachinuki-add-bout-button');
     expect(add, 'the manual add is offered').toBeTruthy();
     await tap(add);
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    const patch = onSubmit.mock.calls[0][0];
-    expect(patch.status).toBe('running');
-    expect(patch.changed).toEqual(['bout:2']);
-    expect(patch.subResults).toEqual([expect.objectContaining({ position: 2, ipponsA: [], ipponsB: [] })]);
+    expect(onSubmit, 'no row write for the pairing').not.toHaveBeenCalled();
     expect(API.recordTap).not.toHaveBeenCalled();
+    await tap(ipponBtn(r.container, 1, 'aka', 'M'));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(events()).toEqual([{ kind: 'ippon.add', pos: 2, side: 'a', letter: 'M' }]);
   });
 });
 

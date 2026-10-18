@@ -1788,7 +1788,7 @@
    }
   },
   {
-   "name": "a kachinuki event lands only on a bout that exists",
+   "name": "a kachinuki pairing the match holds no row for (one added by hand) is made by its first event, and two devices tapping it both count",
    "jsMirror": true,
    "shape": {
     "kind": "kachinuki"
@@ -1879,6 +1879,19 @@
       "side": "a",
       "letter": "M"
      }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "x",
+      "session": "s-x",
+      "seq": 1,
+      "stamp": 22,
+      "kind": "ippon.add",
+      "pos": 2,
+      "side": "a",
+      "letter": "K"
+     }
     }
    ],
    "want": {
@@ -1904,12 +1917,33 @@
          "w"
         ]
        }
+      },
+      {
+       "position": 2,
+       "sideA": "",
+       "sideB": "",
+       "ipponsA": [
+        "M",
+        "K"
+       ],
+       "ipponsB": [],
+       "hansokuA": 0,
+       "hansokuB": 0,
+       "winner": "Kyoto",
+       "decision": "",
+       "markIds": {
+        "a": [
+         "n",
+         "x"
+        ]
+       }
       }
      ],
-     "scoreVersion": 3,
-     "modifiedAt": 20,
+     "scoreVersion": 4,
+     "modifiedAt": 22,
      "groupStamps": {
-      "bout:1": 20
+      "bout:1": 20,
+      "bout:2": 22
      }
     },
     "outcomes": {
@@ -1917,7 +1951,10 @@
       "applied"
      ],
      "n": [
-      "noTarget"
+      "applied"
+     ],
+     "x": [
+      "applied"
      ]
     }
    }

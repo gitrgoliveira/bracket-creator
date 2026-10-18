@@ -548,13 +548,12 @@ function reconcileWinnerMemberId(row) {
 // fusensho snapshot with it; `ctx.stamps` is the replay's group stamps.
 // createsMissingRow says an event on bout pos may make the row when the match
 // holds none (engine.ReplayShape.createsMissingRow): a numbered bout of a
-// fixed-order team match, within its team size (`opts.teamSize`), and a
-// kachinuki encounter's first bout. The team sheet asks it too
-// (boutRowMadeByTap), so it writes no row ahead of a tap the server makes it
-// for.
+// fixed-order team match, within its team size (`opts.teamSize`), and any
+// numbered bout of a kachinuki encounter (its first bout and a pairing added
+// by hand), so no device writes a bout row ahead of its taps.
 export function createsMissingRow(opts, pos) {
   if (!opts.team) return false;
-  if (opts.kachinuki) return pos === 1;
+  if (opts.kachinuki) return pos >= 1;
   return pos >= 1 && pos <= (Number(opts.teamSize) || 0);
 }
 
@@ -581,9 +580,10 @@ function foldBout(m, e, opts, ctx) {
   let rows = m.subResults || [];
   let idx = rows.findIndex((r) => r && r.position === e.pos);
   if (idx < 0) {
-    // A fixed-order bout the match holds no row for yet (a match started from
-    // the queue holds none): the row is made, and kept only if the event
-    // applies (m.subResults is set only then).
+    // A numbered bout the match holds no row for yet (createsMissingRow: a
+    // fixed-order bout of a match started from the queue, a kachinuki first
+    // bout, a pairing added by hand): the row is made, and kept only if the
+    // event applies (m.subResults is set only then).
     if (!createsMissingRow(opts, e.pos)) return NO_TARGET;
     rows = withEmptyBoutRow(rows, e.pos);
     idx = rows.findIndex((r) => r && r.position === e.pos);
@@ -988,6 +988,20 @@ export function replayHead(match, head, lines, opts = {}) {
     items.push({ line: i, stamp: l.event.stamp, baseline: false, id: l.event.id });
     if (!(l.event.id in firstLine)) firstLine[l.event.id] = i;
   });
+  // engine.replayer.startMadeRowsEmpty: a bout an event may make the row of
+  // (createsMissingRow) that no baseline of the log sets starts from no row,
+  // since its row in the match can only be one these events made, and they
+  // are folded again (each would count twice).
+  const madeEmpty = {};
+  for (const l of log) {
+    const e = l.event;
+    if (!e || !createsMissingRow(opts, e.pos)) continue;
+    const g = groupOf(e);
+    if (g !== `bout:${e.pos}` || covered[g] || madeEmpty[g]) continue;
+    madeEmpty[g] = true;
+    cur.subResults = (cur.subResults || []).filter((r) => !r || r.position !== e.pos);
+    delete stamps[g];
+  }
   items.sort(compareItems);
 
   const closed = () => GROUP_RESULT in govern && cur.status === 'completed';

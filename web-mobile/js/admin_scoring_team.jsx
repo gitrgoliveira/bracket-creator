@@ -62,7 +62,7 @@ import { teamDraftTaps } from './draft_taps.jsx';
 // scoring gesture, handed to the outbox (API.recordTap).
 import {
   makeEvent, IPPON_ADD, IPPON_REMOVE, FOUL_ADD, FOUL_REMOVE, ENCHO_ADD, ENCHO_REMOVE,
-  BOUT_DECISION, BOUT_FIGHTER, REP_PICK, DAIHYOSEN_VERDICT, SIDE_A, SIDE_B,
+  BOUT_DECISION, BOUT_FIGHTER, REP_PICK, DAIHYOSEN_VERDICT,
 } from './score_events.jsx';
 import { publishBoardOverlay } from './court_bridge.jsx';
 // bc-cse: a SCHEDULED match a competitor is barred from must never offer a

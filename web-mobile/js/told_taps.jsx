@@ -56,7 +56,7 @@ export function createToldTaps({ storage, now = () => Date.now(), tab }) {
         try {
             raw = storage.getItem(key);
         } catch (_e) {
-            return { ...(memory.get(key) || {}) };
+            return { ...memory.get(key) };
         }
         if (raw === null && memory.has(key)) return { ...memory.get(key) };
         return parse(raw);

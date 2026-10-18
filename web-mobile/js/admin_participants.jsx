@@ -530,6 +530,8 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     for (const [key, t] of typedSeedsRef.current) {
       if (t.landed) typedSeedsRef.current.delete(key);
     }
+    // A ref (stable); the roster is what moves it on.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [c]);
   const updateSeed = (idx, val) => {
     const p = (c.players || [])[idx];

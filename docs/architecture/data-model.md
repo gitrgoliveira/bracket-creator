@@ -200,7 +200,21 @@ competition's lock, onto the lineup stored for that match or that starting lineu
 match with no lineup of its own yet, onto the lineup in force there. Two devices that change
 different positions of one lineup both keep their change, whichever save arrives first, a
 save sent later from a device that was offline included. Two changes to the same position
-keep the later arrival.
+keep the later arrival. A save also says when each position it changes was changed on the device
+(`changedAt`, in the server's clock), and the lineup keeps that time per position (`stamps`); a
+save from an older release sends none, and its changes keep none.
+
+When a kachinuki match starts, the lineup in force there for each team is kept as that match's
+own lineup record, marked with the time of the write that started it (`startedAt`) and the lineup
+it was taken from (`startedFrom`: an earlier match's id, or empty for the starting lineup). It is
+taken only by the write that moves the match out of the queue, inside that write's transaction,
+so a write refused, or any write after the start, never takes one; when the team had no lineup
+it is empty. That record is the match's alone: a later match never carries it, so it goes on
+carrying the starting lineup or an earlier match's own lineup exactly as before. A change to the
+lineup it was taken from that was made before the start reaches it whenever the save arrives,
+unless the position holds a change made later; a change made after the start does not. An
+organiser's save of the match's own lineup replaces the record. The first bout of the match is
+fought by the first fighter of that record, or of the organiser's lineup that replaced it.
 
 Releases up to v2.1.1 also saved a lineup for a round, and read the lineup a team fielded at
 a match as the match's own, else the round lineup with the highest round at or below the
@@ -500,6 +514,8 @@ classDiagram
         TeamLineup per match, or the starting one
         position to name and member id
         a position may hold an id and an empty name
+        when each position was changed
+        startedAt and startedFrom on the lineup a kachinuki match started with
     }
     class team_members_yaml["team-members.yaml"] {
         <<YAML>>
@@ -720,12 +736,16 @@ whole write are ordered against each other by the same rule.
 
 The server adds events of its own to the same log, under the session `server` and with no
 sequence number: the fighters of a kachinuki encounter's first bout, which are the first fighters
-of each team's lineup for the match and which no device sends. It adds them when a write makes
-or changes that bout and when a lineup or team member changes, so they are ordered against the
-taps like any tap and never turn one away; they name who fought, never a score, so they reach a
-finished encounter too without moving its result. A kachinuki match that has started keeps the
-lineup it started with as its own lineup record, so only an edit of that match's lineup renames
-it.
+of the match's lineup and which no device sends. That lineup is the match's own (an organiser's,
+or the one it started with), or, while the match has not started, the lineup in force there; a
+match that started with no lineup of its own keeps the names its first bout has. The server adds
+them only where the first bout holds other names: when a write makes or changes that bout, and
+when a lineup or team member changes. They are ordered against the taps like any tap and never
+turn one away; they name who fought, never a score, so they reach a finished encounter too
+without moving its result. No device may send events under the session `server`: the request is
+refused. A point entered on a kachinuki bout after it was removed, from a device that had not
+seen the removal, does not make the bout again, since it would have no fighters; it is kept in
+the match's history. Picking the bout's fighters adds it again.
 
 Three figures are derived by the replay and stored beside the match so that a reader does not
 have to replay the log: the id of each mark (a removal names its mark by id, so two devices

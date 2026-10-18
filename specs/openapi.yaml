@@ -6050,6 +6050,10 @@ components:
         session:
           type: string
           maxLength: 256
+          description: >
+            The device's event session. `server` is the server's own (the fighters it
+            seats on a kachinuki encounter's first bout): a request under it is
+            refused with a 400.
         events:
           type: array
           minItems: 1
@@ -7943,6 +7947,20 @@ components:
                 a non-empty name, or an empty name with a `memberIds` entry (a member
                 with no name yet), places a fighter there; an empty name with no
                 `memberIds` entry clears the position.
+            changedAt:
+              type: object
+              additionalProperties:
+                type: integer
+                format: int64
+              description: >
+                When each changed position was changed on the device, in milliseconds
+                on the server's clock, keyed like `positions`. Stored per position (a
+                stamp ahead of the server's clock is taken as now). A change to the
+                lineup a kachinuki match started with from, made before the match
+                started, reaches the lineup the match keeps as its own whenever the
+                save arrives, unless that position holds a change made later; one made
+                after the start does not. A save without it is ordered by its arrival,
+                as before.
             writeId:
               $ref: '#/components/schemas/ArrivalWriteId'
 

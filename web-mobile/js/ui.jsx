@@ -192,13 +192,18 @@ function StableInput({ value, onChange, type, autoSelect = true, ...props }) {
   // A blur sends only a change still waiting for its debounce: one that has
   // already gone is not sent again (stage 6 review 7: a seed box re-sent its
   // saved rank as Generate draw took the focus, and the copy raced the draw
-  // and was refused).
+  // and was refused). With nothing waiting, the box takes the value it was
+  // given: one the parent changed while the box had the focus (a refused save
+  // putting the old value back, another device's edit) was skipped then
+  // (stage 6 review 8, M2).
   const handleBlur = (e) => {
     composing.current = false;
     clearTimeout(timer.current);
     if (pending.current) {
       pending.current = false;
       onChange(local);
+    } else if (!Object.is(local, value)) {
+      setLocal(value);
     }
     if (props.onBlur) props.onBlur(e);
   };

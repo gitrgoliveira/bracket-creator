@@ -497,7 +497,7 @@ func TestLineupCarry_ArrivalStampsComeAfterEveryStampOnDisk(t *testing.T) {
 		CopiedAt: ahead, Own: []domain.Position{p1}}, 3))
 	_, err := e.store.LoadTeamLineupsWithRemoved(e.comp)
 	require.NoError(t, err)
-	require.Greater(t, state.LineupArrivalStamp(), ahead)
+	require.Greater(t, state.LineupArrivalStamp(e.comp), ahead)
 	// Two removals sent with no stamp, one after the other, are two records.
 	e.remove("P1-0")
 	e.save("P1-0", 1, "Kato", 0)

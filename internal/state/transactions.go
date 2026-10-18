@@ -648,7 +648,7 @@ func (t *storeTx) LoadTeamLineupsWithRemoved(compID string) (map[string]domain.T
 		var parsed map[string]domain.TeamLineup
 		var err error
 		if pending, ok := t.pendingFor(teamLineupFilename); ok {
-			parsed, err = parseTeamLineupsBytes(pending)
+			parsed, err = parseTeamLineupsBytes(compID, pending)
 		} else {
 			parsed, err = t.store.loadTeamLineupsLocked(compID)
 		}
@@ -747,7 +747,7 @@ func (t *storeTx) RemoveTeamLineupAt(compID, teamID, matchID string, round int, 
 	if err != nil {
 		return false, err
 	}
-	removed, changed := removeTeamLineup(current, teamID, matchID, round, arrivalOrStamp(at))
+	removed, changed := removeTeamLineup(current, teamID, matchID, round, arrivalOrStamp(compID, at))
 	if !changed {
 		return false, nil
 	}

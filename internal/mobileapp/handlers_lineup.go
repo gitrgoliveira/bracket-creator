@@ -837,7 +837,7 @@ func (w lineupSave) landPartial(stx state.StoreTx, comp *state.Competition, chan
 	// that landed before it (state.LineupArrivalStamp). A change sent with no
 	// stamp (an older build's) is ordered by its arrival: it is stamped with
 	// it.
-	now := state.LineupArrivalStamp()
+	now := state.LineupArrivalStamp(w.compID)
 	stamps := map[domain.Position]int64{}
 	for _, p := range changed {
 		if s := w.req.ChangedAt[p]; s > 0 {

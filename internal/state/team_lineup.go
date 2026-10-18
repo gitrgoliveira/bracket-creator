@@ -23,6 +23,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -149,31 +150,49 @@ func removeTeamLineup(lineups map[string]domain.TeamLineup, teamID, matchID stri
 	return removed, true
 }
 
-// lastLineupArrival is the last stamp LineupArrivalStamp gave.
-var lastLineupArrival atomic.Int64
+// lineupArrivals holds, per competition, the last stamp LineupArrivalStamp
+// gave there (an *atomic.Int64 by competition id). Per competition (stage 6
+// review 9, G4): the stamps one competition's lineups.yaml holds order that
+// competition's changes only, so a stamp far ahead in one (a clock stepped
+// back since, a hand-edited file) never moves another's arrival stamps into
+// the future, where an unstamped change would outrank the device changes made
+// after it. Never reset, a deleted and recreated competition included: the
+// counter only climbs for the life of the process.
+var lineupArrivals sync.Map
 
-// LineupArrivalStamp is the server's time for a lineup change ordered by its
-// arrival (one sent with no stamp, an older build's; a removal): now, but
-// always after the stamp it gave before, so two such changes landing in one
-// millisecond keep their arrival order, which the carry by stamp reads (a
-// copy reads the changes made BEFORE its stamp).
-func LineupArrivalStamp() int64 {
+// lineupArrival is compID's arrival counter.
+func lineupArrival(compID string) *atomic.Int64 {
+	if v, ok := lineupArrivals.Load(compID); ok {
+		return v.(*atomic.Int64)
+	}
+	v, _ := lineupArrivals.LoadOrStore(compID, new(atomic.Int64))
+	return v.(*atomic.Int64)
+}
+
+// LineupArrivalStamp is the server's time for a lineup change of compID
+// ordered by its arrival (one sent with no stamp, an older build's; a
+// removal): now, but always after the stamp it gave before in that
+// competition and after every stamp its lineups.yaml holds, so two such
+// changes landing in one millisecond keep their arrival order, which the carry
+// by stamp reads (a copy reads the changes made BEFORE its stamp).
+func LineupArrivalStamp(compID string) int64 {
+	last := lineupArrival(compID)
 	for {
-		last := lastLineupArrival.Load()
-		next := max(time.Now().UnixMilli(), last+1)
-		if lastLineupArrival.CompareAndSwap(last, next) {
+		was := last.Load()
+		next := max(time.Now().UnixMilli(), was+1)
+		if last.CompareAndSwap(was, next) {
 			return next
 		}
 	}
 }
 
-// noteLineupStamps raises the arrival stamp past every stamp lineups holds
-// (stage 6 review 8, m5): read as the file is parsed, so an arrival stamp
+// noteLineupStamps raises compID's arrival stamp past every stamp its lineups
+// hold (stage 6 review 8, m5): read as the file is parsed, so an arrival stamp
 // never repeats or goes back past one on disk, whatever the clock did since
 // the last start (a restart begins the counter at 0, and a clock stepped back
 // would give a removal an older stamp than one kept, and its record the same
-// key).
-func noteLineupStamps(lineups map[string]domain.TeamLineup) {
+// key). Only that competition's counter moves (G4).
+func noteLineupStamps(compID string, lineups map[string]domain.TeamLineup) {
 	top := int64(0)
 	for _, l := range lineups {
 		top = max(top, l.RemovedAt, l.CopiedAt, l.StartedAt)
@@ -186,23 +205,25 @@ func noteLineupStamps(lineups map[string]domain.TeamLineup) {
 			}
 		}
 	}
+	last := lineupArrival(compID)
 	for {
-		last := lastLineupArrival.Load()
-		if last >= top || lastLineupArrival.CompareAndSwap(last, top) {
+		was := last.Load()
+		if was >= top || last.CompareAndSwap(was, top) {
 			return
 		}
 	}
 }
 
-// LineupChangeStamp is the stamp a lineup change is ordered by: the device's
-// own (at) when it sent one, never after the server's time as it lands, else
-// that time (LineupArrivalStamp).
-func LineupChangeStamp(at int64) int64 { return arrivalOrStamp(at) }
+// LineupChangeStamp is the stamp a lineup change of compID is ordered by: the
+// device's own (at) when it sent one, never after the server's time as it
+// lands, else that time (LineupArrivalStamp).
+func LineupChangeStamp(compID string, at int64) int64 { return arrivalOrStamp(compID, at) }
 
-// arrivalOrStamp is the stamp a lineup change is ordered by: the device's own
-// when it sent one, never after the server's time as it lands, else that time.
-func arrivalOrStamp(at int64) int64 {
-	now := LineupArrivalStamp()
+// arrivalOrStamp is the stamp a lineup change of compID is ordered by: the
+// device's own when it sent one, never after the server's time as it lands,
+// else that time.
+func arrivalOrStamp(compID string, at int64) int64 {
+	now := LineupArrivalStamp(compID)
 	if at > 0 && at < now {
 		return at
 	}
@@ -211,7 +232,7 @@ func arrivalOrStamp(at int64) int64 {
 
 // parseTeamLineupsFile reads and parses lineups.yaml at path. A missing
 // file is "no lineups yet" and returns an empty map.
-func parseTeamLineupsFile(path string) (map[string]domain.TeamLineup, error) {
+func parseTeamLineupsFile(compID, path string) (map[string]domain.TeamLineup, error) {
 	data, err := os.ReadFile(path) // #nosec G304, compPath enforces containment under the competitions dir.
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -219,7 +240,7 @@ func parseTeamLineupsFile(path string) (map[string]domain.TeamLineup, error) {
 		}
 		return nil, err
 	}
-	return parseTeamLineupsBytes(data)
+	return parseTeamLineupsBytes(compID, data)
 }
 
 // LoadTeamLineups returns every lineup persisted for compID, keyed by
@@ -234,7 +255,7 @@ func parseTeamLineupsFile(path string) (map[string]domain.TeamLineup, error) {
 // Returns a deep copy so callers can mutate the map freely.
 func (s *Store) LoadTeamLineups(compID string) (map[string]domain.TeamLineup, error) {
 	data, err := s.loadCached(compID, teamLineupFilename, func(path string) (any, error) {
-		return parseTeamLineupsFile(path)
+		return parseTeamLineupsFile(compID, path)
 	})
 	if err != nil {
 		return nil, err
@@ -247,7 +268,7 @@ func (s *Store) LoadTeamLineups(compID string) (map[string]domain.TeamLineup, er
 // (engine/lineup_carry.go), the one reader of them.
 func (s *Store) LoadTeamLineupsWithRemoved(compID string) (map[string]domain.TeamLineup, error) {
 	data, err := s.loadCached(compID, teamLineupFilename, func(path string) (any, error) {
-		return parseTeamLineupsFile(path)
+		return parseTeamLineupsFile(compID, path)
 	})
 	if err != nil {
 		return nil, err
@@ -264,7 +285,7 @@ func (s *Store) LoadTeamLineupsWithRemoved(compID string) (map[string]domain.Tea
 // it by then. A missing file is no lineups yet, an empty map.
 func (s *Store) ReadTeamLineups(compID string, read func(lineups map[string]domain.TeamLineup)) error {
 	data, err := s.loadCached(compID, teamLineupFilename, func(path string) (any, error) {
-		return parseTeamLineupsFile(path)
+		return parseTeamLineupsFile(compID, path)
 	})
 	if err != nil {
 		return err
@@ -279,7 +300,7 @@ func (s *Store) ReadTeamLineups(compID string, read func(lineups map[string]doma
 // locked callers are usually about to mutate and need a fresh private map,
 // mirroring the same pattern in loadBracketLocked.
 func (s *Store) loadTeamLineupsLocked(compID string) (map[string]domain.TeamLineup, error) {
-	return parseTeamLineupsFile(s.compPath(compID, teamLineupFilename))
+	return parseTeamLineupsFile(compID, s.compPath(compID, teamLineupFilename))
 }
 
 // copyTeamLineups deep-copies a lineups map so cached data is never
@@ -304,7 +325,7 @@ var lineupParses atomic.Int64
 // parseTeamLineupsBytes parses lineups.yaml from in-memory bytes.
 // Used by tx-internal read-your-own-writes (storeTx LoadTeamLineups).
 // Empty input → empty map, matching the "file does not exist" contract.
-func parseTeamLineupsBytes(data []byte) (map[string]domain.TeamLineup, error) {
+func parseTeamLineupsBytes(compID string, data []byte) (map[string]domain.TeamLineup, error) {
 	lineupParses.Add(1)
 	if len(data) == 0 {
 		return map[string]domain.TeamLineup{}, nil
@@ -317,7 +338,7 @@ func parseTeamLineupsBytes(data []byte) (map[string]domain.TeamLineup, error) {
 	for _, l := range file.Lineups {
 		out[lineupStorageKey(l)] = l
 	}
-	noteLineupStamps(out)
+	noteLineupStamps(compID, out)
 	return out, nil
 }
 
@@ -335,7 +356,7 @@ func parseTeamLineupsBytes(data []byte) (map[string]domain.TeamLineup, error) {
 func (s *Store) saveTeamLineupsLocked(compID string, lineups map[string]domain.TeamLineup, write writeFn) error {
 	// Every stamp written is behind the next arrival stamp, as every stamp
 	// read is (m5): a start stamped by a device a little ahead included.
-	noteLineupStamps(lineups)
+	noteLineupStamps(compID, lineups)
 	keys := make([]string, 0, len(lineups))
 	for k := range lineups {
 		keys = append(keys, k)
@@ -520,7 +541,7 @@ func (s *Store) RemoveTeamLineupAt(compID, teamID, matchID string, round int, at
 	if err != nil {
 		return false, err
 	}
-	removed, changed := removeTeamLineup(current, teamID, matchID, round, arrivalOrStamp(at))
+	removed, changed := removeTeamLineup(current, teamID, matchID, round, arrivalOrStamp(compID, at))
 	if !changed {
 		return false, nil
 	}

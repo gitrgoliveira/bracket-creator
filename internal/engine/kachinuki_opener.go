@@ -573,7 +573,7 @@ func (e *Engine) UsePreviousLineupTx(h state.StoreTx, compID, teamID, matchID st
 	// held before then is kept as a removed record, so the lineups carried by
 	// stamp that were made while it was in force keep reading it, and a change
 	// of it made after then stays.
-	at = state.LineupChangeStamp(at)
+	at = state.LineupChangeStamp(compID, at)
 	removed, err := h.RemoveTeamLineupAt(compID, teamID, matchID, 0, at)
 	if err != nil {
 		return false, err

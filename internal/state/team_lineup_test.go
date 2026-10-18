@@ -191,13 +191,13 @@ func TestLoadTeamLineupsMissingFile(t *testing.T) {
 // TestParseTeamLineupsBytes_MalformedYAML covers the error path in
 // parseTeamLineupsBytes for invalid YAML input.
 func TestParseTeamLineupsBytes_MalformedYAML(t *testing.T) {
-	_, err := parseTeamLineupsBytes([]byte(":\t:bad yaml:"))
+	_, err := parseTeamLineupsBytes("c", []byte(":\t:bad yaml:"))
 	assert.Error(t, err)
 }
 
 // TestParseTeamLineupsBytes_Empty confirms empty bytes return an empty map.
 func TestParseTeamLineupsBytes_Empty(t *testing.T) {
-	m, err := parseTeamLineupsBytes(nil)
+	m, err := parseTeamLineupsBytes("c", nil)
 	require.NoError(t, err)
 	assert.Empty(t, m)
 }

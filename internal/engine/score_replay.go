@@ -455,11 +455,16 @@ type replayer struct {
 // shields nothing: a tap stamped before it is still one the finish after it
 // did or did not have in view. A tap stamped between a finish and a reopen is
 // the closed-match rule's other half (closed: matchClosed).
-func closingResults(lines []state.ScoreLogLine, items []replayItem) map[int]int {
+func closingResults(lines []state.ScoreLogLine, items []replayItem, stopAt *replayItem) map[int]int {
 	out := map[int]int{}
 	next := -1
 	for k := len(items) - 1; k >= 0; k-- {
 		it := items[k]
+		if stopAt != nil && compareReplayItems(it, *stopAt) >= 0 {
+			// A replay stopped before this item never reaches it: a finish
+			// there closes nothing the replay folds.
+			continue
+		}
 		l := lines[it.line]
 		if l.Baseline != nil {
 			if slices.Contains(it.groups, state.GroupResult) {
@@ -616,7 +621,7 @@ func replayScoring(current *state.MatchResult, lines []state.ScoreLogLine, shape
 	}
 	rp.startMadeRowsEmpty()
 	slices.SortFunc(items, compareReplayItems)
-	rp.closer = closingResults(lines, items)
+	rp.closer = closingResults(lines, items, stopAt)
 	for _, it := range items {
 		if stopAt != nil && compareReplayItems(it, *stopAt) >= 0 {
 			break

@@ -207,12 +207,10 @@ its saves arrive in:
 
 - A position holds its latest change by that time. A change made earlier that arrives later
   does not replace it; it is kept in the position's `history` (the values a position held, each
-  with its time). The history keeps what is still read: the first value, the latest sixteen,
-  and, for every match lineup of the team that carries from it, the value it held at that
-  lineup's time, so at most seventeen plus one per such lineup. A lineup that carries a position
-  therefore never loses the value it carries, however often the position changes later. A first
-  save made later, at a time between two values the history no longer holds, reads the older one
-  kept.
+  with its time). The history keeps every change, however many, so a lineup that carries a
+  position never loses the value it carries, and a first save of a match lineup that arrives
+  after many later changes still reads the position as it stood at its own time. A position the
+  lineup carried from never held at that time is empty there.
 - The first save of a match's own lineup takes the positions it does not name from what the
   match carried when that change was made: the lineup in force there at that time, an earlier
   match's own lineup counting only once it was made, each position as it stood then. The record

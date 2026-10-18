@@ -221,14 +221,18 @@ func (e *carryEnv) boutOne(match string) string {
 	return "(no bout 1)"
 }
 
-// History is bounded, but never loses the value a copy reads: a copy made
-// before nine and more changes of a position keeps what the position held
-// when it was made, whichever of those changes arrive.
-func TestLineupCarry_ACopyKeepsItsValuePastTheHistoryBound(t *testing.T) {
+// manyChanges is a number of changes of one position past the count History
+// was once bounded by (stage 6 reviews 7 and 8: it is no longer bounded).
+const manyChanges = 16
+
+// History never loses the value a copy reads: a copy made before many
+// changes of a position keeps what the position held when it was made,
+// whichever of those changes arrive.
+func TestLineupCarry_ACopyKeepsItsValueAfterManyLaterChanges(t *testing.T) {
 	e := newCarryEnv(t, false)
 	e.save("P1-1", 2, "Endo", -500)
 	require.Equal(t, "Sato", e.at("P1-1", 1))
-	for i := 1; i <= domain.MaxPositionHistory+4; i++ {
+	for i := 1; i <= manyChanges+4; i++ {
 		e.save("", 1, fmt.Sprintf("N%d", i), int64(i*10))
 		require.Equalf(t, "Sato", e.at("P1-1", 1), "after %d changes of the starting lineup made after the copy: %s", i, e.dump())
 	}
@@ -236,7 +240,7 @@ func TestLineupCarry_ACopyKeepsItsValuePastTheHistoryBound(t *testing.T) {
 
 // The lineup a finished kachinuki match started with keeps its value however
 // often the starting lineup changes after the start, and so does bout 1.
-func TestLineupCarry_AFinishedMatchsPinKeepsItsValuePastTheHistoryBound(t *testing.T) {
+func TestLineupCarry_AFinishedMatchsPinKeepsItsValueAfterManyLaterChanges(t *testing.T) {
 	e := newCarryEnv(t, true)
 	e.start("P1-2", "Inu", 0)
 	require.Equal(t, "Sato", e.at("P1-2", 1))
@@ -250,7 +254,7 @@ func TestLineupCarry_AFinishedMatchsPinKeepsItsValuePastTheHistoryBound(t *testi
 		}
 	}
 	require.NoError(t, e.store.SavePoolMatches(e.comp, ms))
-	for i := 1; i <= domain.MaxPositionHistory+4; i++ {
+	for i := 1; i <= manyChanges+4; i++ {
 		e.save("", 1, fmt.Sprintf("N%d", i), int64(1000+i*10))
 		require.Equalf(t, "Sato", e.at("P1-2", 1), "the pin after %d later changes: %s", i, e.dump())
 		require.Equalf(t, "Sato", e.boutOne("P1-2"), "bout 1 after %d later changes", i)
@@ -305,10 +309,10 @@ func TestLineupCarry_ManyChangesOfOnePositionAgainstCopiesAndPinsOfEveryAge(t *t
 		require.Equalf(t, want, got, "arrival order %v: %s", order, e.dump())
 	}
 	all := []ages{{-500, 25, 45}, {25, -500, 45}, {45, 135, 25}, {135, 45, -500}, {15, 35, 55}}
-	// Every arrival order (a sample of them), within the bound: a copy or
-	// the start arriving after the changes still reads the one before it.
-	t.Run("within the bound", func(t *testing.T) {
-		const changes = domain.MaxPositionHistory - 2
+	// Every arrival order (a sample of them), a few changes: a copy or the
+	// start arriving after the changes still reads the one before it.
+	t.Run("a few changes", func(t *testing.T) {
+		const changes = manyChanges - 2
 		for _, a := range all {
 			ref := make([]int, changes+3)
 			for i := range ref {
@@ -327,11 +331,14 @@ func TestLineupCarry_ManyChangesOfOnePositionAgainstCopiesAndPinsOfEveryAge(t *t
 			}
 		}
 	})
-	// Past the bound: the copies and the start are made first, in any order,
-	// and more changes than the bound then arrive in any order, those made
-	// before each copy included: none of them moves a copy or the pin.
-	t.Run("past the bound", func(t *testing.T) {
-		const changes = domain.MaxPositionHistory + 6
+	// Many changes: the copies and the start are made first, in any order,
+	// and the changes then arrive in any order, those made before each copy
+	// included: none of them moves a copy or the pin. Then every step in any
+	// order, the copies and the start arriving after many later changes too
+	// (stage 6 review 8, m2: History is no longer bounded by count, so a late
+	// copy reads what the position held at its stamp).
+	t.Run("many changes", func(t *testing.T) {
+		const changes = manyChanges + 6
 		for _, a := range all {
 			for range 4 {
 				first := []int{changes, changes + 1, changes + 2}
@@ -343,6 +350,19 @@ func TestLineupCarry_ManyChangesOfOnePositionAgainstCopiesAndPinsOfEveryAge(t *t
 				rng.Shuffle(len(rest), func(i, j int) { rest[i], rest[j] = rest[j], rest[i] })
 				run(t, changes, a, append(first, rest...))
 			}
+			for range 2 {
+				o := make([]int, changes+3)
+				for i := range o {
+					o[i] = i
+				}
+				rng.Shuffle(len(o), func(i, j int) { o[i], o[j] = o[j], o[i] })
+				run(t, changes, a, o)
+			}
+			last := make([]int, 0, changes+3)
+			for i := range changes {
+				last = append(last, i)
+			}
+			run(t, changes, a, append(last, changes, changes+1, changes+2))
 		}
 	})
 }

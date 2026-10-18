@@ -263,41 +263,15 @@ func sameCarried(a, b domain.TeamLineup) bool {
 		maps.Equal(a.Stamps, b.Stamps) && a.StartedFrom == b.StartedFrom && a.CopiedFrom == b.CopiedFrom
 }
 
-// trimHistory bounds l's History by what is still read
-// (domain.MaxPositionHistory): the stamps the team's carried lineups are
-// read at (each copy's CopiedAt, each pin's StartedAt, l's own included)
-// keep the value they read.
-func (lc *lineupCarry) trimHistory(l *domain.TeamLineup) {
-	var refs []int64
-	add := func(x domain.TeamLineup) {
-		if x.CopiedAt > 0 {
-			refs = append(refs, x.CopiedAt)
-		}
-		if x.StartedAt > 0 {
-			refs = append(refs, x.StartedAt)
-		}
-	}
-	for _, x := range lc.lineups {
-		if x.TeamID == l.TeamID {
-			add(x)
-		}
-	}
-	add(*l)
-	l.TrimHistory(refs)
-}
-
 // LandStartingLineupSave lands a stamped partial save on a team's starting
 // lineup (its round-0 entry, start; empty when it has none): the position
 // holds its latest change by stamp (domain.TeamLineup.ApplyStampedChanges),
-// and its History keeps every value a copy or a pin of the team reads.
-func LandStartingLineupSave(lineups map[string]domain.TeamLineup, start domain.TeamLineup,
+// and its History keeps every value it held, with the stamp it was set at,
+// with no bound by count (stage 6 review 8, m2: a bound made a copy whose
+// first save arrived after many changes read the oldest value kept).
+func LandStartingLineupSave(start domain.TeamLineup,
 	changed []domain.Position, positions, memberIDs map[domain.Position]string, stamps map[domain.Position]int64, now int64) (domain.TeamLineup, error) {
-	out, err := start.ApplyStampedChanges(changed, positions, memberIDs, stamps, now)
-	if err != nil {
-		return domain.TeamLineup{}, err
-	}
-	(&lineupCarry{lineups: lineups}).trimHistory(&out)
-	return out, nil
+	return start.ApplyStampedChanges(changed, positions, memberIDs, stamps, now)
 }
 
 // LandMatchLineupSave is the lineup a partial save of matchID's own lineup
@@ -348,7 +322,6 @@ func LandMatchLineupSave(lineups map[string]domain.TeamLineup, pool []state.Matc
 		out.CopiedFrom = lc.carryInto(&out, out.CopiedAt)
 	}
 	out.TeamID, out.MatchID, out.Round = teamID, matchID, 0
-	lc.trimHistory(&out)
 	return out, nil
 }
 

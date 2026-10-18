@@ -1,6 +1,7 @@
 package mobileapp
 
 import (
+	"fmt"
 	"math/rand"
 	"slices"
 	"testing"
@@ -43,6 +44,27 @@ func TestLineupCarry_APinMadeACopyEarlierCarriesNothingMadeAfterIt(t *testing.T)
 		}
 		got := e.dump()
 		require.Equalf(t, "start{1=Sato 2=Ueda} P1-0{1=Sato 2=Ueda 3=Endo} P1-1{1=Sato 2=Doi}", got, "late=%v", late)
+	}
+}
+
+// A copy whose first save arrives after many later changes of the position it
+// carries reads the value the position held at its stamp, as when it arrives
+// first: every stamped change of a position is kept, with no bound by count
+// (stage 6 review 8, m2: past 17 changes the copy arriving last read the
+// oldest value kept, Sato, and the one arriving first N5).
+func TestLineupCarry_ACopyArrivingAfterManyChangesReadsItsStamp(t *testing.T) {
+	for _, copyFirst := range []bool{true, false} {
+		e := newCarryEnv(t, false)
+		if copyFirst {
+			e.save("P1-1", 2, "Endo", 55)
+		}
+		for i := 1; i <= 30; i++ {
+			e.save("", 1, fmt.Sprintf("N%d", 1+(i-1)%16), int64(i*10))
+		}
+		if !copyFirst {
+			e.save("P1-1", 2, "Endo", 55)
+		}
+		require.Equalf(t, "N5", e.at("P1-1", 1), "copy first %v: %s", copyFirst, e.dump())
 	}
 }
 

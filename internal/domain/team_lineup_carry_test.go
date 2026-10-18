@@ -69,33 +69,21 @@ func TestApplyStampedChanges_ACarriedCopyKeepsItsOwnPositions(t *testing.T) {
 	assert.Equal(t, "Kato", out.Positions[p1])
 }
 
-// History keeps at most MaxPositionHistory values per position, the latest by
-// stamp, and Clone copies it deeply.
-func TestApplyStampedChanges_HistoryIsBounded(t *testing.T) {
+// History keeps every stamped change of a position, with no bound by count
+// (stage 6 review 8, m2), and Clone copies it deeply.
+func TestApplyStampedChanges_HistoryKeepsEveryChange(t *testing.T) {
+	const changes = 40
 	p := domain.PositionNumbered(1)
 	l := domain.TeamLineup{Positions: map[domain.Position]string{}}
-	for i := 1; i <= domain.MaxPositionHistory+5; i++ {
+	for i := 1; i <= changes; i++ {
 		var err error
 		l, err = l.ApplyStampedChanges([]domain.Position{p}, map[domain.Position]string{p: fmt.Sprint("n", i)}, nil, map[domain.Position]int64{p: int64(i * 10)}, 10_000)
 		require.NoError(t, err)
 	}
-	// Landing drops nothing: only the carry owner knows what is read.
-	require.Len(t, l.History[p], domain.MaxPositionHistory+5)
-	// Trimmed with copies read at 15 and 35: the oldest value (empty, from
-	// the beginning), the latest MaxPositionHistory, and n1 and n3, which
-	// those copies read.
-	l.TrimHistory([]int64{15, 35, 125})
-	var stamps []int64
-	for _, c := range l.History[p] {
-		stamps = append(stamps, c.Stamp)
-	}
-	want := []int64{0, 10, 30}
-	for i := 5; i <= domain.MaxPositionHistory+4; i++ {
-		want = append(want, int64(i*10))
-	}
-	assert.Equal(t, want, stamps)
-	last := domain.MaxPositionHistory + 5
-	for at, want := range map[int64]string{5: "", 15: "n1", 35: "n3", 125: "n12", int64(last * 10): fmt.Sprint("n", last-1), 10_000: fmt.Sprint("n", last)} {
+	// Nothing is dropped: the empty value from the beginning and every value
+	// before the current one, so a read at any stamp finds what was held.
+	require.Len(t, l.History[p], changes)
+	for at, want := range map[int64]string{5: "", 15: "n1", 35: "n3", 125: "n12", int64(changes * 10): fmt.Sprint("n", changes-1), 10_000: fmt.Sprint("n", changes)} {
 		held, ok := l.HeldAt(p, at)
 		require.True(t, ok)
 		assert.Equal(t, want, held.Name, "at %d", at)
@@ -103,5 +91,5 @@ func TestApplyStampedChanges_HistoryIsBounded(t *testing.T) {
 	c := l.Clone()
 	c.History[p][0].Name = "changed"
 	assert.NotEqual(t, "changed", l.History[p][0].Name)
-	assert.Equal(t, domain.PositionChange{Stamp: int64(last * 10), Name: fmt.Sprint("n", last)}, l.Held(p))
+	assert.Equal(t, domain.PositionChange{Stamp: int64(changes * 10), Name: fmt.Sprint("n", changes)}, l.Held(p))
 }

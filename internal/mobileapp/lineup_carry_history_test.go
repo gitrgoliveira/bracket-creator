@@ -694,7 +694,11 @@ func TestLineupCarry_ACarriedLineupTheDomainRefusesKeepsTheChange(t *testing.T) 
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
-	require.Contains(t, body["warning"], "P1-1", "the operator is told which lineup could not follow")
+	// Plain words for the operator (stage 6 review 9, F5): what happened, the
+	// match, and what to check; never the domain's own error text.
+	require.Equal(t, "The lineup was saved, but the lineup carried to P1-1 could not be worked out again "+
+		"(a position the team size has no place for); it was kept as it was. Check that match's lineup.", body["warning"],
+		"the operator is told which lineup could not follow")
 	require.Equal(t, "Doi", e.at("", 2), "the change is kept")
 	kept, ok := e.lineup("P1-1")
 	require.True(t, ok)
@@ -702,6 +706,9 @@ func TestLineupCarry_ACarriedLineupTheDomainRefusesKeepsTheChange(t *testing.T) 
 	// The removal doors the same.
 	rec = e.do(http.MethodDelete, e.lineupPath(""), map[string]any{"writeId": "rm-start", "removedAt": e.base + 60})
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	require.Contains(t, rec.Body.String(), "warning")
+	body = nil
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+	require.Equal(t, "The lineup was removed, but the lineup carried to P1-1 could not be worked out again "+
+		"(a position the team size has no place for); it was kept as it was. Check that match's lineup.", body["warning"])
 	require.Equal(t, "(none)", e.at("", 1), "the removal is kept")
 }

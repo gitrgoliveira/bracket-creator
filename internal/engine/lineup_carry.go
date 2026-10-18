@@ -28,6 +28,7 @@ package engine
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"log"
 	"maps"
@@ -464,6 +465,7 @@ func (e *Engine) FollowLineupSave(h state.StoreTx, comp *state.Competition, save
 					refused = &DerivedLineupError{Err: verr}
 				}
 				refused.MatchIDs = append(refused.MatchIDs, lc.lineups[k].MatchID)
+				refused.Labels = append(refused.Labels, OperatorMatchLabel(comp, bracket, lc.lineups[k].MatchID))
 				break
 			}
 		}
@@ -501,7 +503,10 @@ func (e *Engine) FollowLineupSave(h state.StoreTx, comp *state.Competition, save
 // (FollowLineupSave, stage 6 review 8, m7).
 type DerivedLineupError struct {
 	MatchIDs []string
-	Err      error
+	// Labels names each match of MatchIDs, in the same order, as the operator
+	// knows it (OperatorMatchLabel).
+	Labels []string
+	Err    error
 }
 
 func (d *DerivedLineupError) Error() string {
@@ -510,8 +515,43 @@ func (d *DerivedLineupError) Error() string {
 
 func (d *DerivedLineupError) Unwrap() error { return d.Err }
 
-// Warning is the sentence the operator is told.
-func (d *DerivedLineupError) Warning() string {
-	return fmt.Sprintf("Lineup saved, but the lineup of %s could not follow it and was left as it was (%v). Check that match's lineup.",
-		strings.Join(d.MatchIDs, ", "), d.Err)
+// Warning is the sentence the operator is told when the change was a lineup
+// save.
+func (d *DerivedLineupError) Warning() string { return d.warning("The lineup was saved") }
+
+// RemovalWarning is the sentence the operator is told when the change took a
+// lineup away (both DELETE doors).
+func (d *DerivedLineupError) RemovalWarning() string { return d.warning("The lineup was removed") }
+
+// StartWarning is the sentence the operator is told when the change was a
+// kachinuki match's start keeping the lineup it started with.
+func (d *DerivedLineupError) StartWarning() string { return d.warning("The match was started") }
+
+// warning words the refusal in plain words for the operator (stage 6 review 9,
+// F5): the matches by the labels the operator knows them by, what happened,
+// and what to check. The domain's own error text is never in it (the follow
+// logs it).
+func (d *DerivedLineupError) warning(lead string) string {
+	names := make([]string, 0, len(d.MatchIDs))
+	for i, id := range d.MatchIDs {
+		name := id
+		if i < len(d.Labels) && d.Labels[i] != "" {
+			name = d.Labels[i]
+		}
+		names = append(names, name)
+	}
+	why := "a position the team size has no place for"
+	switch {
+	case errors.Is(d.Err, domain.ErrLineupDuplicateMember):
+		why = "a team member placed at two positions"
+	case errors.Is(d.Err, domain.ErrLineupTeamSizeInvalid):
+		why = "the competition has no team size"
+	}
+	if len(names) == 1 {
+		return fmt.Sprintf("%s, but the lineup carried to %s could not be worked out again (%s); it was kept as it was. Check that match's lineup.",
+			lead, names[0], why)
+	}
+	list := strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+	return fmt.Sprintf("%s, but the lineups carried to %s could not be worked out again (%s); they were kept as they were. Check those matches' lineups.",
+		lead, list, why)
 }

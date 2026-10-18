@@ -4726,6 +4726,14 @@ paths:
     delete:
       tags: [competitions]
       summary: Delete team lineup for a specific match
+      description: >
+        "Use the previous match's lineup": takes the match's own lineup away, so the
+        match carries its team's previous lineup again. On a kachinuki match that
+        has started (it left the queue, or it was sent back to it holding the bouts
+        it was fought on) it is an edit of that match's lineup taken as a snapshot:
+        the lineup in force there at that moment is kept as the match's own in its
+        place (read back with `saved: true`), the first bout takes its first fighter
+        on every device, and a later edit of the starting lineup does not rename it.
       security:
         - TournamentPassword: []
       requestBody:

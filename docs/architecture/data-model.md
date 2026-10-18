@@ -212,9 +212,15 @@ so a write refused, or any write after the start, never takes one; when the team
 it is empty. That record is the match's alone: a later match never carries it, so it goes on
 carrying the starting lineup or an earlier match's own lineup exactly as before. A change to the
 lineup it was taken from that was made before the start reaches it whenever the save arrives,
-unless the position holds a change made later; a change made after the start does not. An
-organiser's save of the match's own lineup replaces the record. The first bout of the match is
-fought by the first fighter of that record, or of the organiser's lineup that replaced it.
+unless the position holds a change made later; a change made after the start does not. So does
+a change to an earlier match's own lineup, made before the start, that the match would have
+carried at its start. A match sent back to the queue still holding the bouts it was fought on
+has started: starting it again takes no record. An organiser's save of the match's own lineup
+replaces the record, and taking it away ("Use the previous match's lineup") on a match that has
+started keeps the lineup in force at that moment as the match's own in its place, a snapshot
+that later edits of the starting lineup do not change. If the store cannot keep the record, the
+write that started the match fails. The first bout of the match is fought by the first fighter
+of that record, or of the organiser's lineup that replaced it.
 
 Releases up to v2.1.1 also saved a lineup for a round, and read the lineup a team fielded at
 a match as the match's own, else the round lineup with the highest round at or below the
@@ -659,9 +665,11 @@ a self-run event, sent to a finished match, is refused outright with the message
 has already been reported. It leaves no log entry and no history line.
 
 A tap made before the finish that the finish's writer had not seen does not join the
-finished result either: the scoreline the finish carries stands, and the tap is kept in the
-history. A tap the writer had seen is already part of the finish, so nothing is lost or
-counted twice. A decision's points are worked out from the changes made before it rather than
+finished result either: the finish governs every scoring group at its stamp, the ones it names
+and the ones it does not, so the scoreline the finish stands on stays and the tap is kept in the
+history, whichever arrives first. A tap the writer had seen is already part of the finish, so
+nothing is lost or counted twice. What the writer had seen is the basis its write sent; a
+finish from a release that sent none is taken to have seen every tap made before it. A decision's points are worked out from the changes made before it rather than
 copied from the value it carries: the side that did not withdraw takes the circles, and the
 points the withdrawing competitor had already struck stay. A fixed-order team match closed by a
 match level kiken, fusenpai or fusensho keeps the bouts that a device which had not seen the
@@ -738,7 +746,8 @@ The server adds events of its own to the same log, under the session `server` an
 sequence number: the fighters of a kachinuki encounter's first bout, which are the first fighters
 of the match's lineup and which no device sends. That lineup is the match's own (an organiser's,
 or the one it started with), or, while the match has not started, the lineup in force there; a
-match that started with no lineup of its own keeps the names its first bout has. The server adds
+match that started with no lineup of its own (one started before this rule) keeps the names its
+first bout has, sent back to the queue or not. The server adds
 them only where the first bout holds other names: when a write makes or changes that bout, and
 when a lineup or team member changes. They are ordered against the taps like any tap and never
 turn one away; they name who fought, never a score, so they reach a finished encounter too

@@ -46,7 +46,7 @@ export function joinQueuedLineupSave(queued, incoming) {
   // position keeps the stamp of the change that holds it, so a change made
   // before a kachinuki match started is still dated before it once joined with
   // one made after (engine.FollowLineupSave).
-  const changedAt = { ...(queued.changedAt || {}) };
+  const changedAt = { ...queued.changedAt };
   incoming.changed.forEach((key) => {
     const name = incoming.positions[key];
     const id = (incoming.memberIds && incoming.memberIds[key]) || '';

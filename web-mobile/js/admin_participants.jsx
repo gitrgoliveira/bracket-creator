@@ -313,15 +313,6 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // React 18 but still a real teardown-race signal.
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
-  // The latest competition prop, for the code that runs AFTER an await. apply()
-  // can sit on a confirm dialog for as long as the operator takes to read it,
-  // and SSE keeps re-rendering this component with a fresher `c` underneath the
-  // suspended closure; anything reading the captured `c` past that point would
-  // write a snapshot taken before the wait. Assigned on every render (not in an
-  // effect) so the value is current even mid-render.
-  const cRef = useRefA(c);
-  cRef.current = c;
-
   const generateText = (playersList) => generateRosterText(playersList, withZekken);
 
   // Fill the roster textarea with a generated sample roster of `count`
@@ -345,9 +336,12 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     // misleads about whether the persisted state was actually updated.
     reader.onload = async (e) => {
       const raw = e.target.result;
+      // The summary reads the roster as shown; the PUT (putRoster) lays the
+      // same rows on the latest known roster as it goes.
       const np = [...(c.players || [])];
       let updatedCount = 0;
       const unmatched = [];
+      const matchedRows = [];
       const allNames = np.map(p => ({ name: p.name, display: p.displayName }));
 
       raw.split(/\r?\n/).forEach((line, i) => {
@@ -367,6 +361,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
 
             if (pIdx >= 0) {
               np[pIdx] = { ...np[pIdx], seed };
+              matchedRows.push({ name, seed });
               updatedCount++;
             } else {
               // Find closest name suggestion via Levenshtein distance:
@@ -400,7 +395,14 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       let saveError = null;
       if (updatedCount > 0) {
         try {
-          await onUpdate({ ...c, players: np });
+          await putRoster((players) => {
+            const next = [...players];
+            for (const row of matchedRows) {
+              const i = findSeedMatchIndex(next, row.name);
+              if (i >= 0) next[i] = { ...next[i], seed: row.seed };
+            }
+            return next;
+          });
         } catch (err) {
           // updateCompetition already surfaced an error toast. Log for
           // dev-console diagnosis but don't emit a second toast or a
@@ -499,7 +501,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // updateCompetition's catch in admin.jsx).
   const clearAllSeeds = async () => {
     try {
-      await onUpdate({ ...c, players: c.players.map((p) => ({ ...p, seed: null })) });
+      await putRoster((players) => players.map((p) => ({ ...p, seed: null })));
     } catch (err) {
       console.error("AdminParticipants: clearAllSeeds PUT failed", err);
     }
@@ -514,54 +516,72 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // implicit-feedback (the input commits visually), so we just need
   // to NOT swallow errors silently.
   //
-  // Seed saves go one at a time, each built as it goes from the LATEST roster
-  // with every seed typed since laid on (stage 6 review 9, F9: the PUT was
-  // built from the roster as rendered, so a second seed typed before the
-  // first was answered sent the first seat's old seed and the two overwrote
-  // each other). A typed seed is laid on until the roster holds it (taken) or
-  // its save is refused; the box shows it meanwhile through the promise
+  // EVERY roster PUT this card makes has ONE owner, putRoster (stage 6 review
+  // 10, M2): a typed seed, a row moved, a shuffle, Clear seeds, a seed file
+  // and Apply changes. They go one at a time, each built as it goes, from the
+  // latest known roster: the roster the last answered PUT sent while the page
+  // still shows the copy it landed over (the refetch that shows it can fail or
+  // come late), else the roster shown, with every seed typed before the write
+  // laid on. Built from the roster as rendered, a row dragged after a seed was
+  // typed sent that row's old seed, landed second and overwrote it (and stage
+  // 6 review 9, F9: two quick seeds overwrote each other). A typed seed is
+  // held by its competitor (id, else name and dojo for an id-less legacy row,
+  // m11), never by its row, so a reorder while its save is out cannot lay it
+  // on someone else; the box shows it meanwhile through the promise
   // StableInput is handed.
   const rosterRef = useRefA(c);
   rosterRef.current = c;
   const typedSeedsRef = useRefA(new Map());
-  const seedChainRef = useRefA(Promise.resolve());
-  const seedKey = (p, i) => p.id || `#${i}`;
-  React.useEffect(() => {
-    for (const [key, t] of typedSeedsRef.current) {
-      if (t.landed) typedSeedsRef.current.delete(key);
-    }
-    // A ref (stable); the roster is what moves it on.
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [c]);
+  const typedSeqRef = useRefA(0);
+  const rosterChainRef = useRefA(Promise.resolve());
+  const landedRosterRef = useRefA(null);
+  const seedKey = (p) => {
+    if (p.id) return p.id;
+    const norm = (s) => (s || "").toLowerCase().trim().replace(/\s+/g, " ");
+    return `nd:${norm(p.name)}\u001f${norm(p.dojo)}`;
+  };
+  // The roster as the server holds it after every write this card made, with
+  // the seeds typed up to `upTo` laid on.
+  const latestRoster = (upTo) => {
+    const cur = rosterRef.current;
+    const landed = landedRosterRef.current;
+    const base = landed && landed.over === cur ? landed.players : (cur.players || []);
+    return base.map((q) => {
+      const t = typedSeedsRef.current.get(seedKey(q));
+      return t && t.seq <= upTo ? { ...q, seed: t.seed } : q;
+    });
+  };
+  // putRoster(build): build(players) answers the roster to send, or null to
+  // send nothing. Resolves with onUpdate's answer; rejects with its refusal.
+  const putRoster = (build) => {
+    const upTo = typedSeqRef.current;
+    const send = async () => {
+      const players = build(latestRoster(upTo));
+      if (!players) return undefined;
+      const answer = await onUpdate({ ...rosterRef.current, players });
+      landedRosterRef.current = { players, over: rosterRef.current };
+      return answer;
+    };
+    const run = rosterChainRef.current.then(send);
+    rosterChainRef.current = run.then(() => undefined, () => undefined);
+    return run;
+  };
   const updateSeed = (idx, val) => {
     const p = (c.players || [])[idx];
     if (!p) return undefined;
-    const key = seedKey(p, idx);
+    const key = seedKey(p);
     const parsed = parseInt(val);
-    const typed = { seed: isNaN(parsed) || parsed <= 0 ? null : parsed, landed: false };
+    typedSeqRef.current += 1;
+    const typed = { seed: isNaN(parsed) || parsed <= 0 ? null : parsed, seq: typedSeqRef.current };
     typedSeedsRef.current.set(key, typed);
-    const send = async () => {
-      const cur = rosterRef.current;
-      const players = (cur.players || []).map((q, i) => {
-        const t = typedSeedsRef.current.get(seedKey(q, i));
-        return t ? { ...q, seed: t.seed } : q;
-      });
-      try {
-        await onUpdate({ ...cur, players });
-        typed.landed = true;
-        const held = (rosterRef.current.players || []).find((q, i) => seedKey(q, i) === key);
-        if (held && (held.seed ?? null) === typed.seed && typedSeedsRef.current.get(key) === typed) {
-          typedSeedsRef.current.delete(key);
-        }
-      } catch (err) {
-        if (typedSeedsRef.current.get(key) === typed) typedSeedsRef.current.delete(key);
-        console.error("AdminParticipants: updateSeed PUT failed", err);
-        // updateCompetition already toasted the error.
-      }
-    };
-    const run = seedChainRef.current.then(send);
-    seedChainRef.current = run;
-    return run;
+    // Once answered the seed is in the landed roster, or refused: either way
+    // it is no longer laid on.
+    const forget = () => { if (typedSeedsRef.current.get(key) === typed) typedSeedsRef.current.delete(key); };
+    return putRoster((players) => players).then(forget, (err) => {
+      forget();
+      console.error("AdminParticipants: updateSeed PUT failed", err);
+      // updateCompetition already toasted the error.
+    });
   };
 
   const dragIdxRef = useRefA(null);
@@ -571,16 +591,26 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // gating the UI.
   const moveSeedRow = async (fromIdx, toIdx) => {
     if (fromIdx === toIdx) return;
-    const np = [...(c.players || [])];
-    const [moved] = np.splice(fromIdx, 1);
-    np.splice(toIdx, 0, moved);
-    // Re-assign seeds by new position order (only for currently-seeded players)
-    const seededCount = np.filter(p => p.seed).length;
-    const payloadPlayers = seededCount > 0
-      ? (() => { let rank = 1; return np.map(p => p.seed ? { ...p, seed: rank++ } : p); })()
-      : np;
+    // The rows are named as shown and found again in the roster the write is
+    // built from (putRoster), which may hold an earlier write not yet shown.
+    const shown = c.players || [];
+    if (!shown[fromIdx] || !shown[toIdx]) return;
+    const movedKey = seedKey(shown[fromIdx]);
+    const targetKey = seedKey(shown[toIdx]);
     try {
-      await onUpdate({ ...c, players: payloadPlayers });
+      await putRoster((players) => {
+        const np = [...players];
+        const from = np.findIndex((p) => seedKey(p) === movedKey);
+        const to = np.findIndex((p) => seedKey(p) === targetKey);
+        if (from < 0 || to < 0 || from === to) return null;
+        const [moved] = np.splice(from, 1);
+        np.splice(to, 0, moved);
+        // Re-assign seeds by new position order (only for currently-seeded players)
+        const seededCount = np.filter(p => p.seed).length;
+        return seededCount > 0
+          ? (() => { let rank = 1; return np.map(p => p.seed ? { ...p, seed: rank++ } : p); })()
+          : np;
+      });
     } catch (err) {
       console.error("AdminParticipants: moveSeedRow PUT failed", err);
     }
@@ -591,24 +621,27 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // → on PUT failure the admin saw "shuffled" while the persisted order
   // was unchanged (only the error toast hinted at the discrepancy).
   const shuffleUnseeded = async () => {
-    const np = [...(c.players || [])];
-    const unseeded = np.filter(p => !p.seed);
-    if (unseeded.length < 2) return;
-    for (let i = unseeded.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [unseeded[i], unseeded[j]] = [unseeded[j], unseeded[i]];
-    }
-    let uIdx = 0;
-    const shuffled = np.map(p => p.seed ? p : unseeded[uIdx++]);
+    let shuffledAny = false;
     try {
-      await onUpdate({ ...c, players: shuffled });
+      await putRoster((players) => {
+        const np = [...players];
+        const unseeded = np.filter(p => !p.seed);
+        if (unseeded.length < 2) return null;
+        for (let i = unseeded.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [unseeded[i], unseeded[j]] = [unseeded[j], unseeded[i]];
+        }
+        let uIdx = 0;
+        shuffledAny = true;
+        return np.map(p => p.seed ? p : unseeded[uIdx++]);
+      });
     } catch (err) {
       console.error("AdminParticipants: shuffleUnseeded PUT failed", err);
       // updateCompetition already toasted the error; don't double-toast
       // or emit a misleading success message.
       return;
     }
-    if (mountedRef.current) showToast("Unseeded list shuffled");
+    if (shuffledAny && mountedRef.current) showToast("Unseeded list shuffled");
   };
 
   const handleAddParticipant = async () => {
@@ -694,7 +727,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // are already toasted by updateCompetition's catch, so a second
   // toast would double up.
   const apply = async () => {
-    let parsed, np, added, updatedCount;
+    let parsed;
     try {
       parsed = window.parseParticipantLines(lines, withZekken);
 
@@ -760,36 +793,47 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       if (!ok) return;
     }
 
-    // Minted AFTER the dialog, from the LATEST roster. The dialog can stand
-    // open for minutes, and a colleague saving from another desk in that
-    // window re-renders this component with a fresher `c`; minting before the
-    // wait would carry a pre-dialog snapshot into the PUT and silently revert
-    // their change. The ids and seeds preserved are the ones on the server now.
-    try {
-      ({ np, added, updatedCount } = mintParticipantIds(cRef.current.id, cRef.current.players, parsed));
-    } catch (err) {
-      // mintParticipantIds can throw on unexpected shape.
-      console.error("AdminParticipants: mint failed", err);
-      showToast("Failed to parse participants: " + err.message, "error");
-      return;
-    }
-
-    await doSave(np, added, updatedCount);
+    // Minted AFTER the dialog, from the LATEST roster, as the PUT goes
+    // (putRoster). The dialog can stand open for minutes, and a colleague
+    // saving from another desk in that window re-renders this component with a
+    // fresher `c`; minting before the wait would carry a pre-dialog snapshot
+    // into the PUT and silently revert their change. The ids and seeds
+    // preserved are the ones on the server now, a seed typed or a row moved
+    // here whose answer the page does not show yet included.
+    await doSave(parsed);
   };
 
   // doSave performs the PUT and shows the success toast. The roster PUT
   // returns server-authoritative near-duplicate warnings; the save has
   // already committed (warnings are non-blocking), so we surface them in a
   // post-save informational banner the operator can review and dismiss.
-  const doSave = async (np, added, updatedCount) => {
+  const doSave = async (parsed) => {
     // Clear any stale banner from a previous import up front, so a cancelled
     // or failed save can't leave a misleading "Saved: …" banner on screen.
     setNearDupPending(null);
     try {
-      // Spread the LATEST competition, not the one apply() captured before its
-      // confirm dialog: every field except `players` must be whatever the
-      // server holds now (see the re-mint in apply()).
-      const warnings = await onUpdate({ ...cRef.current, players: np });
+      // putRoster spreads the LATEST competition, not the one apply() captured
+      // before its confirm dialog: every field except `players` must be
+      // whatever the server holds now, and the roster is minted from the
+      // latest known one as the PUT goes.
+      let minted = null;
+      let mintError = null;
+      const warnings = await putRoster((players) => {
+        try {
+          minted = mintParticipantIds(rosterRef.current.id, players, parsed);
+        } catch (err) {
+          // mintParticipantIds can throw on unexpected shape.
+          mintError = err;
+          return null;
+        }
+        return minted.np;
+      });
+      if (mintError) {
+        console.error("AdminParticipants: mint failed", mintError);
+        if (mountedRef.current) showToast("Failed to parse participants: " + mintError.message, "error");
+        return;
+      }
+      const { np, added, updatedCount } = minted;
 
       // Bail if we unmounted during the in-flight PUT: see mountedRef
       // declaration above. showToast is safe (lifted to AdminApp, still

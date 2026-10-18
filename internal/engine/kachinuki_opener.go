@@ -287,27 +287,7 @@ func pinLineup(h state.StoreTx, d *openerDraw, compID, matchID, teamID string, a
 	}
 	if in.Found {
 		pin.StartedFrom = in.Source.MatchID
-		positions := slices.SortedFunc(maps.Keys(in.Lineup.Positions), domain.ComparePositions)
-		seen := map[string]bool{}
-		for _, p := range positions {
-			if (domain.TeamLineup{Positions: map[domain.Position]string{p: ""}}).ValidatePositions(d.comp.TeamSize) != nil {
-				continue
-			}
-			pin.Positions[p] = in.Lineup.Positions[p]
-			if id := in.Lineup.MemberIDs[p]; id != "" && !seen[id] {
-				seen[id] = true
-				if pin.MemberIDs == nil {
-					pin.MemberIDs = map[domain.Position]string{}
-				}
-				pin.MemberIDs[p] = id
-			}
-			if s := in.Lineup.Stamps[p]; s > 0 {
-				if pin.Stamps == nil {
-					pin.Stamps = map[domain.Position]int64{}
-				}
-				pin.Stamps[p] = s
-			}
-		}
+		copyToPin(&pin, in.Lineup, d.comp.TeamSize, nil)
 	}
 	if err := h.SetTeamLineup(compID, pin, d.comp.TeamSize); err != nil {
 		return fmt.Errorf("kachinuki match %s/%s: the lineup team %s started with was not kept: %w", compID, matchID, teamID, err)
@@ -316,6 +296,55 @@ func pinLineup(h state.StoreTx, d *openerDraw, compID, matchID, teamID string, a
 		d.lineups = fresh
 	}
 	return nil
+}
+
+// copyToPin copies lineup src onto pin, whose Positions it fills (pin's own
+// MemberIDs and Stamps are rebuilt here): every position src names or places
+// a member at (a picked slot with no name yet carries an id and no name) that
+// the domain takes, each member id once, in position order, with the
+// position's stamp. A position src changed at or after the pin's start
+// (stamp >= pin.StartedAt) holds a value the source did not have at the start,
+// which a lineup keeps no history of: kept (when not nil) holds the pin's
+// value from before, which that position then keeps, with no stamp, so a
+// change of the source stamped before the start still reaches it.
+func copyToPin(pin *domain.TeamLineup, src domain.TeamLineup, teamSize int, kept *domain.TeamLineup) {
+	pin.MemberIDs, pin.Stamps = nil, nil
+	keys := map[domain.Position]bool{}
+	for p := range src.Positions {
+		keys[p] = true
+	}
+	for p := range src.MemberIDs {
+		keys[p] = true
+	}
+	seen := map[string]bool{}
+	for _, p := range slices.SortedFunc(maps.Keys(keys), domain.ComparePositions) {
+		if (domain.TeamLineup{Positions: map[domain.Position]string{p: ""}}).ValidatePositions(teamSize) != nil {
+			continue
+		}
+		from, stamp := src, src.Stamps[p]
+		if kept != nil && stamp >= pin.StartedAt {
+			from, stamp = *kept, 0
+		}
+		name, named := from.Positions[p]
+		id := from.MemberIDs[p]
+		if !named && id == "" {
+			continue
+		}
+		pin.Positions[p] = name
+		if id != "" && !seen[id] {
+			seen[id] = true
+			if pin.MemberIDs == nil {
+				pin.MemberIDs = map[domain.Position]string{}
+			}
+			pin.MemberIDs[p] = id
+		}
+		if stamp > 0 {
+			if pin.Stamps == nil {
+				pin.Stamps = map[domain.Position]int64{}
+			}
+			pin.Stamps[p] = stamp
+		}
+	}
 }
 
 // openerSeatEventsTx is the server's fighter events that bring bout 1 of m (and
@@ -477,12 +506,46 @@ func (e *Engine) FollowLineupSave(h state.StoreTx, comp *state.Competition, save
 		from, ok := draw[pin.StartedFrom]
 		return ok && from.Place.Compare(x.Place) < 0
 	}
+	// madeBefore says this save changed a position before at: the saved
+	// lineup was there then.
+	madeBefore := func(at int64) bool {
+		for _, p := range changed {
+			if s := saved.Stamps[p]; s > 0 && s < at {
+				return true
+			}
+		}
+		return false
+	}
 	var moved []string
 	for _, pin := range d.lineups {
 		if !pin.IsStartPin() || pin.TeamID != saved.TeamID || pin.MatchID == saved.MatchID {
 			continue
 		}
-		if pin.StartedFrom != saved.MatchID && !carriedPast(pin) {
+		if pin.StartedFrom != saved.MatchID {
+			// A lineup later in match order than the one the pin came from,
+			// saved before the start: at the start the carry rule gave the
+			// match THIS lineup, read whole, never merged with the one
+			// before it. So the pin is taken again from it, as it stood
+			// before the start, and from then on is compared only with
+			// changes of this one source, by their stamps: the pin is the
+			// carry rule at the start whatever order the saves arrive in
+			// (stage 6 review 5).
+			if !carriedPast(pin) || !madeBefore(pin.StartedAt) {
+				continue
+			}
+			next := copyLineup(pin)
+			next.Positions = map[domain.Position]string{}
+			next.StartedFrom = saved.MatchID
+			copyToPin(&next, saved, comp.TeamSize, &pin)
+			if next.StartedFrom == pin.StartedFrom && maps.Equal(next.Positions, pin.Positions) &&
+				maps.Equal(next.MemberIDs, pin.MemberIDs) && maps.Equal(next.Stamps, pin.Stamps) {
+				continue
+			}
+			if err := h.SetTeamLineup(comp.ID, next, comp.TeamSize); err != nil {
+				log.Printf("engine: kachinuki match %s/%s: a lineup saved before the start does not reach the lineup team %s started with: %v", comp.ID, pin.MatchID, pin.TeamID, err)
+				continue
+			}
+			moved = append(moved, pin.MatchID)
 			continue
 		}
 		next := copyLineup(pin)

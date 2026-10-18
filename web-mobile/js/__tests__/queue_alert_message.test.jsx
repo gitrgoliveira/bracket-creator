@@ -145,3 +145,13 @@ describe('queueAlertToastType', () => {
         },
     );
 });
+
+// Stage 6 review 9 (F5): a lineup kept with a carried lineup that could not
+// follow it is a warning, not an error: the change was kept.
+describe('the lineup warning', () => {
+    it('is a warning toast with the server\'s sentence', () => {
+        const alert = { kind: 'lineup_warning', count: 1, terminalCount: 0, detail: 'The lineup was saved, but the lineup carried to Pool A · Match 2 was kept as it was. Check that match\'s lineup.' };
+        expect(queueAlertToastType(alert)).toBe('warning');
+        expect(queueAlertMessage(alert)).toBe(alert.detail);
+    });
+});

@@ -111,12 +111,16 @@ function Toast({ message, type, onClose }) {
   // before it could fire: so onClose never ran and the toast stuck on screen
   // forever (no CSS hides a non-is-visible toast). Re-triggering on the shown
   // payload restarts the dwell for each new toast, which is the intent.
+  // A warning (a change kept with something to check, stage 6 review 9, F5)
+  // is read like an error, the sign, the dwell and a dismiss, but announced
+  // politely and never latched over the next toast.
+  const shownIsWarning = shown.type === 'warning';
   React.useEffect(() => {
-    const dwell = shownIsError ? TOAST_ERROR_DWELL_MS : TOAST_SUCCESS_DWELL_MS;
+    const dwell = shownIsError || shownIsWarning ? TOAST_ERROR_DWELL_MS : TOAST_SUCCESS_DWELL_MS;
     const t1 = setTimeout(() => setVisible(false), dwell);
     const t2 = setTimeout(() => onCloseRef.current && onCloseRef.current(), dwell + 300);
     return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [shown.message, shown.type, shownIsError]);
+  }, [shown.message, shown.type, shownIsError, shownIsWarning]);
 
   const role = shownIsError ? 'alert' : 'status';
   const ariaLive = shownIsError ? 'assertive' : 'polite';
@@ -127,9 +131,9 @@ function Toast({ message, type, onClose }) {
       role={role}
       aria-live={ariaLive}
     >
-      <div className="toast__icon" aria-hidden="true">{shownIsError ? '⚠️' : shown.type === 'pending' ? '⏳' : '✅'}</div>
+      <div className="toast__icon" aria-hidden="true">{shownIsError || shownIsWarning ? '⚠️' : shown.type === 'pending' ? '⏳' : '✅'}</div>
       <div className="toast__msg">{shown.message}</div>
-      {shownIsError && (
+      {(shownIsError || shownIsWarning) && (
         <button type="button"
           className="toast__dismiss"
           aria-label="Dismiss"

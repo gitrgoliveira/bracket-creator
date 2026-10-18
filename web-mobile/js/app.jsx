@@ -377,7 +377,7 @@ export function queueAlertMessage(alert) {
     case "lineup_warning":
       // The server's own sentence: the change was kept, and it names the
       // carried lineup that could not follow it (stage 6 review 8, m7).
-      return alert.detail || null;
+      return alert.detail || "The lineup change was kept, but a lineup carried from it could not follow it. Check the team's later lineups.";
     case "unreadable":
       return `${n} queued ${one ? "write" : "writes"} could not be read and ${one ? "was" : "were"} discarded. Check the affected ${one ? "match" : "matches"}.`;
     case "rejected":
@@ -448,6 +448,8 @@ export function queueAlertMessage(alert) {
 // error. Exported for test.
 export function queueAlertToastType(alert) {
   if (alert && (alert.kind === "displaced" || alert.kind === "tap_applied")) return "info";
+  // The change was kept; a carried lineup could not follow it (F5).
+  if (alert && alert.kind === "lineup_warning") return "warning";
   return alert && alert.kind === "sent" ? "success" : "error";
 }
 

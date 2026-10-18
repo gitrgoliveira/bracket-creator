@@ -57,10 +57,10 @@ export function createLandedTaps({ storage, now = () => Date.now(), tab }) {
         try {
             raw = storage.getItem(key);
         } catch (_e) {
-            return { ...(memory.get(key) || {}) };
+            return { ...memory.get(key) };
         }
         if (raw === null) {
-            if (failed.has(key)) return { ...(memory.get(key) || {}) };
+            if (failed.has(key)) return { ...memory.get(key) };
             // Removed (another tab's sign-out), or never written: not put back.
             memory.delete(key);
             return {};

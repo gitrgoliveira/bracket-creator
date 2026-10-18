@@ -302,6 +302,10 @@ describe('the tap-outcome readers', () => {
         expect(tapNotAppliedText({ outcome: 'capped' })).toBe('Not applied: the bout was already decided.');
         expect(tapNotAppliedText({ outcome: 'matchClosed' })).toMatch(/tap Correct\.$/);
     });
+    it('a tap the finish was recorded without says so, and says Correct (rule D5)', () => {
+        expect(tapNotAppliedText({ outcome: 'beforeBaseline' })).toBe(
+            "Not applied: the result was recorded without this change, so it was kept in the match's history. To change the result, tap Correct.");
+    });
     it('the alert counts one item per tap', () => {
         expect(tapNotAppliedAlertText(1, true, 'Not applied: the bout was already decided.')).toBe('Not applied: the bout was already decided.');
         expect(tapNotAppliedAlertText(3, false)).toMatch(/^3 taps were not applied\./);

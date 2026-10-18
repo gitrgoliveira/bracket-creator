@@ -185,7 +185,8 @@ export function tapNotAppliedText(o) {
     switch (o.outcome) {
         case 'capped': return 'Not applied: the bout was already decided.';
         case 'matchClosed': return `Not applied: ${MATCH_CLOSED_REASON}. ${MATCH_CLOSED_ADVICE}`;
-        case 'beforeBaseline': return "Not applied: a result recorded since already covers it, so it was kept in the match's history.";
+        // Rule D5: the result was made on a device that never saw this tap.
+        case 'beforeBaseline': return `Not applied: the result was recorded without this change, so it was kept in the match's history. ${MATCH_CLOSED_ADVICE}`;
         case 'noTarget': return "Not applied: the mark it takes off is no longer there, so it was kept in the match's history.";
         case 'notAllowed': return "Not applied: this match does not take that change, so it was kept in the match's history.";
         case 'notStarted': return 'Not applied: the match is not running. Start it to score it.';

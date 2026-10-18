@@ -97,7 +97,7 @@ function eventWords(ev) {
 // Why a tap was not applied (the server's outcome for it).
 const EVENT_OUTCOME_WORDS = {
     capped: 'the bout was already decided',
-    beforeBaseline: 'a result recorded since already covered it',
+    beforeBaseline: 'the result was recorded without this change',
     noTarget: 'the mark it took off was already gone',
     notAllowed: 'this match does not take that change',
     matchClosed: 'the match was already finished',

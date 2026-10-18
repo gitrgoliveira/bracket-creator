@@ -114,6 +114,7 @@ type StoreTx interface {
 	SetCompetitorStatus(compID string, status domain.CompetitorStatus) error
 	LoadTeamLineups(compID string) (map[string]domain.TeamLineup, error)
 	SetTeamLineup(compID string, l domain.TeamLineup, teamSize int) error
+	DeleteTeamLineupForMatch(compID, teamID, matchID string) error
 	LoadParticipants(compID string, withZekkenName bool) ([]domain.Player, error)
 	// LoadSquads is Store.LoadSquads under the held lock, read-your-own-writes
 	// over a team-members file this transaction already staged.
@@ -636,6 +637,25 @@ func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int
 	}
 	t.noteStartLineup(l)
 	return nil
+}
+
+// DeleteTeamLineupForMatch removes the lineup stored for teamID at matchID
+// itself (an operator's, or the one the match started with), staged in the
+// transaction; nothing stored there is no error.
+func (t *storeTx) DeleteTeamLineupForMatch(compID, teamID, matchID string) error {
+	if err := t.checkCompID(compID); err != nil {
+		return err
+	}
+	current, err := t.LoadTeamLineups(compID)
+	if err != nil {
+		return err
+	}
+	key := teamLineupMatchKey(teamID, matchID)
+	if _, ok := current[key]; !ok {
+		return nil
+	}
+	delete(current, key)
+	return t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn())
 }
 
 // keptLineup names a lineup a kachinuki match started with that the

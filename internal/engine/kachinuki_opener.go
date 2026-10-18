@@ -199,9 +199,10 @@ func (d openerDraw) inForce(teamID, matchID string) InForceLineup {
 
 // opener is THE rule for bout 1's fighters (see the file comment): the first
 // fighter of the match's own lineup (saved, or the one it started with), else,
-// while the match is scheduled, of the lineup in force there; else nobody,
-// which renames nothing.
-func (d openerDraw) opener(matchID string, status state.MatchStatus, sideAID, sideBID string) KachinukiOpener {
+// while the match has not started, of the lineup in force there; else nobody,
+// which renames nothing. A match sent back to the queue holding its bouts has
+// started (hasStarted): it never follows the carried lineup.
+func (d openerDraw) opener(matchID string, started bool, sideAID, sideBID string) KachinukiOpener {
 	first := func(teamID string) boutFighter {
 		if teamID == "" {
 			return boutFighter{}
@@ -210,7 +211,7 @@ func (d openerDraw) opener(matchID string, status state.MatchStatus, sideAID, si
 		if !in.Found {
 			return boutFighter{}
 		}
-		if in.Source.MatchID != matchID && status != state.MatchStatusScheduled {
+		if in.Source.MatchID != matchID && started {
 			// Started, with nothing of its own: nothing renames it.
 			return boutFighter{}
 		}
@@ -254,40 +255,67 @@ func startStamp(m *state.MatchResult) int64 {
 // after it still has a lineup to reach (FollowLineupSave). A side with a
 // lineup of its own already (an operator saved one before the start, or the
 // match started before and kept its pin) keeps it. Staged in h, so it commits
-// or aborts with the write that started the match. A pin that cannot be staged
-// is logged: the match then has none, and keeps the fighters bout 1 holds.
-func pinStartLineups(h state.StoreTx, d *openerDraw, compID string, m *state.MatchResult) {
-	pinned := false
+// or aborts with the write that started the match; a pin the store cannot
+// stage fails that write, rather than leave a started match silently without
+// the lineup it started with.
+func pinStartLineups(h state.StoreTx, d *openerDraw, compID string, m *state.MatchResult) error {
 	at := startStamp(m)
 	for _, teamID := range []string{m.SideAID, m.SideBID} {
 		if teamID == "" || ownLineup(d.lineups, teamID, m.ID) {
 			continue
 		}
-		in := d.inForce(teamID, m.ID)
-		pin := domain.TeamLineup{
-			TeamID: teamID, CompetitionID: compID, MatchID: m.ID,
-			Positions: map[domain.Position]string{}, StartedAt: at,
+		if err := pinLineup(h, d, compID, m.ID, teamID, at); err != nil {
+			return err
 		}
-		if in.Found {
-			pin.Positions = maps.Clone(in.Lineup.Positions)
-			pin.MemberIDs = maps.Clone(in.Lineup.MemberIDs)
-			pin.Stamps = maps.Clone(in.Lineup.Stamps)
-			pin.StartedFrom = in.Source.MatchID
-			if pin.Positions == nil {
-				pin.Positions = map[domain.Position]string{}
+	}
+	return nil
+}
+
+// pinLineup keeps the lineup in force for teamID at matchID now as the lineup
+// the match started with (its pin), marked at: a copy of it, or an empty one
+// when the team has none, and the lineup it came from (StartedFrom). Positions
+// the domain would refuse to store (a key the team size does not hold, a
+// member at two positions in a lineup saved before that was refused) are left
+// out of the copy, the second place of a member keeping its name without the
+// id, so the pin always stores; what still fails is the store's own fault and
+// is the caller's error. The pin is the match's own from then on, d included.
+func pinLineup(h state.StoreTx, d *openerDraw, compID, matchID, teamID string, at int64) error {
+	in := d.inForce(teamID, matchID)
+	pin := domain.TeamLineup{
+		TeamID: teamID, CompetitionID: compID, MatchID: matchID,
+		Positions: map[domain.Position]string{}, StartedAt: at,
+	}
+	if in.Found {
+		pin.StartedFrom = in.Source.MatchID
+		positions := slices.SortedFunc(maps.Keys(in.Lineup.Positions), domain.ComparePositions)
+		seen := map[string]bool{}
+		for _, p := range positions {
+			if (domain.TeamLineup{Positions: map[domain.Position]string{p: ""}}).ValidatePositions(d.comp.TeamSize) != nil {
+				continue
+			}
+			pin.Positions[p] = in.Lineup.Positions[p]
+			if id := in.Lineup.MemberIDs[p]; id != "" && !seen[id] {
+				seen[id] = true
+				if pin.MemberIDs == nil {
+					pin.MemberIDs = map[domain.Position]string{}
+				}
+				pin.MemberIDs[p] = id
+			}
+			if s := in.Lineup.Stamps[p]; s > 0 {
+				if pin.Stamps == nil {
+					pin.Stamps = map[domain.Position]int64{}
+				}
+				pin.Stamps[p] = s
 			}
 		}
-		if err := h.SetTeamLineup(compID, pin, d.comp.TeamSize); err != nil {
-			log.Printf("engine: ERROR: kachinuki match %s/%s: the lineup team %s started with is not kept: %v", compID, m.ID, teamID, err)
-			continue
-		}
-		pinned = true
 	}
-	if pinned {
-		if fresh, err := h.LoadTeamLineups(compID); err == nil {
-			d.lineups = fresh
-		}
+	if err := h.SetTeamLineup(compID, pin, d.comp.TeamSize); err != nil {
+		return fmt.Errorf("kachinuki match %s/%s: the lineup team %s started with was not kept: %w", compID, matchID, teamID, err)
 	}
+	if fresh, err := h.LoadTeamLineups(compID); err == nil {
+		d.lineups = fresh
+	}
+	return nil
 }
 
 // openerSeatEventsTx is the server's fighter events that bring bout 1 of m (and
@@ -303,7 +331,7 @@ func openerSeatEventsTx(h state.StoreTx, comp *state.Competition, compID, matchI
 		return nil
 	}
 	stamp := max(serverNowMs(), m.ModifiedAt+1, newestLineStamp(lines)+1)
-	return openerSeatEvents(m, d.opener(matchID, m.Status, m.SideAID, m.SideBID), stamp)
+	return openerSeatEvents(m, d.opener(matchID, hasStarted(m), m.SideAID, m.SideBID), stamp)
 }
 
 // afterMatchWrite runs after a match write that stands (its error nil), in the
@@ -312,37 +340,63 @@ func openerSeatEventsTx(h state.StoreTx, comp *state.Competition, compID, matchI
 // bout 1 is brought to what the rule says (seatOpenerAfterWrite; the
 // score-events door seats its own batch). before is the match's status before
 // the write.
-func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, before state.MatchStatus, door string) {
+func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, before matchBefore, door string) error {
 	comp, err := h.LoadCompetition(compID)
 	if err != nil || comp == nil || !comp.IsKachinuki() {
-		return
+		return nil
 	}
-	if before == state.MatchStatusScheduled {
-		if stored, _, err := e.lookupExistingResultIn(h, compID, matchID); err == nil && stored != nil && stored.Status != state.MatchStatusScheduled {
+	// The first start only: a match sent back to the queue holds the bouts it
+	// was fought on, and a start of it again is no start (it keeps the lineup
+	// it started with, or, started before this rule, none).
+	if before.status == state.MatchStatusScheduled && !before.fought {
+		stored, _, err := e.lookupExistingResultIn(h, compID, matchID)
+		if err == nil && stored != nil && stored.Status != state.MatchStatusScheduled {
 			if d, ok := readOpenerDraw(h, comp, compID); ok {
-				pinStartLineups(h, &d, compID, stored)
+				if err := pinStartLineups(h, &d, compID, stored); err != nil {
+					return err
+				}
 			}
 		}
 	}
 	if door != DoorEvent {
 		e.seatOpenerAfterWrite(h, compID, matchID)
 	}
+	return nil
 }
 
 // storedStatus is the match's status before a write, "" when it cannot be read
 // (an unknown match is the write's to answer).
-func (e *Engine) storedStatus(h state.StoreTx, compID, matchID string) state.MatchStatus {
+func (e *Engine) storedStatus(h state.StoreTx, compID, matchID string) matchBefore {
 	// Read only for a kachinuki competition: the write that follows reads
 	// the match itself and answers what it cannot read.
 	comp, err := h.LoadCompetition(compID)
 	if err != nil || comp == nil || !comp.IsKachinuki() {
-		return ""
+		return matchBefore{}
 	}
 	m, _, err := e.lookupExistingResultIn(h, compID, matchID)
 	if err != nil || m == nil {
-		return ""
+		return matchBefore{}
 	}
-	return m.Status
+	return matchBefore{status: m.Status, fought: holdsBouts(m)}
+}
+
+// matchBefore is what afterMatchWrite needs of a match as it stood before a
+// write: its status, and whether it held the bouts it was fought on.
+type matchBefore struct {
+	status state.MatchStatus
+	fought bool
+}
+
+// holdsBouts says m holds a numbered bout row: on a scheduled kachinuki match,
+// the bouts it was fought on before it was sent back to the queue.
+func holdsBouts(m *state.MatchResult) bool {
+	return slices.ContainsFunc(m.SubResults, func(r state.SubMatchResult) bool { return r.Position > 0 })
+}
+
+// hasStarted says a kachinuki match was started: it left the queue, or it was
+// sent back to it holding the bouts it was fought on.
+func hasStarted(m *state.MatchResult) bool {
+	return m.Status != state.MatchStatusScheduled || holdsBouts(m)
 }
 
 // seatOpenerAfterWrite brings bout 1 of a kachinuki match to what the rule
@@ -383,7 +437,11 @@ func (e *Engine) seatOpenerAfterWrite(h state.StoreTx, compID, matchID string) b
 // save changed whose change is stamped before a match's start reaches the pin
 // that match took from this lineup, unless the pin holds a later-stamped change
 // of that position, so the lineup a match started with is the one its lineup
-// held at the start in stamp order, whichever way the saves arrive. A change
+// held at the start in stamp order, whichever way the saves arrive. A save of
+// an EARLIER match's own lineup lying, in match order, between the lineup a
+// pin was taken from and the pin's match reaches that pin the same way (by
+// stamp order the match carried it at its start), and the pin then names it as
+// the lineup it came from. A change
 // with no stamp (an older build's save) is ordered by its arrival, after every
 // start, and reaches none. saved is the lineup as stored by the save; changed
 // its changed positions. It returns the matches whose pin moved, for the reseat
@@ -396,13 +454,35 @@ func (e *Engine) FollowLineupSave(h state.StoreTx, comp *state.Competition, save
 	if saved.MatchID == "" && saved.Round != 0 {
 		return nil, nil
 	}
-	lineups, err := h.LoadTeamLineups(comp.ID)
-	if err != nil {
-		return nil, err
+	d, ok := readOpenerDraw(h, comp, comp.ID)
+	if !ok {
+		return nil, fmt.Errorf("lineups not readable")
+	}
+	draw := newLineupRuleFrom(d.lineups, d.pool, d.bracket, comp.IsKnockoutEnabled()).draw
+	// carriedPast says the saved lineup (an earlier match's own) lies, in
+	// match order, between the lineup pin was taken from and pin's match: had
+	// the save arrived by the start, pin's match would have carried it.
+	carriedPast := func(pin domain.TeamLineup) bool {
+		if saved.MatchID == "" {
+			return false
+		}
+		x, okX := draw[saved.MatchID]
+		m, okM := draw[pin.MatchID]
+		if !okX || !okM || !x.Seats(pin.TeamID) || x.Place.Compare(m.Place) >= 0 {
+			return false
+		}
+		if pin.StartedFrom == "" {
+			return true
+		}
+		from, ok := draw[pin.StartedFrom]
+		return ok && from.Place.Compare(x.Place) < 0
 	}
 	var moved []string
-	for _, pin := range lineups {
-		if !pin.IsStartPin() || pin.TeamID != saved.TeamID || pin.StartedFrom != saved.MatchID {
+	for _, pin := range d.lineups {
+		if !pin.IsStartPin() || pin.TeamID != saved.TeamID || pin.MatchID == saved.MatchID {
+			continue
+		}
+		if pin.StartedFrom != saved.MatchID && !carriedPast(pin) {
 			continue
 		}
 		next := copyLineup(pin)
@@ -434,6 +514,9 @@ func (e *Engine) FollowLineupSave(h state.StoreTx, comp *state.Competition, save
 		if maps.Equal(next.Stamps, pin.Stamps) {
 			continue
 		}
+		// What the match carried at its start, in stamp order, is now this
+		// lineup.
+		next.StartedFrom = saved.MatchID
 		if err := h.SetTeamLineup(comp.ID, next, comp.TeamSize); err != nil {
 			log.Printf("engine: kachinuki match %s/%s: a change made before the start does not reach the lineup team %s started with: %v", comp.ID, pin.MatchID, pin.TeamID, err)
 			continue
@@ -500,6 +583,47 @@ func (e *Engine) ReseatKachinukiOpeners(compID, teamID string) ([]string, error)
 		return err
 	})
 	return changed, err
+}
+
+// UsePreviousLineupTx is "Use the previous match's lineup" (DELETE
+// match-lineups): it takes the lineup stored for teamID at matchID itself
+// away. On a kachinuki match that has started (hasStarted) that is an edit of
+// the match's own lineup, so it is a snapshot, never a live link: the lineup
+// in force there now, by the carry rule, is kept as the match's own in its
+// place (a pin, pinLineup, marked now), so bout 1 takes those names on every
+// device (the reseat and announcement that follow the door) and a later edit
+// of the starting lineup renames nothing there.
+func (e *Engine) UsePreviousLineupTx(h state.StoreTx, compID, teamID, matchID string) error {
+	if err := h.DeleteTeamLineupForMatch(compID, teamID, matchID); err != nil {
+		return err
+	}
+	comp, err := h.LoadCompetition(compID)
+	if err != nil || comp == nil || !comp.IsKachinuki() {
+		return err
+	}
+	m, _, err := e.lookupExistingResultIn(h, compID, matchID)
+	var notFound *NotFoundError
+	if errors.As(err, &notFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if m == nil || !hasStarted(m) || (m.SideAID != teamID && m.SideBID != teamID) {
+		return nil
+	}
+	d, ok := readOpenerDraw(h, comp, compID)
+	if !ok {
+		return fmt.Errorf("kachinuki match %s/%s: lineups not readable", compID, matchID)
+	}
+	return pinLineup(h, &d, compID, matchID, teamID, max(serverNowMs(), m.ModifiedAt))
+}
+
+// UsePreviousLineup is UsePreviousLineupTx in a transaction of its own.
+func (e *Engine) UsePreviousLineup(compID, teamID, matchID string) error {
+	return e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+		return e.UsePreviousLineupTx(tx, compID, teamID, matchID)
+	})
 }
 
 // serverFighterEvent is whether e is one of the server's own fighter events

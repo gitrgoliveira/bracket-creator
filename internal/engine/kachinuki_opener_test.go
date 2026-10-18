@@ -7,6 +7,7 @@ package engine
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -250,24 +251,157 @@ func TestKachinukiOpener_FollowLineupSaveOrdersByStamp(t *testing.T) {
 	assert.Equal(t, "Kato", pinned())
 }
 
-// An operator's save of a started match's own lineup replaces the lineup it
-// started with; taking it away (Use the previous match's lineup) leaves the
-// match with none of its own, and bout 1 keeps the fighter it holds.
-func TestKachinukiOpener_RemovingAStartedMatchsLineupRenamesNothing(t *testing.T) {
+// "Use the previous match's lineup" on a started match is an edit of its own
+// lineup, taken as a snapshot: the lineup in force there at that moment is kept
+// as the match's own (a pin), bout 1 takes its names on every device, and a
+// later edit of the starting lineup renames nothing there.
+func TestKachinukiOpener_UsePreviousOnAStartedMatchIsASnapshot(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	const c = "op-remove-own"
+	const c = "op-use-previous"
 	openerComp(t, store, c, state.MatchResult{ID: "P1-0", SideA: "Taka", SideB: "Washi", SideAID: "ta", SideBID: "tb", Status: state.MatchStatusScheduled})
 	startingLineup(t, store, c, "ta", "Aoki", "m-aoki")
 	startingLineup(t, store, c, "tb", "Fujii", "m-fujii")
-	startKachinuki(t, eng, c, "P1-0", time.Now().UnixMilli()-2000)
-	postIn(t, eng, c, "P1-0", domain.ScoreEvent{ID: "x1", Session: "evs", Seq: 1, Stamp: time.Now().UnixMilli() - 1000, Kind: domain.ScoreIpponAdd, Pos: 1, Side: "a", Letter: "M"})
+	startKachinuki(t, eng, c, "P1-0", time.Now().UnixMilli()-3000)
+	postIn(t, eng, c, "P1-0", domain.ScoreEvent{ID: "x1", Session: "evs", Seq: 1, Stamp: time.Now().UnixMilli() - 2000, Kind: domain.ScoreIpponAdd, Pos: 1, Side: "a", Letter: "M"})
 	matchLineup(t, store, c, "ta", "P1-0", "Ito", "m-ito")
 	_, err := eng.ReseatKachinukiOpeners(c, "ta")
 	require.NoError(t, err)
 	assert.Equal(t, "Ito", openerMatch(t, store, c, "P1-0").SubResults[0].SideA)
-	require.NoError(t, store.DeleteTeamLineupForMatch(c, "ta", "P1-0"))
+
+	startingLineup(t, store, c, "ta", "Baba", "m-baba")
+	require.NoError(t, eng.UsePreviousLineup(c, "ta", "P1-0"))
+	_, err = eng.ReseatKachinukiOpeners(c, "ta")
+	require.NoError(t, err)
+	m := openerMatch(t, store, c, "P1-0")
+	assert.Equal(t, "Baba", m.SubResults[0].SideA, "bout 1 takes the lineup in force at that moment")
+	assert.Equal(t, []string{"M"}, m.SubResults[0].IpponsA, "its points stay on bout 1")
+	own, err := eng.LineupInForce(c, "ta", "P1-0")
+	require.NoError(t, err)
+	assert.Equal(t, "P1-0", own.Source.MatchID, "kept as the match's own")
+	assert.True(t, own.Lineup.IsStartPin())
+
+	startingLineup(t, store, c, "ta", "Kato", "m-kato")
 	changed, err := eng.ReseatKachinukiOpeners(c, "ta")
 	require.NoError(t, err)
-	assert.Empty(t, changed)
-	assert.Equal(t, "Ito", openerMatch(t, store, c, "P1-0").SubResults[0].SideA, "nothing of its own: bout 1 keeps its fighter")
+	assert.Empty(t, changed, "a snapshot: a later edit of the starting lineup renames nothing")
+	assert.Equal(t, "Baba", openerMatch(t, store, c, "P1-0").SubResults[0].SideA)
+
+	// On a match that has not started it only takes the lineup away.
+	require.NoError(t, store.SavePoolMatches(c, []state.MatchResult{openerMatch(t, store, c, "P1-0"),
+		{ID: "P1-1", SideA: "Taka", SideB: "Kuma", SideAID: "ta", SideBID: "tk", Status: state.MatchStatusScheduled}}))
+	matchLineup(t, store, c, "ta", "P1-1", "Ito", "m-ito")
+	require.NoError(t, eng.UsePreviousLineup(c, "ta", "P1-1"))
+	assert.Zero(t, ownLineupsOf(t, store, c, "P1-1"))
+}
+
+// The same on a started match whose bout 1 has no row yet: the next strike makes
+// the row with the snapshot's fighter, never with nobody.
+func TestKachinukiOpener_UsePreviousBeforeTheFirstStrike(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const c = "op-use-previous-first"
+	openerComp(t, store, c, state.MatchResult{ID: "P1-0", SideA: "Taka", SideB: "Washi", SideAID: "ta", SideBID: "tb", Status: state.MatchStatusScheduled})
+	startingLineup(t, store, c, "ta", "Aoki", "m-aoki")
+	startingLineup(t, store, c, "tb", "Fujii", "m-fujii")
+	startKachinuki(t, eng, c, "P1-0", time.Now().UnixMilli()-3000)
+	require.NoError(t, eng.UsePreviousLineup(c, "ta", "P1-0"))
+	r := postIn(t, eng, c, "P1-0", domain.ScoreEvent{ID: "x1", Session: "evs", Seq: 1, Stamp: time.Now().UnixMilli() - 10, Kind: domain.ScoreIpponAdd, Pos: 1, Side: "b", Letter: "K"})
+	require.Equal(t, domain.ScoreOutcomeApplied, r.Answers[0].Outcome)
+	m := openerMatch(t, store, c, "P1-0")
+	assert.Equal(t, []string{"Aoki", "Fujii"}, []string{m.SubResults[0].SideA, m.SubResults[0].SideB})
+}
+
+// Send back to the queue is ONE behaviour: a scheduled match that holds the
+// bouts it was fought on is a started match, so bout 1 follows its own lineup
+// or the one it started with, never the carried lineup, and starting it again
+// takes no lineup (it is no start). Both for a match started under this rule
+// and for one started before it.
+func TestKachinukiOpener_SentBackFollowsOnlyItsOwnLineup(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(fmt.Sprint("started before the rule=", legacy), func(t *testing.T) {
+			eng, store, _ := setupTestEngine(t)
+			c := fmt.Sprint("op-sendback-", legacy)
+			first := state.MatchResult{ID: "P1-0", SideA: "Taka", SideB: "Washi", SideAID: "ta", SideBID: "tb", Status: state.MatchStatusScheduled}
+			if legacy {
+				first.Status, first.SubResults = state.MatchStatusRunning, openerRows()
+				first.SubResults[0].IpponsA, first.SubResults[0].Winner, first.SubResults[0].WinnerMemberID, first.SubResults[0].Decision = []string{"M"}, "", "", ""
+			}
+			openerComp(t, store, c, first)
+			startingLineup(t, store, c, "ta", "Aoki", "m-aoki")
+			startingLineup(t, store, c, "tb", "Fujii", "m-fujii")
+			if !legacy {
+				startKachinuki(t, eng, c, "P1-0", time.Now().UnixMilli()-5000)
+				postIn(t, eng, c, "P1-0", domain.ScoreEvent{ID: "x1", Session: "evs", Seq: 1, Stamp: time.Now().UnixMilli() - 4000, Kind: domain.ScoreIpponAdd, Pos: 1, Side: "a", Letter: "M"})
+			}
+			pins := ownLineupsOf(t, store, c, "P1-0")
+			require.NoError(t, eng.RevertMatchToQueue(c, "P1-0"))
+			startingLineup(t, store, c, "ta", "Kato", "m-kato")
+			changed, err := eng.ReseatKachinukiOpeners(c, "ta")
+			require.NoError(t, err)
+			assert.Empty(t, changed, "a match sent back keeps bout 1's fighter")
+			assert.Equal(t, "Aoki", openerMatch(t, store, c, "P1-0").SubResults[0].SideA)
+			startKachinuki(t, eng, c, "P1-0", time.Now().UnixMilli())
+			m := openerMatch(t, store, c, "P1-0")
+			assert.Equal(t, state.MatchStatusRunning, m.Status)
+			assert.Equal(t, "Aoki", m.SubResults[0].SideA, "starting it again renames nothing")
+			assert.Equal(t, []string{"M"}, m.SubResults[0].IpponsA, "its points stay with its fighter")
+			assert.Equal(t, pins, ownLineupsOf(t, store, c, "P1-0"), "starting it again takes no lineup")
+		})
+	}
+}
+
+// A pin the store cannot stage fails the write that started the match: a
+// started match never silently lacks the lineup it started with.
+type failLineupSet struct{ state.StoreTx }
+
+func (failLineupSet) SetTeamLineup(string, domain.TeamLineup, int) error {
+	return errors.New("lineups.yaml could not be staged")
+}
+
+func TestKachinukiOpener_APinThatCannotBeKeptFailsTheStart(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const c = "op-pin-fails"
+	openerComp(t, store, c, state.MatchResult{ID: "P1-0", SideA: "Taka", SideB: "Washi", SideAID: "ta", SideBID: "tb", Status: state.MatchStatusScheduled})
+	startingLineup(t, store, c, "ta", "Aoki", "m-aoki")
+	err := store.WithTransaction(c, func(tx state.StoreTx) error {
+		_, err := eng.RecordMatchResultWithIneligibilityTx(failLineupSet{tx}, c, "P1-0",
+			&state.MatchResult{Status: state.MatchStatusRunning, ModifiedAt: time.Now().UnixMilli() - 100, Changed: []string{state.GroupResult}}, ForceOptions{StartOnly: true})
+		return err
+	})
+	require.Error(t, err)
+	assert.Equal(t, state.MatchStatusScheduled, openerMatch(t, store, c, "P1-0").Status, "the start does not stand without its lineup")
+}
+
+// B2: a save of an EARLIER match's own lineup stamped before a later match's
+// start reaches the lineup that match started with, whenever it arrives: by
+// stamp order the match carried it at its start. One stamped after does not.
+func TestKachinukiOpener_AnEarlierMatchsSaveMadeBeforeTheStartReachesIt(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const c = "op-earlier"
+	openerComp(t, store, c,
+		state.MatchResult{ID: "P1-0", SideA: "Taka", SideB: "Kuma", SideAID: "ta", SideBID: "tk", Status: state.MatchStatusScheduled},
+		state.MatchResult{ID: "P1-1", SideA: "Taka", SideB: "Washi", SideAID: "ta", SideBID: "tb", Status: state.MatchStatusScheduled})
+	startingLineup(t, store, c, "ta", "Aoki", "m-aoki")
+	const start = int64(1_000_000)
+	startKachinuki(t, eng, c, "P1-1", start)
+	comp, err := store.LoadCompetition(c)
+	require.NoError(t, err)
+	p1 := domain.PositionNumbered(1)
+	save := func(name string, stamp int64) []string {
+		saved := domain.TeamLineup{TeamID: "ta", MatchID: "P1-0", Positions: map[domain.Position]string{p1: name},
+			MemberIDs: map[domain.Position]string{p1: "m-" + name}, Stamps: map[domain.Position]int64{p1: stamp}}
+		var moved []string
+		require.NoError(t, store.WithTransaction(c, func(tx state.StoreTx) error {
+			require.NoError(t, tx.SetTeamLineup(c, saved, 3))
+			var err error
+			moved, err = eng.FollowLineupSave(tx, comp, saved, []domain.Position{p1})
+			return err
+		}))
+		return moved
+	}
+	assert.Empty(t, save("Mori", start+10), "made after the start")
+	assert.Equal(t, []string{"P1-1"}, save("Kato", start-10), "made before the start, arriving after it")
+	in, err := eng.LineupInForce(c, "ta", "P1-1")
+	require.NoError(t, err)
+	assert.Equal(t, "Kato", in.Lineup.Positions[p1])
+	assert.Equal(t, "P1-0", in.Lineup.StartedFrom, "the pin now names the lineup the match carried")
 }

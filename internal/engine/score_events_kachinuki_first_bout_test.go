@@ -119,17 +119,21 @@ func TestScoreEvents_KachinukiLineupEditRenamesBoutOne(t *testing.T) {
 		}
 	}
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "P1-0", SideA: "Taka", SideB: "Washi", SideAID: "ta", SideBID: "tb", Status: state.MatchStatusScheduled, SubResults: rows()},
+		{ID: "P1-0", SideA: "Taka", SideB: "Washi", SideAID: "ta", SideBID: "tb", Status: state.MatchStatusScheduled},
 		{ID: "P1-1", SideA: "Taka", SideB: "Washi", SideAID: "ta", SideBID: "tb", Status: state.MatchStatusCompleted,
 			Winner: "Taka", WinnerID: "ta", Decision: "kachinuki-exhaustion", SubResults: rows()},
 	}))
 	startingLineup(t, store, compID, "ta", "Aoki", "m-aoki")
 	startingLineup(t, store, compID, "tb", "Fujii", "m-fujii")
 	t0 := time.Now().UnixMilli() - 60_000
-	// The match (sent back to the queue with its bouts) starts again: it
-	// keeps the lineup it started with as its own, and a strike on bout 2
-	// lands.
-	startKachinuki(t, eng, compID, "P1-0", t0-1)
+	// The match starts: it keeps the lineup it started with as its own. Its
+	// first two bouts are then on the sheet (stored as fought), and a strike
+	// on bout 2 lands.
+	_, err := eng.RecordMatchResultWithIneligibility(compID, "P1-0", &state.MatchResult{
+		Status: state.MatchStatusRunning, ModifiedAt: t0 - 2, SubResults: rows(),
+		Changed: []string{state.GroupResult, state.BoutGroup(1), state.BoutGroup(2)},
+	})
+	require.NoError(t, err)
 	res := postIn(t, eng, compID, "P1-0", domain.ScoreEvent{ID: "s1", Session: "evs", Seq: 1, Stamp: t0, Kind: domain.ScoreIpponAdd, Pos: 2, Side: domain.ScoreSideB, Letter: "D"})
 	require.Equal(t, domain.ScoreOutcomeApplied, res.Answers[0].Outcome)
 	lineups, err := store.LoadTeamLineups(compID)

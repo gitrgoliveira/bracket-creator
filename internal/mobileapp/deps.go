@@ -307,4 +307,7 @@ type KachinukiOpenerSeater interface {
 type KachinukiLineupKeeper interface {
 	KachinukiOpenerSeater
 	FollowLineupSave(tx state.StoreTx, comp *state.Competition, saved domain.TeamLineup, changed []domain.Position) ([]string, error)
+	// UsePreviousLineup takes a match's own lineup away; on a kachinuki match
+	// that has started it keeps the lineup in force then as the match's own.
+	UsePreviousLineup(compID, teamID, matchID string) error
 }

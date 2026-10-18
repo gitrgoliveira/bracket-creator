@@ -75,3 +75,35 @@ func TestKachinukiStart_AnnouncesTheLineupItStartedWith(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code, "no client may send the server's own events")
 	assert.Contains(t, w.Body.String(), "server's own")
 }
+
+// No door that takes a device's event session lets a client claim the
+// server's own: the score write, the decision and the score-events batch all
+// answer 400, and nothing is written.
+func TestServerEventSession_RefusedOnEveryDoor(t *testing.T) {
+	r, store, _ := d5Router(t)
+	const c = "srvsess"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: c, Kind: "individual", Status: state.CompStatusPools}))
+	require.NoError(t, store.SavePoolMatches(c, []state.MatchResult{{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, IpponsA: []string{}, IpponsB: []string{}}}))
+	path := "/api/competitions/" + c + "/matches/" + url.PathEscape("Pool A-0")
+	now := time.Now().UnixMilli() - 500
+	for _, req := range []struct {
+		method, url string
+		body        map[string]any
+	}{
+		{http.MethodPut, path + "/score", map[string]any{"sideA": "Alice", "sideB": "Bob", "status": "running", "ipponsA": []string{"M"}, "ipponsB": []string{},
+			"changed": []string{state.GroupPoints}, "modifiedAt": now, "session": engine.ServerEventSession, "basis": map[string]any{"seen": 0}}},
+		{http.MethodPost, path + "/decision", map[string]any{"decision": "kiken-voluntary", "decisionBy": "aka", "modifiedAt": now,
+			"session": engine.ServerEventSession, "basis": map[string]any{"seen": 0}}},
+		{http.MethodPost, path + "/score-events", map[string]any{"session": engine.ServerEventSession,
+			"events": []domain.ScoreEvent{{ID: "e", Stamp: now, Kind: domain.ScoreIpponAdd, Side: "a", Letter: "M"}}}},
+	} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, squadJSONReq(req.method, req.url, "secret", req.body))
+		assert.Equal(t, http.StatusBadRequest, w.Code, "%s %s: %s", req.method, req.url, w.Body.String())
+		assert.Contains(t, w.Body.String(), "server's own", "%s %s", req.method, req.url)
+	}
+	ms, err := store.LoadPoolMatches(c)
+	require.NoError(t, err)
+	assert.Equal(t, state.MatchStatusRunning, ms[0].Status)
+	assert.Empty(t, ms[0].IpponsA)
+}

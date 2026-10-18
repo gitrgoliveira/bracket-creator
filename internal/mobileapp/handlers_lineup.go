@@ -525,7 +525,17 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 		applied := false
 		target := lineupSave{compID: compID, teamID: teamID, matchID: matchID}.target()
 		ran := once.do(target, tag.WriteID, func() bool {
-			if err := store.DeleteTeamLineupForMatch(compID, teamID, matchID); err != nil {
+			// On a kachinuki match that has started, taking its own lineup
+			// away keeps the lineup in force now as its own, a snapshot
+			// (engine.UsePreviousLineupTx); elsewhere it only removes it.
+			remove := func() error { return store.DeleteTeamLineupForMatch(compID, teamID, matchID) }
+			for _, k := range keepers {
+				if k != nil {
+					remove = func() error { return k.UsePreviousLineup(compID, teamID, matchID) }
+					break
+				}
+			}
+			if err := remove(); err != nil {
 				internalError(c, err)
 				return false
 			}

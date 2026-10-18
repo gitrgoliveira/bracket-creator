@@ -40,6 +40,12 @@ func (w writeTag) validateTag() error {
 	if len(w.Session) > domain.MaxScoreEventFieldLen {
 		return fmt.Errorf("session is longer than %d characters", domain.MaxScoreEventFieldLen)
 	}
+	// The server's own event session (engine/kachinuki_opener.go) is no
+	// device's: a write claiming it could make its basis count the server's
+	// fighter events as the writer's own.
+	if w.Session == engine.ServerEventSession {
+		return fmt.Errorf("session %q is the server's own", engine.ServerEventSession)
+	}
 	if w.Basis == nil {
 		return nil
 	}

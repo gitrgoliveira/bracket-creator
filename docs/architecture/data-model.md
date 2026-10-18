@@ -721,8 +721,11 @@ whole write are ordered against each other by the same rule.
 The server adds events of its own to the same log, under the session `server` and with no
 sequence number: the fighters of a kachinuki encounter's first bout, which are the first fighters
 of each team's lineup for the match and which no device sends. It adds them when a write makes
-or changes that bout and when a lineup or team member changes while the encounter is running, so
-they are ordered against the taps like any tap and never turn one away.
+or changes that bout and when a lineup or team member changes, so they are ordered against the
+taps like any tap and never turn one away; they name who fought, never a score, so they reach a
+finished encounter too without moving its result. A kachinuki match that has started keeps the
+lineup it started with as its own lineup record, so only an edit of that match's lineup renames
+it.
 
 Three figures are derived by the replay and stored beside the match so that a reader does not
 have to replay the log: the id of each mark (a removal names its mark by id, so two devices

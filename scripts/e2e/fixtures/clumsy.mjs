@@ -119,16 +119,24 @@ export async function doubleTap(locator) {
   const page = locator.page();
   const { x, y } = await centreOf(locator);
   // The page records each click and touch, and whether the control under the
-  // point was disabled when the second touch ended (the first tap may disable
-  // it, which is why that touch makes no click). The listeners are removed in
+  // point was disabled (or gone) when the second touch ended or in the task after,
+  // where its click would come (the first tap may disable it, which is why
+  // that touch makes no click). The listeners are removed in
   // the finally below whatever the page saw, so none outlives this call.
   await page.evaluate(({ px, py }) => {
     window.__clumsyClicks = [];
     window.__clumsyTouches = [];
     window.__clumsySecondDisabled = null;
-    const disabledAt = () => {
+    const controlAt = () => {
       const el = document.elementFromPoint(px, py);
-      const control = el && el.closest('button, [role="button"], input, select, textarea');
+      return el && el.closest('button, [role="button"], input, select, textarea');
+    };
+    // The control the taps aim at; a click it cannot take is one it no
+    // longer has (it was disabled, or replaced, by the first tap's render).
+    const aimed = controlAt();
+    const disabledAt = () => {
+      if (aimed && !aimed.isConnected) return true;
+      const control = controlAt();
       return !!control && (control.disabled === true || control.getAttribute('aria-disabled') === 'true');
     };
     const listeners = [];
@@ -136,8 +144,13 @@ export async function doubleTap(locator) {
     for (const [type, seen] of [['click', window.__clumsyClicks], ['touchstart', window.__clumsyTouches], ['touchend', ends]]) {
       const rec = () => {
         seen.push(Date.now());
-        // Read as the second tap ends, just before its click would come.
-        if (type === 'touchend' && seen.length === 2) window.__clumsySecondDisabled = disabledAt();
+        // Read as the second tap ends, and again in the next task, where its
+        // click would come: the first tap's render (which disables the
+        // control) can land between the two.
+        if (type === 'touchend' && seen.length === 2) {
+          window.__clumsySecondDisabled = disabledAt();
+          setTimeout(() => { if (!window.__clumsySecondDisabled) window.__clumsySecondDisabled = disabledAt(); }, 0);
+        }
       };
       document.addEventListener(type, rec, true);
       listeners.push([type, rec]);
@@ -164,6 +177,8 @@ export async function doubleTap(locator) {
     } finally {
       await cdp.detach().catch(() => {});
     }
+    // The next task of the page, where the second tap's click would come, has run.
+    await page.evaluate(() => new Promise((r) => setTimeout(r, 0)));
     seen = await page.evaluate(() => ({
       clicks: window.__clumsyClicks, touches: window.__clumsyTouches, secondDisabled: window.__clumsySecondDisabled,
     }));

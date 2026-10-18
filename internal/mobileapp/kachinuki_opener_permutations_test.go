@@ -70,10 +70,24 @@ const (
 	opLateEarly    = "late tap stamped before the finish"
 	opRefused      = "tap stamped before the start"
 	opSpoof        = "client batch under the server's session"
+	opEarly0       = "own lineup save of the first match, stamped before the start"
+	opEarly1       = "own lineup save of the second match, stamped before the start"
 )
 
-const gateMatch = "Pool A-0"
-const gateLater = "Pool A-1"
+// The match the gate drives is team A's third; the two before it are never
+// started, and their own lineups, saved before its start, are what the carry
+// rule gave it at its start whatever order they arrive in (stage 6 review 5).
+const gateEarly0 = "Pool A-0"
+const gateEarly1 = "Pool A-1"
+const gateMatch = "Pool A-2"
+const gateLater = "Pool A-3"
+
+// gateEarlyName is the first fighter an earlier match's own lineup names.
+var gateEarlyName = map[string]string{gateEarly0: "Endo", gateEarly1: "Hara"}
+
+// gateEarlyRank is match order among the lineups before the gate's match: the
+// starting lineup, then each earlier match's own.
+var gateEarlyRank = map[string]int{"": 0, gateEarly0: 1, gateEarly1: 2}
 
 // gateLineup is the model of the lineup record match 1 holds for team A: an
 // operator's save, the lineup it started with, or the snapshot "Use the
@@ -81,8 +95,9 @@ const gateLater = "Pool A-1"
 type gateLineup struct {
 	name      string
 	pin       bool
-	startedAt int64 // a pin's start; a change stamped before it reaches it
-	stamp     int64 // the stamp of the change that put name there
+	startedAt int64  // a pin's start; a change stamped before it reaches it
+	stamp     int64  // the stamp of the change that put name there
+	from      string // a pin's source: "" (the starting lineup) or an earlier match
 }
 
 // gateWorld is one ordering's competition and what the steps have done so far.
@@ -106,7 +121,14 @@ type gateWorld struct {
 	own              *gateLineup
 	finished         *state.MatchResult
 	finishStamp      int64
-	failures         map[string]int
+	// earlier is the latest match, in match order, before the gate's match
+	// whose own lineup was saved ("" for none).
+	earlier string
+	// lateEarlySeen is the log's length just before the late tap stamped
+	// before the finish arrived ahead of the finish (-1 otherwise): the
+	// finish's basis then holds every line but that tap's.
+	lateEarlySeen int
+	failures      map[string]int
 	// kinds is the kinds of assertion this ordering failed, counted once
 	// per ordering under "orderings: <kind>".
 	kinds map[string]bool
@@ -136,6 +158,10 @@ func (w *gateWorld) stamp(op string) int64 {
 		return w.base + 500
 	case opPick2:
 		return w.base + 600
+	case opEarly0:
+		return w.base + 50
+	case opEarly1:
+		return w.base + 30
 	}
 	// Made after a server write (the removal's tombstone, the send back, the
 	// finish): now.
@@ -214,9 +240,41 @@ func (w *gateWorld) saveStarting(name string, stamp int64, op string) {
 	// The lineup door orders by arrival: the later arrival holds the position.
 	w.startingNow, w.startingNowStamp = name, stamp
 	// A save stamped before a pin's start lands on it whichever way it
-	// arrives, unless a later-stamped change is there.
-	if w.own != nil && w.own.pin && stamp > 0 && stamp < w.own.startedAt && stamp > w.own.stamp {
+	// arrives, unless a later-stamped change is there; never once the pin was
+	// taken from an earlier match's own lineup, which the carry rule reads
+	// whole.
+	if w.own != nil && w.own.pin && w.own.from == "" && stamp > 0 && stamp < w.own.startedAt && stamp > w.own.stamp {
 		w.own.name, w.own.stamp = name, stamp
+	}
+}
+
+// inForce is the lineup the carry rule gives the gate's match now, before any
+// lineup of its own: the latest earlier match's own lineup, else the starting
+// lineup.
+func (w *gateWorld) inForce() gateLineup {
+	if w.earlier != "" {
+		return gateLineup{name: gateEarlyName[w.earlier], from: w.earlier}
+	}
+	return gateLineup{name: w.startingNow, stamp: w.startingNowStamp}
+}
+
+// saveEarlier saves an earlier match's own lineup, stamped before the start.
+func (w *gateWorld) saveEarlier(match, op string) {
+	pos := domain.PositionNumbered(1)
+	name := gateEarlyName[match]
+	rec := w.do(http.MethodPut, "/api/competitions/"+w.comp+"/teams/"+w.teamA+"/match-lineups/"+url.PathEscape(match), map[string]any{
+		"positions": map[domain.Position]string{pos: name}, "memberIds": map[domain.Position]string{pos: w.members[name]},
+		"changed": []domain.Position{pos}, "changedAt": map[domain.Position]int64{pos: w.stamp(op)}, "writeId": w.comp + op,
+	})
+	require.Equal(w.t, http.StatusOK, rec.Code, rec.Body.String())
+	if gateEarlyRank[match] > gateEarlyRank[w.earlier] {
+		w.earlier = match
+	}
+	// Saved before the start, it reaches a pin whenever it arrives: the pin
+	// is the carry rule at its start, so a later lineup in match order than
+	// the one it holds replaces it whole.
+	if w.own != nil && w.own.pin && gateEarlyRank[match] > gateEarlyRank[w.own.from] {
+		w.own.name, w.own.from, w.own.stamp = name, match, w.stamp(op)
 	}
 }
 
@@ -244,8 +302,13 @@ func (w *gateWorld) step(op string) {
 	case opStart:
 		w.start(op, w.stamp(op))
 		if w.own == nil {
-			w.own = &gateLineup{name: w.startingNow, pin: true, startedAt: w.stamp(op), stamp: w.startingNowStamp}
+			in := w.inForce()
+			w.own = &gateLineup{name: in.name, pin: true, startedAt: w.stamp(op), stamp: in.stamp, from: in.from}
 		}
+	case opEarly0:
+		w.saveEarlier(gateEarly0, op)
+	case opEarly1:
+		w.saveEarlier(gateEarly1, op)
 	case opHeldStart:
 		before := w.stored(gateMatch)
 		w.start(op, w.stamp(op))
@@ -272,7 +335,8 @@ func (w *gateWorld) step(op string) {
 		w.own = nil
 		if w.started() {
 			// A snapshot of the lineup in force now, kept as the match's own.
-			w.own = &gateLineup{name: w.startingNow, pin: true, startedAt: math.MaxInt64, stamp: w.startingNowStamp}
+			in := w.inForce()
+			w.own = &gateLineup{name: in.name, pin: true, startedAt: math.MaxInt64, stamp: in.stamp, from: in.from}
 		}
 	case opTap1, opTap2:
 		side, letter, session := "a", "M", "dev1"
@@ -302,12 +366,18 @@ func (w *gateWorld) step(op string) {
 		w.finishStamp = w.stamp(op)
 		// A finish as a device sends one: naming the result alone, with a
 		// basis holding every line the board showed.
+		// The board the finishing court showed: every line, but a late tap
+		// that reached the server just before the finish (it never saw it).
+		seen := w.logLen()
+		if w.lateEarlySeen >= 0 {
+			seen = w.lateEarlySeen
+		}
 		rec := w.do(http.MethodPut, w.matchPath(gateMatch)+"/score", map[string]any{
 			"sideA": m.SideA, "sideB": m.SideB, "sideAId": m.SideAID, "sideBId": m.SideBID,
 			"status": "completed", "decision": "hikiwake",
 			"ipponsA": []string{}, "ipponsB": []string{}, "subResults": m.SubResults,
 			"changed": []string{state.GroupResult}, "modifiedAt": w.finishStamp, "writeId": w.comp + op,
-			"session": "dev9", "basis": map[string]any{"seen": w.logLen()},
+			"session": "dev9", "basis": map[string]any{"seen": seen},
 		})
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		f := w.stored(gateMatch)
@@ -318,6 +388,13 @@ func (w *gateWorld) step(op string) {
 		want := domain.ScoreOutcomeMatchClosed
 		if op == opLateEarly {
 			stamp, session, seq, want = w.stamp(op), "dev4", 1, domain.ScoreOutcomeBeforeBaseline
+			if !w.arrived[opFinish] {
+				// Ahead of the finish it lands, and is turned away when the
+				// finish arrives (check() reads its history line and the
+				// match's turnedAway after every step).
+				want = domain.ScoreOutcomeApplied
+				w.lateEarlySeen = w.logLen()
+			}
 		}
 		code, outcome := w.tap(session, domain.ScoreEvent{ID: w.comp + op, Seq: seq, Stamp: stamp, Kind: domain.ScoreIpponAdd, Pos: 1, Side: "b", Letter: "D"})
 		require.Equal(t, http.StatusOK, code)
@@ -424,8 +501,11 @@ func (w *gateWorld) check() {
 	in, err := w.eng.LineupInForce(w.comp, w.teamA, gateLater)
 	require.NoError(t, err)
 	wantLater, wantSource := w.startingNow, ""
-	if w.own != nil && !w.own.pin {
+	switch {
+	case w.own != nil && !w.own.pin:
 		wantLater, wantSource = w.own.name, gateMatch
+	case w.earlier != "":
+		wantLater, wantSource = gateEarlyName[w.earlier], w.earlier
 	}
 	if got := in.Lineup.Positions[domain.PositionNumbered(1)]; got != wantLater || in.Source.MatchID != wantSource {
 		w.fail("later match", "%s fields %q from %q, want %q from %q", gateLater, got, in.Source.MatchID, wantLater, wantSource)
@@ -436,6 +516,39 @@ func (w *gateWorld) check() {
 	require.NoError(t, err)
 	if len(changed) > 0 || w.logLen() != before {
 		w.fail("reseat", "a reseat after the step changed %v (log %d -> %d)", changed, before, w.logLen())
+	}
+	// 7. A late tap ends as the closed-match rule says, in the match's
+	// history (its latest line) and on the match, whose turnedAway tells the
+	// device that made it when its own answer said it landed (review 5).
+	if w.arrived[opLate] || w.arrived[opLateEarly] {
+		hist, err := w.store.LoadMatchHistory(w.comp, gateMatch)
+		require.NoError(t, err)
+		last := map[string]string{}
+		for _, e := range hist {
+			if e.Event != nil {
+				last[e.Event.ID] = e.EventOutcome
+			}
+		}
+		away := w.stored(gateMatch).TurnedAway
+		for _, op := range []string{opLate, opLateEarly} {
+			if !w.arrived[op] {
+				continue
+			}
+			want := domain.ScoreOutcomeMatchClosed
+			if op == opLateEarly {
+				want = domain.ScoreOutcomeBeforeBaseline
+				if !w.arrived[opFinish] {
+					want = domain.ScoreOutcomeApplied
+				}
+			}
+			id := w.comp + op
+			if last[id] != want {
+				w.fail("late tap history", "%s: its latest history line reads %q, want %s", op, last[id], want)
+			}
+			if got, listed := away[id]; (want == domain.ScoreOutcomeApplied) == listed || (listed && got != want) {
+				w.fail("late tap turned away", "%s: the match lists it turned away as %q (listed %v), want %s", op, got, listed, want)
+			}
+		}
 	}
 }
 
@@ -454,8 +567,8 @@ func newGateWorld(t *testing.T, r *gin.Engine, store *state.Store, eng *engine.E
 	}
 	w := &gateWorld{t: t, r: r, store: store, eng: eng, comp: comp, legacy: legacy, teamA: ids["Tora"], teamB: ids["Washi"],
 		members: map[string]string{}, arrived: map[string]bool{}, failures: failures, kinds: map[string]bool{},
-		base: time.Now().UnixMilli() - 600_000, startingNow: "Sato"}
-	for team, names := range map[string][]string{ids["Tora"]: {"Sato", "Kato", "Mori", "Ito", "Kubo", "Aoki", "Sakai"}, ids["Washi"]: {"Fujii"}, ids["Kuma"]: {"Goto"}} {
+		base: time.Now().UnixMilli() - 600_000, startingNow: "Sato", lateEarlySeen: -1}
+	for team, names := range map[string][]string{ids["Tora"]: {"Sato", "Kato", "Mori", "Ito", "Kubo", "Aoki", "Sakai", "Endo", "Hara"}, ids["Washi"]: {"Fujii"}, ids["Kuma"]: {"Goto"}} {
 		for _, n := range names {
 			mem, err := store.AddTeamMember(comp, team, n)
 			require.NoError(t, err)
@@ -476,6 +589,8 @@ func newGateWorld(t *testing.T, r *gin.Engine, store *state.Store, eng *engine.E
 		first.SubResults = []state.SubMatchResult{{Position: 1, SideA: "Aoki", SideAMemberID: w.members["Aoki"], SideB: "Fujii", SideBMemberID: w.members["Fujii"], IpponsA: []string{}, IpponsB: []string{}}}
 	}
 	require.NoError(t, store.SavePoolMatches(comp, []state.MatchResult{
+		{ID: gateEarly0, SideA: "Tora", SideB: "Kuma", SideAID: ids["Tora"], SideBID: ids["Kuma"], Status: state.MatchStatusScheduled},
+		{ID: gateEarly1, SideA: "Tora", SideB: "Kuma", SideAID: ids["Tora"], SideBID: ids["Kuma"], Status: state.MatchStatusScheduled},
 		first,
 		{ID: gateLater, SideA: "Tora", SideB: "Kuma", SideAID: ids["Tora"], SideBID: ids["Kuma"], Status: state.MatchStatusScheduled},
 	}))
@@ -549,8 +664,32 @@ func gateOrderings(legacy bool) [][]string {
 					continue
 				}
 				seen[key] = true
-				// The turning places, each on its own radix of n.
-				seq = place(seq, opLateEarly, []int{after(seq, opFinish), len(seq)}[n%2])
+				// The turning places, each on its own radix of n. First the
+				// own lineups of the two matches before the gate's, both
+				// stamped before its start, arriving before it or after it, in
+				// either order (stage 6 review 5).
+				late := after(seq, opStart)
+				if legacy {
+					late = after(seq, opTap1)
+				}
+				switch (n / 7) % 7 {
+				case 1:
+					seq = place(seq, opEarly0, 0)
+				case 2:
+					seq = place(seq, opEarly0, late)
+				case 3:
+					seq = place(seq, opEarly0, late)
+					seq = place(seq, opEarly1, after(seq, opEarly0))
+				case 4:
+					seq = place(seq, opEarly1, late)
+					seq = place(seq, opEarly0, after(seq, opEarly1))
+				case 5:
+					seq = place(seq, opEarly1, 0)
+					seq = place(seq, opEarly0, after(seq, opStart))
+				case 6:
+					seq = place(seq, opEarly1, late)
+					seq = place(seq, opEarly0, len(seq))
+				}
 				if c := (n / 2) % 4; c > 0 {
 					seq = place(seq, opUnstamped, []int{0, 0, after(seq, opTap1), len(seq)}[c])
 				}
@@ -564,7 +703,13 @@ func gateOrderings(legacy bool) [][]string {
 					seq = place(seq, opRefused, []int{0, slices.Index(seq, opStart), after(seq, opStart), after(seq, opFinish)}[(n/96)%4])
 				}
 				seq = place(seq, opSpoof, []int{0, len(seq) / 2, len(seq)}[(n/3)%3])
-				out = append(out, seq)
+				// The late tap stamped before the finish: after the finish or
+				// at the end, and for every third ordering also just ahead of
+				// the finish, which then never saw it (review 5).
+				out = append(out, place(seq, opLateEarly, []int{after(seq, opFinish), len(seq)}[n%2]))
+				if n%3 == 0 {
+					out = append(out, place(seq, opLateEarly, slices.Index(seq, opFinish)))
+				}
 				n++
 			}
 		}

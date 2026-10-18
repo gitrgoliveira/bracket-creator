@@ -1532,9 +1532,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         // started snapshot, which has left the scheduled list).
         const selHasActive = running.some(m => m.compId === effectiveCompId) || (!!liveBout && liveBout.compId === effectiveCompId) || filteredScheduled.length > 0;
 
-        // Other competitions' scheduled matches still on this court.
+        // Other competitions' scheduled matches still on this court. The bout
+        // this console just started (its started snapshot, still scheduled in
+        // the feed) is a live bout, never one waiting (stage 6 review 7).
         const otherScheduled = allMatches.filter(
-            m => m.compId !== effectiveCompId && m.status === "scheduled"
+            m => m.compId !== effectiveCompId && m.status === "scheduled" && !isStartedSnapshot(m)
         );
         if (otherScheduled.length === 0) return null;
 
@@ -1551,7 +1553,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const entries = Object.values(byComp);
         entries.sort((a, b) => b.count - a.count);
         return { entries, alsoWaiting: selHasActive };
-    }, [allMatches, effectiveCompId, running, liveBout, filteredScheduled, courtKnown]);
+        // isStartedSnapshot reads startedFrom alone.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [allMatches, effectiveCompId, running, liveBout, filteredScheduled, courtKnown, startedFrom]);
 
     // The one place the Starting… state follows the refs: the start in flight,
     // else the pick still deferring the running bout (so a start settling inside

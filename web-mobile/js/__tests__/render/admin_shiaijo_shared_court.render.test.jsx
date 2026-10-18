@@ -165,6 +165,22 @@ describe('the switch nudge on a shared court (bc-shcr)', () => {
     expect(c.utils.getByTestId('shiaijo-nudge').classList.contains('alert--warn')).toBe(false);
   });
 
+  // Stage 6 review 7 (minor 18): the bout this console just started is never
+  // counted as waiting, in the other competition's count either.
+  it("never counts the bout this console just started among another competition's waiting matches", async () => {
+    const pendingStart = vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k', settled: new Promise(() => {}) });
+    const c = await mountCourt([
+      row('m1', 'scheduled', '09:01', { modifiedAt: 100 }),
+      row('m2', 'scheduled', '09:02', league),
+    ], pendingStart);
+    await c.pick('c1');
+    const start = [...c.utils.container.querySelector('.shiaijo-upnext__card').querySelectorAll('button')].find((b) => /start match/i.test(b.textContent));
+    await act(async () => { start.click(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    await c.pick('c2');
+    expect(c.nudges(), 'Cup has nothing waiting: its one match is the live bout').toEqual([]);
+  });
+
   it('stays quiet while the picked competition still has a running match here', async () => {
     const c = await mountCourt([
       row('m1', 'running', '09:01'),

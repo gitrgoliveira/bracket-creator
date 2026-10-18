@@ -2,6 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import {
     createLandedTaps, landedTapsKey, LANDED_TAPS_LEGACY_KEY, LANDED_TABS_KEY, LANDED_TAB_LIVE_MS, LANDED_TAPS_PER_MATCH,
+    LANDED_TAPS_INDEX, LANDED_TAPS_MAX,
 } from '../landed_taps.jsx';
 
 function fakeStorage() {
@@ -18,8 +19,17 @@ function fakeStorage() {
             data[k] = String(v);
         },
         removeItem: (k) => { delete data[k]; },
+        keys: () => Object.keys(data),
     };
 }
+
+// The characters the landed-tap record holds in storage.
+const landedChars = (storage) => Object.entries(storage.data)
+    .filter(([k]) => k.startsWith('bc_landed_taps'))
+    .reduce((n, [k, v]) => n + k.length + v.length, 0);
+const landedEntries = (storage) => Object.entries(storage.data)
+    .filter(([k]) => k.startsWith('bc_landed_taps_v2:'))
+    .reduce((n, [, v]) => n + Object.keys(JSON.parse(v)).length, 0);
 
 const rec = (id) => ({ id, where: 'Pool A · Match 1', kind: 'ippon.add', side: 'a', pos: 1, letter: 'M' });
 
@@ -63,17 +73,75 @@ describe('landed taps', () => {
         expect(storage.data[landedTapsKey('c1', 'm1')]).not.toContain('"x"');
     });
 
-    it('a sign-out keeps only the taps still queued', () => {
+    it("a sign-out takes this tab's taps and a gone tab's, never another live tab's", () => {
+        const storage = fakeStorage();
+        let t = 1_000;
+        const now = () => t;
+        const a = createLandedTaps({ storage, now, tab: 'a' });
+        const b = createLandedTaps({ storage, now, tab: 'b' });
+        const gone = createLandedTaps({ storage, now, tab: 'g' });
+        a.note('c1', 'm1', [rec('x')]);
+        b.note('c1', 'm1', [rec('y')]);
+        b.note('c2', 'm9', [rec('z')]);
+        gone.note('c1', 'm2', [rec('w')]);
+        gone.leave();
+        a.forget();
+        expect(a.has('c1', 'm1', 'x'), "this tab's").toBe(false);
+        expect(a.has('c1', 'm2', 'w'), "a gone tab's, which this tab would tell").toBe(false);
+        expect(b.has('c1', 'm1', 'y'), "another live tab's stays for it").toBe(true);
+        expect(b.has('c2', 'm9', 'z')).toBe(true);
+        b.forget();
+        expect(Object.keys(storage.data).filter((k) => k.startsWith('bc_landed_taps'))).toEqual([]);
+    });
+
+    // m10: the index key can be lost (two tabs racing, a refused write), and a
+    // record it no longer lists must still go at a sign-out.
+    it('a sign-out reaches a match record the index lost', () => {
         const storage = fakeStorage();
         const a = createLandedTaps({ storage, tab: 'a' });
-        a.note('c1', 'm1', [rec('x'), rec('q')]);
-        a.note('c2', 'm9', [rec('y')]);
-        a.forgetExcept(new Set(['q']));
-        expect(a.has('c1', 'm1', 'q')).toBe(true);
-        expect(a.has('c1', 'm1', 'x')).toBe(false);
-        expect(a.has('c2', 'm9', 'y')).toBe(false);
-        a.forgetExcept(new Set());
+        a.note('c1', 'm1', [rec('x')]);
+        a.note('c1', 'm2', [rec('y')]);
+        delete storage.data[LANDED_TAPS_INDEX];
+        a.forget();
         expect(Object.keys(storage.data).filter((k) => k.startsWith('bc_landed_taps'))).toEqual([]);
+    });
+
+    // M3: the record grew without bound (a match's entries were pruned only
+    // when that match was noted again: about 392 K characters a day). Six days
+    // of 100 matches of 12 taps a day: it levels off at about a day's taps.
+    it('levels off: a day of taps at most, whatever the days before held', () => {
+        const storage = fakeStorage();
+        let t = 1_760_000_000_000;
+        const a = createLandedTaps({ storage, now: () => t, tab: 'a' });
+        const perDay = [];
+        for (let day = 0; day < 6; day++) {
+            for (let m = 0; m < 100; m++) {
+                for (let i = 0; i < 12; i++) {
+                    t += 1000;
+                    a.note('c1', `Pool ${day}-${m}`, [rec(`${'0'.repeat(36)}.${day}.${m}.${i}`)]);
+                }
+            }
+            t += 12 * 3600 * 1000;
+            a.beat();
+            perDay.push(landedChars(storage));
+        }
+        expect(landedEntries(storage)).toBeLessThanOrEqual(1200);
+        expect(perDay[5], `characters held after each day: ${perDay}`).toBeLessThanOrEqual(perDay[1]);
+        expect(perDay[5]).toBeLessThan(300_000);
+    });
+
+    it('keeps at most LANDED_TAPS_MAX in all, the latest', () => {
+        const storage = fakeStorage();
+        let t = 1_000_000;
+        const a = createLandedTaps({ storage, now: () => ++t, tab: 'a' });
+        for (let m = 0; m < 300; m++) {
+            a.note('c1', `m${m}`, Array.from({ length: 10 }, (_, i) => rec(`t${m}-${i}`)));
+        }
+        a.sweep();
+        expect(landedEntries(storage)).toBe(LANDED_TAPS_MAX);
+        expect(a.has('c1', 'm299', 't299-9'), 'the latest kept').toBe(true);
+        expect(a.has('c1', 'm0', 't0-0'), 'the oldest gone').toBe(false);
+        expect(storage.data[LANDED_TAPS_INDEX], 'the index lists only what is held').not.toContain('"bc_landed_taps_v2:c1\u001fm0"');
     });
 
     it("takes an older page's single record over, as this tab's, once", () => {
@@ -98,7 +166,7 @@ describe('landed taps', () => {
         storage.writes.length = 0;
         a.note('c1', 'm7', [rec('fresh')]);
         const written = storage.writes.reduce((n, [, len]) => n + len, 0);
-        expect(total).toBeGreaterThan(150_000);
+        expect(total).toBeGreaterThan(100_000);
         expect(written, `bytes written for one batch, of ${total} held`).toBeLessThan(total / 40);
     });
 

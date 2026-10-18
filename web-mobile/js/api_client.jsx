@@ -1439,30 +1439,42 @@ const _landedStorage = {
     getItem: (k) => globalThis.localStorage.getItem(k),
     setItem: (k, v) => globalThis.localStorage.setItem(k, v),
     removeItem: (k) => globalThis.localStorage.removeItem(k),
+    // Every key storage holds, so the record's index can be healed (m10).
+    keys: () => {
+        const ls = globalThis.localStorage;
+        if (typeof ls.length === 'number' && typeof ls.key === 'function') {
+            const out = [];
+            for (let i = 0; i < ls.length; i++) out.push(ls.key(i));
+            return out;
+        }
+        return Object.keys(ls);
+    },
 };
 const _landed = createLandedTaps({ storage: _landedStorage, tab: _randomId() });
+// _landedBeat keeps this tab alive in the record, and tells the taps it may
+// tell now from the newest copy of each match it has seen: a tab that died
+// without its pagehide holds its taps until its heartbeat is old, and the
+// copy that listed them may have come meanwhile, with no later one to come
+// (stage 6 review 8, m11).
+function _landedBeat() {
+    _landed.beat();
+    for (const seen of _turnedAwaySeen.values()) {
+        if (seen && seen.away && seen.compID && seen.matchID) _tellAway(seen.compID, seen.matchID, seen.away);
+    }
+}
 if (typeof setInterval === 'function') {
-    const beat = setInterval(() => _landed.beat(), LANDED_TAB_BEAT_MS);
+    const beat = setInterval(_landedBeat, LANDED_TAB_BEAT_MS);
     if (beat && typeof beat.unref === 'function') beat.unref();
 }
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
     window.addEventListener('pagehide', () => _landed.leave());
 }
-// The ids of the taps this device still holds queued (this tab's queue and
-// the one the tabs share), which a sign-out keeps the landed record of.
-function _queuedTapIds() {
-    const ids = new Set();
-    const add = (d) => { if (d && d.kind === 'evt' && d.payload && d.payload.id) ids.add(d.payload.id); };
-    for (const d of _writeQueue.values()) add(d);
-    for (const d of _storedQueue().values()) add(d);
-    return ids;
-}
-// _forgetLandedTapsNotQueued: on every sign-out the record goes with the
-// operator who made the taps, so the next operator is never told of them;
-// only the taps still queued after the sign-out, to be sent by this device,
-// keep their entries (stage 6 review 7). Asked AFTER the sign-out's wipe.
-function _forgetLandedTapsNotQueued() {
-    _landed.forgetExcept(_queuedTapIds());
+// _forgetLandedTaps: on a sign-out the record goes with the operator who made
+// the taps, so the next operator is never told of them: this tab's entries and
+// those of tabs no longer alive, never another live tab's (stage 6 review 8,
+// m10). A revoked password's park keeps it: the same operator signs in again.
+function _forgetLandedTaps() {
+    _landed.forget();
 }
 // _noteLandedTaps records the taps of one match the server answered as landed.
 function _noteLandedTaps(compID, matchID, descs) {
@@ -1485,23 +1497,25 @@ function _noteLandedTaps(compID, matchID, descs) {
 // lower scoreVersion than the one kept (an answer the server made before
 // the finish) does not replace it. Forgotten with the shown matches.
 const _turnedAwaySeen = new Map();
-function _rememberTurnedAway(base, match) {
+function _rememberTurnedAway(compID, matchID, match) {
     if (!match || typeof match !== 'object') return;
+    const base = _revKey(compID, matchID);
     const raw = match.turnedAway;
     const away = raw && typeof raw === 'object' && Object.keys(raw).length > 0 ? raw : null;
     const prev = _turnedAwaySeen.get(base);
     const v = match.scoreVersion;
+    const keep = (seen) => _turnedAwaySeen.set(base, { ...seen, compID, matchID });
     if (!Number.isFinite(v)) {
         // A copy that names no version cannot be ordered: it never replaces
         // a list kept, and its list is kept only while none is (stage 6
         // review 7: one listing nothing wiped the list).
-        if (away && !(prev && prev.away)) _turnedAwaySeen.set(base, { v: prev ? prev.v : NaN, away });
+        if (away && !(prev && prev.away)) keep({ v: prev ? prev.v : NaN, away });
         return;
     }
     if (prev && !Number.isFinite(prev.v) && prev.away && !away) {
         // A list from a copy that named no version cannot be ordered against
         // this one: it stays, under this version.
-        _turnedAwaySeen.set(base, { v, away: prev.away });
+        keep({ v, away: prev.away });
         return;
     }
     if (prev && Number.isFinite(prev.v)) {
@@ -1510,7 +1524,7 @@ function _rememberTurnedAway(base, match) {
         // result it was turned away for was displaced) is the newest word.
         if (v < prev.v || (v === prev.v && !away)) return;
     }
-    _turnedAwaySeen.set(base, { v, away });
+    keep({ v, away });
 }
 // _tellTurnedAway reads one copy of a match: each tap of this device the
 // server now lists as turned away is told once, to the match's open editor
@@ -1521,7 +1535,7 @@ function _rememberTurnedAway(base, match) {
 function _tellTurnedAway(compID, matchID, match) {
     if (!compID || !matchID) return;
     const base = _revKey(compID, matchID);
-    _rememberTurnedAway(base, match);
+    _rememberTurnedAway(compID, matchID, match);
     // Told from the newest copy seen, never from an older one.
     const seen = _turnedAwaySeen.get(base);
     if (seen && seen.away) _tellAway(compID, matchID, seen.away);
@@ -3130,7 +3144,7 @@ async function _sendTapBatch(base, batch, pass) {
         // Landed: told later if a result that never saw them turns them away.
         // The answer's own copy of the match is remembered first, so a tap it
         // no longer lists is never told from an older copy (stage 6 review 7).
-        _rememberTurnedAway(_revKey(compID, matchID), body.match);
+        _rememberTurnedAway(compID, matchID, body.match);
         _noteLandedTaps(compID, matchID, landed);
         _tellTurnedAway(compID, matchID, body.match);
         const heldSeqs = (body.match && body.match.eventSeqs) || {};
@@ -6192,10 +6206,9 @@ const API = {
         _offlineFlag = false;
         // Every stored entry too, whether or not this tab holds any.
         _parkStoredEntries();
-        // A sign-out too: the landed-tap record keeps only the taps still
-        // queued here, parked to be sent once the operator signs in again.
-        _forgetLandedTapsNotQueued();
-        _turnedAwaySeen.clear();
+        // The landed-tap record and the copies seen stay: the same operator
+        // signs in again, and is told of a tap turned away meanwhile (stage 6
+        // review 8, m10).
         if (parked > 0) {
             _persistQueue();
             _notifyQueueAlert({ kind: 'auth_required', count: parked, terminalCount: _countTerminalQueued() });
@@ -6244,9 +6257,9 @@ const API = {
         // The copies score-events answers handed back go with the session
         // they were answered to (X4).
         _latestDerived.clear();
-        // The landed-tap record goes with the operator: after the wipe no
-        // tap of this device is queued, so all of it (stage 6 review 7).
-        _forgetLandedTapsNotQueued();
+        // The landed-tap record goes with the operator: this tab's taps and
+        // those of tabs no longer alive (stage 6 reviews 7 and 8).
+        _forgetLandedTaps();
         if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
         _flushAttempt = 0;
         _offlineFlag = false;

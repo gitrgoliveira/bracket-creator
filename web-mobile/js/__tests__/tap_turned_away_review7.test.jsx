@@ -182,4 +182,31 @@ describe('the landed record and the other tabs', () => {
         if (typeof offA === 'function') offA();
         if (typeof offB === 'function') offB();
     });
+
+    // Stage 6 review 8, m11: a tab that dies without its pagehide (a crash)
+    // keeps its taps until its heartbeat is old. The copy that listed them came
+    // while it still looked alive, and no later copy comes: the tab left tells
+    // them at its next heartbeat.
+    it('a tab that died without pagehide: its tap is told at the next heartbeat, with no later copy', async () => {
+        global.fetch = vi.fn((url, opts) => (String(url).endsWith('/score-events')
+            ? eventsAnswer('applied', { id: 'm1', scoreVersion: 2 })(opts)
+            : Promise.reject(new TypeError('offline'))));
+        const realInterval = globalThis.setInterval;
+        globalThis.setInterval = () => ({ unref() {} }); // A never beats again
+        const a = await freshTab();
+        globalThis.setInterval = realInterval;
+        const offA = a.API.subscribeToEvents(() => {});
+        const t = a.API.recordTap('c1', 'm1', strike, 'pw', shown);
+        await tick(0);
+        const b = await freshTab();
+        const offB = b.API.subscribeToEvents(() => {});
+        const toldB = listen(b.mod);
+        pushOn(b.es(), { scoreVersion: 9, turnedAway: { [t.id]: 'beforeBaseline' } });
+        expect(toldB(), 'A still looks alive').toHaveLength(0);
+        const { LANDED_TAB_LIVE_MS, LANDED_TAB_BEAT_MS } = await import('../landed_taps.jsx');
+        await tick(LANDED_TAB_LIVE_MS + LANDED_TAB_BEAT_MS);
+        expect(toldB(), 'told by the tab left, from the copy it saw').toHaveLength(1);
+        if (typeof offA === 'function') offA();
+        if (typeof offB === 'function') offB();
+    });
 });

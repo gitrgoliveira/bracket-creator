@@ -19,7 +19,12 @@
 // - Storage that refuses a write keeps the record in memory for that key;
 //   memory is read only while storage still lacks this tab's write, so a
 //   record another tab's sign-out removed is never put back.
-// - Kept a day, at most LANDED_TAPS_PER_MATCH of a match.
+// - Kept a day, at most LANDED_TAPS_PER_MATCH of a match and LANDED_TAPS_MAX
+//   in all (the sweep, which reaches every match record, not only one noted
+//   again), so the record has a fixed ceiling beside the outbox in the same
+//   storage (stage 6 review 8, M3).
+// - A sign-out takes this tab's entries and those of tabs no longer alive;
+//   another live tab's stay for it (m10).
 
 export const LANDED_TAPS_PREFIX = 'bc_landed_taps_v2:';
 export const LANDED_TAPS_INDEX = 'bc_landed_taps_v2';
@@ -27,6 +32,9 @@ export const LANDED_TAPS_LEGACY_KEY = 'bc_landed_taps_v1';
 export const LANDED_TABS_KEY = 'bc_landed_tabs_v1';
 export const LANDED_TAPS_KEEP_MS = 24 * 60 * 60 * 1000;
 export const LANDED_TAPS_PER_MATCH = 500;
+// About 150 characters an entry: some 300 K characters at most in all.
+export const LANDED_TAPS_MAX = 2000;
+export const LANDED_TAPS_SWEEP_MS = 5 * 60 * 1000;
 export const LANDED_TAB_BEAT_MS = 20_000;
 export const LANDED_TAB_LIVE_MS = 3 * LANDED_TAB_BEAT_MS;
 
@@ -94,17 +102,22 @@ export function createLandedTaps({ storage, now = () => Date.now(), tab }) {
         try {
             if (keys.size === 0) storage.removeItem(LANDED_TAPS_INDEX);
             else storage.setItem(LANDED_TAPS_INDEX, JSON.stringify([...keys]));
-        } catch (_e) { /* the match keys are still found through memory */ }
+        } catch (_e) { /* the match keys are still found through memory and the scan */ }
+    };
+    // Every match record: the index, healed by the keys storage holds under
+    // the prefix (an index write lost to two tabs racing, or refused for its
+    // size, would otherwise leave a record no sweep or sign-out reaches).
+    const allKeys = () => {
+        const keys = readIndex();
+        if (typeof storage.keys === 'function') {
+            try {
+                for (const k of storage.keys()) if (typeof k === 'string' && k.startsWith(LANDED_TAPS_PREFIX)) keys.add(k);
+            } catch (_e) { /* the index alone */ }
+        }
+        return keys;
     };
 
     // The tabs alive, by their heartbeat in storage.
-    const beat = () => {
-        const tabs = readObj(LANDED_TABS_KEY);
-        const t = now();
-        for (const id of Object.keys(tabs)) if (t - Number(tabs[id]) >= LANDED_TAB_LIVE_MS) delete tabs[id];
-        tabs[tab] = t;
-        writeObj(LANDED_TABS_KEY, tabs);
-    };
     const liveTabs = () => {
         const tabs = readObj(LANDED_TABS_KEY);
         const t = now();
@@ -117,6 +130,63 @@ export function createLandedTaps({ storage, now = () => Date.now(), tab }) {
         if (live.has(rec.tab)) return false;
         // Its tab is gone: the live tab with the lowest id tells it.
         return [...live].sort()[0] === tab;
+    };
+
+    // Rewrites every match record through keep(rec) and heals the index:
+    // a record left empty is removed, and the index lists what remains.
+    const rewriteAll = (keep) => {
+        const index = allKeys();
+        const objs = new Map();
+        for (const key of index) objs.set(key, readObj(key));
+        const changed = keep(objs);
+        for (const key of changed) writeObj(key, objs.get(key));
+        const live = new Set();
+        for (const [key, obj] of objs) if (Object.keys(obj).length) live.add(key);
+        writeIndex(live);
+    };
+    // The sweep: entries older than LANDED_TAPS_KEEP_MS go from every match
+    // record, not only from a match noted again, and the device keeps at most
+    // LANDED_TAPS_MAX entries in all, the latest, so the record never grows
+    // past a fixed size whatever the day holds (stage 6 review 8, M3: it
+    // shares the origin's storage with the outbox, which it must never crowd
+    // out). Run as a match record is made and at most every
+    // LANDED_TAPS_SWEEP_MS from the heartbeat.
+    let lastSweep = -Infinity;
+    const sweep = () => {
+        const t = now();
+        lastSweep = t;
+        rewriteAll((objs) => {
+            const changed = new Set();
+            const kept = [];
+            for (const [key, obj] of objs) {
+                for (const id of Object.keys(obj)) {
+                    const at = Number(obj[id] && obj[id].at) || 0;
+                    if (t - at >= LANDED_TAPS_KEEP_MS) {
+                        delete obj[id];
+                        changed.add(key);
+                    } else {
+                        kept.push([at, key, id]);
+                    }
+                }
+            }
+            if (kept.length > LANDED_TAPS_MAX) {
+                kept.sort((a, b) => a[0] - b[0]);
+                for (const [, key, id] of kept.slice(0, kept.length - LANDED_TAPS_MAX)) {
+                    delete objs.get(key)[id];
+                    changed.add(key);
+                }
+            }
+            return changed;
+        });
+    };
+
+    const beat = () => {
+        const tabs = readObj(LANDED_TABS_KEY);
+        const t = now();
+        for (const id of Object.keys(tabs)) if (t - Number(tabs[id]) >= LANDED_TAB_LIVE_MS) delete tabs[id];
+        tabs[tab] = t;
+        writeObj(LANDED_TABS_KEY, tabs);
+        if (t - lastSweep >= LANDED_TAPS_SWEEP_MS) sweep();
     };
 
     // An older page's single record: split per match, its entries this
@@ -132,7 +202,8 @@ export function createLandedTaps({ storage, now = () => Date.now(), tab }) {
             if (!r || !r.compID || !r.matchID) continue;
             const key = landedTapsKey(r.compID, r.matchID);
             if (!byKey.has(key)) byKey.set(key, readObj(key));
-            byKey.get(key)[id] = { ...r, tab };
+            const { compID: _c, matchID: _m, id: _i, ...entry } = r;
+            byKey.get(key)[id] = { ...entry, tab };
         }
         const index = readIndex();
         for (const [key, obj] of byKey) {
@@ -143,12 +214,13 @@ export function createLandedTaps({ storage, now = () => Date.now(), tab }) {
         try { storage.removeItem(LANDED_TAPS_LEGACY_KEY); } catch (_e) { /* read again next page */ }
     };
 
-    beat();
     migrate();
+    beat();
 
     return {
         tab,
         beat,
+        sweep,
         /** Records taps of one match as landed. recs: [{ id, where, kind, side, pos, letter }]. */
         note(compID, matchID, recs) {
             if (!recs.length) return;
@@ -156,7 +228,11 @@ export function createLandedTaps({ storage, now = () => Date.now(), tab }) {
             const obj = readObj(key);
             const t = now();
             const fresh = !Object.keys(obj).length;
-            for (const r of recs) if (r && r.id) obj[r.id] = { ...r, compID, matchID, at: t, tab };
+            for (const r of recs) {
+                if (!r || !r.id) continue;
+                const { id, ...entry } = r;
+                obj[id] = { ...entry, at: t, tab };
+            }
             let ids = Object.keys(obj).filter((id) => t - (Number(obj[id] && obj[id].at) || 0) < LANDED_TAPS_KEEP_MS);
             if (ids.length > LANDED_TAPS_PER_MATCH) {
                 ids = ids.sort((a, b) => (obj[b].at || 0) - (obj[a].at || 0)).slice(0, LANDED_TAPS_PER_MATCH);
@@ -165,11 +241,14 @@ export function createLandedTaps({ storage, now = () => Date.now(), tab }) {
             for (const id of ids) kept[id] = obj[id];
             writeObj(key, kept);
             if (fresh) {
+                // A new match record: listed, and the device's whole record
+                // swept, so the records of matches never noted again go too.
                 const index = readIndex();
                 if (!index.has(key)) {
                     index.add(key);
                     writeIndex(index);
                 }
+                sweep();
             }
         },
         /**
@@ -192,24 +271,34 @@ export function createLandedTaps({ storage, now = () => Date.now(), tab }) {
             if (told.length) writeObj(key, obj);
             return told;
         },
-        /** Whether a tap is recorded as landed (for tests and the sign-out). */
+        /** Whether a tap is recorded as landed (for tests). */
         has(compID, matchID, id) {
             return !!readObj(landedTapsKey(compID, matchID))[id];
         },
         /**
-         * Sign-out: the record goes with the operator who made the taps, but
-         * for the taps in keep (still queued, to be sent by this device).
+         * Sign-out: the record goes with the operator who made the taps, so
+         * the next one signed in here is never told of them: this tab's
+         * entries, and those of tabs no longer alive (a page reloaded or
+         * closed, whose taps this tab would tell). Another live tab's entries
+         * stay: its operator is still signed in there (stage 6 review 8, m10).
+         * A tap is noted only once it has left the queue, so no queued tap is
+         * in the record to keep.
          */
-        forgetExcept(keep) {
-            const index = readIndex();
-            for (const key of index) {
-                const obj = readObj(key);
-                const kept = {};
-                for (const id of Object.keys(obj)) if (keep && keep.has(id)) kept[id] = obj[id];
-                writeObj(key, kept);
-                if (!Object.keys(kept).length) index.delete(key);
-            }
-            writeIndex(index);
+        forget() {
+            const live = liveTabs();
+            rewriteAll((objs) => {
+                const changed = new Set();
+                for (const [key, obj] of objs) {
+                    for (const id of Object.keys(obj)) {
+                        const owner = obj[id] && obj[id].tab;
+                        if (!owner || owner === tab || !live.has(owner)) {
+                            delete obj[id];
+                            changed.add(key);
+                        }
+                    }
+                }
+                return changed;
+            });
             try { storage.removeItem(LANDED_TAPS_LEGACY_KEY); } catch (_e) { /* nothing more to do */ }
         },
         /** The page goes: its heartbeat with it, so its taps are told by another tab. */

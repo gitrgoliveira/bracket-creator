@@ -134,7 +134,10 @@ describe('a tap turned away after its answer said it landed', () => {
         if (typeof off === 'function') off();
     });
 
-    it('is forgotten when a revoked password parks the queue, the queued tap kept to be sent', async () => {
+    // Stage 6 review 8, m10: a revoked password's park is no sign-out. The
+    // same operator signs in again, so what this device knows of its landed
+    // taps stays, and a tap turned away meanwhile is told.
+    it('is kept when a revoked password parks the queue, the queued tap kept to be sent', async () => {
         server();
         const off = API.subscribeToEvents(() => {});
         const t = API.recordTap('c1', 'm1', strike, 'pw', shown);
@@ -143,11 +146,11 @@ describe('a tap turned away after its answer said it landed', () => {
         const queued = API.recordTap('c1', 'm1', { ...strike, letter: 'K' }, 'pw', shown);
         await tick(0);
         API.parkQueueForReauth();
-        expect(landedText(), 'forgotten').toBeUndefined();
+        expect(landedText(), 'kept').toContain(t.id);
         expect(API.unsentWrites().total, 'the queued tap stays, to be sent').toBe(1);
         const heard = listen();
         push({ [t.id]: 'beforeBaseline', [queued.id]: 'beforeBaseline' });
-        expect(heard.notApplied(), 'nothing of the previous sign-in is told').toHaveLength(0);
+        expect(heard.notApplied(), 'the landed tap is told; the queued one, never landed, is not').toHaveLength(1);
         if (typeof off === 'function') off();
     });
 

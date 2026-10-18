@@ -64,7 +64,8 @@ describe('StableInput on blur', () => {
   });
 
   it('keeps a change still waiting on blur and sends it, over an outside value', () => {
-    const onChange = vi.fn();
+    // Its save is out (never answered here), so the box shows the change.
+    const onChange = vi.fn(() => new Promise(() => {}));
     const ui = (v) => <StableInput aria-label="Seed" type="number" value={v} onChange={onChange} />;
     const { getByLabelText, rerender } = render(ui(2));
     const box = getByLabelText('Seed');

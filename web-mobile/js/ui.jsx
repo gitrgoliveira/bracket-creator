@@ -152,27 +152,42 @@ function Toast({ message, type, onClose }) {
 // the decideNumericUpdate pattern used by the AdminSettings team/pool
 // inputs at admin_competition.jsx.
 function StableInput({ value, onChange, type, autoSelect = true, ...props }) {
+  // ONE rule for what the box shows (stage 6 review 9, F1/F2): what the
+  // operator typed while that change is theirs (the box has the focus, its
+  // debounce is waiting, or its save is out: `onChange` returned a promise
+  // that has not settled), else the value it is given. So a change whose save
+  // is out stays on screen after a blur, a save that settles shows what is
+  // stored (the new value when taken, the stored one when refused, the
+  // refusal told by the save's own path), and a change made elsewhere shows
+  // at once, or on blur when the box has the focus. A parent whose onChange
+  // returns nothing (a local setter) stores at once.
   const [local, setLocal] = React.useState(value);
+  const [focused, setFocused] = React.useState(false);
+  const [saving, setSaving] = React.useState(0);
   const timer = React.useRef(null);
   // A change typed and not yet sent (its debounce still waiting).
   const pending = React.useRef(false);
-  const composing = React.useRef(false);
-
-  // Sync local state when prop changes from outside (e.g. SSE)
-  // Only sync if the user is NOT currently focused/composing.
-  // Deps are intentionally [value]: adding `local` would re-sync on every
-  // keystroke and defeat the "only sync from outside" behavior above.
-  React.useEffect(() => {
-    if (!composing.current && value !== local) setLocal(value);
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
+  const mounted = React.useRef(true);
 
   // Cancel the 200ms debounce on unmount so the timer can't fire
-  // onChange(val) (which is the parent's setState) after teardown.
-  // Pre-existing in this component before the PR but fits the same
-  // teardown-race theme as the admin-side mountedRef sweep: fixing
-  // here while the file is open for the NaN-display changes.
-  React.useEffect(() => () => clearTimeout(timer.current), []);
+  // onChange(val) (which is the parent's setState) after teardown, and
+  // stop a save settling after teardown from setting state.
+  React.useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; clearTimeout(timer.current); };
+  }, []);
+
+  const holds = focused || pending.current || saving > 0;
+
+  const commit = (val) => {
+    pending.current = false;
+    const r = onChange(val);
+    if (r && typeof r.then === 'function') {
+      setSaving((n) => n + 1);
+      const settle = () => { if (mounted.current) setSaving((n) => n - 1); };
+      r.then(settle, settle);
+    }
+  };
 
   const handleChange = (e) => {
     const raw = e.target.value;
@@ -181,50 +196,47 @@ function StableInput({ value, onChange, type, autoSelect = true, ...props }) {
     // (so "2.5" stays 2.5, "abc" becomes NaN: same as before for those).
     const val = type === 'number' ? (raw === "" ? NaN : +raw) : raw;
     setLocal(val);
+    setFocused(true);
 
     // Immediate local update, debounced parent update to avoid race conditions
     // during typing if the parent re-renders the whole tree.
     clearTimeout(timer.current);
     pending.current = true;
-    timer.current = setTimeout(() => { pending.current = false; onChange(val); }, 200);
+    timer.current = setTimeout(() => commit(val), 200);
   };
 
   // A blur sends only a change still waiting for its debounce: one that has
   // already gone is not sent again (stage 6 review 7: a seed box re-sent its
   // saved rank as Generate draw took the focus, and the copy raced the draw
-  // and was refused). With nothing waiting, the box takes the value it was
-  // given: one the parent changed while the box had the focus (a refused save
-  // putting the old value back, another device's edit) was skipped then
-  // (stage 6 review 8, M2).
+  // and was refused).
   const handleBlur = (e) => {
-    composing.current = false;
     clearTimeout(timer.current);
-    if (pending.current) {
-      pending.current = false;
-      onChange(local);
-    } else if (!Object.is(local, value)) {
-      setLocal(value);
-    }
+    if (pending.current) commit(local);
+    setFocused(false);
     if (props.onBlur) props.onBlur(e);
   };
 
   const handleFocus = (e) => {
-    composing.current = true;
+    // The box starts from what it shows: the stored value, unless a change
+    // of the operator's is still waiting or out.
+    if (!holds) setLocal(value);
+    setFocused(true);
     if (autoSelect) e.target.select();
     if (props.onFocus) props.onFocus(e);
   };
 
-  // Render NaN / non-finite numeric local state as "" so React doesn't
+  const shown = holds ? local : value;
+  // Render NaN / non-finite numeric state as "" so React doesn't
   // warn ("Received NaN for the value attribute") and the input stays
   // visually empty after the user clears it. Non-number types pass
   // through unchanged.
-  const displayValue = type === 'number' && !Number.isFinite(local) ? "" : local;
+  const displayValue = type === 'number' && !Number.isFinite(shown) ? "" : shown;
 
   return (
     <input
       {...props}
       type={type}
-      value={displayValue}
+      value={displayValue ?? ""}
       onChange={handleChange}
       onBlur={handleBlur}
       onFocus={handleFocus}

@@ -513,16 +513,53 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // shuffleUnseeded). No success toast needed: rank changes are
   // implicit-feedback (the input commits visually), so we just need
   // to NOT swallow errors silently.
-  const updateSeed = async (idx, val) => {
-    const np = [...(c.players || [])];
-    const seed = parseInt(val);
-    np[idx] = { ...np[idx], seed: isNaN(seed) || seed <= 0 ? null : seed };
-    try {
-      await onUpdate({ ...c, players: np });
-    } catch (err) {
-      console.error("AdminParticipants: updateSeed PUT failed", err);
-      // updateCompetition already toasted the error.
+  //
+  // Seed saves go one at a time, each built as it goes from the LATEST roster
+  // with every seed typed since laid on (stage 6 review 9, F9: the PUT was
+  // built from the roster as rendered, so a second seed typed before the
+  // first was answered sent the first seat's old seed and the two overwrote
+  // each other). A typed seed is laid on until the roster holds it (taken) or
+  // its save is refused; the box shows it meanwhile through the promise
+  // StableInput is handed.
+  const rosterRef = useRefA(c);
+  rosterRef.current = c;
+  const typedSeedsRef = useRefA(new Map());
+  const seedChainRef = useRefA(Promise.resolve());
+  const seedKey = (p, i) => p.id || `#${i}`;
+  React.useEffect(() => {
+    for (const [key, t] of typedSeedsRef.current) {
+      if (t.landed) typedSeedsRef.current.delete(key);
     }
+  }, [c]);
+  const updateSeed = (idx, val) => {
+    const p = (c.players || [])[idx];
+    if (!p) return undefined;
+    const key = seedKey(p, idx);
+    const parsed = parseInt(val);
+    const typed = { seed: isNaN(parsed) || parsed <= 0 ? null : parsed, landed: false };
+    typedSeedsRef.current.set(key, typed);
+    const send = async () => {
+      const cur = rosterRef.current;
+      const players = (cur.players || []).map((q, i) => {
+        const t = typedSeedsRef.current.get(seedKey(q, i));
+        return t ? { ...q, seed: t.seed } : q;
+      });
+      try {
+        await onUpdate({ ...cur, players });
+        typed.landed = true;
+        const held = (rosterRef.current.players || []).find((q, i) => seedKey(q, i) === key);
+        if (held && (held.seed ?? null) === typed.seed && typedSeedsRef.current.get(key) === typed) {
+          typedSeedsRef.current.delete(key);
+        }
+      } catch (err) {
+        if (typedSeedsRef.current.get(key) === typed) typedSeedsRef.current.delete(key);
+        console.error("AdminParticipants: updateSeed PUT failed", err);
+        // updateCompetition already toasted the error.
+      }
+    };
+    const run = seedChainRef.current.then(send);
+    seedChainRef.current = run;
+    return run;
   };
 
   const dragIdxRef = useRefA(null);

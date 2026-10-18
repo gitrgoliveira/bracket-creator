@@ -168,6 +168,8 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
     const ends = [];
     let firstClick = null;
     const firstClicked = new Promise((r) => { firstClick = r; });
+    let firstEnd = null;
+    const firstEnded = new Promise((r) => { firstEnd = r; });
     for (const [type, seen] of [['click', window.__clumsyClicks], ['touchstart', window.__clumsyTouches], ['touchend', ends]]) {
       const rec = (e) => {
         if (type === 'click') {
@@ -182,6 +184,7 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
         // Read as the second tap ends, and again in the next task, where its
         // click would come: the first tap's render (which disables the
         // control) can land between the two.
+        if (type === 'touchend' && seen.length === 1) firstEnd();
         if (type === 'touchend' && seen.length === 2) {
           window.__clumsySecondDisabled = disabledAt();
           setTimeout(() => { if (!window.__clumsySecondDisabled) window.__clumsySecondDisabled = disabledAt(); }, 0);
@@ -191,8 +194,17 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
       listeners.push([type, rec]);
     }
     // Resolves once the first tap's click has run and the render it caused
-    // has painted.
-    window.__clumsyAfterFirst = () => firstClicked.then(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))));
+    // has painted. A first tap that makes no click rejects in the frame after
+    // its touchend (the click comes in the task right after it), so the
+    // helper fails at once with its sentence rather than waiting for the
+    // test's timeout (stage 6 review 9, F8).
+    const painted = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+    window.__clumsyAfterFirst = () => Promise.race([
+      firstClicked.then(() => true),
+      firstEnded.then(() => new Promise((r) => setTimeout(r, 0))).then(painted).then(() => false),
+    ]).then((clicked) => (clicked || window.__clumsyClicks.length > 0
+      ? painted()
+      : Promise.reject(new Error('no click'))));
     window.__clumsyRemove = () => {
       for (const [type, rec] of listeners) document.removeEventListener(type, rec, true);
       window.__clumsyRemove = null;
@@ -215,7 +227,10 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
       ];
       if (afterRender) {
         await Promise.all(tap());
-        await cdp.send('Runtime.evaluate', { expression: 'window.__clumsyAfterFirst && window.__clumsyAfterFirst()', awaitPromise: true });
+        const first = await cdp.send('Runtime.evaluate', { expression: 'window.__clumsyAfterFirst && window.__clumsyAfterFirst()', awaitPromise: true });
+        if (first && first.exceptionDetails) {
+          throw new Error('clumsy.doubleTap: the first tap produced no click in the page, so the row did not test the bounce guard');
+        }
         await Promise.all(tap());
       } else {
         await Promise.all([...tap(), ...tap()]);

@@ -147,6 +147,31 @@ function finishedHereHolds(f, m) {
     return f.stamp > 0 ? !(m.modifiedAt > f.stamp) : m.modifiedAt === f.at;
 }
 
+// finishWinnerOf: the winner a finish names, or, for an engi finish, which
+// names none (the server decides it from the flags, engine.engiWinnerSide),
+// the side with more flags in it. The console reads a match finished here as
+// finished with this winner (finishedHere) and advances its local bracket on
+// it, so the court row never shows a finished match without its winner
+// (stage 6).
+export function finishWinnerOf(match, patch) {
+    if (!match || !patch) return null;
+    if (patch.winner) return patch.winner;
+    const a = Number(patch.flagsA);
+    const b = Number(patch.flagsB);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || a === b) return null;
+    return a > b ? match.sideA : match.sideB;
+}
+
+// finishFieldsOf: what a finish states beside its verdict that the court row
+// shows (an engi finish's counts), laid on the match while it reads as
+// finished here, so the row's flags and its winner come from the same finish.
+function finishFieldsOf(patch) {
+    if (!patch) return null;
+    const a = Number(patch.flagsA);
+    const b = Number(patch.flagsB);
+    return Number.isFinite(a) && Number.isFinite(b) ? { flagsA: a, flagsB: b } : null;
+}
+
 const _WINNER_OF_RE = /^Winner of r(\d+)-m(\d+)$/;
 
 // pendingFeederSlots maps a pending placeholder final to the feeder matches whose
@@ -673,7 +698,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // resolve to a winner before completing.
     const maybeAdvanceLocal = useCallbackSh((match, patch) => {
         if (!match || match.phase !== "bracket" || !patch || patch.status !== "completed") return;
-        const w = patch.winner;
+        const w = finishWinnerOf(match, patch);
         const wname = _bracketSideName(w);
         if (wname) applyLocalBracketWin(match.compId, match.id, wname);
     }, [applyLocalBracketWin]);
@@ -682,10 +707,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // here until the feed shows it (finishedHere, X3). The server's answer, a
     // callback and never a wait, ends it on a refusal or a discard and marks it
     // landed otherwise.
-    const markFinishedHere = (match, winner, res) => {
+    const markFinishedHere = (match, winner, res, fields = null) => {
         if (!match || match.status === "completed" || !writePending(res)) return;
         const key = matchKey(match);
-        setFinishedHere((prev) => ({ ...prev, [key]: { at: match.modifiedAt, winner: winner || null, landed: false } }));
+        setFinishedHere((prev) => ({ ...prev, [key]: { at: match.modifiedAt, winner: winner || null, fields, landed: false } }));
         // `stamp`: the server's stamp on the finish, from its answer. A copy of
         // the match stamped at or before it is still the one before the finish
         // (this device's own taps land between the tap and the answer), so only
@@ -997,7 +1022,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         () => courtMatchesRaw.filter(hasBothSides).map((m) => {
             const f = finishedHere[matchKey(m)];
             if (!finishedHereHolds(f, m)) return m;
-            return { ...m, status: "completed", ...(f.winner ? { winner: f.winner } : {}) };
+            return { ...m, ...(f.fields || {}), status: "completed", ...(f.winner ? { winner: f.winner } : {}) };
         }),
         [courtMatchesRaw, finishedHere]
     );
@@ -2445,7 +2470,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             // reconciles on reconnect); see writeWasSuperseded.
                                             if (!writeWasSuperseded(res)) maybeAdvanceLocal(selectedMatch, patch);
                                             // A finish the outbox holds: the panel moves on at once (X3).
-                                            if (patch && patch.status === "completed") markFinishedHere(selectedMatch, patch.winner, res);
+                                            if (patch && patch.status === "completed") markFinishedHere(selectedMatch, finishWinnerOf(selectedMatch, patch), res, finishFieldsOf(patch));
                                             // What the write came back with, so the editor shows the
                                             // not-saved banner for one that did not land (queued, F5; or
                                             // superseded by a newer stored result, bc-lww1) and tells a
@@ -2464,7 +2489,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             // advance the local bracket on a winner the server discarded.
                                             if (!writeWasSuperseded(res)) maybeAdvanceLocal(selectedMatch, patch);
                                             if (!mountedRef.current) return res;
-                                            if (patch && patch.status === "completed") markFinishedHere(selectedMatch, patch.winner, res);
+                                            if (patch && patch.status === "completed") markFinishedHere(selectedMatch, finishWinnerOf(selectedMatch, patch), res, finishFieldsOf(patch));
                                             // A write that did not land must NOT advance: the match is
                                             // still running and still holds the court, so starting the
                                             // next one here just earns a court_busy on top of the

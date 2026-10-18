@@ -77,11 +77,12 @@ test.describe('engi', () => {
     const row = completedRows(page).first();
     await expect(row).toContainText(pair.aka);
     // Aka's side carries the winner mark (the row's text names the side it is
-    // on). The Save goes through the outbox and never waits, so the row can
-    // show the match finished before the server's answer names the winner.
+    // on). The Save goes through the outbox and never waits, and the row shows
+    // the match finished with the winner its flags decide from the moment it
+    // is on the Completed list, so it is read once, straight away, never polled.
     const readRow = async () => (await row.innerText()).replace(/\s+/g, ' ');
-    await expect.poll(readRow, { message: 'Aka, who held the two flags, is marked the winner' }).toContain(`Aka: ✓ Winner: ${pair.aka}`);
     const rowText = await readRow();
+    expect(rowText, 'Aka, who held the two flags, is marked the winner').toContain(`Aka: ✓ Winner: ${pair.aka}`);
     expect(rowText.match(/✓/g), 'and only Aka').toHaveLength(1);
     const result = (await row.locator('.shiaijo-qrow__result').innerText()).trim();
     record({ journey: 'engi', action: 'console result row', result });

@@ -69,7 +69,28 @@ type TeamLineup struct {
 	// id-aware reader (kachinuki retirement) falls back to the Positions
 	// name for exactly that slot and no other.
 	MemberIDs map[Position]string `json:"memberIds,omitempty" yaml:"memberIds,omitempty"`
+	// Stamps holds when each position was last changed, as the device that
+	// changed it stamped the change (server-relative ms, the save's
+	// `changedAt`). A position changed by a save that sent no stamp (an older
+	// build's) has none. Only the lineup a kachinuki match started with is
+	// ordered by it (engine/kachinuki_opener.go): a change made before the
+	// start reaches it whenever it arrives.
+	Stamps map[Position]int64 `json:"-" yaml:"stamps,omitempty"`
+	// StartedAt is set on the lineup the server kept as the one a kachinuki
+	// match started with (its pin, engine/kachinuki_opener.go): the stamp of
+	// the write that moved the match out of scheduled. Zero on a lineup an
+	// operator saved. A pin is the match's own lineup for that match alone:
+	// a later match never carries it (engine.LineupInForce).
+	StartedAt int64 `json:"-" yaml:"startedAt,omitempty"`
+	// StartedFrom names the lineup a pin was taken from: the earlier match
+	// whose own lineup the match carried, or "" for the team's starting
+	// lineup. A change to that lineup stamped before StartedAt reaches the pin.
+	StartedFrom string `json:"-" yaml:"startedFrom,omitempty"`
 }
+
+// IsStartPin reports whether t is the lineup a kachinuki match started with,
+// kept by the server (StartedAt), rather than one an operator saved.
+func (t TeamLineup) IsStartPin() bool { return t.StartedAt > 0 }
 
 var ErrLineupTeamSizeInvalid = errors.New("team_lineup: teamSize must be positive")
 
@@ -174,7 +195,11 @@ func (t TeamLineup) ApplyChanges(changed []Position, positions, memberIDs map[Po
 		out.Positions = map[Position]string{}
 	}
 	out.MemberIDs = maps.Clone(t.MemberIDs)
+	// A changed position's stamp is the caller's to set (StampChanges): the
+	// one it had is no longer when it was last changed.
+	out.Stamps = maps.Clone(t.Stamps)
 	for _, p := range changed {
+		delete(out.Stamps, p)
 		name, ok := positions[p]
 		if !ok {
 			return TeamLineup{}, fmt.Errorf("%w: %q", ErrLineupChangedPositionMissing, p)
@@ -198,7 +223,27 @@ func (t TeamLineup) ApplyChanges(changed []Position, positions, memberIDs map[Po
 	if len(out.MemberIDs) == 0 {
 		out.MemberIDs = nil
 	}
+	if len(out.Stamps) == 0 {
+		out.Stamps = nil
+	}
 	return out, nil
+}
+
+// StampChanges records when each changed position was changed, from stamps
+// (position -> server-relative ms); a position with no stamp above zero keeps
+// none. Every stamp is capped at now: a device clock ahead of the server's
+// cannot place a change later than it reached the server.
+func (t *TeamLineup) StampChanges(changed []Position, stamps map[Position]int64, now int64) {
+	for _, p := range changed {
+		s := stamps[p]
+		if s <= 0 {
+			continue
+		}
+		if t.Stamps == nil {
+			t.Stamps = map[Position]int64{}
+		}
+		t.Stamps[p] = min(s, now)
+	}
 }
 
 // LineupSlot is one OCCUPIED position from a lineup: the Position itself,

@@ -335,7 +335,9 @@ func (r *roundLineupSettlement) legacyTeams(comp *Competition, roster lineupRost
 			return slices.ContainsFunc(matches, func(m TeamMatch) bool { return m.ID == matchID && m.Seats(team) })
 		}
 		for _, l := range r.lineups {
-			if l.MatchID != "" && roster.has(l.TeamID) && seatedIn(l.TeamID, l.MatchID) {
+			// The lineup a kachinuki match started with is the server's, never
+			// one v2.1.1 had entered.
+			if l.MatchID != "" && !l.IsStartPin() && roster.has(l.TeamID) && seatedIn(l.TeamID, l.MatchID) {
 				add(l.TeamID)
 			}
 		}

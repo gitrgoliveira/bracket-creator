@@ -52,6 +52,11 @@ func validScoreEventsBody(body *scoreEventsBody) error {
 	if body.Session == "" || len(body.Session) > domain.MaxScoreEventFieldLen {
 		return fmt.Errorf("session must be 1 to %d characters", domain.MaxScoreEventFieldLen)
 	}
+	// The server's own events (engine/kachinuki_opener.go) are made by the
+	// server alone: no device may claim its session.
+	if body.Session == engine.ServerEventSession {
+		return fmt.Errorf("session %q is the server's own", engine.ServerEventSession)
+	}
 	if len(body.Events) == 0 || len(body.Events) > MaxScoreEventsPerBatch {
 		return fmt.Errorf("events must hold 1 to %d events", MaxScoreEventsPerBatch)
 	}

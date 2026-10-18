@@ -1442,8 +1442,13 @@ func foldBout(r *replayMatch, e *domain.ScoreEvent, shape ReplayShape, stamps ma
 	m := &r.m
 	// A bout whose row a line removed keeps its stamp, a tombstone: an event
 	// stamped at or before the removal does not make it again (Remove this
-	// bout stands), one made after it does (the pairing added again).
-	if boutRowIndex(m.SubResults, e.Pos) >= 0 || !shape.createsMissingRow(e.Pos) || stamps[state.BoutGroup(e.Pos)] >= e.Stamp {
+	// bout stands). After it, only a fighter picked there makes it again (the
+	// pairing added again by hand names its fighters first): a strike from a
+	// device that never saw the removal would make a bout with no fighters,
+	// so it is turned away, noTarget, kept in the history and told to the
+	// device (bc-evts stage 6, rule 7).
+	tomb := stamps[state.BoutGroup(e.Pos)]
+	if boutRowIndex(m.SubResults, e.Pos) >= 0 || !shape.createsMissingRow(e.Pos) || tomb >= e.Stamp || (tomb > 0 && e.Kind != domain.ScoreBoutFighter) {
 		return foldBoutRow(r, e, shape, stamps)
 	}
 	// A numbered bout the match holds no row for yet (createsMissingRow: a

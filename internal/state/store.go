@@ -31,6 +31,10 @@ type Store struct {
 	// nil means time.Now. A test sets it to stand still or to step back.
 	clock func() time.Time
 
+	// startLineupKept, when set (OnStartLineupKept), is told of each lineup a
+	// kachinuki match started with that a transaction kept, once it commits.
+	startLineupKept atomic.Pointer[func(compID, teamID, matchID string)]
+
 	// compMu maps competition ID -> *sync.RWMutex for fine-grained locking.
 	compMu sync.Map
 

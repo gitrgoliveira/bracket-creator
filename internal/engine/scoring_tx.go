@@ -93,12 +93,13 @@ import (
 // a downstream match back to a verdict whose competitor stays restored.
 func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, opts ...ForceOptions) (*domain.CompetitorStatus, error) {
 	door := result.WriteDoor
+	before := e.storedStatus(tx, compID, matchID)
 	status, err := e.recordMatchResultWithIneligibilityTx(tx, compID, matchID, result, opts...)
-	// A kachinuki encounter's first fighters are the lineup's in force
-	// (operator decision K1 (c), kachinuki_opener.go), seated by the server's
-	// own events through the score-events door, which seats its own batch.
-	if err == nil && door != DoorEvent {
-		e.seatOpenerAfterWrite(tx, compID, matchID, true)
+	// A kachinuki match keeps the lineups it started with, and bout 1 is
+	// brought to what its lineup says (operator decision K1 (c),
+	// kachinuki_opener.go), only once the write stands.
+	if err == nil {
+		e.afterMatchWrite(tx, compID, matchID, before, door)
 	}
 	return status, err
 }

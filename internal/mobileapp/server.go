@@ -200,6 +200,12 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterEligibilityHandlers(adminSmallBody, store, hub)
 	RegisterReinstateHandler(adminSmallBody, eng, hub)
 	RegisterLineupHandlers(adminSmallBody, store, store, store, hub, store, verifier, eng)
+	// The lineup a kachinuki match started with is kept as the match's own
+	// (engine/kachinuki_opener.go): announced like every lineup write, so the
+	// lineup screens showing the match read it again.
+	store.OnStartLineupKept(func(compID, teamID, matchID string) {
+		hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, matchID))
+	})
 	RegisterSquadHandlers(adminSmallBody, store, store, hub, store, verifier, eng)
 	RegisterDaihyosenHandlers(adminSmallBody, eng, store, hub, store, verifier)
 	RegisterLeagueTiebreakHandlers(adminSmallBody, eng, store, hub)

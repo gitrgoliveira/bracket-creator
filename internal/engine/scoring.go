@@ -1683,7 +1683,11 @@ func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.
 	}
 	var superseded error
 	txErr := e.store.WithTransaction(compId, func(tx state.StoreTx) error {
+		before := e.storedStatus(tx, compId, matchId)
 		err := e.writeMatchResult(tx, compId, matchId, result, matchWriteForward)
+		if err == nil {
+			e.afterMatchWrite(tx, compId, matchId, before, result.WriteDoor)
+		}
 		if errors.Is(err, ErrMatchSuperseded) {
 			// Commit: the write's only footprint is its match history entry,
 			// and an aborted transaction would discard it (bc-mrgc).

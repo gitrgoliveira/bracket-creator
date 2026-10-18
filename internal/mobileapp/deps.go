@@ -299,3 +299,12 @@ type CompetitionTransactor interface {
 type KachinukiOpenerSeater interface {
 	ReseatKachinukiOpeners(compID, teamID string) ([]string, error)
 }
+
+// KachinukiLineupKeeper is a KachinukiOpenerSeater that also carries a lineup
+// save, in the save's transaction, onto the lineups kachinuki matches started
+// with: a change stamped before a match's start reaches it whenever it arrives
+// (engine/kachinuki_opener.go). *engine.Engine satisfies it.
+type KachinukiLineupKeeper interface {
+	KachinukiOpenerSeater
+	FollowLineupSave(tx state.StoreTx, comp *state.Competition, saved domain.TeamLineup, changed []domain.Position) ([]string, error)
+}

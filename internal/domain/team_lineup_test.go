@@ -188,6 +188,28 @@ func TestTeamLineup_ApplyChanges(t *testing.T) {
 	})
 }
 
+// A changed position loses the stamp of its previous change, and takes the
+// device's stamp of this one (capped at the server's now); an unstamped change
+// keeps none, and the positions the save did not change keep theirs.
+func TestTeamLineup_StampChanges(t *testing.T) {
+	p1, p2, p3 := domain.PositionNumbered(1), domain.PositionNumbered(2), domain.PositionNumbered(3)
+	base := domain.TeamLineup{
+		Positions: map[domain.Position]string{p1: "Aoki", p2: "Baba", p3: "Chiba"},
+		Stamps:    map[domain.Position]int64{p1: 5, p2: 6, p3: 7},
+	}
+	out, err := base.ApplyChanges([]domain.Position{p1, p2}, map[domain.Position]string{p1: "Kato", p2: "Mori"}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, map[domain.Position]int64{p3: 7}, out.Stamps, "the changed positions' old stamps go")
+	assert.Equal(t, int64(5), base.Stamps[p1], "the base is not changed")
+	out.StampChanges([]domain.Position{p1, p2}, map[domain.Position]int64{p1: 50, p2: 0}, 40)
+	assert.Equal(t, map[domain.Position]int64{p1: 40, p3: 7}, out.Stamps, "capped at now; an unstamped change keeps none")
+	var empty domain.TeamLineup
+	empty.StampChanges([]domain.Position{p1}, nil, 10)
+	assert.Nil(t, empty.Stamps)
+	assert.False(t, empty.IsStartPin())
+	assert.True(t, domain.TeamLineup{StartedAt: 1}.IsStartPin())
+}
+
 // TestTeamLineup_OrderedMembers_ThreePerson verifies the numeric-position
 // path: positions "1", "2", "3" are returned in ascending numeric order.
 func TestTeamLineup_OrderedMembers_ThreePerson(t *testing.T) {

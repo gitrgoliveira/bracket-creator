@@ -143,6 +143,7 @@ func copyTeamLineups(in map[string]domain.TeamLineup) map[string]domain.TeamLine
 		// an unclosed map here would alias the cache. maps.Clone(nil) is
 		// nil, matching an unrepaired/legacy lineup that never had one.
 		l.MemberIDs = maps.Clone(l.MemberIDs)
+		l.Stamps = maps.Clone(l.Stamps)
 		out[k] = l
 	}
 	return out

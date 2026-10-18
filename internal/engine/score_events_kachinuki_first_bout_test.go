@@ -22,6 +22,16 @@ func startingLineup(t *testing.T, store *state.Store, compID, teamID, name, memb
 	}, 3))
 }
 
+// startKachinuki starts a scheduled match as the court console does: a start
+// write (startOnly) stamped at stamp, which keeps the lineups it starts with.
+func startKachinuki(t *testing.T, eng *Engine, compID, matchID string, stamp int64) {
+	t.Helper()
+	_, err := eng.RecordMatchResultWithIneligibility(compID, matchID, &state.MatchResult{
+		Status: state.MatchStatusRunning, ModifiedAt: stamp, Changed: []string{state.GroupResult},
+	}, ForceOptions{StartOnly: true})
+	require.NoError(t, err)
+}
+
 // Two devices strike on a kachinuki encounter's first bout at once, on a match
 // started from the queue (no bout row yet). No device names a fighter (operator
 // decision K1 (c): bout 1's fighters are whatever the lineup says): the first
@@ -37,11 +47,12 @@ func TestScoreEvents_KachinukiFirstBoutTwoDevicesBothCount(t *testing.T) {
 			const compID = "kfb"
 			require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Kind: "team", TeamMatchType: state.TeamMatchTypeKachinuki, TeamSize: 3}))
 			require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{{
-				ID: "P1-0", SideA: "Taka", SideB: "Washi", SideAID: "ta", SideBID: "tb", Status: state.MatchStatusRunning,
+				ID: "P1-0", SideA: "Taka", SideB: "Washi", SideAID: "ta", SideBID: "tb", Status: state.MatchStatusScheduled,
 			}}))
 			startingLineup(t, store, compID, "ta", "Aoki", "m-aoki")
 			startingLineup(t, store, compID, "tb", "Fujii", "m-fujii")
 			t0 := time.Now().UnixMilli() - 60_000
+			startKachinuki(t, eng, compID, "P1-0", t0)
 			strike := func(id, session string, stamp int64, letter string) domain.ScoreEvent {
 				return domain.ScoreEvent{ID: id, Session: session, Seq: 1, Stamp: stamp, Kind: domain.ScoreIpponAdd, Pos: 1, Side: domain.ScoreSideA, Letter: letter}
 			}
@@ -108,15 +119,17 @@ func TestScoreEvents_KachinukiLineupEditRenamesBoutOne(t *testing.T) {
 		}
 	}
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "P1-0", SideA: "Taka", SideB: "Washi", SideAID: "ta", SideBID: "tb", Status: state.MatchStatusRunning, SubResults: rows()},
+		{ID: "P1-0", SideA: "Taka", SideB: "Washi", SideAID: "ta", SideBID: "tb", Status: state.MatchStatusScheduled, SubResults: rows()},
 		{ID: "P1-1", SideA: "Taka", SideB: "Washi", SideAID: "ta", SideBID: "tb", Status: state.MatchStatusCompleted,
 			Winner: "Taka", WinnerID: "ta", Decision: "kachinuki-exhaustion", SubResults: rows()},
 	}))
 	startingLineup(t, store, compID, "ta", "Aoki", "m-aoki")
 	startingLineup(t, store, compID, "tb", "Fujii", "m-fujii")
 	t0 := time.Now().UnixMilli() - 60_000
-	// A strike on bout 2 begins the match's log, and the match keeps the
-	// lineup it started with as its own.
+	// The match (sent back to the queue with its bouts) starts again: it
+	// keeps the lineup it started with as its own, and a strike on bout 2
+	// lands.
+	startKachinuki(t, eng, compID, "P1-0", t0-1)
 	res := postIn(t, eng, compID, "P1-0", domain.ScoreEvent{ID: "s1", Session: "evs", Seq: 1, Stamp: t0, Kind: domain.ScoreIpponAdd, Pos: 2, Side: domain.ScoreSideB, Letter: "D"})
 	require.Equal(t, domain.ScoreOutcomeApplied, res.Answers[0].Outcome)
 	lineups, err := store.LoadTeamLineups(compID)

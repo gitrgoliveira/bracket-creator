@@ -442,11 +442,20 @@ func TestReplay_Kachinuki(t *testing.T) {
 	assert.Len(t, r.Match.SubResults, 1)
 	assert.Equal(t, domain.ScoreOutcomeBeforeBaseline, r.Outcome("same"), "a tap stamped at the removal does not make the bout again")
 	assert.Equal(t, int64(30), r.Match.GroupStamps[state.BoutGroup(2)], "the tombstone keeps its stamp")
-	// The pairing added by hand again after the removal: a tap made after it
-	// makes the row again (stage 6 review 2, F2).
-	r = ReplayScoring(m, append(head, tomb, evLine("late", 40, domain.ScoreIpponAdd, 2, "a", "M")), shape)
+	// The pairing added by hand again after the removal names its fighter
+	// first: a fighter picked after it makes the row again (stage 6 review 2,
+	// F2), and a strike on it then lands.
+	pick := state.ScoreLogLine{V: 1, Event: &domain.ScoreEvent{ID: "pick", Stamp: 40, Kind: domain.ScoreBoutFighter, Pos: 2, Side: "a", MemberID: "k2", Name: "K2"}}
+	r = ReplayScoring(m, append(head, tomb, pick, evLine("late", 41, domain.ScoreIpponAdd, 2, "a", "M")), shape)
+	assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("pick"))
 	assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("late"))
 	assert.Len(t, r.Match.SubResults, 2)
+	// A strike made after the removal on a device that never saw it would
+	// make a bout with no fighters: it is turned away, noTarget, and the bout
+	// stays removed (stage 6, rule 7).
+	r = ReplayScoring(m, append(head, tomb, evLine("stale", 40, domain.ScoreIpponAdd, 2, "a", "M")), shape)
+	assert.Equal(t, domain.ScoreOutcomeNoTarget, r.Outcome("stale"))
+	assert.Len(t, r.Match.SubResults, 1)
 
 	r = ReplayScoring(m, append(head, evLine("e", 20, domain.ScoreEnchoAdd, 1, "", "")), shape)
 	assert.False(t, state.SubResultAt(r.Match.SubResults, 1).Recorded, "the bout is fought again")
@@ -558,7 +567,11 @@ func TestReplay_LazyMigration(t *testing.T) {
 		assert.Len(t, r.Match.SubResults, 1)
 		assert.Equal(t, int64(12), r.Match.GroupStamps[state.BoutGroup(2)])
 		r = ReplayScoring(m, append(migrated(m), evLine("e2", 20, domain.ScoreIpponAdd, 2, "a", "M")), ReplayShape{Comp: replayTeamComp(true)})
-		assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("e2"), "one made after it makes the bout again")
+		assert.Equal(t, domain.ScoreOutcomeNoTarget, r.Outcome("e2"), "a strike made after it makes no bout with no fighters")
+		pick := state.ScoreLogLine{V: 1, Event: &domain.ScoreEvent{ID: "p", Stamp: 20, Kind: domain.ScoreBoutFighter, Pos: 2, Side: "a", MemberID: "k2", Name: "K2"}}
+		r = ReplayScoring(m, append(migrated(m), pick), ReplayShape{Comp: replayTeamComp(true)})
+		assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("p"), "a fighter picked after it makes the bout again")
+		assert.Len(t, r.Match.SubResults, 2)
 	})
 }
 

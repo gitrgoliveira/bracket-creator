@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -96,6 +97,12 @@ type LineupRequest struct {
 	Positions map[domain.Position]string `json:"positions"`
 	MemberIDs map[domain.Position]string `json:"memberIds,omitempty"`
 	Changed   *[]domain.Position         `json:"changed,omitempty"`
+	// ChangedAt is when each changed position was changed on the device
+	// (server-relative ms), so a change made before a kachinuki match started
+	// reaches the lineup the match started with whenever it arrives
+	// (engine.FollowLineupSave). A save without it (an older build's) is
+	// ordered by its arrival, as every lineup save was.
+	ChangedAt map[domain.Position]int64 `json:"changedAt,omitempty"`
 	// WriteID is the client's id for the save (bc-evts stage 3 review 11,
 	// Y8): a save this door has applied under it is answered as recorded,
 	// never applied again (writeOnce), so a late duplicate puts nothing back.
@@ -382,9 +389,27 @@ func findRoundLineup(lineups map[string]domain.TeamLineup, teamID string, round 
 // sheet saves it when a competitor names a bout's fighter (bc-dhas).
 // `tl`/`verifier` tell an anonymous caller apart (selfRunAnonymous), who may
 // not change the lineup of a match that has finished (see the PUT).
-func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore, tx CompetitionTransactor, hub Broadcaster, tl TournamentLoader, verifier PasswordVerifier, seaters ...KachinukiOpenerSeater) {
+func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps CompetitionStore, tx CompetitionTransactor, hub Broadcaster, tl TournamentLoader, verifier PasswordVerifier, keepers ...KachinukiLineupKeeper) {
+	seaters := make([]KachinukiOpenerSeater, 0, len(keepers))
+	for _, k := range keepers {
+		if k != nil {
+			seaters = append(seaters, k)
+		}
+	}
 	announce := func(compID, teamID, matchID string) {
 		announceLineupChange(hub, comps, seaters, compID, teamID, matchID)
+	}
+	// A save's changes made before a kachinuki match started reach the lineup
+	// the match started with, in the save's transaction (engine.FollowLineupSave).
+	follow := func(stx state.StoreTx, comp *state.Competition, saved domain.TeamLineup, changed []domain.Position) {
+		for _, k := range keepers {
+			if k == nil {
+				continue
+			}
+			if _, err := k.FollowLineupSave(stx, comp, saved, changed); err != nil {
+				log.Printf("mobileapp: competition %s team %s: a lineup save not carried to the lineups matches started with: %v", comp.ID, saved.TeamID, err)
+			}
+		}
 	}
 	// A lineup save is ordered by arrival: a late duplicate of one is
 	// answered as recorded (writeOnce, Y8).
@@ -412,7 +437,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 		}
 
 		save := lineupSave{compID: compID, teamID: teamID, round: round, req: req, once: once}
-		saveLineup(c, tx, announce, save, nil, func(lineups map[string]domain.TeamLineup) (domain.TeamLineup, bool) {
+		saveLineup(c, tx, announce, follow, save, nil, func(lineups map[string]domain.TeamLineup) (domain.TeamLineup, bool) {
 			return findRoundLineup(lineups, teamID, round)
 		})
 	})
@@ -480,7 +505,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 				return memberIDsOutsideTeam(judge, teamID, req.memberIDsRead())
 			}
 		}
-		saveLineup(c, tx, announce, save, guard, func(lineups map[string]domain.TeamLineup) (domain.TeamLineup, bool) {
+		saveLineup(c, tx, announce, follow, save, guard, func(lineups map[string]domain.TeamLineup) (domain.TeamLineup, bool) {
 			return findMatchLineup(lineups, teamID, matchID)
 		})
 	})
@@ -651,6 +676,11 @@ func (w lineupSave) lineupToStore(stx state.StoreTx, comp *state.Competition) (d
 		return domain.TeamLineup{}, &txResponse{status: lineupSetStatus(err), body: gin.H{"error": err.Error()}}
 	}
 	lineup.TeamID, lineup.CompetitionID, lineup.Round, lineup.MatchID = w.teamID, w.compID, w.round, w.matchID
+	// An operator's save of a match's own lineup replaces the lineup the
+	// match started with (engine/kachinuki_opener.go): it is the operator's
+	// now, and a later match carries it.
+	lineup.StartedAt, lineup.StartedFrom = 0, ""
+	lineup.StampChanges(changed, w.req.ChangedAt, time.Now().UnixMilli())
 	return lineup, nil
 }
 
@@ -697,7 +727,7 @@ func (w lineupSave) base(stx state.StoreTx, comp *state.Competition) (domain.Tea
 // (lineupSave.lineupToStore), saves it and reads it back with find for the
 // response. The answer is written after the lock releases (txResponse), and a
 // saved lineup is broadcast so SSE clients re-fetch it.
-func saveLineup(c *gin.Context, tx CompetitionTransactor, announce func(compID, teamID, matchID string), save lineupSave, guard func(stx state.StoreTx, judge *memberJudge) *txResponse, find func(map[string]domain.TeamLineup) (domain.TeamLineup, bool)) {
+func saveLineup(c *gin.Context, tx CompetitionTransactor, announce func(compID, teamID, matchID string), follow func(stx state.StoreTx, comp *state.Competition, saved domain.TeamLineup, changed []domain.Position), save lineupSave, guard func(stx state.StoreTx, judge *memberJudge) *txResponse, find func(map[string]domain.TeamLineup) (domain.TeamLineup, bool)) {
 	compID := save.compID
 	var respErr *txResponse
 	var persistedLineup domain.TeamLineup
@@ -776,6 +806,9 @@ func saveLineup(c *gin.Context, tx CompetitionTransactor, announce func(compID, 
 			respErr = &txResponse{status: lineupSetStatus(err), body: gin.H{"error": err.Error()}}
 			return nil
 		}
+		if changed, partial := save.req.changedPositions(); partial {
+			follow(stx, comp, lineup, changed)
+		}
 		// Reload after write so the response carries the persisted
 		// CompetitionID (auto-stamped by Set) and any future server-managed
 		// fields. This reload reads the same on-disk state as the Set above
@@ -816,11 +849,12 @@ func saveLineup(c *gin.Context, tx CompetitionTransactor, announce func(compID, 
 }
 
 // announceLineupChange is the ONE announcement of a lineup or team-member
-// write: the lineup-updated event, then bout 1 of each running kachinuki match
-// of the team seated with the lineup's fighters (operator decision K1 (c),
-// engine/kachinuki_opener.go) and a match_updated for each match that moved,
-// read fresh from the store. A seat that fails is logged: the match's next
-// write seats it.
+// write: the lineup-updated event, then bout 1 of each kachinuki match of the
+// team brought to what that match's lineup says (operator decision K1 (c),
+// engine/kachinuki_opener.go: its own lineup, or the one it started with, at
+// any status; the lineup in force while it is scheduled) and a match_updated
+// for each match that moved, read fresh from the store. A seat that fails is
+// logged: the match's next write seats it.
 func announceLineupChange(hub Broadcaster, comps CompetitionStore, seaters []KachinukiOpenerSeater, compID, teamID, matchID string) {
 	hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, matchID))
 	for _, seater := range seaters {

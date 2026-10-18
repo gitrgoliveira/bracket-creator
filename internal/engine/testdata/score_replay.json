@@ -2507,7 +2507,7 @@
    }
   },
   {
-   "name": "a kachinuki pairing taken off is not made again by a tap made before the removal, and is by one made after it (the pairing added again)",
+   "name": "a kachinuki pairing taken off is not made again by a tap made before the removal, nor by a bare strike made after it from a device that never saw it (it would make a bout with no fighters: noTarget); a fighter picked after it makes it again (the pairing added again) and a strike then lands",
    "jsMirror": true,
    "shape": {
     "kind": "kachinuki"
@@ -2606,9 +2606,36 @@
     {
      "v": 1,
      "event": {
-      "id": "new",
+      "id": "stale",
+      "session": "s-x",
+      "seq": 2,
+      "stamp": 17,
+      "kind": "ippon.add",
+      "pos": 2,
+      "side": "a",
+      "letter": "K"
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "pick",
       "session": "s-y",
       "seq": 1,
+      "stamp": 19,
+      "kind": "bout.fighter",
+      "pos": 2,
+      "side": "b",
+      "memberId": "o2",
+      "name": "O2"
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "new",
+      "session": "s-y",
+      "seq": 2,
       "stamp": 20,
       "kind": "ippon.add",
       "pos": 2,
@@ -2629,14 +2656,16 @@
       {
        "position": 2,
        "sideA": "",
-       "sideB": "",
+       "sideB": "O2",
+       "sideBMemberId": "o2",
        "ipponsB": [
         "K"
        ],
-       "winner": "Osaka"
+       "winner": "O2",
+       "winnerMemberId": "o2"
       }
      ],
-     "scoreVersion": 3,
+     "scoreVersion": 5,
      "modifiedAt": 20,
      "groupStamps": {
       "bout:1": 10,
@@ -2646,6 +2675,12 @@
     "outcomes": {
      "old": [
       "beforeBaseline"
+     ],
+     "stale": [
+      "noTarget"
+     ],
+     "pick": [
+      "applied"
      ],
      "new": [
       "applied"

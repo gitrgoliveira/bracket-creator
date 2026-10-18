@@ -46,6 +46,10 @@ const (
 	EventReasonSentBack = "match_sent_back"
 	// EventReasonLogUnreadable: the match's score event log cannot be read.
 	EventReasonLogUnreadable = "score_log_unreadable"
+	// EventReasonBoutRemoved: the tap was made on a kachinuki bout that was
+	// removed (Remove this bout) before it, on a device that had not seen the
+	// removal: it would make a bout with no fighters (noTarget).
+	EventReasonBoutRemoved = "bout_removed"
 )
 
 // The sentences the tapping device shows for the engine's own reasons (Q3:
@@ -55,6 +59,7 @@ const (
 	EventMessageSentBack      = "The match was sent back to the queue, so the tap was not scored. Start the match again to score it."
 	EventMessageNotRunning    = "This match is not running, so the tap was not scored. Start the match to score it."
 	EventMessageLogUnreadable = "This match's score log cannot be read, so this tap was not applied; it is kept in the match history. The organiser needs to check the tournament data."
+	EventMessageBoutRemoved   = "Not applied: the bout it was made on was removed, so it was kept in the match's history. Pick the bout's fighters to add it again."
 )
 
 // EventRefusal is why the door's caller refuses one event (the self-run
@@ -81,6 +86,10 @@ type ScoreEventsRequest struct {
 	// resend to grow the match's history file. The organiser's turned-away
 	// events keep one line per event id.
 	NoTurnedAwayHistory bool
+	// server marks a request the server made itself (kachinuki_opener.go): the
+	// only one that may carry ServerEventSession, and one that seats a match in
+	// whatever status it is in. Unexported, so no door can claim it.
+	server bool
 }
 
 // ScoreEventAnswer is the door's answer for one event.
@@ -120,6 +129,9 @@ type ScoreEventsResult struct {
 // stored match differs from the log's replay, and the replay's match is
 // written. A batch that logs nothing writes nothing (FileVersion unchanged).
 func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, req ScoreEventsRequest) (*ScoreEventsResult, error) {
+	if !req.server && (req.Session == ServerEventSession || slices.ContainsFunc(req.Events, func(ev domain.ScoreEvent) bool { return ev.Session == ServerEventSession })) {
+		return nil, ErrServerEventSession
+	}
 	comp, err := tx.LoadCompetition(compID)
 	if err != nil {
 		return nil, err
@@ -162,7 +174,7 @@ func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, r
 	notRunning := stored.Status != state.MatchStatusRunning && stored.Status != state.MatchStatusCompleted
 	// The server's own fighter events (kachinuki_opener.go) seat a match in
 	// whatever status a lineup edit finds it.
-	if req.Session == ServerEventSession {
+	if req.server {
 		notRunning = false
 	}
 	// Whether the match was sent back is a property of the request's match, not
@@ -227,7 +239,7 @@ func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, r
 	rp := ReplayScoring(stored, all, shape)
 	// Bout 1 of a kachinuki encounter takes the lineup's fighters in the same
 	// batch, as the server's own events (kachinuki_opener.go).
-	seat := openerSeatEventsTx(tx, comp, compID, matchID, &rp.Match, all, req.Session != ServerEventSession)
+	seat := openerSeatEventsTx(tx, comp, compID, matchID, &rp.Match, all)
 	if len(seat) > 0 {
 		for i := range seat {
 			added = append(added, state.ScoreLogLine{Event: &seat[i]})
@@ -269,6 +281,9 @@ func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, r
 			// The closed-match rule: told the same words the score door uses.
 			ans.Reason, ans.Message = state.HeldReasonMatchClosed, MatchClosedMessage
 		}
+		if ans.Outcome == domain.ScoreOutcomeNoTarget && onRemovedBout(&rp.Match, req.Events[i]) {
+			ans.Reason, ans.Message = EventReasonBoutRemoved, EventMessageBoutRemoved
+		}
 	}
 	e.recordEventHistory(tx, compID, matchID, req.Events, append(e.unrecordedTurnedAway(tx, compID, matchID, req, turnedAway, res.Answers), take...), res.Answers)
 	for _, ev := range seat {
@@ -282,6 +297,13 @@ func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, r
 	}
 	res.Match = e.storedForAnswer(tx, compID, matchID, nil, inPool)
 	return res, nil
+}
+
+// onRemovedBout reports whether ev, turned away as noTarget, was a tap on a
+// numbered bout the match holds no row for whose stamp is a tombstone (Remove
+// this bout): the bout was removed, not a mark already taken off.
+func onRemovedBout(m *state.MatchResult, ev domain.ScoreEvent) bool {
+	return ev.Pos > 0 && boutRowIndex(m.SubResults, ev.Pos) < 0 && m.GroupStamps[state.BoutGroup(ev.Pos)] > 0
 }
 
 // RecordScoreEvents is RecordScoreEventsTx in a transaction of its own.

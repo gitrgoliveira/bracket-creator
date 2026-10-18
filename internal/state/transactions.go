@@ -222,6 +222,11 @@ func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error 
 	}
 	mu := s.getCompLock(compID)
 	mu.Lock()
+	// The lineups a kachinuki match started with are announced once the
+	// transaction has committed, after its lock is released (this defer runs
+	// after the unlock below).
+	var kept []keptLineup
+	defer func() { s.announceKeptLineups(compID, kept) }()
 	defer mu.Unlock()
 
 	// Begin a fresh WAL for this transaction. The WAL has no on-disk
@@ -298,6 +303,7 @@ func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error 
 		slog.Warn("WithTransaction: WAL Done failed; will retry on restart",
 			"comp", compID, "wal", w.ID(), "err", err)
 	}
+	kept = tx.kept
 	return nil
 }
 
@@ -403,6 +409,9 @@ type storeTx struct {
 	store  *Store
 	compID string
 	wal    *wal.WAL
+	// kept is the lineups kachinuki matches started with that this
+	// transaction wrote, announced once it commits (OnStartLineupKept).
+	kept []keptLineup
 }
 
 // IsTransactional reports whether h is a LIVE transaction handle rather than
@@ -616,9 +625,50 @@ func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int
 		key := lineupStorageKey(l)
 		l.CompetitionID = compID
 		current[key] = l
-		return t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn())
+		if err := t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn()); err != nil {
+			return err
+		}
+		t.noteStartLineup(l)
+		return nil
 	}
-	return t.store.setTeamLineupLocked(compID, l, teamSize, t.txWriteFn())
+	if err := t.store.setTeamLineupLocked(compID, l, teamSize, t.txWriteFn()); err != nil {
+		return err
+	}
+	t.noteStartLineup(l)
+	return nil
+}
+
+// keptLineup names a lineup a kachinuki match started with that the
+// transaction wrote.
+type keptLineup struct{ teamID, matchID string }
+
+// noteStartLineup records a lineup a kachinuki match started with (its pin,
+// engine/kachinuki_opener.go) for the announcement made once the transaction
+// commits (OnStartLineupKept).
+func (t *storeTx) noteStartLineup(l domain.TeamLineup) {
+	if l.IsStartPin() {
+		t.kept = append(t.kept, keptLineup{teamID: l.TeamID, matchID: l.MatchID})
+	}
+}
+
+// OnStartLineupKept sets fn to be told, after the transaction that wrote it
+// commits and its lock is released, of each lineup a kachinuki match started
+// with (the server keeps it as the match's own, engine/kachinuki_opener.go),
+// so the lineup screens that show the match read it again. One fn per store;
+// a later call replaces it.
+func (s *Store) OnStartLineupKept(fn func(compID, teamID, matchID string)) {
+	s.startLineupKept.Store(&fn)
+}
+
+// announceKeptLineups tells the OnStartLineupKept listener of kept.
+func (s *Store) announceKeptLineups(compID string, kept []keptLineup) {
+	fn := s.startLineupKept.Load()
+	if fn == nil || *fn == nil {
+		return
+	}
+	for _, k := range kept {
+		(*fn)(compID, k.teamID, k.matchID)
+	}
 }
 
 func (t *storeTx) LoadSquads(compID string) (map[string][]domain.TeamMember, error) {

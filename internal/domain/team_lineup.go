@@ -103,7 +103,7 @@ type TeamLineup struct {
 	// History keeps, per position, the values it held before each stamped
 	// change, each with the stamp it was set at, so the carry rule can read
 	// what a position held at a stamp whatever order the changes arrived in.
-	// At most MaxPositionHistory per position, the latest by stamp.
+	// Bounded by what is still read (MaxPositionHistory, TrimHistory).
 	History map[Position][]PositionChange `json:"-" yaml:"history,omitempty"`
 }
 
@@ -115,10 +115,15 @@ type PositionChange struct {
 	MemberID string `json:"-" yaml:"memberId,omitempty"`
 }
 
-// MaxPositionHistory bounds TeamLineup.History per position: a position
-// changed more often keeps its latest values by stamp, and a carry read at a
-// stamp before all of them takes the earliest kept.
-const MaxPositionHistory = 8
+// MaxPositionHistory bounds TeamLineup.History per position (TrimHistory,
+// run by the engine's carry owner each time a lineup lands): a position
+// keeps at most its oldest value, its latest MaxPositionHistory values, and
+// one value for each carried lineup of the team (each copy, removed copy and
+// pin), the one it held at that lineup's stamp, so at most
+// MaxPositionHistory + 1 + the team's carried lineups. Every copy and pin
+// therefore keeps reading the value it carries. Accepted: a copy made later
+// at a stamp between two values already dropped reads the older one kept.
+const MaxPositionHistory = 16
 
 // IsCarriedCopy says the lineup is a match's own lineup whose positions not
 // in Own are carried by stamp (CopiedAt).
@@ -157,9 +162,12 @@ func (t TeamLineup) Held(p Position) PositionChange {
 // HeldAt is the value p held at stamp at, as this lineup knows it: of its
 // current value and its History, the one set latest before at (a value
 // with no stamp counts from the beginning; the current value wins a tie).
-// ok is false when none was set before at (on a carried copy the position
-// was then the carried one); earliest is then the value set first.
-func (t TeamLineup) HeldAt(p Position, at int64) (held PositionChange, ok bool, earliest PositionChange) {
+// ok is false when none was set before at: on a carried copy the position
+// was then the carried one, and elsewhere what it held then is not known
+// (TrimHistory never drops the oldest value, so only a lineup whose first
+// value was already stamped reads so). A value set after at is never
+// answered for it.
+func (t TeamLineup) HeldAt(p Position, at int64) (held PositionChange, ok bool) {
 	cur := t.Held(p)
 	_, set := t.Positions[p]
 	_, hasID := t.MemberIDs[p]
@@ -168,15 +176,12 @@ func (t TeamLineup) HeldAt(p Position, at int64) (held PositionChange, ok bool, 
 	if set || hasID || stamped || len(entries) > 0 {
 		entries = append(entries, cur)
 	}
-	for i, e := range entries {
-		if i == 0 || e.Stamp < earliest.Stamp {
-			earliest = e
-		}
+	for _, e := range entries {
 		if e.Stamp < at && (!ok || e.Stamp >= held.Stamp) {
 			held, ok = e, true
 		}
 	}
-	return held, ok, earliest
+	return held, ok
 }
 
 // ApplyStampedChanges is ApplyChanges for a save that may carry stamps
@@ -197,7 +202,7 @@ func (t TeamLineup) ApplyStampedChanges(changed []Position, positions, memberIDs
 		if history == nil {
 			history = map[Position][]PositionChange{}
 		}
-		history[p] = keepLatest(append(history[p], c))
+		history[p] = sortHistory(append(history[p], c))
 	}
 	// A change stamped before the one the position holds is kept in History,
 	// where a carry read at a stamp between the two finds it, and the later
@@ -246,14 +251,53 @@ func (t TeamLineup) ApplyStampedChanges(changed []Position, positions, memberIDs
 	return out, nil
 }
 
-// keepLatest bounds one position's History to MaxPositionHistory, the latest
-// by stamp kept, in stamp order.
-func keepLatest(cs []PositionChange) []PositionChange {
+// sortHistory puts one position's History in stamp order. Nothing is dropped
+// here: only the carry owner knows which values are still read (TrimHistory).
+func sortHistory(cs []PositionChange) []PositionChange {
 	slices.SortStableFunc(cs, func(a, b PositionChange) int { return cmp.Compare(a.Stamp, b.Stamp) })
-	if len(cs) > MaxPositionHistory {
-		cs = cs[len(cs)-MaxPositionHistory:]
-	}
 	return cs
+}
+
+// TrimHistory bounds History by what is still read (MaxPositionHistory):
+// per position it keeps the oldest value, the latest MaxPositionHistory,
+// and, for each stamp in refs (the stamps every carried lineup of the team
+// is read at, its CopiedAt or StartedAt), the value the position held then.
+// So no copy or pin ever loses the value it carries, and a value a carry
+// read needs is dropped only when no lineup is read at a stamp it covers.
+func (t *TeamLineup) TrimHistory(refs []int64) {
+	for p, cs := range t.History {
+		cs = sortHistory(slices.Clone(cs))
+		if len(cs) <= MaxPositionHistory+1 {
+			t.History[p] = cs
+			continue
+		}
+		keep := make([]bool, len(cs))
+		keep[0] = true
+		for i := len(cs) - MaxPositionHistory; i < len(cs); i++ {
+			keep[i] = true
+		}
+		// Read as HeldAt reads: of the values and the current one, the latest
+		// set before r, the current one winning a tie.
+		cur := t.Stamps[p]
+		for _, r := range refs {
+			held := -1
+			for i, c := range cs {
+				if c.Stamp < r && (held < 0 || c.Stamp >= cs[held].Stamp) {
+					held = i
+				}
+			}
+			if held >= 0 && !(cur < r && cur >= cs[held].Stamp) {
+				keep[held] = true
+			}
+		}
+		kept := cs[:0:0]
+		for i, c := range cs {
+			if keep[i] {
+				kept = append(kept, c)
+			}
+		}
+		t.History[p] = kept
+	}
 }
 
 // IsStartPin reports whether t is the lineup a kachinuki match started with,

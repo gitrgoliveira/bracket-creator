@@ -723,7 +723,7 @@ func (w lineupSave) landPartial(stx state.StoreTx, comp *state.Competition, chan
 	}
 	if w.matchID == "" {
 		start, _ := findRoundLineup(lineups, w.teamID, w.round)
-		out, err := start.ApplyStampedChanges(changed, w.req.Positions, w.req.MemberIDs, stamps, now)
+		out, err := engine.LandStartingLineupSave(lineups, start, changed, w.req.Positions, w.req.MemberIDs, stamps, now)
 		if err != nil {
 			return refused(err)
 		}

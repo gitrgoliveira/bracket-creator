@@ -68,23 +68,22 @@ func (lc *lineupCarry) sourceAt(teamID, matchID string, at int64) InForceLineup 
 }
 
 // valueAt is what position p of l held at stamp at.
-func (lc *lineupCarry) valueAt(l domain.TeamLineup, p domain.Position, at int64, depth int) domain.PositionChange {
-	held, ok, earliest := l.HeldAt(p, at)
+func (lc *lineupCarry) valueAt(l domain.TeamLineup, p domain.Position, at int64, depth int) (domain.PositionChange, bool) {
+	held, ok := l.HeldAt(p, at)
 	if l.IsCarriedCopy() && (!ok || !slices.Contains(l.Own, p)) {
 		// Carried, or own only from a change made after at: what l carried.
 		if depth >= carryDepthMax {
-			return domain.PositionChange{}
+			return domain.PositionChange{}, false
 		}
 		src := lc.sourceAt(l.TeamID, l.MatchID, l.CopiedAt)
 		if !src.Found {
-			return domain.PositionChange{}
+			return domain.PositionChange{}, true
 		}
 		return lc.valueAt(src.Lineup, p, l.CopiedAt, depth+1)
 	}
-	if ok {
-		return held
-	}
-	return earliest
+	// Not ok: nothing this lineup knows was set before at. What it held
+	// then is not known, and a value set later is never taken for it.
+	return held, ok
 }
 
 // teamPositions is every position any lineup of the team, or l, names.
@@ -133,6 +132,8 @@ func (lc *lineupCarry) carryInto(l *domain.TeamLineup, at int64) string {
 		if own[p] {
 			continue
 		}
+		stored := l.Positions[p]
+		storedID, storedStamp := l.MemberIDs[p], l.Stamps[p]
 		delete(l.Positions, p)
 		delete(l.MemberIDs, p)
 		delete(l.Stamps, p)
@@ -142,7 +143,12 @@ func (lc *lineupCarry) carryInto(l *domain.TeamLineup, at int64) string {
 		if !src.Found {
 			continue
 		}
-		v := lc.valueAt(src.Lineup, p, at, 0)
+		v, known := lc.valueAt(src.Lineup, p, at, 0)
+		if !known {
+			// Nothing is known of the position at that stamp: the value the
+			// lineup stores stays, and a value set later is never taken.
+			v = domain.PositionChange{Stamp: storedStamp, Name: stored, MemberID: storedID}
+		}
 		if v.Name == "" && v.MemberID == "" {
 			continue
 		}
@@ -217,6 +223,43 @@ func sameCarried(a, b domain.TeamLineup) bool {
 		maps.Equal(a.Stamps, b.Stamps) && a.StartedFrom == b.StartedFrom && a.CopiedFrom == b.CopiedFrom
 }
 
+// trimHistory bounds l's History by what is still read
+// (domain.MaxPositionHistory): the stamps the team's carried lineups are
+// read at (each copy's CopiedAt, each pin's StartedAt, l's own included)
+// keep the value they read.
+func (lc *lineupCarry) trimHistory(l *domain.TeamLineup) {
+	var refs []int64
+	add := func(x domain.TeamLineup) {
+		if x.CopiedAt > 0 {
+			refs = append(refs, x.CopiedAt)
+		}
+		if x.StartedAt > 0 {
+			refs = append(refs, x.StartedAt)
+		}
+	}
+	for _, x := range lc.lineups {
+		if x.TeamID == l.TeamID {
+			add(x)
+		}
+	}
+	add(*l)
+	l.TrimHistory(refs)
+}
+
+// LandStartingLineupSave lands a stamped partial save on a team's starting
+// lineup (its round-0 entry, start; empty when it has none): the position
+// holds its latest change by stamp (domain.TeamLineup.ApplyStampedChanges),
+// and its History keeps every value a copy or a pin of the team reads.
+func LandStartingLineupSave(lineups map[string]domain.TeamLineup, start domain.TeamLineup,
+	changed []domain.Position, positions, memberIDs map[domain.Position]string, stamps map[domain.Position]int64, now int64) (domain.TeamLineup, error) {
+	out, err := start.ApplyStampedChanges(changed, positions, memberIDs, stamps, now)
+	if err != nil {
+		return domain.TeamLineup{}, err
+	}
+	(&lineupCarry{lineups: lineups}).trimHistory(&out)
+	return out, nil
+}
+
 // LandMatchLineupSave is the lineup a partial save of matchID's own lineup
 // for teamID stores (the lineup handler's, under the competition's lock, over
 // what its transaction loaded). The first stamped save of a match's own
@@ -266,6 +309,7 @@ func LandMatchLineupSave(lineups map[string]domain.TeamLineup, pool []state.Matc
 		out.CopiedFrom = lc.carryInto(&out, out.CopiedAt)
 	}
 	out.TeamID, out.MatchID, out.Round = teamID, matchID, 0
+	lc.trimHistory(&out)
 	return out, nil
 }
 

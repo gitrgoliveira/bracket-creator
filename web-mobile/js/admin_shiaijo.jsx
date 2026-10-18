@@ -1075,13 +1075,17 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             const mv = ownMoveOf(m);
             if (mv && mv.landed && !ownStatusMoveHolds(mv, m)) window.API.forgetOwnStatusMove(m.compId, m.id);
         }
-        // A match the court's feed no longer holds (moved to another court,
-        // or gone with its draw) keeps no answered move (stage 6 review 9, F7).
-        if (courtMatchesRaw.length > 0 && typeof window.API.forgetOwnStatusMovesNotIn === "function") {
-            window.API.forgetOwnStatusMovesNotIn(courtMatchesRaw);
+        // A match the tournament no longer holds (gone with its draw) keeps no
+        // answered move (stage 6 review 9, F7). The moves are the tab's, so
+        // the list is the tournament's, never this court's alone (stage 6
+        // review 10, m4: opening court B wiped court A's answered moves, and a
+        // finished match moved to another court is not gone).
+        const held = [...courtMatchesRaw, ...window.tournamentMatches({ competitions: tournament.competitions || [] })];
+        if (held.length > 0 && typeof window.API.forgetOwnStatusMovesNotIn === "function") {
+            window.API.forgetOwnStatusMovesNotIn(held);
         }
         // oxlint-disable-next-line react-hooks/exhaustive-deps
-    }, [courtMatchesRaw, ownMovesSeq]);
+    }, [courtMatchesRaw, tournament.competitions, ownMovesSeq]);
     // Scheduled knockout bouts still waiting on a "Winner of rX-mY" feeder
     // (mp-y3nk). Kept SEPARATE from allMatches / filteredScheduled so they never
     // become upNext, never enter moveMatch reordering, and never carry a Start

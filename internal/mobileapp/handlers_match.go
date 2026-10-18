@@ -1254,7 +1254,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				// timestamp guard), but mapped anyway: the alternative default is
 				// a 500, which the offline write queue treats as transient and
 				// retries forever against a write that can never win.
-				respondSuperseded(c, result.Merge.HeldGroups(), result.Merge.HeldReason())
+				respondSuperseded(c, result.Merge.HeldGroups(), result.Merge.HeldReason(), err)
 				return
 			}
 			if errors.Is(err, engine.ErrMatchSideMismatch) {
@@ -2770,7 +2770,7 @@ func matchSnapshotOrErr(s matchStores, compID, matchID, guardLabel string) (matc
 // lost and still never wins a retry, so it keeps the same applied:false
 // superseded shape, with heldReason and its own message (messageForHeldReason)
 // telling the operator the match is finished and to tap Correct.
-func respondSuperseded(c *gin.Context, heldGroups []string, heldReason string) {
+func respondSuperseded(c *gin.Context, heldGroups []string, heldReason string, from ...error) {
 	// LOGGED because this is the one successful-looking response whose work
 	// an operator does not see on the match. Since bc-mrgc the held values are
 	// in the match's history, but the line still names the request, which is
@@ -2789,6 +2789,17 @@ func respondSuperseded(c *gin.Context, heldGroups []string, heldReason string) {
 	if heldReason != "" {
 		body["heldReason"] = heldReason
 		body["message"] = messageForHeldReason(heldReason)
+	}
+	// The match's turned-away taps as the log stands after the write (a held
+	// rival result is still logged), so the writing device is told of its own
+	// on this answer and not only on the push (stage 6 review 6).
+	for _, err := range from {
+		if away, version := engine.TurnedAwayOf(err); len(away) > 0 {
+			body["turnedAway"] = away
+			if version > 0 {
+				body["scoreVersion"] = version
+			}
+		}
 	}
 	c.JSON(http.StatusOK, body)
 }
@@ -3813,7 +3824,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				// the shape the override endpoint already uses for this exact
 				// condition, and the client keys on it.
 
-				respondSuperseded(c, result.Merge.HeldGroups(), result.Merge.HeldReason())
+				respondSuperseded(c, result.Merge.HeldGroups(), result.Merge.HeldReason(), engErr)
 				return
 			}
 			var refusal *selfRunRefusal

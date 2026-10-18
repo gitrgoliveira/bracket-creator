@@ -518,6 +518,9 @@ func (e *Engine) recordLandedWriteHistory(h state.StoreTx, compID, matchID strin
 // result) still leaves its baseline in the score log, as it was sent: it
 // closes the match for everything stamped after it.
 func (e *Engine) recordSupersededWriteHistory(h state.StoreTx, compID, matchID string, result *state.MatchResult) {
+	// What the answer says of the match's turned-away taps is the server's,
+	// never a value the write carried (supersededBy reads these).
+	result.TurnedAway, result.ScoreVersion = nil, 0
 	if result.Merge != nil && result.Merge.ResultLocked != "" {
 		// Held by the result lock (K1): kept once, whatever the resends.
 		e.recordLockedHoldHistory(h, compID, matchID, result)
@@ -544,11 +547,19 @@ func (e *Engine) recordSupersededWriteHistory(h state.StoreTx, compID, matchID s
 			return
 		}
 	}
-	e.noteWriteBaseline(h, compID, matchID, writeBaseline{
+	note := e.noteWriteBaseline(h, compID, matchID, writeBaseline{
 		door: doorOf(result), stamp: rep.Stamp, writeID: result.WriteID, basis: result.Basis, session: result.WriteSession,
 		prefix: rep.LogPrefix, revSession: result.RevSession, rev: result.Rev, sent: sentBaseline(rep),
 		replay: mr,
 	})
+	if note == nil {
+		return
+	}
+	// The rival's own answer tells its device of a tap of its that is turned
+	// away, as a landed write's does (recordLandedWriteHistory), not only the
+	// push (stage 6 review 6).
+	result.ScoreVersion = note.match.ScoreVersion
+	result.TurnedAway = maps.Clone(note.match.TurnedAway)
 }
 
 // sentBaseline is the baseline the replay judged for a write, nil for a write

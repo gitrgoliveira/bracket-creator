@@ -116,4 +116,23 @@ func TestTurnedAway_AnAppliedTapAFinishNeverSawIsNamedOnEveryCopyOfTheMatch(t *t
 		}
 	}
 	require.Equal(t, domain.ScoreOutcomeBeforeBaseline, last, "the history's latest line for dev2's tap")
+
+	// dev2 then finishes on its own board, never having seen dev1's finish: a
+	// rival, held, and its own answer names dev2's tap (stage 6 review 6).
+	w = do(http.MethodPut, path+"/score", map[string]any{"sideA": "Alice", "sideB": "Bob", "sideAId": id["Alice"], "sideBId": id["Bob"],
+		"status": "completed", "winner": "Bob", "winnerId": id["Bob"], "ipponsA": []string{"M"}, "ipponsB": []string{"K"},
+		"changed": []string{state.GroupResult}, "modifiedAt": base + 300, "writeId": "rival", "session": "dev2",
+		"basis": map[string]any{"seen": seen + 1, "own": []string{"dev2.1"}, "seq": 1}})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var rival struct {
+		Applied      bool              `json:"applied"`
+		HeldReason   string            `json:"heldReason"`
+		TurnedAway   map[string]string `json:"turnedAway"`
+		ScoreVersion int               `json:"scoreVersion"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &rival))
+	require.False(t, rival.Applied, w.Body.String())
+	require.Equal(t, state.HeldReasonMatchClosed, rival.HeldReason)
+	require.Equal(t, want, rival.TurnedAway, "the rival's own answer")
+	require.Positive(t, rival.ScoreVersion)
 }

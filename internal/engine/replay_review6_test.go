@@ -56,3 +56,29 @@ func TestReplayScoring_TurnedAwayListsEveryTapOfADevice(t *testing.T) {
 		require.Contains(t, r.Match.TurnedAway, fmt.Sprintf("s1.%d", state.MaxTurnedAwayPerSession+10))
 	})
 }
+
+// A rival result (a later finish from a device that did not see the first
+// one) is answered superseded; its answer carries the match's turnedAway as
+// the log stands after it, so the rival's device is told of its own tap the
+// first result turned away on the answer itself, not only on the push
+// (stage 6 review 6, finding 5).
+func TestRivalResultAnswerCarriesTurnedAway(t *testing.T) {
+	for _, ko := range []bool{false, true} {
+		t.Run(fmt.Sprintf("knockout=%v", ko), func(t *testing.T) {
+			h := mmIndividual(t, ko)
+			tap := domain.ScoreEvent{ID: "r.1", Session: "r", Seq: 1, Stamp: mmT2, Kind: domain.ScoreIpponAdd, Side: "a", Letter: "K"}
+			require.Equal(t, "ev:"+domain.ScoreOutcomeApplied, pmEventOf(tap).run(h))
+			require.NotContains(t, pmFin(mmT1, wrTeamB, nil, []string{"M"}).run(h), "superseded")
+
+			w := mmRunning(h, mmT3, state.GroupPoints, state.GroupResult)
+			w.Status, w.Winner, w.IpponsA, w.IpponsB = state.MatchStatusCompleted, wrTeamA, []string{"K"}, nil
+			w.Basis = &state.ScoreBasis{Own: []string{tap.ID}}
+			w.TurnedAway = map[string]string{"forged": "matchClosed"}
+			err := h.write(w)
+			require.ErrorIs(t, err, ErrMatchSuperseded)
+			away, version := TurnedAwayOf(err)
+			require.Equal(t, map[string]string{tap.ID: domain.ScoreOutcomeMatchClosed}, away, "the rival's answer names its own tap, and never what the write carried")
+			require.Positive(t, version)
+		})
+	}
+}

@@ -5800,6 +5800,22 @@ components:
             see it, was held because the next knockout match had already been
             played or started. The stored result stands and the write is kept
             in the history.
+        turnedAway:
+          type: object
+          readOnly: true
+          additionalProperties:
+            type: string
+          description: >
+            Present on `superseded` when the write was still logged (a held
+            rival finish or decision) and the match then turns taps away: the
+            match's `turnedAway` as the log stands after the write (see
+            MatchResult.turnedAway), so the writing device is told of its own
+            tap on this answer and not only on the push.
+        scoreVersion:
+          type: integer
+          readOnly: true
+          description: >
+            Present with `turnedAway`: the match's `scoreVersion` it was read at.
 
     MatchHistoryEntry:
       type: object

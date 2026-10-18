@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"maps"
 	"slices"
 	"time"
 
@@ -281,6 +282,12 @@ type SupersededError struct {
 	// state.HeldReasonMatchClosed when a finish or a decision stamped before
 	// the write had already closed the match.
 	HeldReason string
+	// TurnedAway and ScoreVersion are the match's as the log stands after the
+	// write (a rival result is logged though held), so the writing device is
+	// told on its own answer of a tap of its that is turned away (stage 6
+	// review 6). Empty when the write logged nothing.
+	TurnedAway   map[string]string
+	ScoreVersion int
 }
 
 func (e *SupersededError) Error() string { return ErrMatchSuperseded.Error() }
@@ -291,9 +298,21 @@ func (e *SupersededError) Is(target error) bool { return target == ErrMatchSuper
 // supersededBy is the error a write whose every change was held returns.
 func supersededBy(result *state.MatchResult) error {
 	return &SupersededError{
-		Held:       result.Merge.HeldGroups(),
-		HeldReason: result.Merge.HeldReason(),
+		Held:         result.Merge.HeldGroups(),
+		HeldReason:   result.Merge.HeldReason(),
+		TurnedAway:   maps.Clone(result.TurnedAway),
+		ScoreVersion: result.ScoreVersion,
 	}
+}
+
+// TurnedAwayOf returns a superseded write's SupersededError.TurnedAway and
+// ScoreVersion, or nothing.
+func TurnedAwayOf(err error) (map[string]string, int) {
+	var se *SupersededError
+	if errors.As(err, &se) {
+		return se.TurnedAway, se.ScoreVersion
+	}
+	return nil, 0
 }
 
 // HeldReasonOf returns why a superseded write's groups were held (see

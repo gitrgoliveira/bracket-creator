@@ -12,8 +12,9 @@
 // - Each entry names the tab that noted it (`tab`). Every tab of the device
 //   sees the same copies of a match, so only one may tell a tap: the tab that
 //   noted it while that tab is alive (it writes its heartbeat to
-//   LANDED_TABS_KEY every LANDED_TAB_BEAT_MS), else the live tab with the
-//   lowest id. A tab that tells takes the entry out of the record first, so
+//   LANDED_TABS_KEY every LANDED_TAB_BEAT_MS, and as its page is hidden or
+//   shown: a hidden page is alive for LANDED_TAB_HIDDEN_LIVE_MS after its last
+//   beat, since its timers may stop), else the live tab with the lowest id. A tab that tells takes the entry out of the record first, so
 //   no later copy tells it again (one notice per tap per device). Nothing
 //   waits: a tap no tab may tell yet stays in the record for the next copy.
 // - Storage that refuses a write keeps the record in memory for that key;
@@ -37,6 +38,22 @@ export const LANDED_TAPS_MAX = 2000;
 export const LANDED_TAPS_SWEEP_MS = 5 * 60 * 1000;
 export const LANDED_TAB_BEAT_MS = 20_000;
 export const LANDED_TAB_LIVE_MS = 3 * LANDED_TAB_BEAT_MS;
+// A tab in the background (its page hidden) is alive this long after its last
+// beat: a browser slows or stops a hidden page's timers, so its beat cannot
+// say it is alive (stage 6 review 9, F6: a phone's backgrounded tab looked
+// gone after a minute, and a sign-out in another tab took its entries). It
+// beats as it is hidden and as it is shown again; a page that goes removes its
+// beat (pagehide), so only a tab killed in the background waits this long.
+export const LANDED_TAB_HIDDEN_LIVE_MS = 30 * 60 * 1000;
+
+// Whether a tab's beat says it is alive at t: a number (a visible tab's beat,
+// and every beat an older page wrote) or { at, hidden }.
+function beatAlive(beat, t) {
+    if (beat && typeof beat === 'object') {
+        return t - Number(beat.at) < (beat.hidden ? LANDED_TAB_HIDDEN_LIVE_MS : LANDED_TAB_LIVE_MS);
+    }
+    return t - Number(beat) < LANDED_TAB_LIVE_MS;
+}
 
 const SEP = '\u001f';
 
@@ -122,7 +139,7 @@ export function createLandedTaps({ storage, now = () => Date.now(), tab }) {
         const tabs = readObj(LANDED_TABS_KEY);
         const t = now();
         const live = new Set([tab]);
-        for (const id of Object.keys(tabs)) if (t - Number(tabs[id]) < LANDED_TAB_LIVE_MS) live.add(id);
+        for (const id of Object.keys(tabs)) if (beatAlive(tabs[id], t)) live.add(id);
         return live;
     };
     const mayTell = (rec, live) => {
@@ -132,16 +149,38 @@ export function createLandedTaps({ storage, now = () => Date.now(), tab }) {
         return [...live].sort()[0] === tab;
     };
 
-    // Rewrites every match record through keep(rec) and heals the index:
-    // a record left empty is removed, and the index lists what remains.
+    // Rewrites every match record through keep(objs) and heals the index: a
+    // record left empty is removed, and the index lists what remains. Only
+    // what keep took out is written: each changed record is read again just
+    // before its write and loses exactly those entries, so an entry another
+    // tab noted while this pass was reading is kept (stage 6 review 9, F6).
     const rewriteAll = (keep) => {
         const index = allKeys();
         const objs = new Map();
         for (const key of index) objs.set(key, readObj(key));
+        const before = new Map();
+        for (const [key, obj] of objs) before.set(key, { ...obj });
         const changed = keep(objs);
-        for (const key of changed) writeObj(key, objs.get(key));
+        const emptied = new Set();
+        for (const key of changed) {
+            const kept = objs.get(key) || {};
+            const was = before.get(key) || {};
+            const fresh = readObj(key);
+            for (const id of Object.keys(was)) {
+                if (id in kept) continue;
+                // Taken out by this pass: gone, unless another tab noted it
+                // again meanwhile (a later `at`).
+                if (fresh[id] && Number(fresh[id].at) === Number(was[id] && was[id].at)) delete fresh[id];
+            }
+            writeObj(key, fresh);
+            if (!Object.keys(fresh).length) emptied.add(key);
+        }
         const live = new Set();
-        for (const [key, obj] of objs) if (Object.keys(obj).length) live.add(key);
+        for (const key of allKeys()) {
+            if (emptied.has(key)) continue;
+            const obj = objs.has(key) && !changed.has(key) ? objs.get(key) : readObj(key);
+            if (Object.keys(obj).length) live.add(key);
+        }
         writeIndex(live);
     };
     // The sweep: entries older than LANDED_TAPS_KEEP_MS go from every match
@@ -180,11 +219,15 @@ export function createLandedTaps({ storage, now = () => Date.now(), tab }) {
         });
     };
 
-    const beat = () => {
+    // beat({ hidden }) says whether this tab's page is hidden; a beat with no
+    // word keeps what was said last.
+    let hiddenNow = false;
+    const beat = (opts) => {
+        if (opts && typeof opts.hidden === 'boolean') hiddenNow = opts.hidden;
         const tabs = readObj(LANDED_TABS_KEY);
         const t = now();
-        for (const id of Object.keys(tabs)) if (t - Number(tabs[id]) >= LANDED_TAB_LIVE_MS) delete tabs[id];
-        tabs[tab] = t;
+        for (const id of Object.keys(tabs)) if (id !== tab && !beatAlive(tabs[id], t)) delete tabs[id];
+        tabs[tab] = hiddenNow ? { at: t, hidden: true } : t;
         writeObj(LANDED_TABS_KEY, tabs);
         if (t - lastSweep >= LANDED_TAPS_SWEEP_MS) sweep();
     };

@@ -590,7 +590,7 @@ function foldBout(m, e, opts, ctx) {
     // it only a fighter picked there does (the pairing added again), since a
     // bare strike would make a bout with no fighters (engine.foldBout).
     const tomb = ctx.stamps[`bout:${e.pos}`] || 0;
-    if (!createsMissingRow(opts, e.pos) || tomb >= (e.stamp || 0) || (tomb > 0 && e.kind !== BOUT_FIGHTER)) return NO_TARGET;
+    if (!createsMissingRow(opts, e.pos) || tomb >= (e.stamp || 0) || (tomb > 0 && opts.kachinuki && e.kind !== BOUT_FIGHTER)) return NO_TARGET;
     rows = withEmptyBoutRow(rows, e.pos);
     idx = rows.findIndex((r) => r && r.position === e.pos);
   }

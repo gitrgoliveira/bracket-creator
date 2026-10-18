@@ -61,7 +61,7 @@ import { isBarredMatch, sideBarredByDecision, involvesCompetitor } from './ineli
 // header. The same rule is why winnerSideLR and teamMatchMarks come from the
 // side_marks.jsx leaf below, not from bracket.jsx.
 import { BarredMatchNotice } from './barred_match_notice.jsx';
-import { holdsUnsaved, confirmDiscardUnsaved, LEAVE_MATCH_ANYWAY, UNSAVED_ENTRIES_DISCARDED } from './unsaved_entries.jsx';
+import { holdsUnsaved, confirmLeave, leaveThen, discardUnsaved, UNSAVED_ENTRIES_DISCARDED } from './unsaved_entries.jsx';
 // The winner cue and a withdrawn team's mark, imported from their leaf (its one
 // import is competitor_identity.jsx), never read off `window`: a missing global
 // used to paint nothing, with no error to say why.
@@ -571,6 +571,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // first (leaveEditorConfirmed), and Send back to queue says so in its own
     // confirm.
     const editorUnsavedRef = useRefSh(null);
+    // The latest render's pick and correct and the court's matches, for a tap
+    // judged again once the operator has answered the unsaved-entries
+    // question (pickMatch, correctMatch).
+    const latestRef = useRefSh(null);
     useEffectSh(() => {
         if (typeof window.scrollTo === "function") window.scrollTo(0, 0);
         return () => { mountedRef.current = false; };
@@ -1222,12 +1226,17 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // Refuse a tap: remember it against the match that blocks it, and toast.
     // leaveEditorConfirmed: true when the console may unmount the editor or put
     // another match in it: nothing unsaved, or the operator chose Discard
-    // entries (R1). With nothing unsaved it answers at once.
-    const leaveEditorConfirmed = async () => {
-        if (!holdsUnsaved(editorUnsavedRef)) return true;
-        const ok = await confirmDiscardUnsaved(editorUnsavedRef, LEAVE_MATCH_ANYWAY);
-        return ok && mountedRef.current;
-    };
+    // entries (R1). With nothing unsaved it answers `true` at once.
+    const leaveEditorConfirmed = () => confirmLeave(editorUnsavedRef, () => mountedRef.current);
+    // leaving: a page exit (the Dashboard crumb, Sign out, Public viewer, the
+    // court switcher) behind the same question; with nothing unsaved it goes
+    // in the same tick (stage 5 review 9, M1).
+    const leaving = (go) => (...args) => leaveThen(editorUnsavedRef, () => go(...args), () => mountedRef.current);
+    // The editor shows the match a host confirm drops (Send back to queue, a
+    // court move) and holds unsaved entries: the confirm says they are
+    // discarded, and drops them on confirm (m1).
+    const editorUnsavedFor = (compId, matchId) => !!selectedMatch && selectedMatch.compId === compId
+        && selectedMatch.id === matchId && holdsUnsaved(editorUnsavedRef);
     const refuseTap = (m, why) => {
         const blocker = refusalBlocker(why);
         setRefusedTap({
@@ -1626,7 +1635,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     //     on its row, also BEFORE the defer, so the running bout is not sent
     //     back for a start that never happens. A repeat for the match already
     //     being started is silent: it is on its way.
-    const pickMatch = async (m) => {
+    const pickMatch = async (m, asked = false) => {
         if (!m || m.status === "completed") return;
         if (openCorrection) {
             refuseTap(m, "correcting");
@@ -1638,8 +1647,18 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             return;
         }
         // A pick that puts another match in the editor asks first over its
-        // unsaved entries (R1).
-        if (selectedMatch && matchKey(selectedMatch) !== matchKey(m) && holdsUnsaved(editorUnsavedRef) && !(await leaveEditorConfirmed())) return;
+        // unsaved entries (R1). The court may move while the operator answers
+        // (another device finishes the running bout, a start lands), so the
+        // pick is judged again from the top on the court as it is then, by
+        // the latest render's pickMatch, never on this tap's copy (stage 5
+        // review 9, m3).
+        if (!asked && selectedMatch && matchKey(selectedMatch) !== matchKey(m) && holdsUnsaved(editorUnsavedRef)) {
+            if (!(await leaveEditorConfirmed())) return;
+            const latest = latestRef.current;
+            const fresh = latest.allMatches.find((x) => matchKey(x) === matchKey(m));
+            if (fresh) await latest.pickMatch(fresh, true);
+            return;
+        }
         setRefusedTap(null);
         // A scheduled pick is a start in flight from here, before the defer below
         // awaits: a second Start tapped during that wait is refused, and does not
@@ -1726,13 +1745,20 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // score re-write (other formats), same as the Scores page. A reopen makes
     // the match the court's live bout and ends the correction (the effect
     // beside correctingMatch).
-    const correctMatch = async (m) => {
+    const correctMatch = async (m, asked = false) => {
         if (!m || m.status !== "completed") return;
         if (liveBout) {
             refuseTap(m, "running");
             return;
         }
-        if (selectedMatch && matchKey(selectedMatch) !== matchKey(m) && holdsUnsaved(editorUnsavedRef) && !(await leaveEditorConfirmed())) return;
+        // Judged again after the ask on the court as it is then (m3, as pickMatch).
+        if (!asked && selectedMatch && matchKey(selectedMatch) !== matchKey(m) && holdsUnsaved(editorUnsavedRef)) {
+            if (!(await leaveEditorConfirmed())) return;
+            const latest = latestRef.current;
+            const fresh = latest.allMatches.find((x) => matchKey(x) === matchKey(m));
+            if (fresh) latest.correctMatch(fresh, true);
+            return;
+        }
         setRefusedTap(null);
         setCorrectingKey(matchKey(m));
     };
@@ -1747,6 +1773,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // End the correction of the match keyed `key` only if it is still the one
     // open: a write's answer may arrive after another correction was opened.
     const endCorrectionOf = (key) => { setCorrectingKey((k) => (k === key ? null : k)); };
+    latestRef.current = { pickMatch, correctMatch, allMatches };
 
     // Call to court: optional. Broadcasts a tournament announcement so the
     // competitors (and anyone watching the public app) are notified they're
@@ -1901,13 +1928,17 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         // The editor shows this match: its unsaved entries go with the send
         // back, and the confirm says so (R1, the editor's local Mark draw or
         // hantei pick of a running match included).
-        const unsaved = !!selectedMatch && matchKey(selectedMatch) === matchKey(m) && holdsUnsaved(editorUnsavedRef);
+        const unsaved = editorUnsavedFor(m.compId, m.id);
         setPendingRevert({ compId: m.compId, matchId: m.id, label: confirmMatchLabel(m), seen: m.scoreVersion, unsaved });
     };
     const confirmRevert = async () => {
         if (!pendingRevert || reverting) return;
         if (!window.API || typeof window.API.revertMatchToQueue !== "function") return;
         const { compId, matchId, label } = pendingRevert;
+        // The confirm said the editor's unsaved entries are discarded: they go
+        // now, as Discard entries does everywhere (m1), not once the feed
+        // shows the match queued.
+        if (editorUnsavedFor(compId, matchId)) discardUnsaved(editorUnsavedRef);
         setReverting(true);
         try {
             // bc-evts: the outbox's, never awaited: the console moves on at
@@ -1945,11 +1976,14 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // once the operator confirms.
     const requestMoveCourt = (compId, matchId, toCourt) => {
         const mm = sorted.find((x) => x.compId === compId && x.id === matchId);
-        setPendingMove({ compId, matchId, to: toCourt, label: mm ? confirmMatchLabel(mm) : "this match", from: (mm && mm.court) || court });
+        // A correction moved off this court leaves the editor: its unsaved
+        // entries go with it, and the confirm says so (R1).
+        setPendingMove({ compId, matchId, to: toCourt, label: mm ? confirmMatchLabel(mm) : "this match", from: (mm && mm.court) || court, unsaved: editorUnsavedFor(compId, matchId) });
     };
     const confirmMoveCourt = async () => {
         if (!pendingMove || movingCourt) return;
         const { compId, matchId, to } = pendingMove;
+        if (editorUnsavedFor(compId, matchId)) discardUnsaved(editorUnsavedRef);
         setMovingCourt(true);
         try {
             // The host hands the move to the outbox and answers at once with
@@ -1980,9 +2014,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
     return (
         <div className="app">
-            <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} hideRunningStrip />
+            <AdminTopbar onLogout={leaving(onLogout)} onViewerMode={leaving(onViewerMode)} beforeLeave={leaveEditorConfirmed} tournament={tournament} hideRunningStrip />
             <div className="page page--wide">
-                <Breadcrumbs items={[{ label: "Dashboard", onClick: onBack }, { label: `Shiaijo ${court}` }]} />
+                <Breadcrumbs items={[{ label: "Dashboard", onClick: leaving(onBack) }, { label: `Shiaijo ${court}` }]} />
                 <div className="page-head page-head--oneline">
                     {/* Title, court switcher and Refresh on ONE row, no subtitle:
                         this is the court's working surface and every pixel above
@@ -2000,7 +2034,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 <select
                                     className="shiaijo-title-select__native"
                                     value={court}
-                                    onChange={(e) => onSwitchCourt(e.target.value)}
+                                    onChange={(e) => {
+                                        // The switch asks first over unsaved entries (R1):
+                                        // the picker shows this court until it goes.
+                                        const to = e.target.value;
+                                        e.target.value = court;
+                                        leaving(onSwitchCourt)(to);
+                                    }}
                                     aria-label="Switch court"
                                 >
                                     {courts.map((c) => <option key={c} value={c}>Shiaijo {c}</option>)}
@@ -2065,7 +2105,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         <h3>Unknown shiaijo "{court}"</h3>
                         <p style={{ fontSize: 13, color: "var(--ink-3)" }}>
                             This court isn't part of the tournament: it may have been renamed or removed.{" "}
-                            <button type="button" onClick={onBack} className="linklike">Back to dashboard</button>.
+                            <button type="button" onClick={leaving(onBack)} className="linklike">Back to dashboard</button>.
                         </p>
                         {/* The title-overlay court switcher is gated on courtKnown, so an
                             unknown court would otherwise strand the operator. Offer a plain
@@ -2073,7 +2113,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         {courts.length > 0 && (
                             <label className="empty__action">
                                 Go to a court:{" "}
-                                <select className="input" value="" onChange={(e) => { if (e.target.value) onSwitchCourt(e.target.value); }} aria-label="Switch to a valid court">
+                                <select className="input" value="" onChange={(e) => { if (e.target.value) leaving(onSwitchCourt)(e.target.value); }} aria-label="Switch to a valid court">
                                     <option value="" disabled>Choose…</option>
                                     {courts.map((c) => <option key={c} value={c}>Shiaijo {c}</option>)}
                                 </select>
@@ -2528,6 +2568,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         <p className="shiaijo-move-confirm__body">
                             <strong>{pendingMove.label}</strong> leaves Shiaijo {pendingMove.from} and joins
                             the queue on Shiaijo {pendingMove.to}.
+                            {pendingMove.unsaved ? ` ${UNSAVED_ENTRIES_DISCARDED}` : ""}
                         </p>
                         <div className="shiaijo-move-confirm__actions">
                             <button type="button" className="btn" onClick={() => setPendingMove(null)} disabled={movingCourt}>

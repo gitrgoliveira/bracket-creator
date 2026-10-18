@@ -4393,7 +4393,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
     // A removed withdrawal is unsaved until Save correction sends it.
     || removingWithdrawal;
   unsavedRef.current = isDirty;
-  usePublishUnsaved(hostUnsavedRef, unsavedRef);
+  usePublishUnsaved(hostUnsavedRef, unsavedRef, onDiscardUnsaved);
   // D1: what the sheet's draft would tap, as typed over and as held.
   const encounterEnchoOf = (n) => (kachinukiEncounter ? 0 : n);
   // Only while the sheet shows a draft: under its own representative-bout

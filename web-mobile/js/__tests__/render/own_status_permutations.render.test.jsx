@@ -10,7 +10,10 @@
 //     running again; a landed one the feed shows, or never shows running;
 //   - the feed's moves: another device starts or reopens the match, restamps
 //     it, finishes it or sends it back, or nothing;
-//   - a draft typed before, or none; a kept draft saved or discarded;
+//   - a draft typed before, or none; a kept draft saved or discarded, or
+//     any draft still the operator's dropped by the host through the discard
+//     the editor publishes (the court console's Send back to queue over
+//     unsaved entries, stage 5 review 9: at once, no note, nothing sent);
 // is driven through the REAL individual, engi and team editors against a fake
 // server that applies only the groups a write NAMES (`changed`), as the real
 // one does, and after every step these hold:
@@ -395,7 +398,28 @@ async function run(fam, sc) {
   for (const name of [].concat(sc.after)) foreign(name);
   // The operator settles what is left: a kept draft saved or discarded, or a
   // scheduled draft started again.
-  if (kept()) {
+  if (sc.final === 'host' && draft) {
+    // The host drops the editor's entries through the discard the editor
+    // publishes beside its unsaved state (the court console's Send back to
+    // queue over unsaved entries, R1; stage 5 review 9, m1): they go at once,
+    // with no note, nothing sent, and the board the server's.
+    const h = hostRef.current;
+    if (!h || typeof h.discard !== 'function') bad.push('final host: the editor publishes no discard');
+    else {
+      const sent = sentCount();
+      const taps = API.recordTap.mock.calls.length;
+      await act(async () => { h.discard(); });
+      await flush();
+      draft = false; mustLand = false;
+      if (kept()) bad.push('final host: the kept draft stayed after the host discarded it');
+      if (dropped()) bad.push('final host: a dropped note after the host discarded the draft');
+      if (hostRef.current && hostRef.current()) bad.push('final host: the editor still holds unsaved entries');
+      if (sentCount() !== sent || API.recordTap.mock.calls.length !== taps) bad.push('final host: the discard sent a write');
+      const shown = fam.shown(r.container);
+      if (!sameMarks(shown, fmarks(fam, server))) bad.push(`final host: board ${JSON.stringify(shown)} is not the server's ${JSON.stringify(fmarks(fam, server))}`);
+      check('final host discard');
+    }
+  } else if (kept()) {
     if (sc.final === 'decide') {
       // The operator records a kiken over the kept draft and chooses Discard
       // entries (R1, stage 5 review 8): the kept draft goes at once, and the
@@ -641,7 +665,7 @@ describe('two own status writes over one move: every combination (team)', () => 
 
 function* scenarios(fam) {
   for (const draft of [false, true]) {
-    for (const final of draft ? (fam === ENGI ? ['save', 'discard'] : ['save', 'discard', 'decide']) : ['save']) {
+    for (const final of draft ? (fam === ENGI ? ['save', 'discard', 'host'] : ['save', 'discard', 'decide', 'host']) : ['save']) {
       // No own write: only the feed moves.
       for (const after of [['start'], ['start', 'finish'], ['start', 'sendback'], ['restamp'], ['none']]) {
         yield { start: 'scheduled', draft, final, writes: [], after };

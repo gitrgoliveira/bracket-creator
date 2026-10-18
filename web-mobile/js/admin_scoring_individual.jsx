@@ -987,7 +987,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   unsavedRef.current = isDirty;
   // The host asks it before it leaves or swaps this editor (R1); the team and
   // engi editors this one hands a match to publish their own.
-  usePublishUnsaved(isTeam || isEngi ? null : hostUnsavedRef, unsavedRef);
+  usePublishUnsaved(isTeam || isEngi ? null : hostUnsavedRef, unsavedRef, onDiscardUnsaved);
   // The scoreline half of the same rule, declared HERE because the hook needs
   // isDirty: it reads the value from the render BEFORE the server change (see
   // useAdoptFromServer). It self-corrects: a re-seed makes the next render's

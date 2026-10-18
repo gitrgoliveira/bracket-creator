@@ -199,7 +199,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
   // Only a draft can be unsaved: a running match's counts are taps.
   const isDirty = !tapMode && (draftA !== initialFlagsA || draftB !== initialFlagsB);
   // The host asks it before it leaves or swaps this editor (R1).
-  usePublishUnsaved(hostUnsavedRef, isDirty);
+  usePublishUnsaved(hostUnsavedRef, isDirty, () => discardEntries());
   own.note({ a: initialFlagsA, b: initialFlagsB }, { a: draftA, b: draftB });
   // Follow a flag count recorded on another device — the same rule the kendo
   // editors follow, because this is the same rule: an engi match has ONE result
@@ -234,6 +234,10 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
   // (draft_taps.jsx), against the counts they were typed over; Discard drops
   // them. Either way the board shows from now on.
   const leaveKeptDraft = () => { takeServerFlags(); own.release(); };
+  // Discard entries from the host (R1, stage 5 review 9): the counts take the
+  // server's at once and the owner forgets the draft, as the individual and
+  // team editors' own Discard entries does.
+  const discardEntries = () => { takeServerFlags(); own.release(); own.discardDraft(); };
   const saveKeptDraft = () => {
     const board = tapBoardOf(m, ENGI_FOLD);
     for (const ev of engiDraftTaps(own.kept.base, { a: draftA, b: draftB })) {

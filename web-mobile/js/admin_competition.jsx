@@ -14,6 +14,7 @@
 import './admin_competition_overview.jsx';
 import { effectiveDrawPlayers } from './qualifier_preview.jsx';
 import { checkInApplies } from './competition_shape.jsx';
+import { leaveThen, confirmLeave } from './unsaved_entries.jsx';
 export { formatCompMinutes } from './admin_competition_settings.jsx';
 export { buildRunningIpponResult, loadScoreboardPoints } from './admin_competition_bracket.jsx';
 export {
@@ -61,6 +62,14 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   // unmounts and setStarting(false) in finally targets a dead component.
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
+  // The Bracket section's inline score editor publishes its unsaved entries
+  // here (AdminBracket's hostUnsavedRef): every way off the section or the
+  // page asks first over them (R1, stage 5 review 9, M1), and with nothing
+  // unsaved goes in the same tick.
+  const editorUnsavedRef = useRefA(null);
+  const alive = () => mountedRef.current;
+  const leaving = (go) => (...args) => { if (go) leaveThen(editorUnsavedRef, () => go(...args), alive); };
+  const toSection = leaving(onSection);
 
   // Seed-placement warnings for the generated draw. The seeding rules cannot
   // refuse a draw: a constraint the configuration cannot satisfy gives way and
@@ -336,15 +345,15 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
 
   return (
     <div className="app">
-      <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={t} />
+      <AdminTopbar onLogout={leaving(onLogout)} onViewerMode={leaving(onViewerMode)} beforeLeave={() => confirmLeave(editorUnsavedRef, alive)} tournament={t} />
       {/* 1400px keeps every section's lines readable, except the Bracket's:
           a tree needs 180px per round, so a 33 to 64 draw (six rounds) is
           wider than the capped page leaves it and the page takes the whole
           window there instead (operator decision). */}
       <div className="page page--wide" style={{ maxWidth: section === "bracket" ? "none" : 1400 }}>
         <Breadcrumbs items={[
-          { label: "Dashboard", onClick: onBack },
-          { label: c.name, onClick: section === "overview" ? null : () => onSection("overview") },
+          { label: "Dashboard", onClick: leaving(onBack) },
+          { label: c.name, onClick: section === "overview" ? null : () => toSection("overview") },
           currentItem && section !== "overview" ? { label: currentItem.label } : null
         ].filter(Boolean)} />
         <div className="page-head">
@@ -399,11 +408,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                       window where generateDraw has flipped status to draw-ready
                       but its setGenerating(false) hasn't run yet: without it
                       these buttons would be momentarily clickable mid-generate. */}
-                  <button type="button" className="btn btn--ghost btn--danger" onClick={discardDraw} disabled={navBusy}>
+                  <button type="button" className="btn btn--ghost btn--danger" onClick={leaving(discardDraw)} disabled={navBusy}>
                     {discarding && <span className="spinner" />}
                     {discarding ? "Discarding…" : "Discard draw"}
                   </button>
-                  <button type="button" className="btn btn--primary" onClick={start} disabled={navBusy}>
+                  <button type="button" className="btn btn--primary" onClick={leaving(start)} disabled={navBusy}>
                     {starting && <span className="spinner" />}
                     {starting ? "Starting…" : "Start competition →"}
                   </button>
@@ -457,7 +466,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
                        the `section` captured when it started. Navigating
                        mid-flight could strand the UI on a section that
                        disappears once status changes. */
-                    <button type="button" key={it.id} className={section === it.id ? "is-active" : ""} disabled={navBusy} onClick={() => onSection(it.id)}>{it.label}</button>
+                    <button type="button" key={it.id} className={section === it.id ? "is-active" : ""} disabled={navBusy} onClick={() => toSection(it.id)}>{it.label}</button>
                   ))}
                 </div>
               ))}
@@ -468,13 +477,13 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
             <div className="side-nav">
               <div className="side-nav__sec">Other competitions</div>
               {otherComps.map((cc) => (
-                <button type="button" key={cc.id} disabled={navBusy} onClick={() => onOpenCompetition(cc.id)}>{cc.name}</button>
+                <button type="button" key={cc.id} disabled={navBusy} onClick={() => leaving(onOpenCompetition)(cc.id)}>{cc.name}</button>
               ))}
               {otherComps.length === 0 && (
                 <div className="side-nav__hint" style={{ fontSize: 12, color: "var(--ink-3)", padding: "4px 8px" }}>No other competitions yet.</div>
               )}
               {onCreateCompetition && (
-                <button type="button" className="side-nav__add" disabled={navBusy} onClick={onCreateCompetition} style={{ fontWeight: 600, color: "var(--accent)" }}>+ Add competition</button>
+                <button type="button" className="side-nav__add" disabled={navBusy} onClick={leaving(onCreateCompetition)} style={{ fontWeight: 600, color: "var(--accent)" }}>+ Add competition</button>
               )}
             </div>
           </div>
@@ -498,7 +507,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
               />
             )}
             {section === "pools" && <AdminPools c={c} pools={pools} poolMatches={poolMatches} standings={standings} tweaks={tweaks} onEditScore={onEditScore} password={password} />}
-            {section === "bracket" && <AdminBracket c={c} t={t} bracket={bracket} onMoveCourt={onMoveCourt} onEditScore={onEditScore} tweaks={tweaks} password={password} />}
+            {section === "bracket" && <AdminBracket c={c} t={t} bracket={bracket} onMoveCourt={onMoveCourt} onEditScore={onEditScore} tweaks={tweaks} password={password} hostUnsavedRef={editorUnsavedRef} />}
             {section === "scores" && !isDrawReady && <AdminScoreEditor c={c} t={t} onEditScore={onEditScore} onMoveCourt={onMoveCourt} restrictToCompId={c.id} password={password} showToast={showToast} />}
             {section === "export" && <AdminExport c={c} t={t} password={password} showToast={showToast} />}
           </div>

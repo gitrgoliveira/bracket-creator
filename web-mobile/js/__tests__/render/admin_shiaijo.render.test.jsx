@@ -20,11 +20,14 @@ import { START_SUPERSEDED_MESSAGE } from '../../start_match.jsx';
 // below), while the rendered markup stays exactly what the pre-existing
 // tests already query (data-testid="score-editor" data-match=...).
 const probe = { props: null };
+// The latest topbar and breadcrumb props, so a test can take the console's
+// own exits (Sign out, Public viewer, the Dashboard crumb).
+const chrome = { topbar: null, crumbs: null };
 
 const STUBBED_GLOBALS = {
   // MODULE-EVAL-TIME: captured at import; set before dynamic import below
-  AdminTopbar: ({ children }) => <div data-testid="topbar">{children}</div>,
-  Breadcrumbs: () => null,
+  AdminTopbar: (props) => { chrome.topbar = props; return <div data-testid="topbar">{props.children}</div>; },
+  Breadcrumbs: (props) => { chrome.crumbs = props; return null; },
   // Carries the id of the match the panel is scoring, so a test can tell
   // WHICH match the console selected (captured at import, so it cannot be
   // swapped per test).
@@ -1570,18 +1573,20 @@ async function mountCourt(initial, opts = {}) {
   window.API.subscribeToEvents = () => () => {};
   window.API.revertMatchToQueue = vi.fn().mockResolvedValue(true);
   const showToast = vi.fn();
+  const exits = { onBack: vi.fn(), onLogout: vi.fn(), onViewerMode: vi.fn(), onSwitchCourt: vi.fn() };
   let utils;
   await act(async () => {
     utils = render(
-      <AdminShiaijoPage tournament={makeMinimalTournament()} court="A" onBack={vi.fn()} onEditScore={opts.onEditScore || vi.fn()}
-        onMoveCourt={vi.fn()} onLogout={vi.fn()} onViewerMode={vi.fn()} password="" showToast={showToast}
-        tweaks={{}} onSwitchCourt={vi.fn()} />
+      <AdminShiaijoPage tournament={makeMinimalTournament()} court="A" onBack={exits.onBack} onEditScore={opts.onEditScore || vi.fn()}
+        onMoveCourt={vi.fn()} onLogout={exits.onLogout} onViewerMode={exits.onViewerMode} password="" showToast={showToast}
+        tweaks={{}} onSwitchCourt={exits.onSwitchCourt} />
     );
   });
   return {
     utils,
     feed,
     showToast,
+    exits,
     editorMatch: () => { const el = utils.queryByTestId('score-editor'); return el ? el.getAttribute('data-match') : null; },
     refresh: async () => { await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); }); },
     restore: () => {
@@ -2966,6 +2971,136 @@ describe('the console asks before it drops the editor\'s unsaved entries (R1)', 
       dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
       expect(dialog.textContent).not.toContain('Your unsaved entries will be discarded.');
       expect(dialog.textContent).toContain('The score already saved is kept');
+    } finally { c.restore(); }
+  });
+
+  // Stage 5 review 9, m1: the confirm says the entries are discarded, so the
+  // editor drops them at once (its published discard), as Discard entries
+  // does everywhere else, never only once the feed shows the match queued.
+  it('Send back to queue over unsaved entries tells the editor to drop them, and only then', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { modifiedAt: 1000 })]);
+    const sendBack = async () => {
+      await act(async () => { c.utils.getByRole('button', { name: /send back to queue/i }).click(); });
+      const dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
+      await act(async () => { dialog.querySelector('.btn--primary').click(); });
+    };
+    try {
+      const discard = vi.fn();
+      const probeFn = () => true;
+      probeFn.discard = discard;
+      probe.props.hostUnsavedRef.current = probeFn;
+      await sendBack();
+      expect(window.API.revertMatchToQueue).toHaveBeenCalledTimes(1);
+      expect(discard).toHaveBeenCalledTimes(1);
+      const quiet = vi.fn();
+      const clean = () => false;
+      clean.discard = quiet;
+      probe.props.hostUnsavedRef.current = clean;
+      await sendBack();
+      expect(quiet).not.toHaveBeenCalled();
+    } finally { c.restore(); }
+  });
+
+  it('moving the correction to another court says the unsaved entries are discarded, and drops them on confirm', async () => {
+    const c = await mountCourt([courtMatch('m1', 'completed', { modifiedAt: 1000 }), courtMatch('m2', 'scheduled')]);
+    try {
+      await tapCorrect(c, 'Aka m1');
+      const discard = vi.fn();
+      const probeFn = () => true;
+      probeFn.discard = discard;
+      probe.props.hostUnsavedRef.current = probeFn;
+      const row = [...c.utils.container.querySelectorAll('.shiaijo-qrow--complete')].find((r) => r.textContent.includes('Aka m1'));
+      await act(async () => { within(row).getByTestId('move-to-B').click(); });
+      const dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
+      expect(dialog.textContent).toContain('Your unsaved entries will be discarded.');
+      await act(async () => { dialog.querySelector('.btn--primary').click(); });
+      expect(discard).toHaveBeenCalledTimes(1);
+    } finally { c.restore(); }
+  });
+
+  // Stage 5 review 9, M1: every console exit that drops the editor asks the
+  // same question: the court switcher, the Dashboard crumb, Sign out and
+  // Public viewer. With nothing unsaved each goes in the same tick.
+  it('the court switcher asks first; Keep entries stays on this court', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { modifiedAt: 1000 })]);
+    try {
+      const sel = c.utils.container.querySelector('.shiaijo-title-select__native');
+      holdUnsaved(true);
+      window.confirmDialog = vi.fn().mockResolvedValue(false);
+      await act(async () => { fireEvent.change(sel, { target: { value: 'B' } }); });
+      expect(warnings().map(([o]) => o.message)).toEqual(['Your unsaved entries will be discarded. Leave this match anyway?']);
+      expect(c.exits.onSwitchCourt).not.toHaveBeenCalled();
+      expect(sel.value).toBe('A');
+      window.confirmDialog = vi.fn().mockResolvedValue(true);
+      await act(async () => { fireEvent.change(sel, { target: { value: 'B' } }); });
+      expect(c.exits.onSwitchCourt).toHaveBeenCalledWith('B');
+      holdUnsaved(false);
+      window.confirmDialog = vi.fn().mockResolvedValue(false);
+      fireEvent.change(sel, { target: { value: 'B' } });
+      expect(c.exits.onSwitchCourt).toHaveBeenCalledTimes(2);
+      expect(warnings()).toHaveLength(0);
+    } finally { c.restore(); }
+  });
+
+  it('the Dashboard crumb, Sign out and Public viewer ask first', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { modifiedAt: 1000 })]);
+    try {
+      const exits = [
+        ['onBack', () => chrome.crumbs.items[0].onClick()],
+        ['onLogout', () => chrome.topbar.onLogout()],
+        ['onViewerMode', () => chrome.topbar.onViewerMode()],
+      ];
+      for (const [name, take] of exits) {
+        holdUnsaved(true);
+        window.confirmDialog = vi.fn().mockResolvedValue(false);
+        await act(async () => { take(); });
+        expect(warnings(), name).toHaveLength(1);
+        expect(c.exits[name], name).not.toHaveBeenCalled();
+        window.confirmDialog = vi.fn().mockResolvedValue(true);
+        await act(async () => { take(); });
+        expect(c.exits[name], name).toHaveBeenCalledTimes(1);
+        holdUnsaved(false);
+        window.confirmDialog = vi.fn().mockResolvedValue(false);
+        take();
+        expect(c.exits[name], name).toHaveBeenCalledTimes(2);
+        expect(warnings(), name).toHaveLength(0);
+      }
+    } finally { c.restore(); }
+  });
+
+  // Stage 5 review 9, m3: the guards are judged again once the operator has
+  // answered, on the court as it is then, never on the copy from the tap.
+  it('a pick over unsaved entries is judged on the court as it is after the ask', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { modifiedAt: 1000 }), courtMatch('m2', 'scheduled')]);
+    try {
+      holdUnsaved(true);
+      let answer;
+      window.confirmDialog = vi.fn(() => new Promise((res) => { answer = res; }));
+      const card = c.utils.container.querySelector('.shiaijo-upnext__card');
+      const start = [...card.querySelectorAll('button')].find((b) => /start match/i.test(b.textContent));
+      await act(async () => { start.click(); });
+      expect(warnings()).toHaveLength(1);
+      // Another device finishes the running bout while the question is open.
+      c.feed.current = [courtMatch('m1', 'completed', { modifiedAt: 2000 }), courtMatch('m2', 'scheduled')];
+      await c.refresh();
+      await act(async () => { answer(true); });
+      expect(window.API.revertMatchToQueue).not.toHaveBeenCalled();
+    } finally { c.restore(); }
+  });
+
+  it('a Correct over unsaved entries is refused when a bout started while it asked', async () => {
+    const c = await mountCourt([courtMatch('m1', 'completed', { modifiedAt: 1000 }), courtMatch('m3', 'completed', { modifiedAt: 900 }), courtMatch('m2', 'scheduled')]);
+    try {
+      await tapCorrect(c, 'Aka m1');
+      holdUnsaved(true);
+      let answer;
+      window.confirmDialog = vi.fn(() => new Promise((res) => { answer = res; }));
+      await tapCorrect(c, 'Aka m3');
+      expect(warnings()).toHaveLength(1);
+      c.feed.current = [courtMatch('m1', 'completed', { modifiedAt: 1000 }), courtMatch('m3', 'completed', { modifiedAt: 900 }), courtMatch('m2', 'running', { modifiedAt: 3000 })];
+      await c.refresh();
+      await act(async () => { answer(true); });
+      expect(c.editorMatch()).not.toBe('m3');
     } finally { c.restore(); }
   });
 });

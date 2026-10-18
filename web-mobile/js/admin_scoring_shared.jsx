@@ -1716,12 +1716,21 @@ export {
 // unsaved entries (`hostRef`, the host's ref, passed down as the editor's
 // `hostUnsavedRef`), so a host's leave action asks R1's question before it
 // unmounts or swaps the editor. The thunk reads the editor's own `unsaved`
-// as it is when asked; an editor that goes away takes it back.
-export function usePublishUnsaved(hostRef, unsaved) {
+// as it is when asked; an editor that goes away takes it back. The thunk also
+// carries the editor's own Discard entries as `discard` (`onDiscard`, read
+// when called), so a host confirm that says the entries are discarded drops
+// them at once, as the editor's own actions do (stage 5 review 9, m1;
+// unsaved_entries.jsx `discardUnsaved`).
+export function usePublishUnsaved(hostRef, unsaved, onDiscard) {
   const probe = useRefA(null);
   const unsavedRef = useRefA(unsaved);
   unsavedRef.current = unsaved;
-  if (!probe.current) probe.current = () => holdsUnsaved(unsavedRef.current);
+  const discardRef = useRefA(onDiscard);
+  discardRef.current = onDiscard;
+  if (!probe.current) {
+    probe.current = () => holdsUnsaved(unsavedRef.current);
+    probe.current.discard = () => { if (typeof discardRef.current === "function") discardRef.current(); };
+  }
   if (hostRef && hostRef.current !== probe.current) hostRef.current = probe.current;
   useEffectA(() => () => { if (hostRef && hostRef.current === probe.current) hostRef.current = null; }, [hostRef]);
 }

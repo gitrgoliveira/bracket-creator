@@ -199,8 +199,15 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, onMoveC
   );
 });
 RunningMatchPanel.displayName = "RunningMatchPanel";
-function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, password }) {
+function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, password, hostUnsavedRef = null }) {
   const [selected, setSelected] = useStateA(null);
+  // The panel's editor publishes its unsaved entries here: choosing another
+  // match puts it in the editor's place (keyed by match id), so over unsaved
+  // entries that asks first (R1, stage 5 review 8). The competition page
+  // hands its own ref down (`hostUnsavedRef`), so its tabs and exits ask on
+  // the same entries (stage 5 review 9, M1).
+  const ownUnsavedRef = useRefA(null);
+  const editorUnsavedRef = hostUnsavedRef || ownUnsavedRef;
   const scrollRef = useRefA(null);
   const panelRef = useRefA(null);
   const [autoScrollId, setAutoScrollId] = useStateA(null);
@@ -269,10 +276,6 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
     const previewMode = c && c.status === "draw-ready";
     return <EmptyState icon="⚙" title="Bracket not generated yet" message={previewMode ? "Bracket not available for this format preview." : "Start the competition to build the bracket."} />;
   }
-  // The panel's editor publishes its unsaved entries here: choosing another
-  // match puts it in the editor's place (keyed by match id), so over unsaved
-  // entries that asks first (R1, stage 5 review 8).
-  const editorUnsavedRef = useRefA(null);
   const select = async (m, ri, mi) => {
     if (selected && selected.matchId !== m.id && holdsUnsaved(editorUnsavedRef)
       && !(await confirmDiscardUnsaved(editorUnsavedRef, LEAVE_MATCH_ANYWAY))) return;

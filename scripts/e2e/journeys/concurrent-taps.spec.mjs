@@ -20,9 +20,9 @@
 //   d  engi: +Shiro on one device and +Aka on the other end 1-1 on both
 //   e  team: the two devices tap on different bouts at once; both bouts keep
 //      every tap
-//   f  kachinuki: once a bout is recorded on one device, two strikes for
-//      Shiro from two devices at once on the next bout, then Record bout
-//      records that bout with both
+//   f  kachinuki: two strikes for Shiro from two devices at once on the
+//      encounter's first bout, which the server holds no row for yet, then
+//      Record bout records that bout with both
 //
 // Known race, not asserted here: the CAP. A side that holds two points has
 // decided its bout (sanbon shobu), so a third strike for it, or any strike for
@@ -58,7 +58,7 @@ import { openTvBoard, tvBoard } from '../fixtures/public.mjs';
 import { engiEditor, engiSettle, flagButton, flagCount, startUpNextEngi } from '../fixtures/engi.mjs';
 import * as T from '../fixtures/team.mjs';
 import {
-  awardBoutIppon, boutIpponButton, closeLineupPanel, currentBout, doneRowWinner, doneRows,
+  boutIpponButton, closeLineupPanel, currentBout, doneRowWinner, doneRows,
   openLineupFromUpNext, recordBout, recordBoutButton, startUpNextKachinuki, syncPill as kachinukiPill, typeLineup,
 } from '../fixtures/kachinuki.mjs';
 
@@ -387,19 +387,12 @@ test.describe('concurrent taps from two devices', () => {
       await expect(kachinukiPill(d2)).toBeVisible();
       await sameMatchOnBoth(d1, d2);
 
-      // Bout 1 on device 1 alone: Shiro wins it two points to none and it is
-      // recorded, so the server appends bout 2 itself (the winner stays on).
-      // The concurrent taps go on bout 2, a row the server already holds: on a
-      // first bout no device has written yet, each device writes the row
-      // ahead of its first tap, and the second device's row write can turn
-      // the first device's tap away as already covered (a defect this journey
-      // found, reported with the stage; see the handback).
-      await awardBoutIppon(d1, 'shiro', 'M');
-      await awardBoutIppon(d1, 'shiro', 'K');
-      await recordBout(d1);
+      // The concurrent taps go on the FIRST bout, which the server holds no row
+      // for (the encounter was started from the queue): the server makes the
+      // row at the first tap, and each device seats the lineup's fighters as
+      // its own first taps on it, so neither device's strike is turned away.
       for (const [name, d] of [['device 1', d1], ['device 2', d2]]) {
-        await expect(doneRows(d), `${name}: bout 1 is recorded`).toHaveCount(1);
-        await expect(T.rowSlots(currentBout(d), 'shiro'), `${name}: bout 2 starts with no points`).toHaveCount(0);
+        await expect(T.rowSlots(currentBout(d), 'shiro'), `${name}: bout 1 starts with no points`).toHaveCount(0);
       }
 
       const gapMs = await tapAtOnce(boutIpponButton(currentBout(d1), 'shiro', 'M'), boutIpponButton(currentBout(d2), 'shiro', 'K'));
@@ -414,15 +407,15 @@ test.describe('concurrent taps from two devices', () => {
       await shot(d1, 'f-kachinuki-before-record');
       await recordBout(d1);
       for (const [name, d] of [['device 1', d1], ['device 2', d2]]) {
-        await expect(doneRows(d), `${name}: bout 2 is recorded`).toHaveCount(2);
-        const done = doneRows(d).nth(1);
+        await expect(doneRows(d), `${name}: bout 1 is recorded`).toHaveCount(1);
+        const done = doneRows(d).nth(0);
         await expect.poll(() => shiroMarks(done), { message: `${name}: the recorded bout carries both points` }).toEqual(['K', 'M']);
         await expect(T.rowSlots(done, 'aka'), `${name}: and none for Aka`).toHaveCount(0);
         expect(await doneRowWinner(done), `${name}: Shiro won the bout`).toBe('shiro');
       }
       await shot(d1, 'f-kachinuki-recorded-device-1');
       await shot(d2, 'f-kachinuki-recorded-device-2');
-      record({ journey: JOURNEY, case: 'f kachinuki', pair, gapMs, bout2: (await doneRows(d2).nth(1).innerText()).replace(/\s+/g, ' ') });
+      record({ journey: JOURNEY, case: 'f kachinuki', pair, gapMs, bout1: (await doneRows(d2).nth(0).innerText()).replace(/\s+/g, ' ') });
     } finally {
       await ops.close();
     }

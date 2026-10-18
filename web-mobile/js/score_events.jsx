@@ -548,9 +548,25 @@ function reconcileWinnerMemberId(row) {
 // fusensho snapshot with it; `ctx.stamps` is the replay's group stamps.
 // createsMissingRow says an event on bout pos may make the row when the match
 // holds none (engine.ReplayShape.createsMissingRow): a numbered bout of a
-// fixed-order team match, within its team size (`opts.teamSize`).
-function createsMissingRow(opts, pos) {
-  return !!opts.team && !opts.kachinuki && pos >= 1 && pos <= (Number(opts.teamSize) || 0);
+// fixed-order team match, within its team size (`opts.teamSize`), and a
+// kachinuki encounter's first bout. The team sheet asks it too
+// (boutRowMadeByTap), so it writes no row ahead of a tap the server makes it
+// for.
+export function createsMissingRow(opts, pos) {
+  if (!opts.team) return false;
+  if (opts.kachinuki) return pos === 1;
+  return pos >= 1 && pos <= (Number(opts.teamSize) || 0);
+}
+
+// seatsFirstBoutFighter: a fighter on a kachinuki first bout seats a side that
+// holds none, or the same one again (by member id when either carries one,
+// else by name), never another (engine.seatsFirstBoutFighter).
+function seatsFirstBoutFighter(row, e) {
+  const name = e.side === SIDE_B ? row.sideB : row.sideA;
+  const member = e.side === SIDE_B ? row.sideBMemberId : row.sideAMemberId;
+  if (!name && !member) return true;
+  if (member || e.memberId) return (member || '') === (e.memberId || '');
+  return name === (e.name || '');
 }
 
 // withEmptyBoutRow is rows with an empty row at pos, the numbered rows in
@@ -585,8 +601,12 @@ function foldBout(m, e, opts, ctx) {
       } else { b = bout.clearDecision(b); out = APPLIED; }
       break;
     case BOUT_FIGHTER:
-      // The first bout's fighters are the lineup's (a lineup save).
-      if (!opts.kachinuki || e.pos <= 0 || e.pos === lowestNumberedPosition(rows)) return NOT_ALLOWED;
+      if (!opts.kachinuki || e.pos <= 0) return NOT_ALLOWED;
+      // The first bout's fighters are the lineup's (a name picked there is a
+      // lineup save): the sheet seats them as its first taps on the bout, so a
+      // side that holds none takes one and a side never has its fighter
+      // replaced here (engine.seatsFirstBoutFighter).
+      if (e.pos === lowestNumberedPosition(rows) && !seatsFirstBoutFighter(row, e)) return NOT_ALLOWED;
       if (e.side === SIDE_B) { row.sideB = e.name || ''; setOrDelete(row, 'sideBMemberId', e.memberId); }
       else { row.sideA = e.name || ''; setOrDelete(row, 'sideAMemberId', e.memberId); }
       out = APPLIED;

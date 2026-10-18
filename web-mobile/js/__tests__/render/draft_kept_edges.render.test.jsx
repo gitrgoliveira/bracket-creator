@@ -1,8 +1,8 @@
 // Operator decision D1 (a), stage 5 review 2: the edges of a kept draft.
 //
 // 1. Save on a bout the server holds no row for (a kachinuki first bout) writes
-//    the row from the server's copy, position and fighters only, never the
-//    draft's points: the draft's points go as taps, once.
+//    no row: the server makes it at the first tap, and the draft's points go
+//    as taps, once.
 // 2. A kept draft does not outlive the match leaving running on another device
 //    (finished or sent back): the editor drops it, shows the server's copy and
 //    says so, so a Save correction can never record the draft over the result.
@@ -33,17 +33,17 @@ const button = (text) => [...document.querySelectorAll('button')].find((b) => b.
 const saveTwice = async () => { await tap(screen.getByTestId('draft-kept-save')); await tap(screen.getByTestId('draft-kept-save')); };
 
 describe('1: Save on a bout the server holds no row for counts each point once', () => {
-  it('a kachinuki first bout: the row write carries no points, the M goes as one tap', async () => {
+  it('a kachinuki first bout: no row is written, the M goes as one tap', async () => {
     const onSubmit = vi.fn(pending);
     const r = render(el(kachinukiBout({ status: 'scheduled', scoreVersion: 2 }), { onSubmit }));
     await tap(ipponBtn(r.container, 0, 'aka', 'M'));
     r.rerender(el(kachinukiBout({ status: 'running', subResults: [], modifiedAt: NOW + 50, scoreVersion: 3 }), { onSubmit }));
     await saveTwice();
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    const row = onSubmit.mock.calls[0][0].subResults.find((s) => s.position === 1);
-    expect(row.ipponsA || [], 'the row write is the server\'s row, not the draft').toEqual([]);
-    expect(row.ipponsB || []).toEqual([]);
-    expect(row.winner || '').toBe('');
+    // The server makes the first bout's row at its first tap (stage 6): a row
+    // write stamped after another device's tap would turn that tap away. No
+    // lineup is read here, so no fighter is seated (team_editor_taps pins
+    // the fighters going first as taps).
+    expect(onSubmit, 'no row write ahead of the taps').not.toHaveBeenCalled();
     expect(events()).toEqual([{ kind: 'ippon.add', pos: 1, side: 'a', letter: 'M' }]);
   });
 });

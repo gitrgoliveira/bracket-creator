@@ -41,8 +41,10 @@ const (
 	// operator's Tie), "fusensho" (Side is the side AWARDED the bout, as the
 	// team editor's Fusensho button names it), or "clear".
 	ScoreBoutDecision ScoreEventKind = "bout.decision"
-	// ScoreBoutFighter names the fighter of Side on a kachinuki row after the
-	// first (MemberID and Name).
+	// ScoreBoutFighter names the fighter of Side on a kachinuki row (MemberID
+	// and Name). On the first bout it only seats the lineup's fighter on a
+	// side that holds none (or the same one again): a name picked there is a
+	// lineup save.
 	ScoreBoutFighter ScoreEventKind = "bout.fighter"
 	// ScoreRepPick picks Side's representative for the representative bout
 	// (MemberID; empty clears the pick).

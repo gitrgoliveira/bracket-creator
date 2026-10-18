@@ -62,7 +62,7 @@ import { teamDraftTaps } from './draft_taps.jsx';
 // scoring gesture, handed to the outbox (API.recordTap).
 import {
   makeEvent, IPPON_ADD, IPPON_REMOVE, FOUL_ADD, FOUL_REMOVE, ENCHO_ADD, ENCHO_REMOVE,
-  BOUT_DECISION, BOUT_FIGHTER, REP_PICK, DAIHYOSEN_VERDICT,
+  BOUT_DECISION, BOUT_FIGHTER, REP_PICK, DAIHYOSEN_VERDICT, SIDE_A, SIDE_B, createsMissingRow,
 } from './score_events.jsx';
 import { publishBoardOverlay } from './court_bridge.jsx';
 // bc-cse: a SCHEDULED match a competitor is barred from must never offer a
@@ -1305,9 +1305,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   const tapMode = mHost.status === "running" && !own.kept;
   // The numbered bouts the board holds even where the server's copy has no row
   // for them yet: a fixed-order match's team positions, a kachinuki encounter's
-  // first bout, and the pairings added by hand. A tap lands only on a row the
-  // server holds, so the first tap on such a bout queues the row's write ahead
-  // of it (ensureServerRows); the board shows the row from here meanwhile.
+  // first bout, and the pairings added by hand. The server makes the row at
+  // the first tap on the first two (createsMissingRow); a pairing added by hand
+  // is written when it is added (ensureServerRows); the board shows the row
+  // from here meanwhile.
   const padPositions = isKachinuki
     ? [1, ...manualBouts]
     : [...Array.from({ length: teamSize || 0 }, (_, i) => i + 1), ...manualBouts];
@@ -1333,7 +1334,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // is an operator edit, so it disarms the two-tap commits (operatorEditSeq).
   const emitBoutTap = (ev) => {
     tapNote.clear();
-    ensureServerRows(ev.pos);
     // The tap is floored by the match it was made against (bc-hlck), and never
     // below the stamp a Record bout answer gave the match (bc-cse): a tap on the
     // pairing the advance appended, stamped before it, would be older than the
@@ -1341,53 +1341,70 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
     const base = tapBoardOf(mHost, teamFold).base;
     const floor = recordBoutStampRef.current;
     const seen = floor.id === mHost.id && floor.at > (Number(base.modifiedAt) || 0) ? { ...base, modifiedAt: floor.at } : base;
+    ensureServerRows(ev.pos, seen);
     window.API.recordTap(mHost.compId, mHost.id, makeEvent(ev), password, seen);
     setOperatorEditSeq((n) => n + 1);
     setFusenshoRefusal("");
   };
   // ensureServerRows: the ONE owner of "a bout row the server does not make is
   // written before the first tap on it". A tap on a numbered fixed-order bout
-  // within the team size makes its row on the server (engine.createsMissingRow),
-  // so nothing is written for it. Any other bout tap lands only on a row the
-  // server's copy holds: a kachinuki encounter's first bout before its first
-  // write holds none, nor does a pairing added by hand. So the first gesture on
-  // such a bout queues a running write carrying its empty row (a kachinuki first
-  // bout with its lineup's fighters), naming that bout group alone, ahead of the
-  // tap in the match's order. Judged against the server's copy the board is
-  // made from (its base), never the board itself, and once per row for this
-  // sheet.
+  // within the team size, or on a kachinuki encounter's first bout, makes its
+  // row on the server (engine.createsMissingRow, the fold's createsMissingRow),
+  // so no row is written for it: the first bout's lineup fighters go as this
+  // sheet's first taps on it (bout.fighter), ahead of the tap. Any other bout
+  // tap lands only on a row the server's copy holds, which a pairing added by
+  // hand does not, so it is written when it is added: a running write carrying
+  // its empty row, naming that bout group alone, ahead of every tap on it in
+  // the match's order. Judged against the server's copy the board is made from
+  // (its base), never the board itself, and once per row for this sheet.
   const rowsWrittenRef = useRefA({ id: null, positions: new Set() });
   // The latest Record-bout answer's own stamp for this match (adoptRecordBoutAnswer),
   // held apart from matchOverride: with no prior [Remove this bout] there is no
   // override to adopt it into, and the next tap must still be floored by it.
   const recordBoutStampRef = useRefA({ id: null, at: 0 });
-  const ensureServerRows = (pos) => {
-    if (!(pos > 0) || (!isKachinuki && pos <= (Number(teamSize) || 0))) return;
+  const ensureServerRows = (pos, seen) => {
+    if (!(pos > 0)) return;
+    // A bout the server makes the row of at its first tap (a fixed-order
+    // bout within the team size, a kachinuki first bout: createsMissingRow,
+    // the fold's own rule) is never written ahead of the tap.
+    const madeByTap = createsMissingRow(teamFold, pos);
+    if (madeByTap && !isKachinuki) return;
     const req = rowsWrittenRef.current;
     if (req.id !== mHost.id) { req.id = mHost.id; req.positions = new Set(); }
     // The newest server copy the board is made from (a score-events answer
     // newer than the host's included, and the bouts this device's own Start
     // carried, which the host's copy shows until the feed holds the start):
     // a row it holds is never written again (stage 5 review 1, C1).
-    const held = new Set((tapBoardOf(mHost, teamFold).base.subResults || []).filter(Boolean).map((r) => r.position));
+    const base = tapBoardOf(mHost, teamFold).base;
+    const held = new Set((base.subResults || []).filter(Boolean).map((r) => r.position));
     if (held.has(pos) || req.positions.has(pos)) return;
-    const want = [pos];
-    want.forEach((p) => req.positions.add(p));
+    req.positions.add(pos);
     const fields = buildPatchFields("running");
+    const from = (fields.subResults || []).find((s) => s.position === pos) || {};
+    if (madeByTap) {
+      // A kachinuki first bout: its fighters are the lineup's, seated as this
+      // sheet's first taps on the bout (bout.fighter, which seats a side that
+      // holds none and never replaces one), so two devices tapping the bout
+      // at once both count: no row write stamped after one device's tap can
+      // turn that tap away (stage 6).
+      [[SIDE_A, from.sideA, from.sideAMemberId], [SIDE_B, from.sideB, from.sideBMemberId]].forEach(([side, name, memberId]) => {
+        if (!name && !memberId) return;
+        window.API.recordTap(mHost.compId, mHost.id, makeEvent({ kind: BOUT_FIGHTER, pos, side, name, memberId }), password, seen || base);
+      });
+      return;
+    }
     // The row is the bout as the server would hold it with nothing scored: its
-    // position and its fighters (a kachinuki first bout's from the lineup),
-    // never a point, a foul or a result from the sheet. The sheet can be a
-    // draft (a kept draft's Save, D1), whose scoring goes as taps after this
-    // write: carried here too, it would count twice (stage 5 review 2).
-    const emptyRow = (p, from = {}) => ({
-      position: p, sideA: from.sideA || "", sideB: from.sideB || "",
+    // position and its fighters, never a point, a foul or a result from the
+    // sheet. The sheet can be a draft (a kept draft's Save, D1), whose scoring
+    // goes as taps after this write: carried here too, it would count twice
+    // (stage 5 review 2).
+    const row = {
+      position: pos, sideA: from.sideA || "", sideB: from.sideB || "",
       ...(from.sideAMemberId ? { sideAMemberId: from.sideAMemberId } : {}),
       ...(from.sideBMemberId ? { sideBMemberId: from.sideBMemberId } : {}),
       ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, winner: "", decision: "",
-    });
-    const rows = want.map((p) => emptyRow(p, (fields.subResults || []).find((s) => s.position === p)));
-    rows.sort((x, y) => x.position - y.position);
-    doSubmit(() => onSubmit({ ...fields, subResults: rows, changed: want.map(boutGroup), ...boardSeen }));
+    };
+    doSubmit(() => onSubmit({ ...fields, subResults: [row], changed: [boutGroup(pos)], ...boardSeen }));
   };
   // The live board's row at `pos`, read afresh (the outbox's pending taps, not this
   // render's), so two gestures before a re-render judge the board as it is.

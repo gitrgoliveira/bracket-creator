@@ -111,7 +111,7 @@ describe('a mark taken back on a kachinuki bout reaches the server (bc-kclr)', (
     await act(async () => { fireEvent.keyDown(window, { key: 'M', shiftKey: true }); });
   };
 
-  it('a point struck and taken back on a bout the server never held: the row, then the two taps', async () => {
+  it('a point struck and taken back on a first bout the server never held: the two taps, and no row write', async () => {
     const onSubmit = await mount(kachinukiMatch([]));
     await strikeAkaMen();
     const { id } = window.API.recordTap.mock.results[0].value;
@@ -120,9 +120,8 @@ describe('a mark taken back on a kachinuki bout reaches the server (bc-kclr)', (
       { kind: 'ippon.add', pos: 1, side: 'a', letter: 'M' },
       { kind: 'ippon.remove', pos: 1, side: 'a', target: id },
     ]);
-    expect(onSubmit, 'the row the taps land on is written once, ahead of them').toHaveBeenCalledTimes(1);
-    expect(onSubmit.mock.calls[0][0].changed).toEqual(['bout:1']);
-    expect(onSubmit.mock.invocationCallOrder[0], 'the row write is queued before the first tap').toBeLessThan(window.API.recordTap.mock.invocationCallOrder[0]);
+    // The server makes the first bout's row at its first tap (stage 6).
+    expect(onSubmit, 'no row write ahead of the taps').not.toHaveBeenCalled();
     expect(filled('aka')).toBe(0);
   });
 

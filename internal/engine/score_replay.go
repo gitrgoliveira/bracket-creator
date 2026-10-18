@@ -181,9 +181,11 @@ func MigrationBaseline(current *state.MatchResult, id string, receivedAt int64) 
 // what the event made (it would count twice).
 func MigrationBaselineFor(current *state.MatchResult, id string, receivedAt int64, shape ReplayShape) state.ScoreBaseline {
 	var extra []int
-	if shape.team() && !shape.kachinuki() {
-		for p := 1; p <= shape.Comp.TeamSize; p++ {
-			extra = append(extra, p)
+	if shape.team() {
+		for p := 1; p <= max(shape.Comp.TeamSize, 1); p++ {
+			if shape.createsMissingRow(p) {
+				extra = append(extra, p)
+			}
 		}
 	}
 	return migrationBaselineCovering(current, id, receivedAt, extra)
@@ -1455,10 +1457,35 @@ func foldBout(r *replayMatch, e *domain.ScoreEvent, shape ReplayShape, stamps ma
 
 // createsMissingRow says an event on bout pos may make the row when the match
 // holds none: a numbered bout of a fixed-order team match, within its team
-// size. A kachinuki bout, a representative bout and a bout added by hand
-// beyond the team size are written by a score write first.
+// size, and a kachinuki encounter's first bout (a match started from the
+// queue holds no row; the sheet seats the lineup's fighters there as its first
+// taps, bout.fighter). Two devices tapping such a bout at once both count:
+// nothing writes the row ahead of a tap, so no row write stamped after one
+// device's tap can turn it away. A later kachinuki pairing (Record bout
+// appends it), one added by hand and a representative bout are written by a
+// score write first.
 func (shape ReplayShape) createsMissingRow(pos int) bool {
-	return shape.team() && !shape.kachinuki() && pos >= 1 && pos <= shape.Comp.TeamSize
+	if !shape.team() {
+		return false
+	}
+	if shape.kachinuki() {
+		return pos == 1
+	}
+	return pos >= 1 && pos <= shape.Comp.TeamSize
+}
+
+// seatsFirstBoutFighter says a bout.fighter event on a kachinuki encounter's
+// first bout may seat its fighter on a side that holds name and member: the
+// side holds no fighter yet, or holds the same one (by member id when either
+// carries one, else by name), which a second device seats again.
+func seatsFirstBoutFighter(name, member string, e *domain.ScoreEvent) bool {
+	if name == "" && member == "" {
+		return true
+	}
+	if member != "" || e.MemberID != "" {
+		return member == e.MemberID
+	}
+	return name == e.Name
 }
 
 // boutRowIndex is the index of the row at pos, -1 when there is none.
@@ -1518,15 +1545,21 @@ func foldBoutRow(r *replayMatch, e *domain.ScoreEvent, shape ReplayShape, stamps
 			out = b.ClearBoutDecision()
 		}
 	case domain.ScoreBoutFighter:
-		if !shape.kachinuki() || e.Pos <= 0 || e.Pos == lowestNumberedPosition(m.SubResults) {
-			// The first bout's fighters are the lineup's (a lineup save).
+		if !shape.kachinuki() || e.Pos <= 0 {
 			return domain.ScoreOutcomeNotAllowed
 		}
+		name, member := &row.SideA, &row.SideAMemberID
 		if e.Side == domain.ScoreSideB {
-			row.SideB, row.SideBMemberID = e.Name, e.MemberID
-		} else {
-			row.SideA, row.SideAMemberID = e.Name, e.MemberID
+			name, member = &row.SideB, &row.SideBMemberID
 		}
+		if e.Pos == lowestNumberedPosition(m.SubResults) && !seatsFirstBoutFighter(*name, *member, e) {
+			// The first bout's fighters are the lineup's (a name picked there
+			// is a lineup save): the sheet seats them as its first taps on the
+			// bout, so a side that holds none takes one and a side never has
+			// its fighter replaced here.
+			return domain.ScoreOutcomeNotAllowed
+		}
+		*name, *member = e.Name, e.MemberID
 		out = domain.ScoreOutcomeApplied
 	case domain.ScoreDaihyosenVerdict:
 		if e.Value != domain.BoutDecisionClear && !domain.HanteiTiedScoreline(b.IpponsA, b.IpponsB) {

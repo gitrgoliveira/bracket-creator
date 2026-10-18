@@ -25,9 +25,13 @@ describe('the tap outcome note', () => {
     const { getByTestId } = render(<Note />);
     act(() => { emit({ id: 't1', outcome: 'noTarget', reason: 'bout_removed' }); });
     expect(getByTestId('note').textContent).not.toBe('');
-    act(() => { emit({ id: 't2', outcome: 'applied' }); });
+    act(() => { emit({ id: 't2', outcome: 'applied', takenBack: true }); });
     expect(getByTestId('note').textContent, 'another tap applied leaves it').not.toBe('');
-    act(() => { emit({ id: 't1', outcome: 'applied' }); });
+    // A quiet answer the outbox did not take back (a duplicate of a tap still
+    // turned away) leaves it (stage 6 review 9, F3).
+    act(() => { emit({ id: 't1', outcome: 'duplicate' }); });
+    expect(getByTestId('note').textContent).not.toBe('');
+    act(() => { emit({ id: 't1', outcome: 'applied', takenBack: true }); });
     expect(getByTestId('note').textContent).toBe('');
   });
 });

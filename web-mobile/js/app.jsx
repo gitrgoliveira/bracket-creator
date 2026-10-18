@@ -371,7 +371,9 @@ export function queueAlertMessage(alert) {
     case "tap_applied":
       // A tap the board showed as not applied, from a copy behind the
       // server, that the server applied (stage 6 review 8, m12).
-      return `A tap shown as not applied was applied after all${alert.where ? ` (${alert.where})` : ""}. Check the score.`;
+      return one
+        ? `A tap shown as not applied was applied after all${alert.where ? ` (${alert.where})` : ""}. Check the score.`
+        : `${n} taps shown as not applied were applied after all${alert.where ? ` (${alert.where})` : ""}. Check the score.`;
     case "lineup_warning":
       // The server's own sentence: the change was kept, and it names the
       // carried lineup that could not follow it (stage 6 review 8, m7).

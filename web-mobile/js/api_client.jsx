@@ -54,6 +54,7 @@ import { noteServerBuild, setOutboxIdleProbe, setBeforeReload, noteOutboxDrained
 import { CLOCK_SKEW as TAP_CLOCK_SKEW } from './score_events.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
 import { createLandedTaps, LANDED_TAB_BEAT_MS } from './landed_taps.jsx';
+import { createToldTaps, TOLD_TAPS_PREFIX } from './told_taps.jsx';
 import {
     createMintedMembers, mintedAddId, mintedIdsNamed, mintedMemberUrlId, mintedProofCovers, mintedStrip,
     MINTED_MEMBERS_KEY,
@@ -1411,10 +1412,12 @@ const _latestDerived = new Map();
 const _derivedListeners = new Map();
 const _pendingTapListeners = new Map();
 const _tapOutcomeListeners = new Map();
-// The pending taps the board already told as not applied (tellPendingTapRefused),
-// whose answer then tells nothing more: one notice per tap. An id goes as its
-// tap's answer comes (an applied one takes the notice back, m12).
-const _toldOnBoard = new Set();
+// The pending taps the board already told as not applied (tellPendingTapRefused)
+// are the DEVICE's record, told_taps.jsx (`_told`, made beside the landed-tap
+// record below; stage 6 review 9, F4): the tab whose batch the answer is knows
+// what another tab's board told. `_toldHere` is what this tab's own listeners
+// were told, so a board re-render tells them nothing twice.
+const _toldHere = new Set();
 // _pruneToldOnBoard keeps only the ids of taps this tab still holds queued:
 // one no longer queued (answered, or taken by another tab) has nothing left
 // to tell (stage 6 review 8, m12).
@@ -1423,7 +1426,42 @@ function _pruneToldOnBoard() {
     for (const d of _writeQueue.values()) {
         if (d && d.kind === 'evt' && d.payload && d.payload.id) queued.add(d.payload.id);
     }
-    for (const id of _toldOnBoard) if (!queued.has(id)) _toldOnBoard.delete(id);
+    for (const id of _toldHere) if (!queued.has(id)) _toldHere.delete(id);
+    _told.prune((id) => queued.has(id));
+}
+// _notTurnedAway: the newest copy of the match seen names a version and does
+// not list the tap turned away. A `duplicate` answer says only that the tap's
+// id is already in the log, where a tap turned away is logged too, so it takes
+// a board's notice back only on this word (stage 6 review 9, F3).
+function _notTurnedAway(base, id) {
+    const seen = _turnedAwaySeen.get(base);
+    return !!seen && Number.isFinite(seen.v) && !(seen.away && Object.prototype.hasOwnProperty.call(seen.away, id));
+}
+// The board's notices raised in one tick go out as ONE alert per match (F4:
+// a removal reaching a board with several pending taps on the bout gave one
+// identical toast per tap).
+const _boardToldBatch = new Map();
+function _queueBoardTold(compID, matchID, outcome, tap, alert) {
+    const base = _revKey(compID, matchID);
+    let b = _boardToldBatch.get(base);
+    if (!b) {
+        b = { compID, matchID, outcomes: [], alerted: [] };
+        _boardToldBatch.set(base, b);
+        queueMicrotask(() => {
+            _boardToldBatch.delete(base);
+            for (const o of b.outcomes) _emitOn(_tapOutcomeListeners, base, o);
+            if (b.alerted.length > 0) {
+                const [first] = b.alerted;
+                _notifyQueueAlert({
+                    kind: 'not_applied', count: b.alerted.length, terminalCount: 0, compID, matchID,
+                    outcome: first.outcome, where: _shownMatchLabels.get(base) || '',
+                    tap: b.alerted.length === 1 ? first.tap : null,
+                });
+            }
+        });
+    }
+    b.outcomes.push(outcome);
+    if (alert) b.alerted.push({ outcome, tap: tap || null });
 }
 // Per queue key: the promise a door handed out and the refusal claims of the
 // callers. In memory only (never persisted): a function does not survive a
@@ -1549,6 +1587,7 @@ const _landedStorage = {
     },
 };
 const _landed = createLandedTaps({ storage: _landedStorage, tab: _randomId() });
+const _told = createToldTaps({ storage: _landedStorage, tab: _landed.tab });
 // _landedBeat keeps this tab alive in the record, and tells the taps it may
 // tell now from the newest copy of each match it has seen: a tab that died
 // without its pagehide holds its taps until its heartbeat is old, and the
@@ -3218,6 +3257,11 @@ async function _sendTapBatch(base, batch, pass) {
         // The follow-ups of the taps that leave are done once for the batch,
         // as it closes (K6).
         const landed = [];
+        // Taps a board told as not applied that the server applied: one alert.
+        const takenBack = [];
+        // The answer's own copy of the match first, so a duplicate is judged
+        // on the newest word of what was turned away (F3).
+        _rememberTurnedAway(compID, matchID, body.match);
         _openDequeueBatch();
         try {
             for (const [k, d] of batch) {
@@ -3245,22 +3289,24 @@ async function _sendTapBatch(base, batch, pass) {
                 }
                 if (result !== 'settled') continue; // keep strict order behind it
                 if (_dequeue(k, d, { value: o })) dequeued = true;
-                if (tapOutcomeQuiet(o)) {
+                const toldOnBoard = _told.told(compID, matchID, o.id);
+                _toldHere.delete(o.id);
+                if (tapOutcomeQuiet(o) && !toldOnBoard) {
                     landed.push(d);
-                    if (_toldOnBoard.delete(o.id)) {
-                        // The board told it not applied from a copy behind the
-                        // server (its bout shown removed, already picked again
-                        // there): the server applied it, so the notice is
-                        // taken back and the operator told (stage 6 review 8,
-                        // m12).
-                        _emitOn(_tapOutcomeListeners, base, { id: o.id, outcome: o.outcome });
-                        _notifyQueueAlert({
-                            kind: 'tap_applied', count: 1, terminalCount: 0, compID, matchID,
-                            where: _whereOf(d) || _shownMatchLabels.get(base) || '',
-                        });
-                    }
-                } else if (_toldOnBoard.delete(o.id)) {
-                    // Told by the board as the removal reached it: once.
+                } else if (tapOutcomeQuiet(o) && (o.outcome !== 'duplicate' || _notTurnedAway(base, o.id))) {
+                    // The board told it not applied from a copy behind the
+                    // server (its bout shown removed, already picked again
+                    // there): the server applied it, so the notice is taken
+                    // back on every tab and the operator told once (stage 6
+                    // review 8, m12; review 9, F3/F4).
+                    landed.push(d);
+                    if (_told.takeBack(compID, matchID, o.id)) takenBack.push(d);
+                    _emitOn(_tapOutcomeListeners, base, { id: o.id, outcome: 'applied', takenBack: true });
+                } else if (toldOnBoard) {
+                    // Told by the board as the removal reached it: once. A
+                    // duplicate the newest copy still lists turned away is
+                    // such a tap answered again (F3).
+                    _told.settle(compID, matchID, o.id);
                 } else {
                     pass.notApplied++;
                     pass.lastNotApplied = o;
@@ -3271,6 +3317,12 @@ async function _sendTapBatch(base, batch, pass) {
             }
         } finally {
             _closeDequeueBatch();
+        }
+        if (takenBack.length > 0) {
+            _notifyQueueAlert({
+                kind: 'tap_applied', count: takenBack.length, terminalCount: 0, compID, matchID,
+                where: _whereOf(takenBack[0]) || _shownMatchLabels.get(base) || '',
+            });
         }
         // Landed: told later if a result that never saw them turns them away.
         // The answer's own copy of the match is remembered first, so a tap it
@@ -3698,6 +3750,14 @@ if (typeof window !== 'undefined') {
     if (window.__bcStoredQueueHandler) window.removeEventListener('storage', window.__bcStoredQueueHandler);
     const onStorage = (e) => {
         if (e.key === QUEUE_STORAGE_KEY) _onStoredQueueChanged(e.oldValue, e.newValue);
+        // Another tab took back a notice a board gave: this tab's note goes
+        // too (F4).
+        if (typeof e.key === 'string' && e.key.startsWith(TOLD_TAPS_PREFIX)) {
+            for (const t of _told.onStored(e.key, e.oldValue, e.newValue)) {
+                _toldHere.delete(t.id);
+                _emitOn(_tapOutcomeListeners, _revKey(t.compID, t.matchID), { id: t.id, outcome: 'applied', takenBack: true });
+            }
+        }
         // Another tab learned something of a minted member: a member that
         // never was comes off this tab's writes, and a write held back for one
         // may now go (minted_members.jsx).
@@ -6121,16 +6181,13 @@ const API = {
     // as one 'not_applied' alert, and not again when the server's answer for
     // that tap arrives (stage 6 review 7). Never waits: told after the render.
     tellPendingTapRefused(compID, matchID, outcome, tap) {
-        if (!compID || !matchID || !outcome || !outcome.id || _toldOnBoard.has(outcome.id)) return;
-        _toldOnBoard.add(outcome.id);
-        const base = _revKey(compID, matchID);
-        queueMicrotask(() => {
-            _emitOn(_tapOutcomeListeners, base, outcome);
-            _notifyQueueAlert({
-                kind: 'not_applied', count: 1, terminalCount: 0, compID, matchID,
-                outcome, where: _shownMatchLabels.get(base) || '', tap: tap || null,
-            });
-        });
+        if (!compID || !matchID || !outcome || !outcome.id || _toldHere.has(outcome.id)) return;
+        _toldHere.add(outcome.id);
+        // This tab's editor hears it; the operator's alert is raised once per
+        // device (the first board to tell it), one alert for the taps told
+        // together (F4).
+        const first = _told.tell(compID, matchID, outcome.id);
+        _queueBoardTold(compID, matchID, outcome, tap, first);
     },
     // noteShownMatch: the match an editor shows, so a held write of it, or of
     // one of its teams, is named by where it is (H5, _whereOf).
@@ -6375,7 +6432,8 @@ const API = {
         const discarding = _countTerminalQueued();
         const discardingTotal = _writeQueue.size;
         _turnedAwaySeen.clear();
-        _toldOnBoard.clear();
+        _toldHere.clear();
+        _told.forget();
         _ownStatusAnswered.clear();
         if (discardingTotal > 0) {
             _notifyQueueAlert({ kind: 'discarded', count: discardingTotal, terminalCount: discarding });

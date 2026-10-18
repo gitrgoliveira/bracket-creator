@@ -143,13 +143,16 @@ export function useTapOutcomeNote(compId, matchId) {
     const api = window.API;
     if (!api || typeof api.subscribeTapOutcome !== 'function') return undefined;
     return api.subscribeTapOutcome(compId, matchId, (o) => {
-      if (tapOutcomeQuiet(o)) {
+      if (o && o.takenBack) {
         // The server applied a tap this note named not applied (the board
         // judged it from a copy behind the server): the note goes (stage 6
-        // review 8, m12).
-        setState((s) => (s.id && o && s.id === o.id ? { note: null, refusal: null, id: null } : s));
+        // review 8, m12). Only a notice the outbox takes back takes it down,
+        // never any quiet answer: a `duplicate` can be a tap turned away
+        // answered again (review 9, F3).
+        setState((s) => (s.id && s.id === o.id ? { note: null, refusal: null, id: null } : s));
         return;
       }
+      if (tapOutcomeQuiet(o)) return;
       const text = tapNotAppliedText(o);
       if (!text) return;
       const id = (o && o.id) || null;

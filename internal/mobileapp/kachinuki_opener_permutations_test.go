@@ -72,6 +72,7 @@ const (
 	opSpoof        = "client batch under the server's session"
 	opEarly0       = "own lineup save of the first match, stamped before the start"
 	opEarly1       = "own lineup save of the second match, stamped before the start"
+	opDelEarly0    = "the first match's own lineup taken away, stamped as it lands"
 )
 
 // The match the gate drives is team A's third; the two before it are never
@@ -285,6 +286,20 @@ func (w *gateWorld) inForce() gateLineup {
 	return gateLineup{name: w.startingNow, stamp: w.startingNowStamp}
 }
 
+// earlierNow is the latest earlier match whose own lineup is in force now:
+// one taken away is not (its removal is stamped as it lands, after every
+// device change, so it reaches no lineup carried before it, the pin
+// included, which inForce models).
+func (w *gateWorld) earlierNow() string {
+	switch {
+	case w.arrived[opEarly1]:
+		return gateEarly1
+	case w.arrived[opEarly0] && !w.arrived[opDelEarly0]:
+		return gateEarly0
+	}
+	return ""
+}
+
 // saveEarlier saves an earlier match's own lineup, stamped before the start.
 func (w *gateWorld) saveEarlier(match, op string) {
 	pos := domain.PositionNumbered(1)
@@ -340,6 +355,11 @@ func (w *gateWorld) step(op string) {
 		w.saveEarlier(gateEarly0, op)
 	case opEarly1:
 		w.saveEarlier(gateEarly1, op)
+	case opDelEarly0:
+		// Stamped as it lands, after every device change here, the start
+		// included: the lineup the match started with keeps reading it.
+		rec := w.do(http.MethodDelete, "/api/competitions/"+w.comp+"/teams/"+w.teamA+"/match-lineups/"+url.PathEscape(gateEarly0), map[string]any{"writeId": w.comp + op})
+		require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
 	case opHeldStart:
 		before := w.stored(gateMatch)
 		w.start(op, w.stamp(op))
@@ -376,7 +396,11 @@ func (w *gateWorld) step(op string) {
 				}
 			}
 			require.Positive(t, at, "the snapshot is kept as a pin")
-			in := w.inForce()
+			// In force now: a lineup taken away before the snapshot is not.
+			in := gateLineup{name: w.startingNow, stamp: w.startingNowStamp}
+			if e := w.earlierNow(); e != "" {
+				in = gateLineup{name: gateEarlyName[e], from: e}
+			}
 			if in.from == "" {
 				in.name, in.stamp = w.startingAt(at)
 			}
@@ -548,8 +572,8 @@ func (w *gateWorld) check() {
 	switch {
 	case w.own != nil && !w.own.pin:
 		wantLater, wantSource = w.own.name, gateMatch
-	case w.earlier != "":
-		wantLater, wantSource = gateEarlyName[w.earlier], w.earlier
+	case w.earlierNow() != "":
+		wantLater, wantSource = gateEarlyName[w.earlierNow()], w.earlierNow()
 	}
 	if got := in.Lineup.Positions[domain.PositionNumbered(1)]; got != wantLater || in.Source.MatchID != wantSource {
 		w.fail("later match", "%s fields %q from %q, want %q from %q", gateLater, got, in.Source.MatchID, wantLater, wantSource)
@@ -740,6 +764,11 @@ func gateOrderings(legacy bool) [][]string {
 				}
 				if c := (n / 2) % 4; c > 0 {
 					seq = place(seq, opUnstamped, []int{0, 0, after(seq, opTap1), len(seq)}[c])
+				}
+				// The first match's own lineup taken away (review 7): just
+				// after its save, or at the end.
+				if c := (n / 11) % 3; c > 0 && slices.Contains(seq, opEarly0) {
+					seq = place(seq, opDelEarly0, []int{0, after(seq, opEarly0), len(seq)}[c])
 				}
 				if c := (n / 8) % 4; c > 0 {
 					seq = place(seq, opUsePrevious, []int{0, 0, after(seq, opTap1), slices.Index(seq, opFinish)}[c])

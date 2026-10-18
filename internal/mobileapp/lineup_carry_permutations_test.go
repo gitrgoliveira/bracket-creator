@@ -25,7 +25,7 @@ import (
 // name it gives it, and when the change was made (ms from the start).
 type carryStep struct {
 	match string
-	pos   int
+	pos   int // 0: the lineup is taken away (a DELETE), stamped as it lands
 	name  string
 	at    int64
 }
@@ -56,11 +56,34 @@ func TestLineupCarry_AMatchLineupIsTheSameInEveryArrivalOrder(t *testing.T) {
 		{"P1-1", 2, "Endo", -100},
 		{"P1-0", 1, "Mori", -20},
 	}
+	// A removal ("Use the previous match's lineup", stamped as it lands, so
+	// after every change here) is ordered like a change: the lineups made
+	// while the removed one was in force keep what they carried from it,
+	// whatever arrives before or after it. A save of the removed match
+	// itself is ordered by arrival against the removal (it makes the
+	// match's own lineup again), so it always arrives before it here.
+	removal := []carryStep{
+		{"P1-0", 1, "Mori", -100},
+		{"P1-1", 2, "Endo", -50},
+		{"", 2, "Doi", 10},
+		{"", 1, "Aoki", -150},
+		{"P1-0", 0, "", 0},
+	}
+	removeStart := []carryStep{
+		{"P1-1", 2, "Endo", -50},
+		{"", 1, "Aoki", -150},
+		{"P1-0", 2, "Doi", 10},
+		{"", 0, "", 0},
+	}
 	for _, sc := range []struct {
 		name      string
 		steps     []carryStep
 		kachinuki bool
-	}{{"fixed order", fixedOrder, false}, {"kachinuki, with the start", steps, true}, {"one position changed twice", samePosition, false}} {
+	}{
+		{"fixed order", fixedOrder, false}, {"kachinuki, with the start", steps, true}, {"one position changed twice", samePosition, false},
+		{"a match's lineup removed", removal, false}, {"a match's lineup removed, kachinuki, with the start", removal, true},
+		{"the starting lineup removed", removeStart, false}, {"the starting lineup removed, kachinuki, with the start", removeStart, true},
+	} {
 		steps, kachinuki := sc.steps, sc.kachinuki
 		t.Run(sc.name, func(t *testing.T) {
 			n := len(steps)
@@ -71,11 +94,15 @@ func TestLineupCarry_AMatchLineupIsTheSameInEveryArrivalOrder(t *testing.T) {
 			for i := range idx {
 				idx[i] = i
 			}
-			// The reference: every change in the order it was made.
+			// The reference: every change in the order it was made, a
+			// removal (stamped as it lands) after every device's change.
 			ref := slices.Clone(idx)
 			at := func(i int) int64 {
 				if i == len(steps) {
 					return 0
+				}
+				if steps[i].pos == 0 {
+					return 1 << 40
 				}
 				return steps[i].at
 			}
@@ -84,6 +111,9 @@ func TestLineupCarry_AMatchLineupIsTheSameInEveryArrivalOrder(t *testing.T) {
 			differ, total := 0, 0
 			var first []string
 			for _, order := range carryPerms(idx) {
+				if !carrySavesBeforeTheirRemoval(steps, order) {
+					continue
+				}
 				total++
 				if got := carryRun(t, steps, kachinuki, order); got != want {
 					differ++
@@ -95,6 +125,24 @@ func TestLineupCarry_AMatchLineupIsTheSameInEveryArrivalOrder(t *testing.T) {
 			require.Zerof(t, differ, "%d of %d arrival orders give another lineup than the one in time (%s):\n%s", differ, total, want, strings.Join(first, "\n"))
 		})
 	}
+}
+
+// carrySavesBeforeTheirRemoval says every save of a lineup arrives before
+// that lineup's removal in order.
+func carrySavesBeforeTheirRemoval(steps []carryStep, order []int) bool {
+	removed := map[string]bool{}
+	for _, i := range order {
+		if i >= len(steps) {
+			continue
+		}
+		s := steps[i]
+		if s.pos == 0 {
+			removed[s.match] = true
+		} else if removed[s.match] {
+			return false
+		}
+	}
+	return true
 }
 
 func carryPerms(xs []int) [][]int {
@@ -186,6 +234,11 @@ func carryRun(t *testing.T, steps []carryStep, kachinuki bool, order []int) stri
 		path := "/api/competitions/" + comp + "/teams/" + id["Taka"] + "/lineups/0"
 		if s.match != "" {
 			path = "/api/competitions/" + comp + "/teams/" + id["Taka"] + "/match-lineups/" + url.PathEscape(s.match)
+		}
+		if s.pos == 0 {
+			rec := do(http.MethodDelete, path, map[string]any{"writeId": fmt.Sprintf("remove-%d", i)})
+			require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+			continue
 		}
 		rec := do(http.MethodPut, path, map[string]any{
 			"positions": map[domain.Position]string{pos: s.name}, "memberIds": map[domain.Position]string{pos: members[s.name]},

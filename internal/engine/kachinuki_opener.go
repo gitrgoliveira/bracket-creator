@@ -284,8 +284,13 @@ func pinLineup(h state.StoreTx, d *openerDraw, compID, matchID, teamID string, a
 		Positions: map[domain.Position]string{}, StartedAt: at,
 	}
 	// The carry rule at the start, by stamp (lineup_carry.go): a change made
-	// after the start is not in it, whenever it arrived.
-	lc := newLineupCarry(d.lineups, d.pool, d.bracket, d.comp.IsKnockoutEnabled(), d.comp.TeamSize)
+	// after the start is not in it, whenever it arrived, and neither is a
+	// removal made after it (the removed lineups' records are read too).
+	all, err := h.LoadTeamLineupsWithRemoved(compID)
+	if err != nil {
+		return fmt.Errorf("kachinuki match %s/%s: the lineups team %s started with were not readable: %w", compID, matchID, teamID, err)
+	}
+	lc := newLineupCarry(all, d.pool, d.bracket, d.comp.IsKnockoutEnabled(), d.comp.TeamSize)
 	pin.StartedFrom = lc.carryInto(&pin, at)
 	if err := h.SetTeamLineup(compID, pin, d.comp.TeamSize); err != nil {
 		return fmt.Errorf("kachinuki match %s/%s: the lineup team %s started with was not kept: %w", compID, matchID, teamID, err)
@@ -478,13 +483,30 @@ func (e *Engine) ReseatKachinukiOpeners(compID, teamID string) ([]string, error)
 // device (the reseat and announcement that follow the door) and a later edit
 // of the starting lineup renames nothing there.
 func (e *Engine) UsePreviousLineupTx(h state.StoreTx, compID, teamID, matchID string) error {
+	// Taken away as a change stamped now: its record is kept, so the lineups
+	// carried by stamp that were made while it was in force keep reading it.
 	if err := h.DeleteTeamLineupForMatch(compID, teamID, matchID); err != nil {
 		return err
 	}
 	comp, err := h.LoadCompetition(compID)
-	if err != nil || comp == nil || !comp.IsKachinuki() {
+	if err != nil || comp == nil {
 		return err
 	}
+	if comp.IsKachinuki() {
+		if err := e.keepSnapshotLineup(h, comp, compID, teamID, matchID); err != nil {
+			return err
+		}
+	}
+	// Every carried lineup of the team is worked out again in the same
+	// transaction, as after a save (FollowLineupSave).
+	_, err = e.FollowLineupSave(h, comp, domain.TeamLineup{TeamID: teamID, MatchID: matchID}, nil)
+	return err
+}
+
+// keepSnapshotLineup keeps, on a kachinuki match that has started, the lineup
+// in force there now as its own (a pin marked now): taking a started match's
+// own lineup away is an edit of it taken as a snapshot.
+func (e *Engine) keepSnapshotLineup(h state.StoreTx, comp *state.Competition, compID, teamID, matchID string) error {
 	m, _, err := e.lookupExistingResultIn(h, compID, matchID)
 	var notFound *NotFoundError
 	if errors.As(err, &notFound) {

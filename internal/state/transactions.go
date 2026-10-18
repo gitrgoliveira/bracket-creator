@@ -113,7 +113,9 @@ type StoreTx interface {
 	LoadCompetitorStatus(compID string) (map[string]domain.CompetitorStatus, error)
 	SetCompetitorStatus(compID string, status domain.CompetitorStatus) error
 	LoadTeamLineups(compID string) (map[string]domain.TeamLineup, error)
+	LoadTeamLineupsWithRemoved(compID string) (map[string]domain.TeamLineup, error)
 	SetTeamLineup(compID string, l domain.TeamLineup, teamSize int) error
+	DeleteTeamLineup(compID, teamID string, round int) error
 	DeleteTeamLineupForMatch(compID, teamID, matchID string) error
 	LoadParticipants(compID string, withZekkenName bool) ([]domain.Player, error)
 	// LoadSquads is Store.LoadSquads under the held lock, read-your-own-writes
@@ -596,6 +598,16 @@ func (t *storeTx) SetCompetitorStatus(compID string, status domain.CompetitorSta
 }
 
 func (t *storeTx) LoadTeamLineups(compID string) (map[string]domain.TeamLineup, error) {
+	all, err := t.LoadTeamLineupsWithRemoved(compID)
+	if err != nil {
+		return nil, err
+	}
+	return liveTeamLineups(all), nil
+}
+
+// LoadTeamLineupsWithRemoved is Store.LoadTeamLineupsWithRemoved inside the
+// transaction: every record, the removed ones included, read-your-own-writes.
+func (t *storeTx) LoadTeamLineupsWithRemoved(compID string) (map[string]domain.TeamLineup, error) {
 	if err := t.checkCompID(compID); err != nil {
 		return nil, err
 	}
@@ -643,18 +655,27 @@ func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int
 // itself (an operator's, or the one the match started with), staged in the
 // transaction; nothing stored there is no error.
 func (t *storeTx) DeleteTeamLineupForMatch(compID, teamID, matchID string) error {
+	return t.removeTeamLineup(compID, teamLineupMatchKey(teamID, matchID))
+}
+
+// DeleteTeamLineup is Store.DeleteTeamLineup inside the transaction.
+func (t *storeTx) DeleteTeamLineup(compID, teamID string, round int) error {
+	return t.removeTeamLineup(compID, teamLineupKey(teamID, round))
+}
+
+// removeTeamLineup takes the lineup at key away, keeping its record as
+// removed where a carry can read it (removeTeamLineup in team_lineup.go).
+func (t *storeTx) removeTeamLineup(compID, key string) error {
 	if err := t.checkCompID(compID); err != nil {
 		return err
 	}
-	current, err := t.LoadTeamLineups(compID)
+	current, err := t.LoadTeamLineupsWithRemoved(compID)
 	if err != nil {
 		return err
 	}
-	key := teamLineupMatchKey(teamID, matchID)
-	if _, ok := current[key]; !ok {
+	if !removeTeamLineup(current, key, time.Now().UnixMilli()) {
 		return nil
 	}
-	delete(current, key)
 	return t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn())
 }
 

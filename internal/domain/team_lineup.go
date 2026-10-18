@@ -105,7 +105,18 @@ type TeamLineup struct {
 	// what a position held at a stamp whatever order the changes arrived in.
 	// Bounded by what is still read (MaxPositionHistory, TrimHistory).
 	History map[Position][]PositionChange `json:"-" yaml:"history,omitempty"`
+	// RemovedAt is set on a lineup taken away (a match's own lineup by "Use
+	// the previous match's lineup", or a starting lineup): the server's time
+	// of the removal. The record is kept beside the lineups in force, never
+	// read as one (state.Store.LoadTeamLineups leaves it out), so a lineup
+	// carried by stamp (engine/lineup_carry.go) that was made while it was in
+	// force still reads it: a removal is a change like any other, and one
+	// made after a copy or a start never reaches it.
+	RemovedAt int64 `json:"-" yaml:"removedAt,omitempty"`
 }
+
+// IsRemoved says the lineup is the kept record of one taken away (RemovedAt).
+func (t TeamLineup) IsRemoved() bool { return t.RemovedAt > 0 }
 
 // PositionChange is a value a lineup position held, from Stamp (0: from
 // before any stamped change) on: a name, a member id, or neither (empty).

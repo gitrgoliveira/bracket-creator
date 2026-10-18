@@ -222,6 +222,13 @@ their arrival. Every lineup comes out the same whatever order its saves arrive i
 Two devices that change different positions of one lineup both keep their change, a save sent
 later from a device that was offline included.
 
+Taking a lineup away ("Use the previous match's lineup", or removing a starting lineup) is a
+change made at the server's time as it lands. The lineup stops being in force, but its record
+is kept, marked with that time (`removedAt`), beside any lineup saved for the match afterwards,
+so a match lineup that carried positions from it while it was in force keeps them, whatever
+arrives before or after the removal. A save of the same lineup that arrives after its removal
+makes the lineup again. Discarding a draw removes these records with the draw's lineups.
+
 When a kachinuki match starts, the lineup in force there for each team is kept as that match's
 own lineup record, marked with the time of the write that started it (`startedAt`) and the lineup
 it was taken from (`startedFrom`: an earlier match's id, or empty for the starting lineup). It is

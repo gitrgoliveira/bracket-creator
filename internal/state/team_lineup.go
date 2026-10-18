@@ -21,6 +21,8 @@ import (
 	"os"
 	"slices"
 	"sort"
+	"strconv"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"gopkg.in/yaml.v3"
@@ -63,10 +65,59 @@ func teamLineupMatchKey(teamID, matchID string) string {
 // place the scope decision lives, every load/set/delete routes through
 // it so the two namespaces stay consistent.
 func lineupStorageKey(l domain.TeamLineup) string {
+	key := teamLineupKey(l.TeamID, l.Round)
 	if l.MatchID != "" {
-		return teamLineupMatchKey(l.TeamID, l.MatchID)
+		key = teamLineupMatchKey(l.TeamID, l.MatchID)
 	}
-	return teamLineupKey(l.TeamID, l.Round)
+	if l.IsRemoved() {
+		// The kept record of a lineup taken away: one per removal, beside the
+		// lineup the key names, so a lineup saved again after it is its own.
+		return key + "\x00removed\x00" + strconv.FormatInt(l.RemovedAt, 10)
+	}
+	return key
+}
+
+// liveTeamLineups is lineups without the kept records of lineups taken away
+// (domain.TeamLineup.RemovedAt): the lineups in force. The map itself when it
+// holds none; otherwise a new map sharing its values.
+func liveTeamLineups(lineups map[string]domain.TeamLineup) map[string]domain.TeamLineup {
+	removed := false
+	for _, l := range lineups {
+		if l.IsRemoved() {
+			removed = true
+			break
+		}
+	}
+	if !removed {
+		return lineups
+	}
+	out := make(map[string]domain.TeamLineup, len(lineups))
+	for k, l := range lineups {
+		if !l.IsRemoved() {
+			out[k] = l
+		}
+	}
+	return out
+}
+
+// removeTeamLineup takes the lineup stored at key out of lineups, answering
+// whether it was there. A lineup a carry can read (a match's own lineup that
+// is not the one a kachinuki match started with, or a starting lineup) is
+// kept as a removed record stamped at (domain.TeamLineup.RemovedAt), so the
+// lineups carried by stamp that were made while it was in force keep reading
+// it (engine/lineup_carry.go).
+func removeTeamLineup(lineups map[string]domain.TeamLineup, key string, at int64) bool {
+	l, ok := lineups[key]
+	if !ok {
+		return false
+	}
+	delete(lineups, key)
+	if !l.IsStartPin() && (l.MatchID != "" || l.Round == 0) {
+		kept := l.Clone()
+		kept.RemovedAt = at
+		lineups[lineupStorageKey(kept)] = kept
+	}
+	return true
 }
 
 // parseTeamLineupsFile reads and parses lineups.yaml at path. A missing
@@ -99,6 +150,19 @@ func (s *Store) LoadTeamLineups(compID string) (map[string]domain.TeamLineup, er
 	if err != nil {
 		return nil, err
 	}
+	return copyTeamLineups(liveTeamLineups(data.(map[string]domain.TeamLineup))), nil
+}
+
+// LoadTeamLineupsWithRemoved is LoadTeamLineups with the kept records of
+// lineups taken away (domain.TeamLineup.RemovedAt), for the carry by stamp
+// (engine/lineup_carry.go), the one reader of them.
+func (s *Store) LoadTeamLineupsWithRemoved(compID string) (map[string]domain.TeamLineup, error) {
+	data, err := s.loadCached(compID, teamLineupFilename, func(path string) (any, error) {
+		return parseTeamLineupsFile(path)
+	})
+	if err != nil {
+		return nil, err
+	}
 	return copyTeamLineups(data.(map[string]domain.TeamLineup)), nil
 }
 
@@ -116,7 +180,7 @@ func (s *Store) ReadTeamLineups(compID string, read func(lineups map[string]doma
 	if err != nil {
 		return err
 	}
-	read(data.(map[string]domain.TeamLineup))
+	read(liveTeamLineups(data.(map[string]domain.TeamLineup)))
 	return nil
 }
 
@@ -301,8 +365,9 @@ func (s *Store) setTeamLineupLocked(compID string, lineup domain.TeamLineup, tea
 	return s.saveTeamLineupsLocked(compID, current, write)
 }
 
-// DeleteTeamLineup removes the lineup for (teamID, round) if present.
-// Lineups are always deletable, including while a match is running.
+// DeleteTeamLineup removes the lineup for (teamID, round) if present,
+// keeping a starting lineup's record as removed (removeTeamLineup). Lineups
+// are always deletable, including while a match is running.
 //
 // Returns nil when no entry exists (idempotent delete).
 func (s *Store) DeleteTeamLineup(compID, teamID string, round int) error {
@@ -317,17 +382,16 @@ func (s *Store) DeleteTeamLineup(compID, teamID string, round int) error {
 	if err != nil {
 		return err
 	}
-	key := teamLineupKey(teamID, round)
-	if _, ok := current[key]; !ok {
+	if !removeTeamLineup(current, teamLineupKey(teamID, round), time.Now().UnixMilli()) {
 		return nil
 	}
-	delete(current, key)
 	return s.saveTeamLineupsLocked(compID, current, s.directWrite)
 }
 
 // DeleteTeamLineupForMatch removes the match-scoped lineup for
-// (teamID, matchID) if present (mp-825). Lineups are always deletable,
-// including while a match is running.
+// (teamID, matchID) if present (mp-825), keeping its record as removed
+// unless it is a kachinuki start's (removeTeamLineup). Lineups are always
+// deletable, including while a match is running.
 //
 // Returns nil when no entry exists (idempotent delete).
 func (s *Store) DeleteTeamLineupForMatch(compID, teamID, matchID string) error {
@@ -342,11 +406,9 @@ func (s *Store) DeleteTeamLineupForMatch(compID, teamID, matchID string) error {
 	if err != nil {
 		return err
 	}
-	key := teamLineupMatchKey(teamID, matchID)
-	if _, ok := current[key]; !ok {
+	if !removeTeamLineup(current, teamLineupMatchKey(teamID, matchID), time.Now().UnixMilli()) {
 		return nil
 	}
-	delete(current, key)
 	return s.saveTeamLineupsLocked(compID, current, s.directWrite)
 }
 
@@ -369,7 +431,8 @@ func (s *Store) ClearDrawLineups(compID string) error {
 	}
 	return s.WithTransaction(compID, func(tx StoreTx) error {
 		write := tx.(*storeTx).txWriteFn()
-		lineups, err := tx.LoadTeamLineups(compID)
+		// Every record of the draw's matches goes, a removed one's too.
+		lineups, err := tx.LoadTeamLineupsWithRemoved(compID)
 		if err != nil {
 			return err
 		}
@@ -391,7 +454,7 @@ func (s *Store) ClearDrawLineups(compID string) error {
 		}
 		changed := len(comp.RoundLineupsGiven) > 0
 		comp.RoundLineupsGiven = nil
-		if len(comp.RoundLineupsLegacy) > 0 && s.trimLegacyTeams(compID, comp, lineups) {
+		if len(comp.RoundLineupsLegacy) > 0 && s.trimLegacyTeams(compID, comp, liveTeamLineups(lineups)) {
 			changed = true
 		}
 		if !changed {

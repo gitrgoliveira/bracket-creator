@@ -346,3 +346,74 @@ func TestLineupCarry_ManyChangesOfOnePositionAgainstCopiesAndPinsOfEveryAge(t *t
 		}
 	})
 }
+
+// Taking a match's own lineup away is a change stamped when it is made: a
+// copy made while that lineup was in force keeps what it carried from it,
+// whether the removal arrives before or after an unrelated save.
+func TestLineupCarry_ARemovalIsOrderedLikeAChange(t *testing.T) {
+	for _, removeFirst := range []bool{false, true} {
+		t.Run(fmt.Sprintf("removal first %v", removeFirst), func(t *testing.T) {
+			e := newCarryEnv(t, false)
+			e.save("P1-0", 1, "Mori", -100)
+			e.save("P1-1", 2, "Endo", -50)
+			require.Equal(t, "Mori", e.at("P1-1", 1))
+			if removeFirst {
+				e.remove("P1-0")
+				e.save("", 2, "Doi", 10)
+			} else {
+				e.save("", 2, "Doi", 10)
+				e.remove("P1-0")
+			}
+			require.Equal(t, "(none)", e.at("P1-0", 1), "the match's own lineup is gone")
+			require.Equal(t, "Mori", e.at("P1-1", 1), "made while P1-0's lineup was in force: %s", e.dump())
+			require.Equal(t, "Endo", e.at("P1-1", 2))
+			// P1-0 now carries the starting lineup, the later change included.
+			in, err := e.eng.LineupInForce(e.comp, e.id["Taka"], "P1-0")
+			require.NoError(t, err)
+			require.Equal(t, "", in.Source.MatchID)
+			require.Equal(t, "Doi", in.Lineup.Positions[domain.PositionNumbered(2)])
+			require.Equal(t, "Sato", in.Lineup.Positions[domain.PositionNumbered(1)])
+		})
+	}
+}
+
+// A removal made after a kachinuki match started never reaches the lineup it
+// started with, nor its bout 1, whatever arrives after it.
+func TestLineupCarry_ARemovalAfterAStartNeverReachesThePin(t *testing.T) {
+	e := newCarryEnv(t, true)
+	e.save("P1-0", 1, "Mori", -100)
+	e.start("P1-2", "Inu", 0)
+	require.Equal(t, "Mori", e.at("P1-2", 1))
+	ms, err := e.store.LoadPoolMatches(e.comp)
+	require.NoError(t, err)
+	for i := range ms {
+		if ms[i].ID == "P1-2" {
+			ms[i].SubResults = []state.SubMatchResult{{Position: 1, SideA: "Mori", SideAMemberID: e.members["Mori"], SideB: "Kumo", IpponsA: []string{}, IpponsB: []string{}}}
+		}
+	}
+	require.NoError(t, e.store.SavePoolMatches(e.comp, ms))
+	e.remove("P1-0")
+	require.Equal(t, "Mori", e.at("P1-2", 1))
+	e.save("", 2, "Doi", 500)
+	require.Equal(t, "Mori", e.at("P1-2", 1), "an unrelated save after the removal: %s", e.dump())
+	require.Equal(t, "Mori", e.boutOne("P1-2"))
+}
+
+// Taking the starting lineup away reaches no copy made before it.
+func TestLineupCarry_RemovingTheStartingLineupReachesNoEarlierCopy(t *testing.T) {
+	e := newCarryEnv(t, false)
+	e.save("P1-1", 2, "Endo", -50)
+	require.Equal(t, "Sato", e.at("P1-1", 1))
+	e.remove("")
+	require.Equal(t, "(none)", e.at("", 1))
+	require.Equal(t, "Sato", e.at("P1-1", 1))
+	e.save("P1-0", 2, "Doi", 10)
+	require.Equal(t, "Sato", e.at("P1-1", 1), "a save after the removal: %s", e.dump())
+	// A change made before the removal that arrives after it reads the
+	// starting lineup as it stood then.
+	require.Equal(t, "Sato", e.at("P1-0", 1))
+	require.Equal(t, "Doi", e.at("P1-0", 2))
+	// Unstamped, it is made as it lands, after the removal: nothing carried.
+	e.save("P1-1", 3, "Kato", 0)
+	require.Equal(t, "Sato", e.at("P1-1", 1), "the copy keeps the point it was made at")
+}

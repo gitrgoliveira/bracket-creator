@@ -346,7 +346,7 @@ type teamLineupRead struct {
 // internal key format. Returns the lineup and whether it was found.
 func findMatchLineup(lineups map[string]domain.TeamLineup, teamID, matchID string) (domain.TeamLineup, bool) {
 	for _, l := range lineups {
-		if l.MatchID == matchID && l.TeamID == teamID {
+		if l.MatchID == matchID && l.TeamID == teamID && !l.IsRemoved() {
 			return l, true
 		}
 	}
@@ -359,7 +359,7 @@ func findMatchLineup(lineups map[string]domain.TeamLineup, teamID, matchID strin
 // "<teamID>-<round>" key format. Returns the lineup and whether it was found.
 func findRoundLineup(lineups map[string]domain.TeamLineup, teamID string, round int) (domain.TeamLineup, bool) {
 	for _, l := range lineups {
-		if l.MatchID == "" && l.TeamID == teamID && l.Round == round {
+		if l.MatchID == "" && l.TeamID == teamID && l.Round == round && !l.IsRemoved() {
 			return l, true
 		}
 	}
@@ -447,8 +447,23 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 		if !ok {
 			return
 		}
-		if err := store.DeleteTeamLineup(compID, teamID, round); err != nil {
-			internalError(c, err)
+		// Taken away as a change stamped now, its record kept, and every
+		// carried lineup of the team worked out again in the same
+		// transaction, as after a save: a copy or a start made while it was
+		// in force keeps what it carried.
+		txErr := tx.WithTransaction(compID, func(stx state.StoreTx) error {
+			if err := stx.DeleteTeamLineup(compID, teamID, round); err != nil {
+				return err
+			}
+			comp, err := stx.LoadCompetition(compID)
+			if err != nil || comp == nil {
+				return err
+			}
+			follow(stx, comp, domain.TeamLineup{TeamID: teamID, Round: round}, nil)
+			return nil
+		})
+		if txErr != nil {
+			internalError(c, txErr)
 			return
 		}
 		c.Status(http.StatusNoContent)
@@ -717,7 +732,8 @@ func (w lineupSave) landPartial(stx state.StoreTx, comp *state.Competition, chan
 			stamps[p] = now
 		}
 	}
-	lineups, err := stx.LoadTeamLineups(w.compID)
+	// The removed lineups' records too: a carry reads them by stamp.
+	lineups, err := stx.LoadTeamLineupsWithRemoved(w.compID)
 	if err != nil {
 		return internal("LoadTeamLineups", err)
 	}

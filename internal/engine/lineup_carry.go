@@ -27,6 +27,7 @@ import (
 	"log"
 	"maps"
 	"slices"
+	"strconv"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -55,14 +56,48 @@ const carryDepthMax = 64
 // the match's own lineup left out, and an earlier match's own lineup that was
 // not yet made then (a carried copy with CopiedAt at or after at) as well.
 func (lc *lineupCarry) sourceAt(teamID, matchID string, at int64) InForceLineup {
+	// slot names the lineup a record is of: a match's own, or a round's.
+	slot := func(l domain.TeamLineup) string {
+		if l.MatchID != "" {
+			return "m\x00" + l.MatchID
+		}
+		return "r\x00" + strconv.Itoa(l.Round)
+	}
+	// made: a match's carried copy counts only once it was made.
+	made := func(l domain.TeamLineup) bool { return !l.IsCarriedCopy() || l.CopiedAt < at }
+	// A lineup taken away (RemovedAt) stands for its match, or for the
+	// starting lineup, at the stamps it was in force: made before at, removed
+	// at or after it. A removal made after at never reaches what at reads. Of
+	// two such records, the one removed first after at was in force then.
+	removed := map[string]domain.TeamLineup{}
+	for _, l := range lc.lineups {
+		if l.TeamID != teamID || !l.IsRemoved() || l.RemovedAt < at || (l.MatchID != "" && l.MatchID == matchID) || !made(l) {
+			continue
+		}
+		s := slot(l)
+		if prev, ok := removed[s]; ok && prev.RemovedAt <= l.RemovedAt {
+			continue
+		}
+		removed[s] = l
+	}
 	filtered := make(map[string]domain.TeamLineup, len(lc.lineups))
 	for k, l := range lc.lineups {
-		if l.TeamID == teamID && l.MatchID != "" {
-			if l.MatchID == matchID || (l.IsCarriedCopy() && l.CopiedAt >= at) {
+		if l.IsRemoved() {
+			continue
+		}
+		if l.TeamID == teamID {
+			if l.MatchID != "" && (l.MatchID == matchID || !made(l)) {
+				continue
+			}
+			if _, ok := removed[slot(l)]; ok {
 				continue
 			}
 		}
 		filtered[k] = l
+	}
+	for s, l := range removed {
+		l.RemovedAt = 0
+		filtered["removed\x00"+s] = l
 	}
 	return (&lineupRule{lineups: filtered, draw: lc.draw}).inForce(teamID, matchID)
 }
@@ -185,7 +220,9 @@ func (lc *lineupCarry) carryInto(l *domain.TeamLineup, at int64) string {
 func (lc *lineupCarry) rederive(teamID string) []string {
 	var keys []string
 	for k, l := range lc.lineups {
-		if l.TeamID != teamID || (!l.IsCarriedCopy() && !l.IsStartPin()) {
+		// A removed record is what it was when taken away: only its stamps'
+		// reads use it, through sourceAt, which works its carry out again.
+		if l.TeamID != teamID || l.IsRemoved() || (!l.IsCarriedCopy() && !l.IsStartPin()) {
 			continue
 		}
 		if _, ok := lc.draw[l.MatchID]; !ok {
@@ -276,7 +313,7 @@ func LandMatchLineupSave(lineups map[string]domain.TeamLineup, pool []state.Matc
 	var base domain.TeamLineup
 	found := false
 	for _, l := range lineups {
-		if l.TeamID == teamID && l.MatchID == matchID {
+		if l.TeamID == teamID && l.MatchID == matchID && !l.IsRemoved() {
 			base, found = l.Clone(), true
 		}
 	}
@@ -322,7 +359,7 @@ func (e *Engine) FollowLineupSave(h state.StoreTx, comp *state.Competition, save
 	if comp == nil || (saved.MatchID == "" && saved.Round != 0) {
 		return nil, nil
 	}
-	lineups, err := h.LoadTeamLineups(comp.ID)
+	lineups, err := h.LoadTeamLineupsWithRemoved(comp.ID)
 	if err != nil {
 		return nil, err
 	}

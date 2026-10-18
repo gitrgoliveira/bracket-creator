@@ -300,7 +300,7 @@ func (t *TeamLineup) TrimHistory(refs []int64) {
 					held = i
 				}
 			}
-			if held >= 0 && !(cur < r && cur >= cs[held].Stamp) {
+			if held >= 0 && (cur >= r || cur < cs[held].Stamp) {
 				keep[held] = true
 			}
 		}

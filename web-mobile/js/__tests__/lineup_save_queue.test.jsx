@@ -86,6 +86,8 @@ describe('a save that reaches the server names the positions it changed', () => 
       body: {
         teamId: 't1', competitionId: 'c1', matchId: 'm1',
         positions: { senpo: 'Kato' }, memberIds: { senpo: 'mem-k' }, changed: ['senpo'],
+        // When the change was made, in the server's frame (engine.FollowLineupSave).
+        changedAt: { senpo: expect.any(Number) },
       },
     }]);
   });
@@ -95,7 +97,7 @@ describe('a save that reaches the server names the positions it changed', () => 
     await (await API.putTeamLineup('c1', 't1', 0, { jiho: '' }, 'pw', undefined, ['jiho'])).settled;
     expect(s.puts).toEqual([{
       url: '/api/competitions/c1/teams/t1/lineups/0',
-      body: { teamId: 't1', competitionId: 'c1', round: 0, positions: { jiho: '' }, changed: ['jiho'] },
+      body: { teamId: 't1', competitionId: 'c1', round: 0, positions: { jiho: '' }, changed: ['jiho'], changedAt: { jiho: expect.any(Number) } },
     }]);
     expect(s.starting.positions).toEqual({ senpo: 'Sato', taisho: 'Ito' });
   });
@@ -156,6 +158,7 @@ describe('a lineup has one entry in the queue', () => {
     expect(queuedPayloads()[0]).toEqual({
       teamId: 't1', competitionId: 'c1', matchId: 'm1',
       positions: { senpo: 'Ota', jiho: 'Hara' }, memberIds: { senpo: 'mem-o', jiho: 'mem-h' }, changed: ['senpo', 'jiho'],
+      changedAt: { senpo: expect.any(Number), jiho: expect.any(Number) },
     });
     await tick(0);
     await s.reconnect();
@@ -167,8 +170,13 @@ describe('a lineup has one entry in the queue', () => {
     const s = connect({ own: { m1: STORED } });
     s.offline = true;
     await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Kato' }, 'pw', { senpo: 'mem-k' }, ['senpo']);
+    vi.advanceTimersByTime(1000);
     await API.putMatchLineup('c1', 't1', 'm1', { taisho: 'Mori' }, 'pw', { taisho: 'mem-m' }, ['taisho']);
     expect(queuedPayloads()[0].changed).toEqual(['senpo', 'taisho']);
+    // Each position keeps when its own change was made: a change made before
+    // a kachinuki match started stays dated before it once joined.
+    const at = queuedPayloads()[0].changedAt;
+    expect(at.taisho - at.senpo).toBeGreaterThanOrEqual(1000);
     await tick(0);
     await s.reconnect();
     expect(s.own.m1.positions).toEqual({ senpo: 'Kato', jiho: 'Tanaka', taisho: 'Mori' });

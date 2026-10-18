@@ -42,6 +42,11 @@ export function joinQueuedLineupSave(queued, incoming) {
   const whole = !Array.isArray(queued.changed);
   const positions = { ...queued.positions };
   const memberIds = { ...queued.memberIds };
+  // When each position was changed (`changedAt`, stamped by the queue): a
+  // position keeps the stamp of the change that holds it, so a change made
+  // before a kachinuki match started is still dated before it once joined with
+  // one made after (engine.FollowLineupSave).
+  const changedAt = { ...(queued.changedAt || {}) };
   incoming.changed.forEach((key) => {
     const name = incoming.positions[key];
     const id = (incoming.memberIds && incoming.memberIds[key]) || '';
@@ -49,10 +54,17 @@ export function joinQueuedLineupSave(queued, incoming) {
     else positions[key] = name;
     if (id) memberIds[key] = id;
     else delete memberIds[key];
+    const at = incoming.changedAt && incoming.changedAt[key];
+    if (at) changedAt[key] = at;
+    else delete changedAt[key];
   });
   const joined = { ...incoming, positions };
   if (queued.memberIds || incoming.memberIds) joined.memberIds = memberIds;
+  delete joined.changedAt;
   if (whole) delete joined.changed;
-  else joined.changed = [...queued.changed, ...incoming.changed.filter((key) => !queued.changed.includes(key))];
+  else {
+    joined.changed = [...queued.changed, ...incoming.changed.filter((key) => !queued.changed.includes(key))];
+    if (Object.keys(changedAt).length > 0) joined.changedAt = changedAt;
+  }
   return joined;
 }

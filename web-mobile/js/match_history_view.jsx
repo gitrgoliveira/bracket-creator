@@ -102,13 +102,19 @@ const EVENT_OUTCOME_WORDS = {
     notAllowed: 'this match does not take that change',
     matchClosed: 'the match was already finished',
 };
+// The server's reason codes that say more than the outcome does.
+const EVENT_REASON_WORDS = {
+    // A tap made after Remove this bout, on a device that had not seen it
+    // (engine.EventReasonBoutRemoved).
+    bout_removed: 'the bout it was made on had been removed',
+};
 function eventReason(entry) {
     const o = entry.eventOutcome;
     if (!o || o === 'applied' || o === 'recorded' || o === 'duplicate') return null;
     // The server's reason is a sentence for a few outcomes and a code for
-    // others; a code is not shown.
+    // others; a code is not shown, but one with words of its own is said.
     const said = typeof entry.reason === 'string' && /\s/.test(entry.reason) ? entry.reason : null;
-    return `Not applied: ${said || EVENT_OUTCOME_WORDS[o] || 'the server did not apply it'}`;
+    return `Not applied: ${said || EVENT_REASON_WORDS[entry.reason] || EVENT_OUTCOME_WORDS[o] || 'the server did not apply it'}`;
 }
 
 const pad2 = (n) => String(n).padStart(2, '0');

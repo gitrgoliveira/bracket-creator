@@ -25,6 +25,9 @@ describe('a tap in the match history', () => {
         expect(historyEntryView(tap({ kind: 'ippon.add', side: 'b', letter: 'M' }, 'matchClosed')).reason).toBe('Not applied: the match was already finished');
         expect(historyEntryView(tap({ kind: 'ippon.add', side: 'b', letter: 'M' }, 'beforeBaseline')).reason).toBe('Not applied: a result recorded since already covered it');
         expect(historyEntryView(tap({ kind: 'ippon.remove', side: 'b' }, 'noTarget')).reason).toBe('Not applied: the mark it took off was already gone');
+        // A strike made after Remove this bout on a device that had not seen it.
+        expect(historyEntryView(tap({ kind: 'ippon.add', side: 'b', letter: 'M', pos: 2 }, 'noTarget', { reason: 'bout_removed' })).reason)
+            .toBe('Not applied: the bout it was made on had been removed');
         expect(historyEntryView(tap({ kind: 'ippon.add', side: 'b', letter: 'M' }, 'matchClosed', { reason: 'the match was already finished' })).reason)
             .toBe('Not applied: the match was already finished');
     });

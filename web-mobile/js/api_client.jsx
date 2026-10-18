@@ -1511,6 +1511,13 @@ function _outboxWrite({ kind, compID, matchID, method, url, payload, password, s
     const stamped = Number(payload.modifiedAt);
     if (Number.isFinite(stamped) && stamped > 0) payload.modifiedAt = _afterOwnStamp(base, stamped);
     else descriptor.sortStamp = _afterOwnStamp(base, _serverNowMs());
+    // A lineup save names when each position it changes was changed, in the
+    // server's clock frame: a change made before a kachinuki match started
+    // reaches the lineup the match started with whenever it arrives
+    // (engine.FollowLineupSave). The queue's join keeps each position's own.
+    if (kind === 'lineup' && Array.isArray(payload.changed) && !payload.changedAt && descriptor.sortStamp) {
+        payload.changedAt = Object.fromEntries(payload.changed.map((k) => [k, descriptor.sortStamp]));
+    }
     let settled = null;
     const key = _commitEnqueue(base, descriptor, (k) => { settled = _openSettlement(k, onRefusal); });
     return _pendingAnswer(key, settled);

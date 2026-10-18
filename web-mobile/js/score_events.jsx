@@ -586,9 +586,11 @@ function foldBout(m, e, opts, ctx) {
     // bout, a pairing added by hand): the row is made, and kept only if the
     // event applies (m.subResults is set only then).
     // A bout whose row a line removed keeps its stamp, a tombstone: an
-    // event stamped at or before the removal does not make it again, one
-    // made after it does (engine.foldBout).
-    if (!createsMissingRow(opts, e.pos) || (ctx.stamps[`bout:${e.pos}`] || 0) >= (e.stamp || 0)) return NO_TARGET;
+    // event stamped at or before the removal does not make it again; after
+    // it only a fighter picked there does (the pairing added again), since a
+    // bare strike would make a bout with no fighters (engine.foldBout).
+    const tomb = ctx.stamps[`bout:${e.pos}`] || 0;
+    if (!createsMissingRow(opts, e.pos) || tomb >= (e.stamp || 0) || (tomb > 0 && e.kind !== BOUT_FIGHTER)) return NO_TARGET;
     rows = withEmptyBoutRow(rows, e.pos);
     idx = rows.findIndex((r) => r && r.position === e.pos);
   }

@@ -5120,6 +5120,537 @@
      ]
     }
    }
+  },
+  {
+   "name": "D5: a finish naming the result alone, with a basis, turns away a tap stamped before it that it never saw, whichever arrives first; the tap it saw stands",
+   "jsMirror": false,
+   "shape": {
+    "kind": "individual",
+    "knockout": true
+   },
+   "match": {
+    "id": "r0-m0",
+    "sideA": "Aka",
+    "sideB": "Shiro",
+    "sideAId": "pa",
+    "sideBId": "pb",
+    "winner": "",
+    "ipponsA": [],
+    "ipponsB": [],
+    "hansokuA": 0,
+    "hansokuB": 0,
+    "decision": "",
+    "status": "running",
+    "court": "A",
+    "round": 0,
+    "scheduledAt": ""
+   },
+   "head": [
+    {
+     "v": 1,
+     "baseline": {
+      "id": "m0",
+      "door": "test",
+      "stamp": 10,
+      "values": {
+       "points": {
+        "ipponsA": [],
+        "ipponsB": [],
+        "hansokuA": 0,
+        "hansokuB": 0
+       }
+      },
+      "basis": {
+       "seen": 0
+      }
+     }
+    }
+   ],
+   "lines": [
+    {
+     "v": 1,
+     "event": {
+      "id": "e1",
+      "session": "s-e1",
+      "seq": 1,
+      "stamp": 90,
+      "kind": "ippon.add",
+      "side": "a",
+      "letter": "M"
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "e2",
+      "session": "s-e2",
+      "seq": 1,
+      "stamp": 95,
+      "kind": "ippon.add",
+      "side": "b",
+      "letter": "K"
+     }
+    },
+    {
+     "v": 1,
+     "baseline": {
+      "id": "f",
+      "door": "test",
+      "stamp": 100,
+      "values": {
+       "result": {
+        "status": "completed",
+        "winner": "Aka",
+        "decision": "",
+        "winnerId": "pa"
+       }
+      },
+      "basis": {
+       "seen": 1,
+       "own": [
+        "e1"
+       ]
+      },
+      "basisSent": true
+     }
+    }
+   ],
+   "want": {
+    "match": {
+     "status": "completed",
+     "ipponsA": [
+      "M"
+     ],
+     "ipponsB": [],
+     "markIds": {
+      "a": [
+       "e1"
+      ]
+     },
+     "scoreVersion": 4,
+     "modifiedAt": 100,
+     "groupStamps": {
+      "points": 90,
+      "result": 100
+     }
+    },
+    "outcomes": {
+     "e1": [
+      "applied"
+     ],
+     "e2": [
+      "beforeBaseline"
+     ]
+    }
+   }
+  },
+  {
+   "name": "D5: a finish that sent no basis (an older build's) is taken to have seen every tap stamped before it, whichever arrives first",
+   "jsMirror": false,
+   "shape": {
+    "kind": "individual",
+    "knockout": true
+   },
+   "match": {
+    "id": "r0-m0",
+    "sideA": "Aka",
+    "sideB": "Shiro",
+    "sideAId": "pa",
+    "sideBId": "pb",
+    "winner": "",
+    "ipponsA": [],
+    "ipponsB": [],
+    "hansokuA": 0,
+    "hansokuB": 0,
+    "decision": "",
+    "status": "running",
+    "court": "A",
+    "round": 0,
+    "scheduledAt": ""
+   },
+   "head": [
+    {
+     "v": 1,
+     "baseline": {
+      "id": "m0",
+      "door": "test",
+      "stamp": 10,
+      "values": {
+       "points": {
+        "ipponsA": [],
+        "ipponsB": [],
+        "hansokuA": 0,
+        "hansokuB": 0
+       }
+      },
+      "basis": {
+       "seen": 0
+      }
+     }
+    }
+   ],
+   "lines": [
+    {
+     "v": 1,
+     "event": {
+      "id": "e1",
+      "session": "s-e1",
+      "seq": 1,
+      "stamp": 90,
+      "kind": "ippon.add",
+      "side": "a",
+      "letter": "M"
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "e2",
+      "session": "s-e2",
+      "seq": 1,
+      "stamp": 95,
+      "kind": "ippon.add",
+      "side": "b",
+      "letter": "K"
+     }
+    },
+    {
+     "v": 1,
+     "baseline": {
+      "id": "f",
+      "door": "test",
+      "stamp": 100,
+      "values": {
+       "result": {
+        "status": "completed",
+        "winner": "Aka",
+        "decision": "",
+        "winnerId": "pa"
+       }
+      },
+      "basis": {
+       "seen": 1,
+       "own": [
+        "e1"
+       ]
+      }
+     }
+    }
+   ],
+   "want": {
+    "match": {
+     "status": "completed",
+     "ipponsA": [
+      "M"
+     ],
+     "ipponsB": [
+      "K"
+     ],
+     "markIds": {
+      "a": [
+       "e1"
+      ],
+      "b": [
+       "e2"
+      ]
+     },
+     "scoreVersion": 4,
+     "modifiedAt": 100,
+     "groupStamps": {
+      "points": 95,
+      "result": 100
+     }
+    },
+    "outcomes": {
+     "e1": [
+      "applied"
+     ],
+     "e2": [
+      "applied"
+     ]
+    }
+   }
+  },
+  {
+   "name": "D5 (screens too): a finish in the head naming the result alone turns away a tap stamped before it that its basis does not hold",
+   "jsMirror": true,
+   "shape": {
+    "kind": "individual",
+    "knockout": true
+   },
+   "match": {
+    "id": "r0-m0",
+    "sideA": "Aka",
+    "sideB": "Shiro",
+    "sideAId": "pa",
+    "sideBId": "pb",
+    "winner": "Aka",
+    "ipponsA": [
+     "M"
+    ],
+    "ipponsB": [],
+    "hansokuA": 0,
+    "hansokuB": 0,
+    "decision": "",
+    "status": "completed",
+    "court": "A",
+    "round": 0,
+    "scheduledAt": "",
+    "winnerId": "pa"
+   },
+   "head": [
+    {
+     "v": 1,
+     "baseline": {
+      "id": "m0",
+      "door": "test",
+      "stamp": 10,
+      "values": {
+       "points": {
+        "ipponsA": [],
+        "ipponsB": [],
+        "hansokuA": 0,
+        "hansokuB": 0
+       }
+      },
+      "basis": {
+       "seen": 0
+      }
+     }
+    },
+    {
+     "v": 1,
+     "baseline": {
+      "id": "f",
+      "door": "test",
+      "stamp": 100,
+      "values": {
+       "result": {
+        "status": "completed",
+        "winner": "Aka",
+        "decision": "",
+        "winnerId": "pa"
+       }
+      },
+      "basis": {
+       "seen": 1,
+       "own": [
+        "e1"
+       ]
+      },
+      "basisSent": true
+     }
+    }
+   ],
+   "lines": [
+    {
+     "v": 1,
+     "event": {
+      "id": "e1",
+      "session": "s-e1",
+      "seq": 1,
+      "stamp": 90,
+      "kind": "ippon.add",
+      "side": "a",
+      "letter": "M"
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "e2",
+      "session": "s-e2",
+      "seq": 1,
+      "stamp": 95,
+      "kind": "ippon.add",
+      "side": "b",
+      "letter": "K"
+     }
+    }
+   ],
+   "want": {
+    "match": {
+     "status": "completed",
+     "ipponsA": [
+      "M"
+     ],
+     "ipponsB": [],
+     "markIds": {
+      "a": [
+       "e1"
+      ]
+     },
+     "scoreVersion": 4,
+     "modifiedAt": 100,
+     "groupStamps": {
+      "points": 90,
+      "result": 100
+     }
+    },
+    "outcomes": {
+     "e1": [
+      "applied"
+     ],
+     "e2": [
+      "beforeBaseline"
+     ]
+    }
+   }
+  },
+  {
+   "name": "D5 on a kachinuki encounter: a finish naming the result alone turns away a strike on bout 1 stamped before it that it never saw, and keeps the one it saw",
+   "jsMirror": true,
+   "shape": {
+    "kind": "kachinuki"
+   },
+   "match": {
+    "id": "r0-m0",
+    "sideA": "Kyoto",
+    "sideB": "Osaka",
+    "sideAId": "ta",
+    "sideBId": "tb",
+    "winner": "Kyoto",
+    "ipponsA": [],
+    "ipponsB": [],
+    "hansokuA": 0,
+    "hansokuB": 0,
+    "decision": "",
+    "status": "completed",
+    "court": "A",
+    "round": 0,
+    "scheduledAt": "",
+    "subResults": [
+     {
+      "position": 1,
+      "sideA": "K1",
+      "sideB": "O1",
+      "ipponsA": [
+       "M"
+      ],
+      "ipponsB": [],
+      "hansokuA": 0,
+      "hansokuB": 0,
+      "winner": "",
+      "decision": "",
+      "sideAMemberId": "k1",
+      "sideBMemberId": "o1",
+      "winnerMemberId": ""
+     }
+    ],
+    "groupStamps": {
+     "bout:1": 90,
+     "result": 100
+    },
+    "winnerId": "ta"
+   },
+   "head": [
+    {
+     "v": 1,
+     "baseline": {
+      "id": "m0",
+      "door": "test",
+      "stamp": 10,
+      "values": {
+       "bout:1": {
+        "position": 1,
+        "sideA": "K1",
+        "sideB": "O1",
+        "ipponsA": [],
+        "ipponsB": [],
+        "hansokuA": 0,
+        "hansokuB": 0,
+        "winner": "",
+        "decision": "",
+        "sideAMemberId": "k1",
+        "sideBMemberId": "o1",
+        "winnerMemberId": ""
+       }
+      },
+      "basis": {
+       "seen": 0
+      }
+     }
+    },
+    {
+     "v": 1,
+     "baseline": {
+      "id": "f",
+      "door": "test",
+      "stamp": 100,
+      "values": {
+       "result": {
+        "status": "completed",
+        "winner": "Kyoto",
+        "decision": "",
+        "winnerId": "ta"
+       }
+      },
+      "basis": {
+       "seen": 1,
+       "own": [
+        "e1"
+       ]
+      },
+      "basisSent": true
+     }
+    }
+   ],
+   "lines": [
+    {
+     "v": 1,
+     "event": {
+      "id": "e1",
+      "session": "s-e1",
+      "seq": 1,
+      "stamp": 90,
+      "kind": "ippon.add",
+      "side": "a",
+      "letter": "M",
+      "pos": 1
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "e2",
+      "session": "s-e2",
+      "seq": 1,
+      "stamp": 95,
+      "kind": "ippon.add",
+      "side": "b",
+      "letter": "K",
+      "pos": 1
+     }
+    }
+   ],
+   "want": {
+    "match": {
+     "status": "completed",
+     "subResults": [
+      {
+       "position": 1,
+       "ipponsA": [
+        "M"
+       ],
+       "ipponsB": []
+      }
+     ],
+     "scoreVersion": 4,
+     "modifiedAt": 100,
+     "groupStamps": {
+      "bout:1": 90,
+      "result": 100
+     }
+    },
+    "outcomes": {
+     "e1": [
+      "applied"
+     ],
+     "e2": [
+      "beforeBaseline"
+     ]
+    }
+   }
   }
  ]
 }

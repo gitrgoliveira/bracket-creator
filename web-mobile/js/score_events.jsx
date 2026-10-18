@@ -1009,6 +1009,22 @@ export function replayHead(match, head, lines, opts = {}) {
     delete stamps[g];
   }
   items.sort(compareItems);
+  // engine.closingResults: per event line, the baseline line of the first
+  // result after it in stamp order that finishes the match.
+  const closer = {};
+  let nextCloser = -1;
+  for (let k = items.length - 1; k >= 0; k--) {
+    const it = items[k];
+    const l = log[it.line];
+    if (l.baseline) {
+      if ((it.groups || []).includes(GROUP_RESULT)) {
+        const r = (l.baseline.values || {})[GROUP_RESULT];
+        if (r && r.status === 'completed') nextCloser = it.line;
+      }
+      continue;
+    }
+    if (nextCloser >= 0) closer[it.line] = nextCloser;
+  }
 
   const closed = () => GROUP_RESULT in govern && cur.status === 'completed';
   const basisContains = (b, i, e) => {
@@ -1062,9 +1078,22 @@ export function replayHead(match, head, lines, opts = {}) {
     }
   };
 
+  // engine.replayer.closedBefore (D5): a finish or a decision that sent a
+  // basis governs every scoring group and the overtime at its stamp, so an
+  // event stamped before it that it did not have in view is turned away.
+  const closedBefore = (line, e, g) => {
+    if (!(line in closer) || serverFighterEvent(e)) return false;
+    if (!(isScoringGroup(g) || g === 'encho')) return false;
+    const b = log[closer[line]].baseline;
+    if (g in (b.values || {})) return false;
+    if (boutsStayOpen((b.values || {})[GROUP_RESULT] || {}, g, opts)) return false;
+    return !!b.basisSent && !basisContains(b, line, e);
+  };
+
   const applyEvent = (line, e) => {
     const g = groupOf(e);
     if (closed() && !boutsStayOpen(cur, g, opts) && !serverFighterEvent(e)) { outcome[line] = MATCH_CLOSED; return; }
+    if (closedBefore(line, e, g)) { outcome[line] = BEFORE_BASELINE; return; }
     const governed = g in govern;
     if (!governed && covered[g]) { (early[g] = early[g] || []).push(line); return; }
     if (governed && contains(log[govern[g]].baseline, line)) { outcome[line] = RECORDED; return; }

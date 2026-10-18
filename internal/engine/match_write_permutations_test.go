@@ -152,6 +152,9 @@ type pmStep struct {
 	own  []string
 	by   string
 	dec  bool
+	// basis says the result sent a basis: only then does it turn away a tap
+	// stamped before it on a group it does not set (D5, closedBefore).
+	basis bool
 }
 
 // pmAnswer names what a write was answered with.
@@ -191,7 +194,7 @@ func pmPt(at int64, a, b []string) pmStep {
 }
 
 func pmFin(at int64, win string, a, b []string, own ...string) pmStep {
-	return pmStep{at: at, role: pmRes, own: own, sets: []string{state.GroupPoints, state.GroupResult}, run: func(h mmHome) string {
+	return pmStep{at: at, role: pmRes, own: own, basis: own != nil, sets: []string{state.GroupPoints, state.GroupResult}, run: func(h mmHome) string {
 		w := mmRunning(h, at, state.GroupPoints, state.GroupResult)
 		w.Status, w.Winner, w.IpponsA, w.IpponsB = state.MatchStatusCompleted, win, a, b
 		if own != nil {
@@ -213,7 +216,7 @@ func pmBareInd(at int64, win string, a, b []string) pmStep {
 // pmBareFin is a finish that names result alone and carries no scoreline: it
 // stands on the taps in its basis.
 func pmBareFin(at int64, win string, own ...string) pmStep {
-	return pmStep{at: at, role: pmRes, own: own, sets: []string{state.GroupResult}, run: func(h mmHome) string {
+	return pmStep{at: at, role: pmRes, own: own, basis: true, sets: []string{state.GroupResult}, run: func(h mmHome) string {
 		w := mmRunning(h, at, state.GroupResult)
 		w.Status, w.Winner = state.MatchStatusCompleted, win
 		w.Basis = &state.ScoreBasis{Own: own}
@@ -249,7 +252,7 @@ func pmHik(at int64) pmStep {
 
 // pmEngiFin is an engi finish: the flag count and the verdict it decides.
 func pmEngiFin(at int64, flagsA, flagsB int, own ...string) pmStep {
-	return pmStep{at: at, role: pmRes, own: own, sets: []string{state.GroupResult, state.GroupFlags}, run: func(h mmHome) string {
+	return pmStep{at: at, role: pmRes, own: own, basis: own != nil, sets: []string{state.GroupResult, state.GroupFlags}, run: func(h mmHome) string {
 		w := mmEngiFinish(h, at, flagsA, flagsB)
 		if own != nil {
 			w.Basis = &state.ScoreBasis{Own: own}
@@ -293,7 +296,7 @@ func pmTeamFin(at int64, win string, own []string, subs ...state.SubMatchResult)
 	for _, s := range subs {
 		sets = append(sets, state.BoutGroup(s.Position))
 	}
-	return pmStep{at: at, role: pmRes, own: own, sets: sets, run: func(h mmHome) string {
+	return pmStep{at: at, role: pmRes, own: own, basis: own != nil, sets: sets, run: func(h mmHome) string {
 		w := mmRunning(h, at, sets...)
 		w.Status, w.Winner, w.SubResults = state.MatchStatusCompleted, win, subs
 		if own != nil {
@@ -526,6 +529,13 @@ func pmWantOutcome(c pmCase, tap pmStep) string {
 	g := ScoreEventGroup(&tap.ev)
 	sets := slices.Contains(first.sets, g) || (strings.HasPrefix(g, "bout:") && slices.Contains(first.sets, pmAnyBout))
 	if !sets {
+		// D5: a result that sent a basis governs every scoring group and the
+		// overtime at its stamp, so a tap it did not have in view is turned
+		// away whichever arrives first; one with no basis saw everything
+		// stamped before it (closedBefore).
+		if first.basis && (state.IsScoringGroup(g) || g == state.GroupEncho) && !c.landsAfter && !slices.Contains(first.own, tap.id) {
+			return domain.ScoreOutcomeBeforeBaseline
+		}
 		return domain.ScoreOutcomeApplied
 	}
 	if first.dec && g == state.GroupPoints && (tap.ev.Side == domain.ScoreSideA || tap.ev.Side == domain.ScoreSideB) {
@@ -926,9 +936,12 @@ func pmCases() []pmCase {
 		{name: "mix team fin Ryu(b1 M) T2, e b3 b:K T4, e b2 b:M T3", team: true, rows: true, steps: []pmStep{
 			pmTeamFin(t2, wrTeamA, nil, r(1, M, nil, "A1")), pmEvent("e3", "d2", 1, t4, 3, "b", "K"), pmEvent("e2", "d3", 1, t3, 2, "b", "M")},
 			refused: []int{1, 2}, want: []string{`st=completed`, ryu, `[1 [M]-[]`}},
-		{name: "mix team e1 b1 a:M T1, e2 b2 b:M T1.5 unseen, fin Ryu(b1) T2 own e1", team: true, rows: true, steps: []pmStep{
+		// D5 (match-writes.md): the finish governs every scoring group at its
+		// stamp, so a tap stamped before it that its basis does not hold is
+		// turned away (beforeBaseline), whichever arrives first.
+		{name: "mix team e1 b1 a:M T1, e2 b2 b:M T1.5 unseen, fin Ryu(b1) T2 own e1 (e2 turned away)", team: true, rows: true, steps: []pmStep{
 			pmEvent("e1", "d1", 1, t1, 1, "a", "M"), pmEvent("e2", "d2", 1, half(1), 2, "b", "M"), pmTeamFin(t2, wrTeamA, []string{"e1"}, r(1, M, nil, "A1"))},
-			want: []string{`st=completed`, ryu, `[1 [M]-[]`}},
+			refused: []int{1}, want: []string{`st=completed`, ryu, `[1 [M]-[]`}},
 		{name: "mix team e1 b1 a:M T1, bareFin Ryu T2 own e1, e2 b2 b:M T3, e3 b3 b:K T4", team: true, rows: true, steps: []pmStep{
 			pmEvent("e1", "d1", 1, t1, 1, "a", "M"), pmTeamFin(t2, wrTeamA, []string{"e1"}), pmEvent("e2", "d2", 1, t3, 2, "b", "M"), pmEvent("e3", "d2", 2, t4, 3, "b", "K")},
 			refused: []int{2, 3}, want: []string{`st=completed`, ryu, `[1 [M]-[]`}},

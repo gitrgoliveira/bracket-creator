@@ -443,6 +443,73 @@ type replayer struct {
 	early   map[string][]int
 	outcome map[int]string
 	held    map[int]BaselineHold
+	// closer maps an event line to the line of the baseline that sets the
+	// next result after it in stamp order, when that result finishes the
+	// match (a finish or a decision): see closedBefore.
+	closer map[int]int
+}
+
+// closingResults is, for every event line, the baseline line of the first
+// result after it in stamp order (items as sorted) that finishes the match. A
+// result between them that does not (a start, a send back) is no finish and
+// shields nothing: a tap stamped before it is still one the finish after it
+// did or did not have in view. A tap stamped between a finish and a reopen is
+// the closed-match rule's other half (closed: matchClosed).
+func closingResults(lines []state.ScoreLogLine, items []replayItem) map[int]int {
+	out := map[int]int{}
+	next := -1
+	for k := len(items) - 1; k >= 0; k-- {
+		it := items[k]
+		l := lines[it.line]
+		if l.Baseline != nil {
+			if slices.Contains(it.groups, state.GroupResult) {
+				var verdict state.MatchResult
+				if state.SetGroupFromValue(&verdict, state.GroupResult, l.Baseline.Values[state.GroupResult]) == nil && verdict.Status == state.MatchStatusCompleted {
+					next = it.line
+				}
+			}
+			continue
+		}
+		if next >= 0 && l.Event != nil {
+			out[it.line] = next
+		}
+	}
+	return out
+}
+
+// closedBefore is the closed-match rule's other half (D5, match-writes.md):
+// a finish or a decision governs every scoring group (and the overtime) at its
+// stamp, the ones it names and the ones it does not, so an event stamped
+// before it that it did not have in view is turned away (beforeBaseline) and
+// kept in the history, whichever arrives first. A group the result itself
+// sets is judged when its baseline is applied (absorb); a bout a match-level
+// kiken, fusenpai or fusensho leaves open on a fixed-order team match stays
+// open (T1, boutsStayOpen); the server's own fighter events name who fought.
+// What the result had in view is its sent basis (below for one sent none).
+func (rp *replayer) closedBefore(line int, e *domain.ScoreEvent, g string) bool {
+	c, ok := rp.closer[line]
+	if !ok || serverFighterEvent(e) || (!state.IsScoringGroup(g) && g != state.GroupEncho) {
+		return false
+	}
+	b := rp.lines[c].Baseline
+	if _, sets := b.Values[g]; sets {
+		return false
+	}
+	if pos, isBout := state.ParseBoutGroup(g); isBout && pos >= 1 {
+		var verdict state.MatchResult
+		comp := rp.shape.Comp
+		if state.SetGroupFromValue(&verdict, state.GroupResult, b.Values[state.GroupResult]) == nil &&
+			comp != nil && comp.TeamSize >= 2 && !comp.IsKachinuki() && domain.IsDefaultWinDecisionStr(verdict.Decision) {
+			return false
+		}
+	}
+	// A result written with no basis (an older build's, or the server's own
+	// write) says nothing of what its writer saw, and "what had reached the
+	// log" would make the outcome hang on arrival order: it is taken to have
+	// seen everything stamped before it, as before this rule. Taking it to
+	// have seen nothing would strip an older build's finish of the scoreline
+	// it was made on.
+	return b.BasisSent && !BasisContains(b, line, e)
 }
 
 // padDefaultWin gives a team match a default win closes a row for every
@@ -549,6 +616,7 @@ func replayScoring(current *state.MatchResult, lines []state.ScoreLogLine, shape
 	}
 	rp.startMadeRowsEmpty()
 	slices.SortFunc(items, compareReplayItems)
+	rp.closer = closingResults(lines, items)
 	for _, it := range items {
 		if stopAt != nil && compareReplayItems(it, *stopAt) >= 0 {
 			break
@@ -1118,6 +1186,10 @@ func (rp *replayer) applyEvent(line int, e *domain.ScoreEvent) {
 	// the only way to change it.
 	if rp.closed() && !rp.boutsStayOpen(g) && !serverFighterEvent(e) {
 		rp.outcome[line] = domain.ScoreOutcomeMatchClosed
+		return
+	}
+	if rp.closedBefore(line, e, g) {
+		rp.outcome[line] = domain.ScoreOutcomeBeforeBaseline
 		return
 	}
 	b, governed := rp.govern[g]

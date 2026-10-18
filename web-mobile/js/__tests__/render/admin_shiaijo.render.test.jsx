@@ -3001,23 +3001,6 @@ describe('the console asks before it drops the editor\'s unsaved entries (R1)', 
     } finally { c.restore(); }
   });
 
-  it('moving the correction to another court says the unsaved entries are discarded, and drops them on confirm', async () => {
-    const c = await mountCourt([courtMatch('m1', 'completed', { modifiedAt: 1000 }), courtMatch('m2', 'scheduled')]);
-    try {
-      await tapCorrect(c, 'Aka m1');
-      const discard = vi.fn();
-      const probeFn = () => true;
-      probeFn.discard = discard;
-      probe.props.hostUnsavedRef.current = probeFn;
-      const row = [...c.utils.container.querySelectorAll('.shiaijo-qrow--complete')].find((r) => r.textContent.includes('Aka m1'));
-      await act(async () => { within(row).getByTestId('move-to-B').click(); });
-      const dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
-      expect(dialog.textContent).toContain('Your unsaved entries will be discarded.');
-      await act(async () => { dialog.querySelector('.btn--primary').click(); });
-      expect(discard).toHaveBeenCalledTimes(1);
-    } finally { c.restore(); }
-  });
-
   // Stage 5 review 9, M1: every console exit that drops the editor asks the
   // same question: the court switcher, the Dashboard crumb, Sign out and
   // Public viewer. With nothing unsaved each goes in the same tick.

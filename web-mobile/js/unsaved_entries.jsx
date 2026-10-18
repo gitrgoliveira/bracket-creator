@@ -20,8 +20,8 @@
 //     competition, Sign out, Public viewer and the running strip; the bracket
 //     panel's choice of another match), through `confirmLeave`/`leaveThen`;
 //     and a confirm of the host's own that drops the editor's match (the
-//     console's Send back to queue and court move), which says so in its own
-//     words and then drops the entries at once (`discardUnsaved`).
+//     console's Send back to queue), which says so in its own words and then
+//     drops the entries at once (`discardUnsaved`).
 // A Start carries the draft and asks nothing; Close and Prev/Next ask
 // "Discard unsaved scoring changes?" through the editor itself.
 //

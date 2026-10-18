@@ -94,3 +94,22 @@ describe('P9b: one own Start at a time', () => {
     expect(API.recordTap, 'nothing sent twice').not.toHaveBeenCalled();
   });
 });
+
+// Stage 5 review 8 (finding 4): a landed own Start is not undone by a queued
+// copy older than its write (a refetch answered late): Start is not offered
+// again and the board keeps what the Start carried.
+describe('a landed own Start over a late queued copy', () => {
+  it('individual: Start is not offered again and the carried point stays on the board', async () => {
+    const s = starts(1);
+    const r = render(el(bout({ status: 'scheduled', modifiedAt: NOW, scoreVersion: 2 }), s.onSubmit));
+    await tap(letterBtn(shiroSide(r.container), 'M'));
+    await tap(button('Start match'));
+    await s.answer(0, { applied: true, modifiedAt: NOW + 50 });
+    r.rerender(el(bout({ status: 'scheduled', modifiedAt: NOW + 20, scoreVersion: 2 }), s.onSubmit));
+    expect(button('Start match'), 'Start is not offered over the own Start').toBeUndefined();
+    expect(marks(r.container).join(' ')).toMatch(/M/);
+    r.rerender(el(bout({ status: 'running', ipponsB: ['M'], modifiedAt: NOW + 50, scoreVersion: 3, markIds: { b: ['x1'] } }), s.onSubmit));
+    expect(marks(r.container).join(' ')).toMatch(/M/);
+    expect(kept()).toBeNull();
+  });
+});

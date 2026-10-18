@@ -151,6 +151,13 @@ export function createOwnStatus(status, at) {
       // and the draft takes the server's copy.
       const p = st.pending;
       if (p && anyLanded(p) && status === p.from) {
+        // A landed own Start keeps its override over a copy older than its
+        // own write (a refetch answered late): a copy stamped at or after the
+        // Start's own stamp (another device sent it back) ends it; with no
+        // stamp to compare it stands until the feed shows another status
+        // (stage 5 review 8).
+        const start = p.entries.find((x) => x.kind === OWN_START && x.landed);
+        if (start && (!start.at || !at || at < start.at)) return;
         retireLanded();
         reset();
       } else if (p && !p.leftTarget && !hasStart(p) && status === p.from) {
@@ -202,12 +209,14 @@ export function createOwnStatus(status, at) {
 
     // answer: the server's answer to own write `token`: LANDED, or REFUSED,
     // HELD or DISCARDED (`msg`, the sentence to say for a refused Start).
-    answer(token, outcome, msg) {
+    answer(token, outcome, msg, at) {
       const p = st.pending;
       const e = p && p.entries.find((x) => x.token === token);
       if (!e) return;
       if (outcome === LANDED) {
         e.landed = true;
+        // The stamp the server gave the write, when its answer names one.
+        e.at = Number(at) || 0;
         // The feed already showed the move: it was this write.
         if (p.sawTarget || p.leftTarget) retireLanded();
         return;
@@ -243,6 +252,17 @@ export function createOwnStatus(status, at) {
 
     // release: the kept draft was saved or discarded.
     release() { st.kept = null; },
+
+    // discardDraft: the operator chose Discard entries before an own action
+    // (R1, stage 5 review 8): the editor took the server's copy, and no draft
+    // noted before is kept, said dropped, or kept later when a write is
+    // turned down after a move elsewhere.
+    discardDraft() {
+      st.kept = null;
+      st.base = null;
+      st.draft = null;
+      if (st.pending) st.pending.leftDraft = false;
+    },
 
     view() {
       const p = st.pending;

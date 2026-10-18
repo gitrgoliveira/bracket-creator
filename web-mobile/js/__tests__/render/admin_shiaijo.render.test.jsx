@@ -1621,7 +1621,7 @@ describe('Send back to queue keeps the score and is always offered (bc-sbq)', ()
     try {
       expect(c.editorMatch()).toBe('m1');
       const dialog = await tapSendBack(c);
-      expect(dialog.textContent).toContain('Any score entered is kept');
+      expect(dialog.textContent).toContain('The score already saved is kept');
       expect(dialog.textContent).not.toMatch(/discard|lost/i);
     } finally { c.restore(); }
   });
@@ -2871,5 +2871,101 @@ describe('the console writes a Start without any window.startPatch', () => {
       c.restore();
       if (saved) window.startPatch = saved;
     }
+  });
+});
+
+// Operator decision R1 (2026-10-17, stage 5 review 8): every console action
+// that unmounts the score editor or puts another match in it asks first while
+// the editor holds unsaved entries (the editor publishes them through
+// `hostUnsavedRef`; the probe stands in for it here). Keep entries leaves
+// everything as it was; Discard entries goes on. Send back to queue says it in
+// its own confirm. With nothing unsaved nothing asks.
+describe('the console asks before it drops the editor\'s unsaved entries (R1)', () => {
+  const WARN = /^Your unsaved entries will be discarded\. /;
+  const warnings = () => window.confirmDialog.mock.calls.filter(([o]) => WARN.test((o && o.message) || ''));
+  const tapCorrect = async (c, rowText) => {
+    const row = [...c.utils.container.querySelectorAll('.shiaijo-qrow--complete')].find((r) => r.textContent.includes(rowText));
+    const btn = [...row.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Correct');
+    await act(async () => { btn.click(); });
+  };
+  const holdUnsaved = (yes) => { probe.props.hostUnsavedRef.current = () => yes; };
+  const heading = (c) => c.utils.container.querySelector('.shiaijo-context__toggle').textContent;
+  let prevConfirm;
+  beforeEach(() => { prevConfirm = window.confirmDialog; });
+  afterEach(() => { window.confirmDialog = prevConfirm; });
+
+  it('Back to court: Keep entries stays in the correction, Discard entries leaves it', async () => {
+    const c = await mountCourt([courtMatch('m1', 'completed', { modifiedAt: 1000 }), courtMatch('m2', 'scheduled')]);
+    try {
+      await tapCorrect(c, 'Aka m1');
+      holdUnsaved(true);
+      window.confirmDialog = vi.fn().mockResolvedValue(false);
+      await act(async () => { c.utils.getByRole('button', { name: /back to court/i }).click(); });
+      expect(warnings().map(([o]) => o.message)).toEqual(['Your unsaved entries will be discarded. Leave this match anyway?']);
+      expect(heading(c)).toContain('Correcting');
+      expect(c.editorMatch()).toBe('m1');
+      window.confirmDialog = vi.fn().mockResolvedValue(true);
+      await act(async () => { c.utils.getByRole('button', { name: /back to court/i }).click(); });
+      expect(heading(c)).not.toContain('Correcting');
+    } finally { c.restore(); }
+  });
+
+  it('Back to court asks nothing with nothing unsaved', async () => {
+    const c = await mountCourt([courtMatch('m1', 'completed', { modifiedAt: 1000 }), courtMatch('m2', 'scheduled')]);
+    try {
+      await tapCorrect(c, 'Aka m1');
+      holdUnsaved(false);
+      window.confirmDialog = vi.fn().mockResolvedValue(false);
+      await act(async () => { c.utils.getByRole('button', { name: /back to court/i }).click(); });
+      expect(warnings()).toHaveLength(0);
+      expect(heading(c)).not.toContain('Correcting');
+    } finally { c.restore(); }
+  });
+
+  it('Correct on another finished match asks first; Keep entries keeps the editor on its match', async () => {
+    const c = await mountCourt([courtMatch('m1', 'completed', { modifiedAt: 1000 }), courtMatch('m3', 'completed', { modifiedAt: 900 })]);
+    try {
+      await tapCorrect(c, 'Aka m1');
+      holdUnsaved(true);
+      window.confirmDialog = vi.fn().mockResolvedValue(false);
+      await tapCorrect(c, 'Aka m3');
+      expect(warnings()).toHaveLength(1);
+      expect(c.editorMatch()).toBe('m1');
+      window.confirmDialog = vi.fn().mockResolvedValue(true);
+      await tapCorrect(c, 'Aka m3');
+      expect(c.editorMatch()).toBe('m3');
+    } finally { c.restore(); }
+  });
+
+  it('a pick of another bout asks first; Keep entries sends nothing back', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { modifiedAt: 1000 }), courtMatch('m2', 'scheduled')]);
+    try {
+      expect(c.editorMatch()).toBe('m1');
+      holdUnsaved(true);
+      window.confirmDialog = vi.fn().mockResolvedValue(false);
+      const card = c.utils.container.querySelector('.shiaijo-upnext__card');
+      const start = [...card.querySelectorAll('button')].find((b) => /start match/i.test(b.textContent));
+      await act(async () => { start.click(); });
+      expect(warnings()).toHaveLength(1);
+      expect(window.API.revertMatchToQueue).not.toHaveBeenCalled();
+      expect(c.editorMatch()).toBe('m1');
+    } finally { c.restore(); }
+  });
+
+  it('Send back to queue says the unsaved entries are discarded, and only then', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { modifiedAt: 1000 })]);
+    try {
+      holdUnsaved(true);
+      await act(async () => { c.utils.getByRole('button', { name: /send back to queue/i }).click(); });
+      let dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
+      expect(dialog.textContent).toContain('Your unsaved entries will be discarded.');
+      expect(dialog.textContent).not.toContain('Any score entered is kept');
+      await act(async () => { [...dialog.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Cancel').click(); });
+      holdUnsaved(false);
+      await act(async () => { c.utils.getByRole('button', { name: /send back to queue/i }).click(); });
+      dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
+      expect(dialog.textContent).not.toContain('Your unsaved entries will be discarded.');
+      expect(dialog.textContent).toContain('The score already saved is kept');
+    } finally { c.restore(); }
   });
 });

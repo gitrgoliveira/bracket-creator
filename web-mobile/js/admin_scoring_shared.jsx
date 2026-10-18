@@ -34,6 +34,11 @@ import { isOlderRunningCopy } from './patch.jsx';
 // BarredMatchNotice is a separate leaf (imports only ineligible_match.jsx +
 // write_result.jsx): re-exported below, see that file's header for why.
 import { BarredMatchNotice } from './barred_match_notice.jsx';
+import {
+  UNSAVED_ENTRIES_DISCARDED, REOPEN_ANYWAY, QUEUE_AND_REOPEN_ANYWAY, ADD_REP_BOUT_ANYWAY,
+  REMOVE_REP_BOUT_ANYWAY, LEAVE_MATCH_ANYWAY, recordDecisionAnyway, unsavedDiscardDialog,
+  holdsUnsaved, confirmDiscardUnsaved,
+} from './unsaved_entries.jsx';
 
 // Kendo best-of-3 cap. Mirrors the server-side `maxIpponsPerSide` in
 // internal/mobileapp/validation.go: the bout ends when one side reaches
@@ -267,7 +272,8 @@ export function useOwnStatus(feedMatch) {
   const own = ref.current;
   own.observe(feedMatch.status, Number(feedMatch.modifiedAt) || 0);
   const rerender = () => { if (mountedRef.current) bump((n) => n + 1); };
-  const answer = (token, outcome, msg) => { own.answer(token, outcome, msg || ""); rerender(); };
+  const answer = (token, outcome, msg, at) => { own.answer(token, outcome, msg || "", at); rerender(); };
+  const stampOf = (body) => (body && typeof body === "object" ? Number(body.modifiedAt) || 0 : 0);
   const view = own.view();
   return {
     ...view,
@@ -285,14 +291,15 @@ export function useOwnStatus(feedMatch) {
         res.settled.then((body) => {
           if (body && body.discarded === true) { answer(token, OWN_DISCARDED); return; }
           const out = classifyStartOutcome(body);
-          answer(token, out.ok ? OWN_LANDED : OWN_HELD, out.ok ? "" : out.msg);
+          answer(token, out.ok ? OWN_LANDED : OWN_HELD, out.ok ? "" : out.msg, out.ok ? stampOf(body) : 0);
         }, (e) => { if (opts.rejections !== false) answer(token, OWN_REFUSED, startFailureMessage(e)); });
         return;
       }
       if (writeWasRefused(res)) { answer(token, OWN_REFUSED); return; }
-      answer(token, OWN_LANDED);
+      answer(token, OWN_LANDED, "", stampOf(res));
     },
     release: () => { own.release(); rerender(); },
+    discardDraft: () => { own.discardDraft(); rerender(); },
   };
 }
 
@@ -834,11 +841,19 @@ function makeSubmitDecision({
   // The editor's isDirty (a ref or a thunk): a decision carries no draft
   // points, so over unsaved entries it asks first (R1, confirmDiscardUnsaved).
   unsaved = false,
+  // What Discard entries does in the editor (drops a kept draft through its
+  // owner), and the overtime the SERVER holds: a decision sent after Discard
+  // entries carries the server's values for what the draft changed, so the
+  // warning tells the truth (stage 5 review 8).
+  onDiscard,
+  serverEnchoPeriodCount,
 }) {
   const submit = async (kind, { decisionBy, decisionReason }) => {
+    let encho = enchoPeriodCount;
     if (holdsUnsaved(unsaved)) {
-      const go = await confirmDiscardUnsaved(unsaved, recordDecisionAnyway(kind));
+      const go = await confirmDiscardUnsaved(unsaved, recordDecisionAnyway(kind), onDiscard);
       if (!go || !mountedRef.current) return;
+      if (typeof serverEnchoPeriodCount === 'number') encho = serverEnchoPeriodCount;
     }
     setDecisionSubmitting(true);
     setDecisionErr('');
@@ -846,7 +861,7 @@ function makeSubmitDecision({
     if (setPendingWrite && mountedRef.current) setPendingWrite(false);
     try {
       const updated = await submitDecisionRequest(
-        match.compId, match.id, kind, { decisionBy, decisionReason }, enchoPeriodCount, password,
+        match.compId, match.id, kind, { decisionBy, decisionReason }, encho, password,
         { seenModifiedAt: match.modifiedAt || 0, seenScoreVersion: (seenScoreVersion !== undefined ? seenScoreVersion : match.scoreVersion) || 0 },
       );
       if (!mountedRef.current) return;
@@ -1690,47 +1705,25 @@ function withdrawalInForce(m) {
   return m.status === "completed" && isTeamDefaultWinDecision(m.decision);
 }
 
-// The warning an editor's own action gives before it replaces entries the
-// editor holds unsaved (operator decision R1, 2026-10-17: "If I don't save it,
-// the ui should warn me it will be discarded."). The actions it guards are the
-// ones that do not carry the draft: a reopen (Clear <decision> and reopen, the
-// kachinuki Reopen match), the court-busy Queue it and reopen, a decision, and
-// the team sheet's representative-bout add or remove over a sheet it does not
-// save first. A Start carries the draft and asks nothing. `unsaved` is the
-// editor's own isDirty, the one Close asks "Discard unsaved scoring changes?"
-// on, read through a ref or a thunk because the editors work it out below the
-// hooks that take it. The prompt is the operator's own and never waits on the
-// server: Cancel sends nothing and leaves the entries on the board, Discard
-// entries goes on exactly as the action does with nothing unsaved.
-export const UNSAVED_ENTRIES_DISCARDED = "Your unsaved entries will be discarded.";
-export const REOPEN_ANYWAY = "Reopen anyway?";
-export const QUEUE_AND_REOPEN_ANYWAY = "Queue it and reopen anyway?";
-export const ADD_REP_BOUT_ANYWAY = "Add the representative bout anyway?";
-export const REMOVE_REP_BOUT_ANYWAY = "Remove the representative bout anyway?";
-export function recordDecisionAnyway(kind) {
-  return `Record the ${decisionWord(kind) || "decision"} anyway?`;
-}
-export function unsavedDiscardDialog(question = REOPEN_ANYWAY) {
-  return {
-    message: `${UNSAVED_ENTRIES_DISCARDED} ${question}`,
-    confirmLabel: "Discard entries",
-    cancelLabel: "Keep entries",
-    danger: true,
-  };
-}
-export function holdsUnsaved(unsaved) {
-  const v = typeof unsaved === "function" ? unsaved() : (unsaved && typeof unsaved === "object" && "current" in unsaved ? unsaved.current : unsaved);
-  return !!v;
-}
-// confirmDiscardUnsaved: true when the action may go on (nothing unsaved, or
-// the operator chose to discard the entries).
-export async function confirmDiscardUnsaved(unsaved, question) {
-  if (!holdsUnsaved(unsaved)) return true;
-  try {
-    return !!(await window.confirmDialog(unsavedDiscardDialog(question)));
-  } catch {
-    return false;
-  }
+// The unsaved-entries warning (R1) has one owner, unsaved_entries.jsx.
+export {
+  UNSAVED_ENTRIES_DISCARDED, REOPEN_ANYWAY, QUEUE_AND_REOPEN_ANYWAY, ADD_REP_BOUT_ANYWAY,
+  REMOVE_REP_BOUT_ANYWAY, LEAVE_MATCH_ANYWAY, recordDecisionAnyway, unsavedDiscardDialog,
+  holdsUnsaved, confirmDiscardUnsaved,
+};
+
+// usePublishUnsaved: an editor hands its host a way to ask whether it holds
+// unsaved entries (`hostRef`, the host's ref, passed down as the editor's
+// `hostUnsavedRef`), so a host's leave action asks R1's question before it
+// unmounts or swaps the editor. The thunk reads the editor's own `unsaved`
+// as it is when asked; an editor that goes away takes it back.
+export function usePublishUnsaved(hostRef, unsaved) {
+  const probe = useRefA(null);
+  const unsavedRef = useRefA(unsaved);
+  unsavedRef.current = unsaved;
+  if (!probe.current) probe.current = () => holdsUnsaved(unsavedRef.current);
+  if (hostRef && hostRef.current !== probe.current) hostRef.current = probe.current;
+  useEffectA(() => () => { if (hostRef && hostRef.current === probe.current) hostRef.current = null; }, [hostRef]);
 }
 
 // useMatchReopen: the one client of POST .../reopen and its court-busy remedy
@@ -1760,7 +1753,7 @@ export async function confirmDiscardUnsaved(unsaved, question) {
 //     aware of the consequences"). What that reopened is named in `notice`;
 //     declining leaves everything as it was and says so in `err`.
 // Every other refusal is the server's sentence, shown verbatim in `err`.
-function useMatchReopen({ match, password, isComplete, own, unsaved = false }) {
+function useMatchReopen({ match, password, isComplete, own, unsaved = false, onDiscard }) {
   const mountedRef = useRefA(true);
   // The unsaved-entries warning is open (R1): a second tap meanwhile asks
   // nothing more.
@@ -1871,7 +1864,7 @@ function useMatchReopen({ match, password, isComplete, own, unsaved = false }) {
     if (askingRef.current) return true;
     askingRef.current = true;
     try {
-      return !(await confirmDiscardUnsaved(unsaved, question)) || !mountedRef.current;
+      return !(await confirmDiscardUnsaved(unsaved, question, onDiscard)) || !mountedRef.current;
     } finally {
       askingRef.current = false;
     }

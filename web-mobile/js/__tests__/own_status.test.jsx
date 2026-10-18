@@ -107,3 +107,28 @@ describe('own_status', () => {
     }
   });
 });
+
+// Stage 5 review 8 (finding 4): a landed own Start keeps its override over a
+// scheduled copy older than its write (a refetch answered late); a copy at or
+// after its stamp (another device sent it back) ends it.
+describe('own_status: a landed Start over a late scheduled copy', () => {
+  it('keeps the override over an older copy, and ends it at the Start\'s stamp or later', () => {
+    const o = createOwnStatus('scheduled', 1);
+    const t = o.begin(OWN_START, { ipponsB: ['M'] });
+    o.answer(t, LANDED, '', 50);
+    o.observe('scheduled', 20);
+    expect(o.view()).toMatchObject({ shownStatus: 'running', startOffered: false, override: { ipponsB: ['M'] } });
+    o.observe('scheduled', 60);
+    expect(o.view()).toMatchObject({ shownStatus: 'scheduled', startOffered: true, override: null });
+  });
+
+  it('with no stamp in the answer the override stands until the feed shows another status', () => {
+    const o = createOwnStatus('scheduled', 1);
+    const t = o.begin(OWN_START, { ipponsB: ['M'] });
+    o.answer(t, LANDED);
+    o.observe('scheduled', 2);
+    expect(o.view()).toMatchObject({ shownStatus: 'running', startOffered: false });
+    o.observe('running', 3);
+    expect(o.view()).toMatchObject({ shownStatus: 'running', kept: null, override: null });
+  });
+});

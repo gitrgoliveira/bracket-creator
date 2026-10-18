@@ -50,7 +50,7 @@ import {
   useOwnStatus,
   OWN_START,
   OWN_REP,
-  holdsUnsaved, confirmDiscardUnsaved, ADD_REP_BOUT_ANYWAY, REMOVE_REP_BOUT_ANYWAY,
+  holdsUnsaved, confirmDiscardUnsaved, ADD_REP_BOUT_ANYWAY, REMOVE_REP_BOUT_ANYWAY, usePublishUnsaved,
   OWN_REFUSED,
   DraftKeptNotice,
   DraftDroppedNotice,
@@ -1176,7 +1176,7 @@ function useMatchLineups(compId, matchId) {
   };
 }
 
-export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true }) {
+export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true, hostUnsavedRef = null }) {
   // mp-gmcg: a successful [× Remove this bout] shrinks the SERVER bout log, and
   // the parent may not have caught up when this render runs. matchOverride
   // shadows the prop so the removed bout disappears at once, and is cleared
@@ -1759,6 +1759,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // representative-bout change the sheet does not save first).
   const unsavedRef = useRefA(false);
   const repDiscardAskingRef = useRefA(false);
+  // What Discard entries does here (R1, stage 5 review 8): the draft goes at
+  // once, a kept one through its owner as its own Discard does.
+  const discardUnsavedRef = useRefA(() => {});
+  const onDiscardUnsaved = () => discardUnsavedRef.current();
 
   // bc-mrgc: what a write applied only in part kept in the match's history.
   const keptInHistory = useKeptInHistoryNote();
@@ -2403,6 +2407,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
     setDecisionSubmitting, setDecisionErr, setDecisionPromptKind,
     onClose, onAfterDecision, isComplete,
     unsaved: unsavedRef,
+    onDiscard: onDiscardUnsaved,
+    // The server's overtime for the encounter (a kachinuki encounter has none).
+    serverEnchoPeriodCount: kachinukiEncounter ? 0 : initialEnchoPeriods,
   });
 
   const existingSub = m.subResults || [];
@@ -3385,7 +3392,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // remedy mandatory: a plain correction bypasses the court gate entirely, so
   // kachinuki operators, for whom reopen is the ONLY way to fix a bout log,
   // would otherwise be the one group with no way out of a busy court.
-  const reopenCtl = useMatchReopen({ match: m, password, isComplete, own, unsaved: unsavedRef });
+  const reopenCtl = useMatchReopen({ match: m, password, isComplete, own, unsaved: unsavedRef, onDiscard: onDiscardUnsaved });
 
   // mp-4pc: when a daihyosen exists the encho counter belongs to that
   // sub-bout (attached per-sub in buildPatch), so suppress the top-level
@@ -4268,7 +4275,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
     if (!preSave && !change.discardConfirmed && holdsUnsaved(unsavedRef)) {
       if (repDiscardAskingRef.current) return;
       repDiscardAskingRef.current = true;
-      confirmDiscardUnsaved(unsavedRef, change.question).then((go) => {
+      confirmDiscardUnsaved(unsavedRef, change.question, onDiscardUnsaved).then((go) => {
         repDiscardAskingRef.current = false;
         if (go && mountedRef.current) runRepBoutChange({ ...change, discardConfirmed: true });
       }, () => { repDiscardAskingRef.current = false; });
@@ -4385,6 +4392,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
     // A removed withdrawal is unsaved until Save correction sends it.
     || removingWithdrawal;
   unsavedRef.current = isDirty;
+  usePublishUnsaved(hostUnsavedRef, unsavedRef);
   // D1: what the sheet's draft would tap, as typed over and as held.
   const encounterEnchoOf = (n) => (kachinukiEncounter ? 0 : n);
   // Only while the sheet shows a draft: under its own representative-bout
@@ -4405,6 +4413,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   const leaveKeptDraft = () => {
     takeServerDraft();
     own.release();
+  };
+  // Discard entries (R1): the sheet takes the server's copy at once, a
+  // pending withdrawal removal included, and the owner forgets the draft
+  // (stage 5 review 8).
+  discardUnsavedRef.current = () => {
+    if (withdrawalRemoval && withdrawalRemoval.removed) withdrawalRemoval.onUndo();
+    takeServerDraft();
+    own.release();
+    own.discardDraft();
   };
   const saveKeptDraft = () => {
     const board = tapBoardOf(mHost, teamFold).match;
@@ -5830,7 +5847,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               of reading as the full-width block it is everywhere else this
               component renders. */}
           {m.status === "scheduled" && isBarredMatch(m) && (
-            <BarredMatchNotice match={m} password={password} />
+            <BarredMatchNotice match={m} password={password} unsaved={unsavedRef} onDiscard={onDiscardUnsaved} />
           )}
           {own.kept && <DraftKeptNotice from={own.kept.from} onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} />}
           <StartRefusedNotice text={own.refusal ? ownStartRefusalText(m, own.refusal) : ""} />

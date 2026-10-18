@@ -204,7 +204,10 @@ async function run(fam, sc) {
   else if (fam === ENGI) server = { status: 'completed', a: ['F', 'F', 'F'], b: [], at: NOW, v: 2 };
   else server = { status: 'completed', a: ['○', '○'], b: [], at: NOW, v: 2, withdrawal: true, decided: true };
   const bad = [];
-  const el = () => <ScoreEditorModal match={fam.match(server)} onClose={vi.fn()} onSubmit={onSubmit} password="pw" variant="inline" />;
+  API.recordDecision = vi.fn().mockResolvedValue({ applied: true, status: 'completed' });
+  // The host's handle on the editor's unsaved entries (R1, stage 5 review 8).
+  const hostRef = { current: null };
+  const el = () => <ScoreEditorModal match={fam.match(server)} onClose={vi.fn()} onSubmit={onSubmit} password="pw" variant="inline" hostUnsavedRef={hostRef} />;
   const r = render(el());
   const feed = (next) => { server = { ...next, at: server.at + 10, v: server.v + 1 }; r.rerender(el()); };
   // Simulation state.
@@ -234,6 +237,12 @@ async function run(fam, sc) {
     if (refusedNote() && server.status !== 'scheduled') bad.push(`${step}: I5 the Start refusal note stands over a ${server.status} match`);
     if (fam.draftCount(server) > 1 && fam !== ENGI) bad.push(`${step}: I2 the draft's point is on the server ${fam.draftCount(server)} times`);
     if (dropped()) { draft = false; mustLand = false; }
+    // H: a host leaving the editor now asks exactly when a draft is the
+    // operator's still (R1): the editor publishes its unsaved entries.
+    if (!ownStartCurrent && !ownWriteOut) {
+      const says = !!(hostRef.current && hostRef.current());
+      if (says !== draft) bad.push(`${step}: H a host leave would ${says ? '' : 'not '}ask (draft ${draft})`);
+    }
   };
   const foreign = (name) => {
     const f = FOREIGN[name];
@@ -251,6 +260,8 @@ async function run(fam, sc) {
     const n = warned() - before;
     const want = draft && !kept() ? 1 : 0;
     if (n !== want) bad.push(`${label}: R1 the unsaved-entries warning was asked ${n} times (draft ${draft})`);
+    // Discard entries: the draft goes at once (stage 5 review 8).
+    if (n > 0) { draft = false; mustLand = false; }
   };
   const sentCount = () => writes.writes.length + API.reopenMatch.mock.calls.length
     + API.requeueBlockerAndReopen.mock.calls.length + API.recordDaihyosen.mock.calls.length;
@@ -299,11 +310,15 @@ async function run(fam, sc) {
       if (w.kind === 'requeue') {
         API.reopenMatch = vi.fn().mockRejectedValue(Object.assign(new Error('Court A already has a running match.'),
           { code: 'court_busy', court: 'A', matchId: 'm-blk', compId: 'c1' }));
+        await declineFirst(w, label, () => screen.queryByTestId('clear-withdrawal-reopen'));
+        const askedFirst = warned();
         await tap(reopen);
         await flush();
+        // Discard entries at the reopen drops the draft at once, so the
+        // remedy after its refusal has nothing left to ask about.
+        warnedOnce(label, askedFirst);
         const rq = screen.queryByTestId('withdrawal-reopen-requeue-button');
         if (!rq) { bad.push(`${label}: no court-busy remedy offered`); break; }
-        await declineFirst(w, label, () => screen.queryByTestId('withdrawal-reopen-requeue-button'));
         const asked = warned();
         await tap(rq);
         warnedOnce(label, asked);
@@ -381,7 +396,27 @@ async function run(fam, sc) {
   // The operator settles what is left: a kept draft saved or discarded, or a
   // scheduled draft started again.
   if (kept()) {
-    if (sc.final === 'discard') {
+    if (sc.final === 'decide') {
+      // The operator records a kiken over the kept draft and chooses Discard
+      // entries (R1, stage 5 review 8): the kept draft goes at once, and the
+      // own decision is never followed by a note that another device dropped it.
+      const k = screen.queryByTestId('scoring-modal-kiken-voluntary-button');
+      if (!k) bad.push('final decide: no decision offered over the kept draft');
+      else {
+        const asked = warned();
+        await tap(k);
+        await tap(document.querySelector('input[name="decision-side"][value="aka"]'));
+        await act(async () => { fireEvent.submit(document.querySelector('form.decision-prompt')); });
+        await flush();
+        if (warned() - asked !== 1) bad.push('final decide: R1 was not asked over the kept draft');
+        if (API.recordDecision.mock.calls.length !== 1) bad.push(`final decide: ${API.recordDecision.mock.calls.length} decisions sent`);
+        if (kept()) bad.push('final decide: the kept draft stayed after Discard entries');
+        draft = false; mustLand = false;
+        feed({ ...server, status: 'completed', decided: true });
+        if (dropped()) bad.push('final decide: a dropped note follows the own decision');
+        if (kept()) bad.push('final decide: a kept note over the decided match');
+      }
+    } else if (sc.final === 'discard') {
       await tap(screen.getByTestId('draft-kept-discard'));
       draft = false; mustLand = false;
     } else {
@@ -606,7 +641,7 @@ describe('two own status writes over one move: every combination (team)', () => 
 
 function* scenarios(fam) {
   for (const draft of [false, true]) {
-    for (const final of draft ? ['save', 'discard'] : ['save']) {
+    for (const final of draft ? (fam === ENGI ? ['save', 'discard'] : ['save', 'discard', 'decide']) : ['save']) {
       // No own write: only the feed moves.
       for (const after of [['start'], ['start', 'finish'], ['start', 'sendback'], ['restamp'], ['none']]) {
         yield { start: 'scheduled', draft, final, writes: [], after };

@@ -86,20 +86,36 @@ describe('individual editor: Clear fusenpai and reopen over unsaved entries', ()
     expect(API.reopenMatch).toHaveBeenCalledTimes(1);
   });
 
-  it('Queue it and reopen asks again over the entries the refused reopen left', async () => {
+  it('Discard entries drops them at once: a refused reopen leaves the server\'s copy, and its remedy asks nothing', async () => {
     const r = render(el(withdrawal()));
     await flush();
     await tap(letterBtn(shiroSide(r.container), 'M'));
     API.reopenMatch = vi.fn().mockRejectedValue(Object.assign(new Error('Court A already has a running match.'),
       { code: 'court_busy', court: 'A', matchId: 'm-blk', compId: 'c1' }));
+    answerWarning(true);
     await tap(screen.getByTestId('clear-withdrawal-reopen'));
     await flush();
-    const remedy = screen.getByTestId('withdrawal-reopen-requeue-button');
-    answerWarning(false);
-    await tap(remedy);
-    await flush();
     expect(warnings()).toHaveLength(1);
-    expect(warnings()[0][0].message).toBe('Your unsaved entries will be discarded. Queue it and reopen anyway?');
+    expect(marks(r.container).join(' '), 'the discarded entry is gone though the reopen was refused').not.toMatch(/M/);
+    answerWarning(false);
+    await tap(screen.getByTestId('withdrawal-reopen-requeue-button'));
+    await flush();
+    expect(warnings(), 'nothing unsaved is left to ask about').toHaveLength(0);
+    expect(API.requeueBlockerAndReopen).toHaveBeenCalledTimes(1);
+  });
+
+  it('Queue it and reopen asks over entries typed after the refused reopen', async () => {
+    const r = render(el(withdrawal()));
+    await flush();
+    API.reopenMatch = vi.fn().mockRejectedValue(Object.assign(new Error('Court A already has a running match.'),
+      { code: 'court_busy', court: 'A', matchId: 'm-blk', compId: 'c1' }));
+    await tap(screen.getByTestId('clear-withdrawal-reopen'));
+    await flush();
+    await tap(letterBtn(shiroSide(r.container), 'M'));
+    answerWarning(false);
+    await tap(screen.getByTestId('withdrawal-reopen-requeue-button'));
+    await flush();
+    expect(warnings().map(([o]) => o.message)).toEqual(['Your unsaved entries will be discarded. Queue it and reopen anyway?']);
     expect(API.requeueBlockerAndReopen).not.toHaveBeenCalled();
     expect(marks(r.container).join(' ')).toMatch(/M/);
     answerWarning(true);
@@ -268,5 +284,133 @@ describe('engi editor', () => {
       expect(screen.queryByTestId(id)).toBeNull();
     }
     expect([...document.querySelectorAll('button')].some((b) => /Reopen/.test(b.textContent))).toBe(false);
+  });
+});
+
+// Stage 5 review 8.
+describe('a decision over a kept draft (finding 1)', () => {
+  for (const from of ['scheduled', 'completed']) {
+    it(`${from}: Discard entries drops the kept draft, so no "another device" note follows the own decision`, async () => {
+      let m = from === 'scheduled'
+        ? bout({ status: 'scheduled', modifiedAt: NOW, scoreVersion: 1 })
+        : bout({ status: 'completed', ipponsA: ['M'], winner: { id: 'p1', name: 'Yamada' }, modifiedAt: NOW, scoreVersion: 1 });
+      const r = render(el(m));
+      await flush();
+      await tap(letterBtn(shiroSide(r.container), 'K'));
+      m = { ...m, status: 'running', winner: null, modifiedAt: NOW + 10, scoreVersion: 2 };
+      r.rerender(el(m));
+      await flush();
+      expect(screen.queryByTestId('draft-kept-notice')).not.toBeNull();
+      answerWarning(true);
+      await tap(screen.getByTestId('scoring-modal-kiken-voluntary-button'));
+      await tap(document.querySelector('input[name="decision-side"][value="aka"]'));
+      await act(async () => { fireEvent.submit(document.querySelector('form.decision-prompt')); });
+      await flush();
+      expect(warnings()).toHaveLength(1);
+      expect(API.recordDecision).toHaveBeenCalledTimes(1);
+      expect(screen.queryByTestId('draft-kept-notice'), 'the kept draft went with Discard entries').toBeNull();
+      m = { ...m, status: 'completed', decision: 'kiken-voluntary', decisionBy: 'aka', winner: { id: 'p2', name: 'Tanaka' }, modifiedAt: NOW + 20, scoreVersion: 3 };
+      r.rerender(el(m));
+      await flush();
+      expect(screen.queryByTestId('draft-dropped-notice')).toBeNull();
+      expect(screen.queryByTestId('draft-kept-notice')).toBeNull();
+    });
+  }
+
+  it('Keep entries keeps the kept draft and sends nothing', async () => {
+    let m = bout({ status: 'scheduled', modifiedAt: NOW, scoreVersion: 1 });
+    const r = render(el(m));
+    await flush();
+    await tap(letterBtn(shiroSide(r.container), 'K'));
+    m = { ...m, status: 'running', modifiedAt: NOW + 10, scoreVersion: 2 };
+    r.rerender(el(m));
+    await flush();
+    answerWarning(false);
+    await tap(screen.getByTestId('scoring-modal-kiken-voluntary-button'));
+    await tap(document.querySelector('input[name="decision-side"][value="aka"]'));
+    await act(async () => { fireEvent.submit(document.querySelector('form.decision-prompt')); });
+    await flush();
+    expect(API.recordDecision).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('draft-kept-notice')).not.toBeNull();
+    expect(marks(r.container).join(' ')).toMatch(/K/);
+  });
+});
+
+describe('a decision after Discard entries carries the server\'s overtime (finding 2)', () => {
+  it('individual: an unsaved overtime period is not recorded with the kiken', async () => {
+    const m = bout({ status: 'completed', ipponsA: ['M'], winner: { id: 'p1', name: 'Yamada' }, phase: 'knockout', round: 'Round 1' });
+    render(el(m));
+    await flush();
+    const pill = screen.queryByTestId('scoring-modal-encho-pill');
+    if (pill) await tap(pill);
+    const cb = screen.queryByTestId('scoring-modal-encho-checkbox');
+    if (cb) await tap(cb);
+    const inc = document.querySelector('[aria-label="Increase overtime period count"]');
+    if (inc) await tap(inc);
+    answerWarning(true);
+    await tap(screen.getByTestId('scoring-modal-kiken-voluntary-button'));
+    await tap(document.querySelector('input[name="decision-side"][value="aka"]'));
+    await act(async () => { fireEvent.submit(document.querySelector('form.decision-prompt')); });
+    await flush();
+    expect(warnings(), 'the overtime change is unsaved: the warning is asked').toHaveLength(1);
+    expect(API.recordDecision).toHaveBeenCalledTimes(1);
+    expect(API.recordDecision.mock.calls[0][2].encho, 'the told-discarded overtime is not sent').toBeUndefined();
+  });
+
+  it('individual: the server\'s overtime stays on a decision over another unsaved change', async () => {
+    const m = bout({ status: 'completed', ipponsA: ['M'], winner: { id: 'p1', name: 'Yamada' }, encho: { periodCount: 1 }, phase: 'knockout', round: 'Round 1' });
+    const r = render(el(m));
+    await flush();
+    await tap(letterBtn(shiroSide(r.container), 'K'));
+    answerWarning(true);
+    await tap(screen.getByTestId('scoring-modal-kiken-voluntary-button'));
+    await tap(document.querySelector('input[name="decision-side"][value="aka"]'));
+    await act(async () => { fireEvent.submit(document.querySelector('form.decision-prompt')); });
+    await flush();
+    expect(API.recordDecision.mock.calls[0][2].encho).toEqual({ periodCount: 1 });
+  });
+});
+
+describe('the barred-match notice asks too (finding 6)', () => {
+  it('Record fusensho over unsaved entries asks first; Keep entries sends nothing', async () => {
+    const m = bout({ status: 'scheduled', ineligibleSides: { b: 'kiken-voluntary' }, modifiedAt: NOW, scoreVersion: 1 });
+    const r = render(el(m));
+    await flush();
+    const btn = () => [...document.querySelectorAll('button')].find((b) => b.textContent.trim().startsWith('Record fusensho'));
+    if (!btn()) throw new Error('no Record fusensho button');
+    // A typed draft, where the editor offers one with the notice standing.
+    const k = letterBtn(shiroSide(r.container), 'K');
+    if (k && !k.disabled) await tap(k);
+    expect(marks(r.container).join(' '), 'the draft is typed').toContain('K');
+    answerWarning(false);
+    await tap(btn());
+    await flush();
+    expect(warnings().map(([o]) => o.message)).toEqual(['Your unsaved entries will be discarded. Record the fusensho anyway?']);
+    expect(API.recordDecision).not.toHaveBeenCalled();
+    answerWarning(true);
+    await tap(btn());
+    await flush();
+    expect(API.recordDecision).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the editors publish their unsaved entries to the host (finding 3)', () => {
+  const host = (m, ref) => <ScoreEditorModal match={m} onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue({ applied: true })} password="pw" variant="inline" hostUnsavedRef={ref} />;
+  it('individual, team and engi: the host reads the editor\'s isDirty, and nothing once it is gone', async () => {
+    for (const [m, type] of [
+      [bout({ status: 'completed', ipponsA: ['M'], winner: { id: 'p1', name: 'Yamada' } }), async (c) => tap(letterBtn(shiroSide(c), 'K'))],
+      [teamFinished(), async (c) => tap(ipponBtn(c, 0, 'aka', 'M'))],
+      [engiBout({ status: 'completed', flagsA: 3, flagsB: 0, modifiedAt: NOW, scoreVersion: 2 }), async (c) => tap(c.querySelector('[data-testid="engi-shiro-inc"]'))],
+    ]) {
+      const ref = { current: null };
+      const r = render(host(m, ref));
+      await flush();
+      expect(typeof ref.current).toBe('function');
+      expect(ref.current()).toBe(false);
+      await type(r.container);
+      expect(ref.current()).toBe(true);
+      r.unmount();
+      expect(ref.current).toBeNull();
+    }
   });
 });

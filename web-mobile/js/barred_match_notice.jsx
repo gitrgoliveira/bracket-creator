@@ -5,8 +5,8 @@
 // editors. Reads ineligible_match.jsx's stamp; writes through the ordinary
 // /decision and /reinstate calls, exactly like every other operator action.
 //
-// A DELIBERATE LEAF: imports only ineligible_match.jsx and write_result.jsx,
-// both leaves themselves with no imports of their own (see their headers for
+// A DELIBERATE LEAF: imports only ineligible_match.jsx, write_result.jsx and
+// unsaved_entries.jsx, leaves themselves with no imports of their own (see their headers for
 // why). admin_scoring_shared.jsx re-exports this component so the editors'
 // existing `from './admin_scoring_shared.jsx'` import lists need no change,
 // but admin_shiaijo.jsx and admin_schedule_score_editor.jsx import it
@@ -27,6 +27,7 @@ import {
   barredNote, awaitedDefaultWin, defaultWinDecisionBody, defaultWinActionLabel, bothBarredDrawAction,
 } from './ineligible_match.jsx';
 import { notLandedBanner, notSavedText, writeDidNotLand, queuedNotice } from './write_result.jsx';
+import { holdsUnsaved, confirmDiscardUnsaved, recordDecisionAnyway } from './unsaved_entries.jsx';
 
 // No onDone/refresh plumbing here on purpose: recording the default win, or
 // reinstating the competitor, is an ordinary /decision or /reinstate write,
@@ -34,7 +35,9 @@ import { notLandedBanner, notSavedText, writeDidNotLand, queuedNotice } from './
 // competitor_status_updated) once it lands. `onDone`, when a caller passes
 // one, still fires so a host that wants to react sooner (e.g. close a modal)
 // can.
-export function BarredMatchNotice({ match, password, onDone }) {
+// `unsaved`/`onDiscard`: the score editor that shows the notice (R1): the
+// decision carries none of its unsaved entries, so over them it asks first.
+export function BarredMatchNotice({ match, password, onDone, unsaved = false, onDiscard }) {
   const [busy, setBusy] = useState(false);
   // bc-cse: without this, a successful write's button re-enables the instant
   // busy clears and stays tappable until the SSE refetch repaints this
@@ -59,6 +62,10 @@ export function BarredMatchNotice({ match, password, onDone }) {
   // identically.
   const submitDecision = async (body) => {
     if (!body || !window.API || typeof window.API.recordDecision !== "function") return;
+    if (holdsUnsaved(unsaved)) {
+      const go = await confirmDiscardUnsaved(unsaved, recordDecisionAnyway(body.decision), onDiscard);
+      if (!go || !mountedRef.current) return;
+    }
     setErr("");
     setBusy(true);
     try {

@@ -61,6 +61,7 @@ import { isBarredMatch, sideBarredByDecision, involvesCompetitor } from './ineli
 // header. The same rule is why winnerSideLR and teamMatchMarks come from the
 // side_marks.jsx leaf below, not from bracket.jsx.
 import { BarredMatchNotice } from './barred_match_notice.jsx';
+import { holdsUnsaved, confirmDiscardUnsaved, LEAVE_MATCH_ANYWAY, UNSAVED_ENTRIES_DISCARDED } from './unsaved_entries.jsx';
 // The winner cue and a withdrawn team's mark, imported from their leaf (its one
 // import is competitor_identity.jsx), never read off `window`: a missing global
 // used to paint nothing, with no error to say why.
@@ -565,6 +566,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const court = (routeCourt || "").trim();
 
     const mountedRef = useRefSh(true);
+    // The mounted score editor's unsaved entries (R1, stage 5 review 8): every
+    // console action that unmounts the editor or puts another match in it asks
+    // first (leaveEditorConfirmed), and Send back to queue says so in its own
+    // confirm.
+    const editorUnsavedRef = useRefSh(null);
     useEffectSh(() => {
         if (typeof window.scrollTo === "function") window.scrollTo(0, 0);
         return () => { mountedRef.current = false; };
@@ -1214,6 +1220,14 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         return blocker && matchKey(blocker) === refusedTap.against ? refusalText(refusedTap.why) : null;
     };
     // Refuse a tap: remember it against the match that blocks it, and toast.
+    // leaveEditorConfirmed: true when the console may unmount the editor or put
+    // another match in it: nothing unsaved, or the operator chose Discard
+    // entries (R1). With nothing unsaved it answers at once.
+    const leaveEditorConfirmed = async () => {
+        if (!holdsUnsaved(editorUnsavedRef)) return true;
+        const ok = await confirmDiscardUnsaved(editorUnsavedRef, LEAVE_MATCH_ANYWAY);
+        return ok && mountedRef.current;
+    };
     const refuseTap = (m, why) => {
         const blocker = refusalBlocker(why);
         setRefusedTap({
@@ -1623,6 +1637,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             if (inFlight.key !== matchKey(m)) refuseTap(m, "starting");
             return;
         }
+        // A pick that puts another match in the editor asks first over its
+        // unsaved entries (R1).
+        if (selectedMatch && matchKey(selectedMatch) !== matchKey(m) && holdsUnsaved(editorUnsavedRef) && !(await leaveEditorConfirmed())) return;
         setRefusedTap(null);
         // A scheduled pick is a start in flight from here, before the defer below
         // awaits: a second Start tapped during that wait is refused, and does not
@@ -1709,12 +1726,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // score re-write (other formats), same as the Scores page. A reopen makes
     // the match the court's live bout and ends the correction (the effect
     // beside correctingMatch).
-    const correctMatch = (m) => {
+    const correctMatch = async (m) => {
         if (!m || m.status !== "completed") return;
         if (liveBout) {
             refuseTap(m, "running");
             return;
         }
+        if (selectedMatch && matchKey(selectedMatch) !== matchKey(m) && holdsUnsaved(editorUnsavedRef) && !(await leaveEditorConfirmed())) return;
         setRefusedTap(null);
         setCorrectingKey(matchKey(m));
     };
@@ -1722,7 +1740,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // view. Only offered on a COMPLETED correction: once it is reopened it is
     // the live bout, finished via End match / Finish or sent back to the
     // queue like any other.
-    const stopCorrecting = () => { setCorrectingKey(null); };
+    const stopCorrecting = async () => {
+        if (holdsUnsaved(editorUnsavedRef) && !(await leaveEditorConfirmed())) return;
+        setCorrectingKey(null);
+    };
     // End the correction of the match keyed `key` only if it is still the one
     // open: a write's answer may arrive after another correction was opened.
     const endCorrectionOf = (key) => { setCorrectingKey((k) => (k === key ? null : k)); };
@@ -1877,7 +1898,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // score (operator ruling 2026-09-26, bc-sbq): starting it again carries on
     // from it, and the operator removes a wrong mark themselves.
     const requestRevert = (m) => {
-        setPendingRevert({ compId: m.compId, matchId: m.id, label: confirmMatchLabel(m), seen: m.scoreVersion });
+        // The editor shows this match: its unsaved entries go with the send
+        // back, and the confirm says so (R1, the editor's local Mark draw or
+        // hantei pick of a running match included).
+        const unsaved = !!selectedMatch && matchKey(selectedMatch) === matchKey(m) && holdsUnsaved(editorUnsavedRef);
+        setPendingRevert({ compId: m.compId, matchId: m.id, label: confirmMatchLabel(m), seen: m.scoreVersion, unsaved });
     };
     const confirmRevert = async () => {
         if (!pendingRevert || reverting) return;
@@ -2319,6 +2344,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 hold the editor open. */}
                             {(!allDone || correctingMatch) && selectedMatch && (
                                 <ScoreEditorModal
+                                    hostUnsavedRef={editorUnsavedRef}
                                     // No subResults.length: see the same key in
                                     // admin_competition_bracket.jsx. Remounting
                                     // on every bout-log change threw away the
@@ -2525,7 +2551,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         </h3>
                         <p className="shiaijo-move-confirm__body">
                             <strong>{pendingRevert.label}</strong> will be returned to the upcoming queue.
-                            {" Any score entered is kept: starting it again carries on from there."}
+                            {pendingRevert.unsaved
+                                ? ` ${UNSAVED_ENTRIES_DISCARDED} The score already saved is kept: starting it again carries on from there.`
+                                : " The score already saved is kept: starting it again carries on from there."}
                         </p>
                         <div className="shiaijo-move-confirm__actions">
                             <button type="button" className="btn" onClick={() => setPendingRevert(null)} disabled={reverting}>

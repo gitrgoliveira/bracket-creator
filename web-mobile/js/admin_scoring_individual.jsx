@@ -48,6 +48,7 @@ import {
   useAdoptFromServer,
   sideColorName,
   useMatchReopen,
+  usePublishUnsaved,
   useWithdrawalRemoval,
   ReopenFeedback,
   RecordedWithdrawal,
@@ -152,7 +153,7 @@ function startedScore(patch) {
   };
 }
 
-export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, onAfterDecision, started = false, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true }) {
+export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSubmitAndNext: onSubmitAndNextProp, onAfterDecision, started = false, prevMatch, nextMatch, onPrev, onNext, password, selfReport, teamMembers, variant = "modal", canClose = true, hostUnsavedRef = null }) {
   // bc-strt: a match whose start has landed is RUNNING, even while the host's
   // list still says scheduled (it refetches a moment after each save). The
   // editors send a point only for a match they see as running, so a point
@@ -388,6 +389,12 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // isDirty, worked out further down, for the actions that ask before they
   // replace unsaved entries (R1: a reopen, a requeue, a decision).
   const unsavedRef = useRefA(false);
+  // What Discard entries does here (R1, stage 5 review 8): the draft goes at
+  // once, a kept one through its owner as its own Discard does, so the
+  // editor's own write is never followed by a note that another device
+  // dropped it (set below, once the editor's setters exist).
+  const discardUnsavedRef = useRefA(() => {});
+  const onDiscardUnsaved = () => discardUnsavedRef.current();
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
   // bc-mrgc: what a write applied only in part kept in the match's history.
@@ -443,6 +450,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
     // when the decision write is only queued (offline / transient failure).
     setPendingWrite, pendingFnRef,
     unsaved: unsavedRef,
+    onDiscard: onDiscardUnsaved,
+    serverEnchoPeriodCount: initialEnchoPeriods,
   });
   // bc-tmfn: Clear withdrawal and reopen, the same door and component the team
   // editor uses (RecordedWithdrawal / useMatchReopen, admin_scoring_shared.jsx).
@@ -457,7 +466,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // reopened. Called unconditionally (rules of hooks: the team and engi
   // dispatch below returns after every hook).
   const recordedWithdrawal = withdrawalInForce(m);
-  const reopenCtl = useMatchReopen({ match: m, password, isComplete, own, unsaved: unsavedRef });
+  const reopenCtl = useMatchReopen({ match: m, password, isComplete, own, unsaved: unsavedRef, onDiscard: onDiscardUnsaved });
   // While that withdrawal is in force, the WINNER's side holds the default-win
   // maru, which is the ruling itself: Save correction keeps it whatever is
   // sent (engine keptWithdrawalScoreline) and only the withdrawing side's
@@ -975,6 +984,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
     // A removed withdrawal is unsaved until Save correction sends it.
     removingWithdrawal;
   unsavedRef.current = isDirty;
+  // The host asks it before it leaves or swaps this editor (R1); the team and
+  // engi editors this one hands a match to publish their own.
+  usePublishUnsaved(isTeam || isEngi ? null : hostUnsavedRef, unsavedRef);
   // The scoreline half of the same rule, declared HERE because the hook needs
   // isDirty: it reads the value from the render BEFORE the server change (see
   // useAdoptFromServer). It self-corrects: a re-seed makes the next render's
@@ -1008,6 +1020,20 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   const leaveKeptDraft = () => {
     takeServerDraft();
     own.release();
+  };
+  // Discard entries (R1): the board takes the server's copy at once, its
+  // local verdicts and a pending withdrawal removal included, and the owner
+  // forgets the draft, so a write turned down later never brings it back as
+  // kept or says it was dropped (stage 5 review 8).
+  discardUnsavedRef.current = () => {
+    if (withdrawalRemoval && withdrawalRemoval.removed) withdrawalRemoval.onUndo();
+    takeServerDraft();
+    setDecidedByHantei(hanteiRecorded);
+    setHanteiPick(recordedHtKey);
+    setIsDrawToggled(initialIsDrawToggled);
+    setEnchoPeriodCount(initialEnchoPeriods);
+    own.release();
+    own.discardDraft();
   };
   const saveKeptDraft = () => {
     const board = tapBoardOf(m).match;
@@ -1069,6 +1095,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   useEffectA(() => {
     if (lockedKeyRef.current === recordedLockedKey) return;
     lockedKeyRef.current = recordedLockedKey;
+    // A draft kept because ANOTHER device reopened the match (D1) stays as
+    // typed: its note says the entries are still here, and Save sends only
+    // their own changes against the copy they were typed over (draft_taps),
+    // so the old ruling's maru is never sent as points (stage 5 review 8).
+    if (own.kept) return;
     applyServerScore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recordedLockedKey]);
@@ -1195,11 +1226,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // editor is shown from the first render with no kendo-editor flash.
   // The team check is skipped for engi (engi is never a team).
   if (isEngi) {
-    return <EngiScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmitProp} onSubmitAndNext={onSubmitAndNextProp} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} variant={variant} canClose={canClose} password={password} selfReport={selfReport} />;
+    return <EngiScoreEditorModal match={m} onClose={onClose} onSubmit={onSubmitProp} onSubmitAndNext={onSubmitAndNextProp} prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} variant={variant} canClose={canClose} password={password} selfReport={selfReport} hostUnsavedRef={hostUnsavedRef} />;
   }
   // Team routing: forward to TeamScoreEditorModal.
   if (isTeam) {
-    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmitProp} onSubmitAndNext={onSubmitAndNextProp} onAfterDecision={onAfterDecision}  prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} teamMembers={teamMembers} variant={variant} canClose={canClose} />;
+    return <TeamScoreEditorModal match={m} teamSize={teamSize} onClose={onClose} onSubmit={onSubmitProp} onSubmitAndNext={onSubmitAndNextProp} onAfterDecision={onAfterDecision}  prevMatch={prevMatch} nextMatch={nextMatch} onPrev={onPrev} onNext={onNext} password={password} selfReport={selfReport} teamMembers={teamMembers} variant={variant} canClose={canClose} hostUnsavedRef={hostUnsavedRef} />;
   }
 
   // a11y: label the dialog with the match/court context so screen readers
@@ -1644,7 +1675,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
               instead of reading as the full-width block it is everywhere
               else this component renders. */}
           {m.status === "scheduled" && isBarredMatch(m) && (
-            <BarredMatchNotice match={m} password={password} />
+            <BarredMatchNotice match={m} password={password} unsaved={unsavedRef} onDiscard={onDiscardUnsaved} />
           )}
           {own.kept && <DraftKeptNotice from={own.kept.from} onSave={saveKeptDraft} onDiscard={leaveKeptDraft} disabled={submitting} />}
           <StartRefusedNotice text={own.refusal ? ownStartRefusalText(m, own.refusal) : ""} />

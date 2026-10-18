@@ -304,7 +304,11 @@ func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, r
 // numbered bout the match holds no row for whose stamp is a tombstone (Remove
 // this bout): the bout was removed, not a mark already taken off.
 func onRemovedBout(m *state.MatchResult, ev domain.ScoreEvent) bool {
-	return ev.Pos > 0 && boutRowIndex(m.SubResults, ev.Pos) < 0 && m.GroupStamps[state.BoutGroup(ev.Pos)] > 0
+	tomb := m.GroupStamps[state.BoutGroup(ev.Pos)]
+	// Made after the removal: a tap made before it is one the removal never
+	// saw, never "the bout was removed" (stage 6 review 8, m9; the board's
+	// fold says the same, score_events.jsx foldBout).
+	return ev.Pos > 0 && boutRowIndex(m.SubResults, ev.Pos) < 0 && tomb > 0 && ev.Stamp > tomb
 }
 
 // RecordScoreEvents is RecordScoreEventsTx in a transaction of its own.

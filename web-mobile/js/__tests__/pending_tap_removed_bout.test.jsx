@@ -22,10 +22,13 @@ describe('the board folds a pending tap against the bouts the copy shows removed
     expect(r.match.subResults.map((s) => s.position)).toEqual([1]);
   });
 
-  it('one stamped before the removal is not either; a fighter picked after it makes the bout again', () => {
+  // Stage 6 review 8 (m9): one stamped before the removal is a change the
+  // removal never saw, which the server answers beforeBaseline with no reason
+  // (engine.onRemovedBout), so the board gives it none either.
+  it('one stamped before the removal is not either, with no removed-bout reason; a fighter picked after it makes the bout again', () => {
     const early = applyPending(removedBoutCopy(), [ev({ stamp: 400 })], { team: true, kachinuki: true, teamSize: 3 });
     expect(early.outcomes.t1).toBe(NO_TARGET);
-    expect(early.reasons.t1).toBe(BOUT_REMOVED);
+    expect(early.reasons.t1).toBeUndefined();
     const pick = applyPending(removedBoutCopy(), [ev({ id: 'f1', kind: BOUT_FIGHTER, letter: undefined, name: 'Ueda', stamp: 700 })], { team: true, kachinuki: true, teamSize: 3 });
     expect(pick.outcomes.f1).toBe(APPLIED);
     expect(pick.reasons.f1).toBeUndefined();

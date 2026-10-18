@@ -596,8 +596,11 @@ function foldBout(m, e, opts, ctx) {
     // bare strike would make a bout with no fighters (engine.foldBout).
     const tomb = ctx.stamps[`bout:${e.pos}`] || 0;
     if (!createsMissingRow(opts, e.pos) || tomb >= (e.stamp || 0) || (tomb > 0 && opts.kachinuki && e.kind !== BOUT_FIGHTER)) {
-      // The reason the server gives such a tap (engine.EventReasonBoutRemoved).
-      if (tomb > 0 && createsMissingRow(opts, e.pos)) ctx.reason = BOUT_REMOVED;
+      // The reason the server gives such a tap (engine.EventReasonBoutRemoved,
+      // onRemovedBout): only one made AFTER the removal; one made before it
+      // the server answers as the change the removal never saw
+      // (beforeBaseline), with no such reason (stage 6 review 8, m9).
+      if (tomb > 0 && (e.stamp || 0) > tomb && createsMissingRow(opts, e.pos)) ctx.reason = BOUT_REMOVED;
       return NO_TARGET;
     }
     rows = withEmptyBoutRow(rows, e.pos);

@@ -179,7 +179,17 @@ const QUIET_TAP_OUTCOMES = new Set(['applied', 'recorded', 'duplicate']);
 export function tapOutcomeQuiet(o) {
     return !!o && QUIET_TAP_OUTCOMES.has(o.outcome);
 }
-export function tapNotAppliedText(o) {
+// `where` (the match's label) and `what` (the tap, tapWords) name them when the
+// notice is read away from the match: a tap the server turned away after its
+// own answer said it landed, told by the alert (stage 6 review 5), reads
+// "Not applied in Pool A · Match 1 (Aka M added on bout 1): ...".
+export function tapNotAppliedText(o, where = '', what = '') {
+    const text = tapNotAppliedReasonText(o);
+    if (!text || (!where && !what)) return text;
+    const named = [where && `in ${where}`, what && `(${what})`].filter(Boolean).join(' ');
+    return text.startsWith('Not applied:') ? `Not applied ${named}:${text.slice('Not applied:'.length)}` : `Not applied ${named}: ${text}`;
+}
+function tapNotAppliedReasonText(o) {
     if (!o || tapOutcomeQuiet(o)) return null;
     if (typeof o.message === 'string' && o.message) return o.message;
     switch (o.outcome) {
@@ -198,8 +208,9 @@ export function tapNotAppliedText(o) {
 }
 // tapNotAppliedAlertText: the one queue alert per pass for taps the server did
 // not apply (kind 'not_applied'); `text` is the one tap's sentence.
-export function tapNotAppliedAlertText(n, one, text) {
+export function tapNotAppliedAlertText(n, one, text, where = '') {
     if (one) return text || 'A tap was not applied.';
+    if (where) return `${n} taps were not applied in ${where}. Open the match to see why; anything the server kept is in the match's history.`;
     return `${n} taps were not applied. Open their matches to see why; anything the server kept is in the match's history.`;
 }
 

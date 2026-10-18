@@ -8,6 +8,7 @@ import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, apply
 import { BRANDING_DEFAULTS } from './admin_branding.jsx';
 import { queuedWritesNoun, supersededAlertText, displacedAlertText, tapNotAppliedAlertText, tapNotAppliedText } from './write_result.jsx';
 import { VersionBanner } from './version_banner.jsx';
+import { tapWords } from './match_history_view.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
 
@@ -417,8 +418,12 @@ export function queueAlertMessage(alert) {
       return displacedAlertText(n, one);
     // bc-evts: taps the server did not apply this pass, one alert a pass;
     // a single one says why in the server's words or the outcome's.
+    // A tap the server turned away after its own answer said it landed
+    // (`turnedAway`) is told away from its match, so the alert names the match
+    // and the tap.
     case "not_applied":
-      return tapNotAppliedAlertText(n, one, tapNotAppliedText(alert.outcome));
+      return tapNotAppliedAlertText(n, one,
+        tapNotAppliedText(alert.outcome, alert.where || "", alert.tap ? tapWords(alert.tap) : ""), alert.where || "");
     // bc-evts S5 b: a batch of taps the server refused is held, not dropped.
     case "taps_parked":
       return `The server refused ${one ? "a tap" : `${n} taps`}. ${one ? "It is" : "They are"} held and ${one ? "holds" : "hold"} back that match's later changes: open the held writes list to discard ${one ? "it" : "them"}.`;

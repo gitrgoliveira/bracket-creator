@@ -10,11 +10,12 @@ func TestClearDerivedScoreFields_DropsEveryDerivedField(t *testing.T) {
 		MarkIDs:      &MarkIDs{A: []string{"x"}},
 		ScoreVersion: 4,
 		EventSeqs:    map[string]int64{"dev": 9},
+		TurnedAway:   map[string]string{"dev.1": "beforeBaseline"},
 		SubResults:   []SubMatchResult{{Position: 1, MarkIDs: &MarkIDs{B: []string{"y"}}}},
 	}
 	m.ClearDerivedScoreFields()
-	if m.MarkIDs != nil || m.ScoreVersion != 0 || m.EventSeqs != nil || m.SubResults[0].MarkIDs != nil {
-		t.Fatalf("derived fields kept: marks %v, version %d, seqs %v, bout marks %v",
-			m.MarkIDs, m.ScoreVersion, m.EventSeqs, m.SubResults[0].MarkIDs)
+	if m.MarkIDs != nil || m.ScoreVersion != 0 || m.EventSeqs != nil || m.TurnedAway != nil || m.SubResults[0].MarkIDs != nil {
+		t.Fatalf("derived fields kept: marks %v, version %d, seqs %v, turned away %v, bout marks %v",
+			m.MarkIDs, m.ScoreVersion, m.EventSeqs, m.TurnedAway, m.SubResults[0].MarkIDs)
 	}
 }

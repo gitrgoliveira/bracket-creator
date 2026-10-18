@@ -7064,6 +7064,23 @@ components:
             sessions that logged an event with a `seq` appear, one entry each,
             at most 32 (the sessions that tapped latest are kept). Absent when
             none. Derived by the server; a value a write carries is ignored.
+        turnedAway:
+          type: object
+          readOnly: true
+          additionalProperties:
+            type: string
+          description: >
+            Every device tap event the match's score event log holds that the
+            server does not apply now, by event `id`, with its outcome (any
+            outcome but `applied`, `recorded` and `duplicate`, e.g.
+            `beforeBaseline` or `matchClosed`). A tap answered `applied` can be
+            turned away later, when a finish or decision that never saw it, or
+            one stamped before it, reaches the server after it: its own answer
+            said it landed, so the device that made it reads the change here,
+            on whatever copy of the match reaches it next, and tells its
+            operator. The server's own events never appear. At most 64, the
+            latest logged. Absent when none. Derived by the server; a value a
+            write carries is ignored.
         groupStamps:
           type: object
           readOnly: true
@@ -7638,6 +7655,12 @@ components:
             type: integer
             format: int64
           description: See MatchResult.eventSeqs.
+        turnedAway:
+          type: object
+          readOnly: true
+          additionalProperties:
+            type: string
+          description: See MatchResult.turnedAway.
         placeholderA:
           type: string
           readOnly: true

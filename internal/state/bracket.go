@@ -3,6 +3,7 @@ package state
 import (
 	"encoding/json"
 	"log/slog"
+	"maps"
 	"os"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -212,6 +213,7 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 			res.Rounds[i][j].GroupStamps = CloneGroupStamps(round[j].GroupStamps)
 			res.Rounds[i][j].MarkIDs = round[j].MarkIDs.Clone()
 			res.Rounds[i][j].EventSeqs = CloneGroupStamps(round[j].EventSeqs)
+			res.Rounds[i][j].TurnedAway = maps.Clone(round[j].TurnedAway)
 			if round[j].Feeders != nil {
 				res.Rounds[i][j].Feeders = append([]string(nil), round[j].Feeders...)
 			}
@@ -233,6 +235,7 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 		tpm.GroupStamps = CloneGroupStamps(b.ThirdPlaceMatch.GroupStamps)
 		tpm.MarkIDs = b.ThirdPlaceMatch.MarkIDs.Clone()
 		tpm.EventSeqs = CloneGroupStamps(b.ThirdPlaceMatch.EventSeqs)
+		tpm.TurnedAway = maps.Clone(b.ThirdPlaceMatch.TurnedAway)
 		if b.ThirdPlaceMatch.Feeders != nil {
 			tpm.Feeders = append([]string(nil), b.ThirdPlaceMatch.Feeders...)
 		}

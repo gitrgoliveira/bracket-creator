@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"slices"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -508,6 +509,7 @@ func (e *Engine) recordLandedWriteHistory(h state.StoreTx, compID, matchID strin
 	}
 	rep.EventsNotApplied = note.notApplied
 	result.ScoreVersion = note.match.ScoreVersion
+	result.TurnedAway = maps.Clone(note.match.TurnedAway)
 	takeDerivedMarks(&result.MarkIDs, result.SubResults, &note.match)
 }
 
@@ -927,6 +929,7 @@ func (e *Engine) takeReplayDerived(h state.StoreTx, compID, matchID string, inPo
 		_, err = h.UpdatePoolMatchByID(compID, matchID, func(r *state.MatchResult) error {
 			r.ScoreVersion = derived.ScoreVersion
 			r.EventSeqs = state.CloneGroupStamps(derived.EventSeqs)
+			r.TurnedAway = maps.Clone(derived.TurnedAway)
 			takeDerivedMarks(&r.MarkIDs, r.SubResults, derived)
 			return nil
 		})
@@ -934,6 +937,7 @@ func (e *Engine) takeReplayDerived(h state.StoreTx, compID, matchID string, inPo
 		_, err = h.UpdateBracketMatchByID(compID, matchID, func(bm *state.BracketMatch) {
 			bm.ScoreVersion = derived.ScoreVersion
 			bm.EventSeqs = state.CloneGroupStamps(derived.EventSeqs)
+			bm.TurnedAway = maps.Clone(derived.TurnedAway)
 			takeDerivedMarks(&bm.MarkIDs, bm.SubResults, derived)
 		})
 	}

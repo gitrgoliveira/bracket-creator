@@ -1790,11 +1790,27 @@ type MatchResult struct {
 	// logged). Derived by engine.ReplayScoring like ScoreVersion; persisted
 	// after ScoreVersion.
 	EventSeqs map[string]int64 `json:"eventSeqs,omitempty" yaml:"-"`
+	// TurnedAway names, by event id, every device tap the match's score log
+	// holds that the server does not apply now, with its outcome (the
+	// outcomes domain.ScoreOutcome* names other than applied, recorded and
+	// duplicate). A tap answered as applied can be turned away later, when a
+	// finish that never saw it, or one stamped before it, arrives after it
+	// (the closed-match rule): its own answer said applied, so the device
+	// that made it learns of the change from here, on whatever copy of the
+	// match reaches it next (a push, a fetch, an answer), and tells its
+	// operator. The server's own events are never listed. At most
+	// MaxTurnedAway of them, the latest logged. Derived by
+	// engine.ReplayScoring like EventSeqs; persisted after EventSeqs.
+	TurnedAway map[string]string `json:"turnedAway,omitempty" yaml:"-"`
 }
 
 // MaxEventSeqSessions bounds MatchResult.EventSeqs: one entry per device
 // session that tapped on the match, the most recent ones kept.
 const MaxEventSeqSessions = 32
+
+// MaxTurnedAway bounds MatchResult.TurnedAway: the latest taps logged that
+// the server does not apply.
+const MaxTurnedAway = 64
 
 // MarkIDs carries one id per entry of a side's ippon slice, index for index
 // (A names IpponsA[i], B names IpponsB[i]; "" for a placeholder slot).
@@ -2096,11 +2112,12 @@ type BracketMatch struct {
 	// last applied change to each group of this match, persisted in
 	// bracket.json. nil on a legacy match (every group reads ModifiedAt).
 	GroupStamps map[string]int64 `json:"groupStamps,omitempty"`
-	// MarkIDs, ScoreVersion and EventSeqs mirror MatchResult's (bc-evts),
-	// persisted in bracket.json.
-	MarkIDs      *MarkIDs         `json:"markIds,omitempty"`
-	ScoreVersion int              `json:"scoreVersion,omitempty"`
-	EventSeqs    map[string]int64 `json:"eventSeqs,omitempty"`
+	// MarkIDs, ScoreVersion, EventSeqs and TurnedAway mirror MatchResult's
+	// (bc-evts), persisted in bracket.json.
+	MarkIDs      *MarkIDs          `json:"markIds,omitempty"`
+	ScoreVersion int               `json:"scoreVersion,omitempty"`
+	EventSeqs    map[string]int64  `json:"eventSeqs,omitempty"`
+	TurnedAway   map[string]string `json:"turnedAway,omitempty"`
 	// PlaceholderA / PlaceholderB / PlaceholderWinner record what SideA / SideB /
 	// Winner held at DRAW time, before any pool resolved. They are written once,
 	// by engine.buildBracketFromDraw, for a pool-fed (mixed) knockout whose
@@ -2214,12 +2231,13 @@ func (m *MatchResult) ClearRequestFields() {
 
 // ClearDerivedScoreFields drops what only the score replay derives (bc-evts):
 // the mark ids, the match's and every bout's, the event-log version and the
-// highest event seq the log holds per device session. The HTTP doors that
+// highest event seq the log holds per device session, and the taps it turned
+// away. The HTTP doors that
 // bind a whole MatchResult from a body (/score, each bulk-score entry) call it
 // as they bind, so no client can name a mark or claim a version or a seq; the
 // engine stores them only from the replay's own write.
 func (m *MatchResult) ClearDerivedScoreFields() {
-	m.MarkIDs, m.ScoreVersion, m.EventSeqs = nil, 0, nil
+	m.MarkIDs, m.ScoreVersion, m.EventSeqs, m.TurnedAway = nil, 0, nil, nil
 	for i := range m.SubResults {
 		m.SubResults[i].MarkIDs = nil
 	}

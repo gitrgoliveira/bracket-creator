@@ -486,6 +486,7 @@ func priorMatch(m *state.MatchResult) *state.MatchResult {
 	p.GroupStamps = state.CloneGroupStamps(m.GroupStamps)
 	p.MarkIDs = m.MarkIDs.Clone()
 	p.EventSeqs = state.CloneGroupStamps(m.EventSeqs)
+	p.TurnedAway = maps.Clone(m.TurnedAway)
 	p.ClearRequestFields()
 	return &p
 }

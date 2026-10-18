@@ -64,7 +64,10 @@ export function makeFakeOutbox({ session = 'dev1' } = {}) {
     }
     return sent;
   };
-  return { api, ack, taps: (c, m) => listFor(keyOf(c, m)).map((e) => ({ ...e })) };
+  // tell: the outbox tells a tap's LATER outcome, read from a copy of the
+  // match that lists it in turnedAway after its answer said it landed.
+  const tell = (c, m, outcome) => emit('outcome', keyOf(c, m), { ...outcome });
+  return { api, ack, tell, taps: (c, m) => listFor(keyOf(c, m)).map((e) => ({ ...e })) };
 }
 
 // serverFold: a fake server holding `match`, applying `events` in order with

@@ -32,6 +32,19 @@ describe('a tap the server did not apply', () => {
     expect(byTestId(r, 'tap-not-applied-note')).toBeNull();
   });
 
+  // Stage 6 review 5: a tap the server applied and a finish that never saw it
+  // turned away afterwards is said the same way, when the outbox tells it.
+  it('a tap applied first and turned away later by a finish is said on the board', async () => {
+    const r = render(el(bout()));
+    await tapM(r);
+    const [tap] = outbox.taps('c1', 'm1');
+    await act(async () => { outbox.ack('c1', 'm1', null, {}); });
+    expect(byTestId(r, 'tap-not-applied-note'), 'its answer said applied').toBeNull();
+    await act(async () => { outbox.tell('c1', 'm1', { id: tap.id, outcome: 'beforeBaseline' }); });
+    expect(byTestId(r, 'tap-not-applied-note').textContent).toBe(
+      "Not applied: the result was recorded without this change, so it was kept in the match's history. To change the result, tap Correct.");
+  });
+
   it('uses the server\'s message when it sends one', async () => {
     const r = render(el(bout()));
     await tapM(r);

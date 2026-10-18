@@ -2,6 +2,7 @@ package engine
 
 import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	"maps"
 )
 
 // bracketMatchAsResult projects a stored BracketMatch into the MatchResult
@@ -94,6 +95,7 @@ func bracketMatchAsResult(bm *state.BracketMatch) *state.MatchResult {
 		MarkIDs:      bm.MarkIDs.Clone(),
 		ScoreVersion: bm.ScoreVersion,
 		EventSeqs:    state.CloneGroupStamps(bm.EventSeqs),
+		TurnedAway:   maps.Clone(bm.TurnedAway),
 	}
 }
 

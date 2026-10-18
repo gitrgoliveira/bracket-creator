@@ -277,6 +277,7 @@ classDiagram
         +MarkIDs MarkIDs
         +int ScoreVersion (score-log line count)
         +map EventSeqs (per device session, the highest logged tap seq)
+        +map TurnedAway (device taps the log holds that are not applied, by id)
     }
 
     class CompetitorSide {
@@ -365,6 +366,7 @@ classDiagram
         +MarkIDs MarkIDs
         +int ScoreVersion (score-log line count)
         +map EventSeqs (per device session, the highest logged tap seq)
+        +map TurnedAway (device taps the log holds that are not applied, by id)
     }
 
     MatchResult "1" *-- "2" CompetitorSide : side A is aka, side B is shiro
@@ -761,7 +763,10 @@ have to replay the log: the id of each mark (a removal names its mark by id, so 
 removing two different marks both land), the number of log lines the stored match was derived
 from (`ScoreVersion`, which only grows, so a screen can tell which of two copies of a running
 match is older without comparing clocks), and for each device session the highest tap number
-the log holds (`EventSeqs`).
+the log holds (`EventSeqs`). A fourth list names every tap of a device that the log holds and
+the server does not apply now, with the reason (`TurnedAway`): a tap the server first applied
+can be turned away when a finish that never saw it arrives after it, and the device that made it
+reads that from the next copy of the match it receives and tells its operator.
 
 The score event log is the source of truth for match scoring, while the match result stored in
 `pool-matches.csv` or `bracket.json` acts as a materialized cache derived by the replay. This
@@ -775,8 +780,8 @@ truth and an unrecognized line is never skipped or guessed at.
 
 The merge needs the time of each stored change to compare against, so it only works where
 those times are saved. They are saved for every match, in both files (`GroupStamps` in the
-results file at column index 29, followed by `MarkIDs` at index 30, `ScoreVersion` at index 31
-and `EventSeqs` at index 32, and in the bracket file), which is what makes the rule the same wherever a match happens to be
+results file at column index 29, followed by `MarkIDs` at index 30, `ScoreVersion` at index 31,
+`EventSeqs` at index 32 and `TurnedAway` at index 33, and in the bracket file), which is what makes the rule the same wherever a match happens to be
 in the competition. A match saved before the per group times existed has only
 one time for the whole result, and every group reads as changed then, so it is compared exactly
 as before. A running save from a client that does not send a time counts as unstamped and
@@ -918,7 +923,8 @@ Appending columns and leaving some fields unwritten are the two consequences tha
 * Column position is the contract. New fields are appended, and a file written by an older
   version stays readable because the reader leaves each missing trailing column at its
   documented default, empty for most (including `MarkIDs` at column index 30, `ScoreVersion`
-  at index 31 and `EventSeqs` at index 32, defaulting to empty, 0 and empty) and `-1` for the round number, which means unknown.
+  at index 31, `EventSeqs` at index 32 and `TurnedAway` at index 33, defaulting to empty, 0,
+  empty and empty) and `-1` for the round number, which means unknown.
 * Some fields are useful only in flight and are not written at all. Transient client revision
   markers used to discard out of order writes within a single session are one example, as are
   a write's own id, what its writer had in view, the groups it names and the endpoint it came

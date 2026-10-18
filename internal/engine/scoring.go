@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"slices"
 	"sort"
 	"sync"
@@ -963,6 +964,7 @@ func applyPoolWriteLog(stored, result *state.MatchResult, policy matchWritePolic
 		result.SubResultsUnreadable = false
 	}
 	prior := derivedScoreOf(stored.IpponsA, stored.IpponsB, stored.MarkIDs, stored.SubResults, stored.ScoreVersion, stored.EventSeqs)
+	priorTurnedAway := stored.TurnedAway
 	*stored = *result
 	// The write's own merge inputs and report stay on the incoming result for
 	// the caller; the stored copy must not carry them to a later writer.
@@ -978,16 +980,20 @@ func applyPoolWriteLog(stored, result *state.MatchResult, policy matchWritePolic
 	case policy == matchWriteRestore:
 		stored.MarkIDs = result.MarkIDs.Clone()
 		stored.EventSeqs = state.CloneGroupStamps(result.EventSeqs)
+		stored.TurnedAway = maps.Clone(result.TurnedAway)
 	case result.WriteDoor == DoorEvent:
 		stored.MarkIDs = result.MarkIDs.Clone()
 		stored.ScoreVersion = max(prior.version, result.ScoreVersion)
 		stored.EventSeqs = mergeEventSeqs(prior.eventSeqs, result.EventSeqs)
+		stored.TurnedAway = maps.Clone(result.TurnedAway)
 	default:
 		stored.MarkIDs = prior.carry(stored.IpponsA, stored.IpponsB, stored.SubResults)
 		stored.ScoreVersion = prior.version
 		stored.EventSeqs = state.CloneGroupStamps(prior.eventSeqs)
+		stored.TurnedAway = maps.Clone(priorTurnedAway)
 		result.MarkIDs, result.ScoreVersion = stored.MarkIDs.Clone(), stored.ScoreVersion
 		result.EventSeqs = state.CloneGroupStamps(stored.EventSeqs)
+		result.TurnedAway = maps.Clone(stored.TurnedAway)
 	}
 	return false, false, inherited, nil
 }
@@ -2685,9 +2691,11 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	case policy == matchWriteRestore:
 		bm.MarkIDs, bm.ScoreVersion = result.MarkIDs.Clone(), result.ScoreVersion
 		bm.EventSeqs = state.CloneGroupStamps(result.EventSeqs)
+		bm.TurnedAway = maps.Clone(result.TurnedAway)
 	case result.WriteDoor == DoorEvent:
 		bm.MarkIDs, bm.ScoreVersion = result.MarkIDs.Clone(), max(bm.ScoreVersion, result.ScoreVersion)
 		bm.EventSeqs = mergeEventSeqs(bm.EventSeqs, result.EventSeqs)
+		bm.TurnedAway = maps.Clone(result.TurnedAway)
 	default:
 		d := derivedScoreOf(bm.IpponsA, bm.IpponsB, bm.MarkIDs, bm.SubResults, bm.ScoreVersion, bm.EventSeqs)
 		prior = &d
@@ -2748,6 +2756,7 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 		bm.EventSeqs = state.CloneGroupStamps(prior.eventSeqs)
 		result.MarkIDs, result.ScoreVersion = bm.MarkIDs.Clone(), bm.ScoreVersion
 		result.EventSeqs = state.CloneGroupStamps(bm.EventSeqs)
+		result.TurnedAway = maps.Clone(bm.TurnedAway)
 	}
 	// Echo the persisted scheduling fields back into result so the caller (and
 	// the SSE broadcast) sees the full match state rather than the empty

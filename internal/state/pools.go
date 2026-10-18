@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"log/slog"
+	"maps"
 	"os"
 	"sort"
 	"strconv"
@@ -167,6 +168,7 @@ func (s *Store) copyMatchResults(results []MatchResult) []MatchResult {
 		res[i].GroupStamps = CloneGroupStamps(r.GroupStamps)
 		res[i].MarkIDs = r.MarkIDs.Clone()
 		res[i].EventSeqs = CloneGroupStamps(r.EventSeqs)
+		res[i].TurnedAway = maps.Clone(r.TurnedAway)
 		// The write's own transient inputs and outputs never travel on a
 		// stored copy: a writer that builds its result from one (the
 		// daihyosen add, `u := *match`) must state its own.
@@ -740,6 +742,37 @@ var poolMatchColumns = []poolMatchColumn{
 			}
 			if len(seqs) > 0 {
 				m.EventSeqs = seqs
+			}
+		}},
+	// The device taps the score log holds that the server does not apply,
+	// by event id, with their outcome (bc-evts), JSON {"<id>":"<outcome>"},
+	// appended after EventSeqs. A corrupt cell reads as none: the next write's
+	// replay derives it again.
+	{name: "TurnedAway",
+		put: func(r *MatchResult) string {
+			if len(r.TurnedAway) == 0 {
+				return ""
+			}
+			b, err := json.Marshal(r.TurnedAway)
+			if err != nil {
+				slog.Error("state: pool match TurnedAway marshal failed; writing empty cell",
+					"matchID", r.ID, "error", err)
+				return ""
+			}
+			return string(b)
+		},
+		take: func(m *MatchResult, cell string) {
+			if cell == "" {
+				return
+			}
+			var away map[string]string
+			if err := json.Unmarshal([]byte(cell), &away); err != nil {
+				slog.Error("state: pool match TurnedAway cell corrupt; reading as none",
+					"matchID", m.ID, "error", err)
+				return
+			}
+			if len(away) > 0 {
+				m.TurnedAway = away
 			}
 		}},
 }

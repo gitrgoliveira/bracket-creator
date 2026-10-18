@@ -25,6 +25,9 @@
 //      devices show the lineup's fighters on it, a later edit of the match's
 //      lineup renames it on both, and Record bout records that bout with both
 //      points
+//   g  turned away later: device 2's tap is counted, then device 1's finish,
+//      made offline before that tap and never having seen it, lands; device 2
+//      is told its tap was not applied, the alert naming the match and the tap
 //
 // Known race, not asserted here: the CAP. A side that holds two points has
 // decided its bout (sanbon shobu), so a third strike for it, or any strike for
@@ -52,7 +55,8 @@ import { createTournament, login } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
 import { editorIdentity, inlineEditor, openShiaijo, sides, startUpNext, upNextCard } from '../fixtures/shiaijo.mjs';
-import { ipponButton, syncState } from '../fixtures/scoring.mjs';
+import { armFinish, ipponButton, syncState } from '../fixtures/scoring.mjs';
+import { toastText } from '../fixtures/roster.mjs';
 import { editorSides, inlineRunning, rosterOf, slotMarks } from '../fixtures/individual.mjs';
 import { holdScoreWrites } from '../fixtures/held-write.mjs';
 import { tapOnSide } from '../fixtures/pace.mjs';
@@ -442,6 +446,41 @@ test.describe('concurrent taps from two devices', () => {
       await shot(d1, 'f-kachinuki-recorded-device-1');
       await shot(d2, 'f-kachinuki-recorded-device-2');
       record({ journey: JOURNEY, case: 'f kachinuki', pair, gapMs, bout1: (await doneRows(d2).nth(0).innerText()).replace(/\s+/g, ' ') });
+    } finally {
+      await ops.close();
+    }
+  });
+
+  test('g a tap answered as counted that a finish made offline elsewhere turns away is told on its device, naming the match and the tap', async ({ browser, baseURL }) => {
+    const ops = await twoOperators(browser, baseURL, 'A');
+    try {
+      const { d1, d2, ctx1 } = ops;
+      await expect.poll(() => inlineRunning(d1)).toBe(true);
+      await sameMatchOnBoth(d1, d2);
+      await expect.poll(() => marksOf(d2, 'aka')).toEqual(['K']);
+      // Device 1 goes offline, scores Shiro's second point and finishes the
+      // match: both wait in its outbox.
+      await ctx1.setOffline(true);
+      try {
+        await tapOnSide(d1, 'shiro', ipponButton(d1, 'shiro', 'D'));
+        await expect.poll(() => marksOf(d1, 'shiro')).toEqual(['D', 'M']);
+        const armed = await armFinish(d1);
+        await armed.tap();
+        // Then device 2, online, scores for Aka: the server counts it, and its
+        // own answer says so.
+        await tapOnSide(d2, 'aka', ipponButton(d2, 'aka', 'D'));
+        await expect(syncState(d2)).toHaveText('Synced');
+        await expect.poll(() => marksOf(d2, 'aka'), { message: 'device 2\'s tap is counted at first' }).toEqual(['D', 'K']);
+      } finally {
+        await ctx1.setOffline(false);
+      }
+      // Device 1's point and finish land: Shiro had won the bout first, and the
+      // match was finished before device 2's tap. Device 2 is told, though its
+      // tap's own answer said it counted.
+      const told = await toastText(d2, /^Not applied in .+ \(Aka D added\): /);
+      expect(told, 'the alert names the match and the tap').toMatch(/^Not applied in .+ \(Aka D added\): (the bout was already decided|the match is finished)/);
+      await shot(d2, 'g-device-2-told');
+      record({ journey: JOURNEY, case: 'g turned away later', told });
     } finally {
       await ops.close();
     }

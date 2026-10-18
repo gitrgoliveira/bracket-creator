@@ -84,15 +84,23 @@ const EVENT_KIND_WORDS = {
 };
 function eventWords(ev) {
     if (!ev || typeof ev !== 'object') return historyDoorWords('event');
-    const side = ev.side === 'a' ? `${sideWord('aka')} ` : ev.side === 'b' ? `${sideWord('shiro')} ` : '';
     // The server's own fighter events (session "server"): a kachinuki bout's
     // fighter set from the match's lineup, never a tap anyone made.
     if (ev.session === 'server' && ev.kind === 'bout.fighter') {
+        const side = ev.side === 'a' ? `${sideWord('aka')} ` : ev.side === 'b' ? `${sideWord('shiro')} ` : '';
         return `Bout ${ev.pos}: ${side}fighter set from the lineup${ev.name ? ` (${ev.name})` : ''}`;
     }
+    return `${historyDoorWords('event')}: ${tapWords(ev)}`;
+}
+// tapWords names what a tap did: the side ("a" is Aka, "b" is Shiro), the
+// change, and the bout, e.g. "Aka M added on bout 1". The history's lines and
+// the notice of a tap the server turned away after it landed say it alike.
+export function tapWords(ev) {
+    if (!ev || typeof ev !== 'object') return 'a tap';
+    const side = ev.side === 'a' ? `${sideWord('aka')} ` : ev.side === 'b' ? `${sideWord('shiro')} ` : '';
     const what = ev.kind === 'ippon.add' ? `${ev.letter || 'point'} added` : (EVENT_KIND_WORDS[ev.kind] || 'change');
     const bout = ev.pos > 0 ? ` on bout ${ev.pos}` : ev.pos < 0 ? ' on the representative bout' : '';
-    return `${historyDoorWords('event')}: ${side}${what}${bout}`;
+    return `${side}${what}${bout}`;
 }
 // Why a tap was not applied (the server's outcome for it).
 const EVENT_OUTCOME_WORDS = {

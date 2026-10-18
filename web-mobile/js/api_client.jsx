@@ -1261,6 +1261,9 @@ function _revertLocalFields(d) {
 function _overlayPendingFields(comp, compID) {
     const id = compID || (comp && (comp.id || (comp.config && comp.config.id)));
     if (!comp || !id) return comp;
+    // Every fetch of a competition passes here: a tap of this device it turned
+    // away since its answer is told (_tellTurnedAway), after a reload too.
+    _tellTurnedAwayIn(comp, id);
     const byMatch = new Map();
     for (const d of _writeQueue.values()) {
         if (d && _LOCAL_FIELD[d.kind] && d.compID === id && d.matchID && !byMatch.has(d.matchID)) {
@@ -1408,6 +1411,100 @@ function _noteDerived(base, match) {
     if (prev && (Number(prev.scoreVersion) || 0) > v) return;
     _latestDerived.set(base, match);
     _emitOn(_derivedListeners, base, match);
+}
+
+
+// The taps this device made that the server answered as landed (applied,
+// recorded, duplicate), by event id, kept in browser storage so every tab of
+// the device and the next page after a reload know them (stage 6 review 5).
+// Such a tap can be turned away LATER: a finish that never saw it, or one
+// stamped before it, reaches the server after it (rule D5, the closed-match
+// rule). Its own answer said it landed, so nothing else tells this device: the
+// server names it in the match's `turnedAway` on every copy of the match (a
+// push, a fetch, an answer), and `_tellTurnedAway` tells the operator once,
+// for a tap of its own only, whatever moved it. A tap answered not-applied at
+// once is never recorded here, since its own answer already said so. Kept a
+// day, at most LANDED_TAPS_MAX of them; a tap landed before browser storage
+// was cleared is not known after it.
+const LANDED_TAPS_KEY = 'bc_landed_taps_v1';
+const LANDED_TAPS_MAX = 1000;
+const LANDED_TAPS_KEEP_MS = 24 * 60 * 60 * 1000;
+let _landedTapsMemory = {};
+function _readLandedTaps() {
+    try {
+        const raw = localStorage.getItem(LANDED_TAPS_KEY);
+        if (raw === null) return _landedTapsMemory;
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (_e) {
+        return _landedTapsMemory;
+    }
+}
+function _writeLandedTaps(all) {
+    _landedTapsMemory = all;
+    try { localStorage.setItem(LANDED_TAPS_KEY, JSON.stringify(all)); } catch (_e) { /* kept in memory */ }
+}
+// _noteLandedTaps records the taps of one match the server answered as landed.
+function _noteLandedTaps(compID, matchID, descs) {
+    if (!descs.length) return;
+    const now = Date.now();
+    const all = _readLandedTaps();
+    for (const d of descs) {
+        const p = d && d.payload;
+        if (!p || !p.id) continue;
+        all[p.id] = {
+            compID, matchID, at: now, where: _whereOf(d),
+            kind: p.kind, side: p.side, pos: p.pos, letter: p.letter,
+        };
+    }
+    let ids = Object.keys(all).filter((id) => now - (Number(all[id] && all[id].at) || 0) < LANDED_TAPS_KEEP_MS);
+    if (ids.length > LANDED_TAPS_MAX) {
+        ids = ids.sort((a, b) => (all[b].at || 0) - (all[a].at || 0)).slice(0, LANDED_TAPS_MAX);
+    }
+    const kept = {};
+    for (const id of ids) kept[id] = all[id];
+    _writeLandedTaps(kept);
+}
+// _tellTurnedAway reads one copy of a match: each tap of this device the
+// server now lists as turned away is told once, to the match's open editor
+// (subscribeTapOutcome) and as one 'not_applied' alert naming the match and
+// the tap, then forgotten.
+function _tellTurnedAway(compID, matchID, match) {
+    const away = match && match.turnedAway;
+    if (!compID || !matchID || !away || typeof away !== 'object') return;
+    const ids = Object.keys(away);
+    if (ids.length === 0) return;
+    const all = _readLandedTaps();
+    const told = [];
+    for (const id of ids) {
+        const rec = all[id];
+        if (!rec || rec.compID !== compID || rec.matchID !== matchID) continue;
+        told.push({ id, outcome: away[id], rec });
+        delete all[id];
+    }
+    if (told.length === 0) return;
+    _writeLandedTaps(all);
+    const base = _revKey(compID, matchID);
+    const where = told.map((t) => t.rec.where).find(Boolean) || _shownMatchLabels.get(base) || '';
+    for (const t of told) _emitOn(_tapOutcomeListeners, base, { id: t.id, outcome: t.outcome });
+    const last = told[told.length - 1];
+    const tap = { kind: last.rec.kind, side: last.rec.side, pos: last.rec.pos, letter: last.rec.letter };
+    _notifyQueueAlert({
+        kind: 'not_applied', count: told.length, terminalCount: 0, compID, matchID,
+        outcome: { id: last.id, outcome: last.outcome }, where, tap, turnedAway: true,
+    });
+}
+// _tellTurnedAwayIn reads every match a fetched competition holds.
+function _tellTurnedAwayIn(comp, compID) {
+    if (!comp || !compID) return;
+    const look = (m) => { if (m && m.turnedAway) _tellTurnedAway(compID, m.id, m); };
+    for (const m of comp.poolMatches || []) look(m);
+    for (const p of comp.pools || []) for (const m of (p && p.matches) || []) look(m);
+    const b = comp.bracket;
+    if (b) {
+        for (const r of b.rounds || []) for (const m of (Array.isArray(r) ? r : [])) look(m);
+        look(b.thirdPlaceMatch);
+    }
 }
 
 // _basisFor: what a rule-bound write was made against (S3d). `seen` is the
@@ -2710,6 +2807,9 @@ async function _sendEntry(key, descriptor, pass) {
     if (_endDiscardWhileOut(descriptor, res, body)) return 'settled';
     body = body || {};
     if (res.ok) {
+        // An answer that carries the match names the taps the server turned
+        // away since their own answer: this device's are told.
+        if (compID && matchID) _tellTurnedAway(compID, matchID, body.result || body);
         // Success (HTTP 200/201, including a write the server kept in the
         // match's history instead of applying, applied:false).
         if (_answersMatchWrite(descriptor)) {
@@ -2929,6 +3029,7 @@ async function _sendTapBatch(base, batch, pass) {
         let dequeued = false;
         // The follow-ups of the taps that leave are done once for the batch,
         // as it closes (K6).
+        const landed = [];
         _openDequeueBatch();
         try {
             for (const [k, d] of batch) {
@@ -2956,7 +3057,9 @@ async function _sendTapBatch(base, batch, pass) {
                 }
                 if (result !== 'settled') continue; // keep strict order behind it
                 if (_dequeue(k, d, { value: o })) dequeued = true;
-                if (!tapOutcomeQuiet(o)) {
+                if (tapOutcomeQuiet(o)) {
+                    landed.push(d);
+                } else {
                     pass.notApplied++;
                     pass.lastNotApplied = o;
                     _emitOn(_tapOutcomeListeners, base, {
@@ -2967,6 +3070,9 @@ async function _sendTapBatch(base, batch, pass) {
         } finally {
             _closeDequeueBatch();
         }
+        // Landed: told later if a result that never saw them turns them away.
+        _noteLandedTaps(compID, matchID, landed);
+        _tellTurnedAway(compID, matchID, body.match);
         const heldSeqs = (body.match && body.match.eventSeqs) || {};
         let reseq = false;
         for (const [k, d] of unheld) {
@@ -3743,6 +3849,12 @@ function _ensureConnected() {
             _forgetShownMatches(parsed.data && parsed.data.competitionId);
         }
         if (parsed && (parsed.type === 'tournament_updated' || parsed.type === 'password_reset')) _forgetAllShownMatches();
+        // A push of a match names the taps the server turned away since their
+        // answer: this device's are told (_tellTurnedAway).
+        if (parsed && parsed.type === 'match_updated' && parsed.data && parsed.data.result) {
+            const r = parsed.data.result;
+            _tellTurnedAway(parsed.data.competitionId, parsed.data.matchId || r.id, r);
+        }
         _noteEventId(event.lastEventId, parsed);
         for (const sub of _subscribers) {
             try { sub.callback(parsed); } catch (err) { console.error('SSE callback failed:', err); }

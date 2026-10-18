@@ -37,6 +37,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strconv"
@@ -291,6 +292,34 @@ func ScoreLogEventSeqs(lines []state.ScoreLogLine) map[string]int64 {
 	return top
 }
 
+// turnedAwayOf is MatchResult.TurnedAway: every device tap of the log the
+// replay does not apply now (an outcome other than applied, recorded or
+// duplicate), by id, with its outcome; the server's own events never. A tap
+// its own answer called applied can end here when a result that never saw it
+// arrives later, and the device that made it reads that from the match
+// (stage 6 review 5). The latest MaxTurnedAway by line.
+func turnedAwayOf(lines []state.ScoreLogLine, outcome map[int]string) map[string]string {
+	var out map[string]string
+	for i := len(lines) - 1; i >= 0 && len(out) < state.MaxTurnedAway; i-- {
+		e := lines[i].Event
+		if e == nil || e.Session == ServerEventSession {
+			continue
+		}
+		switch o := outcome[i]; o {
+		case "", domain.ScoreOutcomeApplied, domain.ScoreOutcomeRecorded, domain.ScoreOutcomeDuplicate:
+		default:
+			if _, ok := out[e.ID]; ok {
+				continue
+			}
+			if out == nil {
+				out = map[string]string{}
+			}
+			out[e.ID] = o
+		}
+	}
+	return out
+}
+
 // mergeEventSeqs settles the seqs of the replay's derived write (DoorEvent) on
 // a stored match: the replay read the whole log, so its sessions are the ones
 // kept, each never lower than the stored one (the seqs only grow, as the
@@ -418,6 +447,7 @@ func cloneMatchForReplay(m state.MatchResult) state.MatchResult {
 	c.Encho = m.Encho.Clone()
 	c.MarkIDs = m.MarkIDs.Clone()
 	c.EventSeqs = state.CloneGroupStamps(m.EventSeqs)
+	c.TurnedAway = maps.Clone(m.TurnedAway)
 	c.GroupStamps = state.CloneGroupStamps(m.GroupStamps)
 	return c
 }
@@ -654,6 +684,7 @@ func replayScoring(current *state.MatchResult, lines []state.ScoreLogLine, shape
 	}
 	out.Match.ScoreVersion = len(lines)
 	out.Match.EventSeqs = ScoreLogEventSeqs(lines)
+	out.Match.TurnedAway = turnedAwayOf(lines, rp.outcome)
 	for i, l := range lines {
 		if l.Event != nil {
 			out.Outcomes = append(out.Outcomes, EventOutcome{ID: l.Event.ID, Line: i, Outcome: rp.outcome[i]})

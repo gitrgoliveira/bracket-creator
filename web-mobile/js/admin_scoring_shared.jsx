@@ -899,7 +899,15 @@ function makeSubmitDecision({
         match.compId, match.id, kind, { decisionBy, decisionReason }, encho, password,
         { seenModifiedAt: match.modifiedAt || 0, seenScoreVersion: (seenScoreVersion !== undefined ? seenScoreVersion : match.scoreVersion) || 0 },
       );
-      if (!mountedRef.current) return;
+      if (!mountedRef.current) {
+        // The host read the decision from the outbox as it was queued, and
+        // the decided match left this editor (the court console, stage 6
+        // review 8, M4): the host still moves on, as it would have here.
+        if (!writeDidNotLand(updated) && !isComplete && onAfterDecision) {
+          await onAfterDecision(withLocalDecision(updated, match, kind, decisionBy));
+        }
+        return;
+      }
       // A decision that did not land must not advance ANYTHING below this
       // line: not onAfterDecision (which the shiaijo page wires to a LOCAL
       // bracket advance), not the close. This asks the owner predicate rather

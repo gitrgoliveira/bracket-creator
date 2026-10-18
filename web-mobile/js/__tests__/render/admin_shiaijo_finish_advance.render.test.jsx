@@ -191,6 +191,23 @@ describe('a finish or a decision the outbox holds shows after the console is mou
     expect(row.querySelector('.shiaijo-qrow__side--aka .bc-winner-tick'), 'with the winner the finish names').not.toBeNull();
   });
 
+  // The decision is the outbox's before the editor hands it on: the console
+  // reads the match finished at once, and the start after the decision still
+  // goes to the court's next bout (the advance found no live match to start
+  // after, and the court sat idle; the e2e journeys J2 and S2b).
+  it('a decision the outbox already shows finished still starts the next bout', async () => {
+    const onEditScore = vi.fn(async (_c, mid) => pending(`K:${mid}`));
+    renderPage(onEditScore);
+    const res = { ...pending('K:decision'), decision: 'fusenpai', decisionBy: 'shiro' };
+    await act(async () => {
+      outbox.hold('c1', 'Pool A-1', { status: 'completed', kind: 'decision', payload: { decision: 'fusenpai', decisionBy: 'shiro' } }, res);
+    });
+    expect(shownMatch(), 'the decided bout left the live slot').not.toBe('Pool A-1');
+    await act(async () => { await captured.props.onAfterDecision(res); });
+    expect(onEditScore).toHaveBeenCalledTimes(1);
+    expect(onEditScore.mock.calls[0][1]).toBe('Pool A-2');
+  });
+
   it('a queued decision: finished, the side that did not withdraw the winner', async () => {
     tournamentMatchesSpy.mockImplementation(() => [running]);
     outbox.hold('c1', 'Pool A-1', { status: 'completed', kind: 'decision', payload: { decision: 'kiken', decisionBy: 'shiro' } }, pending('K:decision'));

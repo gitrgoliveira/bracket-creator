@@ -1175,6 +1175,26 @@ describe('item 7: non-points decisions advance to next match', () => {
       expect(window.API.recordDecision).toHaveBeenCalledWith('c1', 'm-p', { decision: 'fusenpai', decisionBy: 'shiro' }, 'pw', expect.objectContaining({ onRefusal: expect.any(Function) }));
     });
 
+    // Stage 6 review 8 (M4): the court console reads the decision this device
+    // made from the outbox, so the decided match leaves the live slot, and the
+    // editor goes, as the decision is queued. The host still moves on to the
+    // next bout (the e2e journeys J2 and S2b sat idle).
+    it('calls onAfterDecision for a decision that landed though the editor went meanwhile', async () => {
+      const onAfterDecision = vi.fn().mockResolvedValue(undefined);
+      const setters = makeSetters();
+      const mountedRef = { current: true };
+      window.API.recordDecision.mockImplementationOnce(async () => {
+        mountedRef.current = false; // the console showed the match finished
+        return { applied: true, pending: true, key: 'k', settled: new Promise(() => {}) };
+      });
+      const submit = makeSubmitDecision({
+        match: makeMatch('m1'), enchoPeriodCount: 0, password: 'pw',
+        ...setters, mountedRef, onClose: vi.fn(), onAfterDecision, isComplete: false,
+      });
+      await submit('fusenpai', { decisionBy: 'aka', decisionReason: '' });
+      expect(onAfterDecision).toHaveBeenCalledTimes(1);
+    });
+
     it('calls onAfterDecision for fusenpai when provided and match is not a correction', async () => {
       const onAfterDecision = vi.fn().mockResolvedValue(undefined);
       const onClose = vi.fn();

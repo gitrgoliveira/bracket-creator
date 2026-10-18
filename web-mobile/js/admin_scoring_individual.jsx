@@ -1141,7 +1141,8 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
     }
     // The one warning (R1, unsaved_entries.jsx): Discard entries drops them at
     // once, as every other own action and host exit does, then leaves.
-    if (!(await confirmDiscardUnsaved(isDirty, LEAVE_MATCH_ANYWAY, onDiscardUnsaved))) return;
+    // With nothing unsaved it leaves in the same tick (no await).
+    if (isDirty && !(await confirmDiscardUnsaved(isDirty, LEAVE_MATCH_ANYWAY, onDiscardUnsaved))) return;
     go();
   };
   // bc-dscn: a host that cannot close (the inline court console) has nothing

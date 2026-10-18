@@ -284,7 +284,8 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
     }
     // Not running, so the counts are a draft nothing has sent: the one warning
     // (R1, unsaved_entries.jsx), whose Discard entries drops them at once.
-    if (!(await confirmDiscardUnsaved(isDirty, LEAVE_MATCH_ANYWAY, discardEntries))) return;
+    // With nothing unsaved it leaves in the same tick (no await).
+    if (isDirty && !(await confirmDiscardUnsaved(isDirty, LEAVE_MATCH_ANYWAY, discardEntries))) return;
     go();
   };
   const handleDismiss = () => leaveEditor(onClose);

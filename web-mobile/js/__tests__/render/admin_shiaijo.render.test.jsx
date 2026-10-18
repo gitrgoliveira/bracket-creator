@@ -3029,6 +3029,64 @@ describe('the console asks before it drops the editor\'s unsaved entries (R1)', 
     } finally { c.restore(); }
   });
 
+  // Stage 5 review 11, minor 3: the confirm's wording is decided when it
+  // opens. Entries made while a confirm WITHOUT the warning is open (a scoring
+  // key reaching the console once focus fell to the body) were never named in
+  // it, so confirming must show the warning and wait for a second answer
+  // instead of dropping them silently.
+  it('Send back to queue: entries made while a confirm without the warning is open are asked about, not dropped', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { modifiedAt: 1000 })]);
+    try {
+      const discard = vi.fn();
+      const probeFn = () => true;
+      probeFn.discard = discard;
+      const clean = () => false;
+      clean.discard = vi.fn();
+      probe.props.hostUnsavedRef.current = clean;
+      await act(async () => { c.utils.getByRole('button', { name: /send back to queue/i }).click(); });
+      let dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
+      expect(dialog.textContent).not.toContain('Your unsaved entries will be discarded.');
+      probe.props.hostUnsavedRef.current = probeFn;
+      await act(async () => { dialog.querySelector('.btn--primary').click(); });
+      expect(window.API.revertMatchToQueue).not.toHaveBeenCalled();
+      expect(discard).not.toHaveBeenCalled();
+      dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
+      expect(dialog.textContent).toContain('Your unsaved entries will be discarded.');
+      await act(async () => { dialog.querySelector('.btn--primary').click(); });
+      expect(window.API.revertMatchToQueue).toHaveBeenCalledTimes(1);
+      expect(discard).toHaveBeenCalledTimes(1);
+    } finally { c.restore(); }
+  });
+
+  it('a court move: entries made while a confirm without the warning is open are asked about, not dropped', async () => {
+    const onEditScore = vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k-start', settled: new Promise(() => {}) });
+    const c = await mountCourt([courtMatch('m2', 'scheduled'), courtMatch('m3', 'scheduled')], { onEditScore });
+    const rowOf = () => [...c.utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes('Aka m3'));
+    try {
+      const start = [...rowOf().querySelectorAll('button')].find((b) => /^start/i.test(b.textContent.trim()));
+      await act(async () => { start.click(); });
+      await act(async () => {});
+      expect(c.editorMatch()).toBe('m3');
+      const discard = vi.fn();
+      const probeFn = () => true;
+      probeFn.discard = discard;
+      const clean = () => false;
+      clean.discard = vi.fn();
+      probe.props.hostUnsavedRef.current = clean;
+      await act(async () => { rowOf().querySelector('[data-testid="move-to-B"]').click(); });
+      let dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
+      expect(dialog.textContent).not.toContain('Your unsaved entries will be discarded.');
+      probe.props.hostUnsavedRef.current = probeFn;
+      const confirm = () => [...dialog.querySelectorAll('button')].find((b) => /move to shiaijo b/i.test(b.textContent));
+      await act(async () => { confirm().click(); });
+      expect(discard).not.toHaveBeenCalled();
+      dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
+      expect(dialog.textContent).toContain('Your unsaved entries will be discarded.');
+      await act(async () => { confirm().click(); });
+      expect(discard).toHaveBeenCalledTimes(1);
+    } finally { c.restore(); }
+  });
+
   // Stage 5 review 9, M1: every console exit that drops the editor asks the
   // same question: the court switcher, the Dashboard crumb, Sign out and
   // Public viewer. With nothing unsaved each goes in the same tick.

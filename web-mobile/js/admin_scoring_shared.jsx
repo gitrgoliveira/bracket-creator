@@ -1729,11 +1729,25 @@ export function usePublishUnsaved(hostRef, unsaved, onDiscard) {
   const discardRef = useRefA(onDiscard);
   discardRef.current = onDiscard;
   if (!probe.current) {
-    probe.current = () => holdsUnsaved(unsavedRef.current);
+    probe.current = () => !probe.current.cleared && holdsUnsaved(unsavedRef.current);
     // Run only while this editor is mounted: a host holding the thunk past
     // the editor's unmount (a question answered after it went) drops nothing.
-    probe.current.discard = () => { if (!probe.current.gone && typeof discardRef.current === "function") discardRef.current(); };
+    probe.current.discard = () => {
+      if (probe.current.gone || typeof discardRef.current !== "function") return;
+      discardRef.current();
+      // The entries are dropped at once, but the editor's own unsaved ref is
+      // set by its next render: until then it still reports them, and an exit
+      // that re-asks the thunk after the answer (the leave's `go`) would ask a
+      // second time (stage 5 review 11, minor 1). Say clean now, in the ref
+      // the editor keeps and in the thunk; the next render states the truth.
+      const held = unsavedRef.current;
+      if (held && typeof held === "object" && "current" in held) held.current = false;
+      probe.current.cleared = true;
+    };
   }
+  // A render states the editor's own answer again: an entry made after the
+  // discard is unsaved.
+  probe.current.cleared = false;
   if (hostRef && hostRef.current !== probe.current) hostRef.current = probe.current;
   useEffectA(() => () => { if (hostRef && hostRef.current === probe.current) hostRef.current = null; }, [hostRef]);
   useEffectA(() => { probe.current.gone = false; return () => { probe.current.gone = true; }; }, []);

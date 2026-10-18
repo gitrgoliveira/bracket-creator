@@ -1935,10 +1935,17 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         if (!pendingRevert || reverting) return;
         if (!window.API || typeof window.API.revertMatchToQueue !== "function") return;
         const { compId, matchId, label } = pendingRevert;
+        const heldNow = editorUnsavedFor(compId, matchId);
+        // The confirm's wording was decided when it opened. Entries made while
+        // it was open (a scoring key reaching a console whose focus fell to
+        // the body) were never named in it: show the confirm again WITH the
+        // warning instead of dropping them silently (R1, stage 5 review 11,
+        // minor 3).
+        if (heldNow && !pendingRevert.unsaved) { setPendingRevert({ ...pendingRevert, unsaved: true }); return; }
         // The confirm said the editor's unsaved entries are discarded: they go
         // now, as Discard entries does everywhere (m1), not once the feed
         // shows the match queued.
-        if (editorUnsavedFor(compId, matchId)) discardUnsaved(editorUnsavedRef);
+        if (heldNow) discardUnsaved(editorUnsavedRef);
         setReverting(true);
         try {
             // bc-evts: the outbox's, never awaited: the console moves on at
@@ -1985,7 +1992,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const confirmMoveCourt = async () => {
         if (!pendingMove || movingCourt) return;
         const { compId, matchId, to } = pendingMove;
-        if (editorUnsavedFor(compId, matchId)) discardUnsaved(editorUnsavedRef);
+        const heldNow = editorUnsavedFor(compId, matchId);
+        // Entries made while a confirm without the warning was open are asked
+        // about, never dropped silently (see confirmRevert).
+        if (heldNow && !pendingMove.unsaved) { setPendingMove({ ...pendingMove, unsaved: true }); return; }
+        if (heldNow) discardUnsaved(editorUnsavedRef);
         setMovingCourt(true);
         try {
             // The host hands the move to the outbox and answers at once with

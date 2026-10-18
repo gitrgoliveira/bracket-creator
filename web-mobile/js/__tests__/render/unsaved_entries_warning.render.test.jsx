@@ -442,3 +442,49 @@ describe('a decision after Discard entries on a running match (finding 2)', () =
     expect(sent ? sent.periodCount : 0, 'the overtime the board shows').toBe(tapped);
   });
 });
+
+describe('Discard entries on a leave: the exit sees nothing unsaved (stage 5 review 11, minor 1)', () => {
+  const host = (m, ref) => <ScoreEditorModal match={m} onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue({ applied: true })} password="pw" variant="inline" hostUnsavedRef={ref} />;
+  it('individual, team and engi: `go` runs after the answer, asks once, and reads the editor as clean', async () => {
+    for (const [m, type] of [
+      [bout({ status: 'completed', ipponsA: ['M'], winner: { id: 'p1', name: 'Yamada' } }), async (c) => tap(letterBtn(shiroSide(c), 'K'))],
+      [teamFinished(), async (c) => tap(ipponBtn(c, 0, 'aka', 'M'))],
+      [engiBout({ status: 'completed', flagsA: 3, flagsB: 0, modifiedAt: NOW, scoreVersion: 2 }), async (c) => tap(c.querySelector('[data-testid="engi-shiro-inc"]'))],
+    ]) {
+      const ref = { current: null };
+      const r = render(host(m, ref));
+      await flush();
+      await type(r.container);
+      expect(ref.current()).toBe(true);
+      answerWarning(true);
+      let seenByGo = null;
+      let went = 0;
+      await act(async () => {
+        const { leaveThen, holdsUnsaved } = await import('../../unsaved_entries.jsx');
+        leaveThen(ref, () => { went += 1; seenByGo = holdsUnsaved(ref); }, () => true);
+        for (let i = 0; i < 6; i += 1) await Promise.resolve();
+      });
+      expect(went).toBe(1);
+      expect(seenByGo, 'the exit would ask a second time if it read the editor as still unsaved').toBe(false);
+      expect(warnings()).toHaveLength(1);
+      await flush();
+      r.unmount();
+    }
+  });
+  it('a new entry made after the discard is unsaved again', async () => {
+    const ref = { current: null };
+    const r = render(host(bout({ status: 'completed', ipponsA: ['M'], winner: { id: 'p1', name: 'Yamada' } }), ref));
+    await flush();
+    await tap(letterBtn(shiroSide(r.container), 'K'));
+    answerWarning(true);
+    await act(async () => {
+      const { confirmLeave } = await import('../../unsaved_entries.jsx');
+      await confirmLeave(ref, () => true);
+    });
+    await flush();
+    expect(ref.current()).toBe(false);
+    await tap(letterBtn(shiroSide(r.container), 'K'));
+    expect(ref.current()).toBe(true);
+    r.unmount();
+  });
+});

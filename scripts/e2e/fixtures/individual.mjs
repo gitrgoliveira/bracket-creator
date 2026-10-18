@@ -8,7 +8,7 @@
 import { expect } from '@playwright/test';
 import { INLINE_EDITOR, awardIppon, finishMatch, markDraw } from './scoring.mjs';
 import {
-  UP_NEXT, WAITING_ROWS, completedRowFor, courtDone, courtIdle, inlineEditor, sides, upNextCard,
+  UP_NEXT, WAITING_ROWS, completedRowFor, courtDone, courtIdle, inlineEditor, sidesNow, upNextCard,
 } from './shiaijo.mjs';
 import { hastyShiaijoConfirm } from './clumsy.mjs';
 import { EXPECT_TIMEOUT_MS } from './devices.mjs';
@@ -137,7 +137,7 @@ export async function queueCaughtUp(page) {
     if (!held) return 'the editor is between two bouts';
     const card = upNextCard(page).first();
     if (!(await card.isVisible().catch(() => false))) return 'caught up';
-    const next = await sides(card).catch(() => null);
+    const next = await sidesNow(card);
     return next && next.shiro === held.shiro && next.aka === held.aka
       ? `the Up next card still shows the running bout (${held.shiro} v ${held.aka})` : 'caught up';
   }, { message: 'the court queue caught up with the bout its editor runs' }).toBe('caught up');

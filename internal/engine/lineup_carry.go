@@ -342,9 +342,15 @@ func landEpochs(records []domain.TeamLineup, changed []domain.Position, stamps m
 			return LandedLineup{}, err
 		}
 		if e >= 0 {
-			// A removed record keeps what a carry reads of it (m3).
+			// A removed record keeps what a carry reads of it, its own
+			// positions alone (m3); the live one is stored whole, carried
+			// positions included, so it never depends on a follow putting
+			// them back (stage 6 review 9, G6).
 			out.RemovedAt = records[e].RemovedAt
-			records[e] = out.OwnPositionsOnly()
+			if out.IsRemoved() {
+				out = out.OwnPositionsOnly()
+			}
+			records[e] = out
 		} else {
 			live = len(records)
 			records = append(records, out)

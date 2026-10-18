@@ -23,6 +23,7 @@ package engine
 // force when they arrive, as before.
 
 import (
+	"cmp"
 	"log"
 	"maps"
 	"slices"
@@ -190,7 +191,7 @@ func (lc *lineupCarry) rederive(teamID string) []string {
 		if c := lc.draw[lc.lineups[a].MatchID].Place.Compare(lc.draw[lc.lineups[b].MatchID].Place); c != 0 {
 			return c
 		}
-		return compareStrings(a, b)
+		return cmp.Compare(a, b)
 	})
 	var moved []string
 	for _, k := range keys {
@@ -208,16 +209,6 @@ func (lc *lineupCarry) rederive(teamID string) []string {
 		moved = append(moved, k)
 	}
 	return moved
-}
-
-func compareStrings(a, b string) int {
-	switch {
-	case a < b:
-		return -1
-	case a > b:
-		return 1
-	}
-	return 0
 }
 
 // sameCarried says a re-derivation changed nothing of l.

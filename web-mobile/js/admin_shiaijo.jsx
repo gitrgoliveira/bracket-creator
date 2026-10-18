@@ -691,13 +691,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             return changed ? next : prev;
         });
     }, [tournament.competitions]);
-    // Advance the local bracket when a bracket bout is scored to completion, so a
-    // court running offline sees the NEXT match (incl. the final) become runnable
-    // without the server round-trip. Belt-and-suspenders online (the refetch also
-    // reflects the server's propagation); the ONLY path that resolves it offline.
-    // Draws/no-winner (patch.winner null) never apply: knockout bouts always
-    // resolve to a winner before completing.
-// advanceLocalUntilRefused: the ONE local bracket advance of a result this
+    // advanceLocalUntilRefused: the ONE local bracket advance of a result this
     // console wrote (a finish of any kind, a decision). A result the outbox
     // still holds advances at once, so an offline court keeps moving; when it
     // is refused later (match_closed, a newer stored result) or discarded from
@@ -711,7 +705,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         applyLocalBracketWin(match.compId, match.id, winnerName, (before, after) => { made = { before, after }; });
         if (!writePending(res)) return;
         const takeBack = () => {
-            if (!mountedRef.current || !made) return;
+            if (!mountedRef.current) return;
+            // The court's feed is read again whatever the local advance was.
+            refreshCourt();
+            if (!made) return;
             const { before, after } = made;
             setCourtComps((prev) => {
                 if (!Array.isArray(prev)) return prev;
@@ -723,13 +720,18 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 });
                 return changed ? next : prev;
             });
-            refreshCourt();
         };
         res.settled.then(
             (body) => { if (!body || body.discarded || writeWasRefused(body)) takeBack(); },
             takeBack,
         );
     }, [applyLocalBracketWin, refreshCourt]);
+    // Advance the local bracket when a bracket bout is scored to completion, so a
+    // court running offline sees the NEXT match (incl. the final) become runnable
+    // without the server round-trip. Belt-and-suspenders online (the refetch also
+    // reflects the server's propagation); the ONLY path that resolves it offline.
+    // Draws/no-winner (patch.winner null) never apply: knockout bouts always
+    // resolve to a winner before completing.
     const maybeAdvanceLocal = useCallbackSh((match, patch, res) => {
         if (!match || match.phase !== "bracket" || !patch || patch.status !== "completed") return;
         const w = finishWinnerOf(match, patch);
@@ -1493,7 +1495,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         // (alsoWaiting), quietly, because a match moved onto this court from
         // another one was otherwise visible only through the competition
         // picker (operator request 2026-10-03).
-        const selHasActive = running.some(m => m.compId === effectiveCompId) || filteredScheduled.length > 0;
+        // The bout this console just started counts as running (liveBout: the
+        // started snapshot, which has left the scheduled list).
+        const selHasActive = running.some(m => m.compId === effectiveCompId) || (!!liveBout && liveBout.compId === effectiveCompId) || filteredScheduled.length > 0;
 
         // Other competitions' scheduled matches still on this court.
         const otherScheduled = allMatches.filter(
@@ -1514,7 +1518,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const entries = Object.values(byComp);
         entries.sort((a, b) => b.count - a.count);
         return { entries, alsoWaiting: selHasActive };
-    }, [allMatches, effectiveCompId, running, filteredScheduled, courtKnown]);
+    }, [allMatches, effectiveCompId, running, liveBout, filteredScheduled, courtKnown]);
 
     // The one place the Starting… state follows the refs: the start in flight,
     // else the pick still deferring the running bout (so a start settling inside

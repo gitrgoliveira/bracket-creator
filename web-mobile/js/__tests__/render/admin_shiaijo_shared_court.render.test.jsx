@@ -148,6 +148,23 @@ describe('the switch nudge on a shared court (bc-shcr)', () => {
     expect(c.utils.getByTestId('shiaijo-nudge').classList.contains('alert--warn')).toBe(false);
   });
 
+  // Stage 6 review 2, F4: the bout this console just started (its start still
+  // out) is the picked competition's live bout, so no amber "switch" nudge.
+  it('stays quiet while the operator scores the bout this console just started', async () => {
+    const pendingStart = vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k', settled: new Promise(() => {}) });
+    const c = await mountCourt([
+      row('m1', 'scheduled', '09:01', { modifiedAt: 100 }),
+      row('m2', 'scheduled', '09:02', league),
+    ], pendingStart);
+    await c.pick('c1');
+    const start = [...c.utils.container.querySelector('.shiaijo-upnext__card').querySelectorAll('button')].find((b) => /start match/i.test(b.textContent));
+    await act(async () => { start.click(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(probe.props && probe.props.match.id, 'the editor runs the started bout').toBe('m1');
+    expect(c.nudges()).toEqual(['1 League match also waiting on this court.']);
+    expect(c.utils.getByTestId('shiaijo-nudge').classList.contains('alert--warn')).toBe(false);
+  });
+
   it('stays quiet while the picked competition still has a running match here', async () => {
     const c = await mountCourt([
       row('m1', 'running', '09:01'),

@@ -280,3 +280,30 @@ describe('a queued knockout finish refused or discarded later takes its local ad
     expect(advanced()).toBe(true);
   });
 });
+
+// Stage 6 review 2, F5: a refused or discarded finish reads the court's feed
+// again even when its local advance changed nothing to take back (the final
+// already named the winner).
+describe('a refused finish whose local advance changed nothing still reads the court again', () => {
+  it('refetches the court on the refusal', async () => {
+    const fetchCourtMatches = vi.fn().mockResolvedValue([]);
+    const prev = window.API.fetchCourtMatches;
+    window.API.fetchCourtMatches = fetchCourtMatches;
+    try {
+      let settle;
+      const settled = new Promise((res) => { settle = res; });
+      const t = makeBracketTournament();
+      t.competitions[0].bracket.rounds[1][0] = { ...t.competitions[0].bracket.rounds[1][0], sideA: { id: 'p1', name: 'Yamada' }, status: 'scheduled' };
+      render(
+        <AdminShiaijoPage tournament={t} court="A" onBack={vi.fn()} onEditScore={vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k', settled })}
+          onMoveCourt={vi.fn()} onLogout={vi.fn()} onViewerMode={vi.fn()} password="" showToast={vi.fn()} tweaks={{}} onSwitchCourt={vi.fn()} />
+      );
+      await act(async () => { await capturedSubmit.onSubmit(finishPatch); });
+      const before = fetchCourtMatches.mock.calls.length;
+      await act(async () => { settle({ applied: false, reason: 'superseded', heldGroups: ['result'], heldReason: 'match_closed' }); await new Promise((r) => setTimeout(r, 0)); });
+      expect(fetchCourtMatches.mock.calls.length, 'the court is read again').toBeGreaterThan(before);
+    } finally {
+      window.API.fetchCourtMatches = prev;
+    }
+  });
+});

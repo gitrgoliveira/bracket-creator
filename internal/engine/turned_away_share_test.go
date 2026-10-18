@@ -75,3 +75,29 @@ func TestTurnedAway_EverySessionKeepsItsShare(t *testing.T) {
 		require.Equal(t, state.MaxTurnedAwayPerSession, by["b"])
 	})
 }
+
+// More sessions than the list holds, one tap each (stage 6 review 8, m6): the
+// share of each is less than one, and the list came out empty. It keeps the
+// newest MaxTurnedAway instead, never fewer than it can hold.
+func TestTurnedAway_MoreSessionsThanTheListHoldsKeepTheNewest(t *testing.T) {
+	var sessions []string
+	var n []int
+	for i := range state.MaxTurnedAway + 88 {
+		sessions = append(sessions, fmt.Sprintf("d%04d", i))
+		n = append(n, 1)
+	}
+	lines, outcome := turnedAwayLines(sessions, n)
+	got := turnedAwayOf(lines, outcome)
+	require.Len(t, got, state.MaxTurnedAway)
+	require.Contains(t, got, fmt.Sprintf("d%04d-0", state.MaxTurnedAway+87), "the newest kept")
+	require.NotContains(t, got, "d0000-0", "the oldest goes")
+	// Shares that leave room: the list is filled with the newest of the rest.
+	sessions, n = []string{"big"}, []int{state.MaxTurnedAwayPerSession}
+	for i := range state.MaxTurnedAway {
+		sessions = append(sessions, fmt.Sprintf("s%04d", i))
+		n = append(n, 1)
+	}
+	lines, outcome = turnedAwayLines(sessions, n)
+	got = turnedAwayOf(lines, outcome)
+	require.Len(t, got, state.MaxTurnedAway)
+}

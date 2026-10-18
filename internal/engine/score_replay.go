@@ -302,9 +302,11 @@ func ScoreLogEventSeqs(lines []state.ScoreLogLine) map[string]int64 {
 // MaxTurnedAway every session keeps the same share, the largest that fits,
 // so another device's later taps never push a device's own out (review 7).
 func turnedAwayOf(lines []state.ScoreLogLine, outcome map[int]string) map[string]string {
-	// Each device session's latest, at most MaxTurnedAwayPerSession of each.
+	// Each device session's latest, at most MaxTurnedAwayPerSession of each,
+	// and every one of them newest first (the fill below).
 	type entry struct{ id, outcome string }
 	bySession := map[string][]entry{}
+	var newest []entry
 	seen := map[string]bool{}
 	total := 0
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -320,6 +322,7 @@ func turnedAwayOf(lines []state.ScoreLogLine, outcome map[int]string) map[string
 			}
 			seen[e.ID] = true
 			bySession[e.Session] = append(bySession[e.Session], entry{e.ID, o})
+			newest = append(newest, entry{e.ID, o})
 			total++
 		}
 	}
@@ -351,6 +354,18 @@ func turnedAwayOf(lines []state.ScoreLogLine, outcome map[int]string) map[string
 	out := make(map[string]string, min(total, state.MaxTurnedAway))
 	for _, es := range bySession {
 		for _, en := range es[:min(len(es), share)] {
+			out[en.id] = en.outcome
+		}
+	}
+	// What the shares leave free is filled with the newest of the rest, so
+	// the list never holds fewer than it can (stage 6 review 8, m6: more
+	// sessions than it holds, one tap each, gave every session a share of
+	// none, and the list came out empty).
+	for _, en := range newest {
+		if len(out) >= state.MaxTurnedAway {
+			break
+		}
+		if _, ok := out[en.id]; !ok {
 			out[en.id] = en.outcome
 		}
 	}

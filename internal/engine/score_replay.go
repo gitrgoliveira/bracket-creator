@@ -297,9 +297,12 @@ func ScoreLogEventSeqs(lines []state.ScoreLogLine) map[string]int64 {
 // duplicate), by id, with its outcome; the server's own events never. A tap
 // its own answer called applied can end here when a result that never saw it
 // arrives later, and the device that made it reads that from the match
-// (stage 6 review 5). The latest MaxTurnedAway by line.
+// (stage 6 review 5). The latest by line, at most MaxTurnedAwayPerSession of
+// each device session, so another device's later taps never push a device's
+// own out, and MaxTurnedAway in all (stage 6 review 6).
 func turnedAwayOf(lines []state.ScoreLogLine, outcome map[int]string) map[string]string {
 	var out map[string]string
+	perSession := map[string]int{}
 	for i := len(lines) - 1; i >= 0 && len(out) < state.MaxTurnedAway; i-- {
 		e := lines[i].Event
 		if e == nil || e.Session == ServerEventSession {
@@ -308,13 +311,14 @@ func turnedAwayOf(lines []state.ScoreLogLine, outcome map[int]string) map[string
 		switch o := outcome[i]; o {
 		case "", domain.ScoreOutcomeApplied, domain.ScoreOutcomeRecorded, domain.ScoreOutcomeDuplicate:
 		default:
-			if _, ok := out[e.ID]; ok {
+			if _, ok := out[e.ID]; ok || perSession[e.Session] >= state.MaxTurnedAwayPerSession {
 				continue
 			}
 			if out == nil {
 				out = map[string]string{}
 			}
 			out[e.ID] = o
+			perSession[e.Session]++
 		}
 	}
 	return out

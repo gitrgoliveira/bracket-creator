@@ -1798,8 +1798,9 @@ type MatchResult struct {
 	// (the closed-match rule): its own answer said applied, so the device
 	// that made it learns of the change from here, on whatever copy of the
 	// match reaches it next (a push, a fetch, an answer), and tells its
-	// operator. The server's own events are never listed. At most
-	// MaxTurnedAway of them, the latest logged. Derived by
+	// operator. The server's own events are never listed. The latest
+	// logged, at most MaxTurnedAwayPerSession of each device session and
+	// MaxTurnedAway in all. Derived by
 	// engine.ReplayScoring like EventSeqs; persisted after EventSeqs.
 	TurnedAway map[string]string `json:"turnedAway,omitempty" yaml:"-"`
 }
@@ -1808,9 +1809,20 @@ type MatchResult struct {
 // session that tapped on the match, the most recent ones kept.
 const MaxEventSeqSessions = 32
 
-// MaxTurnedAway bounds MatchResult.TurnedAway: the latest taps logged that
-// the server does not apply.
-const MaxTurnedAway = 64
+// MaxTurnedAwayPerSession and MaxTurnedAway bound MatchResult.TurnedAway:
+// the latest taps logged that the server does not apply, at most
+// MaxTurnedAwayPerSession of each device event session (one page of one
+// device), so another device's later taps never push a device's own out,
+// and at most MaxTurnedAway on the match. A session reaches its bound only
+// past 128 of its own taps turned away on one match, about twice every tap
+// one device makes on a five-person team match and its representative bout
+// with corrections, and many times an individual match's; the match's
+// bound is four such sessions, about 30 KB at most (each entry an event id
+// and an outcome), and a handful of entries in practice.
+const (
+	MaxTurnedAwayPerSession = 128
+	MaxTurnedAway           = 512
+)
 
 // MarkIDs carries one id per entry of a side's ippon slice, index for index
 // (A names IpponsA[i], B names IpponsB[i]; "" for a placeholder slot).

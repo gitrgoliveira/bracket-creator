@@ -7078,8 +7078,10 @@ components:
             one stamped before it, reaches the server after it: its own answer
             said it landed, so the device that made it reads the change here,
             on whatever copy of the match reaches it next, and tells its
-            operator. The server's own events never appear. At most 64, the
-            latest logged. Absent when none. Derived by the server; a value a
+            operator. The server's own events never appear. The latest logged,
+            at most 128 of each device event `session` (so another device's
+            later taps never push a device's own out) and 512 in all. Absent
+            when none. Derived by the server; a value a
             write carries is ignored.
         groupStamps:
           type: object

@@ -919,6 +919,10 @@ function _persistQueue() {
 
 /** @type {Map<string, WriteDescriptor>} */
 const _writeQueue = new Map(); // queue key → pending write descriptor
+// Bumped wherever an entry enters, is replaced in, or leaves _writeQueue, so a
+// view of the queue's entries (the status moves, _statusEntriesByBase) is made
+// again only when they changed, never on every tap (stage 6 review 9, F7).
+let _queueShapeGen = 0;
 
 // Entries this tab has taken out of its queue since the last persist: queue
 // key → the enqueuedAt of the entry removed (Infinity when it carried none).
@@ -1038,7 +1042,7 @@ function _unorderedValue(v) {
 function _dequeue(key, descriptor, outcome) {
     const d = _writeQueue.get(key);
     if (!d || (descriptor && d !== descriptor)) return false;
-    _writeQueue.delete(key);
+    _writeQueue.delete(key); _queueShapeGen++;
     _markSettled(key, d);
     _noteOwnStatusAnswer(key, d, outcome);
     if (outcome && outcome.byOperator && _inFlight.has(d)) {
@@ -1248,14 +1252,32 @@ function _statusMoveOf(d) {
 // copy stamped after it is a later change made elsewhere.
 function _ownStatusMove(compID, matchID) {
     const base = _revKey(compID, matchID);
-    let last = null;
-    for (const [, d] of _entriesFor(base)) {
-        const status = _statusMoveOf(d);
-        if (status) last = { status, kind: d.kind || 'score', payload: d.payload, landed: false, stamp: _entryStamp(d) };
+    const moves = _statusEntriesByBase().get(base);
+    if (moves && moves.length > 0) {
+        const [, d] = moves.slice().sort(_byEntryOrder)[moves.length - 1];
+        const last = { status: _statusMoveOf(d), kind: d.kind || 'score', payload: d.payload, landed: false, stamp: _entryStamp(d) };
+        return last.status === 'running' ? null : last;
     }
-    if (last) return last.status === 'running' ? null : last;
     const answered = _ownStatusAnswered.get(base);
     return answered ? { ...answered, landed: true } : null;
+}
+
+// _statusEntriesByBase: the queued status moves, by base, made again only when
+// the queue's entries changed (_queueShapeGen): the court console asks for every
+// match it shows on every push, and a tap never is a status move (F7: each ask
+// scanned and sorted the whole queue, about 1.7 ms a render at 2000 queued taps).
+let _statusIndex = { gen: -1, byBase: new Map() };
+function _statusEntriesByBase() {
+    if (_statusIndex.gen === _queueShapeGen) return _statusIndex.byBase;
+    const byBase = new Map();
+    for (const [k, d] of _writeQueue) {
+        if (!d || d.kind === 'evt' || !_statusMoveOf(d)) continue;
+        const b = _baseOf(k);
+        if (!byBase.has(b)) byBase.set(b, []);
+        byBase.get(b).push([k, d]);
+    }
+    _statusIndex = { gen: _queueShapeGen, byBase };
+    return byBase;
 }
 
 // _noteOwnStatusAnswer: an entry left the queue (`outcome`, as _dequeue has
@@ -1272,9 +1294,14 @@ function _noteOwnStatusAnswer(key, d, outcome) {
         return;
     }
     const answered = Number(v && typeof v === 'object' && v.modifiedAt);
+    const version = Number(v && typeof v === 'object' && v.scoreVersion);
     _ownStatusAnswered.set(base, {
         status, kind: d.kind || 'score', payload: d.payload,
         stamp: Number.isFinite(answered) && answered > 0 ? answered : _entryStamp(d),
+        // The answer's score version: a feed copy past it is newer, whatever
+        // its stamp (F7).
+        version: Number.isFinite(version) ? version : null,
+        compID: d.compID, matchID: d.matchID,
     });
 }
 
@@ -1283,9 +1310,8 @@ function _noteOwnStatusAnswer(key, d, outcome) {
 function _publishOwnStatus() {
     if (_ownStatusListeners.size === 0) return;
     const parts = [];
-    for (const [k, d] of _writeQueue) {
-        const status = _statusMoveOf(d);
-        if (status) parts.push(`${k}=${status}`);
+    for (const list of _statusEntriesByBase().values()) {
+        for (const [k, d] of list) parts.push(`${k}=${_statusMoveOf(d)}@${_entryStamp(d)}`);
     }
     for (const [base, a] of _ownStatusAnswered) parts.push(`${base}~${a.status}@${a.stamp}`);
     const sig = parts.sort().join('|');
@@ -2231,6 +2257,11 @@ function _forgetShownMatches(compID) {
     // scoreline on a board, nor have it recorded by a Finish.
     for (const k of _latestDerived.keys()) if (k.startsWith(prefix)) _latestDerived.delete(k);
     for (const k of _turnedAwaySeen.keys()) if (k.startsWith(prefix)) _turnedAwaySeen.delete(k);
+    // And the status moves the server answered for them: a re-created match
+    // must never show the old one finished, with its winner (F7).
+    let moved = false;
+    for (const k of _ownStatusAnswered.keys()) if (k.startsWith(prefix)) { _ownStatusAnswered.delete(k); moved = true; }
+    if (moved) _publishOwnStatus();
 }
 
 // _forgetAllShownMatches: the tournament's competitions may have been replaced
@@ -2243,6 +2274,10 @@ function _forgetAllShownMatches() {
     _shownMatchLabels.clear();
     _latestDerived.clear();
     _turnedAwaySeen.clear();
+    if (_ownStatusAnswered.size > 0) {
+        _ownStatusAnswered.clear();
+        _publishOwnStatus();
+    }
 }
 
 function _noteMatchLabel(compID, matchID, label) {
@@ -3469,7 +3504,7 @@ function _commitEnqueue(base, descriptor, beforeFlush, { nextTick = false } = {}
     // An add's id is known to the owner before the add is stored, so a tab
     // that takes the add up already finds it queued.
     if (mintedAddId(descriptor)) _minted.minted(descriptor);
-    _writeQueue.set(key, descriptor);
+    _writeQueue.set(key, descriptor); _queueShapeGen++;
     // Read BEFORE the flush is kicked: the flush's synchronous part can
     // persist again, and it is THIS write's persist the answer reports.
     _lastEnqueuePersisted = _persistQueue();
@@ -3667,7 +3702,7 @@ function _onStoredQueueChanged(oldRaw, newRaw) {
             if (_writeQueue.has(moved)) continue;
             k = moved;
         }
-        _writeQueue.set(k, d);
+        _writeQueue.set(k, d); _queueShapeGen++;
         _noteOwnStamp(k, d);
         _noteOwnTapSeq(k, d);
         _adopted.add(d);
@@ -3734,7 +3769,7 @@ function _takeOverLegacyQueue(raw) {
         if (_settled.has(at) && !_enqueuedAfter(d, _settled.get(at))) continue;
         d.held = true;
         if (d.payload && d.payload.forceDownstreamReopen) d.payload = _withoutDownstreamConfirmation(d.payload);
-        _writeQueue.set(at, d);
+        _writeQueue.set(at, d); _queueShapeGen++;
         _takenFromLegacy.set(at, typeof d.enqueuedAt === 'number' ? d.enqueuedAt : Infinity);
         _noteOwnStamp(at, d);
         _noteOwnTapSeq(at, d);
@@ -3898,7 +3933,7 @@ if (typeof fetch === 'function') {
                 const at = moved || key;
                 if (moved) { _markSettled(key, descriptor); migrated = true; }
                 if (!_writeQueue.has(at)) {
-                    _writeQueue.set(at, descriptor);
+                    _writeQueue.set(at, descriptor); _queueShapeGen++;
                     _noteOwnStamp(at, descriptor);
                     anyLoaded = true;
                 }
@@ -6302,6 +6337,15 @@ const API = {
     forgetOwnStatusMove(compID, matchID) {
         if (_ownStatusAnswered.delete(_revKey(compID, matchID))) _publishOwnStatus();
     },
+    // The feed no longer holds the match (moved to another court, or gone with
+    // its draw): the answered record goes, so it never shows over a match made
+    // again under the same id (F7). `matches` is the feed the caller shows.
+    forgetOwnStatusMovesNotIn(matches) {
+        const held = new Set((matches || []).map((m) => m && _revKey(m.compId, m.id)));
+        let moved = false;
+        for (const k of _ownStatusAnswered.keys()) if (!held.has(k)) { _ownStatusAnswered.delete(k); moved = true; }
+        if (moved) _publishOwnStatus();
+    },
     subscribeLocalMatchPatch(cb) {
         return subscribeLocalMatchPatch(cb);
     },
@@ -6444,7 +6488,7 @@ const API = {
         _queueGen++;
         // A hard wipe, every tab's entries included: the credential they carry
         // is revoked, so nothing of the merge's is kept.
-        _writeQueue.clear();
+        _writeQueue.clear(); _queueShapeGen++;
         _settled.clear();
         // The wipe takes them out of storage too (P2).
         _settledLeftStored = false;

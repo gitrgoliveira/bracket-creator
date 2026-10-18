@@ -145,6 +145,9 @@ function _bracketSideName(side) {
 export function ownStatusMoveHolds(mv, m) {
     if (!mv || !m || m.status === mv.status) return false;
     if (!mv.landed) return true;
+    // A feed copy past the answer's score version is newer whatever its stamp
+    // (stage 6 review 9, F7).
+    if (Number.isFinite(m.scoreVersion) && Number.isFinite(mv.version) && m.scoreVersion > mv.version) return false;
     return !(m.modifiedAt > mv.stamp);
 }
 
@@ -1071,6 +1074,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         for (const m of courtMatchesRaw) {
             const mv = ownMoveOf(m);
             if (mv && mv.landed && !ownStatusMoveHolds(mv, m)) window.API.forgetOwnStatusMove(m.compId, m.id);
+        }
+        // A match the court's feed no longer holds (moved to another court,
+        // or gone with its draw) keeps no answered move (stage 6 review 9, F7).
+        if (courtMatchesRaw.length > 0 && typeof window.API.forgetOwnStatusMovesNotIn === "function") {
+            window.API.forgetOwnStatusMovesNotIn(courtMatchesRaw);
         }
         // oxlint-disable-next-line react-hooks/exhaustive-deps
     }, [courtMatchesRaw, ownMovesSeq]);

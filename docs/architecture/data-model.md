@@ -718,6 +718,12 @@ never received. A whole write (a finish, a decision, a correction, a reopen, a s
 queue) enters the same log as a baseline line, stamped with the time it was made, so a tap and a
 whole write are ordered against each other by the same rule.
 
+The server adds events of its own to the same log, under the session `server` and with no
+sequence number: the fighters of a kachinuki encounter's first bout, which are the first fighters
+of each team's lineup for the match and which no device sends. It adds them when a write makes
+or changes that bout and when a lineup or team member changes while the encounter is running, so
+they are ordered against the taps like any tap and never turn one away.
+
 Three figures are derived by the replay and stored beside the match so that a reader does not
 have to replay the log: the id of each mark (a removal names its mark by id, so two devices
 removing two different marks both land), the number of log lines the stored match was derived

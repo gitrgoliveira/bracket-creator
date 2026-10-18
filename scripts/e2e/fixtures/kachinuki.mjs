@@ -16,7 +16,7 @@ import { expect } from '@playwright/test';
 import { armTwoTap, tapOnSide } from './pace.mjs';
 import { EXPECT_TIMEOUT_MS } from './devices.mjs';
 import { clearMarks } from './scoring.mjs';
-import { inlineEditor, queueCaughtUpWith, sides, upNextCard } from './shiaijo.mjs';
+import { inlineEditor, sides, upNextCard } from './shiaijo.mjs';
 import * as T from './team.mjs';
 
 export const editor = (page) => inlineEditor(page).filter({ has: page.locator('.team-bouts-scroll') }).first();
@@ -170,7 +170,6 @@ export async function startUpNextKachinuki(page) {
   const pair = await sides(upNextCard(page));
   await upNextCard(page).getByRole('button', { name: 'Start match' }).tap();
   await expect(recordBoutButton(page)).toBeVisible();
-  await queueCaughtUpWith(page, pair);
   return pair;
 }
 

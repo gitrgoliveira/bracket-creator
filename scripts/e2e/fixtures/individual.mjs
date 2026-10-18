@@ -128,8 +128,8 @@ export async function inlineRunning(page) {
 // start a Finish + Start Next queues, go through the outbox and never wait
 // (bc-evts), so the editor shows the bout running at once while the queue
 // learns it from the server's push or the court's next refetch a moment
-// later. A journey that reads the queue (what is left to play) or takes the
-// device offline right after a start reads it once it has caught up.
+// later. A journey that reads the queue (what is left to play) reads it once
+// it has caught up, as the operator reads Up next once it shows the next bout.
 export async function queueCaughtUp(page) {
   await expect.poll(async () => {
     if (!(await inlineRunning(page))) return 'caught up';
@@ -149,8 +149,7 @@ export async function queueCaughtUp(page) {
 // start: idle with no startable Up next card (none, or one whose Start is off,
 // e.g. a barred match), or done, held for a moment so a court between two
 // renders is not taken for one with nothing left. Throws when Start was tapped
-// and no bout runs by the deadline, or the console never settles. A running
-// bout is returned once the queue has caught up with it (queueCaughtUp).
+// and no bout runs by the deadline, or the console never settles.
 const NOTHING_HELD_MS = 1_500;
 export async function ensureRunning(page, { timeout = EXPECT_TIMEOUT_MS } = {}) {
   const start = upNextCard(page).getByRole('button', { name: 'Start match' });
@@ -179,7 +178,6 @@ export async function ensureRunning(page, { timeout = EXPECT_TIMEOUT_MS } = {}) 
     throw new Error('the court console shows neither a running bout, the idle placeholder nor the done state');
   }).toPass({ timeout, intervals: [250] });
   if (outcome !== 'running') return null;
-  await queueCaughtUp(page);
   return editorSides(page);
 }
 

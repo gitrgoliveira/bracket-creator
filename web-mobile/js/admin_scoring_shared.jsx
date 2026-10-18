@@ -176,6 +176,21 @@ function sideIdOf(x, key) {
   const side = x[`side${key}`];
   return (side && typeof side === "object" && side.id) || "";
 }
+// unloggedUnderAnswer: the host's running copy carries no score version (no
+// line of the match's score log: the queue row of a match nobody has scored,
+// shown running from this console's own start until the court's feed shows it,
+// bc-strt), while a score-events answer for the same match does. The answer is
+// the newer copy: it is the log's, and the host's copy predates every line of
+// it. Without this an answered tap left the board until the feed caught up,
+// and for good on a device that went offline first (stage 6). The board's own
+// rule, never keepNewerMatches': there a refetch with no version replaces the
+// held copy (a draw made again reuses the match ids), which the answer cannot
+// be, since an answer for other sides is never taken (sameSides) and the
+// answers are forgotten with their competition's draw (_forgetShownMatches).
+function unloggedUnderAnswer(m, derived) {
+  return m.status === "running" && derived.status === "running"
+    && !(Number(m.scoreVersion) > 0) && Number(derived.scoreVersion) > 0;
+}
 function sameSides(m, derived) {
   for (const key of ["A", "B"]) {
     const a = sideIdOf(m, key);
@@ -197,7 +212,7 @@ export function tapBoardOf(m, opts) {
   const api = window.API || {};
   const derived = typeof api.latestDerivedMatch === "function" ? api.latestDerivedMatch(m.compId, m.id) : null;
   let base = m;
-  if (derived && sameSides(m, derived) && isOlderRunningCopy(m, derived.status, derived.modifiedAt, derived.scoreVersion)) {
+  if (derived && sameSides(m, derived) && (isOlderRunningCopy(m, derived.status, derived.modifiedAt, derived.scoreVersion) || unloggedUnderAnswer(m, derived))) {
     base = { ...m };
     for (const [f, none] of Object.entries(DERIVED_BOARD_FIELDS)) base[f] = derived[f] ?? none;
     // A rep pick the answer does not carry is the one the host renders.

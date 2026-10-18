@@ -61,12 +61,10 @@ export async function editorIdentity(page, root = INLINE_EDITOR) {
 }
 
 // Start the Up next match the way the operator does, from its card, and
-// return the pairing once the inline editor holds it and the queue has caught
-// up with the start (the Up next card no longer shows the pairing). Only the
-// card's own "Start match" is used: every Upcoming row carries one too. The
-// Start goes through the outbox and never waits (bc-evts), so the editor holds
-// the match at once while the queue learns it a moment later, from the
-// server's push or the court's refetch.
+// return the pairing once the inline editor holds it. Only the card's own
+// "Start match" is used: every Upcoming row carries one too. The Start goes
+// through the outbox and never waits (bc-evts): the editor holds the match at
+// once, and its board shows every tap from then on, answered or not.
 export async function startUpNext(page) {
   const card = upNextCard(page);
   const pair = await sides(card);
@@ -74,21 +72,7 @@ export async function startUpNext(page) {
   const editor = inlineEditor(page);
   await expect(editor.locator('.sb-side--shiro')).toContainText(pair.shiro);
   await expect(editor.locator('.sb-side--aka')).toContainText(pair.aka);
-  await queueCaughtUpWith(page, pair);
   return pair;
-}
-
-// Wait until the Up next card no longer shows `pair`, the match this console
-// has just started: the queue learns of a start through the outbox's answer,
-// the server's push or the court's refetch, a moment after the editor shows
-// it. For the team and kachinuki sheets' starts as well as the individual's.
-export async function queueCaughtUpWith(page, pair) {
-  const card = upNextCard(page).first();
-  await expect.poll(async () => {
-    if (!(await card.isVisible().catch(() => false))) return 'caught up';
-    const next = await sidesNow(card);
-    return next && next.shiro === pair.shiro && next.aka === pair.aka ? 'Up next still shows the started match' : 'caught up';
-  }, { message: 'the court queue caught up with the start' }).toBe('caught up');
 }
 
 // The newest Completed row whose names match a pairing (the Completed list is

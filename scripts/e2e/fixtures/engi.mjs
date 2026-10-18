@@ -8,7 +8,7 @@ import { expect } from '@playwright/test';
 import { INLINE_EDITOR } from '../../screenshots/lib/editor.mjs';
 import { beforeFinish, finishLanded } from './scoring.mjs';
 import { armTwoTap } from './pace.mjs';
-import { sides, upNextCard } from './shiaijo.mjs';
+import { queueCaughtUpWith, sides, upNextCard } from './shiaijo.mjs';
 
 // The editor panel itself (inline) or its dialog (overlay).
 export const engiEditor = (page, root = INLINE_EDITOR) => page.locator(root).filter({ has: page.getByTestId('engi-submit') }).first();
@@ -45,6 +45,7 @@ export async function startUpNextEngi(page) {
   const pair = await sides(card);
   await card.getByRole('button', { name: 'Start match' }).tap();
   await expect(engiEditor(page)).toBeVisible();
+  await queueCaughtUpWith(page, pair);
   const held = await engiPair(page);
   // Each card holds its own pair: Shiro's the one the Up next card showed on
   // Shiro, Aka's the one it showed on Aka.

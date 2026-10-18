@@ -20,7 +20,7 @@ import { expect } from '@playwright/test';
 import { EXPECT_TIMEOUT_MS } from './devices.mjs';
 import { dwell, settled, tapOnSide } from './pace.mjs';
 import { finishMatch } from './scoring.mjs';
-import { inlineEditor, upNextCard } from './shiaijo.mjs';
+import { inlineEditor, queueCaughtUpWith, sidesNow, upNextCard } from './shiaijo.mjs';
 
 // FIK position names for a five-person team, in order; any other size uses
 // bare numbers (admin_lineup.jsx positionsForSize).
@@ -348,10 +348,12 @@ export async function sheetState(root, bouts = 5) {
 // that it reads PRE-MATCH, and a strike tapped then is a draft, sent only by
 // Start).
 export async function startUpNextTeam(page) {
+  const pair = await sidesNow(upNextCard(page).first());
   await upNextCard(page).getByRole('button', { name: 'Start match' }).tap();
   const ed = inlineEditor(page);
   await expect(boutRow(ed, 1)).toBeVisible();
   await expect(syncPill(ed)).toBeVisible();
+  if (pair) await queueCaughtUpWith(page, pair);
   return ed;
 }
 

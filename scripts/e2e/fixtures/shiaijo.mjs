@@ -74,12 +74,21 @@ export async function startUpNext(page) {
   const editor = inlineEditor(page);
   await expect(editor.locator('.sb-side--shiro')).toContainText(pair.shiro);
   await expect(editor.locator('.sb-side--aka')).toContainText(pair.aka);
+  await queueCaughtUpWith(page, pair);
+  return pair;
+}
+
+// Wait until the Up next card no longer shows `pair`, the match this console
+// has just started: the queue learns of a start through the outbox's answer,
+// the server's push or the court's refetch, a moment after the editor shows
+// it. For the team and kachinuki sheets' starts as well as the individual's.
+export async function queueCaughtUpWith(page, pair) {
+  const card = upNextCard(page).first();
   await expect.poll(async () => {
-    if (!(await card.first().isVisible().catch(() => false))) return 'caught up';
-    const next = await sidesNow(card.first());
+    if (!(await card.isVisible().catch(() => false))) return 'caught up';
+    const next = await sidesNow(card);
     return next && next.shiro === pair.shiro && next.aka === pair.aka ? 'Up next still shows the started match' : 'caught up';
   }, { message: 'the court queue caught up with the start' }).toBe('caught up');
-  return pair;
 }
 
 // The newest Completed row whose names match a pairing (the Completed list is

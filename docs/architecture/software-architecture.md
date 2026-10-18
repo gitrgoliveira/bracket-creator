@@ -113,7 +113,7 @@ flowchart TB
     subgraph proc["mobile-app process (Gin + http.Server)"]
         mw["middleware.go<br/>X-Tournament-Password auth · body caps"]
         authsrc["auth_source.go<br/>PasswordVerifier (file | locked/bcrypt)"]
-        handlers["handlers_*.go<br/>competition · match · participants · tournament<br/>decision · eligibility · lineup · schedule · reset · auth-config"]
+        handlers["handlers_*.go<br/>competition · match · participants · tournament<br/>score-events · decision · eligibility · lineup · schedule · reset · auth-config"]
         hub["hub.go (SSE hub)<br/>seq stamping · 200-event replay ring · resync · heartbeat"]
         safego["safego.go<br/>panic-safe goroutines"]
         engine["engine adapter"]
@@ -136,6 +136,41 @@ per-request cancellation runs through the request context). Graceful shutdown 30
 (Gin Recovery only catches the request goroutine).
 
 ## 5. Write path: recording a score (ACID + broadcast)
+
+A scoring tap and a finishing write take different doors into the same engine. A tap is an
+event: the browser stores it in its outbox at once, and the outbox sends it to the match's
+score events endpoint. The engine appends it to the match's event log, replays the log in the
+order the taps were made, writes the match the replay produces, and keeps a history line, all
+in one transaction.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant SPA as Browser SPA (outbox)
+    participant MW as auth middleware
+    participant H as handlers_score_events.go
+    participant E as engine
+    participant S as state.Store (WAL)
+    participant HUB as SSE hub
+    participant OTHERS as other clients
+
+    SPA->>SPA: tap stored in the outbox, board updated at once
+    SPA->>MW: POST /api/competitions/:id/matches/:mid/score-events (batch of taps)
+    MW->>MW: verify X-Tournament-Password
+    MW->>H: authorized
+    H->>E: RecordScoreEventsTx(...)
+    E->>S: WithTransaction → append events/{matchId}.jsonl, stage the replayed match + history
+    S->>S: WAL commit → atomic write (fsync + rename) → done
+    S-->>E: persisted
+    E-->>H: one outcome per tap + the match as stored
+    H->>HUB: Broadcast(match_updated)  [after persist, at most 4 a second per match]
+    HUB-->>OTHERS: SSE event (id: seq)
+    H-->>SPA: 200 outcomes (the outbox clears each answered tap; a clock_skew one is re-stamped and sent again)
+```
+
+A finish, a decision, a correction, a reopen and the other whole writes use the route below.
+They are outbox entries too, and they enter the same event log as a baseline, so a tap and a
+whole write are ordered against each other by the time each was made.
 
 ```mermaid
 sequenceDiagram
@@ -187,7 +222,7 @@ flowchart TB
         dist -->|go embed| binemb["embedded in binary"]
     end
     subgraph runtime["In the browser"]
-        api["api_client.jsx<br/>HTTP client · SSE consumer · offline write queue (outbox)"]
+        api["api_client.jsx<br/>HTTP client · SSE consumer · outbox for taps and writes"]
         appc["app.jsx (viewer)"]
         adminc["admin.jsx (operator console)"]
         patch["patch.jsx<br/>seq-gap detection (checkSeqGap)"]

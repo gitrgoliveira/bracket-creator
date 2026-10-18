@@ -295,7 +295,7 @@ Tournament state is stored as plain files inside the data folder you specified w
 - `competitions/<id>/config.md`: YAML front-matter with competition kind, format, pool settings, and courts.
 - `competitions/<id>/participants.csv`: one participant per line with name, optional display name (zekken), dojo, and optional dan grade.
 
-The per-match score logs in `competitions/<id>/events/` are append-only logs replayed by the engine and must not be hand-edited during play.
+Do not hand-edit the match logs, during play or between rounds. `competitions/<id>/events/` holds one append-only score log per match, every tap and every finish or correction made to it, and the app replays that log to work out the match's score, so a line changed by hand can change a score, and a line the app cannot read makes it refuse taps for that match until the file is repaired. `competitions/<id>/history/` holds the audit trail of each match, which the **History** button in the score editors shows. Both are written together with the match, and both go with their competition when it is deleted or its draw is discarded.
 
 Refer to [Data model](../../architecture/data-model.md) for every file in the folder and what each holds.
 

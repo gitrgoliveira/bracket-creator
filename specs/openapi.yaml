@@ -354,7 +354,10 @@ paths:
 
         Event types (canonical set defined in `internal/mobileapp/hub.go`):
         - `match_updated`: a match's score/court/scheduledAt changed.
-          `data: { competitionId, matchId, ... }`.
+          `data: { competitionId, matchId, ... }`. A scoring tap
+          (POST .../score-events) pushes the match its replay gives; the pushes
+          for one running match are coalesced to at most four a second, the
+          last one carrying the newest stored state.
         - `competition_started`: a competition transitioned out of `setup`.
           `data: { competitionId }`.
         - `competition_completed`: a competition transitioned to `completed`
@@ -386,6 +389,20 @@ paths:
           payload shapes. Non-originating sessions should clear their
           cached credential from `localStorage` and re-show the
           authentication modal.
+        - `competitor_status_updated`, `participants_updated`,
+          `draw_generated`, `draw_discarded`, `swiss_round_generated` and
+          `announcement`: a competitor's eligibility changed, a roster was
+          edited, a draw was generated or discarded, a Swiss round was
+          generated, or the announcements changed.
+        - `lineup_updated`: a team's lineups or members changed.
+          `data: { competitionId, teamId }`, and `matchId` too for a lineup
+          saved for a match.
+        - `bracket_quarantined`: a `bracket.json` that would not parse was
+          renamed aside and the knockout stage rebuilt; every device should
+          reload.
+        - `resync_required` and `heartbeat`: stream control frames. A
+          `resync_required` says the replay ring cannot close the gap since
+          `Last-Event-ID`, so the client refetches everything.
       responses:
         '200':
           description: SSE stream of tournament events.
@@ -2444,7 +2461,8 @@ paths:
         or fighter, a representative pick, the representative bout's verdict).
         The server appends each event it takes to the match's score event log
         (`competitions/<id>/events/<match>.jsonl`), replays the whole log in
-        the order the taps were made (`stamp`, then `id`) and writes the match
+        the order the taps were made (`stamp`; at one stamp an event comes
+        before a whole write, then `id`) and writes the match
         the replay gives through the same write every other door uses, so
         eligibility, knockout propagation and the history follow as for any
         write. Outcomes are recomputed from the whole log on every replay, so
@@ -2461,9 +2479,10 @@ paths:
         An event whose id the log holds is `duplicate`; a batch of duplicates
         writes nothing. An event stamped more than 5s ahead of the server is
         `clock_skew` and is not logged (the device relearns its clock and
-        sends it again under the same id). A tap on a match that is not running
-        or finished is `notStarted`, with `reason` `match_not_started` or
-        `match_sent_back` and a sentence the device shows. A tap refused by a
+        sends it again under the same id). A tap on a match that is neither running nor
+        finished is `notStarted` and not logged, with `reason`
+        `match_not_started` or `match_sent_back` (sent back to the queue) and a
+        sentence the device shows. A tap on a finished match is logged and answered `matchClosed`. A tap refused by a
         rule is `refused` with its reason (a knockout match after this one
         already played or being fought, a self-run limit, or
         `score_log_unreadable` when the match's log cannot be read).
@@ -3480,9 +3499,9 @@ paths:
       tags: [matches]
       summary: A match's write history
       description: >
-        Every write that reached the match, applied or not, in the order the
-        changes were MADE: by each entry's `stamp`, oldest first, an unstamped
-        write placed at its `receivedAt`, ties in arrival order (bc-mrgc). A
+        Every write and every tap that reached the match, applied or not, in
+        the order the changes were MADE: by each entry's `stamp`, oldest first,
+        an unstamped write placed at its `receivedAt`, ties in arrival order. A
         change the merge did not apply, because a newer change to the same
         group was already recorded, is kept here with its value (`held`), so
         nothing an operator entered is lost. The score editors show it in a
@@ -3522,7 +3541,7 @@ paths:
         for the side's team at this match and the bouts so far. A fighter
         retires on losing a bout, and both fighters retire on a drawn bout.
         The last numbered bout is the one being fought, and both its fighters
-        are `on` whatever its score (the running autosave already writes a
+        are `on` whatever its score (the score of a running bout already names a
         lead's winner and a 1-1's draw on it) until Record bout records it
         (`SubMatchResult.recorded`): then its loser is no longer `on`. A
         recorded draw that is still the last bout keeps both its fighters
@@ -5774,10 +5793,10 @@ components:
     MatchHistoryEntry:
       type: object
       description: >
-        One write that reached a match (bc-mrgc): what made it, when the change
-        was made, the groups it changed and, per group, whether it was applied
-        or kept in the history because a newer change to that group was
-        already recorded.
+        One write, or one tap, that reached a match: what made it, when the
+        change was made, the groups it changed and, per group, whether it was
+        applied or kept in the history because a newer change to that group
+        was already recorded.
       properties:
         matchId:
           type: string
@@ -5837,7 +5856,12 @@ components:
             outranks), "the match was already finished" (scoring or overtime stamped after a
             finish or a decision that closed the match; the answer carries
             `heldReason: match_closed`), or "the representative bout was removed" (a representative
-            pick stamped after the bout's removal, moved here by the removal).
+            pick stamped after the bout's removal, moved here by the removal),
+            "the next round was already fought" or "the next round has
+            already started" (a finish or a decision that did not see the
+            stored result, held because the next knockout match is played or
+            under way; the answer carries `heldReason`
+            `downstream_knockout_played` or `downstream_knockout_running`).
             Absent when each group was judged by its own stamp.
         clearedWithdrawal:
           type: object
@@ -5904,7 +5928,7 @@ components:
         server orders by arrival rather than by a stamp: a court move, a time
         change, a lineup save, a match lineup's removal, a chusen's order, a
         reset of the overrides, a reinstatement, a team member's rename or
-        cleared name (bc-evts stage 3 review 11, Y8, and review 12, Z3). The app sends a write again under the same id
+        cleared name. The app sends a write again under the same id
         when it gave up on its request at the deadline, and the first request
         can still land after the resend and after the next write of the same
         match or team. A write this door has already applied under this id is
@@ -6959,7 +6983,7 @@ components:
           writeOnly: true
           description: >
             Optional client-monotonic revision counter, stamped only on
-            "running"-status autosave writes. The server keeps it (scoped to
+            "running"-status score writes. The server keeps it (scoped to
             revSession) on the write's baseline in the match's score event log
             and holds a lower revision of the same session, an out-of-order
             delivery from a reconnect flush, until the match leaves running.
@@ -6970,7 +6994,7 @@ components:
           writeOnly: true
           description: >
             Optional per-page-load scoring-session id (opaque, e.g. a UUID) sent
-            with "running" autosave writes. It lets the server hold a single
+            with "running"-status score writes. It lets the server hold a single
             session's own out-of-order delivery (a reconnect flush). Writes
             from different sessions are concurrent operators and apply
             last-write-wins. Never returned in responses or public projections.
@@ -7056,7 +7080,8 @@ components:
             On a write's response only, beside `heldGroups` or
             `displacedGroups`: present when they were held or moved because a
             finish or a decision stamped before them had already closed the
-            match (see RefusedWrite.heldReason).
+            match, or the stored result was locked by a played or running next
+            knockout match (see RefusedWrite.heldReason).
             Absent when the groups were held by their stamps alone, and
             absent beside a `displacedGroups` that names a representative
             pick moved by a removal of the representative bout.

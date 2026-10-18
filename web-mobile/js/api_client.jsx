@@ -3070,8 +3070,9 @@ async function _sendEntry(key, descriptor, pass) {
         if (compID && matchID) _tellTurnedAway(compID, matchID, body.result || body);
         // A lineup change the server kept whose carried lineups could not all
         // follow it says so: told to the operator, never only logged (stage 6
-        // review 8, m7).
-        if ((kind === 'lineup' || kind === 'lineup-remove') && typeof body.warning === 'string' && body.warning) {
+        // review 8, m7). So does a score or decision write that started a
+        // kachinuki match and kept its lineup (review 9, G1).
+        if (typeof body.warning === 'string' && body.warning) {
             _notifyQueueAlert({ kind: 'lineup_warning', count: 1, terminalCount: 0, compID, matchID, detail: body.warning });
         }
         // Success (HTTP 200/201, including a write the server kept in the

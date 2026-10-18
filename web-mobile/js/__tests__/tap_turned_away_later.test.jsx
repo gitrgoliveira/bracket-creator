@@ -87,6 +87,68 @@ const alertText = (a) => tapNotAppliedAlertText(a.count, a.count === 1,
     tapNotAppliedText(a.outcome, a.where || '', a.tap ? tapWords(a.tap) : ''), a.where || '');
 
 describe('a tap turned away after its answer said it landed', () => {
+    // Stage 6 review 6, finding 2: the finish's push can list the tap before
+    // the tap's own applied answer arrives. It is told when the answer comes,
+    // from the latest copy of the match seen, never left until a later copy.
+    // Stage 6 review 6, finding 6: the landed-tap record goes with the
+    // operator on sign-out, so the next sign-in is not told of their taps,
+    // unless a tap of this device is still queued, when it is kept.
+    it('is forgotten on sign-out when no tap of the device is still queued', async () => {
+        server();
+        const off = API.subscribeToEvents(() => {});
+        const heard = listen();
+        const t = API.recordTap('c1', 'm1', strike, 'pw', shown);
+        await tick(0);
+        expect(_lsStore.bc_landed_taps_v1, 'recorded as landed').toContain(t.id);
+        API.clearQueue();
+        expect(_lsStore.bc_landed_taps_v1, 'forgotten on sign-out').toBeUndefined();
+        push({ [t.id]: 'beforeBaseline' });
+        expect(heard.notApplied()).toHaveLength(0);
+        if (typeof off === 'function') off();
+    });
+
+    it('is kept on sign-out while a tap of the device is still queued', async () => {
+        server();
+        const t = API.recordTap('c1', 'm1', strike, 'pw', shown);
+        await tick(0);
+        global.fetch = vi.fn(() => Promise.reject(new TypeError('offline')));
+        API.recordTap('c1', 'm1', { ...strike, letter: 'K' }, 'pw', shown);
+        await tick(0);
+        API.clearQueue();
+        expect(_lsStore.bc_landed_taps_v1, 'kept').toContain(t.id);
+    });
+
+    it('is told when the push listing it arrived before its own answer', async () => {
+        let release;
+        global.fetch = vi.fn((url, opts) => {
+            const u = String(url);
+            if (u.endsWith('/score-events')) {
+                const body = JSON.parse(opts.body);
+                return new Promise((res) => {
+                    release = () => res({
+                        ok: true, status: 200,
+                        json: async () => ({ outcomes: body.events.map((e) => ({ id: e.id, outcome: 'applied' })), match: { id: 'm1', scoreVersion: 2 } }),
+                    });
+                });
+            }
+            return Promise.reject(new TypeError('offline'));
+        });
+        const off = API.subscribeToEvents(() => {});
+        const heard = listen();
+        const t = API.recordTap('c1', 'm1', strike, 'pw', shown);
+        await tick(0);
+        push({ [t.id]: 'beforeBaseline' });
+        await tick(0);
+        expect(heard.notApplied(), 'not yet known as landed').toHaveLength(0);
+        release();
+        await tick(0);
+        expect(heard.notApplied(), 'told as its answer lands').toHaveLength(1);
+        expect(heard.outcomes).toEqual([{ id: t.id, outcome: 'beforeBaseline' }]);
+        push({ [t.id]: 'beforeBaseline' });
+        expect(heard.notApplied(), 'told once').toHaveLength(1);
+        if (typeof off === 'function') off();
+    });
+
     it('is told once, on the push, naming the match and the tap', async () => {
         server();
         const off = API.subscribeToEvents(() => {});

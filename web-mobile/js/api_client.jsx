@@ -1444,6 +1444,20 @@ function _writeLandedTaps(all) {
     _landedTapsMemory = all;
     try { localStorage.setItem(LANDED_TAPS_KEY, JSON.stringify(all)); } catch (_e) { /* kept in memory */ }
 }
+// _forgetLandedTapsUnlessPending: on sign-out the record goes with the
+// operator who made the taps, so the next sign-in on this device is never told
+// of them (stage 6 review 6); but not while a tap of this device is still
+// queued, in this tab or in the stored queue the tabs share: the device is then
+// still scoring, and what the record holds is still told. Asked BEFORE the
+// queue is wiped.
+function _forgetLandedTapsUnlessPending() {
+    const isTap = (d) => !!d && d.kind === 'evt';
+    for (const d of _writeQueue.values()) if (isTap(d)) return false;
+    for (const d of _storedQueue().values()) if (isTap(d)) return false;
+    _landedTapsMemory = {};
+    try { localStorage.removeItem(LANDED_TAPS_KEY); } catch (_e) { /* kept in memory, emptied */ }
+    return true;
+}
 // _noteLandedTaps records the taps of one match the server answered as landed.
 function _noteLandedTaps(compID, matchID, descs) {
     if (!descs.length) return;
@@ -1464,13 +1478,38 @@ function _noteLandedTaps(compID, matchID, descs) {
     const kept = {};
     for (const id of ids) kept[id] = all[id];
     _writeLandedTaps(kept);
+    // A copy of the match seen before these answers may already list them.
+    const seen = _turnedAwaySeen.get(_revKey(compID, matchID));
+    if (seen && seen.away) _tellAway(compID, matchID, seen.away);
+}
+// The latest `turnedAway` seen on any copy of each match, by base, so a tap
+// whose own applied answer arrives AFTER the copy listing it (the finish's
+// push overtook the answer) is told as it lands, from _noteLandedTaps, not
+// left until the next copy of the match (stage 6 review 6). A copy with a
+// lower scoreVersion than the one kept (an answer the server made before
+// the finish) does not replace it. Forgotten with the shown matches.
+const _turnedAwaySeen = new Map();
+function _rememberTurnedAway(base, match) {
+    const raw = match && match.turnedAway;
+    const away = raw && typeof raw === 'object' && Object.keys(raw).length > 0 ? raw : null;
+    const v = Number(match && match.scoreVersion);
+    const prev = _turnedAwaySeen.get(base);
+    if (prev && Number.isFinite(prev.v) && Number.isFinite(v) && v < prev.v) return;
+    if (!away && !prev) return;
+    _turnedAwaySeen.set(base, { v, away });
 }
 // _tellTurnedAway reads one copy of a match: each tap of this device the
 // server now lists as turned away is told once, to the match's open editor
 // (subscribeTapOutcome) and as one 'not_applied' alert naming the match and
-// the tap, then forgotten.
+// the tap, then forgotten. Accepted: two tabs of the device reading copies
+// of the match at the same moment can both find the tap in the shared
+// landed record before either removes it, and both tell it.
 function _tellTurnedAway(compID, matchID, match) {
-    const away = match && match.turnedAway;
+    if (!compID || !matchID) return;
+    _rememberTurnedAway(_revKey(compID, matchID), match);
+    _tellAway(compID, matchID, match && match.turnedAway);
+}
+function _tellAway(compID, matchID, away) {
     if (!compID || !matchID || !away || typeof away !== 'object') return;
     const ids = Object.keys(away);
     if (ids.length === 0) return;
@@ -2012,6 +2051,7 @@ function _forgetShownMatches(compID) {
     // (X4): a match id reused by the new draw must never show the old match's
     // scoreline on a board, nor have it recorded by a Finish.
     for (const k of _latestDerived.keys()) if (k.startsWith(prefix)) _latestDerived.delete(k);
+    for (const k of _turnedAwaySeen.keys()) if (k.startsWith(prefix)) _turnedAwaySeen.delete(k);
 }
 
 // _forgetAllShownMatches: the tournament's competitions may have been replaced
@@ -2023,6 +2063,7 @@ function _forgetShownMatches(compID) {
 function _forgetAllShownMatches() {
     _shownMatchLabels.clear();
     _latestDerived.clear();
+    _turnedAwaySeen.clear();
 }
 
 function _noteMatchLabel(compID, matchID, label) {
@@ -6133,6 +6174,10 @@ const API = {
         // tablet chose anything.
         const discarding = _countTerminalQueued();
         const discardingTotal = _writeQueue.size;
+        // The landed-tap record goes with the operator, judged on the queue
+        // as it stands before the wipe below.
+        _forgetLandedTapsUnlessPending();
+        _turnedAwaySeen.clear();
         if (discardingTotal > 0) {
             _notifyQueueAlert({ kind: 'discarded', count: discardingTotal, terminalCount: discarding });
         }

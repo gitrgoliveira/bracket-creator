@@ -154,12 +154,14 @@ describe('the board\'s notices are the device\'s (F4)', () => {
         API.tellPendingTapRefused('c1', 'm1', { id: t.id, outcome: 'noTarget', reason: 'bout_removed' }, strike);
         await tick(0);
         const before = _lsStore[toldTapsKey('c1', 'm1')];
+        // The tab whose board told it has gone (its page went away).
+        window.dispatchEvent(new Event('pagehide'));
         await load();
         const heard = listen();
         server({ outcome: 'applied', match: { id: 'm1', scoreVersion: 4 } });
         window.dispatchEvent(new Event('online'));
         await tick(5_000);
-        expect(heard.applied(), 'the operator is told once').toHaveLength(1);
+        expect(heard.applied(), 'the operator is told once, by a shown tab').toHaveLength(1);
         const after = _lsStore[toldTapsKey('c1', 'm1')];
         expect(JSON.parse(after)[t.id].back, 'every tab hears it was taken back').toBe(true);
         expect(before).toBeTruthy();
@@ -174,12 +176,55 @@ describe('the board\'s notices are the device\'s (F4)', () => {
         const key = toldTapsKey('c1', 'm1');
         const oldValue = _lsStore[key];
         const rec = JSON.parse(oldValue);
-        rec[t.id] = { ...rec[t.id], back: true, tab: 'other' };
+        rec[t.id] = { ...rec[t.id], back: true };
         const newValue = JSON.stringify(rec);
         _lsStore[key] = newValue;
         window.__bcStoredQueueHandler({ key, oldValue, newValue });
         await tick(0);
         expect(heard.outcomes.filter((o) => o.id === t.id).map((o) => o.outcome)).toEqual(['noTarget', 'applied']);
-        expect(heard.applied(), 'the tab that took it back told the operator').toHaveLength(0);
+        // Stage 6 review 10, m1: this tab's board said "Not applied", so this
+        // tab says it was applied after all, once for the device.
+        expect(heard.applied(), 'the tab that told it is told it was applied').toHaveLength(1);
+        window.__bcStoredQueueHandler({ key, oldValue, newValue });
+        await tick(0);
+        expect(heard.applied(), 'once').toHaveLength(1);
+    });
+
+    // m7: what this tab holds of a told tap goes when another tab takes the
+    // entry out (an answer it settled), so the set never only grows.
+    it('a tab forgets a told tap another tab settled', async () => {
+        const heard = listen();
+        const t = API.recordTap('c1', 'm1', strike, 'pw', shown);
+        await tick(0);
+        API.tellPendingTapRefused('c1', 'm1', { id: t.id, outcome: 'noTarget', reason: 'bout_removed' }, strike);
+        await tick(0);
+        const key = toldTapsKey('c1', 'm1');
+        const oldValue = _lsStore[key];
+        delete _lsStore[key];
+        window.__bcStoredQueueHandler({ key, oldValue, newValue: null });
+        await tick(0);
+        // Told again (a board re-render after the record went): heard again,
+        // since nothing of it is held here any more.
+        API.tellPendingTapRefused('c1', 'm1', { id: t.id, outcome: 'noTarget', reason: 'bout_removed' }, strike);
+        await tick(0);
+        expect(heard.outcomes.filter((o) => o.id === t.id)).toHaveLength(2);
+    });
+
+    // m1: the tab whose batch finds it applied says nothing while the tab that
+    // told it is shown and alive: that tab says it.
+    it('a batch that finds applied a tap a live shown tab told leaves the alert to that tab', async () => {
+        const t = API.recordTap('c1', 'm1', strike, 'pw', shown);
+        await tick(0);
+        API.tellPendingTapRefused('c1', 'm1', { id: t.id, outcome: 'noTarget', reason: 'bout_removed' }, strike);
+        await tick(0);
+        await load();
+        const heard = listen();
+        server({ outcome: 'applied', match: { id: 'm1', scoreVersion: 4 } });
+        window.dispatchEvent(new Event('online'));
+        await tick(5_000);
+        expect(heard.applied(), 'the teller says it').toHaveLength(0);
+        const rec = JSON.parse(_lsStore[toldTapsKey('c1', 'm1')])[t.id];
+        expect(rec.back).toBe(true);
+        expect(rec.alerted, 'still the teller\'s to raise').toBeFalsy();
     });
 });

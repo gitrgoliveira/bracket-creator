@@ -1455,6 +1455,34 @@ function _pruneToldOnBoard() {
     for (const id of _toldHere) if (!queued.has(id)) _toldHere.delete(id);
     _told.prune((id) => queued.has(id));
 }
+
+// _onToldTapsStored: another tab changed a match's told-tap record. A notice
+// it took back takes this tab's note down too (F4), and when this is the tab
+// that told it (or a shown tab, that one hidden or gone) the operator is told
+// "applied after all" here, once for the device (stage 6 review 10, m1: only
+// the tab whose batch found it applied said so, and the tab whose board had
+// said "Not applied" just lost its note). An entry the other tab took out is
+// forgotten here too (m7), and the taps it took back are one alert per match.
+function _onToldTapsStored(key, oldValue, newValue) {
+    const alerts = new Map();
+    for (const t of _told.onStored(key, oldValue, newValue)) {
+        _toldHere.delete(t.id);
+        const base = _revKey(t.compID, t.matchID);
+        _emitOn(_tapOutcomeListeners, base, { id: t.id, outcome: 'applied', takenBack: true });
+        if (_landed.tellsFor(_told.tellerOf(t.compID, t.matchID, t.id)) && _told.claimAlert(t.compID, t.matchID, t.id)) {
+            const a = alerts.get(base) || { compID: t.compID, matchID: t.matchID, count: 0 };
+            a.count++;
+            alerts.set(base, a);
+        }
+    }
+    for (const t of _told.goneOnStored(key, oldValue, newValue)) _toldHere.delete(t.id);
+    for (const [base, a] of alerts) {
+        _notifyQueueAlert({
+            kind: 'tap_applied', count: a.count, terminalCount: 0, compID: a.compID, matchID: a.matchID,
+            where: _shownMatchLabels.get(base) || '',
+        });
+    }
+}
 // _notTurnedAway: the newest copy of the match seen names a version and does
 // not list the tap turned away. A `duplicate` answer says only that the tap's
 // id is already in the log, where a tap turned away is logged too, so it takes
@@ -1621,6 +1649,8 @@ const _told = createToldTaps({ storage: _landedStorage, tab: _landed.tab });
 // (stage 6 review 8, m11).
 function _landedBeat() {
     _landed.beat();
+    // The told-tap record's sweep (m7): what it takes out is forgotten here.
+    for (const id of _told.beat()) _toldHere.delete(id);
     for (const seen of _turnedAwaySeen.values()) {
         if (seen && seen.away && seen.compID && seen.matchID) _tellAway(seen.compID, seen.matchID, seen.away);
     }
@@ -3343,8 +3373,13 @@ async function _sendTapBatch(base, batch, pass) {
                     // there): the server applied it, so the notice is taken
                     // back on every tab and the operator told once (stage 6
                     // review 8, m12; review 9, F3/F4).
+                    // The alert goes to the tab that told it, or a shown tab
+                    // when that one is hidden or gone (m1): that tab hears of
+                    // it through the storage event (_onToldTapsStored).
                     landed.push(d);
-                    if (_told.takeBack(compID, matchID, o.id)) takenBack.push(d);
+                    const teller = _told.tellerOf(compID, matchID, o.id);
+                    if (_told.takeBack(compID, matchID, o.id) && _landed.tellsFor(teller)
+                        && _told.claimAlert(compID, matchID, o.id)) takenBack.push(d);
                     _emitOn(_tapOutcomeListeners, base, { id: o.id, outcome: 'applied', takenBack: true });
                 } else if (toldOnBoard) {
                     // Told by the board as the removal reached it: once. A
@@ -3794,14 +3829,7 @@ if (typeof window !== 'undefined') {
     if (window.__bcStoredQueueHandler) window.removeEventListener('storage', window.__bcStoredQueueHandler);
     const onStorage = (e) => {
         if (e.key === QUEUE_STORAGE_KEY) _onStoredQueueChanged(e.oldValue, e.newValue);
-        // Another tab took back a notice a board gave: this tab's note goes
-        // too (F4).
-        if (typeof e.key === 'string' && e.key.startsWith(TOLD_TAPS_PREFIX)) {
-            for (const t of _told.onStored(e.key, e.oldValue, e.newValue)) {
-                _toldHere.delete(t.id);
-                _emitOn(_tapOutcomeListeners, _revKey(t.compID, t.matchID), { id: t.id, outcome: 'applied', takenBack: true });
-            }
-        }
+        if (typeof e.key === 'string' && e.key.startsWith(TOLD_TAPS_PREFIX)) _onToldTapsStored(e.key, e.oldValue, e.newValue);
         // Another tab learned something of a minted member: a member that
         // never was comes off this tab's writes, and a write held back for one
         // may now go (minted_members.jsx).

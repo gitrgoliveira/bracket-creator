@@ -345,6 +345,15 @@ export function createLandedTaps({ storage, now = () => Date.now(), tab, hidden 
             if (told.length) writeObj(key, obj);
             return told;
         },
+        /**
+         * Whether this tab tells the operator now for a notice another tab
+         * `owner` gave (told_taps.jsx's applied-after-all alert): by the same
+         * rule as a landed tap, the owner while it is shown and alive, else
+         * the shown tab with the lowest id (stage 6 review 10, m1).
+         */
+        tellsFor(owner) {
+            return mayTell({ tab: owner }, liveTabs(), tellingTabs());
+        },
         /** Whether a tap is recorded as landed (for tests). */
         has(compID, matchID, id) {
             return !!readObj(landedTapsKey(compID, matchID))[id];

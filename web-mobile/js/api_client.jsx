@@ -53,6 +53,7 @@ import {
 import { noteServerBuild, setOutboxIdleProbe, setBeforeReload, noteOutboxDrained } from './app_version.jsx';
 import { CLOCK_SKEW as TAP_CLOCK_SKEW } from './score_events.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
+import { createLandedTaps, LANDED_TAB_BEAT_MS } from './landed_taps.jsx';
 import {
     createMintedMembers, mintedAddId, mintedIdsNamed, mintedMemberUrlId, mintedProofCovers, mintedStrip,
     MINTED_MEMBERS_KEY,
@@ -1415,8 +1416,9 @@ function _noteDerived(base, match) {
 
 
 // The taps this device made that the server answered as landed (applied,
-// recorded, duplicate), by event id, kept in browser storage so every tab of
-// the device and the next page after a reload know them (stage 6 review 5).
+// recorded, duplicate), by event id, kept in browser storage (landed_taps.jsx,
+// one record per match) so every tab of the device and the next page after a
+// reload know them (stage 6 review 5).
 // Such a tap can be turned away LATER: a finish that never saw it, or one
 // stamped before it, reaches the server after it (rule D5, the closed-match
 // rule). Its own answer said it landed, so nothing else tells this device: the
@@ -1424,61 +1426,52 @@ function _noteDerived(base, match) {
 // push, a fetch, an answer), and `_tellTurnedAway` tells the operator once,
 // for a tap of its own only, whatever moved it. A tap answered not-applied at
 // once is never recorded here, since its own answer already said so. Kept a
-// day, at most LANDED_TAPS_MAX of them; a tap landed before browser storage
+// day, at most LANDED_TAPS_PER_MATCH of a match; a tap landed before browser storage
 // was cleared is not known after it.
-const LANDED_TAPS_KEY = 'bc_landed_taps_v1';
-const LANDED_TAPS_MAX = 1000;
-const LANDED_TAPS_KEEP_MS = 24 * 60 * 60 * 1000;
-let _landedTapsMemory = {};
-function _readLandedTaps() {
-    try {
-        const raw = localStorage.getItem(LANDED_TAPS_KEY);
-        if (raw === null) return _landedTapsMemory;
-        const parsed = JSON.parse(raw);
-        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-    } catch (_e) {
-        return _landedTapsMemory;
-    }
+// The record itself has ONE owner, landed_taps.jsx: one small record per
+// match (a batch's answer touches its own match's only), each entry naming the
+// tab that noted it, so one tab of the device tells it (stage 6 review 7).
+// Storage is reached lazily, so a page whose storage throws keeps it in memory.
+const _landedStorage = {
+    getItem: (k) => globalThis.localStorage.getItem(k),
+    setItem: (k, v) => globalThis.localStorage.setItem(k, v),
+    removeItem: (k) => globalThis.localStorage.removeItem(k),
+};
+const _landed = createLandedTaps({ storage: _landedStorage, tab: _randomId() });
+if (typeof setInterval === 'function') {
+    const beat = setInterval(() => _landed.beat(), LANDED_TAB_BEAT_MS);
+    if (beat && typeof beat.unref === 'function') beat.unref();
 }
-function _writeLandedTaps(all) {
-    _landedTapsMemory = all;
-    try { localStorage.setItem(LANDED_TAPS_KEY, JSON.stringify(all)); } catch (_e) { /* kept in memory */ }
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('pagehide', () => _landed.leave());
 }
-// _forgetLandedTapsUnlessPending: on sign-out the record goes with the
-// operator who made the taps, so the next sign-in on this device is never told
-// of them (stage 6 review 6); but not while a tap of this device is still
-// queued, in this tab or in the stored queue the tabs share: the device is then
-// still scoring, and what the record holds is still told. Asked BEFORE the
-// queue is wiped.
-function _forgetLandedTapsUnlessPending() {
-    const isTap = (d) => !!d && d.kind === 'evt';
-    for (const d of _writeQueue.values()) if (isTap(d)) return false;
-    for (const d of _storedQueue().values()) if (isTap(d)) return false;
-    _landedTapsMemory = {};
-    try { localStorage.removeItem(LANDED_TAPS_KEY); } catch (_e) { /* kept in memory, emptied */ }
-    return true;
+// The ids of the taps this device still holds queued (this tab's queue and
+// the one the tabs share), which a sign-out keeps the landed record of.
+function _queuedTapIds() {
+    const ids = new Set();
+    const add = (d) => { if (d && d.kind === 'evt' && d.payload && d.payload.id) ids.add(d.payload.id); };
+    for (const d of _writeQueue.values()) add(d);
+    for (const d of _storedQueue().values()) add(d);
+    return ids;
+}
+// _forgetLandedTapsNotQueued: on every sign-out the record goes with the
+// operator who made the taps, so the next operator is never told of them;
+// only the taps still queued after the sign-out, to be sent by this device,
+// keep their entries (stage 6 review 7). Asked AFTER the sign-out's wipe.
+function _forgetLandedTapsNotQueued() {
+    _landed.forgetExcept(_queuedTapIds());
 }
 // _noteLandedTaps records the taps of one match the server answered as landed.
 function _noteLandedTaps(compID, matchID, descs) {
     if (!descs.length) return;
-    const now = Date.now();
-    const all = _readLandedTaps();
+    const recs = [];
     for (const d of descs) {
         const p = d && d.payload;
         if (!p || !p.id) continue;
-        all[p.id] = {
-            compID, matchID, at: now, where: _whereOf(d),
-            kind: p.kind, side: p.side, pos: p.pos, letter: p.letter,
-        };
+        recs.push({ id: p.id, where: _whereOf(d), kind: p.kind, side: p.side, pos: p.pos, letter: p.letter });
     }
-    let ids = Object.keys(all).filter((id) => now - (Number(all[id] && all[id].at) || 0) < LANDED_TAPS_KEEP_MS);
-    if (ids.length > LANDED_TAPS_MAX) {
-        ids = ids.sort((a, b) => (all[b].at || 0) - (all[a].at || 0)).slice(0, LANDED_TAPS_MAX);
-    }
-    const kept = {};
-    for (const id of ids) kept[id] = all[id];
-    _writeLandedTaps(kept);
-    // A copy of the match seen before these answers may already list them.
+    _landed.note(compID, matchID, recs);
+    // The newest copy of the match seen before these answers may list them.
     const seen = _turnedAwaySeen.get(_revKey(compID, matchID));
     if (seen && seen.away) _tellAway(compID, matchID, seen.away);
 }
@@ -1490,12 +1483,30 @@ function _noteLandedTaps(compID, matchID, descs) {
 // the finish) does not replace it. Forgotten with the shown matches.
 const _turnedAwaySeen = new Map();
 function _rememberTurnedAway(base, match) {
-    const raw = match && match.turnedAway;
+    if (!match || typeof match !== 'object') return;
+    const raw = match.turnedAway;
     const away = raw && typeof raw === 'object' && Object.keys(raw).length > 0 ? raw : null;
-    const v = Number(match && match.scoreVersion);
     const prev = _turnedAwaySeen.get(base);
-    if (prev && Number.isFinite(prev.v) && Number.isFinite(v) && v < prev.v) return;
-    if (!away && !prev) return;
+    const v = match.scoreVersion;
+    if (!Number.isFinite(v)) {
+        // A copy that names no version cannot be ordered: it never replaces
+        // a list kept, and its list is kept only while none is (stage 6
+        // review 7: one listing nothing wiped the list).
+        if (away && !(prev && prev.away)) _turnedAwaySeen.set(base, { v: prev ? prev.v : NaN, away });
+        return;
+    }
+    if (prev && !Number.isFinite(prev.v) && prev.away && !away) {
+        // A list from a copy that named no version cannot be ordered against
+        // this one: it stays, under this version.
+        _turnedAwaySeen.set(base, { v, away: prev.away });
+        return;
+    }
+    if (prev && Number.isFinite(prev.v)) {
+        // Every copy with a version is remembered, one that lists nothing
+        // included: a newer copy that no longer lists a tap (the first
+        // result it was turned away for was displaced) is the newest word.
+        if (v < prev.v || (v === prev.v && !away)) return;
+    }
     _turnedAwaySeen.set(base, { v, away });
 }
 // _tellTurnedAway reads one copy of a match: each tap of this device the
@@ -1506,23 +1517,19 @@ function _rememberTurnedAway(base, match) {
 // landed record before either removes it, and both tell it.
 function _tellTurnedAway(compID, matchID, match) {
     if (!compID || !matchID) return;
-    _rememberTurnedAway(_revKey(compID, matchID), match);
-    _tellAway(compID, matchID, match && match.turnedAway);
+    const base = _revKey(compID, matchID);
+    _rememberTurnedAway(base, match);
+    // Told from the newest copy seen, never from an older one.
+    const seen = _turnedAwaySeen.get(base);
+    if (seen && seen.away) _tellAway(compID, matchID, seen.away);
 }
 function _tellAway(compID, matchID, away) {
     if (!compID || !matchID || !away || typeof away !== 'object') return;
     const ids = Object.keys(away);
     if (ids.length === 0) return;
-    const all = _readLandedTaps();
-    const told = [];
-    for (const id of ids) {
-        const rec = all[id];
-        if (!rec || rec.compID !== compID || rec.matchID !== matchID) continue;
-        told.push({ id, outcome: away[id], rec });
-        delete all[id];
-    }
+    // Taken out of the record before it is told: one notice per tap.
+    const told = _landed.claim(compID, matchID, ids).map((t) => ({ ...t, outcome: away[t.id] }));
     if (told.length === 0) return;
-    _writeLandedTaps(all);
     const base = _revKey(compID, matchID);
     const where = told.map((t) => t.rec.where).find(Boolean) || _shownMatchLabels.get(base) || '';
     for (const t of told) _emitOn(_tapOutcomeListeners, base, { id: t.id, outcome: t.outcome });
@@ -1536,7 +1543,11 @@ function _tellAway(compID, matchID, away) {
 // _tellTurnedAwayIn reads every match a fetched competition holds.
 function _tellTurnedAwayIn(comp, compID) {
     if (!comp || !compID) return;
-    const look = (m) => { if (m && m.turnedAway) _tellTurnedAway(compID, m.id, m); };
+    // Every copy that names a version is remembered (a newer one that lists
+    // nothing ends what an older one listed), and one with a list is told.
+    const look = (m) => {
+        if (m && m.id && (m.turnedAway || Number.isFinite(m.scoreVersion))) _tellTurnedAway(compID, m.id, m);
+    };
     for (const m of comp.poolMatches || []) look(m);
     for (const p of comp.pools || []) for (const m of (p && p.matches) || []) look(m);
     const b = comp.bracket;
@@ -3112,6 +3123,9 @@ async function _sendTapBatch(base, batch, pass) {
             _closeDequeueBatch();
         }
         // Landed: told later if a result that never saw them turns them away.
+        // The answer's own copy of the match is remembered first, so a tap it
+        // no longer lists is never told from an older copy (stage 6 review 7).
+        _rememberTurnedAway(_revKey(compID, matchID), body.match);
         _noteLandedTaps(compID, matchID, landed);
         _tellTurnedAway(compID, matchID, body.match);
         const heldSeqs = (body.match && body.match.eventSeqs) || {};
@@ -6156,6 +6170,10 @@ const API = {
         _offlineFlag = false;
         // Every stored entry too, whether or not this tab holds any.
         _parkStoredEntries();
+        // A sign-out too: the landed-tap record keeps only the taps still
+        // queued here, parked to be sent once the operator signs in again.
+        _forgetLandedTapsNotQueued();
+        _turnedAwaySeen.clear();
         if (parked > 0) {
             _persistQueue();
             _notifyQueueAlert({ kind: 'auth_required', count: parked, terminalCount: _countTerminalQueued() });
@@ -6174,9 +6192,6 @@ const API = {
         // tablet chose anything.
         const discarding = _countTerminalQueued();
         const discardingTotal = _writeQueue.size;
-        // The landed-tap record goes with the operator, judged on the queue
-        // as it stands before the wipe below.
-        _forgetLandedTapsUnlessPending();
         _turnedAwaySeen.clear();
         if (discardingTotal > 0) {
             _notifyQueueAlert({ kind: 'discarded', count: discardingTotal, terminalCount: discarding });
@@ -6206,6 +6221,9 @@ const API = {
         // The copies score-events answers handed back go with the session
         // they were answered to (X4).
         _latestDerived.clear();
+        // The landed-tap record goes with the operator: after the wipe no
+        // tap of this device is queued, so all of it (stage 6 review 7).
+        _forgetLandedTapsNotQueued();
         if (_flushTimer !== null) { clearTimeout(_flushTimer); _flushTimer = null; }
         _flushAttempt = 0;
         _offlineFlag = false;

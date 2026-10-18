@@ -45,6 +45,12 @@ afterEach(() => {
     global.localStorage = _orig.ls;
 });
 
+// What the landed-tap record holds, every match's (landed_taps.jsx).
+const landedText = () => {
+    const keys = Object.keys(_lsStore).filter((k) => k.startsWith('bc_landed_taps_v2:'));
+    return keys.length ? keys.map((k) => _lsStore[k]).join('\n') : undefined;
+};
+
 async function flushMicrotasks() { for (let i = 0; i < 30; i++) await Promise.resolve(); }
 async function tick(ms = 0) { await vi.advanceTimersByTimeAsync(ms); await flushMicrotasks(); }
 const shown = { id: 'm1', compId: 'c1', phase: 'bracket', matchNumber: 3, status: 'running', modifiedAt: 0 };
@@ -99,23 +105,50 @@ describe('a tap turned away after its answer said it landed', () => {
         const heard = listen();
         const t = API.recordTap('c1', 'm1', strike, 'pw', shown);
         await tick(0);
-        expect(_lsStore.bc_landed_taps_v1, 'recorded as landed').toContain(t.id);
+        expect(landedText(), 'recorded as landed').toContain(t.id);
         API.clearQueue();
-        expect(_lsStore.bc_landed_taps_v1, 'forgotten on sign-out').toBeUndefined();
+        expect(landedText(), 'forgotten on sign-out').toBeUndefined();
         push({ [t.id]: 'beforeBaseline' });
         expect(heard.notApplied()).toHaveLength(0);
         if (typeof off === 'function') off();
     });
 
-    it('is kept on sign-out while a tap of the device is still queued', async () => {
+    // Stage 6 review 7, finding 5: the record belongs to the operator signed
+    // in. EVERY sign-out clears it, "Sign out and discard" included (which
+    // discards the queued tap too), and a revoked password's park; only a tap
+    // still queued to be sent by this device keeps its entry, so the next
+    // operator is never told of the previous operator's taps.
+    it('is forgotten on Sign out and discard, though a tap was still queued', async () => {
         server();
+        const off = API.subscribeToEvents(() => {});
         const t = API.recordTap('c1', 'm1', strike, 'pw', shown);
         await tick(0);
         global.fetch = vi.fn(() => Promise.reject(new TypeError('offline')));
         API.recordTap('c1', 'm1', { ...strike, letter: 'K' }, 'pw', shown);
         await tick(0);
         API.clearQueue();
-        expect(_lsStore.bc_landed_taps_v1, 'kept').toContain(t.id);
+        expect(landedText(), 'forgotten').toBeUndefined();
+        const heard = listen();
+        push({ [t.id]: 'beforeBaseline' });
+        expect(heard.notApplied(), 'the next operator is not told').toHaveLength(0);
+        if (typeof off === 'function') off();
+    });
+
+    it('is forgotten when a revoked password parks the queue, the queued tap kept to be sent', async () => {
+        server();
+        const off = API.subscribeToEvents(() => {});
+        const t = API.recordTap('c1', 'm1', strike, 'pw', shown);
+        await tick(0);
+        global.fetch = vi.fn(() => Promise.reject(new TypeError('offline')));
+        const queued = API.recordTap('c1', 'm1', { ...strike, letter: 'K' }, 'pw', shown);
+        await tick(0);
+        API.parkQueueForReauth();
+        expect(landedText(), 'forgotten').toBeUndefined();
+        expect(API.unsentWrites().total, 'the queued tap stays, to be sent').toBe(1);
+        const heard = listen();
+        push({ [t.id]: 'beforeBaseline', [queued.id]: 'beforeBaseline' });
+        expect(heard.notApplied(), 'nothing of the previous sign-in is told').toHaveLength(0);
+        if (typeof off === 'function') off();
     });
 
     it('is told when the push listing it arrived before its own answer', async () => {
@@ -198,7 +231,8 @@ describe('a tap turned away after its answer said it landed', () => {
         server();
         const t = API.recordTap('c1', 'm1', strike, 'pw', shown);
         await tick(0);
-        // The page goes; the next one reads the competition.
+        // The page goes (its tab with it); the next one reads the competition.
+        window.dispatchEvent(new Event('pagehide'));
         await load();
         server({ detail: { id: 'c1', poolMatches: [{ id: 'm1', status: 'completed', turnedAway: { [t.id]: 'beforeBaseline' } }] } });
         const heard = listen();
@@ -213,6 +247,8 @@ describe('a tap turned away after its answer said it landed', () => {
         server();
         const t = API.recordTap('c1', 'm1', strike, 'pw', shown);
         await tick(0);
+        // The page goes (its tab with it), and the next one loads.
+        window.dispatchEvent(new Event('pagehide'));
         await load();
         const feed = { competitions: [{ config: { id: 'c1', name: 'Cup' }, bracket: { rounds: [[{ id: 'm1', status: 'completed', turnedAway: { [t.id]: 'matchClosed' } }]] } }] };
         global.fetch = vi.fn((url) => (String(url).includes('/api/viewer/court/A/matches')

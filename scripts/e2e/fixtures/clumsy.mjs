@@ -100,14 +100,18 @@ export async function tapNeighbour(locator, direction) {
 
 // V2. Two taps on the same spot inside the app's bounce window
 // (DOUBLE_TAP_LIMIT_MS, derived from tap_guard.jsx's TAP_BOUNCE_MS), the
-// impatient thumb. Returns { gapMs, withinWindow }, gapMs being the time IN
-// THE PAGE between the two clicks the taps produce (Date.now() in a capturing
-// click listener, the clock the app's guard reads), never the host-side round
-// trip of the first tap, which also counts the protocol's own latency; and
+// impatient thumb. Returns { gapMs, clicks, withinWindow }, gapMs being the
+// time IN THE PAGE between the two taps (Date.now() in capturing listeners,
+// the clock the app's guard reads): between the two clicks they produce, or,
+// when the first tap disabled the control so the second produces no click (a
+// browser dispatches none on a disabled button; the bounce then never reaches
+// the app at all), between the two touchstarts. Never the host-side round trip
+// of the first tap, which also counts the protocol's own latency. clicks is how
+// many clicks the page saw (2, or 1 for a control the first tap disabled), and
 // withinWindow always true: a machine too slow to land the taps inside the
 // window THROWS, because the row would not have tested what it says, and so do
-// taps that do not produce exactly two clicks. The first tap's effects cannot
-// be taken back, so the taps are not retried; the caller's test fails with the
+// taps the page did not see as two touches. The first tap's effects cannot be
+// taken back, so the taps are not retried; the caller's test fails with the
 // message above (playwright.config.mjs sets retries to 0). Callers may assert
 // on the outcome unconditionally.
 export async function doubleTap(locator) {
@@ -115,22 +119,28 @@ export async function doubleTap(locator) {
   const { x, y } = await centreOf(locator);
   await page.evaluate(() => {
     window.__clumsyClicks = [];
-    document.addEventListener('click', function rec() {
-      window.__clumsyClicks.push(Date.now());
-      if (window.__clumsyClicks.length === 2) document.removeEventListener('click', rec, true);
-    }, true);
+    window.__clumsyTouches = [];
+    for (const [type, seen] of [['click', window.__clumsyClicks], ['touchstart', window.__clumsyTouches]]) {
+      document.addEventListener(type, function rec() {
+        seen.push(Date.now());
+        if (seen.length === 2) document.removeEventListener(type, rec, true);
+      }, true);
+    }
   });
   await page.touchscreen.tap(x, y);
   await page.touchscreen.tap(x, y);
-  const clicks = await page.evaluate(() => window.__clumsyClicks);
-  if (!Array.isArray(clicks) || clicks.length !== 2) {
-    throw new Error(`clumsy.doubleTap: the two taps produced ${Array.isArray(clicks) ? clicks.length : 'no'} click(s) in the page, not 2, so the row did not test the bounce guard`);
+  const { clicks, touches } = await page.evaluate(() => ({ clicks: window.__clumsyClicks, touches: window.__clumsyTouches }));
+  if (!Array.isArray(touches) || touches.length !== 2) {
+    throw new Error(`clumsy.doubleTap: the page saw ${Array.isArray(touches) ? touches.length : 'no'} touch(es), not 2, so the row did not test the bounce guard`);
   }
-  const gapMs = clicks[1] - clicks[0];
+  if (!Array.isArray(clicks) || clicks.length === 0 || clicks.length > 2) {
+    throw new Error(`clumsy.doubleTap: the two taps produced ${Array.isArray(clicks) ? clicks.length : 'no'} click(s) in the page, so the row did not test the bounce guard`);
+  }
+  const gapMs = clicks.length === 2 ? clicks[1] - clicks[0] : touches[1] - touches[0];
   if (gapMs >= DOUBLE_TAP_LIMIT_MS) {
     throw new Error(`clumsy.doubleTap: the two taps were ${gapMs} ms apart (limit ${DOUBLE_TAP_LIMIT_MS} ms, the app's bounce window is ${TAP_BOUNCE_MS} ms): this machine was too slow, so the row did not test the bounce guard`);
   }
-  return { gapMs, withinWindow: true };
+  return { gapMs, clicks: clicks.length, withinWindow: true };
 }
 
 // V2 (second form). Tap `locator`, then tap the same spot again while the

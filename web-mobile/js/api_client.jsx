@@ -1324,6 +1324,9 @@ const _latestDerived = new Map();
 const _derivedListeners = new Map();
 const _pendingTapListeners = new Map();
 const _tapOutcomeListeners = new Map();
+// The pending taps the board already told as not applied (tellPendingTapRefused),
+// whose answer then tells nothing more: one notice per tap.
+const _toldOnBoard = new Set();
 // Per queue key: the promise a door handed out and the refusal claims of the
 // callers. In memory only (never persisted): a function does not survive a
 // reload, and a rehydrated entry has nobody waiting on it.
@@ -3111,6 +3114,8 @@ async function _sendTapBatch(base, batch, pass) {
                 if (_dequeue(k, d, { value: o })) dequeued = true;
                 if (tapOutcomeQuiet(o)) {
                     landed.push(d);
+                } else if (_toldOnBoard.delete(o.id)) {
+                    // Told by the board as the removal reached it: once.
                 } else {
                     pass.notApplied++;
                     pass.lastNotApplied = o;
@@ -5965,6 +5970,23 @@ const API = {
     subscribeTapOutcome(compID, matchID, fn) {
         return _listenOn(_tapOutcomeListeners, _revKey(compID, matchID), fn);
     },
+    // tellPendingTapRefused: the board found a pending tap of this device the
+    // server will not apply (a tap on a bout the match's copy shows removed,
+    // applyPending's BOUT_REMOVED): told once, now, to the match's editor and
+    // as one 'not_applied' alert, and not again when the server's answer for
+    // that tap arrives (stage 6 review 7). Never waits: told after the render.
+    tellPendingTapRefused(compID, matchID, outcome, tap) {
+        if (!compID || !matchID || !outcome || !outcome.id || _toldOnBoard.has(outcome.id)) return;
+        _toldOnBoard.add(outcome.id);
+        const base = _revKey(compID, matchID);
+        queueMicrotask(() => {
+            _emitOn(_tapOutcomeListeners, base, outcome);
+            _notifyQueueAlert({
+                kind: 'not_applied', count: 1, terminalCount: 0, compID, matchID,
+                outcome, where: _shownMatchLabels.get(base) || '', tap: tap || null,
+            });
+        });
+    },
     // noteShownMatch: the match an editor shows, so a held write of it, or of
     // one of its teams, is named by where it is (H5, _whereOf).
     noteShownMatch(compID, match) {
@@ -6193,6 +6215,7 @@ const API = {
         const discarding = _countTerminalQueued();
         const discardingTotal = _writeQueue.size;
         _turnedAwaySeen.clear();
+        _toldOnBoard.clear();
         if (discardingTotal > 0) {
             _notifyQueueAlert({ kind: 'discarded', count: discardingTotal, terminalCount: discarding });
         }

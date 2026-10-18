@@ -29,7 +29,7 @@ import { struckIppons, realIppons } from './result_slot.jsx';
 import { acceptTap, useArmedConfirm } from './tap_guard.jsx';
 // bc-evts: the board of a running match (tapBoardOf) is the server's copy with
 // this device's pending taps folded on, by the JS replay port.
-import { applyPending, assignMarks, APPLIED } from './score_events.jsx';
+import { applyPending, assignMarks, APPLIED, BOUT_REMOVED, BOUT_REMOVED_MESSAGE } from './score_events.jsx';
 import { isOlderRunningCopy } from './patch.jsx';
 // BarredMatchNotice is a separate leaf (imports only ineligible_match.jsx +
 // write_result.jsx): re-exported below, see that file's header for why.
@@ -229,6 +229,17 @@ export function tapBoardOf(m, opts) {
   // `moving`: the pending taps that still change the board (a tap the base
   // already holds, or one with nothing left to take, changes nothing).
   const moving = all.filter((e) => folded.outcomes[e.id] === APPLIED);
+  // A pending tap on a bout the copy shows removed is not on the board, and
+  // the operator is told so once, now, as the server's answer would tell it
+  // (stage 6 review 7; the fold's own rule, BOUT_REMOVED, never a second one).
+  if (typeof api.tellPendingTapRefused === "function") {
+    for (const e of all) {
+      if ((folded.reasons || {})[e.id] !== BOUT_REMOVED) continue;
+      api.tellPendingTapRefused(m.compId, m.id,
+        { id: e.id, outcome: folded.outcomes[e.id], reason: BOUT_REMOVED, message: BOUT_REMOVED_MESSAGE },
+        { kind: e.kind, side: e.side, pos: e.pos, letter: e.letter });
+    }
+  }
   return { base, match: folded.match, pending: all, moving };
 }
 

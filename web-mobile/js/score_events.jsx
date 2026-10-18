@@ -59,6 +59,11 @@ export const NOT_ALLOWED = 'notAllowed';
 export const NOT_STARTED = 'notStarted';
 export const REFUSED = 'refused';
 export const CLOCK_SKEW = 'clock_skew';
+// The reason, and the sentence, the server gives a tap on a bout a removal
+// took off (engine.EventReasonBoutRemoved, EventMessageBoutRemoved): the
+// board says the same as soon as the removal is on screen (applyPending).
+export const BOUT_REMOVED = 'bout_removed';
+export const BOUT_REMOVED_MESSAGE = "Not applied: the bout it was made on was removed, so it was kept in the match's history. Pick the bout's fighters to add it again.";
 // Which of them need no word to the operator has ONE owner, write_result.jsx
 // (tapOutcomeQuiet), which every reader asks (stage 3 review 11, Y2).
 
@@ -590,7 +595,11 @@ function foldBout(m, e, opts, ctx) {
     // it only a fighter picked there does (the pairing added again), since a
     // bare strike would make a bout with no fighters (engine.foldBout).
     const tomb = ctx.stamps[`bout:${e.pos}`] || 0;
-    if (!createsMissingRow(opts, e.pos) || tomb >= (e.stamp || 0) || (tomb > 0 && opts.kachinuki && e.kind !== BOUT_FIGHTER)) return NO_TARGET;
+    if (!createsMissingRow(opts, e.pos) || tomb >= (e.stamp || 0) || (tomb > 0 && opts.kachinuki && e.kind !== BOUT_FIGHTER)) {
+      // The reason the server gives such a tap (engine.EventReasonBoutRemoved).
+      if (tomb > 0 && createsMissingRow(opts, e.pos)) ctx.reason = BOUT_REMOVED;
+      return NO_TARGET;
+    }
     rows = withEmptyBoutRow(rows, e.pos);
     idx = rows.findIndex((r) => r && r.position === e.pos);
   }
@@ -722,8 +731,18 @@ const markHolder = (m, e) => ((e.pos || 0) === 0 ? m : (m.subResults || []).find
 export function applyPending(serverMatch, pending, opts = {}) {
   let match = withMintedMarkIds(copy(serverMatch));
   const outcomes = {};
+  // `reasons`: why a tap is not applied, where the server gives one too (a tap
+  // on a bout the match's copy shows removed: BOUT_REMOVED).
+  const reasons = {};
   const held = (serverMatch && serverMatch.eventSeqs) || {};
-  const ctx = { bouts: new Map(), stamps: {} };
+  // The copy's bout tombstones (a removed bout keeps its `bout:N` stamp), so a
+  // pending tap on a bout another device removed folds as the server's replay
+  // folds it (stage 6 review 7): not applied once the removal is on screen.
+  const stamps = {};
+  for (const [g, s] of Object.entries((serverMatch && serverMatch.groupStamps) || {})) {
+    if (g.startsWith('bout:')) stamps[g] = s;
+  }
+  const ctx = { bouts: new Map(), stamps };
   for (const e of pending || []) {
     if (match.status === 'completed' && !boutsStayOpen(match, groupOf(e), opts)) { outcomes[e.id] = MATCH_CLOSED; continue; }
     if (match.status === 'scheduled') { outcomes[e.id] = NOT_STARTED; continue; }
@@ -735,11 +754,13 @@ export function applyPending(serverMatch, pending, opts = {}) {
       outcomes[e.id] = DUPLICATE;
       continue;
     }
+    ctx.reason = undefined;
     const r = foldEvent(match, e, opts, ctx);
     match = r.match;
     outcomes[e.id] = r.outcome;
+    if (r.outcome !== APPLIED && ctx.reason) reasons[e.id] = ctx.reason;
   }
-  return { match, markIds: match.markIds || null, outcomes };
+  return { match, markIds: match.markIds || null, outcomes, reasons };
 }
 
 // withMintedMarkIds: a copy that names no mark ids (for the match's points, or

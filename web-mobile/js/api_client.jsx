@@ -923,6 +923,17 @@ const _writeQueue = new Map(); // queue key → pending write descriptor
 // view of the queue's entries (the status moves, _statusEntriesByBase) is made
 // again only when they changed, never on every tap (stage 6 review 9, F7).
 let _queueShapeGen = 0;
+// A tap never is a status move, so one entering or leaving the queue leaves
+// the index as it is (stage 6 review 10, m5: every tap made it again).
+function _shapesStatusIndex(d) {
+    return !d || d.kind !== 'evt';
+}
+// _queueSet: an entry enters, or replaces one in, _writeQueue.
+function _queueSet(key, d) {
+    const prev = _writeQueue.get(key);
+    _writeQueue.set(key, d);
+    if ((prev && _shapesStatusIndex(prev)) || _shapesStatusIndex(d)) _queueShapeGen++;
+}
 
 // Entries this tab has taken out of its queue since the last persist: queue
 // key → the enqueuedAt of the entry removed (Infinity when it carried none).
@@ -1042,7 +1053,8 @@ function _unorderedValue(v) {
 function _dequeue(key, descriptor, outcome) {
     const d = _writeQueue.get(key);
     if (!d || (descriptor && d !== descriptor)) return false;
-    _writeQueue.delete(key); _queueShapeGen++;
+    _writeQueue.delete(key);
+    if (_shapesStatusIndex(d)) _queueShapeGen++;
     _markSettled(key, d);
     _noteOwnStatusAnswer(key, d, outcome);
     if (outcome && outcome.byOperator && _inFlight.has(d)) {
@@ -3548,7 +3560,7 @@ function _commitEnqueue(base, descriptor, beforeFlush, { nextTick = false } = {}
     // An add's id is known to the owner before the add is stored, so a tab
     // that takes the add up already finds it queued.
     if (mintedAddId(descriptor)) _minted.minted(descriptor);
-    _writeQueue.set(key, descriptor); _queueShapeGen++;
+    _queueSet(key, descriptor);
     // Read BEFORE the flush is kicked: the flush's synchronous part can
     // persist again, and it is THIS write's persist the answer reports.
     _lastEnqueuePersisted = _persistQueue();
@@ -3746,7 +3758,7 @@ function _onStoredQueueChanged(oldRaw, newRaw) {
             if (_writeQueue.has(moved)) continue;
             k = moved;
         }
-        _writeQueue.set(k, d); _queueShapeGen++;
+        _queueSet(k, d);
         _noteOwnStamp(k, d);
         _noteOwnTapSeq(k, d);
         _adopted.add(d);
@@ -3813,7 +3825,7 @@ function _takeOverLegacyQueue(raw) {
         if (_settled.has(at) && !_enqueuedAfter(d, _settled.get(at))) continue;
         d.held = true;
         if (d.payload && d.payload.forceDownstreamReopen) d.payload = _withoutDownstreamConfirmation(d.payload);
-        _writeQueue.set(at, d); _queueShapeGen++;
+        _queueSet(at, d);
         _takenFromLegacy.set(at, typeof d.enqueuedAt === 'number' ? d.enqueuedAt : Infinity);
         _noteOwnStamp(at, d);
         _noteOwnTapSeq(at, d);
@@ -3970,7 +3982,7 @@ if (typeof fetch === 'function') {
                 const at = moved || key;
                 if (moved) { _markSettled(key, descriptor); migrated = true; }
                 if (!_writeQueue.has(at)) {
-                    _writeQueue.set(at, descriptor); _queueShapeGen++;
+                    _queueSet(at, descriptor);
                     _noteOwnStamp(at, descriptor);
                     anyLoaded = true;
                 }
@@ -6565,6 +6577,9 @@ export {
     // reaching it through a full offline/refuse/reconnect fixture would test the
     // queue rather than the arithmetic. No production consumer outside this file.
     _restampFor,
+    // Exported for tests only: whether a tap makes the status-move index again
+    // shows only in its identity (stage 6 review 10, m5).
+    _statusEntriesByBase,
 };
 
 // S2: a new build reloads the page only once the outbox is idle, and the

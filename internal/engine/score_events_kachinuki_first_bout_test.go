@@ -166,7 +166,7 @@ func TestScoreEvents_KachinukiLineupEditRenamesBoutOne(t *testing.T) {
 	assert.Equal(t, []string{"P1-1"}, reseat("ta"))
 	after := byID()["P1-1"]
 	assert.Equal(t, state.MatchStatusCompleted, after.Status)
-	assert.Equal(t, []string{before.Winner, before.WinnerID, string(before.Decision)}, []string{after.Winner, after.WinnerID, string(after.Decision)}, "the result does not move")
+	assert.Equal(t, []string{before.Winner, before.WinnerID, before.Decision}, []string{after.Winner, after.WinnerID, after.Decision}, "the result does not move")
 	assert.Equal(t, before.TeamResult(), after.TeamResult(), "nor do the team figures")
 	assert.Equal(t, []string{"Chiba", "m-chiba"}, []string{after.SubResults[0].SideA, after.SubResults[0].SideAMemberID})
 	assert.Equal(t, []string{"M", "K"}, after.SubResults[0].IpponsA, "its points stay on bout 1")

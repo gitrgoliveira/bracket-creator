@@ -255,7 +255,7 @@ func openerSeatEventsTx(h state.StoreTx, comp *state.Competition, compID, matchI
 	if len(m.SubResults) == 0 {
 		return nil
 	}
-	if !pin && started && !(ownLineup(d.lineups, m.SideAID, matchID) || ownLineup(d.lineups, m.SideBID, matchID)) {
+	if !pin && started && !ownLineup(d.lineups, m.SideAID, matchID) && !ownLineup(d.lineups, m.SideBID, matchID) {
 		return nil
 	}
 	stamp := max(serverNowMs(), m.ModifiedAt+1, newestLineStamp(lines)+1)

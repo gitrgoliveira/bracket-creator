@@ -1964,10 +1964,12 @@ function _sameLineup(a, b) {
 // save is an outbox entry (bc-evts M5): a match's in its match's order, a
 // starting lineup under its own `lineup:` base, and a save made while the
 // lineup's save is the base's last entry joins it (_coalesceTarget,
-// _placeWrite), since a lineup PUT carries no stamp the server could order two
-// saves by. It is what holds back removing the lineup, which the queued save
-// would undo, and what keeps a read from putting the old lineup back over the
-// pick the sheet shows.
+// _placeWrite), each position keeping its own `changedAt`, by which the server
+// orders it (decision L1). The server's copy lacks a queued save, so this is
+// what keeps a read answered meanwhile from putting the old lineup back over
+// the pick the team sheet shows (matchLineupSaveQueued). A removal does not
+// wait on it: it is an entry of the same base, sent after the save and ordered
+// by its own stamp (`removedAt`), so the queued save never undoes it.
 function _queuedLineupSave(compID, teamId, { matchId, round } = {}) {
     const probe = { payload: { teamId, ...(matchId ? { matchId } : { round }) } };
     // A match's lineup is an entry of its match (bc-evts M5; one an older
@@ -5774,10 +5776,10 @@ const API = {
     },
     // Whether a save of this lineup is still queued. `target` is { matchId } for a
     // match's own lineup or { round } for a team's Lineups-page round (0: its
-    // starting lineup). A queued save replays after anything sent now, so a
-    // removal made meanwhile would be undone by it: the lineup editors hold their
-    // "Use the previous match's lineup" while this is true. Nothing is composed
-    // on a queued save: a new save of the lineup joins it and names what it changed.
+    // starting lineup). The team sheet asks it before it shows a read of the
+    // lineup (a read answered while a save is queued lacks that save). Nothing
+    // is composed on a queued save: a new save of the lineup joins it and names
+    // what it changed, and a removal is ordered after it by its own stamp.
     queuedLineupSave(compID, teamId, target) {
         return _queuedLineupSave(compID, teamId, target || {});
     },

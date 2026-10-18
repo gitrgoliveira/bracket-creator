@@ -508,7 +508,8 @@ const pmAnyBout = "*bout"
 // withdrawal keeps the bouts scored elsewhere, landsAfter, so the tap is
 // applied). A tap stamped before it, in a group the result does not set, stands
 // (applied). In a group it sets: around a decision the loser's own side is kept
-// (recorded) and the winner's is replaced (beforeBaseline); otherwise the
+// (recorded when the decision held it, else applied) and the winner's is
+// replaced (beforeBaseline); otherwise the
 // result's basis decides (recorded when it holds the tap, else beforeBaseline).
 func pmWantOutcome(c pmCase, tap pmStep) string {
 	var first *pmStep
@@ -542,6 +543,11 @@ func pmWantOutcome(c pmCase, tap pmStep) string {
 		loser := map[string]string{"aka": domain.ScoreSideA, "shiro": domain.ScoreSideB}[first.by]
 		if loser != "" {
 			if tap.ev.Side == loser {
+				// Kept either way; "recorded" only when the decision held
+				// it (a decision with no basis saw everything before it).
+				if first.basis && !slices.Contains(first.own, tap.id) {
+					return domain.ScoreOutcomeApplied
+				}
 				return domain.ScoreOutcomeRecorded
 			}
 			return domain.ScoreOutcomeBeforeBaseline

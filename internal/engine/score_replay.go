@@ -1128,10 +1128,18 @@ func (rp *replayer) absorb(b *state.ScoreBaseline, i int, g string) {
 		// A decision keeps the points its loser had struck and replaces the
 		// other side's (keepLoserPoints), so the side of a tap stamped before
 		// it decides, not the basis: whether the decision saw the tap changes
-		// with arrival order, the scoreline does not.
+		// with arrival order, the scoreline does not. A loser's tap the
+		// decision held is recorded; one its SENT basis never saw still
+		// lands, and is answered as any landed tap is (applied), since
+		// "recorded" would claim the decision held it (stage 6 review 5).
+		// A decision that sent no basis saw every tap stamped before it, as
+		// closedBefore reads it, so the answer never hangs on arrival order.
 		if side := rp.lines[i].Event.Side; side == domain.ScoreSideA || side == domain.ScoreSideB {
 			if side == loser {
-				rp.outcome[i] = domain.ScoreOutcomeRecorded
+				rp.outcome[i] = domain.ScoreOutcomeApplied
+				if !b.BasisSent || rp.contains(b, i) {
+					rp.outcome[i] = domain.ScoreOutcomeRecorded
+				}
 			} else {
 				rp.outcome[i] = domain.ScoreOutcomeBeforeBaseline
 			}

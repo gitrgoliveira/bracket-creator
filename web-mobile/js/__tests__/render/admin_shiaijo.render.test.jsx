@@ -2,6 +2,7 @@ import React from 'react';
 import { render, act, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { createOwnStatusMoves } from '../helpers/own_status_moves.js';
 import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, startWhileCorrectingMessage, startWhileStartingMessage, correctWhileRunningMessage, CLOCK_SKEW_REASON_TEXT, markToasted, startWasBlockedByStartMessage } from '../../write_result.jsx';
 import { scoreRowMatchName } from '../../pool_ids.jsx';
 import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
@@ -21,6 +22,8 @@ import { START_SUPERSEDED_MESSAGE } from '../../start_match.jsx';
 // below), while the rendered markup stays exactly what the pre-existing
 // tests already query (data-testid="score-editor" data-match=...).
 const probe = { props: null };
+// The outbox's status moves the console reads (API.ownStatusMove, M4).
+const outbox = createOwnStatusMoves();
 // The latest topbar and breadcrumb props, so a test can take the console's
 // own exits (Sign out, Public viewer, the Dashboard crumb).
 const chrome = { topbar: null, crumbs: null };
@@ -59,6 +62,7 @@ const STUBBED_GLOBALS = {
     startMatch: vi.fn(),
     recordDecision: vi.fn().mockResolvedValue({ applied: true }),
     reinstateCompetitor: vi.fn().mockResolvedValue({}),
+    ...outbox.api,
   },
   // No startPatch: the console imports it from start_match.jsx (a bare vi.fn()
   // here used to make every console start in this suite send `undefined`).
@@ -1648,12 +1652,17 @@ describe('Send back to queue keeps the score and is always offered (bc-sbq)', ()
   // shows at once, as a finish does: the bout leaves the live slot and the
   // editor and shows queued; a refused or discarded one puts it back.
   describe('a send back still queued shows at once', () => {
+    beforeEach(() => { outbox.clear(); });
     const pendingSendBack = () => {
       let settle;
       const settled = new Promise((resolve, reject) => { settle = { resolve, reject }; });
       settled.catch(() => {});
       return { res: { applied: true, pending: true, key: 'k', settled }, settle };
     };
+    // The send back door, as the outbox holds it (M4): the move is the
+    // outbox's, read by the console, not the page's.
+    const sendBackDoor = (res) => vi.fn().mockImplementation((c, m) => Promise.resolve(
+      outbox.hold(c, m, { status: 'scheduled', kind: 'revert', payload: {} }, res)));
     const confirmSendBack = async (c) => {
       await tapSendBack(c);
       const confirm = [...c.utils.container.querySelectorAll('.shiaijo-move-confirm button')]
@@ -1668,7 +1677,7 @@ describe('Send back to queue keeps the score and is always offered (bc-sbq)', ()
       it(`leaves the live slot at once offline, and comes back when ${outcome}`, async () => {
         const c = await mountCourt([courtMatch('m1', 'running', { ipponsA: ['M'], modifiedAt: 100 })]);
         const { res, settle } = pendingSendBack();
-        window.API.revertMatchToQueue = vi.fn().mockResolvedValue(res);
+        window.API.revertMatchToQueue = sendBackDoor(res);
         try {
           expect(c.editorMatch()).toBe('m1');
           await confirmSendBack(c);
@@ -1690,7 +1699,7 @@ describe('Send back to queue keeps the score and is always offered (bc-sbq)', ()
     it('stays queued once landed until the feed shows it, and ends there', async () => {
       const c = await mountCourt([courtMatch('m1', 'running', { ipponsA: ['M'], modifiedAt: 100 }), courtMatch('m2', 'scheduled')]);
       const { res, settle } = pendingSendBack();
-      window.API.revertMatchToQueue = vi.fn().mockResolvedValue(res);
+      window.API.revertMatchToQueue = sendBackDoor(res);
       try {
         await confirmSendBack(c);
         await act(async () => { settle.resolve({ applied: true, modifiedAt: 200 }); });
@@ -1704,6 +1713,31 @@ describe('Send back to queue keeps the score and is always offered (bc-sbq)', ()
         await c.refresh();
         expect(c.editorMatch()).toBe('m1');
       } finally { c.restore(); }
+    });
+
+    // Stage 6 review 8 (M4): the send back is read from the outbox, never kept
+    // in the page, so the console mounted again (the operator went back to
+    // the court, or reloaded) still shows the bout queued, with no editor,
+    // while the outbox holds it; and once the outbox lets it go unanswered
+    // (refused), the bout is live again there too.
+    it('a send back still queued: the console mounted again shows the bout queued', async () => {
+      const feed = [courtMatch('m1', 'running', { ipponsA: ['M'], modifiedAt: 100 })];
+      const c = await mountCourt(feed);
+      const { res, settle } = pendingSendBack();
+      window.API.revertMatchToQueue = sendBackDoor(res);
+      try {
+        await confirmSendBack(c);
+        expect(c.editorMatch()).toBeNull();
+      } finally { c.restore(); }
+      c.utils.unmount();
+      const again = await mountCourt(feed);
+      try {
+        expect(again.editorMatch(), 'no editor on the bout sent back').toBeNull();
+        expect(upNextText(again), 'the bout shows queued').toContain('Aka m1');
+        expect(again.utils.queryByRole('button', { name: /^send back to queue$/i })).toBeNull();
+        await act(async () => { settle.reject(new Error('Not sent back: the match had finished')); });
+        expect(again.editorMatch(), 'refused: live again').toBe('m1');
+      } finally { again.restore(); }
     });
   });
 

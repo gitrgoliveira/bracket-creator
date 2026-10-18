@@ -52,7 +52,7 @@ import { resultRecencyDesc } from './result_recency.jsx';
 // default-win action instead of Start. One leaf owns the question
 // (ineligible_match.jsx); BarredMatchNotice (admin_scoring_shared.jsx) is the
 // one component that renders the note plus that action across every surface.
-import { isBarredMatch, sideBarredByDecision, involvesCompetitor } from './ineligible_match.jsx';
+import { isBarredMatch, sideBarredByDecision, involvesCompetitor, sideKeyForDecisionBy } from './ineligible_match.jsx';
 // Straight from its own leaf, NOT admin_scoring_shared.jsx: that module also
 // imports bracket.jsx (for sideMarks), and admin_shiaijo.jsx's render suite
 // stubs window.BracketTree before importing this file -- routing through
@@ -133,35 +133,51 @@ function _bracketSideName(side) {
     return typeof side === "object" ? (side.name || "") : side;
 }
 
-// finishedHereHolds: whether the console still reads match `m` as finished
-// here (the finishedHere entry `f`, X3). Not once the feed shows it completed
-// or no longer holds it, and not once the server has answered the finish and
-// the feed's copy is stamped after the finish's own stamp (a later change,
-// e.g. a reopen made elsewhere; Z2). Before that answer the copy may move under this device's own
-// earlier writes landing, which the finish follows, so the stamp is not read.
-function finishedHereHolds(f, m) {
-    if (!f || !m || m.status === "completed") return false;
-    if (!f.landed) return true;
-    // Answered: a copy stamped after the finish's own stamp is a later change.
-    // An answer that carried no stamp falls back to any change since the tap.
-    return f.stamp > 0 ? !(m.modifiedAt > f.stamp) : m.modifiedAt === f.at;
+// ownStatusMoveHolds: whether the console still shows match `m` with the
+// status move this device made (`mv`, from the outbox's ONE owner,
+// API.ownStatusMove: a send back, a finish or a decision; stage 6 review 8,
+// M4) over the feed's copy. Not once the feed shows that status or no longer
+// holds the match. While the move is queued it holds: the copy may move under
+// this device's own earlier writes landing, which the move follows. Once the
+// server has answered it, a copy stamped after the move's own stamp is a later
+// change made elsewhere (a reopen, a start), which shows (X3, Z2, stage 6
+// review 7).
+export function ownStatusMoveHolds(mv, m) {
+    if (!mv || !m || m.status === mv.status) return false;
+    if (!mv.landed) return true;
+    return !(m.modifiedAt > mv.stamp);
 }
 
-// sentBackHereHolds: whether the console still reads match `m` as sent back to
-// the queue here (the sentBackHere entry `f`, stage 6 review 7), the twin of
-// finishedHereHolds: not once the feed shows it scheduled or no longer holds
-// it, and not once the server has answered the send back and the feed's copy
-// is stamped after the send back's own stamp (a later change made elsewhere).
-export function sentBackHereHolds(f, m) {
-    if (!f || !m || m.status === "scheduled") return false;
-    if (!f.landed) return true;
-    return f.stamp > 0 ? !(m.modifiedAt > f.stamp) : m.modifiedAt === f.at;
+// withOwnStatusMove: match `m` as the court console shows it under the move
+// `mv`: sent back reads scheduled, its score kept; finished reads completed
+// with the winner the finish names (an engi finish, which names none: the side
+// its flags decide), or for a decision the side that did not withdraw, the
+// finish's counts laid on, so the court row never shows a finished match
+// without its winner. The same after a reload or with the console mounted
+// again: the move is read from the outbox, never from the page's memory.
+export function withOwnStatusMove(m, mv) {
+    if (!ownStatusMoveHolds(mv, m)) return m;
+    if (mv.status === "scheduled") return { ...m, status: "scheduled" };
+    const p = mv.payload || {};
+    let winner;
+    if (mv.kind === "decision") {
+        const lost = sideKeyForDecisionBy(p.decisionBy);
+        winner = lost === "a" ? m.sideB : lost === "b" ? m.sideA : null;
+    } else {
+        winner = finishWinnerOf(m, p);
+        // The wire names the winner by name: the side it names.
+        if (typeof winner === "string") {
+            if (winner === _bracketSideName(m.sideA)) winner = m.sideA;
+            else if (winner === _bracketSideName(m.sideB)) winner = m.sideB;
+        }
+    }
+    return { ...m, ...(finishFieldsOf(p) || {}), status: "completed", ...(winner ? { winner } : {}) };
 }
 
 // finishWinnerOf: the winner a finish names, or, for an engi finish, which
 // names none (the server decides it from the flags, engine.engiWinnerSide),
 // the side with more flags in it. The console reads a match finished here as
-// finished with this winner (finishedHere) and advances its local bracket on
+// finished with this winner (withOwnStatusMove) and advances its local bracket on
 // it, so the court row never shows a finished match without its winner
 // (stage 6).
 export function finishWinnerOf(match, patch) {
@@ -748,34 +764,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const w = finishWinnerOf(match, patch);
         advanceLocalUntilRefused(match, _bracketSideName(w), res);
     }, [advanceLocalUntilRefused]);
-    // markFinishedHere: the outbox holds a finish or a decision of `match`
-    // (its pending answer `res`), so the console reads the match as finished
-    // here until the feed shows it (finishedHere, X3). The server's answer, a
-    // callback and never a wait, ends it on a refusal or a discard and marks it
-    // landed otherwise.
-    const markFinishedHere = (match, winner, res, fields = null) => {
-        if (!match || match.status === "completed" || !writePending(res)) return;
-        const key = matchKey(match);
-        setFinishedHere((prev) => ({ ...prev, [key]: { at: match.modifiedAt, winner: winner || null, fields, landed: false } }));
-        // `stamp`: the server's stamp on the finish, from its answer. A copy of
-        // the match stamped at or before it is still the one before the finish
-        // (this device's own taps land between the tap and the answer), so only
-        // a later stamp is a later change (Z2).
-        const end = (landed, stamp) => {
-            if (!mountedRef.current) return;
-            setFinishedHere((prev) => {
-                if (!prev[key]) return prev;
-                const next = { ...prev };
-                if (landed) next[key] = { ...prev[key], landed: true, ...(stamp > 0 ? { stamp } : {}) };
-                else delete next[key];
-                return next;
-            });
-        };
-        res.settled.then(
-            (body) => end(!!body && !body.discarded && !writeWasRefused(body), Number(body && body.modifiedAt)),
-            () => end(false),
-        );
-    };
     // The last Start the server refused, or the console refused for a start still
     // out that has since landed, as { key, compId, msg } for the match it was
     // refused for (null = none). It belongs to that match: it shows on that
@@ -977,24 +965,22 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // The match pickMatch started, and the scheduled snapshot it started
     // from: see ScoreEditorModal's `started` (bc-strt).
     const [startedFrom, setStartedFrom] = useStateSh(null);
-    // The matches this console finished (a finish or a decision the outbox
-    // holds, answered pending), by matchKey: { at, winner, landed } (bc-evts
-    // stage 3 review 11, X3). The twin of startedFrom: until the court's feed
-    // shows the match completed, the console reads it as finished here, so the
-    // panel moves on at once, offline included, for a pool match as for a
-    // knockout one. `at` is the match's stamp when it was finished: once the
-    // server answered the write (`landed`), a running copy stamped otherwise is
-    // a later change (a reopen elsewhere) and ends it. A refused or discarded
-    // write ends it too, so the match is back on the panel.
-    const [finishedHere, setFinishedHere] = useStateSh({});
-    // The matches this console sent back to the queue (a send back the outbox
-    // holds, answered pending), by matchKey: { at, landed, stamp } (stage 6
-    // review 7). The twin of finishedHere: until the court's feed shows the
-    // match scheduled, the console reads it as queued, so the bout leaves the
-    // live slot and the editor at once, offline included, and no tap is made
-    // on a bout the operator sent back. A refused or discarded send back puts
-    // it back.
-    const [sentBackHere, setSentBackHere] = useStateSh({});
+    // The status moves this device made (a send back, a finish, a decision)
+    // show at once over the court's feed, offline included, until the feed
+    // shows them (withOwnStatusMove): the panel moves on, a bout sent back
+    // leaves the live slot and the editor. They are read from the outbox
+    // through ONE owner (API.ownStatusMove, stage 6 review 8, M4), never kept
+    // in this page's state, so a reload or the console mounted again shows
+    // what the operator did; a refused or discarded move leaves the outbox,
+    // and the match shows as the server holds it. Re-read whenever a move
+    // changes.
+    const [ownMovesSeq, setOwnMovesSeq] = useStateSh(0);
+    useEffectSh(() => {
+        if (!window.API || typeof window.API.subscribeOwnStatusMoves !== "function") return undefined;
+        return window.API.subscribeOwnStatusMoves(() => setOwnMovesSeq((n) => n + 1));
+    }, []);
+    const ownMoveOf = (m) => (window.API && typeof window.API.ownStatusMove === "function"
+        ? window.API.ownStatusMove(m.compId, m.id) : null);
     // The COMPLETED match the operator has opened to correct in place (parity
     // with the Scores page's "Correct" button). Kept separate from pickedKey so
     // it takes priority over the running bout WITHOUT disturbing it, and so it
@@ -1069,45 +1055,25 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             : [],
         [courtCompetitions, tournament.courts, court]
     );
-    // A match finished here reads completed, with the winner it was finished
-    // with, until the feed says so itself (finishedHere, X3): every list below
-    // (running, Up next, allDone, the advance target) agrees on it.
+    // A match this device finished or sent back reads so, until the feed says
+    // so itself (withOwnStatusMove): every list below (running, Up next,
+    // allDone, the advance target) agrees on it.
     const allMatches = useMemoSh(
-        () => courtMatchesRaw.filter(hasBothSides).map((m) => {
-            // Sent back here: queued, its score kept, until the feed says so.
-            if (sentBackHereHolds(sentBackHere[matchKey(m)], m)) return { ...m, status: "scheduled" };
-            const f = finishedHere[matchKey(m)];
-            if (!finishedHereHolds(f, m)) return m;
-            return { ...m, ...f.fields, status: "completed", ...(f.winner ? { winner: f.winner } : {}) };
-        }),
-        [courtMatchesRaw, finishedHere, sentBackHere]
+        () => courtMatchesRaw.filter(hasBothSides).map((m) => withOwnStatusMove(m, ownMoveOf(m))),
+        // ownMovesSeq: a move queued, answered, refused or discarded.
+        // oxlint-disable-next-line react-hooks/exhaustive-deps
+        [courtMatchesRaw, ownMovesSeq]
     );
+    // A move the server answered ends once the feed shows it, or a later
+    // change made elsewhere: the owner forgets it.
     useEffectSh(() => {
-        const keys = Object.keys(sentBackHere);
-        if (keys.length === 0) return;
-        const byKey = new Map(courtMatchesRaw.map((m) => [matchKey(m), m]));
-        const ended = keys.filter((k) => !sentBackHereHolds(sentBackHere[k], byKey.get(k)));
-        if (ended.length === 0) return;
-        setSentBackHere((prev) => {
-            const next = { ...prev };
-            for (const k of ended) delete next[k];
-            return next;
-        });
-    }, [courtMatchesRaw, sentBackHere]);
-    // An entry ends once the feed shows the match completed (or gone), or, once
-    // the server has answered the finish, shows it changed since.
-    useEffectSh(() => {
-        const keys = Object.keys(finishedHere);
-        if (keys.length === 0) return;
-        const byKey = new Map(courtMatchesRaw.map((m) => [matchKey(m), m]));
-        const ended = keys.filter((k) => !finishedHereHolds(finishedHere[k], byKey.get(k)));
-        if (ended.length === 0) return;
-        setFinishedHere((prev) => {
-            const next = { ...prev };
-            for (const k of ended) delete next[k];
-            return next;
-        });
-    }, [courtMatchesRaw, finishedHere]);
+        if (!window.API || typeof window.API.forgetOwnStatusMove !== "function") return;
+        for (const m of courtMatchesRaw) {
+            const mv = ownMoveOf(m);
+            if (mv && mv.landed && !ownStatusMoveHolds(mv, m)) window.API.forgetOwnStatusMove(m.compId, m.id);
+        }
+        // oxlint-disable-next-line react-hooks/exhaustive-deps
+    }, [courtMatchesRaw, ownMovesSeq]);
     // Scheduled knockout bouts still waiting on a "Winner of rX-mY" feeder
     // (mp-y3nk). Kept SEPARATE from allMatches / filteredScheduled so they never
     // become upNext, never enter moveMatch reordering, and never carry a Start
@@ -1825,7 +1791,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 const sent = await window.API.revertMatchToQueue(cur.compId, cur.id, password, { onRefusal: deferFailed, seen: cur.scoreVersion });
                 after = writeQueueKey(sent);
                 // Shown queued at once, as the Send back confirm's is.
-                if (mountedRef.current) markSentBackHere(matchKey(cur), cur.modifiedAt, sent);
+                if (mountedRef.current) markSentBackHere(matchKey(cur), sent);
             } catch (e) {
                 deferFailed(e);
                 return;
@@ -2043,28 +2009,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         setPendingRevert({ compId: m.compId, matchId: m.id, label: confirmMatchLabel(m), seen: m.scoreVersion, at: m.modifiedAt, key: matchKey(m), unsaved });
     };
     // markSentBackHere: the outbox holds a send back of the match keyed `key`
-    // (its pending answer `res`), so the console reads it as queued until the
-    // feed shows it (sentBackHere). The server's answer, a callback and never a
-    // wait, ends it on a refusal or a discard and marks it landed otherwise. A
-    // start pin of the match (startedFrom) goes with it: the bout is queued.
-    const markSentBackHere = (key, at, res) => {
+    // (its pending answer `res`): the console shows it queued from the outbox
+    // itself (withOwnStatusMove), and a start pin of the match (startedFrom)
+    // goes with it: the bout is queued.
+    const markSentBackHere = (key, res) => {
         if (!key || !writePending(res)) return;
-        setSentBackHere((prev) => ({ ...prev, [key]: { at, landed: false } }));
         setStartedFrom((prev) => (prev && prev.key === key ? null : prev));
-        const end = (landed, stamp) => {
-            if (!mountedRef.current) return;
-            setSentBackHere((prev) => {
-                if (!prev[key]) return prev;
-                const next = { ...prev };
-                if (landed) next[key] = { ...prev[key], landed: true, ...(stamp > 0 ? { stamp } : {}) };
-                else delete next[key];
-                return next;
-            });
-        };
-        res.settled.then(
-            (body) => end(!!body && !body.discarded && !writeWasRefused(body), Number(body && body.modifiedAt)),
-            () => end(false),
-        );
     };
     const confirmRevert = async (ev) => {
         if (!pendingRevert || reverting) return;
@@ -2099,8 +2049,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             if (!mountedRef.current) return;
             // Queued (offline included): the bout leaves the live slot and the
             // editor at once and shows in the queue, as a finish shows finished
-            // (finishedHere); a refused or discarded send back puts it back.
-            markSentBackHere(pendingRevert.key, pendingRevert.at, res);
+            // (withOwnStatusMove); a refused or discarded send back puts it back.
+            markSentBackHere(pendingRevert.key, res);
             if (showToast) showToast(`${label} sent back to queue`);
             setPendingRevert(null);
             setPickedKey(null);
@@ -2582,8 +2532,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             // them to go and check. A queued write still advances (it
                                             // reconciles on reconnect); see writeWasSuperseded.
                                             if (!writeWasSuperseded(res)) maybeAdvanceLocal(selectedMatch, patch, res);
-                                            // A finish the outbox holds: the panel moves on at once (X3).
-                                            if (patch && patch.status === "completed") markFinishedHere(selectedMatch, finishWinnerOf(selectedMatch, patch), res, finishFieldsOf(patch));
+                                            // A finish the outbox holds shows at once, read from the
+                                            // outbox (withOwnStatusMove, X3, M4).
                                             // What the write came back with, so the editor shows the
                                             // not-saved banner for one that did not land (queued, F5; or
                                             // superseded by a newer stored result, bc-lww1) and tells a
@@ -2602,7 +2552,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             // advance the local bracket on a winner the server discarded.
                                             if (!writeWasSuperseded(res)) maybeAdvanceLocal(selectedMatch, patch, res);
                                             if (!mountedRef.current) return res;
-                                            if (patch && patch.status === "completed") markFinishedHere(selectedMatch, finishWinnerOf(selectedMatch, patch), res, finishFieldsOf(patch));
                                             // A write that did not land must NOT advance: the match is
                                             // still running and still holds the court, so starting the
                                             // next one here just earns a court_busy on top of the
@@ -2630,8 +2579,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         // A decision the server refuses or the operator discards later
                                         // takes the advance back (advanceLocalUntilRefused).
                                         advanceLocalUntilRefused(selectedMatch, _bracketSideName(result && result.winner), result);
-                                        // A decision the outbox holds: the panel moves on at once (X3).
-                                        markFinishedHere(selectedMatch, result && result.winner, result);
+                                        // A decision the outbox holds shows at once, read from the
+                                        // outbox (withOwnStatusMove, X3, M4).
                                         // Then start the next scheduled match so the panel advances
                                         // (mirrors onSubmitAndNext), passing over the matches of a
                                         // competitor a withdrawal or no-show has just barred.

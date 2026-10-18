@@ -1039,6 +1039,7 @@ function _dequeue(key, descriptor, outcome) {
     if (!d || (descriptor && d !== descriptor)) return false;
     _writeQueue.delete(key);
     _markSettled(key, d);
+    _noteOwnStatusAnswer(key, d, outcome);
     if (outcome && outcome.byOperator && _inFlight.has(d)) {
         // Discarded while its request is out: the server may still keep it,
         // so what a discard undoes waits for that request to end (L1,
@@ -1206,6 +1207,92 @@ function _entriesFor(base) {
         if (d && _baseOf(k) === base) out.push([k, d]);
     }
     return out.sort(_byEntryOrder);
+}
+
+// ---------------------------------------------------------------------------
+// The status moves this device made (stage 6 review 8, M4, the screen rule:
+// "The screens must display exactly what the operator sees or changes"): a
+// send back to the queue (scheduled), a finish or a decision (completed), and
+// a start or a reopen after them (running). ONE owner, read by the court
+// console: the outbox's queued entries of the match, the last move in its
+// replay order (so a reload, or the console mounted again, still shows a send
+// back or a finish the outbox holds), else the last such move the server
+// answered as landed, kept for the page, until the feed shows it. A refused or
+// discarded move leaves the queue with no answer kept: the screen shows the
+// server's copy again.
+// ---------------------------------------------------------------------------
+const _ownStatusAnswered = new Map(); // base -> { status, kind, payload, stamp }
+const _ownStatusListeners = new Set();
+let _ownStatusSig = '';
+
+// _statusMoveOf: the status a queued entry moves its match to, or null.
+function _statusMoveOf(d) {
+    if (!d) return null;
+    const p = d.payload || {};
+    switch (d.kind) {
+        case 'revert': return 'scheduled';
+        case 'decision': return 'completed';
+        case 'reopen': case 'requeue': return 'running';
+        case 'score': case undefined: case null: case '':
+            if (p.status === 'completed') return 'completed';
+            if (p.status === 'running' && p.startOnly) return 'running';
+            return null;
+        default: return null;
+    }
+}
+
+// _ownStatusMove: what the court console shows for match (compID, matchID)
+// over the server's copy: { status, kind, payload, landed, stamp }, or null.
+// `stamp` is the move's own (the server's answer when it named one): a feed
+// copy stamped after it is a later change made elsewhere.
+function _ownStatusMove(compID, matchID) {
+    const base = _revKey(compID, matchID);
+    let last = null;
+    for (const [, d] of _entriesFor(base)) {
+        const status = _statusMoveOf(d);
+        if (status) last = { status, kind: d.kind || 'score', payload: d.payload, landed: false, stamp: _entryStamp(d) };
+    }
+    if (last) return last.status === 'running' ? null : last;
+    const answered = _ownStatusAnswered.get(base);
+    return answered ? { ...answered, landed: true } : null;
+}
+
+// _noteOwnStatusAnswer: an entry left the queue (`outcome`, as _dequeue has
+// it). A status move the server took is kept as answered; one it refused, or
+// that was discarded or sent by another tab, keeps nothing.
+function _noteOwnStatusAnswer(key, d, outcome) {
+    const status = _statusMoveOf(d);
+    if (!status) return;
+    const base = _baseOf(key);
+    const v = outcome && 'value' in outcome ? outcome.value : undefined;
+    if (v === undefined || v === null || _unorderedValue(v) || writeWasSuperseded(v)) return;
+    if (status === 'running') {
+        _ownStatusAnswered.delete(base);
+        return;
+    }
+    const answered = Number(v && typeof v === 'object' && v.modifiedAt);
+    _ownStatusAnswered.set(base, {
+        status, kind: d.kind || 'score', payload: d.payload,
+        stamp: Number.isFinite(answered) && answered > 0 ? answered : _entryStamp(d),
+    });
+}
+
+// _publishOwnStatus: tells the listeners when any match's own status move
+// changed (from _recomputeSyncStatus, which every queue change reaches).
+function _publishOwnStatus() {
+    if (_ownStatusListeners.size === 0) return;
+    const parts = [];
+    for (const [k, d] of _writeQueue) {
+        const status = _statusMoveOf(d);
+        if (status) parts.push(`${k}=${status}`);
+    }
+    for (const [base, a] of _ownStatusAnswered) parts.push(`${base}~${a.status}@${a.stamp}`);
+    const sig = parts.sort().join('|');
+    if (sig === _ownStatusSig) return;
+    _ownStatusSig = sig;
+    for (const fn of _ownStatusListeners) {
+        try { fn(); } catch (_e) { /* swallow */ }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2154,6 +2241,7 @@ function _afterDiscard() {
 function _recomputeSyncStatus() {
     _setSyncStatus(_deriveSyncStatus());
     _publishUnsentWrites();
+    _publishOwnStatus();
 }
 function _deriveSyncStatus() {
     if (_offlineFlag && _writeQueue.size > 0) return 'offline';
@@ -6100,6 +6188,20 @@ const API = {
 
     // R4: the court moves and time changes this device makes, told in the tick
     // they are made and again when a refusal puts the old value back.
+    // The status move this device made to a match that the court console
+    // shows over the server's copy (_ownStatusMove, M4), and a subscription
+    // told whenever one changes (queued, answered, refused or discarded).
+    ownStatusMove(compID, matchID) {
+        return _ownStatusMove(compID, matchID);
+    },
+    subscribeOwnStatusMoves(fn) {
+        _ownStatusListeners.add(fn);
+        return () => _ownStatusListeners.delete(fn);
+    },
+    // The feed shows the move, or a later change: the answered record goes.
+    forgetOwnStatusMove(compID, matchID) {
+        if (_ownStatusAnswered.delete(_revKey(compID, matchID))) _publishOwnStatus();
+    },
     subscribeLocalMatchPatch(cb) {
         return subscribeLocalMatchPatch(cb);
     },
@@ -6229,6 +6331,7 @@ const API = {
         const discardingTotal = _writeQueue.size;
         _turnedAwaySeen.clear();
         _toldOnBoard.clear();
+        _ownStatusAnswered.clear();
         if (discardingTotal > 0) {
             _notifyQueueAlert({ kind: 'discarded', count: discardingTotal, terminalCount: discarding });
         }

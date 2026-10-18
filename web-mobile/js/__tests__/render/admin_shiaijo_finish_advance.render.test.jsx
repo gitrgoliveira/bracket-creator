@@ -2,6 +2,7 @@ import React from 'react';
 import { render, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { createOwnStatusMoves } from '../helpers/own_status_moves.js';
 
 // bc-evts stage 3 review 11 (X1, X3): the court console's automatic start,
 // after Finish + Start Next or after a decision, is queued AFTER the finish or
@@ -14,6 +15,8 @@ import { installWindowStubs } from '../helpers/stub_globals.js';
 
 const captured = { props: null };
 const tournamentMatchesSpy = vi.fn();
+// The outbox's status moves (M4): the stubbed score door holds the finish.
+const outbox = createOwnStatusMoves();
 
 const STUBBED_GLOBALS = {
   AdminTopbar: ({ children }) => <div data-testid="topbar">{children}</div>,
@@ -31,6 +34,7 @@ const STUBBED_GLOBALS = {
     sendAnnouncement: vi.fn(),
     updateMatchTime: vi.fn(),
     startMatch: vi.fn(),
+    ...outbox.api,
   },
   confirmDialog: vi.fn().mockResolvedValue(true),
   PoolsViewer: () => null,
@@ -68,7 +72,7 @@ function pageElement(onEditScore, t = tournament) {
       tournament={t}
       court="A"
       onBack={vi.fn()}
-      onEditScore={onEditScore}
+      onEditScore={outbox.scoreDoor(onEditScore)}
       onMoveCourt={vi.fn()}
       onLogout={vi.fn()}
       onViewerMode={vi.fn()}
@@ -96,6 +100,7 @@ const shownMatch = () => {
 
 beforeEach(() => {
   captured.props = null;
+  outbox.clear();
   tournamentMatchesSpy.mockReset();
   tournamentMatchesSpy.mockImplementation(() => [running, scheduled]);
   window.tournamentMatches = tournamentMatchesSpy;
@@ -164,6 +169,37 @@ describe('the court console moves on at once on a pending finish (X3)', () => {
     expect(shownMatch()).toBe(null);
     await act(async () => { refuse({ applied: false, reason: 'superseded', heldGroups: ['result'] }); await settled; });
     expect(shownMatch()).toBe('Pool A-1');
+  });
+});
+
+// Stage 6 review 8 (M4): what the console shows of a finish or a decision it
+// made is read from the outbox, never from the page's memory, so the console
+// mounted again (the operator left the court and came back, or reloaded) still
+// shows it finished while the outbox holds it.
+describe('a finish or a decision the outbox holds shows after the console is mounted again (M4)', () => {
+  it('a queued finish: still off the panel, finished with its winner', async () => {
+    tournamentMatchesSpy.mockImplementation(() => [running]);
+    const onEditScore = vi.fn(async (_c, mid) => pending(`K:${mid}`));
+    const first = renderPage(onEditScore);
+    await act(async () => { await captured.props.onSubmit(finishPatch); });
+    expect(shownMatch()).toBe(null);
+    first.unmount();
+    renderPage(onEditScore);
+    expect(shownMatch(), 'the match the outbox finished is not live again').toBe(null);
+    const row = document.querySelector('.shiaijo-qrow--complete');
+    expect(row, 'it shows finished').not.toBeNull();
+    expect(row.querySelector('.shiaijo-qrow__side--aka .bc-winner-tick'), 'with the winner the finish names').not.toBeNull();
+  });
+
+  it('a queued decision: finished, the side that did not withdraw the winner', async () => {
+    tournamentMatchesSpy.mockImplementation(() => [running]);
+    outbox.hold('c1', 'Pool A-1', { status: 'completed', kind: 'decision', payload: { decision: 'kiken', decisionBy: 'shiro' } }, pending('K:decision'));
+    renderPage(vi.fn(async (_c, mid) => pending(`K:${mid}`)));
+    expect(shownMatch()).toBe(null);
+    const row = document.querySelector('.shiaijo-qrow--complete');
+    expect(row).not.toBeNull();
+    expect(row.querySelector('.shiaijo-qrow__side--aka .bc-winner-tick'), 'Aka, as Shiro withdrew').not.toBeNull();
+    expect(row.querySelector('.shiaijo-qrow__side--shiro .bc-winner-tick')).toBeNull();
   });
 });
 

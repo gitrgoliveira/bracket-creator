@@ -2,6 +2,10 @@ import React from 'react';
 import { render, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { createOwnStatusMoves } from '../helpers/own_status_moves.js';
+
+// The outbox's status moves (M4): the stubbed score door holds the finish.
+const outbox = createOwnStatusMoves();
 
 // bc-evts stage 6 (a defect the journeys found): the court console reads a
 // match it finished here as finished at once, from the finish the outbox
@@ -29,6 +33,7 @@ const STUBBED_GLOBALS = {
     sendAnnouncement: vi.fn(),
     updateMatchTime: vi.fn(),
     startMatch: vi.fn(),
+    ...outbox.api,
   },
   confirmDialog: vi.fn().mockResolvedValue(true),
   PoolsViewer: () => null,
@@ -57,7 +62,7 @@ const pending = () => ({ applied: true, pending: true, key: 'k', settled: new Pr
 
 const page = (onEditScore) => (
   <AdminShiaijoPage
-    tournament={tournament} court="A" onBack={vi.fn()} onEditScore={onEditScore} onMoveCourt={vi.fn()}
+    tournament={tournament} court="A" onBack={vi.fn()} onEditScore={outbox.scoreDoor(onEditScore)} onMoveCourt={vi.fn()}
     onLogout={vi.fn()} onViewerMode={vi.fn()} password="" showToast={vi.fn()} tweaks={{}} onSwitchCourt={vi.fn()}
   />
 );
@@ -65,6 +70,7 @@ const completedRow = () => document.querySelector('.shiaijo-qrow--complete');
 
 beforeEach(() => {
   captured.props = null;
+  outbox.clear();
   window.tournamentMatches = () => [engiRunning];
 });
 

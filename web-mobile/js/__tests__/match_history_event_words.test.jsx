@@ -28,6 +28,14 @@ describe('a tap in the match history', () => {
         expect(historyEntryView(tap({ kind: 'ippon.add', side: 'b', letter: 'M' }, 'matchClosed', { reason: 'the match was already finished' })).reason)
             .toBe('Not applied: the match was already finished');
     });
+    // K1 (c): the server seats a kachinuki bout 1 from the lineup with events
+    // of its own; the operator reads that plainly, not as a tap.
+    it('the server\'s own fighter event reads as set from the lineup', () => {
+        expect(historyEntryView(tap({ kind: 'bout.fighter', session: 'server', pos: 1, side: 'b', name: 'Baba' }, 'applied')).door)
+            .toBe('Bout 1: Shiro fighter set from the lineup (Baba)');
+        expect(historyEntryView(tap({ kind: 'bout.fighter', session: 's1', pos: 2, side: 'a', name: 'Chiba' }, 'applied')).door)
+            .toBe('Tap: Aka fighter named on bout 2');
+    });
     it('a door the view does not know still reads, and the replay doors have words', () => {
         expect(historyDoorWords('event')).toBe('Tap');
         expect(historyDoorWords('migrate')).toBe('Score log started');

@@ -1116,7 +1116,7 @@ func (rp *replayer) applyEvent(line int, e *domain.ScoreEvent) {
 	// recorded (in stamp order) closed the match, so a tap stamped after it
 	// is kept and changes nothing. Correct (a baseline) or a reopen is
 	// the only way to change it.
-	if rp.closed() && !rp.boutsStayOpen(g) {
+	if rp.closed() && !rp.boutsStayOpen(g) && !serverFighterEvent(e) {
 		rp.outcome[line] = domain.ScoreOutcomeMatchClosed
 		return
 	}
@@ -1440,9 +1440,10 @@ func boutScoreOf(row state.SubMatchResult) domain.BoutScore {
 // pairing Record bout has not appended, or one removed, is noTarget.
 func foldBout(r *replayMatch, e *domain.ScoreEvent, shape ReplayShape, stamps map[string]int64) string {
 	m := &r.m
-	// A bout whose row a line removed keeps its stamp, a tombstone: it is not
-	// made again (Remove this bout stands).
-	if boutRowIndex(m.SubResults, e.Pos) >= 0 || !shape.createsMissingRow(e.Pos) || stamps[state.BoutGroup(e.Pos)] > 0 {
+	// A bout whose row a line removed keeps its stamp, a tombstone: an event
+	// stamped at or before the removal does not make it again (Remove this
+	// bout stands), one made after it does (the pairing added again).
+	if boutRowIndex(m.SubResults, e.Pos) >= 0 || !shape.createsMissingRow(e.Pos) || stamps[state.BoutGroup(e.Pos)] >= e.Stamp {
 		return foldBoutRow(r, e, shape, stamps)
 	}
 	// A numbered bout the match holds no row for yet (createsMissingRow: a
@@ -1542,7 +1543,13 @@ func foldBoutRow(r *replayMatch, e *domain.ScoreEvent, shape ReplayShape, stamps
 		}
 		// On the first bout too: the lineup's fighters reach it as the
 		// server's own bout.fighter events (kachinuki_opener.go), ordered by
-		// stamp like every tap.
+		// stamp like every tap. A server event that carries the stayer on to
+		// a later bout names, in Target, the fighter it replaces: a side that
+		// holds another one at its point in stamp order (a pick made before
+		// it) keeps the pick.
+		if e.Target != "" && !fighterIs(*name, *member, e.Target) {
+			return domain.ScoreOutcomeNotAllowed
+		}
 		*name, *member = e.Name, e.MemberID
 		out = domain.ScoreOutcomeApplied
 	case domain.ScoreDaihyosenVerdict:

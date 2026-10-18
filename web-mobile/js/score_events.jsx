@@ -555,6 +555,20 @@ export function createsMissingRow(opts, pos) {
   return pos >= 1 && pos <= (Number(opts.teamSize) || 0);
 }
 
+// fighterIs: whether a row's side holds the fighter a server fighter event's
+// target names, "id:<member id>" or "name:<name>" (engine.fighterIs).
+function fighterIs(row, e) {
+  const name = (e.side === SIDE_B ? row.sideB : row.sideA) || '';
+  const member = (e.side === SIDE_B ? row.sideBMemberId : row.sideAMemberId) || '';
+  if (e.target.startsWith('id:')) return member === e.target.slice(3);
+  const n = e.target.startsWith('name:') ? e.target.slice(5) : e.target;
+  return member === '' && name === n;
+}
+
+// serverFighterEvent: the server's own fighter events pass the closed-match
+// rule (engine.serverFighterEvent): they name who fought, never a score.
+const serverFighterEvent = (e) => e.session === 'server' && e.kind === BOUT_FIGHTER;
+
 // withEmptyBoutRow is rows with an empty row at pos, the numbered rows in
 // position order ahead of the representative bout (engine.withEmptyBoutRow).
 function withEmptyBoutRow(rows, pos) {
@@ -571,9 +585,10 @@ function foldBout(m, e, opts, ctx) {
     // fixed-order bout of a match started from the queue, a kachinuki first
     // bout, a pairing added by hand): the row is made, and kept only if the
     // event applies (m.subResults is set only then).
-    // A bout whose row a line removed keeps its stamp, a tombstone: it is
-    // not made again (engine.foldBout).
-    if (!createsMissingRow(opts, e.pos) || (ctx.stamps[`bout:${e.pos}`] || 0) > 0) return NO_TARGET;
+    // A bout whose row a line removed keeps its stamp, a tombstone: an
+    // event stamped at or before the removal does not make it again, one
+    // made after it does (engine.foldBout).
+    if (!createsMissingRow(opts, e.pos) || (ctx.stamps[`bout:${e.pos}`] || 0) >= (e.stamp || 0)) return NO_TARGET;
     rows = withEmptyBoutRow(rows, e.pos);
     idx = rows.findIndex((r) => r && r.position === e.pos);
   }
@@ -593,7 +608,9 @@ function foldBout(m, e, opts, ctx) {
       if (!opts.kachinuki || e.pos <= 0) return NOT_ALLOWED;
       // On the first bout too: the lineup's fighters reach it as the server's
       // own bout.fighter events (engine.openerSeatEvents), ordered by stamp
-      // like every tap.
+      // like every tap. One that carries the stayer on names, in target, the
+      // fighter it replaces: a side holding another keeps it (engine.fighterIs).
+      if (e.target && !fighterIs(row, e)) return NOT_ALLOWED;
       if (e.side === SIDE_B) { row.sideB = e.name || ''; setOrDelete(row, 'sideBMemberId', e.memberId); }
       else { row.sideA = e.name || ''; setOrDelete(row, 'sideAMemberId', e.memberId); }
       out = APPLIED;
@@ -1045,7 +1062,7 @@ export function replayHead(match, head, lines, opts = {}) {
 
   const applyEvent = (line, e) => {
     const g = groupOf(e);
-    if (closed() && !boutsStayOpen(cur, g, opts)) { outcome[line] = MATCH_CLOSED; return; }
+    if (closed() && !boutsStayOpen(cur, g, opts) && !serverFighterEvent(e)) { outcome[line] = MATCH_CLOSED; return; }
     const governed = g in govern;
     if (!governed && covered[g]) { (early[g] = early[g] || []).push(line); return; }
     if (governed && contains(log[govern[g]].baseline, line)) { outcome[line] = RECORDED; return; }

@@ -2317,6 +2317,343 @@
    }
   },
   {
+   "name": "a pick on the stayer's later bout made before a lineup edit renames the stayer stands, whichever reaches the server first: the server's event names the fighter it replaces",
+   "jsMirror": true,
+   "shape": {
+    "kind": "kachinuki"
+   },
+   "match": {
+    "id": "r0-m0",
+    "sideA": "Kyoto",
+    "sideB": "Osaka",
+    "sideAId": "ta",
+    "sideBId": "tb",
+    "winner": "",
+    "ipponsA": [],
+    "ipponsB": [],
+    "hansokuA": 0,
+    "hansokuB": 0,
+    "decision": "",
+    "status": "running",
+    "court": "A",
+    "round": 0,
+    "scheduledAt": "",
+    "subResults": [
+     {
+      "position": 1,
+      "sideA": "K1",
+      "sideB": "O1",
+      "ipponsA": [
+       "M",
+       "K"
+      ],
+      "ipponsB": [],
+      "hansokuA": 0,
+      "hansokuB": 0,
+      "winner": "K1",
+      "decision": "",
+      "sideAMemberId": "k1",
+      "sideBMemberId": "o1",
+      "winnerMemberId": "k1"
+     },
+     {
+      "position": 2,
+      "sideA": "K1",
+      "sideB": "O2",
+      "ipponsA": [],
+      "ipponsB": [],
+      "hansokuA": 0,
+      "hansokuB": 0,
+      "winner": "",
+      "decision": "",
+      "sideAMemberId": "k1",
+      "sideBMemberId": "o2"
+     }
+    ]
+   },
+   "head": [
+    {
+     "v": 1,
+     "baseline": {
+      "id": "m0",
+      "door": "test",
+      "stamp": 10,
+      "values": {
+       "bout:1": {
+        "position": 1,
+        "sideA": "K1",
+        "sideB": "O1",
+        "ipponsA": [
+         "M",
+         "K"
+        ],
+        "ipponsB": [],
+        "hansokuA": 0,
+        "hansokuB": 0,
+        "winner": "K1",
+        "decision": "",
+        "sideAMemberId": "k1",
+        "sideBMemberId": "o1",
+        "winnerMemberId": "k1"
+       },
+       "bout:2": {
+        "position": 2,
+        "sideA": "K1",
+        "sideB": "O2",
+        "ipponsA": [],
+        "ipponsB": [],
+        "hansokuA": 0,
+        "hansokuB": 0,
+        "winner": "",
+        "decision": "",
+        "sideAMemberId": "k1",
+        "sideBMemberId": "o2"
+       }
+      },
+      "basis": {
+       "seen": 0
+      }
+     }
+    }
+   ],
+   "lines": [
+    {
+     "v": 1,
+     "event": {
+      "id": "pick",
+      "session": "s-x",
+      "seq": 1,
+      "stamp": 20,
+      "kind": "bout.fighter",
+      "pos": 2,
+      "side": "a",
+      "name": "Chiba",
+      "memberId": "k3"
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "srv:30:1:a",
+      "session": "server",
+      "seq": 0,
+      "stamp": 30,
+      "kind": "bout.fighter",
+      "pos": 1,
+      "side": "a",
+      "name": "K9",
+      "memberId": "k9"
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "srv:30:2:a",
+      "session": "server",
+      "seq": 0,
+      "stamp": 30,
+      "kind": "bout.fighter",
+      "pos": 2,
+      "side": "a",
+      "name": "K9",
+      "memberId": "k9",
+      "target": "id:k1"
+     }
+    }
+   ],
+   "want": {
+    "match": {
+     "status": "running",
+     "subResults": [
+      {
+       "position": 1,
+       "sideA": "K9",
+       "sideB": "O1",
+       "ipponsA": [
+        "M",
+        "K"
+       ],
+       "winner": "K9",
+       "sideAMemberId": "k9",
+       "sideBMemberId": "o1",
+       "winnerMemberId": "k9"
+      },
+      {
+       "position": 2,
+       "sideA": "Chiba",
+       "sideB": "O2",
+       "sideAMemberId": "k3",
+       "sideBMemberId": "o2"
+      }
+     ],
+     "scoreVersion": 4,
+     "modifiedAt": 30,
+     "groupStamps": {
+      "bout:1": 30,
+      "bout:2": 20
+     }
+    },
+    "outcomes": {
+     "pick": [
+      "applied"
+     ],
+     "srv:30:1:a": [
+      "applied"
+     ],
+     "srv:30:2:a": [
+      "notAllowed"
+     ]
+    }
+   }
+  },
+  {
+   "name": "a kachinuki pairing taken off is not made again by a tap made before the removal, and is by one made after it (the pairing added again)",
+   "jsMirror": true,
+   "shape": {
+    "kind": "kachinuki"
+   },
+   "match": {
+    "id": "r0-m0",
+    "sideA": "Kyoto",
+    "sideB": "Osaka",
+    "sideAId": "ta",
+    "sideBId": "tb",
+    "winner": "",
+    "ipponsA": [],
+    "ipponsB": [],
+    "hansokuA": 0,
+    "hansokuB": 0,
+    "decision": "",
+    "status": "running",
+    "court": "A",
+    "round": 0,
+    "scheduledAt": "",
+    "subResults": [
+     {
+      "position": 1,
+      "sideA": "K1",
+      "sideB": "O1",
+      "ipponsA": [
+       "M",
+       "K"
+      ],
+      "ipponsB": [],
+      "hansokuA": 0,
+      "hansokuB": 0,
+      "winner": "K1",
+      "decision": "",
+      "sideAMemberId": "k1",
+      "sideBMemberId": "o1",
+      "winnerMemberId": "k1"
+     }
+    ],
+    "groupStamps": {
+     "bout:1": 10,
+     "bout:2": 15
+    }
+   },
+   "head": [
+    {
+     "v": 1,
+     "baseline": {
+      "id": "m0",
+      "door": "test",
+      "stamp": 10,
+      "values": {
+       "bout:1": {
+        "position": 1,
+        "sideA": "K1",
+        "sideB": "O1",
+        "ipponsA": [
+         "M",
+         "K"
+        ],
+        "ipponsB": [],
+        "hansokuA": 0,
+        "hansokuB": 0,
+        "winner": "K1",
+        "decision": "",
+        "sideAMemberId": "k1",
+        "sideBMemberId": "o1",
+        "winnerMemberId": "k1"
+       },
+       "bout:2": null
+      },
+      "basis": {
+       "seen": 0
+      },
+      "stamps": {
+       "bout:1": 10,
+       "bout:2": 15
+      }
+     }
+    }
+   ],
+   "lines": [
+    {
+     "v": 1,
+     "event": {
+      "id": "old",
+      "session": "s-x",
+      "seq": 1,
+      "stamp": 14,
+      "kind": "ippon.add",
+      "pos": 2,
+      "side": "a",
+      "letter": "M"
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "new",
+      "session": "s-y",
+      "seq": 1,
+      "stamp": 20,
+      "kind": "ippon.add",
+      "pos": 2,
+      "side": "b",
+      "letter": "K"
+     }
+    }
+   ],
+   "want": {
+    "match": {
+     "status": "running",
+     "subResults": [
+      {
+       "position": 1,
+       "sideA": "K1",
+       "sideB": "O1"
+      },
+      {
+       "position": 2,
+       "sideA": "",
+       "sideB": "",
+       "ipponsB": [
+        "K"
+       ],
+       "winner": "Osaka"
+      }
+     ],
+     "scoreVersion": 3,
+     "modifiedAt": 20,
+     "groupStamps": {
+      "bout:1": 10,
+      "bout:2": 20
+     }
+    },
+    "outcomes": {
+     "old": [
+      "beforeBaseline"
+     ],
+     "new": [
+      "applied"
+     ]
+    }
+   }
+  },
+  {
    "name": "a representative pick and the verdict on a tied representative bout",
    "jsMirror": true,
    "shape": {

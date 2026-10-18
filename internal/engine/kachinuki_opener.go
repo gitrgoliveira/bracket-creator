@@ -43,6 +43,7 @@ import (
 	"fmt"
 	"log"
 	"slices"
+	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -121,12 +122,19 @@ func openerSeatEvents(m *state.MatchResult, o KachinukiOpener, stamp int64) []do
 			if sideFighter(row, side) == f {
 				continue
 			}
-			evs = append(evs, domain.ScoreEvent{
+			ev := domain.ScoreEvent{
 				ID:      fmt.Sprintf("srv:%d:%d:%s", stamp, row.Position, letter),
 				Session: ServerEventSession, Stamp: stamp,
 				Kind: domain.ScoreBoutFighter, Pos: row.Position, Side: letter,
 				Name: f.Name, MemberID: f.MemberID,
-			})
+			}
+			if k > 0 {
+				// The stayer is carried on only while the bout holds the fighter
+				// bout 1 held: a pick stamped before this event, which may
+				// reach the server after it, stands (foldBoutRow).
+				ev.Target = fighterTarget(old)
+			}
+			evs = append(evs, ev)
 		}
 	}
 	return evs
@@ -185,24 +193,79 @@ func (d openerDraw) opener(matchID, sideAID, sideBID string) KachinukiOpener {
 	return KachinukiOpener{A: first(sideAID), B: first(sideBID)}
 }
 
-// openerSeatEventsTx is openerSeatEvents for m, a running kachinuki match as the
-// score log lines leave it, with the lineups the transaction reads, stamped
-// after every line and the match itself. None for a match that is not running.
-func openerSeatEventsTx(h state.StoreTx, comp *state.Competition, compID, matchID string, m *state.MatchResult, lines []state.ScoreLogLine) []domain.ScoreEvent {
-	if comp == nil || !comp.IsKachinuki() || m.Status != state.MatchStatusRunning || len(m.SubResults) == 0 {
+// ownLineup reports whether lineups holds a lineup saved for team teamID at
+// match matchID itself.
+func ownLineup(lineups map[string]domain.TeamLineup, teamID, matchID string) bool {
+	for _, l := range lineups {
+		if l.TeamID == teamID && l.MatchID == matchID {
+			return true
+		}
+	}
+	return false
+}
+
+// pinStartLineups saves, for each side of a kachinuki match that has started,
+// the lineup in force there as the match's own when it has none (operator
+// decision K1 (c): "Lineups are stuck per match as well"): from its start on,
+// the match reads its own lineup whatever later edit is made to the starting
+// lineup or an earlier match's, so its bout 1 and every lineup screen keep
+// the lineup it was started with, and only an edit of this match's own lineup
+// renames it. The saved copy holds what the match already read, so nothing
+// shown changes. A lineups.yaml write that fails is logged: the match then
+// keeps reading the lineup in force.
+func pinStartLineups(h state.StoreTx, d *openerDraw, compID, matchID string, teamIDs ...string) {
+	for _, teamID := range teamIDs {
+		if teamID == "" || ownLineup(d.lineups, teamID, matchID) {
+			continue
+		}
+		in := LineupInForceFrom(d.lineups, d.pool, d.bracket, d.comp.IsKnockoutEnabled(), teamID, matchID)
+		if !in.Found {
+			continue
+		}
+		l := copyLineup(in.Lineup)
+		l.MatchID, l.Round = matchID, 0
+		if err := h.SetTeamLineup(compID, l, d.comp.TeamSize); err != nil {
+			log.Printf("engine: kachinuki match %s/%s: the lineup it started with is not kept as its own: %v", compID, matchID, err)
+			continue
+		}
+		if fresh, err := h.LoadTeamLineups(compID); err == nil {
+			d.lineups = fresh
+		}
+	}
+}
+
+// openerSeatEventsTx is openerSeatEvents for m, a kachinuki match as the score
+// log lines leave it, with the lineups the transaction reads, stamped after
+// every line and the match itself. pin keeps, for a match that has started,
+// the lineup it started with as its own first (pinStartLineups): a match write
+// pins, a lineup write does not (a match started before this rule existed then
+// keeps the names it holds).
+func openerSeatEventsTx(h state.StoreTx, comp *state.Competition, compID, matchID string, m *state.MatchResult, lines []state.ScoreLogLine, pin bool) []domain.ScoreEvent {
+	if comp == nil || !comp.IsKachinuki() {
 		return nil
 	}
 	d, ok := readOpenerDraw(h, comp, compID)
 	if !ok {
 		return nil
 	}
+	started := m.Status != state.MatchStatusScheduled
+	if pin && started {
+		pinStartLineups(h, &d, compID, matchID, m.SideAID, m.SideBID)
+	}
+	if len(m.SubResults) == 0 {
+		return nil
+	}
+	if !pin && started && !(ownLineup(d.lineups, m.SideAID, matchID) || ownLineup(d.lineups, m.SideBID, matchID)) {
+		return nil
+	}
 	stamp := max(serverNowMs(), m.ModifiedAt+1, newestLineStamp(lines)+1)
 	return openerSeatEvents(m, d.opener(matchID, m.SideAID, m.SideBID), stamp)
 }
 
-// seatOpenerAfterWrite seats, through the score-events door, the match a door
-// other than that one has just written. Reports whether it seated anything.
-func (e *Engine) seatOpenerAfterWrite(h state.StoreTx, compID, matchID string) bool {
+// seatOpenerAfterWrite seats, through the score-events door, a kachinuki match
+// a door other than that one has just written (pin true) or a lineup write has
+// changed the lineups of (pin false). Reports whether it seated anything.
+func (e *Engine) seatOpenerAfterWrite(h state.StoreTx, compID, matchID string, pin bool) bool {
 	comp, err := h.LoadCompetition(compID)
 	if err != nil || comp == nil || !comp.IsKachinuki() {
 		return false
@@ -216,7 +279,7 @@ func (e *Engine) seatOpenerAfterWrite(h state.StoreTx, compID, matchID string) b
 		// An unreadable log is the door's to report; bout 1 keeps its fighters.
 		return false
 	}
-	evs := openerSeatEventsTx(h, comp, compID, matchID, stored, lines)
+	evs := openerSeatEventsTx(h, comp, compID, matchID, stored, lines, pin)
 	if len(evs) == 0 {
 		return false
 	}
@@ -233,9 +296,11 @@ func (e *Engine) seatOpenerAfterWrite(h state.StoreTx, compID, matchID string) b
 }
 
 // ReseatKachinukiOpenersTx seats, after a lineup or team-member write in the
-// transaction h, every running kachinuki match of team teamID ("" for every
-// team) whose first bout the lineups in force now name differently, and
-// returns the ids of the matches it changed, for the caller to announce.
+// transaction h, every kachinuki match of team teamID ("" for every team) whose
+// first bout the lineups in force now name differently, whatever its status,
+// and returns the ids of the matches it changed, for the caller to announce. A
+// match that has started reads its own lineup (pinStartLineups), so only an
+// edit of that match's own lineup renames it.
 func (e *Engine) ReseatKachinukiOpenersTx(h state.StoreTx, compID, teamID string) ([]string, error) {
 	comp, err := h.LoadCompetition(compID)
 	if err != nil {
@@ -251,7 +316,7 @@ func (e *Engine) ReseatKachinukiOpenersTx(h state.StoreTx, compID, teamID string
 		log.Printf("engine: kachinuki opener compId=%s: pool matches load error: %v", compID, err)
 	}
 	for _, m := range pool {
-		if m.Status == state.MatchStatusRunning && len(m.SubResults) > 0 && holds(m.SideAID, m.SideBID) {
+		if len(m.SubResults) > 0 && holds(m.SideAID, m.SideBID) {
 			ids = append(ids, m.ID)
 		}
 	}
@@ -266,14 +331,14 @@ func (e *Engine) ReseatKachinukiOpenersTx(h state.StoreTx, compID, teamID string
 			all = append(all, *bracket.ThirdPlaceMatch)
 		}
 		for _, bm := range all {
-			if bm.Status == state.MatchStatusRunning && len(bm.SubResults) > 0 && holds(bm.SideAID, bm.SideBID) {
+			if len(bm.SubResults) > 0 && holds(bm.SideAID, bm.SideBID) {
 				ids = append(ids, bm.ID)
 			}
 		}
 	}
 	var changed []string
 	for _, id := range ids {
-		if e.seatOpenerAfterWrite(h, compID, id) {
+		if e.seatOpenerAfterWrite(h, compID, id, false) {
 			changed = append(changed, id)
 		}
 	}
@@ -290,4 +355,31 @@ func (e *Engine) ReseatKachinukiOpeners(compID, teamID string) ([]string, error)
 		return err
 	})
 	return changed, err
+}
+
+// serverFighterEvent is whether e is one of the server's own fighter events
+// (kachinuki_opener.go). The closed-match rule lets it through: it names who
+// fought, never a score or a result, so an edit of a finished match's own
+// lineup renames its bout 1 and nothing of its result moves.
+func serverFighterEvent(e *domain.ScoreEvent) bool {
+	return e.Session == ServerEventSession && e.Kind == domain.ScoreBoutFighter
+}
+
+// fighterTarget is how a server fighter event names the fighter it replaces
+// (ScoreEvent.Target): by member id when the fighter carries one, else by name.
+func fighterTarget(f boutFighter) string {
+	if f.MemberID != "" {
+		return "id:" + f.MemberID
+	}
+	return "name:" + f.Name
+}
+
+// fighterIs is whether a side holding name and member holds the fighter
+// target names (fighterTarget).
+func fighterIs(name, member, target string) bool {
+	if id, ok := strings.CutPrefix(target, "id:"); ok {
+		return member == id
+	}
+	n, _ := strings.CutPrefix(target, "name:")
+	return member == "" && name == n
 }

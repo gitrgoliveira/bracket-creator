@@ -160,6 +160,11 @@ func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, r
 		}
 	}
 	notRunning := stored.Status != state.MatchStatusRunning && stored.Status != state.MatchStatusCompleted
+	// The server's own fighter events (kachinuki_opener.go) seat a match in
+	// whatever status a lineup edit finds it.
+	if req.Session == ServerEventSession {
+		notRunning = false
+	}
 	// Whether the match was sent back is a property of the request's match, not
 	// of an event: read its history once, and only when an event can need it.
 	sentBack := notRunning && e.sentBackToQueue(tx, compID, matchID)
@@ -222,7 +227,8 @@ func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, r
 	rp := ReplayScoring(stored, all, shape)
 	// Bout 1 of a kachinuki encounter takes the lineup's fighters in the same
 	// batch, as the server's own events (kachinuki_opener.go).
-	if seat := openerSeatEventsTx(tx, comp, compID, matchID, &rp.Match, all); len(seat) > 0 {
+	seat := openerSeatEventsTx(tx, comp, compID, matchID, &rp.Match, all, req.Session != ServerEventSession)
+	if len(seat) > 0 {
 		for i := range seat {
 			added = append(added, state.ScoreLogLine{Event: &seat[i]})
 		}
@@ -265,6 +271,9 @@ func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, r
 		}
 	}
 	e.recordEventHistory(tx, compID, matchID, req.Events, append(e.unrecordedTurnedAway(tx, compID, matchID, req, turnedAway, res.Answers), take...), res.Answers)
+	for _, ev := range seat {
+		e.appendEventLine(tx, compID, matchID, ev, rp.Outcome(ev.ID), "")
+	}
 	// An earlier event whose outcome this batch moved gets a line saying so.
 	e.recordMovedOutcomes(tx, compID, matchID, lines, prev, rp, "")
 	res.Gaps = ScoreLogGaps(all)[req.Session]
@@ -345,6 +354,11 @@ func (e *Engine) recordEventHistory(h state.StoreTx, compID, matchID string, eve
 
 // appendEventLine appends the history line of one event and its outcome.
 func (e *Engine) appendEventLine(h state.StoreTx, compID, matchID string, ev domain.ScoreEvent, outcome, reason string) {
+	if ev.Session == ServerEventSession && outcome != domain.ScoreOutcomeApplied {
+		// A server fighter event that found a pick in its place changed
+		// nothing anyone made: no line of its own.
+		return
+	}
 	g := ScoreEventGroup(&ev)
 	groupOutcome := state.HistoryOutcomeHeld
 	if outcome == domain.ScoreOutcomeApplied || outcome == domain.ScoreOutcomeRecorded {

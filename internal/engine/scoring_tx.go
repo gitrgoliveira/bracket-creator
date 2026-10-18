@@ -98,7 +98,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// (operator decision K1 (c), kachinuki_opener.go), seated by the server's
 	// own events through the score-events door, which seats its own batch.
 	if err == nil && door != DoorEvent {
-		e.seatOpenerAfterWrite(tx, compID, matchID)
+		e.seatOpenerAfterWrite(tx, compID, matchID, true)
 	}
 	return status, err
 }

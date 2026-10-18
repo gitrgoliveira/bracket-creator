@@ -438,10 +438,15 @@ func TestReplay_Kachinuki(t *testing.T) {
 	removed := replayTeamMatch()
 	removed.SubResults = m.SubResults[:1]
 	tomb := baseLine(removed, "rm", 30, state.ScoreBasis{Seen: 1}, state.BoutGroup(2))
-	r = ReplayScoring(m, append(head, tomb, evLine("late", 40, domain.ScoreIpponAdd, 2, "a", "M")), shape)
+	r = ReplayScoring(m, append(head, tomb, evLine("same", 30, domain.ScoreIpponAdd, 2, "a", "M")), shape)
 	assert.Len(t, r.Match.SubResults, 1)
-	assert.Equal(t, domain.ScoreOutcomeNoTarget, r.Outcome("late"))
+	assert.Equal(t, domain.ScoreOutcomeBeforeBaseline, r.Outcome("same"), "a tap stamped at the removal does not make the bout again")
 	assert.Equal(t, int64(30), r.Match.GroupStamps[state.BoutGroup(2)], "the tombstone keeps its stamp")
+	// The pairing added by hand again after the removal: a tap made after it
+	// makes the row again (stage 6 review 2, F2).
+	r = ReplayScoring(m, append(head, tomb, evLine("late", 40, domain.ScoreIpponAdd, 2, "a", "M")), shape)
+	assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("late"))
+	assert.Len(t, r.Match.SubResults, 2)
 
 	r = ReplayScoring(m, append(head, evLine("e", 20, domain.ScoreEnchoAdd, 1, "", "")), shape)
 	assert.False(t, state.SubResultAt(r.Match.SubResults, 1).Recorded, "the bout is fought again")
@@ -548,9 +553,12 @@ func TestReplay_LazyMigration(t *testing.T) {
 		m.GroupStamps = map[string]int64{state.BoutGroup(1): 10, state.BoutGroup(2): 12}
 		b := MigrationBaseline(m, "m0", 0)
 		assert.Equal(t, "null", string(b.Values[state.BoutGroup(2)]))
-		r := ReplayScoring(m, append(migrated(m), evLine("e", 20, domain.ScoreIpponAdd, 2, "a", "M")), ReplayShape{Comp: replayTeamComp(true)})
-		assert.Equal(t, domain.ScoreOutcomeNoTarget, r.Outcome("e"))
+		r := ReplayScoring(m, append(migrated(m), evLine("e", 12, domain.ScoreIpponAdd, 2, "a", "M")), ReplayShape{Comp: replayTeamComp(true)})
+		assert.Equal(t, domain.ScoreOutcomeBeforeBaseline, r.Outcome("e"), "a tap no later than the removal does not make the bout again")
+		assert.Len(t, r.Match.SubResults, 1)
 		assert.Equal(t, int64(12), r.Match.GroupStamps[state.BoutGroup(2)])
+		r = ReplayScoring(m, append(migrated(m), evLine("e2", 20, domain.ScoreIpponAdd, 2, "a", "M")), ReplayShape{Comp: replayTeamComp(true)})
+		assert.Equal(t, domain.ScoreOutcomeApplied, r.Outcome("e2"), "one made after it makes the bout again")
 	})
 }
 

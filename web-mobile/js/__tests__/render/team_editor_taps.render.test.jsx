@@ -310,6 +310,23 @@ describe('a running kachinuki encounter is scored by taps', () => {
   });
 });
 
+describe('a pairing taken off and added again by hand scores (stage 6 review 2, F2)', () => {
+  it('the bout number Remove this bout freed takes the pairing added again, and its first tap shows on it', async () => {
+    const onSubmit = vi.fn(pending);
+    // Bout 2 was removed: the server copy keeps its stamp, a tombstone.
+    const removed = kachinukiBout({
+      modifiedAt: 500, groupStamps: { 'bout:1': 400, 'bout:2': 500 },
+      subResults: [boutRow(1, { sideA: 'K1', sideB: 'O1', sideAMemberId: 'k1', sideBMemberId: 'o1', ipponsA: ['M', 'K'], winner: 'K1', winnerMemberId: 'k1', recorded: true })],
+    });
+    const r = render(el(removed, { onSubmit }));
+    await tap(byTestId(r.container, 'kachinuki-add-bout-button'));
+    await tap(ipponBtn(r.container, 1, 'aka', 'M'));
+    expect(events()).toEqual([{ kind: 'ippon.add', pos: 2, side: 'a', letter: 'M' }]);
+    expect(marks(r.container, 1, 'aka'), 'the board shows the tap on the pairing added again').toEqual(['M']);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+});
+
 describe('a same-device display shows the team board', () => {
   let publish;
   beforeEach(() => { publish = vi.spyOn(bridge, 'publish').mockImplementation(() => {}); });

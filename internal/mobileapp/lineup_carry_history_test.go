@@ -417,3 +417,56 @@ func TestLineupCarry_RemovingTheStartingLineupReachesNoEarlierCopy(t *testing.T)
 	e.save("P1-1", 3, "Kato", 0)
 	require.Equal(t, "Sato", e.at("P1-1", 1), "the copy keeps the point it was made at")
 }
+
+// A change sent with no stamp (an older build's) takes its arrival as its
+// stamp: a match's first such save makes a copy at that time, and a change
+// stamped before it that arrives later still reaches it.
+func TestLineupCarry_AnUnstampedSaveIsMadeAsItLands(t *testing.T) {
+	e := newCarryEnv(t, false)
+	e.save("P1-1", 2, "Endo", 0)
+	l, ok := e.lineup("P1-1")
+	require.True(t, ok)
+	require.True(t, l.IsCarriedCopy(), "a copy, made at its arrival")
+	require.Greater(t, l.CopiedAt, e.base+500_000)
+	require.Equal(t, "Sato", e.at("P1-1", 1))
+	e.save("", 1, "Mori", -100)
+	require.Equal(t, "Mori", e.at("P1-1", 1), "made before the copy: %s", e.dump())
+}
+
+// An older build's whole save (no `changed`) of the starting lineup is a
+// change of every position at its arrival: a copy made before it keeps what
+// it carried, then and after any later save.
+func TestLineupCarry_AnOlderBuildsWholeSaveReachesNoEarlierCopy(t *testing.T) {
+	e := newCarryEnv(t, false)
+	e.save("P1-1", 2, "Endo", -500)
+	require.Equal(t, "Sato", e.at("P1-1", 1))
+	p1, p2 := domain.PositionNumbered(1), domain.PositionNumbered(2)
+	rec := e.do(http.MethodPut, e.lineupPath(""), map[string]any{
+		"positions": map[domain.Position]string{p1: "Aoki", p2: "Kato"},
+		"memberIds": map[domain.Position]string{p1: e.members["Aoki"], p2: e.members["Kato"]},
+		"writeId":   "whole",
+	})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, "Aoki", e.at("", 1))
+	require.Equal(t, "Sato", e.at("P1-1", 1), "after the whole save: %s", e.dump())
+	e.save("", 3, "Doi", 10)
+	require.Equal(t, "Sato", e.at("P1-1", 1), "after a later partial save: %s", e.dump())
+	// A copy made after the whole save carries it.
+	e.save("P1-0", 2, "Mori", 0)
+	require.Equal(t, "Aoki", e.at("P1-0", 1))
+	// A whole save of a match's own lineup replaces it whole: the positions
+	// it leaves out are empty, and carried from nothing.
+	rec = e.do(http.MethodPut, e.lineupPath("P1-1"), map[string]any{
+		"positions": map[domain.Position]string{p1: "Ueda"}, "memberIds": map[domain.Position]string{p1: e.members["Ueda"]},
+		"writeId": "whole-match",
+	})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, "Ueda", e.at("P1-1", 1))
+	require.Equal(t, "(none)", func() string {
+		l, _ := e.lineup("P1-1")
+		if n, ok := l.Positions[p2]; ok {
+			return n
+		}
+		return "(none)"
+	}())
+}

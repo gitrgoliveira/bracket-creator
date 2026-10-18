@@ -71,10 +71,13 @@ type TeamLineup struct {
 	MemberIDs map[Position]string `json:"memberIds,omitempty" yaml:"memberIds,omitempty"`
 	// Stamps holds when each position was last changed, as the device that
 	// changed it stamped the change (server-relative ms, the save's
-	// `changedAt`). A position changed by a save that sent no stamp (an older
-	// build's) has none. Only the lineup a kachinuki match started with is
-	// ordered by it (engine/kachinuki_opener.go): a change made before the
-	// start reaches it whenever it arrives.
+	// `changedAt`). A change sent with no stamp (an older build's) is stamped
+	// with the server's time as it lands. Every lineup is ordered by it
+	// (operator decision L1, engine/lineup_carry.go): a position holds its
+	// latest change by stamp, and a carried lineup reads each position as it
+	// stood at its own stamp. A lineup an older release stored, or one given
+	// by the round-lineup migration, may have none: its values then count
+	// from the beginning.
 	Stamps map[Position]int64 `json:"-" yaml:"stamps,omitempty"`
 	// StartedAt is set on the lineup the server kept as the one a kachinuki
 	// match started with (its pin, engine/kachinuki_opener.go): the stamp of

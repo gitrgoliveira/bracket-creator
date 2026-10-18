@@ -26,10 +26,11 @@ package mobileapp
 import (
 	"errors"
 	"log"
+	"maps"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -679,29 +680,81 @@ func (s lineupSave) target() string {
 	return "lineup\x1f" + s.compID + "\x1f" + s.teamID + "\x1f" + s.matchID + "\x1f" + strconv.Itoa(s.round)
 }
 
-// lineupToStore is the lineup this save stores, built under the write's lock.
-// A body that names no changed positions is the whole lineup. One that does has
-// its changed positions landed on the base read here (base), so what another
-// device saved a moment ago is kept, and the result is the lineup stored for this
-// team at this scope.
-func (w lineupSave) lineupToStore(stx state.StoreTx, comp *state.Competition) (domain.TeamLineup, *txResponse) {
+// lineupToStore is the lineup this save stores, built under the write's lock,
+// with the positions it changed (for the follow). Its changed positions are
+// landed on the lineup stored here, so what another device saved a moment ago
+// is kept, and the result is the lineup stored for this team at this scope. A
+// body that names no changed positions (an older build's whole save) changes
+// every position at its arrival (wholeSaveChanges).
+func (w lineupSave) lineupToStore(stx state.StoreTx, comp *state.Competition) (domain.TeamLineup, []domain.Position, *txResponse) {
 	changed, partial := w.req.changedPositions()
 	if !partial {
-		return domain.TeamLineup{
-			TeamID: w.teamID, CompetitionID: w.compID, Round: w.round, MatchID: w.matchID,
-			Positions: w.req.Positions, MemberIDs: w.req.MemberIDs,
-		}, nil
+		// An older build's whole save is a change of every position at its
+		// arrival (it sends no stamp, so landPartial stamps it now): the
+		// positions it names, and every other position the team's lineups
+		// hold, emptied. So it reaches no copy or pin made before it arrived,
+		// and its History keeps what they read (operator decision L1).
+		var resp *txResponse
+		if changed, resp = w.wholeSaveChanges(stx); resp != nil {
+			return domain.TeamLineup{}, nil, resp
+		}
+		if len(changed) == 0 {
+			return domain.TeamLineup{
+				TeamID: w.teamID, CompetitionID: w.compID, Round: w.round, MatchID: w.matchID,
+				Positions: w.req.Positions, MemberIDs: w.req.MemberIDs,
+			}, nil, nil
+		}
 	}
 	lineup, resp := w.landPartial(stx, comp, changed)
 	if resp != nil {
-		return domain.TeamLineup{}, resp
+		return domain.TeamLineup{}, nil, resp
 	}
 	lineup.TeamID, lineup.CompetitionID, lineup.Round, lineup.MatchID = w.teamID, w.compID, w.round, w.matchID
 	// An operator's save of a match's own lineup replaces the lineup the
 	// match started with (engine/kachinuki_opener.go): it is the operator's
 	// now, carried from the same point, and a later match carries it.
 	lineup.StartedAt, lineup.StartedFrom = 0, ""
-	return lineup, nil
+	return lineup, changed, nil
+}
+
+// wholeSaveChanges is the changed positions of a whole save: the positions
+// it names and every other position the team's lineups in force hold, which
+// it empties (an empty name in w.req.Positions).
+func (w *lineupSave) wholeSaveChanges(stx state.StoreTx) ([]domain.Position, *txResponse) {
+	lineups, err := stx.LoadTeamLineups(w.compID)
+	if err != nil {
+		log.Printf("mobileapp: lineup save for %s: LoadTeamLineups: %v", w.compID, err)
+		return nil, &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
+	}
+	set := map[domain.Position]bool{}
+	for p := range w.req.Positions {
+		set[p] = true
+	}
+	for p := range w.req.MemberIDs {
+		set[p] = true
+	}
+	for _, l := range lineups {
+		if l.TeamID != w.teamID {
+			continue
+		}
+		for p := range l.Positions {
+			set[p] = true
+		}
+		for p := range l.MemberIDs {
+			set[p] = true
+		}
+	}
+	positions := maps.Clone(w.req.Positions)
+	if positions == nil {
+		positions = map[domain.Position]string{}
+	}
+	for p := range set {
+		if _, ok := positions[p]; !ok {
+			positions[p] = ""
+		}
+	}
+	w.req.Positions = positions
+	return slices.SortedFunc(maps.Keys(set), domain.ComparePositions), nil
 }
 
 // landPartial is the lineup a partial save stores, read under the write's
@@ -721,9 +774,11 @@ func (w lineupSave) landPartial(stx state.StoreTx, comp *state.Competition, chan
 	refused := func(err error) (domain.TeamLineup, *txResponse) {
 		return domain.TeamLineup{}, &txResponse{status: lineupSetStatus(err), body: gin.H{"error": err.Error()}}
 	}
-	now := time.Now().UnixMilli()
-	// A change sent with no stamp (an older build's) is ordered by its
-	// arrival: it is stamped with the server's time as it lands.
+	// The server's time as the save lands, after any other lineup change
+	// that landed before it (state.LineupArrivalStamp). A change sent with no
+	// stamp (an older build's) is ordered by its arrival: it is stamped with
+	// it.
+	now := state.LineupArrivalStamp()
 	stamps := map[domain.Position]int64{}
 	for _, p := range changed {
 		if s := w.req.ChangedAt[p]; s > 0 {
@@ -839,7 +894,8 @@ func saveLineup(c *gin.Context, tx CompetitionTransactor, announce func(compID, 
 			}
 		}
 		var lineup domain.TeamLineup
-		if lineup, respErr = save.lineupToStore(stx, comp); respErr != nil {
+		var changed []domain.Position
+		if lineup, changed, respErr = save.lineupToStore(stx, comp); respErr != nil {
 			return nil
 		}
 		if err := stx.SetTeamLineup(compID, lineup, teamSize); err != nil {
@@ -848,9 +904,7 @@ func saveLineup(c *gin.Context, tx CompetitionTransactor, announce func(compID, 
 			respErr = &txResponse{status: lineupSetStatus(err), body: gin.H{"error": err.Error()}}
 			return nil
 		}
-		if changed, partial := save.req.changedPositions(); partial {
-			follow(stx, comp, lineup, changed)
-		}
+		follow(stx, comp, lineup, changed)
 		// Reload after write so the response carries the persisted
 		// CompetitionID (auto-stamped by Set) and any future server-managed
 		// fields. This reload reads the same on-disk state as the Set above

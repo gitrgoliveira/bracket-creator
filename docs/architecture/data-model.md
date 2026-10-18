@@ -200,7 +200,10 @@ competition's lock, onto the lineup stored for that match or that starting lineu
 says when each position it changes was changed on the device (`changedAt`, in the server's
 clock), and the lineup keeps that time per position (`stamps`); a save from an older release
 sends none, and its changes are given the server's time as they land, so they are ordered by
-their arrival. Every lineup comes out the same whatever order its saves arrive in:
+their arrival. Such a release may also save a whole lineup without naming its changes: that is
+taken as a change of every position at its arrival, the positions it leaves out emptied, so it
+reaches no match lineup made before it arrived. Every lineup comes out the same whatever order
+its saves arrive in:
 
 - A position holds its latest change by that time. A change made earlier that arrives later
   does not replace it; it is kept in the position's `history` (the values a position held, each

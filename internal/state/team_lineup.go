@@ -22,6 +22,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -118,6 +119,24 @@ func removeTeamLineup(lineups map[string]domain.TeamLineup, key string, at int64
 		lineups[lineupStorageKey(kept)] = kept
 	}
 	return true
+}
+
+// lastLineupArrival is the last stamp LineupArrivalStamp gave.
+var lastLineupArrival atomic.Int64
+
+// LineupArrivalStamp is the server's time for a lineup change ordered by its
+// arrival (one sent with no stamp, an older build's; a removal): now, but
+// always after the stamp it gave before, so two such changes landing in one
+// millisecond keep their arrival order, which the carry by stamp reads (a
+// copy reads the changes made BEFORE its stamp).
+func LineupArrivalStamp() int64 {
+	for {
+		last := lastLineupArrival.Load()
+		next := max(time.Now().UnixMilli(), last+1)
+		if lastLineupArrival.CompareAndSwap(last, next) {
+			return next
+		}
+	}
 }
 
 // parseTeamLineupsFile reads and parses lineups.yaml at path. A missing
@@ -382,7 +401,7 @@ func (s *Store) DeleteTeamLineup(compID, teamID string, round int) error {
 	if err != nil {
 		return err
 	}
-	if !removeTeamLineup(current, teamLineupKey(teamID, round), time.Now().UnixMilli()) {
+	if !removeTeamLineup(current, teamLineupKey(teamID, round), LineupArrivalStamp()) {
 		return nil
 	}
 	return s.saveTeamLineupsLocked(compID, current, s.directWrite)
@@ -406,7 +425,7 @@ func (s *Store) DeleteTeamLineupForMatch(compID, teamID, matchID string) error {
 	if err != nil {
 		return err
 	}
-	if !removeTeamLineup(current, teamLineupMatchKey(teamID, matchID), time.Now().UnixMilli()) {
+	if !removeTeamLineup(current, teamLineupMatchKey(teamID, matchID), LineupArrivalStamp()) {
 		return nil
 	}
 	return s.saveTeamLineupsLocked(compID, current, s.directWrite)

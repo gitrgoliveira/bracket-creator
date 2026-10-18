@@ -19,8 +19,12 @@ package engine
 // carried lineup of the team out again in match order, so a copy that changes
 // is read by the ones after it.
 //
-// Unstamped saves (an older build's) make no copy: their base is the lineup in
-// force when they arrive, as before.
+// A change sent with no stamp (an older build's) takes its arrival as its
+// stamp: the lineup handler stamps it with the server's time as it lands, so
+// it is ordered like any other, and a match's first such save makes a copy
+// at that time. An older build's whole save (no `changed`) is a change of
+// every position at its arrival (lineupSave.lineupToStore), so it reaches no
+// copy or pin made before it.
 
 import (
 	"cmp"
@@ -305,8 +309,9 @@ func LandStartingLineupSave(lineups map[string]domain.TeamLineup, start domain.T
 // own positions, and one made before its earliest change moves that point
 // back, the carried positions being worked out again there. A save over the
 // lineup a kachinuki match started with turns it into the operator's own,
-// carried from the same point. An unstamped first save lands on the lineup in
-// force when it arrives, as before.
+// carried from the same point. A change sent with no stamp (an older build's)
+// comes stamped with the server's time as it landed (lineupSave.landPartial),
+// so a first such save makes a copy at its arrival like any other.
 func LandMatchLineupSave(lineups map[string]domain.TeamLineup, pool []state.MatchResult, bracket *state.Bracket, knockout bool, teamSize int,
 	teamID, matchID string, changed []domain.Position, positions, memberIDs map[domain.Position]string, stamps map[domain.Position]int64, now int64) (domain.TeamLineup, error) {
 	lc := newLineupCarry(lineups, pool, bracket, knockout, teamSize)
@@ -323,20 +328,18 @@ func LandMatchLineupSave(lineups map[string]domain.TeamLineup, pool []state.Matc
 			first = s
 		}
 	}
+	if first == 0 {
+		// Every change carries a stamp: the handler stamps an unstamped one
+		// (an older build's) with the server's time as it lands.
+		first = now
+	}
 	switch {
 	case found && base.IsStartPin():
 		base.CopiedAt, base.CopiedFrom, base.Own = base.StartedAt, base.StartedFrom, nil
 		base.StartedAt, base.StartedFrom = 0, ""
-	case !found && first > 0:
+	case !found:
 		base = domain.TeamLineup{TeamID: teamID, MatchID: matchID, Positions: map[domain.Position]string{}, CopiedAt: first}
 		base.CopiedFrom = lc.carryInto(&base, first)
-	case !found:
-		in := lc.sourceAt(teamID, matchID, now+1)
-		base = domain.TeamLineup{TeamID: teamID, MatchID: matchID, Positions: maps.Clone(in.Lineup.Positions),
-			MemberIDs: maps.Clone(in.Lineup.MemberIDs), Stamps: maps.Clone(in.Lineup.Stamps)}
-		if base.Positions == nil {
-			base.Positions = map[domain.Position]string{}
-		}
 	}
 	out, err := base.ApplyStampedChanges(changed, positions, memberIDs, stamps, now)
 	if err != nil {

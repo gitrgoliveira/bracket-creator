@@ -673,7 +673,7 @@ func (t *storeTx) removeTeamLineup(compID, key string) error {
 	if err != nil {
 		return err
 	}
-	if !removeTeamLineup(current, key, time.Now().UnixMilli()) {
+	if !removeTeamLineup(current, key, LineupArrivalStamp()) {
 		return nil
 	}
 	return t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn())

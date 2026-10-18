@@ -368,6 +368,10 @@ export function queueAlertMessage(alert) {
   if (n <= 0 && alert.kind !== "storage_full") return null;
   const detail = alert.detail ? ` (${alert.detail})` : "";
   switch (alert.kind) {
+    case "tap_applied":
+      // A tap the board showed as not applied, from a copy behind the
+      // server, that the server applied (stage 6 review 8, m12).
+      return `A tap shown as not applied was applied after all${alert.where ? ` (${alert.where})` : ""}. Check the score.`;
     case "lineup_warning":
       // The server's own sentence: the change was kept, and it names the
       // carried lineup that could not follow it (stage 6 review 8, m7).
@@ -441,7 +445,7 @@ export function queueAlertMessage(alert) {
 // the change it moved aside is in the history); every other kind stays an
 // error. Exported for test.
 export function queueAlertToastType(alert) {
-  if (alert && alert.kind === "displaced") return "info";
+  if (alert && (alert.kind === "displaced" || alert.kind === "tap_applied")) return "info";
   return alert && alert.kind === "sent" ? "success" : "error";
 }
 

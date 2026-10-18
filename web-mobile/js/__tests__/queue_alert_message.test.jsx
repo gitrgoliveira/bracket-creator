@@ -31,6 +31,12 @@ describe('queueAlertMessage', () => {
         expect(msg).toBe("A team member this device treated as not added was kept by the server. Check the team's member names and lineups.");
     });
 
+    it('tells the operator a tap shown as not applied was applied after all (m12)', () => {
+        const alert = { kind: 'tap_applied', count: 1, terminalCount: 0, where: 'Pool A · Match 1' };
+        expect(queueAlertMessage(alert)).toBe('A tap shown as not applied was applied after all (Pool A · Match 1). Check the score.');
+        expect(queueAlertToastType(alert)).toBe('info');
+    });
+
     it('tells the operator a kept lineup change whose carried lineup could not follow it (m7)', () => {
         const detail = 'Lineup saved, but the lineup of P1-1 could not follow it and was left as it was (x). Check that match\'s lineup.';
         expect(queueAlertMessage({ kind: 'lineup_warning', count: 1, terminalCount: 0, detail })).toBe(detail);

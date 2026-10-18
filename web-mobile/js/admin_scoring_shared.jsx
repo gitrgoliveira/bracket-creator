@@ -17,7 +17,7 @@ import {
   writeDidNotLand, writeRetryable, decisionWord,
   attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED, downstreamKnockoutReopenedNotice,
   courtBusyMessage, heldWriteDiscardLabel, heldWriteDiscardConfirm, queuedNotice,
-  tapNotAppliedText, writePending, writeWasRefused,
+  tapNotAppliedText, tapOutcomeQuiet, writePending, writeWasRefused,
 } from './write_result.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { sideWord, sideWithColour } from './side_cell.jsx';
@@ -137,21 +137,29 @@ const TAP_NOT_RUNNING_REASONS = new Set(['match_not_started', 'match_sent_back']
 // for a tap refused because the match is not running. `clear()` drops both,
 // called as the operator taps again.
 export function useTapOutcomeNote(compId, matchId) {
-  const [state, setState] = useStateA({ note: null, refusal: null });
+  const [state, setState] = useStateA({ note: null, refusal: null, id: null });
   useEffectA(() => {
-    setState({ note: null, refusal: null });
+    setState({ note: null, refusal: null, id: null });
     const api = window.API;
     if (!api || typeof api.subscribeTapOutcome !== 'function') return undefined;
     return api.subscribeTapOutcome(compId, matchId, (o) => {
+      if (tapOutcomeQuiet(o)) {
+        // The server applied a tap this note named not applied (the board
+        // judged it from a copy behind the server): the note goes (stage 6
+        // review 8, m12).
+        setState((s) => (s.id && o && s.id === o.id ? { note: null, refusal: null, id: null } : s));
+        return;
+      }
       const text = tapNotAppliedText(o);
       if (!text) return;
-      if (o && TAP_NOT_RUNNING_REASONS.has(o.reason)) setState((s) => ({ ...s, refusal: text }));
-      else setState((s) => ({ ...s, note: text }));
+      const id = (o && o.id) || null;
+      if (o && TAP_NOT_RUNNING_REASONS.has(o.reason)) setState((s) => ({ ...s, refusal: text, id }));
+      else setState((s) => ({ ...s, note: text, id }));
     });
   }, [compId, matchId]);
   const clearRef = useRefA(null);
   if (!clearRef.current) {
-    clearRef.current = () => setState((s) => (s.note || s.refusal ? { note: null, refusal: null } : s));
+    clearRef.current = () => setState((s) => (s.note || s.refusal ? { note: null, refusal: null, id: null } : s));
   }
   return { note: state.note, refusal: state.refusal, clear: clearRef.current };
 }

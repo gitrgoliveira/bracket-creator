@@ -92,6 +92,42 @@ const push = (turnedAway, matchId = 'm1') => es.onmessage({
 const alertText = (a) => tapNotAppliedAlertText(a.count, a.count === 1,
     tapNotAppliedText(a.outcome, a.where || '', a.tap ? tapWords(a.tap) : ''), a.where || '');
 
+// Stage 6 review 8 (m12): the board can judge a pending tap not applied from
+// a copy behind the server (its bout shown removed, while the server already
+// holds the bout picked again). The server then applies the tap: the notice
+// the board gave is taken back, the operator told it was applied after all,
+// and nothing of it is kept.
+describe('a tap the board told as not applied that the server applies', () => {
+    it('is corrected: its note goes and the operator is told it was applied', async () => {
+        let answer;
+        global.fetch = vi.fn((url, opts) => {
+            const u = String(url);
+            if (u.includes('/api/time')) return Promise.reject(new TypeError('clock'));
+            if (u.endsWith('/score-events')) {
+                const body = JSON.parse(opts.body);
+                return new Promise((resolve) => { answer = () => resolve({
+                    ok: true, status: 200,
+                    json: async () => ({ outcomes: body.events.map((e) => ({ id: e.id, outcome: 'applied' })), match: { id: 'm1', scoreVersion: 3 } }),
+                }); });
+            }
+            return Promise.reject(new TypeError('offline'));
+        });
+        const heard = listen();
+        const t = API.recordTap('c1', 'm1', { ...strike, pos: 2 }, 'pw', shown);
+        await tick(0);
+        // The board, behind the server, sees the bout removed.
+        API.tellPendingTapRefused('c1', 'm1', { id: t.id, outcome: 'noTarget', reason: 'bout_removed' }, { ...strike, pos: 2 });
+        await tick(0);
+        expect(heard.notApplied()).toHaveLength(1);
+        answer();
+        await tick(0);
+        const corrected = heard.alerts.filter((a) => a.kind === 'tap_applied');
+        expect(corrected, 'the operator is told it was applied after all').toHaveLength(1);
+        expect(heard.outcomes.filter((o) => o.id === t.id).map((o) => o.outcome)).toEqual(['noTarget', 'applied']);
+        expect(landedText(), 'landed, so a later turn-away is told').toContain(t.id);
+    });
+});
+
 describe('a tap turned away after its answer said it landed', () => {
     // Stage 6 review 6, finding 2: the finish's push can list the tap before
     // the tap's own applied answer arrives. It is told when the answer comes,

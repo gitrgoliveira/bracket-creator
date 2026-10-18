@@ -1412,8 +1412,19 @@ const _derivedListeners = new Map();
 const _pendingTapListeners = new Map();
 const _tapOutcomeListeners = new Map();
 // The pending taps the board already told as not applied (tellPendingTapRefused),
-// whose answer then tells nothing more: one notice per tap.
+// whose answer then tells nothing more: one notice per tap. An id goes as its
+// tap's answer comes (an applied one takes the notice back, m12).
 const _toldOnBoard = new Set();
+// _pruneToldOnBoard keeps only the ids of taps this tab still holds queued:
+// one no longer queued (answered, or taken by another tab) has nothing left
+// to tell (stage 6 review 8, m12).
+function _pruneToldOnBoard() {
+    const queued = new Set();
+    for (const d of _writeQueue.values()) {
+        if (d && d.kind === 'evt' && d.payload && d.payload.id) queued.add(d.payload.id);
+    }
+    for (const id of _toldOnBoard) if (!queued.has(id)) _toldOnBoard.delete(id);
+}
 // Per queue key: the promise a door handed out and the refusal claims of the
 // callers. In memory only (never persisted): a function does not survive a
 // reload, and a rehydrated entry has nobody waiting on it.
@@ -3229,6 +3240,18 @@ async function _sendTapBatch(base, batch, pass) {
                 if (_dequeue(k, d, { value: o })) dequeued = true;
                 if (tapOutcomeQuiet(o)) {
                     landed.push(d);
+                    if (_toldOnBoard.delete(o.id)) {
+                        // The board told it not applied from a copy behind the
+                        // server (its bout shown removed, already picked again
+                        // there): the server applied it, so the notice is
+                        // taken back and the operator told (stage 6 review 8,
+                        // m12).
+                        _emitOn(_tapOutcomeListeners, base, { id: o.id, outcome: o.outcome });
+                        _notifyQueueAlert({
+                            kind: 'tap_applied', count: 1, terminalCount: 0, compID, matchID,
+                            where: _whereOf(d) || _shownMatchLabels.get(base) || '',
+                        });
+                    }
                 } else if (_toldOnBoard.delete(o.id)) {
                     // Told by the board as the removal reached it: once.
                 } else {
@@ -6323,7 +6346,9 @@ const API = {
         _parkStoredEntries();
         // The landed-tap record and the copies seen stay: the same operator
         // signs in again, and is told of a tap turned away meanwhile (stage 6
-        // review 8, m10).
+        // review 8, m10). The board's notices stay for the taps still queued
+        // here, to be answered after the sign-in; the rest go (m12).
+        _pruneToldOnBoard();
         if (parked > 0) {
             _persistQueue();
             _notifyQueueAlert({ kind: 'auth_required', count: parked, terminalCount: _countTerminalQueued() });

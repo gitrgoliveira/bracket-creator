@@ -8,7 +8,7 @@
 import { expect } from '@playwright/test';
 import { INLINE_EDITOR, awardIppon, finishMatch, markDraw } from './scoring.mjs';
 import {
-  UP_NEXT, WAITING_ROWS, completedRowFor, courtDone, courtIdle, inlineEditor, upNextCard,
+  UP_NEXT, WAITING_ROWS, completedRowFor, courtDone, courtIdle, inlineEditor, sides, upNextCard,
 } from './shiaijo.mjs';
 import { hastyShiaijoConfirm } from './clumsy.mjs';
 import { EXPECT_TIMEOUT_MS } from './devices.mjs';
@@ -123,13 +123,34 @@ export async function inlineRunning(page) {
   return (await pill.count()) === 0;
 }
 
+// Wait until the court's queue agrees with its editor: while the editor holds
+// a running bout, the Up next card no longer shows that bout. A Start, and the
+// start a Finish + Start Next queues, go through the outbox and never wait
+// (bc-evts), so the editor shows the bout running at once while the queue
+// learns it from the server's push or the court's next refetch a moment
+// later. A journey that reads the queue (what is left to play) or takes the
+// device offline right after a start reads it once it has caught up.
+export async function queueCaughtUp(page) {
+  await expect.poll(async () => {
+    if (!(await inlineRunning(page))) return 'caught up';
+    const held = await editorSides(page, INLINE_EDITOR, { timeout: 1_000 }).catch(() => null);
+    if (!held) return 'the editor is between two bouts';
+    const card = upNextCard(page).first();
+    if (!(await card.isVisible().catch(() => false))) return 'caught up';
+    const next = await sides(card).catch(() => null);
+    return next && next.shiro === held.shiro && next.aka === held.aka
+      ? `the Up next card still shows the running bout (${held.shiro} v ${held.aka})` : 'caught up';
+  }, { message: 'the court queue caught up with the bout its editor runs' }).toBe('caught up');
+}
+
 // Make sure the shiaijo page has a running bout in its editor, and return its
 // pairing. When the court is idle ("Ready when you are") the Up next card's
 // Start match is tapped, once. Returns null only when the court has nothing to
 // start: idle with no startable Up next card (none, or one whose Start is off,
 // e.g. a barred match), or done, held for a moment so a court between two
 // renders is not taken for one with nothing left. Throws when Start was tapped
-// and no bout runs by the deadline, or the console never settles.
+// and no bout runs by the deadline, or the console never settles. A running
+// bout is returned once the queue has caught up with it (queueCaughtUp).
 const NOTHING_HELD_MS = 1_500;
 export async function ensureRunning(page, { timeout = EXPECT_TIMEOUT_MS } = {}) {
   const start = upNextCard(page).getByRole('button', { name: 'Start match' });
@@ -157,7 +178,9 @@ export async function ensureRunning(page, { timeout = EXPECT_TIMEOUT_MS } = {}) 
     nothingSince = null;
     throw new Error('the court console shows neither a running bout, the idle placeholder nor the done state');
   }).toPass({ timeout, intervals: [250] });
-  return outcome === 'running' ? editorSides(page) : null;
+  if (outcome !== 'running') return null;
+  await queueCaughtUp(page);
+  return editorSides(page);
 }
 
 // Score the running bout on the shiaijo page for the deterministic winner (one
@@ -241,6 +264,7 @@ export async function correctCompleted(page, pair, { readLive = liveIndividualBo
 // the Upcoming rows; not Later, not Completed). A pool bout reads
 // "Match n of m" in its header, a knockout bout "Match n".
 export async function queuedPoolBouts(page) {
+  await queueCaughtUp(page);
   const texts = await page.locator(`${UP_NEXT}, ${WAITING_ROWS}`).allInnerTexts();
   return texts.filter((t) => /Match \d+ of \d+/.test(t)).length;
 }

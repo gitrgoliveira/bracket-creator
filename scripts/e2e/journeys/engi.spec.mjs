@@ -76,9 +76,12 @@ test.describe('engi', () => {
     await expect(completedRows(page)).toHaveCount(1);
     const row = completedRows(page).first();
     await expect(row).toContainText(pair.aka);
-    // Aka's side carries the winner mark (the row's text names the side it is on).
-    const rowText = (await row.innerText()).replace(/\s+/g, ' ');
-    expect(rowText, 'Aka, who held the two flags, is marked the winner').toContain(`Aka: ✓ Winner: ${pair.aka}`);
+    // Aka's side carries the winner mark (the row's text names the side it is
+    // on). The Save goes through the outbox and never waits, so the row can
+    // show the match finished before the server's answer names the winner.
+    const readRow = async () => (await row.innerText()).replace(/\s+/g, ' ');
+    await expect.poll(readRow, { message: 'Aka, who held the two flags, is marked the winner' }).toContain(`Aka: ✓ Winner: ${pair.aka}`);
+    const rowText = await readRow();
     expect(rowText.match(/✓/g), 'and only Aka').toHaveLength(1);
     const result = (await row.locator('.shiaijo-qrow__result').innerText()).trim();
     record({ journey: 'engi', action: 'console result row', result });
@@ -114,7 +117,7 @@ test.describe('engi', () => {
     await expect(engiEditor(page)).toBeVisible();
     await expect(flagCount(page, 'aka')).toHaveText('0');
     const writes = await holdScoreWrites(page);
-    const lastBody = () => writes.bodies[writes.bodies.length - 1];
+    const lastTap = () => writes.events[writes.events.length - 1];
     const reloaded = async () => {
       await page.reload();
       await expect(engiEditor(page)).toBeVisible({ timeout: EXPECT_TIMEOUT_MS });
@@ -124,10 +127,10 @@ test.describe('engi', () => {
       // Add one, and take it back while the add's save is still out.
       let held = writes.holdNext();
       await flagButton(page, 'aka', '+').tap();
-      await held.sent; // past the autosave debounce: the add's PUT is out, held
+      await held.sent; // the add's tap has left the outbox and is held on the wire
       await flagButton(page, 'aka', '-').tap();
       held.release();
-      // The add's response reached the page before the removal's own save went out.
+      // The add's answer reached the page before the removal's own tap went out.
       await writes.answeredBeforeNextWrite(held);
       await engiSettle(page);
       // Deliberate: a late echo that undoes the tap-back must be given the time to land, so the time is the evidence.
@@ -135,8 +138,8 @@ test.describe('engi', () => {
       await expect(flagCount(page, 'aka'), 'the taken-back flag stays taken back').toHaveText('0');
       await shot(page, 'flag-taken-back-kept');
       expect(await reloaded(), 'and the server holds no flag').toBe(0);
-      expect(lastBody(), 'the last save sent was the removal').toMatchObject({ flagsA: 0 });
-      expect(lastBody().changed, 'and named the flags as changed').toContain('flags');
+      // Aka is side a of the match (the score-events wire).
+      expect(lastTap(), 'the last tap sent was the removal of Aka\'s flag').toMatchObject({ kind: 'flag.remove', side: 'a' });
       await shot(page, 'flag-taken-back-after-reload');
 
       // The mirror: from one flag saved, take it off, and put it back while
@@ -156,8 +159,7 @@ test.describe('engi', () => {
       await expect(flagCount(page, 'aka'), 'the flag put back stays').toHaveText('1');
       await shot(page, 'flag-put-back-kept');
       expect(await reloaded(), 'and the server holds it').toBe(1);
-      expect(lastBody(), 'the last save sent was the add').toMatchObject({ flagsA: 1 });
-      expect(lastBody().changed, 'and named the flags as changed').toContain('flags');
+      expect(lastTap(), 'the last tap sent was the add of Aka\'s flag').toMatchObject({ kind: 'flag.add', side: 'a' });
     } finally {
       await writes.stop();
     }

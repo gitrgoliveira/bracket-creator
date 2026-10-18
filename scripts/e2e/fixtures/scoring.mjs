@@ -79,8 +79,12 @@ const SIDE_NAME = { shiro: 'Shiro', aka: 'Aka' };
 export const ipponButton = (page, side, waza, root = INLINE_EDITOR) => page.locator(root)
   .locator(`.sb-side--${side} .ipt-btn`, { hasText: new RegExp(`^${waza}$`) }).first();
 
-// The autosave indicator on the open editor ("Synced", "Syncing…",
-// "Offline", ...; admin_scoring_autosave.jsx).
+// The sync pill on the open editor ("Synced", "Syncing…", "Offline", ...;
+// admin_scoring_autosave.jsx). It reads the device's outbox, where every tap
+// is queued the moment it is made (API.recordTap): "Synced" means the outbox
+// is empty, so every tap this device made has been answered by the server. It
+// is process-wide, not per match, and it says nothing about another device's
+// taps: a check across devices reads the other device's board instead.
 export const syncState = (page, root = INLINE_EDITOR) => page.locator(root).locator('.sync-pill__label').first();
 
 // The slots a side's points fill, outside to inside, that hold a mark. A slot
@@ -91,8 +95,8 @@ export const syncState = (page, root = INLINE_EDITOR) => page.locator(root).loca
 export const filledSlots = (page, side, root = INLINE_EDITOR) => page.locator(root)
   .locator(`[aria-label^="${SIDE_NAME[side]} slot "]:not([aria-label$=": empty"])`);
 
-// Award one ippon and return once the board shows it and the autosave has
-// landed. `side` is 'shiro' | 'aka'. A second strike for the same side waits
+// Award one ippon and return once the board shows it and the tap has been
+// answered (the outbox is empty). `side` is 'shiro' | 'aka'. A second strike for the same side waits
 // out the bounce window of the first (fixtures/pace.mjs).
 export async function awardIppon(page, side, waza = 'M', root = INLINE_EDITOR) {
   const before = await filledSlots(page, side, root).count();
@@ -126,15 +130,29 @@ export const armedFinishButton = (page, root = INLINE_EDITOR) => within(page, ro
 // written, not that THIS match's edit was, so it cannot stand in for the
 // answer to the write itself. Call this BEFORE the tap that
 // causes the write, then `await writeLanded(...)` after it. `tail` is the
-// write's route below /matches/:id: 'score' (PUT, the default: marks, fusensho,
-// Tie, Start, Finish) or 'daihyosen' (POST, the representative bout's add).
-// A timeout the caller never reached is not an unhandled rejection.
+// write's route below /matches/:id: 'score' (PUT, the default: Start, Finish,
+// Record bout, a correction, a team row the sheet writes ahead of its first
+// tap) or 'daihyosen' (POST, the representative bout's add). A scoring tap (a
+// mark, a foul, a flag, a bout's Tie or fusensho, overtime) is not a /score
+// write: it goes to the score-events door, nextTapWrite below. A timeout the
+// caller never reached is not an unhandled rejection.
 export function nextMatchWrite(page, { method = 'PUT', tail = 'score' } = {}) {
   const answered = page.waitForResponse((r) => r.request().method() === method
     && new RegExp(`/matches/[^/]+/${tail}$`).test(new URL(r.url()).pathname), { timeout: EXPECT_TIMEOUT_MS });
   answered.catch(() => {});
   return answered;
 }
+
+// The server's answer to the next batch of scoring taps (POST
+// /matches/:id/score-events, bc-evts): every scoring control of a running match
+// queues an event in the outbox, and the outbox sends the taps of one tick as
+// one batch. Call it BEFORE the tap, then `await writeLanded(...)`.
+export const nextTapWrite = (page) => nextMatchWrite(page, { method: 'POST', tail: 'score-events' });
+
+// The match id of a match write's answer (`res` from nextMatchWrite or
+// nextTapWrite), decoded.
+export const writtenMatchId = (res) => decodeURIComponent(new URL(res.url()).pathname
+  .split('/matches/')[1].replace(/\/(score|score-events|daihyosen)$/, ''));
 
 // Return once that write has been answered with a success status.
 export async function writeLanded(answered, what = 'the write') {

@@ -34,7 +34,7 @@ import {
 } from '../fixtures/shiaijo.mjs';
 import {
   INLINE_EDITOR, EDITOR, clearMarks, ipponButton, syncState, filledSlots, finishButton, armedFinishButton, armFinish, finishMatch,
-  startMatch, awardIppon, nextMatchWrite, writeLanded,
+  startMatch, awardIppon, nextTapWrite, writeLanded,
 } from '../fixtures/scoring.mjs';
 import { dwell, rendered, untilStable } from '../fixtures/pace.mjs';
 import {
@@ -994,7 +994,7 @@ test.describe('knockout-mixed-individual', () => {
       await expect(page.locator(EDITOR)).toBeVisible();
     }
     const w = winnerOf(pair);
-    const ipponSaved = nextMatchWrite(page);
+    const ipponSaved = nextTapWrite(page);
     await ipponButton(page, w, 'M', EDITOR).tap();
     await writeLanded(ipponSaved, 'the ippon save');
     const openAfterIppon = await page.locator(EDITOR).isVisible().catch(() => false);
@@ -1224,7 +1224,7 @@ test.describe('knockout-mixed-individual bead guards', () => {
     await openShiaijo(page, 'L');
     const pair = await ensureRunning(page);
     expect(pair, 'a bout starts on this court').not.toBeNull();
-    // Venue wifi: the court's refresh after the autosave is slow to arrive.
+    // Venue wifi: the court's refresh after the tap is slow to arrive.
     // The score is on the board (and saved) all the same.
     const slowReads = async (route) => {
       if (route.request().method() !== 'GET' || route.request().url().includes('/api/events')) return route.continue();
@@ -1237,7 +1237,7 @@ test.describe('knockout-mixed-individual bead guards', () => {
     await page.getByRole('button', { name: 'Send back to queue' }).tap();
     const dialog = page.locator('.shiaijo-move-confirm[role="dialog"]');
     await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText('Any score entered is kept');
+    await expect(dialog).toContainText('The score already saved is kept');
     await page.unroute('**/api/**', slowReads);
     await hastyShiaijoConfirm(page);
     // The dialog's promise holds: started again, the bout still has its point.

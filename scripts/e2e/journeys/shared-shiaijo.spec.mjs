@@ -395,8 +395,8 @@ test.describe('shared-shiaijo', () => {
     // live bout has a point first, so the send-back is seen to keep a score.
     await ipponButton(C, winnerOf(bouts.b2), 'M').tap();
     await settleOn(C);
+    await expect.poll(() => slotMarks(C, winnerOf(bouts.b2)), { message: 'the live bout shows its point' }).toEqual(['M']);
     const marksB2 = await slotMarks(C, winnerOf(bouts.b2));
-    expect(marksB2).toEqual(['M']);
     const corr = await correctCompleted(C, bouts.b1);
     r({ step: 'S4a correct', action: "Correct an SI bout while SI's next bout runs", variant: 'correct path (refused, bc-crpn)',
       liveBout: corr.live, ...corr.refusal, shot: await shot(C, 's4a-correction-open') });

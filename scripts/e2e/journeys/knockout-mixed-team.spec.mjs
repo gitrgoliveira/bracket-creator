@@ -21,7 +21,7 @@ import { enterTournament, login } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
 import { inlineEditor, openShiaijo, sides, upNextCard, completedRows, completedRowFor } from '../fixtures/shiaijo.mjs';
-import { EDITOR, clearMarks, nextMatchWrite, writeLanded } from '../fixtures/scoring.mjs';
+import { EDITOR, clearMarks, nextMatchWrite, nextTapWrite, writeLanded } from '../fixtures/scoring.mjs';
 import { openScoreEditor } from '../fixtures/scores.mjs';
 import { openTvBoard, openViewer, tvBoard } from '../fixtures/public.mjs';
 import { doubleTap, hastyConfirm, interrupt, retapWhileSaving, tapNeighbour } from '../fixtures/clumsy.mjs';
@@ -312,9 +312,13 @@ test.describe('knockout-mixed-team', () => {
       if (offered.some((o) => o.includes('Aoki'))) await T.pickFromNameBox(box, 'Aoki');
       else await T.typeIntoNameBox(box, 'Aoki');
       await expect(box).toHaveValue('Aoki');
-      // V1: the thumb picks the option under Aoki's.
+      // V1: the thumb picks the option under Aoki's. The pick just made
+      // stamped the bout list, which ignores a tap inside it for the bounce
+      // window, so the operator's next tap comes after the dwell.
+      await T.dwellAfterNameOption(page);
       await box.tap();
       const opts = row1.locator('.pmf__option');
+      await expect(opts.first()).toBeVisible();
       const texts = await opts.allInnerTexts();
       const aokiIdx = texts.findIndex((t) => t.includes('Aoki'));
       const wrongOpt = opts.nth(Math.min(aokiIdx + 1, texts.length - 1));
@@ -641,7 +645,7 @@ test.describe('knockout-mixed-team', () => {
 
       // V3: fusensho, the operator looks away (the write lands), the page
       // reloads, then the operator untoggles "from memory".
-      const fusenshoSaved = nextMatchWrite(page);
+      const fusenshoSaved = nextTapWrite(page);
       await T.rowFusensho(row, 'aka').tap();
       await expect(T.rowSlots(row, 'aka')).toHaveCount(2);
       await writeLanded(fusenshoSaved, 'the fusensho save');
@@ -716,7 +720,7 @@ test.describe('knockout-mixed-team', () => {
       const row5 = T.boutRow(ed, 5);
       await row5.scrollIntoViewIfNeeded();
       const before5 = { middle: (await T.rowMiddle(row5).innerText()).trim(), tieLabel: (await T.rowTie(row5).innerText()).trim() };
-      const tieSaved = nextMatchWrite(page);
+      const tieSaved = nextTapWrite(page);
       await T.rowTie(row5).tap();
       await writeLanded(tieSaved, 'the Tie save');
       const after5 = { middle: (await T.rowMiddle(row5).innerText()).trim(), tieLabel: (await T.rowTie(row5).innerText()).trim() };
@@ -1175,7 +1179,7 @@ test.describe('knockout-mixed-team', () => {
     await seedF4(page, { name: 'B3 KO', court: 'J', prefix: 'J', teams: [['B3 Ume', 'Kita Dojo'], ['B3 Sakura', 'Minami Dojo']] });
     await openShiaijo(page, 'J');
     const ed = await T.startUpNextTeam(page);
-    const ipponSaved = nextMatchWrite(page);
+    const ipponSaved = nextTapWrite(page);
     await T.boutIppon(ed, 1, 'shiro', 'M');
     await writeLanded(ipponSaved, 'the ippon save');
     await page.reload();
@@ -1207,7 +1211,7 @@ test.describe('knockout-mixed-team', () => {
     // The kote is saved before the fusensho.
     await expect(T.syncPill(ed)).toHaveText('Synced');
     // Shiro's fighter cannot continue; the bout goes to Aka as a fusensho.
-    const fusenshoSaved = nextMatchWrite(page);
+    const fusenshoSaved = nextTapWrite(page);
     await T.rowFusensho(T.boutRow(ed, 1), 'aka').tap();
     await expect(T.rowSlots(T.boutRow(ed, 1), 'aka')).toHaveText(['○', '○']);
     // recording-decisions.md: "Any point the withdrawing side had already

@@ -119,14 +119,20 @@ export async function doubleTap(locator) {
   return { gapMs, withinWindow: true };
 }
 
-// V2 (second form). Tap `locator`, then tap the same spot again while it reads
-// "Saving…". A local server answers in milliseconds, far too fast for any
-// thumb, so the write is held for `holdWritesMs` first (every non-GET /api
-// request), which is what a venue's wifi does anyway. Returns
-// { savingSeen, retapped, labelAfter, writesSent }, both flags always true: a button that
-// never shows "Saving…" within the hold THROWS (the second tap was not made, so
-// a check built on this helper would pass without testing anything). Any other
-// failure propagates as it is.
+// V2 (second form). Tap `locator`, then tap the same spot again while the
+// write the first tap caused is still unanswered. A local server answers in
+// milliseconds, far too fast for any thumb, so the write is held for
+// `holdWritesMs` first (every non-GET /api request), which is what a venue's
+// wifi does anyway. "While saving" is whichever comes first: the button reads
+// "Saving…" (a form that waits for its answer, such as a Finish), or the
+// write is out and held (a write that goes through the outbox, which never
+// blocks the screen, so a button such as Record bout or Save lineup shows no
+// "Saving…" at all; bc-evts). Returns { savingSeen, writeOut, retapped,
+// labelAfter, writesSent }: `savingSeen` says the label was read, `writeOut`
+// that a write was in flight at the retap, and `retapped` is always true. A
+// tap that neither shows "Saving…" nor sends a write within the hold THROWS
+// (the second tap was not made, so a check built on this helper would pass
+// without testing anything). Any other failure propagates as it is.
 export async function retapWhileSaving(locator, { holdWritesMs = 1200, savingText = /Saving…/ } = {}) {
   const page = locator.page();
   const { x, y } = await centreOf(locator);
@@ -156,21 +162,32 @@ export async function retapWhileSaving(locator, { holdWritesMs = 1200, savingTex
   page.on('request', started);
   page.on('requestfinished', ended);
   page.on('requestfailed', ended);
+  let writeOutSeen;
+  const writeOut = new Promise((resolve) => { writeOutSeen = resolve; });
+  const onWriteOut = (req) => {
+    if (req.method() !== 'GET' && new URL(req.url()).pathname.startsWith('/api/')) writeOutSeen('write');
+  };
+  page.on('request', onWriteOut);
   try {
     await page.touchscreen.tap(x, y);
+    let first;
     try {
-      await page.waitForFunction(
+      const label = page.waitForFunction(
         ([el, src, flags]) => new RegExp(src, flags).test(el.textContent || ''),
         [handle, savingText.source, savingText.flags],
         { timeout: holdWritesMs, polling: 'raf' },
-      );
+      ).then(() => 'label');
+      first = await Promise.race([label, writeOut]);
+      label.catch(() => {});
     } catch (err) {
       if (err instanceof errors.TimeoutError) {
-        throw new Error(`clumsy.retapWhileSaving: ${locator} never read ${savingText} within ${holdWritesMs} ms of the tap (writes were held for that long), so there was no second tap to make`);
+        throw new Error(`clumsy.retapWhileSaving: ${locator} never read ${savingText} and sent no write within ${holdWritesMs} ms of the tap (writes were held for that long), so there was no second tap to make`);
       }
       throw err;
     }
-    const savingSeen = true;
+    const savingSeen = first === 'label'
+      || await handle.evaluate((el, [src, flags]) => new RegExp(src, flags).test(el.textContent || ''), [savingText.source, savingText.flags]).catch(() => false);
+    const writeOutAtRetap = inFlight.size > 0;
     await page.touchscreen.tap(x, y);
     // Let the held write go through before the route is removed.
     await page.waitForFunction(
@@ -184,8 +201,9 @@ export async function retapWhileSaving(locator, { holdWritesMs = 1200, savingTex
       await new Promise((r) => setTimeout(r, 50));
     }
     const labelAfter = await handle.evaluate((el) => (el.isConnected ? el.textContent.trim() : null));
-    return { savingSeen, retapped: savingSeen, labelAfter, writesSent };
+    return { savingSeen, writeOut: writeOutAtRetap, retapped: true, labelAfter, writesSent };
   } finally {
+    page.off('request', onWriteOut);
     page.off('request', started);
     page.off('requestfinished', ended);
     page.off('requestfailed', ended);

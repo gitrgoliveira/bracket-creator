@@ -41,7 +41,7 @@ export async function editorIdentity(page, root = INLINE_EDITOR) {
   const ed = typeof root === 'string' ? page.locator(root).first() : root.first();
   const first = async (sel) => ((await ed.locator(sel).allInnerTexts())[0] || '').trim();
   const eyebrow = await first('.editor-modal__eyebrow');
-  // The title's first line: the autosave pill beside it is not the match.
+  // The title's first line: the sync pill beside it is not the match.
   const title = (await first('.editor-modal__title')).split('\n')[0].trim();
   const names = (await ed.locator('.numbered-name__text').allInnerTexts()).slice(0, 2).map((t) => t.trim());
   return {
@@ -52,8 +52,12 @@ export async function editorIdentity(page, root = INLINE_EDITOR) {
 }
 
 // Start the Up next match the way the operator does, from its card, and
-// return the pairing once the inline editor holds it. Only the card's own
-// "Start match" is used: every Upcoming row carries one too.
+// return the pairing once the inline editor holds it and the queue has caught
+// up with the start (the Up next card no longer shows the pairing). Only the
+// card's own "Start match" is used: every Upcoming row carries one too. The
+// Start goes through the outbox and never waits (bc-evts), so the editor holds
+// the match at once while the queue learns it a moment later, from the
+// server's push or the court's refetch.
 export async function startUpNext(page) {
   const card = upNextCard(page);
   const pair = await sides(card);
@@ -61,6 +65,11 @@ export async function startUpNext(page) {
   const editor = inlineEditor(page);
   await expect(editor.locator('.sb-side--shiro')).toContainText(pair.shiro);
   await expect(editor.locator('.sb-side--aka')).toContainText(pair.aka);
+  await expect.poll(async () => {
+    if (!(await card.first().isVisible().catch(() => false))) return 'caught up';
+    const next = await sides(card.first()).catch(() => null);
+    return next && next.shiro === pair.shiro && next.aka === pair.aka ? 'Up next still shows the started match' : 'caught up';
+  }, { message: 'the court queue caught up with the start' }).toBe('caught up');
   return pair;
 }
 

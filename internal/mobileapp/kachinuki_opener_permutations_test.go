@@ -87,6 +87,9 @@ type gateWorld struct {
 	pinnedStamp      int64
 	finished         *state.MatchResult
 	failures         map[string]int
+	// kinds is the kinds of assertion this ordering failed, counted once
+	// per ordering under "orderings: <kind>".
+	kinds map[string]bool
 }
 
 func (w *gateWorld) stamp(op string) int64 {
@@ -116,6 +119,10 @@ func (w *gateWorld) stamp(op string) int64 {
 
 func (w *gateWorld) fail(kind, format string, args ...any) {
 	w.failures[kind]++
+	if !w.kinds[kind] {
+		w.kinds[kind] = true
+		w.failures["orderings: "+kind]++
+	}
 	if w.failures[kind] <= 3 {
 		w.t.Logf("[%s] %s after %v: %s", kind, w.comp, w.order, fmt.Sprintf(format, args...))
 	}
@@ -369,7 +376,7 @@ func newGateWorld(t *testing.T, r *gin.Engine, store *state.Store, eng *engine.E
 		ids[p.Name] = p.ID
 	}
 	w := &gateWorld{t: t, r: r, store: store, eng: eng, comp: comp, legacy: legacy, teamA: ids["Tora"], teamB: ids["Washi"],
-		members: map[string]string{}, arrived: map[string]bool{}, failures: failures,
+		members: map[string]string{}, arrived: map[string]bool{}, failures: failures, kinds: map[string]bool{},
 		base: time.Now().UnixMilli() - 600_000, startingNow: "Sato", pinned: "Sato"}
 	for team, names := range map[string][]string{ids["Tora"]: {"Sato", "Kato", "Mori", "Ito", "Kubo", "Aoki"}, ids["Washi"]: {"Fujii"}, ids["Kuma"]: {"Goto"}} {
 		for _, n := range names {

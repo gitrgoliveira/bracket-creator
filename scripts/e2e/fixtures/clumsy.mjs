@@ -106,7 +106,8 @@ export async function tapNeighbour(locator, direction) {
 // when the first tap disabled the control so the second produces no click (a
 // browser dispatches none on a disabled button; the bounce then never reaches
 // the app at all), between the two touchstarts. Never the host-side round trip
-// of the first tap, which also counts the protocol's own latency. clicks is how
+// of the first tap, which also counts the protocol's own latency, and the
+// taps are sent so that none sits between them. clicks is how
 // many clicks the page saw (2, or 1 for a control the first tap disabled), and
 // withinWindow always true: a machine too slow to land the taps inside the
 // window THROWS, because the row would not have tested what it says, and so do
@@ -127,8 +128,21 @@ export async function doubleTap(locator) {
       }, true);
     }
   });
-  await page.touchscreen.tap(x, y);
-  await page.touchscreen.tap(x, y);
+  // The four touch events go back to back on ONE CDP session, so the second
+  // tap is queued in the page right behind the first rather than after a
+  // host round trip (two awaited touchscreen.tap calls measured over 500 ms
+  // in the page on a loaded machine). One session delivers them in order.
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    const sent = [];
+    for (let i = 0; i < 2; i++) {
+      sent.push(cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] }));
+      sent.push(cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }));
+    }
+    await Promise.all(sent);
+  } finally {
+    await cdp.detach().catch(() => {});
+  }
   const { clicks, touches } = await page.evaluate(() => ({ clicks: window.__clumsyClicks, touches: window.__clumsyTouches }));
   if (!Array.isArray(touches) || touches.length !== 2) {
     throw new Error(`clumsy.doubleTap: the page saw ${Array.isArray(touches) ? touches.length : 'no'} touch(es), not 2, so the row did not test the bounce guard`);

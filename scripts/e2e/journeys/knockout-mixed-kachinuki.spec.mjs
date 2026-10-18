@@ -397,7 +397,7 @@ test.describe('J5 kachinuki from the court console', () => {
       // The thumb's first tap is a deliberate one: Record bout, a moment ago,
       // shares this place's bounce guard.
       await dwellOnSide(page, BOUT_CHANGE);
-      const v2 = await doubleTap(remove);
+      const v2 = await doubleTap(remove, { afterRender: true });
       const removeTappedAt = Date.now();
       // The appended pairing is gone once the removal has been answered.
       await expect(remove).toBeHidden();
@@ -786,7 +786,7 @@ test.describe('J5 kachinuki from the court console', () => {
     await test.step('Reopen match, double-tapped', async () => {
       const reopen = reopenButton(page);
       const box = await reopen.boundingBox();
-      const v2 = await doubleTap(reopen);
+      const v2 = await doubleTap(reopen, { afterRender: true });
       await expect(recordBoutButton(page)).toBeVisible({ timeout: EXPECT_TIMEOUT_MS });
       await rendered(page);
       record({ step: 'M1 reopen', action: 'Reopen match', variant: 'V2 doubleTap', ...v2, reopenBox: box,
@@ -1124,7 +1124,7 @@ test.describe('J5 kachinuki from the court console', () => {
           await awardBoutIppon(page, 'aka', 'M');
           // V2 on Record bout: two taps inside 300ms.
           const before = await doneRows(page).count();
-          const v2 = await doubleTap(recordBoutButton(page));
+          const v2 = await doubleTap(recordBoutButton(page), { afterRender: true });
           await expect(doneRows(page)).toHaveCount(before + 1);
           // Deliberate: the bounced second tap must NOT append another bout, and
           // an absence has no state to wait for, so the time is the evidence.

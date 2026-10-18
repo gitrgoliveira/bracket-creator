@@ -115,14 +115,26 @@ export async function tapNeighbour(locator, direction) {
 // taken back, so the taps are not retried; the caller's test fails with the
 // message above (playwright.config.mjs sets retries to 0). Callers may assert
 // on the outcome unconditionally.
-export async function doubleTap(locator) {
+//
+// Both taps must reach the same place (stage 6 review 8, m11): two clicks
+// count only when each landed on a control holding the point, and a lone click
+// only when the control under the point was DISABLED at the second touch. A
+// control the first tap REPLACED takes no click when its replacement lands
+// between the second touch's start and end, so the bounce never reached the
+// place-keyed guard (acceptTap) the row claims to test: that throws. A row
+// whose first tap replaces the control in place (Add or Remove representative
+// bout, Record bout, Remove this bout, Reopen match) passes { afterRender:
+// true }: the second tap is sent once the first tap's render has run (as a
+// thumb's second tap, some 100 ms later, lands), so it reaches the replacement.
+export async function doubleTap(locator, { afterRender = false } = {}) {
   const page = locator.page();
   const { x, y } = await centreOf(locator);
-  // The page records each click and touch, and whether the control under the
-  // point was disabled (or gone) when the second touch ended or in the task after,
-  // where its click would come (the first tap may disable it, which is why
-  // that touch makes no click). The listeners are removed in
-  // the finally below whatever the page saw, so none outlives this call.
+  // The page records each click (with whether its control holds the point)
+  // and each touch, and whether the control under the point was disabled when
+  // the second touch ended or in the task after, where its click would come
+  // (the first tap may disable it, which is why that touch makes no click).
+  // The listeners are removed in the finally below whatever the page saw, so
+  // none outlives this call.
   await page.evaluate(({ px, py }) => {
     window.__clumsyClicks = [];
     window.__clumsyTouches = [];
@@ -131,19 +143,28 @@ export async function doubleTap(locator) {
       const el = document.elementFromPoint(px, py);
       return el && el.closest('button, [role="button"], input, select, textarea');
     };
-    // The control the taps aim at; a click it cannot take is one it no
-    // longer has (it was disabled, or replaced, by the first tap's render).
-    const aimed = controlAt();
     const disabledAt = () => {
-      if (aimed && !aimed.isConnected) return true;
       const control = controlAt();
       return !!control && (control.disabled === true || control.getAttribute('aria-disabled') === 'true');
     };
+    const holdsPoint = (target) => {
+      const el = target && target.closest ? (target.closest('button, [role="button"], input, select, textarea') || target) : null;
+      if (!el || !el.isConnected) return false;
+      const r = el.getBoundingClientRect();
+      return px >= r.left && px <= r.right && py >= r.top && py <= r.bottom;
+    };
     const listeners = [];
     const ends = [];
+    let firstClick = null;
+    const firstClicked = new Promise((r) => { firstClick = r; });
     for (const [type, seen] of [['click', window.__clumsyClicks], ['touchstart', window.__clumsyTouches], ['touchend', ends]]) {
-      const rec = () => {
-        seen.push(Date.now());
+      const rec = (e) => {
+        if (type === 'click') {
+          seen.push({ at: Date.now(), atPoint: holdsPoint(e.target) });
+          firstClick();
+        } else {
+          seen.push(Date.now());
+        }
         // Read as the second tap ends, and again in the next task, where its
         // click would come: the first tap's render (which disables the
         // control) can land between the two.
@@ -155,9 +176,13 @@ export async function doubleTap(locator) {
       document.addEventListener(type, rec, true);
       listeners.push([type, rec]);
     }
+    // Resolves once the first tap's click has run and the render it caused
+    // has painted.
+    window.__clumsyAfterFirst = () => firstClicked.then(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))));
     window.__clumsyRemove = () => {
       for (const [type, rec] of listeners) document.removeEventListener(type, rec, true);
       window.__clumsyRemove = null;
+      window.__clumsyAfterFirst = null;
     };
   }, { px: x, py: y });
   let seen;
@@ -166,14 +191,21 @@ export async function doubleTap(locator) {
     // tap is queued in the page right behind the first rather than after a
     // host round trip (two awaited touchscreen.tap calls measured over 500 ms
     // in the page on a loaded machine). One session delivers them in order.
+    // With afterRender, the second pair follows the first tap's render, asked
+    // of the page on the same session.
     const cdp = await page.context().newCDPSession(page);
     try {
-      const sent = [];
-      for (let i = 0; i < 2; i++) {
-        sent.push(cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] }));
-        sent.push(cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }));
+      const tap = () => [
+        cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] }),
+        cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }),
+      ];
+      if (afterRender) {
+        await Promise.all(tap());
+        await cdp.send('Runtime.evaluate', { expression: 'window.__clumsyAfterFirst && window.__clumsyAfterFirst()', awaitPromise: true });
+        await Promise.all(tap());
+      } else {
+        await Promise.all([...tap(), ...tap()]);
       }
-      await Promise.all(sent);
     } finally {
       await cdp.detach().catch(() => {});
     }
@@ -192,16 +224,22 @@ export async function doubleTap(locator) {
   if (!Array.isArray(clicks) || clicks.length === 0 || clicks.length > 2) {
     throw new Error(`clumsy.doubleTap: the two taps produced ${Array.isArray(clicks) ? clicks.length : 'no'} click(s) in the page, so the row did not test the bounce guard`);
   }
-  // One click is a double tap only when the first tap disabled the control,
-  // so the second touch landed on a disabled one; otherwise a tap was lost.
-  if (clicks.length === 1 && secondDisabled !== true) {
-    throw new Error('clumsy.doubleTap: the two taps produced one click while the control was not disabled at the second touch, so a tap was lost and the row did not test the bounce guard');
+  // Two clicks: each on a control holding the point, so the bounce reached the
+  // place the first tap did.
+  if (clicks.length === 2 && !clicks.every((c) => c.atPoint)) {
+    throw new Error('clumsy.doubleTap: a click of the two taps did not land on a control at the tapped point, so the taps did not reach the same place and the row did not test the bounce guard');
   }
-  const gapMs = clicks.length === 2 ? clicks[1] - clicks[0] : touches[1] - touches[0];
+  // One click is a double tap only when the first tap disabled the control,
+  // so the second touch landed on a disabled one; a control replaced, or a
+  // tap lost, is not.
+  if (clicks.length === 1 && secondDisabled !== true) {
+    throw new Error('clumsy.doubleTap: the two taps produced one click while the control at the point was not disabled at the second touch (replaced by the first tap, or a tap lost), so the bounce never reached it and the row did not test the bounce guard; a row whose first tap replaces the control in place passes { afterRender: true }');
+  }
+  const gapMs = clicks.length === 2 ? clicks[1].at - clicks[0].at : touches[1] - touches[0];
   if (gapMs >= DOUBLE_TAP_LIMIT_MS) {
     throw new Error(`clumsy.doubleTap: the two taps were ${gapMs} ms apart (limit ${DOUBLE_TAP_LIMIT_MS} ms, the app's bounce window is ${TAP_BOUNCE_MS} ms): this machine was too slow, so the row did not test the bounce guard`);
   }
-  return { gapMs, clicks: clicks.length, withinWindow: true, secondDisabled: clicks.length === 1 };
+  return { gapMs, clicks: clicks.length, withinWindow: true, secondDisabled: clicks.length === 1, afterRender };
 }
 
 // V2 (second form). Tap `locator`, then tap the same spot again while the

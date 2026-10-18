@@ -70,7 +70,7 @@ import {
   ownStartRefusalText,
   StartRefusedNotice,
 } from './admin_scoring_shared.jsx';
-import { individualDraftTaps } from './draft_taps.jsx';
+import { individualDraftTaps, rebaseIndividualDraft } from './draft_taps.jsx';
 // bc-cse: a SCHEDULED match a competitor is barred from must never offer a
 // Start the server would refuse; isBarredMatch (ineligible_match.jsx) is the
 // one owner of that question.
@@ -1096,11 +1096,27 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   useEffectA(() => {
     if (lockedKeyRef.current === recordedLockedKey) return;
     lockedKeyRef.current = recordedLockedKey;
-    // A draft kept because ANOTHER device reopened the match (D1) stays as
-    // typed: its note says the entries are still here, and Save sends only
-    // their own changes against the copy they were typed over (draft_taps),
-    // so the old ruling's maru is never sent as points (stage 5 review 8).
-    if (own.kept) return;
+    // A draft kept because ANOTHER device reopened the match (D1) keeps the
+    // operator's own changes: its note says the entries are still here, and
+    // Save sends only those changes (draft_taps), so the old ruling's maru is
+    // never sent as points (stage 5 review 8). The board shows exactly that:
+    // the reopened copy with the draft's own changes over it, never the old
+    // ruling's maru beside them, and the kept draft's base moves to that copy
+    // (stage 5 review 9, m2).
+    if (own.kept) {
+      const server = { aPts: initialAPts, bPts: initialBPts, aFouls: initialAFouls, bFouls: initialBFouls, encho: initialEnchoPeriods, repA: m.repPlayerA || "", repB: m.repPlayerB || "" };
+      const next = rebaseIndividualDraft(own.kept.base,
+        { aPts: aPtsLocal, bPts: bPtsLocal, aFouls: aFoulsLocal, bFouls: bFoulsLocal, encho: enchoLocal, repA: repPlayerA, repB: repPlayerB }, server);
+      setAPts(next.aPts);
+      setBPts(next.bPts);
+      setAFouls(next.aFouls);
+      setBFouls(next.bFouls);
+      setEnchoPeriodCount(next.encho);
+      setRepPlayerA(next.repA);
+      setRepPlayerB(next.repB);
+      own.rebaseKept(server);
+      return;
+    }
     applyServerScore();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recordedLockedKey]);

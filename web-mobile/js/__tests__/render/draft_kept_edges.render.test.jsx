@@ -105,3 +105,26 @@ describe('3: a refused own Start is not this editor\'s start', () => {
     expect(kept()).not.toBeNull();
   });
 });
+
+// Stage 5 review 9, m2: a draft kept when another device reopens a withdrawal
+// match shows what Save sends. The old ruling's circles are no entry of the
+// operator's and Save never sends them as points, so the kept draft shows the
+// reopened copy with the operator's own changes over it.
+describe('4: a draft kept over a reopen elsewhere shows what Save sends', () => {
+  const decided = bout({
+    id: 'm-r1-0', phase: 'knockout', round: 'Round 1', status: 'completed', ipponsA: ['○', '○'], ipponsB: [],
+    decision: 'fusenpai', decisionBy: 'shiro', winner: { id: 'p1', name: 'Yamada' }, scoreVersion: 2,
+  });
+  const reopened = bout({ id: 'm-r1-0', phase: 'knockout', round: 'Round 1', status: 'running', ipponsA: [], ipponsB: [], modifiedAt: NOW + 10, scoreVersion: 3 });
+
+  it('individual: the old ruling\'s circles go, the typed M stays, and Save sends the M alone', async () => {
+    const r = render(el(decided));
+    await tap(letterBtn(shiroSide(r.container), 'M'));
+    r.rerender(el(reopened));
+    expect(kept()).not.toBeNull();
+    expect(marks(r.container)).toEqual(['Shiro slot 1: remove M']);
+    await saveTwice();
+    expect(events()).toEqual([{ kind: 'ippon.add', pos: 0, side: 'b', letter: 'M' }]);
+    expect(marks(r.container)).toEqual(['Shiro slot 1: remove M']);
+  });
+});

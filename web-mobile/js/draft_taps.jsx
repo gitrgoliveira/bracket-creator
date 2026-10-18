@@ -85,6 +85,34 @@ export function individualDraftTaps(base, draft, board = {}) {
   return out;
 }
 
+// rebaseIndividualDraft: an individual draft's own changes (against `base`,
+// the copy it was typed over) laid over the server's copy `server`, so a kept
+// draft whose base the server no longer holds shows what Save would make of
+// it (stage 5 review 9, m2: the old ruling's circles are no change of the
+// draft's and Save never sends them). The same changes individualDraftTaps
+// sends: the letters the draft added and took off (a removal of a letter the
+// server no longer holds is nothing, as Save's is), the foul and overtime
+// counts moved by the same amount, a pool representative the draft changed.
+// Points stop at two a side, as the server's fold caps them.
+export function rebaseIndividualDraft(base, draft, server) {
+  const pts = (k) => {
+    const { add, remove } = letterChanges(base[k], draft[k]);
+    const out = [...(server[k] || [])];
+    for (const l of remove) {
+      const i = out.indexOf(l);
+      if (i >= 0) out.splice(i, 1);
+    }
+    return [...out, ...add].slice(0, 2);
+  };
+  const count = (k) => Math.max(0, (Number(server[k]) || 0) + (Number(draft[k]) || 0) - (Number(base[k]) || 0));
+  const rep = (k) => ((draft[k] || '') !== (base[k] || '') ? (draft[k] || '') : (server[k] || ''));
+  return {
+    aPts: pts('aPts'), bPts: pts('bPts'),
+    aFouls: count('aFouls'), bFouls: count('bFouls'), encho: count('encho'),
+    repA: rep('repA'), repB: rep('repB'),
+  };
+}
+
 // engiDraftTaps: an engi match's flag counts ({a, b}) against the base.
 export function engiDraftTaps(base, draft) {
   return ['a', 'b'].flatMap((side) => countTaps({ side, from: base[side], to: draft[side], addKind: FLAG_ADD, removeKind: FLAG_REMOVE }));

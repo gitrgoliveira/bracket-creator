@@ -253,6 +253,11 @@ export function createOwnStatus(status, at) {
     // release: the kept draft was saved or discarded.
     release() { st.kept = null; },
 
+    // rebaseKept: the editor laid the kept draft's own changes over the
+    // server's copy (stage 5 review 9, m2), so that copy is the one Save
+    // diffs against from now on.
+    rebaseKept(base) { if (st.kept) st.kept = { ...st.kept, base }; },
+
     // discardDraft: the operator chose Discard entries before an own action
     // (R1, stage 5 review 8): the editor took the server's copy, and no draft
     // noted before is kept, said dropped, or kept later when a write is

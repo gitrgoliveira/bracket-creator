@@ -299,6 +299,7 @@ export function useOwnStatus(feedMatch) {
       answer(token, OWN_LANDED, "", stampOf(res));
     },
     release: () => { own.release(); rerender(); },
+    rebaseKept: (base) => { own.rebaseKept(base); rerender(); },
     discardDraft: () => { own.discardDraft(); rerender(); },
   };
 }

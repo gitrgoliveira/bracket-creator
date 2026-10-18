@@ -2,7 +2,7 @@
 // as the taps that would have made it (operator decision D1 (a)), against the
 // copy it was typed over, never against the board.
 import { describe, it, expect } from 'vitest';
-import { letterChanges, pointTaps, countTaps, individualDraftTaps, engiDraftTaps, teamDraftTaps } from '../draft_taps.jsx';
+import { letterChanges, pointTaps, countTaps, individualDraftTaps, rebaseIndividualDraft, engiDraftTaps, teamDraftTaps } from '../draft_taps.jsx';
 
 describe('letterChanges', () => {
   it('names the letters added in draft order and the base letters taken away, ignoring maru, Ht and placeholders', () => {
@@ -83,5 +83,26 @@ describe('teamDraftTaps', () => {
       { kind: 'rep.pick', pos: -1, side: 'a', memberId: 'k1' },
       { kind: 'ippon.add', pos: -1, side: 'b', letter: 'K' },
     ]);
+  });
+});
+
+// Stage 5 review 9, m2: a kept draft laid over the server's copy shows what
+// Save makes of it: the draft's own changes, never the old copy's circles.
+describe('rebaseIndividualDraft', () => {
+  const none = { aPts: [], bPts: [], aFouls: 0, bFouls: 0, encho: 0, repA: '', repB: '' };
+  it('drops the old ruling\'s circles and keeps the typed letter', () => {
+    const base = { ...none, aPts: ['○', '○'] };
+    const draft = { ...base, bPts: ['M'] };
+    expect(rebaseIndividualDraft(base, draft, none)).toEqual({ ...none, bPts: ['M'] });
+  });
+  it('moves the counts by the draft\'s own change and takes a removal only of a letter the server holds', () => {
+    const base = { ...none, aPts: ['K'], aFouls: 1, encho: 1 };
+    const draft = { ...none, aPts: [], bPts: ['D'], aFouls: 0, encho: 2, repB: 'Sato' };
+    const server = { ...none, aPts: ['K', 'M'], bFouls: 1, encho: 1, repA: 'Ito' };
+    expect(rebaseIndividualDraft(base, draft, server)).toEqual({ aPts: ['M'], bPts: ['D'], aFouls: 0, bFouls: 1, encho: 2, repA: 'Ito', repB: 'Sato' });
+    expect(rebaseIndividualDraft(base, draft, none).aPts).toEqual([]);
+  });
+  it('stops points at two a side', () => {
+    expect(rebaseIndividualDraft(none, { ...none, aPts: ['M'] }, { ...none, aPts: ['K', 'D'] }).aPts).toEqual(['K', 'D']);
   });
 });

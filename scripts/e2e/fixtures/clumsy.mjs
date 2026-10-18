@@ -117,7 +117,7 @@ export async function tapNeighbour(locator, direction) {
 // on the outcome unconditionally.
 //
 // Both taps must reach the same place (stage 6 review 8, m11): two clicks
-// count only when each landed on a control holding the point, and a lone click
+// count only when each landed on what was at the point as its touch began, and a lone click
 // only when the control under the point was DISABLED at the second touch. A
 // control the first tap REPLACED takes no click when its replacement lands
 // between the second touch's start and end, so the bounce never reached the
@@ -147,8 +147,19 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
       const control = controlAt();
       return !!control && (control.disabled === true || control.getAttribute('aria-disabled') === 'true');
     };
-    const holdsPoint = (target) => {
-      const el = target && target.closest ? (target.closest('button, [role="button"], input, select, textarea') || target) : null;
+    // The control (or element) a node belongs to.
+    const placeOf = (node) => (node && node.closest ? (node.closest('button, [role="button"], input, select, textarea') || node) : null);
+    // What was at the point as each touch began: a click must land there, the
+    // place the thumb touched (a control the first tap replaced included: the
+    // second touch then begins on its replacement).
+    const touched = [];
+    const atTouch = (el, i) => {
+      const t = touched[i];
+      return !!el && !!t && (el === t || el.contains(t) || t.contains(el));
+    };
+    // Or what holds the point as the click comes (a render between the touch
+    // and its click put a replacement there).
+    const holdsPoint = (el) => {
       if (!el || !el.isConnected) return false;
       const r = el.getBoundingClientRect();
       return px >= r.left && px <= r.right && py >= r.top && py <= r.bottom;
@@ -160,9 +171,12 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
     for (const [type, seen] of [['click', window.__clumsyClicks], ['touchstart', window.__clumsyTouches], ['touchend', ends]]) {
       const rec = (e) => {
         if (type === 'click') {
-          seen.push({ at: Date.now(), atPoint: holdsPoint(e.target) });
+          const el = placeOf(e.target);
+          seen.push({ at: Date.now(), atPoint: atTouch(el, seen.length) || holdsPoint(el),
+            desc: el ? `${el.tagName} "${(el.textContent || '').trim().slice(0, 40)}"` : 'none' });
           firstClick();
         } else {
+          if (type === 'touchstart') touched.push(placeOf(document.elementFromPoint(px, py)));
           seen.push(Date.now());
         }
         // Read as the second tap ends, and again in the next task, where its
@@ -224,10 +238,11 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
   if (!Array.isArray(clicks) || clicks.length === 0 || clicks.length > 2) {
     throw new Error(`clumsy.doubleTap: the two taps produced ${Array.isArray(clicks) ? clicks.length : 'no'} click(s) in the page, so the row did not test the bounce guard`);
   }
-  // Two clicks: each on a control holding the point, so the bounce reached the
-  // place the first tap did.
+  // Two clicks: each on what was at the tapped point as its touch began, or
+  // holds it as the click comes, so the bounce reached the place the first
+  // tap did (its control, or the one that replaced it there).
   if (clicks.length === 2 && !clicks.every((c) => c.atPoint)) {
-    throw new Error('clumsy.doubleTap: a click of the two taps did not land on a control at the tapped point, so the taps did not reach the same place and the row did not test the bounce guard');
+    throw new Error(`clumsy.doubleTap: a click of the two taps did not land at the tapped point (${x},${y}: ${clicks.map((c) => c.desc).join(' | ')}), so the taps did not reach the same place and the row did not test the bounce guard`);
   }
   // One click is a double tap only when the first tap disabled the control,
   // so the second touch landed on a disabled one; a control replaced, or a

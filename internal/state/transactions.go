@@ -115,6 +115,7 @@ type StoreTx interface {
 	LoadTeamLineups(compID string) (map[string]domain.TeamLineup, error)
 	LoadTeamLineupsWithRemoved(compID string) (map[string]domain.TeamLineup, error)
 	SetTeamLineup(compID string, l domain.TeamLineup, teamSize int) error
+	SetTeamLineups(compID string, ls []domain.TeamLineup, teamSize int) error
 	DeleteTeamLineup(compID, teamID string, round int) error
 	DeleteTeamLineupForMatch(compID, teamID, matchID string) error
 	LoadParticipants(compID string, withZekkenName bool) ([]domain.Player, error)
@@ -648,6 +649,42 @@ func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int
 		return err
 	}
 	t.noteStartLineup(l)
+	return nil
+}
+
+// SetTeamLineups is SetTeamLineup for several lineups in ONE staged write of
+// lineups.yaml: one parse and one save however many lineups it sets (the
+// carry's follow sets every lineup it moved through it, stage 6 review 7). A
+// lineup the domain refuses sets none of them.
+func (t *storeTx) SetTeamLineups(compID string, ls []domain.TeamLineup, teamSize int) error {
+	if len(ls) == 0 {
+		return nil
+	}
+	if err := t.checkCompID(compID); err != nil {
+		return err
+	}
+	if err := ValidateCompetitionID(compID); err != nil {
+		return err
+	}
+	for _, l := range ls {
+		if err := l.ValidatePositions(teamSize); err != nil {
+			return err
+		}
+	}
+	current, err := t.LoadTeamLineupsWithRemoved(compID)
+	if err != nil {
+		return err
+	}
+	for _, l := range ls {
+		l.CompetitionID = compID
+		current[lineupStorageKey(l)] = l
+	}
+	if err := t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn()); err != nil {
+		return err
+	}
+	for _, l := range ls {
+		t.noteStartLineup(l)
+	}
 	return nil
 }
 

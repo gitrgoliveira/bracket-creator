@@ -470,3 +470,37 @@ func TestLineupCarry_AnOlderBuildsWholeSaveReachesNoEarlierCopy(t *testing.T) {
 		return "(none)"
 	}())
 }
+
+// refusingFollow is the engine with a follow whose store refuses the write.
+type refusingFollow struct{ *engine.Engine }
+
+func (refusingFollow) FollowLineupSave(state.StoreTx, *state.Competition, domain.TeamLineup, []domain.Position) ([]string, error) {
+	return nil, fmt.Errorf("disk refuses")
+}
+
+// A save whose follow cannot be stored is not kept: the door answers 500 (the
+// outbox sends it again) and the transaction leaves nothing behind.
+func TestLineupCarry_AFollowThatCannotBeStoredFailsTheSave(t *testing.T) {
+	e := newCarryEnv(t, false)
+	r := gin.New()
+	admin := r.Group("/api")
+	verifier := NewFileVerifier(e.store)
+	admin.Use(AuthMiddleware(verifier, e.store))
+	hub := NewHub()
+	t.Cleanup(hub.Close)
+	RegisterLineupHandlers(admin, e.store, e.store, e.store, hub, e.store, verifier, refusingFollow{e.eng})
+	e.r = r
+	p := domain.PositionNumbered(1)
+	for _, path := range []string{e.lineupPath(""), e.lineupPath("P1-0")} {
+		rec := e.do(http.MethodPut, path, map[string]any{
+			"positions": map[domain.Position]string{p: "Aoki"}, "memberIds": map[domain.Position]string{p: e.members["Aoki"]},
+			"changed": []domain.Position{p}, "changedAt": map[domain.Position]int64{p: e.base}, "writeId": "w-" + path,
+		})
+		require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
+	}
+	require.Equal(t, "Sato", e.at("", 1), "the starting lineup save was not kept")
+	require.Equal(t, "(none)", e.at("P1-0", 1))
+	rec := e.do(http.MethodDelete, e.lineupPath(""), map[string]any{"writeId": "rm"})
+	require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
+	require.Equal(t, "Sato", e.at("", 1), "the removal was not kept")
+}

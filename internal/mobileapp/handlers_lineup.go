@@ -402,15 +402,18 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 	}
 	// A save's changes made before a kachinuki match started reach the lineup
 	// the match started with, in the save's transaction (engine.FollowLineupSave).
-	follow := func(stx state.StoreTx, comp *state.Competition, saved domain.TeamLineup, changed []domain.Position) {
+	// A follow that cannot store what it worked out fails the transaction
+	// (stage 6 review 7), as a pin that cannot be kept fails the start.
+	follow := func(stx state.StoreTx, comp *state.Competition, saved domain.TeamLineup, changed []domain.Position) error {
 		for _, k := range keepers {
 			if k == nil {
 				continue
 			}
 			if _, err := k.FollowLineupSave(stx, comp, saved, changed); err != nil {
-				log.Printf("mobileapp: competition %s team %s: a lineup save not carried to the lineups matches started with: %v", comp.ID, saved.TeamID, err)
+				return err
 			}
 		}
+		return nil
 	}
 	// A lineup save is ordered by arrival: a late duplicate of one is
 	// answered as recorded (writeOnce, Y8).
@@ -460,8 +463,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			if err != nil || comp == nil {
 				return err
 			}
-			follow(stx, comp, domain.TeamLineup{TeamID: teamID, Round: round}, nil)
-			return nil
+			return follow(stx, comp, domain.TeamLineup{TeamID: teamID, Round: round}, nil)
 		})
 		if txErr != nil {
 			internalError(c, txErr)
@@ -824,7 +826,7 @@ func (w lineupSave) landPartial(stx state.StoreTx, comp *state.Competition, chan
 // (lineupSave.lineupToStore), saves it and reads it back with find for the
 // response. The answer is written after the lock releases (txResponse), and a
 // saved lineup is broadcast so SSE clients re-fetch it.
-func saveLineup(c *gin.Context, tx CompetitionTransactor, announce func(compID, teamID, matchID string), follow func(stx state.StoreTx, comp *state.Competition, saved domain.TeamLineup, changed []domain.Position), save lineupSave, guard func(stx state.StoreTx, judge *memberJudge) *txResponse, find func(map[string]domain.TeamLineup) (domain.TeamLineup, bool)) {
+func saveLineup(c *gin.Context, tx CompetitionTransactor, announce func(compID, teamID, matchID string), follow func(stx state.StoreTx, comp *state.Competition, saved domain.TeamLineup, changed []domain.Position) error, save lineupSave, guard func(stx state.StoreTx, judge *memberJudge) *txResponse, find func(map[string]domain.TeamLineup) (domain.TeamLineup, bool)) {
 	compID := save.compID
 	var respErr *txResponse
 	var persistedLineup domain.TeamLineup
@@ -904,7 +906,11 @@ func saveLineup(c *gin.Context, tx CompetitionTransactor, announce func(compID, 
 			respErr = &txResponse{status: lineupSetStatus(err), body: gin.H{"error": err.Error()}}
 			return nil
 		}
-		follow(stx, comp, lineup, changed)
+		if err := follow(stx, comp, lineup, changed); err != nil {
+			// Returned so the transaction aborts: the save is not kept
+			// without the lineups it moves (answered 500, sent again).
+			return err
+		}
 		// Reload after write so the response carries the persisted
 		// CompetitionID (auto-stamped by Set) and any future server-managed
 		// fields. This reload reads the same on-disk state as the Set above

@@ -49,8 +49,11 @@ func TestTeamLineupRemoval_KeepsARecordOnlyTheCarryReads(t *testing.T) {
 	require.Equal(t, map[string]bool{"M1": true, "": true}, kept)
 	require.Len(t, all, 2)
 
-	// Saved again, the lineup is its own beside the record.
-	require.NoError(t, s.SetTeamLineup(comp, domain.TeamLineup{TeamID: "t", MatchID: "M1", Positions: pos}, 3))
+	// Saved again, the lineup is its own beside the record (several lineups
+	// in one write; one the domain refuses sets none).
+	require.Error(t, s.SetTeamLineups(comp, []domain.TeamLineup{{TeamID: "t", MatchID: "M1", Positions: pos}, {TeamID: "t", MatchID: "M3", Positions: map[domain.Position]string{domain.PositionNumbered(9): "x"}}}, 3))
+	require.NoError(t, s.SetTeamLineups(comp, nil, 3))
+	require.NoError(t, s.SetTeamLineups(comp, []domain.TeamLineup{{TeamID: "t", MatchID: "M1", Positions: pos}}, 3))
 	live, err = s.LoadTeamLineups(comp)
 	require.NoError(t, err)
 	require.Len(t, live, 1)

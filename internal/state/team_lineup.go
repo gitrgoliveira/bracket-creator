@@ -361,6 +361,35 @@ func (s *Store) SetTeamLineup(compID string, lineup domain.TeamLineup, teamSize 
 	return s.setTeamLineupLocked(compID, lineup, teamSize, s.directWrite)
 }
 
+// SetTeamLineups sets several lineups in one write of lineups.yaml (the
+// transaction's SetTeamLineups outside a transaction). A lineup the domain
+// refuses sets none of them.
+func (s *Store) SetTeamLineups(compID string, ls []domain.TeamLineup, teamSize int) error {
+	if len(ls) == 0 {
+		return nil
+	}
+	if err := ValidateCompetitionID(compID); err != nil {
+		return err
+	}
+	for _, l := range ls {
+		if err := l.ValidatePositions(teamSize); err != nil {
+			return err
+		}
+	}
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
+	current, err := s.loadTeamLineupsLocked(compID)
+	if err != nil {
+		return err
+	}
+	for _, l := range ls {
+		l.CompetitionID = compID
+		current[lineupStorageKey(l)] = l
+	}
+	return s.saveTeamLineupsLocked(compID, current, s.directWrite)
+}
+
 // setTeamLineupLocked applies the load-mutate-save dance WITHOUT
 // acquiring the per-competition lock. Caller MUST already hold it
 // (typically via WithTransaction).

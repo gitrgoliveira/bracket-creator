@@ -28,7 +28,7 @@ package engine
 
 import (
 	"cmp"
-	"log"
+	"fmt"
 	"maps"
 	"slices"
 	"strconv"
@@ -375,14 +375,21 @@ func (e *Engine) FollowLineupSave(h state.StoreTx, comp *state.Competition, save
 		return nil, err
 	}
 	lc := newLineupCarry(lineups, pool, bracket, comp.IsKnockoutEnabled(), comp.TeamSize)
-	var moved []string
-	for _, k := range lc.rederive(saved.TeamID) {
-		l := lc.lineups[k]
-		if err := h.SetTeamLineup(comp.ID, l, comp.TeamSize); err != nil {
-			log.Printf("engine: competition %s match %s: the lineup team %s carries there was not worked out again after a lineup save: %v", comp.ID, l.MatchID, l.TeamID, err)
-			continue
-		}
-		moved = append(moved, l.MatchID)
+	keys := lc.rederive(saved.TeamID)
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	// Every lineup that moved in ONE staged write, and a store that refuses
+	// it fails the save's transaction, as a pin that cannot be kept fails the
+	// start: what the carry worked out is never half stored.
+	moved := make([]string, 0, len(keys))
+	out := make([]domain.TeamLineup, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, lc.lineups[k])
+		moved = append(moved, lc.lineups[k].MatchID)
+	}
+	if err := h.SetTeamLineups(comp.ID, out, comp.TeamSize); err != nil {
+		return nil, fmt.Errorf("competition %s team %s: the lineups carried after a lineup save were not kept: %w", comp.ID, saved.TeamID, err)
 	}
 	return moved, nil
 }

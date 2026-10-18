@@ -104,15 +104,23 @@ describe('the competition page asks before it drops the bracket editor\'s unsave
     const failures = [];
     for (const [label, fn, take] of cases) {
       const before = exits[fn].mock.calls.length;
-      editor.props.hostUnsavedRef.current = () => true;
+      // The editor's published thunk, with its own Discard entries on it.
+      const discard = vi.fn();
+      const unsaved = () => true;
+      unsaved.discard = discard;
+      editor.props.hostUnsavedRef.current = unsaved;
       window.confirmDialog = vi.fn().mockResolvedValue(false);
       await act(async () => { take(); });
       const asked = window.confirmDialog.mock.calls.filter(([o]) => WARN.test((o && o.message) || '')).map(([o]) => o.message);
       if (asked.length !== 1 || asked[0] !== 'Your unsaved entries will be discarded. Leave this match anyway?') failures.push(`${label}: asked ${JSON.stringify(asked)}`);
       if (exits[fn].mock.calls.length !== before) failures.push(`${label}: Keep entries left anyway`);
+      if (discard.mock.calls.length) failures.push(`${label}: Keep entries discarded the entries`);
       window.confirmDialog = vi.fn().mockResolvedValue(true);
       await act(async () => { take(); });
       if (exits[fn].mock.calls.length !== before + 1) failures.push(`${label}: Discard entries did not leave`);
+      // Stage 5 review 10, minor 2: the entries go at the answer, whether or
+      // not the exit then unmounts the editor.
+      if (discard.mock.calls.length !== 1) failures.push(`${label}: Discard entries ran the editor's discard ${discard.mock.calls.length} times`);
       editor.props.hostUnsavedRef.current = () => false;
       window.confirmDialog = vi.fn().mockResolvedValue(false);
       take();
@@ -120,6 +128,22 @@ describe('the competition page asks before it drops the bracket editor\'s unsave
       if (window.confirmDialog.mock.calls.length) failures.push(`${label}: asked with nothing unsaved`);
     }
     expect(failures).toEqual([]);
+  });
+
+  // Stage 5 review 10, minor 2: the tab already shown leaves nothing, so it
+  // asks nothing and discards nothing.
+  it('the active section tab asks nothing over unsaved entries', async () => {
+    const { utils, exits } = await mountBracket();
+    const discard = vi.fn();
+    const unsaved = () => true;
+    unsaved.discard = discard;
+    editor.props.hostUnsavedRef.current = unsaved;
+    window.confirmDialog = vi.fn().mockResolvedValue(true);
+    await act(async () => { navButton(utils.container, 'Bracket').click(); });
+    expect(window.confirmDialog).not.toHaveBeenCalled();
+    expect(discard).not.toHaveBeenCalled();
+    expect(screen.getByTestId('probe-score-editor').getAttribute('data-match')).toBe('m1');
+    expect(exits.onSection.mock.calls.filter(([s]) => s !== 'bracket')).toEqual([]);
   });
 
   it('the running strip takes the same question (the topbar is handed it)', async () => {

@@ -3001,6 +3001,34 @@ describe('the console asks before it drops the editor\'s unsaved entries (R1)', 
     } finally { c.restore(); }
   });
 
+  // Stage 5 review 10, M1: between the console's own Start of a queue row and
+  // the feed showing it running, the editor shows that match while its row
+  // still offers a court move; a Mark draw or hantei pick stays local on the
+  // running board (the probe's unsaved thunk stands in for it). The move's
+  // confirm says the entries go, and drops them on confirm.
+  it('moving the match the editor shows (own Start pending) says the unsaved entries are discarded, and drops them on confirm', async () => {
+    const onEditScore = vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k-start', settled: new Promise(() => {}) });
+    const c = await mountCourt([courtMatch('m2', 'scheduled'), courtMatch('m3', 'scheduled')], { onEditScore });
+    const rowOf = () => [...c.utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes('Aka m3'));
+    try {
+      const start = [...rowOf().querySelectorAll('button')].find((b) => /^start/i.test(b.textContent.trim()));
+      await act(async () => { start.click(); });
+      await act(async () => {});
+      expect(c.editorMatch()).toBe('m3');
+      expect(probe.props.started).toBe(true);
+      const discard = vi.fn();
+      const probeFn = () => true;
+      probeFn.discard = discard;
+      probe.props.hostUnsavedRef.current = probeFn;
+      await act(async () => { rowOf().querySelector('[data-testid="move-to-B"]').click(); });
+      const dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
+      expect(dialog.textContent).toContain('Your unsaved entries will be discarded.');
+      expect(discard).not.toHaveBeenCalled();
+      await act(async () => { [...dialog.querySelectorAll('button')].find((b) => /move to shiaijo b/i.test(b.textContent)).click(); });
+      expect(discard).toHaveBeenCalledTimes(1);
+    } finally { c.restore(); }
+  });
+
   // Stage 5 review 9, M1: every console exit that drops the editor asks the
   // same question: the court switcher, the Dashboard crumb, Sign out and
   // Public viewer. With nothing unsaved each goes in the same tick.
@@ -3075,7 +3103,10 @@ describe('the console asks before it drops the editor\'s unsaved entries (R1)', 
     const c = await mountCourt([courtMatch('m1', 'completed', { modifiedAt: 1000 }), courtMatch('m3', 'completed', { modifiedAt: 900 }), courtMatch('m2', 'scheduled')]);
     try {
       await tapCorrect(c, 'Aka m1');
-      holdUnsaved(true);
+      const discard = vi.fn();
+      const unsaved = () => true;
+      unsaved.discard = discard;
+      probe.props.hostUnsavedRef.current = unsaved;
       let answer;
       window.confirmDialog = vi.fn(() => new Promise((res) => { answer = res; }));
       await tapCorrect(c, 'Aka m3');
@@ -3084,6 +3115,9 @@ describe('the console asks before it drops the editor\'s unsaved entries (R1)', 
       await c.refresh();
       await act(async () => { answer(true); });
       expect(c.editorMatch()).not.toBe('m3');
+      // Stage 5 review 10, minor 2: Discard entries dropped them, though the
+      // Correct was then refused and the editor stayed.
+      expect(discard).toHaveBeenCalledTimes(1);
     } finally { c.restore(); }
   });
 });

@@ -69,7 +69,8 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   const editorUnsavedRef = useRefA(null);
   const alive = () => mountedRef.current;
   const leaving = (go) => (...args) => { if (go) leaveThen(editorUnsavedRef, () => go(...args), alive); };
-  const toSection = leaving(onSection);
+  // The section already shown leaves nothing: no question (review 10, minor 2).
+  const toSection = (id) => (id === section ? onSection(id) : leaving(onSection)(id));
 
   // Seed-placement warnings for the generated draw. The seeding rules cannot
   // refuse a draw: a constraint the configuration cannot satisfy gives way and

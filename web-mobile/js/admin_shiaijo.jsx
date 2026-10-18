@@ -1232,9 +1232,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // court switcher) behind the same question; with nothing unsaved it goes
     // in the same tick (stage 5 review 9, M1).
     const leaving = (go) => (...args) => leaveThen(editorUnsavedRef, () => go(...args), () => mountedRef.current);
-    // The editor shows the match Send back to queue drops and holds unsaved
-    // entries: the confirm says they are discarded, and drops them on confirm
-    // (m1).
+    // The editor shows the match a host confirm drops (Send back to queue, a
+    // court move) and holds unsaved entries: the confirm says they are
+    // discarded, and drops them on confirm (m1).
     const editorUnsavedFor = (compId, matchId) => !!selectedMatch && selectedMatch.compId === compId
         && selectedMatch.id === matchId && holdsUnsaved(editorUnsavedRef);
     const refuseTap = (m, why) => {
@@ -1976,11 +1976,16 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // once the operator confirms.
     const requestMoveCourt = (compId, matchId, toCourt) => {
         const mm = sorted.find((x) => x.compId === compId && x.id === matchId);
-        setPendingMove({ compId, matchId, to: toCourt, label: mm ? confirmMatchLabel(mm) : "this match", from: (mm && mm.court) || court });
+        // The editor can show a match its row still offers to move: between
+        // this console's own Start of a queue row and the feed showing it
+        // running. Its unsaved entries (a Mark draw, a hantei pick) go with
+        // the move, and the confirm says so (R1, stage 5 review 10).
+        setPendingMove({ compId, matchId, to: toCourt, label: mm ? confirmMatchLabel(mm) : "this match", from: (mm && mm.court) || court, unsaved: editorUnsavedFor(compId, matchId) });
     };
     const confirmMoveCourt = async () => {
         if (!pendingMove || movingCourt) return;
         const { compId, matchId, to } = pendingMove;
+        if (editorUnsavedFor(compId, matchId)) discardUnsaved(editorUnsavedRef);
         setMovingCourt(true);
         try {
             // The host hands the move to the outbox and answers at once with
@@ -2565,6 +2570,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         <p className="shiaijo-move-confirm__body">
                             <strong>{pendingMove.label}</strong> leaves Shiaijo {pendingMove.from} and joins
                             the queue on Shiaijo {pendingMove.to}.
+                            {pendingMove.unsaved ? ` ${UNSAVED_ENTRIES_DISCARDED}` : ""}
                         </p>
                         <div className="shiaijo-move-confirm__actions">
                             <button type="button" className="btn" onClick={() => setPendingMove(null)} disabled={movingCourt}>

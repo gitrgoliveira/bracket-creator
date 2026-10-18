@@ -1730,10 +1730,13 @@ export function usePublishUnsaved(hostRef, unsaved, onDiscard) {
   discardRef.current = onDiscard;
   if (!probe.current) {
     probe.current = () => holdsUnsaved(unsavedRef.current);
-    probe.current.discard = () => { if (typeof discardRef.current === "function") discardRef.current(); };
+    // Run only while this editor is mounted: a host holding the thunk past
+    // the editor's unmount (a question answered after it went) drops nothing.
+    probe.current.discard = () => { if (!probe.current.gone && typeof discardRef.current === "function") discardRef.current(); };
   }
   if (hostRef && hostRef.current !== probe.current) hostRef.current = probe.current;
   useEffectA(() => () => { if (hostRef && hostRef.current === probe.current) hostRef.current = null; }, [hostRef]);
+  useEffectA(() => { probe.current.gone = false; return () => { probe.current.gone = true; }; }, []);
 }
 
 // useMatchReopen: the one client of POST .../reopen and its court-busy remedy

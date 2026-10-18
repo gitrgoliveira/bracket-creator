@@ -20,8 +20,10 @@
 //     competition, Sign out, Public viewer and the running strip; the bracket
 //     panel's choice of another match), through `confirmLeave`/`leaveThen`;
 //     and a confirm of the host's own that drops the editor's match (the
-//     console's Send back to queue), which says so in its own words and then
-//     drops the entries at once (`discardUnsaved`).
+//     console's Send back to queue and court move), which says so in its own
+//     words and then drops the entries at once (`discardUnsaved`). Discard
+//     entries on a leave question drops them at the answer too, whether or
+//     not the exit then completes.
 // A Start carries the draft and asks nothing; Close and Prev/Next ask
 // "Discard unsaved scoring changes?" through the editor itself.
 //
@@ -92,7 +94,14 @@ export function discardUnsaved(unsaved) {
 // host still mounted) no longer holds.
 export function confirmLeave(unsaved, alive) {
   if (!holdsUnsaved(unsaved)) return true;
-  return confirmDiscardUnsaved(unsaved, LEAVE_MATCH_ANYWAY).then((ok) => ok && (typeof alive !== "function" || !!alive()));
+  // The editor asked about, bound now: Discard entries drops ITS entries at
+  // the answer (stage 5 review 10, minor 2), whether or not the exit then
+  // unmounts it (a refused pick, a failed Start competition, a cancelled
+  // Discard draw), and never those of an editor swapped in meanwhile. The
+  // discard is the editor's own, local state only: nothing is sent.
+  const asked = unsaved && typeof unsaved === "object" && "current" in unsaved ? unsaved.current : unsaved;
+  return confirmDiscardUnsaved(asked, LEAVE_MATCH_ANYWAY, () => discardUnsaved(asked))
+    .then((ok) => ok && (typeof alive !== "function" || !!alive()));
 }
 
 // whenConfirmed: run `go` once `answer` (confirmLeave's) says yes: in the same

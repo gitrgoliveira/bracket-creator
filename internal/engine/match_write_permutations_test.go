@@ -242,6 +242,28 @@ func pmDec(at int64, d, by string) pmStep {
 		}}
 }
 
+// pmDecB is a decision that sends a basis, as every client door does since
+// stage 3: own names the taps its device had made before it (held), and an
+// empty own is a basis that held none of them.
+func pmDecB(at int64, d, by string, own ...string) pmStep {
+	s := pmDec(at, d, by)
+	s.own, s.basis = own, true
+	s.run = func(h mmHome) string {
+		var (
+			res *state.MatchResult
+			e   error
+		)
+		if err := h.store.WithTransaction(h.compID, func(tx state.StoreTx) error {
+			res, _, e = h.eng.RecordDecisionTxWithOptions(tx, h.compID, h.matchID, d, by, "", nil, ForceOptions{Basis: &state.ScoreBasis{Own: own}}, at)
+			return nil
+		}); err != nil {
+			return "tx:" + err.Error()
+		}
+		return pmWriteAnswer(res, e)
+	}
+	return s
+}
+
 func pmHik(at int64) pmStep {
 	return pmStep{at: at, role: pmRes, sets: []string{state.GroupResult}, run: func(h mmHome) string {
 		return pmAnswer(h.write(&state.MatchResult{ID: h.matchID, SideA: wrTeamA, SideB: wrTeamB, SideAID: wrTeamAID, SideBID: wrTeamBID,
@@ -509,7 +531,7 @@ const pmAnyBout = "*bout"
 // applied). A tap stamped before it, in a group the result does not set, stands
 // (applied). In a group it sets: around a decision the loser's own side is kept
 // (recorded when the decision held it, else applied) and the winner's is
-// replaced (beforeBaseline); otherwise the
+// replaced (recorded when the decision held it, else beforeBaseline); otherwise the
 // result's basis decides (recorded when it holds the tap, else beforeBaseline).
 func pmWantOutcome(c pmCase, tap pmStep) string {
 	var first *pmStep
@@ -550,7 +572,13 @@ func pmWantOutcome(c pmCase, tap pmStep) string {
 				}
 				return domain.ScoreOutcomeRecorded
 			}
-			return domain.ScoreOutcomeBeforeBaseline
+			// The winner's tap is replaced by the circles: recorded when
+			// the decision held it (or sent no basis), turned away only
+			// when a sent basis never held it (stage 6 review 6).
+			if first.basis && !slices.Contains(first.own, tap.id) {
+				return domain.ScoreOutcomeBeforeBaseline
+			}
+			return domain.ScoreOutcomeRecorded
 		}
 	}
 	if slices.Contains(first.own, tap.id) {
@@ -1037,6 +1065,18 @@ func pmKindCases() []pmCase {
 		return s
 	}
 	return []pmCase{
+		// A decision recorded on the device that scored the winner's point,
+		// its basis holding that tap: the tap is recorded, never told "Not
+		// applied" (stage 6 review 6). One whose sent basis held no tap turns
+		// the winner's tap away; the loser's is kept either way.
+		{name: "kind ind e1 a:K T1 / kiken shiro T2 own e1 (the winner's tap is held)", steps: []pmStep{e("e1", 1, t1, domain.ScoreIpponAdd, 0, "a", "K", "", ""), pmDecB(t2, "kiken-voluntary", "shiro", "e1")},
+			want: []string{`st=completed`, ryu + ` d="kiken-voluntary" by="shiro"`}, outs: map[string]string{"e1": "recorded"}},
+		{name: "kind ind e1 a:K T1 / e2 b:M T2 / kiken shiro T3 own e1 e2", steps: []pmStep{e("e1", 1, t1, domain.ScoreIpponAdd, 0, "a", "K", "", ""), e("e2", 2, t2, domain.ScoreIpponAdd, 0, "b", "M", "", ""), pmDecB(t3, "kiken-voluntary", "shiro", "e1", "e2")},
+			want: []string{`st=completed`, ryu + ` d="kiken-voluntary" by="shiro"`, `B=[M]`}, outs: map[string]string{"e1": "recorded", "e2": "recorded"}},
+		{name: "kind ind e1 a:K T1 / e2 b:M T2 / kiken shiro T3 (a basis that held neither)", steps: []pmStep{e("e1", 1, t1, domain.ScoreIpponAdd, 0, "a", "K", "", ""), e("e2", 2, t2, domain.ScoreIpponAdd, 0, "b", "M", "", ""), pmDecB(t3, "kiken-voluntary", "shiro")},
+			want: []string{`st=completed`, ryu + ` d="kiken-voluntary" by="shiro"`, `B=[M]`}, outs: map[string]string{"e1": "beforeBaseline", "e2": "applied"}},
+		{name: "kind ind e1 a:K T1 / kiken shiro T2 (no basis)", steps: []pmStep{e("e1", 1, t1, domain.ScoreIpponAdd, 0, "a", "K", "", ""), pmDec(t2, "kiken-voluntary", "shiro")},
+			want: []string{`st=completed`, ryu + ` d="kiken-voluntary" by="shiro"`}, outs: map[string]string{"e1": "recorded"}},
 		// The H a second foul awards is a mark like any other: removed by its id.
 		{name: "kind ind foul a T1 / foul a T2 (H to b) / remove the H T3 by its id", steps: []pmStep{e("e1", 1, t1, domain.ScoreFoulAdd, 0, "a", "", "", ""), secondFoul, removeH(t3)},
 			causal: [][2]int{{0, 1}, {1, 2}}, want: []string{`st=running`, `B=[]`}, outs: map[string]string{"r1": "applied"}},

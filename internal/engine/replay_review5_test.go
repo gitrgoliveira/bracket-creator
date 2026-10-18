@@ -56,7 +56,11 @@ func TestReplayScoring_StoppedBeforeAFinishTurnsNoTapAway(t *testing.T) {
 // answered "recorded" only when the decision's basis held it; one the
 // decision never saw is answered as any landed tap is, "applied", since
 // "recorded" would claim the decision held it (stage 6 review 5, finding 3).
-// The winner's tap is replaced by the decision's circles: beforeBaseline.
+// The winner's tap is replaced by the decision's circles: recorded when the
+// decision held it (or sent no basis, so saw everything stamped before it),
+// beforeBaseline only when a sent basis never held it (stage 6 review 6: the
+// operator's own tap, held by the decision recorded on the same device, was
+// told "Not applied").
 func TestReplayScoring_DecisionAnswersALoserTapItNeverSawAsApplied(t *testing.T) {
 	shape, err := goldenShape("individual", false)
 	require.NoError(t, err)
@@ -65,24 +69,31 @@ func TestReplayScoring_DecisionAnswersALoserTapItNeverSawAsApplied(t *testing.T)
 	start := `{"v":1,"baseline":{"id":"m0","door":"test","stamp":100,"values":{"points":{"ipponsA":[],"ipponsB":[],"hansokuA":0,"hansokuB":0},"result":{"status":"running"}},"basis":{"seen":0}}}`
 	loser := `{"v":1,"event":{"id":"lose","session":"s1","seq":1,"stamp":150,"kind":"ippon.add","side":"b","letter":"M"}}`
 	winner := `{"v":1,"event":{"id":"win","session":"s1","seq":2,"stamp":160,"kind":"ippon.add","side":"a","letter":"K"}}`
+	const decisionHead = `{"v":1,"baseline":{"id":"d","door":"decision","stamp":200,"values":{"points":{"ipponsA":["○","○"],"ipponsB":[],"hansokuA":0,"hansokuB":0},"result":{"status":"completed","winner":"Aka","winnerId":"pa","decision":"kiken-voluntary","decisionBy":"shiro"}}`
 	decision := func(seen int) string {
-		return `{"v":1,"baseline":{"id":"d","door":"decision","stamp":200,"values":{"points":{"ipponsA":["○","○"],"ipponsB":[],"hansokuA":0,"hansokuB":0},"result":{"status":"completed","winner":"Aka","winnerId":"pa","decision":"kiken-voluntary","decisionBy":"shiro"}},"basis":{"seen":` + string(rune('0'+seen)) + `},"basisSent":true}}`
+		return decisionHead + `,"basis":{"seen":` + string(rune('0'+seen)) + `},"basisSent":true}}`
 	}
+	noBasis := decisionHead + `}}`
 	for _, tc := range []struct {
-		name      string
-		lines     []string
-		wantLoser string
+		name       string
+		lines      []string
+		wantLoser  string
+		wantWinner string
 	}{
-		{"the taps arrive after a decision that saw neither", []string{start, decision(1), loser, winner}, domain.ScoreOutcomeApplied},
-		{"the taps arrive before a decision that saw neither", []string{start, loser, winner, decision(1)}, domain.ScoreOutcomeApplied},
-		{"the decision saw both", []string{start, loser, winner, decision(3)}, domain.ScoreOutcomeRecorded},
+		{"the taps arrive after a decision that saw neither", []string{start, decision(1), loser, winner}, domain.ScoreOutcomeApplied, domain.ScoreOutcomeBeforeBaseline},
+		{"the taps arrive before a decision that saw neither", []string{start, loser, winner, decision(1)}, domain.ScoreOutcomeApplied, domain.ScoreOutcomeBeforeBaseline},
+		{"the decision saw both", []string{start, loser, winner, decision(3)}, domain.ScoreOutcomeRecorded, domain.ScoreOutcomeRecorded},
+		{"the decision sent no basis", []string{start, loser, winner, noBasis}, domain.ScoreOutcomeRecorded, domain.ScoreOutcomeRecorded},
+		{"the taps arrive after a decision that sent no basis", []string{start, noBasis, loser, winner}, domain.ScoreOutcomeRecorded, domain.ScoreOutcomeRecorded},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := ReplayScoring(&match, review5Lines(t, tc.lines...), shape)
 			require.Equal(t, tc.wantLoser, review5Outcome(r, "lose"))
-			require.Equal(t, domain.ScoreOutcomeBeforeBaseline, review5Outcome(r, "win"))
+			require.Equal(t, tc.wantWinner, review5Outcome(r, "win"))
 			require.Equal(t, []string{"M"}, r.Match.IpponsB, "the loser keeps the point it struck")
 			require.Equal(t, []string{"○", "○"}, r.Match.IpponsA)
+			_, listed := r.Match.TurnedAway["win"]
+			require.Equal(t, tc.wantWinner == domain.ScoreOutcomeBeforeBaseline, listed, "turnedAway lists the winner's tap exactly when it was turned away")
 		})
 	}
 }

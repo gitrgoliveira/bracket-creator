@@ -1163,15 +1163,21 @@ func (rp *replayer) absorb(b *state.ScoreBaseline, i int, g string) {
 		// decision held is recorded; one its SENT basis never saw still
 		// lands, and is answered as any landed tap is (applied), since
 		// "recorded" would claim the decision held it (stage 6 review 5).
-		// A decision that sent no basis saw every tap stamped before it, as
-		// closedBefore reads it, so the answer never hangs on arrival order.
+		// The winner's tap is replaced by the decision's circles: recorded
+		// when the decision held it, turned away (beforeBaseline) only when
+		// a SENT basis never held it, so the operator's own tap, held by the
+		// decision recorded on the same device, is never told "Not applied"
+		// (stage 6 review 6). A decision that sent no basis saw every tap
+		// stamped before it, as closedBefore reads it, so the answer never
+		// hangs on arrival order.
 		if side := rp.lines[i].Event.Side; side == domain.ScoreSideA || side == domain.ScoreSideB {
-			if side == loser {
+			held := !b.BasisSent || rp.contains(b, i)
+			switch {
+			case held:
+				rp.outcome[i] = domain.ScoreOutcomeRecorded
+			case side == loser:
 				rp.outcome[i] = domain.ScoreOutcomeApplied
-				if !b.BasisSent || rp.contains(b, i) {
-					rp.outcome[i] = domain.ScoreOutcomeRecorded
-				}
-			} else {
+			default:
 				rp.outcome[i] = domain.ScoreOutcomeBeforeBaseline
 			}
 			return

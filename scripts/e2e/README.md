@@ -83,9 +83,9 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             match, the correction doors
     fixtures/engi.mjs       the engi (kata pairs) flag editor: flag counters,
                             entering flags, the two-tap Save result
-    fixtures/held-write.mjs holding a match's score PUT in flight (Start,
-                            Finish, a correction), to observe a race with its
-                            echo; a tap is not that PUT (below)
+    fixtures/held-write.mjs holding a match's scoring taps in flight (a
+                            batch POSTed to score-events), to observe a
+                            race with its echo (below)
     fixtures/shared-court.mjs  two competitions on one shiaijo and a moved
                             match: seeding, the competition picker, the nudges
     fixtures/public.mjs     the public viewer and the TV board; the readers of
@@ -289,33 +289,41 @@ listeners read.
 ## Holding a save in flight
 
 On localhost the answer to a write comes back within milliseconds of the write
-going out, so a tap made "while the write is out" never lands in that window by
-itself. `fixtures/held-write.mjs` (`holdScoreWrites(page)`) intercepts the match
-score PUTs, the whole writes (Start match, Finish, a correction, Record bout):
-`holdNext()` holds the next one, its `sent` promise resolves once that PUT is
-out, and `release()` lets it through after the journey has made the next tap, as
-a slow uplink would. `bodies` lists every score PUT the page sent.
-`answeredBeforeNextWrite(held)` waits for the held write's response, then for the
-write that follows it (each up to `safetyMs`), and throws if no follow-up write
-was ever sent or if it was sent before the response reached the page, so a
-journey cannot pass without exercising the race. A hold nobody releases is let
+going out, so a tap made "while the last one is out" never lands in that window
+by itself. Every scoring tap on a running match is an event the app puts in its
+outbox at once and sends to `POST .../matches/<id>/score-events`, the taps of
+one tick as one batch (`{ session, events }`); there is no autosave window to
+wait out. `fixtures/held-write.mjs` (`holdScoreWrites(page)`) intercepts those
+batches: `holdNext()` holds the next one, its `sent` promise resolves once that
+batch is out, and `release()` lets it through after the journey has made the
+next tap, as a slow uplink would. The outbox sends a match's entries strictly in
+order, so the next tap's batch goes only once the held one is answered.
+`bodies` lists every batch the page sent, and `events` every event those
+batches carried, in send order, flat (each with its `kind`, `side`, `letter`,
+`target`, `pos` and the rest).
+
+`answeredBeforeNextWrite(held)` waits for the held batch's response, then for
+the batch that follows it (each up to `safetyMs`), and throws if no follow-up
+batch was ever sent or if it was sent before the response reached the page, so
+a journey cannot pass without exercising the race. A hold nobody releases is let
 go after a safety timeout (`safetyMs`, 10 s by default); `stop()` only cleans up
 (release, unroute, remove the listener) and is called in a `finally`, and
 `assertNoSafetyRelease()` throws when the safety timeout had to fire, so a
 journey calls it after its body succeeded, outside the `finally`, where a throw
-would hide the body's own assertion error.
+would hide the body's own assertion error. Its errors name a "held tap batch".
 
-A scoring tap on a running match is not a score PUT. The app puts it in its
-outbox at once and sends it to `POST .../matches/<id>/score-events`, in a batch
-with the taps made beside it, and there is no autosave window to wait out. The
-fixture's route (`**/matches/*/score`) does not match that URL, so it neither
-sees nor holds a tap. A journey that has to hold a tap in flight needs the same
-hold on the score-events route, and `bodies` then lists event batches
-(`{ session, events }`), not match results. The bc-ltap step of
-`knockout-mixed-individual.spec.mjs` (individual editor) and the bc-evts step of
-`engi.spec.mjs` (engi editor) are written around this fixture, holding a score
-PUT and then tapping a mark or a flag back. Those steps are stale: a running flag
-or mark tap is a `recordTap` sent to score-events, and the fixture holds only the PUT.
+The bc-ltap step of `knockout-mixed-individual.spec.mjs` (a mark taken off and
+tapped back on the individual editor), the bc-evts step of `engi.spec.mjs` (a
+flag taken back on the engi editor) and case c of `concurrent-taps.spec.mjs`
+are written around this fixture.
+
+A Start, a Finish, a correction and Record bout are not taps: they are the
+match's score PUT (`/matches/<id>/score`). To wait for one of those writes, or
+for a tap batch, without holding it, use `fixtures/scoring.mjs`:
+`nextMatchWrite(page)` before the action that causes the PUT, and
+`nextTapWrite(page)` (the same, for `{ method: 'POST', tail: 'score-events' }`)
+before a tap; then `writeLanded(answered)`. `writtenMatchId(res)` reads the
+match id an answer was for.
 
 ## The pace of a tap
 
@@ -364,9 +372,9 @@ settle helpers in `fixtures/pace.mjs`:
   before the tap): the helper then waits up to 3 s for the read to leave it,
   and settles on it only if nothing ever changed. Where the end state IS known,
   wait for that instead (`expect.poll(...)`); where the tap causes one match
-  write, wait for its answer (`nextMatchWrite`; it waits for the match's score PUT by
-  default, which is Start match, Finish and a correction, and for a tap it takes
-  `{ method: 'POST', tail: 'score-events' }`).
+  write, wait for its answer (`nextMatchWrite` waits for the match's score PUT,
+  which is Start match, Finish and a correction; `nextTapWrite` for a tap's
+  batch).
 
 `page.waitForTimeout` stays in four places, each marked `Deliberate:` or
 named for what it is: the dwell of a tap's pace (above); the time away of an

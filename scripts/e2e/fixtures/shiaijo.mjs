@@ -31,15 +31,6 @@ export async function sides(row) {
   return { shiro: (await names.nth(0).textContent()).trim(), aka: (await names.nth(1).textContent()).trim() };
 }
 
-// The same two names, read at once without waiting: null when the row does
-// not name two competitors now (a "Winner of M1" placeholder card, a row
-// between two renders). For a check that polls, where sides() would wait out
-// the action timeout on a row that names fewer than two.
-export async function sidesNow(row) {
-  const names = (await row.locator('.numbered-name__text').allTextContents().catch(() => [])).map((t) => t.trim());
-  return names.length >= 2 ? { shiro: names[0], aka: names[1] } : null;
-}
-
 // Which match an editor holds, as the operator reads it: its eyebrow ("MEN
 // INDIVIDUAL · POOL A · MATCH 1 OF 3"), its title line ("Shiaijo B · 10:20",
 // which says the court) and the first two names it shows. `key` joins them,

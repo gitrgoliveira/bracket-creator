@@ -8,7 +8,7 @@
 import { expect } from '@playwright/test';
 import { INLINE_EDITOR, awardIppon, finishMatch, markDraw } from './scoring.mjs';
 import {
-  UP_NEXT, WAITING_ROWS, completedRowFor, courtDone, courtIdle, inlineEditor, sidesNow, upNextCard,
+  UP_NEXT, WAITING_ROWS, completedRowFor, courtDone, courtIdle, inlineEditor, upNextCard,
 } from './shiaijo.mjs';
 import { hastyShiaijoConfirm } from './clumsy.mjs';
 import { EXPECT_TIMEOUT_MS } from './devices.mjs';
@@ -121,26 +121,6 @@ export async function inlineRunning(page) {
   if (!(await ed.isVisible().catch(() => false))) return false;
   const pill = ed.locator('.editor-head-pill');
   return (await pill.count()) === 0;
-}
-
-// Wait until the court's queue agrees with its editor: while the editor holds
-// a running bout, the Up next card no longer shows that bout. A Start, and the
-// start a Finish + Start Next queues, go through the outbox and never wait
-// (bc-evts), so the editor shows the bout running at once while the queue
-// learns it from the server's push or the court's next refetch a moment
-// later. A journey that reads the queue (what is left to play) reads it once
-// it has caught up, as the operator reads Up next once it shows the next bout.
-export async function queueCaughtUp(page) {
-  await expect.poll(async () => {
-    if (!(await inlineRunning(page))) return 'caught up';
-    const held = await editorSides(page, INLINE_EDITOR, { timeout: 1_000 }).catch(() => null);
-    if (!held) return 'the editor is between two bouts';
-    const card = upNextCard(page).first();
-    if (!(await card.isVisible().catch(() => false))) return 'caught up';
-    const next = await sidesNow(card);
-    return next && next.shiro === held.shiro && next.aka === held.aka
-      ? `the Up next card still shows the running bout (${held.shiro} v ${held.aka})` : 'caught up';
-  }, { message: 'the court queue caught up with the bout its editor runs' }).toBe('caught up');
 }
 
 // Make sure the shiaijo page has a running bout in its editor, and return its
@@ -262,7 +242,6 @@ export async function correctCompleted(page, pair, { readLive = liveIndividualBo
 // the Upcoming rows; not Later, not Completed). A pool bout reads
 // "Match n of m" in its header, a knockout bout "Match n".
 export async function queuedPoolBouts(page) {
-  await queueCaughtUp(page);
   const texts = await page.locator(`${UP_NEXT}, ${WAITING_ROWS}`).allInnerTexts();
   return texts.filter((t) => /Match \d+ of \d+/.test(t)).length;
 }

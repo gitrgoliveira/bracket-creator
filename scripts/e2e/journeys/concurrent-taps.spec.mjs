@@ -21,8 +21,10 @@
 //   e  team: the two devices tap on different bouts at once; both bouts keep
 //      every tap
 //   f  kachinuki: two strikes for Shiro from two devices at once on the
-//      encounter's first bout, which the server holds no row for yet, then
-//      Record bout records that bout with both
+//      encounter's first bout, which the server holds no row for yet; both
+//      devices show the lineup's fighters on it, a later edit of the match's
+//      lineup renames it on both, and Record bout records that bout with both
+//      points
 //
 // Known race, not asserted here: the CAP. A side that holds two points has
 // decided its bout (sanbon shobu), so a third strike for it, or any strike for
@@ -58,7 +60,7 @@ import { openTvBoard, tvBoard } from '../fixtures/public.mjs';
 import { engiEditor, engiSettle, flagButton, flagCount, startUpNextEngi } from '../fixtures/engi.mjs';
 import * as T from '../fixtures/team.mjs';
 import {
-  boutIpponButton, closeLineupPanel, currentBout, doneRowWinner, doneRows,
+  boutIpponButton, boutNames, closeLineupPanel, currentBout, doneRowWinner, doneRows,
   openLineupFromUpNext, recordBout, recordBoutButton, startUpNextKachinuki, syncPill as kachinukiPill, typeLineup,
 } from '../fixtures/kachinuki.mjs';
 
@@ -239,8 +241,13 @@ test.describe('concurrent taps from two devices', () => {
         await expect.poll(() => marksOf(d2, 'aka'), { message: 'device 2 shows its offline tap' }).toEqual(['D', 'K']);
         await expect(syncState(d2)).not.toHaveText('Synced');
         pillOffline = (await syncState(d2).innerText()).trim();
-        // Device 1 has not seen it: it has not reached the server.
-        expect(await marksOf(d1, 'aka'), 'device 1 cannot see a tap still on device 2').toEqual(['K']);
+        // Device 1 has not seen it: it has not reached the server. Device 1
+        // reads the server's copy afresh (a reload), so its board is the
+        // server's match as it stands now, which holds Aka's K and not the D.
+        await d1.reload();
+        await expect.poll(() => inlineRunning(d1), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
+        await expect.poll(() => slotMarks(d1, 'shiro'), { message: 'device 1 shows the server\'s copy' }).toEqual(['M']);
+        await expect.poll(() => marksOf(d1, 'aka'), { message: 'device 1 cannot see a tap still on device 2' }).toEqual(['K']);
         await shot(d2, 'b-device-2-offline');
       } finally {
         await ctx2.setOffline(false);
@@ -282,6 +289,11 @@ test.describe('concurrent taps from two devices', () => {
           await expect.poll(() => marksOf(d, 'aka'), { message: `${name}: the mark tapped back stays` }).toEqual(['D', 'K']);
         }
         await shot(d2, 'c-tapped-back-on-device-2');
+        await d2.reload();
+        await expect.poll(() => inlineRunning(d2), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
+        await expect.poll(() => marksOf(d2, 'aka'), { message: 'and the server holds the mark tapped back' }).toEqual(['D', 'K']);
+        await expect.poll(() => slotMarks(d2, 'shiro')).toEqual(['M']);
+        await shot(d2, 'c-tapped-back-after-reload');
 
         // The reverse: D off (answered), then D added and taken off again
         // while the add's batch is held.
@@ -389,8 +401,10 @@ test.describe('concurrent taps from two devices', () => {
 
       // The concurrent taps go on the FIRST bout, which the server holds no row
       // for (the encounter was started from the queue): the server makes the
-      // row at the first tap, and each device seats the lineup's fighters as
-      // its own first taps on it, so neither device's strike is turned away.
+      // row at the first tap and seats the lineup's fighters on it itself
+      // (operator decision: bout 1 is whatever the lineup says), so neither
+      // device's strike is turned away and both show the same names.
+      const opener = { shiro: KACHINUKI_MEMBERS[pair.shiro][0], aka: KACHINUKI_MEMBERS[pair.aka][0] };
       for (const [name, d] of [['device 1', d1], ['device 2', d2]]) {
         await expect(T.rowSlots(currentBout(d), 'shiro'), `${name}: bout 1 starts with no points`).toHaveCount(0);
       }
@@ -403,7 +417,18 @@ test.describe('concurrent taps from two devices', () => {
       // bout is made over a board that holds them.
       for (const [name, d] of [['device 1', d1], ['device 2', d2]]) {
         await expect.poll(() => shiroMarks(currentBout(d)), { message: `${name} shows both of Shiro's points` }).toEqual(['K', 'M']);
+        await expect.poll(() => boutNames(currentBout(d)), { message: `${name} shows the lineup's fighters on bout 1` }).toEqual(opener);
       }
+      // A later edit of this match's lineup (Shiro's first fighter typed anew
+      // on bout 1's name box) renames bout 1 on both devices; its points stay.
+      const renamed = 'Ishii';
+      await T.typeIntoNameBox(T.rowNameBox(currentBout(d1), 'shiro'), renamed);
+      opener.shiro = renamed;
+      for (const [name, d] of [['device 1', d1], ['device 2', d2]]) {
+        await expect.poll(() => boutNames(currentBout(d)), { message: `${name} shows bout 1 renamed by the lineup edit` }).toEqual(opener);
+        await expect.poll(() => shiroMarks(currentBout(d)), { message: `${name}: the points stay on bout 1` }).toEqual(['K', 'M']);
+      }
+      await expect(kachinukiPill(d1)).toHaveText('Synced');
       await shot(d1, 'f-kachinuki-before-record');
       await recordBout(d1);
       for (const [name, d] of [['device 1', d1], ['device 2', d2]]) {
@@ -412,6 +437,7 @@ test.describe('concurrent taps from two devices', () => {
         await expect.poll(() => shiroMarks(done), { message: `${name}: the recorded bout carries both points` }).toEqual(['K', 'M']);
         await expect(T.rowSlots(done, 'aka'), `${name}: and none for Aka`).toHaveCount(0);
         expect(await doneRowWinner(done), `${name}: Shiro won the bout`).toBe('shiro');
+        await expect.poll(() => boutNames(done), { message: `${name}: the recorded bout names the lineup's fighters` }).toEqual(opener);
       }
       await shot(d1, 'f-kachinuki-recorded-device-1');
       await shot(d2, 'f-kachinuki-recorded-device-2');

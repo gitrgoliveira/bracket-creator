@@ -91,13 +91,17 @@ function Toast({ message, type, onClose }) {
   const shownIsError = shown.type === 'error';
 
   // Accept an incoming prop change only when it is NOT being suppressed: a
-  // later non-error toast is ignored while an error is still visible; anything
-  // else (error→error, error→after-dismiss, non-error→anything) replaces.
-  // Deps are intentionally [message, type]: re-running on shown.*/visible would
-  // defeat the error-latch guard above (see comment).
+  // later non-error toast is ignored while an error is still visible, and a
+  // later toast that is neither an error nor a warning is ignored while a
+  // warning is (stage 6 review 10, m2: the flush pass's "N sent", raised just
+  // after a lineup warning, replaced it a render later); anything else
+  // (error→error, warning→error or warning, after a dismiss, other→anything)
+  // replaces. Deps are intentionally [message, type]: re-running on
+  // shown.*/visible would defeat the latch guard above (see comment).
   React.useEffect(() => {
     const incomingIsError = type === 'error';
     if (shownIsError && visible && !incomingIsError) return; // protect the error
+    if (shown.type === 'warning' && visible && !incomingIsError && type !== 'warning') return; // and the warning
     if (message === shown.message && type === shown.type) return; // no change
     setShown({ message, type });
     setVisible(true);
@@ -112,8 +116,8 @@ function Toast({ message, type, onClose }) {
   // forever (no CSS hides a non-is-visible toast). Re-triggering on the shown
   // payload restarts the dwell for each new toast, which is the intent.
   // A warning (a change kept with something to check, stage 6 review 9, F5)
-  // is read like an error, the sign, the dwell and a dismiss, but announced
-  // politely and never latched over the next toast.
+  // is read like an error, the sign, the dwell, a dismiss and the latch, but
+  // announced politely.
   const shownIsWarning = shown.type === 'warning';
   React.useEffect(() => {
     const dwell = shownIsError || shownIsWarning ? TOAST_ERROR_DWELL_MS : TOAST_SUCCESS_DWELL_MS;

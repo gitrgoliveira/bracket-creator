@@ -1,8 +1,9 @@
 package engine
 
 import (
-	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"maps"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 // bracketMatchAsResult projects a stored BracketMatch into the MatchResult

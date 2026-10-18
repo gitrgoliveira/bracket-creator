@@ -668,26 +668,30 @@ func gateOrderings(legacy bool) [][]string {
 				// own lineups of the two matches before the gate's, both
 				// stamped before its start, arriving before it or after it, in
 				// either order (stage 6 review 5).
-				late := after(seq, opStart)
-				if legacy {
-					late = after(seq, opTap1)
+				// After the start (a legacy match started before the gate:
+				// after its first tap).
+				late := func() int {
+					if legacy {
+						return after(seq, opTap1)
+					}
+					return after(seq, opStart)
 				}
 				switch (n / 7) % 7 {
 				case 1:
 					seq = place(seq, opEarly0, 0)
 				case 2:
-					seq = place(seq, opEarly0, late)
+					seq = place(seq, opEarly0, late())
 				case 3:
-					seq = place(seq, opEarly0, late)
+					seq = place(seq, opEarly0, late())
 					seq = place(seq, opEarly1, after(seq, opEarly0))
 				case 4:
-					seq = place(seq, opEarly1, late)
+					seq = place(seq, opEarly1, late())
 					seq = place(seq, opEarly0, after(seq, opEarly1))
 				case 5:
 					seq = place(seq, opEarly1, 0)
-					seq = place(seq, opEarly0, after(seq, opStart))
+					seq = place(seq, opEarly0, late())
 				case 6:
-					seq = place(seq, opEarly1, late)
+					seq = place(seq, opEarly1, late())
 					seq = place(seq, opEarly0, len(seq))
 				}
 				if c := (n / 2) % 4; c > 0 {

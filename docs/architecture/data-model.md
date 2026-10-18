@@ -764,7 +764,7 @@ removing two different marks both land), the number of log lines the stored matc
 from (`ScoreVersion`, which only grows, so a screen can tell which of two copies of a running
 match is older without comparing clocks), and for each device session the highest tap number
 the log holds (`EventSeqs`). A fourth list names every tap of a device that the log holds and
-the server does not apply now, with the reason (`TurnedAway`): a tap the server first applied
+the server does not apply now, with its outcome (`TurnedAway`): a tap the server first applied
 can be turned away when a finish that never saw it arrives after it, and the device that made it
 reads that from the next copy of the match it receives and tells its operator.
 

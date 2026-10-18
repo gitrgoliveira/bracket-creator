@@ -146,4 +146,19 @@ describe('a tap turned away after its answer said it landed', () => {
         await API.fetchCompetitionDetails('c1');
         expect(heard.notApplied(), 'told once').toHaveLength(1);
     });
+
+    it("is told by the court console's reload, a knockout match read from the court's feed", async () => {
+        server();
+        const t = API.recordTap('c1', 'm1', strike, 'pw', shown);
+        await tick(0);
+        await load();
+        const feed = { competitions: [{ config: { id: 'c1', name: 'Cup' }, bracket: { rounds: [[{ id: 'm1', status: 'completed', turnedAway: { [t.id]: 'matchClosed' } }]] } }] };
+        global.fetch = vi.fn((url) => (String(url).includes('/api/viewer/court/A/matches')
+            ? Promise.resolve({ ok: true, status: 200, json: async () => feed })
+            : Promise.reject(new TypeError('offline'))));
+        const heard = listen();
+        await API.fetchCourtMatches('A');
+        expect(heard.notApplied()).toHaveLength(1);
+        expect(heard.notApplied()[0].outcome).toEqual({ id: t.id, outcome: 'matchClosed' });
+    });
 });

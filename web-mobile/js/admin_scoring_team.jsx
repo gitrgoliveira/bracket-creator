@@ -50,7 +50,7 @@ import {
   useOwnStatus,
   OWN_START,
   OWN_REP,
-  holdsUnsaved, confirmDiscardUnsaved, ADD_REP_BOUT_ANYWAY, REMOVE_REP_BOUT_ANYWAY, usePublishUnsaved,
+  holdsUnsaved, confirmDiscardUnsaved, ADD_REP_BOUT_ANYWAY, REMOVE_REP_BOUT_ANYWAY, LEAVE_MATCH_ANYWAY, usePublishUnsaved,
   OWN_REFUSED,
   DraftKeptNotice,
   DraftDroppedNotice,
@@ -4613,7 +4613,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
       go();
       return;
     }
-    if (isDirty && !(await window.confirmDialog({ message: "Discard unsaved scoring changes?", confirmLabel: "Discard changes", danger: true }))) return;
+    // The one warning (R1, unsaved_entries.jsx): Discard entries drops them at
+    // once, as every other own action and host exit does, then leaves.
+    if (!(await confirmDiscardUnsaved(isDirty, LEAVE_MATCH_ANYWAY, onDiscardUnsaved))) return;
     go();
   };
   // bc-dscn: a host that cannot close (the inline court console) has nothing

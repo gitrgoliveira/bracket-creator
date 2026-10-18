@@ -69,6 +69,8 @@ import {
   DraftDroppedNotice,
   ownStartRefusalText,
   StartRefusedNotice,
+  confirmDiscardUnsaved,
+  LEAVE_MATCH_ANYWAY,
 } from './admin_scoring_shared.jsx';
 import { individualDraftTaps, rebaseIndividualDraft } from './draft_taps.jsx';
 // bc-cse: a SCHEDULED match a competitor is barred from must never offer a
@@ -1137,7 +1139,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
       go();
       return;
     }
-    if (isDirty && !(await window.confirmDialog({ message: "Discard unsaved scoring changes?", confirmLabel: "Discard changes", danger: true }))) return;
+    // The one warning (R1, unsaved_entries.jsx): Discard entries drops them at
+    // once, as every other own action and host exit does, then leaves.
+    if (!(await confirmDiscardUnsaved(isDirty, LEAVE_MATCH_ANYWAY, onDiscardUnsaved))) return;
     go();
   };
   // bc-dscn: a host that cannot close (the inline court console) has nothing

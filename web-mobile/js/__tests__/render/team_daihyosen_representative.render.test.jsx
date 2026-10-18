@@ -505,7 +505,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await pickFromDh('AKA', 'Erin');
     expect(dhInput('AKA').value).toBe('Erin');
     await act(async () => { fireEvent.click(screen.getByText('✕ Close')); });
-    expect(window.confirmDialog).toHaveBeenCalledWith(expect.objectContaining({ message: 'Discard unsaved scoring changes?' }));
+    expect(window.confirmDialog).toHaveBeenCalledWith(expect.objectContaining({ message: 'Your unsaved entries will be discarded. Leave this match anyway?' }));
     expect(onClose).not.toHaveBeenCalled();
   });
 
@@ -534,7 +534,7 @@ describe('team daihyosen representative picker (bc-dhrp)', () => {
     await act(async () => { fireEvent.click(within(wrap).getByRole('button', { name: 'Clear player' })); });
     expect(dhInput('AKA').value).toBe('');
     await act(async () => { fireEvent.click(screen.getByText('✕ Close')); });
-    expect(window.confirmDialog).toHaveBeenCalledWith(expect.objectContaining({ message: 'Discard unsaved scoring changes?' }));
+    expect(window.confirmDialog).toHaveBeenCalledWith(expect.objectContaining({ message: 'Your unsaved entries will be discarded. Leave this match anyway?' }));
     expect(onClose).not.toHaveBeenCalled();
   });
 

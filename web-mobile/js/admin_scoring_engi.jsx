@@ -25,6 +25,7 @@ const { useState: useStateE, useEffect: useEffectE, useRef: useRefE } = React;
 import {
   ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer, HeldWriteDiscard, HeldWriteNotice, useClearPendingWhenNothingHeld,
   tapBoardOf, useTapBoard, useTapOutcomeNote, useOwnStatus, DraftKeptNotice, DraftDroppedNotice, usePublishUnsaved,
+  confirmDiscardUnsaved, LEAVE_MATCH_ANYWAY,
 } from './admin_scoring_shared.jsx';
 import { engiDraftTaps } from './draft_taps.jsx';
 import { SyncStatusPill, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
@@ -281,8 +282,9 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
       go();
       return;
     }
-    // Not running, so the counts are a draft nothing has sent.
-    if (isDirty && !(await confirmDialog({ message: "Discard unsaved scoring changes?", confirmLabel: "Discard changes", danger: true }))) return;
+    // Not running, so the counts are a draft nothing has sent: the one warning
+    // (R1, unsaved_entries.jsx), whose Discard entries drops them at once.
+    if (!(await confirmDiscardUnsaved(isDirty, LEAVE_MATCH_ANYWAY, discardEntries))) return;
     go();
   };
   const handleDismiss = () => leaveEditor(onClose);

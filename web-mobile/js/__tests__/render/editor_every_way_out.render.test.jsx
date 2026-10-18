@@ -8,11 +8,13 @@
 // itself. Since bc-evts stages 3 to 5 a running edit is a tap, in the outbox
 // and stamped when it is made, so every way out keeps it, and a tap made
 // before another device finished the match is older than that finish and
-// cannot reopen it. Prev/Next ask "Discard unsaved scoring changes?" first
-// whenever Close would.
+// cannot reopen it. Prev/Next ask first whenever Close would, with the one
+// warning every own action and host exit gives (R1, unsaved_entries.jsx):
+// "Your unsaved entries will be discarded. Leave this match anyway?", Discard
+// entries / Keep entries.
 
 import React from 'react';
-import { render, act, fireEvent, screen, cleanup, within } from '@testing-library/react';
+import { render, act, fireEvent, screen, cleanup } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { beforeEach as beforeEachTest } from 'vitest';
@@ -177,11 +179,16 @@ describe('Prev/Next ask first whenever Close would', () => {
     },
   );
 
-  it('individual: Discard changes moves on and writes nothing', async () => {
+  // The one warning (stage 6): the editor's own Close and Prev/Next ask what
+  // every other exit asks, never a prompt of their own.
+  const ONE_WARNING = { message: 'Your unsaved entries will be discarded. Leave this match anyway?', confirmLabel: 'Discard entries', cancelLabel: 'Keep entries' };
+
+  it('individual: Discard entries moves on and writes nothing', async () => {
     const { onNext } = await mount(individual());
     await click(screen.getByTestId('scoring-modal-mark-draw'));
     await viaButton();
     expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(window.confirmDialog).toHaveBeenCalledWith(expect.objectContaining(ONE_WARNING));
     expect(onNext).toHaveBeenCalledTimes(1);
     await settle();
     expect(writes).toHaveLength(0);
@@ -193,6 +200,7 @@ describe('Prev/Next ask first whenever Close would', () => {
     window.confirmDialog = vi.fn().mockResolvedValue(false);
     await viaButton();
     expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(window.confirmDialog).toHaveBeenCalledWith(expect.objectContaining(ONE_WARNING));
     expect(onNext).not.toHaveBeenCalled();
   });
 
@@ -206,16 +214,17 @@ describe('Prev/Next ask first whenever Close would', () => {
     window.confirmDialog = vi.fn().mockResolvedValue(false);
     await viaButton();
     expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(window.confirmDialog).toHaveBeenCalledWith(expect.objectContaining(ONE_WARNING));
     expect(onNext).not.toHaveBeenCalled();
   });
 
   it('engi: an unsaved flag change to a finished match asks', async () => {
     const { onNext } = await mount(engi({ status: 'completed', flagsA: 3, flagsB: 0 }), { editor: 'engi' });
     await click(screen.getByTestId('engi-shiro-inc'));
+    window.confirmDialog = vi.fn().mockResolvedValue(false);
     await viaButton();
-    // The editor is a dialog too: find the confirm by what it asks.
-    const dialog = screen.getByText('Discard unsaved scoring changes?').closest('[role="dialog"]');
-    await click(within(dialog).getByText('Cancel'));
+    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(window.confirmDialog).toHaveBeenCalledWith(expect.objectContaining(ONE_WARNING));
     expect(onNext).not.toHaveBeenCalled();
   });
 

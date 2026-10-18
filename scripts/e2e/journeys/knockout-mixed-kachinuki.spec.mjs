@@ -1073,7 +1073,7 @@ test.describe('J5 kachinuki from the court console', () => {
           await openList();
           await page.keyboard.press('Escape');
           await rendered(page);
-          const discard = page.locator('.modal[role="dialog"]').filter({ hasText: /Discard unsaved/ });
+          const discard = page.locator('.modal[role="dialog"]').filter({ hasText: /Your unsaved entries will be discarded/ });
           const dialogShown = await discard.isVisible();
           const escShot = await shot(page, 'm2-esc-discard-dialog');
           let hasty = {};

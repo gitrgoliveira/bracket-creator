@@ -24,8 +24,9 @@
 //     words and then drops the entries at once (`discardUnsaved`). Discard
 //     entries on a leave question drops them at the answer too, whether or
 //     not the exit then completes.
-// A Start carries the draft and asks nothing; Close and Prev/Next ask
-// "Discard unsaved scoring changes?" through the editor itself.
+// A Start carries the draft and asks nothing. The editors' own Close and
+// Prev/Next ask this same warning, LEAVE_MATCH_ANYWAY (stage 6: "Only one
+// behaviour allowed"; the old "Discard unsaved scoring changes?" is gone).
 //
 // `unsaved` is the editor's isDirty, the one Close asks on: a boolean, a
 // thunk, or a ref whose `current` is either (a host holds the ref an editor

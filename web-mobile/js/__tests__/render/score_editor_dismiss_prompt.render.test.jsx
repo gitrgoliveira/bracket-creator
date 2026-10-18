@@ -1,5 +1,6 @@
-// bc-dscn: "Discard unsaved scoring changes?" may only appear where closing
-// would really discard something.
+// bc-dscn: the unsaved-entries warning ("Your unsaved entries will be
+// discarded. Leave this match anyway?", the one warning since stage 6) may
+// only appear where closing would really discard something.
 //
 // Three ways it used to lie:
 //  - On a RUNNING match every scoring edit was once autosaved (300ms debounce), so

@@ -2621,6 +2621,15 @@ paths:
             refused rather than trusted or zeroed, and the client should resync
             from GET /api/time and re-submit the same result). See the
             RefusedWrite schema.
+            A write that first starts a kachinuki match keeps the lineup in
+            force there as the match's own; when that moves the match's own
+            lineup back to the start, the team's later matches' carried
+            lineups are worked out again, as after a lineup save. A carried
+            lineup that cannot be worked out again (a position the team size
+            has no place for, kept from older data) stays as it was, the write
+            stands, and the body adds `warning`, a sentence for the operator
+            naming the matches to check (the same refusal the lineup doors
+            answer with `warning`).
           content:
             application/json:
               schema:
@@ -2629,7 +2638,12 @@ paths:
                 # also validates against it. oneOf demands exactly one match and
                 # would flag that as ambiguous in most JSON-Schema tooling.
                 anyOf:
-                  - $ref: '#/components/schemas/MatchResult'
+                  - allOf:
+                      - $ref: '#/components/schemas/MatchResult'
+                      - type: object
+                        properties:
+                          warning:
+                            $ref: '#/components/schemas/LineupFollowWarning'
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
           description: |
@@ -4058,12 +4072,20 @@ paths:
             already recorded (the same decision, side and `modifiedAt`: a
             queued send whose first answer was lost) is answered as recorded,
             with the stored MatchResult, before any 409 below; it changes
-            nothing.
+            nothing. A decision that first moves a kachinuki match out of the
+            queue keeps its lineup as `PUT .../score` does, and its body adds
+            `warning` the same way when a later match's carried lineup could
+            not be worked out again.
           content:
             application/json:
               schema:
                 oneOf:
-                  - $ref: '#/components/schemas/MatchResult'
+                  - allOf:
+                      - $ref: '#/components/schemas/MatchResult'
+                      - type: object
+                        properties:
+                          warning:
+                            $ref: '#/components/schemas/LineupFollowWarning'
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
           description: >
@@ -4538,11 +4560,16 @@ paths:
               $ref: '#/components/schemas/TeamLineupSave'
       responses:
         '200':
-          description: Lineup saved. The body is the whole lineup as stored after the save.
+          description: >
+            Lineup saved. The body is the whole lineup as stored after the save. When a
+            later match's carried lineup could not be worked out again from it (a
+            position the team size has no place for, or a member at two positions, kept
+            from older data), the save is kept, that lineup stays as it was, and the
+            body adds `warning`, the sentence to show the operator.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TeamLineup'
+                $ref: '#/components/schemas/TeamLineupSaved'
         '400':
           description: >
             The round is 1 or more (a lineup is saved as the team's starting lineup, or
@@ -4583,6 +4610,17 @@ paths:
             schema:
               $ref: '#/components/schemas/LineupRemoval'
       responses:
+        '200':
+          description: >
+            Lineup deleted, but a match's carried lineup could not be worked out
+            again (a position the team size has no place for, or a member at two
+            positions, kept from older data): that lineup stays as it was, the
+            removal stands, and the body carries the `warning` to show the
+            operator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LineupFollowWarningAnswer'
         '204':
           description: Lineup deleted, nothing to delete, or a writeId this door already applied answered as recorded (nothing removed).
         '400':
@@ -4681,11 +4719,16 @@ paths:
               $ref: '#/components/schemas/TeamLineupSave'
       responses:
         '200':
-          description: Lineup saved. The body is the whole lineup as stored after the save.
+          description: >
+            Lineup saved. The body is the whole lineup as stored after the save. When a
+            later match's carried lineup could not be worked out again from it (a
+            position the team size has no place for, or a member at two positions, kept
+            from older data), the save is kept, that lineup stays as it was, and the
+            body adds `warning`, the sentence to show the operator.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TeamLineup'
+                $ref: '#/components/schemas/TeamLineupSaved'
         '400':
           description: |
             The body is not a JSON object, a position key is not a valid
@@ -4764,8 +4807,19 @@ paths:
             schema:
               $ref: '#/components/schemas/LineupRemoval'
       responses:
+        '200':
+          description: >
+            Lineup deleted (or kept as the snapshot above), but a later match's
+            carried lineup could not be worked out again (a position the team
+            size has no place for, or a member at two positions, kept from older
+            data): that lineup stays as it was, the removal stands, and the body
+            carries the `warning` to show the operator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LineupFollowWarningAnswer'
         '204':
-          description: Lineup deleted, or a writeId this door already applied answered as recorded (nothing removed).
+          description: Lineup deleted, nothing to delete, or a writeId this door already applied answered as recorded (nothing removed).
         '400':
           $ref: '#/components/responses/BadRequest'
         '500':
@@ -8004,6 +8058,38 @@ components:
             Map of position label to the team member's id, keyed by the same
             positions as `positions`. Optional: a position without an entry
             here is identified by its name alone.
+
+    LineupFollowWarning:
+      type: string
+      description: >
+        A sentence to show the operator, present only when a change was kept
+        but a match's carried lineup could not be worked out again from it (a
+        position the team size has no place for, or a member at two positions,
+        kept from older data), so that lineup was kept as it was. It names the
+        change made and the matches to check, e.g. "The lineup was saved, but
+        the lineup carried to Pool A · Match 2 could not be worked out again (a
+        position the team size has no place for); it was kept as it was. Check
+        that match's lineup." The lead is "The lineup was saved" for a save,
+        "The lineup was removed" for a removal and "The match was started" for
+        a kachinuki start.
+
+    LineupFollowWarningAnswer:
+      type: object
+      required: [warning]
+      properties:
+        warning:
+          $ref: '#/components/schemas/LineupFollowWarning'
+
+    TeamLineupSaved:
+      description: >
+        A lineup save's answer: the whole lineup as stored after the save, plus
+        `warning` when a carried lineup could not follow it.
+      allOf:
+        - $ref: '#/components/schemas/TeamLineup'
+        - type: object
+          properties:
+            warning:
+              $ref: '#/components/schemas/LineupFollowWarning'
 
     TeamLineupSave:
       description: >

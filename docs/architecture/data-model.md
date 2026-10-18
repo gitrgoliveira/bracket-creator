@@ -796,7 +796,10 @@ match is older without comparing clocks), and for each device session the highes
 the log holds (`EventSeqs`). A fourth list names every tap of a device that the log holds and
 the server does not apply now, with its outcome (`TurnedAway`): a tap the server first applied
 can be turned away when a finish that never saw it arrives after it, and the device that made it
-reads that from the next copy of the match it receives and tells its operator.
+reads that from the next copy of the match it receives and tells its operator. The list keeps
+each device session's latest, at most 128 of a session and 512 on the match; when the sessions
+together hold more, each keeps the same share, the largest that fits, so a device with fewer
+taps listed keeps all of its own and no device's taps are pushed out by another's.
 
 The score event log is the source of truth for match scoring, while the match result stored in
 `pool-matches.csv` or `bracket.json` acts as a materialized cache derived by the replay. This

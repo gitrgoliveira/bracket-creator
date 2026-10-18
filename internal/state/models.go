@@ -1800,7 +1800,7 @@ type MatchResult struct {
 	// match reaches it next (a push, a fetch, an answer), and tells its
 	// operator. The server's own events are never listed. The latest
 	// logged, at most MaxTurnedAwayPerSession of each device session and
-	// MaxTurnedAway in all. Derived by
+	// MaxTurnedAway in all, shared fairly between sessions. Derived by
 	// engine.ReplayScoring like EventSeqs; persisted after EventSeqs.
 	TurnedAway map[string]string `json:"turnedAway,omitempty" yaml:"-"`
 }
@@ -1812,8 +1812,12 @@ const MaxEventSeqSessions = 32
 // MaxTurnedAwayPerSession and MaxTurnedAway bound MatchResult.TurnedAway:
 // the latest taps logged that the server does not apply, at most
 // MaxTurnedAwayPerSession of each device event session (one page of one
-// device), so another device's later taps never push a device's own out,
-// and at most MaxTurnedAway on the match. A session reaches its bound only
+// device), and at most MaxTurnedAway on the match. Past MaxTurnedAway every
+// session keeps the same share, the largest that fits (engine.turnedAwayOf),
+// so each session keeps at least MaxTurnedAway divided by the sessions that
+// have any (a device with fewer keeps every one of its own) and another
+// device's later taps never push a device's own out (stage 6 review 7: four
+// sessions of 128 pushed a fifth's ten out entirely). A session reaches its bound only
 // past 128 of its own taps turned away on one match, about twice every tap
 // one device makes on a five-person team match and its representative bout
 // with corrections, and many times an individual match's; the match's

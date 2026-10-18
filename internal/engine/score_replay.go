@@ -298,12 +298,16 @@ func ScoreLogEventSeqs(lines []state.ScoreLogLine) map[string]int64 {
 // its own answer called applied can end here when a result that never saw it
 // arrives later, and the device that made it reads that from the match
 // (stage 6 review 5). The latest by line, at most MaxTurnedAwayPerSession of
-// each device session, so another device's later taps never push a device's
-// own out, and MaxTurnedAway in all (stage 6 review 6).
+// each device session and MaxTurnedAway in all (stage 6 review 6); over
+// MaxTurnedAway every session keeps the same share, the largest that fits,
+// so another device's later taps never push a device's own out (review 7).
 func turnedAwayOf(lines []state.ScoreLogLine, outcome map[int]string) map[string]string {
-	var out map[string]string
-	perSession := map[string]int{}
-	for i := len(lines) - 1; i >= 0 && len(out) < state.MaxTurnedAway; i-- {
+	// Each device session's latest, at most MaxTurnedAwayPerSession of each.
+	type entry struct{ id, outcome string }
+	bySession := map[string][]entry{}
+	seen := map[string]bool{}
+	total := 0
+	for i := len(lines) - 1; i >= 0; i-- {
 		e := lines[i].Event
 		if e == nil || e.Session == ServerEventSession {
 			continue
@@ -311,14 +315,43 @@ func turnedAwayOf(lines []state.ScoreLogLine, outcome map[int]string) map[string
 		switch o := outcome[i]; o {
 		case "", domain.ScoreOutcomeApplied, domain.ScoreOutcomeRecorded, domain.ScoreOutcomeDuplicate:
 		default:
-			if _, ok := out[e.ID]; ok || perSession[e.Session] >= state.MaxTurnedAwayPerSession {
+			if seen[e.ID] || len(bySession[e.Session]) >= state.MaxTurnedAwayPerSession {
 				continue
 			}
-			if out == nil {
-				out = map[string]string{}
+			seen[e.ID] = true
+			bySession[e.Session] = append(bySession[e.Session], entry{e.ID, o})
+			total++
+		}
+	}
+	if total == 0 {
+		return nil
+	}
+	// Over MaxTurnedAway in all, every session keeps the same share, the
+	// largest that fits (a session holding fewer keeps all of its own), so no
+	// session is pushed out by another's later taps (stage 6 review 7).
+	share := state.MaxTurnedAwayPerSession
+	if total > state.MaxTurnedAway {
+		fits := func(c int) bool {
+			n := 0
+			for _, es := range bySession {
+				n += min(len(es), c)
 			}
-			out[e.ID] = o
-			perSession[e.Session]++
+			return n <= state.MaxTurnedAway
+		}
+		lo, hi := 0, state.MaxTurnedAwayPerSession
+		for lo < hi {
+			if mid := (lo + hi + 1) / 2; fits(mid) {
+				lo = mid
+			} else {
+				hi = mid - 1
+			}
+		}
+		share = lo
+	}
+	out := make(map[string]string, min(total, state.MaxTurnedAway))
+	for _, es := range bySession {
+		for _, en := range es[:min(len(es), share)] {
+			out[en.id] = en.outcome
 		}
 	}
 	return out

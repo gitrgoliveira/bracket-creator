@@ -1593,16 +1593,6 @@ func appendHanteiMark(ippons, marks []string, id string) ([]string, []string) {
 	return out, marks
 }
 
-func lowestNumberedPosition(subs []state.SubMatchResult) int {
-	low := 0
-	for _, s := range subs {
-		if s.Position > 0 && (low == 0 || s.Position < low) {
-			low = s.Position
-		}
-	}
-	return low
-}
-
 // writeBoutRow puts a folded bout score back on its row, with the row's
 // winner and decision worked out as the team editor's buildPatch works them
 // (domain.BoutWinnerSide; a kachinuki bout's winner is its fighter, else the

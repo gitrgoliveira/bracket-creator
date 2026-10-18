@@ -50,7 +50,6 @@ package engine
 
 import (
 	"log"
-	"maps"
 	"slices"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -260,8 +259,5 @@ func LineupInForceFrom(lineups map[string]domain.TeamLineup, poolMatches []state
 
 // copyLineup is l with its own copies of the position maps.
 func copyLineup(l domain.TeamLineup) domain.TeamLineup {
-	l.Positions = maps.Clone(l.Positions)
-	l.MemberIDs = maps.Clone(l.MemberIDs)
-	l.Stamps = maps.Clone(l.Stamps)
-	return l
+	return l.Clone()
 }

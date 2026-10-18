@@ -227,11 +227,11 @@ func TestKachinukiOpener_FollowLineupSaveOrdersByStamp(t *testing.T) {
 	require.NoError(t, err)
 	p1 := domain.PositionNumbered(1)
 	follow := func(name string, stamp int64) []string {
-		saved := domain.TeamLineup{TeamID: "ta", Round: 0, Positions: map[domain.Position]string{p1: name},
-			MemberIDs: map[domain.Position]string{p1: "m-" + name}, Stamps: map[domain.Position]int64{p1: stamp}}
 		var moved []string
 		require.NoError(t, store.WithTransaction(c, func(tx state.StoreTx) error {
-			require.NoError(t, tx.SetTeamLineup(c, saved, 3))
+			// Landed as the lineup door lands a partial save of the
+			// starting lineup (its History kept).
+			saved := carryTestStartingSave(t, tx, c, "ta", p1, name, "m-"+name, stamp)
 			var err error
 			moved, err = eng.FollowLineupSave(tx, comp, saved, []domain.Position{p1})
 			return err
@@ -249,6 +249,45 @@ func TestKachinukiOpener_FollowLineupSaveOrdersByStamp(t *testing.T) {
 	assert.Equal(t, "Kato", pinned())
 	assert.Empty(t, follow("Sato", start-20), "older than the change already there")
 	assert.Equal(t, "Kato", pinned())
+}
+
+// carryTestStartingSave lands a one-position change of a team's starting
+// lineup as the lineup door does (ApplyStampedChanges on the stored entry, so
+// the value it replaces is kept in History), stores it and returns it.
+func carryTestStartingSave(t *testing.T, tx state.StoreTx, c, teamID string, p domain.Position, name, id string, stamp int64) domain.TeamLineup {
+	t.Helper()
+	lineups, err := tx.LoadTeamLineups(c)
+	require.NoError(t, err)
+	var base domain.TeamLineup
+	for _, l := range lineups {
+		if l.TeamID == teamID && l.MatchID == "" && l.Round == 0 {
+			base = l
+		}
+	}
+	saved, err := base.ApplyStampedChanges([]domain.Position{p}, map[domain.Position]string{p: name}, map[domain.Position]string{p: id},
+		map[domain.Position]int64{p: stamp}, stamp+1_000_000)
+	require.NoError(t, err)
+	saved.TeamID, saved.Round, saved.MatchID = teamID, 0, ""
+	require.NoError(t, tx.SetTeamLineup(c, saved, 3))
+	return saved
+}
+
+// carryTestMatchSave lands a one-position change of a match's own lineup as
+// the lineup door does (LandMatchLineupSave), stores it and returns it.
+func carryTestMatchSave(t *testing.T, tx state.StoreTx, comp *state.Competition, teamID, matchID string, p domain.Position, name, id string, stamp int64) domain.TeamLineup {
+	t.Helper()
+	lineups, err := tx.LoadTeamLineups(comp.ID)
+	require.NoError(t, err)
+	pool, err := tx.LoadPoolMatches(comp.ID)
+	require.NoError(t, err)
+	br, err := tx.LoadBracket(comp.ID)
+	require.NoError(t, err)
+	saved, err := LandMatchLineupSave(lineups, pool, br, comp.IsKnockoutEnabled(), comp.TeamSize, teamID, matchID,
+		[]domain.Position{p}, map[domain.Position]string{p: name}, map[domain.Position]string{p: id}, map[domain.Position]int64{p: stamp}, stamp+1_000_000)
+	require.NoError(t, err)
+	saved.CompetitionID = comp.ID
+	require.NoError(t, tx.SetTeamLineup(comp.ID, saved, comp.TeamSize))
+	return saved
 }
 
 // "Use the previous match's lineup" on a started match is an edit of its own
@@ -387,11 +426,9 @@ func TestKachinukiOpener_AnEarlierMatchsSaveMadeBeforeTheStartReachesIt(t *testi
 	require.NoError(t, err)
 	p1 := domain.PositionNumbered(1)
 	save := func(name string, stamp int64) []string {
-		saved := domain.TeamLineup{TeamID: "ta", MatchID: "P1-0", Positions: map[domain.Position]string{p1: name},
-			MemberIDs: map[domain.Position]string{p1: "m-" + name}, Stamps: map[domain.Position]int64{p1: stamp}}
 		var moved []string
 		require.NoError(t, store.WithTransaction(c, func(tx state.StoreTx) error {
-			require.NoError(t, tx.SetTeamLineup(c, saved, 3))
+			saved := carryTestMatchSave(t, tx, comp, "ta", "P1-0", p1, name, "m-"+name, stamp)
 			var err error
 			moved, err = eng.FollowLineupSave(tx, comp, saved, []domain.Position{p1})
 			return err

@@ -114,10 +114,13 @@ type gateWorld struct {
 	base    int64             // the device stamps' frame, in the past
 	arrived map[string]bool
 	order   []string
-	// The model: team A's starting lineup's first fighter by arrival (the
-	// lineup door orders by arrival) with its stamp, and match 1's own record.
+	// The model: team A's starting lineup's first fighter, the latest change
+	// BY STAMP (operator decision L1; an unstamped save is stamped with the
+	// server's time as it lands), with its stamp, every change of it that has
+	// arrived, and match 1's own record.
 	startingNow      string
 	startingNowStamp int64
+	startingSaves    []gateLineup
 	own              *gateLineup
 	finished         *state.MatchResult
 	finishStamp      int64
@@ -237,15 +240,39 @@ func (w *gateWorld) saveStarting(name string, stamp int64, op string) {
 	}
 	rec := w.do(http.MethodPut, "/api/competitions/"+w.comp+"/teams/"+w.teamA+"/lineups/0", body)
 	require.Equal(w.t, http.StatusOK, rec.Code, rec.Body.String())
-	// The lineup door orders by arrival: the later arrival holds the position.
-	w.startingNow, w.startingNowStamp = name, stamp
-	// A save stamped before a pin's start lands on it whichever way it
-	// arrives, unless a later-stamped change is there; never once the pin was
-	// taken from an earlier match's own lineup, which the carry rule reads
-	// whole.
-	if w.own != nil && w.own.pin && w.own.from == "" && stamp > 0 && stamp < w.own.startedAt && stamp > w.own.stamp {
-		w.own.name, w.own.stamp = name, stamp
+	if stamp <= 0 {
+		// Stamped with the server's time as it landed, after every stamp
+		// this gate's devices made: it holds the position now.
+		lineups, err := w.store.LoadTeamLineups(w.comp)
+		require.NoError(w.t, err)
+		for _, l := range lineups {
+			if l.TeamID == w.teamA && l.MatchID == "" && l.Round == 0 {
+				stamp = l.Stamps[pos]
+			}
+		}
+		require.Positive(w.t, stamp, "an unstamped change is stamped as it lands")
 	}
+	w.startingSaves = append(w.startingSaves, gateLineup{name: name, stamp: stamp})
+	// The position holds the latest change by stamp, whichever arrived last.
+	w.startingNow, w.startingNowStamp = w.startingAt(math.MaxInt64)
+	// A pin taken from the starting lineup holds what it held at the pin's
+	// stamp, whatever order the changes arrive in.
+	if w.own != nil && w.own.pin && w.own.from == "" {
+		w.own.name, w.own.stamp = w.startingAt(w.own.startedAt)
+	}
+}
+
+// startingAt is the starting lineup's first fighter at stamp at: of the
+// changes arrived so far (and the one it began with, stamp 0), the latest
+// made before at.
+func (w *gateWorld) startingAt(at int64) (string, int64) {
+	name, stamp := "Sato", int64(0)
+	for _, s := range w.startingSaves {
+		if s.stamp < at && s.stamp > stamp {
+			name, stamp = s.name, s.stamp
+		}
+	}
+	return name, stamp
 }
 
 // inForce is the lineup the carry rule gives the gate's match now, before any
@@ -303,6 +330,10 @@ func (w *gateWorld) step(op string) {
 		w.start(op, w.stamp(op))
 		if w.own == nil {
 			in := w.inForce()
+			if in.from == "" {
+				// The carry rule at the start, by stamp.
+				in.name, in.stamp = w.startingAt(w.stamp(op))
+			}
 			w.own = &gateLineup{name: in.name, pin: true, startedAt: w.stamp(op), stamp: in.stamp, from: in.from}
 		}
 	case opEarly0:
@@ -334,9 +365,22 @@ func (w *gateWorld) step(op string) {
 		require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
 		w.own = nil
 		if w.started() {
-			// A snapshot of the lineup in force now, kept as the match's own.
+			// A snapshot of the lineup in force now, kept as the match's own,
+			// at the server's time (read back from the store).
+			at := int64(0)
+			lineups, err := w.store.LoadTeamLineups(w.comp)
+			require.NoError(t, err)
+			for _, l := range lineups {
+				if l.TeamID == w.teamA && l.MatchID == gateMatch && l.IsStartPin() {
+					at = l.StartedAt
+				}
+			}
+			require.Positive(t, at, "the snapshot is kept as a pin")
 			in := w.inForce()
-			w.own = &gateLineup{name: in.name, pin: true, startedAt: math.MaxInt64, stamp: in.stamp, from: in.from}
+			if in.from == "" {
+				in.name, in.stamp = w.startingAt(at)
+			}
+			w.own = &gateLineup{name: in.name, pin: true, startedAt: at, stamp: in.stamp, from: in.from}
 		}
 	case opTap1, opTap2:
 		side, letter, session := "a", "M", "dev1"

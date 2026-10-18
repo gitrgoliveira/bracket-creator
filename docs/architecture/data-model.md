@@ -196,27 +196,41 @@ the kachinuki roster, the Kachinuki Detail export and the public `lineup-in-forc
 ask it.
 
 A lineup save names the positions it changed, and the server writes only those, under the
-competition's lock, onto the lineup stored for that match or that starting lineup, or, for a
-match with no lineup of its own yet, onto the lineup in force there. Two devices that change
-different positions of one lineup both keep their change, whichever save arrives first, a
-save sent later from a device that was offline included. Two changes to the same position
-keep the later arrival. A save also says when each position it changes was changed on the device
-(`changedAt`, in the server's clock), and the lineup keeps that time per position (`stamps`); a
-save from an older release sends none, and its changes keep none.
+competition's lock, onto the lineup stored for that match or that starting lineup. A save also
+says when each position it changes was changed on the device (`changedAt`, in the server's
+clock), and the lineup keeps that time per position (`stamps`); a save from an older release
+sends none, and its changes are given the server's time as they land, so they are ordered by
+their arrival. Every lineup comes out the same whatever order its saves arrive in:
+
+- A position holds its latest change by that time. A change made earlier that arrives later
+  does not replace it; it is kept in the position's `history` (the values a position held, each
+  with its time, at most eight).
+- The first save of a match's own lineup takes the positions it does not name from what the
+  match carried when that change was made: the lineup in force there at that time, an earlier
+  match's own lineup counting only once it was made, each position as it stood then. The record
+  keeps that time (`copiedAt`, moved back if an earlier change of the match arrives later), the
+  lineup it carried from (`copiedFrom`: an earlier match's id, or empty for the starting lineup)
+  and the positions its own saves changed (`own`). After every lineup save the carried positions
+  of the team's match lineups are worked out again, in match order, so a change made before that
+  time reaches them whenever it arrives, and one made after it never does.
+
+Two devices that change different positions of one lineup both keep their change, a save sent
+later from a device that was offline included.
 
 When a kachinuki match starts, the lineup in force there for each team is kept as that match's
 own lineup record, marked with the time of the write that started it (`startedAt`) and the lineup
 it was taken from (`startedFrom`: an earlier match's id, or empty for the starting lineup). It is
 taken only by the write that moves the match out of the queue, inside that write's transaction,
 so a write refused, or any write after the start, never takes one; when the team had no lineup
-it is empty. That record is the match's alone: a later match never carries it, so it goes on
-carrying the starting lineup or an earlier match's own lineup exactly as before. A change to the
-lineup it was taken from that was made before the start reaches it whenever the save arrives,
-unless the position holds a change made later; a change made after the start does not. So does
-a change to an earlier match's own lineup, made before the start, that the match would have
-carried at its start. A match sent back to the queue still holding the bouts it was fought on
-has started: starting it again takes no record. An organiser's save of the match's own lineup
-replaces the record, and taking it away ("Use the previous match's lineup") on a match that has
+it is empty. It is the lineup in force at the start's time, read the same way as a first save's
+carried positions: a change made before the start reaches it whenever the save arrives, a change
+made after the start never does, even one that arrived before it, and so does a change to an
+earlier match's own lineup, made before the start, that the match would have carried at its
+start. That record is the match's alone: a later match never carries it, so it goes on carrying
+the starting lineup or an earlier match's own lineup exactly as before. A match sent back to the
+queue still holding the bouts it was fought on has started: starting it again takes no record.
+An organiser's save of the match's own lineup makes the record the organiser's own lineup,
+its other positions still carried from the start, and taking it away ("Use the previous match's lineup") on a match that has
 started keeps the lineup in force at that moment as the match's own in its place, a snapshot
 that later edits of the starting lineup do not change. If the store cannot keep the record, the
 write that started the match fails. The first bout of the match is fought by the first fighter
@@ -522,7 +536,8 @@ classDiagram
         TeamLineup per match, or the starting one
         position to name and member id
         a position may hold an id and an empty name
-        when each position was changed
+        when each position was changed, and the values it held before
+        copiedAt, copiedFrom and own on a match lineup a first save made
         startedAt and startedFrom on the lineup a kachinuki match started with
     }
     class team_members_yaml["team-members.yaml"] {

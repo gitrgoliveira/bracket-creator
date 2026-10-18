@@ -18,7 +18,6 @@ package state
 import (
 	"fmt"
 	"log"
-	"maps"
 	"os"
 	"slices"
 	"sort"
@@ -136,15 +135,11 @@ func (s *Store) loadTeamLineupsLocked(compID string) (map[string]domain.TeamLine
 func copyTeamLineups(in map[string]domain.TeamLineup) map[string]domain.TeamLineup {
 	out := make(map[string]domain.TeamLineup, len(in))
 	for k, l := range in {
-		l.Positions = maps.Clone(l.Positions)
-		// MemberIDs (bc-tmid pass 2) is a map too, and cloned for the exact
-		// reason Positions is: callers of LoadTeamLineups mutate the
-		// returned map in load-mutate-save flows (setTeamLineupLocked), so
-		// an unclosed map here would alias the cache. maps.Clone(nil) is
-		// nil, matching an unrepaired/legacy lineup that never had one.
-		l.MemberIDs = maps.Clone(l.MemberIDs)
-		l.Stamps = maps.Clone(l.Stamps)
-		out[k] = l
+		// Every map and slice (Positions, MemberIDs, Stamps, Own, History)
+		// is cloned: callers of LoadTeamLineups mutate the returned map in
+		// load-mutate-save flows (setTeamLineupLocked), so an unclosed one
+		// would alias the cache. A nil map stays nil.
+		out[k] = l.Clone()
 	}
 	return out
 }

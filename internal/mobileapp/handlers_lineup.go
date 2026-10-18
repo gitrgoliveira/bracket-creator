@@ -677,35 +677,45 @@ func (w lineupSave) lineupToStore(stx state.StoreTx, comp *state.Competition) (d
 			Positions: w.req.Positions, MemberIDs: w.req.MemberIDs,
 		}, nil
 	}
-	base, resp := w.base(stx, comp)
+	lineup, resp := w.landPartial(stx, comp, changed)
 	if resp != nil {
 		return domain.TeamLineup{}, resp
-	}
-	lineup, err := base.ApplyChanges(changed, w.req.Positions, w.req.MemberIDs)
-	if err != nil {
-		return domain.TeamLineup{}, &txResponse{status: lineupSetStatus(err), body: gin.H{"error": err.Error()}}
 	}
 	lineup.TeamID, lineup.CompetitionID, lineup.Round, lineup.MatchID = w.teamID, w.compID, w.round, w.matchID
 	// An operator's save of a match's own lineup replaces the lineup the
 	// match started with (engine/kachinuki_opener.go): it is the operator's
-	// now, and a later match carries it.
+	// now, carried from the same point, and a later match carries it.
 	lineup.StartedAt, lineup.StartedFrom = 0, ""
-	lineup.StampChanges(changed, w.req.ChangedAt, time.Now().UnixMilli())
 	return lineup, nil
 }
 
-// base is the lineup a partial save lands on. For a match, its own stored
-// lineup; with none, the lineup in force there, which is what the team fields
-// there and so what a read of the match shows: the match's own lineup is read
-// whole, never merged with the one before it, so a base left empty would drop
-// every carried position from the next read. Failing both, empty. For the
-// starting lineup, the one stored, else empty. The in-force rule is the
-// engine's one (engine.LineupInForceFrom), asked over what this transaction
-// loads, since the store's own reads would wait on the lock it holds.
-func (w lineupSave) base(stx state.StoreTx, comp *state.Competition) (domain.TeamLineup, *txResponse) {
+// landPartial is the lineup a partial save stores, read under the write's
+// lock over what this transaction loads (the store's own reads would wait on
+// the lock it holds). The starting lineup: its stored entry with the changes
+// on it. A match's own lineup: engine.LandMatchLineupSave, the carry rule by
+// stamp (operator decision L1): a first stamped save takes the positions it
+// does not name from what the match carried at its stamp, a later one joins
+// them, and an unstamped first save lands on the lineup in force when it
+// arrives. The match's own lineup is read whole, never merged with the one
+// before it, so a base left empty would drop every carried position.
+func (w lineupSave) landPartial(stx state.StoreTx, comp *state.Competition, changed []domain.Position) (domain.TeamLineup, *txResponse) {
 	internal := func(what string, err error) (domain.TeamLineup, *txResponse) {
 		log.Printf("mobileapp: lineup save for %s: %s: %v", w.compID, what, err)
 		return domain.TeamLineup{}, &txResponse{status: http.StatusInternalServerError, body: gin.H{"error": "internal error"}}
+	}
+	refused := func(err error) (domain.TeamLineup, *txResponse) {
+		return domain.TeamLineup{}, &txResponse{status: lineupSetStatus(err), body: gin.H{"error": err.Error()}}
+	}
+	now := time.Now().UnixMilli()
+	// A change sent with no stamp (an older build's) is ordered by its
+	// arrival: it is stamped with the server's time as it lands.
+	stamps := map[domain.Position]int64{}
+	for _, p := range changed {
+		if s := w.req.ChangedAt[p]; s > 0 {
+			stamps[p] = s
+		} else {
+			stamps[p] = now
+		}
 	}
 	lineups, err := stx.LoadTeamLineups(w.compID)
 	if err != nil {
@@ -713,10 +723,11 @@ func (w lineupSave) base(stx state.StoreTx, comp *state.Competition) (domain.Tea
 	}
 	if w.matchID == "" {
 		start, _ := findRoundLineup(lineups, w.teamID, w.round)
-		return start, nil
-	}
-	if own, ok := findMatchLineup(lineups, w.teamID, w.matchID); ok {
-		return own, nil
+		out, err := start.ApplyStampedChanges(changed, w.req.Positions, w.req.MemberIDs, stamps, now)
+		if err != nil {
+			return refused(err)
+		}
+		return out, nil
 	}
 	pool, err := stx.LoadPoolMatches(w.compID)
 	if err != nil {
@@ -726,7 +737,12 @@ func (w lineupSave) base(stx state.StoreTx, comp *state.Competition) (domain.Tea
 	if err != nil {
 		return internal("LoadBracket", err)
 	}
-	return engine.LineupInForceFrom(lineups, pool, bracket, comp.IsKnockoutEnabled(), w.teamID, w.matchID).Lineup, nil
+	out, err := engine.LandMatchLineupSave(lineups, pool, bracket, comp.IsKnockoutEnabled(), comp.TeamSize,
+		w.teamID, w.matchID, changed, w.req.Positions, w.req.MemberIDs, stamps, now)
+	if err != nil {
+		return refused(err)
+	}
+	return out, nil
 }
 
 // saveLineup is the body the round and the match lineup PUTs share. Under one

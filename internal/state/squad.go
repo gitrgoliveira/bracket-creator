@@ -758,6 +758,19 @@ func (s *Store) renameMemberInLineupsLocked(compID, memberID, name string, write
 			lineups[key] = lineup
 			changed = true
 		}
+		// The values a position held before (History) name the member by
+		// its current name too: a carried copy reads them (engine
+		// lineup_carry.go), and must never bring an old name back.
+		for pos, cs := range lineup.History {
+			for i, c := range cs {
+				if c.MemberID == memberID && c.Name != name {
+					cs[i].Name = name
+					lineup.History[pos] = cs
+					lineups[key] = lineup
+					changed = true
+				}
+			}
+		}
 	}
 	if !changed {
 		return nil

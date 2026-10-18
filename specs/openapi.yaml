@@ -4630,12 +4630,15 @@ paths:
         with a 400.
 
         With `changed` (operator decision 2026-10-07), only the positions it names
-        are written, under the competition's lock, onto the match's own lineup, or,
-        when the match has none yet, onto the lineup in force there (the one the
-        team carries from its previous match, else its starting lineup), so a
-        change another device made to any other position stays, whichever save
-        arrives first. Two saves of the same position keep the later arrival.
-        Without `changed` the body replaces the whole lineup. See `TeamLineupSave`.
+        are written, under the competition's lock, onto the match's own lineup, so
+        a change another device made to any other position stays, whichever save
+        arrives first. Every position holds its latest change by `changedAt`,
+        whatever order the saves arrive in. The first save of a match's own lineup
+        takes the positions it does not name from what the match carried when its
+        change was made (the lineup the team carries from its previous match, else
+        its starting lineup, as it stood then), and a change to those made before
+        it still reaches them when it arrives later. Without `changed` the body
+        replaces the whole lineup. See `TeamLineupSave`.
 
         In a self-run tournament the request is also accepted with an empty
         password: the public score sheet saves it when a competitor names a
@@ -8004,12 +8007,12 @@ components:
               description: >
                 When each changed position was changed on the device, in milliseconds
                 on the server's clock, keyed like `positions`. Stored per position (a
-                stamp ahead of the server's clock is taken as now). A change to the
-                lineup a kachinuki match started with from, made before the match
-                started, reaches the lineup the match keeps as its own whenever the
-                save arrives, unless that position holds a change made later; one made
-                after the start does not. A save without it is ordered by its arrival,
-                as before.
+                stamp ahead of the server's clock is taken as now). A position holds
+                its latest change by this time, whatever order the saves arrive in. A
+                change made before a match's own lineup was first saved, or before a
+                kachinuki match started, reaches what that lineup carries whenever the
+                save arrives; one made after does not. A change without it is given
+                the server's time as it lands, so it is ordered by its arrival.
             writeId:
               $ref: '#/components/schemas/ArrivalWriteId'
 

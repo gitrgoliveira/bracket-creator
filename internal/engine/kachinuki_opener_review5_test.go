@@ -19,7 +19,56 @@ var rv5p1, rv5p2 = domain.PositionNumbered(1), domain.PositionNumbered(2)
 // positions landed on the lineup stored for that scope (lineupToStore),
 // stamped, then carried to the lineups matches started with
 // (FollowLineupSave), in one transaction. matchID "" is the starting lineup.
-func rv5Save(t *testing.T, eng *Engine, store *state.Store, c, matchID string, names map[domain.Position]string, stamp int64) (copied string) {
+func rv5Save(t *testing.T, eng *Engine, store *state.Store, c, matchID string, names map[domain.Position]string, stamp int64) {
+	t.Helper()
+	comp, err := store.LoadCompetition(c)
+	require.NoError(t, err)
+	changed := slices.SortedFunc(maps.Keys(names), domain.ComparePositions)
+	ids := map[domain.Position]string{}
+	stamps := map[domain.Position]int64{}
+	for p, n := range names {
+		ids[p] = "m-" + strings.ToLower(n)
+		stamps[p] = stamp
+	}
+	// Landed as the lineup door lands a partial save (the handler's
+	// landPartial): the starting lineup's stored entry with the changes on
+	// it; a match's own lineup through LandMatchLineupSave, the carry rule by
+	// stamp.
+	require.NoError(t, store.WithTransaction(c, func(tx state.StoreTx) error {
+		lineups, err := tx.LoadTeamLineups(c)
+		require.NoError(t, err)
+		var saved domain.TeamLineup
+		if matchID == "" {
+			var base domain.TeamLineup
+			for _, l := range lineups {
+				if l.TeamID == "ta" && l.MatchID == "" && l.Round == 0 {
+					base = l
+				}
+			}
+			saved, err = base.ApplyStampedChanges(changed, names, ids, stamps, stamp+1_000_000)
+			require.NoError(t, err)
+		} else {
+			pool, err := tx.LoadPoolMatches(c)
+			require.NoError(t, err)
+			br, err := tx.LoadBracket(c)
+			require.NoError(t, err)
+			saved, err = LandMatchLineupSave(lineups, pool, br, comp.IsKnockoutEnabled(), comp.TeamSize, "ta", matchID, changed, names, ids, stamps, stamp+1_000_000)
+			require.NoError(t, err)
+		}
+		saved.TeamID, saved.CompetitionID, saved.MatchID, saved.Round = "ta", c, matchID, 0
+		saved.StartedAt, saved.StartedFrom = 0, ""
+		require.NoError(t, tx.SetTeamLineup(c, saved, 3))
+		_, err = eng.FollowLineupSave(tx, comp, saved, changed)
+		return err
+	}))
+}
+
+// rv5SaveInTime is the reference's save, for saves that arrive in the order
+// they were made: the changes land on the lineup's own stored entry, else (a
+// match's first save) the lineup in force there as it arrives
+// (LineupInForceFrom, as rt19's probe saves), which in time is the carry rule
+// by stamp. It shares nothing with the carry code but the in-force rule.
+func rv5SaveInTime(t *testing.T, store *state.Store, c, matchID string, names map[domain.Position]string, stamp int64) {
 	t.Helper()
 	comp, err := store.LoadCompetition(c)
 	require.NoError(t, err)
@@ -33,9 +82,6 @@ func rv5Save(t *testing.T, eng *Engine, store *state.Store, c, matchID string, n
 	require.NoError(t, store.WithTransaction(c, func(tx state.StoreTx) error {
 		lineups, err := tx.LoadTeamLineups(c)
 		require.NoError(t, err)
-		// The base the save lands on, as the handler reads it under the lock
-		// (lineupSave.base): the starting lineup's stored entry; a match's
-		// own stored lineup; else the lineup in force there.
 		var base domain.TeamLineup
 		found := false
 		for _, l := range lineups {
@@ -48,27 +94,15 @@ func rv5Save(t *testing.T, eng *Engine, store *state.Store, c, matchID string, n
 			require.NoError(t, err)
 			br, err := tx.LoadBracket(c)
 			require.NoError(t, err)
-			base = LineupInForceFrom(lineups, pool, br, comp.IsKnockoutEnabled(), "ta", matchID).Lineup
-			// A first save of a match's own lineup copies the positions it
-			// does not change from the lineup in force as it ARRIVES.
-			var parts []string
-			for _, p := range slices.SortedFunc(maps.Keys(base.Positions), domain.ComparePositions) {
-				if _, ok := names[p]; !ok {
-					parts = append(parts, fmt.Sprintf("%s=%s", p, base.Positions[p]))
-				}
-			}
-			copied = strings.Join(parts, " ")
+			in := LineupInForceFrom(lineups, pool, br, comp.IsKnockoutEnabled(), "ta", matchID).Lineup
+			base = domain.TeamLineup{Positions: in.Positions, MemberIDs: in.MemberIDs, Stamps: in.Stamps}
 		}
 		saved, err := base.ApplyChanges(changed, names, ids)
 		require.NoError(t, err)
 		saved.TeamID, saved.CompetitionID, saved.MatchID, saved.Round = "ta", c, matchID, 0
-		saved.StartedAt, saved.StartedFrom = 0, ""
 		saved.StampChanges(changed, stamps, stamp+1_000_000)
-		require.NoError(t, tx.SetTeamLineup(c, saved, 3))
-		_, err = eng.FollowLineupSave(tx, comp, saved, changed)
-		return err
+		return tx.SetTeamLineup(c, saved, 3)
 	}))
-	return copied
 }
 
 // rv5Pin is the lineup match P1-2 started with, as names by position, and the
@@ -151,7 +185,7 @@ type rv5Step struct {
 // order they were made, then the start.
 func rv5PinGate(t *testing.T, start int64, saves []rv5Step) {
 	type save = rv5Step
-	n, marked, diverged := 0, 0, 0
+	n := 0
 	for mask := 0; mask < 1<<len(saves); mask++ {
 		var chosen []save
 		for i, s := range saves {
@@ -160,9 +194,10 @@ func rv5PinGate(t *testing.T, start int64, saves []rv5Step) {
 			}
 		}
 		var want, wantFrom string
-		var wantCopied map[string]string
+		reference := true
 		// The reference: every save arriving in the order it was made (its
-		// stamp), then the start, as the handler would see them in time.
+		// stamp), each landed on the lineup the match's own lineup, else the
+		// lineup in force there, then held (rv5SaveInTime), then the start.
 		inTime := make([]int, 0, len(chosen)+1)
 		for i := range chosen {
 			inTime = append(inTime, i)
@@ -182,7 +217,6 @@ func rv5PinGate(t *testing.T, start int64, saves []rv5Step) {
 				MemberIDs: map[domain.Position]string{rv5p1: "m-sato", rv5p2: "m-ueda"},
 				Stamps:    map[domain.Position]int64{rv5p1: start - 1000, rv5p2: start - 1000}}, 3))
 			var steps []string
-			copied := map[string]string{}
 			for _, i := range order {
 				if i == len(chosen) {
 					steps = append(steps, "start")
@@ -191,44 +225,23 @@ func rv5PinGate(t *testing.T, start int64, saves []rv5Step) {
 				}
 				s := chosen[i]
 				steps = append(steps, "save "+s.match)
-				if got := rv5Save(t, eng, store, c, s.match, s.names, s.stamp); got != "" {
-					copied[s.match] = got
+				if reference {
+					rv5SaveInTime(t, store, c, s.match, s.names, s.stamp)
+				} else {
+					rv5Save(t, eng, store, c, s.match, s.names, s.stamp)
 				}
 			}
 			got, from := rv5Pin(t, store, c)
-			if wantCopied == nil {
-				// The first order is the reference.
+			if reference {
 				require.Equal(t, "start", steps[len(steps)-1], "the first order starts last")
-				want, wantFrom, wantCopied = got, from, copied
-				continue
-			}
-			// Finding P (stage 6 review 6, put to the operator, production
-			// unchanged): a match's first PARTIAL lineup save copies the
-			// positions it does not name from the lineup in force when it
-			// ARRIVES, so an order in which that lineup differs then from
-			// what it was in time copies something else. Such an order is
-			// named here and not held to the reference; every other order is.
-			if !maps.Equal(copied, wantCopied) {
-				marked++
-				if want != got || wantFrom != from {
-					diverged++
-				}
-				t.Logf("finding P (copies the lineup in force on arrival): saves %d, order %v: copied %v, in time %v; pin %q from %q, in time %q from %q",
-					mask, steps, copied, wantCopied, got, from, want, wantFrom)
-				// Still the carry rule at the start over what the save copied.
-				require.Equal(t, wantFrom, from, "saves %d, order %v: the lineup the pin came from", mask, steps)
-				if c := copied[from]; c != "" {
-					for _, part := range strings.Fields(c) {
-						require.Contains(t, got, part+"/", "saves %d, order %v: the pin holds what its source copied", mask, steps)
-					}
-				}
+				want, wantFrom, reference = got, from, false
 				continue
 			}
 			require.Equal(t, want, got, "saves %d, order %v", mask, steps)
 			require.Equal(t, wantFrom, from, "saves %d, order %v: the lineup the pin came from", mask, steps)
 		}
 	}
-	t.Logf("%d orderings, %d marked as finding P (%d of them with another pin)", n, marked, diverged)
+	t.Logf("%d orderings, none marked: every one is the reference", n)
 }
 
 // The lineup a match started with keeps the member id of a position that has

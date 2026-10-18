@@ -662,7 +662,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // becomes runnable immediately: even with no server (the override write is
     // separately queued for sync). The server stays authoritative: a later
     // refetch/reconnect replaces this optimistic tree with the real one.
-    const applyLocalBracketWin = useCallbackSh((compId, feederId, winnerName) => {
+    // `onApplied(before, after)`, when given, is told the competition's bracket
+    // before and after the advance, so a caller can take it back.
+    const applyLocalBracketWin = useCallbackSh((compId, feederId, winnerName, onApplied) => {
         setCourtComps((prev) => {
             // Seed from the prop aggregate when the live feed hasn't materialised
             // (e.g. offline before the first fetch resolved), so the optimistic
@@ -678,14 +680,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 );
                 if (rounds === c.bracket.rounds && thirdPlaceMatch === null) return c;
                 changed = true;
-                return {
-                    ...c,
-                    bracket: {
-                        ...c.bracket,
-                        rounds,
-                        ...(thirdPlaceMatch !== null ? { thirdPlaceMatch } : {}),
-                    },
+                const bracket = {
+                    ...c.bracket,
+                    rounds,
+                    ...(thirdPlaceMatch !== null ? { thirdPlaceMatch } : {}),
                 };
+                if (onApplied) onApplied(c.bracket, bracket);
+                return { ...c, bracket };
             });
             return changed ? next : prev;
         });
@@ -696,12 +697,44 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // reflects the server's propagation); the ONLY path that resolves it offline.
     // Draws/no-winner (patch.winner null) never apply: knockout bouts always
     // resolve to a winner before completing.
-    const maybeAdvanceLocal = useCallbackSh((match, patch) => {
+// advanceLocalUntilRefused: the ONE local bracket advance of a result this
+    // console wrote (a finish of any kind, a decision). A result the outbox
+    // still holds advances at once, so an offline court keeps moving; when it
+    // is refused later (match_closed, a newer stored result) or discarded from
+    // the held-writes list, nothing of it will land, so the advance is taken
+    // back: the competition's bracket is put back as it was when nothing has
+    // changed it since, and the court's feed is read again either way (stage 6
+    // review 1).
+    const advanceLocalUntilRefused = useCallbackSh((match, winnerName, res) => {
+        if (!match || match.phase !== "bracket" || !winnerName) return;
+        let made = null;
+        applyLocalBracketWin(match.compId, match.id, winnerName, (before, after) => { made = { before, after }; });
+        if (!writePending(res)) return;
+        const takeBack = () => {
+            if (!mountedRef.current || !made) return;
+            const { before, after } = made;
+            setCourtComps((prev) => {
+                if (!Array.isArray(prev)) return prev;
+                let changed = false;
+                const next = prev.map((c) => {
+                    if (c.id !== match.compId || c.bracket !== after) return c;
+                    changed = true;
+                    return { ...c, bracket: before };
+                });
+                return changed ? next : prev;
+            });
+            refreshCourt();
+        };
+        res.settled.then(
+            (body) => { if (!body || body.discarded || writeWasRefused(body)) takeBack(); },
+            takeBack,
+        );
+    }, [applyLocalBracketWin, refreshCourt]);
+    const maybeAdvanceLocal = useCallbackSh((match, patch, res) => {
         if (!match || match.phase !== "bracket" || !patch || patch.status !== "completed") return;
         const w = finishWinnerOf(match, patch);
-        const wname = _bracketSideName(w);
-        if (wname) applyLocalBracketWin(match.compId, match.id, wname);
-    }, [applyLocalBracketWin]);
+        advanceLocalUntilRefused(match, _bracketSideName(w), res);
+    }, [advanceLocalUntilRefused]);
     // markFinishedHere: the outbox holds a finish or a decision of `match`
     // (its pending answer `res`), so the console reads the match as finished
     // here until the feed shows it (finishedHere, X3). The server's answer, a
@@ -1308,9 +1341,16 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // Filtered to the selected competition (AC4).
     // Running matches are NEVER filtered: the panel must stay on the running
     // bout even if the operator switches comp (AC7).
+    // The match this console's own Start began is not waiting any more: while
+    // the start is out (isStartedSnapshot, until the feed shows it running) the
+    // editor runs it, so it leaves Upcoming and Up next as a running match does.
+    // A start refused or discarded takes startedFrom back (startMatch's unpin),
+    // and the match is in the list again.
     const filteredScheduled = useMemoSh(
-        () => effectiveCompId ? scheduled.filter(m => m.compId === effectiveCompId) : scheduled,
-        [scheduled, effectiveCompId]
+        () => scheduled.filter((m) => (!effectiveCompId || m.compId === effectiveCompId) && !isStartedSnapshot(m)),
+        // isStartedSnapshot reads startedFrom alone.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [scheduled, effectiveCompId, startedFrom]
     );
     const filteredCompleted = useMemoSh(
         () => effectiveCompId ? completed.filter(m => m.compId === effectiveCompId) : completed,
@@ -2055,7 +2095,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // still have matches here (the nudge banner surfaces that).
     // A pending placeholder final for this comp means the court is NOT done: it
     // has a downstream bout waiting on its feeders, so hold off the done state.
-    const allDone = courtKnown && allMatches.length > 0 && running.length === 0 && filteredScheduled.length === 0 && filteredPending.length === 0;
+    // A match this console just started (liveBout: the started snapshot, which
+    // has left the scheduled list) is not done either.
+    const allDone = courtKnown && allMatches.length > 0 && running.length === 0 && !liveBout && filteredScheduled.length === 0 && filteredPending.length === 0;
     const selectedCompName = (courtsComps.find((c) => c.id === effectiveCompId) || {}).name || "";
 
     return (
@@ -2468,7 +2510,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             // own dropped winner on the very queue the banner below tells
                                             // them to go and check. A queued write still advances (it
                                             // reconciles on reconnect); see writeWasSuperseded.
-                                            if (!writeWasSuperseded(res)) maybeAdvanceLocal(selectedMatch, patch);
+                                            if (!writeWasSuperseded(res)) maybeAdvanceLocal(selectedMatch, patch, res);
                                             // A finish the outbox holds: the panel moves on at once (X3).
                                             if (patch && patch.status === "completed") markFinishedHere(selectedMatch, finishWinnerOf(selectedMatch, patch), res, finishFieldsOf(patch));
                                             // What the write came back with, so the editor shows the
@@ -2487,7 +2529,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             res = await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);
                                             // See the onSubmit handler above: a superseded write must not
                                             // advance the local bracket on a winner the server discarded.
-                                            if (!writeWasSuperseded(res)) maybeAdvanceLocal(selectedMatch, patch);
+                                            if (!writeWasSuperseded(res)) maybeAdvanceLocal(selectedMatch, patch, res);
                                             if (!mountedRef.current) return res;
                                             if (patch && patch.status === "completed") markFinishedHere(selectedMatch, finishWinnerOf(selectedMatch, patch), res, finishFieldsOf(patch));
                                             // A write that did not land must NOT advance: the match is
@@ -2514,10 +2556,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         // winner, so offline we must advance the LOCAL bracket the same
                                         // way the score path does (mp-y3nk), else a decision-completed
                                         // bout leaves the next match on placeholders until Refresh/SSE.
-                                        const winnerName = _bracketSideName(result && result.winner);
-                                        if (selectedMatch && selectedMatch.phase === "bracket" && winnerName) {
-                                            applyLocalBracketWin(selectedMatch.compId, selectedMatch.id, winnerName);
-                                        }
+                                        // A decision the server refuses or the operator discards later
+                                        // takes the advance back (advanceLocalUntilRefused).
+                                        advanceLocalUntilRefused(selectedMatch, _bracketSideName(result && result.winner), result);
                                         // A decision the outbox holds: the panel moves on at once (X3).
                                         markFinishedHere(selectedMatch, result && result.winner, result);
                                         // Then start the next scheduled match so the panel advances

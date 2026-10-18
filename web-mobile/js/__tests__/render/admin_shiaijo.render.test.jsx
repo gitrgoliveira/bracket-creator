@@ -2222,14 +2222,17 @@ describe('a Start tapped while another start is still out is refused before anyt
       await act(async () => { land({ applied: true }); });
       await act(async () => {});
       // m3 was asked for and never started; the court is not free, so it is not
-      // started on its own, and the row says so.
-      expect(rowOf(c, 'Aka m3').querySelector('[role="alert"]').textContent).toBe(startWasBlockedByStartMessage({ label }));
+      // started on its own, and the row says so. With m2 started, m3 is the Up
+      // next card (stage 6 review 1: a started bout leaves the queue).
+      const m3 = () => rowOf(c, 'Aka m3') || c.utils.container.querySelector('.shiaijo-upnext__card');
+      expect(m3().textContent).toContain('Aka m3');
+      expect(m3().querySelector('.shiaijo-upnext__error').textContent).toBe(startWasBlockedByStartMessage({ label }));
       expect(onEditScore.mock.calls.map((x) => x[1])).toEqual(['m2']);
       // The operator starts it: the sentence goes and the start is sent.
-      await act(async () => { startButton(rowOf(c, 'Aka m3')).click(); });
+      await act(async () => { startButton(m3()).click(); });
       await act(async () => {});
       expect(onEditScore.mock.calls.map((x) => x[1])).toEqual(['m2', 'm3']);
-      expect(rowOf(c, 'Aka m3').querySelector('[role="alert"]')).toBeNull();
+      expect(c.utils.container.querySelector('.shiaijo-upnext__error')).toBeNull();
     } finally { c.restore(); }
   });
 
@@ -2707,7 +2710,8 @@ describe('the console reports a superseded Start that holds its result as a refu
       try {
         await act(async () => { startButton(rowOf(c, 'Aka m2')).click(); });
         await act(async () => {});
-        expect(rowOf(c, 'Aka m2').querySelector('.shiaijo-upnext__error'), 'no refusal sentence on the row').toBeNull();
+        expect(rowOf(c, 'Aka m2'), 'the started bout left the queue (stage 6 review 1)').toBeUndefined();
+        expect(c.utils.container.querySelector('.shiaijo-upnext__error'), 'no refusal sentence').toBeNull();
         expect(c.utils.container.textContent).not.toContain('Not started');
         expect(c.showToast, 'no toast').not.toHaveBeenCalled();
         expect(c.editorMatch(), 'the start went out: the panel is pinned on m2').toBe('m2');
@@ -3002,33 +3006,6 @@ describe('the console asks before it drops the editor\'s unsaved entries (R1)', 
     } finally { c.restore(); }
   });
 
-  // Stage 5 review 10, M1: between the console's own Start of a queue row and
-  // the feed showing it running, the editor shows that match while its row
-  // still offers a court move; a Mark draw or hantei pick stays local on the
-  // running board (the probe's unsaved thunk stands in for it). The move's
-  // confirm says the entries go, and drops them on confirm.
-  it('moving the match the editor shows (own Start pending) says the unsaved entries are discarded, and drops them on confirm', async () => {
-    const onEditScore = vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k-start', settled: new Promise(() => {}) });
-    const c = await mountCourt([courtMatch('m2', 'scheduled'), courtMatch('m3', 'scheduled')], { onEditScore });
-    const rowOf = () => [...c.utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes('Aka m3'));
-    try {
-      const start = [...rowOf().querySelectorAll('button')].find((b) => /^start/i.test(b.textContent.trim()));
-      await act(async () => { start.click(); });
-      await act(async () => {});
-      expect(c.editorMatch()).toBe('m3');
-      expect(probe.props.started).toBe(true);
-      const discard = vi.fn();
-      const probeFn = () => true;
-      probeFn.discard = discard;
-      probe.props.hostUnsavedRef.current = probeFn;
-      await act(async () => { rowOf().querySelector('[data-testid="move-to-B"]').click(); });
-      const dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
-      expect(dialog.textContent).toContain('Your unsaved entries will be discarded.');
-      expect(discard).not.toHaveBeenCalled();
-      await act(async () => { [...dialog.querySelectorAll('button')].find((b) => /move to shiaijo b/i.test(b.textContent)).click(); });
-      expect(discard).toHaveBeenCalledTimes(1);
-    } finally { c.restore(); }
-  });
 
   // Stage 5 review 11, minor 3: the confirm's wording is decided when it
   // opens. Entries made while a confirm WITHOUT the warning is open (a scoring
@@ -3059,34 +3036,6 @@ describe('the console asks before it drops the editor\'s unsaved entries (R1)', 
     } finally { c.restore(); }
   });
 
-  it('a court move: entries made while a confirm without the warning is open are asked about, not dropped', async () => {
-    const onEditScore = vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k-start', settled: new Promise(() => {}) });
-    const c = await mountCourt([courtMatch('m2', 'scheduled'), courtMatch('m3', 'scheduled')], { onEditScore });
-    const rowOf = () => [...c.utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes('Aka m3'));
-    try {
-      const start = [...rowOf().querySelectorAll('button')].find((b) => /^start/i.test(b.textContent.trim()));
-      await act(async () => { start.click(); });
-      await act(async () => {});
-      expect(c.editorMatch()).toBe('m3');
-      const discard = vi.fn();
-      const probeFn = () => true;
-      probeFn.discard = discard;
-      const clean = () => false;
-      clean.discard = vi.fn();
-      probe.props.hostUnsavedRef.current = clean;
-      await act(async () => { rowOf().querySelector('[data-testid="move-to-B"]').click(); });
-      let dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
-      expect(dialog.textContent).not.toContain('Your unsaved entries will be discarded.');
-      probe.props.hostUnsavedRef.current = probeFn;
-      const confirm = () => [...dialog.querySelectorAll('button')].find((b) => /move to shiaijo b/i.test(b.textContent));
-      await act(async () => { confirm().click(); });
-      expect(discard).not.toHaveBeenCalled();
-      dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
-      expect(dialog.textContent).toContain('Your unsaved entries will be discarded.');
-      await act(async () => { confirm().click(); });
-      expect(discard).toHaveBeenCalledTimes(1);
-    } finally { c.restore(); }
-  });
 
   // A confirm that turns warned (entries made while it was open) is one
   // confirm: the bounce of the tap that re-rendered it must not send the match
@@ -3121,39 +3070,6 @@ describe('the console asks before it drops the editor\'s unsaved entries (R1)', 
     } finally { spy.mockRestore(); c.restore(); }
   });
 
-  it('a court move: the bounce of the tap that turned the confirm warned does nothing; a later tap moves once', async () => {
-    const onEditScore = vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k-start', settled: new Promise(() => {}) });
-    const c = await mountCourt([courtMatch('m2', 'scheduled'), courtMatch('m3', 'scheduled')], { onEditScore });
-    const rowOf = () => [...c.utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes('Aka m3'));
-    try {
-      const start = [...rowOf().querySelectorAll('button')].find((b) => /^start/i.test(b.textContent.trim()));
-      await act(async () => { start.click(); });
-      await act(async () => {});
-      expect(c.editorMatch()).toBe('m3');
-      const discard = vi.fn();
-      const probeFn = () => true; probeFn.discard = discard;
-      const clean = () => false; clean.discard = vi.fn();
-      probe.props.hostUnsavedRef.current = clean;
-      await act(async () => { rowOf().querySelector('[data-testid="move-to-B"]').click(); });
-      probe.props.hostUnsavedRef.current = probeFn;
-      let now = Date.now() + 1000;
-      const spy = vi.spyOn(Date, 'now').mockImplementation(() => now);
-      try {
-        const confirmBtn = () => c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"] .btn--primary');
-        await act(async () => { fireEvent.click(confirmBtn(), { detail: 1 }); });
-        expect(c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]').textContent).toContain('Your unsaved entries will be discarded.');
-        expect(c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"] .shiaijo-move-confirm__body').getAttribute('aria-live')).toBe('polite');
-        now += 30;
-        await act(async () => { fireEvent.click(confirmBtn(), { detail: 1 }); });
-        expect(discard).not.toHaveBeenCalled();
-        expect(c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]')).not.toBeNull();
-        now += TAP_BOUNCE_MS;
-        await act(async () => { fireEvent.click(confirmBtn(), { detail: 1 }); });
-        expect(discard).toHaveBeenCalledTimes(1);
-        expect(c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]')).toBeNull();
-      } finally { spy.mockRestore(); }
-    } finally { c.restore(); }
-  });
 
   it('the confirm body that gains the unsaved-entries warning is announced (aria-live)', async () => {
     const c = await mountCourt([courtMatch('m1', 'running', { modifiedAt: 1000 })]);
@@ -3260,6 +3176,45 @@ describe('the console asks before it drops the editor\'s unsaved entries (R1)', 
       // Stage 5 review 10, minor 2: Discard entries dropped them, though the
       // Correct was then refused and the editor stayed.
       expect(discard).toHaveBeenCalledTimes(1);
+    } finally { c.restore(); }
+  });
+});
+
+// Stage 6 review 1: while this console's own Start is out (and long while
+// offline), the editor runs the match it started, so the Up next card and the
+// Upcoming list never offer that bout again (Start match, Call to court). A
+// start refused later puts it back, as startedFrom's unpin does.
+describe('an own Start still out takes the match out of Up next and Upcoming', () => {
+  const upNextText = (c) => { const el = c.utils.container.querySelector('.shiaijo-upnext__card'); return el ? el.textContent : ''; };
+  const startOnCard = (c) => [...c.utils.container.querySelector('.shiaijo-upnext__card').querySelectorAll('button')].find((b) => /start match/i.test(b.textContent));
+
+  it('the started bout leaves the card at once and the next bout is Up next', async () => {
+    const pendingStart = { applied: true, pending: true, key: 'k', settled: new Promise(() => {}) };
+    const onEditScore = vi.fn().mockImplementation(() => Promise.resolve(pendingStart));
+    const c = await mountCourt([courtMatch('m1', 'scheduled', { modifiedAt: 100 }), courtMatch('m2', 'scheduled', { modifiedAt: 100 })], { onEditScore });
+    try {
+      expect(upNextText(c)).toContain('Aka m1');
+      await act(async () => { startOnCard(c).click(); });
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      expect(c.editorMatch(), 'the editor runs the started bout').toBe('m1');
+      expect(upNextText(c), 'Up next moves on').toContain('Aka m2');
+      expect(upNextText(c)).not.toContain('Aka m1');
+      const queueText = [...c.utils.container.querySelectorAll('.shiaijo-queue-row, .shiaijo-queue__row, li')].map((n) => n.textContent).join(' ');
+      expect(queueText, 'nor is it in Upcoming').not.toContain('Aka m1');
+    } finally { c.restore(); }
+  });
+
+  it('a start refused later puts the bout back on Up next', async () => {
+    const onEditScore = vi.fn().mockImplementation(() => Promise.resolve({ applied: true, pending: true, key: 'k', settled: new Promise(() => {}) }));
+    const c = await mountCourt([courtMatch('m1', 'scheduled', { modifiedAt: 100 }), courtMatch('m2', 'scheduled', { modifiedAt: 100 })], { onEditScore });
+    try {
+      await act(async () => { startOnCard(c).click(); });
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      expect(upNextText(c)).not.toContain('Aka m1');
+      // The outbox hands a later refusal to the caller's onRefusal.
+      const { onRefusal } = onEditScore.mock.calls[0][4];
+      await act(async () => { onRefusal(new Error('Sato is fighting on shiaijo B')); });
+      expect(upNextText(c), 'the refused bout is Up next again').toContain('Aka m1');
     } finally { c.restore(); }
   });
 });

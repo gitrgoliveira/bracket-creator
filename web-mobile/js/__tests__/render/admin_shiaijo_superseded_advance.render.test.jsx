@@ -21,7 +21,7 @@ import { installWindowStubs } from '../helpers/stub_globals.js';
 // courtComps via window.tournamentMatches({competitions}), so the competitions
 // handed to that function on the next render ARE the local bracket.
 
-const capturedSubmit = { onSubmit: null };
+const capturedSubmit = { onSubmit: null, onSubmitAndNext: null };
 const tournamentMatchesSpy = vi.fn();
 
 const STUBBED_GLOBALS = {
@@ -31,6 +31,7 @@ const STUBBED_GLOBALS = {
   // path the operator's "Finish" tap takes.
   ScoreEditorModal: (props) => {
     capturedSubmit.onSubmit = props.onSubmit;
+    capturedSubmit.onSubmitAndNext = props.onSubmitAndNext;
     return <div data-testid="score-editor" />;
   },
   CourtPicker: () => null,
@@ -234,5 +235,48 @@ describe('AdminShiaijo Up-Next start vs a clock_skew refusal (bc-cse)', () => {
     const btn = [...document.querySelectorAll('button')].find(b => (b.textContent || '').trim() === 'Start match');
     await act(async () => { btn.click(); });
     expect([...document.querySelectorAll('[role=alert]')].length).toBe(0);
+  });
+});
+
+// Stage 6 review 1: a finish the outbox holds advances the local bracket at
+// once (an offline court keeps moving). When that finish is later refused
+// (match_closed, a newer stored result) or discarded from the held-writes
+// list, nothing of it will ever land, so the local advance is taken back:
+// the court shows what the server holds, not the operator's dropped winner.
+// One rule for every kind of finish the console hands the editor (individual
+// and engi alike go through onSubmit / onSubmitAndNext).
+describe('a queued knockout finish refused or discarded later takes its local advance back', () => {
+  const pendingFinish = () => {
+    let settle; let refuse;
+    const settled = new Promise((res, rej) => { settle = res; refuse = rej; });
+    settled.catch(() => {});
+    return { res: { applied: true, pending: true, key: 'k-finish', settled }, settle: (b) => settle(b), refuse: (e) => refuse(e) };
+  };
+  const advanced = () => lastLocalSemi().status === 'completed' && lastLocalFinal().sideA.name === 'Yamada';
+  const takenBack = () => lastLocalSemi().status === 'running' && lastLocalFinal().sideA.name === 'Winner of r1-m0' && lastLocalFinal().status === 'pending';
+
+  for (const [what, end] of [
+    ['refused as superseded (match_closed)', (p) => p.settle({ applied: false, reason: 'superseded', heldGroups: ['result'], heldReason: 'match_closed' })],
+    ['refused outright', (p) => p.refuse(new Error('Not saved: the match is finished.'))],
+    ['discarded', (p) => p.settle({ discarded: true })],
+  ]) {
+    for (const door of ['onSubmit', 'onSubmitAndNext']) {
+      it(`${door}: ${what}`, async () => {
+        const p = pendingFinish();
+        renderPage(vi.fn().mockResolvedValue(p.res));
+        await act(async () => { await capturedSubmit[door](finishPatch); });
+        expect(advanced(), 'the queued finish advances at once').toBe(true);
+        await act(async () => { end(p); await new Promise((r) => setTimeout(r, 0)); });
+        expect(takenBack(), 'the advance is taken back').toBe(true);
+      });
+    }
+  }
+
+  it('a finish that lands keeps its advance', async () => {
+    const p = pendingFinish();
+    renderPage(vi.fn().mockResolvedValue(p.res));
+    await act(async () => { await capturedSubmit.onSubmit(finishPatch); });
+    await act(async () => { p.settle({ id: 'r1-m0', status: 'completed', modifiedAt: 5 }); await new Promise((r) => setTimeout(r, 0)); });
+    expect(advanced()).toBe(true);
   });
 });

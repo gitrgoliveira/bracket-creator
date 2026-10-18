@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } 
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, startWhileCorrectingMessage, startWhileStartingMessage, correctWhileRunningMessage, CLOCK_SKEW_REASON_TEXT, markToasted, startWasBlockedByStartMessage } from '../../write_result.jsx';
 import { scoreRowMatchName } from '../../pool_ids.jsx';
+import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
 import { START_SUPERSEDED_MESSAGE } from '../../start_match.jsx';
 // Window globals required by admin_shiaijo.jsx.
 // MODULE-EVAL-TIME entries (e.g. `const AdminTopbar = window.AdminTopbar;`)
@@ -3084,6 +3085,89 @@ describe('the console asks before it drops the editor\'s unsaved entries (R1)', 
       expect(dialog.textContent).toContain('Your unsaved entries will be discarded.');
       await act(async () => { confirm().click(); });
       expect(discard).toHaveBeenCalledTimes(1);
+    } finally { c.restore(); }
+  });
+
+  // A confirm that turns warned (entries made while it was open) is one
+  // confirm: the bounce of the tap that re-rendered it must not send the match
+  // or drop the entries, and a later deliberate tap confirms once. Pointer
+  // taps (detail 1) are the ones tap_guard reads as bounces; the clock is a
+  // spy on Date.now, which tap_guard reads.
+  it('Send back to queue: the bounce of the tap that turned the confirm warned does nothing; a later tap confirms once', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { modifiedAt: 1000 })]);
+    let now = Date.now() + 1000;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const discard = vi.fn();
+      const probeFn = () => true; probeFn.discard = discard;
+      const clean = () => false; clean.discard = vi.fn();
+      probe.props.hostUnsavedRef.current = clean;
+      await act(async () => { c.utils.getByRole('button', { name: /send back to queue/i }).click(); });
+      probe.props.hostUnsavedRef.current = probeFn;
+      // The tap that opened the confirm stamped the clock; the first Confirm is a
+      // separate tap, past the bounce window of that one.
+      now += TAP_BOUNCE_MS;
+      const confirmBtn = () => c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"] .btn--primary');
+      await act(async () => { fireEvent.click(confirmBtn(), { detail: 1 }); });
+      expect(c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]').textContent).toContain('Your unsaved entries will be discarded.');
+      now += 30;
+      await act(async () => { fireEvent.click(confirmBtn(), { detail: 1 }); });
+      expect(window.API.revertMatchToQueue).not.toHaveBeenCalled();
+      expect(discard).not.toHaveBeenCalled();
+      now += TAP_BOUNCE_MS;
+      await act(async () => { fireEvent.click(confirmBtn(), { detail: 1 }); });
+      expect(discard).toHaveBeenCalledTimes(1);
+      expect(window.API.revertMatchToQueue).toHaveBeenCalledTimes(1);
+    } finally { spy.mockRestore(); c.restore(); }
+  });
+
+  it('a court move: the bounce of the tap that turned the confirm warned does nothing; a later tap moves once', async () => {
+    const onEditScore = vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k-start', settled: new Promise(() => {}) });
+    const c = await mountCourt([courtMatch('m2', 'scheduled'), courtMatch('m3', 'scheduled')], { onEditScore });
+    const rowOf = () => [...c.utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes('Aka m3'));
+    try {
+      const start = [...rowOf().querySelectorAll('button')].find((b) => /^start/i.test(b.textContent.trim()));
+      await act(async () => { start.click(); });
+      await act(async () => {});
+      expect(c.editorMatch()).toBe('m3');
+      const discard = vi.fn();
+      const probeFn = () => true; probeFn.discard = discard;
+      const clean = () => false; clean.discard = vi.fn();
+      probe.props.hostUnsavedRef.current = clean;
+      await act(async () => { rowOf().querySelector('[data-testid="move-to-B"]').click(); });
+      probe.props.hostUnsavedRef.current = probeFn;
+      let now = Date.now() + 1000;
+      const spy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+      try {
+        const confirmBtn = () => c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"] .btn--primary');
+        await act(async () => { fireEvent.click(confirmBtn(), { detail: 1 }); });
+        expect(c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]').textContent).toContain('Your unsaved entries will be discarded.');
+        expect(c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"] .shiaijo-move-confirm__body').getAttribute('aria-live')).toBe('polite');
+        now += 30;
+        await act(async () => { fireEvent.click(confirmBtn(), { detail: 1 }); });
+        expect(discard).not.toHaveBeenCalled();
+        expect(c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]')).not.toBeNull();
+        now += TAP_BOUNCE_MS;
+        await act(async () => { fireEvent.click(confirmBtn(), { detail: 1 }); });
+        expect(discard).toHaveBeenCalledTimes(1);
+        expect(c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]')).toBeNull();
+      } finally { spy.mockRestore(); }
+    } finally { c.restore(); }
+  });
+
+  it('the confirm body that gains the unsaved-entries warning is announced (aria-live)', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { modifiedAt: 1000 })]);
+    try {
+      const discard = vi.fn();
+      const probeFn = () => true; probeFn.discard = discard;
+      const clean = () => false; clean.discard = vi.fn();
+      probe.props.hostUnsavedRef.current = clean;
+      await act(async () => { c.utils.getByRole('button', { name: /send back to queue/i }).click(); });
+      const body = () => c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"] .shiaijo-move-confirm__body');
+      probe.props.hostUnsavedRef.current = probeFn;
+      await act(async () => { c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"] .btn--primary').click(); });
+      expect(body().textContent).toContain('Your unsaved entries will be discarded.');
+      expect(body().getAttribute('aria-live')).toBe('polite');
     } finally { c.restore(); }
   });
 

@@ -960,6 +960,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // must not land on the fresh backdrop or its buttons. One ref serves both
     // (only one is ever open).
     const { openedRef: confirmOpenedRef, onClickCapture: confirmOnClickCapture } = useOpenedTapGuard();
+    // The Confirm button of either confirm: its bounce is not a second confirm
+    // (acceptTap in both handlers below). One ref serves both, as above.
+    const confirmTapRef = useRefSh(null);
     const [reverting, setReverting] = useStateSh(false);
     // The two confirms are this page's own dialogs, so they do what DialogHost does
     // for confirmDialog: focus moves into the open one (its first button, Cancel),
@@ -1931,9 +1934,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         const unsaved = editorUnsavedFor(m.compId, m.id);
         setPendingRevert({ compId: m.compId, matchId: m.id, label: confirmMatchLabel(m), seen: m.scoreVersion, unsaved });
     };
-    const confirmRevert = async () => {
+    const confirmRevert = async (ev) => {
         if (!pendingRevert || reverting) return;
         if (!window.API || typeof window.API.revertMatchToQueue !== "function") return;
+        // A bounce of the tap that turned this confirm into the warned one must
+        // not confirm the warned version the operator has not read yet.
+        if (!acceptTap(confirmTapRef, ev)) return;
         const { compId, matchId, label } = pendingRevert;
         const heldNow = editorUnsavedFor(compId, matchId);
         // The confirm's wording was decided when it opened. Entries made while
@@ -1989,8 +1995,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         // the move, and the confirm says so (R1, stage 5 review 10).
         setPendingMove({ compId, matchId, to: toCourt, label: mm ? confirmMatchLabel(mm) : "this match", from: (mm && mm.court) || court, unsaved: editorUnsavedFor(compId, matchId) });
     };
-    const confirmMoveCourt = async () => {
+    const confirmMoveCourt = async (ev) => {
         if (!pendingMove || movingCourt) return;
+        // The bounce guard of confirmRevert, for the court move's Confirm.
+        if (!acceptTap(confirmTapRef, ev)) return;
         const { compId, matchId, to } = pendingMove;
         const heldNow = editorUnsavedFor(compId, matchId);
         // Entries made while a confirm without the warning was open are asked
@@ -2578,7 +2586,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         <h3 id="shiaijo-move-title" className="shiaijo-move-confirm__title">
                             Move to Shiaijo {pendingMove.to}?
                         </h3>
-                        <p className="shiaijo-move-confirm__body">
+                        <p className="shiaijo-move-confirm__body" aria-live="polite">
                             <strong>{pendingMove.label}</strong> leaves Shiaijo {pendingMove.from} and joins
                             the queue on Shiaijo {pendingMove.to}.
                             {pendingMove.unsaved ? ` ${UNSAVED_ENTRIES_DISCARDED}` : ""}
@@ -2603,7 +2611,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         <h3 id="shiaijo-revert-title" className="shiaijo-move-confirm__title">
                             Send back to queue?
                         </h3>
-                        <p className="shiaijo-move-confirm__body">
+                        <p className="shiaijo-move-confirm__body" aria-live="polite">
                             <strong>{pendingRevert.label}</strong> will be returned to the upcoming queue.
                             {pendingRevert.unsaved
                                 ? ` ${UNSAVED_ENTRIES_DISCARDED} The score already saved is kept: starting it again carries on from there.`

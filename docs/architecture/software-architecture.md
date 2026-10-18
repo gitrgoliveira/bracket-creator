@@ -163,12 +163,13 @@ sequenceDiagram
     S->>S: WAL commit → atomic write (fsync + rename) → done
     S-->>E: persisted
     E-->>H: one outcome per tap + the match as stored
-    H->>HUB: Broadcast(match_updated)  [after persist, at most 4 a second per match]
+    H->>HUB: Broadcast(match_updated)  [after persist; a running match at most 4 a second]
     HUB-->>OTHERS: SSE event (id: seq)
     H-->>SPA: 200 outcomes (the outbox clears each answered tap; a clock_skew one is re-stamped and sent again)
 ```
 
-A finish, a decision, a correction, a reopen and the other whole writes use the route below.
+A finish, a correction and the other whole writes use their own routes, such as the one below
+(a decision and a reopen have theirs, `POST /decision` and `POST /reopen`).
 They are outbox entries too, and they enter the same event log as a baseline, so a tap and a
 whole write are ordered against each other by the time each was made.
 

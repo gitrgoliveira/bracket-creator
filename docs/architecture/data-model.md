@@ -638,16 +638,19 @@ way to change it is Correct. The finished result stays as it was recorded: nothi
 reopened and no winner is worked out again. This holds whichever change arrives first. A tap
 that reaches the server before a finish made earlier is applied at that moment, and is moved
 out of the match into the history when the finish arrives, so both orders end in the same
-match and the same kept change.
+match and the same kept change. One exception: a competitor's tap on the public score sheet of
+a self-run event, sent to a finished match, is refused outright with the message that the result
+has already been reported. It leaves no log entry and no history line.
 
 A tap made before the finish that the finish's writer had not seen does not join the
 finished result either: the scoreline the finish carries stands, and the tap is kept in the
 history. A tap the writer had seen is already part of the finish, so nothing is lost or
 counted twice. A decision's points are worked out from the changes made before it rather than
 copied from the value it carries: the side that did not withdraw takes the circles, and the
-points the withdrawing competitor had already struck stay. A team match closed by a
+points the withdrawing competitor had already struck stay. A fixed-order team match closed by a
 match level kiken, fusenpai or fusensho keeps the bouts that a device which had not seen the
-decision scored; the decision credits only the bouts still without a result.
+decision scored; the decision credits only the bouts still without a result. A kachinuki match,
+and a team match closed by a finish, stay closed whole.
 
 **The first recorded result stands.** Two devices can finish the same match. In the order the
 changes were made, a later finish or decision from a device that did not see the result in
@@ -659,10 +662,11 @@ knockout match whose next match has been played or has started: a rival that wou
 the stored result is not applied, and the history says that the next round was already
 fought, or has already started.
 
-A finish that would leave a knockout match without a winner is refused as invalid, and so is an
-engi finish whose flag total is not 1, 3 or 5 (an even total cannot decide a winner). The match
-keeps the result it had, and the operator resolves the tie first, with a representative bout
-or with overtime on the final kachinuki bout.
+A finish that would leave a knockout match without a winner is refused as invalid, and the
+match keeps the result it had. The operator resolves the tie first: in a team match with a
+representative bout, or with overtime on the final kachinuki bout; in an individual match with
+overtime (encho) or a judges' decision (hantei). An engi finish whose flag total is not 1, 3
+or 5 is refused too; it is a wrong flag count, so the whole panel's flags are entered.
 
 An out of order running write from the same device session (an older save arriving after a
 newer one) is not applied, and is kept whole in the history as an older revision of that board.
@@ -724,8 +728,8 @@ the log holds (`EventSeqs`).
 The score event log is the source of truth for match scoring, while the match result stored in
 `pool-matches.csv` or `bracket.json` acts as a materialized cache derived by the replay. This
 differs from the match history in `history/`: the score log records the raw events and baselines
-that construct the score, whereas the match history keeps one line for every write that reached
-the match, recording whether each change was applied or held, the door it came through, and the
+that construct the score, whereas the match history keeps one line for every write and every
+tap that reached the match, recording whether each change was applied or held, the door it came through, and the
 reason when one was held. Both the score log append and the history entry are written in the same
 transaction as the match through the write ahead log, ensuring they land together. A log line
 with an unknown format version is refused on load naming the file and line, because the log is the
@@ -752,8 +756,8 @@ window. Discarding it makes the write count as unstamped, and an unstamped write
 applies, so the device with the wrong clock overwrites a newer result recorded elsewhere and
 nobody is told. A few seconds ahead is ordinary and is accepted, since a device learns the
 server time over the network and a little drift is normal. Beyond that the device is told
-its clock is wrong, nothing is written, and the app resyncs its clock so the operator can
-enter the same result again. Entering it again is safe precisely because the refused write
+its clock is wrong and nothing is written. The app resyncs its clock, re-stamps the queued write
+once and sends it again by itself. Sending it again is safe precisely because the refused write
 never landed. A tap is checked the same way, tap by tap within a batch: one
 stamped too far ahead is not logged, and the device stamps it again and sends it under the same id.
 

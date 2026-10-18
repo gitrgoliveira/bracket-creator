@@ -2589,7 +2589,10 @@ paths:
             those groups is stored) the body also carries `heldGroups`, the
             groups kept in the match's history instead of applied, and
             `heldReason: match_closed` when they were held because a finish or a
-            decision stamped before them had already closed the match.
+            decision stamped before them had already closed the match, or
+            `downstream_knockout_played` / `downstream_knockout_running` when a
+            rival finish or decision was held because the next knockout match
+            was already played or under way.
             An applied finish or decision that moved stored, NEWER scoring into
             the match's history (in stamp order it came after this result and
             was closed out) carries `displacedGroups` naming those groups, with

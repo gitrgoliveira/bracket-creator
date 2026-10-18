@@ -314,8 +314,8 @@ hold on the score-events route, and `bodies` then lists event batches
 (`{ session, events }`), not match results. The bc-ltap step of
 `knockout-mixed-individual.spec.mjs` (individual editor) and the bc-evts step of
 `engi.spec.mjs` (engi editor) are written around this fixture, holding a score
-PUT and then tapping a mark or a flag back. Whether they still hold what they mean
-to, now that those taps go to score-events, has not been checked here.
+PUT and then tapping a mark or a flag back. Those steps are stale: a running flag
+or mark tap is a `recordTap` sent to score-events, and the fixture holds only the PUT.
 
 ## The pace of a tap
 

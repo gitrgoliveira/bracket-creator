@@ -22,7 +22,7 @@ const detail = (prefix) => ({
 
 describe('storedCompetitionInDetail numbers the competitors as the refetch will', () => {
   it('a prefix changed after the draw renumbers every competitor as the server composes it', () => {
-    const stored = { numberPrefix: ' M ', players: detail('K').config.players.map(({ number, ...p }) => p) };
+    const stored = { numberPrefix: ' M ', players: detail('K').config.players.map(({ number: _number, ...p }) => p) };
     const next = storedCompetitionInDetail(detail('K'), 'c1', stored);
     expect(next.config.players.map((p) => p.number)).toEqual([
       composeLikeTheServer('M', 1), composeLikeTheServer('M', 12), undefined,
@@ -30,7 +30,7 @@ describe('storedCompetitionInDetail numbers the competitors as the refetch will'
   });
 
   it('an unchanged prefix keeps the numbers', () => {
-    const stored = { numberPrefix: 'K', players: detail('K').config.players.map(({ number, ...p }) => p) };
+    const stored = { numberPrefix: 'K', players: detail('K').config.players.map(({ number: _number, ...p }) => p) };
     const next = storedCompetitionInDetail(detail('K'), 'c1', stored);
     expect(next.config.players.map((p) => p.number)).toEqual(['K1', 'K12', undefined]);
   });
@@ -38,7 +38,7 @@ describe('storedCompetitionInDetail numbers the competitors as the refetch will'
   it('a prefix whose stored numbers do not start with it numbers nobody rather than guess', () => {
     const prev = detail('K');
     prev.config.players[0].number = 'X1';
-    const stored = { numberPrefix: 'M', players: prev.config.players.map(({ number, ...p }) => p) };
+    const stored = { numberPrefix: 'M', players: prev.config.players.map(({ number: _number, ...p }) => p) };
     const next = storedCompetitionInDetail(prev, 'c1', stored);
     expect(next.config.players[0].number).toBeUndefined();
     expect(next.config.players[1].number).toBe('M12');

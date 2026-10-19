@@ -291,6 +291,8 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	players, plErr := store.LoadParticipantsOpt(compID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: true, HasIDs: comp.ParticipantIDsHint()})
 	if plErr != nil {
 		log.Printf("mobileapp: viewer payload %s: load participants: %v", compID, plErr)
+	} else {
+		comp.RosterVersion = state.RosterVersion(players)
 	}
 	comp.Players = players
 	// One gated pools.csv read serves both the number merge and the pools.csv
@@ -658,6 +660,9 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 					HasIDs:    comp.ParticipantIDsHint(),
 				})
 				comp.Players = p
+				if e == nil {
+					comp.RosterVersion = state.RosterVersion(p)
+				}
 				playersErr = e
 			})
 			safeGo(&wg, &panicRef, func() {

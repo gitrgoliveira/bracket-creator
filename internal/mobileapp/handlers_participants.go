@@ -326,7 +326,11 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		if err := store.SaveParticipants(id, players); err != nil {
+		// The check-ins carried above were read before the lock; the write
+		// keeps every check-in stored at the moment it lands
+		// (ReplaceRosterKeepingCheckIns), so one another desk made in between
+		// is not erased (stage 6 review 12, C1).
+		if err := store.ReplaceRosterKeepingCheckIns(id, players); err != nil {
 			// Defense-in-depth: saveParticipantsNoLock also enforces the
 			// Tier-1 (name, dojo) guard and the blank-dojo/reserved-name
 			// floors, so map those to their 4xx rather than 500 in case the

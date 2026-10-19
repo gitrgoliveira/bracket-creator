@@ -2181,7 +2181,27 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				entries[i] = [2]string{p.Name, p.Dojo}
 			}
 			nearDupWarnings = helper.FindNearDupWarnings(entries)
-			if err := store.SaveParticipants(id, comp.Players); err != nil {
+			// The roster and its seeds land as ONE locked step (SaveRoster):
+			// a PUT built from a roster that is no longer the stored one (the
+			// rosterVersion it sends back) is refused 409 roster_changed with
+			// the roster as it stands and nothing written, so a competitor
+			// another desk added, removed or seeded meanwhile is never lost
+			// to it; the page lays its change on that roster and sends it
+			// again. A check-in is never written here: every competitor keeps
+			// the one stored for them, so another desk's check-in made while
+			// this PUT was out stands (stage 6 review 12, C1).
+			seedsErr, err := store.SaveRoster(id, comp.Players, extractSeeds(comp.Players), comp.RosterVersion)
+			if err != nil {
+				var changed *state.RosterChangedError
+				if errors.As(err, &changed) {
+					c.JSON(http.StatusConflict, gin.H{
+						"error":         "The competitor list was changed on another device after this one was read, so nothing was saved. The list as it stands is included.",
+						"code":          "roster_changed",
+						"players":       changed.Players,
+						"rosterVersion": changed.Version,
+					})
+					return
+				}
 				// A perfect (name, dojo) duplicate, a reserved-pattern name,
 				// or a blank dojo is a client error naming the offending row,
 				// not a server fault; respondRosterWriteError (errors.go) is
@@ -2192,9 +2212,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				internalError(c, err, "failed to save participants")
 				return
 			}
-			assignments := extractSeeds(comp.Players)
-			if err := store.SaveSeeds(id, assignments); err != nil {
-				fmt.Printf("Warning: failed to save seeds: %v\n", err)
+			if seedsErr != nil {
+				fmt.Printf("Warning: failed to save seeds: %v\n", seedsErr)
 			}
 			// Deferred HasParticipantIDs flip, runs ONLY after the
 			// participants file lands successfully. See the roster-only
@@ -2343,6 +2362,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			}
 			if players, lerr := store.LoadParticipantsOpt(id, updated.EffectiveWithZekkenName(), loadOpts); lerr == nil {
 				updated.Players = players
+				updated.RosterVersion = state.RosterVersion(players)
 			} else {
 				fmt.Printf("Warning: PUT /api/competitions/%s, failed to re-load participants for roster-PUT response (falling back to request body): %v\n", id, lerr)
 				updated.Players = comp.Players // fallback: echo body
@@ -2352,8 +2372,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// response so the merge doesn't push null into local state.
 			// Falling back to an empty slice on load failure is safer
 			// than nil (which JSON-encodes as null).
-			if players, lerr := store.LoadParticipants(id, updated.EffectiveWithZekkenName()); lerr == nil {
+			if players, lerr := store.LoadParticipantsOpt(id, updated.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: true, HasIDs: updated.ParticipantIDsHint()}); lerr == nil {
 				updated.Players = players
+				updated.RosterVersion = state.RosterVersion(players)
 			} else {
 				fmt.Printf("Warning: failed to load participants for settings-PUT response: %v\n", lerr)
 				updated.Players = []domain.Player{}

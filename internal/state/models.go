@@ -579,6 +579,13 @@ type Competition struct {
 	RoundLineupsLegacy []string `yaml:"round_lineups_legacy,omitempty" json:"-"`
 
 	Players []domain.Player `yaml:"-" json:"players"`
+
+	// RosterVersion names the roster Players holds (RosterVersion, the
+	// function), on every answer that carries one. A roster PUT sends back
+	// the version of the roster it was built from; the server refuses it
+	// with 409 roster_changed when the stored roster is no longer that one
+	// (SaveRoster). Never stored: it is worked out from the roster.
+	RosterVersion string `yaml:"-" json:"rosterVersion,omitempty"`
 }
 
 // ParticipantIDsHint returns the LoadParticipantsOpts.HasIDs hint for this

@@ -1055,6 +1055,8 @@ function _dequeue(key, descriptor, outcome) {
     if (!d || (descriptor && d !== descriptor)) return false;
     _writeQueue.delete(key);
     if (_shapesStatusIndex(d)) _queueShapeGen++;
+    // A tap no longer queued here is no longer on a board (minor 2).
+    if (d.kind === 'evt' && d.payload && d.payload.id) _toldHere.delete(d.payload.id);
     _markSettled(key, d);
     _noteOwnStatusAnswer(key, d, outcome);
     if (outcome && outcome.byOperator && _inFlight.has(d)) {
@@ -1459,13 +1461,31 @@ const _toldHere = new Set();
 // _pruneToldOnBoard keeps only the ids of taps this tab still holds queued:
 // one no longer queued (answered, or taken by another tab) has nothing left
 // to tell (stage 6 review 8, m12).
-function _pruneToldOnBoard() {
+function _queuedTapIds() {
     const queued = new Set();
     for (const d of _writeQueue.values()) {
         if (d && d.kind === 'evt' && d.payload && d.payload.id) queued.add(d.payload.id);
     }
+    return queued;
+}
+function _pruneToldOnBoard() {
+    const queued = _queuedTapIds();
     for (const id of _toldHere) if (!queued.has(id)) _toldHere.delete(id);
     _told.prune((id) => queued.has(id));
+}
+// _forgetToldHere: the device's record no longer holds these taps (another
+// tab settled them, or the sweep took them out). A tap this tab still holds
+// queued stays told here until it leaves this tab's queue (_dequeue): the
+// tab that settled it stores the record before the queue, so a board render
+// between the two still shows it pending and told it again (stage 6 review
+// 11, minor 2).
+function _forgetToldHere(ids) {
+    let queued = null;
+    for (const id of ids) {
+        if (!_toldHere.has(id)) continue;
+        if (!queued) queued = _queuedTapIds();
+        if (!queued.has(id)) _toldHere.delete(id);
+    }
 }
 
 // _onToldTapsStored: another tab changed a match's told-tap record. A notice
@@ -1487,7 +1507,7 @@ function _onToldTapsStored(key, oldValue, newValue) {
             alerts.set(base, a);
         }
     }
-    for (const t of _told.goneOnStored(key, oldValue, newValue)) _toldHere.delete(t.id);
+    _forgetToldHere(_told.goneOnStored(key, oldValue, newValue).map((t) => t.id));
     for (const [base, a] of alerts) {
         _notifyQueueAlert({
             kind: 'tap_applied', count: a.count, terminalCount: 0, compID: a.compID, matchID: a.matchID,
@@ -1662,7 +1682,7 @@ const _told = createToldTaps({ storage: _landedStorage, tab: _landed.tab });
 function _landedBeat() {
     _landed.beat();
     // The told-tap record's sweep (m7): what it takes out is forgotten here.
-    for (const id of _told.beat()) _toldHere.delete(id);
+    _forgetToldHere(_told.beat());
     for (const seen of _turnedAwaySeen.values()) {
         if (seen && seen.away && seen.compID && seen.matchID) _tellAway(seen.compID, seen.matchID, seen.away);
     }
@@ -1747,9 +1767,11 @@ function _rememberTurnedAway(compID, matchID, match) {
 // _tellTurnedAway reads one copy of a match: each tap of this device the
 // server now lists as turned away is told once, to the match's open editor
 // (subscribeTapOutcome) and as one 'not_applied' alert naming the match and
-// the tap, then forgotten. Accepted: two tabs of the device reading copies
-// of the match at the same moment can both find the tap in the shared
-// landed record before either removes it, and both tell it.
+// the tap, then forgotten. One tab tells it: the tab that noted it while its
+// page is shown, else the shown tab with the lowest id (landed_taps.jsx
+// `claim`, a marker read back before telling). Accepted: two tabs whose
+// copies of the record are both behind each other's marker can still both
+// tell it; the notice is said twice, never lost.
 function _tellTurnedAway(compID, matchID, match) {
     if (!compID || !matchID) return;
     const base = _revKey(compID, matchID);

@@ -51,6 +51,7 @@ package engine
 // run).
 
 import (
+	"bytes"
 	"cmp"
 	"errors"
 	"fmt"
@@ -396,8 +397,9 @@ func openerSeatEventsTx(h state.StoreTx, comp *state.Competition, compID, matchI
 // out of scheduled keeps the lineups it started with (pinStartLineups), and
 // bout 1 is brought to what the rule says (seatOpenerAfterWrite; the
 // score-events door seats its own batch). before is the match's status before
-// the write.
-func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, before matchBefore, door string, stamp int64) (string, error) {
+// the write; writeID and stamp are the write's own (resentStartWarning knows a
+// resend of the start by them).
+func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, before matchBefore, door, writeID string, stamp int64) (string, error) {
 	comp, err := h.LoadCompetition(compID)
 	if err != nil || comp == nil || !comp.IsKachinuki() {
 		return "", nil
@@ -440,7 +442,7 @@ func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, before
 	} else if door != DoorEvent && before.status != state.MatchStatusScheduled {
 		// That write sent again, its answer lost, is told what the first
 		// answer said (stage 6 review 11, item 6).
-		if told, err = e.resentStartWarning(h, comp, matchID, stamp, door); err != nil {
+		if told, err = e.resentStartWarning(h, comp, matchID, writeID, stamp, door); err != nil {
 			return "", err
 		}
 	}
@@ -456,23 +458,67 @@ func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, before
 // resentStartWarning is the warning the write that first moved a kachinuki
 // match out of scheduled was answered with, for that write sent again because
 // its answer was lost (the same writeId, or the same stamp; stage 6 review 11,
-// item 6), "" for any other write. That write is the one stamped at the stamp
-// the match's result holds (startStamp), and a team its start anchored holds
-// its own lineup at the match as a carried copy made at that stamp
-// (anchorStartedCopy). Those teams' carried lineups are worked out again with
-// nothing stored (deriveCarried), and the ones the domain refuses are named as
-// the first answer named them, since a refused lineup stays as stored and is
-// refused again. A pin is never carried, so a pinned team is not followed, as
-// at the start. Accepted: a start anchored at a removal's later stamp is not
-// recognised (told ""), and an operator's save over a pin, which makes it a
-// copy made at the start, makes that team followed too, telling what is
-// refused for it now.
-func (e *Engine) resentStartWarning(h state.StoreTx, comp *state.Competition, matchID string, stamp int64, door string) (string, error) {
-	if stamp <= 0 || comp == nil || !comp.IsKachinuki() {
+// item 6), "" for any other write. That write is known by its line in the
+// match's score log (startLineOf: the first baseline, in log order, that sets
+// the result to a status other than scheduled), never by the stamp the match's
+// result group holds now, which another device's later write moves and a
+// write in the same millisecond shares (stage 6 review 12, m6): a write whose
+// writeId the log holds is the start only when its line is that line, or the
+// start sent again under another id and logged anew (the same result at the
+// same stamp, which no reading can tell from the start itself); one whose
+// writeId the log does not hold (an exact resend under another id, or none) is
+// judged by the start line's stamp, the documented fallback. A team the start
+// anchored holds its own lineup at the match as a carried copy made at that
+// stamp (anchorStartedCopy). Those teams' carried lineups are worked out again
+// with nothing stored (deriveCarried), and the ones the domain refuses are
+// named as the first answer named them, under the lead of the start's own
+// status, since a refused lineup stays as stored and is refused again. A pin
+// is never carried, so a pinned team is not followed, as at the start.
+// Accepted: a start anchored at a removal's later stamp is not recognised
+// (told ""), an operator's save over a pin, which makes it a copy made at the
+// start, makes that team followed too, telling what is refused for it now, and
+// a write with no writeId stamped in the start's millisecond falls to the
+// stamp arm.
+func (e *Engine) resentStartWarning(h state.StoreTx, comp *state.Competition, matchID, writeID string, stamp int64, door string) (string, error) {
+	if comp == nil || !comp.IsKachinuki() {
+		return "", nil
+	}
+	lines, err := h.LoadScoreLog(comp.ID, matchID)
+	if err != nil {
+		log.Printf("engine: ERROR: match %s/%s: score event log not read to tell a resent start: %v", comp.ID, matchID, err)
+		return "", nil
+	}
+	start, startStatus, ok := startLineOf(lines)
+	if !ok {
+		return "", nil
+	}
+	at := start.Stamps[state.GroupResult]
+	if at <= 0 {
+		at = start.Stamp
+	}
+	var own *state.ScoreBaseline
+	if writeID != "" {
+		if i := slices.IndexFunc(lines, func(l state.ScoreLogLine) bool {
+			return l.Baseline != nil && l.Baseline.WriteID == writeID
+		}); i >= 0 {
+			own = lines[i].Baseline
+		}
+	}
+	if own != nil {
+		// The write's own line: the start's, or the start sent again under
+		// another id and logged anew (same stamp, same result).
+		ownAt := own.Stamps[state.GroupResult]
+		if ownAt <= 0 {
+			ownAt = own.Stamp
+		}
+		if own != start && (ownAt != at || !bytes.Equal(own.Values[state.GroupResult], start.Values[state.GroupResult])) {
+			return "", nil
+		}
+	} else if stamp <= 0 || stamp != at {
 		return "", nil
 	}
 	stored, _, err := e.lookupExistingResultIn(h, comp.ID, matchID)
-	if err != nil || stored == nil || stored.Status == state.MatchStatusScheduled || startStamp(stored) != stamp {
+	if err != nil || stored == nil {
 		return "", nil
 	}
 	lineups, err := h.LoadTeamLineups(comp.ID)
@@ -483,7 +529,7 @@ func (e *Engine) resentStartWarning(h state.StoreTx, comp *state.Competition, ma
 	for _, teamID := range []string{stored.SideAID, stored.SideBID} {
 		anchored := false
 		for _, l := range lineups {
-			if teamID != "" && l.TeamID == teamID && l.MatchID == matchID && l.IsCarriedCopy() && l.CopiedAt == stamp {
+			if teamID != "" && l.TeamID == teamID && l.MatchID == matchID && l.IsCarriedCopy() && l.CopiedAt == at {
 				anchored = true
 				break
 			}
@@ -505,7 +551,32 @@ func (e *Engine) resentStartWarning(h state.StoreTx, comp *state.Competition, ma
 	if refused == nil {
 		return "", nil
 	}
-	return refused.warning(matchWriteLead(stored.Status, door)), nil
+	return refused.warning(matchWriteLead(startStatus, door)), nil
+}
+
+// startLineOf is the baseline of the write that first moved the match out of
+// scheduled, in log order (the order the writes landed), with the status it
+// set; a migration line, which records what the match already held, is never
+// it.
+func startLineOf(lines []state.ScoreLogLine) (*state.ScoreBaseline, state.MatchStatus, bool) {
+	for _, l := range lines {
+		b := l.Baseline
+		if b == nil || b.Door == MigrationDoor {
+			continue
+		}
+		raw, ok := b.Values[state.GroupResult]
+		if !ok {
+			continue
+		}
+		var verdict state.MatchResult
+		if state.SetGroupFromValue(&verdict, state.GroupResult, raw) != nil {
+			continue
+		}
+		if verdict.Status != "" && verdict.Status != state.MatchStatusScheduled {
+			return b, verdict.Status, true
+		}
+	}
+	return nil, "", false
 }
 
 // matchWriteLead says what the write that first moved a match out of scheduled

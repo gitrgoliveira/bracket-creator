@@ -92,17 +92,20 @@ import (
 // competitor-status writes made before K3, and a bracket-only restore would put
 // a downstream match back to a verdict whose competitor stays restored.
 func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, opts ...ForceOptions) (*domain.CompetitorStatus, error) {
-	// The write's own stamp, read before an answer as recorded replaces
-	// result with the stored match (afterMatchWrite tells a resend of the
-	// start by it).
-	door, stamp := result.WriteDoor, result.ModifiedAt
+	// The write's own id and stamp, read before an answer as recorded
+	// replaces result with the stored match (afterMatchWrite tells a resend
+	// of the start by its logged line, resentStartWarning).
+	door, stamp, writeID := result.WriteDoor, result.ModifiedAt, result.WriteID
+	if writeID == "" {
+		writeID = firstForceOptions(opts).WriteID
+	}
 	before := e.storedStatus(tx, compID, matchID)
 	status, err := e.recordMatchResultWithIneligibilityTx(tx, compID, matchID, result, opts...)
 	// A kachinuki match keeps the lineups it started with, and bout 1 is
 	// brought to what its lineup says (operator decision K1 (c),
 	// kachinuki_opener.go), only once the write stands.
 	if err == nil {
-		result.LineupWarning, err = e.afterMatchWrite(tx, compID, matchID, before, door, stamp)
+		result.LineupWarning, err = e.afterMatchWrite(tx, compID, matchID, before, door, writeID, stamp)
 	}
 	return status, err
 }
@@ -1042,7 +1045,7 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 		// The decision that first moved a kachinuki match out of
 		// scheduled, sent again, is told what its first answer said
 		// (stage 6 review 11, item 6).
-		if result.LineupWarning, err = e.resentStartWarning(tx, comp, matchID, modifiedAtStamp, DoorDecision); err != nil {
+		if result.LineupWarning, err = e.resentStartWarning(tx, comp, matchID, kcdgOpts.WriteID, modifiedAtStamp, DoorDecision); err != nil {
 			return nil, nil, err
 		}
 		return result, nil, nil
@@ -1097,7 +1100,7 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 		// The decision that first moved a kachinuki match out of
 		// scheduled, sent again, is told what its first answer said
 		// (stage 6 review 11, item 6).
-		warning, werr := e.resentStartWarning(tx, comp, matchID, modifiedAtStamp, DoorDecision)
+		warning, werr := e.resentStartWarning(tx, comp, matchID, kcdgOpts.WriteID, modifiedAtStamp, DoorDecision)
 		if werr != nil {
 			return nil, nil, werr
 		}

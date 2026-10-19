@@ -1690,10 +1690,10 @@ func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.
 	var superseded error
 	txErr := e.store.WithTransaction(compId, func(tx state.StoreTx) error {
 		before := e.storedStatus(tx, compId, matchId)
-		stamp := result.ModifiedAt
+		stamp, writeID := result.ModifiedAt, result.WriteID
 		err := e.writeMatchResult(tx, compId, matchId, result, matchWriteForward)
 		if err == nil {
-			result.LineupWarning, err = e.afterMatchWrite(tx, compId, matchId, before, result.WriteDoor, stamp)
+			result.LineupWarning, err = e.afterMatchWrite(tx, compId, matchId, before, result.WriteDoor, writeID, stamp)
 		}
 		if errors.Is(err, ErrMatchSuperseded) {
 			// Commit: the write's only footprint is its match history entry,

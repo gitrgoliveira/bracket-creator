@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"os"
 	"strconv"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -151,16 +152,16 @@ func keepStoredCheckIns(players, stored []domain.Player) []domain.Player {
 // roster as given, with every stored check-in kept (keepStoredCheckIns), read
 // and written under one lock so a check-in landing between the handler's
 // read and this write is not erased. It writes no seeds.
-func (s *Store) ReplaceRosterKeepingCheckIns(compID string, players []domain.Player) error {
+func (s *Store) ReplaceRosterKeepingCheckIns(compID string, players []domain.Player, prune SeedPruner) (seedsErr error, err error) {
 	if err := ValidateCompetitionID(compID); err != nil {
-		return err
+		return nil, err
 	}
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
 	withZekken, comp, err := s.withZekkenNameLocked(compID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var hint *bool
 	if comp != nil {
@@ -168,7 +169,32 @@ func (s *Store) ReplaceRosterKeepingCheckIns(compID string, players []domain.Pla
 	}
 	stored, err := s.loadParticipantsNoLock(compID, withZekken, LoadParticipantsOpts{HasIDs: hint})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return s.saveParticipantsNoLock(compID, keepStoredCheckIns(players, stored), withZekken, teamNameRule{comp: comp})
+	if err := s.saveParticipantsNoLock(compID, keepStoredCheckIns(players, stored), withZekken, teamNameRule{comp: comp}); err != nil {
+		return nil, err
+	}
+	if prune == nil {
+		return nil, nil
+	}
+	// The seeds are read, pruned and written back inside this same locked
+	// step, so a seed another desk set since the caller last read them is
+	// kept, never written over by a copy read before the lock (stage 6
+	// review 13, m7).
+	seeds, rerr := helper.ReadSeedsFileRaw(s.compPath(compID, "seeds.csv"))
+	if rerr != nil {
+		if os.IsNotExist(rerr) {
+			return nil, nil
+		}
+		return rerr, nil
+	}
+	if kept := prune(stored, seeds); len(kept) != len(seeds) {
+		return s.saveSeedsLocked(compID, kept), nil
+	}
+	return nil, nil
 }
+
+// SeedPruner decides, under the competition's lock, which of the stored seed
+// rows a roster replace keeps: it is handed the roster as it stood before the
+// replace and the seeds stored now.
+type SeedPruner func(storedRoster []domain.Player, seeds []domain.SeedAssignment) (kept []domain.SeedAssignment)

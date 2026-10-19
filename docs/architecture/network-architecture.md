@@ -230,8 +230,9 @@ check competitors in and add them at the same time. Two rules keep each desk's c
 
 - **A list save never writes a check-in.** Every competitor keeps the check-in the server holds
   for them, whatever the list says. Only the check-in calls check a competitor in or out.
-- **A list save names the list it was built from** (`rosterVersion`, which every answer carrying
-  the list includes). When another desk has added, removed, renamed, moved or seeded a
+- **A list save names the list it was built from** (`rosterVersion` on a competition answer, and
+  the `X-Roster-Version` header on the plain list answers of the participants endpoint, so every
+  answer carrying the list names it). When another desk has added, removed, renamed, moved or seeded a
   competitor since, the server refuses the save with 409 `roster_changed`, writes nothing, and
   answers with the list as it stands. The page shows that list at once, applies the
   operator's change to it again (the seed, the move, the shuffle) and sends it straight away,

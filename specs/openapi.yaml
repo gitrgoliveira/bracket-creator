@@ -1325,9 +1325,12 @@ paths:
         never erased by it.
 
         A roster save may send `rosterVersion`, the version of the roster
-        it was built from, as every answer that carries `players` names it
-        (this endpoint's, and `GET /api/viewer/competitions` and
-        `/api/viewer/competitions/{id}`). When the stored roster is no
+        it was built from, as every answer that carries the roster names it:
+        a competition answer in `rosterVersion` (this endpoint's, and
+        `GET /api/viewer/competitions` and `/api/viewer/competitions/{id}`),
+        the bare list answers of `GET` and `POST
+        /api/competitions/{id}/participants` in the `X-Roster-Version`
+        header. When the stored roster is no
         longer that one (another desk added, removed, renamed, moved or
         seeded a competitor since), the save is refused with 409
         `roster_changed`, nothing is written, and the answer carries the
@@ -2101,6 +2104,14 @@ paths:
       responses:
         '200':
           description: List of players.
+          headers:
+            X-Roster-Version:
+              description: >
+                The version of the roster the list holds (seeds merged), as a
+                roster save names it (`rosterVersion` on a competition
+                answer). The list is a bare array, so the version rides here.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -2139,7 +2150,14 @@ paths:
             dropped an already-seeded participant without adding any new
             participant, that removal is unambiguous (see the 409 case below)
             and their now-orphaned row in `seeds.csv` is dropped as part of
-            this save.
+            this save, in the same locked step as the roster write.
+          headers:
+            X-Roster-Version:
+              description: >
+                The version of the roster the list holds, as on
+                `GET /api/competitions/{id}/participants`.
+              schema:
+                type: string
           content:
             application/json:
               schema:

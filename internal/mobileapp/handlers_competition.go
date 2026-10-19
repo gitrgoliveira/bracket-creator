@@ -2366,6 +2366,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			} else {
 				fmt.Printf("Warning: PUT /api/competitions/%s, failed to re-load participants for roster-PUT response (falling back to request body): %v\n", id, lerr)
 				updated.Players = comp.Players // fallback: echo body
+				// The version of what is echoed, never "": a page given none
+				// would send its next save unchecked. The echo lacks the ids
+				// the save minted, so that save is refused roster_changed
+				// and the page lays its change on the stored roster.
+				updated.RosterVersion = state.RosterVersion(comp.Players)
 			}
 		} else {
 			// Settings-only PUT, load the on-disk roster for the
@@ -2378,6 +2383,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			} else {
 				fmt.Printf("Warning: failed to load participants for settings-PUT response: %v\n", lerr)
 				updated.Players = []domain.Player{}
+				// Named for what is answered (see the roster-PUT fallback above).
+				updated.RosterVersion = state.RosterVersion(updated.Players)
 			}
 		}
 		// Embed the competition fields inline and add the near-duplicate

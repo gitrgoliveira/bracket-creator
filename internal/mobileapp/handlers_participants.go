@@ -13,6 +13,11 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// rosterVersionHeader carries the version of the roster a bare-array answer
+// holds (GET and the batch POST of /participants), the way `rosterVersion`
+// does on a competition answer.
+const rosterVersionHeader = "X-Roster-Version"
+
 func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub Broadcaster) {
 	r.GET("/competitions/:id/participants", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
@@ -30,6 +35,9 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			internalError(c, err)
 			return
 		}
+		// The list is a bare array, so the version of the roster it holds
+		// rides in a header (a competition answer names it in `rosterVersion`).
+		c.Header(rosterVersionHeader, state.RosterVersion(players))
 		c.JSON(http.StatusOK, players)
 	})
 
@@ -317,7 +325,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			canonicalPlayers[i].Name = helper.TitleCaseName(canonicalPlayers[i].Name)
 			canonicalPlayers[i].Dojo = strings.TrimSpace(canonicalPlayers[i].Dojo)
 		}
-		orphaned, keptSeeds := seedsOrphanedByRosterReplace(existing, canonicalPlayers, seeds)
+		orphaned, _ := seedsOrphanedByRosterReplace(existing, canonicalPlayers, seeds)
 		if len(orphaned) > 0 && rosterReplaceAddsIdentities(existing, canonicalPlayers) {
 			labels := formatOrphanedSeedLabels(orphaned)
 			c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf(
@@ -330,7 +338,16 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// keeps every check-in stored at the moment it lands
 		// (ReplaceRosterKeepingCheckIns), so one another desk made in between
 		// is not erased (stage 6 review 12, C1).
-		if err := store.ReplaceRosterKeepingCheckIns(id, players); err != nil {
+		//
+		// The orphaned seed rows of an unambiguous removal are dropped in the
+		// same locked step, from the seeds stored when it runs: a seed
+		// another desk set between the read above and the write is kept.
+		dropOrphanedSeeds := func(stored []domain.Player, current []domain.SeedAssignment) []domain.SeedAssignment {
+			_, kept := seedsOrphanedByRosterReplace(stored, canonicalPlayers, current)
+			return kept
+		}
+		seedsErr, err := store.ReplaceRosterKeepingCheckIns(id, players, dropOrphanedSeeds)
+		if err != nil {
 			// Defense-in-depth: saveParticipantsNoLock also enforces the
 			// Tier-1 (name, dojo) guard and the blank-dojo/reserved-name
 			// floors, so map those to their 4xx rather than 500 in case the
@@ -359,10 +376,8 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// case seedsOrphanedByRosterReplace already tolerates elsewhere --
 		// not a new failure mode -- so there is nothing worth rolling the
 		// roster write back over.
-		if len(orphaned) > 0 {
-			if err := store.SaveSeeds(id, keptSeeds); err != nil {
-				fmt.Printf("Warning: failed to drop orphaned seed(s) after roster removal: %v\n", err)
-			}
+		if seedsErr != nil {
+			fmt.Printf("Warning: failed to drop orphaned seed(s) after roster removal: %v\n", seedsErr)
 		}
 
 		// Reload from disk so the response reflects the persisted roster,
@@ -376,6 +391,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
+		c.Header(rosterVersionHeader, state.RosterVersion(saved))
 		c.JSON(http.StatusOK, saved)
 	})
 

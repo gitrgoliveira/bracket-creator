@@ -2629,7 +2629,9 @@ paths:
             has no place for, kept from older data) stays as it was, the write
             stands, and the body adds `warning`, a sentence for the operator
             naming the matches to check (the same refusal the lineup doors
-            answer with `warning`).
+            answer with `warning`). That write sent again because its answer
+            was lost (the same `writeId`, or the same `modifiedAt`) is
+            answered as recorded with the same `warning`.
           content:
             application/json:
               schema:
@@ -4096,11 +4098,16 @@ paths:
             nothing. A decision that first moves a kachinuki match out of the
             queue keeps its lineup as `PUT .../score` does, and its body adds
             `warning` the same way when a later match's carried lineup could
-            not be worked out again.
+            not be worked out again; that decision sent again (an exact
+            replay, or the same `writeId`) is answered with the same
+            `warning`.
           content:
             application/json:
               schema:
-                oneOf:
+                # anyOf, not oneOf, as on PUT .../score: MatchResult is an
+                # open schema, so a RefusedWrite body also validates against
+                # it.
+                anyOf:
                   - allOf:
                       - $ref: '#/components/schemas/MatchResult'
                       - type: object
@@ -8085,8 +8092,9 @@ components:
       description: >
         A sentence to show the operator, present only when a change was kept
         but a match's carried lineup could not be worked out again from it (a
-        position the team size has no place for, or a member at two positions,
-        kept from older data), so that lineup was kept as it was. It names the
+        position the team size has no place for or a team member placed at
+        two positions, kept from older data, or the competition has no team
+        size), so that lineup was kept as it was. It names the
         change made and the matches to check, e.g. "The lineup was saved, but
         the lineup carried to Pool A · Match 2 could not be worked out again (a
         position the team size has no place for); it was kept as it was. Check
@@ -8095,11 +8103,14 @@ components:
         moves a kachinuki match out of scheduled, "The match was started" (a
         start), "The match was finished" (a finish) or "The decision was
         recorded" (a decision). One sentence names every such lineup, both
-        teams' included; when they were refused for different reasons, each
-        match is named with its own, e.g. "the lineups carried to Pool A ·
-        Match 2 (a position the team size has no place for) and Pool A ·
-        Match 3 (a team member placed at two positions) could not be worked
-        out again".
+        teams' included (two teams' lineups at one match are two lineups),
+        and each match once, with every reason its lineups were refused for.
+        The matches refused for the same reasons are named together, and
+        when there are several such groups they are listed apart, e.g. "the
+        lineups carried to these matches could not be worked out again and
+        were kept as they were: Pool A · Match 2 and Pool A · Match 4 (a
+        position the team size has no place for); Pool A · Match 3 (a team
+        member placed at two positions)".
 
     LineupFollowWarningAnswer:
       type: object

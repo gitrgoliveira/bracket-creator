@@ -2526,10 +2526,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     onClose={() => endCorrectionOf(matchKey(selectedMatch))}
                                     started={isStartedSnapshot(selectedMatch)}
                                     canClose={false}
-                                    onSubmit={async (patch) => {
+                                    onSubmit={async (patch, opts) => {
                                         const key = matchKey(selectedMatch);
                                         try {
-                                            const res = await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch);
+                                            // opts: the editor's own claim on a refusal (onRefusal).
+                                            const res = await onEditScore(selectedMatch.compId, selectedMatch.id, patch, selectedMatch, opts);
                                             // A landed Save correction ends the correction (a
                                             // write that did not land keeps it open, with the
                                             // editor's not-saved banner).

@@ -541,9 +541,10 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
             onPrev={() => setOpenKey(scoreKeyOf(prevMatch))}
             onNext={() => setOpenKey(scoreKeyOf(nextMatch))}
             onClose={() => setOpenKey(null)}
-            onSubmit={async (patch) => {
+            onSubmit={async (patch, opts) => {
               try {
-                const res = await onEditScore(openMatch.compId, openMatch.id, patch, openMatch);
+                // opts: the editor's own claim on a refusal (onRefusal).
+                const res = await onEditScore(openMatch.compId, openMatch.id, patch, openMatch, opts);
                 if (!mountedRef.current) return res;
                 // Whether the modal stays open is writeKeepsEditorOpen's
                 // (write_result.jsx), the rule every host asks. A write that did

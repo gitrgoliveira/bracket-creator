@@ -3,7 +3,8 @@
 // three rounds of patches to scattered flags opened new edges each time).
 //
 // A score editor makes status writes of its own: a Start (scheduled to
-// running), a reopen or the court-busy requeue-and-reopen (completed to
+// running; the kachinuki sheet's Record bout on a queued encounter is one), a
+// reopen or the court-busy requeue-and-reopen (completed to
 // running), and the team sheet's representative-bout change (a finished match
 // shown running at once). Another device can make the same changes. What the
 // editor shows depends on which made a change and how its own write was
@@ -248,6 +249,18 @@ export function createOwnStatus(status, at) {
         // The move the feed showed was another device's.
         keepDraft(p.from);
       }
+    },
+
+    // saysRefusal: will a refusal of own write `token`, arriving now, be said
+    // here? True for an own Start still open while the feed shows the match
+    // scheduled: `answer` then states its sentence beside the board
+    // (StartRefusedNotice), so the editor claims the refusal from the outbox,
+    // which then raises no second alert for it. Anything else is left to the
+    // outbox to tell.
+    saysRefusal(token) {
+      const p = st.pending;
+      return !!(p && st.feed.status === 'scheduled'
+        && p.entries.some((x) => x.token === token && x.kind === OWN_START));
     },
 
     // release: the kept draft was saved or discarded.

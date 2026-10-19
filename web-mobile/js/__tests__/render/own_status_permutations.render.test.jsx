@@ -35,7 +35,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import {
   installIndividualEditor, resetOutbox, API, bout, letterBtn, shiroSide, NOW,
 } from '../helpers/individual_editor.js';
-import { teamBout, ipponBtn, marks as boutMarks } from '../helpers/team_editor.js';
+import { teamBout, kachinukiBout, ipponBtn, marks as boutMarks } from '../helpers/team_editor.js';
 import { engiBout } from '../helpers/engi_editor.js';
 
 let ScoreEditorModal;
@@ -64,7 +64,7 @@ function ownWriteAnswerer() {
     let resolve; let reject;
     const settled = new Promise((res, rej) => { resolve = res; reject = rej; });
     settled.catch(() => {});
-    writes.push({ resolve, reject, onRefusal: opts && opts.onRefusal, answered: false });
+    writes.push({ resolve, reject, onRefusal: opts && opts.onRefusal, answered: false, claimed: false });
     return { applied: true, pending: true, settled };
   };
   const answer = async (outcome) => {
@@ -77,13 +77,15 @@ function ownWriteAnswerer() {
       else if (outcome === 'discarded') w.resolve({ discarded: true });
       else {
         const e = new Error('The match could not be changed.');
-        if (w.onRefusal) w.onRefusal(e);
+        // As the outbox does: the claims first (true = the caller says it,
+        // and the outbox raises no alert), then `settled` rejects.
+        w.claimed = !!(w.onRefusal && w.onRefusal(e) === true);
         w.reject(e);
       }
       await Promise.resolve();
     });
     await flush();
-    return true;
+    return w;
   };
   return { make, answer, writes };
 }
@@ -177,6 +179,25 @@ const ENGI = {
   match: (server) => engiBout({ status: server.status, flagsA: server.a.length, flagsB: server.b.length, modifiedAt: server.at, scoreVersion: server.v,
     ...(server.status === 'completed' ? { winner: 'Aka One - Aka Two' } : {}) }),
 };
+// The kachinuki sheet's Record bout on a QUEUED encounter (bc-evts stage 6):
+// its running write starts the match and records the bout, so it is an own
+// Start, begun on the owner like the Start button's. The fake server applies
+// it as it applies a Start (the points it names and the status); the pairing
+// the real server appends is not modelled here
+// (kachinuki_record_bout_from_queue.render.test.jsx shows it).
+const kachinukiRows = (server) => [{
+  position: 1, sideA: 'K1', sideB: 'O1', sideAMemberId: 'k1', sideBMemberId: 'o1',
+  ipponsA: server.a, ipponsB: server.b, hansokuA: 0, hansokuB: 0, winner: '', decision: '',
+}];
+const KACHINUKI = {
+  ...TEAM,
+  name: 'kachinuki Record bout',
+  startButton: 'Record bout',
+  match: (server) => kachinukiBout({
+    status: server.status, phase: 'bracket', modifiedAt: server.at, scoreVersion: server.v, subResults: kachinukiRows(server),
+    ...(server.status === 'completed' ? { winner: 'Kyoto' } : {}),
+  }),
+};
 const fmarks = (fam, s) => (fam === ENGI ? { a: [...s.a], b: [...s.b] } : { a: letters(s.a), b: letters(s.b) });
 
 // Foreign moves of the feed, from the status they apply to.
@@ -200,7 +221,9 @@ async function run(fam, sc) {
   // case declines it first (declineFirst); every other confirm is agreed.
   let declining = false;
   window.confirmDialog = vi.fn(async (o) => !(declining && UNSAVED_WARNING.test((o && o.message) || '')));
-  const onSubmit = vi.fn((patch) => (patch.status === 'running' ? Promise.resolve(writes.make()) : Promise.resolve({ applied: true })));
+  // The editor's opts reach the outbox as every host hands them on: its claim
+  // on a refusal it says itself (onRefusal).
+  const onSubmit = vi.fn((patch, opts) => (patch.status === 'running' ? Promise.resolve(writes.make(opts)) : Promise.resolve({ applied: true })));
   let server;
   if (sc.start === 'scheduled') server = { status: 'scheduled', a: [], b: [], at: NOW, v: 2 };
   else if (fam === TEAM) server = { status: 'completed', a: [], b: [], at: NOW, v: 2, knockout: true };
@@ -293,8 +316,11 @@ async function run(fam, sc) {
   for (const [i, w] of sc.writes.entries()) {
     const label = `${w.kind}${i + 1}:${w.outcome}/${w.timing}${w.skip ? '/skipped' : ''}`;
     if (w.kind === 'start') {
-      if (!button('Start match')) { check(`${label} not offered`); break; }
-      await tap(button('Start match'));
+      // The family's own start: Start match, or the kachinuki sheet's Record
+      // bout on a queued encounter, whose running write is the match's start.
+      const startLabel = fam.startButton || 'Start match';
+      if (!button(startLabel) || button(startLabel).disabled) { check(`${label} not offered`); break; }
+      await tap(button(startLabel));
       ownStartCurrent = true;
       carried = onSubmit.mock.calls.at(-1)[0];
     } else if (w.kind === 'rep') {
@@ -375,9 +401,16 @@ async function run(fam, sc) {
       check(`${label} finished elsewhere before the feed showed it`);
     };
     const answer = async () => {
-      await writes.answer(w.outcome);
+      const sent = await writes.answer(w.outcome);
       ownWriteOut = false;
       if ((w.kind === 'start' || w.kind === 'rep') && w.outcome !== 'landed') ownStartCurrent = false;
+      // I6: a refused own Start is told ONCE. Said beside the board (the
+      // refusal note), it is claimed from the outbox, which then raises no
+      // alert with the same sentence; claimed, it is said here.
+      if (w.kind === 'start' && w.outcome === 'refused' && sent) {
+        if (refusedNote() && !sent.claimed) bad.push(`${label}: I6 the refusal is noted here and left to the outbox to tell again`);
+        if (sent.claimed && !refusedNote()) bad.push(`${label}: I6 the refusal is claimed and told nowhere`);
+      }
       check(`${label} answered`);
     };
     if (w.outcome === 'landed') {
@@ -692,7 +725,7 @@ function* scenarios(fam) {
         }
       }
       // A status write over a finished match.
-      const kinds = fam === INDIVIDUAL ? ['reopen', 'requeue', 'confirm'] : ['rep'];
+      const kinds = fam === INDIVIDUAL ? ['reopen', 'requeue', 'confirm'] : fam === KACHINUKI ? [] : ['rep'];
       for (const kind of kinds) {
         for (const outcome of OUTCOMES) {
           for (const timing of outcome === 'landed' ? ['before', 'after'] : ['before', 'after', 'afterLeft']) {
@@ -740,7 +773,7 @@ describe('the running sheet\'s representative-bout change: every combination (te
   }, 300_000);
 });
 
-describe.each([[INDIVIDUAL], [TEAM], [ENGI]])('own status writes and the kept draft: every combination (%s)', (fam) => {
+describe.each([[INDIVIDUAL], [TEAM], [KACHINUKI], [ENGI]])('own status writes and the kept draft: every combination (%s)', (fam) => {
   it(`holds every invariant (${fam.name})`, async () => {
     const failures = [];
     let n = 0;

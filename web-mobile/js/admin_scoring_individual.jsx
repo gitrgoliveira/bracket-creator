@@ -186,7 +186,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
   // Every write built through claim is watched: one that does not land
   // (refused, held or discarded) is forgotten, so the next build of the same
   // value names its groups again (stage 5 review 5).
-  const onSubmit = onSubmitProp && ((patch) => claimChanged.watch(onSubmitProp(patch), patch));
+  const onSubmit = onSubmitProp && ((patch, opts) => claimChanged.watch(onSubmitProp(patch, opts), patch));
   const onSubmitAndNext = onSubmitAndNextProp && ((patch) => claimChanged.watch(onSubmitAndNextProp(patch), patch));
   const isComplete = m.status === "completed";
   // Canonical team check (matches admin_pools.jsx and the lineup panel):
@@ -1722,7 +1722,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
                   // The owner shows the start at once, with the score it
                   // carries (the draft), and reads its answer as it comes.
                   const token = own.begin(OWN_START, startedScore(startPatch));
-                  const res = await doSubmit(() => onSubmit(startPatch));
+                  // Its refusal is said here (StartRefusedNotice), so it is
+                  // claimed from the outbox: no second alert with the same
+                  // sentence.
+                  const res = await doSubmit(() => onSubmit(startPatch, { onRefusal: own.claimRefusal(token) }));
                   // bc-cse: a direct refusal's not-saved banner, if any (the
                   // clock-vs-supersede ordering lives in notLandedBanner).
                   const banner = res && notLandedBanner(res);

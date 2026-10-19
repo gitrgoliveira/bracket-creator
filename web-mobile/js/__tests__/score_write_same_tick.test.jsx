@@ -85,7 +85,7 @@ describe('every score editor host reaches the write before its first await', () 
 
   it.each(HOSTS)('%s', (file, write) => {
     const text = source(file);
-    const handlers = [...text.matchAll(/onSubmit(?:AndNext)?(?:=\{|:)[^{]*?async\s*\(patch\)\s*=>\s*\{/g)];
+    const handlers = [...text.matchAll(/onSubmit(?:AndNext)?(?:=\{|:)[^{]*?async\s*\(patch(?:,\s*opts)?\)\s*=>\s*\{/g)];
     expect(handlers.length, `${file}: no async (patch) => onSubmit handler found`).toBeGreaterThan(0);
     for (const h of handlers) {
       expect(firstAwaited(text, h.index + h[0].length),

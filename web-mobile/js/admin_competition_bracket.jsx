@@ -166,9 +166,10 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, onMoveC
             // (editing a completed match); an un-played match has nowhere to go.
             canClose={isComplete}
             onClose={() => setEditing(false)}
-            onSubmit={async (patch) => {
+            onSubmit={async (patch, opts) => {
               try {
-                const res = await onEditScore(compId, match.id, patch, match);
+                // opts: the editor's own claim on a refusal (onRefusal).
+                const res = await onEditScore(compId, match.id, patch, match, opts);
                 // Recorded → fall back to the result card, unless the editor's
                 // job is not done (writeKeepsEditorOpen).
                 if (!writeKeepsEditorOpen(patch, res)) setEditing(false);

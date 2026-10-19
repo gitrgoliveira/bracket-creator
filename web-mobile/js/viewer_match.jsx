@@ -442,14 +442,17 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
     return React.createElement(window.ScoreEditorModal, {
       match,
       onClose: () => setIsScoring(false),
-      onSubmit: async (patch) => {
+      onSubmit: async (patch, opts) => {
         try {
           // bc-evts: the write is the outbox's and the answer here is the
           // pending one (never waited on). A refusal the server sends later
           // comes through onRefusal, told by this page's one fallback, as a
           // direct refusal is below, and claimed so no second alert is raised.
+          // A refusal the editor says itself (its own Start's, opts.onRefusal)
+          // is not alerted again.
           const onRefusal = (e) => {
-            window.alert(e && e.message ? e.message : "Couldn't save the result. Please try again.");
+            const own = opts && typeof opts.onRefusal === "function" && opts.onRefusal(e) === true;
+            if (!own) window.alert(e && e.message ? e.message : "Couldn't save the result. Please try again.");
             return true;
           };
           const res = await window.API.recordScore(compId, match.id, patch, "", match, { onRefusal });

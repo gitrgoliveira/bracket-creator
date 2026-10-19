@@ -1285,7 +1285,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // Every write built through claim is watched: one that does not land
   // (refused, held or discarded) is forgotten, so the next build of the same
   // value names its groups again (stage 5 review 5).
-  const onSubmit = onSubmitProp && ((patch) => claimChanged.watch(onSubmitProp(patch), patch));
+  const onSubmit = onSubmitProp && ((patch, opts) => claimChanged.watch(onSubmitProp(patch, opts), patch));
   const onSubmitAndNext = onSubmitAndNextProp && ((patch) => claimChanged.watch(onSubmitAndNextProp(patch), patch));
   // T136 / T141: competition lookup so we can branch on teamMatchType
   // ("kachinuki" vs "fixed") and gate the daihyosen affordance on the
@@ -4220,7 +4220,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
     // running it makes is never read as another device's, whatever the add
     // after it is answered.
     const ownStart = own.begin(OWN_START, { subResults: startPatch.subResults || [], encho: startPatch.encho || null });
-    const sent = doSubmit(() => onSubmit(startPatch));
+    const sent = doSubmit(() => onSubmit(startPatch, { onRefusal: own.claimRefusal(ownStart) }));
     Promise.resolve(sent).then((res) => own.settle(ownStart, res), () => own.answer(ownStart, OWN_REFUSED));
     // A save the server turns away says so beside the change, when its answer
     // comes (a callback, never a wait).
@@ -5874,7 +5874,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                   // it carries (a pre-match draft rides on it), until the feed
                   // holds it, and reads its answer as it comes.
                   const token = own.begin(OWN_START, { subResults: startPatch.subResults || [], encho: startPatch.encho || null });
-                  const res = await doSubmit(() => onSubmit(startPatch));
+                  // Its refusal is said here (StartRefusedNotice), so it is
+                  // claimed from the outbox: no second alert with the same
+                  // sentence.
+                  const res = await doSubmit(() => onSubmit(startPatch, { onRefusal: own.claimRefusal(token) }));
                   // bc-cse: a direct refusal's not-saved banner, if any.
                   const banner = res && notLandedBanner(res);
                   if (banner) setWriteFailed(banner);
@@ -5921,8 +5924,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                   // bout. End/Reopen keep the two-step arm: they are rare
                   // and terminal.
                   setEndArmed(false);
+                  const recordPatch = buildPatch("running", { kachinukiBoutFinal: true });
+                  // On a QUEUED encounter this running write is also the
+                  // match's start (bc-evts stage 6): an own Start like the
+                  // Start button's, with the bouts it carries, so the move to
+                  // running it makes is never read as another device's. On a
+                  // running match the owner records nothing for it.
+                  const ownStart = own.begin(OWN_START, { subResults: recordPatch.subResults || [], encho: recordPatch.encho || null });
                   doSubmit(async () => {
-                    const sent = await onSubmit(buildPatch("running", { kachinukiBoutFinal: true }));
+                    const sent = await onSubmit(recordPatch, { onRefusal: own.claimRefusal(ownStart) });
+                    own.settle(ownStart, sent);
                     // bc-evts: the outbox has the write; what follows reads the
                     // server's answer when it comes (a callback, never a wait).
                     if (writePending(sent)) {

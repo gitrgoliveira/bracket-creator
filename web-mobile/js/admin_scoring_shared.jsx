@@ -320,6 +320,12 @@ export function useOwnStatus(feedMatch) {
     note: (base, draft) => own.note(base, draft),
     begin: (kind, fields) => { const t = own.begin(kind, fields); rerender(); return t; },
     answer,
+    // claimRefusal: the `onRefusal` for own write `token`'s outbox entry. It
+    // claims a refusal this editor says itself (an own Start's sentence,
+    // StartRefusedNotice), so the outbox raises no `rejected` alert with the
+    // same sentence; the settle below then states it. Anything else, or an
+    // editor gone, is left to the outbox to tell.
+    claimRefusal: (token) => () => mountedRef.current && own.saysRefusal(token),
     settle: (token, res, opts = {}) => {
       if (!res) { answer(token, OWN_REFUSED); return; }
       if (writePending(res)) {

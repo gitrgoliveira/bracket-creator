@@ -1009,6 +1009,16 @@ func (e *Engine) loggedWriteID(h state.StoreTx, compID, matchID, writeID string)
 	})
 }
 
+// WriteIDLogged is loggedWriteID for a door outside the engine that writes
+// through RecordMatchResultWithIneligibilityTx and must answer its own late
+// duplicate as recorded before its own refusals judge it (the representative
+// bout's add and removal, whose "already there" and "not there" checks would
+// otherwise refuse the resend of a write that landed). h is the caller's
+// transaction, so the check and the write it guards are one locked step.
+func (e *Engine) WriteIDLogged(h state.StoreTx, compID, matchID, writeID string) bool {
+	return e.loggedWriteID(h, compID, matchID, writeID)
+}
+
 // replayedGroups is every group of a and b: the scalar and server groups and
 // each bout either holds.
 func replayedGroups(a, b *state.MatchResult) []string {

@@ -4300,7 +4300,10 @@ paths:
             another match's withdrawal bars its team, see the description), or the
             match already has a representative bout (`daihyosen_exists`): an
             encounter has one, and the tie this route checks counts none, so a
-            second would otherwise be appended beside the first.
+            second would otherwise be appended beside the first. The same add
+            sent again (its `writeId` already in the match's score log, its first
+            answer lost) is not refused: it is answered 200 as recorded, with the
+            bout and the match as stored.
 
 
             Self-run, an empty password: the match is not running. Once it has
@@ -4411,7 +4414,8 @@ paths:
         '404':
           description: >
             Match not found, or it carries no daihyosen bout to remove
-            (`no_daihyosen`).
+            (`no_daihyosen`). The same removal sent again (its `writeId` already
+            in the match's score log) is answered 200 as recorded instead.
           content:
             application/json:
               schema:

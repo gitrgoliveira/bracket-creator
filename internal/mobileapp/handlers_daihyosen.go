@@ -132,6 +132,7 @@ type DaihyosenEngine interface {
 	AddDaihyosen(compID, matchID, nameA, nameB string, sideA, sideB engine.TeamSummary, isPool bool, sideAEligible, sideBEligible int) (*state.SubMatchResult, error)
 	RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, opts ...engine.ForceOptions) (*domain.CompetitorStatus, error)
 	MaybeAutoCompletePoolsAfterWrite(compID string, written ...state.MatchResult) (engine.AutoCompleteOutcome, error)
+	WriteIDLogged(h state.StoreTx, compID, matchID, writeID string) bool
 }
 
 // DaihyosenStore is the consumer-boundary view of *state.Store used by
@@ -220,6 +221,14 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 					resp = refusal.response()
 					return nil
 				}
+			}
+			// The same removal sent again after its answer was lost (its
+			// writeId is in the match's score log): answered as recorded,
+			// with the match as stored, before the "no representative bout"
+			// refusal its own landing would otherwise draw.
+			if eng.WriteIDLogged(stx, id, mid, tag.WriteID) {
+				resp = &txResponse{status: http.StatusOK, body: gin.H{"result": matchForBroadcast(*match)}}
+				return nil
 			}
 			dhIdx := state.DaihyosenSubIndex(match.SubResults)
 			if dhIdx < 0 {
@@ -408,6 +417,19 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// running and bury the verdict recorded on the first (bc-dhas).
 			// The score sheet never offers it; two devices adding at once, or a
 			// crafted request, would.
+			// The same add sent again after its answer was lost (its writeId
+			// is in the match's score log): answered as recorded, with the
+			// bout and the match as stored, before the one-bout refusal its
+			// own landing would otherwise draw.
+			if eng.WriteIDLogged(stx, id, mid, tag.WriteID) {
+				var row *state.SubMatchResult
+				if i := state.DaihyosenSubIndex(match.SubResults); i >= 0 {
+					stored := match.SubResults[i]
+					row = &stored
+				}
+				resp = &txResponse{status: http.StatusOK, body: gin.H{"subResult": row, "result": matchForBroadcast(*match)}}
+				return nil
+			}
 			if state.DaihyosenSubIndex(match.SubResults) >= 0 {
 				resp = &txResponse{status: http.StatusConflict, body: gin.H{"error": "daihyosen_exists"}}
 				return nil

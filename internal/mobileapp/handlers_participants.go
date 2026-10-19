@@ -13,11 +13,6 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// rosterVersionHeader carries the version of the roster a bare-array answer
-// holds (GET and the batch POST of /participants), the way `rosterVersion`
-// does on a competition answer.
-const rosterVersionHeader = "X-Roster-Version"
-
 func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub Broadcaster) {
 	r.GET("/competitions/:id/participants", func(c *gin.Context) {
 		id, ok := requireValidCompID(c)
@@ -35,9 +30,6 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			internalError(c, err)
 			return
 		}
-		// The list is a bare array, so the version of the roster it holds
-		// rides in a header (a competition answer names it in `rosterVersion`).
-		c.Header(rosterVersionHeader, state.RosterVersion(players))
 		c.JSON(http.StatusOK, players)
 	})
 
@@ -391,7 +383,6 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		hub.Broadcast(EventParticipantsUpdated, gin.H{"competitionId": id})
-		c.Header(rosterVersionHeader, state.RosterVersion(saved))
 		c.JSON(http.StatusOK, saved)
 	})
 

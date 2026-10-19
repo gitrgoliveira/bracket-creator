@@ -950,8 +950,23 @@ function storedCompetitionInDetail(prev, cid, stored) {
   if (!prev || !prev.config || prev.config.id !== cid || !stored) return prev;
   const { config } = normalizeCompetitionDetail({ config: { ...prev.config, ...stored } });
   // A competitor's number is composed when the competition is read, never
-  // stored, so the PUT's answer carries none: the number shown stays, by id.
-  const numbers = new Map((prev.config.players || []).filter((p) => p && p.id && p.number).map((p) => [p.id, p.number]));
+  // stored, so the PUT's answer carries none: the number shown stays, by id,
+  // composed again under the prefix the save stored (stage 6 review 11,
+  // minor 10: a changed prefix showed the old one while the refetch failed;
+  // a cleared one numbers nobody). The prefix is trimmed as Go's
+  // EffectiveNumberPrefix trims it.
+  const trimmed = (v) => (v == null ? "" : String(v).trim());
+  const oldPrefix = trimmed(prev.config.numberPrefix);
+  const newPrefix = trimmed(config.numberPrefix);
+  const renumber = (n) => {
+    if (oldPrefix === newPrefix) return n;
+    if (!newPrefix || !oldPrefix || !n.startsWith(oldPrefix)) return "";
+    return newPrefix + n.slice(oldPrefix.length);
+  };
+  const numbers = new Map((prev.config.players || [])
+    .filter((p) => p && p.id && p.number)
+    .map((p) => [p.id, renumber(String(p.number))])
+    .filter(([, n]) => n));
   if (numbers.size && Array.isArray(config.players)) {
     config.players = config.players.map((p) => (p && !p.number && numbers.has(p.id) ? { ...p, number: numbers.get(p.id) } : p));
   }

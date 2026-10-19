@@ -106,4 +106,45 @@ describe('a competition save', () => {
     expect(probe.props.competition.players[0].number).toBe('K1');
     logged.mockRestore();
   });
+
+  // Stage 6 review 11, minor 10: a save that changes the competition's number
+  // prefix shows the numbers under the new prefix, never the old one, when
+  // the refetch after it fails; a prefix cleared takes the numbers away.
+  for (const [label, next, want] of [
+    ['a new prefix', 'A', 'A1'],
+    ['a cleared prefix', '', undefined],
+  ]) {
+    it(`shows the competitor numbers under ${label}`, async () => {
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const numbered = () => {
+        const d = detail(null);
+        d.config.numberPrefix = 'K';
+        d.config.players = [{ id: 'p-1', name: 'Alice', dojo: 'D1', seed: null, number: 'K1' }];
+        return d;
+      };
+      window.API.fetchCompetitionDetails.mockReset();
+      window.API.fetchCompetitionDetails
+        .mockResolvedValueOnce(numbered())
+        .mockRejectedValue(new Error('offline'));
+      window.API.updateCompetition.mockResolvedValue({
+        ...numbered().config,
+        numberPrefix: next,
+        players: [{ id: 'p-1', name: 'Alice', dojo: 'D1', seed: null }],
+        warnings: [],
+      });
+      await act(async () => {
+        render(
+          <AdminApp
+            tournament={{ name: 'Cup', courts: ['A'], competitions: [numbered().config] }}
+            onUpdate={vi.fn()} onLogout={vi.fn()} onViewerMode={vi.fn()} onPasswordChange={vi.fn()}
+            tweaks={{}} password="pw" view={{ kind: 'competition', id: 'c1', section: 'participants' }} setView={vi.fn()}
+            showToast={vi.fn()} authConfig={{}}
+          />,
+        );
+      });
+      await act(async () => { await probe.props.onUpdate({ ...probe.props.competition, numberPrefix: next }); });
+      expect(probe.props.competition.players[0].number).toBe(want);
+      logged.mockRestore();
+    });
+  }
 });

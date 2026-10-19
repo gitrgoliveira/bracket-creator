@@ -507,6 +507,16 @@ export function kachinukiEnchoAvailable(outcome) {
   return outcome.kind === "draw" || (outcome.kind === "blocked" && outcome.reason === "knockout-tie");
 }
 
+// The three footer hints a kachinuki sheet shows above its buttons. Their
+// words live here once because the slot that holds the line reserves the
+// tallest of them (stage 6 review 13, m5): a hint can be two or three lines on
+// a tablet, and the Encho clause is the longer form of the two it can end in.
+const KACHINUKI_HINT_NOTHING = "Nothing recorded yet: score a bout before ending the match.";
+const kachinukiTiedHint = (enchoOffered) =>
+  `Tied bout. End match records a drawn encounter. Record bout retires both and brings the next pair up.${enchoOffered ? " Encho keeps the same pair fighting when this pairing must produce a result." : ""}`;
+const kachinukiNoDrawHint = (enchoOffered) =>
+  `No draws in a knockout. Record bout brings the next fighter up.${enchoOffered ? " Encho keeps the same pair on this bout." : ""} Continue until there is a point.`;
+
 // kachinukiBandModel: content model for the summary band in KACHINUKI mode
 // (light instrument panel, user-confirmed brief 2026-08-02). The band shows
 // BOUT-LOG FACTS ONLY — never roster inferences (the roster is advisory by
@@ -5729,32 +5739,44 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               This replaces the koTieBlocked gating for kachinuki: the
               correction-mode Finish buttons below never see a running
               kachinuki match, so there are no competing hints. */}
-          {kachinukiBoutMode && (kachinukiEndOutcome?.kind === "blocked" || kachinukiEndOutcome?.kind === "draw")
-            && !kachinukiLiveBoutAwaitsScore && !kachinukiNoLiveBout && (
-            <div data-testid="kachinuki-end-hint" style={{ fontSize: 12, color: "var(--ink-2)" }}>
-              {!kachinukiEnchoAvailable(kachinukiEndOutcome) ? (
-                <span>Nothing recorded yet: score a bout before ending the match.</span>
-              ) : kachinukiEndOutcome.kind === "draw" ? (
-                // The Encho clause is dropped once the encounter has advanced
-                // past the tied bout (kachinukiEnchoOffered false) so the hint
-                // never advertises a hidden button (mp-gmcg review).
-                <span>Tied bout. End match records a drawn encounter. Record bout retires both and brings the next pair up.{kachinukiEnchoOffered ? " Encho keeps the same pair fighting when this pairing must produce a result." : ""}</span>
-              ) : (
-                <span>No draws in a knockout. Record bout brings the next fighter up.{kachinukiEnchoOffered ? " Encho keeps the same pair on this bout." : ""} Continue until there is a point.</span>
-              )}
-            </div>
-          )}
-          {/* The hint above holds its line when it goes (operator decision F1,
+          {/* The hint holds its room when it goes (operator decision F1,
               2026-10-19): the overlay editor is centred, so a line leaving its
               footer (the first point or a Fusensho scored on the bout) moved the
-              whole sheet up by half a line under the operator's thumb, and a
-              quick second tap on Fusensho landed beside it. */}
-          {kachinukiBoutMode && !((kachinukiEndOutcome?.kind === "blocked" || kachinukiEndOutcome?.kind === "draw")
-            && !kachinukiLiveBoutAwaitsScore && !kachinukiNoLiveBout) && (
-            <div className="holds-space" aria-hidden="true" data-testid="kachinuki-end-hint-space" style={{ fontSize: 12 }}>
-              <span>Nothing recorded yet: score a bout before ending the match.</span>
-            </div>
-          )}
+              whole sheet up under the operator's thumb, and a quick second tap
+              on Fusensho landed beside it. The room is the TALLEST hint that
+              can appear here, not the one shown: they run to two or three lines
+              on a tablet, and a one-line placeholder still moved the sheet
+              (stage 6 review 13, m5). Every hint's words are laid hidden in the
+              slot's one cell (.hint-slot), whether a hint is shown or not, so
+              the slot is as tall as the tallest, at any width. */}
+          {kachinukiBoutMode && (() => {
+            const hintShown = (kachinukiEndOutcome?.kind === "blocked" || kachinukiEndOutcome?.kind === "draw")
+              && !kachinukiLiveBoutAwaitsScore && !kachinukiNoLiveBout;
+            return (
+              <div className="hint-slot" data-testid="kachinuki-end-hint-slot" style={{ fontSize: 12 }}>
+                {hintShown && (
+                  <div data-testid="kachinuki-end-hint" style={{ color: "var(--ink-2)" }}>
+                    {!kachinukiEnchoAvailable(kachinukiEndOutcome) ? (
+                      <span>{KACHINUKI_HINT_NOTHING}</span>
+                    ) : kachinukiEndOutcome.kind === "draw" ? (
+                      // The Encho clause is dropped once the encounter has advanced
+                      // past the tied bout (kachinukiEnchoOffered false) so the hint
+                      // never advertises a hidden button (mp-gmcg review).
+                      <span>{kachinukiTiedHint(kachinukiEnchoOffered)}</span>
+                    ) : (
+                      <span>{kachinukiNoDrawHint(kachinukiEnchoOffered)}</span>
+                    )}
+                  </div>
+                )}
+                <div className="holds-space hint-slot" aria-hidden="true"
+                  data-testid={hintShown ? undefined : "kachinuki-end-hint-space"}>
+                  <div data-reserve-hint="nothing">{KACHINUKI_HINT_NOTHING}</div>
+                  <div data-reserve-hint="tied">{kachinukiTiedHint(true)}</div>
+                  <div data-reserve-hint="no-draws">{kachinukiNoDrawHint(true)}</div>
+                </div>
+              </div>
+            );
+          })()}
           {/* bc-tmfn: why Finish did not finish. Visible text, not a title
               (a tablet has no hover), and only after a Finish tap, so a
               match in progress is not nagged about bouts still to come. */}

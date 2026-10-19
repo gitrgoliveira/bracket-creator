@@ -2062,6 +2062,19 @@ a:hover {
   visibility: hidden;
 }
 
+/* A slot that shows one of several texts of different lengths keeps the room of
+   the longest (operator decision F1, 2026-10-19; stage 6 review 13): its
+   children share one grid cell, so the slot is as tall as the tallest child
+   whether that child is shown or laid hidden (.holds-space), at any width. The
+   team sheet's kachinuki footer hint is one. */
+.hint-slot {
+  display: grid;
+}
+
+.hint-slot > * {
+  grid-area: 1 / 1;
+}
+
 /* A control whose label changes when pressed holds its place (operator
    decision F1, 2026-10-19, the team sheet's Fusensho): its longer label
    (data-reserve) is laid, hidden, in the same grid cell as the shown one, so

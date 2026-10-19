@@ -101,3 +101,52 @@ describe('the Fusensho button holds its place when pressed', () => {
     if (space()) expect(space().classList.contains('holds-space')).toBe(true);
   });
 });
+
+// Stage 6 review 13, m5. The footer hint that goes when the bout gets a result
+// can be two or three lines on a tablet (the tied-bout and knockout hints), and
+// a placeholder of one line left the centred sheet shifting under the thumb. The
+// slot therefore always reserves the tallest hint that can appear there: every
+// hint's words laid hidden in one grid cell, so the cell is as tall as the
+// tallest, whether a hint is shown or not, at any width (1180x820 and 390x844
+// alike: jsdom lays nothing out, so the structure is pinned and the stylesheet
+// asserted).
+describe('the kachinuki footer hint keeps the room of the tallest hint', () => {
+  const tiedKnockoutBout = () => ({
+    position: 1, sideA: '', sideB: '', ipponsA: ['M'], ipponsB: ['M'], hansokuA: 0, hansokuB: 0, winner: '', decision: '',
+  });
+  const slot = () => document.querySelector('[data-testid="kachinuki-end-hint-slot"]');
+  const reserved = () => Array.from(slot().querySelectorAll('[data-reserve-hint]')).map((n) => n.textContent);
+
+  for (const [label, viewport] of [['1180x820', [1180, 820]], ['390x844', [390, 844]]]) {
+    it(`a tied knockout bout, then Fusensho, at ${label}: the slot holds the same reserve before and after`, async () => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: viewport[0] });
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: viewport[1] });
+      const kachinuki = match({ phase: 'bracket', teamMatchType: 'kachinuki', subResults: [tiedKnockoutBout()] });
+      await act(async () => {
+        render(<ScoreEditorModal match={kachinuki} onClose={vi.fn()} onSubmit={vi.fn()} password="" />);
+      });
+      expect(slot(), 'one slot holds the hint line').toBeTruthy();
+      const shown = document.querySelector('[data-testid="kachinuki-end-hint"]');
+      expect(shown, 'a tied knockout bout shows the knockout hint').toBeTruthy();
+      expect(shown.textContent).toMatch(/^No draws in a knockout\./);
+      expect(slot().contains(shown), 'the visible hint is inside the slot').toBe(true);
+      const before = reserved();
+      // The tallest of each hint: with the Encho clause, which is the longer.
+      expect(before.some((t) => /^Nothing recorded yet/.test(t))).toBe(true);
+      expect(before.some((t) => /^Tied bout\..*Encho keeps the same pair fighting/.test(t))).toBe(true);
+      expect(before.some((t) => /^No draws in a knockout\..*Encho keeps the same pair on this bout\./.test(t))).toBe(true);
+
+      await act(async () => { fireEvent.click(fusenshoButton('shiro')); });
+      expect(slot(), 'the slot stays after the bout has a result').toBeTruthy();
+      expect(document.querySelector('[data-testid="kachinuki-end-hint"]'), 'the hint itself has gone').toBeNull();
+      expect(reserved(), 'and the room it reserves is the same').toEqual(before);
+      expect(slot().querySelector('.holds-space[aria-hidden="true"]'), 'laid hidden, for no reader').toBeTruthy();
+    });
+  }
+
+  it('the stylesheet stacks the reserved hints in one cell', () => {
+    const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../../css/styles.css'), 'utf8');
+    expect(css).toMatch(/\.hint-slot\s*\{[^}]*display:\s*grid/);
+    expect(css).toMatch(/\.hint-slot > \*\s*\{[^}]*grid-area:\s*1 \/ 1/);
+  });
+});

@@ -163,4 +163,65 @@ describe('the participants card\'s roster writes', () => {
     expect(stored.get('Alice')).toBe(1);
     expect(stored.get('Bob')).toBe(2);
   });
+
+  // Stage 6 review 11, C: a tap on Move up or Move down means "put this row
+  // directly above (or below) the row it passed, as the operator saw them",
+  // applied to the latest roster, and nothing when that already holds. Re-found
+  // by key and spliced by index, a second Move up on Carol before the page
+  // showed the first moved her back down.
+  const names = (players) => players.map((p) => p.name);
+  const three = () => comp([
+    { id: 'p-1', name: 'Alice', dojo: 'D1', seed: 1 },
+    { id: 'p-2', name: 'Bob', dojo: 'D2', seed: 2 },
+    { id: 'p-3', name: 'Carol', dojo: 'D3', seed: 3 },
+  ]);
+
+  it('two quick Move up taps on one row leave it above the row it passed', async () => {
+    const server = makeServer(three());
+    let r;
+    await act(async () => { r = render(<server.Host />); });
+    fireEvent.click(r.getAllByLabelText('Move up')[2]);
+    await flush();
+    fireEvent.click(r.getAllByLabelText('Move up')[2]);
+    await flush();
+    await server.answerAll();
+    expect(names(server.stored)).toEqual(['Alice', 'Carol', 'Bob']);
+    expect(seeds(server.stored)).toEqual([['Alice', 1], ['Carol', 2], ['Bob', 3]]);
+  });
+
+  it('two quick Move down taps on one row leave it below the row it passed', async () => {
+    const server = makeServer(three());
+    let r;
+    await act(async () => { r = render(<server.Host />); });
+    fireEvent.click(r.getAllByLabelText('Move down')[0]);
+    await flush();
+    fireEvent.click(r.getAllByLabelText('Move down')[0]);
+    await flush();
+    await server.answerAll();
+    expect(names(server.stored)).toEqual(['Bob', 'Alice', 'Carol']);
+  });
+
+  it('Move up then Move down on one row before the page shows the first leaves it below the row the second passed', async () => {
+    const server = makeServer(three());
+    let r;
+    await act(async () => { r = render(<server.Host />); });
+    fireEvent.click(r.getAllByLabelText('Move up')[1]);
+    await flush();
+    fireEvent.click(r.getAllByLabelText('Move down')[1]);
+    await flush();
+    await server.answerAll();
+    expect(names(server.stored)).toEqual(['Alice', 'Carol', 'Bob']);
+  });
+
+  it('moves of two different rows each put their row where the operator put it', async () => {
+    const server = makeServer(three());
+    let r;
+    await act(async () => { r = render(<server.Host />); });
+    fireEvent.click(r.getAllByLabelText('Move up')[2]);
+    await flush();
+    fireEvent.click(r.getAllByLabelText('Move up')[1]);
+    await flush();
+    await server.answerAll();
+    expect(names(server.stored)).toEqual(['Bob', 'Alice', 'Carol']);
+  });
 });

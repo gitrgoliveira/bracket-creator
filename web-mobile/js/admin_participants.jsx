@@ -601,20 +601,27 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // gating the UI.
   const moveSeedRow = async (fromIdx, toIdx) => {
     if (fromIdx === toIdx) return;
-    // The rows are named as shown and found again in the roster the write is
-    // built from (putRoster), which may hold an earlier write not yet shown.
+    // A move means "this row directly above (moved up) or below (moved down)
+    // the row it passed, as the operator saw them" (stage 6 review 11, C).
+    // The rows are named as shown and the relation is laid on the roster the
+    // write is built from (putRoster), which may hold an earlier move not yet
+    // shown; when the relation already holds nothing is sent, so a second Move
+    // up tapped before the page shows the first never moves the row back.
     const shown = c.players || [];
     if (!shown[fromIdx] || !shown[toIdx]) return;
     const movedKey = seedKey(shown[fromIdx]);
     const targetKey = seedKey(shown[toIdx]);
+    const above = fromIdx > toIdx;
     try {
       await putRoster((players) => {
         const np = [...players];
         const from = np.findIndex((p) => seedKey(p) === movedKey);
-        const to = np.findIndex((p) => seedKey(p) === targetKey);
-        if (from < 0 || to < 0 || from === to) return null;
+        const at = np.findIndex((p) => seedKey(p) === targetKey);
+        if (from < 0 || at < 0 || from === at) return null;
+        if (from === (above ? at - 1 : at + 1)) return null;
         const [moved] = np.splice(from, 1);
-        np.splice(to, 0, moved);
+        const to = np.findIndex((p) => seedKey(p) === targetKey);
+        np.splice(above ? to : to + 1, 0, moved);
         // Re-assign seeds by new position order (only for currently-seeded players)
         const seededCount = np.filter(p => p.seed).length;
         return seededCount > 0

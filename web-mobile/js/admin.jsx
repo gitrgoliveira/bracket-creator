@@ -324,6 +324,11 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     // write made before the page shows this one is built on it.
     const answer = nearDupWarnings || [];
     Object.defineProperty(answer, "rosterVersion", { value: updatedComp.rosterVersion || "", enumerable: false });
+    // The roster that version names: what the server read back after the
+    // write, which can hold another desk's later change, so a roster write
+    // made before the page shows this one is built on these players and never
+    // on the list that was sent (stage 6 review 13, m3).
+    Object.defineProperty(answer, "rosterPlayers", { value: Array.isArray(updatedComp.players) ? updatedComp.players : null, enumerable: false });
     return answer;
   };
 

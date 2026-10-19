@@ -598,9 +598,15 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
           // before the save resolves (updateCompetition, m10), so the next PUT
           // is built from what the page shows (stage 6 review 11, A). Only a
           // page that has not rendered since this PUT went knows nothing newer
-          // than what it sent, under the version the save answered.
-          landedRosterRef.current = rosterRef.current === before
-            ? { players, version: (answer && answer.rosterVersion) || "", over: before } : null;
+          // than what it sent, under the version the save answered. The
+          // version names the roster the server read back after the write,
+          // which can hold another desk's later add and the ids it minted, so
+          // it is paired with the players the answer returns, never with the
+          // list that was sent (stage 6 review 13, m3); an answer that returns
+          // none leaves the next PUT to be built from what the page shows.
+          const answered = answer && Array.isArray(answer.rosterPlayers) ? answer.rosterPlayers : null;
+          landedRosterRef.current = rosterRef.current === before && answered
+            ? { players: answered, version: answer.rosterVersion || "", over: before } : null;
           return answer;
         } catch (err) {
           if (!err || err.code !== "roster_changed") throw err;

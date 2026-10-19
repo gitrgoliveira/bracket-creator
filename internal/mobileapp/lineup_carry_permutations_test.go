@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -29,6 +30,10 @@ type carryStep struct {
 	name  string
 	at    int64
 }
+
+// carryRaceKeep is how many arrival orders of each scenario run under the race
+// detector (raceSample); a scenario of 24 or 120 runs whole there too.
+const carryRaceKeep = 120
 
 // TestLineupCarry_AMatchLineupIsTheSameInEveryArrivalOrder is the property the
 // operator asked for (decision L1): a match's own lineup comes out the same in
@@ -106,7 +111,8 @@ func TestLineupCarry_AMatchLineupIsTheSameInEveryArrivalOrder(t *testing.T) {
 		{"P1-2", 1, "Mori", 60},
 		{"", 1, "Aoki", 50},
 	}
-	for _, sc := range []struct {
+	gin.SetMode(gin.TestMode)
+	for k, sc := range []struct {
 		name      string
 		steps     []carryStep
 		kachinuki bool
@@ -118,8 +124,11 @@ func TestLineupCarry_AMatchLineupIsTheSameInEveryArrivalOrder(t *testing.T) {
 		{"the starting lineup removed", removeStart, false}, {"the starting lineup removed, kachinuki, with the start", removeStart, true},
 		{"a copy's stamp moved back", movedBack, false}, {"a pin made a copy before the start", pinToCopy, true},
 	} {
-		steps, kachinuki := sc.steps, sc.kachinuki
+		steps, kachinuki, comp := sc.steps, sc.kachinuki, fmt.Sprintf("carry%d", k)
 		t.Run(sc.name, func(t *testing.T) {
+			// Each scenario has its own competition, so they run side by side.
+			t.Parallel()
+			fx := newCarryFixture(t, comp, kachinuki)
 			n := len(steps)
 			if kachinuki {
 				n++ // the start of P1-2, at 0
@@ -138,13 +147,16 @@ func TestLineupCarry_AMatchLineupIsTheSameInEveryArrivalOrder(t *testing.T) {
 				return steps[i].at
 			}
 			slices.SortFunc(ref, func(a, b int) int { return int(at(a) - at(b)) })
-			want := carryRun(t, steps, kachinuki, ref)
+			want := carryRun(t, fx, steps, ref)
 			t.Logf("in time: %s", want)
 			differ, total := 0, 0
 			var first []string
-			for _, order := range carryPerms(idx) {
+			all := carryPerms(idx)
+			orders := raceSample(all, carryRaceKeep)
+			t.Logf("%d of %d arrival orders driven", len(orders), len(all))
+			for _, order := range orders {
 				total++
-				if got := carryRun(t, steps, kachinuki, order); got != want {
+				if got := carryRun(t, fx, steps, order); got != want {
 					differ++
 					if len(first) < 4 {
 						first = append(first, fmt.Sprintf("order %v: %s", order, got))
@@ -173,15 +185,16 @@ func carryPerms(xs []int) [][]int {
 
 // carryRun plays one arrival order through the lineup doors and the start, and
 // answers the team's three match lineups as stored.
-func carryRun(t *testing.T, steps []carryStep, kachinuki bool, order []int) string {
+func carryRun(t *testing.T, fx carryFixture, steps []carryStep, order []int) string {
 	t.Helper()
-	// The doors as the server wires them: the lineup PUTs with the engine
-	// that follows a save (setupTestRouter registers them without it).
-	gin.SetMode(gin.TestMode)
+	// Every ordering starts from a copy of the fixture's data folder, opened by
+	// a store of its own, as a restarted server opens it.
 	dir := t.TempDir()
+	require.NoError(t, os.CopyFS(dir, os.DirFS(fx.dir)))
 	store, err := state.NewStore(dir)
 	require.NoError(t, err)
-	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Carry", Password: "secret"}))
+	// The doors as the server wires them: the lineup PUTs with the engine
+	// that follows a save (setupTestRouter registers them without it).
 	eng := engine.New(store)
 	hub := NewHub()
 	defer hub.Close()
@@ -191,36 +204,7 @@ func carryRun(t *testing.T, steps []carryStep, kachinuki bool, order []int) stri
 	admin.Use(AuthMiddleware(verifier, store))
 	RegisterMatchHandlers(admin, eng, store, store, hub, verifier, store)
 	RegisterLineupHandlers(admin, store, store, store, hub, store, verifier, eng)
-	const comp = "carry"
-	c := &state.Competition{ID: comp, Kind: "team", TeamSize: 3, Status: state.CompStatusPools}
-	if kachinuki {
-		c.TeamMatchType = state.TeamMatchTypeKachinuki
-	}
-	require.NoError(t, store.SaveCompetition(c))
-	require.NoError(t, store.SaveParticipants(comp, []domain.Player{{Name: "Taka", Dojo: "T"}, {Name: "Kuma", Dojo: "K"}, {Name: "Washi", Dojo: "W"}, {Name: "Inu", Dojo: "I"}}))
-	ps, err := store.LoadParticipants(comp, false)
-	require.NoError(t, err)
-	id := map[string]string{}
-	for _, p := range ps {
-		id[p.Name] = p.ID
-	}
-	members := map[string]string{}
-	for _, name := range []string{"Sato", "Ueda", "Mori", "Doi", "Endo", "Kato", "Aoki"} {
-		m, err := store.AddTeamMember(comp, id["Taka"], name)
-		require.NoError(t, err)
-		members[name] = m.ID
-	}
-	base := time.Now().UnixMilli() - 600_000
-	p1, p2 := domain.PositionNumbered(1), domain.PositionNumbered(2)
-	require.NoError(t, store.SetTeamLineup(comp, domain.TeamLineup{TeamID: id["Taka"],
-		Positions: map[domain.Position]string{p1: "Sato", p2: "Ueda"},
-		MemberIDs: map[domain.Position]string{p1: members["Sato"], p2: members["Ueda"]},
-		Stamps:    map[domain.Position]int64{p1: base - 1000, p2: base - 1000}}, 3))
-	require.NoError(t, store.SavePoolMatches(comp, []state.MatchResult{
-		{ID: "P1-0", SideA: "Taka", SideB: "Kuma", SideAID: id["Taka"], SideBID: id["Kuma"], Status: state.MatchStatusScheduled},
-		{ID: "P1-1", SideA: "Taka", SideB: "Washi", SideAID: id["Taka"], SideBID: id["Washi"], Status: state.MatchStatusScheduled},
-		{ID: "P1-2", SideA: "Taka", SideB: "Inu", SideAID: id["Taka"], SideBID: id["Inu"], Status: state.MatchStatusScheduled},
-	}))
+	comp, id, members, base := fx.comp, fx.id, fx.members, fx.base
 	do := func(method, path string, body any) *httptest.ResponseRecorder {
 		b, _ := json.Marshal(body)
 		req := httptest.NewRequest(method, path, bytes.NewReader(b))
@@ -279,4 +263,53 @@ func carryRun(t *testing.T, steps []carryStep, kachinuki bool, order []int) stri
 		}
 	}
 	return strings.Join(out, " ")
+}
+
+// carryFixture is the data every ordering of one scenario starts from, built
+// once (seven team members added one by one rewrite team-members.yaml seven
+// times, about half of an ordering's cost) and copied for each ordering.
+type carryFixture struct {
+	dir, comp   string
+	base        int64
+	id, members map[string]string
+}
+
+// newCarryFixture builds the team competition the orderings run on: four
+// teams, Taka's seven members, its starting lineup and its three pool matches.
+func newCarryFixture(t *testing.T, comp string, kachinuki bool) carryFixture {
+	t.Helper()
+	dir := t.TempDir()
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Carry", Password: "secret"}))
+	c := &state.Competition{ID: comp, Kind: "team", TeamSize: 3, Status: state.CompStatusPools}
+	if kachinuki {
+		c.TeamMatchType = state.TeamMatchTypeKachinuki
+	}
+	require.NoError(t, store.SaveCompetition(c))
+	require.NoError(t, store.SaveParticipants(comp, []domain.Player{{Name: "Taka", Dojo: "T"}, {Name: "Kuma", Dojo: "K"}, {Name: "Washi", Dojo: "W"}, {Name: "Inu", Dojo: "I"}}))
+	ps, err := store.LoadParticipants(comp, false)
+	require.NoError(t, err)
+	id := map[string]string{}
+	for _, p := range ps {
+		id[p.Name] = p.ID
+	}
+	members := map[string]string{}
+	for _, name := range []string{"Sato", "Ueda", "Mori", "Doi", "Endo", "Kato", "Aoki"} {
+		m, err := store.AddTeamMember(comp, id["Taka"], name)
+		require.NoError(t, err)
+		members[name] = m.ID
+	}
+	base := time.Now().UnixMilli() - 600_000
+	p1, p2 := domain.PositionNumbered(1), domain.PositionNumbered(2)
+	require.NoError(t, store.SetTeamLineup(comp, domain.TeamLineup{TeamID: id["Taka"],
+		Positions: map[domain.Position]string{p1: "Sato", p2: "Ueda"},
+		MemberIDs: map[domain.Position]string{p1: members["Sato"], p2: members["Ueda"]},
+		Stamps:    map[domain.Position]int64{p1: base - 1000, p2: base - 1000}}, 3))
+	require.NoError(t, store.SavePoolMatches(comp, []state.MatchResult{
+		{ID: "P1-0", SideA: "Taka", SideB: "Kuma", SideAID: id["Taka"], SideBID: id["Kuma"], Status: state.MatchStatusScheduled},
+		{ID: "P1-1", SideA: "Taka", SideB: "Washi", SideAID: id["Taka"], SideBID: id["Washi"], Status: state.MatchStatusScheduled},
+		{ID: "P1-2", SideA: "Taka", SideB: "Inu", SideAID: id["Taka"], SideBID: id["Inu"], Status: state.MatchStatusScheduled},
+	}))
+	return carryFixture{dir: dir, comp: comp, base: base, id: id, members: members}
 }

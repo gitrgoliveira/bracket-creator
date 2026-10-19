@@ -701,11 +701,15 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
 const QUEUE_STORAGE_KEY = 'bc_write_queue_v2';
 const LEGACY_QUEUE_STORAGE_KEY = 'bc_write_queue';
 
-// Defense-in-depth allowlist for terminal-write replay. The queue only ever
-// holds score/decision/lineup writes, which are ALWAYS PUT/POST to
-// /api/competitions/…: so a tampered or corrupted bc_write_queue entry can't be
-// flushed into some other endpoint or HTTP method. Used by both rehydrate (load)
-// and flush, kept in one place so the two checks can't drift apart.
+// Defense-in-depth allowlist for outbox replay. Every entry the queue holds (a
+// score write, a decision, a tap, a reopen, a send back, an override, a court
+// move, a time change, a lineup save or removal, a member add, rename or
+// cleared name, a reinstatement, a chusen's order, a representative bout's add
+// or remove, a kachinuki bout's removal) is a PUT, POST or DELETE to
+// /api/competitions/…, and a DELETE only for the doors named below, so a
+// tampered or corrupted stored entry can't be flushed into some other endpoint
+// or HTTP method. Used by both rehydrate (load) and flush, kept in one place so
+// the two checks can't drift apart.
 const _ALLOWED_QUEUE_METHODS = ['PUT', 'POST', 'DELETE'];
 function _isAllowedTerminalRequest(method, url) {
     if (!_ALLOWED_QUEUE_METHODS.includes(method) || typeof url !== 'string' || !url) return false;
@@ -723,13 +727,15 @@ function _isAllowedTerminalRequest(method, url) {
         return false;
     }
     if (u.origin !== origin || !u.pathname.startsWith('/api/competitions/')) return false;
-    // A DELETE is queued for five doors: the representative bout's remove, a
-    // kachinuki bout's removal (bc-evts), a team member's name cleared, a
-    // match's own lineup removed (review 2, R1) and a competition's pool-rank
-    // overrides reset (review 11, Y7).
+    // A DELETE is queued for four doors: the representative bout's remove, a
+    // kachinuki bout's removal (bc-evts), a team member's name cleared and a
+    // match's own lineup removed (review 2, R1). A reset of the pool-rank
+    // overrides is not one: no shipped build queued it (only builds of this
+    // change between stage 3 reviews 11 and 12 did), so no stored entry needs
+    // to replay it, and the server's DELETE overrides stays a repair door
+    // (stage 6 review 11, item 11 b).
     if (method === 'DELETE') {
         return /\/(daihyosen|kachinuki-bout)$/.test(u.pathname)
-            || /^\/api\/competitions\/[^/]+\/overrides$/.test(u.pathname)
             || /\/teams\/[^/]+\/(members|match-lineups)\/[^/]+$/.test(u.pathname);
     }
     return true;

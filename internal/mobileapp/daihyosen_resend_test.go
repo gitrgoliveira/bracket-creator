@@ -22,6 +22,10 @@ func TestDaihyosen_AResendAfterALostAnswerIsAnsweredAsRecorded(t *testing.T) {
 	add := map[string]any{"modifiedAt": f.now, "writeId": "w-add-1"}
 	w := f.send(http.MethodPost, repBoutMatchPath+"/daihyosen", "main-pw", add)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var first struct {
+		Result map[string]any `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &first))
 
 	w = f.send(http.MethodPost, repBoutMatchPath+"/daihyosen", "main-pw", add)
 	require.Equal(t, http.StatusOK, w.Code, "the same add sent again is answered as recorded: %s", w.Body.String())
@@ -32,7 +36,10 @@ func TestDaihyosen_AResendAfterALostAnswerIsAnsweredAsRecorded(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	require.NotNil(t, body.SubResult, "the answer carries the bout as stored")
 	assert.Equal(t, -1, body.SubResult.Position)
-	assert.NotNil(t, body.Result)
+	require.NotNil(t, body.Result)
+	for _, k := range []string{"status", "court", "sideA", "sideB", "winner"} {
+		assert.Equal(t, first.Result[k], body.Result[k], "the resend's answer reads as the first one did: %s", k)
+	}
 	rows := 0
 	for _, s := range storedB1(t, f.store, "c1").SubResults {
 		if s.Position == -1 {

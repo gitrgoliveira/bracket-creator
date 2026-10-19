@@ -25,7 +25,8 @@ beforeAll(async () => {
 });
 
 // A host whose server stores each PUT as it is answered (in the order they
-// land) and whose page shows the stored roster only once refetched (the
+// land) and whose page shows each PUT's stored answer, as AdminApp's
+// updateCompetition does (stage 6 review 10, m10), with no refetch (the
 // refetch after a PUT can fail, or come late).
 function makeServer(initial) {
   const server = { stored: initial.players, saves: [], setC: null };
@@ -37,6 +38,7 @@ function makeServer(initial) {
       server.saves.push({ next, d });
       await d.promise;
       server.stored = next.players;
+      setC((prev) => ({ ...prev, players: next.players }));
       return [];
     };
     return (

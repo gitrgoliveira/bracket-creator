@@ -519,10 +519,13 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // EVERY roster PUT this card makes has ONE owner, putRoster (stage 6 review
   // 10, M2): a typed seed, a row moved, a shuffle, Clear seeds, a seed file
   // and Apply changes. They go one at a time, each built as it goes, from the
-  // latest known roster: the roster the last answered PUT sent while the page
-  // still shows the copy it landed over (the refetch that shows it can fail or
-  // come late), else the roster shown, with every seed typed before the write
-  // laid on. Built from the roster as rendered, a row dragged after a seed was
+  // roster the page shows (the host shows each PUT's stored answer, then its
+  // refetch, before the save resolves: a check-in or a competitor another
+  // desk added or removed meanwhile is in it, stage 6 review 11, A; the PUT
+  // is a whole-roster write and the server stores `checkedIn` as sent), or,
+  // while the page has not rendered since the last PUT went, that PUT's
+  // roster, with every seed typed before the write and not yet answered laid
+  // on. Built from the roster as rendered, a row dragged after a seed was
   // typed sent that row's old seed, landed second and overwrote it (and stage
   // 6 review 9, F9: two quick seeds overwrote each other). A typed seed is
   // held by its competitor (id, else name and dojo for an id-less legacy row,
@@ -558,8 +561,15 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     const send = async () => {
       const players = build(latestRoster(upTo));
       if (!players) return undefined;
-      const answer = await onUpdate({ ...rosterRef.current, players });
-      landedRosterRef.current = { players, over: rosterRef.current };
+      const before = rosterRef.current;
+      const answer = await onUpdate({ ...before, players });
+      // The host shows the PUT's stored answer, and then its refetch, before
+      // the save resolves (updateCompetition, m10), so the next PUT is built
+      // from what the page shows, a desk's check-in or a competitor added or
+      // removed meanwhile included (stage 6 review 11, A). Only a page that
+      // has not rendered since this PUT went knows nothing newer than what
+      // it sent.
+      landedRosterRef.current = rosterRef.current === before ? { players, over: before } : null;
       return answer;
     };
     const run = rosterChainRef.current.then(send);

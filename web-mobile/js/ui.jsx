@@ -1,6 +1,7 @@
 // Shared UI primitives used by both admin and viewer modules.
 
 import { useOpenedTapGuard } from './tap_guard.jsx';
+import { toastSnapshot, subscribeToast, dismissToast } from './toast_queue.jsx';
 
 // Formats that run their matches through the pool pipeline but are not pools.
 // See the label note inside StatusBadge.
@@ -53,121 +54,50 @@ function formatDate(d) {
   return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
-// Toast: single visible slot. Success toasts auto-dismiss quickly and are
-// polite (announced when the SR is idle). ERROR toasts dwell ≥8s, expose a
-// manual dismiss control, and are assertive (announced immediately) so an
-// operator in a noisy hall doesn't miss a failed action. The Toast component
-// itself (not the host) refuses to overwrite a still-visible error with a
-// later non-error toast: it latches the shown payload and ignores a
-// suppressed prop change (see the effect below). These dwell constants are
-// module-local; they are not exported.
-const TOAST_SUCCESS_DWELL_MS = 2700;
-const TOAST_ERROR_DWELL_MS = 8000;
-
-// Toast renders a single visible slot. The host (app.jsx) keeps one toast in
-// state and RE-RENDERS the same <Toast> instance with new props on each
-// showToast call (no changing key, so it is not remounted). Toast latches the
-// payload it is currently showing in its OWN `shown` state and ignores a
-// parent prop change that would overwrite a still-visible ERROR with a later
-// non-error toast. This protects ops-critical failures from being silently
-// replaced by a routine success, without requiring the host to track dwell
-// windows.
+// Toast: single visible slot, drawn from toast_queue.jsx, the one owner of
+// the queue, the toast shown and its timers (dwells, latching, arrival order
+// and identity dedupe are its rules; see that file).
 //
 //  - success/info: role=status + aria-live=polite, short auto-dismiss.
 //  - pending: the same, with the pending icon instead of the success check: a
 //    write the device holds until the connection returns is not saved yet
 //    (worded by write_result.jsx's queuedNotice).
-//  - error: role=alert + aria-live=assertive, long dwell (>=8s) plus a manual
-//    dismiss control; cannot be clobbered by an incoming non-error toast.
-function Toast({ message, type, onClose }) {
-  // Latch the first non-trivial payload this mount sees. The host re-renders
-  // this component (not remounts) when state.toast changes, so without this
-  // latch an incoming success prop would overwrite a live error in place.
-  // `seq` tells two shows of the same words apart, so each gets its dwell.
-  const [shown, setShown] = React.useState({ message, type, seq: 0 });
-  const [visible, setVisible] = React.useState(true);
-  const onCloseRef = React.useRef(onClose);
-  React.useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
-  // Toasts held back by a latched error or warning, shown in order once it
-  // goes, never dropped (stage 6 review 11, minor 1: "A tap shown as not
-  // applied was applied after all" is told once per device, and a warning
-  // showing dropped it).
-  const queueRef = React.useRef([]);
-  const seqRef = React.useRef(0);
-  const show = (next) => {
-    seqRef.current += 1;
-    setShown({ message: next.message, type: next.type, seq: seqRef.current });
-    setVisible(true);
-  };
-  // The shown toast is done: the next one held back shows, else the host
-  // closes the toast.
-  const advance = () => {
-    const next = queueRef.current.shift();
-    if (next) { show(next); return; }
-    if (onCloseRef.current) onCloseRef.current();
-  };
+//  - error: role=alert + aria-live=assertive, long dwell (>=8s).
+//  - warning: the warning sign and the long dwell, announced politely.
+//  - a LATCHED toast (an error, a warning, a once-told queue alert) carries a
+//    manual dismiss control and is never replaced by a later toast.
+function Toast() {
+  // Presentational (bc-evts stage 6 review 12): the queue, the toast shown,
+  // its visibility and its timers are toast_queue.jsx's, which survive this
+  // component remounting (the admin and viewer branches each render one). A
+  // remount reads the snapshot again; it never re-pushes or re-times a toast.
+  const [shown, setShown] = React.useState(toastSnapshot);
+  React.useEffect(() => {
+    const off = subscribeToast(setShown);
+    // A change between the first render and this effect is not missed.
+    setShown(toastSnapshot());
+    return off;
+  }, []);
+  if (!shown) return null;
 
   const shownIsError = shown.type === 'error';
-
-  // Accept an incoming prop change only when it is NOT being held back: a
-  // later non-error toast waits while an error is still visible, and a later
-  // toast that is neither an error nor a warning waits while a warning is
-  // (stage 6 review 10, m2: the flush pass's "N sent", raised just after a
-  // lineup warning, replaced it a render later); anything else (error→error,
-  // warning→error or warning, after a dismiss, other→anything) replaces.
-  // Deps are intentionally [message, type]: re-running on shown.*/visible
-  // would defeat the latch guard above (see comment).
-  React.useEffect(() => {
-    const incomingIsError = type === 'error';
-    const held = (shownIsError && visible && !incomingIsError)
-      || (shown.type === 'warning' && visible && !incomingIsError && type !== 'warning');
-    if (held) {
-      const q = queueRef.current;
-      const last = q[q.length - 1];
-      if (!last || last.message !== message || last.type !== type) q.push({ message, type });
-      return;
-    }
-    if (message === shown.message && type === shown.type) return; // no change
-    show({ message, type });
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [message, type]);
-
-  // Auto-dismiss sequence, keyed on the SHOWN payload identity: NOT on
-  // `visible`. t1 hides at dwell; t2 shows the next toast held back, else
-  // fires onClose (host setToast(null) → unmount) 300ms later. `visible` must
-  // NOT be a dep: when t1 flips it false the effect would re-run, and its
-  // cleanup would clear the still-pending t2 before it could fire: so onClose
-  // never ran and the toast stuck on screen forever (no CSS hides a
-  // non-is-visible toast). Re-triggering on the shown payload restarts the
-  // dwell for each new toast, which is the intent.
-  // A warning (a change kept with something to check, stage 6 review 9, F5)
-  // is read like an error, the sign, the dwell, a dismiss and the latch, but
-  // announced politely.
   const shownIsWarning = shown.type === 'warning';
-  React.useEffect(() => {
-    const dwell = shownIsError || shownIsWarning ? TOAST_ERROR_DWELL_MS : TOAST_SUCCESS_DWELL_MS;
-    const t1 = setTimeout(() => setVisible(false), dwell);
-    const t2 = setTimeout(advance, dwell + 300);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [shown.message, shown.type, shown.seq, shownIsError, shownIsWarning]);
-
   const role = shownIsError ? 'alert' : 'status';
   const ariaLive = shownIsError ? 'assertive' : 'polite';
 
   return (
     <div
-      className={`toast toast--${shown.type || 'info'} ${visible ? 'is-visible' : ''}`}
+      className={`toast toast--${shown.type || 'info'} ${shown.visible ? 'is-visible' : ''}`}
       role={role}
       aria-live={ariaLive}
     >
       <div className="toast__icon" aria-hidden="true">{shownIsError || shownIsWarning ? '⚠️' : shown.type === 'pending' ? '⏳' : '✅'}</div>
       <div className="toast__msg">{shown.message}</div>
-      {(shownIsError || shownIsWarning) && (
+      {shown.latched && (
         <button type="button"
           className="toast__dismiss"
           aria-label="Dismiss"
-          onClick={() => { setVisible(false); advance(); }}
+          onClick={dismissToast}
         >&times;</button>
       )}
     </div>

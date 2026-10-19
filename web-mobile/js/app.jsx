@@ -11,6 +11,7 @@ import { VersionBanner } from './version_banner.jsx';
 import { tapWords } from './match_history_view.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
+import { pushToast } from './toast_queue.jsx';
 
 const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC } = React;
 
@@ -453,6 +454,28 @@ export function queueAlertToastType(alert) {
   return alert && alert.kind === "sent" ? "success" : "error";
 }
 
+
+// queueAlertToastOptions: the toast queue's identity and latch for a queue
+// alert (bc-evts stage 6 review 12). Every kind but "N sent" is told ONCE
+// (a tap_applied whose told-tap record was claimed, a displaced result, a
+// refusal...), so it is latched: never replaced by a later toast, it waits
+// for its dwell or a dismiss. The identity is the alert object itself (the
+// outbox builds a fresh one per alert, and the buffered channel replays the
+// same object), so one alert is never shown twice and two alerts with the
+// same words both show. Exported for test.
+const _queueAlertIds = new WeakMap();
+let _queueAlertSeq = 0;
+export function queueAlertToastOptions(alert) {
+  if (!alert || typeof alert !== "object") return { latched: false };
+  let id = _queueAlertIds.get(alert);
+  if (id === undefined) {
+    _queueAlertSeq += 1;
+    id = `queue-alert:${alert.kind}:${_queueAlertSeq}`;
+    _queueAlertIds.set(alert, id);
+  }
+  return { id, latched: alert.kind !== "sent" };
+}
+
 function App() {
   const [tournament, setTournament] = useS(undefined);
   const [loading, setLoading] = useS(true);
@@ -546,7 +569,6 @@ function App() {
   // refetch while the shiaijo operator console is active (mp-9h1f).
   const adminViewRef = useR(adminView);
   useE(() => { adminViewRef.current = adminView; }, [adminView]);
-  const [toast, setToast] = useS(null);
   // T063: SSE connection status, surfaced to display surfaces so the
   // TV / lobby / overlay can render a reconnect indicator during the
   // window between EventSource error and reconnect-onopen. The
@@ -627,8 +649,11 @@ function App() {
   const [authConfig, setAuthConfig] = useS(undefined);
   const authPromptRef = React.useRef(false);
 
-  const showToast = (message, type = 'success') => {
-    setToast({ message, type });
+  // The queue, the toast shown and its timers are toast_queue.jsx's, so they
+  // survive the admin<->viewer switch that remounts <Toast>. `opts.id` dedupes
+  // by identity; `opts.latched` marks a notice told once.
+  const showToast = (message, type = 'success', opts) => {
+    pushToast(message, type, opts);
   };
 
   // bc-qttl: the offline write queue has no other way to reach the operator.
@@ -644,9 +669,9 @@ function App() {
     if (typeof window.subscribeQueueAlert !== "function") return;
     return window.subscribeQueueAlert((alert) => {
       const message = queueAlertMessage(alert);
-      if (message) showToast(message, queueAlertToastType(alert));
+      if (message) showToast(message, queueAlertToastType(alert), queueAlertToastOptions(alert));
     });
-    // Mount-only: showToast closes over setToast, which is stable.
+    // Mount-only: showToast pushes into the module-level toast queue.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1573,7 +1598,7 @@ function App() {
             }}
           />
         )}
-        {toast && <window.Toast {...toast} onClose={() => setToast(null)} />}
+        <window.Toast />
       </>
     );
   }
@@ -1714,7 +1739,7 @@ function App() {
           }}
         />
       )}
-      {toast && <window.Toast {...toast} onClose={() => setToast(null)} />}
+      <window.Toast />
     </>
   );
 }

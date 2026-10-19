@@ -2062,6 +2062,29 @@ a:hover {
   visibility: hidden;
 }
 
+/* A control whose label changes when pressed holds its place (operator
+   decision F1, 2026-10-19, the team sheet's Fusensho): its longer label
+   (data-reserve) is laid, hidden, in the same grid cell as the shown one, so
+   the control is as wide in both states and never moves or wraps when tapped.
+   Generated content, so the control's text stays the one label shown; hidden,
+   so it is not announced. */
+.holds-label {
+  display: inline-grid;
+  justify-items: center;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.holds-label > .holds-label__text,
+.holds-label::after {
+  grid-area: 1 / 1;
+}
+
+.holds-label::after {
+  content: attr(data-reserve);
+  visibility: hidden;
+}
+
 .pool-match-numbered-row__score {
   font-family: var(--font-mono);
   font-weight: 600;

@@ -689,22 +689,33 @@ test.describe('J5 kachinuki from the court console', () => {
 
     await test.step('bout 8: fusensho to Shiro (exhaustion walkover), then End match double-tapped', async () => {
       const fus = currentBout(page).locator('.team-sub-match__side--shiro').getByTestId('scoring-modal-fusensho-button');
-      // V1: the thumb meant Fusensho and landed on the button beside it.
-      const v1 = await tapNeighbour(fus, 'left');
+      // V1: the thumb meant Fusensho and landed on the button above it (the
+      // button has a line of its own, wide enough for its pressed label, F1).
+      const v1 = await tapNeighbour(fus, 'up');
       await rendered(page);
       const marks = await boutFilled(currentBout(page), 'shiro').allInnerTexts();
       const v1Shot = await shot(page, 'v1-fusensho-neighbour');
       const recoverTaps = await clearBoutMarks(currentBout(page), 'shiro');
-      record({ step: 'M1 bout 8', action: 'Fusensho (Shiro)', variant: 'V1 tapNeighbour left', ...v1, shiroMarks: marks,
+      record({ step: 'M1 bout 8', action: 'Fusensho (Shiro)', variant: 'V1 tapNeighbour up', ...v1, shiroMarks: marks,
         recoverTaps, screenshot: v1Shot });
       // V2: Fusensho double-tapped (it is a toggle).
       const fusBefore = await fus.innerText();
+      // F1 (operator decision 2026-10-19): the button holds its place when
+      // pressed, so the second tap lands on it, never on H beside it.
+      const fusBox = await fus.boundingBox();
       const v2 = await doubleTap(fus);
       const label = (await untilStable(() => fus.innerText(), { from: fusBefore })).trim();
       record({ step: 'M1 bout 8', action: 'Fusensho (Shiro)', variant: 'V2 doubleTap', ...v2, labelAfter: label,
         shiroMarks: await boutFilled(currentBout(page), 'shiro').allInnerTexts(), screenshot: await shot(page, 'v2-fusensho-double-tap') });
       if (!/✓/.test(label)) await fus.tap();
       await expect(fus).toHaveText(/✓ Fusensho/);
+      // Where it was and as big. One pixel down is allowed: a tapped .btn
+      // stays :active under touch emulation, and :active nudges it 1px
+      // (translateY), the press feedback, not a layout move.
+      const fusAfter = await fus.boundingBox();
+      expect({ x: fusAfter.x, width: fusAfter.width, height: fusAfter.height }, 'pressed, the Fusensho button is where it was and as big')
+        .toEqual({ x: fusBox.x, width: fusBox.width, height: fusBox.height });
+      expect(Math.abs(fusAfter.y - fusBox.y), 'pressed, the Fusensho button stays on its line').toBeLessThanOrEqual(1);
       await shot(page, 'bout-8-fusensho');
       // V2 on End match: two taps inside 300ms on a two-tap guard.
       const end = endMatchButton(page);

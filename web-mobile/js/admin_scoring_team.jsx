@@ -818,6 +818,10 @@ export function fusenshoSideFromSub(sub) {
 // (applyFusenshoToggle), and a refused fusensho (fusenshoAllowed) names the
 // side that already won the bout. That win can sit under the winner's own
 // fusensho, whose circles are not tapped away, so its undo is named first.
+// The pressed Fusensho button's label, the longer of its two: the button keeps
+// room for it in both states (.holds-label), so it holds its place.
+export const FUSENSHO_PRESSED_LABEL = "✓ Fusensho";
+
 function fusenshoButtonTitle(sub, rs, other) {
   if (sub.fusensho === rs.key) {
     return sub._preFusensho
@@ -5280,13 +5284,20 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                             <button
                               data-testid="scoring-modal-fusensho-button"
                               type="button"
-                              className={`btn btn--sm ${s.fusensho === rs.key ? "btn--primary" : ""}`}
+                              className={`btn btn--sm holds-label ${s.fusensho === rs.key ? "btn--primary" : ""}`}
                               onClick={() => (fusenshoAllowed(s, rs.key) ? setFusenshoFor(idx, rs.key) : setFusenshoRefusal(rs.tapKey))}
                               disabled={rowLocked}
                               aria-disabled={fusenshoAllowed(s, rs.key) ? undefined : "true"}
                               title={fusenshoButtonTitle(s, rs, rowSides[1 - rsIdx])}
+                              // Holds its place (operator decision F1, 2026-10-19,
+                              // as Encho / Undo encho do): the button keeps room
+                              // for its longer label in both states (.holds-label,
+                              // data-reserve), so pressing it never moves it or
+                              // wraps it onto another line, and a quick second
+                              // tap lands on it again, never on H beside it.
+                              data-reserve={FUSENSHO_PRESSED_LABEL}
                             >
-                              {s.fusensho === rs.key ? "✓ Fusensho" : "Fusensho"}
+                              <span className="holds-label__text">{s.fusensho === rs.key ? FUSENSHO_PRESSED_LABEL : "Fusensho"}</span>
                             </button>
                           </div>
                         </div>
@@ -5731,6 +5742,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
               ) : (
                 <span>No draws in a knockout. Record bout brings the next fighter up.{kachinukiEnchoOffered ? " Encho keeps the same pair on this bout." : ""} Continue until there is a point.</span>
               )}
+            </div>
+          )}
+          {/* The hint above holds its line when it goes (operator decision F1,
+              2026-10-19): the overlay editor is centred, so a line leaving its
+              footer (the first point or a Fusensho scored on the bout) moved the
+              whole sheet up by half a line under the operator's thumb, and a
+              quick second tap on Fusensho landed beside it. */}
+          {kachinukiBoutMode && !((kachinukiEndOutcome?.kind === "blocked" || kachinukiEndOutcome?.kind === "draw")
+            && !kachinukiLiveBoutAwaitsScore && !kachinukiNoLiveBout) && (
+            <div className="holds-space" aria-hidden="true" data-testid="kachinuki-end-hint-space" style={{ fontSize: 12 }}>
+              <span>Nothing recorded yet: score a bout before ending the match.</span>
             </div>
           )}
           {/* bc-tmfn: why Finish did not finish. Visible text, not a title

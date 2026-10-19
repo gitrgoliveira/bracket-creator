@@ -218,7 +218,7 @@ export function createOwnStatus(status, at) {
       const p = st.pending;
       const e = p && p.entries.find((x) => x.token === token);
       if (!e || !e.landed || !fields) return;
-      e.fields = { ...(e.fields || {}), ...fields };
+      e.fields = { ...e.fields, ...fields };
     },
 
     // answer: the server's answer to own write `token`: LANDED, or REFUSED,

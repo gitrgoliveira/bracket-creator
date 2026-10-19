@@ -125,6 +125,22 @@ function scorableRows(page) {
   return page.locator('.score-edit-row').filter({ has: page.locator('button', { hasText: /^Score$/ }) });
 }
 
+// What names a row of the Scores list: its time, its match number and its two
+// names, as the row's own cells give them.
+const ROW_KEY_CELLS = '.score-edit-row__time, .score-edit-row__matchno, .score-edit-row__side .name';
+function rowKey(row) {
+  return row.evaluate((el, sel) => [...el.querySelectorAll(sel)].map((n) => n.textContent.trim()).join('|'), ROW_KEY_CELLS);
+}
+
+// Wait until no row named `key` still offers Score: the finished match reads
+// Correct, or its row has gone from the list.
+async function rowLeavesScore(page, key) {
+  await page.waitForFunction(([k, sel]) => ![...document.querySelectorAll('.score-edit-row')].some((el) =>
+    [...el.querySelectorAll(sel)].map((n) => n.textContent.trim()).join('|') === k
+    && [...el.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Score')),
+  [key, ROW_KEY_CELLS], { timeout: 15000 });
+}
+
 async function gotoScores(page, base, compId) {
   await page.goto(`${base}/admin/competition/${compId}/scores`, { waitUntil: 'domcontentloaded' });
   await page.locator('.score-edit-row').first().waitFor({ state: 'visible', timeout: 8000 }).catch(() => {});
@@ -147,9 +163,15 @@ async function scoreEveryMatch(page, base, compId, score, limit = 60) {
       await gotoScores(page, base, compId);
       if (!(await scorableRows(page).count())) break;
     }
-    await openEditorForRow(page, scorableRows(page).first());
+    const row = scorableRows(page).first();
+    const key = await rowKey(row);
+    await openEditorForRow(page, row);
     await score(page.locator(EDITOR).first(), page, done);
     await finishAndClose(page);
+    // The server has the finish (finishMatch waits for its answer); the list
+    // shows it once its refresh or push lands. Wait for that, so the next
+    // pass never opens the match just finished from a stale Score row.
+    await rowLeavesScore(page, key);
     done += 1;
   }
   return done;

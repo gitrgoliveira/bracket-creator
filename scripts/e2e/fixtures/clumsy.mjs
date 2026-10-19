@@ -124,9 +124,10 @@ export async function tapNeighbour(locator, direction) {
 //
 // Both taps must reach the same place (stage 6 review 8, m11): two clicks
 // count only when each landed on what was at the point as its touch began, and a lone click
-// only when the control under the point was DISABLED after the first touch
-// (watched from that touch on, since the first click, and so the disable it
-// causes, can come after the second touch has ended). A
+// only when the tapped control itself (or the one that replaced it in the same
+// place, never a neighbour) was DISABLED when the second click would have come:
+// once the second touch had ended and the first click, with the render it
+// caused, had run, whichever was later (stage 6 review 12, m3 and m4). A
 // control the first tap REPLACED takes no click when its replacement lands
 // between the second touch's start and end, so the bounce never reached the
 // place-keyed guard (acceptTap) the row claims to test: that throws. A row
@@ -182,22 +183,31 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
     let replaced = false;
     const wakers = new Set();
     const wake = () => { for (const w of [...wakers]) w(); };
-    // The control the second touch met was disabled: the one the first
-    // touch pressed, the one at the point, or the browser's own target for
-    // the second touch, which can differ from the point's (it adjusts a
-    // touch towards a nearby control: a first tap that moved the pressed
-    // control away, as a toggle whose label grows does, leaves the second
-    // touch on a neighbour the point itself is not on; stage 6 review 11).
-    let secondTarget = null;
-    const noteDisabled = () => {
-      if (!window.__clumsySecondDisabled && (isDisabled(watched) || disabledAt() || isDisabled(secondTarget))) {
-        window.__clumsySecondDisabled = true;
-      }
+    // Whether the GUARDED control was disabled when the second tap's click
+    // would have been dispatched (stage 6 review 12, m3 and m4). Only the
+    // control the first touch pressed counts, while it still holds the
+    // point, or the control that replaced it in the same place: a disabled
+    // neighbour the browser moved the second touch onto never reached the
+    // guard, so it does not count. And it is judged ONCE, at the moment the
+    // second click would come: once the second touch has ended AND the first
+    // click has run with the render it caused (a task after it), whichever
+    // is later. A disable seen only later (an answer from the server, a
+    // render 250 ms on) does not explain a click that was never made.
+    const guardedDisabled = () => {
+      if (watched && watched.isConnected) return holdsPoint(watched) && isDisabled(watched);
+      if (watched && !watched.isConnected) return disabledAt();
+      return false;
+    };
+    let secondEnded = false;
+    let firstClickRan = false;
+    const judgeSecond = () => {
+      if (window.__clumsySecondDisabled !== null || !secondEnded || !firstClickRan) return;
+      window.__clumsySecondDisabled = guardedDisabled();
+      wake();
     };
     const observer = new MutationObserver(() => {
       if (!watched) return;
       if (!watched.isConnected) replaced = true;
-      noteDisabled();
       wake();
     });
     const listeners = [];
@@ -207,6 +217,9 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
           const el = placeOf(e.target);
           seen.push({ at: Date.now(), atPoint: atTouch(el, seen.length) || holdsPoint(el),
             desc: el ? `${el.tagName} "${(el.textContent || '').trim().slice(0, 40)}"` : 'none' });
+          // The first click's handlers, and the render they cause, have run
+          // a task later: the second click would come no earlier.
+          if (seen.length === 1) setTimeout(() => { firstClickRan = true; judgeSecond(); }, 0);
         } else {
           const place = placeOf(document.elementFromPoint(px, py));
           touched.push(place);
@@ -216,7 +229,6 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
           // the one it pressed away from the point.
           const target = placeOf(e.target);
           if (seen.length === 1) {
-            secondTarget = target;
             const first = touchTargets[0];
             window.__clumsyMovedTo = target && first && target !== first && !first.contains(target) && !target.contains(first) && first.isConnected
               ? `${target.tagName.toLowerCase()}${target.disabled ? ' (disabled)' : ''} "${(target.textContent || '').trim().slice(0, 30)}"` : null;
@@ -229,13 +241,21 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
               subtree: true, childList: true, attributes: true, attributeFilter: ['disabled', 'aria-disabled'],
             });
           }
-          if (seen.length === 2) noteDisabled();
         }
         wake();
       };
       document.addEventListener(type, rec, true);
       listeners.push([type, rec]);
     }
+    // The second touch has ended: the browser decides then whether that tap
+    // makes a click.
+    let touchEnds = 0;
+    const onTouchEnd = () => {
+      touchEnds += 1;
+      if (touchEnds === 2) { secondEnded = true; judgeSecond(); }
+    };
+    document.addEventListener('touchend', onTouchEnd, true);
+    listeners.push(['touchend', onTouchEnd]);
     // What the page saw of the taps, in order, for a throw to say: each
     // input event with its target, whether the page cancelled it (read as it
     // leaves the page), and where the tapped control then stood.
@@ -282,7 +302,7 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
     // replacement, and a lone click there is a throw anyway.
     window.__clumsySettled = () => until(() => window.__clumsyTouches.length >= 2 && (window.__clumsyClicks.length >= 2
       || (window.__clumsyClicks.length === 1 && window.__clumsySecondDisabled === true)))
-      .then(() => { noteDisabled(); return window.__clumsyClicks.length < 2 ? painted() : null; })
+      .then(() => { judgeSecond(); return window.__clumsyClicks.length < 2 ? painted() : null; })
       .then(() => ({ replaced, moved: !!watched && watched.isConnected && !holdsPoint(watched) }));
     window.__clumsyRemove = () => {
       for (const [type, rec, target] of listeners) (target || document).removeEventListener(type, rec, !target);

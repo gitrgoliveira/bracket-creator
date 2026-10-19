@@ -1042,7 +1042,7 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 		if err != nil {
 			return nil, nil, err
 		}
-		// The decision that first moved a kachinuki match out of
+		// The decision that last moved a kachinuki match out of
 		// scheduled, sent again, is told what its first answer said
 		// (stage 6 review 11, item 6).
 		if result.LineupWarning, err = e.resentStartWarning(tx, comp, matchID, kcdgOpts.WriteID, modifiedAtStamp, DoorDecision); err != nil {
@@ -1097,7 +1097,7 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 				}
 			}
 		}
-		// The decision that first moved a kachinuki match out of
+		// The decision that last moved a kachinuki match out of
 		// scheduled, sent again, is told what its first answer said
 		// (stage 6 review 11, item 6).
 		warning, werr := e.resentStartWarning(tx, comp, matchID, kcdgOpts.WriteID, modifiedAtStamp, DoorDecision)

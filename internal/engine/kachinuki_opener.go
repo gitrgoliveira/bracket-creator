@@ -455,12 +455,13 @@ func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, before
 	return told, nil
 }
 
-// resentStartWarning is the warning the write that first moved a kachinuki
+// resentStartWarning is the warning the write that last moved a kachinuki
 // match out of scheduled was answered with, for that write sent again because
 // its answer was lost (the same writeId, or the same stamp; stage 6 review 11,
 // item 6), "" for any other write. That write is known by its line in the
-// match's score log (startLineOf: the first baseline, in log order, that sets
-// the result to a status other than scheduled), never by the stamp the match's
+// match's score log (startLineOf: the last baseline, in log order, that moves
+// the result out of scheduled, so a match sent back to the queue and started
+// again is known by its second start), never by the stamp the match's
 // result group holds now, which another device's later write moves and a
 // write in the same millisecond shares (stage 6 review 12, m6): a write whose
 // writeId the log holds is the start only when its line is that line, or the
@@ -554,7 +555,7 @@ func (e *Engine) resentStartWarning(h state.StoreTx, comp *state.Competition, ma
 	return refused.warning(matchWriteLead(startStatus, door)), nil
 }
 
-// startLineOf is the baseline of the write that first moved the match out of
+// startLineOf is the baseline of the write that last moved the match out of
 // scheduled, in log order (the order the writes landed), with the status it
 // set; a migration line, which records what the match already held, is never
 // it.
@@ -593,7 +594,7 @@ func startLineOf(lines []state.ScoreLogLine) (*state.ScoreBaseline, state.MatchS
 	return found, foundState, found != nil
 }
 
-// matchWriteLead says what the write that first moved a match out of scheduled
+// matchWriteLead says what the write that moved a match out of scheduled
 // did, as the operator made it (stage 6 review 10, m8): a decision recorded, a
 // match finished straight from scheduled, or a match started.
 func matchWriteLead(status state.MatchStatus, door string) string {

@@ -20,9 +20,14 @@ const isTapBatch = (r) => r.method() === 'POST' && /\/score-events$/.test(new UR
 //   answeredBeforeNextWrite(held)
 //               waits for the held batch's response and then for the batch
 //               that follows it (up to safetyMs each), and throws unless that
-//               batch was sent AFTER the response reached the page
-//               (the echo then met a board whose next tap was still unsent,
-//               which is the race a journey holds the batch for)
+//               batch reached the route only once the held one's answer was
+//               being handed to the page (the echo then met a board whose
+//               next tap was still unsent, which is the race a journey holds
+//               the batch for). Judged by that causal order, never by two
+//               host clocks from separate event streams, which tie or swap
+//               under load (stage 6 review 11, E). Returns { held, next }:
+//               the two batches' JSON bodies, so a journey can check its tap
+//               was in the second and not the first
 //   bodies      the JSON body of every tap batch the page sent, in send order
 //   events      every event those batches carried, in send order (each with
 //               its kind, side, letter, target, pos, ...)
@@ -37,8 +42,12 @@ export async function holdScoreWrites(page, { safetyMs = 10_000 } = {}) {
   let safetyFired = 0;
   const bodies = [];
   const events = [];
-  const sends = []; // { body, at } in send order, parallel to `bodies`
+  // { body, afterHeldAnswer } in send order, parallel to `bodies`:
+  // afterHeldAnswer says the last batch held had its answer already on its
+  // way to the page when this one reached the route.
+  const sends = [];
   const holds = []; // every hold made, taken or not
+  let lastHeld = null; // the last hold a batch took
   const handler = async (route) => {
     const req = route.request();
     if (isTapBatch(req)) {
@@ -46,10 +55,11 @@ export async function holdScoreWrites(page, { safetyMs = 10_000 } = {}) {
       try { body = req.postDataJSON(); } catch { /* not JSON */ }
       bodies.push(body);
       if (body && Array.isArray(body.events)) events.push(...body.events);
-      sends.push({ body, at: Date.now() });
+      sends.push({ body, afterHeldAnswer: !!(lastHeld && lastHeld.fulfilling) });
       if (hold) {
         const h = hold;
         hold = null;
+        lastHeld = h;
         h.request = req;
         h.sendIndex = sends.length - 1;
         let timer;
@@ -58,14 +68,30 @@ export async function holdScoreWrites(page, { safetyMs = 10_000 } = {}) {
         });
         await Promise.race([h.promise, timedOut]);
         clearTimeout(timer);
+        // The server answers first, and `fulfilling` is set before that
+        // answer is handed to the page: a batch the route sees while the
+        // hold was still on finds it unset. A page that navigated or closed
+        // during the hold cancels the request, and there is nothing to hand.
+        let res;
+        try {
+          res = await route.fetch();
+        } catch {
+          // The server could not be reached: the page sees the batch fail,
+          // as it would on the wire, and its outbox sends it again.
+          await route.abort().catch(() => {});
+          return;
+        }
+        h.fulfilling = true;
+        await route.fulfill({ response: res }).catch(() => {});
+        return;
       }
     }
     await route.continue();
   };
   const onResponse = (res) => {
     const h = holds.find((x) => x.request && x.request === res.request());
-    if (h && h.answeredAt === undefined) {
-      h.answeredAt = Date.now();
+    if (h && !h.answeredSeen) {
+      h.answeredSeen = true;
       h.resolveAnswered();
     }
   };
@@ -75,7 +101,7 @@ export async function holdScoreWrites(page, { safetyMs = 10_000 } = {}) {
     bodies,
     events,
     holdNext() {
-      const h = { released: false, request: null, sendIndex: -1, answeredAt: undefined };
+      const h = { released: false, request: null, sendIndex: -1, fulfilling: false, answeredSeen: false };
       h.promise = new Promise((resolve) => { h.release = () => { h.released = true; resolve(); }; });
       h.answered = new Promise((resolve) => { h.resolveAnswered = resolve; });
       holds.push(h);
@@ -96,9 +122,10 @@ export async function holdScoreWrites(page, { safetyMs = 10_000 } = {}) {
         while (!sends[h.sendIndex + 1] && Date.now() < deadline) await wait(25);
         const next = sends[h.sendIndex + 1];
         if (!next) throw new Error('held tap batch: the follow-up batch was never sent');
-        if (next.at <= h.answeredAt) {
-          throw new Error(`held tap batch: the next batch was sent ${h.answeredAt - next.at} ms before the held one's response reached the page, so the race was not exercised`);
+        if (!next.afterHeldAnswer) {
+          throw new Error('held tap batch: the next batch was sent before the held one\'s answer was handed to the page, so the race was not exercised');
         }
+        return { held: sends[h.sendIndex].body, next: next.body };
       } finally {
         for (const t of timers) clearTimeout(t);
       }

@@ -73,6 +73,11 @@ const JOURNEY = 'concurrent-taps';
 // Two taps count as made "at once" when their dispatches end this close.
 const AT_ONCE_MS = 300;
 
+// How many of a tap batch's events are `kind` on Aka (with `letter`, when
+// given): a batch body is `{ session, events }` (fixtures/held-write.mjs).
+const tapsIn = (body, kind, letter) => ((body && body.events) || [])
+  .filter((e) => e.kind === kind && e.side === 'a' && (!letter || e.letter === letter)).length;
+
 const PAIRS = [
   'Akira Tanaka - Ben Carter, Gyokusen',
   'Chie Mori - Dan Evans, Musashi',
@@ -285,7 +290,12 @@ test.describe('concurrent taps from two devices', () => {
         await held.sent;
         await tapOnSide(d1, 'aka', ipponButton(d1, 'aka', 'D'));
         held.release();
-        await writes.answeredBeforeNextWrite(held);
+        let batches = await writes.answeredBeforeNextWrite(held);
+        // The tap-back was made while the removal was out: it is not in the
+        // held batch, and it went in the next one.
+        expect(tapsIn(batches.held, 'ippon.add', 'D'), 'the tap-back is not in the held removal batch').toBe(0);
+        expect(tapsIn(batches.held, 'ippon.remove'), 'the held batch carries the removal').toBe(1);
+        expect(tapsIn(batches.next, 'ippon.add', 'D'), 'the tap-back is in the batch after it').toBe(1);
         await expect(syncState(d1)).toHaveText('Synced');
         // Deliberate: a late echo that undoes the tap-back must be given the time to land, so the time is the evidence.
         await d1.waitForTimeout(1000);
@@ -309,7 +319,10 @@ test.describe('concurrent taps from two devices', () => {
         await held.sent;
         await akaMark('D').tap();
         held.release();
-        await writes.answeredBeforeNextWrite(held);
+        batches = await writes.answeredBeforeNextWrite(held);
+        expect(tapsIn(batches.held, 'ippon.remove'), 'the removal is not in the held add batch').toBe(0);
+        expect(tapsIn(batches.held, 'ippon.add', 'D'), 'the held batch carries the add').toBe(1);
+        expect(tapsIn(batches.next, 'ippon.remove'), 'the removal is in the batch after it').toBe(1);
         await expect(syncState(d1)).toHaveText('Synced');
         // Deliberate: a late echo that undoes the removal must be given the time to land, so the time is the evidence.
         await d1.waitForTimeout(1000);

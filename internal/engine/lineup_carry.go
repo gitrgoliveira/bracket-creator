@@ -542,7 +542,7 @@ func (d *DerivedLineupError) errAt(i int) error {
 
 // join adds other's refused matches to d, so one write that followed several
 // teams' lineups is told in one sentence (stage 6 review 10, m8; warning
-// names a match once per reason).
+// names each match once, with its reasons).
 func (d *DerivedLineupError) join(other *DerivedLineupError) {
 	n := len(d.MatchIDs)
 	labels, errs := make([]string, n), make([]error, n)
@@ -596,40 +596,62 @@ func joinNames(names []string) string {
 
 // warning words the refusal in plain words for the operator (stage 6 review 9,
 // F5): what happened (lead), the matches by the labels the operator knows them
-// by, each with its own reason (stage 6 review 10, m9: the matches refused for
-// one reason named together), and what to check. The domain's own error text
+// by, each named once with its own reasons (stage 6 review 10, m9; review 11:
+// the matches refused for the same reasons named together, "A and B (why)",
+// and the groups apart, "; "), and what to check, the lineups counted one per
+// team (both teams' lineups at one match are two). The domain's own error text
 // is never in it (the follow logs it).
 func (d *DerivedLineupError) warning(lead string) string {
-	type group struct {
-		why   string
-		names []string
+	// Each match once, with every reason its carried lineups were refused
+	// for (two teams' lineups at one match can be refused for different
+	// reasons), then the matches refused for the same reasons together
+	// (stage 6 review 11, items 3 and 5).
+	type match struct {
+		name string
+		whys []string
 	}
-	var groups []group
-	count := 0
+	var matches []*match
 	for i, id := range d.MatchIDs {
 		name := id
 		if i < len(d.Labels) && d.Labels[i] != "" {
 			name = d.Labels[i]
 		}
-		why := refusalReason(d.errAt(i))
-		at := slices.IndexFunc(groups, func(g group) bool { return g.why == why })
+		at := slices.IndexFunc(matches, func(m *match) bool { return m.name == name })
 		if at < 0 {
-			groups = append(groups, group{why: why})
+			matches = append(matches, &match{name: name})
+			at = len(matches) - 1
+		}
+		if why := refusalReason(d.errAt(i)); !slices.Contains(matches[at].whys, why) {
+			matches[at].whys = append(matches[at].whys, why)
+		}
+	}
+	type group struct {
+		why   string
+		names []string
+	}
+	var groups []*group
+	for _, m := range matches {
+		why := joinNames(m.whys)
+		at := slices.IndexFunc(groups, func(g *group) bool { return g.why == why })
+		if at < 0 {
+			groups = append(groups, &group{why: why})
 			at = len(groups) - 1
 		}
-		if !slices.Contains(groups[at].names, name) {
-			groups[at].names = append(groups[at].names, name)
-			count++
-		}
+		groups[at].names = append(groups[at].names, m.name)
 	}
-	switch count {
-	case 0:
+	// The lineups are counted, not the matches: both teams' lineups at one
+	// match are two (item 4).
+	lineups := len(d.MatchIDs)
+	switch {
+	case len(matches) == 0:
 		return ""
-	case 1:
+	case lineups == 1:
 		return fmt.Sprintf("%s, but the lineup carried to %s could not be worked out again (%s); it was kept as it was. Check that match's lineup.",
 			lead, groups[0].names[0], groups[0].why)
-	}
-	if len(groups) == 1 {
+	case len(matches) == 1:
+		return fmt.Sprintf("%s, but the lineups carried to %s could not be worked out again (%s); they were kept as they were. Check that match's lineups.",
+			lead, groups[0].names[0], groups[0].why)
+	case len(groups) == 1:
 		return fmt.Sprintf("%s, but the lineups carried to %s could not be worked out again (%s); they were kept as they were. Check those matches' lineups.",
 			lead, joinNames(groups[0].names), groups[0].why)
 	}
@@ -637,6 +659,6 @@ func (d *DerivedLineupError) warning(lead string) string {
 	for _, g := range groups {
 		each = append(each, fmt.Sprintf("%s (%s)", joinNames(g.names), g.why))
 	}
-	return fmt.Sprintf("%s, but the lineups carried to %s could not be worked out again; they were kept as they were. Check those matches' lineups.",
-		lead, joinNames(each))
+	return fmt.Sprintf("%s, but the lineups carried to these matches could not be worked out again and were kept as they were: %s. Check those matches' lineups.",
+		lead, strings.Join(each, "; "))
 }

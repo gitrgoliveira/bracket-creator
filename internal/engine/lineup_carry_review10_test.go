@@ -72,9 +72,9 @@ func TestLineupCarry_EachRefusedCarriedLineupKeepsItsOwnReason(t *testing.T) {
 	}))
 	require.Equal(t, []string{"Pool A-1", "Pool A-2"}, derived.MatchIDs)
 	require.True(t, errors.Is(derived, domain.ErrLineupDuplicateMember), "Pool A-2's own reason is kept: %v", derived)
-	require.Equal(t, "The lineup was saved, but the lineups carried to Pool A · Match 2 (a position the team size has no place for) "+
-		"and Pool A · Match 3 (a team member placed at two positions) could not be worked out again; "+
-		"they were kept as they were. Check those matches' lineups.", derived.Warning())
+	require.Equal(t, "The lineup was saved, but the lineups carried to these matches could not be worked out again "+
+		"and were kept as they were: Pool A · Match 2 (a position the team size has no place for); "+
+		"Pool A · Match 3 (a team member placed at two positions). Check those matches' lineups.", derived.Warning())
 }
 
 // Matches refused for the same reason are named together under it; a
@@ -87,7 +87,7 @@ func TestLineupCarry_RefusalsAreGroupedByReason(t *testing.T) {
 		Labels:   []string{"Pool A · Match 2", "Pool A · Match 3", "Pool A · Match 4"},
 		Errs:     []error{size, dup, size},
 	}
-	require.Equal(t, "The lineup was removed, but the lineups carried to Pool A · Match 2 and Pool A · Match 4 "+
-		"(a position the team size has no place for) and Pool A · Match 3 (a team member placed at two positions) "+
-		"could not be worked out again; they were kept as they were. Check those matches' lineups.", d.RemovalWarning())
+	require.Equal(t, "The lineup was removed, but the lineups carried to these matches could not be worked out again "+
+		"and were kept as they were: Pool A · Match 2 and Pool A · Match 4 (a position the team size has no place for); "+
+		"Pool A · Match 3 (a team member placed at two positions). Check those matches' lineups.", d.RemovalWarning())
 }

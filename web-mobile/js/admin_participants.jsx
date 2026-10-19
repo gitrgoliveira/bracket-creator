@@ -128,20 +128,20 @@ function mintParticipantIds(compID, existingPlayers, parsed) {
   });
   let nextSlot = 1;
   let added = 0, updatedCount = 0;
-  const np = parsed.map(({ name, displayName, dojo, danGrade, source, checkedIn: parsedCheckedIn }) => {
+  // No check-in rides on the rows: a roster save never writes one (the server
+  // keeps the check-in stored for each competitor), so none is sent.
+  const np = parsed.map(({ name, displayName, dojo, danGrade, source }) => {
     const existing = existingMap.get(idKey(name, dojo));
     if (existing) {
       updatedCount++;
-      // Preserve existing check-in state; CSV token takes precedence if explicitly set.
-      const checkedIn = parsedCheckedIn || existing.checkedIn || false;
-      return { id: existing.id, name, displayName, dojo, danGrade, source, seed: existing.seed || null, checkedIn };
+      return { id: existing.id, name, displayName, dojo, danGrade, source, seed: existing.seed || null };
     }
     added++;
     while (usedIds.has(`${compID}-p${nextSlot}`)) nextSlot++;
     const id = `${compID}-p${nextSlot}`;
     usedIds.add(id);
     nextSlot++;
-    return { id, name, displayName, dojo, danGrade, source, seed: null, checkedIn: parsedCheckedIn || false };
+    return { id, name, displayName, dojo, danGrade, source, seed: null };
   });
   return { np, added, updatedCount };
 }
@@ -267,6 +267,10 @@ function participantFormError({ name, dojo, engi }) {
 // roster changing faster than a round trip, or a fault) end it with the
 // sentence below, never silently.
 export const ROSTER_REBUILD_ATTEMPTS = 10;
+// Said after a pasted list that carried a checked_in column is saved: a roster
+// save never writes a check-in, so the column was read off the rows and not
+// applied (stage 6 review 13, m4).
+export const PASTED_CHECK_IN_NOT_APPLIED = "Check-in in a pasted list is not applied: use the registration desk or the check-in buttons.";
 export const ROSTER_KEPT_CHANGING = "Not saved: the competitor list kept changing on other devices. Make the change again.";
 // Apply changes replaces the whole list with the pasted one. When the list
 // changed on another desk after the operator was asked to replace it, the
@@ -927,6 +931,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       if (added > 0 || updatedCount > 0) {
         msg += ` (${added} new, ${updatedCount} updated)`;
       }
+      if (parsed.some((row) => row.checkInIgnored)) msg += `. ${PASTED_CHECK_IN_NOT_APPLIED}`;
       showToast(msg);
       setImportSummary(null);
       setText("");

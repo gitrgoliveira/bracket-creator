@@ -415,12 +415,16 @@ function parseParticipantLines(lines, withZekken) {
     const parts = line.split(",").map((s) => s.trim());
     const name = parts[0] || "";
     let displayName = "", dojo = "", danGrade = "", source = "";
-    let checkedIn = false;
+    let checkInIgnored = false;
 
     // Detect trailing checked_in column: mirrors Go's column-based check (len > 2).
     // Requires at least 3 parts so a bare "Name, Dojo" row is never affected.
+    // The marker is read off the row so it is not taken for a source or a
+    // dan grade, but it is NOT a check-in: a roster save never writes one
+    // (only the check-in actions do), so the row reports it as ignored for
+    // the page to say so.
     if (parts.length > 2 && parts[parts.length - 1]?.toLowerCase() === "checked_in") {
-      checkedIn = true;
+      checkInIgnored = true;
       parts.pop();
     }
 
@@ -441,7 +445,7 @@ function parseParticipantLines(lines, withZekken) {
       dojo = parts[1] || "";
       danGrade = parts[2] || "";
     }
-    return { name, displayName, dojo, danGrade, source, checkedIn };
+    return { name, displayName, dojo, danGrade, source, checkInIgnored };
   });
 }
 

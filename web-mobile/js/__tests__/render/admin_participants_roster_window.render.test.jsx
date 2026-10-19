@@ -146,7 +146,7 @@ describe('the participants card builds every roster PUT from the roster it shows
     }
   }
 
-  it('Apply changes after the desk checked Bob in keeps him checked in', async () => {
+  it('Apply changes after the desk checked Bob in sends no check-in of its own, so the one the desk stored stands', async () => {
     const savedConfirm = window.confirmDialog;
     window.confirmDialog = vi.fn().mockResolvedValue(true);
     try {
@@ -164,7 +164,12 @@ describe('the participants card builds every roster PUT from the roster it shows
       await act(async () => { fireEvent.click(apply); });
       await flush();
       expect(server.puts.length).toBe(2);
-      expect(DESK['checks Bob in'].kept(server.puts[1])).toBe(true);
+      // A roster save never writes a check-in: Bob is on the list, and the
+      // PUT says nothing about whether he is checked in (the server keeps the
+      // check-in it stored for him; stage 6 review 13, m4).
+      const sentBob = server.puts[1].find((p) => p.name === 'Bob');
+      expect(sentBob, 'Bob is still on the list').toBeTruthy();
+      expect('checkedIn' in sentBob, 'and no check-in rides on him').toBe(false);
       await server.settle();
     } finally {
       window.confirmDialog = savedConfirm;

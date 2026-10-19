@@ -167,9 +167,14 @@ export function createToldTaps({ storage, now = () => Date.now(), tab }) {
             const obj = read(key);
             const rec = obj[id];
             if (!rec || !rec.back || rec.alerted) return false;
-            obj[id] = { ...rec, alerted: true };
+            // A marker naming this tab, read back before the alert is raised
+            // (stage 6 review 11, B): a tab whose copy was behind and wrote its
+            // own marker meanwhile raises it instead, never both. Residual as
+            // the landed-tap claim's.
+            obj[id] = { ...rec, alerted: tab };
             write(key, obj);
-            return true;
+            const back = read(key)[id];
+            return !!back && back.alerted === tab;
         },
         /** Whether the device told the tap and has not taken it back. */
         told(compID, matchID, id) {

@@ -165,14 +165,18 @@ export function createLandedTaps({ storage, now = () => Date.now(), tab, hidden 
         if (!hiddenNow) shown.add(tab);
         return shown;
     };
+    // The owner tells only while its page is shown, or when no tab is shown
+    // (stage 6 review 11, B: a hidden owner, a background tab that still
+    // hears the push, told before the shown tab and the notice landed where
+    // the operator does not look). Otherwise the shown tab with the lowest id
+    // tells, and with none shown a gone (or unknown) owner's taps go to the
+    // live tab with the lowest id while a hidden live one keeps its own.
     const mayTell = (rec, live, shown) => {
-        if (!rec.tab || rec.tab === tab) return true;
-        if (shown.has(rec.tab)) return false;
-        // Its tab is hidden or gone: the shown tab with the lowest id tells it,
-        // and with none shown, a gone tab's taps go to the live tab with the
-        // lowest id while a hidden one keeps its own.
+        const owner = rec.tab;
+        if (owner === tab) return !hiddenNow || shown.size === 0;
+        if (owner && shown.has(owner)) return false;
         if (shown.size) return [...shown].sort()[0] === tab;
-        if (live.has(rec.tab)) return false;
+        if (owner && live.has(owner)) return false;
         return [...live].sort()[0] === tab;
     };
 
@@ -335,14 +339,33 @@ export function createLandedTaps({ storage, now = () => Date.now(), tab, hidden 
             if (!Object.keys(obj).length) return [];
             const live = liveTabs();
             const shown = tellingTabs();
-            const told = [];
+            // A claim is a marker written and read back before telling
+            // (stage 6 review 11, B): storage has no lock across tabs, so a tab
+            // whose copy was behind can decide on the same tap; the one whose
+            // marker the record holds when read back tells, and a live tab's
+            // marker already there keeps the others off. Residual: a tab whose
+            // read back comes before the other's marker lands can still tell
+            // too; the notice is then said twice, never lost.
+            const staked = [];
             for (const id of ids) {
                 const rec = obj[id];
                 if (!rec || !mayTell(rec, live, shown)) continue;
-                told.push({ id, rec });
-                delete obj[id];
+                if (rec.claim && rec.claim !== tab && live.has(rec.claim)) continue;
+                obj[id] = { ...rec, claim: tab };
+                staked.push(id);
             }
-            if (told.length) writeObj(key, obj);
+            if (!staked.length) return [];
+            writeObj(key, obj);
+            const back = readObj(key);
+            const told = [];
+            for (const id of staked) {
+                const rec = back[id];
+                if (!rec || rec.claim !== tab) continue;
+                const { claim: _c, ...entry } = rec;
+                told.push({ id, rec: entry });
+                delete back[id];
+            }
+            if (told.length) writeObj(key, back);
             return told;
         },
         /**

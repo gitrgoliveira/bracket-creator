@@ -162,10 +162,10 @@ sequenceDiagram
     E->>S: WithTransaction → append events/{matchId}.jsonl, stage the replayed match + history
     S->>S: WAL commit → atomic write (fsync + rename) → done
     S-->>E: persisted
-    E-->>H: one outcome per tap + the match as stored
-    H->>HUB: Broadcast(match_updated)  [after persist; a running match at most 4 a second]
+    E-->>H: one outcome per tap + gaps + the match as stored (carries eventSeqs, turnedAway)
+    H->>HUB: Broadcast(match_updated)  [after persist, a running match at most 4 a second]
     HUB-->>OTHERS: SSE event (id: seq)
-    H-->>SPA: 200 outcomes (the outbox clears each answered tap; a clock_skew one is re-stamped and sent again)
+    H-->>SPA: 200 (outbox clears applied, recorded and duplicate taps<br/>clock_skew ones re-stamped and sent again, gaps sent again<br/>turnedAway told once per device)
 ```
 
 A finish, a correction and the other whole writes use their own routes, such as the one below
@@ -176,7 +176,7 @@ whole write are ordered against each other by the time each was made.
 ```mermaid
 sequenceDiagram
     autonumber
-    participant SPA as Browser SPA
+    participant SPA as Browser SPA (outbox)
     participant MW as auth middleware
     participant H as handlers_match.go
     participant E as engine
@@ -184,6 +184,7 @@ sequenceDiagram
     participant HUB as SSE hub
     participant OTHERS as other clients
 
+    SPA->>SPA: write stored in the outbox, answered pending at once,<br/>sent after the match's earlier entries
     SPA->>MW: PUT /api/competitions/:id/matches/:mid/score
     MW->>MW: verify X-Tournament-Password
     MW->>H: authorized
@@ -228,7 +229,9 @@ flowchart TB
         adminc["admin.jsx (operator console)"]
         patch["patch.jsx<br/>seq-gap detection (checkSeqGap)"]
         editors["admin_scoring_* · viewer_match · lineup editors"]
+        taps["landed_taps · told_taps · minted_members<br/>records kept in browser storage"]
         api --> appc & adminc & editors
+        api --> taps
         patch --> appc & adminc
     end
 ```

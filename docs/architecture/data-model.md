@@ -107,6 +107,14 @@ classDiagram
         +string MatchID
         +Map~Position, string~ Positions
         +Map~Position, string~ MemberIDs
+        +Map~Position, int64~ Stamps
+        +Map~Position, PositionChange[]~ History
+        +int64 CopiedAt
+        +string CopiedFrom
+        +Position[] Own
+        +int64 RemovedAt
+        +int64 StartedAt
+        +string StartedFrom
     }
 
     class TeamMember {
@@ -775,7 +783,10 @@ interleave in the order they were made, so a tablet that was offline for a while
 taps where they belong. The sequence numbers let the server tell a device which of its taps it
 never received. A whole write (a finish, a decision, a correction, a reopen, a send back to the
 queue) enters the same log as a baseline line, stamped with the time it was made, so a tap and a
-whole write are ordered against each other by the same rule.
+whole write are ordered against each other by the same rule. Refer to
+[Client resilience on flaky Wi-Fi](network-architecture.md#4-client-resilience-on-flaky-wi-fi)
+for a diagram of one match's taps, from the device's outbox to the server's answer and the
+taps turned away later, and for which writes are outbox entries.
 
 The server adds events of its own to the same log, under the session `server` and with no
 sequence number: the fighters of a kachinuki encounter's first bout, which are the first fighters

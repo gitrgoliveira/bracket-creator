@@ -973,7 +973,13 @@ function storedCompetitionInDetail(prev, cid, stored) {
   // composed again under the prefix the save stored (stage 6 review 11,
   // minor 10: a changed prefix showed the old one while the refetch failed;
   // a cleared one numbers nobody). The prefix is trimmed as Go's
-  // EffectiveNumberPrefix trims it.
+  // EffectiveNumberPrefix trims it. The prefix IS editable after the draw
+  // (it is outside the draw-ready refusal), and every PUT then renumbers
+  // (engine.RenumberCompetitors), composing each number as prefix + the
+  // draw position (helper.CompetitorNumber), the same integer the old number
+  // carried after its prefix; so the number composed here is the one the
+  // refetch will show (stage 6 review 12, m8; pinned in
+  // admin_stored_detail_numbers.test.jsx).
   const trimmed = (v) => (v == null ? "" : String(v).trim());
   const oldPrefix = trimmed(prev.config.numberPrefix);
   const newPrefix = trimmed(config.numberPrefix);
@@ -1101,4 +1107,4 @@ window.normalizeCreatedRecord = normalizeCreatedRecord;
 // component with no window binding, and its confirm phase now carries the
 // "will NOT be started" list, which is the surface that stops "Start all"
 // offering a competition the server would refuse.
-export { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord, refreshFailureToast, StartAllModal, attemptScoreWrite };
+export { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord, refreshFailureToast, StartAllModal, attemptScoreWrite, storedCompetitionInDetail };

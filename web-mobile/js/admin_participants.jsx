@@ -534,7 +534,8 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // roster the page shows (the host shows each PUT's stored answer, then its
   // refetch, before the save resolves: a check-in or a competitor another
   // desk added or removed meanwhile is in it, stage 6 review 11, A; the PUT
-  // is a whole-roster write and the server stores `checkedIn` as sent), or,
+  // is a whole-roster write; since stage 6 review 12, C1, the server keeps
+  // every stored check-in and refuses a PUT built on an older list), or,
   // while the page has not rendered since the last PUT went, that PUT's
   // roster, with every seed typed before the write and not yet answered laid
   // on. Built from the roster as rendered, a row dragged after a seed was

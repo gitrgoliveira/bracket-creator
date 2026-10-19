@@ -3890,6 +3890,20 @@ paths:
                           type: string
                           enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
                           description: As RefusedWrite.heldReason.
+                  warnings:
+                    type: array
+                    description: >
+                      Entries that applied while a carried lineup could not follow
+                      the write (as PUT /score's `warning`): the entry stands and
+                      the operator is told which lineups to check. Omitted when no
+                      entry carries one.
+                    items:
+                      type: object
+                      properties:
+                        matchId:
+                          type: string
+                        warning:
+                          $ref: '#/components/schemas/LineupFollowWarning'
 
   /api/competitions/{id}/matches/{mid}/quick-score:
     put:
@@ -3953,12 +3967,19 @@ paths:
             stored result, so the write always applies (and leaves a stamp a
             later stale write is ordered against). Documented, and mapped
             server-side, so that a change to that stamping cannot silently
-            turn the drop into a 500.
+            turn the drop into a 500. On a kachinuki match the body adds
+            `warning` when a carried lineup could not follow the write, as on
+            PUT /score.
           content:
             application/json:
               schema:
                 anyOf:
-                  - $ref: '#/components/schemas/MatchResult'
+                  - allOf:
+                      - $ref: '#/components/schemas/MatchResult'
+                      - type: object
+                        properties:
+                          warning:
+                            $ref: '#/components/schemas/LineupFollowWarning'
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
           $ref: '#/components/responses/BadRequest'
@@ -8070,8 +8091,15 @@ components:
         the lineup carried to Pool A · Match 2 could not be worked out again (a
         position the team size has no place for); it was kept as it was. Check
         that match's lineup." The lead is "The lineup was saved" for a save,
-        "The lineup was removed" for a removal and "The match was started" for
-        a kachinuki start.
+        "The lineup was removed" for a removal, and, for the write that first
+        moves a kachinuki match out of scheduled, "The match was started" (a
+        start), "The match was finished" (a finish) or "The decision was
+        recorded" (a decision). One sentence names every such lineup, both
+        teams' included; when they were refused for different reasons, each
+        match is named with its own, e.g. "the lineups carried to Pool A ·
+        Match 2 (a position the team size has no place for) and Pool A ·
+        Match 3 (a team member placed at two positions) could not be worked
+        out again".
 
     LineupFollowWarningAnswer:
       type: object

@@ -464,8 +464,10 @@ func (e *Engine) FollowLineupSave(h state.StoreTx, comp *state.Competition, save
 				if refused == nil {
 					refused = &DerivedLineupError{Err: verr}
 				}
+				// Each match keeps its own refusal (stage 6 review 10, m9).
 				refused.MatchIDs = append(refused.MatchIDs, lc.lineups[k].MatchID)
 				refused.Labels = append(refused.Labels, OperatorMatchLabel(comp, bracket, lc.lineups[k].MatchID))
+				refused.Errs = append(refused.Errs, verr)
 				break
 			}
 		}
@@ -506,14 +508,64 @@ type DerivedLineupError struct {
 	// Labels names each match of MatchIDs, in the same order, as the operator
 	// knows it (OperatorMatchLabel).
 	Labels []string
-	Err    error
+	// Errs is each match's own refusal, in the same order (stage 6 review 10,
+	// m9: the first refusal's reason was given for every match).
+	Errs []error
+	// Err is the first refusal (Errs[0]), kept for the callers that read one.
+	Err error
 }
 
 func (d *DerivedLineupError) Error() string {
-	return fmt.Sprintf("the lineups carried at %s could not follow the change and were left as they were: %v", strings.Join(d.MatchIDs, ", "), d.Err)
+	parts := make([]string, 0, len(d.MatchIDs))
+	for i, id := range d.MatchIDs {
+		parts = append(parts, fmt.Sprintf("%s (%v)", id, d.errAt(i)))
+	}
+	return fmt.Sprintf("the lineups carried at %s could not follow the change and were left as they were", strings.Join(parts, ", "))
 }
 
-func (d *DerivedLineupError) Unwrap() error { return d.Err }
+// Unwrap answers every match's own refusal, so errors.Is finds any of them.
+func (d *DerivedLineupError) Unwrap() []error {
+	if len(d.Errs) > 0 {
+		return d.Errs
+	}
+	return []error{d.Err}
+}
+
+// errAt is the refusal of the i-th match: its own, else (a value built
+// without Errs) the one Err.
+func (d *DerivedLineupError) errAt(i int) error {
+	if i < len(d.Errs) && d.Errs[i] != nil {
+		return d.Errs[i]
+	}
+	return d.Err
+}
+
+// join adds other's refused matches to d, so one write that followed several
+// teams' lineups is told in one sentence (stage 6 review 10, m8; warning
+// names a match once per reason).
+func (d *DerivedLineupError) join(other *DerivedLineupError) {
+	n := len(d.MatchIDs)
+	labels, errs := make([]string, n), make([]error, n)
+	for i := range n {
+		if i < len(d.Labels) {
+			labels[i] = d.Labels[i]
+		}
+		errs[i] = d.errAt(i)
+	}
+	for i, id := range other.MatchIDs {
+		label := ""
+		if i < len(other.Labels) {
+			label = other.Labels[i]
+		}
+		d.MatchIDs = append(d.MatchIDs, id)
+		labels = append(labels, label)
+		errs = append(errs, other.errAt(i))
+	}
+	d.Labels, d.Errs = labels, errs
+	if d.Err == nil {
+		d.Err = other.Err
+	}
+}
 
 // Warning is the sentence the operator is told when the change was a lineup
 // save.
@@ -523,35 +575,68 @@ func (d *DerivedLineupError) Warning() string { return d.warning("The lineup was
 // lineup away (both DELETE doors).
 func (d *DerivedLineupError) RemovalWarning() string { return d.warning("The lineup was removed") }
 
-// StartWarning is the sentence the operator is told when the change was a
-// kachinuki match's start keeping the lineup it started with.
-func (d *DerivedLineupError) StartWarning() string { return d.warning("The match was started") }
+// refusalReason words a refusal for the operator.
+func refusalReason(err error) string {
+	switch {
+	case errors.Is(err, domain.ErrLineupDuplicateMember):
+		return "a team member placed at two positions"
+	case errors.Is(err, domain.ErrLineupTeamSizeInvalid):
+		return "the competition has no team size"
+	}
+	return "a position the team size has no place for"
+}
+
+// joinNames lists names as "A", "A and B" or "A, B and C".
+func joinNames(names []string) string {
+	if len(names) == 1 {
+		return names[0]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+}
 
 // warning words the refusal in plain words for the operator (stage 6 review 9,
-// F5): the matches by the labels the operator knows them by, what happened,
-// and what to check. The domain's own error text is never in it (the follow
-// logs it).
+// F5): what happened (lead), the matches by the labels the operator knows them
+// by, each with its own reason (stage 6 review 10, m9: the matches refused for
+// one reason named together), and what to check. The domain's own error text
+// is never in it (the follow logs it).
 func (d *DerivedLineupError) warning(lead string) string {
-	names := make([]string, 0, len(d.MatchIDs))
+	type group struct {
+		why   string
+		names []string
+	}
+	var groups []group
+	count := 0
 	for i, id := range d.MatchIDs {
 		name := id
 		if i < len(d.Labels) && d.Labels[i] != "" {
 			name = d.Labels[i]
 		}
-		names = append(names, name)
+		why := refusalReason(d.errAt(i))
+		at := slices.IndexFunc(groups, func(g group) bool { return g.why == why })
+		if at < 0 {
+			groups = append(groups, group{why: why})
+			at = len(groups) - 1
+		}
+		if !slices.Contains(groups[at].names, name) {
+			groups[at].names = append(groups[at].names, name)
+			count++
+		}
 	}
-	why := "a position the team size has no place for"
-	switch {
-	case errors.Is(d.Err, domain.ErrLineupDuplicateMember):
-		why = "a team member placed at two positions"
-	case errors.Is(d.Err, domain.ErrLineupTeamSizeInvalid):
-		why = "the competition has no team size"
-	}
-	if len(names) == 1 {
+	switch count {
+	case 0:
+		return ""
+	case 1:
 		return fmt.Sprintf("%s, but the lineup carried to %s could not be worked out again (%s); it was kept as it was. Check that match's lineup.",
-			lead, names[0], why)
+			lead, groups[0].names[0], groups[0].why)
 	}
-	list := strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
-	return fmt.Sprintf("%s, but the lineups carried to %s could not be worked out again (%s); they were kept as they were. Check those matches' lineups.",
-		lead, list, why)
+	if len(groups) == 1 {
+		return fmt.Sprintf("%s, but the lineups carried to %s could not be worked out again (%s); they were kept as they were. Check those matches' lineups.",
+			lead, joinNames(groups[0].names), groups[0].why)
+	}
+	each := make([]string, 0, len(groups))
+	for _, g := range groups {
+		each = append(each, fmt.Sprintf("%s (%s)", joinNames(g.names), g.why))
+	}
+	return fmt.Sprintf("%s, but the lineups carried to %s could not be worked out again; they were kept as they were. Check those matches' lineups.",
+		lead, joinNames(each))
 }

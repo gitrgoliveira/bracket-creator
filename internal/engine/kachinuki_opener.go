@@ -402,7 +402,8 @@ func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, before
 	if err != nil || comp == nil || !comp.IsKachinuki() {
 		return "", nil
 	}
-	var warnings []string
+	var refused *DerivedLineupError
+	var lead string
 	// The first start only: a match sent back to the queue holds the bouts it
 	// was fought on, and a start of it again is no start (it keeps the lineup
 	// it started with, or, started before this rule, none).
@@ -414,19 +415,24 @@ func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, before
 				if err != nil {
 					return "", err
 				}
+				lead = matchWriteLead(stored.Status, door)
 				// A copy the start anchored is carried by the team's later
 				// matches: they are worked out again, as after a save. A
 				// carried lineup the domain refuses as worked out stays as
 				// stored and the start stands, as for a save, and the
 				// operator is told on the write's answer (stage 6 review 9,
-				// G1; the follow logs the refusal itself).
+				// G1; the follow logs the refusal itself), in ONE sentence
+				// for both teams (stage 6 review 10, m8).
 				for _, teamID := range anchored {
 					if _, err := e.FollowLineupSave(h, comp, domain.TeamLineup{TeamID: teamID, MatchID: matchID}, nil); err != nil {
 						var derived *DerivedLineupError
 						if !errors.As(err, &derived) {
 							return "", err
 						}
-						warnings = append(warnings, derived.StartWarning())
+						if refused == nil {
+							refused = &DerivedLineupError{}
+						}
+						refused.join(derived)
 					}
 				}
 			}
@@ -435,7 +441,23 @@ func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, before
 	if door != DoorEvent {
 		e.seatOpenerAfterWrite(h, compID, matchID)
 	}
-	return strings.Join(warnings, " "), nil
+	if refused == nil {
+		return "", nil
+	}
+	return refused.warning(lead), nil
+}
+
+// matchWriteLead says what the write that first moved a match out of scheduled
+// did, as the operator made it (stage 6 review 10, m8): a decision recorded, a
+// match finished straight from scheduled, or a match started.
+func matchWriteLead(status state.MatchStatus, door string) string {
+	switch {
+	case status == state.MatchStatusCompleted && door == DoorDecision:
+		return "The decision was recorded"
+	case status == state.MatchStatusCompleted:
+		return "The match was finished"
+	}
+	return "The match was started"
 }
 
 // storedStatus is the match's status before a write, "" when it cannot be read

@@ -116,7 +116,7 @@ func TestLineupCarry_ARefusedCarriedLineupIsNamedAsTheOperatorKnowsIt(t *testing
 	require.Equal(t, "The lineup was removed, but the lineup carried to Pool A · Match 2 could not be worked out again "+
 		"(a position the team size has no place for); it was kept as it was. Check that match's lineup.", derived.RemovalWarning())
 	require.Equal(t, "The match was started, but the lineup carried to Pool A · Match 2 could not be worked out again "+
-		"(a position the team size has no place for); it was kept as it was. Check that match's lineup.", derived.StartWarning())
+		"(a position the team size has no place for); it was kept as it was. Check that match's lineup.", derived.warning(matchWriteLead(state.MatchStatusRunning, DoorScore)))
 	require.Contains(t, derived.Error(), "team_lineup", "the log keeps the domain's own error")
 }
 

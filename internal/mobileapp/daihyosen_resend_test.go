@@ -60,3 +60,41 @@ func TestDaihyosen_AResendAfterALostAnswerIsAnsweredAsRecorded(t *testing.T) {
 	w = f.send(http.MethodPost, repBoutMatchPath+"/daihyosen", "main-pw", map[string]any{"modifiedAt": f.now + 30, "writeId": "w-add-3"})
 	assert.Equal(t, http.StatusConflict, w.Code, "a second add that is no resend is refused as before")
 }
+
+// A participant's add or removal that landed, whose answer was lost, and that
+// is sent again once the match has finished or left running, is answered as
+// recorded: the log already holds the write, so telling the participant 409
+// result_finalized or match_not_running would name a refusal for a change that
+// is in the match.
+func TestDaihyosen_AnAnonymousResendOfALandedWriteIsAnsweredAsRecordedWhateverTheStatusIsNow(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status state.MatchStatus
+	}{
+		{"the match finished meanwhile", state.MatchStatusCompleted},
+		{"the match left running meanwhile", state.MatchStatusScheduled},
+	} {
+		t.Run("add, "+tc.name, func(t *testing.T) {
+			f := newRepBoutFixture(t, true)
+			add := map[string]any{"modifiedAt": f.now + 100, "writeId": "w-anon-add"}
+			w := f.send(http.MethodPost, repBoutMatchPath+"/daihyosen", "", add)
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			f.setB1(t, func(bm *state.BracketMatch) { bm.Status = tc.status })
+
+			w = f.send(http.MethodPost, repBoutMatchPath+"/daihyosen", "", add)
+			assert.Equal(t, http.StatusOK, w.Code, "the landed add sent again is answered as recorded: %s", w.Body.String())
+		})
+		t.Run("remove, "+tc.name, func(t *testing.T) {
+			f := newRepBoutFixture(t, true)
+			w := f.send(http.MethodPost, repBoutMatchPath+"/daihyosen", "", map[string]any{"modifiedAt": f.now + 100, "writeId": "w-anon-add"})
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			del := map[string]any{"modifiedAt": f.now + 200, "writeId": "w-anon-del"}
+			w = f.send(http.MethodDelete, repBoutMatchPath+"/daihyosen", "", del)
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			f.setB1(t, func(bm *state.BracketMatch) { bm.Status = tc.status })
+
+			w = f.send(http.MethodDelete, repBoutMatchPath+"/daihyosen", "", del)
+			assert.Equal(t, http.StatusOK, w.Code, "the landed removal sent again is answered as recorded: %s", w.Body.String())
+		})
+	}
+}

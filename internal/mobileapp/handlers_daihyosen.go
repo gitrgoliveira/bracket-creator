@@ -216,19 +216,21 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 				resp = &txResponse{status: http.StatusNotFound, body: gin.H{"error": "match not found"}}
 				return nil
 			}
+			// The same removal sent again after its answer was lost (its
+			// writeId is in the match's score log): answered as recorded,
+			// with the match as stored, before the "no representative bout"
+			// refusal its own landing would otherwise draw, and before the
+			// participant's status rule: a change that landed is not
+			// refused because the match has finished or left running since.
+			if eng.WriteIDLogged(stx, id, mid, tag.WriteID) {
+				resp = &txResponse{status: http.StatusOK, body: gin.H{"result": matchForBroadcast(*match)}}
+				return nil
+			}
 			if anonymous {
 				if refusal := selfRunDaihyosenRefusal(match.Status, "This match has not started. Start it before removing its representative bout."); refusal != nil {
 					resp = refusal.response()
 					return nil
 				}
-			}
-			// The same removal sent again after its answer was lost (its
-			// writeId is in the match's score log): answered as recorded,
-			// with the match as stored, before the "no representative bout"
-			// refusal its own landing would otherwise draw.
-			if eng.WriteIDLogged(stx, id, mid, tag.WriteID) {
-				resp = &txResponse{status: http.StatusOK, body: gin.H{"result": matchForBroadcast(*match)}}
-				return nil
 			}
 			dhIdx := state.DaihyosenSubIndex(match.SubResults)
 			if dhIdx < 0 {
@@ -405,6 +407,21 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 				resp = &txResponse{status: http.StatusNotFound, body: gin.H{"error": "match not found"}}
 				return nil
 			}
+			// The same add sent again after its answer was lost (its writeId
+			// is in the match's score log): answered as recorded, with the
+			// bout and the match as stored, before the participant's status
+			// rule (a change that landed is not refused because the match has
+			// finished or left running since) and before the one-bout refusal
+			// its own landing would otherwise draw.
+			if eng.WriteIDLogged(stx, id, mid, tag.WriteID) {
+				var row *state.SubMatchResult
+				if i := state.DaihyosenSubIndex(match.SubResults); i >= 0 {
+					stored := match.SubResults[i]
+					row = &stored
+				}
+				resp = &txResponse{status: http.StatusOK, body: gin.H{"subResult": row, "result": matchForBroadcast(*match)}}
+				return nil
+			}
 			if anonymous {
 				if refusal := selfRunDaihyosenRefusal(match.Status, "This match has not started. Start it before adding a representative bout."); refusal != nil {
 					resp = refusal.response()
@@ -417,19 +434,6 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// running and bury the verdict recorded on the first (bc-dhas).
 			// The score sheet never offers it; two devices adding at once, or a
 			// crafted request, would.
-			// The same add sent again after its answer was lost (its writeId
-			// is in the match's score log): answered as recorded, with the
-			// bout and the match as stored, before the one-bout refusal its
-			// own landing would otherwise draw.
-			if eng.WriteIDLogged(stx, id, mid, tag.WriteID) {
-				var row *state.SubMatchResult
-				if i := state.DaihyosenSubIndex(match.SubResults); i >= 0 {
-					stored := match.SubResults[i]
-					row = &stored
-				}
-				resp = &txResponse{status: http.StatusOK, body: gin.H{"subResult": row, "result": matchForBroadcast(*match)}}
-				return nil
-			}
 			if state.DaihyosenSubIndex(match.SubResults) >= 0 {
 				resp = &txResponse{status: http.StatusConflict, body: gin.H{"error": "daihyosen_exists"}}
 				return nil

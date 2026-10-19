@@ -148,6 +148,8 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
   await page.evaluate(({ px, py, settleMs }) => {
     window.__clumsyClicks = [];
     window.__clumsyTouches = [];
+    window.__clumsyMovedTo = null;
+    const touchTargets = [];
     window.__clumsySecondDisabled = null;
     const controlAt = () => {
       const el = document.elementFromPoint(px, py);
@@ -180,8 +182,17 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
     let replaced = false;
     const wakers = new Set();
     const wake = () => { for (const w of [...wakers]) w(); };
+    // The control the second touch met was disabled: the one the first
+    // touch pressed, the one at the point, or the browser's own target for
+    // the second touch, which can differ from the point's (it adjusts a
+    // touch towards a nearby control: a first tap that moved the pressed
+    // control away, as a toggle whose label grows does, leaves the second
+    // touch on a neighbour the point itself is not on; stage 6 review 11).
+    let secondTarget = null;
     const noteDisabled = () => {
-      if (!window.__clumsySecondDisabled && (isDisabled(watched) || disabledAt())) window.__clumsySecondDisabled = true;
+      if (!window.__clumsySecondDisabled && (isDisabled(watched) || disabledAt() || isDisabled(secondTarget))) {
+        window.__clumsySecondDisabled = true;
+      }
     };
     const observer = new MutationObserver(() => {
       if (!watched) return;
@@ -199,6 +210,18 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
         } else {
           const place = placeOf(document.elementFromPoint(px, py));
           touched.push(place);
+          // The browser's own target for the touch, which can differ from
+          // the point's (it adjusts a touch towards a nearby control): the
+          // second touch reaching ANOTHER control means the first tap moved
+          // the one it pressed away from the point.
+          const target = placeOf(e.target);
+          if (seen.length === 1) {
+            secondTarget = target;
+            const first = touchTargets[0];
+            window.__clumsyMovedTo = target && first && target !== first && !first.contains(target) && !target.contains(first) && first.isConnected
+              ? `${target.tagName.toLowerCase()}${target.disabled ? ' (disabled)' : ''} "${(target.textContent || '').trim().slice(0, 30)}"` : null;
+          }
+          touchTargets.push(target);
           seen.push(Date.now());
           if (seen.length === 1) {
             watched = place;
@@ -212,6 +235,21 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
       };
       document.addEventListener(type, rec, true);
       listeners.push([type, rec]);
+    }
+    // What the page saw of the taps, in order, for a throw to say: each
+    // input event with its target, whether the page cancelled it (read as it
+    // leaves the page), and where the tapped control then stood.
+    const t0 = Date.now();
+    const short = (el) => (el && el.tagName ? `${el.tagName.toLowerCase()}${el.disabled ? '[disabled]' : ''}"${(el.textContent || '').trim().slice(0, 16)}"` : '-');
+    window.__clumsyTrace = [];
+    for (const type of ['touchstart', 'touchend', 'touchcancel', 'pointerdown', 'pointerup', 'pointercancel', 'mousedown', 'mouseup', 'click']) {
+      const rec = (e) => {
+        if (window.__clumsyTrace.length >= 40) return;
+        const atPt = placeOf(document.elementFromPoint(px, py));
+        window.__clumsyTrace.push(`${Date.now() - t0}ms ${type}->${short(placeOf(e.target))}${e.defaultPrevented ? '(prevented)' : ''} pt:${short(atPt)}`);
+      };
+      window.addEventListener(type, rec, false);
+      listeners.push([type, rec, window]);
     }
     const painted = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
     // Waits, at most settleMs, until `done()` holds; re-checked on every
@@ -245,9 +283,9 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
     window.__clumsySettled = () => until(() => window.__clumsyTouches.length >= 2 && (window.__clumsyClicks.length >= 2
       || (window.__clumsyClicks.length === 1 && window.__clumsySecondDisabled === true)))
       .then(() => { noteDisabled(); return window.__clumsyClicks.length < 2 ? painted() : null; })
-      .then(() => ({ replaced }));
+      .then(() => ({ replaced, moved: !!watched && watched.isConnected && !holdsPoint(watched) }));
     window.__clumsyRemove = () => {
-      for (const [type, rec] of listeners) document.removeEventListener(type, rec, true);
+      for (const [type, rec, target] of listeners) (target || document).removeEventListener(type, rec, !target);
       observer.disconnect();
       wakers.clear();
       window.__clumsyRemove = null;
@@ -285,34 +323,35 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
     // Every click the taps make has come (or the bound has passed), judged in
     // the page, never by a host-side wait: the clicks can trail the touches.
     seen = await page.evaluate(async () => {
-      const { replaced } = await window.__clumsySettled();
-      return { clicks: window.__clumsyClicks, touches: window.__clumsyTouches, secondDisabled: window.__clumsySecondDisabled, replaced };
+      const { replaced, moved } = await window.__clumsySettled();
+      return { clicks: window.__clumsyClicks, touches: window.__clumsyTouches, secondDisabled: window.__clumsySecondDisabled, replaced, moved, movedTo: window.__clumsyMovedTo, trace: window.__clumsyTrace };
     });
   } finally {
     await page.evaluate(() => { if (typeof window.__clumsyRemove === 'function') window.__clumsyRemove(); }).catch(() => {});
   }
-  const { clicks, touches, secondDisabled, replaced } = seen;
+  const { clicks, touches, secondDisabled, replaced, moved, movedTo, trace } = seen;
+  const saw = ` (the page saw: ${(trace || []).join(' | ')})`;
   if (!Array.isArray(touches) || touches.length !== 2) {
-    throw new Error(`clumsy.doubleTap: the page saw ${Array.isArray(touches) ? touches.length : 'no'} touch(es), not 2, so the row did not test the bounce guard`);
+    throw new Error(`clumsy.doubleTap: the page saw ${Array.isArray(touches) ? touches.length : 'no'} touch(es), not 2, so the row did not test the bounce guard${saw}`);
   }
   if (!Array.isArray(clicks) || clicks.length === 0 || clicks.length > 2) {
-    throw new Error(`clumsy.doubleTap: the two taps produced ${Array.isArray(clicks) ? clicks.length : 'no'} click(s) in the page, so the row did not test the bounce guard`);
+    throw new Error(`clumsy.doubleTap: the two taps produced ${Array.isArray(clicks) ? clicks.length : 'no'} click(s) in the page, so the row did not test the bounce guard${saw}`);
   }
   // Two clicks: each on what was at the tapped point as its touch began, or
   // holds it as the click comes, so the bounce reached the place the first
   // tap did (its control, or the one that replaced it there).
   if (clicks.length === 2 && !clicks.every((c) => c.atPoint)) {
-    throw new Error(`clumsy.doubleTap: a click of the two taps did not land at the tapped point (${x},${y}: ${clicks.map((c) => c.desc).join(' | ')}), so the taps did not reach the same place and the row did not test the bounce guard`);
+    throw new Error(`clumsy.doubleTap: a click of the two taps did not land at the tapped point (${x},${y}: ${clicks.map((c) => c.desc).join(' | ')}), so the taps did not reach the same place and the row did not test the bounce guard${saw}`);
   }
-  // One click is a double tap only when the first tap disabled the control,
-  // so the second touch landed on a disabled one; a control replaced, or a
-  // tap lost, is not.
+  // One click is a double tap only when the second touch landed on a
+  // disabled control (the first tap disabled it, or moved it and left a
+  // disabled one there); a control replaced, or a tap lost, is not.
   if (clicks.length === 1 && secondDisabled !== true) {
-    throw new Error(`clumsy.doubleTap: the two taps produced one click while the control at the point was never disabled (${replaced ? 'the first tap replaced it' : 'a tap lost'}), so the bounce never reached it and the row did not test the bounce guard; a row whose first tap replaces the control in place passes { afterRender: true }`);
+    throw new Error(`clumsy.doubleTap: the two taps produced one click while the control the second touch met was never disabled (${replaced ? 'the first tap replaced it' : moved || movedTo ? `the first tap moved it off the point${movedTo ? `, so the second touch landed on ${movedTo}` : ''}` : 'a tap lost'}), so the bounce never reached it and the row did not test the bounce guard; a row whose first tap replaces the control in place passes { afterRender: true }${saw}`);
   }
   const gapMs = clicks.length === 2 ? clicks[1].at - clicks[0].at : touches[1] - touches[0];
   if (gapMs >= DOUBLE_TAP_LIMIT_MS) {
-    throw new Error(`clumsy.doubleTap: the two taps were ${gapMs} ms apart (limit ${DOUBLE_TAP_LIMIT_MS} ms, the app's bounce window is ${TAP_BOUNCE_MS} ms): this machine was too slow, so the row did not test the bounce guard`);
+    throw new Error(`clumsy.doubleTap: the two taps were ${gapMs} ms apart (limit ${DOUBLE_TAP_LIMIT_MS} ms, the app's bounce window is ${TAP_BOUNCE_MS} ms): this machine was too slow, so the row did not test the bounce guard${saw}`);
   }
   return { gapMs, clicks: clicks.length, withinWindow: true, secondDisabled: clicks.length === 1, afterRender };
 }

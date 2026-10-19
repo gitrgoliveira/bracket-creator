@@ -841,6 +841,10 @@ func gateOrderings(legacy bool) [][]string {
 	return out
 }
 
+// gateRaceKeep is how many of the gate's orderings run under the race detector
+// (raceSample): about a tenth of the 2560; every one runs without it.
+const gateRaceKeep = 256
+
 func TestKachinukiBoutOnePermutationGate(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	dir, err := os.MkdirTemp("", "kachinuki-gate-*")
@@ -863,12 +867,25 @@ func TestKachinukiBoutOnePermutationGate(t *testing.T) {
 		legacy bool
 		ops    []string
 	}
-	var all []ordering
+	var every []ordering
 	for _, legacy := range []bool{false, true} {
 		for _, ops := range gateOrderings(legacy) {
-			all = append(all, ordering{legacy, ops})
+			every = append(every, ordering{legacy, ops})
 		}
 	}
+	all := raceSample(every, gateRaceKeep)
+	// A sample still drives every operation the orderings hold, in both
+	// kinds of match, at least once.
+	opsOf := func(set []ordering) map[string]bool {
+		seen := map[string]bool{}
+		for _, o := range set {
+			for _, op := range o.ops {
+				seen[fmt.Sprint(o.legacy, op)] = true
+			}
+		}
+		return seen
+	}
+	require.Equal(t, opsOf(every), opsOf(all), "the race sample drives every operation of the orderings")
 	// Each ordering is its own competition, so they run side by side in
 	// chunks; the failures are counted together.
 	var mu sync.Mutex
@@ -901,5 +918,5 @@ func TestKachinukiBoutOnePermutationGate(t *testing.T) {
 	for _, k := range kinds {
 		t.Errorf("%s: %d failed assertions", k, failures[k])
 	}
-	t.Logf("%d orderings driven", len(all))
+	t.Logf("%d of %d orderings driven", len(all), len(every))
 }

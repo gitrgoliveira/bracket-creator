@@ -767,6 +767,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// and what withHeldGroups adds (heldGroups, always present on an
 		// entry, empty when its only change was a move to the history).
 		var partlyHeld []gin.H
+		// warnings reports each applied entry whose write a carried lineup
+		// could not follow: its matchId and the operator's sentence, as /score
+		// answers `warning` (stage 6 review 10, m3).
+		var warnings []gin.H
 		// Only successfully-recorded results go into the SSE broadcast so
 		// clients never patch with values the engine rejected.
 		var successful []state.MatchResult
@@ -1018,6 +1022,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			if rep := results[i].Merge; len(rep.HeldGroups())+len(rep.DisplacedGroups()) > 0 {
 				partlyHeld = append(partlyHeld, withHeldGroups(gin.H{"matchId": results[i].ID, "heldGroups": []string{}}, rep))
 			}
+			if results[i].LineupWarning != "" {
+				warnings = append(warnings, gin.H{"matchId": results[i].ID, "warning": results[i].LineupWarning})
+			}
 			if capturedStatus != nil {
 				eligibilityUpdates = append(eligibilityUpdates, capturedStatus)
 			}
@@ -1056,6 +1063,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		body := gin.H{"succeeded": len(successful), "errors": errs}
 		if len(partlyHeld) > 0 {
 			body["heldGroups"] = partlyHeld
+		}
+		if len(warnings) > 0 {
+			body["warnings"] = warnings
 		}
 		c.JSON(http.StatusOK, body)
 	})

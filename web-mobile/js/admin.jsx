@@ -949,6 +949,12 @@ function normalizeCreatedRecord(created) {
 function storedCompetitionInDetail(prev, cid, stored) {
   if (!prev || !prev.config || prev.config.id !== cid || !stored) return prev;
   const { config } = normalizeCompetitionDetail({ config: { ...prev.config, ...stored } });
+  // A competitor's number is composed when the competition is read, never
+  // stored, so the PUT's answer carries none: the number shown stays, by id.
+  const numbers = new Map((prev.config.players || []).filter((p) => p && p.id && p.number).map((p) => [p.id, p.number]));
+  if (numbers.size && Array.isArray(config.players)) {
+    config.players = config.players.map((p) => (p && !p.number && numbers.has(p.id) ? { ...p, number: numbers.get(p.id) } : p));
+  }
   return { ...prev, config };
 }
 

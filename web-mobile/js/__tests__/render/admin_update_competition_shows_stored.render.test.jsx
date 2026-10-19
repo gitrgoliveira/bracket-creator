@@ -72,4 +72,38 @@ describe('a competition save', () => {
     expect(probe.props.competition.warnings, 'the answer\'s warnings never ride on the competition').toBeUndefined();
     logged.mockRestore();
   });
+
+  // The competitor number is composed when the competition is read, never
+  // stored, so the PUT's answer carries none: the one shown stays.
+  it('keeps the competitor numbers the page shows', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const numbered = () => {
+      const d = detail(null);
+      d.config.players = [{ id: 'p-1', name: 'Alice', dojo: 'D1', seed: null, number: 'K1' }];
+      return d;
+    };
+    window.API.fetchCompetitionDetails.mockReset();
+    window.API.fetchCompetitionDetails
+      .mockResolvedValueOnce(numbered())
+      .mockRejectedValue(new Error('offline'));
+    window.API.updateCompetition.mockResolvedValue({
+      ...numbered().config,
+      players: [{ id: 'p-1', name: 'Alice', dojo: 'D1', seed: 2 }],
+      warnings: [],
+    });
+    await act(async () => {
+      render(
+        <AdminApp
+          tournament={{ name: 'Cup', courts: ['A'], competitions: [numbered().config] }}
+          onUpdate={vi.fn()} onLogout={vi.fn()} onViewerMode={vi.fn()} onPasswordChange={vi.fn()}
+          tweaks={{}} password="pw" view={{ kind: 'competition', id: 'c1', section: 'participants' }} setView={vi.fn()}
+          showToast={vi.fn()} authConfig={{}}
+        />,
+      );
+    });
+    await act(async () => { await probe.props.onUpdate({ ...probe.props.competition }); });
+    expect(probe.props.competition.players[0].seed).toBe(2);
+    expect(probe.props.competition.players[0].number).toBe('K1');
+    logged.mockRestore();
+  });
 });

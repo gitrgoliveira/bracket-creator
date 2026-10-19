@@ -746,6 +746,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
       // carries a fresh stamp and beats the newer result it overwrites.
       // Re-arming has to be deliberate.
       setFinishArmed(false);
+      // Taken: this editor, mounted on the match, shows the refusal in its
+      // not-saved banner, so the outbox raises no alert saying it again.
+      return true;
     });
     return unsub;
   }, [m.compId, m.id]);

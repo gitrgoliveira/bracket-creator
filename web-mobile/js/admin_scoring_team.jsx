@@ -1778,6 +1778,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
       // so it would overwrite the newer result rather than lose to it.
       setFinishArmed(false);
       setPendingWrite(false); // the queued write is gone: it failed, not pending
+      // Taken: this sheet, mounted on the match, shows the refusal in its
+      // not-saved banner, so the outbox raises no alert saying it again.
+      return true;
     });
     return unsub;
   }, [m.compId, m.id]);

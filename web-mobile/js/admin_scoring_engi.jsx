@@ -423,6 +423,9 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
       // Re-sending a failed save has to be deliberate: disarm, as the
       // individual editor does.
       setSaveArmed(false);
+      // Taken: this editor, mounted on the match, shows the refusal in its
+      // not-saved banner, so the outbox raises no alert saying it again.
+      return true;
     });
     return unsub;
   }, [m.compId, m.id]);

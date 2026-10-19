@@ -2152,9 +2152,24 @@ function subscribeTerminalWriteFailed(fn) {
     return () => _terminalFailListeners.delete(fn);
 }
 function _notifyTerminalWriteFailed(info) {
+    // Answers whether an editor open on that match took the refusal and shows
+    // it (its listener returned true). That editor is then the one place the
+    // operator is told, and the caller raises no queue alert repeating it
+    // ("Only one behaviour allowed"); with none showing it, the alert is the
+    // one tell (_tellRefusal).
+    let shown = false;
     for (const fn of _terminalFailListeners) {
-        try { fn(info); } catch (_e) { /* swallow */ }
+        try { if (fn(info) === true) shown = true; } catch (_e) { /* swallow */ }
     }
+    return shown;
+}
+
+// _tellRefusal is the ONE rule for a write the server refused on replay: the
+// editor open on its match says it (_notifyTerminalWriteFailed), else the
+// queue alert does. Nothing is told twice and nothing goes untold.
+function _tellRefusal(info, alert) {
+    if (_notifyTerminalWriteFailed(info)) return;
+    _notifyQueueAlert(alert);
 }
 
 // The "did this write land?" predicates live in write_result.jsx, a leaf with
@@ -2198,7 +2213,9 @@ function _notifyScoreSupersededEditor(compID, matchID, body) {
     // owner, so a future wording change cannot paste the copy anywhere a
     // fourth time. `body` is the server's answer: a change turned away
     // because the match was finished gets its own advice (writeMatchClosed).
-    _notifyTerminalWriteFailed({ compID, matchID, kind: 'score', status: 200, ...supersededBanner(body) });
+    // Answers whether the editor open on the match shows it, in which case
+    // the caller counts it into no superseded alert.
+    return _notifyTerminalWriteFailed({ compID, matchID, kind: 'score', status: 200, ...supersededBanner(body) });
 }
 
 // The ALERT half: reaches an operator who has already moved on to another
@@ -2223,7 +2240,7 @@ function _heldForClosedMatch(body) {
 }
 
 function _notifyScoreSuperseded(compID, matchID, body) {
-    _notifyScoreSupersededEditor(compID, matchID, body);
+    if (_notifyScoreSupersededEditor(compID, matchID, body)) return;
     _notifyScoreSupersededAlert(1, compID, matchID, _heldForClosedMatch(body));
 }
 
@@ -3086,10 +3103,12 @@ async function _sendEntry(key, descriptor, pass) {
     if (terminal) {
         if (!_isAllowedTerminalRequest(method, url)) {
             console.warn(`[sync] dropping terminal ${kind || ''} write with disallowed method/url:`, method, url);
-            _notifyTerminalWriteFailed({ compID, matchID, kind, status: 0, reason: 'corrupted queue entry' });
-            // Undeliverable by construction: announced globally as well, since
-            // the editor-scoped channel only reaches an operator on this match.
-            _notifyQueueAlert({ kind: 'unreadable', count: 1, terminalCount: isFinishedResultWrite(descriptor) ? 1 : 0, compID, matchID });
+            // Undeliverable by construction: said by the editor open on this
+            // match, else announced globally (_tellRefusal).
+            _tellRefusal(
+                { compID, matchID, kind, status: 0, reason: 'corrupted queue entry' },
+                { kind: 'unreadable', count: 1, terminalCount: isFinishedResultWrite(descriptor) ? 1 : 0, compID, matchID },
+            );
             leaveQueue({ error: new Error('corrupted queue entry') });
             return 'settled';
         }
@@ -3161,13 +3180,16 @@ async function _sendEntry(key, descriptor, pass) {
                 if (descriptor.skewRetried) {
                     // Refused a second time on a stamp built from a freshly
                     // learned offset: this device's frame cannot be reconciled.
-                    // Dropped loudly, on both channels.
+                    // Dropped loudly, once: by the editor open on this match,
+                    // else by the queue alert (_tellRefusal).
                     console.warn(`[sync] dropping queued ${kind} write refused twice for clock skew (serverNowMs=${body.serverNowMs}); the device clock cannot be reconciled`);
-                    _notifyTerminalWriteFailed({ compID, matchID, kind, status: 200, reason: CLOCK_SKEW_FAIL_REASON, advice: CLOCK_SKEW_UNHEALED_ADVICE });
-                    _notifyQueueAlert({
-                        kind: 'rejected', count: 1, terminalCount: isFinishedResultWrite(descriptor) ? 1 : 0, compID, matchID,
-                        detail: CLOCK_SKEW_FAIL_REASON,
-                    });
+                    _tellRefusal(
+                        { compID, matchID, kind, status: 200, reason: CLOCK_SKEW_FAIL_REASON, advice: CLOCK_SKEW_UNHEALED_ADVICE },
+                        {
+                            kind: 'rejected', count: 1, terminalCount: isFinishedResultWrite(descriptor) ? 1 : 0, compID, matchID,
+                            detail: CLOCK_SKEW_FAIL_REASON,
+                        },
+                    );
                     // An override additionally leaves an optimistic local advance
                     // standing on a write that will never land: ask for a refetch.
                     if (kind === 'override') _notifyBracketResync({ compID, matchID, reason: CLOCK_SKEW_REASON });
@@ -3184,20 +3206,23 @@ async function _sendEntry(key, descriptor, pass) {
                 // bc-cse: our stamp lost either way, so re-check our clock frame.
                 _relearnClockThrottled();
                 if (_writeQueue.get(key) === descriptor) {
+                    // bc-lww1: the operator's own entry, kept in the match's
+                    // history, not applied. Said by the editor open on the
+                    // match, else counted into the pass's one superseded alert.
+                    let shown = false;
                     if (kind === 'override') {
                         // A feeder-winner ASSERTION the server held: any optimistic
                         // local advance from it is stale, so ask listeners to
                         // refetch; told in the pass's one superseded alert.
                         _notifyBracketResync({ compID, matchID, reason: 'lww_dropped' });
                     } else {
-                        // bc-lww1: the operator's own entry, kept in the match's
-                        // history, not applied. The editor-targeted half fires per
-                        // match; the alert half is counted for the pass.
-                        _notifyScoreSupersededEditor(compID, matchID, body);
-                        if (_heldForClosedMatch(body)) pass.matchClosed = true;
+                        shown = _notifyScoreSupersededEditor(compID, matchID, body);
                     }
-                    pass.superseded++;
-                    pass.lastSuperseded = { compID, matchID };
+                    if (!shown) {
+                        if (kind !== 'override' && _heldForClosedMatch(body)) pass.matchClosed = true;
+                        pass.superseded++;
+                        pass.lastSuperseded = { compID, matchID };
+                    }
                 }
             }
         } else if (!terminal && kind === 'score') {
@@ -3226,8 +3251,8 @@ async function _sendEntry(key, descriptor, pass) {
         // whatever the write (a superseded Finish was counted above; never a
         // displaced answer: that finish was recorded).
         if (kind === 'score' && writeMatchClosed(body) && !(terminal && writeWasSuperseded(body))
-            && _writeQueue.get(key) === descriptor) {
-            _notifyScoreSupersededEditor(compID, matchID, body);
+            && _writeQueue.get(key) === descriptor
+            && !_notifyScoreSupersededEditor(compID, matchID, body)) {
             pass.superseded++;
             pass.matchClosed = true;
             pass.lastSuperseded = { compID, matchID };
@@ -3298,19 +3323,22 @@ async function _sendEntry(key, descriptor, pass) {
     // server answers an exact replay of a recorded decision as recorded
     // (engine.exactDecisionReplay). A caller that claims the refusal
     // (onRefusal, e.g. the downstream confirm in attemptScoreWrite) shows it
-    // itself; otherwise the editor-scoped channel and the global alert carry
-    // it, with downstreamKnockoutPlayedQueueDrop's words for a knockout
+    // itself; otherwise the editor open on the match says it, else the global
+    // alert does (_tellRefusal), with downstreamKnockoutPlayedQueueDrop's words for a knockout
     // correction whose later match was played meanwhile.
     console.warn(`[sync] queued ${kind || 'running'} write rejected (${res.status}):`, body);
     const err = _doorRefusal(descriptor, res.status, body);
     if (!_claimRefusal(key, err)) {
         const refusal = _replayRefusal(body, kind === 'decision' && res.status === 409 ? 'conflict (409)' : `HTTP ${res.status}`);
-        if (terminal) _notifyTerminalWriteFailed({ compID, matchID, kind, status: res.status, ...refusal });
-        _notifyQueueAlert({
+        const alert = {
             kind: 'rejected', count: 1, terminalCount: isFinishedResultWrite(descriptor) ? 1 : 0, compID, matchID,
             detail: refusal.reason,
             ...(refusal.sentence ? { sentence: true } : {}),
-        });
+        };
+        // Said once: by the editor open on the match (a terminal write's
+        // banner), else by the alert.
+        if (terminal) _tellRefusal({ compID, matchID, kind, status: res.status, ...refusal }, alert);
+        else _notifyQueueAlert(alert);
     }
     if (!leaveQueue({ error: err }) && _writeQueue.has(key)) {
         _flushRequested = true;

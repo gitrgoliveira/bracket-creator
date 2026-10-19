@@ -208,6 +208,19 @@ export function createOwnStatus(status, at) {
       return st.token;
     },
 
+    // carry: what a LANDED own write's answer says the match now holds (the
+    // kachinuki Record bout's bout log, with the pairing the advance
+    // appended), laid on the fields its override shows until the feed shows
+    // the move (stage 6 review 14, item 5: the screen shows what the operator
+    // did). An entry already retired, or one the chain no longer holds, takes
+    // nothing.
+    carry(token, fields) {
+      const p = st.pending;
+      const e = p && p.entries.find((x) => x.token === token);
+      if (!e || !e.landed || !fields) return;
+      e.fields = { ...(e.fields || {}), ...fields };
+    },
+
     // answer: the server's answer to own write `token`: LANDED, or REFUSED,
     // HELD or DISCARDED (`msg`, the sentence to say for a refused Start).
     answer(token, outcome, msg, at) {

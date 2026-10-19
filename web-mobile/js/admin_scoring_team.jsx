@@ -5939,10 +5939,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
                     own.settle(ownStart, sent);
                     // bc-evts: the outbox has the write; what follows reads the
                     // server's answer when it comes (a callback, never a wait).
+                    // A landed answer's bout log, the pairing the advance
+                    // appended included, is what the own start's override
+                    // shows until the feed shows the match running (the
+                    // screen shows what the operator did; settle has
+                    // answered the write first, so a refusal carries nothing).
+                    const carryAnswer = (answer) => {
+                      if (answer && Array.isArray(answer.subResults)) own.carry(ownStart, { subResults: answer.subResults });
+                    };
                     if (writePending(sent)) {
-                      sent.settled.then((answer) => { adoptRecordBoutAnswer(answer); }, () => {});
+                      sent.settled.then((answer) => { carryAnswer(answer); adoptRecordBoutAnswer(answer); }, () => {});
                       return sent;
                     }
+                    carryAnswer(sent);
                     adoptRecordBoutAnswer(sent);
                     // bc-rboq: doSubmit reads the result to raise the pending
                     // banner for a queued write; returning nothing hid it.

@@ -75,4 +75,20 @@ describe('Record bout on a queued kachinuki encounter is the editor\'s own start
     expect(button('Record bout')).toBeDefined();
     expect(rows(r.container).length).toBe(2);
   });
+
+  // The screen shows what the operator did (stage 6 review 14, item 5): the
+  // answer has landed with the pairing Record bout appended while the host's
+  // feed still shows the encounter queued, and the sheet shows both bouts at
+  // once, not the one the start carried until the feed catches up.
+  it('the answer landed, the feed still queued: the appended pairing shows at once', async () => {
+    const s = recordOnce();
+    const queued = kachinukiBout({ status: 'scheduled', phase: 'bracket', scoreVersion: 2 });
+    const r = render(el(queued, s.onSubmit));
+    await recordFromQueue(r, s);
+    await s.answer({ applied: true, subResults: recordedRows, modifiedAt: NOW + 50 });
+    r.rerender(el(queued, s.onSubmit));
+    expect(rows(r.container).length, 'bout 1 recorded and the next pairing').toBe(2);
+    expect(kept()).toBeNull();
+    expect(button('Record bout')).toBeDefined();
+  });
 });

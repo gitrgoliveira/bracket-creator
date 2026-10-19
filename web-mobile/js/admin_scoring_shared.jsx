@@ -341,6 +341,9 @@ export function useOwnStatus(feedMatch) {
       if (writeWasRefused(res)) { answer(token, OWN_REFUSED); return; }
       answer(token, OWN_LANDED, "", stampOf(res));
     },
+    // carry(token, fields): a landed own write's answer laid on its override
+    // (own_status.jsx carry), read after settle has answered it.
+    carry: (token, fields) => { own.carry(token, fields); rerender(); },
     release: () => { own.release(); rerender(); },
     rebaseKept: (base) => { own.rebaseKept(base); rerender(); },
     discardDraft: () => { own.discardDraft(); rerender(); },

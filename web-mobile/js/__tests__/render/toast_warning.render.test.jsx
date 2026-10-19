@@ -5,8 +5,8 @@
 // toast arriving while it shows (the flush pass's "N sent", raised just after
 // the warning) never replaces it; an error or another warning does.
 import React from 'react';
-import { render } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
+import { render, fireEvent, act } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Toast } from '../../ui.jsx';
 
 describe('a warning toast', () => {
@@ -27,5 +27,45 @@ describe('a warning toast', () => {
     expect(container.querySelector('.toast__msg').textContent).toBe('Another lineup to check.');
     rerender(<Toast message="Not saved." type="error" onClose={() => {}} />);
     expect(container.querySelector('.toast__msg').textContent).toBe('Not saved.');
+  });
+});
+
+// Stage 6 review 11, minor 1: a toast held back by a latched warning or error
+// is queued behind it, never dropped: "A tap shown as not applied was applied
+// after all" is told once per device, so dropping it told nobody.
+describe('a toast that arrives while a warning or an error shows', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('shows once the warning is dismissed, and the host closes only after it', () => {
+    const onClose = vi.fn();
+    const { container, rerender, getByRole } = render(<Toast message="Check that match's lineup." type="warning" onClose={onClose} />);
+    rerender(<Toast message="A tap shown as not applied was applied after all." type="info" onClose={onClose} />);
+    expect(container.querySelector('.toast__msg').textContent).toBe("Check that match's lineup.");
+    fireEvent.click(getByRole('button', { name: 'Dismiss' }));
+    expect(container.querySelector('.toast__msg').textContent).toBe('A tap shown as not applied was applied after all.');
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('shows in order after the warning\'s dwell, each in turn', () => {
+    vi.useFakeTimers();
+    const onClose = vi.fn();
+    const { container, rerender } = render(<Toast message="Check that match's lineup." type="warning" onClose={onClose} />);
+    rerender(<Toast message="First note." type="info" onClose={onClose} />);
+    rerender(<Toast message="Second note." type="success" onClose={onClose} />);
+    act(() => { vi.advanceTimersByTime(60_000); });
+    expect(container.querySelector('.toast__msg').textContent).toBe('First note.');
+    act(() => { vi.advanceTimersByTime(60_000); });
+    expect(container.querySelector('.toast__msg').textContent).toBe('Second note.');
+    expect(onClose).not.toHaveBeenCalled();
+    act(() => { vi.advanceTimersByTime(60_000); });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows after an error it arrived behind', () => {
+    const { container, rerender, getByRole } = render(<Toast message="Not saved." type="error" onClose={() => {}} />);
+    rerender(<Toast message="1 change sent" type="success" onClose={() => {}} />);
+    expect(container.querySelector('.toast__msg').textContent).toBe('Not saved.');
+    fireEvent.click(getByRole('button', { name: 'Dismiss' }));
+    expect(container.querySelector('.toast__msg').textContent).toBe('1 change sent');
   });
 });

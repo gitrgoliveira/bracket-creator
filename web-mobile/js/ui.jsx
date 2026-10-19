@@ -83,38 +83,63 @@ function Toast({ message, type, onClose }) {
   // Latch the first non-trivial payload this mount sees. The host re-renders
   // this component (not remounts) when state.toast changes, so without this
   // latch an incoming success prop would overwrite a live error in place.
-  const [shown, setShown] = React.useState({ message, type });
+  // `seq` tells two shows of the same words apart, so each gets its dwell.
+  const [shown, setShown] = React.useState({ message, type, seq: 0 });
   const [visible, setVisible] = React.useState(true);
   const onCloseRef = React.useRef(onClose);
   React.useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  // Toasts held back by a latched error or warning, shown in order once it
+  // goes, never dropped (stage 6 review 11, minor 1: "A tap shown as not
+  // applied was applied after all" is told once per device, and a warning
+  // showing dropped it).
+  const queueRef = React.useRef([]);
+  const seqRef = React.useRef(0);
+  const show = (next) => {
+    seqRef.current += 1;
+    setShown({ message: next.message, type: next.type, seq: seqRef.current });
+    setVisible(true);
+  };
+  // The shown toast is done: the next one held back shows, else the host
+  // closes the toast.
+  const advance = () => {
+    const next = queueRef.current.shift();
+    if (next) { show(next); return; }
+    if (onCloseRef.current) onCloseRef.current();
+  };
 
   const shownIsError = shown.type === 'error';
 
-  // Accept an incoming prop change only when it is NOT being suppressed: a
-  // later non-error toast is ignored while an error is still visible, and a
-  // later toast that is neither an error nor a warning is ignored while a
-  // warning is (stage 6 review 10, m2: the flush pass's "N sent", raised just
-  // after a lineup warning, replaced it a render later); anything else
-  // (error→error, warning→error or warning, after a dismiss, other→anything)
-  // replaces. Deps are intentionally [message, type]: re-running on
-  // shown.*/visible would defeat the latch guard above (see comment).
+  // Accept an incoming prop change only when it is NOT being held back: a
+  // later non-error toast waits while an error is still visible, and a later
+  // toast that is neither an error nor a warning waits while a warning is
+  // (stage 6 review 10, m2: the flush pass's "N sent", raised just after a
+  // lineup warning, replaced it a render later); anything else (error→error,
+  // warning→error or warning, after a dismiss, other→anything) replaces.
+  // Deps are intentionally [message, type]: re-running on shown.*/visible
+  // would defeat the latch guard above (see comment).
   React.useEffect(() => {
     const incomingIsError = type === 'error';
-    if (shownIsError && visible && !incomingIsError) return; // protect the error
-    if (shown.type === 'warning' && visible && !incomingIsError && type !== 'warning') return; // and the warning
+    const held = (shownIsError && visible && !incomingIsError)
+      || (shown.type === 'warning' && visible && !incomingIsError && type !== 'warning');
+    if (held) {
+      const q = queueRef.current;
+      const last = q[q.length - 1];
+      if (!last || last.message !== message || last.type !== type) q.push({ message, type });
+      return;
+    }
     if (message === shown.message && type === shown.type) return; // no change
-    setShown({ message, type });
-    setVisible(true);
+    show({ message, type });
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [message, type]);
 
   // Auto-dismiss sequence, keyed on the SHOWN payload identity: NOT on
-  // `visible`. t1 hides at dwell; t2 fires onClose (host setToast(null) →
-  // unmount) 300ms later. `visible` must NOT be a dep: when t1 flips it false
-  // the effect would re-run, and its cleanup would clear the still-pending t2
-  // before it could fire: so onClose never ran and the toast stuck on screen
-  // forever (no CSS hides a non-is-visible toast). Re-triggering on the shown
-  // payload restarts the dwell for each new toast, which is the intent.
+  // `visible`. t1 hides at dwell; t2 shows the next toast held back, else
+  // fires onClose (host setToast(null) → unmount) 300ms later. `visible` must
+  // NOT be a dep: when t1 flips it false the effect would re-run, and its
+  // cleanup would clear the still-pending t2 before it could fire: so onClose
+  // never ran and the toast stuck on screen forever (no CSS hides a
+  // non-is-visible toast). Re-triggering on the shown payload restarts the
+  // dwell for each new toast, which is the intent.
   // A warning (a change kept with something to check, stage 6 review 9, F5)
   // is read like an error, the sign, the dwell, a dismiss and the latch, but
   // announced politely.
@@ -122,9 +147,10 @@ function Toast({ message, type, onClose }) {
   React.useEffect(() => {
     const dwell = shownIsError || shownIsWarning ? TOAST_ERROR_DWELL_MS : TOAST_SUCCESS_DWELL_MS;
     const t1 = setTimeout(() => setVisible(false), dwell);
-    const t2 = setTimeout(() => onCloseRef.current && onCloseRef.current(), dwell + 300);
+    const t2 = setTimeout(advance, dwell + 300);
     return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [shown.message, shown.type, shownIsError, shownIsWarning]);
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [shown.message, shown.type, shown.seq, shownIsError, shownIsWarning]);
 
   const role = shownIsError ? 'alert' : 'status';
   const ariaLive = shownIsError ? 'assertive' : 'polite';
@@ -141,7 +167,7 @@ function Toast({ message, type, onClose }) {
         <button type="button"
           className="toast__dismiss"
           aria-label="Dismiss"
-          onClick={() => { setVisible(false); if (onCloseRef.current) onCloseRef.current(); }}
+          onClick={() => { setVisible(false); advance(); }}
         >&times;</button>
       )}
     </div>

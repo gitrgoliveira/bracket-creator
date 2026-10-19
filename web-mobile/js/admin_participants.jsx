@@ -262,6 +262,18 @@ function participantFormError({ name, dojo, engi }) {
   return null;
 }
 
+// A roster PUT refused because another desk changed the roster is laid on the
+// roster as it stands and sent again at once; this many refusals in a row (a
+// roster changing faster than a round trip, or a fault) end it with the
+// sentence below, never silently.
+export const ROSTER_REBUILD_ATTEMPTS = 10;
+export const ROSTER_KEPT_CHANGING = "Not saved: the competitor list kept changing on other devices. Make the change again.";
+// Apply changes replaces the whole list with the pasted one. When the list
+// changed on another desk after the operator was asked to replace it, the
+// paste is not laid over a list they never saw: it stays in the box and they
+// are told (stage 6 review 12, C1).
+export const ROSTER_CHANGED_BEFORE_APPLY = "Not saved: the competitor list was changed on another device. The list now shown is the current one; your pasted list is still in the box, so tap Apply changes to replace it.";
+
 function AdminParticipants({ c, tournament: _tournament, onUpdate, password, showToast, onSection }) {
   // Zekken-column flag. Engi pairs store both member names combined in the
   // name field ("Name 1 - Name 2"), so engi does not alter the roster layout.
@@ -544,33 +556,65 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     return `nd:${norm(p.name)}\u001f${norm(p.dojo)}`;
   };
   // The roster as the server holds it after every write this card made, with
-  // the seeds typed up to `upTo` laid on.
+  // the seeds typed up to `upTo` laid on, and its version (rosterVersion: the
+  // server refuses a PUT built from a roster that is no longer the stored one).
   const latestRoster = (upTo) => {
     const cur = rosterRef.current;
     const landed = landedRosterRef.current;
-    const base = landed && landed.over === cur ? landed.players : (cur.players || []);
-    return base.map((q) => {
-      const t = typedSeedsRef.current.get(seedKey(q));
-      return t && t.seq <= upTo ? { ...q, seed: t.seed } : q;
-    });
+    const fromLanded = landed && landed.over === cur;
+    const base = fromLanded ? landed.players : (cur.players || []);
+    return {
+      version: fromLanded ? landed.version : (cur.rosterVersion || ""),
+      players: base.map((q) => {
+        const t = typedSeedsRef.current.get(seedKey(q));
+        return t && t.seq <= upTo ? { ...q, seed: t.seed } : q;
+      }),
+    };
   };
-  // putRoster(build): build(players) answers the roster to send, or null to
-  // send nothing. Resolves with onUpdate's answer; rejects with its refusal.
-  const putRoster = (build) => {
+  // putRoster(build, { replace }): build(players) answers the roster to send,
+  // or null to send nothing: an OPERATION laid on the roster it is handed (a
+  // seed set, a row moved, a shuffle, seeds cleared or read from a file). The
+  // PUT names the version of the roster it was built on; when another desk
+  // changed the roster meanwhile (a competitor added, removed or seeded) the
+  // server refuses it, roster_changed, with the roster as it stands, which the
+  // host shows at once, and the operation is laid on THAT roster and sent
+  // again, so neither desk's change is lost and nothing waits on the operator
+  // (stage 6 review 12, C1). A check-in never refuses it: the roster PUT never
+  // writes one. A `replace` (Apply changes, a whole pasted list) is not laid
+  // on a roster its operator never saw: its refusal is handed back for the
+  // caller to tell. Resolves with onUpdate's answer; rejects with its refusal.
+  const putRoster = (build, { replace = false } = {}) => {
     const upTo = typedSeqRef.current;
     const send = async () => {
-      const players = build(latestRoster(upTo));
-      if (!players) return undefined;
-      const before = rosterRef.current;
-      const answer = await onUpdate({ ...before, players });
-      // The host shows the PUT's stored answer, and then its refetch, before
-      // the save resolves (updateCompetition, m10), so the next PUT is built
-      // from what the page shows, a desk's check-in or a competitor added or
-      // removed meanwhile included (stage 6 review 11, A). Only a page that
-      // has not rendered since this PUT went knows nothing newer than what
-      // it sent.
-      landedRosterRef.current = rosterRef.current === before ? { players, over: before } : null;
-      return answer;
+      for (let attempt = 1; ; attempt += 1) {
+        const { players: base, version } = latestRoster(upTo);
+        const players = build(base);
+        if (!players) return undefined;
+        const before = rosterRef.current;
+        try {
+          const answer = await onUpdate({ ...before, players, rosterVersion: version });
+          // The host shows the PUT's stored answer, and then its refetch,
+          // before the save resolves (updateCompetition, m10), so the next PUT
+          // is built from what the page shows (stage 6 review 11, A). Only a
+          // page that has not rendered since this PUT went knows nothing newer
+          // than what it sent, under the version the save answered.
+          landedRosterRef.current = rosterRef.current === before
+            ? { players, version: (answer && answer.rosterVersion) || "", over: before } : null;
+          return answer;
+        } catch (err) {
+          if (!err || err.code !== "roster_changed") throw err;
+          // The roster as it stands is the base the operation is laid on
+          // again (the host shows it too, once it renders).
+          landedRosterRef.current = rosterRef.current === before
+            ? { players: err.players || [], version: err.rosterVersion || "", over: before } : null;
+          if (replace) throw err;
+          if (attempt >= ROSTER_REBUILD_ATTEMPTS) {
+            const gaveUp = new Error(ROSTER_KEPT_CHANGING);
+            if (mountedRef.current) showToast(ROSTER_KEPT_CHANGING, "error");
+            throw gaveUp;
+          }
+        }
+      }
     };
     const run = rosterChainRef.current.then(send);
     rosterChainRef.current = run.then(() => undefined, () => undefined);
@@ -612,12 +656,17 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     const movedKey = seedKey(shown[fromIdx]);
     const targetKey = seedKey(shown[toIdx]);
     const above = fromIdx > toIdx;
+    let gone = false;
     try {
       await putRoster((players) => {
         const np = [...players];
         const from = np.findIndex((p) => seedKey(p) === movedKey);
         const at = np.findIndex((p) => seedKey(p) === targetKey);
-        if (from < 0 || at < 0 || from === at) return null;
+        // Another desk took one of the two off the list meanwhile: there is
+        // nothing to move, and the operator is told rather than left looking
+        // at a move that never happened.
+        gone = from < 0 || at < 0;
+        if (gone || from === at) return null;
         if (from === (above ? at - 1 : at + 1)) return null;
         const [moved] = np.splice(from, 1);
         const to = np.findIndex((p) => seedKey(p) === targetKey);
@@ -630,6 +679,10 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       });
     } catch (err) {
       console.error("AdminParticipants: moveSeedRow PUT failed", err);
+      return;
+    }
+    if (gone && mountedRef.current) {
+      showToast(`Not moved: ${shown[fromIdx].name} or ${shown[toIdx].name} was taken off the list on another device.`, "error");
     }
   };
 
@@ -844,7 +897,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
           return null;
         }
         return minted.np;
-      });
+      }, { replace: true });
       if (mintError) {
         console.error("AdminParticipants: mint failed", mintError);
         if (mountedRef.current) showToast("Failed to parse participants: " + mintError.message, "error");
@@ -884,6 +937,13 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
         else if (isStarted) onSection("scores");
       }
     } catch (err) {
+      // The list changed on another device after the operator was asked to
+      // replace it: nothing was saved, the page shows the list as it stands
+      // and the pasted list stays in the box for one tap to apply it again.
+      if (err && err.code === "roster_changed") {
+        if (mountedRef.current) showToast(ROSTER_CHANGED_BEFORE_APPLY, "error");
+        return;
+      }
       // PUT failure path. updateCompetition already showed an error
       // toast for the user; log here so the dev console has the stack
       // for diagnosis but don't emit a second toast.

@@ -1317,6 +1317,25 @@ paths:
         first, then roster). Players with `seed: 0` produce no seed
         entry; sending `players: []` clears the roster.
 
+        A roster save NEVER writes a check-in: every competitor keeps the
+        `checkedIn` stored for them (matched by participant id), whatever
+        the body says, and a competitor new to the roster is not checked
+        in. Only the check-in endpoints check a competitor in or out, so a
+        check-in another desk records while a roster save is in transit is
+        never erased by it.
+
+        A roster save may send `rosterVersion`, the version of the roster
+        it was built from, as every answer that carries `players` names it
+        (this endpoint's, and `GET /api/viewer/competitions` and
+        `/api/viewer/competitions/{id}`). When the stored roster is no
+        longer that one (another desk added, removed, renamed, moved or
+        seeded a competitor since), the save is refused with 409
+        `roster_changed`, nothing is written, and the answer carries the
+        roster as it stands (`players`) and its `rosterVersion`; the admin
+        page lays its change on that roster and sends it again (a pasted
+        list it reports instead). A check-in does not change the version.
+        A save without `rosterVersion` is written unchecked.
+
         The seed ranks in a roster save are NOT validated for
         completeness, unlike `PUT /api/competitions/{id}/seeds`. The
         admin console sends this request on every keystroke in its
@@ -1360,7 +1379,12 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: |
-            Conflict. Three distinct cases, all 409:
+            Conflict. Four distinct cases, all 409:
+
+            * `roster_changed`: a roster save whose `rosterVersion` is not
+              the stored roster's. Nothing was written; the body is
+              `{error, code: "roster_changed", players, rosterVersion}`,
+              the roster as it stands and its version.
 
             * Output-affecting settings (format, courts, pool
               size/winners/mode, extra qualifiers, pool format, round-robin,
@@ -6903,6 +6927,14 @@ components:
             `GET /api/competitions/{id}`).
           items:
             $ref: '#/components/schemas/Player'
+        rosterVersion:
+          type: string
+          description: >
+            The version of the roster `players` holds, on every answer that
+            carries `players`: a hash of each competitor's id, name, zekken
+            name, dojo, metadata, registration source and seed, in roster
+            order (a check-in is not part of it). A roster save sends it back;
+            see `PUT /api/competitions/{id}`. Never stored.
 
     FightingSpiritAward:
       type: object

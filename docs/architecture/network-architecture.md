@@ -224,6 +224,22 @@ flowchart LR
     direct --> srv
 ```
 
+The Participants page saves the whole competitor list in one call (a typed seed, a row moved, a
+shuffle, seeds cleared or read from a file, a pasted list applied), while registration desks
+check competitors in and add them at the same time. Two rules keep each desk's change:
+
+- **A list save never writes a check-in.** Every competitor keeps the check-in the server holds
+  for them, whatever the list says. Only the check-in calls check a competitor in or out.
+- **A list save names the list it was built from** (`rosterVersion`, which every answer carrying
+  the list includes). When another desk has added, removed, renamed, moved or seeded a
+  competitor since, the server refuses the save with 409 `roster_changed`, writes nothing, and
+  answers with the list as it stands. The page shows that list at once, applies the
+  operator's change to it again (the seed, the move, the shuffle) and sends it straight away,
+  so both desks' changes land. A pasted list is the one exception: it would replace a list the
+  operator never saw, so the page saves nothing, says the list changed on another device and
+  keeps the pasted list in the box for one tap to apply it again. A check-in does not count as a
+  change of the list.
+
 ```mermaid
 flowchart LR
     subgraph watchdog["SSE liveness"]

@@ -222,7 +222,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     } catch (e) {
       console.warn(`refresh after ${actionLabel} failed (action did succeed):`, e);
       const toast = refreshFailureToast(actionLabel, e);
-      if (toast && mountedRef.current) showToast(toast, "error");
+      // One notice for a refresh still failing: the toast queue shows each
+      // error in turn, so a repeat of the same hint joins the one waiting.
+      if (toast && mountedRef.current) showToast(toast, "error", { id: `refresh-failed:${actionLabel}` });
     }
   };
 
@@ -271,6 +273,18 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     try {
       updated = await window.API.updateCompetition(cid, next, password);
     } catch (e) {
+      // A roster PUT refused because the roster changed on another desk is
+      // not a failure to tell: the page shows the roster as it stands at once
+      // (the refusal carries it), and the Participants page lays its change
+      // on it and sends it again, or, for a pasted list, says so itself
+      // (stage 6 review 12, C1).
+      if (e && e.code === "roster_changed") {
+        const current = { players: e.players, rosterVersion: e.rosterVersion };
+        onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current,
+          comps => comps.map(c => c.id === cid ? { ...c, ...current } : c)));
+        if (mountedRef.current) setAdminCompData((prev) => storedCompetitionInDetail(prev, cid, current));
+        throw e;
+      }
       showToast(e.message, "error");
       throw e;
     }
@@ -305,7 +319,12 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         console.error("Failed to refresh competition details after save:", e);
       }
     }
-    return nearDupWarnings || [];
+    // The version of the roster the save stored rides on the answer (not
+    // enumerable, so the warnings array reads as it always did): a roster
+    // write made before the page shows this one is built on it.
+    const answer = nearDupWarnings || [];
+    Object.defineProperty(answer, "rosterVersion", { value: updatedComp.rosterVersion || "", enumerable: false });
+    return answer;
   };
 
   // Mutation handlers split into two phases:

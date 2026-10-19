@@ -4963,7 +4963,18 @@ const API = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to update competition");
+            const e = new Error(err.error || "Failed to update competition");
+            // A roster PUT built from a roster that is no longer the stored
+            // one (another desk added, removed or seeded a competitor since):
+            // nothing was saved, and the answer carries the roster as it
+            // stands, normalized as a fetched detail's, for the page to lay
+            // its change on and send again (stage 6 review 12, C1).
+            if (res.status === 409 && err.code === 'roster_changed') {
+                e.code = 'roster_changed';
+                e.players = normalizeCompetitionDetail({ config: { players: err.players || [] } }).config.players;
+                e.rosterVersion = err.rosterVersion || '';
+            }
+            throw e;
         }
         return res.json();
     },

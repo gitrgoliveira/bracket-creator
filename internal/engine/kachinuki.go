@@ -1086,12 +1086,6 @@ var (
 // changed still applies.
 func (e *Engine) ReopenMatch(compID, matchID, reason string, opts ...ForceOptions) (*domain.CompetitorStatus, error) {
 	fo := firstForceOptions(opts)
-	// A resend of a reopen already logged (its write id) is answered as
-	// recorded, before the preconditions that would now refuse it (the match
-	// is no longer completed): nothing written, no history line (bc-evts F1).
-	if e.loggedWriteID(e.store, compID, matchID, fo.WriteID) {
-		return nil, nil
-	}
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
 		return nil, err
@@ -1110,6 +1104,16 @@ func (e *Engine) ReopenMatch(compID, matchID, reason string, opts ...ForceOption
 	// court state, so a bad-input rejection need not serialize on the lock.
 	var restored *domain.CompetitorStatus
 	err = e.store.WithCourtExclusivityLock(func() error {
+		// A resend of a reopen already logged (its write id) is answered as
+		// recorded, before the preconditions that would now refuse it (the
+		// match is no longer completed): nothing written, no history line
+		// (bc-evts F1). Asked HERE, under the court lock the reopen's own
+		// write and commit are made under, so a copy racing the first waits
+		// for it and then finds its line (stage 6 review 12, m5): asked before
+		// the lock, both copies passed it and the second was refused.
+		if e.loggedWriteID(e.store, compID, matchID, fo.WriteID) {
+			return nil
+		}
 		// Read-only RESULT preconditions BEFORE the court gates, so a plain reopen
 		// of a permanently-unreopenable target (not completed, or its result fed a
 		// fought downstream) reports THAT — not a transient court_busy. The admin
@@ -1343,17 +1347,19 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 // removes no withdrawal.
 func (e *Engine) RequeueBlockerAndReopen(targetComp, targetMatch, blockerComp, blockerMatch, reason string, opts ...ForceOptions) (*domain.CompetitorStatus, error) {
 	fo := firstForceOptions(opts)
-	// A resend already logged on the target (its write id) is answered as
-	// recorded, as ReopenMatch answers one (bc-evts F1).
-	if e.loggedWriteID(e.store, targetComp, targetMatch, fo.WriteID) {
-		return nil, nil
-	}
 	comp, err := e.store.LoadCompetition(targetComp)
 	if err != nil {
 		return nil, err
 	}
 	var restored *domain.CompetitorStatus
 	err = e.store.WithCourtExclusivityLock(func() error {
+		// A resend already logged on the target (its write id) is answered
+		// as recorded, as ReopenMatch answers one (bc-evts F1), under the
+		// court lock its write is made under, before the blocker check that
+		// the first copy's requeue would now fail (stage 6 review 12, m5).
+		if e.loggedWriteID(e.store, targetComp, targetMatch, fo.WriteID) {
+			return nil
+		}
 		if verr := e.requireBlockerHoldsCourt(targetComp, targetMatch, blockerComp, blockerMatch); verr != nil {
 			return verr
 		}

@@ -1,0 +1,11 @@
+{
+  "_comment": [
+    "bc-evts stage 6 review 11: the lineup warning a write's answer carries when a",
+    "carried lineup could not follow it (engine.DerivedLineupError), shared by",
+    "the server's test (lineup_warning_shared_test.go, which pins it against a",
+    "real start's answer) and the outbox's test",
+    "(web-mobile/js/__tests__/outbox_score_warning.test.jsx, which pins that the",
+    "operator is told it as the server sent it). It pins values, not source text."
+  ],
+  "matchStarted": "The match was started, but the lineup carried to P1-1 could not be worked out again (a position the team size has no place for); it was kept as it was. Check that match's lineup."
+}

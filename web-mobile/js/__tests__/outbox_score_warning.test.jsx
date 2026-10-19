@@ -3,6 +3,8 @@
 // decision answer carries `warning`, as the lineup doors' answers do. The
 // outbox tells it to the operator, never only logs it.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 let mod;
 let API;
@@ -36,7 +38,12 @@ afterEach(() => {
 
 async function flushMicrotasks() { for (let i = 0; i < 30; i++) await Promise.resolve(); }
 async function tick(ms = 0) { await vi.advanceTimersByTimeAsync(ms); await flushMicrotasks(); }
-const WARNING = 'The match was started, but the lineup carried to Pool A · Match 2 could not follow it and was kept as it was. Check that match\'s lineup.';
+// The sentence the server sends, shared with its Go test
+// (internal/mobileapp/lineup_warning_shared_test.go pins it against a real
+// start's answer; stage 6 review 11, item 7).
+const WARNING = JSON.parse(readFileSync(
+    resolve(__dirname, '..', '..', '..', 'internal', 'mobileapp', 'testdata', 'lineup_warnings.json'), 'utf8',
+)).matchStarted;
 
 describe('a score write answered with a warning', () => {
     it('tells the operator once, as a lineup warning', async () => {

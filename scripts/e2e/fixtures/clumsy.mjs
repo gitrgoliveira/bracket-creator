@@ -32,6 +32,12 @@ import { dwell, TAP_BOUNCE_MS } from './pace.mjs';
 const DOUBLE_TAP_MARGIN_MS = 100;
 export const DOUBLE_TAP_LIMIT_MS = TAP_BOUNCE_MS - DOUBLE_TAP_MARGIN_MS;
 
+// The longest doubleTap waits in the page for a tap's click. A click trails
+// its touch by many tasks on a loaded machine, so the wait ends on what the
+// page saw (the clicks, a control disabled) and this bound only stops a tap
+// that never makes one from waiting for the test's timeout.
+const SETTLE_MS = 2000;
+
 // Controls a thumb can land on.
 const INTERACTIVE = 'button, [role="button"], a[href], input:not([type="hidden"]), select, textarea, [role="checkbox"], [role="tab"], [role="switch"]';
 
@@ -118,7 +124,9 @@ export async function tapNeighbour(locator, direction) {
 //
 // Both taps must reach the same place (stage 6 review 8, m11): two clicks
 // count only when each landed on what was at the point as its touch began, and a lone click
-// only when the control under the point was DISABLED at the second touch. A
+// only when the control under the point was DISABLED after the first touch
+// (watched from that touch on, since the first click, and so the disable it
+// causes, can come after the second touch has ended). A
 // control the first tap REPLACED takes no click when its replacement lands
 // between the second touch's start and end, so the bounce never reached the
 // place-keyed guard (acceptTap) the row claims to test: that throws. A row
@@ -130,12 +138,14 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
   const page = locator.page();
   const { x, y } = await centreOf(locator);
   // The page records each click (with whether its control holds the point)
-  // and each touch, and whether the control under the point was disabled when
-  // the second touch ended or in the task after, where its click would come
-  // (the first tap may disable it, which is why that touch makes no click).
-  // The listeners are removed in the finally below whatever the page saw, so
-  // none outlives this call.
-  await page.evaluate(({ px, py }) => {
+  // and each touch, and whether the control under the point was disabled at
+  // any moment from the first touch on (the first tap may disable it, which is
+  // why the second touch makes no click). That is watched, not sampled: a
+  // click can trail both touches by many tasks on a loaded machine, so the
+  // disable it causes can come after any fixed read (stage 6 review 11, D).
+  // The listeners and the observer are removed in the finally below whatever
+  // the page saw, so none outlives this call.
+  await page.evaluate(({ px, py, settleMs }) => {
     window.__clumsyClicks = [];
     window.__clumsyTouches = [];
     window.__clumsySecondDisabled = null;
@@ -143,10 +153,8 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
       const el = document.elementFromPoint(px, py);
       return el && el.closest('button, [role="button"], input, select, textarea');
     };
-    const disabledAt = () => {
-      const control = controlAt();
-      return !!control && (control.disabled === true || control.getAttribute('aria-disabled') === 'true');
-    };
+    const isDisabled = (control) => !!control && (control.disabled === true || control.getAttribute('aria-disabled') === 'true');
+    const disabledAt = () => isDisabled(controlAt());
     // The control (or element) a node belongs to.
     const placeOf = (node) => (node && node.closest ? (node.closest('button, [role="button"], input, select, textarea') || node) : null);
     // What was at the point as each touch began: a click must land there, the
@@ -164,53 +172,89 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
       const r = el.getBoundingClientRect();
       return px >= r.left && px <= r.right && py >= r.top && py <= r.bottom;
     };
+    // Sticky from the first touch on: the control the first touch began on
+    // (or whatever holds the point) became disabled, or that control left
+    // the document (the first tap replaced it). Each is a fact once seen,
+    // whenever the click that caused it came.
+    let watched = null;
+    let replaced = false;
+    const wakers = new Set();
+    const wake = () => { for (const w of [...wakers]) w(); };
+    const noteDisabled = () => {
+      if (!window.__clumsySecondDisabled && (isDisabled(watched) || disabledAt())) window.__clumsySecondDisabled = true;
+    };
+    const observer = new MutationObserver(() => {
+      if (!watched) return;
+      if (!watched.isConnected) replaced = true;
+      noteDisabled();
+      wake();
+    });
     const listeners = [];
-    const ends = [];
-    let firstClick = null;
-    const firstClicked = new Promise((r) => { firstClick = r; });
-    let firstEnd = null;
-    const firstEnded = new Promise((r) => { firstEnd = r; });
-    for (const [type, seen] of [['click', window.__clumsyClicks], ['touchstart', window.__clumsyTouches], ['touchend', ends]]) {
+    for (const [type, seen] of [['click', window.__clumsyClicks], ['touchstart', window.__clumsyTouches]]) {
       const rec = (e) => {
         if (type === 'click') {
           const el = placeOf(e.target);
           seen.push({ at: Date.now(), atPoint: atTouch(el, seen.length) || holdsPoint(el),
             desc: el ? `${el.tagName} "${(el.textContent || '').trim().slice(0, 40)}"` : 'none' });
-          firstClick();
         } else {
-          if (type === 'touchstart') touched.push(placeOf(document.elementFromPoint(px, py)));
+          const place = placeOf(document.elementFromPoint(px, py));
+          touched.push(place);
           seen.push(Date.now());
+          if (seen.length === 1) {
+            watched = place;
+            observer.observe(document.documentElement, {
+              subtree: true, childList: true, attributes: true, attributeFilter: ['disabled', 'aria-disabled'],
+            });
+          }
+          if (seen.length === 2) noteDisabled();
         }
-        // Read as the second tap ends, and again in the next task, where its
-        // click would come: the first tap's render (which disables the
-        // control) can land between the two.
-        if (type === 'touchend' && seen.length === 1) firstEnd();
-        if (type === 'touchend' && seen.length === 2) {
-          window.__clumsySecondDisabled = disabledAt();
-          setTimeout(() => { if (!window.__clumsySecondDisabled) window.__clumsySecondDisabled = disabledAt(); }, 0);
-        }
+        wake();
       };
       document.addEventListener(type, rec, true);
       listeners.push([type, rec]);
     }
-    // Resolves once the first tap's click has run and the render it caused
-    // has painted. A first tap that makes no click rejects in the frame after
-    // its touchend (the click comes in the task right after it), so the
-    // helper fails at once with its sentence rather than waiting for the
-    // test's timeout (stage 6 review 9, F8).
     const painted = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
-    window.__clumsyAfterFirst = () => Promise.race([
-      firstClicked.then(() => true),
-      firstEnded.then(() => new Promise((r) => setTimeout(r, 0))).then(painted).then(() => false),
-    ]).then((clicked) => (clicked || window.__clumsyClicks.length > 0
-      ? painted()
-      : Promise.reject(new Error('no click'))));
+    // Waits, at most settleMs, until `done()` holds; re-checked on every
+    // touch, click and observed change, and on a short poll for the bound.
+    const until = (done) => new Promise((resolve) => {
+      const deadline = Date.now() + settleMs;
+      let timer = null;
+      const check = () => {
+        const ok = done();
+        if (!ok && Date.now() < deadline) return;
+        wakers.delete(check);
+        clearTimeout(timer);
+        resolve(ok);
+      };
+      const poll = () => { check(); if (wakers.has(check)) timer = setTimeout(poll, 10); };
+      wakers.add(check);
+      poll();
+    });
+    // Resolves once the first tap's click has run and the render it caused
+    // has painted. A first tap that makes no click within the bound rejects,
+    // so the helper fails with its sentence rather than waiting for the
+    // test's timeout (stage 6 review 9, F8). Nothing waits between the click
+    // and the paint, which would widen the gap the second tap is timed by.
+    window.__clumsyAfterFirst = () => until(() => window.__clumsyClicks.length > 0)
+      .then((clicked) => (clicked ? painted() : Promise.reject(new Error('no click'))));
+    // Resolves once the taps' clicks have all come: two clicks, or one click
+    // on a control that became disabled (then a frame, for a second click
+    // still on its way), or at the bound. A lone click on a REPLACED control
+    // does not end the wait early: the second click can still trail onto the
+    // replacement, and a lone click there is a throw anyway.
+    window.__clumsySettled = () => until(() => window.__clumsyTouches.length >= 2 && (window.__clumsyClicks.length >= 2
+      || (window.__clumsyClicks.length === 1 && window.__clumsySecondDisabled === true)))
+      .then(() => { noteDisabled(); return window.__clumsyClicks.length < 2 ? painted() : null; })
+      .then(() => ({ replaced }));
     window.__clumsyRemove = () => {
       for (const [type, rec] of listeners) document.removeEventListener(type, rec, true);
+      observer.disconnect();
+      wakers.clear();
       window.__clumsyRemove = null;
       window.__clumsyAfterFirst = null;
+      window.__clumsySettled = null;
     };
-  }, { px: x, py: y });
+  }, { px: x, py: y, settleMs: SETTLE_MS });
   let seen;
   try {
     // The four touch events go back to back on ONE CDP session, so the second
@@ -238,15 +282,16 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
     } finally {
       await cdp.detach().catch(() => {});
     }
-    // The next task of the page, where the second tap's click would come, has run.
-    await page.evaluate(() => new Promise((r) => setTimeout(r, 0)));
-    seen = await page.evaluate(() => ({
-      clicks: window.__clumsyClicks, touches: window.__clumsyTouches, secondDisabled: window.__clumsySecondDisabled,
-    }));
+    // Every click the taps make has come (or the bound has passed), judged in
+    // the page, never by a host-side wait: the clicks can trail the touches.
+    seen = await page.evaluate(async () => {
+      const { replaced } = await window.__clumsySettled();
+      return { clicks: window.__clumsyClicks, touches: window.__clumsyTouches, secondDisabled: window.__clumsySecondDisabled, replaced };
+    });
   } finally {
     await page.evaluate(() => { if (typeof window.__clumsyRemove === 'function') window.__clumsyRemove(); }).catch(() => {});
   }
-  const { clicks, touches, secondDisabled } = seen;
+  const { clicks, touches, secondDisabled, replaced } = seen;
   if (!Array.isArray(touches) || touches.length !== 2) {
     throw new Error(`clumsy.doubleTap: the page saw ${Array.isArray(touches) ? touches.length : 'no'} touch(es), not 2, so the row did not test the bounce guard`);
   }
@@ -263,7 +308,7 @@ export async function doubleTap(locator, { afterRender = false } = {}) {
   // so the second touch landed on a disabled one; a control replaced, or a
   // tap lost, is not.
   if (clicks.length === 1 && secondDisabled !== true) {
-    throw new Error('clumsy.doubleTap: the two taps produced one click while the control at the point was not disabled at the second touch (replaced by the first tap, or a tap lost), so the bounce never reached it and the row did not test the bounce guard; a row whose first tap replaces the control in place passes { afterRender: true }');
+    throw new Error(`clumsy.doubleTap: the two taps produced one click while the control at the point was never disabled (${replaced ? 'the first tap replaced it' : 'a tap lost'}), so the bounce never reached it and the row did not test the bounce guard; a row whose first tap replaces the control in place passes { afterRender: true }`);
   }
   const gapMs = clicks.length === 2 ? clicks[1].at - clicks[0].at : touches[1] - touches[0];
   if (gapMs >= DOUBLE_TAP_LIMIT_MS) {

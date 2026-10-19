@@ -26,4 +26,29 @@ test.describe('clumsy.doubleTap', () => {
     expect(r.clicks).toBe(2);
     expect(await p.evaluate(() => window.n)).toBe(2);
   });
+
+  // Without afterRender, on a slowed page (the CPU throttled, as on a loaded
+  // machine, where a click trails both touches by many tasks): a control
+  // its first click disables is one click, never a throw, and a control
+  // that stays enabled is still two (stage 6 review 11, D).
+  for (const [name, disables, clicks] of [['a control its first click disables is one click', true, 1], ['a control that stays enabled is two clicks', false, 2]]) {
+    test(`slowed: ${name}`, async ({ page: p }) => {
+      const cdp = await p.context().newCDPSession(p);
+      try {
+        for (let i = 0; i < 5; i++) {
+          await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+          // In a block: setContent keeps the window, so a second top-level
+          // `const b` would fail to declare and the script would not run.
+          await p.setContent(page(`window.n = 0; { const b = document.getElementById('b'); b.addEventListener('click', () => { window.n++; ${disables ? 'queueMicrotask(() => { b.disabled = true; });' : ''} }); }`));
+          await cdp.send('Emulation.setCPUThrottlingRate', { rate: 10 });
+          const r = await doubleTap(p.locator('#b'));
+          expect(r.clicks).toBe(clicks);
+          expect(await p.evaluate(() => window.n)).toBe(clicks);
+        }
+      } finally {
+        await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 }).catch(() => {});
+        await cdp.detach().catch(() => {});
+      }
+    });
+  }
 });

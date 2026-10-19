@@ -132,7 +132,7 @@ describe('the kachinuki footer hint keeps the room of the tallest hint', () => {
       expect(slot().contains(shown), 'the visible hint is inside the slot').toBe(true);
       const before = reserved();
       // The tallest of each hint: with the Encho clause, which is the longer.
-      expect(before.some((t) => /^Nothing recorded yet/.test(t))).toBe(true);
+      expect(before.some((t) => t.startsWith('Nothing recorded yet'))).toBe(true);
       expect(before.some((t) => /^Tied bout\..*Encho keeps the same pair fighting/.test(t))).toBe(true);
       expect(before.some((t) => /^No draws in a knockout\..*Encho keeps the same pair on this bout\./.test(t))).toBe(true);
 

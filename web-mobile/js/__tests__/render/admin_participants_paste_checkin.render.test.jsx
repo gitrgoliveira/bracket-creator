@@ -54,7 +54,7 @@ describe('a pasted list that carries a checked_in column', () => {
     expect(sent.map((p) => p.name)).toEqual(['Alice', 'Bob']);
     expect(sent.map((p) => p.dojo), 'the marker is read off the row, not into the dojo').toEqual(['D1', 'D2']);
     for (const p of sent) expect('checkedIn' in p, `${p.name} carries no check-in`).toBe(false);
-    const saved = seen.toasts.find((t) => /^Saved /.test(t.m));
+    const saved = seen.toasts.find((t) => t.m.startsWith('Saved '));
     expect(saved, 'the save is confirmed').toBeTruthy();
     expect(saved.m).toContain(PASTED_CHECK_IN_NOT_APPLIED);
   });
@@ -66,7 +66,7 @@ describe('a pasted list that carries a checked_in column', () => {
     await pasteAndApply(r, 'Alice, D1\nBob, D2');
     expect(seen.puts.length).toBe(1);
     for (const p of seen.puts[0].players) expect('checkedIn' in p).toBe(false);
-    const saved = seen.toasts.find((t) => /^Saved /.test(t.m));
+    const saved = seen.toasts.find((t) => t.m.startsWith('Saved '));
     expect(saved.m).not.toContain(PASTED_CHECK_IN_NOT_APPLIED);
     vi.restoreAllMocks();
   });

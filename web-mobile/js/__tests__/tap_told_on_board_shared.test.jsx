@@ -203,8 +203,18 @@ describe('the board\'s notices are the device\'s (F4)', () => {
         delete _lsStore[key];
         window.__bcStoredQueueHandler({ key, oldValue, newValue: null });
         await tick(0);
-        // Told again (a board re-render after the record went): heard again,
-        // since nothing of it is held here any more.
+        // Stage 6 review 11, minor 2: this tab still holds the tap queued (the
+        // other tab stores the record before the queue), so a board render
+        // meanwhile tells it nothing more.
+        API.tellPendingTapRefused('c1', 'm1', { id: t.id, outcome: 'noTarget', reason: 'bout_removed' }, strike);
+        await tick(0);
+        expect(heard.outcomes.filter((o) => o.id === t.id)).toHaveLength(1);
+        // Once the tap leaves this tab's queue, nothing of it is held here.
+        const queued = _lsStore.bc_write_queue_v2;
+        _lsStore.bc_write_queue_v2 = '[]';
+        window.__bcStoredQueueHandler({ key: 'bc_write_queue_v2', oldValue: queued, newValue: '[]' });
+        await tick(0);
+        expect(API.pendingTaps('c1', 'm1'), 'the tap left this tab\'s queue').toEqual([]);
         API.tellPendingTapRefused('c1', 'm1', { id: t.id, outcome: 'noTarget', reason: 'bout_removed' }, strike);
         await tick(0);
         expect(heard.outcomes.filter((o) => o.id === t.id)).toHaveLength(2);

@@ -559,6 +559,15 @@ func (e *Engine) resentStartWarning(h state.StoreTx, comp *state.Competition, ma
 // set; a migration line, which records what the match already held, is never
 // it.
 func startLineOf(lines []state.ScoreLogLine) (*state.ScoreBaseline, state.MatchStatus, bool) {
+	// The LAST line that moves the match out of scheduled: a match started,
+	// sent back to the queue and started again is known by its second start,
+	// the write a resend of it names (stage 6 review 13, m2). The first
+	// start of a match that was never sent back is the only one.
+	var (
+		found      *state.ScoreBaseline
+		foundState state.MatchStatus
+		scheduled  = true
+	)
 	for _, l := range lines {
 		b := l.Baseline
 		if b == nil || b.Door == MigrationDoor {
@@ -572,11 +581,16 @@ func startLineOf(lines []state.ScoreLogLine) (*state.ScoreBaseline, state.MatchS
 		if state.SetGroupFromValue(&verdict, state.GroupResult, raw) != nil {
 			continue
 		}
-		if verdict.Status != "" && verdict.Status != state.MatchStatusScheduled {
-			return b, verdict.Status, true
+		if verdict.Status == "" {
+			continue
 		}
+		underWay := verdict.Status != state.MatchStatusScheduled
+		if underWay && scheduled {
+			found, foundState = b, verdict.Status
+		}
+		scheduled = !underWay
 	}
-	return nil, "", false
+	return found, foundState, found != nil
 }
 
 // matchWriteLead says what the write that first moved a match out of scheduled

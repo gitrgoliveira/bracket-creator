@@ -465,7 +465,6 @@ test.describe('J5 kachinuki from the court console', () => {
     });
 
     await test.step('bout 5: a hurried double tap lands one M, a second M tapped on purpose records M M for a win that was M K', async () => {
-      const tappedAt = Date.now();
       const dbl = await doubleTap(boutIpponButton(currentBout(page), 'shiro', 'M'));
       // The app ignores the bounce of a tap: two taps inside its window land one M.
       await expect(boutFilled(currentBout(page), 'shiro')).toHaveCount(1);
@@ -474,7 +473,12 @@ test.describe('J5 kachinuki from the court console', () => {
       // The mistake the later correction is about: the operator, meaning M K,
       // taps M a second time, past the bounce window.
       if ((await boutFilled(currentBout(page), 'shiro').count()) < 2) {
-        await dwell(page, tappedAt);
+        // Out of the bounce window counted from now, after the double tap's
+        // clicks have all come: counted from before the double tap (its setup
+        // in the page can take longer than the window on a loaded machine),
+        // the deliberate tap could still fall inside it and be taken as the
+        // bounce (seen once in a full run, stage 6 review 12).
+        await dwell(page, Date.now());
         await boutIpponButton(currentBout(page), 'shiro', 'M').tap();
       }
       await expect(boutFilled(currentBout(page), 'shiro')).toHaveCount(2);

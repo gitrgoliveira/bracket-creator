@@ -14,8 +14,8 @@ import (
 // the groups of matches refused for different reasons so no "and" nests.
 
 var (
-	rv11Size = fmt.Errorf("team_lineup: position %q not allowed", "5")
-	rv11Dup  = fmt.Errorf("team_lineup: %w", domain.ErrLineupDuplicateMember)
+	errRv11Size = fmt.Errorf("team_lineup: position %q not allowed", "5")
+	errRv11Dup  = fmt.Errorf("team_lineup: %w", domain.ErrLineupDuplicateMember)
 )
 
 // Item 3: both teams' carried lineups at one match, refused for different
@@ -24,7 +24,7 @@ func TestLineupWarning_OneMatchRefusedForTwoReasonsIsNamedOnce(t *testing.T) {
 	d := &DerivedLineupError{
 		MatchIDs: []string{"Final", "Final"},
 		Labels:   []string{"Match 3 (Final)", "Match 3 (Final)"},
-		Errs:     []error{rv11Size, rv11Dup},
+		Errs:     []error{errRv11Size, errRv11Dup},
 	}
 	require.Equal(t, "The match was started, but the lineups carried to Match 3 (Final) could not be worked out again "+
 		"(a position the team size has no place for and a team member placed at two positions); "+
@@ -37,7 +37,7 @@ func TestLineupWarning_TwoTeamsAtOneMatchArePlural(t *testing.T) {
 	d := &DerivedLineupError{
 		MatchIDs: []string{"Final", "Final"},
 		Labels:   []string{"Match 3 (Final)", "Match 3 (Final)"},
-		Errs:     []error{rv11Size, rv11Size},
+		Errs:     []error{errRv11Size, errRv11Size},
 	}
 	require.Equal(t, "The match was started, but the lineups carried to Match 3 (Final) could not be worked out again "+
 		"(a position the team size has no place for); they were kept as they were. Check that match's lineups.",
@@ -50,7 +50,7 @@ func TestLineupWarning_GroupsOfMatchesAreSeparated(t *testing.T) {
 	d := &DerivedLineupError{
 		MatchIDs: []string{"Pool A-2", "Pool A-3", "Pool A-4", "Pool A-5", "Pool A-5"},
 		Labels:   []string{"Match 3", "Match 4", "Match 5", "Match 6", "Match 6"},
-		Errs:     []error{rv11Size, rv11Size, rv11Dup, rv11Size, rv11Dup},
+		Errs:     []error{errRv11Size, errRv11Size, errRv11Dup, errRv11Size, errRv11Dup},
 	}
 	require.Equal(t, "The lineup was saved, but the lineups carried to these matches could not be worked out again "+
 		"and were kept as they were: Match 3 and Match 4 (a position the team size has no place for); "+

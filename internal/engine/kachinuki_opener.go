@@ -397,13 +397,13 @@ func openerSeatEventsTx(h state.StoreTx, comp *state.Competition, compID, matchI
 // bout 1 is brought to what the rule says (seatOpenerAfterWrite; the
 // score-events door seats its own batch). before is the match's status before
 // the write.
-func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, before matchBefore, door string) (string, error) {
+func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, before matchBefore, door string, stamp int64) (string, error) {
 	comp, err := h.LoadCompetition(compID)
 	if err != nil || comp == nil || !comp.IsKachinuki() {
 		return "", nil
 	}
 	var refused *DerivedLineupError
-	var lead string
+	var lead, told string
 	// The first start only: a match sent back to the queue holds the bouts it
 	// was fought on, and a start of it again is no start (it keeps the lineup
 	// it started with, or, started before this rule, none).
@@ -437,14 +437,75 @@ func (e *Engine) afterMatchWrite(h state.StoreTx, compID, matchID string, before
 				}
 			}
 		}
+	} else if door != DoorEvent && before.status != state.MatchStatusScheduled {
+		// That write sent again, its answer lost, is told what the first
+		// answer said (stage 6 review 11, item 6).
+		if told, err = e.resentStartWarning(h, comp, matchID, stamp, door); err != nil {
+			return "", err
+		}
 	}
 	if door != DoorEvent {
 		e.seatOpenerAfterWrite(h, compID, matchID)
 	}
+	if refused != nil {
+		told = refused.warning(lead)
+	}
+	return told, nil
+}
+
+// resentStartWarning is the warning the write that first moved a kachinuki
+// match out of scheduled was answered with, for that write sent again because
+// its answer was lost (the same writeId, or the same stamp; stage 6 review 11,
+// item 6), "" for any other write. That write is the one stamped at the stamp
+// the match's result holds (startStamp), and a team its start anchored holds
+// its own lineup at the match as a carried copy made at that stamp
+// (anchorStartedCopy). Those teams' carried lineups are worked out again with
+// nothing stored (deriveCarried), and the ones the domain refuses are named as
+// the first answer named them, since a refused lineup stays as stored and is
+// refused again. A pin is never carried, so a pinned team is not followed, as
+// at the start. Accepted: a start anchored at a removal's later stamp is not
+// recognised (told ""), and an operator's save over a pin, which makes it a
+// copy made at the start, makes that team followed too, telling what is
+// refused for it now.
+func (e *Engine) resentStartWarning(h state.StoreTx, comp *state.Competition, matchID string, stamp int64, door string) (string, error) {
+	if stamp <= 0 || comp == nil || !comp.IsKachinuki() {
+		return "", nil
+	}
+	stored, _, err := e.lookupExistingResultIn(h, comp.ID, matchID)
+	if err != nil || stored == nil || stored.Status == state.MatchStatusScheduled || startStamp(stored) != stamp {
+		return "", nil
+	}
+	lineups, err := h.LoadTeamLineups(comp.ID)
+	if err != nil {
+		return "", err
+	}
+	var refused *DerivedLineupError
+	for _, teamID := range []string{stored.SideAID, stored.SideBID} {
+		anchored := false
+		for _, l := range lineups {
+			if teamID != "" && l.TeamID == teamID && l.MatchID == matchID && l.IsCarriedCopy() && l.CopiedAt == stamp {
+				anchored = true
+				break
+			}
+		}
+		if !anchored {
+			continue
+		}
+		_, _, derived, err := deriveCarried(h, comp, teamID)
+		if err != nil {
+			return "", err
+		}
+		if derived != nil {
+			if refused == nil {
+				refused = &DerivedLineupError{}
+			}
+			refused.join(derived)
+		}
+	}
 	if refused == nil {
 		return "", nil
 	}
-	return refused.warning(lead), nil
+	return refused.warning(matchWriteLead(stored.Status, door)), nil
 }
 
 // matchWriteLead says what the write that first moved a match out of scheduled

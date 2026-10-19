@@ -432,49 +432,9 @@ func (e *Engine) FollowLineupSave(h state.StoreTx, comp *state.Competition, save
 	if comp == nil || (saved.MatchID == "" && saved.Round != 0) {
 		return nil, nil
 	}
-	lineups, err := h.LoadTeamLineupsWithRemoved(comp.ID)
+	lc, keys, refused, err := deriveCarried(h, comp, saved.TeamID)
 	if err != nil {
 		return nil, err
-	}
-	pool, err := h.LoadPoolMatches(comp.ID)
-	if err != nil {
-		return nil, err
-	}
-	bracket, err := h.LoadBracket(comp.ID)
-	if err != nil {
-		return nil, err
-	}
-	// A carried lineup the domain refuses as worked out (a position the
-	// competition's team size has no place for, kept from older data) is a
-	// refusal sending the change again would meet again: it stays as stored,
-	// the ones after it are worked out from it as stored, and the change
-	// itself is kept (stage 6 review 8, m7: failing the save held its outbox
-	// entry, and every later write of the match behind it, forever).
-	frozen := map[string]bool{}
-	var refused *DerivedLineupError
-	var lc *lineupCarry
-	var keys []string
-	for {
-		lc = newLineupCarry(maps.Clone(lineups), pool, bracket, comp.IsKnockoutEnabled(), comp.TeamSize)
-		keys = lc.rederive(saved.TeamID, frozen)
-		bad := ""
-		for _, k := range keys {
-			if verr := lc.lineups[k].ValidatePositions(comp.TeamSize); verr != nil {
-				bad = k
-				if refused == nil {
-					refused = &DerivedLineupError{Err: verr}
-				}
-				// Each match keeps its own refusal (stage 6 review 10, m9).
-				refused.MatchIDs = append(refused.MatchIDs, lc.lineups[k].MatchID)
-				refused.Labels = append(refused.Labels, OperatorMatchLabel(comp, bracket, lc.lineups[k].MatchID))
-				refused.Errs = append(refused.Errs, verr)
-				break
-			}
-		}
-		if bad == "" {
-			break
-		}
-		frozen[bad] = true
 	}
 	moved := make([]string, 0, len(keys))
 	if len(keys) > 0 {
@@ -496,6 +456,61 @@ func (e *Engine) FollowLineupSave(h state.StoreTx, comp *state.Competition, save
 		return moved, refused
 	}
 	return moved, nil
+}
+
+// deriveCarried works every carried lineup of the team out again, as a lineup
+// save does (FollowLineupSave), and stores nothing: it answers what it worked
+// out (lc), the lineups that moved (keys, the refused ones left out) and the
+// carried lineups the domain refuses as worked out (refused, nil when none),
+// which stay as stored. Those stay refused on every later derivation until a
+// change lets them follow, so a derivation made again names them again
+// (resentStartWarning reads that).
+func deriveCarried(h state.StoreTx, comp *state.Competition, teamID string) (*lineupCarry, []string, *DerivedLineupError, error) {
+	lineups, err := h.LoadTeamLineupsWithRemoved(comp.ID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	pool, err := h.LoadPoolMatches(comp.ID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	bracket, err := h.LoadBracket(comp.ID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	// A carried lineup the domain refuses as worked out (a position the
+	// competition's team size has no place for, kept from older data) is a
+	// refusal sending the change again would meet again: it stays as stored,
+	// the ones after it are worked out from it as stored, and the change
+	// itself is kept (stage 6 review 8, m7: failing the save held its outbox
+	// entry, and every later write of the match behind it, forever).
+	frozen := map[string]bool{}
+	var refused *DerivedLineupError
+	var lc *lineupCarry
+	var keys []string
+	for {
+		lc = newLineupCarry(maps.Clone(lineups), pool, bracket, comp.IsKnockoutEnabled(), comp.TeamSize)
+		keys = lc.rederive(teamID, frozen)
+		bad := ""
+		for _, k := range keys {
+			if verr := lc.lineups[k].ValidatePositions(comp.TeamSize); verr != nil {
+				bad = k
+				if refused == nil {
+					refused = &DerivedLineupError{Err: verr}
+				}
+				// Each match keeps its own refusal (stage 6 review 10, m9).
+				refused.MatchIDs = append(refused.MatchIDs, lc.lineups[k].MatchID)
+				refused.Labels = append(refused.Labels, OperatorMatchLabel(comp, bracket, lc.lineups[k].MatchID))
+				refused.Errs = append(refused.Errs, verr)
+				break
+			}
+		}
+		if bad == "" {
+			break
+		}
+		frozen[bad] = true
+	}
+	return lc, keys, refused, nil
 }
 
 // DerivedLineupError reports the carried lineups a lineup change could not

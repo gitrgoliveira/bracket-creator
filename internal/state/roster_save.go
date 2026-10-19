@@ -151,7 +151,8 @@ func keepStoredCheckIns(players, stored []domain.Player) []domain.Player {
 // ReplaceRosterKeepingCheckIns is the batch POST /participants write: the
 // roster as given, with every stored check-in kept (keepStoredCheckIns), read
 // and written under one lock so a check-in landing between the handler's
-// read and this write is not erased. It writes no seeds.
+// read and this write is not erased. The seed rows it touches are the ones
+// prune judges, in the same locked step (see SeedPruner).
 func (s *Store) ReplaceRosterKeepingCheckIns(compID string, players []domain.Player, prune SeedPruner) (seedsErr error, err error) {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return nil, err
@@ -171,30 +172,42 @@ func (s *Store) ReplaceRosterKeepingCheckIns(compID string, players []domain.Pla
 	if err != nil {
 		return nil, err
 	}
+	// The seeds are read and judged inside this same locked step, before
+	// anything is written, so a seed another desk set since the caller last
+	// read them is judged too: kept, or the replace refused with nothing
+	// written, never dropped by a judgement made on a copy read before the
+	// lock (stage 6 review 13, m7; review 14, item 2).
+	var (
+		seeds   []domain.SeedAssignment
+		kept    []domain.SeedAssignment
+		readErr error
+	)
+	if prune != nil {
+		var rerr error
+		seeds, rerr = helper.ReadSeedsFileRaw(s.compPath(compID, "seeds.csv"))
+		switch {
+		case rerr == nil:
+			if kept, err = prune(stored, seeds); err != nil {
+				return nil, err
+			}
+		case !os.IsNotExist(rerr):
+			readErr = rerr
+		}
+	}
 	if err := s.saveParticipantsNoLock(compID, keepStoredCheckIns(players, stored), withZekken, teamNameRule{comp: comp}); err != nil {
 		return nil, err
 	}
-	if prune == nil {
-		return nil, nil
+	if readErr != nil {
+		return readErr, nil
 	}
-	// The seeds are read, pruned and written back inside this same locked
-	// step, so a seed another desk set since the caller last read them is
-	// kept, never written over by a copy read before the lock (stage 6
-	// review 13, m7).
-	seeds, rerr := helper.ReadSeedsFileRaw(s.compPath(compID, "seeds.csv"))
-	if rerr != nil {
-		if os.IsNotExist(rerr) {
-			return nil, nil
-		}
-		return rerr, nil
-	}
-	if kept := prune(stored, seeds); len(kept) != len(seeds) {
+	if prune != nil && len(kept) != len(seeds) {
 		return s.saveSeedsLocked(compID, kept), nil
 	}
 	return nil, nil
 }
 
-// SeedPruner decides, under the competition's lock, which of the stored seed
-// rows a roster replace keeps: it is handed the roster as it stood before the
-// replace and the seeds stored now.
-type SeedPruner func(storedRoster []domain.Player, seeds []domain.SeedAssignment) (kept []domain.SeedAssignment)
+// SeedPruner judges, under the competition's lock and before the roster is
+// written, which of the stored seed rows a roster replace keeps: it is handed
+// the roster as it stood before the replace and the seeds stored now. An
+// error refuses the replace, and nothing is written.
+type SeedPruner func(storedRoster []domain.Player, seeds []domain.SeedAssignment) (kept []domain.SeedAssignment, err error)

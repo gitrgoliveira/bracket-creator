@@ -319,10 +319,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		orphaned, _ := seedsOrphanedByRosterReplace(existing, canonicalPlayers, seeds)
 		if len(orphaned) > 0 && rosterReplaceAddsIdentities(existing, canonicalPlayers) {
-			labels := formatOrphanedSeedLabels(orphaned)
-			c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf(
-				"this replace removes or renames %d already-seeded participant(s) (%s), and also adds new participant(s), so a removal can't be told apart from a rename; keep their name and dojo unchanged, do the removal in a request that adds no new participants, or update/clear their seed first via PUT /competitions/:id/participants/:pid or the seeding panel",
-				len(orphaned), strings.Join(labels, ", "))})
+			c.JSON(http.StatusConflict, gin.H{"error": (&orphanedSeedsRefusal{orphaned: orphaned}).Error()})
 			return
 		}
 
@@ -333,12 +330,15 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		//
 		// The orphaned seed rows of an unambiguous removal are dropped in the
 		// same locked step, from the seeds stored when it runs: a seed
-		// another desk set between the read above and the write is kept.
-		dropOrphanedSeeds := func(stored []domain.Player, current []domain.SeedAssignment) []domain.SeedAssignment {
-			_, kept := seedsOrphanedByRosterReplace(stored, canonicalPlayers, current)
-			return kept
+		// another desk set between the read above and the write is kept, and
+		// the 409 above is judged again there, so a seed set in the gap on a
+		// competitor this replace renames refuses it with nothing written.
+		seedsErr, err := store.ReplaceRosterKeepingCheckIns(id, players, rosterReplaceSeedPruner(canonicalPlayers))
+		var orphanedRefusal *orphanedSeedsRefusal
+		if errors.As(err, &orphanedRefusal) {
+			c.JSON(http.StatusConflict, gin.H{"error": orphanedRefusal.Error()})
+			return
 		}
-		seedsErr, err := store.ReplaceRosterKeepingCheckIns(id, players, dropOrphanedSeeds)
 		if err != nil {
 			// Defense-in-depth: saveParticipantsNoLock also enforces the
 			// Tier-1 (name, dojo) guard and the blank-dojo/reserved-name

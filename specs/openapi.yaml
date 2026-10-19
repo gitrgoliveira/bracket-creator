@@ -2160,7 +2160,10 @@ paths:
             of its own and has no stable per-request participant id, so in
             that combination it cannot tell a rename (remove old identity, add
             new identity) apart from an unrelated removal plus addition, and
-            refuses the write rather than guess. A replacement that only
+            refuses the write rather than guess. It is judged on the roster
+            and seeds stored when the write runs, so a seed set by another
+            desk a moment earlier counts, and nothing is written. A
+            replacement that only
             removes seeded participants, adding nobody, is unambiguous and
             succeeds instead (see the 200 response). The error message names
             the affected competitors and how to proceed.

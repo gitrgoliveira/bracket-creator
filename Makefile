@@ -3,7 +3,7 @@ BIN_NAME := bracket-creator
 GH_REPOSITORY ?= gitrgoliveira/bracket-creator
 IMAGE_NAME := ghcr.io/$(GH_REPOSITORY)
 BIN_PATH := ./bin
-GO_VERSION := 1.27.2
+GO_VERSION := 1.27.3
 GO_SOURCES := $(shell find . -name "*.go" -type f)
 EMBEDDED_ASSETS := $(shell find ./web ./web-mobile -type f 2>/dev/null)
 
@@ -52,7 +52,7 @@ local/deps: hooks/install js/deps ## Install project dependencies
 	# runs outside this module, so it would otherwise use whatever `go` is on
 	# PATH rather than the toolchain go.mod asks for.
 	# The version also matters on its own: each analyser reads the standard
-	# library's export data through its bundled golang.org/x/tools, and go1.27.2
+	# library's export data through its bundled golang.org/x/tools, and go1.27.3
 	# writes a newer export-data version than x/tools v0.49 can read ("export
 	# data version 5 is greater than maximum supported version 4"). golangci-lint
 	# v2.14.0 bundles x/tools v0.50. No gosec release does yet, so gosec is pinned

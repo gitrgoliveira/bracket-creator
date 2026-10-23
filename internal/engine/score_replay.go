@@ -263,31 +263,21 @@ func ScoreLogGaps(lines []state.ScoreLogLine) map[string][]int64 {
 // whatever the replay made of it (applied, a duplicate mark, not allowed,
 // turned away by a finished match), since each is held by the server and a
 // board must not fold it again. Events with no session or no Seq are not
-// counted; nil when none is. Past state.MaxEventSeqSessions sessions, the ones
-// whose last event was logged latest are kept.
+// counted; nil when none is. Every session that tapped is listed, never only
+// the latest few: a board whose session was left out would fold its pending
+// taps over a copy that already holds them and show them twice. The list is
+// bounded by the sessions that tapped this match, which its log already holds.
 func ScoreLogEventSeqs(lines []state.ScoreLogLine) map[string]int64 {
 	top := map[string]int64{}
-	last := map[string]int{}
-	for i, l := range lines {
+	for _, l := range lines {
 		e := l.Event
 		if e == nil || e.Seq <= 0 || e.Session == "" {
 			continue
 		}
 		top[e.Session] = max(top[e.Session], e.Seq)
-		last[e.Session] = i
 	}
 	if len(top) == 0 {
 		return nil
-	}
-	if len(top) > state.MaxEventSeqSessions {
-		sessions := make([]string, 0, len(top))
-		for s := range top {
-			sessions = append(sessions, s)
-		}
-		slices.SortFunc(sessions, func(a, b string) int { return cmp.Compare(last[b], last[a]) })
-		for _, s := range sessions[state.MaxEventSeqSessions:] {
-			delete(top, s)
-		}
 	}
 	return top
 }

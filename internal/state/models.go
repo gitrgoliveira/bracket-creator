@@ -1799,10 +1799,9 @@ type MatchResult struct {
 	// session's tap events the match's score log holds (bc-evts), whatever
 	// each tap's outcome: a board folding its own pending taps over this copy
 	// skips a tap whose seq is at or below it, since the server copy already
-	// holds it (an echo that lands before the tap's own answer). Only sessions
-	// with a seq'd event, at most MaxEventSeqSessions of them (the latest
-	// logged). Derived by engine.ReplayScoring like ScoreVersion; persisted
-	// after ScoreVersion.
+	// holds it (an echo that lands before the tap's own answer). Every session
+	// with a seq'd event is listed. Derived by engine.ReplayScoring like
+	// ScoreVersion; persisted after ScoreVersion.
 	EventSeqs map[string]int64 `json:"eventSeqs,omitempty" yaml:"-"`
 	// TurnedAway names, by event id, every device tap the match's score log
 	// holds that the server does not apply now, with its outcome (the
@@ -1818,10 +1817,6 @@ type MatchResult struct {
 	// engine.ReplayScoring like EventSeqs; persisted after EventSeqs.
 	TurnedAway map[string]string `json:"turnedAway,omitempty" yaml:"-"`
 }
-
-// MaxEventSeqSessions bounds MatchResult.EventSeqs: one entry per device
-// session that tapped on the match, the most recent ones kept.
-const MaxEventSeqSessions = 32
 
 // MaxTurnedAwayPerSession and MaxTurnedAway bound MatchResult.TurnedAway:
 // the latest taps logged that the server does not apply, at most

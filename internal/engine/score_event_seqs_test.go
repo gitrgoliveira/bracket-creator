@@ -26,22 +26,21 @@ func TestScoreLogEventSeqs_HighestPerSession(t *testing.T) {
 	assert.Equal(t, map[string]int64{"a": 2, "b": 5}, ScoreLogEventSeqs(lines))
 }
 
-// Bounded: past MaxEventSeqSessions, the sessions logged latest are kept.
-func TestScoreLogEventSeqs_KeepsTheLatestSessions(t *testing.T) {
+// Not bounded: every session that tapped is listed, however many tapped after it.
+func TestScoreLogEventSeqs_ListsEverySession(t *testing.T) {
+	// s000 taps first and every other session taps after it: s000 is still
+	// listed, so its board never folds a tap the copy already holds again.
 	var lines []state.ScoreLogLine
-	n := state.MaxEventSeqSessions + 3
+	const n = 200
 	for i := 0; i < n; i++ {
-		lines = append(lines, seqLine(fmt.Sprintf("s%02d", i), 1))
+		lines = append(lines, seqLine(fmt.Sprintf("s%03d", i), 1))
 	}
-	// s00 taps again last, so it is among the latest.
-	lines = append(lines, seqLine("s00", 2))
+	lines = append(lines, seqLine("s001", 2))
 	got := ScoreLogEventSeqs(lines)
-	require.Len(t, got, state.MaxEventSeqSessions)
-	assert.Equal(t, int64(2), got["s00"])
-	for _, gone := range []string{"s01", "s02", "s03"} {
-		assert.NotContains(t, got, gone)
-	}
-	assert.Contains(t, got, fmt.Sprintf("s%02d", n-1))
+	require.Len(t, got, n)
+	assert.Equal(t, int64(1), got["s000"])
+	assert.Equal(t, int64(2), got["s001"])
+	assert.Equal(t, int64(1), got[fmt.Sprintf("s%03d", n-1)])
 }
 
 // The highest bout an event may name is the last bout a kachinuki encounter

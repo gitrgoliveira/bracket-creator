@@ -207,6 +207,52 @@ describe('`after`: a write that follows another match\'s entry', () => {
     });
 });
 
+describe('a write queued while a pass runs', () => {
+    it('a tap on another match made after the pass started is sent at once, never behind a hanging request', async () => {
+        // Review of PR #483: the bases flushed side by side only for the
+        // entries in the pass's snapshot; a write queued after it waited for
+        // every base to end, so court B's taps waited up to FETCH_TIMEOUT_MS
+        // behind court A's hanging request.
+        const held = heldFetches();
+        await API.recordScore('c1', 'mA', finish, 'pw', { id: 'mA', modifiedAt: 0 });
+        await flushMicrotasks();
+        expect(writes().length, 'court A\'s Finish is out and hangs').toBe(1);
+        API.recordTap('c1', 'mB', { kind: 'ippon.add', pos: 0, side: 'a', letter: 'M' }, 'pw', { id: 'mB', modifiedAt: 0 });
+        await flushMicrotasks();
+        // No timer advanced and court A's request still out.
+        expect(writes().length).toBe(2);
+        expect(String(writes()[1][0])).toContain('/mB/score-events');
+        // A second tap on B once the first landed goes too, still with A out.
+        answer(held[1], { outcomes: [{ id: bodyOf(writes()[1]).events[0].id, outcome: 'applied' }], match: { id: 'mB', scoreVersion: 1 } });
+        await flushMicrotasks();
+        API.recordTap('c1', 'mB', { kind: 'ippon.add', pos: 0, side: 'a', letter: 'K' }, 'pw', { id: 'mB', modifiedAt: 0 });
+        await flushMicrotasks();
+        expect(writes().length).toBe(3);
+        expect(String(writes()[2][0])).toContain('/mB/score-events');
+        // A write of court A queued meanwhile still waits for A's Finish.
+        await API.recordScore('c1', 'mA', { status: 'completed', winner: 'B', ipponsA: [], ipponsB: ['M'], correctionReason: 'x' }, 'pw', { id: 'mA', modifiedAt: 0 });
+        await flushMicrotasks();
+        expect(writes().filter(([u]) => String(u).includes('/mA/')).length).toBe(1);
+        answer(held[0], { applied: true });
+        await flushMicrotasks();
+        // Sent as court A's Finish lands, with court B's second tap still out.
+        expect(writes().filter(([u]) => String(u).includes('/mA/')).length).toBe(2);
+    });
+
+    it('logout stops every base: a write queued after it, while the old pass is still out, is not sent by that pass', async () => {
+        const held = heldFetches();
+        await API.recordScore('c1', 'mA', finish, 'pw', { id: 'mA', modifiedAt: 0 });
+        await flushMicrotasks();
+        API.clearQueue();
+        await flushMicrotasks();
+        // Nothing the cleared pass held is started again.
+        expect(writes().length).toBe(1);
+        answer(held[0], { applied: true });
+        await flushMicrotasks();
+        expect(writes().length).toBe(1);
+    });
+});
+
 describe('`after` on a write held for the clock', () => {
     it('a Finish refused for the clock twice holds the start that follows it, names it, and can be discarded from the waiting match', async () => {
         // Review of PR #483: a write kept for the clock (`clockRefused`) never

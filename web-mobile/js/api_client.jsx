@@ -2545,6 +2545,10 @@ const SERVER_REJECTION_NOTICE_THRESHOLD = 10;
 // finishes so newly-queued or still-failed writes are retried without overlap.
 let _flushInProgress = false;
 let _flushRequested = false;
+// _launchIdleBases: while a pass runs, starts every base of the queue that is
+// not out and did not end failing in it (set by _flushQueue, null otherwise;
+// _wakeIdleBases asks it).
+let _launchIdleBases = null;
 // Bumped by clearQueue() (logout / password_reset). An in-flight _flushQueue loop
 // snapshots this at the start and aborts if it changes mid-loop, so a credential
 // revocation can't keep sending queued writes with the now-revoked password.
@@ -2663,7 +2667,7 @@ function _restampFor(enqueuedAt, perfAtEnqueue) {
 }
 
 async function _flushQueue() {
-    if (_flushInProgress) { _flushRequested = true; return; }
+    if (_flushInProgress) { _flushRequested = true; _wakeIdleBases(); return; }
     _flushInProgress = true;
     // What this pass has to tell, counted across the whole call (the do/while
     // rerun included) and announced ONCE at the end, so a court reconnecting
@@ -2706,26 +2710,62 @@ async function _flushQueue() {
             // parked, held by an open fetch, re-stamped for a clock refusal) ends
             // THAT match's turn; the other matches go on. A write made after
             // another on this device never reaches the server before it.
-            const byBase = new Map();
-            for (const entry of [..._writeQueue.entries()].sort(_byEntryOrder)) {
-                const base = _baseOf(entry[0]);
-                if (!byBase.has(base)) byBase.set(base, []);
-                byBase.get(base).push(entry);
-            }
-            // Entries that wait on each other are stuck, not waiting (H1).
-            _markWaitCycles(byBase);
             // The matches go side by side, each strictly in its own order: one
             // match's slow or hanging request never holds another match's
             // writes for the pass. A base checks `gen` before each send, so
             // clearQueue() (logout / password_reset) stops every base before it
-            // sends anything else with the revoked password. A base freed by
-            // another's settle (`after`) goes on the rerun _dequeue requests.
-            // allSettled, so one base's fault never cuts another's turn short;
-            // the first is thrown once every base has ended, as before.
-            const ends = await Promise.allSettled(
-                [...byBase].map(([base, list]) => _flushBase(base, list, pass, gen)));
-            const fault = ends.find((e) => e.status === 'rejected');
-            if (fault) throw fault.reason;
+            // sends anything else with the revoked password. A write queued
+            // while the pass runs, or a base freed by another's settle
+            // (`after`), starts its base at once when that base is not out
+            // (_launchIdleBases), so it never waits for another match's
+            // hanging request; a base that ended failing is not started again
+            // until the rerun, as before. One base's fault never cuts
+            // another's turn short; the first is thrown once every base has
+            // ended, as before.
+            const active = new Map();
+            const failedBases = new Set();
+            const faults = [];
+            const launch = () => {
+                if (gen !== _queueGen) return;
+                const byBase = new Map();
+                for (const entry of [..._writeQueue.entries()].sort(_byEntryOrder)) {
+                    const base = _baseOf(entry[0]);
+                    if (!byBase.has(base)) byBase.set(base, []);
+                    byBase.get(base).push(entry);
+                }
+                // Entries that wait on each other are stuck, not waiting (H1).
+                _markWaitCycles(byBase);
+                for (const [base, list] of byBase) {
+                    if (active.has(base) || failedBases.has(base)) continue;
+                    active.set(base, true);
+                    (async () => {
+                        let ended = '';
+                        try {
+                            ended = await _flushBase(base, list, pass, gen);
+                            if (ended === 'kept' || ended === 'offline') failedBases.add(base);
+                        } catch (e) {
+                            faults.push(e);
+                            failedBases.add(base);
+                        } finally {
+                            active.delete(base);
+                            // A base that sent all it held goes on with what
+                            // was queued for it meanwhile, in its order.
+                            if (ended === 'settled' && [..._writeQueue.keys()].some((k) => _baseOf(k) === base)) launch();
+                            if (active.size === 0) allEnded();
+                        }
+                    })();
+                }
+            };
+            let allEnded = () => {};
+            const everyBaseEnded = new Promise((resolve) => { allEnded = resolve; });
+            _launchIdleBases = launch;
+            try {
+                launch();
+                if (active.size > 0) await everyBaseEnded;
+            } finally {
+                _launchIdleBases = null;
+            }
+            if (faults.length > 0) throw faults[0];
             _persistQueue();
             if (_writeQueue.size === 0) {
                 _flushAttempt = 0;
@@ -2850,7 +2890,7 @@ async function _flushBase(base, list, pass, gen) {
         }
         if (outcome !== 'settled') break;
     }
-    if (outcome === 'settled') return;
+    if (outcome === 'settled') return outcome;
     let marked = false;
     for (const [key, d] of list) {
         if (_writeQueue.get(key) === d && !d.held && outcome === 'kept') { d.held = true; marked = true; }
@@ -2859,6 +2899,7 @@ async function _flushBase(base, list, pass, gen) {
     // it (F6): its own base may have had its turn earlier in this pass.
     if (marked && _markWaitersHeld()) marked = true;
     if (marked) _recomputeSyncStatus();
+    return outcome;
 }
 
 // _blockedByHeld: whether the entry `key` names in `after` is stuck: held after
@@ -4745,8 +4786,14 @@ function _endDiscardWhileOut(d, res, body) {
 
 // _rerunFlushSoon: a flush now, or a rerun of the one under way.
 function _rerunFlushSoon() {
-    if (_flushInProgress) _flushRequested = true;
+    if (_flushInProgress) { _flushRequested = true; _wakeIdleBases(); }
     else queueMicrotask(() => { if (_writeQueue.size > 0) _flushQueue(); });
+}
+
+// _wakeIdleBases: asks the running pass, in a microtask (never inside the
+// enqueue or settle that asks), to start the bases a new or freed entry needs.
+function _wakeIdleBases() {
+    queueMicrotask(() => { if (_launchIdleBases) _launchIdleBases(); });
 }
 
 // _announceDroppedMember: the `team-member-dropped` event, once per id per

@@ -143,28 +143,33 @@ describe('a refusal the open editor shows is not toasted again', () => {
         expect(r.alerts.map((a) => a.kind)).toEqual(['rejected']);
     });
 
-    it('a Finish (or End match) refused twice for the clock: said once by the editor', async () => {
+    it('a Finish (or End match) refused twice for the clock: held and told once, never a not-saved banner', async () => {
+        // Not a refusal any more: held for the clock and retried, never
+        // dropped, so the editor shows no not-saved banner (its held-write
+        // banner says it) and the held write is told once.
         const r = await replay(finish, skew, { editor: ['c1', 'm1'] });
-        expect(r.server.writes).toBe(2);
-        expect(r.shown.length).toBe(1);
-        expect(r.alerts).toEqual([]);
+        expect(r.server.writes).toBeGreaterThanOrEqual(3);
+        expect(r.shown.length).toBe(0);
+        expect(r.alerts.map((a) => a.kind)).toEqual(['server_error']);
     });
 
-    it('a Finish refused twice for the clock with the editor closed: the alert still fires', async () => {
+    it('a Finish refused twice for the clock with the editor closed: held and told once', async () => {
         const r = await replay(finish, skew);
-        expect(r.server.writes).toBe(2);
-        expect(r.alerts.map((a) => a.kind)).toEqual(['rejected']);
+        expect(r.server.writes).toBeGreaterThanOrEqual(3);
+        expect(r.alerts.map((a) => a.kind)).toEqual(['server_error']);
     });
 
-    it('an own Start refused twice for the clock: no alert, its settlement carries the refusal the editor says', async () => {
-        let settled;
+    it('an own Start refused twice for the clock: held and told once, its settlement waiting', async () => {
+        let settled = null;
         const r = await replay(async (API) => {
             const res = await API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null);
-            settled = res.settled;
+            res.settled.then((v) => { settled = v; });
         }, skew, { editor: ['c1', 'm1'] });
-        expect(r.server.writes).toBe(2);
-        expect(r.alerts).toEqual([]);
+        // A running write is held for the clock as a result is: kept, told
+        // once, its settlement waiting for the answer that lands.
+        expect(r.server.writes).toBeGreaterThanOrEqual(3);
+        expect(r.alerts.map((a) => a.kind)).toEqual(['server_error']);
         expect(r.shown.length).toBe(0);
-        await expect(settled).resolves.toMatchObject({ applied: false, reason: 'clock_skew' });
+        expect(settled).toBeNull();
     });
 });

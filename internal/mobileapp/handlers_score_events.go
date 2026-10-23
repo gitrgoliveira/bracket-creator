@@ -6,7 +6,10 @@ package mobileapp
 // replay derives; this file owns the request's shape, the clock and the
 // self-run participant's limits, and the answer. The answer is ALWAYS 200 with
 // one outcome per event (a refusal included): the device's outbox retries a
-// 5xx for ever, and no event here can be cured by a retry.
+// 5xx for ever. Every outcome is final for its event except clock_skew, which
+// is answered here before the engine, so the event was not logged: the device
+// learns the clock again, re-stamps it and resends it, and keeps it queued
+// until it lands or the operator discards it.
 
 import (
 	"errors"

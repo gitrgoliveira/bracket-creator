@@ -295,7 +295,43 @@ describe('M4: a tap alert names taps', () => {
 });
 
 describe('M1: the re-stamp floor counts only writes the server ordered', () => {
-    it('a tap dropped after a second clock refusal does not floor a later re-stamp into the future', async () => {
+    it('a tap refused for the clock again after its re-stamp is kept on the board and held, never dropped', async () => {
+        // Review of PR #483: a tap refused for the clock again after its
+        // re-stamp was dropped for good, though the server never logged it.
+        // Now it stays queued and on the board, held, re-stamped on each
+        // retry, told once, until it lands or the operator discards it.
+        await load();
+        const alerts = [];
+        mod.subscribeQueueAlert((a) => alerts.push(a));
+        let skewed = true;
+        const batches = eventServer({ outcome: () => (skewed ? { outcome: 'clock_skew' } : { outcome: 'applied' }) });
+        API.recordTap('c1', 'm1', tap('M'), 'pw', { id: 'm1', modifiedAt: Date.now() + 4000 });
+        await tick(0);
+        await tick(0);
+        const sends = () => batches.flatMap((b) => b.body.events).filter((e) => e.letter === 'M');
+        expect(sends().length).toBe(2);
+        expect(API.pendingTaps('c1', 'm1').map((t) => t.letter)).toEqual(['M']);
+        expect(API.heldWrites()).toEqual([expect.objectContaining({ matchID: 'm1', keepsFailing: true })]);
+        expect(alerts.filter((a) => a.kind === 'server_error')).toEqual([
+            expect.objectContaining({ count: 1, taps: true, detail: expect.stringMatching(/clock/i) }),
+        ]);
+        expect(alerts.some((a) => a.kind === 'not_applied')).toBe(false);
+
+        // Retried on the backoff, re-stamped, still told only once.
+        await tick(600);
+        expect(sends().length).toBe(3);
+        expect(alerts.filter((a) => a.kind === 'server_error')).toHaveLength(1);
+
+        // The clock is right: it lands.
+        skewed = false;
+        await tick(1100);
+        expect(sends().length).toBe(4);
+        expect(API.pendingTaps('c1', 'm1')).toEqual([]);
+        expect(API.heldWrites()).toEqual([]);
+    });
+
+
+    it('a tap held for the clock and discarded does not floor a later re-stamp into the future', async () => {
         await load();
         // The first tap (M) is refused every time; the second (K) only once.
         const sends = {};
@@ -308,6 +344,8 @@ describe('M1: the re-stamp floor counts only writes the server ordered', () => {
         API.recordTap('c1', 'm1', tap('M'), 'pw', { id: 'm1', modifiedAt: Date.now() + 4000 });
         await tick(0);
         await tick(0);
+        const [held] = API.heldWrites();
+        expect(API.discardHeldWrite(held.key)).toBeTruthy();
         expect(API.pendingTaps('c1', 'm1')).toEqual([]);
         const now = Date.now();
         API.recordTap('c1', 'm1', tap('K'), 'pw', { id: 'm1' });

@@ -623,34 +623,47 @@ describe('clock_skew recovery: a live completed write', () => {
 
     // bc-evts: the write is queued now (every finished write is); what is
     // pinned is that the second refusal drops it rather than loop.
-    it('refused twice: reports it, never a third attempt, and drops it from the queue', async () => {
-        // The drop console.warns for devtools; the strict test setup fails on an
-        // unexpected warn, so own the spy here and assert it fired.
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    it('refused twice: kept queued and held, re-stamped on each retry, told once, and lands once the clock is right', async () => {
+        // Review of PR #483: a write refused for the clock again after its
+        // re-stamp was dropped for good, though the server logged nothing.
+        // Now it is kept queued and held, re-stamped on every retry, told once,
+        // and lands once the clock is right.
         const server = makeServer({ timeOk: true });
         const mod = await loadModWith(server);
         const API = mod.API;
 
         const failures = [];
-        const unsub = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+        const alerts = [];
+        const unsubFail = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
 
-        server.writeReply = () => skewRefusal(); // refuses forever
+        server.writeReply = () => skewRefusal(); // refuses until the clock is fixed
 
         await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', null);
-        await tick(2000);
+        await tick(0);
 
+        // Re-stamped and resent at once, refused again: kept, never dropped.
         expect(server.payloads.length).toBe(2);
-        expect(failures.length).toBe(1);
-        expect(failures[0]).toMatchObject({ compID: 'c1', matchID: 'm1', kind: 'score', status: 200 });
-        // The advice must name the CLOCK: "re-enter the result" alone would
-        // send the operator round the same refusal forever.
-        expect(failures[0].advice).toMatch(/clock/i);
-        // Out of the queue: an entry stamped by a device that cannot get the
-        // stamp right would poison-loop the flush.
+        expect(failures).toEqual([]);
+        expect(API.heldWrites()).toEqual([expect.objectContaining({ matchID: 'm1', keepsFailing: true })]);
+        expect(JSON.parse(_lsStore.bc_write_queue_v2)).toHaveLength(1);
+        const told = alerts.filter((a) => a.kind === 'server_error');
+        expect(told).toEqual([expect.objectContaining({ matchID: 'm1', terminalCount: 1, detail: expect.stringMatching(/clock/i) })]);
+
+        // Retried on the backoff, re-stamped each time, told only once.
+        await tick(600);
+        expect(server.payloads.length).toBe(3);
+        expect(alerts.filter((a) => a.kind === 'server_error')).toHaveLength(1);
+
+        // The clock is right again: it lands and leaves the queue.
+        server.writeReply = () => ({});
+        await tick(1100);
+        expect(server.payloads.length).toBe(4);
+        expect(API.heldWrites()).toEqual([]);
         expect(_lsStore.bc_write_queue_v2).toBe('[]');
-        expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/clock skew/i));
-        warnSpy.mockRestore();
-        unsub();
+        expect(failures).toEqual([]);
+        unsubFail();
+        unsubAlert();
     });
 
     // bc-evts: a running write is an outbox entry, so a clock refusal is
@@ -722,10 +735,8 @@ describe('clock_skew recovery: a queued write on the flush path', () => {
         expect(_lsStore.bc_write_queue_v2).toBe('[]');
     });
 
-    it('refused twice: dropped, reported on both channels, never a third attempt', async () => {
-        // The drop console.warns for devtools; the strict test setup fails on an
-        // unexpected warn, so own the spy here and assert it fired.
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    it('refused twice: held, told once, and discardable', async () => {
+        // Held, never dropped: told once, and the operator may discard it.
         const server = makeServer({ timeOk: true });
         const mod = await loadModWith(server);
         const API = mod.API;
@@ -736,25 +747,25 @@ describe('clock_skew recovery: a queued write on the flush path', () => {
         const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
 
         server.online = false;
-        await API.recordScore('c1', 'mq', { status: 'completed' }, 'pw', null);
+        const r = await API.recordScore('c1', 'mq', { status: 'completed' }, 'pw', null);
         await flushMicrotasks();
 
         server.online = true;
-        server.writeReply = () => skewRefusal(); // refuses forever
+        server.writeReply = () => skewRefusal(); // refuses until the clock is fixed
         window.dispatchEvent(new Event('online'));
-        await tick(2000);
+        await tick(0);
 
         expect(server.payloads.length).toBe(2);
-        // The editor-scoped channel, for an operator still on this match...
-        expect(failures.length).toBe(1);
-        expect(failures[0]).toMatchObject({ compID: 'c1', matchID: 'mq', kind: 'score' });
-        expect(failures[0].advice).toMatch(/clock/i);
-        // ...and the alert channel, for one who has moved to another court.
-        expect(alerts.some((a) => a.kind === 'rejected' && /clock/i.test(a.detail || ''))).toBe(true);
-        // Dropped rather than left to poison-loop the flush.
+        expect(failures).toEqual([]);
+        expect(alerts.filter((a) => a.kind === 'server_error' && /clock/i.test(a.detail || ''))).toHaveLength(1);
+        expect(alerts.some((a) => a.kind === 'rejected')).toBe(false);
+        const held = API.heldWrites();
+        expect(held).toEqual([expect.objectContaining({ matchID: 'mq', keepsFailing: true })]);
+
+        // Discardable like any write the server keeps refusing.
+        expect(API.discardHeldWrite(held[0].key)).toBeTruthy();
+        expect(await r.settled).toEqual({ discarded: true });
         expect(_lsStore.bc_write_queue_v2).toBe('[]');
-        expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/clock skew/i));
-        warnSpy.mockRestore();
         unsubFail();
         unsubAlert();
     });
@@ -829,62 +840,62 @@ describe('clock_skew recovery: an override assertion', () => {
         expect(server.timeCalls).toBe(2);
     });
 
-    it('refused twice: settles applied:false for the caller, never a third attempt', async () => {
-        // The second refusal console.warns for devtools; own the spy so the
-        // strict test setup does not fail on it.
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    it('refused twice: kept, and settles with the answer once the clock is right', async () => {
+        // Refused again after its re-stamp: kept, not settled as refused; it
+        // settles with the server's answer once the clock is right.
         const server = makeServer({ timeOk: true });
         const API = await loadWith(server);
 
         server.writeReply = () => skewRefusal();
         const r = await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw');
-        await tick(2000);
+        let settled = null;
+        r.settled.then((v) => { settled = v; });
+        await tick(0);
 
-        // Unchanged contract: the caller must not trust its optimistic pick -
-        // now WITH the reason, so a caller can say why. The two verdicts this
-        // boundary can return need opposite things said about them, and
-        // `applied:false` alone cannot tell them apart.
-        expect(await r.settled).toEqual({ applied: false, reason: 'clock_skew', message: 'stamp is in the future' });
         expect(server.payloads.length).toBe(2);
-        expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/clock skew/i));
-        warnSpy.mockRestore();
+        expect(settled).toBeNull();
+        expect(API.heldWrites()).toEqual([expect.objectContaining({ matchID: 'm-r2-0', keepsFailing: true })]);
+
+        server.writeReply = () => ({ applied: true });
+        await tick(600);
+        expect(await r.settled).toEqual({ applied: true });
+        expect(server.payloads.length).toBe(3);
     });
 });
 
 describe('clock_skew recovery: a queued override assertion', () => {
-    it('asks for a bracket resync when it is dropped for good', async () => {
-        // A dropped assertion leaves any optimistic local advance standing on a
-        // write that will now never land. The supersede case is benign (a newer
-        // result won, so the server is right and only a refetch is owed); this
-        // one is a failure AND a wrong local bracket, so it owes both.
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    it('held for the clock, it asks for no resync and tells no failure', async () => {
+        // Held, never dropped: the assertion stays queued and the local
+        // advance stands on a write that will still land, so no resync is
+        // asked for and no failure is told; the held write is told once.
         const server = makeServer({ timeOk: true });
         const mod = await loadModWith(server);
         const API = mod.API;
 
         const resyncs = [];
         const failures = [];
+        const alerts = [];
         const unsubResync = mod.subscribeBracketResync((info) => resyncs.push(info));
         const unsubFail = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
 
         server.online = false;
         expect(await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw')).toMatchObject({ pending: true });
         await flushMicrotasks();
 
         server.online = true;
-        server.writeReply = () => skewRefusal(); // refuses forever
+        server.writeReply = () => skewRefusal(); // refuses until the clock is fixed
         window.dispatchEvent(new Event('online'));
-        await tick(2000);
+        await tick(0);
 
         expect(server.payloads.length).toBe(2);
-        expect(resyncs.length).toBe(1);
-        expect(resyncs[0]).toMatchObject({ compID: 'c1', matchID: 'm-r2-0', reason: 'clock_skew' });
-        expect(failures.length).toBe(1);
-        expect(_lsStore.bc_write_queue_v2).toBe('[]');
-        expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/clock skew/i));
-        warnSpy.mockRestore();
+        expect(resyncs).toEqual([]);
+        expect(failures).toEqual([]);
+        expect(alerts.filter((a) => a.kind === 'server_error')).toHaveLength(1);
+        expect(JSON.parse(_lsStore.bc_write_queue_v2)).toHaveLength(1);
         unsubResync();
         unsubFail();
+        unsubAlert();
     });
 });
 
@@ -936,11 +947,9 @@ describe('clock_skew recovery: a queued running write on the flush path', () => 
         expect(_lsStore.bc_write_queue_v2).toBe('[]');
     });
 
-    it('refused twice: dropped exactly as a delivered entry is, with no banner', async () => {
-        // Running state is level-triggered and the next running write supersedes it,
-        // so there is nothing here an operator could act on - only the devtools
-        // warn, which names the kachinuki risk.
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    it('refused twice: held like a result, told once, with no banner', async () => {
+        // A running write is held for the clock exactly as a result is: kept
+        // queued (its kachinuki command with it), told once, no banner.
         const server = makeServer({ timeOk: true });
         const mod = await loadModWith(server);
         const API = mod.API;
@@ -955,16 +964,15 @@ describe('clock_skew recovery: a queued running write on the flush path', () => 
         await flushMicrotasks();
 
         server.online = true;
-        server.writeReply = () => skewRefusal(); // refuses forever
+        server.writeReply = () => skewRefusal(); // refuses until the clock is fixed
         window.dispatchEvent(new Event('online'));
-        await tick(2000);
+        await tick(0);
 
         expect(server.payloads.length).toBe(2);
         expect(failures).toEqual([]);
-        expect(alerts).toEqual([]);
-        expect(_lsStore.bc_write_queue_v2).toBe('[]');
-        expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/clock skew/i));
-        warnSpy.mockRestore();
+        expect(alerts).toEqual([expect.objectContaining({ kind: 'server_error', matchID: 'mk', terminalCount: 0 })]);
+        expect(API.heldWrites()).toEqual([expect.objectContaining({ matchID: 'mk', keepsFailing: true })]);
+        expect(JSON.parse(_lsStore.bc_write_queue_v2)).toHaveLength(1);
         unsubFail();
         unsubAlert();
     });
@@ -1044,8 +1052,7 @@ describe('clock_skew recovery: a queued running write on the flush path', () => 
 // by design, since the stamp it carries was already built from a learned offset.
 
 describe('clock_skew recovery: the retried-once mark is persisted', () => {
-    it('survives the localStorage round-trip, so the rehydrated entry is dropped on its FIRST refusal', async () => {
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    it('survives the localStorage round-trip, so the rehydrated entry is held on its FIRST refusal', async () => {
         const server = makeServer({ timeOk: true });
         const API = await loadWith(server);
 
@@ -1079,14 +1086,14 @@ describe('clock_skew recovery: the retried-once mark is persisted', () => {
         await tick(50);
 
         // ONE attempt in the new session: the rehydrated mark says this entry has
-        // already had its retry. Had the mark been dropped by the round-trip, the
-        // entry would have been re-stamped and sent a second time instead.
+        // already had its immediate resend, so its first refusal holds it (kept,
+        // re-stamped, on the backoff), never dropped.
         expect(server2.payloads.length).toBe(1);
-        expect(failures.length).toBe(1);
-        expect(failures[0]).toMatchObject({ compID: 'c1', matchID: 'mq', kind: 'score' });
-        expect(_lsStore.bc_write_queue_v2).toBe('[]');
-        expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/clock skew/i));
-        warnSpy.mockRestore();
+        expect(failures).toEqual([]);
+        const kept = JSON.parse(_lsStore.bc_write_queue_v2);
+        expect(kept).toHaveLength(1);
+        expect(kept[0][1].clockRefused).toBe(true);
+        expect(mod2.API.heldWrites()).toEqual([expect.objectContaining({ matchID: 'mq', keepsFailing: true })]);
         unsub();
     });
 });
@@ -1118,18 +1125,16 @@ describe('the daihyosen add and remove carry the stamp', () => {
 
     // bc-evts: the add and remove are the outbox's, so the refusal is what
     // `settled` resolves with. A clock_skew refusal is re-stamped by the queue
-    // and resent once first; refused again, it is dropped with the clock alert.
+    // and resent at once first; refused again, it is kept queued and held for
+    // the clock (never dropped: the server logged nothing).
     it.each([
-        ['add', 'superseded', (API) => API.recordDaihyosen('c1', 'B1', 'pw')],
-        ['add', 'clock_skew', (API) => API.recordDaihyosen('c1', 'B1', 'pw')],
-        ['remove', 'superseded', (API) => API.removeDaihyosen('c1', 'B1', 'pw')],
-        ['remove', 'clock_skew', (API) => API.removeDaihyosen('c1', 'B1', 'pw')],
-    ])('a refused %s (%s) settles as the refusal and relearns the offset', async (_name, reason, send) => {
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        ['add', (API) => API.recordDaihyosen('c1', 'B1', 'pw')],
+        ['remove', (API) => API.removeDaihyosen('c1', 'B1', 'pw')],
+    ])('a superseded %s settles as the refusal and relearns the offset', async (_name, send) => {
         const server = makeServer({ timeOk: true });
         const API = await loadWith(server);
         expect(server.timeCalls).toBe(1);
-        server.writeReply = () => ({ applied: false, reason, message: 'Not saved.' });
+        server.writeReply = () => ({ applied: false, reason: 'superseded', message: 'Not saved.' });
 
         const answer = await send(API);
         expect(answer).toMatchObject({ applied: true, pending: true });
@@ -1138,14 +1143,31 @@ describe('the daihyosen add and remove carry the stamp', () => {
 
         expect(writeDidNotLand(res)).toBe(true);
         expect(writeWasSuperseded(res)).toBe(true);
-        expect(writeWasRefusedForClock(res)).toBe(reason === 'clock_skew');
-        // The load's learn, then one relearn; a clock refusal adds the
-        // re-stamp's own awaited learn before its resend.
-        expect(server.timeCalls).toBe(reason === 'clock_skew' ? 3 : 2);
-        // A supersede is never resent; a clock refusal exactly once.
-        expect(server.payloads).toHaveLength(reason === 'clock_skew' ? 2 : 1);
+        expect(writeWasRefusedForClock(res)).toBe(false);
+        expect(server.timeCalls).toBe(2);
+        expect(server.payloads).toHaveLength(1);
         expect(API.unsentWrites().total).toBe(0);
-        warnSpy.mockRestore();
+    });
+
+    it.each([
+        ['add', (API) => API.recordDaihyosen('c1', 'B1', 'pw')],
+        ['remove', (API) => API.removeDaihyosen('c1', 'B1', 'pw')],
+    ])('a %s refused for the clock twice is kept and held, never dropped', async (_name, send) => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        server.writeReply = () => ({ applied: false, reason: 'clock_skew', message: 'Not saved.' });
+
+        const answer = await send(API);
+        let settled = null;
+        answer.settled.then((v) => { settled = v; });
+        await tick(50);
+
+        // Re-stamped (its own learn) and resent at once, refused again: kept.
+        expect(server.timeCalls).toBe(3);
+        expect(server.payloads).toHaveLength(2);
+        expect(settled).toBeNull();
+        expect(API.unsentWrites().total).toBe(1);
+        expect(API.heldWrites()).toEqual([expect.objectContaining({ matchID: 'B1', keepsFailing: true })]);
     });
 
     // The team editor holds every running write on the court until the add or

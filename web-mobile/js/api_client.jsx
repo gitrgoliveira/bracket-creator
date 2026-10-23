@@ -43,7 +43,7 @@ import { serverNowMs, serverClockOffsetMs, setServerClockOffsetMs } from './serv
 import {
     writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock, writeMatchClosed, writeResultLocked, writeDisplacedGroups, supersededBanner,
     SUPERSEDED_REASON, SUPERSEDED_ADVICE,
-    CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, CLOCK_SKEW_UNHEALED_ADVICE,
+    CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE,
     downstreamKnockoutPlayedQueueDrop, downstreamKnockoutRunningMessage, downstreamKnockoutRunningReopenMessage,
     downstreamKnockoutRunningQueueDrop, courtBusyMessage,
     FETCH_TIMEOUT_MS, REP_BOUT_NOT_ADDED, REP_BOUT_NOT_REMOVED, tapOutcomeQuiet,
@@ -533,19 +533,16 @@ function _perfAgeMs(reading) {
 //
 // The TEST for that shape is writeWasRefusedForClock (write_result.jsx), asked
 // wherever a parsed body is on hand, for the same reason writeWasSuperseded is:
-// a response test re-derived per call site is a response test that drifts. This
-// constant remains for the two places that are not testing a body - the wire
-// label on a bracket-resync notification, and the override path, which has
-// already collapsed the body down to a boolean.
-const CLOCK_SKEW_REASON = 'clock_skew';
+// a response test re-derived per call site is a response test that drifts.
 // The operator-facing copy lives in write_result.jsx beside the SUPERSEDED
 // pair, not here: it is a VERDICT string, and the whole point of this response
 // is that its verdict is the opposite of the superseded one. A local copy of it
 // drifted almost immediately - it kept the superseded advice ("check what is
 // recorded") under a comment claiming it named the clock - which is exactly the
-// failure one owner prevents. This module keeps only the wire value it
-// compares, and the one reason string that has no consumer outside the queue.
-const CLOCK_SKEW_FAIL_REASON = 'the device clock could not be reconciled with the server';
+// failure one owner prevents. This module keeps only the one reason string
+// that has no consumer outside the queue: the detail of the alert that says a
+// write is held for the clock (_resendForClock).
+const CLOCK_SKEW_FAIL_REASON = "this device's clock is out of step with the server: check its date and time";
 
 // Heartbeat tripwire threshold. Deliberately BELOW the server's 5s refusal
 // margin: the tripwire is meant to fire and heal while writes are still being
@@ -654,17 +651,15 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
  *   skewRetried     : true once this entry has been re-stamped and retried after
  *                     a clock_skew refusal (bc-cse). ABSENT means not-yet-retried,
  *                     which is the safe default for an entry persisted by an
- *                     older build. A second clock_skew refusal on a marked entry
- *                     drops it rather than retrying a third time: the stamp is
- *                     reconstructed by _restampFor (the older of the wall-clock
- *                     and monotonic estimates),
- *                     so if that is still refused the device's frame cannot be
- *                     reconciled and further attempts would poison-loop.
- *                     A reload landing between the re-stamp and the retry
- *                     rehydrates the entry with the flag already set, so its
- *                     first refusal in the new session drops it with no retry
- *                     at all: conservative by design, since the persisted stamp
- *                     was already built from a learned offset.
+ *                     older build. A clock_skew refusal on a marked entry is
+ *                     never a drop: the server logged nothing. The entry is
+ *                     re-stamped again (a freshly learned offset) and kept
+ *                     queued and held (`clockRefused`, _keepForClock), retried
+ *                     on the backoff until it lands or an operator discards it.
+ *   clockRefused    : true once a marked entry was refused for clock_skew again
+ *                     (_keepForClock): it reads as a write the server keeps
+ *                     refusing (_refusedByServer), so it is held and
+ *                     discardable, and the operator was told once.
  *   authBlocked     : true once the server answered 401. The entry stays QUEUED
  *                     but is skipped by the flush loop, because it carries the
  *                     password it was enqueued with and can only reproduce the
@@ -688,6 +683,7 @@ const _revSession = (typeof crypto !== 'undefined' && crypto.randomUUID)
  *   enqueuedAt: number,
  *   attempts?: number,
  *   skewRetried?: boolean,
+ *   clockRefused?: boolean,
  * }} WriteDescriptor
  * `method`/`url` are present only on terminal entries; running entries omit them.
  */
@@ -1083,10 +1079,10 @@ function _dequeue(key, descriptor, outcome) {
         }
     }
     // The server answered it: a clock-skew re-stamp of a later write of the
-    // match is never stamped below it (_afterSettledStamp). Not a discard, and
-    // not a write dropped after a second clock refusal: the server never
-    // ordered those, and that stamp is in its future, so it would floor every
-    // later re-stamp of the match into the future too.
+    // match is never stamped below it (_afterSettledStamp). Not a discard (of
+    // a write held for the clock, say): the server never ordered it, and its
+    // stamp may be in the server's future, so it would floor every later
+    // re-stamp of the match into the future too.
     if (outcome && 'value' in outcome && !_unorderedValue(outcome.value)) {
         const base = _baseOf(key);
         const s = _entryStamp(d);
@@ -2288,7 +2284,7 @@ function _keepsFailing(d) {
 // (a parked tap batch, or past the notice threshold), not because of what
 // it waits on.
 function _refusedByServer(d) {
-    return !!d && (!!d.parked || (Number(d.attempts) || 0) >= SERVER_REJECTION_NOTICE_THRESHOLD);
+    return !!d && (!!d.parked || !!d.clockRefused || (Number(d.attempts) || 0) >= SERVER_REJECTION_NOTICE_THRESHOLD);
 }
 
 // _heldWriteItem: one held write as API.heldWrites() lists it.
@@ -2601,6 +2597,40 @@ async function _restampQueuedEntryForSkew(descriptor) {
         _stampAfterSeen(_restampFor(enqueuedAt, descriptor.perfAtEnqueue), descriptor.seenModifiedAt));
     descriptor.skewRetried = true;
     _persistQueue();
+}
+
+// _resendForClock: a write the server refused for clock_skew (it logged
+// nothing). The clock is learned again and the write re-stamped, every time.
+// The first refusal resends at once; a refusal again on a stamp built from a
+// relearned clock keeps the write queued and held (_keepForClock), retried on
+// the backoff until the clock is right or an operator discards it. Never
+// dropped (operator rule: nothing a device sends is dropped).
+async function _resendForClock(key, descriptor, pass, alert) {
+    const again = !!descriptor.skewRetried;
+    await _restampQueuedEntryForSkew(descriptor);
+    if (_writeQueue.get(key) !== descriptor) return 'settled'; // discarded meanwhile
+    if (!again) {
+        _flushRequested = true;
+        return 'restamped';
+    }
+    if (_keepForClock(descriptor, pass)) {
+        _notifyQueueAlert({ kind: 'server_error', ...alert, detail: CLOCK_SKEW_FAIL_REASON });
+        _recomputeSyncStatus();
+    }
+    return 'kept';
+}
+
+// _keepForClock: the ONE rule for a write or tap refused for clock_skew again
+// after a re-stamp. It stays queued, reads as one the server keeps refusing
+// (`clockRefused`, _refusedByServer: held, and discardable from its editor and
+// the held-writes list), and the pass backs off. True the first time, so the
+// caller tells the operator once.
+function _keepForClock(d, pass) {
+    pass.anyFailed = true;
+    if (d.clockRefused) return false;
+    d.clockRefused = true;
+    _persistQueue();
+    return true;
 }
 
 // The re-stamp arithmetic, factored out so it can be tested without a queue and
@@ -3184,31 +3214,12 @@ async function _sendEntry(key, descriptor, pass) {
             if (writeWasRefusedForClock(body)) {
                 // bc-cse: NOT a supersede. The stamp this replay carries is in
                 // the server's future; nothing newer won. Heal the offset and
-                // RECONSTRUCT the stamp, then retry once.
-                if (descriptor.skewRetried) {
-                    // Refused a second time on a stamp built from a freshly
-                    // learned offset: this device's frame cannot be reconciled.
-                    // Dropped loudly, once: by the editor open on this match,
-                    // else by the queue alert (_tellRefusal).
-                    console.warn(`[sync] dropping queued ${kind} write refused twice for clock skew (serverNowMs=${body.serverNowMs}); the device clock cannot be reconciled`);
-                    _tellRefusal(
-                        { compID, matchID, kind, status: 200, reason: CLOCK_SKEW_FAIL_REASON, advice: CLOCK_SKEW_UNHEALED_ADVICE },
-                        {
-                            kind: 'rejected', count: 1, terminalCount: isFinishedResultWrite(descriptor) ? 1 : 0, compID, matchID,
-                            detail: CLOCK_SKEW_FAIL_REASON,
-                        },
-                    );
-                    // An override additionally leaves an optimistic local advance
-                    // standing on a write that will never land: ask for a refetch.
-                    if (kind === 'override') _notifyBracketResync({ compID, matchID, reason: CLOCK_SKEW_REASON });
-                    leaveQueue({ value: _doorValue(descriptor, body) });
-                    return 'settled';
-                }
-                await _restampQueuedEntryForSkew(descriptor);
-                // Left QUEUED, with an immediate rerun of the loop, so the
-                // corrected write goes out now rather than on a backoff timer.
-                _flushRequested = true;
-                return 'restamped';
+                // RECONSTRUCT the stamp, then resend. Never dropped: the server
+                // logged nothing, so a refusal again keeps it queued and held
+                // (_keepForClock), one behaviour for every write and tap.
+                return _resendForClock(key, descriptor, pass, {
+                    count: 1, terminalCount: isFinishedResultWrite(descriptor) ? 1 : 0, compID, matchID,
+                });
             }
             if (body.applied === false) {
                 // bc-cse: our stamp lost either way, so re-check our clock frame.
@@ -3239,15 +3250,10 @@ async function _sendEntry(key, descriptor, pass) {
             // except the clock-skew refusal, where res.ok means nothing was
             // written: it is re-stamped and resent in its place, since the
             // entry may hold an edge-triggered kachinukiBoutFinal.
-            const refusedForClock = writeWasRefusedForClock(body);
-            if (refusedForClock && !descriptor.skewRetried) {
-                await _restampQueuedEntryForSkew(descriptor);
-                _flushRequested = true;
-                return 'restamped';
+            if (writeWasRefusedForClock(body)) {
+                return _resendForClock(key, descriptor, pass, { count: 1, terminalCount: 0, compID, matchID });
             }
-            if (refusedForClock) {
-                console.warn(`[sync] dropping queued running write for ${matchID} refused twice for clock skew (serverNowMs=${body.serverNowMs}); a pending kachinuki advancement may need re-pressing`);
-            } else if (body.applied === false) {
+            if (body.applied === false) {
                 // Kept in the match's history, not applied: our stamp lost, so
                 // re-check our clock frame. The editor that sent it reads the
                 // answer from `settled`; no alert (an autosave's would repeat).
@@ -3409,6 +3415,8 @@ async function _sendTapBatch(base, batch, pass) {
         const landed = [];
         // Taps a board told as not applied that the server applied: one alert.
         const takenBack = [];
+        // Taps held for the clock for the first time: told once, below.
+        let clockHeld = 0;
         // The answer's own copy of the match first, so a duplicate is judged
         // on the newest word of what was turned away (F3).
         _rememberTurnedAway(compID, matchID, body.match);
@@ -3425,16 +3433,25 @@ async function _sendTapBatch(base, batch, pass) {
                     if (result === 'settled') result = 'kept';
                     continue;
                 }
-                if (o.outcome === TAP_CLOCK_SKEW && !d.skewRetried) {
+                if (o.outcome === TAP_CLOCK_SKEW) {
                     // The taps settled so far leave storage before the clock is
                     // read (K2): while it is out, another tab's write to the
                     // queue would otherwise hand them back to this tab.
                     if (dequeued) { _persistQueue(); dequeued = false; }
                     _closeDequeueBatch();
+                    // Never dropped: the server logged nothing. Re-stamped each
+                    // time; refused again after a re-stamp, it stays queued and
+                    // held (_keepForClock), as every write does.
+                    const again = !!d.skewRetried;
                     await _restampQueuedTapForSkew(d);
-                    _flushRequested = true;
-                    if (result === 'settled') result = 'restamped';
                     unheld.push([k, d]);
+                    if (again) {
+                        if (_keepForClock(d, pass)) clockHeld++;
+                        result = 'kept';
+                    } else {
+                        _flushRequested = true;
+                        if (result === 'settled') result = 'restamped';
+                    }
                     continue;
                 }
                 if (result !== 'settled') continue; // keep strict order behind it
@@ -3472,6 +3489,12 @@ async function _sendTapBatch(base, batch, pass) {
             }
         } finally {
             _closeDequeueBatch();
+        }
+        if (clockHeld > 0) {
+            _notifyQueueAlert({
+                kind: 'server_error', count: clockHeld, terminalCount: 0, compID, matchID, taps: true,
+                detail: CLOCK_SKEW_FAIL_REASON,
+            });
         }
         if (takenBack.length > 0) {
             _notifyQueueAlert({
@@ -6647,7 +6670,7 @@ export {
     enqueueRunningWrite,
     writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock,
     SUPERSEDED_REASON, SUPERSEDED_ADVICE,
-    CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, CLOCK_SKEW_UNHEALED_ADVICE,
+    CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE,
     // Exported for tests only: the take-the-older rule is a safety property, and
     // reaching it through a full offline/refuse/reconnect fixture would test the
     // queue rather than the arithmetic. No production consumer outside this file.

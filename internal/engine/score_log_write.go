@@ -226,17 +226,16 @@ func (e *Engine) RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, r
 	// Never an event on an empty log: the stored match becomes its first
 	// baseline, at its own group stamps (lazy migration); a drift or repair
 	// line is logged ahead of the events (replayLines, the one owner).
-	_, prefix, _ := replayLines(stored, lines, shape, now, true)
+	// prev, the outcomes as the log stood, is the drift check's own replay of
+	// exactly lines (the zero Replay for an empty log): the same call on the
+	// same inputs, so it is not made a second time.
+	_, prefix, _, prev := replayLinesAsFound(stored, lines, shape, now, true)
 	added := slices.Clone(prefix)
 	for _, i := range take {
 		ev := req.Events[i]
 		added = append(added, state.ScoreLogLine{Event: &ev})
 	}
 	all := append(slices.Clone(lines), added...)
-	var prev Replay
-	if len(lines) > 0 {
-		prev = ReplayScoring(stored, lines, shape)
-	}
 	rp := ReplayScoring(stored, all, shape)
 	// Bout 1 of a kachinuki encounter takes the lineup's fighters in the same
 	// batch, as the server's own events (kachinuki_opener.go).
@@ -793,7 +792,7 @@ func (e *Engine) noteWriteBaseline(h state.StoreTx, compID, matchID string, wb w
 // that differ become a "drift" baseline at their own stamps, and the ERROR is
 // logged. nil when they agree.
 func driftBaseline(stored *state.MatchResult, lines []state.ScoreLogLine, shape ReplayShape, now int64) *state.ScoreLogLine {
-	line, diff, _ := driftOf(stored, lines, shape, now)
+	line, diff, _, _ := driftOf(stored, lines, shape, now)
 	logDrift(stored, line, diff)
 	return line
 }
@@ -801,12 +800,14 @@ func driftBaseline(stored *state.MatchResult, lines []state.ScoreLogLine, shape 
 // driftOf is driftBaseline without the log line: the drift or repair line
 // (nil when the stored match is what lines replay to), the groups it carries,
 // and the replayer over exactly lines, which a caller asking what result is
-// in force at the end of the log reads instead of replaying again.
-func driftOf(stored *state.MatchResult, lines []state.ScoreLogLine, shape ReplayShape, now int64) (*state.ScoreLogLine, []string, *replayer) {
+// in force at the end of the log reads instead of replaying again. The last
+// value is the replay of exactly lines, drift or not, for a caller that needs
+// the outcomes as the log stood (the score-events door's prior).
+func driftOf(stored *state.MatchResult, lines []state.ScoreLogLine, shape ReplayShape, now int64) (*state.ScoreLogLine, []string, *replayer, Replay) {
 	rp, found := replayScoring(stored, lines, shape, nil)
 	diff := replayGroupsDiffer(stored, &rp.Match)
 	if len(diff) == 0 {
-		return nil, nil, found
+		return nil, nil, found, rp
 	}
 	// A load-time repair (EnsureLegacyUpgraded: a winner's id, a bout's member
 	// ids) fills ids on a row the log already covers, in memory and again after
@@ -823,7 +824,7 @@ func driftOf(stored *state.MatchResult, lines []state.ScoreLogLine, shape Replay
 	stamp := max(stored.ModifiedAt, newestLineStamp(lines))
 	b := BaselineFromMatch(stored, logBaselineID(len(lines), door), door, stamp, diff, state.ScoreBasis{Seen: len(lines)})
 	b.ReceivedAt = now
-	return &state.ScoreLogLine{Baseline: &b}, diff, nil
+	return &state.ScoreLogLine{Baseline: &b}, diff, nil, rp
 }
 
 // logDrift says why a drift or repair line was minted; nothing for nil.
@@ -848,19 +849,28 @@ func logDrift(stored *state.MatchResult, line *state.ScoreLogLine, diff []string
 // what result is in force at the end of the log need not replay again.
 // logIt says the drift or repair once, from the write that logs it.
 func replayLines(stored *state.MatchResult, lines []state.ScoreLogLine, shape ReplayShape, now int64, logIt bool) (all, prefix []state.ScoreLogLine, found *replayer) {
+	all, prefix, found, _ = replayLinesAsFound(stored, lines, shape, now, logIt)
+	return all, prefix, found
+}
+
+// replayLinesAsFound is replayLines also handing back the replay of exactly
+// lines (the zero Replay for an empty log), which the drift check has already
+// made: the score-events door reads its outcomes as the prior a batch moved
+// rather than replaying the same lines a second time.
+func replayLinesAsFound(stored *state.MatchResult, lines []state.ScoreLogLine, shape ReplayShape, now int64, logIt bool) (all, prefix []state.ScoreLogLine, found *replayer, asFound Replay) {
 	if len(lines) == 0 {
 		mb := MigrationBaselineFor(stored, MigrationDoor+"-0", now, shape)
 		prefix = []state.ScoreLogLine{{Baseline: &mb}}
-		return prefix, prefix, nil
+		return prefix, prefix, nil, Replay{}
 	}
-	line, diff, found := driftOf(stored, lines, shape, now)
+	line, diff, found, asFound := driftOf(stored, lines, shape, now)
 	if line == nil {
-		return lines, nil, found
+		return lines, nil, found, asFound
 	}
 	if logIt {
 		logDrift(stored, line, diff)
 	}
-	return append(slices.Clone(lines), *line), []state.ScoreLogLine{*line}, nil
+	return append(slices.Clone(lines), *line), []state.ScoreLogLine{*line}, nil, asFound
 }
 
 // winnerSideIDs lists the side ids the match's winner can legitimately carry:

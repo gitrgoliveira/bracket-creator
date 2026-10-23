@@ -553,7 +553,8 @@ function reconcileWinnerMemberId(row) {
 // holds none (engine.ReplayShape.createsMissingRow): a numbered bout of a
 // fixed-order team match, within its team size (`opts.teamSize`), and any
 // numbered bout of a kachinuki encounter (its first bout and a pairing added
-// by hand), so no device writes a bout row ahead of its taps.
+// by hand; foldBout makes it only at the next position, nextBoutPosition), so
+// no device writes a bout row ahead of its taps.
 export function createsMissingRow(opts, pos) {
   if (!opts.team) return false;
   if (opts.kachinuki) return pos >= 1;

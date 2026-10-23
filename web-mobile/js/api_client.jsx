@@ -2872,9 +2872,10 @@ function _blockedByHeld(key, index = _queueIndex()) {
 
 // _isStuckEntry: an entry that cannot go for now for a reason other than the
 // connection: the server refused it (a 5xx, 429 or 403: `attempts`, once a pass
-// has held it), parked, or waiting on a password.
+// has held it), the server keeps refusing it (_refusedByServer: parked, held
+// for the clock, past the notice threshold), or waiting on a password.
 function _isStuckEntry(d) {
-    return !!d && (!!d.parked || !!d.authBlocked || !!d.cycled || (!!d.held && (Number(d.attempts) || 0) > 0));
+    return !!d && (_refusedByServer(d) || !!d.authBlocked || !!d.cycled || (!!d.held && (Number(d.attempts) || 0) > 0));
 }
 
 // _markWaitCycles: marks `cycled` every entry on a wait cycle, and clears it

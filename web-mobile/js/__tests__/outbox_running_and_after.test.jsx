@@ -206,3 +206,40 @@ describe('`after`: a write that follows another match\'s entry', () => {
         expect(byMatch['c1:m2'].held).toBeFalsy();
     });
 });
+
+describe('`after` on a write held for the clock', () => {
+    it('a Finish refused for the clock twice holds the start that follows it, names it, and can be discarded from the waiting match', async () => {
+        // Review of PR #483: a write kept for the clock (`clockRefused`) never
+        // gets `attempts`, so the start queued `after` it read as only waiting:
+        // never held, no banner naming the Finish, waiting until someone found
+        // and discarded it. Held for the clock is stuck, exactly as refused.
+        const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        mockFetch((url) => (String(url).includes('/m1/')
+            ? ok({ applied: false, reason: 'clock_skew', serverNowMs: Date.now() + 100000 })
+            : ok({ applied: true })));
+        const fin = await API.recordScore('c1', 'm1', finish, 'pw', { id: 'm1', modifiedAt: 0 });
+        await API.recordScore('c1', 'm2', { status: 'running', ipponsA: [], ipponsB: [], after: fin.key }, 'pw', { id: 'm2', modifiedAt: 0 });
+        for (let i = 0; i < 4; i++) { await vi.advanceTimersByTimeAsync(5000); await flushMicrotasks(); }
+        const byMatch = Object.fromEntries(stored().map(([k, d]) => [k.split('\u001f')[0], d]));
+        expect(byMatch['c1:m1'].clockRefused, 'the Finish is kept for the clock').toBe(true);
+        expect(byMatch['c1:m2'].held, 'the start waiting on it is held with it').toBe(true);
+        expect(writes().filter(([u]) => String(u).includes('/m2/')).length, 'and never sent').toBe(0);
+        expect(API.heldWriteBlocker('c1', 'm2')).toMatchObject({ matchID: 'm1', keepsFailing: true });
+        // Discarded from the waiting match's banner, the start then goes.
+        expect(API.discardFailingHeldWrites('c1', 'm2')).toBe(1);
+        await vi.advanceTimersByTimeAsync(10); await flushMicrotasks();
+        expect(writes().filter(([u]) => String(u).includes('/m2/score')).length).toBe(1);
+        spy.mockRestore();
+    });
+
+    it('a write held for the clock is discarded from the held-writes list', async () => {
+        const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        mockFetch(() => ok({ applied: false, reason: 'clock_skew', serverNowMs: Date.now() + 100000 }));
+        const fin = await API.recordScore('c1', 'm1', finish, 'pw', { id: 'm1', modifiedAt: 0 });
+        for (let i = 0; i < 4; i++) { await vi.advanceTimersByTimeAsync(5000); await flushMicrotasks(); }
+        expect(API.heldWrites().find((h) => h.key === fin.key)).toMatchObject({ keepsFailing: true, held: true });
+        expect(API.discardHeldWrite(fin.key)).toBe(true);
+        expect(stored().length).toBe(0);
+        spy.mockRestore();
+    });
+});

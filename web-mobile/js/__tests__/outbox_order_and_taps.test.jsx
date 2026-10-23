@@ -87,6 +87,55 @@ function eventServer({ outcome = () => ({ outcome: 'applied' }), version = () =>
     return batches;
 }
 
+// Bases flush side by side: one match's request that never answers does not
+// hold another match's taps for the pass (review: "other matches never wait").
+describe('matches flush concurrently, each in its own order', () => {
+    it('a hanging request of one match does not hold back another match\'s taps', async () => {
+        await load();
+        const sent = [];
+        global.fetch = vi.fn((url, opts) => {
+            if (isClock(url)) return Promise.reject(new TypeError('clock'));
+            const body = JSON.parse(opts.body);
+            sent.push({ url: String(url), body });
+            if (String(url).includes('/matches/m0/')) return new Promise(() => {});
+            const outcomes = body.events.map((e) => ({ id: e.id, outcome: 'applied' }));
+            return Promise.resolve({
+                ok: true, status: 200,
+                json: async () => ({ outcomes, match: { id: 'm1', status: 'running', scoreVersion: 1, eventSeqs: {} } }),
+            });
+        });
+        API.recordTap('c1', 'm0', tap('M'), 'pw', { id: 'm0' });
+        API.recordTap('c1', 'm0', tap('K'), 'pw', { id: 'm0' });
+        API.recordTap('c1', 'm1', tap('D'), 'pw', { id: 'm1' });
+        await tick(0);
+        const m0 = sent.filter((s) => s.url.includes('/matches/m0/'));
+        const m1 = sent.filter((s) => s.url.includes('/matches/m1/'));
+        // m0's one batch is out and hangs; m1's tap went in the same pass.
+        expect(m0.length).toBe(1);
+        expect(m1.length).toBe(1);
+        expect(m1[0].body.events.map((e) => e.letter)).toEqual(['D']);
+        expect(API.pendingTaps('c1', 'm1')).toEqual([]);
+        // m0 keeps its own order: both taps still queued, nothing sent past them.
+        expect(API.pendingTaps('c1', 'm0').length).toBe(2);
+    });
+
+    it('within one match a later write still waits for the one that hangs', async () => {
+        await load();
+        const sent = [];
+        global.fetch = vi.fn((url, opts) => {
+            if (isClock(url)) return Promise.reject(new TypeError('clock'));
+            sent.push({ url: String(url), body: JSON.parse(opts.body) });
+            return new Promise(() => {});
+        });
+        API.recordTap('c1', 'm0', tap('M'), 'pw', { id: 'm0' });
+        await tick(0);
+        API.recordScore('c1', 'm0', { id: 'm0', status: 'running' }, 'pw');
+        await tick(0);
+        // The tap is out; the score write behind it is not sent.
+        expect(sent.map((s) => s.url.endsWith('/score-events'))).toEqual([true]);
+    });
+});
+
 describe('M1: a match\'s own order survives a reload and another tab', () => {
     it('a tap after a reload is stamped after the taps the previous page left queued', async () => {
         const ahead = Date.now() + 2000;

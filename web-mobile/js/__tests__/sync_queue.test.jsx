@@ -1189,10 +1189,12 @@ describe('hasPendingTerminalWrite: true only for terminal writes (banner re-hydr
 
 describe('clearQueue: cancels an in-flight flush (no sends with a revoked password)', () => {
     it('does not send remaining queued writes after clearQueue() during a flush', async () => {
-        // Enqueue two terminal writes while offline (direct call fails → queued).
+        // Enqueue two writes of ONE match while offline: the matches flush side
+        // by side, so the gen guard is what stops a match's later write once
+        // its earlier one is out.
         mockFetch(() => Promise.reject(new TypeError('offline')));
         await API.recordScore('c1', 'mA', { status: 'completed', winner: 'A' }, 'pw', null);
-        await API.recordScore('c1', 'mB', { status: 'completed', winner: 'B' }, 'pw', null);
+        API.reopenMatch('c1', 'mA', 'pw', { reason: 'wrong winner' });
         await flushMicrotasks();
 
         // Controllable fetch: the FIRST flush request hangs until we resolve it,
@@ -1220,7 +1222,7 @@ describe('clearQueue: cancels an in-flight flush (no sends with a revoked passwo
         // The second queued write must NOT have been sent (gen-guard aborted the loop).
         expect(writeCallCount()).toBe(1);
         expect(API.hasPendingTerminalWrite('c1', 'mA')).toBe(false);
-        expect(API.hasPendingTerminalWrite('c1', 'mB')).toBe(false);
+        expect(API.heldWrites().length).toBe(0);
         // The in-flight flush's post-loop _persistQueue() must NOT re-create an
         // empty bc_write_queue_v2 after clearQueue() removed it (credential revocation).
         expect(localStorage.getItem('bc_write_queue_v2')).toBeNull();

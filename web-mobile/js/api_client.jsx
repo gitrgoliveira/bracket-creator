@@ -2684,13 +2684,18 @@ async function _flushQueue() {
             }
             // Entries that wait on each other are stuck, not waiting (H1).
             _markWaitCycles(byBase);
-            for (const [base, list] of byBase) {
-                // If clearQueue() ran during a prior await (logout / password_reset →
-                // credential revocation), abort before sending anything else with the
-                // now-revoked password/header.
-                if (gen !== _queueGen) break;
-                await _flushBase(base, list, pass, gen);
-            }
+            // The matches go side by side, each strictly in its own order: one
+            // match's slow or hanging request never holds another match's
+            // writes for the pass. A base checks `gen` before each send, so
+            // clearQueue() (logout / password_reset) stops every base before it
+            // sends anything else with the revoked password. A base freed by
+            // another's settle (`after`) goes on the rerun _dequeue requests.
+            // allSettled, so one base's fault never cuts another's turn short;
+            // the first is thrown once every base has ended, as before.
+            const ends = await Promise.allSettled(
+                [...byBase].map(([base, list]) => _flushBase(base, list, pass, gen)));
+            const fault = ends.find((e) => e.status === 'rejected');
+            if (fault) throw fault.reason;
             _persistQueue();
             if (_writeQueue.size === 0) {
                 _flushAttempt = 0;
@@ -2990,7 +2995,10 @@ function _markWaitersHeld() {
     }
     if (blockedBases.size === 0) return false;
     for (const [key, d] of _writeQueue) {
-        if (!d.held && blockedBases.has(_baseOf(key))) { d.held = true; marked = true; }
+        // Never an entry whose request is out: the matches flush side by
+        // side, and one marked held while out would count as a held write
+        // that landed (`pass.sent`) when its answer comes.
+        if (!d.held && !_inFlight.has(d) && blockedBases.has(_baseOf(key))) { d.held = true; marked = true; }
     }
     return marked;
 }

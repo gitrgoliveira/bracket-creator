@@ -277,8 +277,13 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 			slog.Error("mobile-app: shutdown error", "err", err)
 			return err
 		}
-		// Drain the listener goroutine so deferred cleanup completes.
-		<-serveErr
+		// Drain the listener goroutine so deferred cleanup completes. After a
+		// clean Shutdown it reports nil (ListenAndServe returns
+		// http.ErrServerClosed); anything else is a real listener failure.
+		if err := <-serveErr; err != nil {
+			slog.Error("mobile-app: listener error during shutdown", "err", err)
+			return err
+		}
 		slog.Info("mobile-app: shutdown complete")
 		return nil
 	case err := <-serveErr:

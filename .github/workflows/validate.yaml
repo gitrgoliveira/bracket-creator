@@ -62,7 +62,7 @@ jobs:
           # (the Makefile's pin, used by `make go/lint` locally) did not.
           # Keep this in lockstep with the `go install` version in
           # Makefile's go/lint target so a local green run predicts CI.
-          version: v2.14.0
+          version: v2.15.0
 
       #   ____             _
       #  |  _ \  ___   ___| | _____ _ __

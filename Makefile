@@ -55,10 +55,9 @@ local/deps: hooks/install js/deps ## Install project dependencies
 	# library's export data through its bundled golang.org/x/tools, and go1.27.3
 	# writes a newer export-data version than x/tools v0.49 can read ("export
 	# data version 5 is greater than maximum supported version 4"). golangci-lint
-	# v2.14.0 bundles x/tools v0.50. No gosec release does yet, so gosec is pinned
-	# to the master commit that does (x/tools v0.51); move it to the next tag.
-	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
-	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/securego/gosec/v2/cmd/gosec@v2.29.1-0.20261009120814-7b1b5cebe007
+	# v2.15.0 and gosec v2.30.0 both bundle x/tools v0.52.
+	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/securego/gosec/v2/cmd/gosec@v2.30.0
 	GOTOOLCHAIN=go$(GO_VERSION) go install golang.org/x/vuln/cmd/govulncheck@latest
 	python3 -m pip install -r docs/requirements.txt
 

@@ -48,7 +48,7 @@ RUN make go/build
 # ---------------------------------------------------------------------------
 # Final stage, Debian slim + LibreOffice headless
 # ---------------------------------------------------------------------------
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 LABEL maintainer="Ricardo Oliveira @gitrgoliveira"
 LABEL org.opencontainers.image.description="bracket-creator mobile app with LibreOffice for PDF export (opt-in, ~500 MB+)"

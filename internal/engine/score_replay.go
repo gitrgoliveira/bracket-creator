@@ -1342,10 +1342,13 @@ func assignMarks(prev, prevMarks, next []string, pos int, side string) []string 
 	isMark := func(v string) bool { return v != "" && v != domain.IpponPlaceholder }
 	same := func(i, j int) bool { return isMark(next[j]) && prev[i] == next[j] }
 	// lcs[i][j] is the length of the longest common subsequence of prev[i:]
-	// and next[j:] (both a handful of marks).
-	lcs := make([][]int, len(prev)+1)
-	for i := range lcs {
-		lcs[i] = make([]int, len(next)+1)
+	// and next[j:] (both a handful of marks), with a row and a column of zeros
+	// past the ends. The extra row and column are appended rather than added to
+	// a length, which reads to CodeQL as an allocation that might overflow
+	// (go/allocation-size-overflow).
+	lcs := make([][]int, 0, len(prev))
+	for i := 0; i <= len(prev); i++ {
+		lcs = append(lcs, append(make([]int, len(next)), 0))
 	}
 	for i := len(prev) - 1; i >= 0; i-- {
 		for j := len(next) - 1; j >= 0; j-- {

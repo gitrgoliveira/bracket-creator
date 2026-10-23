@@ -12,7 +12,15 @@ const INDEX = path.resolve(__dirname, '../../index.html');
 
 function inlineScript() {
     const html = fs.readFileSync(INDEX, 'utf8');
-    const blocks = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+    // The bare `<script>` tags index.html ships, found by a plain search (it is
+    // this repo's own file, not markup to filter).
+    const blocks = [];
+    for (let at = html.indexOf('<script>'); at !== -1; at = html.indexOf('<script>', at)) {
+        const end = html.indexOf('</script>', at);
+        if (end === -1) break;
+        blocks.push(html.slice(at + '<script>'.length, end));
+        at = end;
+    }
     const found = blocks.filter((b) => b.includes('window.bcModuleFailed'));
     expect(found, 'index.html defines bcModuleFailed in one inline script').toHaveLength(1);
     return found[0];

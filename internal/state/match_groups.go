@@ -249,7 +249,7 @@ func boutOrderKey(position int) int {
 // position goes: a hand-edited file holding two is repaired by the merge, not
 // copied twice.
 func setSubAt(subs []SubMatchResult, position int, row *SubMatchResult) []SubMatchResult {
-	out := make([]SubMatchResult, 0, len(subs)+1)
+	out := make([]SubMatchResult, 0, len(subs))
 	placed := false
 	for i := range subs {
 		if subs[i].Position == position {

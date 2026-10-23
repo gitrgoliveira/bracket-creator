@@ -253,6 +253,51 @@ describe('a write queued while a pass runs', () => {
     });
 });
 
+describe('a pass that has ended starts nothing', () => {
+    // Second review of the concurrent flush: the last base's end resolved the
+    // pass, but a wake queued just before the pass's own continuation still
+    // found its launch and started a base the pass no longer tracked; the
+    // rerun then flushed that base a second time while the first was out.
+    for (const depth of [0, 1, 2, 3, 4]) {
+        it(`a write a settle queues ${depth} ticks down is sent once, by one flush (depth ${depth})`, async () => {
+            const held = heldFetches();
+            const fin = await API.recordScore('c1', 'mA', finish, 'pw', { id: 'mA', modifiedAt: 0 });
+            await flushMicrotasks();
+            let p = fin.settled;
+            for (let i = 0; i < depth; i++) p = p.then((v) => v);
+            p.then(() => API.recordScore('c1', 'mX', running(['M']), 'pw', { id: 'mX', modifiedAt: 0 }));
+            answer(held[0], { applied: true });
+            await flushMicrotasks();
+            const toX = () => writes().filter(([u]) => String(u).includes('/mX/'));
+            expect(toX().length, 'the write is out once').toBe(1);
+            answer(held[1], { applied: true });
+            await flushMicrotasks();
+            await vi.advanceTimersByTimeAsync(5000); await flushMicrotasks();
+            expect(toX().length, 'and never sent again').toBe(1);
+            expect(stored().length).toBe(0);
+        });
+    }
+});
+
+describe('a write that takes the place of one already out', () => {
+    it('goes as soon as that one lands, not behind another match\'s hanging request', async () => {
+        // A lineup save joins one of the same lineup already out (the same
+        // key, _placeWrite); the flush sends the union straight after it.
+        const held = heldFetches();
+        await API.recordScore('c1', 'mA', finish, 'pw', { id: 'mA', modifiedAt: 0 });
+        API.putMatchLineup('c1', 't1', 'mB', { senpo: 'Ren Abe' }, 'pw', {}, ['senpo']);
+        await flushMicrotasks();
+        expect(writes().length, 'A hangs and B\'s lineup save is out').toBe(2);
+        API.putMatchLineup('c1', 't1', 'mB', { jiho: 'Kai Ito' }, 'pw', {}, ['jiho']);
+        await flushMicrotasks();
+        answer(held[1], { lineup: { teamId: 't1', matchId: 'mB', positions: { senpo: 'Ren Abe' } } });
+        await flushMicrotasks();
+        const toB = writes().filter(([u]) => String(u).includes('/mB'));
+        expect(toB.length, 'the joined save of B goes with A still out').toBe(2);
+        expect(bodyOf(toB[1]).changed).toEqual(expect.arrayContaining(['jiho']));
+    });
+});
+
 describe('`after` on a write held for the clock', () => {
     it('a Finish refused for the clock twice holds the start that follows it, names it, and can be discarded from the waiting match', async () => {
         // Review of PR #483: a write kept for the clock (`clockRefused`) never

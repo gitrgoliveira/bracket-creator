@@ -2549,6 +2549,9 @@ let _flushRequested = false;
 // not out and did not end failing in it (set by _flushQueue, null otherwise;
 // _wakeIdleBases asks it).
 let _launchIdleBases = null;
+// _basesOut: the bases a pass is flushing now. Every launch checks it, so no
+// base is ever flushed by two copies at once, whatever the timing.
+const _basesOut = new Set();
 // Bumped by clearQueue() (logout / password_reset). An in-flight _flushQueue loop
 // snapshots this at the start and aborts if it changes mid-loop, so a credential
 // revocation can't keep sending queued writes with the now-revoked password.
@@ -2615,7 +2618,7 @@ async function _resendForClock(key, descriptor, pass, alert) {
     if (_writeQueue.get(key) !== descriptor) return 'settled'; // discarded meanwhile
     if (!again) {
         _flushRequested = true;
-        return 'restamped';
+        return 'reclocked';
     }
     if (_keepForClock(descriptor, pass)) {
         _notifyQueueAlert({ kind: 'server_error', ...alert, detail: CLOCK_SKEW_FAIL_REASON });
@@ -2725,8 +2728,12 @@ async function _flushQueue() {
             const active = new Map();
             const failedBases = new Set();
             const faults = [];
+            // `closed` is set in the same step as the last base ends, so a wake
+            // that runs before this pass's continuation starts nothing the pass
+            // no longer waits for (the rerun picks it up).
+            let closed = false;
             const launch = () => {
-                if (gen !== _queueGen) return;
+                if (closed || gen !== _queueGen) return;
                 const byBase = new Map();
                 for (const entry of [..._writeQueue.entries()].sort(_byEntryOrder)) {
                     const base = _baseOf(entry[0]);
@@ -2736,8 +2743,9 @@ async function _flushQueue() {
                 // Entries that wait on each other are stuck, not waiting (H1).
                 _markWaitCycles(byBase);
                 for (const [base, list] of byBase) {
-                    if (active.has(base) || failedBases.has(base)) continue;
+                    if (active.has(base) || failedBases.has(base) || _basesOut.has(base)) continue;
                     active.set(base, true);
+                    _basesOut.add(base);
                     (async () => {
                         let ended = '';
                         try {
@@ -2748,10 +2756,20 @@ async function _flushQueue() {
                             failedBases.add(base);
                         } finally {
                             active.delete(base);
-                            // A base that sent all it held goes on with what
-                            // was queued for it meanwhile, in its order.
-                            if (ended === 'settled' && [..._writeQueue.keys()].some((k) => _baseOf(k) === base)) launch();
-                            if (active.size === 0) allEnded();
+                            _basesOut.delete(base);
+                            // A base that sent all it held, or whose entry was
+                            // replaced while out (`restamped`), goes on with what
+                            // is queued for it, in its order. A clock-skew
+                            // re-stamp (`reclocked`) waits for the pass's rerun,
+                            // as it always did: the clock it was re-stamped from
+                            // is learned again there.
+                            if ((ended === 'settled' || ended === 'restamped')
+                                && [..._writeQueue.keys()].some((k) => _baseOf(k) === base)) launch();
+                            if (active.size === 0 && !closed) {
+                                closed = true;
+                                _launchIdleBases = null;
+                                allEnded();
+                            }
                         }
                     })();
                 }
@@ -3151,8 +3169,10 @@ function _doorRefusal(d, status, body) {
 }
 
 // _sendEntry: one queued write (not a tap). 'settled' when it left the queue
-// (sent, or refused for good), 'restamped' when it was re-stamped for a clock
-// refusal and goes again at once, 'kept' when it waits for a later pass.
+// (sent, or refused for good), 'reclocked' when it was re-stamped for a clock
+// refusal and goes again on the pass's rerun, 'restamped' when a later write
+// took its place while it was out and goes straight after it, 'kept' when it
+// waits for a later pass.
 // _answersMatchWrite: whether an entry sent with its own method and url is a
 // MATCH write, whose answer can be a refusal body (`applied: false`, a clock
 // refusal) read by the branch it gates in _sendEntry. A lineup save, a team
@@ -3492,7 +3512,7 @@ async function _sendTapBatch(base, batch, pass) {
                         result = 'kept';
                     } else {
                         _flushRequested = true;
-                        if (result === 'settled') result = 'restamped';
+                        if (result === 'settled') result = 'reclocked';
                     }
                     continue;
                 }

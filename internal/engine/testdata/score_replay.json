@@ -5651,6 +5651,168 @@
      ]
     }
    }
+  },
+  {
+   "name": "a kachinuki pairing is made only at the next position (the one after the last bout the match holds, as a pairing added by hand is): a strike on a bout further on, which no pairing reaches, is turned away (noTarget) and makes no row",
+   "jsMirror": true,
+   "shape": {
+    "kind": "kachinuki"
+   },
+   "match": {
+    "id": "r0-m0",
+    "sideA": "Kyoto",
+    "sideB": "Osaka",
+    "sideAId": "ta",
+    "sideBId": "tb",
+    "winner": "",
+    "ipponsA": [],
+    "ipponsB": [],
+    "hansokuA": 0,
+    "hansokuB": 0,
+    "decision": "",
+    "status": "running",
+    "court": "A",
+    "round": 0,
+    "scheduledAt": "",
+    "subResults": [
+     {
+      "position": 1,
+      "sideA": "K1",
+      "sideB": "O1",
+      "ipponsA": [],
+      "ipponsB": [],
+      "hansokuA": 0,
+      "hansokuB": 0,
+      "winner": "",
+      "decision": "",
+      "sideAMemberId": "k1",
+      "sideBMemberId": "o1"
+     }
+    ]
+   },
+   "head": [
+    {
+     "v": 1,
+     "baseline": {
+      "id": "m0",
+      "door": "test",
+      "stamp": 10,
+      "values": {
+       "bout:1": {
+        "position": 1,
+        "sideA": "K1",
+        "sideB": "O1",
+        "ipponsA": [],
+        "ipponsB": [],
+        "hansokuA": 0,
+        "hansokuB": 0,
+        "winner": "",
+        "decision": "",
+        "sideAMemberId": "k1",
+        "sideBMemberId": "o1"
+       }
+      },
+      "basis": {
+       "seen": 0
+      }
+     }
+    }
+   ],
+   "lines": [
+    {
+     "v": 1,
+     "event": {
+      "id": "n",
+      "session": "s-n",
+      "seq": 1,
+      "stamp": 20,
+      "kind": "ippon.add",
+      "pos": 2,
+      "side": "a",
+      "letter": "M"
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "far",
+      "session": "s-f",
+      "seq": 1,
+      "stamp": 21,
+      "kind": "ippon.add",
+      "pos": 50,
+      "side": "a",
+      "letter": "K"
+     }
+    },
+    {
+     "v": 1,
+     "event": {
+      "id": "skip",
+      "session": "s-s",
+      "seq": 1,
+      "stamp": 22,
+      "kind": "ippon.add",
+      "pos": 4,
+      "side": "b",
+      "letter": "D"
+     }
+    }
+   ],
+   "want": {
+    "match": {
+     "subResults": [
+      {
+       "position": 1,
+       "sideA": "K1",
+       "sideB": "O1",
+       "ipponsA": [],
+       "ipponsB": [],
+       "hansokuA": 0,
+       "hansokuB": 0,
+       "winner": "",
+       "decision": "",
+       "sideAMemberId": "k1",
+       "sideBMemberId": "o1"
+      },
+      {
+       "position": 2,
+       "sideA": "",
+       "sideB": "",
+       "ipponsA": [
+        "M"
+       ],
+       "ipponsB": [],
+       "hansokuA": 0,
+       "hansokuB": 0,
+       "winner": "Kyoto",
+       "decision": "",
+       "markIds": {
+        "a": [
+         "n"
+        ]
+       }
+      }
+     ],
+     "scoreVersion": 4,
+     "modifiedAt": 20,
+     "groupStamps": {
+      "bout:1": 10,
+      "bout:2": 20
+     }
+    },
+    "outcomes": {
+     "n": [
+      "applied"
+     ],
+     "far": [
+      "noTarget"
+     ],
+     "skip": [
+      "noTarget"
+     ]
+    }
+   }
   }
  ]
 }

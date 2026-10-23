@@ -6194,6 +6194,7 @@ components:
         pos:
           type: integer
           minimum: -1
+          maximum: 199
         side:
           type: string
           enum: [a, b]

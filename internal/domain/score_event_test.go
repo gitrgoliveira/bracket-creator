@@ -23,6 +23,7 @@ func TestScoreEventValidate(t *testing.T) {
 		{"no stamp", func(e *domain.ScoreEvent) { e.Stamp = 0 }},
 		{"negative seq", func(e *domain.ScoreEvent) { e.Seq = -1 }},
 		{"bad pos", func(e *domain.ScoreEvent) { e.Pos = -2 }},
+		{"pos past every bout", func(e *domain.ScoreEvent) { e.Pos = domain.MaxScoreEventPos + 1 }},
 		{"hantei is not a strike", func(e *domain.ScoreEvent) { e.Letter = domain.HanteiMark }},
 		{"maru is not a strike", func(e *domain.ScoreEvent) { e.Letter = domain.DefaultWinIppon }},
 		{"two letters", func(e *domain.ScoreEvent) { e.Letter = "MK" }},
@@ -51,6 +52,7 @@ func TestScoreEventValidate(t *testing.T) {
 		{ID: "v", Stamp: 1, Kind: domain.ScoreDaihyosenVerdict, Pos: -1, Value: domain.BoutDecisionClear},
 		{ID: "p", Stamp: 1, Kind: domain.ScoreRepPick, Pos: -1, Side: "a", MemberID: "m"},
 		{ID: "h", Stamp: 1, Kind: domain.ScoreIpponAdd, Side: "b", Letter: "H"},
+		{ID: "last", Stamp: 1, Kind: domain.ScoreIpponAdd, Pos: domain.MaxScoreEventPos, Side: "a", Letter: "M"},
 	} {
 		assert.NoError(t, e.Validate(), e.ID)
 	}

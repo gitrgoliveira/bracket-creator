@@ -44,6 +44,12 @@ func TestScoreLogEventSeqs_KeepsTheLatestSessions(t *testing.T) {
 	assert.Contains(t, got, fmt.Sprintf("s%02d", n-1))
 }
 
+// The highest bout an event may name is the last bout a kachinuki encounter
+// between the largest teams the app plans for can take.
+func TestMaxScoreEventPos_IsTheLastKachinukiBoutOfTheLargestTeam(t *testing.T) {
+	assert.Equal(t, domain.KachinukiMaxBouts(MaxTeamSize), domain.MaxScoreEventPos)
+}
+
 // The replay's derived write keeps its sessions, never lowering a stored one;
 // with none it keeps the stored.
 func TestMergeEventSeqs(t *testing.T) {

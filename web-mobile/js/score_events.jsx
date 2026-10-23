@@ -582,6 +582,14 @@ function withEmptyBoutRow(rows, pos) {
   return at < 0 ? [...rows, empty] : [...rows.slice(0, at), empty, ...rows.slice(at)];
 }
 
+// nextBoutPosition is the position after the last numbered bout rows hold, 1
+// when they hold none (engine.nextBoutPosition).
+function nextBoutPosition(rows) {
+  let last = 0;
+  for (const r of rows) if (r && r.position > last) last = r.position;
+  return last + 1;
+}
+
 function foldBout(m, e, opts, ctx) {
   let rows = m.subResults || [];
   let idx = rows.findIndex((r) => r && r.position === e.pos);
@@ -594,8 +602,11 @@ function foldBout(m, e, opts, ctx) {
     // event stamped at or before the removal does not make it again; after
     // it only a fighter picked there does (the pairing added again), since a
     // bare strike would make a bout with no fighters (engine.foldBout).
+    // On a kachinuki encounter the row is made only at the next position, the
+    // one after the last bout the match holds (engine.nextBoutPosition): a
+    // tap on a bout further on, which no pairing reaches, is noTarget.
     const tomb = ctx.stamps[`bout:${e.pos}`] || 0;
-    if (!createsMissingRow(opts, e.pos) || tomb >= (e.stamp || 0) || (tomb > 0 && opts.kachinuki && e.kind !== BOUT_FIGHTER)) {
+    if (!createsMissingRow(opts, e.pos) || tomb >= (e.stamp || 0) || (tomb > 0 && opts.kachinuki && e.kind !== BOUT_FIGHTER) || (opts.kachinuki && e.pos > nextBoutPosition(rows))) {
       // The reason the server gives such a tap (engine.EventReasonBoutRemoved,
       // onRemovedBout): only one made AFTER the removal; one made before it
       // the server answers as the change the removal never saw

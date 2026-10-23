@@ -1625,8 +1625,13 @@ func foldBout(r *replayMatch, e *domain.ScoreEvent, shape ReplayShape, stamps ma
 	// that never saw the removal would make a bout with no fighters, so it is
 	// turned away, noTarget, kept in the history and told to the device
 	// (bc-evts stage 6, rule 7).
+	// On a kachinuki encounter the row is made only at the next position, the
+	// one after the last bout the match holds (its first bout, a pairing added
+	// by hand, the pairing added again after a removal, which is always the
+	// trailing one): a tap on a bout further on, which no pairing reaches, is
+	// turned away, noTarget, rather than making an empty bout there.
 	tomb := stamps[state.BoutGroup(e.Pos)]
-	if boutRowIndex(m.SubResults, e.Pos) >= 0 || !shape.createsMissingRow(e.Pos) || tomb >= e.Stamp || (tomb > 0 && shape.kachinuki() && e.Kind != domain.ScoreBoutFighter) {
+	if boutRowIndex(m.SubResults, e.Pos) >= 0 || !shape.createsMissingRow(e.Pos) || tomb >= e.Stamp || (tomb > 0 && shape.kachinuki() && e.Kind != domain.ScoreBoutFighter) || (shape.kachinuki() && e.Pos > nextBoutPosition(m.SubResults)) {
 		return foldBoutRow(r, e, shape, stamps)
 	}
 	// A numbered bout the match holds no row for yet (createsMissingRow: a
@@ -1642,11 +1647,21 @@ func foldBout(r *replayMatch, e *domain.ScoreEvent, shape ReplayShape, stamps ma
 	return out
 }
 
+// nextBoutPosition is the position after the last numbered bout rows hold
+// (lastNumberedBout), 1 when they hold none.
+func nextBoutPosition(rows []state.SubMatchResult) int {
+	if i := lastNumberedBout(rows); i >= 0 {
+		return rows[i].Position + 1
+	}
+	return 1
+}
+
 // createsMissingRow says an event on bout pos may make the row when the match
 // holds none: a numbered bout of a fixed-order team match, within its team
 // size, and any numbered bout of a kachinuki encounter (its first bout, which
 // a match started from the queue holds no row for, and a pairing added by
-// hand). Two devices tapping such a bout at once both count: nothing writes
+// hand; foldBout makes it only at the next position). Two devices tapping such
+// a bout at once both count: nothing writes
 // the row ahead of a tap, so no row write stamped after one device's tap can
 // turn it away. Only the server writes a bout row ahead of the taps on it: a
 // kachinuki pairing Record bout appends, and a representative bout.

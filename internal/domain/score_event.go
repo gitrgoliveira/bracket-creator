@@ -81,6 +81,11 @@ const MaxEngiFlags = 5
 const (
 	MaxScoreEventIDLen    = 128
 	MaxScoreEventFieldLen = 256
+	// MaxScoreEventPos is the highest bout an event may name: the most bouts
+	// a kachinuki encounter can take (KachinukiMaxBouts) between teams of
+	// 100, the largest team size the app plans for anywhere
+	// (engine.MaxTeamSize, pinned equal by an engine test).
+	MaxScoreEventPos = 199
 )
 
 // The outcomes the replay gives each event (engine.ReplayScoring). They are
@@ -157,7 +162,7 @@ func (e ScoreEvent) Validate() error {
 	if e.Seq < 0 {
 		return bad("seq must not be negative")
 	}
-	if e.Pos < DaihyosenBoutPos {
+	if e.Pos < DaihyosenBoutPos || e.Pos > MaxScoreEventPos {
 		return bad("pos %d is not a bout", e.Pos)
 	}
 	sideNeeded := true

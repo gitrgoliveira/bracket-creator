@@ -7232,7 +7232,7 @@ components:
             not yet answered onto this copy skips a tap whose `seq` is at or
             below its session's entry: the copy already holds it. Only
             sessions that logged an event with a `seq` appear, one entry each,
-            at most 32 (the sessions that tapped latest are kept). Absent when
+            and every such session is listed. Absent when
             none. Derived by the server; a value a write carries is ignored.
         turnedAway:
           type: object

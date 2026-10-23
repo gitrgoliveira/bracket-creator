@@ -977,25 +977,16 @@ function setSubAt(rows, pos, row) {
 }
 
 // logEventSeqs mirrors engine.ScoreLogEventSeqs: per event session, the
-// highest seq the log holds, whatever each tap's outcome; null when none, and
-// past MAX_EVENT_SEQ_SESSIONS the sessions logged latest are kept.
-const MAX_EVENT_SEQ_SESSIONS = 32;
+// highest seq the log holds, whatever each tap's outcome; null when none.
+// Every session that tapped is listed.
 function logEventSeqs(log) {
   const top = {};
-  const last = {};
-  log.forEach((l, i) => {
+  log.forEach((l) => {
     const e = l && l.event;
     if (!e || !(e.seq > 0) || !e.session) return;
     top[e.session] = Math.max(top[e.session] || 0, e.seq);
-    last[e.session] = i;
   });
-  const sessions = Object.keys(top);
-  if (sessions.length === 0) return null;
-  if (sessions.length > MAX_EVENT_SEQ_SESSIONS) {
-    sessions.sort((a, b) => last[b] - last[a]);
-    for (const s of sessions.slice(MAX_EVENT_SEQ_SESSIONS)) delete top[s];
-  }
-  return top;
+  return Object.keys(top).length === 0 ? null : top;
 }
 
 // replayHead is engine.replayScoring for a log of individual or engi lines:

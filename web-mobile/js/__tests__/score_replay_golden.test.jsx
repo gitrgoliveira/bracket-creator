@@ -120,4 +120,19 @@ describe('score replay: the JS mirror answers the Go golden table', () => {
     replayHead(c.match, c.head, c.lines, foldOpts(c.shape));
     expect(JSON.stringify([c.match, c.head, c.lines])).toBe(before);
   });
+
+  // Mirrors TestScoreLogEventSeqs_ListsEverySession (the golden table holds at
+  // most 6 lines a case): every session that tapped is listed, the first
+  // included, however many tapped after it.
+  it('lists every session that tapped in eventSeqs', () => {
+    const c = cases.find((x) => x.shape.kind === 'individual');
+    const n = 40;
+    const lines = Array.from({ length: n }, (_, i) => {
+      const s = `s${String(i).padStart(2, '0')}`;
+      return { v: 1, event: { id: `${s}.1`, session: s, seq: 1, stamp: 1000 + i, kind: 'encho.add' } };
+    });
+    const r = replayHead(c.match, c.head, lines, foldOpts(c.shape));
+    // The case's head may hold sessions of its own; all 40 are listed beside them.
+    for (const l of lines) expect(r.match.eventSeqs[l.event.session], l.event.session).toBe(1);
+  });
 });

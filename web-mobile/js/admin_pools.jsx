@@ -201,8 +201,6 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // order and can change between fetches (bc-appx item 2), and never the bare display name, which two members
   // can share.
   const [chusenInputs, setChusenInputs] = useStateA({});
-  // A chusen order being typed holds a new build's automatic reload (app_version.jsx).
-  useUnsavedInput(Object.keys(chusenInputs).length > 0);
   // Per-group busy flag: keyed by groupKey "${poolName}::${minPosition}" -> bool
   // (a pool can hold more than one unresolved tied group).
   const [chusenBusy, setChusenBusy] = useStateA({});
@@ -214,6 +212,20 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   const [chusenRecorded, setChusenRecorded] = useStateA(null);
   // groupKey -> true while the operator is changing that recorded chusen.
   const [chusenChanging, setChusenChanging] = useStateA({});
+  // A chusen order being typed holds a new build's automatic reload
+  // (app_version.jsx), but only while it holds a change: a rank in a group
+  // still shown (an unresolved tie, or a recorded one being changed) that is
+  // not empty and not the rank the box shows by itself. A key left behind by
+  // an erased rank, or by a group another device resolved, holds nothing.
+  const chusenShown = [
+    ...(chusenCandidates || []),
+    ...(chusenRecorded || []).filter(g => chusenChanging[`${g.poolName}::${g.minPosition}`]),
+  ];
+  useUnsavedInput(chusenShown.some(g => (g.teams || []).some((m, idx) => {
+    const raw = chusenInputs[`${g.poolName}::${g.minPosition}::${checkinPid(m)}`];
+    const typed = raw === undefined ? "" : String(raw).trim();
+    return typed !== "" && typed !== String(g.ranks ? g.ranks[idx] : g.minPosition + idx);
+  })));
   const applyChusen = (res) => {
     setChusenCandidates(res ? res.candidates : null);
     setChusenRecorded(res ? res.recorded : null);

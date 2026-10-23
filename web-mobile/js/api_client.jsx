@@ -2549,8 +2549,10 @@ let _flushRequested = false;
 // not out and did not end failing in it (set by _flushQueue, null otherwise;
 // _wakeIdleBases asks it).
 let _launchIdleBases = null;
-// _basesOut: the bases a pass is flushing now. Every launch checks it, so no
-// base is ever flushed by two copies at once, whatever the timing.
+// _basesOut: the bases a pass is flushing now. Every launch checks it. Passes
+// run one at a time and each waits for all its turns, so today it always
+// matches the pass's own `active`; it is kept so that a later change letting a
+// pass end with a turn still out cannot flush one base twice at once.
 const _basesOut = new Set();
 // Bumped by clearQueue() (logout / password_reset). An in-flight _flushQueue loop
 // snapshots this at the start and aborts if it changes mid-loop, so a credential
@@ -3170,8 +3172,9 @@ function _doorRefusal(d, status, body) {
 
 // _sendEntry: one queued write (not a tap). 'settled' when it left the queue
 // (sent, or refused for good), 'reclocked' when it was re-stamped for a clock
-// refusal and goes again on the pass's rerun, 'restamped' when a later write
-// took its place while it was out and goes straight after it, 'kept' when it
+// refusal and goes again on the pass's rerun, 'restamped' when another copy
+// took its key while it was out (a later write joined into it, or another
+// tab's newer copy taken up from storage) and goes straight after it, 'kept' when it
 // waits for a later pass.
 // _answersMatchWrite: whether an entry sent with its own method and url is a
 // MATCH write, whose answer can be a refusal body (`applied: false`, a clock

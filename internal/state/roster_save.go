@@ -121,13 +121,16 @@ func (s *Store) saveRosterLocked(compID string, players []domain.Player, seeds [
 // ones, and not checked in for a competitor the stored roster does not hold.
 // A stored competitor is found by participant id. A stored row that carries
 // no id (a roster saved before ids existed, which the first save after it
-// gives ids) can be found by nothing else, so it is found by its (name, dojo)
-// pair, the identity rows had before ids (helper.CompetitorKey with no id).
+// gives ids) can be found by nothing else, so a row the write also sends with
+// no id is found by its (name, dojo) pair, the identity rows had before ids
+// (helper.CompetitorKey with no id). A row the write sends WITH an id is found
+// by that id only, never by name: an id the stored roster lacks is a new
+// competitor.
 func keepStoredCheckIns(players, stored []domain.Player) []domain.Player {
 	byID := make(map[string]bool, len(stored))
 	byKey := map[string]bool{}
 	for _, p := range stored {
-		if p.ID != "" {
+		if !helper.ParticipantIDMissing(p.ID) {
 			byID[p.ID] = p.CheckedIn
 		} else {
 			byKey[helper.CompetitorKey("", p.Name, p.Dojo)] = p.CheckedIn
@@ -136,14 +139,15 @@ func keepStoredCheckIns(players, stored []domain.Player) []domain.Player {
 	out := make([]domain.Player, len(players))
 	copy(out, players)
 	for i := range out {
-		checked, ok := false, false
-		if out[i].ID != "" {
-			checked, ok = byID[out[i].ID]
+		// A competitor the write names by an id is found by that id alone (an
+		// id the stored roster does not hold is a new competitor); only one
+		// the write sends with no id, as the page sends a row saved before ids
+		// existed, is found by (name, dojo) among the stored rows with none.
+		if helper.ParticipantIDMissing(out[i].ID) {
+			out[i].CheckedIn = byKey[helper.CompetitorKey("", out[i].Name, out[i].Dojo)]
+		} else {
+			out[i].CheckedIn = byID[out[i].ID]
 		}
-		if !ok && len(byKey) > 0 {
-			checked = byKey[helper.CompetitorKey("", out[i].Name, out[i].Dojo)]
-		}
-		out[i].CheckedIn = checked
 	}
 	return out
 }

@@ -58,17 +58,45 @@ func TestSaveRoster_ALegacyRowWithoutAnIdKeepsItsCheckIn(t *testing.T) {
 	require.True(t, stored[0].CheckedIn)
 	require.Empty(t, stored[0].ID)
 
-	// The page gives every row an id on its first save.
+	// The page sends a stored row back with the id it has, none for a row
+	// saved before ids existed (mintParticipantIds keeps existing.id); this
+	// save gives it one.
 	next := []domain.Player{
-		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice", Dojo: "DojoA"},
-		{ID: "22222222-2222-4222-8222-222222222222", Name: "Bob", Dojo: "DojoB", CheckedIn: true},
+		{Name: "Alice", Dojo: "DojoA"},
+		{Name: "Bob", Dojo: "DojoB", CheckedIn: true},
 	}
 	_, err = store.SaveRoster("legacy", next, nil, "")
 	require.NoError(t, err)
 	got, err := store.LoadParticipants("legacy", false)
 	require.NoError(t, err)
 	assert.True(t, got[0].CheckedIn, "a row saved before ids existed is found by its name and dojo")
+	assert.NotEmpty(t, got[0].ID, "the save gives it an id")
 	assert.False(t, got[1].CheckedIn)
+}
+
+// A competitor the write names by an id is found by that id alone: an id the
+// stored roster does not hold is a new competitor, not checked in, even when a
+// stored row with no id carries the same name and dojo (CLAUDE.md: a record
+// that carries an id is resolved by id only).
+func TestSaveRoster_AnIdNotStoredIsANewCompetitorWhateverItsName(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	require.NoError(t, err)
+	writeLegacyRoster(t, store, "legacy", "Alice,DojoA,checked_in\nBob,DojoB\n")
+	stored, err := store.LoadParticipants("legacy", false)
+	require.NoError(t, err)
+	require.True(t, stored[0].CheckedIn)
+	require.Empty(t, stored[0].ID)
+
+	next := []domain.Player{
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice", Dojo: "DojoA"},
+		{Name: "Bob", Dojo: "DojoB"},
+	}
+	_, err = store.SaveRoster("legacy", next, nil, "")
+	require.NoError(t, err)
+	got, err := store.LoadParticipants("legacy", false)
+	require.NoError(t, err)
+	assert.Equal(t, "11111111-1111-4111-8111-111111111111", got[0].ID)
+	assert.False(t, got[0].CheckedIn, "an id the roster does not hold is never matched by name and dojo")
 }
 
 func TestRosterVersion_ReadsTheRosterNotItsCheckIns(t *testing.T) {

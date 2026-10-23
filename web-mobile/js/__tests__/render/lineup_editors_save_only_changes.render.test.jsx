@@ -37,6 +37,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { answered, namedLater } from '../helpers/team_members.js';
 import { lineupPutStub } from '../helpers/lineup_server.js';
 import { QUEUED_NOTICE, QUEUED_UNSAVED_NOTICE } from '../../write_result.jsx';
+import * as AppVersion from '../../app_version.jsx';
 
 const SQUAD = [
   { id: 'mem-1', index: 1, name: 'Aoki' },
@@ -1100,5 +1101,52 @@ describe('the Lineups page: the newest copy of a member stands', () => {
 
     expect(rowText(utils, 'mem-2')).toContain('Sato-kun');
     expect(rowText(utils, 'mem-2')).not.toContain('Sato-san');
+  });
+});
+
+// Review of PR #483 (d6a45d25): a rename box held a new build's automatic
+// reload while merely open. It holds it only once the name typed there differs
+// from the name the box opened with.
+describe('a rename box holds the reload only while it holds a change', () => {
+  let reload;
+  beforeEach(() => {
+    document.head.innerHTML = '<meta name="app-build" content="build-a">';
+    AppVersion.resetVersionForTests();
+    reload = vi.fn();
+    AppVersion.setReloader(reload);
+  });
+  afterEach(() => {
+    document.head.innerHTML = '';
+    AppVersion.resetVersionForTests();
+  });
+
+  it('on the at-court panel', async () => {
+    const utils = await mountPanel();
+    await click(panelRow(utils, 3).getByRole('button', { name: 'Rename 3 player' }));
+    const box = panelRow(utils, 3).getByLabelText('Rename 3 player');
+    await act(async () => { fireEvent.change(box, { target: { value: 'Itoh' } }); });
+    act(() => { AppVersion.noteServerBuild('build-b'); });
+    expect(reload, 'a changed name holds the reload').not.toHaveBeenCalled();
+    // Typed back to the name it opened with: the open box holds nothing.
+    await act(async () => { fireEvent.change(box, { target: { value: 'Ito' } }); });
+    expect(reload).toHaveBeenCalledTimes(1);
+    utils.unmount();
+  });
+
+  it('on the Lineups page', async () => {
+    const utils = await mountPage();
+    await click(memberRow(utils, 'mem-3').getByRole('button', { name: 'Rename' }));
+    act(() => { AppVersion.noteServerBuild('build-b'); });
+    expect(reload, 'a box only opened holds nothing').toHaveBeenCalledTimes(1);
+    utils.unmount();
+  });
+
+  it('on the Lineups page, a changed name holds it', async () => {
+    const utils = await mountPage();
+    await click(memberRow(utils, 'mem-3').getByRole('button', { name: 'Rename' }));
+    await act(async () => { fireEvent.change(utils.getByLabelText('Rename Ito'), { target: { value: 'Itoh' } }); });
+    act(() => { AppVersion.noteServerBuild('build-b'); });
+    expect(reload).not.toHaveBeenCalled();
+    utils.unmount();
   });
 });

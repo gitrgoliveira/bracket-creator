@@ -82,9 +82,12 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // so a correction needs this explicit door.
   const [renamingKey, setRenamingKey] = useStateA(null);
   const [renamingName, setRenamingName] = useStateA("");
+  // The name the rename box opened with: an open box holds nothing until
+  // its name differs from it.
+  const [renamingFrom, setRenamingFrom] = useStateA("");
   // A member name being typed is not kept across a reload (the lineup draft
   // is), so it holds a new build's automatic reload (app_version.jsx).
-  useUnsavedInput(renamingKey != null);
+  useUnsavedInput(renamingKey != null && renamingName.trim() !== renamingFrom.trim());
   const [saving, setSaving] = useStateA(false);
 
   // bc-pnum: the suggestion list reads the SQUAD, because that is where a
@@ -151,6 +154,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     if (!mem) return;
     setRenamingKey(posKey);
     setRenamingName(mem.name);
+    setRenamingFrom(mem.name || "");
     setError("");
   };
   const cancelRename = () => { setRenamingKey(null); setRenamingName(""); };

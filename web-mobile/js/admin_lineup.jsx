@@ -473,9 +473,13 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
   // Operation 3 (RENAME): which squad member (by id) is being renamed.
   const [renamingId, setRenamingId] = useStateA(null);
   const [renamingName, setRenamingName] = useStateA("");
+  // The name the rename box opened with: an open box holds nothing until
+  // its name differs from it.
+  const [renamingFrom, setRenamingFrom] = useStateA("");
   // The lineup draft survives a reload (lineup_draft.jsx); a member name
   // being typed does not, so it holds a new build's automatic reload.
-  useUnsavedInput((addingPos != null && addingName.trim() !== "") || renamingId != null);
+  useUnsavedInput((addingPos != null && addingName.trim() !== "")
+    || (renamingId != null && renamingName.trim() !== renamingFrom.trim()));
 
   // CLEAR: this page is the one home for a team's people (bc-dnst, operator
   // decision 2026-09-15): "Clear name" used to live on the competition
@@ -638,6 +642,7 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
   const startRename = (member) => {
     setRenamingId(member.id);
     setRenamingName(member.name);
+    setRenamingFrom(member.name || "");
     setError("");
   };
 

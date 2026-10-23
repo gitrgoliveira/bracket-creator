@@ -9,6 +9,7 @@ import { NO_ID_HINT } from './data_integrity.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { PillButton } from './competition_fields.jsx';
+import { useUnsavedInput } from './app_version.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -462,6 +463,13 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // Anything in the box is a list not yet applied (the box never mirrors the
   // saved roster), so the unsaved indicator is simply "the box has lines".
   const rosterDirty = lines.length > 0;
+  // A new build waits to reload while anything typed here is unsaved: the
+  // paste box, the Add form, an Edit dialog changed from the row it opened on.
+  const addTyped = showAddForm && [addName, addDojo, addDanGrade, addZekken].some((s) => String(s || "").trim() !== "");
+  const editChanged = !!replaceTarget && (replaceName !== (replaceTarget.name || "")
+    || replaceDojo !== (replaceTarget.dojo || "") || replaceDanGrade !== (replaceTarget.danGrade || "")
+    || (withZekken && replaceZekken !== (replaceTarget.displayName || "")));
+  useUnsavedInput(rosterDirty || addTyped || editChanged);
   const players = useMemoA(() => c.players || [], [c.players]);
   // First-run: with no participants yet there is nothing to seed or check in,
   // so the seeding panel is premature. Collapse it and let the roster-input

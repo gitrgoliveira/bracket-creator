@@ -5,6 +5,7 @@
 // (handlers_announcement.go), driven through window.API.sendAnnouncement.
 
 import { useStableId } from './stable_id.jsx';
+import { useUnsavedInput } from './app_version.jsx';
 
 const { useState: useStateAn, useEffect: useEffectAn, useCallback: useCallbackAn } = React;
 
@@ -25,6 +26,8 @@ function sendAnnouncementLabel(inFlight) {
 // surfaces success/error feedback. Both are optional: guarded at call sites.
 function AnnouncementComposer({ password, showToast }) {
   const [announcementMessage, setAnnouncementMessage] = useStateAn("");
+  // A message being written holds a new build's automatic reload (app_version.jsx).
+  useUnsavedInput(announcementMessage.trim() !== "");
   const [announcementDuration, setAnnouncementDuration] = useStateAn(5);
   const [announcementInFlight, setAnnouncementInFlight] = useStateAn(false);
   const [activeAnnouncements, setActiveAnnouncements] = useStateAn([]);

@@ -9,6 +9,8 @@
 // parent prop. This keeps unsaved tournament-form edits above intact
 // when a sponsor is added or deleted (no page reload needed).
 
+import { useUnsavedInput } from './app_version.jsx';
+
 const { useState: useStateSp, useRef: useRefSp } = React;
 
 function SponsorsManager({ tournament, password, showToast, maxSponsors }) {
@@ -25,6 +27,8 @@ function SponsorsManager({ tournament, password, showToast, maxSponsors }) {
   );
   const [name, setName] = useStateSp("");
   const [link, setLink] = useStateSp("");
+  // A sponsor being typed holds a new build's automatic reload (app_version.jsx).
+  useUnsavedInput(name.trim() !== "" || link.trim() !== "");
   const [busy, setBusy] = useStateSp(false);
   const fileRef = useRefSp(null);
 

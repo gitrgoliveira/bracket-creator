@@ -11,6 +11,7 @@ import { queuedNotice, writePending, writeHeldOnDeviceOnly } from './write_resul
 import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice } from './lineup_draft.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { useDialogFocus } from './dialog_focus.jsx';
+import { useUnsavedInput } from './app_version.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA, useCallback: useCallbackA } = React;
 
@@ -81,6 +82,9 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // so a correction needs this explicit door.
   const [renamingKey, setRenamingKey] = useStateA(null);
   const [renamingName, setRenamingName] = useStateA("");
+  // A member name being typed is not kept across a reload (the lineup draft
+  // is), so it holds a new build's automatic reload (app_version.jsx).
+  useUnsavedInput(renamingKey != null);
   const [saving, setSaving] = useStateA(false);
 
   // bc-pnum: the suggestion list reads the SQUAD, because that is where a

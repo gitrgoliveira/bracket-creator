@@ -10,7 +10,7 @@
 
 import { ScoreEditorModal } from './admin_scoring_individual.jsx';
 import { EngiScoreEditorModal } from './admin_scoring_engi.jsx';
-import { registerOpenEditor } from './app_version.jsx';
+import { registerUnsavedInput } from './app_version.jsx';
 
 import {
   teamResultLabel,
@@ -49,7 +49,7 @@ import {
 // sheet included, so the editors register here, on mount.
 function withOpenEditorRegistered(Editor) {
   function OpenEditor(props) {
-    React.useEffect(() => registerOpenEditor(), []);
+    React.useEffect(() => registerUnsavedInput(), []);
     return <Editor {...props} />;
   }
   return OpenEditor;

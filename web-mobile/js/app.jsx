@@ -8,6 +8,7 @@ import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, apply
 import { BRANDING_DEFAULTS } from './admin_branding.jsx';
 import { queuedWritesNoun, supersededAlertText, displacedAlertText, tapNotAppliedAlertText, tapNotAppliedText } from './write_result.jsx';
 import { VersionBanner } from './version_banner.jsx';
+import { useUnsavedInput } from './app_version.jsx';
 import { tapWords } from './match_history_view.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
@@ -1892,6 +1893,9 @@ function CreateTournament({ onCreated, authConfig }) {
   // Chosen once at creation; read-only after that. Default officiated
   // means existing deployments are unaffected.
   const [mode, setMode] = useS("officiated");
+  // A tournament being created is unsaved input: it holds a new build's
+  // automatic reload (app_version.jsx).
+  useUnsavedInput(name.trim() !== "" || venue.trim() !== "" || pass !== "");
   const [saving, setSaving] = useS(false);
   const [error, setError] = useS("");
   // submit's catch sets setSaving(false) post-await; on success the

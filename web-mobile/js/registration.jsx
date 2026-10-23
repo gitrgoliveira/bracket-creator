@@ -7,6 +7,8 @@
 //
 // Both endpoints return 404 in officiated-mode tournaments.
 
+import { useUnsavedInput } from './app_version.jsx';
+
 const { useState: useStateReg, useEffect: useEffectReg, useRef: useRefReg } = React;
 
 function RegistrationForm({ compId, onBack }) {
@@ -18,6 +20,8 @@ function RegistrationForm({ compId, onBack }) {
   const [dojo, setDojo] = useStateReg("");
   const [danGrade, setDanGrade] = useStateReg("");
   const [displayName, setDisplayName] = useStateReg("");
+  // A registration being typed holds a new build's automatic reload (app_version.jsx).
+  useUnsavedInput([name, dojo, danGrade, displayName].some((s) => s.trim() !== ""));
 
   const [saving, setSaving] = useStateReg(false);
   const [success, setSuccess] = useStateReg(false);

@@ -2,6 +2,7 @@
 
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { toastSnapshot, subscribeToast, dismissToast } from './toast_queue.jsx';
+import { useUnsavedInput } from './app_version.jsx';
 
 // Formats that run their matches through the pool pipeline but are not pools.
 // See the label note inside StatusBadge.
@@ -322,6 +323,9 @@ function DialogHost() {
   // a judgement is out (the dialog neither closes nor submits twice meanwhile).
   const [error, setError] = React.useState("");
   const [busy, setBusy] = React.useState(false);
+  // A prompt's answer being typed holds a new build's automatic reload
+  // (app_version.jsx).
+  useUnsavedInput(!!req && req.kind === "prompt" && value.trim() !== String(req.defaultValue || "").trim());
   const inputRef = React.useRef(null);
   const triggerRef = React.useRef(null);
   const trapRef = React.useRef(null);

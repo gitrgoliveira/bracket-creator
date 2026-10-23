@@ -2,11 +2,12 @@
 // and may it reload onto the new one" (bc-evts stage 3, S2). A leaf with no
 // imports: api_client.jsx feeds it the server's build (the X-App-Build header
 // of every answer, the SSE hello frame's `build`) and the outbox's state, the
-// score editors register while they are open, and the app shell renders the
+// score editors and every form holding unsaved input register while they do
+// (registerUnsavedInput, useUnsavedInput), and the app shell renders the
 // banner from versionState(). The app and every display follow this one rule:
 //
 //   builds match (or either is "unknown")       -> 'current'
-//   mismatch, no editor open, outbox idle       -> persist the outbox, reload
+//   mismatch, no unsaved input, outbox idle     -> persist the outbox, reload
 //                                                  ONCE -> 'reloading'
 //   mismatch otherwise                          -> 'stale' (the banner), and
 //                                                  re-checked when an editor
@@ -32,7 +33,7 @@ const UNKNOWN = 'unknown';
 
 let _bundleBuild = null;
 let _serverBuild = null;
-let _openEditors = 0;
+let _unsavedHolders = 0;
 let _state = 'current';
 let _reloaded = false;
 let _outboxIdle = () => true;
@@ -129,18 +130,32 @@ export function noteServerBuild(build) {
     checkVersion();
 }
 
-// registerOpenEditor counts an open score editor; the function it returns
-// unregisters it once however often it is called (StrictMode runs an effect's
-// cleanup twice), then re-checks.
-export function registerOpenEditor() {
-    _openEditors += 1;
+// registerUnsavedInput: the ONE registry of "this page holds input the
+// operator has not saved", which an automatic reload would lose. A score
+// editor registers while it is open (admin_scoring_modal.jsx); a form
+// registers while it holds typed input not yet saved (useUnsavedInput): the
+// participants paste box, a settings form, a lineup rename, a prompt's reason.
+// While any holder is registered the automatic reload waits and the banner
+// shows. The function it returns unregisters once however often it is called
+// (StrictMode runs an effect's cleanup twice), then re-checks.
+export function registerUnsavedInput() {
+    _unsavedHolders += 1;
     let done = false;
     return () => {
         if (done) return;
         done = true;
-        _openEditors = Math.max(0, _openEditors - 1);
+        _unsavedHolders = Math.max(0, _unsavedHolders - 1);
         checkVersion();
     };
+}
+
+// useUnsavedInput: a form's hook into registerUnsavedInput, registered while
+// `holds` is true (typed input not yet saved) and unregistered as it saves,
+// clears or unmounts. React is the page's global (the vendored Preact compat),
+// so this leaf still imports nothing.
+export function useUnsavedInput(holds) {
+    const on = !!holds;
+    React.useEffect(() => (on ? registerUnsavedInput() : undefined), [on]);
 }
 
 // setOutboxIdleProbe: () => boolean, true when the outbox is empty and nothing
@@ -206,7 +221,7 @@ export function checkVersion() {
     }
     // Reloaded for this server build already, and still behind it: the banner,
     // not another reload (R8). `_reloaded` keeps it to one reload per page.
-    if (_openEditors === 0 && _outboxIsIdle() && !_reloadedFor(_serverBuild)) {
+    if (_unsavedHolders === 0 && _outboxIsIdle() && !_reloadedFor(_serverBuild)) {
         const noted = _noteReloadFor(_serverBuild);
         let to;
         try {
@@ -246,7 +261,7 @@ export function subscribeVersionState(fn) {
 export function resetVersionForTests() {
     _bundleBuild = null;
     _serverBuild = null;
-    _openEditors = 0;
+    _unsavedHolders = 0;
     _state = 'current';
     _reloaded = false;
     _flaggedFor = '';

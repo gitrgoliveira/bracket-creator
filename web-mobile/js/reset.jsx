@@ -13,11 +13,15 @@
 // authConfig.resetEnabled (fetched from /api/auth-config on App() mount)
 // gates which UI is shown: form or "operator-disabled" message.
 
+import { useUnsavedInput } from './app_version.jsx';
+
 const { useState: useStateR, useEffect: useEffectR, useRef: useRefR } = React;
 
 function ResetPasswordForm({ authConfig, onBack, onSuccess, originatorId }) {
   const [pw, setPw] = useStateR("");
   const [confirm, setConfirm] = useStateR("");
+  // A password being typed holds a new build's automatic reload (app_version.jsx).
+  useUnsavedInput(pw !== "" || confirm !== "");
   const [err, setErr] = useStateR("");
   const [saving, setSaving] = useStateR(false);
   // submit's catch sets setSaving(false) post-await. On success the

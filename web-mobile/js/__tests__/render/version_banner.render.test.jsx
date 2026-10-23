@@ -35,7 +35,7 @@ describe('VersionBanner', () => {
   it('with an editor open, a new build shows the banner instead of reloading', () => {
     const reload = vi.fn();
     V.setReloader(reload);
-    const close = V.registerOpenEditor();
+    const close = V.registerUnsavedInput();
     render(<VersionBanner onReload={reload} />);
     act(() => { V.noteServerBuild('build-b'); });
     expect(screen.getByTestId('version-banner').textContent).toContain(V.VERSION_BANNER_TEXT);
@@ -53,7 +53,7 @@ describe('VersionBanner', () => {
     V.setBeforeReload(saved);
     let idle = false;
     V.setOutboxIdleProbe(() => idle);
-    const close = V.registerOpenEditor();
+    const close = V.registerUnsavedInput();
     render(<VersionBanner />);
     act(() => { V.noteServerBuild('build-b'); });
     expect(screen.getByTestId('version-banner')).toBeTruthy();
@@ -73,7 +73,7 @@ describe('VersionBanner', () => {
     const { QUEUED_UNSAVED_NOTICE } = await import('../../write_result.jsx');
     const reload = vi.fn();
     V.setReloader(reload);
-    const close = V.registerOpenEditor();
+    const close = V.registerUnsavedInput();
     const hadAPI = 'API' in window;
     const prevAPI = window.API;
     let stores = false;
@@ -100,7 +100,7 @@ describe('VersionBanner', () => {
   it('Reload goes whenever the outbox is empty and idle, whatever storage answers', () => {
     const reload = vi.fn();
     V.setReloader(reload);
-    const close = V.registerOpenEditor();
+    const close = V.registerUnsavedInput();
     const hadAPI = 'API' in window;
     const prevAPI = window.API;
     window.API = { persistQueue: () => false };

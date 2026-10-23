@@ -11,6 +11,7 @@ import { EstimateHeadline } from './admin_schedule_utils.jsx';
 // disagree about what counts as seeded.
 import { seededRanks } from './admin_helpers.jsx';
 import { checkInApplies } from './competition_shape.jsx';
+import { useUnsavedInput } from './app_version.jsx';
 // One owner for what the operator is told when a file on disk does not say what
 // the app expects; shared with the pool surfaces so the wording cannot drift.
 import {
@@ -791,6 +792,8 @@ function FightingSpiritAwardsEditor({ c, password, showToast }) {
   // from props when there are no pending edits (except on a competition
   // SWITCH, where we always reset to the new comp's list.
   const [dirty, setDirty] = useStateA(false);
+  // Unsaved edits hold a new build's automatic reload (app_version.jsx).
+  useUnsavedInput(dirty);
   const lastCompId = useRefA(c.id);
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);

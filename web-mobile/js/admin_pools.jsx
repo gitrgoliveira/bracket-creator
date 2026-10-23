@@ -20,6 +20,7 @@ import { NO_ID_POOL_HINT, NoIdHint } from './data_integrity.jsx';
 // confirm-and-retry every score write uses.
 import { attemptScoreWrite, DOWNSTREAM_KNOCKOUT_RANKING_CANCELLED, writeKeepsEditorOpen } from './write_result.jsx';
 import { rankOrdinal } from './viewer_standings.jsx';
+import { useUnsavedInput } from './app_version.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 const EmptyState = window.EmptyState;
@@ -200,6 +201,8 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // order and can change between fetches (bc-appx item 2), and never the bare display name, which two members
   // can share.
   const [chusenInputs, setChusenInputs] = useStateA({});
+  // A chusen order being typed holds a new build's automatic reload (app_version.jsx).
+  useUnsavedInput(Object.keys(chusenInputs).length > 0);
   // Per-group busy flag: keyed by groupKey "${poolName}::${minPosition}" -> bool
   // (a pool can hold more than one unresolved tied group).
   const [chusenBusy, setChusenBusy] = useStateA({});

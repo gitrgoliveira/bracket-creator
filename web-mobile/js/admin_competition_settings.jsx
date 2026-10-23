@@ -53,6 +53,7 @@ import {
 } from './competition_shape.jsx';
 import { PillGroup, PillButton, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
 import { seededRanks } from './admin_helpers.jsx';
+import { useUnsavedInput } from './app_version.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 
@@ -108,6 +109,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // the unsaved indicator + the Save button's enabled state; saving disables
   // the button and shows "Saving…" during the in-flight PUT.
   const [isDirty, setIsDirty] = useStateA(false);
+  // Unsaved edits hold a new build's automatic reload (app_version.jsx).
+  useUnsavedInput(isDirty);
   const [saving, setSaving] = useStateA(false);
   // Court-clash warnings surfaced after a save (mp-4a52). Non-blocking: the
   // save already committed; when present we stay on the page to show them

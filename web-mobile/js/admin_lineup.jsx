@@ -55,6 +55,7 @@ import { renameMemberFields } from './lineup_rename.jsx';
 import { changedLineupSave } from './lineup_save.jsx';
 import { queuedNotice, writePending, writeHeldOnDeviceOnly } from './write_result.jsx';
 import { useLineupForm, LineupSourceLine, LineupProblem, LineupDraftNotice, membersNotReadNotice } from './lineup_draft.jsx';
+import { useUnsavedInput } from './app_version.jsx';
 
 const { useState: useStateA, useMemo: useMemoA } = React;
 
@@ -472,6 +473,9 @@ function AdminLineup({ comp, team, matchId = "", matchLabel = "", notInMatch = f
   // Operation 3 (RENAME): which squad member (by id) is being renamed.
   const [renamingId, setRenamingId] = useStateA(null);
   const [renamingName, setRenamingName] = useStateA("");
+  // The lineup draft survives a reload (lineup_draft.jsx); a member name
+  // being typed does not, so it holds a new build's automatic reload.
+  useUnsavedInput((addingPos != null && addingName.trim() !== "") || renamingId != null);
 
   // CLEAR: this page is the one home for a team's people (bc-dnst, operator
   // decision 2026-09-15): "Clear name" used to live on the competition

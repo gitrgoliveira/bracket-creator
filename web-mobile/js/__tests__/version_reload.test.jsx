@@ -3,7 +3,7 @@
 // shows the banner until it can. One rule for the app and every display.
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import {
-    bundleBuild, noteServerBuild, buildsMatch, registerOpenEditor, setOutboxIdleProbe,
+    bundleBuild, noteServerBuild, buildsMatch, registerUnsavedInput, setOutboxIdleProbe,
     setReloader, setBeforeReload, checkVersion, noteOutboxDrained, subscribeVersionState,
     versionState, resetVersionForTests, VERSION_BANNER_TEXT, VERSION_RELOAD_LABEL,
 } from '../app_version.jsx';
@@ -89,7 +89,7 @@ describe('checkVersion', () => {
     });
 
     it('is stale while an editor is open and reloads once it closes', () => {
-        const unregister = registerOpenEditor();
+        const unregister = registerUnsavedInput();
         noteServerBuild('def');
         expect(versionState()).toBe('stale');
         expect(reload).not.toHaveBeenCalled();
@@ -98,8 +98,8 @@ describe('checkVersion', () => {
     });
 
     it('counts editors, and a double unregister (StrictMode) counts once', () => {
-        const a = registerOpenEditor();
-        const b = registerOpenEditor();
+        const a = registerUnsavedInput();
+        const b = registerUnsavedInput();
         noteServerBuild('def');
         a();
         a();
@@ -121,7 +121,7 @@ describe('checkVersion', () => {
     });
 
     it('goes back to current when the server is back on the bundle build', () => {
-        registerOpenEditor();
+        registerUnsavedInput();
         noteServerBuild('def');
         expect(versionState()).toBe('stale');
         noteServerBuild('abc');
@@ -131,7 +131,7 @@ describe('checkVersion', () => {
     it('tells subscribers of each change', () => {
         const seen = [];
         const unsub = subscribeVersionState((s) => seen.push(s));
-        const close = registerOpenEditor();
+        const close = registerUnsavedInput();
         noteServerBuild('def');
         close();
         unsub();

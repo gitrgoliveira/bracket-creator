@@ -36,6 +36,7 @@
 import { checkinPid, checkinApiPid } from './data.jsx';
 import { NO_ID_HINT, NoIdHint } from './data_integrity.jsx';
 import { checkInApplies, tournamentHasCheckIn, SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
+import { useUnsavedInput } from './app_version.jsx';
 
 const { useState: useStateRD, useEffect: useEffectRD, useRef: useRefRD, useMemo: useMemoRD, useCallback: useCallbackRD } = React;
 
@@ -453,6 +454,8 @@ function RdWalkUp({ comp, seedName, password, showToast, onAdded, onCancel }) {
   const [dojo, setDojo] = useStateRD("");
   const [zekken, setZekken] = useStateRD("");
   const [dan, setDan] = useStateRD("");
+  // A walk-up being typed holds a new build's automatic reload (app_version.jsx).
+  useUnsavedInput(name !== (seedName || "") || dojo !== "" || zekken !== "" || dan !== "");
   const [busy, setBusy] = useStateRD(false);
   const nameRef = useRefRD(null);
 
@@ -533,6 +536,10 @@ function RdEditModal({ comp, player, password, showToast, onSaved, onClose }) {
   const [dojo, setDojo] = useStateRD(player.dojo || "");
   const [zekken, setZekken] = useStateRD(player.displayName && player.displayName !== player.name ? player.displayName : "");
   const [dan, setDan] = useStateRD(player.danGrade || (player.metadata && player.metadata[0]) || "");
+  // An edit changed from the row it opened on holds a new build's automatic
+  // reload (app_version.jsx).
+  const [opened] = useStateRD(() => ({ name, dojo, zekken, dan }));
+  useUnsavedInput(name !== opened.name || dojo !== opened.dojo || zekken !== opened.zekken || dan !== opened.dan);
   const [busy, setBusy] = useStateRD(false);
 
   const save = async () => {

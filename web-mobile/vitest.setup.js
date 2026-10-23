@@ -1,4 +1,5 @@
 import { vi, beforeEach, afterEach } from 'vitest';
+import './vitest.setup.storage.js';
 
 // Fail tests that produce unexpected console.warn or console.error.
 // Tests that intentionally trigger warnings mock console themselves

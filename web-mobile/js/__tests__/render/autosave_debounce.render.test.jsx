@@ -6,7 +6,7 @@
 // representative bout's add and remove show at once and take the server's
 // answer in the right order, with the taps queued around them.
 //
-// These tests live in the render suite (real React 18 + RTL) because the
+// These tests live in the render suite (real React 19 + RTL) because the
 // feature is exercised through actual component interaction. Timer strategy:
 // vi.useFakeTimers() so time can be advanced deterministically (WAIT_MS stands
 // in for the 300 ms debounce there used to be: nothing is written after it).

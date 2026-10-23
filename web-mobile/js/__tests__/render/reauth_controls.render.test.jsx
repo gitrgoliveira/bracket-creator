@@ -6,7 +6,7 @@
 // a running match's score editor, so the topbar is the persistent home for
 // the parked-queue state once that editor is closed).
 //
-// Real React 18 + RTL, because these are subscribe-then-rerender components:
+// Real React 19 + RTL, because these are subscribe-then-rerender components:
 // the unit suite's fake React stub never invokes useEffect, so the
 // subscription (and the state change it drives) would never fire there.
 

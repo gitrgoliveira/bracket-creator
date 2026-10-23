@@ -43,6 +43,45 @@ describe('the board folds a pending tap against the bouts the copy shows removed
   });
 });
 
+// Review of PR #483 (af7eab65, the kachinuki next-position rule): Record bout
+// is a server write that appends the next pairing, and the board shows a
+// pairing only once a copy holding it is on screen, so a tap on the newest
+// pairing after two quick Record bouts is folded onto a copy holding that row
+// and the rule never turns it away; the server pins the same in
+// kachinuki_tap_after_record_bout_test.go.
+describe('a tap on the pairing two quick Record bouts appended', () => {
+  const afterTwoRecordBouts = () => ({
+    id: 'm1', status: 'running', sideA: 'Taka', sideB: 'Kuma', sideAId: 'ta', sideBId: 'tb',
+    subResults: [
+      { position: 1, sideA: 'Sato', sideB: 'Kumo', ipponsA: ['M', 'K'], ipponsB: [], winner: 'Sato', recorded: true },
+      { position: 2, sideA: 'Sato', sideB: 'Kido', ipponsA: ['D', 'M'], ipponsB: [], winner: 'Sato', recorded: true },
+      { position: 3, sideA: 'Sato', sideB: 'Kano', ipponsA: [], ipponsB: [] },
+    ],
+    groupStamps: { 'bout:1': 100, 'bout:2': 300, 'bout:3': 500, recorded: 500 },
+    modifiedAt: 500,
+  });
+
+  it('is on the board, on the pairing Record bout appended, with no row made past it', () => {
+    const taps = [ev({ id: 't1', pos: 3, stamp: 501 }), ev({ id: 't2', seq: 2, pos: 3, letter: 'K', stamp: 502 })];
+    const r = applyPending(afterTwoRecordBouts(), taps, { team: true, kachinuki: true, teamSize: 3 });
+    expect(r.outcomes.t1).toBe(APPLIED);
+    expect(r.outcomes.t2).toBe(APPLIED);
+    expect(r.match.subResults.map((s) => s.position)).toEqual([1, 2, 3]);
+    expect(r.match.subResults[2].ipponsA).toEqual(['M', 'K']);
+  });
+
+  it('a pairing added by hand after it, its fighter picked first, takes the taps that follow', () => {
+    const taps = [
+      ev({ id: 'f4', kind: BOUT_FIGHTER, letter: undefined, pos: 4, name: 'Ueda', stamp: 510 }),
+      ev({ id: 't4', seq: 2, pos: 4, stamp: 511 }),
+    ];
+    const r = applyPending(afterTwoRecordBouts(), taps, { team: true, kachinuki: true, teamSize: 3 });
+    expect(r.outcomes.f4).toBe(APPLIED);
+    expect(r.outcomes.t4).toBe(APPLIED);
+    expect(r.match.subResults.map((s) => s.position)).toEqual([1, 2, 3, 4]);
+  });
+});
+
 describe('the operator is told once', () => {
   let _lsStore;
   let _orig;

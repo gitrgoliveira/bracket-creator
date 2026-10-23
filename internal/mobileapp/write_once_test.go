@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"fmt"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -144,4 +145,92 @@ func TestWriteOnce_ForgetsByAgeAndBound(t *testing.T) {
 	assert.False(t, g.seenAt("bulk", "w0"), "the oldest went first")
 	assert.True(t, g.seenAt("bulk", fmt.Sprintf("w%d", writeOnceMax+4)))
 	assert.False(t, g.seenAt("bulk", ""), "no id is never seen")
+}
+
+// A resend racing its first copy at the same target waits for it and is then
+// answered as recorded: the write is applied once.
+func TestWriteOnce_SameTargetDuplicateWaitsAndAppliesOnce(t *testing.T) {
+	g := newWriteOnce()
+	var applied atomic.Int32
+	entered, release := make(chan struct{}), make(chan struct{})
+	first := make(chan bool)
+	go func() {
+		first <- g.do("m", "w1", func() bool {
+			applied.Add(1)
+			close(entered)
+			<-release
+			return true
+		})
+	}()
+	<-entered
+	second := make(chan bool)
+	go func() {
+		second <- g.do("m", "w1", func() bool { applied.Add(1); return true })
+	}()
+	select {
+	case <-second:
+		t.Fatal("the duplicate was judged while its first copy was being applied")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	require.True(t, <-first)
+	require.False(t, <-second, "the duplicate is answered as recorded")
+	assert.Equal(t, int32(1), applied.Load())
+	assert.Empty(t, g.busy, "a target's lock is forgotten once nobody holds it")
+}
+
+// Writes of different targets never wait on each other, even two targets that
+// shared one of the 64 stripe locks this replaced.
+func TestWriteOnce_OtherTargetsDoNotWait(t *testing.T) {
+	stripe := func(s string) uint32 {
+		h := uint32(2166136261)
+		for i := 0; i < len(s); i++ {
+			h ^= uint32(s[i])
+			h *= 16777619
+		}
+		return h % 64
+	}
+	a, b := "match-0", ""
+	for i := 1; b == ""; i++ {
+		if c := fmt.Sprintf("match-%d", i); stripe(c) == stripe(a) {
+			b = c
+		}
+	}
+	g := newWriteOnce()
+	entered, release := make(chan struct{}), make(chan struct{})
+	done := make(chan bool)
+	go func() {
+		done <- g.do(a, "w1", func() bool { close(entered); <-release; return true })
+	}()
+	<-entered
+	other := make(chan bool)
+	go func() { other <- g.do(b, "w1", func() bool { return true }) }()
+	select {
+	case ran := <-other:
+		assert.True(t, ran)
+	case <-time.After(2 * time.Second):
+		t.Fatalf("a write of %q waited on one of %q", b, a)
+	}
+	close(release)
+	require.True(t, <-done)
+}
+
+// Expired ids are taken off as new ones are recorded, oldest first, so the
+// set holds only the live ones without a scan.
+func TestWriteOnce_RecordPurgesExpired(t *testing.T) {
+	g := newWriteOnce()
+	now := time.Unix(1000, 0)
+	g.now = func() time.Time { return now }
+	for i := 0; i < 100; i++ {
+		g.remember("m", fmt.Sprintf("w%d", i))
+	}
+	g.remember("m", "w0") // again: its first record goes stale
+	now = now.Add(writeOnceKeep / 2)
+	g.remember("m", "half")
+	now = now.Add(writeOnceKeep/2 + time.Millisecond)
+	g.remember("m", "late")
+	assert.Len(t, g.seen, 2, "the first hundred expired")
+	assert.True(t, g.seenAt("m", "half"))
+	assert.True(t, g.seenAt("m", "late"))
+	assert.Equal(t, 2, len(g.order)-g.head, "stale and expired records are gone from the order too")
 }

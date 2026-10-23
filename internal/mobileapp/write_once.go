@@ -24,12 +24,30 @@ import (
 // resend is judged again. Writes of one target (one match, or one team's
 // lineup or member) are serialised while they are judged, so a duplicate
 // arriving while its first copy is being applied waits for it and is then
-// answered as recorded.
+// answered as recorded. The lock is the target's own (busy), so writes of
+// different targets never wait on each other.
 type writeOnce struct {
-	stripes [64]sync.Mutex
-	mu      sync.Mutex
-	seen    map[string]time.Time
-	now     func() time.Time
+	mu   sync.Mutex // guards busy, seen and order; never held across apply
+	busy map[string]*targetLock
+	seen map[string]time.Time
+	// order is every record in the order it was made, so in time order: the
+	// oldest is at head, and expiry and the bound take from there. An entry
+	// whose key was recorded again since is stale and is skipped.
+	order []onceRecord
+	head  int
+	now   func() time.Time
+}
+
+// targetLock serialises the writes of one target; refs counts the callers
+// holding or waiting for it, and the last one out removes it.
+type targetLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
+type onceRecord struct {
+	key string
+	at  time.Time
 }
 
 const (
@@ -38,7 +56,7 @@ const (
 )
 
 func newWriteOnce() *writeOnce {
-	return &writeOnce{seen: map[string]time.Time{}, now: time.Now}
+	return &writeOnce{busy: map[string]*targetLock{}, seen: map[string]time.Time{}, now: time.Now}
 }
 
 // validWriteID refuses a writeId no client mints (a 400 for the request).
@@ -57,15 +75,8 @@ func (g *writeOnce) do(target, writeID string, apply func() bool) (ran bool) {
 		apply()
 		return true
 	}
-	// FNV-1a over the target picks its stripe.
-	h := uint32(2166136261)
-	for i := 0; i < len(target); i++ {
-		h ^= uint32(target[i])
-		h *= 16777619
-	}
-	stripe := &g.stripes[h%uint32(len(g.stripes))]
-	stripe.Lock()
-	defer stripe.Unlock()
+	tl := g.lockTarget(target)
+	defer g.unlockTarget(target, tl)
 	key := target + "\x1f" + writeID
 	if g.has(key) {
 		return false
@@ -74,6 +85,31 @@ func (g *writeOnce) do(target, writeID string, apply func() bool) (ran bool) {
 		g.record(key)
 	}
 	return true
+}
+
+// lockTarget takes target's own lock, making it on first use.
+func (g *writeOnce) lockTarget(target string) *targetLock {
+	g.mu.Lock()
+	tl := g.busy[target]
+	if tl == nil {
+		tl = &targetLock{}
+		g.busy[target] = tl
+	}
+	tl.refs++
+	g.mu.Unlock()
+	tl.mu.Lock()
+	return tl
+}
+
+// unlockTarget releases target's lock, and forgets it once nobody holds or
+// waits for it.
+func (g *writeOnce) unlockTarget(target string, tl *targetLock) {
+	tl.mu.Unlock()
+	g.mu.Lock()
+	if tl.refs--; tl.refs == 0 {
+		delete(g.busy, target)
+	}
+	g.mu.Unlock()
 }
 
 func (g *writeOnce) has(key string) bool {
@@ -87,24 +123,27 @@ func (g *writeOnce) record(key string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	now := g.now()
-	if len(g.seen) >= writeOnceMax {
-		for k, at := range g.seen {
-			if now.Sub(at) >= writeOnceKeep {
-				delete(g.seen, k)
-			}
+	// The expired go first, oldest at the head; then, while still full, the
+	// oldest. Each record is taken off the head once, so a record costs O(1)
+	// over time however full the set is.
+	for g.head < len(g.order) {
+		r := g.order[g.head]
+		live := g.seen[r.key].Equal(r.at)
+		if live && now.Sub(r.at) < writeOnceKeep && len(g.seen) < writeOnceMax {
+			break
 		}
-		// Still full: the oldest go first.
-		for len(g.seen) >= writeOnceMax {
-			oldest, oldestAt := "", now
-			for k, at := range g.seen {
-				if !at.After(oldestAt) {
-					oldest, oldestAt = k, at
-				}
-			}
-			delete(g.seen, oldest)
+		if live {
+			delete(g.seen, r.key)
 		}
+		g.order[g.head] = onceRecord{}
+		g.head++
+	}
+	if g.head > len(g.order)/2 {
+		g.order = append(g.order[:0], g.order[g.head:]...)
+		g.head = 0
 	}
 	g.seen[key] = now
+	g.order = append(g.order, onceRecord{key: key, at: now})
 }
 
 // seenAt and remember are do's two halves, for a door that judges its write

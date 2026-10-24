@@ -117,9 +117,9 @@ export const START_FAILED_MESSAGE = "Could not start the match: check eligibilit
 // stored one: an equal one is a HeldEcho, neither listed nor kept (reportHeld,
 // match_merge.go), and respondSuperseded omits `heldGroups` when it would be
 // empty. A start does carry rev/revSession like every running payload
-// (api_client.jsx stamps them), and the rev guard (holdOlderRevision ->
-// holdWriteTx, holdAll) holds through reportHeld too, so an echo is an echo-hold
-// there as well. So:
+// (api_client.jsx stamps them), and the older-revision hold (mergeMatchWrite's
+// olderRevisionThanLogged, which holds every group the write changes) reports
+// through reportHeld too, so an echo is an echo-hold there as well. So:
 //   - NO heldGroups: the stored result already equals the start. Another
 //     device's start of this same match landed first with a later stamp, i.e. the
 //     match IS running. The start went out, as far as this device is concerned:

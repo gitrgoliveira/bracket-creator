@@ -31,7 +31,7 @@
 //   E. The browser 'online' event relearns, queue empty or not.
 //   F. A live write refused for clock_skew: a COMPLETED one heals and resends
 //      once (and is reported, never queued, if refused again); a RUNNING
-//      autosave heals silently and does not resend.
+//      running write heals silently and does not resend.
 //   G. A queued write refused on the flush path: the stamp is RECONSTRUCTED
 //      from enqueuedAt + the freshly learned offset (so the write keeps its
 //      real age) and retried once; a second refusal drops it with both
@@ -47,6 +47,17 @@
 //   L. The representative-bout add and remove carry the stamp too, hand a
 //      refusal back as the refusal and relearn, and the stamp is what keeps a
 //      refetch read before the add from replacing the copy it pushed.
+//
+// bc-evts (stage 3, the outbox): every rule-bound door (a finished or
+// scheduled recordScore, recordDecision, overrideBracketWinner, the
+// representative bout's add and remove, ...) now enqueues at once and answers
+// `{ applied: true, pending: true, key, settled }`; `settled` is the server's
+// eventual answer in the shape the direct call used to return, and a 4xx
+// refusal rejects it with the Error the direct call used to throw. So the
+// "direct" recordScore and override sites above are the QUEUE's flush now
+// (only a RUNNING recordScore still goes direct), a clock_skew resend is the
+// queue's re-stamp (_restampQueuedEntryForSkew), and a request given up at the
+// 12 s deadline keeps its entry queued and replays it with the same stamp.
 //
 // The offset is never exported. It is observed through the one thing that
 // matters - payload.modifiedAt on a captured request body.
@@ -297,7 +308,9 @@ describe('server-clock offset: a superseded write relearns the offset', () => {
         await flushMicrotasks();
         expect(server.timeCalls).toBe(2);
 
-        // The operator re-enters the result: it now carries a corrected stamp.
+        // The operator re-enters the result: it now carries a corrected stamp
+        // (once the relearn's answer is in: the write went through the outbox).
+        await flushMicrotasks();
         server.writeReply = () => ({});
         expect(await stampOffset(API, server, 'm1')).toBe(SKEW_MS);
     });
@@ -350,9 +363,11 @@ describe('server-clock offset: a superseded QUEUED write relearns on the flush p
 
         // Offline: the finished result is queued rather than sent.
         server.online = false;
+        // bc-evts: the door answers pending at once; the write stays queued.
         const queued = await API.recordScore('c1', 'mq', { status: 'completed' }, 'pw', null);
-        expect(queued).toMatchObject({ queued: true });
+        expect(queued).toMatchObject({ applied: true, pending: true });
         await flushMicrotasks();
+        expect(API.unsentWrites().total).toBe(1);
         expect(server.timeCalls).toBe(1); // a network failure is not a supersede signal
 
         // Reconnect: the flush delivers it and the server drops it as stale.
@@ -362,6 +377,7 @@ describe('server-clock offset: a superseded QUEUED write relearns on the flush p
         await tick(50);
 
         expect(server.timeCalls).toBe(2);
+        expect(await queued.settled).toMatchObject({ applied: false, reason: 'superseded' });
     });
 });
 
@@ -372,8 +388,10 @@ describe('server-clock offset: a superseded override assertion relearns', () => 
         expect(server.timeCalls).toBe(1);
 
         server.writeReply = () => ({ applied: false });
+        // bc-evts: the assertion is the outbox's; its answer arrives on `settled`.
         const r = await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw');
-        expect(r).toEqual({ applied: false });
+        expect(r).toMatchObject({ applied: true, pending: true });
+        expect(await r.settled).toEqual({ applied: false });
         await flushMicrotasks();
 
         expect(server.timeCalls).toBe(2);
@@ -386,7 +404,7 @@ describe('server-clock offset: a superseded override assertion relearns', () => 
 
         server.writeReply = () => ({ applied: true });
         const r = await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw');
-        expect(r).toEqual({ applied: true });
+        expect(await r.settled).toEqual({ applied: true });
 
         // Ride past the throttle window, so a wrongly-fired relearn cannot be
         // hidden by the throttle instead of by the applied:true check.
@@ -535,7 +553,9 @@ describe('clock relearn on reconnect', () => {
 // frame, is what should be recorded - so the client heals and resends once.
 
 describe('clock_skew recovery: a live completed write', () => {
-    it('relearns, re-stamps and resends exactly once, and lands', async () => {
+    // bc-evts: a finished write is the outbox's, so the resend is the queue's
+    // re-stamp (_restampQueuedEntryForSkew), still exactly one, at once.
+    it('is re-stamped by the queue, resent exactly once, and lands', async () => {
         const server = makeServer({ timeOk: true });
         const mod = await loadModWith(server);
         const API = mod.API;
@@ -547,20 +567,21 @@ describe('clock_skew recovery: a live completed write', () => {
         server.skew = SKEW_MS + 20000; // what a fresh learn will report
         server.writeReply = replies(skewRefusal(), {});
 
+        const sentAt = Date.now();
         const res = await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', null);
-        await flushMicrotasks();
+        await tick(50);
 
         // Exactly two attempts: the refused one and the healed one.
         expect(server.payloads.length).toBe(2);
         expect(server.timeCalls).toBe(2);
         // The resend carries the CORRECTED stamp: the first stamp plus the
         // delta the learn discovered.
-        expect(server.payloads[0].modifiedAt).toBe(Date.now() + SKEW_MS);
+        expect(server.payloads[0].modifiedAt).toBe(sentAt + SKEW_MS);
         expect(server.payloads[1].modifiedAt).toBe(server.payloads[0].modifiedAt + 20000);
-        // It landed, so nothing is reported and nothing is queued.
-        expect(res).toEqual({});
+        // It landed, so nothing is reported and nothing is left queued.
+        expect(await res.settled).toEqual({});
         expect(failures).toEqual([]);
-        expect(_lsStore.bc_write_queue).toBeUndefined();
+        expect(_lsStore.bc_write_queue_v2).toBe('[]');
         unsub();
     });
 
@@ -568,7 +589,10 @@ describe('clock_skew recovery: a live completed write', () => {
     // a refusal carrying a sentence (the organiser finished the match, or
     // recorded the judges' decision, meanwhile) is thrown with the sentence,
     // as the first attempt's refusal is, never the bare code.
-    it('a resend refused with a sentence throws the sentence', async () => {
+    // bc-evts: the refusal now rejects the door's `settled` (and the queue
+    // reports it: the 'rejected' alert and its devtools warn).
+    it('a resend refused with a sentence rejects settled with the sentence', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const server = makeServer({ timeOk: true });
         const API = await loadWith(server);
         const answering = server.fetch;
@@ -587,42 +611,65 @@ describe('clock_skew recovery: a live completed write', () => {
         });
         server.writeReply = () => skewRefusal();
 
-        await expect(API.recordScore('c1', 'm1', { status: 'completed' }, '', null))
+        const answer = await API.recordScore('c1', 'm1', { status: 'completed' }, '', null);
+        expect(answer).toMatchObject({ pending: true });
+        await expect(answer.settled)
             .rejects.toThrow('The judges decided this representative bout (hantei). Ask the tournament organizer to change it.');
         expect(writes).toBe(2);
+        expect(API.unsentWrites().total).toBe(0);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/rejected/), expect.anything());
+        warnSpy.mockRestore();
     });
 
-    it('refused twice: reports it, never a third attempt, never queued', async () => {
-        // The drop console.warns for devtools; the strict test setup fails on an
-        // unexpected warn, so own the spy here and assert it fired.
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // bc-evts: the write is queued now (every finished write is); what is
+    // pinned is that the second refusal drops it rather than loop.
+    it('refused twice: kept queued and held, re-stamped on each retry, told once, and lands once the clock is right', async () => {
+        // Review of PR #483: a write refused for the clock again after its
+        // re-stamp was dropped for good, though the server logged nothing.
+        // Now it is kept queued and held, re-stamped on every retry, told once,
+        // and lands once the clock is right.
         const server = makeServer({ timeOk: true });
         const mod = await loadModWith(server);
         const API = mod.API;
 
         const failures = [];
-        const unsub = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+        const alerts = [];
+        const unsubFail = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
 
-        server.writeReply = () => skewRefusal(); // refuses forever
+        server.writeReply = () => skewRefusal(); // refuses until the clock is fixed
 
         await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', null);
-        await tick(2000);
+        await tick(0);
 
+        // Re-stamped and resent at once, refused again: kept, never dropped.
         expect(server.payloads.length).toBe(2);
-        expect(failures.length).toBe(1);
-        expect(failures[0]).toMatchObject({ compID: 'c1', matchID: 'm1', kind: 'score', status: 200 });
-        // The advice must name the CLOCK: "re-enter the result" alone would
-        // send the operator round the same refusal forever.
-        expect(failures[0].advice).toMatch(/clock/i);
-        // Never queued: an entry stamped by a device that cannot get the stamp
-        // right would poison-loop the flush.
-        expect(_lsStore.bc_write_queue).toBeUndefined();
-        expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/clock skew/i));
-        warnSpy.mockRestore();
-        unsub();
+        expect(failures).toEqual([]);
+        expect(API.heldWrites()).toEqual([expect.objectContaining({ matchID: 'm1', keepsFailing: true })]);
+        expect(JSON.parse(_lsStore.bc_write_queue_v2)).toHaveLength(1);
+        const told = alerts.filter((a) => a.kind === 'server_error');
+        expect(told).toEqual([expect.objectContaining({ matchID: 'm1', terminalCount: 1, detail: expect.stringMatching(/clock/i) })]);
+
+        // Retried on the backoff, re-stamped each time, told only once.
+        await tick(600);
+        expect(server.payloads.length).toBe(3);
+        expect(alerts.filter((a) => a.kind === 'server_error')).toHaveLength(1);
+
+        // The clock is right again: it lands and leaves the queue.
+        server.writeReply = () => ({});
+        await tick(1100);
+        expect(server.payloads.length).toBe(4);
+        expect(API.heldWrites()).toEqual([]);
+        expect(_lsStore.bc_write_queue_v2).toBe('[]');
+        expect(failures).toEqual([]);
+        unsubFail();
+        unsubAlert();
     });
 
-    it('a running autosave is healed silently: no banner, one attempt', async () => {
+    // bc-evts: a running write is an outbox entry, so a clock refusal is
+    // handled as a queued running write's is (J below): re-stamped once and
+    // resent, silently.
+    it('a running write is healed silently: no banner, re-stamped and resent once', async () => {
         const server = makeServer({ timeOk: true });
         const mod = await loadModWith(server);
         const API = mod.API;
@@ -631,13 +678,14 @@ describe('clock_skew recovery: a live completed write', () => {
         const failures = [];
         const unsub = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
 
-        server.writeReply = () => skewRefusal();
+        server.writeReply = replies(skewRefusal(), {});
         await API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null);
         await flushMicrotasks();
+        await tick(50);
 
-        // No resend: the next keystroke's autosave (~300ms) carries the
-        // corrected stamp, and a banner here would fire on every one of them.
-        expect(server.payloads.length).toBe(1);
+        // One resend with the corrected stamp, and no banner: one here would
+        // fire on every running write of a skewed device.
+        expect(server.payloads.length).toBe(2);
         expect(failures).toEqual([]);
         // But the heal still happens.
         expect(server.timeCalls).toBe(2);
@@ -663,9 +711,11 @@ describe('clock_skew recovery: a queued write on the flush path', () => {
         // device believed at the time.
         server.online = false;
         const enqueuedAt = Date.now();
-        expect(await API.recordScore('c1', 'mq', { status: 'completed' }, 'pw', null)).toMatchObject({ queued: true });
+        // bc-evts: pending, and held in the queue while offline.
+        expect(await API.recordScore('c1', 'mq', { status: 'completed' }, 'pw', null)).toMatchObject({ pending: true });
         await flushMicrotasks();
         expect(server.payloads.length).toBe(0);
+        expect(API.hasPendingTerminalWrite('c1', 'mq')).toBe(true);
 
         // Time passes on this court before the wifi returns.
         await tick(30000);
@@ -682,13 +732,11 @@ describe('clock_skew recovery: a queued write on the flush path', () => {
         expect(server.payloads[1].modifiedAt).toBe(enqueuedAt + SKEW_MS + 20000);
         expect(server.payloads[1].modifiedAt).toBeLessThan(Date.now() + SKEW_MS + 20000);
         // Landed, so the queue is empty again.
-        expect(_lsStore.bc_write_queue).toBeUndefined();
+        expect(_lsStore.bc_write_queue_v2).toBe('[]');
     });
 
-    it('refused twice: dropped, reported on both channels, never a third attempt', async () => {
-        // The drop console.warns for devtools; the strict test setup fails on an
-        // unexpected warn, so own the spy here and assert it fired.
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    it('refused twice: held, told once, and discardable', async () => {
+        // Held, never dropped: told once, and the operator may discard it.
         const server = makeServer({ timeOk: true });
         const mod = await loadModWith(server);
         const API = mod.API;
@@ -699,25 +747,25 @@ describe('clock_skew recovery: a queued write on the flush path', () => {
         const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
 
         server.online = false;
-        await API.recordScore('c1', 'mq', { status: 'completed' }, 'pw', null);
+        const r = await API.recordScore('c1', 'mq', { status: 'completed' }, 'pw', null);
         await flushMicrotasks();
 
         server.online = true;
-        server.writeReply = () => skewRefusal(); // refuses forever
+        server.writeReply = () => skewRefusal(); // refuses until the clock is fixed
         window.dispatchEvent(new Event('online'));
-        await tick(2000);
+        await tick(0);
 
         expect(server.payloads.length).toBe(2);
-        // The editor-scoped channel, for an operator still on this match...
-        expect(failures.length).toBe(1);
-        expect(failures[0]).toMatchObject({ compID: 'c1', matchID: 'mq', kind: 'score' });
-        expect(failures[0].advice).toMatch(/clock/i);
-        // ...and the alert channel, for one who has moved to another court.
-        expect(alerts.some((a) => a.kind === 'rejected' && /clock/i.test(a.detail || ''))).toBe(true);
-        // Dropped rather than left to poison-loop the flush.
-        expect(_lsStore.bc_write_queue).toBeUndefined();
-        expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/clock skew/i));
-        warnSpy.mockRestore();
+        expect(failures).toEqual([]);
+        expect(alerts.filter((a) => a.kind === 'server_error' && /clock/i.test(a.detail || ''))).toHaveLength(1);
+        expect(alerts.some((a) => a.kind === 'rejected')).toBe(false);
+        const held = API.heldWrites();
+        expect(held).toEqual([expect.objectContaining({ matchID: 'mq', keepsFailing: true })]);
+
+        // Discardable like any write the server keeps refusing.
+        expect(API.discardHeldWrite(held[0].key)).toBeTruthy();
+        expect(await r.settled).toEqual({ discarded: true });
+        expect(_lsStore.bc_write_queue_v2).toBe('[]');
         unsubFail();
         unsubAlert();
     });
@@ -751,7 +799,9 @@ describe('a superseded write is untouched by the clock_skew recovery', () => {
 
         expect(server.payloads.length).toBe(1);
         expect(server.payloads[0].modifiedAt).toBe(sentAt + SKEW_MS);
-        expect(res).toMatchObject({ applied: false });
+        // bc-evts: the supersede is the answer `settled` resolves with.
+        expect(res).toMatchObject({ pending: true });
+        expect(await res.settled).toMatchObject({ applied: false, reason: 'superseded' });
         // The pre-existing supersede notification, unchanged.
         expect(failures.length).toBe(1);
         expect(failures[0].reason).toBe(mod.SUPERSEDED_REASON);
@@ -772,7 +822,8 @@ describe('a superseded write is untouched by the clock_skew recovery', () => {
 // shared chokepoint, so the other two cover for a deletion here.
 
 describe('clock_skew recovery: an override assertion', () => {
-    it('relearns, re-stamps and resends once, then reports applied', async () => {
+    // bc-evts: the resend is the queue's re-stamp; `settled` reports applied.
+    it('relearns, is re-stamped by the queue and resent once, then settles applied', async () => {
         const server = makeServer({ timeOk: true });
         const API = await loadWith(server);
         expect(server.timeCalls).toBe(1);
@@ -781,70 +832,70 @@ describe('clock_skew recovery: an override assertion', () => {
         server.writeReply = replies(skewRefusal(), { applied: true });
 
         const r = await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw');
-        await flushMicrotasks();
+        await tick(50);
 
-        expect(r).toEqual({ applied: true });
+        expect(await r.settled).toEqual({ applied: true });
         expect(server.payloads.length).toBe(2);
         expect(server.payloads[1].modifiedAt).toBe(server.payloads[0].modifiedAt + 20000);
         expect(server.timeCalls).toBe(2);
     });
 
-    it('refused twice: reports applied:false to the caller, never a third attempt', async () => {
-        // The second refusal console.warns for devtools; own the spy so the
-        // strict test setup does not fail on it.
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    it('refused twice: kept, and settles with the answer once the clock is right', async () => {
+        // Refused again after its re-stamp: kept, not settled as refused; it
+        // settles with the server's answer once the clock is right.
         const server = makeServer({ timeOk: true });
         const API = await loadWith(server);
 
         server.writeReply = () => skewRefusal();
         const r = await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw');
-        await tick(2000);
+        let settled = null;
+        r.settled.then((v) => { settled = v; });
+        await tick(0);
 
-        // Unchanged contract: the caller must not trust its optimistic pick -
-        // now WITH the reason, so a caller can say why. The two verdicts this
-        // boundary can return need opposite things said about them, and
-        // `applied:false` alone cannot tell them apart.
-        expect(r).toEqual({ applied: false, reason: 'clock_skew', message: 'stamp is in the future' });
         expect(server.payloads.length).toBe(2);
-        expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/clock skew/i));
-        warnSpy.mockRestore();
+        expect(settled).toBeNull();
+        expect(API.heldWrites()).toEqual([expect.objectContaining({ matchID: 'm-r2-0', keepsFailing: true })]);
+
+        server.writeReply = () => ({ applied: true });
+        await tick(600);
+        expect(await r.settled).toEqual({ applied: true });
+        expect(server.payloads.length).toBe(3);
     });
 });
 
 describe('clock_skew recovery: a queued override assertion', () => {
-    it('asks for a bracket resync when it is dropped for good', async () => {
-        // A dropped assertion leaves any optimistic local advance standing on a
-        // write that will now never land. The supersede case is benign (a newer
-        // result won, so the server is right and only a refetch is owed); this
-        // one is a failure AND a wrong local bracket, so it owes both.
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    it('held for the clock, it asks for no resync and tells no failure', async () => {
+        // Held, never dropped: the assertion stays queued and the local
+        // advance stands on a write that will still land, so no resync is
+        // asked for and no failure is told; the held write is told once.
         const server = makeServer({ timeOk: true });
         const mod = await loadModWith(server);
         const API = mod.API;
 
         const resyncs = [];
         const failures = [];
+        const alerts = [];
         const unsubResync = mod.subscribeBracketResync((info) => resyncs.push(info));
         const unsubFail = mod.subscribeTerminalWriteFailed((info) => failures.push(info));
+        const unsubAlert = mod.subscribeQueueAlert((a) => alerts.push(a));
 
         server.online = false;
-        expect(await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw')).toMatchObject({ queued: true });
+        expect(await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw')).toMatchObject({ pending: true });
         await flushMicrotasks();
 
         server.online = true;
-        server.writeReply = () => skewRefusal(); // refuses forever
+        server.writeReply = () => skewRefusal(); // refuses until the clock is fixed
         window.dispatchEvent(new Event('online'));
-        await tick(2000);
+        await tick(0);
 
         expect(server.payloads.length).toBe(2);
-        expect(resyncs.length).toBe(1);
-        expect(resyncs[0]).toMatchObject({ compID: 'c1', matchID: 'm-r2-0', reason: 'clock_skew' });
-        expect(failures.length).toBe(1);
-        expect(_lsStore.bc_write_queue).toBeUndefined();
-        expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/clock skew/i));
-        warnSpy.mockRestore();
+        expect(resyncs).toEqual([]);
+        expect(failures).toEqual([]);
+        expect(alerts.filter((a) => a.kind === 'server_error')).toHaveLength(1);
+        expect(JSON.parse(_lsStore.bc_write_queue_v2)).toHaveLength(1);
         unsubResync();
         unsubFail();
+        unsubAlert();
     });
 });
 
@@ -856,7 +907,7 @@ describe('clock_skew recovery: a queued override assertion', () => {
 // the response backwards - nothing was stored - and deleting the entry throws
 // away the only copy of an EDGE-TRIGGERED command: kachinukiBoutFinal, which
 // tells the server to advance the winner-stays sequence. The rest of a running
-// payload is level-triggered and the next autosave restates it; that flag is
+// payload is level-triggered and the next running write restates it; that flag is
 // not, so losing the entry stalls the encounter until the operator presses
 // Record bout again.
 
@@ -870,7 +921,7 @@ describe('clock_skew recovery: a queued running write on the flush path', () => 
         server.online = false;
         const enqueuedAt = Date.now();
         expect(await API.recordScore('c1', 'mk', { status: 'running', kachinukiBoutFinal: true }, 'pw', null))
-            .toMatchObject({ queued: true });
+            .toMatchObject({ pending: true });
         await flushMicrotasks();
         expect(server.payloads.length).toBe(0);
 
@@ -893,14 +944,12 @@ describe('clock_skew recovery: a queued running write on the flush path', () => 
         // The whole point: the command survived the refusal.
         expect(server.payloads[1].kachinukiBoutFinal).toBe(true);
         // Landed on the retry, so the entry leaves the queue.
-        expect(_lsStore.bc_write_queue).toBeUndefined();
+        expect(_lsStore.bc_write_queue_v2).toBe('[]');
     });
 
-    it('refused twice: dropped exactly as a delivered entry is, with no banner', async () => {
-        // Running state is level-triggered and the next autosave supersedes it,
-        // so there is nothing here an operator could act on - only the devtools
-        // warn, which names the kachinuki risk.
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    it('refused twice: held like a result, told once, with no banner', async () => {
+        // A running write is held for the clock exactly as a result is: kept
+        // queued (its kachinuki command with it), told once, no banner.
         const server = makeServer({ timeOk: true });
         const mod = await loadModWith(server);
         const API = mod.API;
@@ -915,16 +964,15 @@ describe('clock_skew recovery: a queued running write on the flush path', () => 
         await flushMicrotasks();
 
         server.online = true;
-        server.writeReply = () => skewRefusal(); // refuses forever
+        server.writeReply = () => skewRefusal(); // refuses until the clock is fixed
         window.dispatchEvent(new Event('online'));
-        await tick(2000);
+        await tick(0);
 
         expect(server.payloads.length).toBe(2);
         expect(failures).toEqual([]);
-        expect(alerts).toEqual([]);
-        expect(_lsStore.bc_write_queue).toBeUndefined();
-        expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/clock skew/i));
-        warnSpy.mockRestore();
+        expect(alerts).toEqual([expect.objectContaining({ kind: 'server_error', matchID: 'mk', terminalCount: 0 })]);
+        expect(API.heldWrites()).toEqual([expect.objectContaining({ matchID: 'mk', keepsFailing: true })]);
+        expect(JSON.parse(_lsStore.bc_write_queue_v2)).toHaveLength(1);
         unsubFail();
         unsubAlert();
     });
@@ -947,7 +995,7 @@ describe('clock_skew recovery: a queued running write on the flush path', () => 
         await tick(50);
 
         expect(server.payloads.length).toBe(1);
-        expect(_lsStore.bc_write_queue).toBeUndefined();
+        expect(_lsStore.bc_write_queue_v2).toBe('[]');
         // The 'online' event relearns on its own (change E), so exactly one extra
         // call is expected and nothing more: the delivered body added none. Read
         // past the relearn throttle window, so a wrongly-fired relearn cannot be
@@ -984,7 +1032,7 @@ describe('clock_skew recovery: a queued running write on the flush path', () => 
 
         expect(server.payloads.length).toBe(1);
         expect(server.payloads[0].modifiedAt).toBe(enqueuedAt + SKEW_MS);
-        expect(_lsStore.bc_write_queue).toBeUndefined();
+        expect(_lsStore.bc_write_queue_v2).toBe('[]');
         expect(failures).toEqual([]);
         expect(alerts).toEqual([]);
         // The 'online' event relearns on its own (change E), so one extra call is
@@ -1004,8 +1052,7 @@ describe('clock_skew recovery: a queued running write on the flush path', () => 
 // by design, since the stamp it carries was already built from a learned offset.
 
 describe('clock_skew recovery: the retried-once mark is persisted', () => {
-    it('survives the localStorage round-trip, so the rehydrated entry is dropped on its FIRST refusal', async () => {
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    it('survives the localStorage round-trip, so the rehydrated entry is held on its FIRST refusal', async () => {
         const server = makeServer({ timeOk: true });
         const API = await loadWith(server);
 
@@ -1021,7 +1068,7 @@ describe('clock_skew recovery: the retried-once mark is persisted', () => {
         await tick(50);
 
         expect(server.payloads.length).toBe(1);
-        const persisted = JSON.parse(_lsStore.bc_write_queue);
+        const persisted = JSON.parse(_lsStore.bc_write_queue_v2);
         expect(persisted).toHaveLength(1);
         expect(persisted[0][1].skewRetried).toBe(true);
 
@@ -1039,14 +1086,14 @@ describe('clock_skew recovery: the retried-once mark is persisted', () => {
         await tick(50);
 
         // ONE attempt in the new session: the rehydrated mark says this entry has
-        // already had its retry. Had the mark been dropped by the round-trip, the
-        // entry would have been re-stamped and sent a second time instead.
+        // already had its immediate resend, so its first refusal holds it (kept,
+        // re-stamped, on the backoff), never dropped.
         expect(server2.payloads.length).toBe(1);
-        expect(failures.length).toBe(1);
-        expect(failures[0]).toMatchObject({ compID: 'c1', matchID: 'mq', kind: 'score' });
-        expect(_lsStore.bc_write_queue).toBeUndefined();
-        expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/clock skew/i));
-        warnSpy.mockRestore();
+        expect(failures).toEqual([]);
+        const kept = JSON.parse(_lsStore.bc_write_queue_v2);
+        expect(kept).toHaveLength(1);
+        expect(kept[0][1].clockRefused).toBe(true);
+        expect(mod2.API.heldWrites()).toEqual([expect.objectContaining({ matchID: 'mq', keepsFailing: true })]);
         unsub();
     });
 });
@@ -1076,85 +1123,124 @@ describe('the daihyosen add and remove carry the stamp', () => {
         expect(server.payloads[0].modifiedAt).toBe(Date.now() + SKEW_MS);
     });
 
+    // bc-evts: the add and remove are the outbox's, so the refusal is what
+    // `settled` resolves with. A clock_skew refusal is re-stamped by the queue
+    // and resent at once first; refused again, it is kept queued and held for
+    // the clock (never dropped: the server logged nothing).
     it.each([
-        ['add', 'superseded', (API) => API.recordDaihyosen('c1', 'B1', 'pw')],
-        ['add', 'clock_skew', (API) => API.recordDaihyosen('c1', 'B1', 'pw')],
-        ['remove', 'superseded', (API) => API.removeDaihyosen('c1', 'B1', 'pw')],
-        ['remove', 'clock_skew', (API) => API.removeDaihyosen('c1', 'B1', 'pw')],
-    ])('a refused %s (%s) comes back as the refusal and relearns the offset', async (_name, reason, send) => {
+        ['add', (API) => API.recordDaihyosen('c1', 'B1', 'pw')],
+        ['remove', (API) => API.removeDaihyosen('c1', 'B1', 'pw')],
+    ])('a superseded %s settles as the refusal and relearns the offset', async (_name, send) => {
         const server = makeServer({ timeOk: true });
         const API = await loadWith(server);
         expect(server.timeCalls).toBe(1);
-        server.writeReply = () => ({ applied: false, reason, message: 'Not saved.' });
+        server.writeReply = () => ({ applied: false, reason: 'superseded', message: 'Not saved.' });
 
-        const res = await send(API);
-        await flushMicrotasks();
+        const answer = await send(API);
+        expect(answer).toMatchObject({ applied: true, pending: true });
+        await tick(50);
+        const res = await answer.settled;
 
         expect(writeDidNotLand(res)).toBe(true);
         expect(writeWasSuperseded(res)).toBe(true);
-        expect(writeWasRefusedForClock(res)).toBe(reason === 'clock_skew');
+        expect(writeWasRefusedForClock(res)).toBe(false);
         expect(server.timeCalls).toBe(2);
+        expect(server.payloads).toHaveLength(1);
+        expect(API.unsentWrites().total).toBe(0);
     });
 
-    // The team editor holds every autosave on the court until the add or
-    // remove settles, so each gives up after fetchWithTimeout's 12 s like
-    // every other write rather than wait for the browser to fail a half-open
-    // connection, and says so in a sentence the editor shows as it is.
     it.each([
-        ['add', (API) => API.recordDaihyosen('c1', 'B1', 'pw'), 'added'],
-        ['remove', (API) => API.removeDaihyosen('c1', 'B1', 'pw'), 'removed'],
-    ])('the %s is given up after 12 s when the server never answers, and reported', async (_name, send, done) => {
+        ['add', (API) => API.recordDaihyosen('c1', 'B1', 'pw')],
+        ['remove', (API) => API.removeDaihyosen('c1', 'B1', 'pw')],
+    ])('a %s refused for the clock twice is kept and held, never dropped', async (_name, send) => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        server.writeReply = () => ({ applied: false, reason: 'clock_skew', message: 'Not saved.' });
+
+        const answer = await send(API);
+        let settled = null;
+        answer.settled.then((v) => { settled = v; });
+        await tick(50);
+
+        // Re-stamped (its own learn) and resent at once, refused again: kept.
+        expect(server.timeCalls).toBe(3);
+        expect(server.payloads).toHaveLength(2);
+        expect(settled).toBeNull();
+        expect(API.unsentWrites().total).toBe(1);
+        expect(API.heldWrites()).toEqual([expect.objectContaining({ matchID: 'B1', keepsFailing: true })]);
+    });
+
+    // The team editor holds every running write on the court until the add or
+    // remove settles. bc-evts: the request is the queue's now, still bounded
+    // by _fetchJson's 12 s rather than left to the browser to fail a
+    // half-open connection; given up, the entry STAYS queued (a network
+    // failure, never a refusal), `settled` waits for a real answer, and the
+    // backoff replays it with the same stamp.
+    //
+    // `first` is how the first request fails to answer: a connection that
+    // never answers (it settles only when its signal aborts it, like a real
+    // fetch), or headers whose body never completes (fetchWithTimeout's abort
+    // used to end when the headers arrived; _fetchJson reads the body by the
+    // same deadline). `retry` is the answer the replay gets.
+    const repMatch = { id: 'B1', status: 'running', subResults: [] };
+    const neverAnswers = (opts) => new Promise((_resolve, reject) => {
+        if (opts && opts.signal) {
+            opts.signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+        }
+    });
+    const bodyNeverCompletes = (ok) => () => Promise.resolve({ ok, status: ok ? 200 : 409, json: () => new Promise(() => {}) });
+    const landedReply = () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ result: repMatch }) });
+    const refusedReply = () => Promise.resolve({ ok: false, status: 409, json: () => Promise.resolve({ error: 'daihyosen_scored' }) });
+
+    it.each([
+        ['add that is never answered', 'POST', (API) => API.recordDaihyosen('c1', 'B1', 'pw'), neverAnswers, landedReply],
+        ['remove that is never answered', 'DELETE', (API) => API.removeDaihyosen('c1', 'B1', 'pw'), neverAnswers, landedReply],
+        ['add whose body never completes', 'POST', (API) => API.recordDaihyosen('c1', 'B1', 'pw'), bodyNeverCompletes(true), landedReply],
+        ['remove whose body never completes', 'DELETE', (API) => API.removeDaihyosen('c1', 'B1', 'pw'), bodyNeverCompletes(true), landedReply],
+        ['refused add whose body never completes', 'POST', (API) => API.recordDaihyosen('c1', 'B1', 'pw'), bodyNeverCompletes(false), refusedReply],
+    ])('the %s is given up at 12 s, stays queued, and is replayed with the same stamp', async (_name, method, send, first, retry) => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const server = makeServer({ timeOk: true });
         const API = await loadWith(server);
         const answering = server.fetch;
+        const sent = [];
         global.fetch = vi.fn((url, opts) => {
             if (!String(url).includes('/daihyosen')) return answering(url, opts);
-            // A connection that never answers: like a real fetch, the request
-            // settles only when its signal aborts it.
-            return new Promise((_resolve, reject) => {
-                if (opts && opts.signal) {
-                    opts.signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
-                }
-            });
+            sent.push({ method: opts.method, body: JSON.parse(opts.body) });
+            return sent.length === 1 ? first(opts) : retry();
         });
+        const answer = await send(API);
+        expect(answer).toMatchObject({ applied: true, pending: true });
         let outcome = null;
-        send(API).then(() => { outcome = { landed: true }; }, (error) => { outcome = { error }; });
+        answer.settled.then((value) => { outcome = { value }; }, (error) => { outcome = { error }; });
 
         await tick(11000);
         expect(outcome, 'still waiting inside the 12 s').toBeNull();
-        await tick(1500);
-        expect(outcome && outcome.error, 'given up and reported').toBeTruthy();
-        expect(outcome.error.message).toBe(`The representative bout was not ${done}: the server did not answer. Check the connection and try again.`);
-    });
+        expect(sent).toHaveLength(1);
+        // Past the deadline: given up, but kept, and `settled` still waits.
+        await tick(1100);
+        expect(outcome, 'a request given up on is not an answer').toBeNull();
+        expect(API.hasPendingTerminalWrite('c1', 'B1')).toBe(true);
+        expect(API.unsentWrites().total).toBe(1);
 
-    // fetchWithTimeout's abort ends when the headers arrive, so a body that
-    // never completes (a connection dropped mid-response with no reset) used
-    // to hold the editor's writes for good. It is read by the same deadline.
-    it.each([
-        ['add', (API) => API.recordDaihyosen('c1', 'B1', 'pw'), 'added', true],
-        ['remove', (API) => API.removeDaihyosen('c1', 'B1', 'pw'), 'removed', true],
-        ['refused add', (API) => API.recordDaihyosen('c1', 'B1', 'pw'), 'added', false],
-    ])('the %s is given up at the same 12 s when its body never completes', async (_name, send, done, ok) => {
-        const server = makeServer({ timeOk: true });
-        const API = await loadWith(server);
-        const answering = server.fetch;
-        global.fetch = vi.fn((url, opts) => {
-            if (!String(url).includes('/daihyosen')) return answering(url, opts);
-            return Promise.resolve({ ok, status: ok ? 200 : 409, json: () => new Promise(() => {}) });
-        });
-        let outcome = null;
-        send(API).then(() => { outcome = { landed: true }; }, (error) => { outcome = { error }; });
-
-        await tick(11000);
-        expect(outcome, 'still reading inside the 12 s').toBeNull();
-        await tick(1500);
-        expect(outcome && outcome.error, 'given up and reported').toBeTruthy();
-        expect(outcome.error.message).toBe(`The representative bout was not ${done}: the server did not answer. Check the connection and try again.`);
+        // The backoff replays it, as it does a write whose connection failed.
+        await tick(1000);
+        expect(sent).toHaveLength(2);
+        expect(sent[1].method).toBe(method);
+        expect(sent[1].body.modifiedAt).toBe(sent[0].body.modifiedAt);
+        expect(API.unsentWrites().total, 'out of the queue once answered').toBe(0);
+        if (retry === landedReply) {
+            expect(outcome).toEqual({ value: repMatch });
+        } else {
+            expect(outcome && outcome.error && outcome.error.message).toBe('daihyosen_scored');
+        }
+        warnSpy.mockRestore();
     });
 
     // ONE controller stays armed through the body read (_fetchJson): a stalled
     // body is ABORTED at the deadline, which frees its connection, instead of
-    // being left reading while the editor has given up on it.
+    // being left reading. bc-evts: the read is the flush's now, and the
+    // entry stays queued after it.
     it('a stalled body is aborted at the deadline, freeing its connection', async () => {
         const server = makeServer({ timeOk: true });
         const API = await loadWith(server);
@@ -1162,23 +1248,21 @@ describe('the daihyosen add and remove carry the stamp', () => {
         let signal = null;
         global.fetch = vi.fn((url, opts) => {
             if (!String(url).includes('/daihyosen')) return answering(url, opts);
-            signal = opts.signal;
+            if (!signal) signal = opts.signal; // the first request's
             return Promise.resolve({ ok: true, status: 200, json: () => new Promise(() => {}) });
         });
-        let outcome = null;
-        API.recordDaihyosen('c1', 'B1', 'pw').then(() => { outcome = { landed: true }; }, (error) => { outcome = { error }; });
+        await API.recordDaihyosen('c1', 'B1', 'pw');
 
         await tick(11000);
         expect(signal && signal.aborted, 'still reading inside the 12 s').toBe(false);
-        await tick(1500);
+        await tick(1100);
         expect(signal.aborted, 'the body read is aborted, not just stopped waiting for').toBe(true);
-        expect(outcome && outcome.error && outcome.error.message)
-            .toBe('The representative bout was not added: the server did not answer. Check the connection and try again.');
+        expect(API.unsentWrites().total, 'given up on, still queued').toBe(1);
     });
 
     // The budget runs on a timer, not the wall clock: a device clock stepped
     // forward while the request is out (an NTP correction) must not cut it
-    // short and report a landed add as unanswered.
+    // short and leave a landed add unsettled.
     it('a step of the wall clock during the request does not cut its budget', async () => {
         const server = makeServer({ timeOk: true });
         const API = await loadWith(server);
@@ -1191,7 +1275,8 @@ describe('the daihyosen add and remove carry the stamp', () => {
             return new Promise((resolve) => { answerHeaders = resolve; });
         });
         let outcome = null;
-        API.recordDaihyosen('c1', 'B1', 'pw').then((res) => { outcome = { res }; }, (error) => { outcome = { error }; });
+        const answer = await API.recordDaihyosen('c1', 'B1', 'pw');
+        answer.settled.then((res) => { outcome = { res }; }, (error) => { outcome = { error }; });
         await tick(100);
 
         // The clock steps forward while the request is out; then the answer
@@ -1202,18 +1287,21 @@ describe('the daihyosen add and remove carry the stamp', () => {
 
         expect(outcome && outcome.error, 'not reported as unanswered').toBeFalsy();
         expect(outcome && outcome.res).toEqual({ id: 'B1', status: 'running', subResults: [row] });
+        expect(API.unsentWrites().total).toBe(0);
     });
 
     // A refused add or remove shows the server's own sentence when it sends
     // one (a finished match's, for a participant); a bare code is thrown as it
-    // is, for the editor's own wording of it.
+    // is, for the editor's own wording of it. bc-evts: it rejects `settled`,
+    // and the queue reports the refusal (its devtools warn).
     it.each([
         ['an add refused with a sentence', (API) => API.recordDaihyosen('c1', 'B1', ''), { error: 'result_finalized', message: 'This match result has already been reported. Contact the tournament organizer to correct it.' },
             'This match result has already been reported. Contact the tournament organizer to correct it.'],
         ['a remove refused with a sentence', (API) => API.removeDaihyosen('c1', 'B1', ''), { error: 'result_finalized', message: 'This match result has already been reported. Contact the tournament organizer to correct it.' },
             'This match result has already been reported. Contact the tournament organizer to correct it.'],
         ['a remove refused with a bare code', (API) => API.removeDaihyosen('c1', 'B1', 'pw'), { error: 'daihyosen_scored' }, 'daihyosen_scored'],
-    ])('%s is thrown with the words the editor shows', async (_name, send, reply, words) => {
+    ])('%s rejects settled with the words the editor shows', async (_name, send, reply, words) => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const server = makeServer({ timeOk: true });
         const API = await loadWith(server);
         const answering = server.fetch;
@@ -1222,7 +1310,11 @@ describe('the daihyosen add and remove carry the stamp', () => {
             return Promise.resolve({ ok: false, status: 409, json: () => Promise.resolve(reply) });
         });
 
-        await expect(send(API)).rejects.toThrow(words);
+        const answer = await send(API);
+        await expect(answer.settled).rejects.toThrow(words);
+        expect(API.unsentWrites().total, 'a refusal leaves the queue').toBe(0);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/rejected/), expect.anything());
+        warnSpy.mockRestore();
     });
 
     it('a landed add is the match, unwrapped from its envelope', async () => {
@@ -1231,7 +1323,8 @@ describe('the daihyosen add and remove carry the stamp', () => {
         const row = { position: -1, sideA: '', sideB: '', ipponsA: null, ipponsB: null, winner: '', decision: 'daihyosen' };
         server.writeReply = () => ({ subResult: row, result: { id: 'B1', status: 'running', subResults: [row] } });
 
-        const res = await API.recordDaihyosen('c1', 'B1', 'pw');
+        // bc-evts: the stored match is what `settled` resolves with.
+        const res = await (await API.recordDaihyosen('c1', 'B1', 'pw')).settled;
 
         expect(res).toEqual({ id: 'B1', status: 'running', subResults: [row] });
         expect(writeDidNotLand(res)).toBe(false);
@@ -1263,7 +1356,7 @@ describe('the daihyosen add and remove carry the stamp', () => {
         };
         const comp = (m) => ({ id: 'c1', poolMatches: [], bracket: { rounds: [[m]], thirdPlaceMatch: null } });
 
-        const added = await API.recordDaihyosen('c1', 'B1', 'pw');
+        const added = await (await API.recordDaihyosen('c1', 'B1', 'pw')).settled;
         const held = applyPatch(comp(b1), { type: 'match_updated', data: { competitionId: 'c1', matchId: 'B1', result: added } });
         const out = keepNewerMatches(held, comp({ ...b1 }));
 
@@ -1450,12 +1543,15 @@ describe('a score write whose answer never completes is queued, not held', () =>
     const stalledBody = () => Promise.resolve({ ok: true, status: 200, json: () => new Promise(() => {}) });
     const answered = () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
 
+    // bc-evts: a finished score, a decision and an override are the outbox's:
+    // the door answers pending at once, and the 12 s deadline (_fetchJson,
+    // inside the flush) gives the request up while the entry stays queued and
+    // `settled` waits; the backoff replays it with the same stamp.
     it.each([
         ['a finished score', '/score', (API) => API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', null)],
-        ['a running score', '/score', (API) => API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null)],
         ['a decision', '/decision', (API) => API.recordDecision('c1', 'm1', { decision: 'kiken-voluntary', decisionBy: 'shiro' }, 'pw')],
         ['a winner override', '/override-winner', (API) => API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw')],
-    ])('%s is given up at 12 s, queued, and replayed with the same stamp', async (_name, path, send) => {
+    ])('%s is given up at 12 s, stays queued, and is replayed with the same stamp', async (_name, path, send) => {
         const server = makeServer({ timeOk: true });
         const API = await loadWith(server);
         const answering = server.fetch;
@@ -1465,14 +1561,17 @@ describe('a score write whose answer never completes is queued, not held', () =>
             sent.push(JSON.parse(opts.body));
             return sent.length === 1 ? stalledBody() : answered();
         });
+        const answer = await send(API);
+        expect(answer).toMatchObject({ applied: true, pending: true });
         let outcome = null;
-        send(API).then((res) => { outcome = { res }; }, (error) => { outcome = { error }; });
+        answer.settled.then((value) => { outcome = { value }; }, (error) => { outcome = { error }; });
 
         await tick(11000);
         expect(outcome, 'still reading inside the 12 s').toBeNull();
-        await tick(1500);
-        expect(outcome && outcome.res, 'given up and queued, not thrown').toEqual({ queued: true });
-        expect(writeDidNotLand(outcome.res)).toBe(true);
+        await tick(1100);
+        expect(outcome, 'given up on, but not answered').toBeNull();
+        expect(API.hasPendingTerminalWrite('c1', 'm1'), 'kept queued, not thrown').toBe(true);
+        expect(sent).toHaveLength(1);
 
         // The queue replays it, as it does a write whose connection failed.
         await tick(1000);
@@ -1480,6 +1579,41 @@ describe('a score write whose answer never completes is queued, not held', () =>
         expect(sent[1].modifiedAt).toBe(sent[0].modifiedAt);
         expect(sent[1].rev).toBe(sent[0].rev);
         expect(API.unsentWrites().total, 'delivered and out of the queue').toBe(0);
+        expect(outcome && 'value' in outcome, 'settled with the answer').toBe(true);
+    });
+
+    // A RUNNING score is the outbox's too (bc-evts): answered pending at once;
+    // its send, given up at 12 s, stays queued and is replayed with the same
+    // stamp and rev.
+    it('a running score is given up at 12 s, kept queued, and replayed with the same stamp', async () => {
+        const server = makeServer({ timeOk: true });
+        const API = await loadWith(server);
+        const answering = server.fetch;
+        const sent = [];
+        global.fetch = vi.fn((url, opts) => {
+            if (!String(url).includes('/score')) return answering(url, opts);
+            sent.push(JSON.parse(opts.body));
+            return sent.length === 1 ? stalledBody() : answered();
+        });
+        const answer = await API.recordScore('c1', 'm1', { status: 'running' }, 'pw', null);
+        expect(answer).toMatchObject({ applied: true, pending: true });
+        expect(writeDidNotLand(answer)).toBe(false);
+        let outcome = null;
+        answer.settled.then((value) => { outcome = { value }; }, (error) => { outcome = { error }; });
+
+        await tick(11000);
+        expect(outcome, 'still reading inside the 12 s').toBeNull();
+        await tick(1100);
+        expect(outcome, 'given up on, but not answered').toBeNull();
+        expect(API.unsentWrites().total, 'kept queued, not thrown').toBe(1);
+        expect(sent).toHaveLength(1);
+
+        await tick(1000);
+        expect(sent).toHaveLength(2);
+        expect(sent[1].modifiedAt).toBe(sent[0].modifiedAt);
+        expect(sent[1].rev).toBe(sent[0].rev);
+        expect(API.unsentWrites().total, 'delivered and out of the queue').toBe(0);
+        expect(outcome && 'value' in outcome, 'settled with the answer').toBe(true);
     });
 
     // The replay loop is single-flight: one replay whose body never completed
@@ -1497,19 +1631,26 @@ describe('a score write whose answer never completes is queued, not held', () =>
             return sent.length === 2 ? stalledBody() : answered();
         });
 
-        // Offline: the finished score is queued, and the queue replays it at
-        // once; that replay's answer never completes.
-        expect(await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', null)).toEqual({ queued: true });
+        // bc-evts: the finished score is the outbox's at once; its first send
+        // fails on the network, so it stays queued, and the backoff (500 ms)
+        // replays it; that replay's answer never completes.
+        const answer = await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw', null);
+        expect(answer).toMatchObject({ applied: true, pending: true });
         await flushMicrotasks();
+        expect(sent).toHaveLength(1);
+        await tick(500);
         expect(sent).toHaveLength(2);
 
         await tick(11000);
         expect(API.unsentWrites().total, 'still waiting on the replay inside the 12 s').toBe(1);
-        // Given up at the deadline, kept, and retried after the backoff.
+        // Given up at the deadline (12.5 s), kept, and retried after the
+        // next backoff (1 s).
         await tick(1500);
+        expect(sent).toHaveLength(2);
         await tick(1000);
         expect(sent).toHaveLength(3);
         expect(sent[2].modifiedAt).toBe(sent[0].modifiedAt);
+        await expect(answer.settled).resolves.toEqual({});
         expect(API.unsentWrites().total, 'delivered and out of the queue').toBe(0);
     });
 });

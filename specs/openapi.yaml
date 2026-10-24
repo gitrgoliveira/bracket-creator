@@ -27,6 +27,12 @@ info:
     - **`GET /api/competitions/{id}/swiss/standings`**: public read; always public.
     - **`GET /api/tournament/announcement`**: public read; returns the currently active admin broadcast announcement (204 when none/expired).
 
+    **The build header.** Every answer of the Mobile/Admin API carries
+    `X-App-Build`, the git commit of the server's build (`unknown` when the
+    binary was built without one), and the SSE stream's first data frame names
+    the same build. A tab running another build's bundle reloads, or tells the
+    operator to; the server refuses nothing for its version.
+
     **Self-run mode.** When the tournament is created with `mode: self-run`, the
     main-password gate is bypassed for the operational play surface (scoring,
     start/complete, generate-draw, etc.) so participants can drive their own flow without
@@ -341,9 +347,17 @@ paths:
       description: |
         Subscribe to real-time tournament updates via SSE.
 
+        The first data frame is the stream's hello: a heartbeat (no `id:`, no
+        seq consumed) carrying `hello: true`, the server's `nowMs` and its
+        `build` (the `X-App-Build` value). A `match_updated` frame's `result`
+        carries the match's `markIds`, `scoreVersion` and `eventSeqs` (see MatchResult).
+
         Event types (canonical set defined in `internal/mobileapp/hub.go`):
         - `match_updated`: a match's score/court/scheduledAt changed.
-          `data: { competitionId, matchId, ... }`.
+          `data: { competitionId, matchId, ... }`. A scoring tap
+          (POST .../score-events) pushes the match its replay gives; the pushes
+          for one running match are coalesced to at most four a second, the
+          last one carrying the newest stored state.
         - `competition_started`: a competition transitioned out of `setup`.
           `data: { competitionId }`.
         - `competition_completed`: a competition transitioned to `completed`
@@ -375,6 +389,20 @@ paths:
           payload shapes. Non-originating sessions should clear their
           cached credential from `localStorage` and re-show the
           authentication modal.
+        - `competitor_status_updated`, `participants_updated`,
+          `draw_generated`, `draw_discarded`, `swiss_round_generated` and
+          `announcement`: a competitor's eligibility changed, a roster was
+          edited, a draw was generated or discarded, a Swiss round was
+          generated, or the announcements changed.
+        - `lineup_updated`: a team's lineups or members changed.
+          `data: { competitionId, teamId }`, and `matchId` too for a lineup
+          saved for a match.
+        - `bracket_quarantined`: a `bracket.json` that would not parse was
+          renamed aside and the knockout stage rebuilt; every device should
+          reload.
+        - `resync_required` and `heartbeat`: stream control frames. A
+          `resync_required` says the replay ring cannot close the gap since
+          `Last-Event-ID`, so the client refetches everything.
       responses:
         '200':
           description: SSE stream of tournament events.
@@ -1289,6 +1317,25 @@ paths:
         first, then roster). Players with `seed: 0` produce no seed
         entry; sending `players: []` clears the roster.
 
+        A roster save NEVER writes a check-in: every competitor keeps the
+        `checkedIn` stored for them (matched by participant id), whatever
+        the body says, and a competitor new to the roster is not checked
+        in. Only the check-in endpoints check a competitor in or out, so a
+        check-in another desk records while a roster save is in transit is
+        never erased by it.
+
+        A roster save may send `rosterVersion`, the version of the roster
+        it was built from, as every competition answer names it in
+        `rosterVersion` (this endpoint's, and `GET /api/viewer/competitions`
+        and `/api/viewer/competitions/{id}`). When the stored roster is no
+        longer that one (another desk added, removed, renamed, moved or
+        seeded a competitor since), the save is refused with 409
+        `roster_changed`, nothing is written, and the answer carries the
+        roster as it stands (`players`) and its `rosterVersion`; the admin
+        page lays its change on that roster and sends it again (a pasted
+        list it reports instead). A check-in does not change the version.
+        A save without `rosterVersion` is written unchecked.
+
         The seed ranks in a roster save are NOT validated for
         completeness, unlike `PUT /api/competitions/{id}/seeds`. The
         admin console sends this request on every keystroke in its
@@ -1332,7 +1379,12 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: |
-            Conflict. Three distinct cases, all 409:
+            Conflict. Four distinct cases, all 409:
+
+            * `roster_changed`: a roster save whose `rosterVersion` is not
+              the stored roster's. Nothing was written; the body is
+              `{error, code: "roster_changed", players, rosterVersion}`,
+              the roster as it stands and its version.
 
             * Output-affecting settings (format, courts, pool
               size/winners/mode, extra qualifiers, pool format, round-robin,
@@ -1738,9 +1790,18 @@ paths:
         - TournamentPassword: []
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                writeId:
+                  $ref: '#/components/schemas/ArrivalWriteId'
       responses:
         '204':
-          description: Overrides reset.
+          description: Overrides reset, or a writeId this door already applied answered as recorded (nothing reset).
 
 
   /api/competitions/{id}/awards:
@@ -1868,10 +1929,16 @@ paths:
                     and reopens the named knockout match(es) with the new
                     qualifier seated. Never gets past
                     `downstream_knockout_running`.
+                writeId:
+                  $ref: '#/components/schemas/ArrivalWriteId'
       responses:
         '200':
           description: >
-            Rank override saved. In a mixed competition a new order that
+            Rank override saved, or a writeId this door already applied
+            answered as recorded (nothing recorded, `reopenedMatches` empty even when the
+            first request reopened knockout matches, so a client whose first
+            answer was lost is not told which ones; the broadcast went out and
+            the knockout shows them reopened). In a mixed competition a new order that
             moves who holds one of the pool's qualifying places repaints the
             knockout slots that place feeds; `reopenedMatches` names the
             knockout matches a confirmed override reopened (empty otherwise).
@@ -2072,7 +2139,7 @@ paths:
             dropped an already-seeded participant without adding any new
             participant, that removal is unambiguous (see the 409 case below)
             and their now-orphaned row in `seeds.csv` is dropped as part of
-            this save.
+            this save, in the same locked step as the roster write.
           content:
             application/json:
               schema:
@@ -2093,7 +2160,10 @@ paths:
             of its own and has no stable per-request participant id, so in
             that combination it cannot tell a rename (remove old identity, add
             new identity) apart from an unrelated removal plus addition, and
-            refuses the write rather than guess. A replacement that only
+            refuses the write rather than guess. It is judged on the roster
+            and seeds stored when the write runs, so a seed set by another
+            desk a moment earlier counts, and nothing is written. A
+            replacement that only
             removes seeded participants, adding nobody, is unambiguous and
             succeeds instead (see the 200 response). The error message names
             the affected competitors and how to proceed.
@@ -2408,6 +2478,68 @@ paths:
 
   # ── Matches (Admin, requires auth) ─────────────────────────────────────────
 
+  /api/competitions/{id}/matches/{mid}/score-events:
+    post:
+      tags: [matches]
+      summary: Record score taps (events)
+      description: |
+        A score editor's taps, one event per tap (an ippon struck or taken
+        back, a foul, an overtime period, an engi flag, a team bout's decision
+        or fighter, a representative pick, the representative bout's verdict).
+        The server appends each event it takes to the match's score event log
+        (`competitions/<id>/events/<match>.jsonl`), replays the whole log in
+        the order the taps were made (`stamp`; at one stamp an event comes
+        before a whole write, then `id`) and writes the match
+        the replay gives through the same write every other door uses, so
+        eligibility, knockout propagation and the history follow as for any
+        write. Outcomes are recomputed from the whole log on every replay, so
+        the order taps ARRIVE in changes nothing.
+
+        Public in self-run mode, where a caller with an empty
+        `X-Tournament-Password` is held to the self-run score path's limits
+        (no tap on a finished match, `result_finalized`; no judges' decision,
+        `hantei_organiser_only`; a fighter or representative of the side's own
+        team only, `team_member_not_in_team`). A password sent but wrong is 401.
+
+        The answer is ALWAYS 200 (a malformed batch excepted, 400), with one
+        outcome per event in request order: nothing here is cured by a retry.
+        An event whose id the log holds is `duplicate`; a batch of duplicates
+        writes nothing. An event stamped more than 5s ahead of the server is
+        `clock_skew` and is not logged (the device relearns its clock and
+        sends it again under the same id). A tap on a match that is neither running nor
+        finished is `notStarted` and not logged, with `reason`
+        `match_not_started` or `match_sent_back` (sent back to the queue) and a
+        sentence the device shows. A tap on a finished match is logged and answered `matchClosed`. A tap refused by a
+        rule is `refused` with its reason (a knockout match after this one
+        already played or being fought, a self-run limit, or
+        `score_log_unreadable` when the match's log cannot be read).
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - $ref: '#/components/parameters/MatchId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScoreEventsRequest'
+      responses:
+        '200':
+          description: Every event answered; `match` is the match as it now stands.
+          headers:
+            X-App-Build:
+              $ref: '#/components/headers/AppBuild'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScoreEventsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: A password was sent and it is wrong.
+        '404':
+          description: Competition or match not found.
   /api/competitions/{id}/matches/{mid}/score:
     put:
       tags: [matches]
@@ -2435,6 +2567,15 @@ paths:
           completed correction with no decision, or `hikiwake`, keeps the
           ruling. A team match must then carry a result on every bout.
 
+          `writeId`, `basis` and `session` (also request-only, optional) tag the write
+          for the match's score event log: a write whose `writeId` the log
+          already holds (its first send landed, its answer was lost) is
+          answered as recorded, the stored match with nothing written and no
+          history line; `basis` is what the board had in view (see
+          ScoreBasis), so a score event made before the write that the board
+          never showed is kept in the history as not applied
+          (`beforeBaseline`). A write without them is judged as before.
+
           `changed` (also request-only) names the GROUPS this write changes,
           and the server merges the write group by group (see the MergeGroup
           schema): each named group applies only when the write's
@@ -2444,41 +2585,25 @@ paths:
           kept in the match's history with its values. Absent `changed` means
           every group the payload carries, except that a `running` or
           `scheduled` write over a `completed` match never carries `result`:
-          its scoring changes apply to the finished match when they were made
-          after the result (the match stays completed and its winner is worked
-          out again from the merged points or bouts; a pool or league match
-          left tied becomes a draw), and are held when made before it. A
-          change that would leave a finished knockout match tied, or an engi
-          match with no valid flag count, is never applied: the match keeps its
-          recorded finish (it never goes back to running) and the change is
-          held, answered with `heldReason: needs_winner`, so the operator
-          corrects the result with a winner. A running board's scoring, or
-          its overtime, over a match a decision already closed (a kiken or a
-          fusenpai of this match, or a fusensho awarded because the other
-          side is barred by a DIFFERENT match) is held the same way, answered
-          with `heldReason: default_win_stands` and `heldDecision` naming
-          that decision; the match already has the winner it needs, so the
-          operator corrects the decision from the match's score editor
-          instead of correcting the result with one. A finish whose result applies over
-          scoring stored NEWER than it gets the winner that scoring gives (the
-          same verdict as if the two had arrived in stamp order); when that
-          scoring would leave the finished match without a winner (a knockout
-          tie, an engi count that is not valid), the finish is applied on its
-          own scoreline, as in stamp order, and that newer scoring is moved to
-          the match's history as held; the answer names it in
-          `displacedGroups`, with `heldReason: needs_winner`. A finish that carries
-          no scoreline of its own is held instead. A write that removes the
+          its scoring changes are turned away when they were made after the
+          result (the closed-match rule: once a finish or a decision, a kiken,
+          fusenpai, fusensho, hantei, daihyosen or hikiwake, is recorded, any
+          tap or scoring write stamped after it is refused and kept in the
+          match's history), answered with `heldReason: match_closed`, so the
+          operator corrects the result from the match's score editor; and
+          are ordered by their stamp when made before it. The match stays
+          completed and its winner stays advanced. A finish or a decision
+          whose result applies over scoring stored NEWER than it closes that
+          scoring out, as in stamp order: it is moved to the match's history as
+          held and the answer names it in `displacedGroups`, with `heldReason:
+          match_closed`. A write that removes the
           representative bout (a write that names it and carries no row, such
           as the daihyosen DELETE) likewise moves a representative pick
           (`repPickA`, `repPickB`) stamped AFTER the removal to the history,
           since in stamp order the pick landed on a bout that no longer
           existed; the answer names it in `displacedGroups` with NO
-          `heldReason` (it is no question of the winner), and the history
-          keeps it with the reason "the representative bout was removed". A points change whose write does not apply
-          `result` keeps a recorded judges' decision (hantei mark). A scoring change made on a
-          running board after a recorded kiken, fusenpai, or fusensho clears
-          it (points scored mean the withdrawal was a mistake), and the competitor
-          it barred is eligible again. A name that is not a group is a 400.
+          `heldReason`, and the history keeps it with the reason "the
+          representative bout was removed". A name that is not a group is a 400.
         content:
           application/json:
             schema:
@@ -2490,27 +2615,30 @@ paths:
             MatchResult. When part of the write was held (a newer change to
             those groups is stored) the body also carries `heldGroups`, the
             groups kept in the match's history instead of applied, and
-            `heldReason: needs_winner` when they were held because applying
-            them would leave a finished match without the winner it needs, or
-            `heldReason: default_win_stands` with `heldDecision` naming the
-            decision (a kiken or a fusenpai of this match, or a fusensho
-            awarded for a bar on a DIFFERENT match) that already closed the
-            match.
-            An applied finish that moved stored, NEWER scoring into the
-            match's history (it would have left the match without a winner,
-            and in stamp order came after this finish) carries
-            `displacedGroups` naming those groups, with `heldReason:
-            needs_winner`. An applied removal of the representative bout that
+            `heldReason: match_closed` when they were held because a finish or a
+            decision stamped before them had already closed the match, or
+            `downstream_knockout_played` / `downstream_knockout_running` when a
+            rival finish or decision was held because the next knockout match
+            was already played or under way.
+            An applied finish or decision that moved stored, NEWER scoring into
+            the match's history (in stamp order it came after this result and
+            was closed out) carries `displacedGroups` naming those groups, with
+            `heldReason: match_closed`. An applied removal of the representative bout that
             moved a representative pick stamped after it into the history
             carries `displacedGroups` naming the pick's group (`repPickA` or
             `repPickB`) with no `heldReason`.
-            A running write the rev-guard finds older than one the same client
-            session already sent (a lower rev, e.g. an out-of-order reconnect
-            flush) is not applied and not dropped: the whole write is kept in
-            the match's history with the reason "older revision of this board"
-            and answered with the RefusedWrite shape below (`superseded`, with
-            the `heldGroups` it held). Different client sessions are concurrent
-            operators; the server merges their writes by stamp. When EVERY
+            A running write older than one the same client session already
+            sent (a lower rev than one the match's score event log holds for
+            that revSession since the match last started running, e.g. an
+            out-of-order reconnect flush) is not applied and not dropped: the
+            whole write is kept in the match's history with the reason "older
+            revision of this board" and answered with the RefusedWrite shape
+            below (`superseded`, with the `heldGroups` it held). Different
+            client sessions are concurrent operators; the server orders their
+            writes by stamp. A scoring write (running or finishing, and every
+            bulk-score and quick-score entry) is decided by the score event
+            log's replay: it is logged as a baseline of the groups it changes
+            at its stamp, never refused for the build that sent it. When EVERY
             group the write changes is held, the body is the RefusedWrite shape
             (`{"applied": false, "reason": "superseded", "heldGroups": [...],
             ...}`): nothing of it was applied to the match, no SSE broadcast is
@@ -2520,6 +2648,17 @@ paths:
             refused rather than trusted or zeroed, and the client should resync
             from GET /api/time and re-submit the same result). See the
             RefusedWrite schema.
+            A write that first starts a kachinuki match keeps the lineup in
+            force there as the match's own; when that moves the match's own
+            lineup back to the start, the team's later matches' carried
+            lineups are worked out again, as after a lineup save. A carried
+            lineup that cannot be worked out again (a position the team size
+            has no place for, kept from older data) stays as it was, the write
+            stands, and the body adds `warning`, a sentence for the operator
+            naming the matches to check (the same refusal the lineup doors
+            answer with `warning`). That write sent again because its answer
+            was lost (the same `writeId`, or the same `modifiedAt`) is
+            answered as recorded with the same `warning`.
           content:
             application/json:
               schema:
@@ -2528,7 +2667,12 @@ paths:
                 # also validates against it. oneOf demands exactly one match and
                 # would flag that as ambiguous in most JSON-Schema tooling.
                 anyOf:
-                  - $ref: '#/components/schemas/MatchResult'
+                  - allOf:
+                      - $ref: '#/components/schemas/MatchResult'
+                      - type: object
+                        properties:
+                          warning:
+                            $ref: '#/components/schemas/LineupFollowWarning'
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
           description: |
@@ -2848,6 +2992,24 @@ paths:
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
         - $ref: '#/components/parameters/MatchId'
+      requestBody:
+        required: false
+        description: >
+          Optional. The write's `writeId` and `basis`: a resend of a
+          write whose id the match's score event log holds is answered as the
+          first was, with nothing written and no history line. An empty body
+          is the one-tap shape.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                writeId:
+                  $ref: '#/components/schemas/WriteId'
+                basis:
+                  $ref: '#/components/schemas/ScoreBasis'
+                session:
+                  $ref: '#/components/schemas/WriteSession'
       responses:
         '200':
           description: Match reverted to the scheduled queue.
@@ -2971,6 +3133,12 @@ paths:
                     Optional. The operator's confirmation after a 409
                     `downstream_knockout_played`: also reopen the later
                     knockout match(es) the refusal named.
+                writeId:
+                  $ref: '#/components/schemas/WriteId'
+                basis:
+                  $ref: '#/components/schemas/ScoreBasis'
+                session:
+                  $ref: '#/components/schemas/WriteSession'
       responses:
         '200':
           description: Match reopened (status back to `running`).
@@ -3162,6 +3330,12 @@ paths:
                 forceDownstreamReopen:
                   type: boolean
                   description: Optional. As on the reopen endpoint.
+                writeId:
+                  $ref: '#/components/schemas/WriteId'
+                basis:
+                  $ref: '#/components/schemas/ScoreBasis'
+                session:
+                  $ref: '#/components/schemas/WriteSession'
       responses:
         '200':
           description: >
@@ -3282,6 +3456,24 @@ paths:
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
         - $ref: '#/components/parameters/MatchId'
+      requestBody:
+        required: false
+        description: >
+          Optional. The write's `writeId` and `basis`: a resend of a
+          write whose id the match's score event log holds is answered as the
+          first was, with nothing written and no history line. An empty body
+          is the one-tap shape.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                writeId:
+                  $ref: '#/components/schemas/WriteId'
+                basis:
+                  $ref: '#/components/schemas/ScoreBasis'
+                session:
+                  $ref: '#/components/schemas/WriteSession'
       responses:
         '200':
           description: The trailing unscored bout was removed; returns the updated match.
@@ -3335,18 +3527,27 @@ paths:
                   type: string
                   maxLength: 32
                   example: A
+                writeId:
+                  $ref: '#/components/schemas/ArrivalWriteId'
       responses:
         '200':
-          description: Court updated.
+          description: Court updated, or a writeId this door already applied answered as recorded (nothing moved).
+        '400':
+          description: Body malformed or the court label too long.
+        '404':
+          description: >
+            The competition holds no match with this id. Never a 500: the
+            app's offline queue retries a 5xx forever, and this refusal would
+            never change.
 
   /api/competitions/{id}/matches/{mid}/history:
     get:
       tags: [matches]
       summary: A match's write history
       description: >
-        Every write that reached the match, applied or not, in the order the
-        changes were MADE: by each entry's `stamp`, oldest first, an unstamped
-        write placed at its `receivedAt`, ties in arrival order (bc-mrgc). A
+        Every write and every tap that reached the match, applied or not, in
+        the order the changes were MADE: by each entry's `stamp`, oldest first,
+        an unstamped write placed at its `receivedAt`, ties in arrival order. A
         change the merge did not apply, because a newer change to the same
         group was already recorded, is kept here with its value (`held`), so
         nothing an operator entered is lost. The score editors show it in a
@@ -3386,7 +3587,7 @@ paths:
         for the side's team at this match and the bouts so far. A fighter
         retires on losing a bout, and both fighters retire on a drawn bout.
         The last numbered bout is the one being fought, and both its fighters
-        are `on` whatever its score (the running autosave already writes a
+        are `on` whatever its score (the score of a running bout already names a
         lead's winner and a 1-1's draw on it) until Record bout records it
         (`SubMatchResult.recorded`): then its loser is no longer `on`. A
         recorded draw that is still the last bout keeps both its fighters
@@ -3485,6 +3686,12 @@ paths:
                     reconciliation, unix milliseconds; omit (or 0) when
                     unstamped. A value implausibly far in the future is refused
                     with the RefusedWrite shape, see the 200 response.
+                writeId:
+                  $ref: '#/components/schemas/WriteId'
+                basis:
+                  $ref: '#/components/schemas/ScoreBasis'
+                session:
+                  $ref: '#/components/schemas/WriteSession'
       responses:
         '200':
           description: >
@@ -3555,9 +3762,15 @@ paths:
                   maxLength: 32
                   description: HH:MM scheduled time.
                   example: "14:30"
+                writeId:
+                  $ref: '#/components/schemas/ArrivalWriteId'
       responses:
         '200':
-          description: Time updated.
+          description: Time updated, or a writeId this door already applied answered as recorded (nothing changed).
+        '400':
+          description: Body malformed or the time too long.
+        '404':
+          description: The competition holds no match with this id (as for the court move).
 
   /api/competitions/{id}/matches/bulk-score:
     post:
@@ -3676,22 +3889,12 @@ paths:
                           description: On a `superseded` entry, the groups held.
                         heldReason:
                           type: string
-                          enum: [needs_winner, default_win_stands]
+                          enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
                           description: >
-                            On a `superseded` entry held because applying it would
-                            leave a finished match without the winner it needs, or
-                            because a decision (a kiken or a fusenpai of this
-                            match, or a fusensho awarded for a bar on a DIFFERENT
-                            match) already closed the match (see
-                            RefusedWrite.heldReason); `error` then carries that
-                            sentence.
-                        heldDecision:
-                          type: string
-                          description: >
-                            The decision code (e.g. `fusensho`, `kiken-voluntary`)
-                            that closed the match, present only beside
-                            `heldReason: default_win_stands`. See
-                            RefusedWrite.heldDecision.
+                            On a `superseded` entry held because a finish or a
+                            decision stamped before it had already closed the
+                            match (see RefusedWrite.heldReason); `error` then
+                            carries that sentence.
                   heldGroups:
                     type: array
                     description: >
@@ -3714,11 +3917,22 @@ paths:
                           description: As MatchResult.displacedGroups.
                         heldReason:
                           type: string
-                          enum: [needs_winner, default_win_stands]
+                          enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
                           description: As RefusedWrite.heldReason.
-                        heldDecision:
+                  warnings:
+                    type: array
+                    description: >
+                      Entries that applied while a carried lineup could not follow
+                      the write (as PUT /score's `warning`): the entry stands and
+                      the operator is told which lineups to check. Omitted when no
+                      entry carries one.
+                    items:
+                      type: object
+                      properties:
+                        matchId:
                           type: string
-                          description: As RefusedWrite.heldDecision.
+                        warning:
+                          $ref: '#/components/schemas/LineupFollowWarning'
 
   /api/competitions/{id}/matches/{mid}/quick-score:
     put:
@@ -3763,6 +3977,12 @@ paths:
                 draws:
                   type: integer
                   description: Number of individual bouts that were draws.
+                writeId:
+                  $ref: '#/components/schemas/WriteId'
+                basis:
+                  $ref: '#/components/schemas/ScoreBasis'
+                session:
+                  $ref: '#/components/schemas/WriteSession'
       responses:
         '200':
           description: >
@@ -3776,12 +3996,19 @@ paths:
             stored result, so the write always applies (and leaves a stamp a
             later stale write is ordered against). Documented, and mapped
             server-side, so that a change to that stamping cannot silently
-            turn the drop into a 500.
+            turn the drop into a 500. On a kachinuki match the body adds
+            `warning` when a carried lineup could not follow the write, as on
+            PUT /score.
           content:
             application/json:
               schema:
                 anyOf:
-                  - $ref: '#/components/schemas/MatchResult'
+                  - allOf:
+                      - $ref: '#/components/schemas/MatchResult'
+                      - type: object
+                        properties:
+                          warning:
+                            $ref: '#/components/schemas/LineupFollowWarning'
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
           $ref: '#/components/responses/BadRequest'
@@ -3837,6 +4064,12 @@ paths:
               type: object
               required: [decision]
               properties:
+                writeId:
+                  $ref: '#/components/schemas/WriteId'
+                basis:
+                  $ref: '#/components/schemas/ScoreBasis'
+                session:
+                  $ref: '#/components/schemas/WriteSession'
                 decision:
                   type: string
                   enum: [kiken, kiken-voluntary, kiken-injury, fusenpai, fusensho, hikiwake, daihyosen]
@@ -3889,12 +4122,25 @@ paths:
             already recorded (the same decision, side and `modifiedAt`: a
             queued send whose first answer was lost) is answered as recorded,
             with the stored MatchResult, before any 409 below; it changes
-            nothing.
+            nothing. A decision that first moves a kachinuki match out of the
+            queue keeps its lineup as `PUT .../score` does, and its body adds
+            `warning` the same way when a later match's carried lineup could
+            not be worked out again; that decision sent again (an exact
+            replay, or the same `writeId`) is answered with the same
+            `warning`.
           content:
             application/json:
               schema:
-                oneOf:
-                  - $ref: '#/components/schemas/MatchResult'
+                # anyOf, not oneOf, as on PUT .../score: MatchResult is an
+                # open schema, so a RefusedWrite body also validates against
+                # it.
+                anyOf:
+                  - allOf:
+                      - $ref: '#/components/schemas/MatchResult'
+                      - type: object
+                        properties:
+                          warning:
+                            $ref: '#/components/schemas/LineupFollowWarning'
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
           description: >
@@ -4015,14 +4261,8 @@ paths:
                           and kept in the match's history. As RefusedWrite.heldGroups.
                       heldReason:
                         type: string
-                        enum: [needs_winner, default_win_stands]
+                        enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
                         description: As RefusedWrite.heldReason.
-                      heldDecision:
-                        type: string
-                        description: >
-                          The decision code that closed the match, present
-                          only beside `heldReason: default_win_stands`. As
-                          RefusedWrite.heldDecision.
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
           description: >
@@ -4063,7 +4303,10 @@ paths:
             another match's withdrawal bars its team, see the description), or the
             match already has a representative bout (`daihyosen_exists`): an
             encounter has one, and the tie this route checks counts none, so a
-            second would otherwise be appended beside the first.
+            second would otherwise be appended beside the first. The same add
+            sent again (its `writeId` already in the match's score log, its first
+            answer lost) is not refused: it is answered 200 as recorded, with the
+            bout and the match as stored.
 
 
             Self-run, an empty password: the match is not running. Once it has
@@ -4150,14 +4393,8 @@ paths:
                           `heldReason`. As MatchResult.displacedGroups.
                       heldReason:
                         type: string
-                        enum: [needs_winner, default_win_stands]
+                        enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
                         description: As RefusedWrite.heldReason.
-                      heldDecision:
-                        type: string
-                        description: >
-                          The decision code that closed the match, present
-                          only beside `heldReason: default_win_stands`. As
-                          RefusedWrite.heldDecision.
                   - $ref: '#/components/schemas/RefusedWrite'
         '400':
           description: >
@@ -4180,7 +4417,8 @@ paths:
         '404':
           description: >
             Match not found, or it carries no daihyosen bout to remove
-            (`no_daihyosen`).
+            (`no_daihyosen`). The same removal sent again (its `writeId` already
+            in the match's score log) is answered 200 as recorded instead.
           content:
             application/json:
               schema:
@@ -4272,13 +4510,33 @@ paths:
           schema:
             type: string
           description: Player ID of the competitor to reinstate.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                writeId:
+                  $ref: '#/components/schemas/ArrivalWriteId'
       responses:
         '200':
-          description: Competitor reinstated.
+          description: >
+            Competitor reinstated, or a writeId this door already applied
+            answered as recorded (the competitor is not reinstated again and
+            the body names `playerId` only).
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CompetitorStatus'
+                oneOf:
+                  - $ref: '#/components/schemas/CompetitorStatus'
+                  - type: object
+                    description: >
+                      The answer to a writeId this door already applied.
+                    required: [playerId]
+                    properties:
+                      playerId:
+                        type: string
         '400':
           $ref: '#/components/responses/BadRequest'
         '409':
@@ -4347,7 +4605,10 @@ paths:
         2026-10-07), only the positions it names are written, onto the starting lineup
         stored when the request is handled (an empty one when none is), so a change
         another device made to any other position stays; see `TeamLineupSave`. Without
-        it the body replaces the whole lineup.
+        it the body replaces the whole lineup. A member id the team does not hold is
+        not stored: the position keeps its name with no id. A save naming a member id
+        when the competition's `team-members.yaml` cannot be read is refused with 409
+        `team_members_unreadable` and nothing is written.
       security:
         - TournamentPassword: []
       requestBody:
@@ -4358,11 +4619,16 @@ paths:
               $ref: '#/components/schemas/TeamLineupSave'
       responses:
         '200':
-          description: Lineup saved. The body is the whole lineup as stored after the save.
+          description: >
+            Lineup saved. The body is the whole lineup as stored after the save. When a
+            later match's carried lineup could not be worked out again from it (a
+            position the team size has no place for, or a member at two positions, kept
+            from older data), the save is kept, that lineup stays as it was, and the
+            body adds `warning`, the sentence to show the operator.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TeamLineup'
+                $ref: '#/components/schemas/TeamLineupSaved'
         '400':
           description: >
             The round is 1 or more (a lineup is saved as the team's starting lineup, or
@@ -4375,16 +4641,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '409':
+          description: >
+            The competition's team members could not be read to check a member id
+            the save names (`error: team_members_unreadable`, with a `message` to
+            show). Nothing is written, and the offline queue does not retry it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/InternalError'
     delete:
       tags: [competitions]
       summary: Delete team lineup for round
+      description: >
+        Takes the team's starting lineup (round 0) away, ordered by when it was
+        made (`removedAt`) like every change of a lineup, its record kept for
+        the lineups carried by stamp. The lineups carried from it are worked
+        out again only when a lineup was taken away.
       security:
         - TournamentPassword: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LineupRemoval'
       responses:
+        '200':
+          description: >
+            Lineup deleted, but a match's carried lineup could not be worked out
+            again (a position the team size has no place for, or a member at two
+            positions, kept from older data): that lineup stays as it was, the
+            removal stands, and the body carries the `warning` to show the
+            operator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LineupFollowWarningAnswer'
         '204':
-          description: Lineup deleted.
+          description: Lineup deleted, nothing to delete, or a writeId this door already applied answered as recorded (nothing removed).
         '400':
           $ref: '#/components/responses/BadRequest'
         '500':
@@ -4441,12 +4738,15 @@ paths:
         with a 400.
 
         With `changed` (operator decision 2026-10-07), only the positions it names
-        are written, under the competition's lock, onto the match's own lineup, or,
-        when the match has none yet, onto the lineup in force there (the one the
-        team carries from its previous match, else its starting lineup), so a
-        change another device made to any other position stays, whichever save
-        arrives first. Two saves of the same position keep the later arrival.
-        Without `changed` the body replaces the whole lineup. See `TeamLineupSave`.
+        are written, under the competition's lock, onto the match's own lineup, so
+        a change another device made to any other position stays, whichever save
+        arrives first. Every position holds its latest change by `changedAt`,
+        whatever order the saves arrive in. The first save of a match's own lineup
+        takes the positions it does not name from what the match carried when its
+        change was made (the lineup the team carries from its previous match, else
+        its starting lineup, as it stood then), and a change to those made before
+        it still reaches them when it arrives later. Without `changed` the body
+        replaces the whole lineup. See `TeamLineupSave`.
 
         In a self-run tournament the request is also accepted with an empty
         password: the public score sheet saves it when a competitor names a
@@ -4461,6 +4761,13 @@ paths:
         reads the file); the organiser, sending the password, keeps the always-editable
         rule above, and a password that is sent but wrong gets 401 before the
         body is read.
+
+        No lineup is stored with a member id the team does not hold: the
+        organiser's save keeps such a position by its name, with no id (most
+        often the id the app minted for a member add the server then refused),
+        and answers the lineup as stored. A save naming a member id when the
+        competition's `team-members.yaml` cannot be read is refused with 409
+        `team_members_unreadable`, whoever sends it.
       security:
         - TournamentPassword: []
       requestBody:
@@ -4471,11 +4778,16 @@ paths:
               $ref: '#/components/schemas/TeamLineupSave'
       responses:
         '200':
-          description: Lineup saved. The body is the whole lineup as stored after the save.
+          description: >
+            Lineup saved. The body is the whole lineup as stored after the save. When a
+            later match's carried lineup could not be worked out again from it (a
+            position the team size has no place for, or a member at two positions, kept
+            from older data), the save is kept, that lineup stays as it was, and the
+            body adds `warning`, the sentence to show the operator.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TeamLineup'
+                $ref: '#/components/schemas/TeamLineupSaved'
         '400':
           description: |
             The body is not a JSON object, a position key is not a valid
@@ -4512,9 +4824,9 @@ paths:
         '409':
           description: |
             Self-run, an empty password: the match has finished
-            (`error: result_finalized`, with a `message` to show), or the
-            team members could not be read to check a member id
-            (`error: team_members_unreadable`, with a `message` to show).
+            (`error: result_finalized`, with a `message` to show). Any caller:
+            the team members could not be read to check a member id the save
+            names (`error: team_members_unreadable`, with a `message` to show).
           content:
             application/json:
               schema:
@@ -4530,11 +4842,43 @@ paths:
     delete:
       tags: [competitions]
       summary: Delete team lineup for a specific match
+      description: >
+        "Use the previous match's lineup": takes the match's own lineup away, so the
+        match carries its team's previous lineup again. On a kachinuki match that
+        has started (it left the queue, or it was sent back to it holding the bouts
+        it was fought on) it is an edit of that match's lineup taken as a snapshot:
+        the lineup in force there at that moment is kept as the match's own in its
+        place (read back with `saved: true`), the first bout takes its first fighter
+        on every device, and a later edit of the starting lineup does not rename it.
+
+        A removal is a change ordered by when it was made (`removedAt`), like
+        every change of a lineup: what the lineup held before then is kept as a
+        record the lineups carried by stamp still read, a change of it made
+        before then that arrives later is taken away by it, and a change made
+        after then stays the match's own. A body with no `removedAt` (an older
+        build's) is ordered as it lands.
       security:
         - TournamentPassword: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LineupRemoval'
       responses:
+        '200':
+          description: >
+            Lineup deleted (or kept as the snapshot above), but a later match's
+            carried lineup could not be worked out again (a position the team
+            size has no place for, or a member at two positions, kept from older
+            data): that lineup stays as it was, the removal stands, and the body
+            carries the `warning` to show the operator.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LineupFollowWarningAnswer'
         '204':
-          description: Lineup deleted.
+          description: Lineup deleted, nothing to delete, or a writeId this door already applied answered as recorded (nothing removed).
         '400':
           $ref: '#/components/responses/BadRequest'
         '500':
@@ -4632,6 +4976,15 @@ paths:
         two members (409 `team_member_limit`), since a member is never removed;
         the organiser adds past both. A password that is sent but wrong gets
         401 before the body is read.
+
+        The app sends the add from its offline queue without waiting for it,
+        so it mints the member's `id` itself (a lowercase UUID v4) and a lineup
+        save naming the member can be queued behind the add. A resend of an
+        add that landed (an `id` this team already holds, whatever its name
+        is now: it may have been renamed or cleared since) is answered 200
+        with the member as stored, writes nothing and is judged before the
+        limit and the finished competition. With no `id` the server mints one,
+        as before.
       security:
         - TournamentPassword: []
       requestBody:
@@ -4639,8 +4992,27 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TeamMemberName'
+              allOf:
+                - $ref: '#/components/schemas/TeamMemberName'
+                - type: object
+                  properties:
+                    id:
+                      type: string
+                      format: uuid
+                      description: >
+                        The member's id as the device minted it, a lowercase
+                        UUID v4. Optional; the server mints one without it.
+                      example: 6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b
       responses:
+        '200':
+          description: >
+            A resend of an add that landed: the team already holds this `id`,
+            under this name or the one a rename or a cleared name gave it
+            since. The member as stored; nothing is written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeamMember'
         '201':
           description: Member added.
           content:
@@ -4648,7 +5020,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/TeamMember'
         '400':
-          description: The body is not a JSON object, or `name` is empty or longer than 100 bytes.
+          description: >
+            The body is not a JSON object, `name` is empty or longer than 100
+            bytes, or `id` is not a lowercase UUID v4.
           content:
             application/json:
               schema:
@@ -4671,7 +5045,8 @@ paths:
         '409':
           description: >
             Another member of the team already has this name (`error` only).
-            Or, self-run with an empty password, the competition has finished
+            Or another team's member, or a participant of the competition,
+            already has this `id` (`member_id_conflict`, with a `message`). Or, self-run with an empty password, the competition has finished
             (`competition_finished`) or the team is at its limit
             (`team_member_limit`), each with a `message` to show.
           content:
@@ -4784,6 +5159,16 @@ paths:
         The answer is the member as stored, with its new `modifiedAt` stamp.
       security:
         - TournamentPassword: []
+      requestBody:
+        required: false
+        description: Optional; an empty body is the one-tap shape.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                writeId:
+                  $ref: '#/components/schemas/ArrivalWriteId'
       responses:
         '200':
           description: Name cleared.
@@ -5393,6 +5778,13 @@ components:
         type: string
       description: Match ID (e.g. "pool-a-0" or "bracket-r1-m0").
 
+  headers:
+    AppBuild:
+      description: >
+        The git commit of the build that answered (`unknown` when the binary
+        has none). Set on every answer of the Mobile/Admin API.
+      schema:
+        type: string
   responses:
     BadRequest:
       description: Invalid input.
@@ -5497,9 +5889,12 @@ components:
           description: >
             Machine-readable cause. `superseded` means the write's groups were
             held rather than applied, either because a newer stored result won
-            or for one of the two other reasons named in `heldReason`;
+            or because the match was already closed (`heldReason`);
             `clock_skew` means this device's clock is ahead of the server and
-            the stamp was refused.
+            the stamp was refused. A match whose score log cannot be read
+            never gets `score_log_unreadable` here (only the score-events
+            door answers it): the write is judged as having seen nothing and
+            is kept in the match's history.
         serverNowMs:
           type: integer
           format: int64
@@ -5522,39 +5917,44 @@ components:
             of them held and kept in the match's history.
         heldReason:
           type: string
-          enum: [needs_winner, default_win_stands]
+          enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
           description: >
             Present on `superseded` when the groups were held not because a
-            newer change is stored but for one of two other reasons.
-            `needs_winner`: applying them would leave a FINISHED match
-            without the winner it needs (a knockout match left tied, an engi
-            match left with no valid flag count); `message` then tells the
-            operator to correct the result with a winner. `default_win_stands`:
-            a decision already closed the match -- a kiken or a fusenpai of
-            this match, or a fusensho awarded because the other side is
-            barred by a DIFFERENT match; `heldDecision` names which one, and
-            `message` then tells the operator to correct that decision from
-            the match's score editor instead, since the match already has
-            the winner it needs. Either way the change is kept in the
-            match's history. Also carried, beside `heldGroups`, by a write
-            applied in part.
-        heldDecision:
-          type: string
+            newer change is stored but because a finish or a decision stamped
+            before them had already closed the match (the closed-match rule):
+            `message` then tells the operator the match is finished and to tap
+            Correct. The change is kept in the match's history. Also
+            carried, beside `heldGroups` or `displacedGroups`, by a write
+            applied in part. `downstream_knockout_played` and
+            `downstream_knockout_running` say the stored result is locked: a
+            finish or decision stamped before it, from a device that did not
+            see it, was held because the next knockout match had already been
+            played or started. The stored result stands and the write is kept
+            in the history.
+        turnedAway:
+          type: object
+          readOnly: true
+          additionalProperties:
+            type: string
           description: >
-            The decision code (e.g. `fusensho`, `kiken-voluntary`) that
-            closed the match, present only beside `heldReason:
-            default_win_stands`. Kendo names the decision itself; there is no
-            shared umbrella term for this class of result, so a client
-            renders this value (or a word derived from it) rather than a
-            generic label.
+            Present on `superseded` when the write was still logged (a held
+            rival finish or decision) and the match then turns taps away: the
+            match's `turnedAway` as the log stands after the write (see
+            MatchResult.turnedAway), so the writing device is told of its own
+            tap on this answer and not only on the push.
+        scoreVersion:
+          type: integer
+          readOnly: true
+          description: >
+            Present with `turnedAway`: the match's `scoreVersion` it was read at.
 
     MatchHistoryEntry:
       type: object
       description: >
-        One write that reached a match (bc-mrgc): what made it, when the change
-        was made, the groups it changed and, per group, whether it was applied
-        or kept in the history because a newer change to that group was
-        already recorded.
+        One write, or one tap, that reached a match: what made it, when the
+        change was made, the groups it changed and, per group, whether it was
+        applied or kept in the history because a newer change to that group
+        was already recorded.
       properties:
         matchId:
           type: string
@@ -5571,7 +5971,9 @@ components:
             engi, kachinuki-advance (Record bout appending the next pairing),
             kachinuki-record (Record bout appending none, only marking the bout
             it closes recorded), kachinuki-remove-bout, downstream-reopen,
-            or engine for a write the server made itself.
+            event (one score tap through POST .../score-events, with `event`
+            and `eventOutcome`; a later `event` line for the same tap says its
+            outcome moved), or engine for a write the server made itself.
           example: score
         stamp:
           type: integer
@@ -5607,25 +6009,29 @@ components:
           description: >
             Why groups were held other than by their own stamps, when one rule
             did that: "older revision of this board" (a running write the same
-            client session had already followed with a newer one), "a finish
-            and the scoreline it stood on are kept together" (a completing
-            write stamped older than the stored result over a finished match,
-            held whole), "the flags and the winner they decide are kept
+            client session had already followed with a newer one), "the flags and the winner they decide are kept
             together" (an engi finish one of whose two groups a newer change
-            outranks), "a kiken closed this match" / "a fusenpai closed this
-            match" / "a fusensho closed this match" (scoring or overtime sent
-            for a match one of those decisions already closed; the answer
-            carries `heldReason: default_win_stands` and `heldDecision`), "a
-            knockout match needs a winner" (a change that would leave a
-            finished knockout match tied), "an engi result needs a valid
-            flag count" (a recount that would leave a finished engi match with
-            none), or "the representative bout was removed" (a representative
-            pick stamped after the bout's removal, moved here by the removal).
+            outranks), "the match was already finished" (scoring or overtime stamped after a
+            finish or a decision that closed the match; the answer carries
+            `heldReason: match_closed`), or "the representative bout was removed" (a representative
+            pick stamped after the bout's removal, moved here by the removal),
+            "the next round was already fought" or "the next round has
+            already started" (a finish or a decision that did not see the
+            stored result, held because the next knockout match is played or
+            under way; the answer carries `heldReason`
+            `downstream_knockout_played` or `downstream_knockout_running`).
             Absent when each group was judged by its own stamp.
         clearedWithdrawal:
           type: object
           description: The kiken, fusenpai, or fusensho a later scoring change cleared (the result group as it was), when one was.
           additionalProperties: {}
+        event:
+          $ref: '#/components/schemas/ScoreEvent'
+        eventOutcome:
+          type: string
+          description: >
+            What became of the `event` (door `event`): a ScoreEventOutcome
+            outcome; a refused tap's line carries the refusal in `reason`.
 
     MergeGroup:
       type: string
@@ -5665,6 +6071,216 @@ components:
         `recorded`, which the server alone writes.
       pattern: '^(points|result|encho|flags|rep|repPickA|repPickB|bout:-?[0-9]+)$'
 
+    WriteId:
+      type: string
+      maxLength: 128
+      description: >
+        The client's id for one write (request-only). A write whose id the
+        match's score event log already holds is answered as recorded, with
+        nothing written and no history line.
+    LineupRemoval:
+      type: object
+      description: The optional body of a lineup removal.
+      properties:
+        writeId:
+          $ref: '#/components/schemas/ArrivalWriteId'
+        removedAt:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >
+            When the removal was made (server-relative ms), by which it is
+            ordered against the saves of the same lineup. Never taken as later
+            than the server's time as it lands. Absent: ordered as it lands.
+    ArrivalWriteId:
+      type: string
+      maxLength: 128
+      description: >
+        The client's id for one write (request-only, optional) on a door the
+        server orders by arrival rather than by a stamp: a court move, a time
+        change, a lineup save, a match lineup's removal, a chusen's order, a
+        reset of the overrides, a reinstatement, a team member's rename or
+        cleared name. The app sends a write again under the same id
+        when it gave up on its request at the deadline, and the first request
+        can still land after the resend and after the next write of the same
+        match or team. A write this door has already applied under this id is
+        answered 200 as recorded, with the value as stored where the door
+        answers one, and nothing is applied again, so a late duplicate never
+        puts an older value back. The ids are kept in memory for 15 minutes
+        (at most 16384); a restart ends every request it held. A write the door
+        refused is not recorded, so its resend is judged again. Absent: applied
+        every time, as before.
+    WriteSession:
+      type: string
+      maxLength: 256
+      description: >
+        The writing device's score event session (request-only, optional),
+        the same string its score-events batches carry. It rides on the
+        baseline the write leaves, so the basis's `seq` counts that device's
+        own events up to `seq` as seen. Ignored without a `basis`; longer
+        than 256 characters is a 400.
+    ScoreBasis:
+      type: object
+      description: >
+        What the writer had in view when it built the write (request-only):
+        `seen`, the number of lines of the match's score event log its board
+        had reached (its `scoreVersion`); `own`, its own events not yet
+        acknowledged; `seq`, the highest sequence number of its own session it
+        had made, counted only when the write also sends its `session`
+        (WriteSession): every event of that session with a sequence number up
+        to `seq` is then held. An event the basis holds is `recorded` by the
+        write; an older one it does not hold is `beforeBaseline`. Without a
+        basis the write is taken as having seen every line logged.
+      properties:
+        seen:
+          type: integer
+          minimum: 0
+        own:
+          type: array
+          maxItems: 1024
+          items:
+            type: string
+            maxLength: 128
+        seq:
+          type: integer
+          format: int64
+          minimum: 0
+    MarkIDs:
+      type: object
+      readOnly: true
+      description: >
+        The id of each mark of a scoreline, index for index with ipponsA and
+        ipponsB: the id of the score event that struck it, or `b:`-prefixed
+        for a mark a baseline (a write that is not a tap) brought. A removal
+        tap names its mark by this id. Derived by the server's replay of the
+        match's score event log; a value a write carries is ignored.
+      properties:
+        a:
+          type: array
+          items:
+            type: string
+        b:
+          type: array
+          items:
+            type: string
+    ScoreEvent:
+      type: object
+      required: [id, stamp, kind]
+      description: >
+        One tap. `id` is the device's and never reused; `stamp` the
+        server-relative time it was made (unix ms, from GET /api/time); `seq`
+        its place in the device's session (a gap is reported back). `pos` is
+        0 for the match, a bout's position, or -1 for the representative bout.
+        `side` is `a` (sideA) or `b` (sideB).
+      properties:
+        id:
+          type: string
+          maxLength: 128
+        session:
+          type: string
+          maxLength: 256
+          description: The device's event session (the batch's, when absent).
+        seq:
+          type: integer
+          format: int64
+          minimum: 0
+        stamp:
+          type: integer
+          format: int64
+          minimum: 1
+        kind:
+          type: string
+          enum: [ippon.add, ippon.remove, foul.add, foul.remove, encho.add, encho.remove, flag.add, flag.remove, bout.decision, bout.fighter, rep.pick, pool.rep, daihyosen.verdict]
+        pos:
+          type: integer
+          minimum: -1
+          maximum: 199
+        side:
+          type: string
+          enum: [a, b]
+        letter:
+          type: string
+          description: The strike (ippon.add).
+        target:
+          type: string
+          description: The mark id a removal takes off (ippon.remove).
+        value:
+          type: string
+          description: >
+            bout.decision: `hikiwake`, `fusensho` (side is the side awarded
+            the bout) or `clear`; daihyosen.verdict: empty, or `clear`.
+        memberId:
+          type: string
+        name:
+          type: string
+    ScoreEventsRequest:
+      type: object
+      required: [session, events]
+      properties:
+        session:
+          type: string
+          maxLength: 256
+          description: >
+            The device's event session. `server` is the server's own (the fighters it
+            seats on a kachinuki encounter's first bout): a request under it is
+            refused with a 400.
+        events:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items:
+            $ref: '#/components/schemas/ScoreEvent'
+    ScoreEventOutcome:
+      type: object
+      required: [id, outcome]
+      properties:
+        id:
+          type: string
+        outcome:
+          type: string
+          enum: [applied, recorded, duplicate, capped, beforeBaseline, matchClosed, noTarget, notAllowed, notStarted, refused, clock_skew]
+          description: >
+            `applied`: in the match. `recorded`: a write built with it in view
+            already holds it. `duplicate`: the log holds this id. `capped`: the
+            side or bout already holds the most points it can. `beforeBaseline`:
+            made before a write that never saw it, whose value stands (kept in
+            the history). `matchClosed`: a finish or a decision stamped before it had closed
+            the match; the tap is kept in the history and changes nothing
+            (`reason` is `match_closed`, `message` the sentence to show).
+            `noTarget`: what it names is not there. `notAllowed`: not a tap
+            this match or bout takes. `notStarted`, `refused`, `clock_skew`:
+            not logged, see `reason` and `message`.
+        reason:
+          type: string
+        message:
+          type: string
+          description: The sentence the tapping device shows.
+        serverNowMs:
+          type: integer
+          format: int64
+          description: clock_skew only, the server's clock.
+        aheadMs:
+          type: integer
+          format: int64
+          description: clock_skew only, how far ahead the stamp was.
+    ScoreEventsResponse:
+      type: object
+      required: [match, outcomes]
+      properties:
+        match:
+          $ref: '#/components/schemas/MatchResult'
+        outcomes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScoreEventOutcome'
+        gaps:
+          type: array
+          description: >
+            Sequence numbers of the posting session the log is missing: taps
+            the device made that never arrived. Absent when none.
+          items:
+            type: integer
+            format: int64
     DaihyosenWriteStamp:
       type: object
       description: >
@@ -5681,6 +6297,12 @@ components:
             result is refused as `superseded`, and one more than 5s in the
             server's future as `clock_skew` (see RefusedWrite). A write that
             applies moves the match's stored `modifiedAt` to it.
+        writeId:
+          $ref: '#/components/schemas/WriteId'
+        basis:
+          $ref: '#/components/schemas/ScoreBasis'
+        session:
+          $ref: '#/components/schemas/WriteSession'
 
     Error:
       type: object
@@ -6313,6 +6935,14 @@ components:
             `GET /api/competitions/{id}`).
           items:
             $ref: '#/components/schemas/Player'
+        rosterVersion:
+          type: string
+          description: >
+            The version of the roster `players` holds, on every answer that
+            carries `players`: a hash of each competitor's id, name, zekken
+            name, dojo, metadata, registration source and seed, in roster
+            order (a check-in is not part of it). A roster save sends it back;
+            see `PUT /api/competitions/{id}`. Never stored.
 
     FightingSpiritAward:
       type: object
@@ -6538,17 +7168,19 @@ components:
           writeOnly: true
           description: >
             Optional client-monotonic revision counter, stamped only on
-            "running"-status autosave writes. The server's rev-guard uses it
-            (scoped to revSession) to drop out-of-order delivery from a
-            reconnect flush. Never returned in responses or public projections.
+            "running"-status score writes. The server keeps it (scoped to
+            revSession) on the write's baseline in the match's score event log
+            and holds a lower revision of the same session, an out-of-order
+            delivery from a reconnect flush, until the match leaves running.
+            Never returned in responses or public projections.
         revSession:
           type: string
           maxLength: 64
           writeOnly: true
           description: >
             Optional per-page-load scoring-session id (opaque, e.g. a UUID) sent
-            with "running" autosave writes. It lets the server's rev-guard drop a
-            single session's own out-of-order delivery (a reconnect flush). Writes
+            with "running"-status score writes. It lets the server hold a single
+            session's own out-of-order delivery (a reconnect flush). Writes
             from different sessions are concurrent operators and apply
             last-write-wins. Never returned in responses or public projections.
         changed:
@@ -6564,6 +7196,63 @@ components:
             group it does not apply in the match's history. Absent means every
             group the payload carries; see PUT /score. Never stored or
             returned.
+        writeId:
+          allOf:
+            - $ref: '#/components/schemas/WriteId'
+          writeOnly: true
+        basis:
+          allOf:
+            - $ref: '#/components/schemas/ScoreBasis'
+          writeOnly: true
+        session:
+          allOf:
+            - $ref: '#/components/schemas/WriteSession'
+          writeOnly: true
+        markIds:
+          $ref: '#/components/schemas/MarkIDs'
+        scoreVersion:
+          type: integer
+          readOnly: true
+          description: >
+            The number of lines in the match's score event log (0 or absent:
+            no log yet). It only grows, so of two copies of a running match the
+            one with the higher version is the newer. Derived by the server;
+            a value a write carries is ignored.
+        eventSeqs:
+          type: object
+          readOnly: true
+          additionalProperties:
+            type: integer
+            format: int64
+          description: >
+            Per device event session (the `session` of
+            POST /api/competitions/{id}/matches/{mid}/score-events), the highest
+            `seq` of that session's tap events the match's score event log
+            holds, whatever each tap's outcome. A device folding its own taps
+            not yet answered onto this copy skips a tap whose `seq` is at or
+            below its session's entry: the copy already holds it. Only
+            sessions that logged an event with a `seq` appear, one entry each,
+            and every such session is listed. Absent when
+            none. Derived by the server; a value a write carries is ignored.
+        turnedAway:
+          type: object
+          readOnly: true
+          additionalProperties:
+            type: string
+          description: >
+            Every device tap event the match's score event log holds that the
+            server does not apply now, by event `id`, with its outcome (any
+            outcome but `applied`, `recorded` and `duplicate`, e.g.
+            `beforeBaseline` or `matchClosed`). A tap answered `applied` can be
+            turned away later, when a finish or decision that never saw it, or
+            one stamped before it, reaches the server after it: its own answer
+            said it landed, so the device that made it reads the change here,
+            on whatever copy of the match reaches it next, and tells its
+            operator. The server's own events never appear. The latest logged,
+            at most 128 of each device event `session` (so another device's
+            later taps never push a device's own out) and 512 in all. Absent
+            when none. Derived by the server; a value a
+            write carries is ignored.
         groupStamps:
           type: object
           readOnly: true
@@ -6583,28 +7272,23 @@ components:
             $ref: '#/components/schemas/MergeGroup'
           description: >
             On a write's response only: the groups of THIS write that were not
-            applied (a newer change to them is stored, applying them would
-            leave a finished match without the winner it needs, or a
-            decision already closed the match: see `heldReason`) and were
-            kept in the match's history. Omitted when everything applied.
+            applied (a newer change to them is stored, or a finish or a
+            decision stamped before them had already closed the match: see
+            `heldReason`) and were kept in the match's history. Omitted when
+            everything applied.
         heldReason:
           type: string
           readOnly: true
-          enum: [needs_winner, default_win_stands]
+          enum: [match_closed, downstream_knockout_played, downstream_knockout_running]
           description: >
             On a write's response only, beside `heldGroups` or
-            `displacedGroups`: present when they were held or moved because
-            applying them would leave a finished match without the winner it
-            needs, or because a decision (a kiken or a fusenpai of this
-            match, or a fusensho awarded for a bar recorded on a DIFFERENT
-            match) already closed the match (see RefusedWrite.heldReason).
+            `displacedGroups`: present when they were held or moved because a
+            finish or a decision stamped before them had already closed the
+            match, or the stored result was locked by a played or running next
+            knockout match (see RefusedWrite.heldReason).
             Absent when the groups were held by their stamps alone, and
             absent beside a `displacedGroups` that names a representative
             pick moved by a removal of the representative bout.
-        heldDecision:
-          type: string
-          readOnly: true
-          description: As RefusedWrite.heldDecision.
         displacedGroups:
           type: array
           readOnly: true
@@ -6614,10 +7298,9 @@ components:
             On a write's response only: groups whose STORED values this
             (applied) write moved to the match's history, held. The history
             keeps them, at their own stamp, with door `displaced`. Two cases.
-            A finish moves scoring changed after the finish was made that
-            would have left the match without the winner it needs, so in
-            stamp order it could not apply after it; the answer then carries
-            `heldReason: needs_winner`. A removal of the representative bout
+            A finish or a decision moves scoring stamped after it, which in
+            stamp order could not apply after the match was closed; the answer
+            then carries `heldReason: match_closed`. A removal of the representative bout
             moves a representative pick (`repPickA`, `repPickB`) stamped after
             the removal, since in stamp order the pick landed on a bout that
             no longer existed; the answer then carries NO `heldReason`, and
@@ -6818,6 +7501,8 @@ components:
       type: object
       description: Individual member match result within a team match.
       properties:
+        markIds:
+          $ref: '#/components/schemas/MarkIDs'
         position:
           type: integer
         sideA:
@@ -7129,6 +7814,25 @@ components:
           description: >
             The stamp of the last applied change to each group of this match,
             keyed by MergeGroup; see MatchResult.groupStamps.
+        markIds:
+          $ref: '#/components/schemas/MarkIDs'
+        scoreVersion:
+          type: integer
+          readOnly: true
+          description: See MatchResult.scoreVersion.
+        eventSeqs:
+          type: object
+          readOnly: true
+          additionalProperties:
+            type: integer
+            format: int64
+          description: See MatchResult.eventSeqs.
+        turnedAway:
+          type: object
+          readOnly: true
+          additionalProperties:
+            type: string
+          description: See MatchResult.turnedAway.
         placeholderA:
           type: string
           readOnly: true
@@ -7355,6 +8059,12 @@ components:
         name:
           type: string
           description: The member's name; must not be empty.
+        writeId:
+          allOf:
+            - $ref: '#/components/schemas/ArrivalWriteId'
+          description: >
+            On a rename (PUT) only; see ArrivalWriteId. The add (POST) needs
+            none: its member `id` already makes a resend an echo.
 
     TeamMember:
       type: object
@@ -7417,6 +8127,49 @@ components:
             positions as `positions`. Optional: a position without an entry
             here is identified by its name alone.
 
+    LineupFollowWarning:
+      type: string
+      description: >
+        A sentence to show the operator, present only when a change was kept
+        but a match's carried lineup could not be worked out again from it (a
+        position the team size has no place for or a team member placed at
+        two positions, kept from older data, or the competition has no team
+        size), so that lineup was kept as it was. It names the
+        change made and the matches to check, e.g. "The lineup was saved, but
+        the lineup carried to Pool A · Match 2 could not be worked out again (a
+        position the team size has no place for); it was kept as it was. Check
+        that match's lineup." The lead is "The lineup was saved" for a save,
+        "The lineup was removed" for a removal, and, for the write that first
+        moves a kachinuki match out of scheduled, "The match was started" (a
+        start), "The match was finished" (a finish) or "The decision was
+        recorded" (a decision). One sentence names every such lineup, both
+        teams' included (two teams' lineups at one match are two lineups),
+        and each match once, with every reason its lineups were refused for.
+        The matches refused for the same reasons are named together, and
+        when there are several such groups they are listed apart, e.g. "the
+        lineups carried to these matches could not be worked out again and
+        were kept as they were: Pool A · Match 2 and Pool A · Match 4 (a
+        position the team size has no place for); Pool A · Match 3 (a team
+        member placed at two positions)".
+
+    LineupFollowWarningAnswer:
+      type: object
+      required: [warning]
+      properties:
+        warning:
+          $ref: '#/components/schemas/LineupFollowWarning'
+
+    TeamLineupSaved:
+      description: >
+        A lineup save's answer: the whole lineup as stored after the save, plus
+        `warning` when a carried lineup could not follow it.
+      allOf:
+        - $ref: '#/components/schemas/TeamLineup'
+        - type: object
+          properties:
+            warning:
+              $ref: '#/components/schemas/LineupFollowWarning'
+
     TeamLineupSave:
       description: >
         The request body of the two lineup PUTs: a TeamLineup plus an optional
@@ -7440,6 +8193,22 @@ components:
                 a non-empty name, or an empty name with a `memberIds` entry (a member
                 with no name yet), places a fighter there; an empty name with no
                 `memberIds` entry clears the position.
+            changedAt:
+              type: object
+              additionalProperties:
+                type: integer
+                format: int64
+              description: >
+                When each changed position was changed on the device, in milliseconds
+                on the server's clock, keyed like `positions`. Stored per position (a
+                stamp ahead of the server's clock is taken as now). A position holds
+                its latest change by this time, whatever order the saves arrive in. A
+                change made before a match's own lineup was first saved, or before a
+                kachinuki match started, reaches what that lineup carries whenever the
+                save arrives; one made after does not. A change without it is given
+                the server's time as it lands, so it is ordered by its arrival.
+            writeId:
+              $ref: '#/components/schemas/ArrivalWriteId'
 
     TeamLineupRead:
       description: >

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { toBackendMatchResult, normalizeMatch, buildPlayerMap, normalizePlayer, isHikiwake, buildPlayerMetadata, normalizeCompetitionDetail } from '../api_serializers.jsx';
 import { API } from '../api_client.jsx';
 
@@ -1000,51 +1000,58 @@ describe('API Utils', () => {
       const data = await API.startCompetition('c1', 'pw');
       expect(data.id).toBe('c1');
       expect(data.pools).toEqual([]);
-    });
-
-    it('recordScore should throw with default message if json fails', async () => {
+    });    // bc-evts: a Finish is the outbox's; its refusal comes through `settled`
+    // (a 403 is retried there as a server state, so a 400 refuses here).
+    it('recordScore settles with the default message if json fails', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         global.fetch = vi.fn().mockResolvedValue({
           ok: false,
-          status: 403,
+          status: 400,
           json: async () => { throw new Error('parse error'); }
-        });
-        await expect(API.recordScore('c1', 'm1', {}, 'pw')).rejects.toThrow('Failed to record score');
+        });        await expect((await API.recordScore('c1', 'm1', {}, 'pw')).settled).rejects.toThrow('Failed to record score');
+        warn.mockRestore();
       });
 
+    // bc-evts M5: an entry of the match's outbox, answered at once (pending);
+    // the server's answer, or its refusal, comes through `settled`.
     describe('moveMatchCourt', () => {
+      afterEach(() => { API.clearQueue(); });
+
       it('PUTs to the correct endpoint with court in body', async () => {
-        global.fetch = vi.fn().mockResolvedValue({ ok: true });
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
         const result = await API.moveMatchCourt('comp1', 'match42', 'B', 'secret');
-        expect(result).toBe(true);
-        expect(global.fetch).toHaveBeenCalledWith(
-          '/api/competitions/comp1/matches/match42/court',
-          expect.objectContaining({
-            method: 'PUT',
-            headers: expect.objectContaining({
-              'Content-Type': 'application/json',
-              'X-Tournament-Password': 'secret',
-            }),
-            body: JSON.stringify({ court: 'B' }),
-          })
-        );
+        expect(result.pending).toBe(true);
+        await result.settled;
+        const [url, opts] = global.fetch.mock.calls.find(([u]) => String(u).endsWith('/court'));
+        expect(url).toBe('/api/competitions/comp1/matches/match42/court');
+        expect(opts.method).toBe('PUT');
+        expect(opts.headers).toEqual(expect.objectContaining({
+          'Content-Type': 'application/json',
+          'X-Tournament-Password': 'secret',
+        }));
+        expect(JSON.parse(opts.body).court).toBe('B');
       });
 
-      it('throws with server error message on failure', async () => {
+      it('settles as a rejection with the server error message', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         global.fetch = vi.fn().mockResolvedValue({
-          ok: false,
+          ok: false, status: 400,
           json: async () => ({ error: 'court not found' }),
         });
-        await expect(API.moveMatchCourt('c1', 'm1', 'Z', 'pw'))
-          .rejects.toThrow('court not found');
+        const result = await API.moveMatchCourt('c1', 'm1', 'Z', 'pw', { onRefusal: () => true });
+        await expect(result.settled).rejects.toThrow('court not found');
+        warn.mockRestore();
       });
 
-      it('throws default message if json parse fails', async () => {
+      it('settles with the default message if the refusal has no body', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         global.fetch = vi.fn().mockResolvedValue({
-          ok: false,
+          ok: false, status: 400,
           json: async () => { throw new Error(); },
         });
-        await expect(API.moveMatchCourt('c1', 'm1', 'X', 'pw'))
-          .rejects.toThrow('Failed to move match court');
+        const result = await API.moveMatchCourt('c1', 'm1', 'X', 'pw', { onRefusal: () => true });
+        await expect(result.settled).rejects.toThrow('Failed to move match court');
+        warn.mockRestore();
       });
     });
 
@@ -1056,7 +1063,7 @@ describe('API Utils', () => {
           ok: true,
           json: async () => ({ result: { id: 'm1', subResults: [{ position: 1 }] } }),
         });
-        const result = await API.removeKachinukiBout('comp1', 'm1', 'secret');
+        const result = await (await API.removeKachinukiBout('comp1', 'm1', 'secret')).settled;
         expect(result).toEqual({ id: 'm1', subResults: [{ position: 1 }] });
         expect(global.fetch).toHaveBeenCalledWith(
           '/api/competitions/comp1/matches/m1/kachinuki-bout',
@@ -1071,9 +1078,10 @@ describe('API Utils', () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: false,
           json: async () => ({ error: 'no unscored bout to remove; only an empty appended bout can be removed' }),
-        });
-        await expect(API.removeKachinukiBout('c1', 'm1', 'pw'))
+        });        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        await expect((await API.removeKachinukiBout('c1', 'm1', 'pw')).settled)
           .rejects.toThrow('no unscored bout to remove');
+        warn.mockRestore();
       });
     });
 
@@ -1129,36 +1137,50 @@ describe('API Utils', () => {
     // end of JSON input") right after a *successful* save. The fix is
     // `return true;`, verified here by mocking a response with no .json
     // method (any call to it would throw, which the test would see).
-    describe('overridePoolRanks (empty-body success)', () => {
+    // bc-evts stage 3 review 11, Y7: a chusen's order is the outbox's, as every
+    // write is ("ALL goes to the outbox ... but never blocks the UI"): the
+    // door answers pending at once, `settled` carries the server's answer or
+    // its refusal, and the empty-body success of older servers still reads as
+    // done (the body is never parsed into an error).
+    describe('overridePoolRanks (an outbox entry)', () => {
       const order = [{ playerId: 'id-alice', rank: 2 }, { playerId: 'id-bob', rank: 1 }];
+      const sent = () => global.fetch.mock.calls.filter(([u]) => String(u).includes('/override-rank'));
+      // Each case starts from an empty outbox: an entry an earlier case left
+      // out (a request that never answers) holds its base's later ones.
+      beforeEach(() => { API.clearQueue(); });
 
-      it('resolves to true on 200 with no body', async () => {
-        global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-        await expect(API.overridePoolRanks('c1', 'p1', order, 'pw'))
-          .resolves.toBe(true);
+      it('answers pending at once, before the server has answered', async () => {
+        const held = [];
+        global.fetch = vi.fn(() => new Promise((resolve) => { held.push(resolve); }));
+        const res = await API.overridePoolRanks('c1', 'p1', order, 'pw');
+        expect(res).toMatchObject({ applied: true, pending: true });
+        expect(typeof res.key).toBe('string');
+        // Answered only now, so no request of this case is left out.
+        for (let i = 0; i < 5 && held.length > 0; i++) {
+          for (const r of held.splice(0)) r({ ok: true, status: 200, json: async () => ({}) });
+          await res.settled.catch(() => {});
+        }
       });
 
-      it('does not call res.json() on the success path', async () => {
-        // If a future regression re-introduces `return res.json()`,
-        // this empty-body mock would throw "Unexpected end of JSON
-        // input" and the test would fail.
+      it('settles on 200 with no body', async () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: true,
           status: 200,
           json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
         });
-        await expect(API.overridePoolRanks('c1', 'p1', order, 'pw'))
-          .resolves.toBe(true);
+        await expect((await API.overridePoolRanks('c1', 'p1', order, 'pw')).settled).resolves.toBeTruthy();
       });
 
-      it('throws with server error message on 400', async () => {
+      it('rejects settled with the server error message on 400', async () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: false,
           status: 400,
           json: async () => ({ error: 'rank must be a positive integer ≤ 1000' }),
         });
-        await expect(API.overridePoolRanks('c1', 'p1', [{ playerId: 'id-alice', rank: 2000 }], 'pw'))
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        await expect((await API.overridePoolRanks('c1', 'p1', [{ playerId: 'id-alice', rank: 2000 }], 'pw')).settled)
           .rejects.toThrow('rank must be a positive integer ≤ 1000');
+        warn.mockRestore();
       });
 
       // The whole order goes in ONE request, as the group form ({ranks}),
@@ -1167,21 +1189,15 @@ describe('API Utils', () => {
       // only), and neither a name nor a dojo is sent: the server never reads
       // them.
       it('PUTs the whole order as one ranks body', async () => {
-        global.fetch = vi.fn().mockResolvedValue({ ok: true });
-        await API.overridePoolRanks('comp1', 'pool-A', order, 'secret');
-        expect(global.fetch).toHaveBeenCalledTimes(1);
-        expect(global.fetch).toHaveBeenCalledWith(
-          '/api/competitions/comp1/pools/pool-A/override-rank',
-          expect.objectContaining({
-            method: 'PUT',
-            headers: expect.objectContaining({
-              'Content-Type': 'application/json',
-              'X-Tournament-Password': 'secret',
-            }),
-          }),
-        );
-        const [, opts] = global.fetch.mock.calls[0];
-        expect(JSON.parse(opts.body)).toEqual({ ranks: order });
+        global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+        await (await API.overridePoolRanks('comp1', 'pool-A', order, 'secret')).settled;
+        expect(sent()).toHaveLength(1);
+        const [url, opts] = sent()[0];
+        expect(url).toBe('/api/competitions/comp1/pools/pool-A/override-rank');
+        expect(opts).toMatchObject({ method: 'PUT', headers: expect.objectContaining({ 'Content-Type': 'application/json', 'X-Tournament-Password': 'secret' }) });
+        const body = JSON.parse(opts.body);
+        expect(body.ranks).toEqual(order);
+        expect(body).not.toHaveProperty('forceDownstreamReopen');
       });
 
       // An order that moves a qualifier out of a knockout match already
@@ -1190,6 +1206,7 @@ describe('API Utils', () => {
       // ranking for the dialog copy), and the confirmed retry must carry the
       // confirmation; the terminal running refusal keeps its operator copy.
       it('parses a downstream refusal and forwards the confirmation', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         global.fetch = vi.fn().mockResolvedValue({
           ok: false,
           status: 409,
@@ -1199,7 +1216,7 @@ describe('API Utils', () => {
             qualifierChange: [{ pool: 'Pool A', rank: 1, place: '1st', from: { name: 'Alpha' }, to: { name: 'Beta' } }],
           }),
         });
-        const err = await API.overridePoolRanks('c1', 'Pool A', order, 'pw').catch((e) => e);
+        const err = await (await API.overridePoolRanks('c1', 'Pool A', order, 'pw', false, { onRefusal: () => true })).settled.catch((e) => e);
         expect(err.downstreamKnockoutPlayed).toMatchObject({ ranking: true, blockingMatchId: 'm9' });
         expect(err.downstreamKnockoutPlayed.qualifierChange).toHaveLength(1);
 
@@ -1208,10 +1225,10 @@ describe('API Utils', () => {
           status: 409,
           json: async () => ({ error: 'downstream_knockout_running', matchId: '', runningMatches: [{ id: 'm9', number: 9 }] }),
         });
-        await expect(API.overridePoolRanks('c1', 'Pool A', order, 'pw', true))
+        await expect((await API.overridePoolRanks('c1', 'Pool A', order, 'pw', true, { onRefusal: () => true })).settled)
           .rejects.toThrow('Match 9 is being fought now. Finish it or send it back to the queue, then save this correction again.');
-        const [, opts] = global.fetch.mock.calls[0];
-        expect(JSON.parse(opts.body)).toEqual({ ranks: order, forceDownstreamReopen: true });
+        expect(JSON.parse(sent()[0][1].body)).toMatchObject({ ranks: order, forceDownstreamReopen: true });
+        warn.mockRestore();
       });
     });
 
@@ -1224,16 +1241,14 @@ describe('API Utils', () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: true, status: 200,
           json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
-        });
-        await expect(API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw'))
+        });        await expect((await API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw')).settled)
           .resolves.toEqual({ applied: true });
       });
 
       it('surfaces { applied: false } when the server drops a stale replay', async () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: true, status: 200, json: async () => ({ applied: false }),
-        });
-        await expect(API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw'))
+        });        await expect((await API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw')).settled)
           .resolves.toEqual({ applied: false });
       });
 
@@ -1241,46 +1256,10 @@ describe('API Utils', () => {
         global.fetch = vi.fn().mockResolvedValue({
           ok: false,
           json: async () => ({ error: 'match not found' }),
-        });
-        await expect(API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw'))
+        });        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        await expect((await API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw')).settled)
           .rejects.toThrow('match not found');
-      });
-    });
-
-    describe('resetOverrides (204 No Content)', () => {
-      it('resolves to true on 204 with no body', async () => {
-        global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 204 });
-        await expect(API.resetOverrides('c1', 'pw')).resolves.toBe(true);
-      });
-
-      it('does not call res.json() on the success path', async () => {
-        global.fetch = vi.fn().mockResolvedValue({
-          ok: true,
-          status: 204,
-          json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
-        });
-        await expect(API.resetOverrides('c1', 'pw')).resolves.toBe(true);
-      });
-
-      it('DELETEs the overrides endpoint with auth header', async () => {
-        global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 204 });
-        await API.resetOverrides('comp1', 'secret');
-        expect(global.fetch).toHaveBeenCalledWith(
-          '/api/competitions/comp1/overrides',
-          expect.objectContaining({
-            method: 'DELETE',
-            headers: expect.objectContaining({ 'X-Tournament-Password': 'secret' }),
-          }),
-        );
-      });
-
-      it('throws with server error message on failure', async () => {
-        global.fetch = vi.fn().mockResolvedValue({
-          ok: false,
-          json: async () => ({ error: 'permission denied' }),
-        });
-        await expect(API.resetOverrides('c1', 'pw'))
-          .rejects.toThrow('permission denied');
+        warn.mockRestore();
       });
     });
 

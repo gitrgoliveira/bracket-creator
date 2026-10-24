@@ -23,6 +23,32 @@ describe('queueAlertMessage', () => {
         expect(msg).not.toMatch(/^.*\bRe-enter it\.\s*$/i);
     });
 
+    // bc-evts stage 3 review 10, N4: the outbox changed writes on the judgement
+    // that a team member was never added; if it was, or a rename was left
+    // unsent, the operator is told.
+    it('tells the operator a team member judged not added was kept, and where to look', () => {
+        const msg = queueAlertMessage({ kind: 'member_kept', count: 1, terminalCount: 0 });
+        expect(msg).toBe("A team member this device treated as not added was kept by the server. Check the team's member names and lineups.");
+    });
+
+    it('tells the operator a tap shown as not applied was applied after all (m12)', () => {
+        const alert = { kind: 'tap_applied', count: 1, terminalCount: 0, where: 'Pool A · Match 1' };
+        expect(queueAlertMessage(alert)).toBe('A tap shown as not applied was applied after all (Pool A · Match 1). Check the score.');
+        expect(queueAlertToastType(alert)).toBe('info');
+    });
+
+    it('tells the operator a kept lineup change whose carried lineup could not follow it (m7)', () => {
+        const detail = 'Lineup saved, but the lineup of P1-1 could not follow it and was left as it was (x). Check that match\'s lineup.';
+        expect(queueAlertMessage({ kind: 'lineup_warning', count: 1, terminalCount: 0, detail })).toBe(detail);
+    });
+
+    it('tells the operator a change to a team member\'s name was not sent', () => {
+        const msg = queueAlertMessage({ kind: 'member_unsent', count: 1, terminalCount: 0 });
+        expect(msg).toMatch(/not sent/i);
+        expect(msg).toMatch(/never added/i);
+        expect(msg).not.toMatch(/\bsquad\b|\bmats?\b|default win/i);
+    });
+
     it('still tells the operator to re-enter a genuinely rejected result', () => {
         const msg = queueAlertMessage({ kind: 'rejected', count: 1, terminalCount: 1 });
         expect(msg).toMatch(/re-enter it/i);
@@ -44,6 +70,16 @@ describe('queueAlertMessage', () => {
         expect(msg).toBe('A result was refused by the server (conflict) and cannot be saved. Re-enter it.');
     });
 
+    // bc-evts: a running score write is the outbox's too, so a refused one is
+    // told by this alert (terminalCount 0). It is a change, not a result (R5).
+    it('names a refused running score write a change, not a result', () => {
+        expect(queueAlertMessage({ kind: 'rejected', count: 1, terminalCount: 0, detail: 'conflict' }))
+            .toBe('A change was refused by the server (conflict) and cannot be saved. Re-enter it.');
+        const sentence = 'The match is finished. Tap Correct to change it.';
+        expect(queueAlertMessage({ kind: 'rejected', count: 1, terminalCount: 0, detail: sentence, sentence: true }))
+            .toBe(`A change was refused by the server and cannot be saved. ${sentence}`);
+    });
+
     it('pluralises a superseded batch', () => {
         const msg = queueAlertMessage({ kind: 'superseded', count: 3, terminalCount: 3 });
         expect(msg).toMatch(/3 results were not applied/i);
@@ -51,41 +87,32 @@ describe('queueAlertMessage', () => {
         expect(msg).toMatch(/matches/i);
     });
 
-    // A write the server keeps refusing holds back no other write any more,
-    // and its match's editor offers to discard it: the alert says both,
-    // rather than only "keep this tab open".
-    it('a write the server keeps refusing: later results still go, and how to clear it', () => {
+    // A write the server keeps refusing holds back its match's later changes
+    // (strict order, bc-evts F1), and its match's editor offers to discard it:
+    // the alert says both (queue_alert_held_order.test.jsx covers taps).
+    it('a write the server keeps refusing: that match\'s later changes wait, and how to clear it', () => {
         const msg = queueAlertMessage({ kind: 'server_error', count: 1, terminalCount: 1, detail: 'HTTP 500' });
         expect(msg).toMatch(/keeps refusing a queued result \(HTTP 500\)/);
-        expect(msg).toMatch(/later results are still sent/i);
+        expect(msg).toMatch(/later changes to that match wait until it lands or is discarded/i);
         expect(msg).toMatch(/discard the held result and enter it again/i);
     });
 
     // A held finish landed and moved a later change of its match to the
     // history: recorded, so information, not an error.
     it('a held finish that moved a later change aside: saved, as information', () => {
-        const alert = { kind: 'displaced', count: 1, terminalCount: 1, forWinner: 1 };
+        const alert = { kind: 'displaced', count: 1, terminalCount: 1 };
         expect(queueAlertMessage(alert)).toMatch(/^A held result was saved\./);
         expect(queueAlertToastType(alert)).toBe('info');
     });
 
-    // The reason is per replayed answer: the alert says "without a winner"
-    // only for the changes the server moved for one (forWinner), and plainly
-    // otherwise (a representative's pick stamped after the bout's removal).
-    it('names a winner only when the moved change was moved for one', () => {
-        const none = queueAlertMessage({ kind: 'displaced', count: 1, terminalCount: 1, forWinner: 0 });
-        expect(none).toMatch(/^A held result was saved\./);
-        expect(none).not.toMatch(/without a winner/);
-        expect(queueAlertMessage({ kind: 'displaced', count: 1, terminalCount: 1, forWinner: 1 })).toMatch(/without a winner/);
-        // An alert without the count reads as none for a winner.
-        expect(queueAlertMessage({ kind: 'displaced', count: 1, terminalCount: 1 })).not.toMatch(/without a winner/);
-        const manyNone = queueAlertMessage({ kind: 'displaced', count: 2, terminalCount: 2, forWinner: 0 });
-        expect(manyNone).toMatch(/^2 held results were saved\./);
-        expect(manyNone).not.toMatch(/without a winner/);
-        expect(queueAlertMessage({ kind: 'displaced', count: 2, terminalCount: 2, forWinner: 2 })).toMatch(/^2 held results were saved\. .*without a winner/);
-        expect(queueAlertMessage({ kind: 'displaced', count: 2, terminalCount: 2, forWinner: 1 })).toBe(
-            "2 held results were saved. Later changes to those matches were moved to each match's history. 1 of those changes would have left a match without a winner.");
-        expect(queueAlertToastType({ kind: 'displaced', count: 2, terminalCount: 2, forWinner: 0 })).toBe('info');
+    it('several held finishes that moved later changes say how many', () => {
+        expect(queueAlertMessage({ kind: 'displaced', count: 2, terminalCount: 2 })).toBe(
+            "2 held results were saved. Later changes to those matches were moved to each match's history.");
+        expect(queueAlertToastType({ kind: 'displaced', count: 2, terminalCount: 2 })).toBe('info');
+    });
+
+    it('a write turned away by a finished match says to tap Correct', () => {
+        expect(queueAlertMessage({ kind: 'superseded', count: 1, terminalCount: 1, matchClosed: true })).toMatch(/tap Correct\.$/);
     });
 
     it('returns null for an unknown kind, so nothing is toasted', () => {
@@ -117,4 +144,14 @@ describe('queueAlertToastType', () => {
             expect(queueAlertToastType({ kind, count: 1, terminalCount: 1 })).toBe('error');
         },
     );
+});
+
+// Stage 6 review 9 (F5): a lineup kept with a carried lineup that could not
+// follow it is a warning, not an error: the change was kept.
+describe('the lineup warning', () => {
+    it('is a warning toast with the server\'s sentence', () => {
+        const alert = { kind: 'lineup_warning', count: 1, terminalCount: 0, detail: 'The lineup was saved, but the lineup carried to Pool A · Match 2 was kept as it was. Check that match\'s lineup.' };
+        expect(queueAlertToastType(alert)).toBe('warning');
+        expect(queueAlertMessage(alert)).toBe(alert.detail);
+    });
 });

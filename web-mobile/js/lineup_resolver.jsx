@@ -238,7 +238,7 @@ export function mergeLineupIdsForPosition(existingIds, posKey, resolvedId) {
 // identity failure must never block the write (an operator swapping a
 // fighter mid-encounter keeps the swap). The caller reports the members-
 // unavailable warning, which memberIdentityWarning composes.
-export async function resolveTypedMemberName(compId, teamId, key, value, squad, password, currentIds) {
+export async function resolveTypedMemberName(compId, teamId, key, value, squad, password, currentIds, opts = {}) {
   const answer = { squad: Array.isArray(squad) ? squad : [], memberId: null, failures: [], resolverMissing: false };
   try {
     const resolver = window.AdminLineupHelpers?.resolveMemberIdsForPositions;
@@ -248,8 +248,10 @@ export async function resolveTypedMemberName(compId, teamId, key, value, squad, 
       // currentIds: a name typed into a slot PICKED by number (its member id
       // already set on this key) renames that same member rather than falling
       // back to the position's index default -- see resolveMemberIdsForPositions'
-      // own doc comment.
-      const resolved = await resolver(compId, teamId, { [key]: value }, squad, password, currentIds);
+      // own doc comment. `opts.onMemberRefusal` hears a member write the server
+      // refuses later (the writes are outbox entries, bc-evts stage 3 review 2).
+      const resolved = await resolver(compId, teamId, { [key]: value }, squad, password, currentIds,
+        { onMemberRefusal: opts.onMemberRefusal });
       answer.squad = resolved.squad;
       answer.memberId = resolved.memberIds[key] || null;
       answer.failures = resolved.failures || [];
@@ -317,7 +319,7 @@ export async function resolveTypedMemberName(compId, teamId, key, value, squad, 
 // (internal/domain/team_lineup.go's ValidatePositions rejects the same
 // case, but refusing here means the operator never round-trips to the
 // server to find out).
-export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posKey, value, password, member) {
+export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posKey, value, password, member, opts = {}) {
   const existing = lineup?.positions || {};
   const positions = { ...existing };
   const pickedMemberId = member && member.id ? member.id : null;
@@ -328,10 +330,15 @@ export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posK
   let resolvedId = pickedMemberId;
   let nextSquad = Array.isArray(squad) ? squad : [];
   let failures = [];
-  if (!pickedMemberId && value) {
+  // `opts.resolve === false`: the side's members have not been read, so a typed
+  // name is placed by name alone (no id), never resolved against no list,
+  // where it would mint a member the seeded slot or a named member already is
+  // (bc-evts stage 3 review 2, R1: nothing waits for the read).
+  if (!pickedMemberId && value && opts.resolve !== false) {
     // A failed resolve still writes the name: mergeLineupIdsForPosition below
     // clears this position's id, and the load-time repair fills it in later.
-    const typed = await resolveTypedMemberName(compId, teamId, posKey, value, squad, password, lineup?.memberIds);
+    const typed = await resolveTypedMemberName(compId, teamId, posKey, value, squad, password, lineup?.memberIds,
+      { onMemberRefusal: opts.onMemberRefusal });
     nextSquad = typed.squad;
     resolvedId = typed.memberId;
     failures = typed.failures;
@@ -425,12 +432,11 @@ export const STARTING_ROUND = 0;
 
 // The words both lineup editors (the at-court panel and the Lineups page) use
 // to take a match's own lineup away so the match carries its team's previous
-// one again: the button, the confirm that says what else follows, why the
-// button waits while a save of that lineup is still queued (the save would
-// replay after the removal and bring the lineup back), and what is said when the
-// lineup the match now carries could not be read.
+// one again: the button, the confirm that says what else follows, and what is
+// said when the lineup the match now carries could not be read. (The button no
+// longer waits for a queued save: the removal is an entry of the match's outbox,
+// after any save queued before it, bc-evts stage 3 review 2.)
 export const PREVIOUS_LINEUP_LABEL = "Use the previous match's lineup";
-export const SAVE_QUEUED_REASON = "A save of this lineup is still waiting to be sent.";
 export const REMOVED_UNREAD_NOTICE = "Removed. The lineup this match now uses could not be read: try again.";
 
 // What a lineup editor says when the read of a lineup fails. A request that never

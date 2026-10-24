@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } 
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
 import { pointerTap, keyboardClick } from '../helpers/tap_events.js';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -70,13 +71,11 @@ async function mount(match) {
   });
 }
 
-// The patch of the most recent write.
-const lastPatch = () => {
-  const calls = window.API.recordScore.mock.calls;
-  return calls.length ? calls[calls.length - 1][2] : null;
-};
 
 describe('bc-dtip: individual editor', () => {
+  // bc-evts stage 3: a running individual match is scored by taps handed to
+  // the outbox (API.recordTap); the board shows them at once.
+  beforeEach(() => { Object.assign(window.API, makeFakeOutbox().api); });
   const match = () => ({
     id: 'm-ind', compId: 'comp1', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A',
     sideA: { id: 'p1', name: 'Yamada' },
@@ -86,14 +85,19 @@ describe('bc-dtip: individual editor', () => {
   const btn = (side, letter) => [...document.querySelectorAll(`.sb-side--${side} button.ipt-btn`)].find((b) => b.textContent === letter);
   const foulPlus = (side) => document.querySelector(`[data-testid="scoring-modal-hansoku-${side}"] .foul-counter__btn--inc`);
   const foulCount = (side) => document.querySelector(`[data-testid="scoring-modal-hansoku-${side}"] .foul-counter__num`).textContent;
+  // The letters a side's slots show, in slot order.
+  const board = (side) => [...document.querySelectorAll('button')]
+    .map((b) => (b.getAttribute('aria-label') || '').match(new RegExp(`^${side === 'aka' ? 'Aka' : 'Shiro'} slot \\d: remove (.+)$`)))
+    .filter(Boolean).map((x) => x[1]);
+  const taps = () => window.API.recordTap.mock.calls.map((c) => c[2]);
 
-  it('a double tap on one ippon button records one ippon and one autosave', async () => {
+  it('a double tap on one ippon button records one ippon and one tap', async () => {
     await mount(match());
     await pointerTap(btn('aka', 'M'));
     await pointerTap(btn('aka', 'M'));
-    await wait(350);
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    expect(lastPatch().ipponsA).toEqual(['M']);
+    expect(taps()).toEqual([{ kind: 'ippon.add', pos: 0, side: 'a', letter: 'M' }]);
+    expect(board('aka')).toEqual(['M']);
+    expect(window.API.recordScore).not.toHaveBeenCalled();
   });
 
   it('a deliberate second tap after the window records the second ippon', async () => {
@@ -101,33 +105,30 @@ describe('bc-dtip: individual editor', () => {
     await pointerTap(btn('aka', 'M'));
     await wait(TAP_BOUNCE_MS + 50);
     await pointerTap(btn('aka', 'M'));
-    await wait(350);
-    expect(lastPatch().ipponsA).toEqual(['M', 'M']);
+    expect(board('aka')).toEqual(['M', 'M']);
   });
 
   it('a bounce onto the same side\'s neighbouring letter is ignored too', async () => {
     await mount(match());
     await pointerTap(btn('aka', 'M'));
     await pointerTap(btn('aka', 'K'));
-    await wait(350);
-    expect(lastPatch().ipponsA).toEqual(['M']);
+    expect(board('aka')).toEqual(['M']);
   });
 
   it('the other side\'s button is never refused', async () => {
     await mount(match());
     await pointerTap(btn('aka', 'M'));
     await pointerTap(btn('shiro', 'M'));
-    await wait(350);
-    expect(lastPatch().ipponsA).toEqual(['M']);
-    expect(lastPatch().ipponsB).toEqual(['M']);
+    expect(board('aka')).toEqual(['M']);
+    expect(board('shiro')).toEqual(['M']);
   });
 
   it('a keyboard-synthesized click (detail 0) is never swallowed', async () => {
     await mount(match());
     await pointerTap(btn('aka', 'M'));
     await keyboardClick(btn('aka', 'K'));
-    await wait(350);
-    expect(lastPatch().ipponsA).toEqual(['M', 'K']);
+    // Aka's slots are mirrored on screen, so compare the set.
+    expect(board('aka').sort()).toEqual(['K', 'M']);
   });
 
   it('taking the mark back off lets the right letter in at once', async () => {
@@ -137,21 +138,23 @@ describe('bc-dtip: individual editor', () => {
     expect(mSlot).toBeTruthy();
     await pointerTap(mSlot);
     await pointerTap(btn('aka', 'K'));
-    await wait(350);
-    expect(lastPatch().ipponsA).toEqual(['K']);
+    expect(board('aka')).toEqual(['K']);
   });
 
   it('a double tap on the foul "+" records one foul and awards no H', async () => {
     await mount(match());
     await pointerTap(foulPlus('shiro'));
     await pointerTap(foulPlus('shiro'));
-    await wait(350);
     expect(foulCount('shiro')).toBe('1');
-    expect(lastPatch().ipponsA || []).toEqual([]);
+    expect(board('aka')).toEqual([]);
+    expect(taps()).toEqual([{ kind: 'foul.add', pos: 0, side: 'b' }]);
   });
 });
 
 describe('bc-dtip: team bout rows', () => {
+  // bc-evts stage 5: a running team match is scored by taps too; each test gets
+  // a fresh fake of the outbox, so no tap of an earlier test is on its board.
+  beforeEach(() => { Object.assign(window.API, makeFakeOutbox().api); });
   const teamMatch = () => ({
     id: 'm-team', compId: 'comp1', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A',
     compKind: 'team', teamSize: 3,

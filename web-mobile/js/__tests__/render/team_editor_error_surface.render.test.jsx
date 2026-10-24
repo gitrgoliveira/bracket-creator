@@ -18,6 +18,7 @@
 import React from 'react';
 import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { SUPERSEDED_REASON, SUPERSEDED_ADVICE } from '../../write_result.jsx';
 
@@ -155,77 +156,65 @@ describe('team editor inline error surface', () => {
     });
   });
 
-  // saveRunningSheet's pre-save can come back QUEUED (offline / retryable
-  // 5xx) rather than refused. notLandedBanner rightly says nothing about a
-  // queue, so without dependentActionBlocked's sentence (the one the editor
-  // said before saveRunningSheet existed, assertRunningWritePersisted /
-  // score_not_synced, see git history at 26d12df2) the tap silently did
-  // nothing.
-  const QUEUED_MESSAGE = "Couldn't save the current scores (offline or server busy). Try again once the connection is back.";
-
-  it('a queued pre-save on Add shows the not-yet-sent message and never posts the add', async () => {
-    // No daihyosen row yet, so the Add affordance (not Remove) renders.
-    const noDaihyosenYet = matchWithDaihyosen({
-      subResults: [
-        { position: 1, sideA: 'Team A', sideB: 'Team B', ipponsA: ['M'], ipponsB: ['K'], winner: '' },
-      ],
-    });
-    await renderEditor({ match: noDaihyosenYet, onSubmit: vi.fn().mockResolvedValue({ queued: true }) });
-
-    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
-
-    await waitFor(() => {
-      expect(screen.getByTestId('team-editor-error').textContent).toBe(QUEUED_MESSAGE);
-    });
-    expect(window.API.recordDaihyosen).not.toHaveBeenCalled();
-  });
-
-  it('a queued pre-save on Remove shows the not-yet-sent message and never posts the remove', async () => {
-    await renderEditor({ onSubmit: vi.fn().mockResolvedValue({ queued: true }) });
-
-    // Arm the debounce on bout 2 (unscored, never the daihyosen row) so
-    // onRemoveDaihyosen's own pre-save condition (hadPending || isDirty) is
-    // true and the queued pre-save actually runs.
-    await act(async () => { fireEvent.click(ipponButton(subMatchRows()[1], 'shiro', 'M')); });
-    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
-
-    await waitFor(() => {
-      expect(screen.getByTestId('team-editor-error').textContent).toBe(QUEUED_MESSAGE);
-    });
-    expect(window.API.removeDaihyosen).not.toHaveBeenCalled();
-  });
-
-  // A pre-save the server REFUSED stops the add or remove too: a newer result
-  // is stored, and a change made over the sheet as this device holds it would
-  // be judged on bouts it has not seen. The not-saved banner says why.
+  // bc-evts (the governing rule): the pre-save and the add or remove are
+  // entries of this match in the outbox, sent strictly in that order, and
+  // nothing waits for the pre-save's answer. A pre-save only queued does not
+  // stop the change (it is queued behind it); one the server turns away says
+  // so in the not-saved banner, and the change behind it is judged by the
+  // server on the bouts it holds.
   const SUPERSEDED = { applied: false, reason: 'superseded' };
   const failedBannerText = () => document.querySelector('.pending-write-banner--failed')?.textContent;
-
-  it('a superseded pre-save on Add shows the not-saved banner and never posts the add', async () => {
-    const noDaihyosenYet = matchWithDaihyosen({
-      subResults: [
-        { position: 1, sideA: 'Team A', sideB: 'Team B', ipponsA: ['M'], ipponsB: ['K'], winner: '' },
-      ],
-    });
-    await renderEditor({ match: noDaihyosenYet, onSubmit: vi.fn().mockResolvedValue(SUPERSEDED) });
-
-    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
-
-    await waitFor(() => {
-      expect(failedBannerText()).toBe(`Not applied: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
-    });
-    expect(window.API.recordDaihyosen).not.toHaveBeenCalled();
+  const noDaihyosenYet = () => matchWithDaihyosen({
+    subResults: [
+      { position: 1, sideA: 'Team A', sideB: 'Team B', ipponsA: ['M'], ipponsB: ['K'], winner: '' },
+    ],
   });
 
-  it('a superseded pre-save on Remove shows the not-saved banner and never posts the remove', async () => {
-    await renderEditor({ onSubmit: vi.fn().mockResolvedValue(SUPERSEDED) });
+  it('a queued pre-save on Add does not stop the add: it is sent behind it', async () => {
+    await renderEditor({ match: noDaihyosenYet(), onSubmit: vi.fn().mockResolvedValue({ queued: true }) });
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
+    expect(window.API.recordDaihyosen).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('team-editor-error')).toBeNull();
+  });
 
+  it('a queued pre-save on Remove does not stop the remove: it is sent behind it', async () => {
+    await renderEditor({ onSubmit: vi.fn().mockResolvedValue({ queued: true }) });
+    // Arm the debounce on bout 2 (unscored, never the daihyosen row) so
+    // onRemoveDaihyosen's own pre-save condition (hadPending || isDirty) holds.
     await act(async () => { fireEvent.click(ipponButton(subMatchRows()[1], 'shiro', 'M')); });
     await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
+    expect(window.API.removeDaihyosen).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('team-editor-error')).toBeNull();
+  });
 
+  // Only a queued (scheduled) match is saved before an add, to start it
+  // (bc-evts stage 5: a running sheet's taps are already ahead of the add).
+  it('a superseded pre-save on Add shows the not-saved banner; the add was already handed over', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(SUPERSEDED);
+    await renderEditor({ match: { ...noDaihyosenYet(), status: 'scheduled' }, onSubmit });
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
     await waitFor(() => {
       expect(failedBannerText()).toBe(`Not applied: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
     });
-    expect(window.API.removeDaihyosen).not.toHaveBeenCalled();
+    expect(onSubmit.mock.invocationCallOrder[0]).toBeLessThan(window.API.recordDaihyosen.mock.invocationCallOrder[0]);
+  });
+
+  // A remove saves no sheet first: the point struck before it is a tap, ahead
+  // of the remove in the outbox (bc-evts stage 5). The match holds no row for
+  // bout 2 yet, and the tap makes it on the server, so nothing else is written.
+  it('a point struck right before Remove is a tap ahead of the remove, and no sheet is saved first', async () => {
+    const onSubmit = vi.fn().mockResolvedValue({ applied: true });
+    await renderEditor({ onSubmit });
+    await act(async () => { fireEvent.click(ipponButton(subMatchRows()[1], 'shiro', 'M')); });
+    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
+    await waitFor(() => expect(window.API.removeDaihyosen).toHaveBeenCalledTimes(1));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(window.API.recordTap.mock.invocationCallOrder[0]).toBeLessThan(window.API.removeDaihyosen.mock.invocationCallOrder[0]);
   });
 });
+
+// bc-evts stage 5: a running team match is scored by taps handed to the outbox
+// (API.recordTap); each test gets a fresh fake of that surface, whose pending
+// taps the board folds on. Registered last, so it lands on the API the hooks
+// above set up.
+beforeEach(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });

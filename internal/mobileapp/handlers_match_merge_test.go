@@ -31,7 +31,15 @@ const (
 // plus a second match on the same court.
 func mergeServer(t *testing.T, compID string) (http.Handler, *state.Store) {
 	t.Helper()
-	r, store, _, _, _ := setupTestRouter(t)
+	r, store, _ := mergeServerDir(t, compID)
+	return r, store
+}
+
+// mergeServerDir is mergeServer that also names the store's data folder, for
+// a test that damages a file in it.
+func mergeServerDir(t *testing.T, compID string) (http.Handler, *state.Store, string) {
+	t.Helper()
+	r, store, _, _, dir := setupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Name: compID, Kind: "individual", Format: state.CompFormatLeague,
@@ -45,8 +53,7 @@ func mergeServer(t *testing.T, compID string) (http.Handler, *state.Store) {
 		{ID: "Pool A-0", SideA: mgAlice, SideAID: mgAliceID, SideB: mgBob, SideBID: mgBobID, Court: "A", Status: state.MatchStatusRunning},
 		{ID: "Pool A-1", SideA: mgBob, SideAID: mgBobID, SideB: mgAlice, SideBID: mgAliceID, Court: "A", Status: state.MatchStatusScheduled},
 	}))
-	runningRevStore.Delete(compID + ":Pool A-0")
-	return r, store
+	return r, store, dir
 }
 
 func mergeScore(t *testing.T, r http.Handler, compID string, body map[string]any) map[string]any {
@@ -147,15 +154,20 @@ func TestScoreHandler_RunningCorrectionAfterTheFinishApplies(t *testing.T) {
 	ms[1].Status = state.MatchStatusRunning
 	require.NoError(t, store.SavePoolMatches(compID, ms))
 
+	// The closed-match rule: a running write stamped after the finish is turned
+	// away (a 200 that says so), whatever the court is doing: no court_busy.
 	out := mergeScore(t, r, compID, map[string]any{
 		"status": "running", "ipponsA": []string{"M"}, "ipponsB": []string{"K", "D"},
 		"modifiedAt": now - 10_000,
 	})
-	assert.NotContains(t, out, "applied", "no court_busy, no stale: it applied; got %v", out)
+	assert.Equal(t, false, out["applied"])
+	assert.Equal(t, "superseded", out["reason"])
+	assert.Equal(t, state.HeldReasonMatchClosed, out["heldReason"])
+	assert.Equal(t, MatchClosedMessage, out["message"])
 	m := mergeStored(t, store, compID)
 	assert.Equal(t, state.MatchStatusCompleted, m.Status, "the match stays finished")
-	assert.Equal(t, mgBob, m.Winner, "worked out again from the points")
-	assert.Equal(t, mgBobID, m.WinnerID)
+	assert.Equal(t, mgAlice, m.Winner, "the finish stands")
+	assert.Equal(t, mgAliceID, m.WinnerID)
 }
 
 // A decision made before a point that is already stored is held whole, and
@@ -226,6 +238,50 @@ func TestBulkScore_ReportsHeldGroups(t *testing.T) {
 	history, err := store.LoadMatchHistory(compID, "Pool A-0")
 	require.NoError(t, err)
 	assert.Len(t, history, 3, "both entries recorded, the superseded one included")
+}
+
+// The mark ids and the event-log version are the replay's, never a client's
+// (bc-evts): /score and bulk-score bind a whole MatchResult, so a body
+// carrying them must not land them. A snapshot write is replayed onto the
+// match's log (stage 2b), so what is stored is the log's version and ids.
+func TestScoreWrites_IgnoreClientMarkIDsAndScoreVersion(t *testing.T) {
+	const compID = "merge-derived"
+	r, store := mergeServer(t, compID)
+	ms, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	ms[0].IpponsA = []string{"M"}
+	ms[0].MarkIDs = &state.MarkIDs{A: []string{"e1"}}
+	ms[0].ScoreVersion = 7
+	require.NoError(t, store.SavePoolMatches(compID, ms))
+	forged := map[string]any{"a": []string{"forged"}}
+	now := time.Now().UnixMilli()
+
+	mergeScore(t, r, compID, map[string]any{
+		"status": "running", "ipponsA": []string{"M"}, "ipponsB": []string{},
+		"scoreVersion": 1_000_000_000, "markIds": forged, "modifiedAt": now,
+	})
+	got := mergeStored(t, store, compID)
+	assertReplayOwnsDerived(t, store, compID, got, "/score")
+
+	w := serveJSON(r, "POST", "/api/competitions/"+compID+"/matches/bulk-score", []map[string]any{
+		{"id": "Pool A-0", "sideA": mgAlice, "sideB": mgBob, "status": "running", "ipponsA": []string{"M"}, "ipponsB": []string{},
+			"scoreVersion": 1_000_000_000, "markIds": forged, "modifiedAt": now + 1},
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	got = mergeStored(t, store, compID)
+	assertReplayOwnsDerived(t, store, compID, got, "bulk-score")
+}
+
+// assertReplayOwnsDerived checks the stored version is the log's line count
+// and no forged id landed.
+func assertReplayOwnsDerived(t *testing.T, store *state.Store, compID string, got state.MatchResult, door string) {
+	t.Helper()
+	lines, err := store.LoadScoreLog(compID, "Pool A-0")
+	require.NoError(t, err)
+	assert.Equal(t, len(lines), got.ScoreVersion, door+": the version is the log's")
+	require.NotNil(t, got.MarkIDs)
+	assert.NotContains(t, got.MarkIDs.A, "forged", door+": no forged id lands")
+	assert.Len(t, got.MarkIDs.A, 1)
 }
 
 // A start write (startOnly) changes the status alone: the score the stored

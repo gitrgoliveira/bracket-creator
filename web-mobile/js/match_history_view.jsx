@@ -54,10 +54,75 @@ const DOOR_WORDS = {
     // A match that was not reopened but had a side seated again by a correction to an
     // earlier match (a feeder's winner changed), for a line of its own.
     'reseat': 'Side given another team by a correction to an earlier match',
+    // bc-evts: one tap from a score editor (the score-events door), and the
+    // lines the server keeps the stored match in step with its score log by.
+    'event': 'Tap',
+    'migrate': 'Score log started',
+    'drift': 'Stored match brought in line with its score log',
+    'repair': 'Competitor ids filled in',
 };
 
 export function historyDoorWords(door) {
     return DOOR_WORDS[door] || 'Updated';
+}
+
+// A tap's words (door "event"): the side ("a" is Aka, "b" is Shiro), what it
+// did, and the mark for a point added.
+const EVENT_KIND_WORDS = {
+    'ippon.remove': 'point taken off',
+    'foul.add': 'foul added',
+    'foul.remove': 'foul taken off',
+    'encho.add': 'overtime added',
+    'encho.remove': 'overtime taken off',
+    'flag.add': 'flag added',
+    'flag.remove': 'flag taken off',
+    'bout.decision': 'bout decision',
+    'bout.fighter': 'fighter named',
+    'rep.pick': 'representative picked',
+    'pool.rep': 'representative picked',
+    'daihyosen.verdict': 'representative bout decided',
+};
+function eventWords(ev) {
+    if (!ev || typeof ev !== 'object') return historyDoorWords('event');
+    // The server's own fighter events (session "server"): a kachinuki bout's
+    // fighter set from the match's lineup, never a tap anyone made.
+    if (ev.session === 'server' && ev.kind === 'bout.fighter') {
+        const side = ev.side === 'a' ? `${sideWord('aka')} ` : ev.side === 'b' ? `${sideWord('shiro')} ` : '';
+        return `Bout ${ev.pos}: ${side}fighter set from the lineup${ev.name ? ` (${ev.name})` : ''}`;
+    }
+    return `${historyDoorWords('event')}: ${tapWords(ev)}`;
+}
+// tapWords names what a tap did: the side ("a" is Aka, "b" is Shiro), the
+// change, and the bout, e.g. "Aka M added on bout 1". The history's lines and
+// the notice of a tap the server turned away after it landed say it alike.
+export function tapWords(ev) {
+    if (!ev || typeof ev !== 'object') return 'a tap';
+    const side = ev.side === 'a' ? `${sideWord('aka')} ` : ev.side === 'b' ? `${sideWord('shiro')} ` : '';
+    const what = ev.kind === 'ippon.add' ? `${ev.letter || 'point'} added` : (EVENT_KIND_WORDS[ev.kind] || 'change');
+    const bout = ev.pos > 0 ? ` on bout ${ev.pos}` : ev.pos < 0 ? ' on the representative bout' : '';
+    return `${side}${what}${bout}`;
+}
+// Why a tap was not applied (the server's outcome for it).
+const EVENT_OUTCOME_WORDS = {
+    capped: 'the bout was already decided',
+    beforeBaseline: 'the result was recorded without this change',
+    noTarget: 'the mark it took off was already gone',
+    notAllowed: 'this match does not take that change',
+    matchClosed: 'the match was already finished',
+};
+// The server's reason codes that say more than the outcome does.
+const EVENT_REASON_WORDS = {
+    // A tap made after Remove this bout, on a device that had not seen it
+    // (engine.EventReasonBoutRemoved).
+    bout_removed: 'the bout it was made on had been removed',
+};
+function eventReason(entry) {
+    const o = entry.eventOutcome;
+    if (!o || o === 'applied' || o === 'recorded' || o === 'duplicate') return null;
+    // The server's reason is a sentence for a few outcomes and a code for
+    // others; a code is not shown, but one with words of its own is said.
+    const said = typeof entry.reason === 'string' && /\s/.test(entry.reason) ? entry.reason : null;
+    return `Not applied: ${said || EVENT_REASON_WORDS[entry.reason] || EVENT_OUTCOME_WORDS[o] || 'the server did not apply it'}`;
 }
 
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -162,10 +227,12 @@ export function historyEntryView(entry, resolve) {
     // Why the whole write was kept rather than applied, when one rule did that
     // (bc-mrgc phase 3): the server's own words ("older revision of this
     // board" for a save the same device had already followed with a newer one).
-    const reason = typeof entry.reason === 'string' && entry.reason ? `${moved ? 'Moved to history' : 'Not applied'}: ${entry.reason}` : null;
+    const isTap = entry.door === 'event';
+    const reason = isTap ? eventReason(entry)
+        : typeof entry.reason === 'string' && entry.reason ? `${moved ? 'Moved to history' : 'Not applied'}: ${entry.reason}` : null;
     return {
         time: historyTime(entry),
-        door: historyDoorWords(entry.door),
+        door: isTap ? eventWords(entry.event) : historyDoorWords(entry.door),
         changed: changed.length ? `changed ${changed.join(', ')}` : 'changed nothing',
         held,
         cleared,

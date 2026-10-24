@@ -107,6 +107,14 @@ classDiagram
         +string MatchID
         +Map~Position, string~ Positions
         +Map~Position, string~ MemberIDs
+        +Map~Position, int64~ Stamps
+        +Map~Position, PositionChange[]~ History
+        +int64 CopiedAt
+        +string CopiedFrom
+        +Position[] Own
+        +int64 RemovedAt
+        +int64 StartedAt
+        +string StartedFrom
     }
 
     class TeamMember {
@@ -196,11 +204,63 @@ the kachinuki roster, the Kachinuki Detail export and the public `lineup-in-forc
 ask it.
 
 A lineup save names the positions it changed, and the server writes only those, under the
-competition's lock, onto the lineup stored for that match or that starting lineup, or, for a
-match with no lineup of its own yet, onto the lineup in force there. Two devices that change
-different positions of one lineup both keep their change, whichever save arrives first, a
-save sent later from a device that was offline included. Two changes to the same position
-keep the later arrival.
+competition's lock, onto the lineup stored for that match or that starting lineup. A save also
+says when each position it changes was changed on the device (`changedAt`, in the server's
+clock), and the lineup keeps that time per position (`stamps`); a save from an older release
+sends none, and its changes are given the server's time as they land, so they are ordered by
+their arrival. Such a release may also save a whole lineup without naming its changes: that is
+taken as a change of every position at its arrival, the positions it leaves out emptied, so it
+reaches no match lineup made before it arrived. Every lineup comes out the same whatever order
+its saves and removals arrive in:
+
+- A position holds its latest change by that time. A change made earlier that arrives later
+  does not replace it; it is kept in the position's `history` (the values a position held, each
+  with its time). The history keeps every change, however many, so a lineup that carries a
+  position never loses the value it carries, and a first save of a match lineup that arrives
+  after many later changes still reads the position as it stood at its own time. A position the
+  lineup carried from never held at that time is empty there.
+- The first save of a match's own lineup takes the positions it does not name from what the
+  match carried when that change was made: the lineup in force there at that time, an earlier
+  match's own lineup counting only once it was made, each position as it stood then. The record
+  keeps that time (`copiedAt`, moved back if an earlier change of the match arrives later), the
+  lineup it carried from (`copiedFrom`: an earlier match's id, or empty for the starting lineup)
+  and the positions its own saves changed (`own`). After every lineup save the carried positions
+  of the team's match lineups are worked out again, in match order, so a change made before that
+  time reaches them whenever it arrives, and one made after it never does.
+
+Two devices that change different positions of one lineup both keep their change, a save sent
+later from a device that was offline included.
+
+Taking a lineup away ("Use the previous match's lineup", or removing a starting lineup) is a
+change like any other, ordered by when it was made (`removedAt`, sent by the device; a removal
+from an older release carries none and is ordered as it lands). The lineup stops being in force
+at that time, but what it held before then is kept as a record, marked with that time, beside
+any lineup saved for the match afterwards, so a match lineup that carried positions from it
+while it was in force keeps them, whatever arrives before or after the removal. Each change is
+kept in one record only: a change made before the removal belongs to the lineup it took away,
+even one that arrives after it, and a change made after it is the match's own lineup again,
+even one that arrived before it. A removal that found nothing to take away is still kept, as
+its time alone, so a change made before it that arrives later is taken away by it. Discarding a
+draw removes these records with the draw's lineups.
+
+When a kachinuki match starts, the lineup in force there for each team is kept as that match's
+own lineup record, marked with the time of the write that started it (`startedAt`) and the lineup
+it was taken from (`startedFrom`: an earlier match's id, or empty for the starting lineup). It is
+taken only by the write that moves the match out of the queue, inside that write's transaction,
+so a write refused, or any write after the start, never takes one; when the team had no lineup
+it is empty. It is the lineup in force at the start's time, read the same way as a first save's
+carried positions: a change made before the start reaches it whenever the save arrives, a change
+made after the start never does, even one that arrived before it, and so does a change to an
+earlier match's own lineup, made before the start, that the match would have carried at its
+start. That record is the match's alone: a later match never carries it, so it goes on carrying
+the starting lineup or an earlier match's own lineup exactly as before. A match sent back to the
+queue still holding the bouts it was fought on has started: starting it again takes no record.
+An organiser's save of the match's own lineup makes the record the organiser's own lineup,
+its other positions still carried from the start, and taking it away ("Use the previous match's lineup") on a match that has
+started keeps the lineup in force at that moment as the match's own in its place, a snapshot
+that later edits of the starting lineup do not change. If the store cannot keep the record, the
+write that started the match fails. The first bout of the match is fought by the first fighter
+of that record, or of the organiser's lineup that replaced it.
 
 Releases up to v2.1.1 also saved a lineup for a round, and read the lineup a team fielded at
 a match as the match's own, else the round lineup with the highest round at or below the
@@ -254,6 +314,10 @@ classDiagram
         +bool ReopenPending
         +long ModifiedAt
         +map GroupStamps
+        +MarkIDs MarkIDs
+        +int ScoreVersion (score-log line count)
+        +map EventSeqs (per device session, the highest logged tap seq)
+        +map TurnedAway (device taps the log holds that are not applied, by id)
     }
 
     class CompetitorSide {
@@ -287,6 +351,8 @@ classDiagram
         +string WinnerMemberID
         +string Decision
         +bool? DecidedByHantei (legacy, read-only, unset = writer said nothing)
+        +bool Recorded (kachinuki only, set by the server when Record bout closes the bout)
+        +MarkIDs MarkIDs (derived by the replay)
     }
 
     class EnchoMetadata {
@@ -337,6 +403,10 @@ classDiagram
         +bool DecidedByHantei (legacy, read-only)
         +long ModifiedAt
         +map GroupStamps
+        +MarkIDs MarkIDs
+        +int ScoreVersion (score-log line count)
+        +map EventSeqs (per device session, the highest logged tap seq)
+        +map TurnedAway (device taps the log holds that are not applied, by id)
     }
 
     MatchResult "1" *-- "2" CompetitorSide : side A is aka, side B is shiro
@@ -492,6 +562,9 @@ classDiagram
         TeamLineup per match, or the starting one
         position to name and member id
         a position may hold an id and an empty name
+        when each position was changed, and the values it held before
+        copiedAt, copiedFrom and own on a match lineup a first save made
+        startedAt and startedFrom on the lineup a kachinuki match started with
     }
     class team_members_yaml["team-members.yaml"] {
         <<YAML>>
@@ -505,6 +578,11 @@ classDiagram
         <<JSON lines, one file per match>>
         every write that reached the match
         applied or held, with held values
+    }
+    class events_dir["events/"] {
+        <<JSON lines, one file per match>>
+        append-only score event log
+        event and baseline lines ("v": 1)
     }
     class wal[".wal/"] {
         <<pending transactions>>
@@ -533,6 +611,7 @@ classDiagram
     config_md --> team_members_yaml
     config_md --> overrides_json
     config_md --> history_dir
+    config_md --> events_dir
     team_members_yaml --> lineups_yaml : positions reference members
 ```
 
@@ -543,6 +622,7 @@ Markdown, CSV, and JSON or YAML each earn their place:
 | Markdown with YAML front matter | tournament and competition settings | Human readable and editable, and the body can hold notes |
 | CSV | participants, seeds, pools, pool and league matches | Opens in a spreadsheet; one row per record diffs cleanly |
 | JSON and YAML | bracket, eligibility, lineups, overrides | Tree shaped data that does not fit a row |
+| JSON lines (JSONL) | match history and per-match score event logs | Append-only audit trail and event sourcing stream; one line per write or event |
 
 A competitor list must exist before a seed can be set: a seed ranks a participant, so a rank
 with nobody to attach it to is refused, not stored. Clearing a seeding is exempt, since that
@@ -570,9 +650,12 @@ from cache while holding it, so two writes to the same competition cannot interl
 
 **Multi file changes are transactional.** Some actions touch several files at once, for
 example recording a withdrawal writes the match result, the competitor eligibility record
-and the updated bracket. Those run as a transaction: the intended writes are collected,
-committed to a write ahead log, and only then applied. If the process stops midway the log
-is replayed at the next startup, so the group either lands completely or not at all.
+and the updated bracket. Similarly, match writes, their append-only score event logs in
+`events/<matchId>.jsonl`, and their audit trail in `history/<matchId>.jsonl` are staged in the
+same transaction as the match result (in `pool-matches.csv` or `bracket.json`). Those run as a
+transaction: the intended writes are collected, committed to a write ahead log, and only then
+applied. If the process stops midway the log is replayed at the next startup, so the group
+either lands completely or not at all.
 One write sits outside this: a participant edit lands by atomic rename rather than through the
 log, so it is crash safe on its own but is not rolled back if the rest of the group fails.
 
@@ -611,40 +694,49 @@ not applied (the operator sees an explicit notice naming that it was kept in the
 and one applied in part says which groups were held. A write that does not name its groups
 counts as changing every group it carries.
 
-Further rules sit on top. A kiken, fusenpai, or fusensho is one change with the scoreline it
-writes: it is held whole when any point or bout was entered after it was declared, because
-points scored later mean the decision no longer describes the match. The other way round, a
-point entered on a board still scoring the match after one was recorded means it was a
-mistake: it is cleared (and kept in the history), the competitor it barred
-can fight again, and the winner is worked out from the points. That clearing rule is for a withdrawal of the
-match itself. A kiken, fusenpai, or fusensho that has already closed a match, whether a
-withdrawal or a win awarded because the other side is barred by another match, otherwise
-stands: a later change to its score, or its overtime, says nothing about that decision, so
-it is held in the history with the reason. A board that is still scoring a
-match that has meanwhile been finished never reopens it: its changes made after the finish
-are applied to the finished result, which stays finished, and the winner is worked out again
-from the merged points or bouts; its changes made before the finish are held. A pool or
-league match that this leaves tied becomes a draw. A finished knockout match needs a winner,
-so a correction that would leave it tied is not applied: the match keeps the result it was
-finished with (it never goes back to running), the change is kept in the history as held, and
-the operator is told to correct the result with a winner. The same holds for an engi match,
-in a pool as in a knockout: it is never a draw, so a recount that decides no winner (an even
-total) is held and the recorded result stands. A judges' decision (hantei) belongs to the
-result, so a points change that does not touch the result keeps it.
+**A finished match is closed.** Changes are compared in the order they were made, never the
+order they arrived. Once a finish or a decision (kiken, fusenpai, fusensho, a judges'
+decision, a representative bout verdict or a drawn result) is recorded, any tap or scoring
+write made after it is not applied. It is kept in the match's history with the reason "the
+match was already finished", and the device is told that the match is finished and that the
+way to change it is Correct. The finished result stays as it was recorded: nothing is
+reopened and no winner is worked out again. This holds whichever change arrives first. A tap
+that reaches the server before a finish made earlier is applied at that moment, and is moved
+out of the match into the history when the finish arrives, so both orders end in the same
+match and the same kept change. One exception: a competitor's tap on the public score sheet of
+a self-run event, sent to a finished match, is refused outright with the message that the result
+has already been reported. It leaves no log entry and no history line.
 
-The order of arrival does not change the outcome. A finish made before a point that arrives
-later is applied, and the winner is then worked out from the newer point; a finish that
-arrives after a newer point gets the same winner, worked out from that point, and keeps its
-judges' decision. If the newer point would leave a finished knockout match tied (or an engi
-match without a valid count), then in the order the changes were made it came after the
-finish and could not apply. So a finish that arrives after it is applied on the scoreline it
-was made on, and the newer point is moved out of the match into the history as held, with
-the reason. Both orders end in the same match and the same kept change. A finish that does
-not carry the scoreline it was made on cannot be replayed that way; it is held instead, and
-the match stays as the point left it.
+A tap made before the finish that the finish's writer had not seen does not join the
+finished result either: the finish governs every scoring group at its stamp, the ones it names
+and the ones it does not, so the scoreline the finish stands on stays and the tap is kept in the
+history, whichever arrives first. A tap the writer had seen is already part of the finish, so
+nothing is lost or counted twice. What the writer had seen is the basis its write sent; a
+finish from a release that sent none is taken to have seen every tap made before it. A decision's points are worked out from the changes made before it rather than
+copied from the value it carries: the side that did not withdraw takes the circles, and the
+points the withdrawing competitor had already struck stay. A fixed-order team match closed by a
+match level kiken, fusenpai or fusensho keeps the bouts that a device which had not seen the
+decision scored; the decision credits only the bouts still without a result. A kachinuki match,
+and a team match closed by a finish, stay closed whole.
 
-An out of order write from the same client session (an older save arriving after a newer one)
-is not applied, and is kept whole in the history as an older revision of that board.
+**The first recorded result stands.** Two devices can finish the same match. In the order the
+changes were made, a later finish or decision from a device that did not see the result in
+force is a rival and is not applied, in the same way as a tap: it is kept in the history with
+the match closed reason, whichever of the two arrived first. A result is no rival when its
+writer saw the one in force, as a correction does (it names a reason). A reopen, a send back
+to the queue and an organiser's override of a winner are never rivals. The same applies to a
+knockout match whose next match has been played or has started: a rival that would replace
+the stored result is not applied, and the history says that the next round was already
+fought, or has already started.
+
+A finish that would leave a knockout match without a winner is refused as invalid, and the
+match keeps the result it had. The operator resolves the tie first: in a team match with a
+representative bout, or with overtime on the final kachinuki bout; in an individual match with
+overtime (encho) or a judges' decision (hantei). An engi finish whose flag total is not 1, 3
+or 5 is refused too; it is a wrong flag count, so the whole panel's flags are entered.
+
+An out of order running write from the same device session (an older save arriving after a
+newer one) is not applied, and is kept whole in the history as an older revision of that board.
 
 A deliberate correction is subject to the same rule, which matters most when it was made
 without a connection. Correcting the result you are looking at works normally. Correcting
@@ -654,26 +746,90 @@ would be. That is the point, because a correction saved during an outage can rea
 hours later, long after the match has moved on, and the operator who wrote it has no way of
 knowing what happened in between.
 
-**Every write is kept in the match's history.** Each match has an append only history file in
-the competition's `history/` folder, one line per write that reached it: when the change was
-made, when the server received it, which endpoint it came through, the groups it changed and,
-for each, whether it was applied or held, with the held values. A held group that says exactly
-what is already stored (for example "no overtime" over a match with none) is no loss, so it is
-recorded as unchanged and its value is not kept. When a rule held changes rather than their
-times, the line also says why: an older revision of the same board, a late finish kept
-together with the scoreline it closed the match on, an engi result whose flags and winner are
-kept together, a kiken, fusenpai, or fusensho that already closed the match, a knockout match
-that needs a winner, or an engi result that needs a valid flag count. The history is written in the
-same transaction as the match, so the two land together or not at all, and a write refused
+**Every write and every tap is kept in the match's history.** Each match has an append only
+history file in the competition's `history/` folder, one line per write that reached it and one
+per tap: when the change was made, when the server received it, which endpoint it came through
+(a tap's is `event`), the groups it changed and, for each, whether it was applied or held, with
+the held values. A tap's line also holds the tap and what became of it (applied, recorded in a
+finish that had seen it, capped, turned away because the match was finished, and so on). A tap
+whose fate changes later, because a finish made before it arrives afterwards, gets a second line
+saying so. A held group that says exactly what is already stored (for example "no overtime"
+over a match with none) is no loss, so it is recorded as unchanged and its value is not kept.
+When a rule held changes rather than their times, the line also says why: an older revision
+of the same running board, the match was already finished, an engi result whose flags and
+winner are kept together, a representative bout that was removed, or a next round that was
+already fought or has already started. The history is written in the same
+transaction as the match, so the two land together or not at all, and a write refused
 outright (an invalid payload, the wrong competitors) leaves no line. Reopening, requeueing,
 overriding a winner and the other server actions that change a result write their own line.
 The history goes with its competition, and with a discarded draw, since a draw generated again
 reuses the match ids.
 
+**Score events use per-match event sourcing.** Each match has an append only score event log
+stored at `competitions/<id>/events/<matchId>.jsonl`. The log consists of JSON lines, each
+stamped with format version `"v": 1`, containing either an event line (a scoring tap such as
+an ippon, foul, encho, or flag) or a baseline line (the state left by a non-tap write such as
+a finish, decision, correction, or migration). The pattern is explicitly per-match event sourcing
+(the match is rebuilt by replaying its log in timestamp order) with a client-side transactional
+outbox. No message broker is used: offline tablets hold the queue; order comes from when a tap
+was made, not when it arrived; the app is one binary that keeps its data in files.
+
+A tap is one event with its own id, the device's session and a sequence number within it, and
+the time it was made. The device sends taps in batches to the match's score events endpoint,
+and the server answers every batch with one outcome per tap, even for a tap it did not apply,
+so a device never has to retry a tap that no retry can fix. Sending a tap again with the same
+id is harmless: the server recognises it and logs it once. Taps from different devices
+interleave in the order they were made, so a tablet that was offline for a while adds its
+taps where they belong. The sequence numbers let the server tell a device which of its taps it
+never received. A whole write (a finish, a decision, a correction, a reopen, a send back to the
+queue) enters the same log as a baseline line, stamped with the time it was made, so a tap and a
+whole write are ordered against each other by the same rule. Refer to
+[Client resilience on flaky Wi-Fi](network-architecture.md#4-client-resilience-on-flaky-wi-fi)
+for a diagram of one match's taps, from the device's outbox to the server's answer and the
+taps turned away later, and for which writes are outbox entries.
+
+The server adds events of its own to the same log, under the session `server` and with no
+sequence number: the fighters of a kachinuki encounter's first bout, which are the first fighters
+of the match's lineup and which no device sends. That lineup is the match's own (an organiser's,
+or the one it started with), or, while the match has not started, the lineup in force there; a
+match that started with no lineup of its own (one started before this rule) keeps the names its
+first bout has, sent back to the queue or not. The server adds
+them only where the first bout holds other names: when a write makes or changes that bout, and
+when a lineup or team member changes. They are ordered against the taps like any tap and never
+turn one away; they name who fought, never a score, so they reach a finished encounter too
+without moving its result. No device may send events under the session `server`: the request is
+refused. A point entered on a kachinuki bout after it was removed, from a device that had not
+seen the removal, does not make the bout again, since it would have no fighters; it is kept in
+the match's history. Picking the bout's fighters adds it again.
+
+Three figures are derived by the replay and stored beside the match so that a reader does not
+have to replay the log: the id of each mark (a removal names its mark by id, so two devices
+removing two different marks both land), the number of log lines the stored match was derived
+from (`ScoreVersion`, which only grows, so a screen can tell which of two copies of a running
+match is older without comparing clocks), and for each device session the highest tap number
+the log holds (`EventSeqs`). A fourth list names every tap of a device that the log holds and
+the server does not apply now, with its outcome (`TurnedAway`): a tap the server first applied
+can be turned away when a finish that never saw it arrives after it, and the device that made it
+reads that from the next copy of the match it receives and tells its operator. The list keeps
+each device session's latest, at most 128 of a session and 512 on the match; when the sessions
+together hold more, each keeps the same share, the largest that fits, so a device with fewer
+taps listed keeps all of its own and no device's taps are pushed out by another's.
+
+The score event log is the source of truth for match scoring, while the match result stored in
+`pool-matches.csv` or `bracket.json` acts as a materialized cache derived by the replay. This
+differs from the match history in `history/`: the score log records the raw events and baselines
+that construct the score, whereas the match history keeps one line for every write and every
+tap that reached the match, recording whether each change was applied or held, the door it came through, and the
+reason when one was held. Both the score log append and the history entry are written in the same
+transaction as the match through the write ahead log, ensuring they land together. A log line
+with an unknown format version is refused on load naming the file and line, because the log is the
+truth and an unrecognized line is never skipped or guessed at.
+
 The merge needs the time of each stored change to compare against, so it only works where
-those times are saved. They are saved for every match, in both files (the last column of the
-results file, and the bracket file), which is what makes the rule the same wherever a match
-happens to be in the competition. A match saved before the per group times existed has only
+those times are saved. They are saved for every match, in both files (`GroupStamps` in the
+results file at column index 29, followed by `MarkIDs` at index 30, `ScoreVersion` at index 31,
+`EventSeqs` at index 32 and `TurnedAway` at index 33, and in the bracket file), which is what makes the rule the same wherever a match happens to be
+in the competition. A match saved before the per group times existed has only
 one time for the whole result, and every group reads as changed then, so it is compared exactly
 as before. A running save from a client that does not send a time counts as unstamped and
 always applies: the merge discriminates only when both sides carry a stamp, so it can never
@@ -690,9 +846,10 @@ window. Discarding it makes the write count as unstamped, and an unstamped write
 applies, so the device with the wrong clock overwrites a newer result recorded elsewhere and
 nobody is told. A few seconds ahead is ordinary and is accepted, since a device learns the
 server time over the network and a little drift is normal. Beyond that the device is told
-its clock is wrong, nothing is written, and the app resyncs its clock so the operator can
-enter the same result again. Entering it again is safe precisely because the refused write
-never landed.
+its clock is wrong and nothing is written. The app resyncs its clock, re-stamps the queued write
+once and sends it again by itself. Sending it again is safe precisely because the refused write
+never landed. A tap is checked the same way, tap by tap within a batch: one
+stamped too far ahead is not logged, and the device stamps it again and sends it under the same id.
 
 The check is applied when the write arrives, not when it was stamped, so a write held in
 the outbox escapes it in proportion to how long it waited. A device whose clock is ahead by
@@ -812,12 +969,17 @@ Appending columns and leaving some fields unwritten are the two consequences tha
 
 * Column position is the contract. New fields are appended, and a file written by an older
   version stays readable because the reader leaves each missing trailing column at its
-  documented default, empty for most and `-1` for the round number, which means unknown.
-* Some fields are useful only in flight and are not written at all. Client revision markers
-  used to discard out of order writes are one example: they exist to order writes within one
-  session and carry no meaning once the result has landed. A match's queue position is
-  another. It is derived from court, status and scheduled time each time a match list is
-  served, so the queue shrinks as matches finish. Persisting it would let a stale copy
+  documented default, empty for most (including `MarkIDs` at column index 30, `ScoreVersion`
+  at index 31, `EventSeqs` at index 32 and `TurnedAway` at index 33, defaulting to empty, 0,
+  empty and empty) and `-1` for the round number, which means unknown.
+* Some fields are useful only in flight and are not written at all. Transient client revision
+  markers used to discard out of order writes within a single session are one example, as are
+  a write's own id, what its writer had in view, the groups it names and the endpoint it came
+  through, which judge the write and are then kept only in the score log and the history. By
+  contrast, the log-derived `ScoreVersion` is persisted in `pool-matches.csv` and `bracket.json` so readers
+  can order running match updates against incoming events. A match's queue position is
+  another in-flight field. It is derived from court, status and scheduled time each time a match
+  list is served, so the queue shrinks as matches finish. Persisting it would let a stale copy
   disagree with the schedule it was drawn from, so it is
   excluded from `pool-matches.csv` by name, on top of carrying a tag that already keeps it out
   of the YAML-marshalled forms.

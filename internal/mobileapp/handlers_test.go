@@ -23,6 +23,12 @@ import (
 )
 
 func setupTestRouter(t testing.TB) (*gin.Engine, *state.Store, *engine.Engine, *Hub, string) {
+	return setupTestRouterWithHub(t, NewHub())
+}
+
+// setupTestRouterWithHub is setupTestRouter over a hub the test built, e.g.
+// with a pushClock its score handler's coalescer is built with.
+func setupTestRouterWithHub(t testing.TB, hub *Hub) (*gin.Engine, *state.Store, *engine.Engine, *Hub, string) {
 	tempDir, err := os.MkdirTemp("", "mobileapp-test-*")
 	require.NoError(t, err)
 	t.Cleanup(func() { os.RemoveAll(tempDir) })
@@ -31,7 +37,9 @@ func setupTestRouter(t testing.TB) (*gin.Engine, *state.Store, *engine.Engine, *
 	require.NoError(t, err)
 
 	eng := engine.New(store)
-	hub := NewHub()
+	// Registered after the temp dir's removal, so it runs first: no trailing
+	// push timer of this router's coalescer outlives the test.
+	t.Cleanup(hub.Close)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

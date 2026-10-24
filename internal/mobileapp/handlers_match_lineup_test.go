@@ -192,12 +192,13 @@ func TestMatchLineupPUT_EmptyNameWithMemberIDIsAccepted(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
 
 	const blankMemberID = "11111111-1111-4111-8111-111111111111"
+	teamA := teamHoldingMembers(t, store, "c1", [2]string{blankMemberID, ""})
 	body, _ := json.Marshal(LineupRequest{
 		Positions: map[domain.Position]string{domain.PosSenpo: ""},
 		MemberIDs: map[domain.Position]string{domain.PosSenpo: blankMemberID},
 	})
 	req := httptest.NewRequest(http.MethodPut,
-		"/api/competitions/c1/teams/teamA/match-lineups/PoolA-0", bytes.NewReader(body))
+		"/api/competitions/c1/teams/"+teamA+"/match-lineups/PoolA-0", bytes.NewReader(body))
 	req.Header.Set("X-Tournament-Password", "secret")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -210,7 +211,7 @@ func TestMatchLineupPUT_EmptyNameWithMemberIDIsAccepted(t *testing.T) {
 
 	lineups, err := store.LoadTeamLineups("c1")
 	require.NoError(t, err)
-	saved, found := findMatchLineup(lineups, "teamA", "PoolA-0")
+	saved, found := findMatchLineup(lineups, teamA, "PoolA-0")
 	require.True(t, found)
 	assert.Equal(t, "", saved.Positions[domain.PosSenpo])
 	assert.Equal(t, blankMemberID, saved.MemberIDs[domain.PosSenpo])
@@ -226,6 +227,7 @@ func TestMatchLineupPUT_DuplicateMemberRejected(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
 
 	const memberID = "22222222-2222-4222-8222-222222222222"
+	teamA := teamHoldingMembers(t, store, "c1", [2]string{memberID, "Sato"})
 	body, _ := json.Marshal(LineupRequest{
 		Positions: map[domain.Position]string{
 			domain.PosSenpo: "Sato",
@@ -237,7 +239,7 @@ func TestMatchLineupPUT_DuplicateMemberRejected(t *testing.T) {
 		},
 	})
 	req := httptest.NewRequest(http.MethodPut,
-		"/api/competitions/c1/teams/teamA/match-lineups/PoolA-0", bytes.NewReader(body))
+		"/api/competitions/c1/teams/"+teamA+"/match-lineups/PoolA-0", bytes.NewReader(body))
 	req.Header.Set("X-Tournament-Password", "secret")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)

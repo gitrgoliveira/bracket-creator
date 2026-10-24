@@ -30,7 +30,7 @@ describe('attemptScoreWrite (bc-kcdg)', () => {
     });
     expect(res).toEqual({ id: 'm1', status: 'completed' });
     expect(recordScore).toHaveBeenCalledTimes(1);
-    expect(recordScore).toHaveBeenCalledWith('c1', 'm1', result, 'pw', null);
+    expect(recordScore).toHaveBeenCalledWith('c1', 'm1', result, 'pw', null, expect.objectContaining({ onRefusal: expect.any(Function) }));
     // No refusal: the confirm dialog must never be shown for an ordinary
     // success or an ordinary (non-downstream) failure.
     expect(confirmDialog).not.toHaveBeenCalled();

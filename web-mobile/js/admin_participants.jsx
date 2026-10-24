@@ -9,6 +9,7 @@ import { NO_ID_HINT } from './data_integrity.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { PillButton } from './competition_fields.jsx';
+import { useUnsavedInput } from './app_version.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -128,20 +129,20 @@ function mintParticipantIds(compID, existingPlayers, parsed) {
   });
   let nextSlot = 1;
   let added = 0, updatedCount = 0;
-  const np = parsed.map(({ name, displayName, dojo, danGrade, source, checkedIn: parsedCheckedIn }) => {
+  // No check-in rides on the rows: a roster save never writes one (the server
+  // keeps the check-in stored for each competitor), so none is sent.
+  const np = parsed.map(({ name, displayName, dojo, danGrade, source }) => {
     const existing = existingMap.get(idKey(name, dojo));
     if (existing) {
       updatedCount++;
-      // Preserve existing check-in state; CSV token takes precedence if explicitly set.
-      const checkedIn = parsedCheckedIn || existing.checkedIn || false;
-      return { id: existing.id, name, displayName, dojo, danGrade, source, seed: existing.seed || null, checkedIn };
+      return { id: existing.id, name, displayName, dojo, danGrade, source, seed: existing.seed || null };
     }
     added++;
     while (usedIds.has(`${compID}-p${nextSlot}`)) nextSlot++;
     const id = `${compID}-p${nextSlot}`;
     usedIds.add(id);
     nextSlot++;
-    return { id, name, displayName, dojo, danGrade, source, seed: null, checkedIn: parsedCheckedIn || false };
+    return { id, name, displayName, dojo, danGrade, source, seed: null };
   });
   return { np, added, updatedCount };
 }
@@ -262,6 +263,22 @@ function participantFormError({ name, dojo, engi }) {
   return null;
 }
 
+// A roster PUT refused because another desk changed the roster is laid on the
+// roster as it stands and sent again at once; this many refusals in a row (a
+// roster changing faster than a round trip, or a fault) end it with the
+// sentence below, never silently.
+export const ROSTER_REBUILD_ATTEMPTS = 10;
+// Said after a pasted list that carried a checked_in column is saved: a roster
+// save never writes a check-in, so the column was read off the rows and not
+// applied (stage 6 review 13, m4).
+export const PASTED_CHECK_IN_NOT_APPLIED = "Check-in in a pasted list is not applied: use the registration desk or the check-in buttons.";
+export const ROSTER_KEPT_CHANGING = "Not saved: the competitor list kept changing on other devices. Make the change again.";
+// Apply changes replaces the whole list with the pasted one. When the list
+// changed on another desk after the operator was asked to replace it, the
+// paste is not laid over a list they never saw: it stays in the box and they
+// are told (stage 6 review 12, C1).
+export const ROSTER_CHANGED_BEFORE_APPLY = "Not saved: the competitor list was changed on another device. The list now shown is the current one; your pasted list is still in the box, so tap Apply changes to replace it.";
+
 function AdminParticipants({ c, tournament: _tournament, onUpdate, password, showToast, onSection }) {
   // Zekken-column flag. Engi pairs store both member names combined in the
   // name field ("Name 1 - Name 2"), so engi does not alter the roster layout.
@@ -313,15 +330,6 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // React 18 but still a real teardown-race signal.
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
-  // The latest competition prop, for the code that runs AFTER an await. apply()
-  // can sit on a confirm dialog for as long as the operator takes to read it,
-  // and SSE keeps re-rendering this component with a fresher `c` underneath the
-  // suspended closure; anything reading the captured `c` past that point would
-  // write a snapshot taken before the wait. Assigned on every render (not in an
-  // effect) so the value is current even mid-render.
-  const cRef = useRefA(c);
-  cRef.current = c;
-
   const generateText = (playersList) => generateRosterText(playersList, withZekken);
 
   // Fill the roster textarea with a generated sample roster of `count`
@@ -345,9 +353,12 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     // misleads about whether the persisted state was actually updated.
     reader.onload = async (e) => {
       const raw = e.target.result;
+      // The summary reads the roster as shown; the PUT (putRoster) lays the
+      // same rows on the latest known roster as it goes.
       const np = [...(c.players || [])];
       let updatedCount = 0;
       const unmatched = [];
+      const matchedRows = [];
       const allNames = np.map(p => ({ name: p.name, display: p.displayName }));
 
       raw.split(/\r?\n/).forEach((line, i) => {
@@ -367,6 +378,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
 
             if (pIdx >= 0) {
               np[pIdx] = { ...np[pIdx], seed };
+              matchedRows.push({ name, seed });
               updatedCount++;
             } else {
               // Find closest name suggestion via Levenshtein distance:
@@ -400,7 +412,14 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       let saveError = null;
       if (updatedCount > 0) {
         try {
-          await onUpdate({ ...c, players: np });
+          await putRoster((players) => {
+            const next = [...players];
+            for (const row of matchedRows) {
+              const i = findSeedMatchIndex(next, row.name);
+              if (i >= 0) next[i] = { ...next[i], seed: row.seed };
+            }
+            return next;
+          });
         } catch (err) {
           // updateCompetition already surfaced an error toast. Log for
           // dev-console diagnosis but don't emit a second toast or a
@@ -444,6 +463,13 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // Anything in the box is a list not yet applied (the box never mirrors the
   // saved roster), so the unsaved indicator is simply "the box has lines".
   const rosterDirty = lines.length > 0;
+  // A new build waits to reload while anything typed here is unsaved: the
+  // paste box, the Add form, an Edit dialog changed from the row it opened on.
+  const addTyped = showAddForm && [addName, addDojo, addDanGrade, addZekken].some((s) => String(s || "").trim() !== "");
+  const editChanged = !!replaceTarget && (replaceName !== (replaceTarget.name || "")
+    || replaceDojo !== (replaceTarget.dojo || "") || replaceDanGrade !== (replaceTarget.danGrade || "")
+    || (withZekken && replaceZekken !== (replaceTarget.displayName || "")));
+  useUnsavedInput(rosterDirty || addTyped || editChanged);
   const players = useMemoA(() => c.players || [], [c.players]);
   // First-run: with no participants yet there is nothing to seed or check in,
   // so the seeding panel is premature. Collapse it and let the roster-input
@@ -499,7 +525,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // updateCompetition's catch in admin.jsx).
   const clearAllSeeds = async () => {
     try {
-      await onUpdate({ ...c, players: c.players.map((p) => ({ ...p, seed: null })) });
+      await putRoster((players) => players.map((p) => ({ ...p, seed: null })));
     } catch (err) {
       console.error("AdminParticipants: clearAllSeeds PUT failed", err);
     }
@@ -513,16 +539,122 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // shuffleUnseeded). No success toast needed: rank changes are
   // implicit-feedback (the input commits visually), so we just need
   // to NOT swallow errors silently.
-  const updateSeed = async (idx, val) => {
-    const np = [...(c.players || [])];
-    const seed = parseInt(val);
-    np[idx] = { ...np[idx], seed: isNaN(seed) || seed <= 0 ? null : seed };
-    try {
-      await onUpdate({ ...c, players: np });
-    } catch (err) {
+  //
+  // EVERY roster PUT this card makes has ONE owner, putRoster (stage 6 review
+  // 10, M2): a typed seed, a row moved, a shuffle, Clear seeds, a seed file
+  // and Apply changes. They go one at a time, each built as it goes, from the
+  // roster the page shows (the host shows each PUT's stored answer, then its
+  // refetch, before the save resolves: a check-in or a competitor another
+  // desk added or removed meanwhile is in it, stage 6 review 11, A; the PUT
+  // is a whole-roster write; since stage 6 review 12, C1, the server keeps
+  // every stored check-in and refuses a PUT built on an older list), or,
+  // while the page has not rendered since the last PUT went, that PUT's
+  // roster, with every seed typed before the write and not yet answered laid
+  // on. Built from the roster as rendered, a row dragged after a seed was
+  // typed sent that row's old seed, landed second and overwrote it (and stage
+  // 6 review 9, F9: two quick seeds overwrote each other). A typed seed is
+  // held by its competitor (id, else name and dojo for an id-less legacy row,
+  // m11), never by its row, so a reorder while its save is out cannot lay it
+  // on someone else; the box shows it meanwhile through the promise
+  // StableInput is handed.
+  const rosterRef = useRefA(c);
+  rosterRef.current = c;
+  const typedSeedsRef = useRefA(new Map());
+  const typedSeqRef = useRefA(0);
+  const rosterChainRef = useRefA(Promise.resolve());
+  const landedRosterRef = useRefA(null);
+  const seedKey = (p) => {
+    if (p.id) return p.id;
+    const norm = (s) => (s || "").toLowerCase().trim().replace(/\s+/g, " ");
+    return `nd:${norm(p.name)}\u001f${norm(p.dojo)}`;
+  };
+  // The roster as the server holds it after every write this card made, with
+  // the seeds typed up to `upTo` laid on, and its version (rosterVersion: the
+  // server refuses a PUT built from a roster that is no longer the stored one).
+  const latestRoster = (upTo) => {
+    const cur = rosterRef.current;
+    const landed = landedRosterRef.current;
+    const fromLanded = landed && landed.over === cur;
+    const base = fromLanded ? landed.players : (cur.players || []);
+    return {
+      version: fromLanded ? landed.version : (cur.rosterVersion || ""),
+      players: base.map((q) => {
+        const t = typedSeedsRef.current.get(seedKey(q));
+        return t && t.seq <= upTo ? { ...q, seed: t.seed } : q;
+      }),
+    };
+  };
+  // putRoster(build, { replace }): build(players) answers the roster to send,
+  // or null to send nothing: an OPERATION laid on the roster it is handed (a
+  // seed set, a row moved, a shuffle, seeds cleared or read from a file). The
+  // PUT names the version of the roster it was built on; when another desk
+  // changed the roster meanwhile (a competitor added, removed or seeded) the
+  // server refuses it, roster_changed, with the roster as it stands, which the
+  // host shows at once, and the operation is laid on THAT roster and sent
+  // again, so neither desk's change is lost and nothing waits on the operator
+  // (stage 6 review 12, C1). A check-in never refuses it: the roster PUT never
+  // writes one. A `replace` (Apply changes, a whole pasted list) is not laid
+  // on a roster its operator never saw: its refusal is handed back for the
+  // caller to tell. Resolves with onUpdate's answer; rejects with its refusal.
+  const putRoster = (build, { replace = false } = {}) => {
+    const upTo = typedSeqRef.current;
+    const send = async () => {
+      for (let attempt = 1; ; attempt += 1) {
+        const { players: base, version } = latestRoster(upTo);
+        const players = build(base);
+        if (!players) return undefined;
+        const before = rosterRef.current;
+        try {
+          const answer = await onUpdate({ ...before, players, rosterVersion: version });
+          // The host shows the PUT's stored answer, and then its refetch,
+          // before the save resolves (updateCompetition, m10), so the next PUT
+          // is built from what the page shows (stage 6 review 11, A). Only a
+          // page that has not rendered since this PUT went knows nothing newer
+          // than what it sent, under the version the save answered. The
+          // version names the roster the server read back after the write,
+          // which can hold another desk's later add and the ids it minted, so
+          // it is paired with the players the answer returns, never with the
+          // list that was sent (stage 6 review 13, m3); an answer that returns
+          // none leaves the next PUT to be built from what the page shows.
+          const answered = answer && Array.isArray(answer.rosterPlayers) ? answer.rosterPlayers : null;
+          landedRosterRef.current = rosterRef.current === before && answered
+            ? { players: answered, version: answer.rosterVersion || "", over: before } : null;
+          return answer;
+        } catch (err) {
+          if (!err || err.code !== "roster_changed") throw err;
+          // The roster as it stands is the base the operation is laid on
+          // again (the host shows it too, once it renders).
+          landedRosterRef.current = rosterRef.current === before
+            ? { players: err.players || [], version: err.rosterVersion || "", over: before } : null;
+          if (replace) throw err;
+          if (attempt >= ROSTER_REBUILD_ATTEMPTS) {
+            const gaveUp = new Error(ROSTER_KEPT_CHANGING);
+            if (mountedRef.current) showToast(ROSTER_KEPT_CHANGING, "error");
+            throw gaveUp;
+          }
+        }
+      }
+    };
+    const run = rosterChainRef.current.then(send);
+    rosterChainRef.current = run.then(() => undefined, () => undefined);
+    return run;
+  };
+  const updateSeed = (idx, val) => {
+    const p = (c.players || [])[idx];
+    if (!p) return undefined;
+    const key = seedKey(p);
+    const parsed = parseInt(val);
+    typedSeqRef.current += 1;
+    const typed = { seed: isNaN(parsed) || parsed <= 0 ? null : parsed, seq: typedSeqRef.current };
+    typedSeedsRef.current.set(key, typed);
+    // Once answered the seed is in the landed roster, or refused: either way
+    // it is no longer laid on.
+    const forget = () => { if (typedSeedsRef.current.get(key) === typed) typedSeedsRef.current.delete(key); };
+    return putRoster((players) => players).then(forget, (err) => {
+      forget();
       console.error("AdminParticipants: updateSeed PUT failed", err);
       // updateCompetition already toasted the error.
-    }
+    });
   };
 
   const dragIdxRef = useRefA(null);
@@ -532,18 +664,44 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // gating the UI.
   const moveSeedRow = async (fromIdx, toIdx) => {
     if (fromIdx === toIdx) return;
-    const np = [...(c.players || [])];
-    const [moved] = np.splice(fromIdx, 1);
-    np.splice(toIdx, 0, moved);
-    // Re-assign seeds by new position order (only for currently-seeded players)
-    const seededCount = np.filter(p => p.seed).length;
-    const payloadPlayers = seededCount > 0
-      ? (() => { let rank = 1; return np.map(p => p.seed ? { ...p, seed: rank++ } : p); })()
-      : np;
+    // A move means "this row directly above (moved up) or below (moved down)
+    // the row it passed, as the operator saw them" (stage 6 review 11, C).
+    // The rows are named as shown and the relation is laid on the roster the
+    // write is built from (putRoster), which may hold an earlier move not yet
+    // shown; when the relation already holds nothing is sent, so a second Move
+    // up tapped before the page shows the first never moves the row back.
+    const shown = c.players || [];
+    if (!shown[fromIdx] || !shown[toIdx]) return;
+    const movedKey = seedKey(shown[fromIdx]);
+    const targetKey = seedKey(shown[toIdx]);
+    const above = fromIdx > toIdx;
+    let gone = false;
     try {
-      await onUpdate({ ...c, players: payloadPlayers });
+      await putRoster((players) => {
+        const np = [...players];
+        const from = np.findIndex((p) => seedKey(p) === movedKey);
+        const at = np.findIndex((p) => seedKey(p) === targetKey);
+        // Another desk took one of the two off the list meanwhile: there is
+        // nothing to move, and the operator is told rather than left looking
+        // at a move that never happened.
+        gone = from < 0 || at < 0;
+        if (gone || from === at) return null;
+        if (from === (above ? at - 1 : at + 1)) return null;
+        const [moved] = np.splice(from, 1);
+        const to = np.findIndex((p) => seedKey(p) === targetKey);
+        np.splice(above ? to : to + 1, 0, moved);
+        // Re-assign seeds by new position order (only for currently-seeded players)
+        const seededCount = np.filter(p => p.seed).length;
+        return seededCount > 0
+          ? (() => { let rank = 1; return np.map(p => p.seed ? { ...p, seed: rank++ } : p); })()
+          : np;
+      });
     } catch (err) {
       console.error("AdminParticipants: moveSeedRow PUT failed", err);
+      return;
+    }
+    if (gone && mountedRef.current) {
+      showToast(`Not moved: ${shown[fromIdx].name} or ${shown[toIdx].name} was taken off the list on another device.`, "error");
     }
   };
 
@@ -552,24 +710,27 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // → on PUT failure the admin saw "shuffled" while the persisted order
   // was unchanged (only the error toast hinted at the discrepancy).
   const shuffleUnseeded = async () => {
-    const np = [...(c.players || [])];
-    const unseeded = np.filter(p => !p.seed);
-    if (unseeded.length < 2) return;
-    for (let i = unseeded.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [unseeded[i], unseeded[j]] = [unseeded[j], unseeded[i]];
-    }
-    let uIdx = 0;
-    const shuffled = np.map(p => p.seed ? p : unseeded[uIdx++]);
+    let shuffledAny = false;
     try {
-      await onUpdate({ ...c, players: shuffled });
+      await putRoster((players) => {
+        const np = [...players];
+        const unseeded = np.filter(p => !p.seed);
+        if (unseeded.length < 2) return null;
+        for (let i = unseeded.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [unseeded[i], unseeded[j]] = [unseeded[j], unseeded[i]];
+        }
+        let uIdx = 0;
+        shuffledAny = true;
+        return np.map(p => p.seed ? p : unseeded[uIdx++]);
+      });
     } catch (err) {
       console.error("AdminParticipants: shuffleUnseeded PUT failed", err);
       // updateCompetition already toasted the error; don't double-toast
       // or emit a misleading success message.
       return;
     }
-    if (mountedRef.current) showToast("Unseeded list shuffled");
+    if (shuffledAny && mountedRef.current) showToast("Unseeded list shuffled");
   };
 
   const handleAddParticipant = async () => {
@@ -655,7 +816,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // are already toasted by updateCompetition's catch, so a second
   // toast would double up.
   const apply = async () => {
-    let parsed, np, added, updatedCount;
+    let parsed;
     try {
       parsed = window.parseParticipantLines(lines, withZekken);
 
@@ -721,36 +882,47 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       if (!ok) return;
     }
 
-    // Minted AFTER the dialog, from the LATEST roster. The dialog can stand
-    // open for minutes, and a colleague saving from another desk in that
-    // window re-renders this component with a fresher `c`; minting before the
-    // wait would carry a pre-dialog snapshot into the PUT and silently revert
-    // their change. The ids and seeds preserved are the ones on the server now.
-    try {
-      ({ np, added, updatedCount } = mintParticipantIds(cRef.current.id, cRef.current.players, parsed));
-    } catch (err) {
-      // mintParticipantIds can throw on unexpected shape.
-      console.error("AdminParticipants: mint failed", err);
-      showToast("Failed to parse participants: " + err.message, "error");
-      return;
-    }
-
-    await doSave(np, added, updatedCount);
+    // Minted AFTER the dialog, from the LATEST roster, as the PUT goes
+    // (putRoster). The dialog can stand open for minutes, and a colleague
+    // saving from another desk in that window re-renders this component with a
+    // fresher `c`; minting before the wait would carry a pre-dialog snapshot
+    // into the PUT and silently revert their change. The ids and seeds
+    // preserved are the ones on the server now, a seed typed or a row moved
+    // here whose answer the page does not show yet included.
+    await doSave(parsed);
   };
 
   // doSave performs the PUT and shows the success toast. The roster PUT
   // returns server-authoritative near-duplicate warnings; the save has
   // already committed (warnings are non-blocking), so we surface them in a
   // post-save informational banner the operator can review and dismiss.
-  const doSave = async (np, added, updatedCount) => {
+  const doSave = async (parsed) => {
     // Clear any stale banner from a previous import up front, so a cancelled
     // or failed save can't leave a misleading "Saved: …" banner on screen.
     setNearDupPending(null);
     try {
-      // Spread the LATEST competition, not the one apply() captured before its
-      // confirm dialog: every field except `players` must be whatever the
-      // server holds now (see the re-mint in apply()).
-      const warnings = await onUpdate({ ...cRef.current, players: np });
+      // putRoster spreads the LATEST competition, not the one apply() captured
+      // before its confirm dialog: every field except `players` must be
+      // whatever the server holds now, and the roster is minted from the
+      // latest known one as the PUT goes.
+      let minted = null;
+      let mintError = null;
+      const warnings = await putRoster((players) => {
+        try {
+          minted = mintParticipantIds(rosterRef.current.id, players, parsed);
+        } catch (err) {
+          // mintParticipantIds can throw on unexpected shape.
+          mintError = err;
+          return null;
+        }
+        return minted.np;
+      }, { replace: true });
+      if (mintError) {
+        console.error("AdminParticipants: mint failed", mintError);
+        if (mountedRef.current) showToast("Failed to parse participants: " + mintError.message, "error");
+        return;
+      }
+      const { np, added, updatedCount } = minted;
 
       // Bail if we unmounted during the in-flight PUT: see mountedRef
       // declaration above. showToast is safe (lifted to AdminApp, still
@@ -767,6 +939,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       if (added > 0 || updatedCount > 0) {
         msg += ` (${added} new, ${updatedCount} updated)`;
       }
+      if (parsed.some((row) => row.checkInIgnored)) msg += `. ${PASTED_CHECK_IN_NOT_APPLIED}`;
       showToast(msg);
       setImportSummary(null);
       setText("");
@@ -784,6 +957,13 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
         else if (isStarted) onSection("scores");
       }
     } catch (err) {
+      // The list changed on another device after the operator was asked to
+      // replace it: nothing was saved, the page shows the list as it stands
+      // and the pasted list stays in the box for one tap to apply it again.
+      if (err && err.code === "roster_changed") {
+        if (mountedRef.current) showToast(ROSTER_CHANGED_BEFORE_APPLY, "error");
+        return;
+      }
       // PUT failure path. updateCompetition already showed an error
       // toast for the user; log here so the dev console has the stack
       // for diagnosis but don't emit a second toast.

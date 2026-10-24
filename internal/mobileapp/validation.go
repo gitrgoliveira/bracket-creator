@@ -91,8 +91,8 @@ const (
 	// MaxLenMatchID caps the byte length of the "mid" path parameter accepted
 	// by the score endpoint. Match IDs legitimately contain spaces (e.g.
 	// "Pool A-1"), so a charset regex is inappropriate, a length cap is the
-	// right defense-in-depth guard against abusive keys growing runningRevStore
-	// unbounded. 128 bytes covers any realistic match ID.
+	// right defense-in-depth guard against abusive keys growing the per-match
+	// broadcast coalescer's map. 128 bytes covers any realistic match ID.
 	MaxLenMatchID = 128
 
 	// MaxBulkCheckInIDs is the upper bound on the participantIds array
@@ -306,6 +306,32 @@ func seedsOrphanedByRosterReplace(oldPlayers, newPlayers []domain.Player, seeds 
 		orphaned = append(orphaned, a)
 	}
 	return orphaned, kept
+}
+
+// rosterReplaceSeedPruner is the batch replace's seed rule, judged under the
+// competition's lock on the roster and seeds stored when the write runs.
+func rosterReplaceSeedPruner(canonicalPlayers []domain.Player) state.SeedPruner {
+	return func(stored []domain.Player, current []domain.SeedAssignment) ([]domain.SeedAssignment, error) {
+		orphaned, kept := seedsOrphanedByRosterReplace(stored, canonicalPlayers, current)
+		if len(orphaned) > 0 && rosterReplaceAddsIdentities(stored, canonicalPlayers) {
+			return nil, &orphanedSeedsRefusal{orphaned: orphaned}
+		}
+		return kept, nil
+	}
+}
+
+// orphanedSeedsRefusal is the batch replace's 409 for a replace that leaves
+// seeded competitors unresolved while it also adds competitors, so a removal
+// cannot be told from a rename (rosterReplaceAddsIdentities).
+type orphanedSeedsRefusal struct {
+	orphaned []domain.SeedAssignment
+}
+
+func (r *orphanedSeedsRefusal) Error() string {
+	labels := formatOrphanedSeedLabels(r.orphaned)
+	return fmt.Sprintf(
+		"this replace removes or renames %d already-seeded participant(s) (%s), and also adds new participant(s), so a removal can't be told apart from a rename; keep their name and dojo unchanged, do the removal in a request that adds no new participants, or update/clear their seed first via PUT /competitions/:id/participants/:pid or the seeding panel",
+		len(r.orphaned), strings.Join(labels, ", "))
 }
 
 // rosterReplaceAddsIdentities reports whether newPlayers contains any

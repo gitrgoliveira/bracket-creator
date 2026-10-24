@@ -99,6 +99,10 @@ func TestWithdrawalClearedByCorrection_TeamMatchIsNotPadded(t *testing.T) {
 	m := wrPoolMatch(t, store, compID)
 	assert.Equal(t, "", m.Decision)
 	assert.Equal(t, wrTeamB, m.Winner)
+	// The mark ids are the score replay's (bc-evts), not a bout's result.
+	for i := range m.SubResults {
+		m.SubResults[i].MarkIDs = nil
+	}
 	assert.Equal(t, wrFoughtBouts(), m.SubResults, "the bouts fought, nothing credited")
 	assert.True(t, wrEligible(t, store, compID, wrTeamAID))
 }

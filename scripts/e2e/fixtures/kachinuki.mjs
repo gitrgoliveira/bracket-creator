@@ -13,7 +13,7 @@
 // Locator.tap(), so the coarse-pointer hit test decides what is hit, as it
 // does for a thumb.
 import { expect } from '@playwright/test';
-import { armTwoTap } from './pace.mjs';
+import { armTwoTap, tapOnSide } from './pace.mjs';
 import { EXPECT_TIMEOUT_MS } from './devices.mjs';
 import { clearMarks } from './scoring.mjs';
 import { inlineEditor, sides, upNextCard } from './shiaijo.mjs';
@@ -121,16 +121,25 @@ export const boutMiddle = async (row) => (await T.rowMiddle(row).first().innerTe
 export const clearBoutMarks = (row, side, opts) => clearMarks(boutFilled(row, side), opts);
 
 // Award one ippon on the current bout and return once the board shows it and
-// the autosave has landed (fixtures/team.mjs ipponOnRow, the one strike the
+// the tap has been answered (fixtures/team.mjs ipponOnRow, the one strike the
 // team sheet shares). A second ippon on the same side waits out the bounce
 // window of the first (fixtures/pace.mjs).
 export const awardBoutIppon = (page, side, waza = 'M') => T.ipponOnRow(editor(page), () => currentBout(page), 'current bout', side, waza);
 
-// Record bout: one tap. Returns once the bout has become a read-only row (the
-// server appended the next pairing, or the tie retired both).
+// The guard key Record bout and Remove this bout share: the two sit in one
+// place and the sheet takes a bounce of either through one guard
+// (admin_scoring_team.jsx boutChangeTap("bout"), tap_guard.jsx acceptTap), so
+// a tap on one within the bounce window of a tap on the other is ignored. A
+// journey that taps either by other means waits it out with
+// pace.mjs dwellOnSide(page, BOUT_CHANGE).
+export const BOUT_CHANGE = 'bout change';
+
+// Record bout: one tap, paced against the last Record bout this page made.
+// Returns once the bout has become a read-only row (the server appended the
+// next pairing, or the tie retired both).
 export async function recordBout(page) {
   const before = await doneRows(page).count();
-  await recordBoutButton(page).tap();
+  await tapOnSide(page, BOUT_CHANGE, recordBoutButton(page));
   await expect(doneRows(page)).toHaveCount(before + 1, { timeout: EXPECT_TIMEOUT_MS });
   await expect(recordBoutButton(page)).not.toHaveText('Saving…');
 }

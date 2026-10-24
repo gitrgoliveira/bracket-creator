@@ -43,7 +43,7 @@ describe('pickManualBoutName hands a rename to onRenamed', () => {
   it('as the member the server answered, stamp included, once it accepted the rename', async () => {
     const { onRenamed, onRenameFailed } = await pick();
 
-    expect(renameTeamMember).toHaveBeenCalledWith('c1', 'team-B', 'b3', 'Ito', 'pw');
+    expect(renameTeamMember).toHaveBeenCalledWith('c1', 'team-B', 'b3', 'Ito', 'pw', expect.any(Object));
     const answeredMember = await renameTeamMember.mock.results[0].value;
     expect(answeredMember.modifiedAt).toBeGreaterThan(0);
     expect(onRenamed).toHaveBeenCalledTimes(1);

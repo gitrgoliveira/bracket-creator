@@ -6,11 +6,18 @@
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA, useLayoutEffect: useLayoutEffectA } = React;
 const Icon = window.Icon;
 
-import { DAIHYOSEN_POSITION, scoreRowMatchName } from './pool_ids.jsx';
+import { DAIHYOSEN_POSITION, scoreRowMatchName, scoreRowMatchLabel } from './pool_ids.jsx';
+import { classifyStartOutcome, startFailureMessage } from './start_match.jsx';
+import {
+  createOwnStatus, OWN_START, OWN_REOPEN, OWN_REQUEUE, OWN_REP,
+  LANDED as OWN_LANDED, REFUSED as OWN_REFUSED, HELD as OWN_HELD, DISCARDED as OWN_DISCARDED,
+} from './own_status.jsx';
+export { OWN_START, OWN_REOPEN, OWN_REQUEUE, OWN_REP, OWN_REFUSED };
 import {
   writeDidNotLand, writeRetryable, decisionWord,
   attemptScoreWrite, DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, DOWNSTREAM_KNOCKOUT_REOPEN_CANCELLED, downstreamKnockoutReopenedNotice,
-  courtBusyMessage, HELD_WRITE_DISCARD_LABEL, heldWriteDiscardConfirm, queuedNotice,
+  courtBusyMessage, heldWriteDiscardLabel, heldWriteDiscardConfirm, queuedNotice,
+  tapNotAppliedText, tapOutcomeQuiet, writePending, writeWasRefused,
 } from './write_result.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
 import { sideWord, sideWithColour } from './side_cell.jsx';
@@ -18,11 +25,20 @@ import { sideMarks, defaultWinMaru } from './bracket.jsx';
 import { NumberedName, numberFollowsName } from './numbered_name.jsx';
 import { withdrawnSideKey } from './ineligible_match.jsx';
 import { isTeamDefaultWinDecision } from './team_default_credit.jsx';
-import { struckIppons } from './result_slot.jsx';
-import { acceptTap } from './tap_guard.jsx';
+import { struckIppons, realIppons } from './result_slot.jsx';
+import { acceptTap, useArmedConfirm } from './tap_guard.jsx';
+// bc-evts: the board of a running match (tapBoardOf) is the server's copy with
+// this device's pending taps folded on, by the JS replay port.
+import { applyPending, assignMarks, APPLIED, BOUT_REMOVED, BOUT_REMOVED_MESSAGE } from './score_events.jsx';
+import { isOlderRunningCopy } from './patch.jsx';
 // BarredMatchNotice is a separate leaf (imports only ineligible_match.jsx +
 // write_result.jsx): re-exported below, see that file's header for why.
 import { BarredMatchNotice } from './barred_match_notice.jsx';
+import {
+  UNSAVED_ENTRIES_DISCARDED, REOPEN_ANYWAY, QUEUE_AND_REOPEN_ANYWAY, ADD_REP_BOUT_ANYWAY,
+  REMOVE_REP_BOUT_ANYWAY, LEAVE_MATCH_ANYWAY, recordDecisionAnyway, unsavedDiscardDialog,
+  holdsUnsaved, confirmDiscardUnsaved,
+} from './unsaved_entries.jsx';
 
 // Kendo best-of-3 cap. Mirrors the server-side `maxIpponsPerSide` in
 // internal/mobileapp/validation.go: the bout ends when one side reaches
@@ -55,15 +71,28 @@ function isBoutDecided(aPts, bPts) {
 // write crossing the threshold, a write landing, and a discard made from the
 // topbar's list all reach it. The editors' pending banner, its line
 // (HeldWriteNotice) and its Discard read it.
-export function useMatchHeldWrite(compId, matchId) {
+export function useMatchHeldWrite(compId, matchId, match = null) {
   const api = window.API;
+  // The match the editor shows names its held writes, and its teams' (H5).
+  if (match && api && compId && typeof api.noteShownMatch === 'function') api.noteShownMatch(compId, match);
   // `held` is null when this page has no queue to ask (the editors' render
   // tests stub window.API without one): unknown, so nothing is cleared.
-  const read = () => ({
-    held: api && typeof api.hasHeldWrite === 'function' && compId && matchId ? api.hasHeldWrite(compId, matchId) : null,
-    stuck: !!(api && typeof api.heldWriteKeepsFailing === 'function'
-      && compId && matchId && api.heldWriteKeepsFailing(compId, matchId)),
-  });
+  // `blocker` is the write of another kind this match waits for that the
+  // server keeps refusing (a team member's add; stage 3 review 4, G2), or null.
+  // `stuck` and `blocker` come from ONE read of the queue (heldWriteState,
+  // stage 3 review 5, H2); a page whose API has only the two older questions
+  // asks them.
+  const read = () => {
+    const asks = !!(api && compId && matchId);
+    const state = asks && typeof api.heldWriteState === 'function' ? api.heldWriteState(compId, matchId) : null;
+    return {
+      held: asks && typeof api.hasHeldWrite === 'function' ? api.hasHeldWrite(compId, matchId) : null,
+      stuck: state ? !!state.keepsFailing
+        : !!(asks && typeof api.heldWriteKeepsFailing === 'function' && api.heldWriteKeepsFailing(compId, matchId)),
+      blocker: (state ? state.blocker
+        : (asks && typeof api.heldWriteBlocker === 'function' && api.heldWriteBlocker(compId, matchId))) || null,
+    };
+  };
   const [state, setState] = useStateA(read);
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
@@ -71,7 +100,8 @@ export function useMatchHeldWrite(compId, matchId) {
     const refresh = () => {
       if (!mountedRef.current) return;
       const next = read();
-      setState((prev) => (prev.held === next.held && prev.stuck === next.stuck ? prev : next));
+      const blockerKey = (s) => (s.blocker ? s.blocker.key : '');
+      setState((prev) => (prev.held === next.held && prev.stuck === next.stuck && blockerKey(prev) === blockerKey(next) ? prev : next));
     };
     refresh();
     const offs = [];
@@ -97,17 +127,296 @@ export function useClearPendingWhenNothingHeld(compId, matchId, pendingWrite, on
   }, [pendingWrite, held]);
 }
 
+// The refusals a tap gets while the server holds the match as not running
+// (operator S7 a): the server's sentence is shown next to the board.
+const TAP_NOT_RUNNING_REASONS = new Set(['match_not_started', 'match_sent_back']);
+
+// useTapOutcomeNote (bc-evts stage 3): what the outbox reported about a tap of
+// this editor's match the server did not apply (API.subscribeTapOutcome).
+// `note` is the quiet line (tapNotAppliedText); `refusal` the server's sentence
+// for a tap refused because the match is not running. `clear()` drops both,
+// called as the operator taps again.
+export function useTapOutcomeNote(compId, matchId) {
+  const [state, setState] = useStateA({ note: null, refusal: null, id: null });
+  useEffectA(() => {
+    setState({ note: null, refusal: null, id: null });
+    const api = window.API;
+    if (!api || typeof api.subscribeTapOutcome !== 'function') return undefined;
+    return api.subscribeTapOutcome(compId, matchId, (o) => {
+      if (o && o.takenBack) {
+        // The server applied a tap this note named not applied (the board
+        // judged it from a copy behind the server): the note goes (stage 6
+        // review 8, m12). Only a notice the outbox takes back takes it down,
+        // never any quiet answer: a `duplicate` can be a tap turned away
+        // answered again (review 9, F3).
+        setState((s) => (s.id && s.id === o.id ? { note: null, refusal: null, id: null } : s));
+        return;
+      }
+      if (tapOutcomeQuiet(o)) return;
+      const text = tapNotAppliedText(o);
+      if (!text) return;
+      const id = (o && o.id) || null;
+      if (o && TAP_NOT_RUNNING_REASONS.has(o.reason)) setState((s) => ({ ...s, refusal: text, id }));
+      else setState((s) => ({ ...s, note: text, id }));
+    });
+  }, [compId, matchId]);
+  const clearRef = useRefA(null);
+  if (!clearRef.current) {
+    clearRef.current = () => setState((s) => (s.note || s.refusal ? { note: null, refusal: null, id: null } : s));
+  }
+  return { note: state.note, refusal: state.refusal, clear: clearRef.current };
+}
+
+// The scoring fields a board takes from the newest copy the outbox holds. The
+// flags are an engi match's: the server leaves a count of 0 out, so a missing
+// count is left missing (an individual match must not gain flags the TV board
+// would show) and the engi editor reads it as 0.
+const DERIVED_BOARD_FIELDS = {
+  ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, encho: null, markIds: undefined,
+  flagsA: undefined, flagsB: undefined, scoreVersion: 0, modifiedAt: 0, eventSeqs: undefined,
+};
+
+// sameSides: whether the copy a score-events answer handed back is of the
+// match the host renders, by its competitors (bc-evts stage 3 review 11, X4).
+// Match ids are name slugs, so a competition made again under the same name
+// reuses them; a copy whose side ids differ is the old match. A side with no
+// id on either copy (a legacy row) decides nothing.
+function sideIdOf(x, key) {
+  const flat = x[`side${key}Id`];
+  if (flat) return flat;
+  const side = x[`side${key}`];
+  return (side && typeof side === "object" && side.id) || "";
+}
+// unloggedUnderAnswer: the host's running copy carries no score version (no
+// line of the match's score log: the queue row of a match nobody has scored,
+// shown running from this console's own start until the court's feed shows it,
+// bc-strt), while a score-events answer for the same match does. The answer is
+// the newer copy: it is the log's, and the host's copy predates every line of
+// it. Without this an answered tap left the board until the feed caught up,
+// and for good on a device that went offline first (stage 6). The board's own
+// rule, never keepNewerMatches': there a refetch with no version replaces the
+// held copy (a draw made again reuses the match ids), which the answer cannot
+// be, since an answer for other sides is never taken (sameSides) and the
+// answers are forgotten with their competition's draw (_forgetShownMatches).
+function unloggedUnderAnswer(m, derived) {
+  return m.status === "running" && derived.status === "running"
+    && !(Number(m.scoreVersion) > 0) && Number(derived.scoreVersion) > 0;
+}
+function sameSides(m, derived) {
+  for (const key of ["A", "B"]) {
+    const a = sideIdOf(m, key);
+    const b = sideIdOf(derived, key);
+    if (a && b && a !== b) return false;
+  }
+  return true;
+}
+
+// tapBoardOf (bc-evts stage 3, S6): the board of a RUNNING match, for the
+// individual, engi (stage 4) and team (stage 5) editors alike. Its base is the newer of the
+// match the host renders and the newest copy a score-events answer handed back
+// (API.latestDerivedMatch), by isOlderRunningCopy's rule (scoreVersion first,
+// then the stamp); this device's pending taps are folded on top (applyPending,
+// `opts` its fold options: {engi: true} for an engi match, whose flag taps the
+// fold refuses otherwise; {team: true, kachinuki} for a team match, whose bout
+// taps it refuses otherwise). `base` is what the taps were made against.
+export function tapBoardOf(m, opts) {
+  const api = window.API || {};
+  const derived = typeof api.latestDerivedMatch === "function" ? api.latestDerivedMatch(m.compId, m.id) : null;
+  let base = m;
+  if (derived && sameSides(m, derived) && (isOlderRunningCopy(m, derived.status, derived.modifiedAt, derived.scoreVersion) || unloggedUnderAnswer(m, derived))) {
+    base = { ...m };
+    for (const [f, none] of Object.entries(DERIVED_BOARD_FIELDS)) base[f] = derived[f] ?? none;
+    // A rep pick the answer does not carry is the one the host renders.
+    if (derived.repPlayerA !== undefined) base.repPlayerA = derived.repPlayerA;
+    if (derived.repPlayerB !== undefined) base.repPlayerB = derived.repPlayerB;
+    // A team match's bout rows (stage 5), when the answer carries them.
+    if (Array.isArray(derived.subResults)) base.subResults = derived.subResults;
+  }
+  // `opts.prepare` lets an editor add to the base what the server has not
+  // answered for yet but taps already name (the team editor's kachinuki rows
+  // added by hand, whose add is queued ahead of those taps).
+  const all = (typeof api.pendingTaps === "function" && api.pendingTaps(m.compId, m.id)) || [];
+  const folded = applyPending(opts && opts.prepare ? opts.prepare(base) : base, all, opts);
+  // `moving`: the pending taps that still change the board (a tap the base
+  // already holds, or one with nothing left to take, changes nothing).
+  const moving = all.filter((e) => folded.outcomes[e.id] === APPLIED);
+  // A pending tap on a bout the copy shows removed is not on the board, and
+  // the operator is told so once, now, as the server's answer would tell it
+  // (stage 6 review 7; the fold's own rule, BOUT_REMOVED, never a second one).
+  if (typeof api.tellPendingTapRefused === "function") {
+    for (const e of all) {
+      if ((folded.reasons || {})[e.id] !== BOUT_REMOVED) continue;
+      api.tellPendingTapRefused(m.compId, m.id,
+        { id: e.id, outcome: folded.outcomes[e.id], reason: BOUT_REMOVED, message: BOUT_REMOVED_MESSAGE },
+        { kind: e.kind, side: e.side, pos: e.pos, letter: e.letter });
+    }
+  }
+  return { base, match: folded.match, pending: all, moving };
+}
+
+// shownMarkIds: the mark id of each mark a side shows (realIppons order: the
+// placeholders and the hantei mark dropped) for a match (pos 0) or a team bout
+// row (its position), "" where none can be named. An ippon.remove names the
+// mark by this id. A copy that names no ids for a side is one whose score log
+// has not begun (a match last written before mark ids existed): the server's
+// first baseline mints each mark's id from what the mark is
+// (b:<pos>:<side>:<letter>:<n>, engine.MigrationBaseline through assignMarks),
+// so the same ids are minted here.
+export function shownMarkIds(holder, key) {
+  const raw = (key === "a" ? holder.ipponsA : holder.ipponsB) || [];
+  const named = holder.markIds && holder.markIds[key];
+  const ids = named || (holder.markIds ? [] : assignMarks([], [], raw, Number(holder.position) || 0, key));
+  const out = [];
+  raw.forEach((x, i) => { if (realIppons([x]).length) out.push(ids[i] || ""); });
+  return out;
+}
+
+// useTapBoard re-renders the editor when this device's pending taps for the
+// match or the newest derived copy move, and answers the board while `on`.
+// DRAFT_KEPT_NOTE: what a score editor says while it keeps a draft the match
+// was started under by another device (operator decision D1 (a), 2026-10-17).
+export const DRAFT_KEPT_NOTE = "This match was started on another device. Your unsaved entries are still here: Save adds them to the match, Discard drops them.";
+// DRAFT_KEPT_REOPENED_NOTE: the same for a correction draft over a finished
+// match another device reopened (stage 5 review 3, under D1's rule).
+export const DRAFT_KEPT_REOPENED_NOTE = "This match was reopened on another device. Your unsaved entries are still here: Save adds them to the match, Discard drops them.";
+// DRAFT_DROPPED_NOTE: what it says when the match leaves running elsewhere
+// while it keeps the draft (stage 5 review 2): the draft is dropped, never
+// silently, and the editor shows the server's copy.
+export const DRAFT_DROPPED_NOTE = "This match was finished or sent back to the queue on another device. Your unsaved entries were dropped.";
+
+// useOwnStatus: one editor's own_status.jsx owner (the ONE owner of this
+// editor's own status writes and the draft it keeps), observing `feedMatch`
+// (the host's copy of the match, the court console's `started` included, and
+// the team sheet's own representative-bout override) on every render. It
+// answers the owner's view (shownStatus, override, startOffered, refusal,
+// kept, droppedShown, resetSeq) and its doors:
+//   - note(base, draft): what the draft would tap, each render;
+//   - begin(kind, fields): an own Start (OWN_START, `fields` the score the
+//     Start carried, shown until the feed shows the start), reopen
+//     (OWN_REOPEN), requeue-and-reopen (OWN_REQUEUE) or representative-bout
+//     change (OWN_REP); its token;
+//   - settle(token, res): the write's answer, read as it comes: a direct
+//     answer at once, the outbox's through `settled` (a callback, never a
+//     wait); `{ rejections: false }` leaves a rejection to the caller's own
+//     refusal callback (answer);
+//   - answer(token, outcome, msg), release().
+export function useOwnStatus(feedMatch) {
+  const ref = useRefA(null);
+  if (!ref.current) ref.current = createOwnStatus(feedMatch.status, Number(feedMatch.modifiedAt) || 0);
+  const mountedRef = useRefA(true);
+  useEffectA(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+  const [, bump] = useStateA(0);
+  const own = ref.current;
+  own.observe(feedMatch.status, Number(feedMatch.modifiedAt) || 0);
+  const rerender = () => { if (mountedRef.current) bump((n) => n + 1); };
+  const answer = (token, outcome, msg, at) => { own.answer(token, outcome, msg || "", at); rerender(); };
+  const stampOf = (body) => (body && typeof body === "object" ? Number(body.modifiedAt) || 0 : 0);
+  const view = own.view();
+  return {
+    ...view,
+    // Read when the note renders, after this render's `note`, so the first
+    // edit of a new draft takes it down at once.
+    get droppedShown() { return own.view().droppedShown; },
+    note: (base, draft) => own.note(base, draft),
+    begin: (kind, fields) => { const t = own.begin(kind, fields); rerender(); return t; },
+    answer,
+    // claimRefusal: the `onRefusal` for own write `token`'s outbox entry. It
+    // claims a refusal this editor says itself (an own Start's sentence,
+    // StartRefusedNotice), so the outbox raises no `rejected` alert with the
+    // same sentence; the settle below then states it. Anything else, or an
+    // editor gone, is left to the outbox to tell.
+    claimRefusal: (token) => () => mountedRef.current && own.saysRefusal(token),
+    settle: (token, res, opts = {}) => {
+      if (!res) { answer(token, OWN_REFUSED); return; }
+      if (writePending(res)) {
+        // A pending answer with no settlement says nothing more.
+        if (!res.settled || typeof res.settled.then !== "function") return;
+        res.settled.then((body) => {
+          if (body && body.discarded === true) { answer(token, OWN_DISCARDED); return; }
+          const out = classifyStartOutcome(body);
+          answer(token, out.ok ? OWN_LANDED : OWN_HELD, out.ok ? "" : out.msg, out.ok ? stampOf(body) : 0);
+        }, (e) => { if (opts.rejections !== false) answer(token, OWN_REFUSED, startFailureMessage(e)); });
+        return;
+      }
+      if (writeWasRefused(res)) { answer(token, OWN_REFUSED); return; }
+      answer(token, OWN_LANDED, "", stampOf(res));
+    },
+    // carry(token, fields): a landed own write's answer laid on its override
+    // (own_status.jsx carry), read after settle has answered it.
+    carry: (token, fields) => { own.carry(token, fields); rerender(); },
+    release: () => { own.release(); rerender(); },
+    rebaseKept: (base) => { own.rebaseKept(base); rerender(); },
+    discardDraft: () => { own.discardDraft(); rerender(); },
+  };
+}
+
+// DraftKeptNotice: the note, Save (two taps, as the editors' Finish: the
+// bounce of the arming tap cannot save) and Discard (one tap). `from` is the
+// status the match left: "completed" says it was reopened.
+export function DraftKeptNotice({ onSave, onDiscard, disabled, from }) {
+  const { armed, confirm } = useArmedConfirm();
+  return (
+    <div className="pending-write-banner" role="status" aria-live="polite" data-testid="draft-kept-notice">
+      <span>{from === "completed" ? DRAFT_KEPT_REOPENED_NOTE : DRAFT_KEPT_NOTE}</span>
+      <button type="button" className={`btn btn--sm btn--primary ${armed ? "btn--confirm" : ""}`} data-testid="draft-kept-save" disabled={disabled}
+        onClick={(ev) => { if (confirm(ev)) onSave(); }}>
+        {armed ? "Tap again to save" : "Save"}
+      </button>
+      <button type="button" className="btn btn--sm btn--ghost" data-testid="draft-kept-discard" disabled={disabled} onClick={onDiscard}>Discard</button>
+    </div>
+  );
+}
+
+// ownStartRefusalText: that sentence, naming the match.
+export function ownStartRefusalText(match, msg) {
+  const label = scoreRowMatchLabel(match || {});
+  return label ? `${label}: ${msg}` : msg;
+}
+
+// StartRefusedNotice: the sentence beside the board.
+export function StartRefusedNotice({ text }) {
+  if (!text) return null;
+  return (
+    <div className="pending-write-banner pending-write-banner--failed" role="alert" aria-live="assertive" data-testid="start-refused-notice">
+      <span>{text}</span>
+    </div>
+  );
+}
+
+// DraftDroppedNotice: the note a dropped draft leaves (DRAFT_DROPPED_NOTE).
+export function DraftDroppedNotice() {
+  return (
+    <div className="pending-write-banner" role="status" aria-live="polite" data-testid="draft-dropped-notice">
+      <span>{DRAFT_DROPPED_NOTE}</span>
+    </div>
+  );
+}
+
+export function useTapBoard(m, on, opts) {
+  const [, setTick] = useStateA(0);
+  useEffectA(() => {
+    const api = window.API || {};
+    if (!on) return undefined;
+    const bump = () => setTick((t) => t + 1);
+    const offs = [];
+    if (typeof api.subscribePendingTaps === "function") offs.push(api.subscribePendingTaps(m.compId, m.id, bump));
+    if (typeof api.subscribeDerivedMatch === "function") offs.push(api.subscribeDerivedMatch(m.compId, m.id, bump));
+    return () => { for (const off of offs) if (typeof off === "function") off(); };
+  }, [m.compId, m.id, on]);
+  return on ? tapBoardOf(m, opts) : null;
+}
+
 // HeldWriteNotice: the pending banner's line, worded for where the held
 // write stands (queuedNotice): waiting for the connection, held in this page
 // only, or refused by the server on every attempt. The three editors render it.
-export function HeldWriteNotice({ compId, matchId, res }) {
-  const { stuck } = useMatchHeldWrite(compId, matchId);
-  return <span>{queuedNotice(res, { keepsFailing: stuck })}</span>;
+export function HeldWriteNotice({ compId, matchId, res, match = null }) {
+  const { stuck, blocker } = useMatchHeldWrite(compId, matchId, match);
+  return <span>{queuedNotice(res, { keepsFailing: stuck, blockedBy: blocker })}</span>;
 }
 
-export function HeldWriteDiscard({ compId, matchId, onDiscarded, disabled = false }) {
+export function HeldWriteDiscard({ compId, matchId, onDiscarded, disabled = false, match = null }) {
   const api = window.API;
-  const { stuck } = useMatchHeldWrite(compId, matchId);
+  const { stuck, blocker } = useMatchHeldWrite(compId, matchId, match);
   const [busy, setBusy] = useStateA(false);
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
@@ -116,9 +425,15 @@ export function HeldWriteDiscard({ compId, matchId, onDiscarded, disabled = fals
     setBusy(true);
     try {
       const ok = typeof window.confirmDialog === 'function'
-        ? await window.confirmDialog(heldWriteDiscardConfirm())
+        ? await window.confirmDialog(heldWriteDiscardConfirm(blocker || undefined))
         : false;
       if (!ok || !mountedRef.current) return;
+      if (blocker) {
+        // The write the match waits for (G2): the match's own writes stay
+        // queued and go once it is gone, so the editor keeps what it holds.
+        api.discardHeldWrite(blocker.key);
+        return;
+      }
       api.discardFailingHeldWrites(compId, matchId);
       if (typeof onDiscarded === 'function') onDiscarded();
     } finally {
@@ -133,7 +448,7 @@ export function HeldWriteDiscard({ compId, matchId, onDiscarded, disabled = fals
       disabled={disabled || busy}
       onClick={discard}
     >
-      {HELD_WRITE_DISCARD_LABEL}
+      {heldWriteDiscardLabel(blocker)}
     </button>
   );
 }
@@ -505,8 +820,14 @@ function buildDecisionBody(kind, { decisionBy, decisionReason }, enchoPeriodCoun
 // since both are plain objects the server reads the same field off.
 function submitDecisionRequest(compId, matchId, kind, decisionPayload, enchoPeriodCount, password, opts = {}) {
   const body = buildDecisionBody(kind, decisionPayload, enchoPeriodCount, opts);
+  // bc-evts: the decision is the outbox's; `seenScoreVersion` is the score
+  // log line count the editor showed, so a correction over a finished match
+  // carries a basis that says it saw the result (I1).
+  const seen = Number(opts.seenScoreVersion) || 0;
   return attemptScoreWrite({
-    recordScore: (cId, mId, result, pwd) => window.API.recordDecision(cId, mId, result, pwd),
+    recordScore: (cId, mId, result, pwd, _match, o) => window.API.recordDecision(
+      cId, mId, result, pwd, { ...o, ...(seen > 0 ? { seen } : {}) },
+    ),
     confirmDialog: window.confirmDialog,
     compId, matchId, result: body, password: resolveDecisionPassword(password),
   });
@@ -521,6 +842,19 @@ function submitDecisionRequest(compId, matchId, kind, decisionPayload, enchoPeri
 //     match is not a correction (item 7: starts next match), else falls back
 //     to onClose.
 // Call it fresh each render so it captures the current enchoPeriodCount/password.
+// withLocalDecision: what a host's onAfterDecision reads (bc-evts stage 3
+// review 11, X3). The outbox's pending answer carries nothing of the decision,
+// so the decision as recorded here rides on it: its kind, the side it names
+// (the side that withdrew, did not appear or is barred) and the winner that
+// gives, for the hosts' local advance and their skip of the barred
+// competitor's other matches. A direct answer is the stored match already.
+function withLocalDecision(res, match, kind, decisionBy) {
+  if (!writePending(res)) return res;
+  const lost = withdrawnSideKey({ decisionBy });
+  const winner = lost === "a" ? match.sideB : lost === "b" ? match.sideA : null;
+  return { ...res, decision: kind, decisionBy, ...(winner ? { winner } : {}) };
+}
+
 function makeSubmitDecision({
   match,
   enchoPeriodCount,
@@ -546,18 +880,46 @@ function makeSubmitDecision({
   // Not provided by TeamScoreEditorModal (which has its own pending state path).
   setPendingWrite,
   pendingFnRef,
+  // The server copy the screen showed, when it is not `match`'s own (the
+  // individual editor's board, which may show a score-events answer's copy):
+  // the decision's basis claims it and nothing more (bc-evts stage 3 review
+  // 11, m1).
+  seenScoreVersion,
+  // The editor's isDirty (a ref or a thunk): a decision carries no draft
+  // points, so over unsaved entries it asks first (R1, confirmDiscardUnsaved).
+  unsaved = false,
+  // What Discard entries does in the editor (drops a kept draft through its
+  // owner), and the overtime the SERVER holds: a decision sent after Discard
+  // entries carries the server's values for what the draft changed, so the
+  // warning tells the truth (stage 5 review 8).
+  onDiscard,
+  serverEnchoPeriodCount,
 }) {
   const submit = async (kind, { decisionBy, decisionReason }) => {
+    let encho = enchoPeriodCount;
+    if (holdsUnsaved(unsaved)) {
+      const go = await confirmDiscardUnsaved(unsaved, recordDecisionAnyway(kind), onDiscard);
+      if (!go || !mountedRef.current) return;
+      if (typeof serverEnchoPeriodCount === 'number') encho = serverEnchoPeriodCount;
+    }
     setDecisionSubmitting(true);
     setDecisionErr('');
     // F5: clear any prior pending-write state when the operator retries.
     if (setPendingWrite && mountedRef.current) setPendingWrite(false);
     try {
       const updated = await submitDecisionRequest(
-        match.compId, match.id, kind, { decisionBy, decisionReason }, enchoPeriodCount, password,
-        { seenModifiedAt: match.modifiedAt || 0 },
+        match.compId, match.id, kind, { decisionBy, decisionReason }, encho, password,
+        { seenModifiedAt: match.modifiedAt || 0, seenScoreVersion: (seenScoreVersion !== undefined ? seenScoreVersion : match.scoreVersion) || 0 },
       );
-      if (!mountedRef.current) return;
+      if (!mountedRef.current) {
+        // The host read the decision from the outbox as it was queued, and
+        // the decided match left this editor (the court console, stage 6
+        // review 8, M4): the host still moves on, as it would have here.
+        if (!writeDidNotLand(updated) && !isComplete && onAfterDecision) {
+          await onAfterDecision(withLocalDecision(updated, match, kind, decisionBy));
+        }
+        return;
+      }
       // A decision that did not land must not advance ANYTHING below this
       // line: not onAfterDecision (which the shiaijo page wires to a LOCAL
       // bracket advance), not the close. This asks the owner predicate rather
@@ -598,7 +960,7 @@ function makeSubmitDecision({
         // (winner/status) so an offline host can also advance the LOCAL
         // bracket for a decision-completed bout (mp-y3nk), matching the
         // score path's maybeAdvanceLocal.
-        await onAfterDecision(updated);
+        await onAfterDecision(withLocalDecision(updated, match, kind, decisionBy));
       } else {
         onClose();
       }
@@ -1398,6 +1760,53 @@ function withdrawalInForce(m) {
   return m.status === "completed" && isTeamDefaultWinDecision(m.decision);
 }
 
+// The unsaved-entries warning (R1) has one owner, unsaved_entries.jsx.
+export {
+  UNSAVED_ENTRIES_DISCARDED, REOPEN_ANYWAY, QUEUE_AND_REOPEN_ANYWAY, ADD_REP_BOUT_ANYWAY,
+  REMOVE_REP_BOUT_ANYWAY, LEAVE_MATCH_ANYWAY, recordDecisionAnyway, unsavedDiscardDialog,
+  holdsUnsaved, confirmDiscardUnsaved,
+};
+
+// usePublishUnsaved: an editor hands its host a way to ask whether it holds
+// unsaved entries (`hostRef`, the host's ref, passed down as the editor's
+// `hostUnsavedRef`), so a host's leave action asks R1's question before it
+// unmounts or swaps the editor. The thunk reads the editor's own `unsaved`
+// as it is when asked; an editor that goes away takes it back. The thunk also
+// carries the editor's own Discard entries as `discard` (`onDiscard`, read
+// when called), so a host confirm that says the entries are discarded drops
+// them at once, as the editor's own actions do (stage 5 review 9, m1;
+// unsaved_entries.jsx `discardUnsaved`).
+export function usePublishUnsaved(hostRef, unsaved, onDiscard) {
+  const probe = useRefA(null);
+  const unsavedRef = useRefA(unsaved);
+  unsavedRef.current = unsaved;
+  const discardRef = useRefA(onDiscard);
+  discardRef.current = onDiscard;
+  if (!probe.current) {
+    probe.current = () => !probe.current.cleared && holdsUnsaved(unsavedRef.current);
+    // Run only while this editor is mounted: a host holding the thunk past
+    // the editor's unmount (a question answered after it went) drops nothing.
+    probe.current.discard = () => {
+      if (probe.current.gone || typeof discardRef.current !== "function") return;
+      discardRef.current();
+      // The entries are dropped at once, but the editor's own unsaved ref is
+      // set by its next render: until then it still reports them, and an exit
+      // that re-asks the thunk after the answer (the leave's `go`) would ask a
+      // second time (stage 5 review 11, minor 1). Say clean now, in the ref
+      // the editor keeps and in the thunk; the next render states the truth.
+      const held = unsavedRef.current;
+      if (held && typeof held === "object" && "current" in held) held.current = false;
+      probe.current.cleared = true;
+    };
+  }
+  // A render states the editor's own answer again: an entry made after the
+  // discard is unsaved.
+  probe.current.cleared = false;
+  if (hostRef && hostRef.current !== probe.current) hostRef.current = probe.current;
+  useEffectA(() => () => { if (hostRef && hostRef.current === probe.current) hostRef.current = null; }, [hostRef]);
+  useEffectA(() => { probe.current.gone = false; return () => { probe.current.gone = true; }; }, []);
+}
+
 // useMatchReopen: the one client of POST .../reopen and its court-busy remedy
 // POST .../requeue-blocker-and-reopen, for every editor that reopens a match:
 // the kachinuki Reopen and Clear withdrawal and reopen in the individual and
@@ -1425,8 +1834,11 @@ function withdrawalInForce(m) {
 //     aware of the consequences"). What that reopened is named in `notice`;
 //     declining leaves everything as it was and says so in `err`.
 // Every other refusal is the server's sentence, shown verbatim in `err`.
-function useMatchReopen({ match, password, isComplete }) {
+function useMatchReopen({ match, password, isComplete, own, unsaved = false, onDiscard }) {
   const mountedRef = useRefA(true);
+  // The unsaved-entries warning is open (R1): a second tap meanwhile asks
+  // nothing more.
+  const askingRef = useRefA(false);
   useEffectA(() => () => { mountedRef.current = false; }, []);
   const [busy, setBusy] = useStateA(false);
   // The server answered success; the match prop may not have flipped yet.
@@ -1491,8 +1903,22 @@ function useMatchReopen({ match, password, isComplete }) {
     setErr(msg);
   };
 
-  const run = (call, reason, force) => attemptScoreWrite({
-    recordScore: (_compId, _matchId, result, pw) => call(pw, { reason, force: !!result.forceDownstreamReopen }),
+  // bc-evts: a reopen (and the requeue remedy) is the outbox's: the panel
+  // reads it as landed at once, and a refusal arriving later through the
+  // outbox (court busy, a downstream match, anything else) is claimed here
+  // (`onRefusal`) and put back on the panel, so nothing waits on the network.
+  const noteReopened = (ids) => {
+    const n = downstreamKnockoutReopenedNotice(ids);
+    if (n && mountedRef.current) setNotice(n);
+  };
+  const run = (call, reason, force, onRefusal, onForced) => attemptScoreWrite({
+    recordScore: (_compId, _matchId, result, pw, _match, o) => call(pw, {
+      reason, force: !!result.forceDownstreamReopen,
+      seen: match.scoreVersion || 0, onRefusal: o && o.onRefusal,
+    }),
+    onRefusal,
+    onForced,
+    onDownstreamReopened: noteReopened,
     confirmDialog: async (opts) => {
       const ok = await window.confirmDialog(opts);
       if (ok) confirmedRef.current = true;
@@ -1512,18 +1938,50 @@ function useMatchReopen({ match, password, isComplete }) {
     setLanded(true);
   };
 
-  const reopen = async (reason = "") => {
+  // R1: an action over unsaved entries asks first; with none it goes on in
+  // the same tick, as it always did.
+  // Asked only when holdsUnsaved(unsaved), so nothing else awaits.
+  const unsavedDeclined = async (question) => {
+    if (askingRef.current) return true;
+    askingRef.current = true;
+    try {
+      return !(await confirmDiscardUnsaved(unsaved, question, onDiscard)) || !mountedRef.current;
+    } finally {
+      askingRef.current = false;
+    }
+  };
+
+  const reopen = async (reason = "", question = REOPEN_ANYWAY) => {
     if (busy || landed) return;
+    if (holdsUnsaved(unsaved) && await unsavedDeclined(question)) return;
     setErr("");
     setConflict(null);
     setNotice("");
     confirmedRef.current = false;
     setBusy(true);
+    // The editor's own reopen (useOwnStatus): a draft it holds is not kept as
+    // if another device had reopened the match.
+    const token = own ? own.begin(OWN_REOPEN) : 0;
+    // A refusal the outbox brings back later puts the panel back as it was.
+    const refused = (e) => {
+      if (own) own.answer(token, OWN_REFUSED);
+      if (!mountedRef.current) return false;
+      setLanded(false);
+      applyFailure(e, reason);
+      setBusy(false);
+      return true;
+    };
     try {
-      const res = await run((pw, opts) => window.API.reopenMatch(match.compId, match.id, pw, opts), reason, false);
+      // A reopen the downstream confirm sends again is settled by that write.
+      const forced = (f) => { if (own) own.settle(token, f, { rejections: false }); };
+      const res = await run((pw, opts) => window.API.reopenMatch(match.compId, match.id, pw, opts), reason, false, refused, forced);
+      // Its answer, as it comes; a refusal is `refused`'s (a downstream
+      // confirm may still send it again).
+      if (own) own.settle(token, res, { rejections: false });
       if (!mountedRef.current) return;
       finish(res);
     } catch (e) {
+      if (own) own.answer(token, OWN_REFUSED);
       if (!mountedRef.current) return;
       applyFailure(e, reason);
       setBusy(false);
@@ -1537,17 +1995,30 @@ function useMatchReopen({ match, password, isComplete }) {
   const requeueBlocker = async () => {
     const c = conflict;
     if (!c || busy || landed) return;
+    if (holdsUnsaved(unsaved) && await unsavedDeclined(QUEUE_AND_REOPEN_ANYWAY)) return;
     setErr("");
     setBusy(true);
+    const token = own ? own.begin(OWN_REQUEUE) : 0;
+    const refused = (e) => {
+      if (own) own.answer(token, OWN_REFUSED);
+      if (!mountedRef.current) return false;
+      setLanded(false);
+      applyFailure(e, c.reason);
+      setBusy(false);
+      return true;
+    };
     try {
       const res = await run(
-        (pw, opts) => window.API.requeueBlockerAndReopen(match.compId, match.id, c.compId, c.matchId, pw, opts),
-        c.reason, c.force,
+        (pw, opts) => window.API.requeueBlockerAndReopen(match.compId, match.id, c.compId, c.matchId, pw,
+          { ...opts, match, blockerLabel: c.label }),
+        c.reason, c.force, refused, (f) => { if (own) own.settle(token, f, { rejections: false }); },
       );
+      if (own) own.settle(token, res, { rejections: false });
       if (!mountedRef.current) return;
       setConflict(null);
       finish(res);
     } catch (e) {
+      if (own) own.answer(token, OWN_REFUSED);
       if (!mountedRef.current) return;
       // One atomic call, so one failure path: a DIFFERENT match that has since
       // taken the court is offered the remedy again; anything else is shown.
@@ -1952,7 +2423,7 @@ function RecordedWithdrawal({ match, ctl, disabled = false, singleBout = false, 
               type="button"
               className="btn btn--sm"
               data-testid="clear-withdrawal-reopen"
-              onClick={() => ctl.reopen("")}
+              onClick={() => ctl.reopen("", !(clearsDefaultWin || barMovesOn) ? REOPEN_ANYWAY : `Clear the ${decisionNoun} anyway?`)}
               disabled={disabled || ctl.busy || ctl.landed || !settled}
             >
               {/* bc-cse: "Clear <decision>" -- no "and reopen" -- because a

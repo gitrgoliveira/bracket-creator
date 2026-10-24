@@ -268,6 +268,7 @@ func (e *Engine) tiedQualifyingLabels(tx state.StoreTx, compID string, comp *sta
 		if !courtSet {
 			court, courtSet = m.Court, true
 		}
+		// Not state.IsPoolSupplementaryMatchID: only the one kind being rebuilt counts.
 		if (daihyosen && IsPoolDaihyosenMatchID(m.ID)) || (!daihyosen && IsTiebreakerMatchID(m.ID)) {
 			existing = append(existing, m)
 		}

@@ -47,7 +47,8 @@ const CONSOLE_ALLOWLIST = [
   {
     reason: 'The court console logs its queue refresh failing while the journey has the device offline (fetchCourtMatches, admin_shiaijo.jsx); it refreshes again once back online.',
     text: /^Failed to fetch court matches TypeError: Failed to fetch\b/,
-    url: /\/dist\/admin_shiaijo\.js$/,
+    // The build serves its modules under /dist/<build hash>/ (index_meta.go withAssetPrefix).
+    url: /\/dist\/(?:[0-9a-f]+\/)?admin_shiaijo\.js$/,
     whileOffline: true,
   },
   {

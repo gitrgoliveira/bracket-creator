@@ -49,6 +49,9 @@ type DecisionRequest struct {
 	// engine.ForceOptions.Force on the RecordDecisionTxWithOptions call
 	// below.
 	ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
+	// writeTag is the optional writeId and basis (bc-evts F1): a resend of a
+	// decision the match's score event log holds answers as recorded.
+	writeTag
 }
 
 // Validate enforces request-shape invariants on a decision payload
@@ -83,6 +86,9 @@ func (r *DecisionRequest) Validate() error {
 	}
 	if err := validateMaxLen("decisionReason", r.DecisionReason, MaxLenDecisionReason); err != nil {
 		return err
+	}
+	if err := r.validateTag(); err != nil {
+		return &ValidationError{Field: "writeId", Message: err.Error()}
 	}
 	return nil
 }
@@ -193,17 +199,24 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 				return snapErr
 			}
 			// Pass the TRIMMED reason (not req.DecisionReason): it is persisted
-			// into DecisionReason, and dischargeReopenPendingUnderTx stores the
-			// same trimmed value into CorrectionReason below — feeding the raw one
-			// here left the two audit fields on one record disagreeing byte-for-
-			// byte on padding. Mirrors the score path's up-front TrimSpace of
+			// into DecisionReason, and ForceOptions.ReopenReason below carries the
+			// same trimmed value into CorrectionReason on the write itself, so
+			// the two audit fields on one record agree byte for byte on padding.
+			// dischargeReopenPendingUnderTx is handed no reason: it only clears
+			// the flag. Mirrors the score path's up-front TrimSpace of
 			// CorrectionReason (mp-gmcg review).
 			// bc-kcdg/bc-cse finding 5: RecordDecisionTxWithOptions carries
 			// req.ForceDownstreamReopen (the bc-kcdg downstream-knockout-
 			// correction guard) and surfaces the reopened downstream match
 			// ids so they can be broadcast below.
+			fo := engine.ForceOptions{Force: req.ForceDownstreamReopen, Reopened: &reopenedDownstream}
+			if snap.ReopenPending {
+				// The reason is part of the result group: it goes on the
+				// write itself, so the baseline the write leaves holds it.
+				fo.ReopenReason = reason
+			}
 			result, status, engErr = eng.RecordDecisionTxWithOptions(stx, id, mid, req.Decision, req.DecisionBy, reason, req.Encho,
-				engine.ForceOptions{Force: req.ForceDownstreamReopen, Reopened: &reopenedDownstream}, req.ModifiedAt)
+				req.tagInto(fo), req.ModifiedAt)
 			if result != nil && result.ResultSource == "" {
 				result.ResultSource = "admin"
 			}
@@ -215,7 +228,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 				// A decision can complete a POOL or a bracket match, so pass the
 				// snapshot's own home: a pool match still takes the pool arm, a
 				// bracket match skips the guaranteed-miss pool probe (mp-gmcg review).
-				return dischargeReopenPendingUnderTx(stx, id, mid, reason, snap.InBracket)
+				return dischargeReopenPendingUnderTx(stx, id, mid, "", snap.InBracket)
 			}
 			return nil
 		})
@@ -234,7 +247,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		}
 
 		stampWithdrawnStatus(store, id, result)
-		hub.Broadcast(EventMatchUpdated, gin.H{
+		broadcastMatchNow(hub, store, id, mid, gin.H{
 			"competitionId": id,
 			"matchId":       mid,
 			"result":        matchPtrForBroadcast(result),
@@ -243,7 +256,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		// just corrected; broadcast it too so a client watching only that
 		// court/match learns its verdict was cleared (mirrors /score,
 		// /override-winner, and /quick-score).
-		broadcastReopenedDownstream(hub, id, reopenedDownstream)
+		broadcastReopenedDownstream(hub, store, id, reopenedDownstream)
 		if status != nil {
 			hub.Broadcast(EventCompetitorStatusUpdated, gin.H{
 				"competitionId": id,
@@ -297,7 +310,7 @@ func respondDecisionEngineError(c *gin.Context, store CompetitionStore, compID, 
 		// supersede here would not merely mis-report a dropped write,
 		// it would poison the offline queue with one that can never
 		// succeed.
-		respondSuperseded(c, engine.HeldGroupsOf(engErr), engine.HeldReasonOf(engErr), engine.HeldDecisionOf(engErr))
+		respondSuperseded(c, engine.HeldGroupsOf(engErr), engine.HeldReasonOf(engErr), engErr)
 	case errors.As(engErr, &alreadyIneligErr):
 		// T105/CHK047: concurrent kiken, another operator already
 		// recorded ineligibility for this player on a different
@@ -433,6 +446,10 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 			// The draw is a verdict and nothing else (bc-mrgc).
 			Changed: []string{state.GroupResult}, WriteDoor: engine.DoorDecision,
 		}
+		if m.ReopenPending && m.CorrectionReason == "" {
+			// Part of the result group: on the write, so its baseline holds it.
+			write.CorrectionReason = reason
+		}
 		if _, werr := eng.RecordMatchResultWithIneligibilityTx(stx, compID, matchID, write); werr != nil {
 			writeErr = werr
 			return nil
@@ -440,7 +457,7 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 		result = *write
 		applied = true
 		if m.ReopenPending {
-			return dischargeReopenPendingUnderTx(stx, compID, matchID, reason, false)
+			return dischargeReopenPendingUnderTx(stx, compID, matchID, "", false)
 		}
 		return nil
 	})
@@ -465,9 +482,10 @@ func handleBothSidesBarredHikiwake(c *gin.Context, eng ScoringEngine, store Comp
 		}
 		return false
 	}
-	hub.Broadcast(EventMatchUpdated, gin.H{
+	broadcastMatchNow(hub, store, compID, matchID, gin.H{
 		"competitionId": compID,
-		"results":       matchesForBroadcast([]state.MatchResult{result}),
+		"matchId":       matchID,
+		"result":        matchPtrForBroadcast(&result),
 	})
 	tryAutoCompletePoolsAfterWrite(c, eng, hub, compID, result)
 	c.JSON(http.StatusOK, scoreResponseWithReopened(&result, nil))

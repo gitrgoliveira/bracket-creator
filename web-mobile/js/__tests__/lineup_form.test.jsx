@@ -22,8 +22,6 @@ import { answered, namedLater } from './helpers/team_members.js';
 const stubReact = global.React;
 const KEYS = ['1', '2', '3'];
 const NAMES = { positions: { 1: 'Aoki', 2: 'Sato', 3: 'Ito' }, memberIds: { 1: 'mem-1', 2: 'mem-2', 3: 'mem-3' } };
-// What API.queuedLineupSave answers while a save of the lineup is queued.
-const QUEUED = true;
 // The team's members as the API answers them, keyed by the team's id.
 const MEMBERS = [
   { id: 'mem-1', index: 1, name: 'Aoki' },
@@ -311,11 +309,10 @@ describe('giving a match\'s own lineup up', () => {
 
     await drop(view);
 
-    expect(api.deleteMatchLineup).toHaveBeenCalledWith('c', 't', 'm1', 'pw');
+    expect(api.deleteMatchLineup).toHaveBeenCalledWith('c', 't', 'm1', 'pw', expect.any(Object));
     expect(view.result.current.source).toEqual({ matchId: 'm0' });
     expect(view.result.current.values).toEqual(NAMES.positions);
     expect(view.result.current.read).toBe(true);
-    expect(view.result.current.removing).toBe(false);
     expect(sessionStorage.getItem(DRAFT_KEY)).toBeNull();
   });
 
@@ -384,63 +381,21 @@ describe('giving a match\'s own lineup up', () => {
   });
 });
 
+// bc-evts stage 3 review 2, R1: removing a match's own lineup no longer waits
+// for a save of it still queued. The removal is an entry of the match's outbox,
+// after that save, so the server receives the save and then the removal.
 describe('a save of the lineup that is still queued', () => {
-  it('asks the API about this match\'s lineup, and about round 0 for the starting lineup', async () => {
-    await mount();
-    expect(api.queuedLineupSave).toHaveBeenCalledWith('c', 't', { matchId: 'm1' });
-    api.queuedLineupSave.mockClear();
-    await mount({ matchId: '' });
-    expect(api.queuedLineupSave).toHaveBeenCalledWith('c', 't', { round: 0 });
-  });
-
-  it('is false when the API has no such question (a stub), and nothing is queued', async () => {
-    delete api.queuedLineupSave;
+  it('does not hold the removal back: it is asked for, and handed to the outbox', async () => {
+    api.queuedLineupSave = vi.fn().mockReturnValue(true);
+    api.fetchLineupInForce.mockResolvedValueOnce(OWN).mockResolvedValue(CARRIED);
     const view = await mount();
-    expect(view.result.current.saveQueued).toBe(false);
-  });
-
-  it('is true when the API says a save is queued, and false when it says none is', async () => {
-    api.queuedLineupSave.mockReturnValue(QUEUED);
-    expect((await mount()).result.current.saveQueued).toBe(true);
-
-    api.queuedLineupSave.mockReturnValue(false);
-    expect((await mount()).result.current.saveQueued).toBe(false);
-  });
-
-  it('keeps the removal from being asked for: nothing is confirmed, nothing removed', async () => {
-    api.fetchLineupInForce.mockResolvedValue(OWN);
-    api.queuedLineupSave.mockReturnValue(QUEUED);
-    const view = await mount();
-    expect(view.result.current.saveQueued).toBe(true);
-
     await act(async () => { await view.result.current.dropOwnLineup(); });
-
-    expect(window.confirmDialog).not.toHaveBeenCalled();
-    expect(api.deleteMatchLineup).not.toHaveBeenCalled();
-  });
-
-  it('follows the queue: it is false again once the save has gone out', async () => {
-    const listeners = new Set();
-    window.subscribeUnsentWrites = (fn) => { listeners.add(fn); fn(); return () => listeners.delete(fn); };
-    api.queuedLineupSave.mockReturnValue(QUEUED);
-    const view = await mount();
-    expect(view.result.current.saveQueued).toBe(true);
-
-    api.queuedLineupSave.mockReturnValue(false);
-    act(() => listeners.forEach((fn) => fn()));
-    expect(view.result.current.saveQueued).toBe(false);
-
-    api.queuedLineupSave.mockReturnValue(QUEUED);
-    act(() => listeners.forEach((fn) => fn()));
-    expect(view.result.current.saveQueued).toBe(true);
-
-    view.unmount();
-    expect(listeners.size).toBe(0);
+    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(api.deleteMatchLineup).toHaveBeenCalledTimes(1);
+    expect(view.result.current.saveQueued).toBeUndefined();
   });
 });
 
-// Another device saved a lineup of the competition. The editors follow it, as the
-// team sheet does, but never over what the operator has done to the form.
 describe('a lineup change announced for the competition', () => {
   const CHANGED = {
     positions: { 1: 'Kato', 2: 'Sato', 3: 'Ito' }, memberIds: { 1: 'mem-5', 2: 'mem-2', 3: 'mem-3' },
@@ -534,27 +489,6 @@ describe('a lineup change announced for the competition', () => {
     expect(view.result.current.values[1]).toBe('Mori');
     expect(view.result.current.baseline.positions[1]).toBe('Mori');
     expect(view.result.current.dirty).toBe(false);
-  });
-
-  it('is not read while a removal is out, and the removal\'s own read is what ends up shown', async () => {
-    api.fetchLineupInForce.mockResolvedValueOnce(OWN).mockResolvedValue(CARRIED);
-    const view = await mount();
-    const gate = deferred();
-    api.deleteMatchLineup.mockReturnValue(gate.promise);
-    let removal;
-    await act(async () => {
-      removal = view.result.current.dropOwnLineup();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    expect(view.result.current.removing).toBe(true);
-    const before = reads();
-
-    await announce();
-    expect(reads(), 'nothing is read while the removal is out').toBe(before);
-
-    await act(async () => { gate.resolve(true); await removal; });
-    expect(view.result.current.removing).toBe(false);
-    expect(view.result.current.source).toEqual({ matchId: 'm0' });
   });
 
   it('does not put the lineup that a removal took away back, when a read from before it answers', async () => {
@@ -951,6 +885,32 @@ describe('the team\'s members', () => {
   // An editor's own change to the members, made once the server holds it (an add, a
   // rename, a mint): the members as the server answered the write, stamped.
   const change = (view, members) => act(async () => { view.result.current.changeMembers(members); });
+
+  // Stage 3 review 3, F2: an add the server refused (or an operator discarded) leaves
+  // a member that never was on the list this device showed it on, and its id on the
+  // positions it was placed at. The outbox says so (team-member-dropped); the form
+  // takes the member off its list and the id off its positions, keeping the names.
+  it('drop a member whose add never landed, from the list and from the positions, keeping the names', async () => {
+    const view = await mount();
+    await change(view, [NEW_MEMBER]);
+    await act(async () => {
+      view.result.current.setValues((v) => ({ ...v, 2: 'Zed' }));
+      view.result.current.setMemberIds((ids) => ({ ...ids, 2: 'mem-9' }));
+    });
+    expect(view.result.current.squad.map((m) => m.id)).toContain('mem-9');
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('team-member-dropped', { detail: { competitionId: 'c', teamId: 'u', memberId: 'mem-9' } }));
+    });
+    expect(view.result.current.squad.map((m) => m.id), 'another team\'s drop changes nothing').toContain('mem-9');
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('team-member-dropped', { detail: { competitionId: 'c', teamId: 't', memberId: 'mem-9' } }));
+    });
+    expect(view.result.current.squad.map((m) => m.id)).not.toContain('mem-9');
+    expect(view.result.current.memberIds[2]).toBeUndefined();
+    expect(view.result.current.values[2], 'the name stays').toBe('Zed');
+  });
 
   it('are read when the editor opens, for its team, with the password', async () => {
     const view = await mount();
@@ -1523,9 +1483,10 @@ describe('the team\'s members', () => {
 
   // A name typed before the first list is shown would be resolved against no members: a
   // new name minted where the member's seeded slot is free, and the name of a member the
-  // team has refused by the server as a second one. The editors that resolve a typed name
-  // wait for the list first (waitForMembers), bounded by the deadline of any request.
-  describe('the wait for the first list', () => {
+  // team has refused by the server as a second one. Nothing waits for the first list
+  // (bc-evts stage 3 review 2, R1): an editor asks membersListed() whether a read has
+  // shown one (membersReadOver() whether the read is over), and resolves only then.
+  describe('whether a list has been read', () => {
     const openedWith = async (opening) => {
       api.fetchSquads.mockReturnValueOnce(opening.promise);
       const view = renderHook((p) => useLineupForm(p), { initialProps: props() });
@@ -1533,147 +1494,93 @@ describe('the team\'s members', () => {
       return view;
     };
 
-    it('is nothing to wait for once the list the editor opened with is shown', async () => {
+    it('is true once the list the editor opened with is shown, and there is no wait to ask for', async () => {
       const view = await mount();
-      expect(view.result.current.waitForMembers()).toBeNull();
+      expect(view.result.current.membersListed()).toBe(true);
+      expect(view.result.current.waitForMembers).toBeUndefined();
     });
 
-    it('lasts until the read made as the editor opened shows its list, and says so', async () => {
+    it('is false while the read made as the editor opened is out, and true once it shows its list', async () => {
       const opening = deferred();
       const view = await openedWith(opening);
-      let outcome;
-      const waiting = view.result.current.waitForMembers();
-      expect(waiting, 'the read is out').not.toBeNull();
-      waiting.then((listed) => { outcome = listed; });
-      await act(async () => { await Promise.resolve(); });
-      expect(outcome, 'still waiting').toBeUndefined();
-
+      expect(view.result.current.membersListed()).toBe(false);
       await act(async () => { opening.resolve({ t: MEMBERS }); });
-
-      expect(await waiting).toBe(true);
+      expect(view.result.current.membersListed()).toBe(true);
       expect(view.result.current.squad).toEqual(MEMBERS);
-      expect(view.result.current.waitForMembers()).toBeNull();
     });
 
-    it('is ended by an empty list: a team with no members is a list that was read', async () => {
+    it('is true for an empty list: a team with no members is a list that was read', async () => {
       const opening = deferred();
       const view = await openedWith(opening);
-      const waiting = view.result.current.waitForMembers();
-
       await act(async () => { opening.resolve({ t: [] }); });
-
-      expect(await waiting).toBe(true);
+      expect(view.result.current.membersListed()).toBe(true);
     });
 
-    it('is ended by the read failing, which says no list was shown, and there is nothing to wait for after it', async () => {
+    it('stays false when the read fails, which flags the members as unavailable', async () => {
       const opening = deferred();
       const view = await openedWith(opening);
-      const waiting = view.result.current.waitForMembers();
-
-      await act(async () => { opening.reject(new Error('down')); });
-
-      expect(await waiting).toBe(false);
+      await act(async () => { opening.reject(new Error('offline')); });
+      expect(view.result.current.membersListed()).toBe(false);
       expect(view.result.current.squadUnavailable).toBe(true);
-      expect(view.result.current.waitForMembers(), 'the editor goes on without them, as it always did').toBeNull();
     });
 
-    it('is ended at the deadline of any bounded request, saying no list was shown', async () => {
+    // Stage 3 review 3, F1: a read that is never answered must not leave a typed name
+    // unresolved for the editor's life. The read made as the editor opens is ended at
+    // the deadline of any bounded request, as a failure is.
+    it('is ended at the deadline of any bounded request, saying the members could not be read', async () => {
       vi.useFakeTimers();
       try {
         const view = await openedWith(deferred());
-        let outcome = 'waiting';
-        view.result.current.waitForMembers().then((listed) => { outcome = listed; });
-
         await act(async () => { await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS - 1); });
-        expect(outcome).toBe('waiting');
+        expect(view.result.current.membersReadOver(), 'the read is still out').toBe(false);
+        expect(view.result.current.squadUnavailable).toBe(false);
         await act(async () => { await vi.advanceTimersByTimeAsync(1); });
-
-        expect(outcome).toBe(false);
+        expect(view.result.current.membersReadOver()).toBe(true);
+        expect(view.result.current.membersListed()).toBe(false);
+        expect(view.result.current.squadUnavailable).toBe(true);
       } finally {
         vi.useRealTimers();
       }
     });
 
-    // A read that hangs holds up the first typed name for the deadline and no other: after
-    // it the editor goes on without the members, as it does when the read fails, and says
-    // so. A list that arrives later is still shown.
-    it('ends at the deadline for good: nothing is left to wait for, the members read as unavailable, and a list that arrives later is still shown', async () => {
+    it('ends at the deadline for good: a name typed next goes on, the members read as unavailable, and a list that arrives later is still shown', async () => {
       vi.useFakeTimers();
       try {
         const opening = deferred();
         const view = await openedWith(opening);
-        view.result.current.waitForMembers();
-
         await act(async () => { await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS); });
-
-        expect(view.result.current.waitForMembers(), 'a name typed next goes on at once').toBeNull();
+        expect(view.result.current.membersReadOver(), 'a name typed next goes on at once').toBe(true);
         expect(view.result.current.squadUnavailable, 'and the editor says the members could not be read').toBe(true);
 
         await act(async () => { opening.resolve({ t: MEMBERS }); });
 
         expect(view.result.current.squad, 'the list that arrives late is shown').toEqual(MEMBERS);
         expect(view.result.current.squadUnavailable, 'and the members are available again').toBe(false);
-        expect(view.result.current.waitForMembers()).toBeNull();
+        expect(view.result.current.membersListed()).toBe(true);
       } finally {
         vi.useRealTimers();
       }
     });
 
-    it('is ended for a second wait begun meanwhile by the first one\'s deadline, not held for a deadline of its own', async () => {
-      vi.useFakeTimers();
-      try {
-        const view = await openedWith(deferred());
-        view.result.current.waitForMembers();
-        await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
-        let second = 'waiting';
-        view.result.current.waitForMembers().then((listed) => { second = listed; });
-
-        await act(async () => { await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS - 5000); });
-
-        expect(second).toBe(false);
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    // Only a read's list ends it: the members an editor's own write put on the list are
-    // not the team's, and a typed name resolved against them alone still misses the rest.
-    it('is not ended by a member the editor wrote itself, however newly stamped: only a read\'s list ends it', async () => {
+    it('is not made true by a member the editor wrote itself: only a read\'s list makes it', async () => {
       const opening = deferred();
       const view = await openedWith(opening);
-
       await change(view, [answered(NEW_MEMBER)]);
-
-      expect(view.result.current.squad).toEqual([expect.objectContaining({ id: 'mem-9', name: 'Zed' })]);
-      expect(view.result.current.waitForMembers()).not.toBeNull();
+      expect(view.result.current.membersListed()).toBe(false);
       await act(async () => { opening.resolve({ t: MEMBERS }); });
-      expect(view.result.current.waitForMembers()).toBeNull();
+      expect(view.result.current.membersListed()).toBe(true);
       expect(view.result.current.squad.map((m) => m.id)).toEqual(['mem-1', 'mem-2', 'mem-3', 'mem-9']);
     });
 
-    it('is not started again by a read that is out once a list has been shown', async () => {
+    it('is false again for another team, whose members were not read yet', async () => {
       const view = await mount();
-      api.fetchSquads.mockReturnValue(new Promise(() => {}));
-
-      await announce();
-
-      expect(api.fetchSquads, 'a followed lineup reads the members again').toHaveBeenCalledTimes(2);
-      expect(view.result.current.waitForMembers()).toBeNull();
-    });
-
-    it('starts again when the editor is given another team, whose members were not read yet', async () => {
-      const view = await mount();
-      expect(view.result.current.waitForMembers()).toBeNull();
       const other = deferred();
       api.fetchSquads.mockReturnValue(other.promise);
-
       view.rerender(props({ teamId: 'u' }));
       await act(async () => { await Promise.resolve(); });
-      const waiting = view.result.current.waitForMembers();
-      expect(waiting).not.toBeNull();
-
+      expect(view.result.current.membersListed()).toBe(false);
       await act(async () => { other.resolve({ u: [{ id: 'oth-1', index: 1, name: 'Oda' }] }); });
-      expect(await waiting).toBe(true);
+      expect(view.result.current.membersListed()).toBe(true);
     });
   });
 });

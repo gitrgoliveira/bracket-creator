@@ -335,7 +335,9 @@ func (r *roundLineupSettlement) legacyTeams(comp *Competition, roster lineupRost
 			return slices.ContainsFunc(matches, func(m TeamMatch) bool { return m.ID == matchID && m.Seats(team) })
 		}
 		for _, l := range r.lineups {
-			if l.MatchID != "" && roster.has(l.TeamID) && seatedIn(l.TeamID, l.MatchID) {
+			// The lineup a kachinuki match started with is the server's, never
+			// one v2.1.1 had entered.
+			if l.MatchID != "" && !l.IsStartPin() && roster.has(l.TeamID) && seatedIn(l.TeamID, l.MatchID) {
 				add(l.TeamID)
 			}
 		}
@@ -533,7 +535,7 @@ func (s *Store) directRoundLineupStage(compID string) *roundLineupStage {
 func (t *storeTx) roundLineupStage() *roundLineupStage {
 	st := &roundLineupStage{store: t.store, compID: t.compID, write: t.txWriteFn()}
 	st.comp = func() (*Competition, error) { return t.LoadCompetition(t.compID) }
-	st.lineups = func() (map[string]domain.TeamLineup, error) { return t.LoadTeamLineups(t.compID) }
+	st.lineups = func() (map[string]domain.TeamLineup, error) { return t.LoadTeamLineupsWithRemoved(t.compID) }
 	st.poolMatches = func() ([]MatchResult, error) { return t.LoadPoolMatches(t.compID) }
 	st.bracket = func() (*Bracket, error) { return t.LoadBracket(t.compID) }
 	st.players = st.loadPlayers
@@ -588,9 +590,17 @@ func (st *roundLineupStage) settle(onLoad bool) (saved *Competition, err error) 
 		return nil, err
 	}
 
-	res := settleRoundLineups(comp, players, lineups, DrawMatchesFrom(pool, bracket), onLoad)
+	// The settlement reads the lineups in force; the records of lineups taken
+	// away (RemovedAt) are no lineup of any match and are kept as they are.
+	live := liveTeamLineups(lineups)
+	res := settleRoundLineups(comp, players, maps.Clone(live), DrawMatchesFrom(pool, bracket), onLoad)
 
 	if res.changed {
+		for k, l := range lineups {
+			if l.IsRemoved() {
+				res.lineups[k] = l
+			}
+		}
 		if err := st.store.saveTeamLineupsLocked(st.compID, res.lineups, st.write); err != nil {
 			return nil, err
 		}

@@ -184,13 +184,11 @@ func TestOrganiser_AStalePickTheMergeHoldsIsNotRefused(t *testing.T) {
 	}
 }
 
-// A finish stamped before the stored verdict that names another winner is held
-// WHOLE by the merge (HoldReasonFinishAtomic): its picks land nowhere, even when
-// their own stamps are newer than the stored picks'. The judge reads what the
-// write landed, and a held write lands nothing, so such a write is answered
-// superseded and kept in the history, never refused for a pick that was not
-// written.
-func TestOrganiser_AStaleFinishWithAForeignPickIsSupersededNotRefused(t *testing.T) {
+// A finish stamped before the stored verdict that names another winner has its
+// verdict held by the replay, but its groups land or are held by their own
+// stamps, so a pick newer than the stored one WOULD land. The judge reads what
+// the write landed, so a foreign pick is refused (400) and nothing is written.
+func TestOrganiser_AStaleFinishWithAForeignPickThatWouldLandIsRefused(t *testing.T) {
 	for _, mode := range organiserModes {
 		t.Run(mode.name, func(t *testing.T) {
 			p := newOrganiserPickFixture(t, mode.selfRun)
@@ -211,12 +209,15 @@ func TestOrganiser_AStaleFinishWithAForeignPickIsSupersededNotRefused(t *testing
 			before := storedB1(t, p.store, "c1")
 
 			// Another winner, stamped between the picks' stamps and the verdict's.
+			// The replay orders it by its stamp (its pick is newer than the
+			// stored one and would land), so the pick is judged like any
+			// landed pick: a foreign one is refused, nothing is written.
 			stale := sheetWith(state.MatchStatusCompleted, "TeamB", p.now-20_000, nil,
 				repBoutRow([]string{}, []string{"M"}, "TeamB"), unheldMemberID, "")
 			w := p.send(http.MethodPut, repBoutMatchPath+"/score", organiserPassword, stale)
-			require.Equal(t, http.StatusOK, w.Code, "held whole, not refused for its pick: %s", w.Body.String())
-			assert.Contains(t, w.Body.String(), `"superseded"`)
-			assert.Equal(t, before, storedB1(t, p.store, "c1"), "a held write changes nothing")
+			require.Equal(t, http.StatusBadRequest, w.Code, "the pick the write would land is not on the team: %s", w.Body.String())
+			assert.Contains(t, w.Body.String(), `team_member_not_in_team`)
+			assert.Equal(t, before, storedB1(t, p.store, "c1"), "a refused write changes nothing")
 			assert.Empty(t, p.storedRepBout(t).SideAMemberID)
 		})
 	}

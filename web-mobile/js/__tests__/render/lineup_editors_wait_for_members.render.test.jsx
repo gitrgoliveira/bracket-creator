@@ -1,25 +1,25 @@
-// A name typed in a lineup editor is resolved against the team's members, so the
-// editor waits for them to have been read before it resolves one (useLineupForm's
-// waitForMembers), in a real DOM. Resolved against none:
+// A name typed in a lineup editor is resolved against the team's members only once
+// their read is over, and nothing waits for that read (bc-evts stage 3 review 2, R1,
+// the operator's rule: "ALL goes to the outbox ... but never blocks the UI"), in a
+// real DOM. Resolved against none while the read is out:
 //
-//  - a new name is minted where the member's seeded slot is free, instead of naming
-//    that slot (the unnamed member whose number the position was shown with), and
-//  - the name of a member the team already has is refused by the server as a second
-//    member of that name, so the lineup is saved with the name and no member id.
+//  - a new name would be minted where the member's seeded slot is free, instead of
+//    naming that slot (the unnamed member whose number the position was shown with), and
+//  - the name of a member the team already has would be refused by the server as a
+//    second member of that name.
 //
-// The wait is bounded by the deadline of any request, and ends when the read fails:
-// the editor then goes on without the members, as it always did, and says so. Once a
-// list has been shown nothing waits, whatever read is out.
-//
-// Both surfaces that resolve a typed name are covered: the at-court panel's Save and
-// the Lineups page's add row.
+// So while the read is out the at-court panel's Save saves the typed name alone, with
+// no id and the members-unavailable warning, and the Lineups page's add row refuses
+// the add at once, keeping the typed name. Once a list has been shown a typed name is
+// placed by the member it belongs to; after a read that failed the editor goes on
+// without the members, as it always did, and says so.
 
 import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { FETCH_TIMEOUT_MS } from '../../write_result.jsx';
 import { answered } from '../helpers/team_members.js';
 import { lineupPutStub } from '../helpers/lineup_server.js';
+import { membersNotReadNotice } from '../../lineup_draft.jsx';
 
 const TEAM_MEMBERS = [
   { id: 'mem-1', index: 1, name: 'Aoki' },
@@ -86,13 +86,6 @@ afterEach(() => {
   }
 });
 
-function deferred() {
-  let resolve;
-  let reject;
-  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
-  return { promise, resolve, reject };
-}
-
 async function flush() {
   for (let i = 0; i < 6; i += 1) {
     await act(async () => { await Promise.resolve(); });
@@ -134,67 +127,61 @@ async function typeName(utils, position, name) {
 }
 
 const saveButton = (utils) => utils.getByRole('button', { name: /^Save lineup$/ });
-const savingButton = (utils) => utils.getByRole('button', { name: 'Saving…' });
 const putOf = (call) => ({ positions: call[3], memberIds: call[5] });
 const announce = () => act(async () => {
   window.dispatchEvent(new CustomEvent('lineup-updated', { detail: { competitionId: 'comp-1' } }));
 });
 const warning = (utils) => utils.getByTestId('match-lineup-warning-team-a').textContent;
 
-describe('the at-court panel: a Save with a typed name waits for the team\'s members', () => {
-  it('places a member the team has by its id when the name is typed before the members were read', async () => {
-    const members = deferred();
-    api.fetchSquads.mockReturnValue(members.promise);
+describe('the at-court panel: a Save with a typed name never waits for the team\'s members', () => {
+  it('saves the typed name alone, with the warning, while the members are being read', async () => {
+    api.fetchSquads.mockReturnValue(new Promise(() => {}));
     const utils = await mountPanel();
     await typeName(utils, 1, 'Mori');
 
     await click(saveButton(utils));
 
-    expect(api.addTeamMember, 'nothing is added while the members are out').not.toHaveBeenCalled();
-    expect(api.putMatchLineup, 'nor written').not.toHaveBeenCalled();
-    expect(savingButton(utils).disabled, 'the Save is waiting for the members').toBe(true);
+    expect(api.addTeamMember, 'nothing is minted against no list').not.toHaveBeenCalled();
+    expect(api.renameTeamMember).not.toHaveBeenCalled();
+    expect(putOf(api.putMatchLineup.mock.calls[0]), 'the name goes with no id').toEqual({ positions: { 1: 'Mori' }, memberIds: undefined });
+    expect(saveButton(utils), 'nothing waits').toBeTruthy();
+    expect(warning(utils)).toContain('team member list could not be loaded');
+  });
 
-    await act(async () => { members.resolve({ 'team-a': TEAM_MEMBERS }); });
-    await flush();
+  it('places a member the team has by its id once the members were read', async () => {
+    const utils = await mountPanel();
+    await typeName(utils, 1, 'Mori');
+
+    await click(saveButton(utils));
 
     expect(api.addTeamMember, 'Mori is the member the team has, not a new one').not.toHaveBeenCalled();
     expect(api.renameTeamMember).not.toHaveBeenCalled();
     expect(putOf(api.putMatchLineup.mock.calls[0])).toEqual({ positions: { 1: 'Mori' }, memberIds: { 1: 'mem-4' } });
   });
 
-  it('names the unnamed member seeded for the position when a new name is typed before the members were read', async () => {
+  it('names the unnamed member seeded for the position once the members were read', async () => {
     api.fetchLineupInForce.mockResolvedValue(matchLineup(EMPTY));
-    const members = deferred();
-    api.fetchSquads.mockReturnValue(members.promise);
+    api.fetchSquads.mockResolvedValue({ 'team-a': FRESH });
     const utils = await mountPanel();
     await typeName(utils, 1, 'Mori');
 
     await click(saveButton(utils));
-    expect(api.addTeamMember).not.toHaveBeenCalled();
-    expect(api.renameTeamMember).not.toHaveBeenCalled();
-    await act(async () => { members.resolve({ 'team-a': FRESH }); });
-    await flush();
 
-    expect(api.renameTeamMember, 'the slot the position was shown with is named').toHaveBeenCalledWith('comp-1', 'team-a', 'mem-1', 'Mori', 'pw');
+    expect(api.renameTeamMember, 'the slot the position was shown with is named').toHaveBeenCalledWith('comp-1', 'team-a', 'mem-1', 'Mori', 'pw', expect.any(Object));
     expect(api.addTeamMember, 'no member is added beside it').not.toHaveBeenCalled();
     expect(putOf(api.putMatchLineup.mock.calls[0])).toEqual({ positions: { 1: 'Mori' }, memberIds: { 1: 'mem-1' } });
   });
 
-  // The Save is judged on the members once they were read, before the resolver names or
-  // mints anything: against none, Kato would be minted for a Save the typed Mori refuses.
-  it('refuses a lineup that would field a member twice before anything is minted, judged on the members once they were read', async () => {
+  // Judged before the resolver names or mints anything: Kato is not minted for a Save
+  // the typed Mori refuses.
+  it('refuses a lineup that would field a member twice before anything is minted', async () => {
     api.fetchLineupInForce.mockResolvedValue(matchLineup({
       positions: { 1: 'Mori', 2: 'Sato', 3: 'Ito' }, memberIds: { 1: 'mem-4', 2: 'mem-2', 3: 'mem-3' },
     }));
-    const members = deferred();
-    api.fetchSquads.mockReturnValue(members.promise);
     const utils = await mountPanel();
     await typeName(utils, 2, 'Mori');
     await typeName(utils, 3, 'Kato');
     await click(saveButton(utils));
-
-    await act(async () => { members.resolve({ 'team-a': TEAM_MEMBERS }); });
-    await flush();
 
     expect(utils.getByText('Mori is already at Position 1.')).toBeTruthy();
     expect(api.addTeamMember, 'Kato is not minted for a Save that is refused').not.toHaveBeenCalled();
@@ -202,9 +189,8 @@ describe('the at-court panel: a Save with a typed name waits for the team\'s mem
     expect(api.putMatchLineup).not.toHaveBeenCalled();
   });
 
-  it('does not wait for a Save with no typed name: a position that was picked or left alone needs no members', async () => {
-    const members = deferred();
-    api.fetchSquads.mockReturnValue(members.promise);
+  it('needs no members for a Save with no typed name: a position that was picked or left alone', async () => {
+    api.fetchSquads.mockReturnValue(new Promise(() => {}));
     const utils = await mountPanel();
     await act(async () => { fireEvent.click(utils.getAllByRole('button', { name: 'Clear player' })[0]); });
 
@@ -226,79 +212,44 @@ describe('the at-court panel: a Save with a typed name waits for the team\'s mem
     expect(warning(utils)).toContain('team member list could not be loaded');
   });
 
-  it('goes on, and says so, when the read fails while the Save waits for it', async () => {
-    const members = deferred();
-    api.fetchSquads.mockReturnValue(members.promise);
+  it('places the name by its id once a list has been shown, whatever read is out', async () => {
     const utils = await mountPanel();
-    await typeName(utils, 1, 'Mori');
-    await click(saveButton(utils));
-    expect(api.addTeamMember).not.toHaveBeenCalled();
-
-    await act(async () => { members.reject(new TypeError('Failed to fetch')); });
-    await flush();
-
-    expect(api.addTeamMember).toHaveBeenCalledTimes(1);
-    expect(putOf(api.putMatchLineup.mock.calls[0]).memberIds).toEqual({ 1: 'mem-minted' });
-    expect(warning(utils)).toContain('team member list could not be loaded');
-  });
-
-  it('goes on, and says so, when the read is not answered by its deadline', async () => {
-    api.fetchSquads.mockReturnValue(new Promise(() => {}));
-    const utils = await mountPanel();
-    await typeName(utils, 1, 'Mori');
-
-    vi.useFakeTimers();
-    try {
-      await act(async () => { fireEvent.click(saveButton(utils)); });
-      await act(async () => { vi.advanceTimersByTime(FETCH_TIMEOUT_MS - 1); });
-      expect(api.addTeamMember, 'nothing is minted while the read may still answer').not.toHaveBeenCalled();
-      await act(async () => { vi.advanceTimersByTime(2); });
-      await flush();
-    } finally {
-      vi.useRealTimers();
-    }
-
-    expect(api.addTeamMember).toHaveBeenCalledTimes(1);
-    expect(putOf(api.putMatchLineup.mock.calls[0]).memberIds).toEqual({ 1: 'mem-minted' });
-    expect(warning(utils)).toContain('team member list could not be loaded');
-  });
-
-  it('does not wait once a list has been shown, whatever read is out', async () => {
-    const utils = await mountPanel();
-    // A lineup another device saved makes the editor read the members again; never answered.
     api.fetchSquads.mockReturnValue(new Promise(() => {}));
     await announce();
-    await typeName(utils, 2, 'Kato');
+    await typeName(utils, 1, 'Mori');
 
     await click(saveButton(utils));
 
-    expect(api.addTeamMember, 'Kato is minted against the list shown, at once').toHaveBeenCalledTimes(1);
-    expect(putOf(api.putMatchLineup.mock.calls[0]).memberIds).toEqual({ 2: 'mem-minted' });
+    expect(putOf(api.putMatchLineup.mock.calls[0])).toEqual({ positions: { 1: 'Mori' }, memberIds: { 1: 'mem-4' } });
   });
 });
 
-describe('the Lineups page: an add row waits for the team\'s members', () => {
+describe('the Lineups page: an add row never waits for the team\'s members', () => {
   const addRow = async (utils, name) => {
     await act(async () => { fireEvent.change(utils.getByTestId('lineup-position-1'), { target: { value: '__add__' } }); });
     await act(async () => { fireEvent.change(utils.getByLabelText('New member name for 1'), { target: { value: name } }); });
   };
   const addButton = (utils) => utils.getByRole('button', { name: /^(Add|Adding…)$/ });
 
-  it('selects a member the team has, once the members were read, instead of adding the name again', async () => {
-    const members = deferred();
-    api.fetchSquads.mockReturnValue(members.promise);
+  it('refuses the add at once while the members are being read, and keeps the typed name', async () => {
+    api.fetchSquads.mockReturnValue(new Promise(() => {}));
     const utils = await mountPage();
     await addRow(utils, 'Mori');
 
     await click(addButton(utils));
 
-    expect(api.addTeamMember, 'nothing is added while the members are out').not.toHaveBeenCalled();
+    expect(api.addTeamMember, 'nothing is added').not.toHaveBeenCalled();
     expect(window.confirmDialog, 'nor asked').not.toHaveBeenCalled();
-    expect(addButton(utils).textContent, 'the add waits for the members').toBe('Adding…');
-    expect(addButton(utils).disabled).toBe(true);
+    expect(addButton(utils).disabled, 'nothing waits').toBe(false);
+    expect(utils.getByText(membersNotReadNotice('Mori'))).toBeTruthy();
+    expect(utils.getByLabelText('New member name for 1').value).toBe('Mori');
+  });
 
-    await act(async () => { members.resolve({ 'team-a': TEAM_MEMBERS }); });
-    await flush();
+  it('selects a member the team has, once the members were read, instead of adding the name again', async () => {
+    const utils = await mountPage();
+    await addRow(utils, 'Mori');
+
+    await click(addButton(utils));
 
     expect(api.addTeamMember, 'Mori is the member the team has, not a new one').not.toHaveBeenCalled();
     expect(window.confirmDialog, 'selecting a member that exists asks nothing').not.toHaveBeenCalled();
@@ -307,38 +258,15 @@ describe('the Lineups page: an add row waits for the team\'s members', () => {
 
   it('names the unnamed member seeded for the position, once the members were read, instead of adding one', async () => {
     api.fetchTeamLineup.mockResolvedValue(startingLineup(EMPTY));
-    const members = deferred();
-    api.fetchSquads.mockReturnValue(members.promise);
+    api.fetchSquads.mockResolvedValue({ 'team-a': FRESH });
     const utils = await mountPage();
     await addRow(utils, 'Mori');
 
     await click(addButton(utils));
-    expect(window.confirmDialog).not.toHaveBeenCalled();
-    await act(async () => { members.resolve({ 'team-a': FRESH }); });
-    await flush();
 
     expect(window.confirmDialog).toHaveBeenCalledTimes(1);
-    expect(window.confirmDialog.mock.calls[0][0].message, 'the slot is named').not.toContain('as a new member of');
-    expect(api.renameTeamMember).toHaveBeenCalledWith('comp-1', 'team-a', 'mem-1', 'Mori', 'pw');
+    expect(api.renameTeamMember).toHaveBeenCalledWith('comp-1', 'team-a', 'mem-1', 'Mori', 'pw', expect.any(Object));
     expect(api.addTeamMember).not.toHaveBeenCalled();
-    expect(utils.getByTestId('lineup-position-1').value).toBe('mem-1');
-  });
-
-  it('judges the placements as they are once the wait is over: a position cleared meanwhile no longer holds the member', async () => {
-    const members = deferred();
-    api.fetchSquads.mockReturnValue(members.promise);
-    const utils = await mountPage();
-    // Sato holds position 2 of the starting lineup, and is typed for position 1.
-    await addRow(utils, 'Sato');
-    await click(addButton(utils));
-    await act(async () => { fireEvent.change(utils.getByTestId('lineup-position-2'), { target: { value: '' } }); });
-
-    await act(async () => { members.resolve({ 'team-a': TEAM_MEMBERS }); });
-    await flush();
-
-    expect(utils.queryByText(/is already at/), 'Sato is no longer at position 2').toBeNull();
-    expect(api.addTeamMember).not.toHaveBeenCalled();
-    expect(utils.getByTestId('lineup-position-1').value).toBe('mem-2');
   });
 
   it('adds the member when the members could not be read, as it always did', async () => {
@@ -348,53 +276,7 @@ describe('the Lineups page: an add row waits for the team\'s members', () => {
 
     await click(addButton(utils));
 
-    expect(window.confirmDialog.mock.calls[0][0].message).toContain('as a new member of');
-    expect(api.addTeamMember).toHaveBeenCalledWith('comp-1', 'team-a', 'Mori', 'pw');
-    expect(utils.getByTestId('lineup-position-1').value).toBe('mem-minted');
-  });
-
-  it('adds the member when the read fails while the add waits for it', async () => {
-    const members = deferred();
-    api.fetchSquads.mockReturnValue(members.promise);
-    const utils = await mountPage();
-    await addRow(utils, 'Mori');
-    await click(addButton(utils));
-    expect(api.addTeamMember).not.toHaveBeenCalled();
-
-    await act(async () => { members.reject(new TypeError('Failed to fetch')); });
-    await flush();
-
-    expect(api.addTeamMember).toHaveBeenCalledWith('comp-1', 'team-a', 'Mori', 'pw');
-    expect(utils.getByTestId('lineup-position-1').value, 'the member is placed and the add row closed').toBe('mem-minted');
-  });
-
-  it('adds the member when the read is not answered by its deadline', async () => {
-    api.fetchSquads.mockReturnValue(new Promise(() => {}));
-    const utils = await mountPage();
-    await addRow(utils, 'Mori');
-
-    vi.useFakeTimers();
-    try {
-      await act(async () => { fireEvent.click(addButton(utils)); });
-      await act(async () => { vi.advanceTimersByTime(FETCH_TIMEOUT_MS - 1); });
-      expect(api.addTeamMember).not.toHaveBeenCalled();
-      await act(async () => { vi.advanceTimersByTime(2); });
-      await flush();
-    } finally {
-      vi.useRealTimers();
-    }
-
-    expect(api.addTeamMember).toHaveBeenCalledWith('comp-1', 'team-a', 'Mori', 'pw');
-  });
-
-  it('does not wait once a list has been shown, whatever read is out', async () => {
-    const utils = await mountPage();
-    api.fetchSquads.mockReturnValue(new Promise(() => {}));
-    await announce();
-    await addRow(utils, 'Kato');
-
-    await click(addButton(utils));
-
-    expect(api.addTeamMember, 'Kato is added against the list shown, at once').toHaveBeenCalledWith('comp-1', 'team-a', 'Kato', 'pw');
+    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(api.addTeamMember).toHaveBeenCalledTimes(1);
   });
 });

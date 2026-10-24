@@ -211,7 +211,7 @@ describe('AdminPools chusen banner: same-name members are kept apart by index/id
 
     await waitFor(() => expect(api.overridePoolRanks).toHaveBeenCalledTimes(1));
     // (compID, poolID, ranks, password, forceDownstreamReopen)
-    expect(api.overridePoolRanks.mock.calls[0]).toEqual(['c1', 'Pool A', [
+    expect(api.overridePoolRanks.mock.calls[0].slice(0, 5)).toEqual(['c1', 'Pool A', [
       { playerId: 'team-1', rank: 2 },
       { playerId: 'team-2', rank: 1 },
     ], PASSWORD, false]);
@@ -240,7 +240,7 @@ describe('AdminPools chusen banner: unique-name group regression guard', () => {
     await act(async () => { fireEvent.click(recordBtn); });
 
     await waitFor(() => expect(api.overridePoolRanks).toHaveBeenCalledTimes(1));
-    expect(api.overridePoolRanks.mock.calls[0]).toEqual(['c1', 'Pool A', [
+    expect(api.overridePoolRanks.mock.calls[0].slice(0, 5)).toEqual(['c1', 'Pool A', [
       { playerId: 'team-a', rank: 2 },
       { playerId: 'team-b', rank: 1 },
     ], PASSWORD, false]);
@@ -337,7 +337,7 @@ describe('AdminPools chusen banner: two tied groups in the same pool stay indepe
 
     await waitFor(() => expect(api.overridePoolRanks).toHaveBeenCalledTimes(1));
     // Group 2 must never appear in the write: it was not submitted.
-    expect(api.overridePoolRanks.mock.calls[0]).toEqual(['c1', 'Pool A', [
+    expect(api.overridePoolRanks.mock.calls[0].slice(0, 5)).toEqual(['c1', 'Pool A', [
       { playerId: 'team-a', rank: 2 },
       { playerId: 'team-b', rank: 1 },
     ], PASSWORD, false]);
@@ -584,10 +584,41 @@ describe('AdminPools chusen banner: a rank that moves a knockout qualifier', () 
     expect(message).toContain('Match 9');
     expect(confirmLabel).toBe('Apply and reopen');
     const order = [{ playerId: 'team-a', rank: 1 }, { playerId: 'team-b', rank: 2 }];
-    expect(api.overridePoolRanks.mock.calls).toEqual([
+    expect(api.overridePoolRanks.mock.calls.map((call) => call.slice(0, 5))).toEqual([
       ['c1', 'Pool A', order, PASSWORD, false],
       ['c1', 'Pool A', order, PASSWORD, true],
     ]);
+  });
+
+  // bc-evts stage 3 review 11, Y7: the order is the outbox's, answered
+  // pending at once; the refusal comes later, through the onRefusal the door
+  // is handed, and is asked about and told exactly as a direct one.
+  const pending = () => ({ applied: true, pending: true, key: 'k', settled: new Promise(() => {}) });
+
+  it('a pending order frees the group at once, and its later refusal is asked about and resent confirmed', async () => {
+    const api = makeApi([uniqueGroup]);
+    api.overridePoolRanks = vi.fn().mockResolvedValue(pending());
+    window.confirmDialog = vi.fn().mockResolvedValue(true);
+    await recordDefaults(api);
+    await waitFor(() => expect(api.overridePoolRanks).toHaveBeenCalledTimes(1));
+    const opts = api.overridePoolRanks.mock.calls[0][5];
+    expect(typeof (opts && opts.onRefusal)).toBe('function');
+    let claimed;
+    await act(async () => { claimed = opts.onRefusal(refusal()); });
+    expect(claimed).toBe(true);
+    await waitFor(() => expect(api.overridePoolRanks).toHaveBeenCalledTimes(2));
+    expect(api.overridePoolRanks.mock.calls[1][4]).toBe(true);
+  });
+
+  it('a pending order\'s later plain refusal is said in the group, and the order read again', async () => {
+    const api = makeApi([uniqueGroup]);
+    api.overridePoolRanks = vi.fn().mockResolvedValue(pending());
+    await recordDefaults(api);
+    await waitFor(() => expect(api.overridePoolRanks).toHaveBeenCalledTimes(1));
+    const reads = api.chusenCandidates.mock.calls.length;
+    await act(async () => { api.overridePoolRanks.mock.calls[0][5].onRefusal(new Error('rank refused')); });
+    await screen.findByText('rank refused');
+    expect(api.chusenCandidates.mock.calls.length).toBeGreaterThan(reads);
   });
 
   it('declined, records nothing and says so in the group', async () => {
@@ -690,7 +721,7 @@ describe('AdminPools chusen: a recorded chusen can be changed', () => {
     await waitFor(() => expect(api.overridePoolRanks).toHaveBeenCalled());
     // (compID, poolID, ranks, password, forceDownstreamReopen): the same call
     // a first chusen makes, once, with the whole order.
-    expect(api.overridePoolRanks.mock.calls).toEqual([
+    expect(api.overridePoolRanks.mock.calls.map((call) => call.slice(0, 5))).toEqual([
       ['c1', 'Pool A', [
         { playerId: 'id-alpha', rank: 1 },
         { playerId: 'id-beta', rank: 2 },

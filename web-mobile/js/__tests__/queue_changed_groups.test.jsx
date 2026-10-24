@@ -70,7 +70,7 @@ function installFetch() {
     });
 }
 
-const storedEntries = () => JSON.parse(_lsStore.bc_write_queue || '[]').map(([, d]) => d);
+const storedEntries = () => JSON.parse(_lsStore.bc_write_queue_v2 || '[]').map(([, d]) => d);
 
 describe('`changed` survives the queue', () => {
     it('persisted, rehydrated after a reload, and replayed', async () => {
@@ -97,6 +97,8 @@ describe('a write that replaces a queued one claims both writes\' groups', () =>
         online = false;
         installFetch();
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'], ipponsB: [], changed: ['points'] }, 'pw', null);
+        // Its offline send fails (the entry is not out when the next comes).
+        await tick(0);
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'], ipponsB: [], encho: { periodCount: 1 }, changed: ['encho'] }, 'pw', null);
         expect(storedEntries()).toHaveLength(1);
         expect(storedEntries()[0].payload.changed).toEqual(['points', 'encho']);
@@ -106,31 +108,42 @@ describe('a write that replaces a queued one claims both writes\' groups', () =>
         expect(sent.at(-1).changed).toEqual(['points', 'encho']);
     });
 
-    it('a direct running write sent past a queued one names the queued one\'s groups too', async () => {
+    // bc-evts: a running write is the outbox's too; made over a queued one
+    // not yet out, it takes its place and is sent once, naming both.
+    it('a running write made over a queued one takes its place and names the queued one\'s groups too', async () => {
         online = false;
         installFetch();
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'], ipponsB: [], changed: ['points'] }, 'pw', null);
+        // Its offline send fails (the entry is not out when the next comes).
+        await tick(0);
         online = true;
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'], ipponsB: [], encho: { periodCount: 1 }, changed: ['encho'] }, 'pw', null);
-        const direct = sent.find((b) => b.rev === 2);
-        expect(direct).toBeTruthy();
-        expect(direct.changed).toEqual(['points', 'encho']);
+        await tick(0);
+        const running = sent.filter((b) => b.status === 'running');
+        expect(running).toHaveLength(1);
+        expect(running[0].changed).toEqual(['points', 'encho']);
     });
 
-    it('a Finish sent past a queued autosave names the autosave\'s groups too', async () => {
+    // bc-evts: the Finish is the outbox's; it takes the queued running write's
+    // place (_coalesceTarget) and is sent in its turn.
+    it('a Finish that takes a queued running write\'s place names its groups too', async () => {
         online = false;
         installFetch();
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'], ipponsB: [], changed: ['points'] }, 'pw', null);
+        // Its offline send fails (the entry is not out when the next comes).
+        await tick(0);
         online = true;
-        await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A', ipponsA: ['M'], ipponsB: [], changed: ['result'] }, 'pw', null);
+        await (await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A', ipponsA: ['M'], ipponsB: [], changed: ['result'] }, 'pw', null)).settled;
         const finish = sent.find((b) => b.status === 'completed');
         expect(finish.changed).toEqual(['points', 'result']);
     });
 
-    it('a Finish queued over a queued autosave names both', async () => {
+    it('a Finish queued over a queued running write names both', async () => {
         online = false;
         installFetch();
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'], ipponsB: [], changed: ['points'] }, 'pw', null);
+        // Its offline send fails (the entry is not out when the next comes).
+        await tick(0);
         await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A', ipponsA: ['M'], ipponsB: [], changed: ['result'] }, 'pw', null);
         const entries = storedEntries();
         expect(entries).toHaveLength(1);
@@ -146,12 +159,11 @@ describe('a write that replaces a queued one claims both writes\' groups', () =>
         await flushMicrotasks();
         mod.enqueueRunningWrite('c1', 'm1', { status: 'running', ipponsA: ['M'], changed: ['bout:2'] }, 'pw');
         expect(storedEntries()[0].payload.changed).toEqual(['points', 'bout:2']);
-    });
-
-    it('a Finish whose send fails after another write was queued meanwhile names both', async () => {
-        // The Finish is in flight when an autosave from another editor for the
-        // same match fails and is queued; the Finish then fails too and takes
-        // that entry's place in the queue.
+    });    // bc-evts: the Finish is the outbox's from the start. A running write
+    // queued while it is out never takes its place (a running write never
+    // replaces a queued Finish): it is its own entry behind it, and each keeps
+    // the groups it names.
+    it('a running write queued while the Finish is out is its own entry behind it', async () => {
         installFetch();
         const mod = await import('../api_client.jsx');
         let failFinish;
@@ -166,11 +178,9 @@ describe('a write that replaces a queued one claims both writes\' groups', () =>
         mod.enqueueRunningWrite('c1', 'm1', { status: 'running', ipponsA: ['M'], encho: { periodCount: 1 }, changed: ['encho'] }, 'pw');
         await flushMicrotasks();
         failFinish();
-        await finishing;
+        await finishing;        await flushMicrotasks();
         const entries = storedEntries();
-        expect(entries).toHaveLength(1);
-        expect(entries[0].terminal).toBe(true);
-        expect(entries[0].payload.changed).toEqual(['encho', 'result']);
+        expect(entries.map((d) => [d.terminal, d.payload.changed])).toEqual([[true, ['result']], [false, ['encho']]]);
     });
 
     it('a queued write that named no groups ("every group") makes the survivor name none', async () => {

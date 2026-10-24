@@ -27,8 +27,9 @@
 
 import { IPPON_PLACEHOLDER } from './result_slot.jsx';
 import {
-    NEEDS_WINNER_NOTE, DEFAULT_WIN_STANDS_NOTE, writeNeedsWinner, writeDefaultWinStands, writeHeldDecision,
-    writePartlyHeld, writeHeldGroups, writeDisplacedGroups, writeDisplacedForWinner,
+    MATCH_CLOSED_NOTE, RESULT_LOCKED_PLAYED_REASON, RESULT_LOCKED_RUNNING_REASON, MATCH_CLOSED_ADVICE,
+    writeMatchClosed, writeResultLocked,
+    writePartlyHeld, writeHeldGroups, writeDisplacedGroups, writeDisplacedForClosedMatch,
 } from './write_result.jsx';
 
 export const GROUP_POINTS = 'points';
@@ -115,45 +116,45 @@ export function groupsLabel(groups) {
 
 // heldGroupsNote: the quiet note a score editor shows when the server applied
 // a write in part and kept the rest in the match's history (write_result.jsx
-// writePartlyHeld), naming what was kept; null when nothing was. `needsWinner`
-// when they were held because applying them would leave the finished match
-// without a winner (writeNeedsWinner): the note then says to correct the
-// result with a winner instead of naming a newer change.
-export function heldGroupsNote(groups, needsWinner = false, defaultWinStands = false, decision = null) {
+// writePartlyHeld), naming what was kept; null when nothing was. `why` is the
+// sentence it ends on when the answer gives a reason (keptInHistoryNote);
+// without one the note names a newer change.
+export function heldGroupsNote(groups, why = null) {
     const words = groupsLabel(groups);
     if (!words) return null;
-    const why = needsWinner ? NEEDS_WINNER_NOTE : defaultWinStands ? DEFAULT_WIN_STANDS_NOTE(decision) : 'A newer change to the same thing was recorded first.';
-    return `Kept in the match's history, not applied: ${words}. ${why}`;
+    return `Kept in the match's history, not applied: ${words}. ${why || 'A newer change to the same thing was recorded first.'}`;
 }
 
 // displacedGroupsNote: the note for a write that WAS recorded and moved a
 // later change of the match to its history (write_result.jsx
-// writeDisplacedGroups). `needsWinner` (writeDisplacedForWinner) when the
-// answer says why with heldReason "needs_winner": the change would have left
-// the finished match without a winner. A change moved for another reason (a representative's pick
-// stamped after the representative bout's removal, which leaves it nothing to
-// stand on) carries no such reason and is worded plainly, never with a winner
-// the match does not lack. null when nothing was moved.
-export function displacedGroupsNote(groups, needsWinner = false) {
+// writeDisplacedGroups). `afterFinish` (writeDisplacedForClosedMatch) when the
+// answer says the change was made after the match was finished (heldReason
+// "match_closed"); a change moved for another reason (a representative's pick
+// stamped after the representative bout's removal) is worded plainly. null
+// when nothing was moved.
+export function displacedGroupsNote(groups, afterFinish = false) {
     const words = groupsLabel(groups);
     if (!words) return null;
-    return needsWinner
-        ? `Saved. A later change to ${words} would have left the finished match without a winner, so it was moved to the match's history.`
+    return afterFinish
+        ? `Saved. A later change to ${words} was made after the match was finished, so it was moved to the match's history.`
         : `Saved. A later change to ${words} was moved to the match's history.`;
 }
 
 // keptInHistoryNote: the ONE note a score editor (useKeptInHistoryNote) or
 // its closing host (admin.jsx's toast) shows for what a write's answer kept
 // in the match's history: this write's own groups held (applied in part, or
-// superseded because the finished match needs a winner), and/or later
-// changes it moved there (worded by the reason the answer gives, if any).
-// null when the answer kept nothing.
+// turned away because the match is finished or the next round depends on its
+// result), and/or later changes it moved there. null when it kept nothing.
 export function keptInHistoryNote(res) {
     const parts = [];
-    if (writePartlyHeld(res) || writeNeedsWinner(res) || writeDefaultWinStands(res)) {
-        parts.push(heldGroupsNote(writeHeldGroups(res), writeNeedsWinner(res), writeDefaultWinStands(res), writeHeldDecision(res)));
+    const locked = writeResultLocked(res);
+    if (writePartlyHeld(res) || writeMatchClosed(res) || locked) {
+        const why = locked
+            ? `${(locked === 'played' ? RESULT_LOCKED_PLAYED_REASON : RESULT_LOCKED_RUNNING_REASON).replace(/^./, (c) => c.toUpperCase())}. ${MATCH_CLOSED_ADVICE}`
+            : writeMatchClosed(res) ? MATCH_CLOSED_NOTE : null;
+        parts.push(heldGroupsNote(writeHeldGroups(res), why));
     }
-    parts.push(displacedGroupsNote(writeDisplacedGroups(res), writeDisplacedForWinner(res)));
+    parts.push(displacedGroupsNote(writeDisplacedGroups(res), writeDisplacedForClosedMatch(res)));
     const text = parts.filter(Boolean).join(' ');
     return text || null;
 }

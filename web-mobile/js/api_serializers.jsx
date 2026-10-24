@@ -171,8 +171,11 @@ function toBackendMatchResult(patch, match) {
         // mark on the sub winner's side; the field itself never reaches the
         // wire. Subs echoed verbatim from the server already carry the mark
         // inside their ippons and pass through untouched.
-        result.subResults = patch.subResults.map((sub) => {
-            if (typeof sub.decidedByHantei !== "boolean") return sub;
+        // A bout row read from the server carries its own markIds (bc-evts):
+        // they name the marks for the score-events door and are never sent.
+        result.subResults = patch.subResults.map((row) => {
+            const { markIds: _markIds, ...sub } = row || {};
+            if (typeof sub.decidedByHantei !== "boolean") return row && row.markIds !== undefined ? sub : row;
             const { decidedByHantei, ...rest } = sub;
             let a = stripHt(rest.ipponsA), b = stripHt(rest.ipponsB);
             if (decidedByHantei) {
@@ -196,8 +199,10 @@ function toBackendMatchResult(patch, match) {
     if (patch.kachinukiBoutFinal) result.kachinukiBoutFinal = true;
     // bc-sbq: transient request-only flag marking a write that only starts the
     // match (startPatch): the server keeps the stored score, so a start sends
-    // none, and nothing that reads the payload (the display-tab broadcast
-    // included) mistakes an empty scoreline for the match's. Never persisted.
+    // none. The display-tab broadcast of the same payload has its own rule
+    // (_broadcastPatch, api_client.jsx: no scoreline key at all, the held flag
+    // counts stated), since a key the hantei placement below leaves undefined,
+    // or a flag count left out, still reads as a score there. Never persisted.
     if (patch.startOnly) {
         result.startOnly = true;
         delete result.ipponsA; delete result.ipponsB;

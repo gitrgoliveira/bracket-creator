@@ -54,7 +54,7 @@ describe('buildInlineLineupWrite', () => {
     // it is what lets a name typed into a slot PICKED by number rename the
     // ALREADY-PICKED member instead of falling back to the index default.
     expect(resolveMemberIdsForPositions).toHaveBeenCalledWith(
-      'comp1', 'team1', { jiho: 'Tanaka' }, [{ id: 'mem-tanaka', name: 'Tanaka' }], 'pw', lineup.memberIds
+      'comp1', 'team1', { jiho: 'Tanaka' }, [{ id: 'mem-tanaka', name: 'Tanaka' }], 'pw', lineup.memberIds, expect.any(Object)
     );
     // Existing position untouched; the changed one added.
     expect(out.positions).toEqual({ senpo: 'Sato', jiho: 'Tanaka' });

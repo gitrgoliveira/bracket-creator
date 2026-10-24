@@ -1,5 +1,5 @@
 // bc-strt: a point struck right after Start match was not saved until the
-// next edit. The editors autosave only a match they see as running, and the
+// next edit. The editors tap only a match they see as running, and the
 // court list refetches a moment after each save, so for that moment the
 // just-started match still read "scheduled" and the point stayed on this
 // board alone. A start that has landed now makes the editor treat the
@@ -10,6 +10,12 @@ import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { beforeEach as beforeEachTest } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
+
+// bc-evts stage 3: a running individual match is scored by taps handed to
+// the outbox (API.recordTap); each test gets a fresh fake of that surface.
+beforeEachTest(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -73,8 +79,8 @@ const el = (match, onSubmit, props = {}) => (
 // returns nothing.
 const LANDED = { status: 'running' };
 
-// The writes after the Start match one: the autosaves.
-const autosaves = (onSubmit) => onSubmit.mock.calls.map((c) => c[0]).filter((p) => p.status === 'running').slice(1);
+// The writes after the Start: running writes (there should be none).
+const runningWrites = (onSubmit) => onSubmit.mock.calls.map((c) => c[0]).filter((p) => p.status === 'running').slice(1);
 
 const tapStart = async () => {
   await act(async () => { fireEvent.click(screen.getByText('Start match')); });
@@ -95,21 +101,24 @@ describe('a point struck right after Start match saves at once (bc-strt)', () =>
     await tapStart();
     expect(onSubmit.mock.calls[0][0].status, 'precondition: Start match wrote running').toBe('running');
 
+    // bc-evts stage 3: the point is a tap, sent without waiting for the list.
     await strikeIndividualMen();
-    const saves = autosaves(onSubmit);
-    expect(saves.length, 'the point is autosaved without waiting for the list').toBe(1);
-    expect([...(saves[0].ipponsA || []), ...(saves[0].ipponsB || [])]).toContain('M');
+    expect(runningWrites(onSubmit), 'no running score write').toEqual([]);
+    expect(window.API.recordTap.mock.calls.map((c) => c[2])).toEqual([
+      expect.objectContaining({ kind: 'ippon.add', letter: 'M' }),
+    ]);
   });
 
   it('individual: a start the host made (the Up next card) counts too', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     await act(async () => { render(el(individual(), onSubmit, { started: true })); });
     await strikeIndividualMen();
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit.mock.calls[0][0].status).toBe('running');
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
+    expect(window.API.recordTap.mock.calls[0][2]).toMatchObject({ kind: 'ippon.add', letter: 'M' });
   });
 
-  it('a scheduled match nobody started still does not autosave', async () => {
+  it('a scheduled match nobody started still writes nothing', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     await act(async () => { render(el(individual(), onSubmit)); });
     await strikeIndividualMen();
@@ -122,7 +131,7 @@ describe('a point struck right after Start match saves at once (bc-strt)', () =>
     await tapStart();
     expect(onSubmit).toHaveBeenCalledTimes(1);
     await strikeIndividualMen();
-    expect(onSubmit, 'nothing was started, so nothing autosaves').toHaveBeenCalledTimes(1);
+    expect(onSubmit, 'nothing was started, so nothing is written').toHaveBeenCalledTimes(1);
   });
 
   it('a later snapshot of the match (sent back to the queue) ends it', async () => {
@@ -150,11 +159,11 @@ describe('a point struck right after Start match saves at once (bc-strt)', () =>
     await tapStart();
     expect(onSubmit.mock.calls[0][0].status, 'precondition: Start match wrote running').toBe('running');
 
+    // bc-evts stage 5: the point is a tap on the running match, sent without
+    // waiting for the list.
     await strikeKachinukiAkaMen();
-    const saves = autosaves(onSubmit);
-    expect(saves.length, 'the point is autosaved without waiting for the list').toBe(1);
-    const bout1 = (saves[0].subResults || []).find((s) => s.position === 1);
-    expect(bout1 && bout1.ipponsA).toEqual(['M']);
+    expect(window.API.recordTap.mock.calls.map((c) => c[2]), 'the point is a tap without waiting for the list')
+      .toEqual([{ kind: 'ippon.add', pos: 1, side: 'a', letter: 'M' }]);
   });
 
   // The court is busy or a competitor is withdrawn: the server answers with
@@ -167,7 +176,7 @@ describe('a point struck right after Start match saves at once (bc-strt)', () =>
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(screen.getByText('Start match'), 'the operator can try again').toBeTruthy();
     await strikeIndividualMen();
-    expect(onSubmit, 'nothing was started, so nothing autosaves').toHaveBeenCalledTimes(1);
+    expect(onSubmit, 'nothing was started, so nothing is written').toHaveBeenCalledTimes(1);
   });
 
   it('kachinuki: a start the server refused with an error leaves the match scheduled', async () => {
@@ -177,6 +186,6 @@ describe('a point struck right after Start match saves at once (bc-strt)', () =>
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(screen.getByText('Start match'), 'the operator can try again').toBeTruthy();
     await strikeKachinukiAkaMen();
-    expect(onSubmit, 'nothing was started, so nothing autosaves').toHaveBeenCalledTimes(1);
+    expect(onSubmit, 'nothing was started, so nothing is written').toHaveBeenCalledTimes(1);
   });
 });

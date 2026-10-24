@@ -1,5 +1,5 @@
 // Render tests for the masked m:ss DurationInput (mp-m5kf). DurationInput is a
-// leaf component with no window.* deps, so it mounts directly under React 18 +
+// leaf component with no window.* deps, so it mounts directly under React 19 +
 // jsdom. These cover the display derivation, the parse/normalize behaviour, and
 // the validation states the pure parseDuration tests can't reach (draft state,
 // aria wiring, onValidity plumbing, blur normalization).

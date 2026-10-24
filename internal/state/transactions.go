@@ -113,7 +113,17 @@ type StoreTx interface {
 	LoadCompetitorStatus(compID string) (map[string]domain.CompetitorStatus, error)
 	SetCompetitorStatus(compID string, status domain.CompetitorStatus) error
 	LoadTeamLineups(compID string) (map[string]domain.TeamLineup, error)
+	LoadTeamLineupsWithRemoved(compID string) (map[string]domain.TeamLineup, error)
 	SetTeamLineup(compID string, l domain.TeamLineup, teamSize int) error
+	SetTeamLineups(compID string, ls []domain.TeamLineup, teamSize int) error
+	DeleteTeamLineup(compID, teamID string, round int) error
+	DeleteTeamLineupForMatch(compID, teamID, matchID string) error
+	// RemoveTeamLineupAt takes a lineup slot away, ordered by the removal's
+	// own stamp (0: stamped as it lands); removed says a lineup was taken.
+	RemoveTeamLineupAt(compID, teamID, matchID string, round int, at int64) (bool, error)
+	// ReplaceTeamLineupSlot sets every record of one lineup slot, the live
+	// one and the removed ones, in one staged write.
+	ReplaceTeamLineupSlot(compID, teamID, matchID string, round int, records []domain.TeamLineup, teamSize int) error
 	LoadParticipants(compID string, withZekkenName bool) ([]domain.Player, error)
 	// LoadSquads is Store.LoadSquads under the held lock, read-your-own-writes
 	// over a team-members file this transaction already staged.
@@ -151,6 +161,12 @@ type StoreTx interface {
 	// read-your-own-writes over an append this transaction staged.
 	AppendMatchHistory(compID string, entry MatchHistoryEntry) error
 	LoadMatchHistory(compID, matchID string) ([]MatchHistoryEntry, error)
+	// AppendScoreLog stages lines onto a match's score event log
+	// (score_log.go) in this transaction, so they land exactly when the
+	// write they belong to does. LoadScoreLog reads it back,
+	// read-your-own-writes over lines this transaction staged.
+	AppendScoreLog(compID, matchID string, lines ...ScoreLogLine) error
+	LoadScoreLog(compID, matchID string) ([]ScoreLogLine, error)
 }
 
 // WithTransaction runs fn under the per-competition write lock for
@@ -216,6 +232,11 @@ func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error 
 	}
 	mu := s.getCompLock(compID)
 	mu.Lock()
+	// The lineups a kachinuki match started with are announced once the
+	// transaction has committed, after its lock is released (this defer runs
+	// after the unlock below).
+	var kept []keptLineup
+	defer func() { s.announceKeptLineups(compID, kept) }()
 	defer mu.Unlock()
 
 	// Begin a fresh WAL for this transaction. The WAL has no on-disk
@@ -292,6 +313,7 @@ func (s *Store) WithTransaction(compID string, fn func(tx StoreTx) error) error 
 		slog.Warn("WithTransaction: WAL Done failed; will retry on restart",
 			"comp", compID, "wal", w.ID(), "err", err)
 	}
+	kept = tx.kept
 	return nil
 }
 
@@ -397,6 +419,16 @@ type storeTx struct {
 	store  *Store
 	compID string
 	wal    *wal.WAL
+	// kept is the lineups kachinuki matches started with that this
+	// transaction wrote, announced once it commits (OnStartLineupKept).
+	kept []keptLineup
+	// lineups is lineups.yaml as this transaction holds it, parsed ONCE
+	// (stage 6 review 8, m4: a lineup save parsed it four to five times):
+	// every read answers a copy of it, a write through this transaction's
+	// own lineup writers replaces it with what it wrote, and any other staged
+	// write of the file (txWriteFn) drops it, to be parsed again. nil until
+	// first read.
+	lineups map[string]domain.TeamLineup
 }
 
 // IsTransactional reports whether h is a LIVE transaction handle rather than
@@ -434,9 +466,28 @@ func IsTransactional(h StoreTx) bool {
 // shim closure converts.
 func (t *storeTx) txWriteFn() writeFn {
 	walWrite := t.wal.WriteFn()
+	lineupsPath := t.store.compPath(t.compID, teamLineupFilename)
 	return func(path string, data []byte, perm os.FileMode) error {
+		if path == lineupsPath {
+			// The parsed copy no longer says what is staged (m4).
+			t.lineups = nil
+		}
 		return walWrite(path, data, perm)
 	}
+}
+
+// keepLineups records lineups as what this transaction just staged for
+// lineups.yaml (its own lineup writers, after their write), so the next read
+// answers a copy of it rather than parsing the bytes again (m4). A lineup
+// read back is the shape the file gives: Positions never nil.
+func (t *storeTx) keepLineups(lineups map[string]domain.TeamLineup) {
+	for k, l := range lineups {
+		if l.Positions == nil {
+			l.Positions = map[domain.Position]string{}
+			lineups[k] = l
+		}
+	}
+	t.lineups = lineups
 }
 
 // pendingFor returns the WAL-staged bytes for the file `filename`
@@ -580,13 +631,33 @@ func (t *storeTx) SetCompetitorStatus(compID string, status domain.CompetitorSta
 }
 
 func (t *storeTx) LoadTeamLineups(compID string) (map[string]domain.TeamLineup, error) {
+	all, err := t.LoadTeamLineupsWithRemoved(compID)
+	if err != nil {
+		return nil, err
+	}
+	return liveTeamLineups(all), nil
+}
+
+// LoadTeamLineupsWithRemoved is Store.LoadTeamLineupsWithRemoved inside the
+// transaction: every record, the removed ones included, read-your-own-writes.
+func (t *storeTx) LoadTeamLineupsWithRemoved(compID string) (map[string]domain.TeamLineup, error) {
 	if err := t.checkCompID(compID); err != nil {
 		return nil, err
 	}
-	if pending, ok := t.pendingFor(teamLineupFilename); ok {
-		return parseTeamLineupsBytes(pending)
+	if t.lineups == nil {
+		var parsed map[string]domain.TeamLineup
+		var err error
+		if pending, ok := t.pendingFor(teamLineupFilename); ok {
+			parsed, err = parseTeamLineupsBytes(compID, pending)
+		} else {
+			parsed, err = t.store.loadTeamLineupsLocked(compID)
+		}
+		if err != nil {
+			return nil, err
+		}
+		t.lineups = parsed
 	}
-	return t.store.loadTeamLineupsLocked(compID)
+	return copyTeamLineups(t.lineups), nil
 }
 
 func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int) error {
@@ -596,23 +667,165 @@ func (t *storeTx) SetTeamLineup(compID string, l domain.TeamLineup, teamSize int
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
-	// Read-your-own-writes: if lineups.yaml is already staged, merge
-	// into the staged map instead of the on-disk version. Otherwise
-	// the staged write would be discarded on the next save.
-	if pending, ok := t.pendingFor(teamLineupFilename); ok {
+	if err := l.ValidatePositions(teamSize); err != nil {
+		return err
+	}
+	// Read-your-own-writes: merged into what this transaction holds (the
+	// staged map when lineups.yaml is already staged), parsed once (m4).
+	current, err := t.LoadTeamLineupsWithRemoved(compID)
+	if err != nil {
+		return err
+	}
+	l.CompetitionID = compID
+	current[lineupStorageKey(l)] = l.Clone()
+	if err := t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn()); err != nil {
+		return err
+	}
+	t.keepLineups(current)
+	t.noteStartLineup(l)
+	return nil
+}
+
+// SetTeamLineups is SetTeamLineup for several lineups in ONE staged write of
+// lineups.yaml: one parse and one save however many lineups it sets (the
+// carry's follow sets every lineup it moved through it, stage 6 review 7). A
+// lineup the domain refuses sets none of them.
+func (t *storeTx) SetTeamLineups(compID string, ls []domain.TeamLineup, teamSize int) error {
+	if len(ls) == 0 {
+		return nil
+	}
+	if err := t.checkCompID(compID); err != nil {
+		return err
+	}
+	if err := ValidateCompetitionID(compID); err != nil {
+		return err
+	}
+	for _, l := range ls {
 		if err := l.ValidatePositions(teamSize); err != nil {
 			return err
 		}
-		current, perr := parseTeamLineupsBytes(pending)
-		if perr != nil {
-			return perr
-		}
-		key := lineupStorageKey(l)
-		l.CompetitionID = compID
-		current[key] = l
-		return t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn())
 	}
-	return t.store.setTeamLineupLocked(compID, l, teamSize, t.txWriteFn())
+	current, err := t.LoadTeamLineupsWithRemoved(compID)
+	if err != nil {
+		return err
+	}
+	for _, l := range ls {
+		l.CompetitionID = compID
+		current[lineupStorageKey(l)] = l.Clone()
+	}
+	if err := t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn()); err != nil {
+		return err
+	}
+	t.keepLineups(current)
+	for _, l := range ls {
+		t.noteStartLineup(l)
+	}
+	return nil
+}
+
+// DeleteTeamLineupForMatch removes the lineup stored for teamID at matchID
+// itself (an operator's, or the one the match started with), staged in the
+// transaction; nothing stored there is no error.
+func (t *storeTx) DeleteTeamLineupForMatch(compID, teamID, matchID string) error {
+	_, err := t.RemoveTeamLineupAt(compID, teamID, matchID, 0, 0)
+	return err
+}
+
+// DeleteTeamLineup is Store.DeleteTeamLineup inside the transaction.
+func (t *storeTx) DeleteTeamLineup(compID, teamID string, round int) error {
+	_, err := t.RemoveTeamLineupAt(compID, teamID, "", round, 0)
+	return err
+}
+
+// RemoveTeamLineupAt is Store.RemoveTeamLineupAt inside the transaction:
+// the removal ordered by its own stamp (removeTeamLineup in team_lineup.go).
+func (t *storeTx) RemoveTeamLineupAt(compID, teamID, matchID string, round int, at int64) (bool, error) {
+	if err := t.checkCompID(compID); err != nil {
+		return false, err
+	}
+	current, err := t.LoadTeamLineupsWithRemoved(compID)
+	if err != nil {
+		return false, err
+	}
+	removed, changed := removeTeamLineup(current, teamID, matchID, round, arrivalOrStamp(compID, at))
+	if !changed {
+		return false, nil
+	}
+	if err := t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn()); err != nil {
+		return false, err
+	}
+	t.keepLineups(current)
+	return removed, nil
+}
+
+// ReplaceTeamLineupSlot sets the records of one lineup slot (a team's
+// starting lineup or a match's own lineup: the live one and the removed ones)
+// to records, in ONE staged write: what a save landed on the epochs of the
+// slot (engine.LandMatchLineupSave, stage 6 review 8, m1). A lineup the domain
+// refuses sets none of them.
+func (t *storeTx) ReplaceTeamLineupSlot(compID, teamID, matchID string, round int, records []domain.TeamLineup, teamSize int) error {
+	if err := t.checkCompID(compID); err != nil {
+		return err
+	}
+	for _, l := range records {
+		if err := l.ValidatePositions(teamSize); err != nil {
+			return err
+		}
+	}
+	current, err := t.LoadTeamLineupsWithRemoved(compID)
+	if err != nil {
+		return err
+	}
+	for k, l := range current {
+		if l.TeamID == teamID && l.MatchID == matchID && (matchID != "" || l.Round == round) {
+			delete(current, k)
+		}
+	}
+	for _, l := range records {
+		l.CompetitionID = compID
+		current[lineupStorageKey(l)] = l.Clone()
+	}
+	if err := t.store.saveTeamLineupsLocked(compID, current, t.txWriteFn()); err != nil {
+		return err
+	}
+	// No pin is noted: a save never makes one (it turns one it lands on into
+	// the operator's own), and a pin it leaves untouched was announced when
+	// the start kept it.
+	t.keepLineups(current)
+	return nil
+}
+
+// keptLineup names a lineup a kachinuki match started with that the
+// transaction wrote.
+type keptLineup struct{ teamID, matchID string }
+
+// noteStartLineup records a lineup a kachinuki match started with (its pin,
+// engine/kachinuki_opener.go) for the announcement made once the transaction
+// commits (OnStartLineupKept).
+func (t *storeTx) noteStartLineup(l domain.TeamLineup) {
+	if l.IsStartPin() {
+		t.kept = append(t.kept, keptLineup{teamID: l.TeamID, matchID: l.MatchID})
+	}
+}
+
+// OnStartLineupKept sets fn to be told, after the transaction that wrote it
+// commits and its lock is released, of each lineup a kachinuki match started
+// with (the server keeps it as the match's own, engine/kachinuki_opener.go),
+// so the lineup screens that show the match read it again. One fn per store;
+// a later call replaces it.
+func (s *Store) OnStartLineupKept(fn func(compID, teamID, matchID string)) {
+	s.startLineupKept.Store(&fn)
+}
+
+// announceKeptLineups tells the OnStartLineupKept listener of kept.
+func (s *Store) announceKeptLineups(compID string, kept []keptLineup) {
+	fn := s.startLineupKept.Load()
+	if fn == nil || *fn == nil {
+		return
+	}
+	for _, k := range kept {
+		(*fn)(compID, k.teamID, k.matchID)
+	}
 }
 
 func (t *storeTx) LoadSquads(compID string) (map[string][]domain.TeamMember, error) {

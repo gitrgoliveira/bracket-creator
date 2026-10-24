@@ -20,6 +20,7 @@ import { NO_ID_POOL_HINT, NoIdHint } from './data_integrity.jsx';
 // confirm-and-retry every score write uses.
 import { attemptScoreWrite, DOWNSTREAM_KNOCKOUT_RANKING_CANCELLED, writeKeepsEditorOpen } from './write_result.jsx';
 import { rankOrdinal } from './viewer_standings.jsx';
+import { useUnsavedInput } from './app_version.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 const EmptyState = window.EmptyState;
@@ -211,6 +212,20 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   const [chusenRecorded, setChusenRecorded] = useStateA(null);
   // groupKey -> true while the operator is changing that recorded chusen.
   const [chusenChanging, setChusenChanging] = useStateA({});
+  // A chusen order being typed holds a new build's automatic reload
+  // (app_version.jsx), but only while it holds a change: a rank in a group
+  // still shown (an unresolved tie, or a recorded one being changed) that is
+  // not empty and not the rank the box shows by itself. A key left behind by
+  // an erased rank, or by a group another device resolved, holds nothing.
+  const chusenShown = [
+    ...(chusenCandidates || []),
+    ...(chusenRecorded || []).filter(g => chusenChanging[`${g.poolName}::${g.minPosition}`]),
+  ];
+  useUnsavedInput(chusenShown.some(g => (g.teams || []).some((m, idx) => {
+    const raw = chusenInputs[`${g.poolName}::${g.minPosition}::${checkinPid(m)}`];
+    const typed = raw === undefined ? "" : String(raw).trim();
+    return typed !== "" && typed !== String(g.ranks ? g.ranks[idx] : g.minPosition + idx);
+  })));
   const applyChusen = (res) => {
     setChusenCandidates(res ? res.candidates : null);
     setChusenRecorded(res ? res.recorded : null);
@@ -425,6 +440,28 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       }
       setChusenGroupErr(prev => ({ ...prev, [groupKey]: null }));
       setChusenBusy(prev => ({ ...prev, [groupKey]: true }));
+      // A refusal is told on this group, and the server's order read again:
+      // the order is the outbox's (bc-evts stage 3 review 11, Y7), answered
+      // at once and shown as entered, so a refusal arrives later, through
+      // onRefusal (claimed: the outbox raises no second alert for it), or
+      // thrown by a door that still answers directly.
+      const refused = (e) => {
+        const msg = e && e.downstreamKnockoutPlayedCancelled
+          ? DOWNSTREAM_KNOCKOUT_RANKING_CANCELLED
+          : ((e && e.message) || "Failed to record chusen result");
+        setChusenGroupErr(prev => ({ ...prev, [groupKey]: msg }));
+        // A refusal records none of the group, and a lost response may have
+        // recorded all of it. Re-fetch the candidates so the panel shows the
+        // order the server holds rather than waiting for the next SSE-driven
+        // refresh; the typed ranks are keyed by team, so they survive a
+        // reorder.
+        if (window.API && typeof window.API.chusenCandidates === "function") {
+          window.API.chusenCandidates(c.id, password)
+            .then(applyChusen)
+            .catch(() => {});
+        }
+        return true;
+      };
       try {
         // The whole order is ONE write, so the server answers for the order
         // entered and nothing else: sent one rank at a time, it passed
@@ -435,11 +472,12 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         // operator and, confirmed, resends it with forceDownstreamReopen,
         // which reopens that match.
         await attemptScoreWrite({
-          recordScore: (cId, pool, body, pwd) => window.API.overridePoolRanks(cId, pool, body.ranks, pwd, !!body.forceDownstreamReopen),
+          recordScore: (cId, pool, body, pwd, _match, o) => window.API.overridePoolRanks(cId, pool, body.ranks, pwd, !!body.forceDownstreamReopen, o),
           confirmDialog: window.confirmDialog,
           compId: c.id, matchId: poolName,
           result: { ranks: members.map((m, i) => ({ playerId: m.id, rank: effRank(m, i) })) },
           password,
+          onRefusal: refused,
         });
         if (changing) {
           // Show the new order at once and close the entry; the re-fetch
@@ -457,20 +495,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         // same pool must not have its inputs wiped here too).
         clearInputs();
       } catch (e) {
-        const msg = e && e.downstreamKnockoutPlayedCancelled
-          ? DOWNSTREAM_KNOCKOUT_RANKING_CANCELLED
-          : (e.message || "Failed to record chusen result");
-        setChusenGroupErr(prev => ({ ...prev, [groupKey]: msg }));
-        // A refusal records none of the group, and a lost response may have
-        // recorded all of it. Re-fetch the candidates so the panel shows the
-        // order the server holds rather than waiting for the next SSE-driven
-        // refresh; the typed ranks are keyed by team, so they survive a
-        // reorder.
-        if (window.API && typeof window.API.chusenCandidates === "function") {
-          window.API.chusenCandidates(c.id, password)
-            .then(applyChusen)
-            .catch(() => {});
-        }
+        refused(e);
       } finally {
         setChusenBusy(prev => ({ ...prev, [groupKey]: false }));
       }
@@ -733,9 +758,10 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       onPrev={null}
       onNext={null}
       onClose={() => setScoreOpenId(null)}
-      onSubmit={async (patch) => {
+      onSubmit={async (patch, opts) => {
         try {
-          const res = await onEditScore(c.id, scoreOpenMatch.id, patch, scoreOpenMatch);
+          // opts: the editor's own claim on a refusal (onRefusal).
+          const res = await onEditScore(c.id, scoreOpenMatch.id, patch, scoreOpenMatch, opts);
           // What the write came back with: a refused one threw and returns
           // nothing, which is how the editor tells them apart.
           if (mountedRef.current && !writeKeepsEditorOpen(patch, res)) setScoreOpenId(null);

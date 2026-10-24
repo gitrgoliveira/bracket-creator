@@ -99,7 +99,7 @@ func refuseUnfinishedTeamFinish(store CompetitionStore, compID, matchID string, 
 	if req.Status != state.MatchStatusCompleted || domain.IsWithdrawalDecisionStr(req.Decision) {
 		return nil, nil
 	}
-	if engine.IsPoolDaihyosenMatchID(matchID) || engine.IsTiebreakerMatchID(matchID) {
+	if state.IsPoolSupplementaryMatchID(matchID) {
 		return nil, nil
 	}
 	comp, err := store.LoadCompetition(compID)
@@ -127,7 +127,7 @@ func refuseUnfinishedTeamFinishForComp(comp *state.Competition, matchID string, 
 	if req.Status != state.MatchStatusCompleted || domain.IsWithdrawalDecisionStr(req.Decision) {
 		return nil
 	}
-	if engine.IsPoolDaihyosenMatchID(matchID) || engine.IsTiebreakerMatchID(matchID) {
+	if state.IsPoolSupplementaryMatchID(matchID) {
 		return nil
 	}
 	if comp == nil || comp.TeamSize < 2 || comp.IsKachinuki() {

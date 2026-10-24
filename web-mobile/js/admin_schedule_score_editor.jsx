@@ -1,7 +1,7 @@
 // Score editor components extracted from admin_schedule.jsx (mp-d7tl).
 // ScoreEditCourtBtn (local), AdminScoreEditor, AdminScoreEditorPage.
 
-import { writeDidNotLand, writeKeepsEditorOpen, startWhileStartingMessage, startWasBlockedByStartMessage, wasToasted } from './write_result.jsx';
+import { writeDidNotLand, writeKeepsEditorOpen, writePending, writeQueueKey, startWhileStartingMessage, startWasBlockedByStartMessage, wasToasted } from './write_result.jsx';
 import { matchMentions } from './competitor_search.jsx';
 import { SideCell } from './side_cell.jsx';
 import { allMatchesCompleted } from './admin_schedule_utils.jsx';
@@ -213,7 +213,11 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
   // moves on.
   // Every start-gating rule is the server's (StartMatchTx), so a thrown 409 only
   // needs reporting.
-  const startNext = async (next) => {
+  // `after`: the queue key of the finish or decision this start follows (the
+  // pending answer's `key`, bc-evts stage 3 review 11, X1), so the outbox sends
+  // the start only once that write has settled and the server never sees it
+  // while the court is still held by the match being finished.
+  const startNext = async (next, after = null) => {
     const key = scoreKeyOf(next);
     const guard = startGuardRef.current;
     const began = guard.begin(key, next);
@@ -226,8 +230,24 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
     }
     if (mountedRef.current) setStartRefusal(null);
     try {
-      const outcome = classifyStartOutcome(await onEditScore(next.compId, next.id, startPatch(), next));
-      if (outcome.ok) return true;
+      // bc-evts: the start is the outbox's, so the answer here is the pending
+      // one and the advance never waits on the server. A refusal comes later:
+      // thrown on the flush (onRefusal, claimed so the outbox raises no second
+      // alert) or as the settled answer (clock_skew, a held result). Both are
+      // told on the refused match as a direct refusal is.
+      // Claimed only when it was said, on the row or by the toast (R2).
+      const onRefusal = (e) => { refuseStart(next, startFailureMessage(e)); return mountedRef.current || !!showToast; };
+      const res = await onEditScore(next.compId, next.id, after ? { ...startPatch(), after } : startPatch(), next, { onRefusal });
+      const outcome = classifyStartOutcome(res);
+      if (outcome.ok) {
+        if (writePending(res)) {
+          res.settled.then((body) => {
+            const late = classifyStartOutcome(body);
+            if (!late.ok) refuseStart(next, late.msg);
+          }, () => {});
+        }
+        return true;
+      }
       refuseStart(next, outcome.msg);
       return false;
     } catch (e) {
@@ -521,9 +541,10 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
             onPrev={() => setOpenKey(scoreKeyOf(prevMatch))}
             onNext={() => setOpenKey(scoreKeyOf(nextMatch))}
             onClose={() => setOpenKey(null)}
-            onSubmit={async (patch) => {
+            onSubmit={async (patch, opts) => {
               try {
-                const res = await onEditScore(openMatch.compId, openMatch.id, patch, openMatch);
+                // opts: the editor's own claim on a refusal (onRefusal).
+                const res = await onEditScore(openMatch.compId, openMatch.id, patch, openMatch, opts);
                 if (!mountedRef.current) return res;
                 // Whether the modal stays open is writeKeepsEditorOpen's
                 // (write_result.jsx), the rule every host asks. A write that did
@@ -594,7 +615,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                 // resolve the issue. The live lookup shows a started match:
                 // editMatchScore awaits its refresh.
                 setOpenKey(scoreKeyOf(nextActiveMatch));
-                if (nextActiveMatch.status === "scheduled") await startNext(nextActiveMatch);
+                if (nextActiveMatch.status === "scheduled") await startNext(nextActiveMatch, writeQueueKey(res));
               } catch (_err) { /* keep modal open on error */ }
             } : null}
             onAfterDecision={nextActiveMatch ? async (result) => {
@@ -610,7 +631,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
               // reason, as the court console does (startNext); a start that goes
               // ahead opens it.
               if (next.status === "scheduled") {
-                const started = await startNext(next);
+                const started = await startNext(next, writeQueueKey(result));
                 if (started && mountedRef.current) setOpenKey(scoreKeyOf(next));
               }
             } : null}

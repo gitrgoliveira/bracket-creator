@@ -562,7 +562,7 @@ describe('every mount site hands the editor what a write came back with (bc-strt
 });
 
 // ── when an editor closes ────────────────────────────────────────────────────
-// A start, each autosaved point and a kachinuki Record bout are running writes
+// A start, each running write and a kachinuki Record bout are running writes
 // the operator keeps scoring after, so an editor that closed on every landed
 // write dropped them out of the match after one point. And a write that did
 // not land (queued offline, or superseded) must not look saved.
@@ -581,7 +581,7 @@ describe('the pools and bracket editors close only on a saved result (bc-plcl)',
     await submit({ status: 'running', winner: null });
     expect(editorOpen(), 'after Start').toBe(true);
     await submit({ status: 'running', ipponsA: ['M'] });
-    expect(editorOpen(), 'after an autosaved point').toBe(true);
+    expect(editorOpen(), 'after a scored point').toBe(true);
     await submit({ status: 'completed', winner: { id: 'p1', name: 'Yamada' } });
     expect(editorOpen(), 'after a finish that only queued').toBe(true);
     await submit({ status: 'completed', winner: { id: 'p1', name: 'Yamada' } });
@@ -621,7 +621,7 @@ describe('the pools and bracket editors close only on a saved result (bc-plcl)',
 
 // ── the self-run editor's own close decision (bc-dhas) ───────────────────────
 // The public surface used to close on ANY landed write (writeDidNotLand
-// alone), so Start match and every autosaved point dumped the operator back
+// alone), so Start match and every running write dumped the operator back
 // to the match card. It now asks writeKeepsEditorOpen like every other
 // closing host (bc-plcl): stay open for a running write with no winner, or
 // for one that did not land; close, with the match card, only for a landed
@@ -630,7 +630,7 @@ describe('the pools and bracket editors close only on a saved result (bc-plcl)',
 describe('the self-run editor stays open through running writes (bc-dhas)', () => {
   const editorOpen = () => !!screen.queryByTestId('probe-score-editor');
 
-  it('stays open after Start and after an autosave; closes with the match card only on a landed finish', async () => {
+  it('stays open after Start and after a scored point; closes with the match card only on a landed finish', async () => {
     const write = vi.fn()
       .mockResolvedValueOnce({ status: 'running', winner: null })
       .mockResolvedValueOnce({ status: 'running', ipponsA: ['M'] })
@@ -647,7 +647,7 @@ describe('the self-run editor stays open through running writes (bc-dhas)', () =
       expect(onClose).not.toHaveBeenCalled();
 
       await submit({ status: 'running', ipponsA: ['M'] });
-      expect(editorOpen(), 'after an autosaved point').toBe(true);
+      expect(editorOpen(), 'after a scored point').toBe(true);
       expect(onClose).not.toHaveBeenCalled();
 
       await submit({ status: 'completed', winner: { id: 'p1', name: 'Yamada' } });
@@ -659,6 +659,36 @@ describe('the self-run editor stays open through running writes (bc-dhas)', () =
       expect(onClose).toHaveBeenCalledTimes(1);
     } finally {
       window.API.recordScore = recordScore;
+    }
+  });
+});
+
+// bc-evts stage 3: the participant's write is the outbox's. The submit returns
+// the pending answer at once (never waiting on settled), and a refusal the
+// server sends later reaches the participant through onRefusal, told by the
+// page's one fallback (window.alert) as a direct refusal was.
+describe('the self-run editor is told of a refusal the outbox receives', () => {
+  it('passes an onRefusal that alerts the sentence and claims it, and never waits on settled', async () => {
+    let opts = null;
+    const write = vi.fn((_c, _m, _p, _pw, _match, o) => {
+      opts = o;
+      return Promise.resolve({ applied: true, pending: true, key: 'k', settled: new Promise(() => {}) });
+    });
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const recordScore = window.API.recordScore;
+    window.API.recordScore = write;
+    try {
+      await mountSelfRun();
+      await act(async () => { await probe.props.onSubmit({ status: 'running', ipponsA: ['M'] }); });
+      expect(opts && typeof opts.onRefusal, 'the write carries an onRefusal').toBe('function');
+      expect(alert).not.toHaveBeenCalled();
+      expect(opts.onRefusal(new Error('The match is finished. Tap Correct.'))).toBe(true);
+      expect(alert).toHaveBeenCalledWith('The match is finished. Tap Correct.');
+      expect(opts.onRefusal(null)).toBe(true);
+      expect(alert).toHaveBeenLastCalledWith("Couldn't save the result. Please try again.");
+    } finally {
+      window.API.recordScore = recordScore;
+      alert.mockRestore();
     }
   });
 });

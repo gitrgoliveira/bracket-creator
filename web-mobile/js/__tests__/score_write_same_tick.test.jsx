@@ -1,4 +1,4 @@
-// bc-sync: on pagehide the autosave writes a pending edit marked `durable`,
+// bc-sync (retired with the autosave): on pagehide a pending edit was written marked `durable`,
 // and recordScore puts it into the persisted outbox. That only lands if the
 // write reaches API.recordScore before the page goes. The score editor hosts
 // call editMatchScore (admin.jsx), which calls attemptScoreWrite first thing;
@@ -20,7 +20,41 @@ describe('attemptScoreWrite reaches recordScore in the same tick', () => {
       compId: 'c1', matchId: 'm1', result: { status: 'running' }, password: 'pw', match: null,
     });
     expect(recordScore).toHaveBeenCalledTimes(1);
-    expect(recordScore).toHaveBeenCalledWith('c1', 'm1', { status: 'running' }, 'pw', null);
+    // bc-evts: the trailing options carry the refusal claim (the downstream
+    // confirm), for a write the outbox answers later.
+    expect(recordScore).toHaveBeenCalledWith('c1', 'm1', { status: 'running' }, 'pw', null,
+      expect.objectContaining({ onRefusal: expect.any(Function) }));
+  });
+});
+
+// bc-evts: a tap is in the persisted outbox when recordTap returns. It is not
+// async at all: no promise stands between the tap and the stored entry.
+describe('API.recordTap stores the tap in the same tick', () => {
+  it('returns { id, stamp, seq } synchronously with the entry already stored', async () => {
+    vi.resetModules();
+    const store = {};
+    const origLs = global.localStorage;
+    const origFetch = global.fetch;
+    global.localStorage = {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: (k) => { delete store[k]; },
+    };
+    global.fetch = vi.fn(() => new Promise(() => {}));
+    try {
+      const { API } = await import('../api_client.jsx');
+      const out = API.recordTap('c1', 'm1', { kind: 'ippon.add', side: 'a', letter: 'M' }, 'pw', { id: 'm1' });
+      expect(out).not.toBeInstanceOf(Promise);
+      expect(out.seq).toBe(1);
+      expect(typeof out.id).toBe('string');
+      const stored = JSON.parse(store.bc_write_queue_v2);
+      expect(stored).toHaveLength(1);
+      expect(stored[0][1].payload).toMatchObject({ id: out.id, seq: 1, stamp: out.stamp, kind: 'ippon.add' });
+    } finally {
+      global.localStorage = origLs;
+      global.fetch = origFetch;
+      vi.resetModules();
+    }
   });
 });
 
@@ -51,7 +85,7 @@ describe('every score editor host reaches the write before its first await', () 
 
   it.each(HOSTS)('%s', (file, write) => {
     const text = source(file);
-    const handlers = [...text.matchAll(/onSubmit(?:AndNext)?(?:=\{|:)[^{]*?async\s*\(patch\)\s*=>\s*\{/g)];
+    const handlers = [...text.matchAll(/onSubmit(?:AndNext)?(?:=\{|:)[^{]*?async\s*\(patch(?:,\s*opts)?\)\s*=>\s*\{/g)];
     expect(handlers.length, `${file}: no async (patch) => onSubmit handler found`).toBeGreaterThan(0);
     for (const h of handlers) {
       expect(firstAwaited(text, h.index + h[0].length),

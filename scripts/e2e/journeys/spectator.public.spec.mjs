@@ -345,9 +345,15 @@ test.describe('spectator on a phone', () => {
     // change the score, and check the OPEN card shows the change at once.
     const door = async (name, open, before, change, after) => {
       await test.step(name, async () => {
-        const opened = Date.now();
         await open();
         await expect(card).toBeVisible();
+        // The card takes no tap within the app's bounce window of the tap that
+        // opened it (useOpenedTapGuard), so the dwell runs from when the card
+        // was seen. Timed from before open() (a page load and a tab tap ago),
+        // it was over before the card showed, and a Close tapped right after a
+        // quick change landed inside the window and was swallowed (about one
+        // run in five on the Pools door).
+        const opened = Date.now();
         await expect.poll(() => cardMarks(card), { message: `${name}: the card opens on the live score` }).toEqual(before);
         await change();
         await expect.poll(() => cardMarks(card), { message: `${name}: the open card follows the operator` }).toEqual(after);

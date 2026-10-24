@@ -83,8 +83,9 @@ browser, `--debug` opens the inspector, and a failing test leaves a trace
                             match, the correction doors
     fixtures/engi.mjs       the engi (kata pairs) flag editor: flag counters,
                             entering flags, the two-tap Save result
-    fixtures/held-write.mjs holding a running match's score write in flight, to
-                            observe a race with its echo (below)
+    fixtures/held-write.mjs holding a match's scoring taps in flight (a
+                            batch POSTed to score-events), to observe a
+                            race with its echo (below)
     fixtures/shared-court.mjs  two competitions on one shiaijo and a moved
                             match: seeding, the competition picker, the nudges
     fixtures/public.mjs     the public viewer and the TV board; the readers of
@@ -287,24 +288,42 @@ listeners read.
 
 ## Holding a save in flight
 
-On localhost the answer to an autosave comes back within milliseconds of the save
-going out, so a tap made "while the save is out" never lands in that window by
-itself. `fixtures/held-write.mjs` (`holdScoreWrites(page)`) intercepts the match
-score PUTs: `holdNext()` holds the next one, its `sent` promise resolves once that
-PUT is out (so the autosave debounce has run), and `release()` lets it through
-after the journey has made the next tap, as a slow uplink would. `bodies` lists
-every score PUT the page sent. `answeredBeforeNextWrite(held)` waits for the held
-write's response, then for the write that follows it (each up to `safetyMs`), and
-throws if no follow-up write was ever sent or if it was sent before the response
-reached the page, so a journey cannot pass without exercising the race. A hold
-nobody releases is let go after a safety timeout (`safetyMs`, 10 s by default);
-`stop()` only cleans up (release, unroute, remove the listener) and is called in a
-`finally`, and `assertNoSafetyRelease()` throws when the safety timeout had to
-fire, so a journey calls it after its body succeeded, outside the `finally`, where
-a throw would hide the body's own assertion error. The bc-ltap step of
-`knockout-mixed-individual.spec.mjs` (individual editor) and the bc-evts step of
-`engi.spec.mjs` (engi editor) use it to guard a flag or mark taken back while its
-add is still saving.
+On localhost the answer to a write comes back within milliseconds of the write
+going out, so a tap made "while the last one is out" never lands in that window
+by itself. Every scoring tap on a running match is an event the app puts in its
+outbox at once and sends to `POST .../matches/<id>/score-events`, the taps of
+one tick as one batch (`{ session, events }`); there is no autosave window to
+wait out. `fixtures/held-write.mjs` (`holdScoreWrites(page)`) intercepts those
+batches: `holdNext()` holds the next one, its `sent` promise resolves once that
+batch is out, and `release()` lets it through after the journey has made the
+next tap, as a slow uplink would. The outbox sends a match's entries strictly in
+order, so the next tap's batch goes only once the held one is answered.
+`bodies` lists every batch the page sent, and `events` every event those
+batches carried, in send order, flat (each with its `kind`, `side`, `letter`,
+`target`, `pos` and the rest).
+
+`answeredBeforeNextWrite(held)` waits for the held batch's response, then for
+the batch that follows it (each up to `safetyMs`), and throws if no follow-up
+batch was ever sent or if it was sent before the response reached the page, so
+a journey cannot pass without exercising the race. A hold nobody releases is let
+go after a safety timeout (`safetyMs`, 10 s by default); `stop()` only cleans up
+(release, unroute, remove the listener) and is called in a `finally`, and
+`assertNoSafetyRelease()` throws when the safety timeout had to fire, so a
+journey calls it after its body succeeded, outside the `finally`, where a throw
+would hide the body's own assertion error. Its errors name a "held tap batch".
+
+The bc-ltap step of `knockout-mixed-individual.spec.mjs` (a mark taken off and
+tapped back on the individual editor), the bc-evts step of `engi.spec.mjs` (a
+flag taken back on the engi editor) and case c of `concurrent-taps.spec.mjs`
+are written around this fixture.
+
+A Start, a Finish, a correction and Record bout are not taps: they are the
+match's score PUT (`/matches/<id>/score`). To wait for one of those writes, or
+for a tap batch, without holding it, use `fixtures/scoring.mjs`:
+`nextMatchWrite(page)` before the action that causes the PUT, and
+`nextTapWrite(page)` (the same, for `{ method: 'POST', tail: 'score-events' }`)
+before a tap; then `writeLanded(answered)`. `writtenMatchId(res)` reads the
+match id an answer was for.
 
 ## The pace of a tap
 
@@ -322,7 +341,7 @@ through `armTwoTap` (tap, wait for the armed state, out the dwell): `armFinish`
 a bout, through `tapOnSide`, which keeps the time of the last tap on each side:
 `awardIppon` and `ipponOnRow` (the strike `boutIppon` makes on the team sheet
 and `awardBoutIppon` on the kachinuki sheet, which both wait for the board and
-the autosave). In a fighter name list, through `tapNameOption`, which keeps the
+the sync pill, which reads the outbox). In a fighter name list, through `tapNameOption`, which keeps the
 time of the last option tap: a pick stamps the team sheet's bout list, which
 ignores every click inside it for that window, so `pickFromNameBox` and any
 option tapped by hand go through it. A journey that taps such a thing by hand
@@ -353,7 +372,9 @@ settle helpers in `fixtures/pace.mjs`:
   before the tap): the helper then waits up to 3 s for the read to leave it,
   and settles on it only if nothing ever changed. Where the end state IS known,
   wait for that instead (`expect.poll(...)`); where the tap causes one match
-  write, wait for its answer (`nextMatchWrite`).
+  write, wait for its answer (`nextMatchWrite` waits for the match's score PUT,
+  which is Start match, Finish and a correction; `nextTapWrite` for a tap's
+  batch).
 
 `page.waitForTimeout` stays in four places, each marked `Deliberate:` or
 named for what it is: the dwell of a tap's pace (above); the time away of an

@@ -321,7 +321,7 @@ func NeedsDefaultWinBoutPadding(status MatchStatus, decision, sideA, sideB, id s
 	if !domain.IsDefaultWinDecisionStr(decision) {
 		return false
 	}
-	if IsPoolDaihyosenMatchID(id) || IsTiebreakerMatchID(id) {
+	if IsPoolSupplementaryMatchID(id) {
 		return false
 	}
 	present := make(map[int]bool, len(subResults))

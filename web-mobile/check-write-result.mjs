@@ -98,7 +98,7 @@ export const FORBIDDEN = [
     // whole rule exists to prevent. A copy constant read off `window` is worse
     // still: it renders as the literal text "undefined" in an operator banner.
     // Import from write_result.jsx; do not re-add a mirror.
-    re: /window\.(writeDidNotLand|writeWasSuperseded|writeWasRefused|writeWasRefusedForClock|writeRetryable|notLandedBanner|SUPERSEDED_LEAD|SUPERSEDED_REASON|SUPERSEDED_ADVICE|supersededAlertText|writeHeldGroups|writePartlyHeld|CLOCK_SKEW_REASON_TEXT|CLOCK_SKEW_ADVICE|QUEUED_NOTICE|QUEUED_UNSAVED_NOTICE|queuedNotice|queuedWritesNoun|heldWritesText|writeNeedsWinner|writeDisplacedGroups|writeDisplacedForWinner|supersededBanner|displacedAlertText)\b/,
+    re: /window\.(writeDidNotLand|writeWasSuperseded|writeWasRefused|writeWasRefusedForClock|writeRetryable|notLandedBanner|SUPERSEDED_LEAD|SUPERSEDED_REASON|SUPERSEDED_ADVICE|supersededAlertText|writeHeldGroups|writePartlyHeld|CLOCK_SKEW_REASON_TEXT|CLOCK_SKEW_ADVICE|QUEUED_NOTICE|QUEUED_UNSAVED_NOTICE|queuedNotice|queuedWritesNoun|heldWritesText|writeMatchClosed|writeDisplacedGroups|writeDisplacedForClosedMatch|writeResultLocked|writePending|tapOutcomeQuiet|tapNotAppliedText|tapNotAppliedAlertText|supersededBanner|displacedAlertText)\b/,
     why: 'reads an owned predicate/copy off window; those mirrors are deleted, import from write_result.jsx instead',
   },
   {
@@ -191,6 +191,35 @@ export const FORBIDDEN = [
     re: /(?:\b(?:wins?|winning|loses)\b|\bwon\b(?:[^'.|]|$))[^.|]{0,40}\bby\s+default\b/i,
     why: 'says a side "wins by default", a phrase kendo does not have; name the recorded decision instead (kiken, fusenpai, fusensho) through decisionWord (write_result.jsx)',
   },
+  {
+    // bc-evts stage 3: a tap's outcome (the score-events door's per-event
+    // answer) is read through write_result.jsx (tapOutcomeQuiet,
+    // tapNotAppliedText); the outbox (api_client.jsx) and the replay port
+    // (score_events.jsx) are the only other readers of the raw field.
+    name: 'tap-outcome',
+    re: /\.outcome\s*(===|==|!==|!=)/,
+    exempt: ['write_result.jsx', 'api_client.jsx', 'score_events.jsx'],
+    why: 'compares a tap .outcome by hand; ask tapOutcomeQuiet(o) / tapNotAppliedText(o) (write_result.jsx) instead',
+  },
+  {
+    // The closed-match rule (2026-10-15) retired these two held reasons: the
+    // server sends match_closed for both, so a client reading either reads
+    // nothing. No file is exempt.
+    name: 'retired-held-reasons',
+    re: /\b(needs_winner|default_win_stands)\b/,
+    why: 'reads a retired held reason; the server answers match_closed (writeMatchClosed, write_result.jsx)',
+  },
+  {
+    // bc-evts stage 3 (S6): the individual editor scores a RUNNING match by
+    // tap events (API.recordTap), so it has no autosave to debounce or land
+    // and no unsaved running edit for an adopt to keep. Widened to the engi
+    // editor's flag taps in stage 4 and to the team editor's bout taps in
+    // stage 5.
+    name: 'editor-taps',
+    re: /\b(useDebouncedRunningWrite|landedAutosave)\b|keepLocalEdits:\s*true|\bAPI\.recordScore\b/,
+    only: ['admin_scoring_individual.jsx', 'admin_scoring_engi.jsx', 'admin_scoring_team.jsx'],
+    why: 'autosaves, keeps a running edit or writes a running score (API.recordScore) in a tap-scored editor (individual, engi, team); a running match is scored by taps (API.recordTap) and its board is the server\'s with this device\'s pending taps folded on; Save and Finish go through the host\'s onSubmit',
+  },
 ];
 
 // Scanned against the WHOLE comment-stripped file (scanWholeFile) rather
@@ -233,6 +262,11 @@ export function findViolations() {
     const rules = FORBIDDEN.filter((_, r) => {
       if (isOwner && OWNER_EXEMPT_RULE_INDICES.has(r)) return false;
       if (isParser && r === ALLOWED_RULE_INDEX) return false;
+      // A rule may name the files it does not apply to (`exempt`) or the only
+      // files it applies to (`only`), by basename.
+      const rule = FORBIDDEN[r];
+      if (rule.exempt && rule.exempt.some((f) => file.endsWith(`/${f}`))) return false;
+      if (rule.only && !rule.only.some((f) => file.endsWith(`/${f}`))) return false;
       return true;
     });
     if (rules.length === 0) continue;

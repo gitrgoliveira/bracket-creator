@@ -43,7 +43,7 @@ import { openViewer, recentResult } from '../fixtures/public.mjs';
 import { scoreRows } from '../fixtures/scores.mjs';
 import { nextMatchWrite, writeLanded } from '../fixtures/scoring.mjs';
 import { EDITOR } from '../../screenshots/lib/editor.mjs';
-import { dwell, rendered, settled, tapOnSide, untilStable } from '../fixtures/pace.mjs';
+import { dwell, dwellOnSide, rendered, settled, tapOnSide, untilStable } from '../fixtures/pace.mjs';
 import { ensureCoarse } from '../fixtures/pointer.mjs';
 // clumsy.hastyConfirm answers confirmDialog (ui.jsx) and hastyShiaijoConfirm
 // the shiaijo page's own `.shiaijo-move-confirm`. The inline reason prompt and
@@ -54,7 +54,7 @@ import {
 } from '../fixtures/clumsy.mjs';
 import { closeNameList } from '../fixtures/team.mjs';
 import {
-  awardBoutIppon, boutFilled, clearBoutMarks, boutIpponButton, boutMiddle, boutNames, closeLineupPanel, correctingBout,
+  BOUT_CHANGE, awardBoutIppon, boutFilled, clearBoutMarks, boutIpponButton, boutMiddle, boutNames, closeLineupPanel, correctingBout,
   currentBout, doneRowWinner, doneRows, editor, enchoButton, enchoUndoButton, endMatch, endMatchButton, lineupSide, lineupSource,
   openLineupFromUpNext, recordBout, recordBoutButton, removeBoutButton, reopenButton, syncPill, tieButton,
   typeLineup, winBout,
@@ -199,33 +199,35 @@ test.describe('J5 kachinuki from the court console', () => {
   // bc-sync (fixed): the sync pill used to read "Synced" through the
   // autosave's debounce window after a tap, although nothing had been sent,
   // so a reload there lost the point with no warning (audit row "final bout
-  // 4"). It reads "Syncing…" from the tap until the write lands; this guards
-  // it. The score write is held, so the pill is read while the point is
-  // provably still unsaved, whatever this machine's timing.
+  // 4"). No editor autosaves now: a tap is an outbox entry from the moment it
+  // is made and goes to the score-events door (bc-evts), and the pill reads
+  // "Syncing…" from the tap until the server has answered it; this guards it.
+  // The tap's batch is held, so the pill is read while the point is provably
+  // still unsaved, whatever this machine's timing.
   async function guardSync(page) {
     const live = currentBout(page);
-    const isScoreWrite = (url) => /\/api\/competitions\/[^/]+\/matches\/[^/]+\/score$/.test(url.pathname);
+    const isTapBatch = (url) => /\/api\/competitions\/[^/]+\/matches\/[^/]+\/score-events$/.test(url.pathname);
     let release;
     const released = new Promise((r) => { release = r; });
     const hold = async (route) => {
-      if (route.request().method() !== 'PUT') return route.continue();
+      if (route.request().method() !== 'POST') return route.continue();
       await released;
       return route.continue().catch(() => {});
     };
-    await page.route(isScoreWrite, hold);
+    await page.route(isTapBatch, hold);
     try {
-      const sent = page.waitForRequest((r) => r.method() === 'PUT' && isScoreWrite(new URL(r.url())));
-      // A test that fails before the write goes out must not leave this rejecting unheard.
+      const sent = page.waitForRequest((r) => r.method() === 'POST' && isTapBatch(new URL(r.url())));
+      // A test that fails before the tap goes out must not leave this rejecting unheard.
       sent.catch(() => {});
       await boutIpponButton(live, 'aka', 'D').tap();
-      // From the tap: the edit waits out the debounce (nothing sent yet)...
+      // From the tap: the point is in the outbox...
       await expect(syncPill(page)).toHaveText('Syncing…');
-      // ...then its write is out, and held: still unsaved.
+      // ...then its batch is out, and held: still unsaved.
       await sent;
       await expect(syncPill(page)).toHaveText('Syncing…');
     } finally {
       release();
-      await page.unroute(isScoreWrite, hold);
+      await page.unroute(isTapBatch, hold);
     }
     await expect(syncPill(page)).toHaveText('Synced');
     // Leave the bout as it was: take the point back.
@@ -392,13 +394,20 @@ test.describe('J5 kachinuki from the court console', () => {
       const remove = removeBoutButton(page);
       await expect(remove).toBeVisible();
       const removeBox = await remove.boundingBox();
-      const v2 = await doubleTap(remove);
+      // The thumb's first tap is a deliberate one: Record bout, a moment ago,
+      // shares this place's bounce guard.
+      await dwellOnSide(page, BOUT_CHANGE);
+      const v2 = await doubleTap(remove, { afterRender: true });
+      const removeTappedAt = Date.now();
       // The appended pairing is gone once the removal has been answered.
       await expect(remove).toBeHidden();
       const afterRemove = { doneRows: await doneRows(page).count(), current: await boutNames(currentBout(page)),
         currentShiroMarks: await boutFilled(currentBout(page), 'shiro').count(), currentAkaMarks: await boutFilled(currentBout(page), 'aka').count() };
       const removeShot = await shot(page, 'v2-remove-bout-double-tap');
-      // Recover: Record bout again re-appends the same pairing.
+      // Recover: Record bout again re-appends the same pairing. It shares
+      // Remove this bout's bounce guard, so the operator's next tap there comes
+      // after the dwell.
+      await dwell(page, removeTappedAt);
       await recordBout(page);
       record({ step: 'M1 bout 3', action: '× Remove this bout', variant: 'V2 doubleTap', ...v2, removeBox, afterRemove,
         recoveredTo: await boutNames(currentBout(page)), recoverTaps: 1, screenshot: removeShot });
@@ -456,7 +465,6 @@ test.describe('J5 kachinuki from the court console', () => {
     });
 
     await test.step('bout 5: a hurried double tap lands one M, a second M tapped on purpose records M M for a win that was M K', async () => {
-      const tappedAt = Date.now();
       const dbl = await doubleTap(boutIpponButton(currentBout(page), 'shiro', 'M'));
       // The app ignores the bounce of a tap: two taps inside its window land one M.
       await expect(boutFilled(currentBout(page), 'shiro')).toHaveCount(1);
@@ -465,7 +473,12 @@ test.describe('J5 kachinuki from the court console', () => {
       // The mistake the later correction is about: the operator, meaning M K,
       // taps M a second time, past the bounce window.
       if ((await boutFilled(currentBout(page), 'shiro').count()) < 2) {
-        await dwell(page, tappedAt);
+        // Out of the bounce window counted from now, after the double tap's
+        // clicks have all come: counted from before the double tap (its setup
+        // in the page can take longer than the window on a loaded machine),
+        // the deliberate tap could still fall inside it and be taken as the
+        // bounce (seen once in a full run, stage 6 review 12).
+        await dwell(page, Date.now());
         await boutIpponButton(currentBout(page), 'shiro', 'M').tap();
       }
       await expect(boutFilled(currentBout(page), 'shiro')).toHaveCount(2);
@@ -680,22 +693,33 @@ test.describe('J5 kachinuki from the court console', () => {
 
     await test.step('bout 8: fusensho to Shiro (exhaustion walkover), then End match double-tapped', async () => {
       const fus = currentBout(page).locator('.team-sub-match__side--shiro').getByTestId('scoring-modal-fusensho-button');
-      // V1: the thumb meant Fusensho and landed on the button beside it.
-      const v1 = await tapNeighbour(fus, 'left');
+      // V1: the thumb meant Fusensho and landed on the button above it (the
+      // button has a line of its own, wide enough for its pressed label, F1).
+      const v1 = await tapNeighbour(fus, 'up');
       await rendered(page);
       const marks = await boutFilled(currentBout(page), 'shiro').allInnerTexts();
       const v1Shot = await shot(page, 'v1-fusensho-neighbour');
       const recoverTaps = await clearBoutMarks(currentBout(page), 'shiro');
-      record({ step: 'M1 bout 8', action: 'Fusensho (Shiro)', variant: 'V1 tapNeighbour left', ...v1, shiroMarks: marks,
+      record({ step: 'M1 bout 8', action: 'Fusensho (Shiro)', variant: 'V1 tapNeighbour up', ...v1, shiroMarks: marks,
         recoverTaps, screenshot: v1Shot });
       // V2: Fusensho double-tapped (it is a toggle).
       const fusBefore = await fus.innerText();
+      // F1 (operator decision 2026-10-19): the button holds its place when
+      // pressed, so the second tap lands on it, never on H beside it.
+      const fusBox = await fus.boundingBox();
       const v2 = await doubleTap(fus);
       const label = (await untilStable(() => fus.innerText(), { from: fusBefore })).trim();
       record({ step: 'M1 bout 8', action: 'Fusensho (Shiro)', variant: 'V2 doubleTap', ...v2, labelAfter: label,
         shiroMarks: await boutFilled(currentBout(page), 'shiro').allInnerTexts(), screenshot: await shot(page, 'v2-fusensho-double-tap') });
       if (!/✓/.test(label)) await fus.tap();
       await expect(fus).toHaveText(/✓ Fusensho/);
+      // Where it was and as big. One pixel down is allowed: a tapped .btn
+      // stays :active under touch emulation, and :active nudges it 1px
+      // (translateY), the press feedback, not a layout move.
+      const fusAfter = await fus.boundingBox();
+      expect({ x: fusAfter.x, width: fusAfter.width, height: fusAfter.height }, 'pressed, the Fusensho button is where it was and as big')
+        .toEqual({ x: fusBox.x, width: fusBox.width, height: fusBox.height });
+      expect(Math.abs(fusAfter.y - fusBox.y), 'pressed, the Fusensho button stays on its line').toBeLessThanOrEqual(1);
       await shot(page, 'bout-8-fusensho');
       // V2 on End match: two taps inside 300ms on a two-tap guard.
       const end = endMatchButton(page);
@@ -777,7 +801,7 @@ test.describe('J5 kachinuki from the court console', () => {
     await test.step('Reopen match, double-tapped', async () => {
       const reopen = reopenButton(page);
       const box = await reopen.boundingBox();
-      const v2 = await doubleTap(reopen);
+      const v2 = await doubleTap(reopen, { afterRender: true });
       await expect(recordBoutButton(page)).toBeVisible({ timeout: EXPECT_TIMEOUT_MS });
       await rendered(page);
       record({ step: 'M1 reopen', action: 'Reopen match', variant: 'V2 doubleTap', ...v2, reopenBox: box,
@@ -1064,7 +1088,7 @@ test.describe('J5 kachinuki from the court console', () => {
           await openList();
           await page.keyboard.press('Escape');
           await rendered(page);
-          const discard = page.locator('.modal[role="dialog"]').filter({ hasText: /Discard unsaved/ });
+          const discard = page.locator('.modal[role="dialog"]').filter({ hasText: /Your unsaved entries will be discarded/ });
           const dialogShown = await discard.isVisible();
           const escShot = await shot(page, 'm2-esc-discard-dialog');
           let hasty = {};
@@ -1115,7 +1139,7 @@ test.describe('J5 kachinuki from the court console', () => {
           await awardBoutIppon(page, 'aka', 'M');
           // V2 on Record bout: two taps inside 300ms.
           const before = await doneRows(page).count();
-          const v2 = await doubleTap(recordBoutButton(page));
+          const v2 = await doubleTap(recordBoutButton(page), { afterRender: true });
           await expect(doneRows(page)).toHaveCount(before + 1);
           // Deliberate: the bounced second tap must NOT append another bout, and
           // an absence has no state to wait for, so the time is the evidence.

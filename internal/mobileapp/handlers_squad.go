@@ -66,6 +66,16 @@ import (
 // Rename keeps them.
 type SquadMemberRequest struct {
 	Name string `json:"name"`
+	// ID is the member's id as the device minted it, on POST only and
+	// optional (bc-evts stage 3 review 2, R1): a lowercase UUID v4
+	// (state.IsClientMemberID). The add is an outbox entry, so a lineup save
+	// naming the member is queued behind it with the id it will have.
+	ID string `json:"id,omitempty"`
+	// WriteID is the client's id for a rename (bc-evts stage 3 review 11,
+	// Y8): one the door applied is answered with the member as stored, never
+	// applied again, so a late duplicate puts no older name back. The add
+	// needs none: its member id already makes a resend an echo.
+	WriteID string `json:"writeId,omitempty"`
 }
 
 // RegisterSquadHandlers wires the GET/POST/PUT/DELETE squad endpoints under
@@ -77,7 +87,10 @@ type SquadMemberRequest struct {
 // tl/verifier tell an anonymous self-run caller apart (selfRunAnonymous), for
 // the add's and the rename's guards and so that a wrong password on either
 // write is 401.
-func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps CompetitionStore, hub Broadcaster, tl TournamentLoader, verifier PasswordVerifier) {
+func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps CompetitionStore, hub Broadcaster, tl TournamentLoader, verifier PasswordVerifier, seaters ...KachinukiOpenerSeater) {
+	// A rename and a cleared name are ordered by arrival: a late duplicate of
+	// one is answered as recorded (writeOnce, Y8).
+	once := newWriteOnce()
 	r.GET("/competitions/:id/team-members", func(c *gin.Context) {
 		compID, ok := requireValidCompID(c)
 		if !ok {
@@ -115,21 +128,33 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		if !validMemberName(c, req.Name) {
 			return
 		}
+		if req.ID != "" && !state.IsClientMemberID(req.ID) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": state.ErrInvalidMemberID.Error()})
+			return
+		}
 		// A participant's add is bounded and refused once the competition
-		// has finished, both judged by the store under its lock.
+		// has finished, both judged by the store under its lock. A resend of
+		// an add that landed (the same client id, whatever name the member
+		// holds now: a rename or a cleared name since does not refuse it, F5)
+		// is answered 200 with the member as stored, and announces nothing new.
 		var member domain.TeamMember
+		var created bool
 		var err error
 		if anonymous {
-			member, err = store.AddTeamMemberUpTo(compID, teamID, req.Name, selfRunMemberLimit(comp.TeamSize))
+			member, created, err = store.AddTeamMemberAsUpTo(compID, teamID, req.ID, req.Name, selfRunMemberLimit(comp.TeamSize))
 		} else {
-			member, err = store.AddTeamMember(compID, teamID, req.Name)
+			member, created, err = store.AddTeamMemberAs(compID, teamID, req.ID, req.Name)
 		}
 		if err != nil {
 			respondSquadWriteError(c, err)
 			return
 		}
+		if !created {
+			c.JSON(http.StatusOK, member)
+			return
+		}
 		c.JSON(http.StatusCreated, member)
-		hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, ""))
+		announceLineupChange(hub, comps, seaters, compID, teamID, "")
 	})
 
 	r.PUT("/competitions/:id/teams/:tid/members/:memberId", func(c *gin.Context) {
@@ -168,13 +193,28 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		if anonymous {
 			rename = store.NameUnnamedTeamMember
 		}
-		member, err := rename(compID, teamID, memberID, req.Name)
-		if err != nil {
-			respondSquadWriteError(c, err)
+		if err := validWriteID(req.WriteID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, member)
-		hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, ""))
+		applied := false
+		ran := once.do(memberTarget(compID, teamID, memberID), req.WriteID, func() bool {
+			member, err := rename(compID, teamID, memberID, req.Name)
+			if err != nil {
+				respondSquadWriteError(c, err)
+				return false
+			}
+			c.JSON(http.StatusOK, member)
+			applied = true
+			return true
+		})
+		if !ran {
+			answerStoredMember(c, store, compID, teamID, memberID)
+			return
+		}
+		if applied {
+			announceLineupChange(hub, comps, seaters, compID, teamID, "")
+		}
 	})
 
 	// DELETE is the operator's "removal": it clears the member's Name back
@@ -197,14 +237,53 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 			c.JSON(http.StatusBadRequest, gin.H{"error": "member ID is required"})
 			return
 		}
-		member, err := store.ClearTeamMemberName(compID, teamID, memberID)
-		if err != nil {
-			respondSquadWriteError(c, err)
+		// The optional {writeId} body (Y8), as the rename's.
+		tag, ok := bindOptionalWriteTag(c)
+		if !ok {
 			return
 		}
-		c.JSON(http.StatusOK, member)
-		hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, ""))
+		applied := false
+		ran := once.do(memberTarget(compID, teamID, memberID), tag.WriteID, func() bool {
+			member, err := store.ClearTeamMemberName(compID, teamID, memberID)
+			if err != nil {
+				respondSquadWriteError(c, err)
+				return false
+			}
+			c.JSON(http.StatusOK, member)
+			applied = true
+			return true
+		})
+		if !ran {
+			answerStoredMember(c, store, compID, teamID, memberID)
+			return
+		}
+		if applied {
+			announceLineupChange(hub, comps, seaters, compID, teamID, "")
+		}
 	})
+}
+
+// memberTarget names a member for writeOnce: its renames and its cleared name
+// are ordered together.
+func memberTarget(compID, teamID, memberID string) string {
+	return "member\x1f" + compID + "\x1f" + teamID + "\x1f" + memberID
+}
+
+// answerStoredMember answers a late duplicate of a member write the door
+// already applied (Y8): 200 with the member as stored, nothing written.
+func answerStoredMember(c *gin.Context, store SquadStore, compID, teamID, memberID string) {
+	squads, err := store.LoadSquads(compID)
+	if err != nil {
+		internalError(c, err)
+		return
+	}
+	for _, m := range squads[teamID] {
+		if m.ID == memberID {
+			c.JSON(http.StatusOK, m)
+			return
+		}
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": state.ErrTeamMemberNotFound.Error()})
 }
 
 // requireValidCompIDAndTeam extracts (compID, teamID) from the URL, 400ing
@@ -302,6 +381,18 @@ func respondSquadWriteError(c *gin.Context, err error) {
 	}
 	if errors.Is(err, state.ErrTeamMemberNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, state.ErrTeamMemberIDConflict) {
+		// The id is the device's (an outbox add): another team's member, or a
+		// participant, holds it (F7). A resend of an add this team already
+		// holds under the id is 200 with the member as stored, whatever name it
+		// now carries (F5), so it never reaches here. Never retried.
+		c.JSON(http.StatusConflict, gin.H{"error": "member_id_conflict", "message": "Another team member already has this id. Reload the page and add the member again."})
+		return
+	}
+	if errors.Is(err, state.ErrInvalidMemberID) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if errors.Is(err, state.ErrTeamMemberLimit) {

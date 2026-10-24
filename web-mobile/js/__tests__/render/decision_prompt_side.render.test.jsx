@@ -123,7 +123,7 @@ describe('DecisionPrompt side picker', () => {
     fireEvent.submit(container.querySelector('form'));
     await Promise.resolve();
     expect(window.API.recordDecision).toHaveBeenCalledWith(
-      'comp-1', 'match-1', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'explicit-pw',
+      'comp-1', 'match-1', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'explicit-pw', expect.objectContaining({ onRefusal: expect.any(Function) }),
     );
   });
 

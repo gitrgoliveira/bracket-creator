@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"maps"
+
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -89,6 +91,12 @@ func bracketMatchAsResult(bm *state.BracketMatch) *state.MatchResult {
 		// exactly, so a rolled-back match keeps ordering later writes by the
 		// stamps it really had.
 		GroupStamps: state.CloneGroupStamps(bm.GroupStamps),
+		// The mark ids and the event-log version the score was derived from
+		// (bc-evts), so a restore puts back the ids the marks really had.
+		MarkIDs:      bm.MarkIDs.Clone(),
+		ScoreVersion: bm.ScoreVersion,
+		EventSeqs:    state.CloneGroupStamps(bm.EventSeqs),
+		TurnedAway:   maps.Clone(bm.TurnedAway),
 	}
 }
 

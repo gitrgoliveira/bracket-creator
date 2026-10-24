@@ -10,8 +10,8 @@
 import React from 'react';
 import { render, act, fireEvent, cleanup } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
 import { DEFAULT_WIN_IPPON } from '../../result_slot.jsx';
 
 const STUBBED_GLOBALS = {
@@ -58,7 +58,10 @@ afterEach(() => {
 
 const CIRCLES = [DEFAULT_WIN_IPPON, DEFAULT_WIN_IPPON];
 
-function makeMatch(subResults = []) {
+// The bout rows a running team match holds once its sheet has been written.
+const BOUT_ROWS = [1, 2, 3].map((position) => ({ position, sideA: '', sideB: '', ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, winner: '', decision: '' }));
+
+function makeMatch(subResults = BOUT_ROWS) {
   return {
     id: 'tm-fus',
     compId: 'comp1',
@@ -93,28 +96,31 @@ async function tap(el) {
   await act(async () => { fireEvent.click(el); });
 }
 
+// Long past the 300 ms debounce the sheet used to have: nothing is written after it.
 async function settle() {
-  await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+  await act(async () => { vi.advanceTimersByTime(350); });
 }
 
-function lastBout1() {
-  const calls = window.API.recordScore.mock.calls;
-  expect(calls.length).toBeGreaterThan(0);
-  const [, , patch] = calls[calls.length - 1];
-  return (patch.subResults || []).find((s) => s.position === 1);
-}
+// bc-evts stage 5: a running match's bout changes are taps; the board shows
+// what they make of the bout (the server's fold, mirrored in score_events.jsx).
+const taps = () => window.API.recordTap.mock.calls.map((c) => c[2]);
+const marks = (color) => markSlots(color).map((b) => b.textContent).filter((t) => t !== '·');
+const pressed = (color) => fusenshoButton(color).textContent.includes('✓ Fusensho');
 
 describe('bc-fsnp: a per-bout fusensho keeps the other side\'s struck points', () => {
-  it('writes the circles for the winner and keeps the loser\'s kote', async () => {
+  it('gives the circles to the winner and keeps the loser\'s kote', async () => {
     await mount(makeMatch());
     await tap(ipponButton('shiro', 'K'));
-    await settle();
     await tap(fusenshoButton('aka'));
+    expect(taps()).toEqual([
+      { kind: 'ippon.add', pos: 1, side: 'b', letter: 'K' },
+      { kind: 'bout.decision', pos: 1, side: 'a', value: 'fusensho' },
+    ]);
+    expect(pressed('aka')).toBe(true);
+    expect(marks('aka')).toEqual(CIRCLES);
+    expect(marks('shiro')).toEqual(['K']);
     await settle();
-    const row = lastBout1();
-    expect(row.decision).toBe('fusensho');
-    expect(row.ipponsA).toEqual(CIRCLES);
-    expect(row.ipponsB).toEqual(['K']);
+    expect(window.API.recordScore).not.toHaveBeenCalled();
   });
 
   it('after a reload, the undo drops the circles and keeps the kote', async () => {
@@ -125,11 +131,10 @@ describe('bc-fsnp: a per-bout fusensho keeps the other side\'s struck points', (
     ]));
     expect(fusenshoButton('aka').textContent).toContain('✓ Fusensho');
     await tap(fusenshoButton('aka'));
-    await settle();
-    const row = lastBout1();
-    expect(row.decision || '').not.toBe('fusensho');
-    expect(row.ipponsA).toEqual([]);
-    expect(row.ipponsB).toEqual(['K']);
+    expect(taps()).toEqual([{ kind: 'bout.decision', pos: 1, value: 'clear' }]);
+    expect(pressed('aka')).toBe(false);
+    expect(marks('aka')).toEqual([]);
+    expect(marks('shiro')).toEqual(['K']);
   });
 
   it('correcting the loser\'s point keeps the fusensho', async () => {
@@ -137,24 +142,21 @@ describe('bc-fsnp: a per-bout fusensho keeps the other side\'s struck points', (
     // operator recorded stays (a correction keeps what it did not touch).
     await mount(makeMatch());
     await tap(ipponButton('shiro', 'K'));
-    await settle();
+    const kId = window.API.recordTap.mock.results[0].value.id;
     await tap(fusenshoButton('aka'));
-    await settle();
     // Tap Shiro's K mark to remove it, the operator's way to fix a point.
     const kSlot = markSlots('shiro').find((b) => b.textContent === 'K');
     await tap(kSlot);
-    await settle();
-    const row = lastBout1();
-    expect(row.decision).toBe('fusensho');
-    expect(row.ipponsA).toEqual(CIRCLES);
-    expect(row.ipponsB).toEqual([]);
+    expect(taps()[2]).toEqual({ kind: 'ippon.remove', pos: 1, side: 'b', target: kId });
+    expect(pressed('aka')).toBe(true);
+    expect(marks('aka')).toEqual(CIRCLES);
+    expect(marks('shiro')).toEqual([]);
     // And undoing the fusensho afterwards does not bring the kote back.
     await tap(fusenshoButton('aka'));
-    await settle();
-    const undone = lastBout1();
-    expect(undone.decision || '').not.toBe('fusensho');
-    expect(undone.ipponsA).toEqual([]);
-    expect(undone.ipponsB).toEqual([]);
+    expect(taps()[3]).toEqual({ kind: 'bout.decision', pos: 1, value: 'clear' });
+    expect(pressed('aka')).toBe(false);
+    expect(marks('aka')).toEqual([]);
+    expect(marks('shiro')).toEqual([]);
   });
 
   it('names the undo first when the side that won the bout holds a fusensho', async () => {
@@ -183,12 +185,19 @@ describe('bc-fsnp: a per-bout fusensho keeps the other side\'s struck points', (
     // The reason is not shown until the operator taps: every bout won 2-0
     // refuses the loser's Fusensho, and a line under each would be clutter.
     expect(refusalNote('aka')).toBeNull();
-    window.API.recordScore.mockClear();
+    const before = window.API.recordTap.mock.calls.length;
     await tap(aka);
     await settle();
+    expect(window.API.recordTap.mock.calls.length, 'the refused tap sends nothing').toBe(before);
     expect(window.API.recordScore).not.toHaveBeenCalled();
     // A title never shows on a touchscreen, so the tap puts the reason in view.
     expect(refusalNote('aka').textContent).toBe('SHIRO already won this bout: clear their points first');
     expect(aka.textContent).toBe('Fusensho');
   });
 });
+
+// bc-evts stage 5: a running team match is scored by taps handed to the outbox
+// (API.recordTap); each test gets a fresh fake of that surface, whose pending
+// taps the board folds on. Registered last, so it lands on the API the hooks
+// above set up.
+beforeEach(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });

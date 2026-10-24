@@ -115,7 +115,7 @@ function makeHandleDismiss({ submitting, dirty, confirmResult, onClose }) {
   const confirm = vi.fn().mockReturnValue(confirmResult);
   const dismiss = () => {
     if (submitting) return;
-    if (dirty && !confirm('Discard unsaved scoring changes?')) return;
+    if (dirty && !confirm('Your unsaved entries will be discarded. Leave this match anyway?')) return;
     onClose();
   };
   return { dismiss, confirm };

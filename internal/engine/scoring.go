@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
+	"slices"
 	"sort"
 	"sync"
 
@@ -697,24 +699,34 @@ type ForceOptions struct {
 	// bytes as an operator clearing every mark on an editor board, which must
 	// still clear them.
 	StartOnly bool
-	// HoldReason, when set, holds the write whole: nothing of it is applied,
-	// all of it is kept in the match's history with this reason, and the
-	// write answers superseded (holdWriteTx). The score handler sets it for a
-	// running write older than one the same board already sent
-	// (HoldReasonOlderRevision): the ordering protection the rev guard gives,
-	// without dropping anything.
-	HoldReason string
 	// NoReplayHistory leaves out the history line an exact resend of a
 	// recorded finish would otherwise add (answerExactScoreReplay). The score
 	// handler sets it for an anonymous self-run participant, whose resend
 	// changes nothing and could otherwise be looped to grow the match's
 	// history file. The organiser's resend keeps its line.
 	NoReplayHistory bool
+	// WriteID and Basis tag a door's server-built write (a decision) with
+	// the client's write id and what it had in view (bc-evts F1, Q9), for the
+	// baseline it leaves in the score event log; a write the client builds
+	// carries them on the MatchResult itself.
+	WriteID string
+	Basis   *state.ScoreBasis
+	// Session is the client's event session, carried with Basis onto the
+	// baseline (bc-evts S8 b) so the basis's Seq arm can count its events.
+	Session string
+	// ReopenReason is the reason a decision that ends a match reopened with no
+	// reason keeps as the match's correction reason. It rides on the write
+	// itself, so the baseline the write leaves in the score event log holds it:
+	// set after the write it would be a result-group field its log did not
+	// replay to. Taken only when the stored match holds no correction reason.
+	ReopenReason string
 }
 
-// HoldReasonOlderRevision is the history reason of a running write the same
-// scoring board had already followed with a newer one (the score handler's
-// rev guard, bc-mrgc phase 3).
+// HoldReasonOlderRevision is the history reason of a previous build's running
+// write the same scoring board had already followed with a newer one: a lower
+// revision of a session whose higher one the score event log holds
+// (olderRevisionThanLogged, bc-evts stage 2b; an in-memory guard in the score
+// handler before it).
 const HoldReasonOlderRevision = "older revision of this board"
 
 // firstForceOptions returns the caller's ForceOptions, or the zero value
@@ -756,7 +768,15 @@ func firstForceOptions(opts []ForceOptions) ForceOptions {
 // force (bc-kcdg) reaches ONLY the bracket branch's downstream-knockout-
 // correction guard; the pool branch has no equivalent concept and ignores it.
 func (e *Engine) writeToPoolOrBracket(h state.StoreTx, compId, matchId string, result *state.MatchResult, policy matchWritePolicy, force bool, comp *state.Competition) (mismatch bool, reopened []ReopenedMatch, inherited bool, err error) {
-	// The merge needs the competition to work a winner out again (R3), so a
+	return e.writeToPoolOrBracketLog(h, compId, matchId, result, policy, force, comp, e.snapshotScoreLog(h, compId, matchId, result, policy))
+}
+
+// writeToPoolOrBracketLog is writeToPoolOrBracket with the match's score log
+// already read (snapshotScoreLog), for a caller that needed it before the
+// write (the /score path's shapeScoreWrite): one read per write.
+func (e *Engine) writeToPoolOrBracketLog(h state.StoreTx, compId, matchId string, result *state.MatchResult, policy matchWritePolicy, force bool, comp *state.Competition, lines []state.ScoreLogLine) (mismatch bool, reopened []ReopenedMatch, inherited bool, err error) {
+	// The merge needs the competition to judge the write (engi, team,
+	// kachinuki), so a
 	// forward write whose caller did not load it loads it here.
 	if comp == nil && policy == matchWriteForward {
 		if comp, err = h.LoadCompetition(compId); err != nil {
@@ -768,7 +788,7 @@ func (e *Engine) writeToPoolOrBracket(h state.StoreTx, compId, matchId string, r
 		// The POOL branch of the path POST /score and the bulk-score endpoint
 		// actually take — the site the hand-copied merge once missed.
 		var werr error
-		mismatch, superseded, inherited, werr = applyPoolWrite(r, result, policy, comp)
+		mismatch, superseded, inherited, werr = applyPoolWriteLog(r, result, policy, comp, lines)
 		if werr != nil {
 			// A genuine validation failure (e.g. backfillMatchIdentity's
 			// winnerId-names-neither-side check): propagate it AS the error,
@@ -805,8 +825,25 @@ func (e *Engine) writeToPoolOrBracket(h state.StoreTx, compId, matchId string, r
 		return false, nil, false, perr
 	}
 	// The SAME policy the pool branch would have used.
-	reopened, inherited, err = e.recordBracketMatchResult(h, compId, matchId, result, policy, force, comp)
+	reopened, inherited, err = e.recordBracketMatchResultLog(h, compId, matchId, result, policy, force, comp, lines)
 	return false, reopened, inherited, err
+}
+
+// snapshotScoreLog reads the match's score event log for a scoring snapshot
+// the replay decides (replaysSnapshot); nil for any other write. A log that
+// cannot be read is logged and read as empty: the snapshot is then replayed
+// onto the stored match alone, and the door's baseline is not logged (its
+// append reads the log again and fails the same way).
+func (e *Engine) snapshotScoreLog(h state.StoreTx, compID, matchID string, result *state.MatchResult, policy matchWritePolicy) []state.ScoreLogLine {
+	if policy != matchWriteForward || result.WriteDoor == DoorEvent || !replaysSnapshot(result) {
+		return nil
+	}
+	lines, err := h.LoadScoreLog(compID, matchID)
+	if err != nil {
+		log.Printf("engine: ERROR: match %s/%s: score event log not read, the %s write is replayed onto the stored match alone: %v", compID, matchID, doorOf(result), err)
+		return nil
+	}
+	return lines
 }
 
 // applyPoolWrite folds the stored match into an incoming result and then
@@ -840,6 +877,12 @@ func (e *Engine) writeToPoolOrBracket(h state.StoreTx, compId, matchId string, r
 // and not "stale" (superseded), but "this winner doesn't correspond to
 // either competitor in this match" -- and the caller maps it to 400, not 409.
 func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy, comp *state.Competition) (mismatch, superseded, inherited bool, err error) {
+	return applyPoolWriteLog(stored, result, policy, comp, nil)
+}
+
+// applyPoolWriteLog is applyPoolWrite with the match's score event log, which
+// a scoring snapshot is replayed onto (mergeByReplay).
+func applyPoolWriteLog(stored, result *state.MatchResult, policy matchWritePolicy, comp *state.Competition, lines []state.ScoreLogLine) (mismatch, superseded, inherited bool, err error) {
 	// reconcileSides BACKFILLS omitted sides as a side effect and only reports
 	// the mismatch, so it must run under both policies; hoisted out of the
 	// condition below because folding it into a short-circuit would let a later
@@ -858,7 +901,7 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy, 
 	// match untouched (its history entry is written by the caller). A pool's
 	// whole-struct write has always replaced the stored bouts with a nil
 	// list, so the default keeps that (nilSubsClear).
-	if mergeMatchWrite(stored, result, policy, mergeCtx{comp: comp, nilSubsClear: true}).Superseded() {
+	if mergeMatchWrite(stored, result, policy, mergeCtx{comp: comp, nilSubsClear: true, lines: lines}).Superseded() {
 		return false, true, false, nil
 	}
 	// A bout-row correction over a recorded withdrawal keeps the ruling
@@ -881,7 +924,10 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy, 
 	}
 	result.Round = stored.Round
 	// Everything below is forward-only; matchWriteRestore inherits nothing more.
-	if policy == matchWriteForward {
+	// Nor does the score replay's derived write (bc-evts): the replay owns
+	// its hantei marks and its rows, and a change made here would be a match
+	// its own log no longer replays to.
+	if policy == matchWriteForward && result.WriteDoor != DoorEvent {
 		// Set-if-empty: see the drift note on this function.
 		if result.CorrectionReason == "" {
 			result.CorrectionReason = stored.CorrectionReason
@@ -917,11 +963,38 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy, 
 		result.SubResultsRaw = ""
 		result.SubResultsUnreadable = false
 	}
+	prior := derivedScoreOf(stored.IpponsA, stored.IpponsB, stored.MarkIDs, stored.SubResults, stored.ScoreVersion, stored.EventSeqs)
+	priorTurnedAway := stored.TurnedAway
 	*stored = *result
 	// The write's own merge inputs and report stay on the incoming result for
 	// the caller; the stored copy must not carry them to a later writer.
 	stored.ClearRequestFields()
 	stored.GroupStamps = state.CloneGroupStamps(result.GroupStamps)
+	// The mark ids and the event-log version are the replay's alone
+	// (bc-evts): only its derived write (DoorEvent) sets them, and its
+	// version only grows. Any other write is built by a client (or from
+	// one), so what it carries is never stored: it keeps the stored ids of
+	// each scoreline it left as it was, and the stored version
+	// (derivedScore.carry). A restore puts back the snapshot's exactly.
+	switch {
+	case policy == matchWriteRestore:
+		stored.MarkIDs = result.MarkIDs.Clone()
+		stored.EventSeqs = state.CloneGroupStamps(result.EventSeqs)
+		stored.TurnedAway = maps.Clone(result.TurnedAway)
+	case result.WriteDoor == DoorEvent:
+		stored.MarkIDs = result.MarkIDs.Clone()
+		stored.ScoreVersion = max(prior.version, result.ScoreVersion)
+		stored.EventSeqs = mergeEventSeqs(prior.eventSeqs, result.EventSeqs)
+		stored.TurnedAway = maps.Clone(result.TurnedAway)
+	default:
+		stored.MarkIDs = prior.carry(stored.IpponsA, stored.IpponsB, stored.SubResults)
+		stored.ScoreVersion = prior.version
+		stored.EventSeqs = state.CloneGroupStamps(prior.eventSeqs)
+		stored.TurnedAway = maps.Clone(priorTurnedAway)
+		result.MarkIDs, result.ScoreVersion = stored.MarkIDs.Clone(), stored.ScoreVersion
+		result.EventSeqs = state.CloneGroupStamps(stored.EventSeqs)
+		result.TurnedAway = maps.Clone(stored.TurnedAway)
+	}
 	return false, false, inherited, nil
 }
 
@@ -1490,7 +1563,8 @@ func KeepsWithdrawalRuling(storedStatus state.MatchStatus, storedDecision string
 // reads result.Winner for this write: applyPoolWrite before identity
 // backfill, applyBracketResultIn before the downstream-correction guard.
 func preserveWithdrawalRuling(stored withdrawalRuling, result *state.MatchResult, policy matchWritePolicy) bool {
-	if policy != matchWriteForward || !KeepsWithdrawalRuling(stored.Status, stored.Decision, result) {
+	if policy != matchWriteForward || !KeepsWithdrawalRuling(stored.Status, stored.Decision, result) ||
+		displacesStoredResult(result) {
 		return false
 	}
 	result.Decision = stored.Decision
@@ -1508,6 +1582,21 @@ func preserveWithdrawalRuling(stored withdrawalRuling, result *state.MatchResult
 		result.Encho = &encho
 	}
 	return true
+}
+
+// displacesStoredResult reports whether the write's merge took the stored
+// result out of the match: the stored result was a rival of this one, stamped
+// after it by a device that had not seen it (rivalResult), so the first
+// recorded result is the write's and there is no stored ruling left to keep.
+// A correction that saw the ruling displaces nothing and keeps it (bc-tmfn).
+func displacesStoredResult(result *state.MatchResult) bool {
+	if result.Merge == nil {
+		return false
+	}
+	return slices.ContainsFunc(result.Merge.Displaced, func(d state.DisplacedChange) bool {
+		_, ok := d.Values[state.GroupResult]
+		return ok
+	})
 }
 
 // keptWithdrawalScoreline is the match-level scoreline a correction that keeps
@@ -1563,13 +1652,7 @@ func keptWithdrawalScoreline(stored withdrawalRuling, result *state.MatchResult)
 // construction, so a future non-scoring token added there (as HanteiMark
 // itself once was) does not also need remembering here.
 func struckIppons(ippons []string) []string {
-	var out []string
-	for _, v := range ippons {
-		if domain.IsScoringIppon(v) && v != domain.DefaultWinIppon {
-			out = append(out, v)
-		}
-	}
-	return out
+	return domain.StruckIppons(ippons)
 }
 
 // countScoringIppons is the package-local spelling of domain.CountScoringIppons
@@ -1606,7 +1689,12 @@ func (e *Engine) RecordMatchResult(compId string, matchId string, result *state.
 	}
 	var superseded error
 	txErr := e.store.WithTransaction(compId, func(tx state.StoreTx) error {
+		before := e.storedStatus(tx, compId, matchId)
+		stamp, writeID := result.ModifiedAt, result.WriteID
 		err := e.writeMatchResult(tx, compId, matchId, result, matchWriteForward)
+		if err == nil {
+			result.LineupWarning, err = e.afterMatchWrite(tx, compId, matchId, before, result.WriteDoor, writeID, stamp)
+		}
 		if errors.Is(err, ErrMatchSuperseded) {
 			// Commit: the write's only footprint is its match history entry,
 			// and an aborted transaction would discard it (bc-mrgc).
@@ -1657,7 +1745,7 @@ func (e *Engine) writeMatchResult(h state.StoreTx, compId string, matchId string
 	if errors.Is(err, ErrMatchSuperseded) {
 		// Kept in the match's history (bc-mrgc); RecordMatchResult commits
 		// the transaction on this error so the entry lands.
-		e.recordWriteHistory(h, compId, matchId, result)
+		e.recordSupersededWriteHistory(h, compId, matchId, result)
 		return supersededBy(result)
 	}
 	if err != nil {
@@ -1679,7 +1767,7 @@ func (e *Engine) writeMatchResult(h state.StoreTx, compId string, matchId string
 	if policy == matchWriteRestore {
 		return nil
 	}
-	e.recordWriteHistory(h, compId, matchId, result)
+	e.recordLandedWriteHistory(h, compId, matchId, result)
 	// A write that kept a recorded withdrawal (preserveWithdrawalRuling), or
 	// whose merge left the verdict where it was, changed no ruling, so it has
 	// no eligibility consequence to record.
@@ -1946,7 +2034,7 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 				continue
 			}
 			// Tiebreaker and pool-daihyosen matches don't count toward regular pool stats.
-			if IsTiebreakerMatchID(m.ID) || IsPoolDaihyosenMatchID(m.ID) {
+			if state.IsPoolSupplementaryMatchID(m.ID) {
 				continue
 			}
 			sA := lookupStandingsPlayer(playerStandings, m.SideAID)
@@ -2243,7 +2331,7 @@ func markTiedStandings(comp *state.Competition, sorted []state.PlayerStanding, m
 	// Separate regular matches (exclude supplementary TB/DH bouts).
 	var regularMatches []state.MatchResult
 	for _, m := range matches {
-		if !IsTiebreakerMatchID(m.ID) && !IsPoolDaihyosenMatchID(m.ID) {
+		if !state.IsPoolSupplementaryMatchID(m.ID) {
 			regularMatches = append(regularMatches, m)
 		}
 	}
@@ -2411,6 +2499,12 @@ func markTiedStandingsLeague(comp *state.Competition, sorted []state.PlayerStand
 // beside the reopen lines (recordRepPickClears), in the same transaction; a
 // restore (matchWriteRestore) is not a door and records none.
 func (e *Engine) recordBracketMatchResult(h state.StoreTx, compId string, matchId string, result *state.MatchResult, policy matchWritePolicy, force bool, comp *state.Competition) ([]ReopenedMatch, bool, error) {
+	return e.recordBracketMatchResultLog(h, compId, matchId, result, policy, force, comp, e.snapshotScoreLog(h, compId, matchId, result, policy))
+}
+
+// recordBracketMatchResultLog is recordBracketMatchResult with the match's
+// score event log already read (snapshotScoreLog).
+func (e *Engine) recordBracketMatchResultLog(h state.StoreTx, compId string, matchId string, result *state.MatchResult, policy matchWritePolicy, force bool, comp *state.Competition, lines []state.ScoreLogLine) ([]ReopenedMatch, bool, error) {
 	var (
 		reopened  []ReopenedMatch
 		inherited bool
@@ -2418,7 +2512,7 @@ func (e *Engine) recordBracketMatchResult(h state.StoreTx, compId string, matchI
 	)
 	err := h.UpdateBracket(compId, func(bracket *state.Bracket) error {
 		var ierr error
-		reopened, inherited, clears, ierr = e.applyBracketResultIn(bracket, compId, matchId, result, policy, force, comp)
+		reopened, inherited, clears, ierr = e.applyBracketResultIn(bracket, compId, matchId, result, policy, force, comp, lines)
 		return ierr
 	})
 	if err == nil {
@@ -2527,10 +2621,14 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	// completed verdict-silent write that the pool path accepts (deriving the
 	// winner from the preserved rep bout) was rejected here.
 	// Forward only: see the restore note on bm.SubResults below.
-	if policy == matchWriteForward && result.SubResults != nil {
-		preserveDaihyosenOutcome(bm.SubResults, result)
+	// The score replay's derived write (bc-evts) is the replay's own: no
+	// verdict is restored onto it or derived for it here.
+	if result.WriteDoor != DoorEvent {
+		if policy == matchWriteForward && result.SubResults != nil {
+			preserveDaihyosenOutcome(bm.SubResults, result)
+		}
+		deriveDaihyosenWinner(result)
 	}
-	deriveDaihyosenWinner(result)
 	// Preserve the match's fixed pairing ids (stamped at generation/pool
 	// resolution/propagation, never rewritten by a score write -- see the
 	// reconcileSides comment above) and resolve the winner id from them, the
@@ -2585,10 +2683,29 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	// exactly (restore, nil included: a match never stamped goes back to
 	// unstamped, as ModifiedAt does above).
 	bm.GroupStamps = state.CloneGroupStamps(result.GroupStamps)
+	// The mark ids and the event-log version, the replay's alone (bc-evts),
+	// as applyPoolWrite settles them: the snapshot's under restore, the
+	// derived write's (DoorEvent, the version only growing), and for any
+	// other write the stored ones, carried below once the scorelines land.
+	var prior *derivedScore
+	switch {
+	case policy == matchWriteRestore:
+		bm.MarkIDs, bm.ScoreVersion = result.MarkIDs.Clone(), result.ScoreVersion
+		bm.EventSeqs = state.CloneGroupStamps(result.EventSeqs)
+		bm.TurnedAway = maps.Clone(result.TurnedAway)
+	case result.WriteDoor == DoorEvent:
+		bm.MarkIDs, bm.ScoreVersion = result.MarkIDs.Clone(), max(bm.ScoreVersion, result.ScoreVersion)
+		bm.EventSeqs = mergeEventSeqs(bm.EventSeqs, result.EventSeqs)
+		bm.TurnedAway = maps.Clone(result.TurnedAway)
+	default:
+		d := derivedScoreOf(bm.IpponsA, bm.IpponsB, bm.MarkIDs, bm.SubResults, bm.ScoreVersion, bm.EventSeqs)
+		prior = &d
+	}
 	// The verdict rides in the ippons about to be rendered; forward writes
 	// from non-validated paths must not persist a mark that contradicts the
-	// result (see stripInvalidHantei). Restore replays the snapshot verbatim.
-	if policy == matchWriteForward {
+	// result (see stripInvalidHantei). Restore replays the snapshot verbatim,
+	// and the score replay's derived write already holds S3 (bc-evts).
+	if policy == matchWriteForward && result.WriteDoor != DoorEvent {
 		stripInvalidHantei(result)
 	}
 	// Defensive copies: bm must not alias result's slices, mirroring the
@@ -2634,6 +2751,14 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	// projection below). Without this a nil-preserve re-score would keep the
 	// stored bouts on disk but emit an omitted subResults payload in the same turn.
 	result.SubResults = bm.SubResults
+	if prior != nil {
+		bm.MarkIDs = prior.carry(bm.IpponsA, bm.IpponsB, bm.SubResults)
+		bm.ScoreVersion = prior.version
+		bm.EventSeqs = state.CloneGroupStamps(prior.eventSeqs)
+		result.MarkIDs, result.ScoreVersion = bm.MarkIDs.Clone(), bm.ScoreVersion
+		result.EventSeqs = state.CloneGroupStamps(bm.EventSeqs)
+		result.TurnedAway = maps.Clone(bm.TurnedAway)
+	}
 	// Echo the persisted scheduling fields back into result so the caller (and
 	// the SSE broadcast) sees the full match state rather than the empty
 	// Court/ScheduledAt the scoring UI sends.
@@ -2665,11 +2790,11 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 // correction and its propagation have landed, requeues the ONE downstream
 // match the correction would otherwise have silently repainted; its id is
 // returned so the caller can broadcast match_updated for it.
-func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID string, result *state.MatchResult, policy matchWritePolicy, force bool, comp *state.Competition) ([]ReopenedMatch, bool, []repPickClear, error) {
+func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID string, result *state.MatchResult, policy matchWritePolicy, force bool, comp *state.Competition, lines []state.ScoreLogLine) ([]ReopenedMatch, bool, []repPickClear, error) {
 	if bracket == nil {
 		return nil, false, nil, notFoundErrorf("bracket not found for competition %s", compID)
 	}
-	mc := mergeCtx{comp: comp, knockout: true}
+	mc := mergeCtx{comp: comp, knockout: true, lines: lines}
 	for rIdx := range bracket.Rounds {
 		for mIdx := range bracket.Rounds[rIdx] {
 			bm := &bracket.Rounds[rIdx][mIdx]
@@ -2677,7 +2802,7 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 				continue
 			}
 			// The stored pairing first, as the pool branch does it: the
-			// merge works a winner out again from the merged match (R3, S2),
+			// merge judges the write against the merged match,
 			// and a payload that omits its sides would otherwise read as one
 			// with no sides at all (bc-mrgc review S6).
 			if sidesBeforeMerge(bm, result, policy) {
@@ -2690,8 +2815,19 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 			// clock frame"), never a downstream refusal the guard would raise
 			// against a result it is not changing (bc-cse finding 2).
 			// Returning an error makes UpdateBracket skip the save.
-			if mergeMatchWrite(bracketMatchAsResult(bm), result, policy, mc).Superseded() {
+			rep := mergeMatchWrite(bracketMatchAsResult(bm), result, policy, mc)
+			if rep.Superseded() {
 				return nil, false, nil, ErrMatchSuperseded
+			}
+			// The result lock (K1, result_lock.go): an older finish that did
+			// not see the stored result is held, never refused, once the next
+			// match was played or started.
+			if policy == matchWriteForward && rivalDisplacesResult(rep) {
+				if code := downstreamLockCode(bracket, rIdx, mIdx); code != "" {
+					result.Merge = rep
+					holdAsLocked(result, nil, code)
+					return nil, false, nil, ErrMatchSuperseded
+				}
 			}
 			// A bout-row correction over a recorded withdrawal keeps the
 			// ruling (bc-tmfn). It must run BEFORE the downstream guard below,
@@ -2728,10 +2864,9 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 			// Propagate only a genuinely completed result. A "running" update is
 			// for live-status display, so the next round's SideA/SideB must stay
 			// empty until the match has a final result. A correction never
-			// puts a finished knockout match back to running: one that would
-			// leave it tied is held by the merge (R4, operator ruling
-			// 2026-10-04), so the match keeps its finish and its advanced
-			// winner.
+			// puts a finished knockout match back to running: scoring stamped
+			// after the result is turned away by the merge (the closed-match
+			// rule), so the match keeps its finish and its advanced winner.
 			var reopened []ReopenedMatch
 			if bracket.Rounds[rIdx][mIdx].Status == state.MatchStatusCompleted {
 				e.propagateBracketWinner(bracket, rIdx, mIdx)
@@ -3376,9 +3511,20 @@ func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string
 	if !errors.Is(err, errMatchNotFound) {
 		return err
 	}
-	return e.withBracketMatch(e.store, compId, matchId, func(m *state.BracketMatch) {
+	return matchNotFoundAsNotFound(compId, matchId, e.withBracketMatch(e.store, compId, matchId, func(m *state.BracketMatch) {
 		m.Court = newCourt
-	})
+	}))
+}
+
+// matchNotFoundAsNotFound turns the pool-then-bracket fall-through's final
+// errMatchNotFound into a *NotFoundError, so a handler answers 404 for a match
+// the competition does not hold rather than a 500 the outbox would retry
+// forever (bc-evts stage 3 review 2, R3). Any other error is returned as is.
+func matchNotFoundAsNotFound(compId, matchId string, err error) error {
+	if errors.Is(err, errMatchNotFound) {
+		return notFoundErrorf("match %s not found in competition %s", matchId, compId)
+	}
+	return err
 }
 
 // setBracketOverrideWinner sets m's Winner name AND (bc-pnum review finding
@@ -3471,8 +3617,14 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 	// (errLWWDropped) assertion makes no write at all, so it is recorded
 	// outside the transaction below, but an APPLIED override must not land
 	// with no history line explaining it if the process dies right after.
-	var held bool
+	var held, recorded bool
 	err := e.store.WithTransaction(compId, func(tx state.StoreTx) error {
+		// A resend of an override already logged (its write id) is answered
+		// as recorded: nothing written, no history line (bc-evts F1, Q6).
+		if e.loggedWriteID(tx, compId, matchId, fo.WriteID) {
+			recorded = true
+			return nil
+		}
 		uerr := tx.UpdateBracket(compId, func(bracket *state.Bracket) error {
 			if bracket == nil {
 				return notFoundErrorf("bracket not found for competition %s", compId)
@@ -3557,7 +3709,7 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 		if uerr != nil {
 			return uerr
 		}
-		e.recordOverrideHistory(tx, compId, matchId, winnerName, modifiedAt, true)
+		e.recordOverrideHistory(tx, compId, matchId, winnerName, modifiedAt, true, fo)
 		// restoreForceReopened must run with the SAME handle the bracket write
 		// just used (its own doc comment says so): it both restores eligibility
 		// for a competitor the reopen un-bars and appends that reopen's history
@@ -3578,11 +3730,14 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 		// history as held, with the winner it named (bc-mrgc). No write
 		// landed, so this is appended on its own, outside the transaction
 		// above (which, for this case, staged nothing).
-		e.recordOverrideHistory(e.store, compId, matchId, winnerName, modifiedAt, false)
+		e.recordOverrideHistory(e.store, compId, matchId, winnerName, modifiedAt, false, fo)
 		return false, nil
 	}
 	if err != nil {
 		return false, err
+	}
+	if recorded {
+		return true, nil
 	}
 	if fo.Reopened != nil {
 		*fo.Reopened = reopened
@@ -3653,9 +3808,9 @@ func (e *Engine) UpdateMatchTime(compId string, matchId string, scheduledAt stri
 	if !errors.Is(err, errMatchNotFound) {
 		return err
 	}
-	return e.withBracketMatch(e.store, compId, matchId, func(m *state.BracketMatch) {
+	return matchNotFoundAsNotFound(compId, matchId, e.withBracketMatch(e.store, compId, matchId, func(m *state.BracketMatch) {
 		m.ScheduledAt = scheduledAt
-	})
+	}))
 }
 
 // RevertMatchToQueue reverts a running match back to the scheduled (queued)
@@ -3679,7 +3834,8 @@ func (e *Engine) UpdateMatchTime(compId string, matchId string, scheduledAt stri
 // court-FREEING operation and needs no court gate; if that ever changes, add a
 // lock-free `revertMatchToQueueUnderCourtLock` core and call THAT from the
 // composition, mirroring reopenUnderCourtLock.
-func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
+func (e *Engine) RevertMatchToQueue(compId, matchId string, opts ...ForceOptions) error {
+	fo := firstForceOptions(opts)
 	var alreadyCompleted, notFound bool
 
 	// The write and its history entry are one transaction (bc-mrgc): a
@@ -3687,6 +3843,11 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 	// after it lands must not leave the match with nothing explaining how
 	// it got there.
 	err := e.store.WithTransaction(compId, func(tx state.StoreTx) error {
+		// A resend of a send back already logged (its write id) is answered
+		// as recorded: nothing written, no history line (bc-evts F1, Q6).
+		if e.loggedWriteID(tx, compId, matchId, fo.WriteID) {
+			return nil
+		}
 		stamp := serverNowMs()
 		perr := e.withPoolMatch(tx, compId, matchId, func(r *state.MatchResult) error {
 			if r.Status == state.MatchStatusCompleted {
@@ -3731,7 +3892,7 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 		})
 		if perr == nil {
 			if !alreadyCompleted {
-				e.recordDirectHistory(tx, compId, matchId, doorRequeue, stamp, state.GroupResult)
+				e.recordDirectHistoryTagged(tx, compId, matchId, doorRequeue, stamp, fo, state.GroupResult)
 			}
 			return nil
 		}
@@ -3764,7 +3925,7 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 			return berr
 		}
 		if !alreadyCompleted {
-			e.recordDirectHistory(tx, compId, matchId, doorRequeue, stamp, state.GroupResult)
+			e.recordDirectHistoryTagged(tx, compId, matchId, doorRequeue, stamp, fo, state.GroupResult)
 		}
 		return nil
 	})

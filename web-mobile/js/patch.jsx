@@ -37,7 +37,7 @@
 // always loaded data.js first). The explicit import makes the
 // dependency a build-graph contract: esbuild will fail loudly rather
 // than fall through to a wrong-shape merge.
-import { mergeMatchPatch as _mergeMatchPatch } from './data.jsx';
+import { mergeMatchPatch as _mergeMatchPatch, olderByScoreVersion } from './data.jsx';
 import { normalizeMatch, buildPlayerMap } from './api_serializers.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
 
@@ -496,12 +496,18 @@ function applyPatch(prev, event) {
     return changed ? next : prev;
 }
 
-// isOlderRunningCopy: whether `fetched` is a running match stamped earlier
-// than a running copy held at `heldStamp`. The one rule keepNewerMatches and a
-// score editor's held answer both apply; see keepNewerMatches for why only
-// running over running, and only a stamped fetched copy.
-function isOlderRunningCopy(fetched, heldStatus, heldStamp) {
-    return heldStatus === "running" && fetched.status === "running" && fetched.modifiedAt > 0 && (heldStamp || 0) > fetched.modifiedAt;
+// isOlderRunningCopy: whether `fetched` is a running match older than a
+// running copy held at `heldStamp` (and `heldVersion`). The one rule
+// keepNewerMatches and a score editor's held answer both apply; see
+// keepNewerMatches for why only running over running. bc-evts S5: when both
+// copies carry the server's scoreVersion, it decides (olderByScoreVersion,
+// data.jsx): it reads no device's clock. Otherwise only a stamped fetched copy
+// older than the held stamp is older.
+function isOlderRunningCopy(fetched, heldStatus, heldStamp, heldVersion) {
+    if (heldStatus !== "running" || fetched.status !== "running") return false;
+    const byVersion = olderByScoreVersion(fetched, { scoreVersion: heldVersion });
+    if (byVersion !== null) return byVersion;
+    return fetched.modifiedAt > 0 && (heldStamp || 0) > fetched.modifiedAt;
 }
 
 // keepNewerMatches: the competition a refetch answered with, keeping a running
@@ -534,7 +540,7 @@ function keepNewerMatches(held, fetched) {
     // match ids) always replaces too.
     const newer = (row) => {
         const h = heldById.get(row.id);
-        return h && isOlderRunningCopy(row, h.status, h.modifiedAt) ? h : row;
+        return h && isOlderRunningCopy(row, h.status, h.modifiedAt, h.scoreVersion) ? h : row;
     };
     const b = fetched.bracket;
     return {
@@ -571,7 +577,24 @@ function keepNewerTournament(held, fetched) {
     return held ? { ...fetched, competitions: keepNewerCompetitions(held.competitions, fetched.competitions) } : fetched;
 }
 
+// matchInComp: a competition's match by id, a pool match, a knockout round's
+// or the 3rd-place match, or null. Shared by the court console and the admin
+// host, which reads a match's court or time before changing it (R4, `was`).
+function matchInComp(comp, id) {
+    if (!comp) return null;
+    const pool = (comp.poolMatches || []).find((m) => m.id === id);
+    if (pool) return pool;
+    const b = comp.bracket;
+    if (!b) return null;
+    for (const round of b.rounds || []) {
+        const m = round.find((x) => x.id === id);
+        if (m) return m;
+    }
+    return b.thirdPlaceMatch && b.thirdPlaceMatch.id === id ? b.thirdPlaceMatch : null;
+}
+
 export {
     applyPatch, applyPatchOrdered, checkSeqGap, recomputeQueuePositions, recomputeBracketQueuePositions,
     keepNewerMatches, keepNewerDetail, keepNewerCompetitions, keepNewerTournament, isOlderRunningCopy,
+    matchInComp,
 };

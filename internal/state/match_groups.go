@@ -20,6 +20,7 @@ package state
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"slices"
 	"sort"
@@ -248,7 +249,7 @@ func boutOrderKey(position int) int {
 // position goes: a hand-edited file holding two is repaired by the merge, not
 // copied twice.
 func setSubAt(subs []SubMatchResult, position int, row *SubMatchResult) []SubMatchResult {
-	out := make([]SubMatchResult, 0, len(subs)+1)
+	out := make([]SubMatchResult, 0, len(subs))
 	placed := false
 	for i := range subs {
 		if subs[i].Position == position {
@@ -347,6 +348,86 @@ func GroupValue(m *MatchResult, group string) json.RawMessage {
 		return json.RawMessage("null")
 	}
 	return b
+}
+
+// SetGroupFromValue sets one group of m to a value GroupValue projected (a
+// score log baseline's, bc-evts), through CopyGroup, so the one owner of
+// which fields a group holds also decides what setting it moves. A bout
+// group's null removes the bout (a tombstone).
+func SetGroupFromValue(m *MatchResult, group string, raw json.RawMessage) error {
+	var src MatchResult
+	src.SubResults = CloneSubResults(m.SubResults)
+	unmarshal := func(v any) error {
+		if err := json.Unmarshal(raw, v); err != nil {
+			return fmt.Errorf("group %s: %w", group, err)
+		}
+		return nil
+	}
+	switch group {
+	case GroupPoints:
+		var v pointsGroup
+		if err := unmarshal(&v); err != nil {
+			return err
+		}
+		src.IpponsA, src.IpponsB, src.HansokuA, src.HansokuB = v.IpponsA, v.IpponsB, v.HansokuA, v.HansokuB
+	case GroupResult:
+		var v resultGroup
+		if err := unmarshal(&v); err != nil {
+			return err
+		}
+		src.Status, src.Winner, src.WinnerID = v.Status, v.Winner, v.WinnerID
+		src.Decision, src.DecisionBy, src.DecisionReason = v.Decision, v.DecisionBy, v.DecisionReason
+		src.CorrectionReason, src.ResultSource = v.CorrectionReason, v.ResultSource
+	case GroupEncho:
+		if err := unmarshal(&src.Encho); err != nil {
+			return err
+		}
+	case GroupFlags:
+		var v flagsGroup
+		if err := unmarshal(&v); err != nil {
+			return err
+		}
+		src.FlagsA, src.FlagsB = v.FlagsA, v.FlagsB
+	case GroupRep:
+		var v repGroup
+		if err := unmarshal(&v); err != nil {
+			return err
+		}
+		src.RepPlayerA, src.RepPlayerB = v.RepPlayerA, v.RepPlayerB
+	case GroupRepPickA:
+		var v repPickAGroup
+		if err := unmarshal(&v); err != nil {
+			return err
+		}
+		src.SetRepPick(domain.MatchSideA, v.SideAMemberID)
+	case GroupRepPickB:
+		var v repPickBGroup
+		if err := unmarshal(&v); err != nil {
+			return err
+		}
+		src.SetRepPick(domain.MatchSideB, v.SideBMemberID)
+	case GroupRecorded:
+		var v recordedGroup
+		if err := unmarshal(&v); err != nil {
+			return err
+		}
+		setRecordedPositions(src.SubResults, v.Positions)
+	default:
+		pos, ok := ParseBoutGroup(group)
+		if !ok {
+			return fmt.Errorf("group %q: not a group", group)
+		}
+		var row *SubMatchResult
+		if err := unmarshal(&row); err != nil {
+			return err
+		}
+		if row != nil {
+			row.Position = pos
+		}
+		src.SubResults = setSubAt(src.SubResults, pos, row)
+	}
+	CopyGroup(m, &src, group)
+	return nil
 }
 
 type pointsGroup struct {
@@ -455,8 +536,10 @@ func groupProjection(m *MatchResult, group string) any {
 		}
 		c := CloneSubResults([]SubMatchResult{*row})[0]
 		c.IpponsA, c.IpponsB = nonNilStrings(c.IpponsA), nonNilStrings(c.IpponsB)
-		// The recorded mark is GroupRecorded's.
+		// The recorded mark is GroupRecorded's, and the mark ids are derived
+		// by the replay (bc-evts), never part of the bout's value.
 		c.Recorded = false
+		c.MarkIDs = nil
 		if pos == DaihyosenSubPosition {
 			// The representatives are GroupRepPickA's and GroupRepPickB's, not
 			// the bout's. The row's WinnerMemberID is derived from the winner's
@@ -614,7 +697,7 @@ func (bm *BracketMatch) StampGroups(stamp int64, groups ...string) {
 // mergeMatchWrite has already decided for them, bypassing stampGroups' never-
 // lower guard (bc-mrgc fix: the engi recorder). The merge is the one place
 // that orders a group against every other stored group, including S2's
-// displaceNewerScoring: a finish that arrives after a newer but INVALID
+// displacement (mergeByReplay, MergeReport.Displaced): a finish that arrives after a newer but INVALID
 // stored count applies on its own, older scoreline and moves that count to
 // the history, which legitimately puts the group's stamp BACK to the
 // finish's own time. A naive never-lower re-stamp cannot express that move
@@ -658,7 +741,7 @@ type MergeReport struct {
 	// the stored ModifiedAt into the result.
 	Stamp int64
 	// Changed is the effective list of groups the write changes, after the
-	// default (every group the payload carries) and R3's rule that a running
+	// default (every group the payload carries) and the rule that a running
 	// write over a finished match never carries the result.
 	Changed []string
 	// Applied, Held and HeldEcho partition Changed: a held group is one a
@@ -677,49 +760,68 @@ type MergeReport struct {
 	// HoldReason, when set, is why groups were held other than by their
 	// stamps: every group the write changes, regardless of its stamp (a
 	// running write older than one the same board already sent: "older
-	// revision of this board"), or the groups that would have left the match
-	// without a winner it needs (NeedsWinner). Recorded in the history entry.
+	// revision of this board"), or the scoring a finish or a decision stamped
+	// before it had closed out (MatchClosed). Recorded in the history entry.
 	HoldReason string
-	// NeedsWinner reports that the held groups were held because applying
-	// them would leave the match with no winner it must have (R4, operator
-	// ruling 2026-10-04: a finished knockout match left tied, or an engi
-	// match left with no valid flag count). The answer carries it as
-	// heldReason "needs_winner", so the operator is told to correct the
-	// result with a winner.
-	NeedsWinner bool
-	// DefaultWinStands reports that the held groups were held because a
-	// default win (any of kiken, kiken-injury, fusenpai, or a match-level
-	// fusensho awarded for a bar recorded on a DIFFERENT match) already
-	// closed the match: a board still scoring it, points or overtime alike,
-	// says nothing that overrides that ruling, and a scoreline (or an (E)
-	// mark) cannot land beside the default win's circles without one
-	// discarding the other, so the default win stands and the scoring is
-	// kept in the history. Unlike NeedsWinner, the
-	// match already has the winner it needs; the answer carries it as
-	// heldReason "default_win_stands", so the operator is told to use Remove
-	// default win rather than to correct the result with a winner.
-	DefaultWinStands bool
-	// StandingDecision is the decision code (e.g. "fusensho",
-	// "kiken-voluntary") that closed the match when DefaultWinStands is set;
-	// "" otherwise. The HTTP layer reads it through HeldDecision and surfaces
-	// it as heldDecision beside heldReason "default_win_stands" so the
-	// client can name the decision itself rather than the eliminated
-	// "default win" umbrella term.
-	StandingDecision string
-	// Displaced are STORED changes this write moved to the history (S2 with
-	// R4): a finish that arrives after newer scoring which would leave the
-	// match without the winner it needs is applied on its own scoreline, as
-	// in stamp order, and the newer scoring is kept in the history as held,
-	// one entry per stamp. The answer names their groups (displacedGroups).
+	// MatchClosed reports that the held groups were held because a finish or
+	// a decision stamped before the write had already closed the match (the
+	// closed-match rule, operator ruling 2026-10-15): the write is kept in the
+	// history and the answer carries heldReason "match_closed", so the device
+	// is told the match is finished and to tap Correct.
+	MatchClosed bool
+	// Displaced are STORED changes this write moved to the history: a finish
+	// or a decision that arrives after scoring stamped later than it closes
+	// that scoring out, exactly as the same scoring arriving after the finish
+	// is refused, and the scoring is kept in the history as held, one entry
+	// per stamp. The answer names their groups (displacedGroups).
 	Displaced []DisplacedChange
-	// ClearedWithdrawal is the result group a later scoring change cleared
-	// (R2: points scored means the withdrawal was a mistake), kept for the
-	// history; nil when none was.
-	ClearedWithdrawal json.RawMessage
 	// ResultChanged reports whether the stored verdict moved: the result
 	// group applied, a withdrawal was cleared, or the winner was worked out
 	// again. A write that leaves it unmoved has no eligibility consequence.
 	ResultChanged bool
+	// EventsNotApplied are the score events (bc-evts) this write's baseline
+	// replaced without having seen them (beforeBaseline, D5): each is kept in
+	// the history with that outcome, and the answer names them.
+	EventsNotApplied []string
+	// Replayed reports that the score replay judged the write (a scoring
+	// snapshot or a decision) rather than the merge's own holds: every group
+	// it changed is then logged with its baseline at the write's stamp, held
+	// ones with the values it sent, so the log orders it like a tap.
+	Replayed bool
+	// Baseline is the baseline the replay judged for such a write: the write
+	// as it was made, which the door logs as it is (id, write id and
+	// revision aside).
+	Baseline *ScoreBaseline `json:"-"`
+	// LogPrefix are the score log lines the replay that decided a snapshot
+	// write needed ahead of the write's own baseline (the match's migration
+	// baseline, or a drift baseline): the door logs them first.
+	LogPrefix []ScoreLogLine
+	// Prior is the match as it was stored before the write (a copy), set when
+	// the write was decided by the replay over a log that had lines: the door
+	// reads the outcome each earlier event had at its own arrival from it, so
+	// a move the write causes (a tap that found no bout row, and finds one
+	// the write pads) is recorded.
+	Prior *MatchResult `json:"-"`
+	// Replay is the engine's own record of the replay that decided the write
+	// (the log it read, and the replay of it with the write's baseline),
+	// which the door that logs the baseline reuses rather than reading and
+	// replaying the log again. Opaque here.
+	Replay any `json:"-"`
+	// ResultLocked, when set, is the wire code (HeldReasonDownstreamPlayed or
+	// HeldReasonDownstreamRunning) of a finish or decision held because the
+	// next knockout match had already been played or started (operator decision
+	// K1, 2026-10-16): the stored result is locked, and the write is kept in the
+	// history instead of displacing it.
+	ResultLocked string
+	// StoredResultInForce and StoredResultSeen are what the replay's one owner
+	// of "the result in force" (engine.ResultInForceAt) says of the log as the
+	// write found it, set when the write displaced something and named no
+	// correction: whether a finished result was in force at the log's end (the
+	// stored result the write would displace; none after a reopen or a send
+	// back to the queue), and whether the write's SENT basis holds the line
+	// that set it. The result lock reads them (engine.rivalDisplacesResult).
+	StoredResultInForce bool `json:"-"`
+	StoredResultSeen    bool `json:"-"`
 }
 
 // Superseded reports whether nothing of the write applied: a group it
@@ -727,7 +829,7 @@ type MergeReport struct {
 // Only then is it answered applied:false, and nothing is written but its
 // history entry.
 func (r *MergeReport) Superseded() bool {
-	return r != nil && len(r.Held)+len(r.HeldEcho) > 0 && len(r.Applied) == len(r.Unchanged)
+	return r != nil && len(r.Held)+len(r.HeldEcho) > 0 && len(r.Applied) == len(r.Unchanged) && len(r.Displaced) == 0
 }
 
 // DisplacedChange is a stored change a later-arriving, earlier-stamped write
@@ -757,44 +859,32 @@ func (r *MergeReport) DisplacedGroups() []string {
 	return out
 }
 
-// HeldReasonNeedsWinner is the wire code (heldReason) of groups held because
-// applying them would leave the match without the winner it needs
-// (MergeReport.NeedsWinner).
-const HeldReasonNeedsWinner = "needs_winner"
-
-// HeldReasonDefaultWinStands is the wire code (heldReason) of groups held
-// because a default win -- a withdrawal of this match (kiken, kiken-injury,
-// fusenpai) or a match-level fusensho awarded for a bar recorded on ANOTHER
-// match -- already closed the match (MergeReport.DefaultWinStands). Unlike
-// HeldReasonNeedsWinner, the match already has a winner, so the operator is
-// not told to correct it with one; the remedy is the editor's own Remove
-// default win.
-const HeldReasonDefaultWinStands = "default_win_stands"
+// HeldReasonMatchClosed is the wire code (heldReason) of a scoring write held
+// because a finish or a decision stamped before it had already closed the
+// match (the closed-match rule): the write is kept in the history and the
+// device is told to tap Correct.
+const HeldReasonMatchClosed = "match_closed"
 
 // HeldReason is the code a response carries beside heldGroups, "" when the
 // held groups were held by their stamps alone.
 func (r *MergeReport) HeldReason() string {
-	if r == nil || len(r.Held)+len(r.Displaced) == 0 {
+	if r != nil && r.ResultLocked != "" && len(r.Held) > 0 {
+		return r.ResultLocked
+	}
+	if r == nil || len(r.Held)+len(r.Displaced) == 0 || !r.MatchClosed {
 		return ""
 	}
-	if r.NeedsWinner {
-		return HeldReasonNeedsWinner
-	}
-	if r.DefaultWinStands {
-		return HeldReasonDefaultWinStands
-	}
-	return ""
+	return HeldReasonMatchClosed
 }
 
-// HeldDecision is the decision code (StandingDecision) a response carries
-// as heldDecision beside heldReason "default_win_stands", "" when the held
-// groups were not held for that reason.
-func (r *MergeReport) HeldDecision() string {
-	if r == nil || r.HeldReason() != HeldReasonDefaultWinStands {
-		return ""
-	}
-	return r.StandingDecision
-}
+// HeldReasonDownstreamPlayed and HeldReasonDownstreamRunning are the wire codes
+// (heldReason) of a finish or decision held because the next knockout match was
+// already played or started (operator decision K1, 2026-10-16): the recorded
+// result is locked. They reuse the codes of the explicit-correction refusal.
+const (
+	HeldReasonDownstreamPlayed  = "downstream_knockout_played"
+	HeldReasonDownstreamRunning = "downstream_knockout_running"
+)
 
 // HeldGroups is the list a response carries, nil when nothing was held.
 func (r *MergeReport) HeldGroups() []string {

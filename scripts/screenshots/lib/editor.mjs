@@ -66,23 +66,37 @@ export async function finishMatch(page) {
   const armed = modal.locator('button').filter({ hasText: /^Tap again to (finish|save)/ }).first();
   await armed.waitFor({ state: 'visible', timeout: 3000 });
   await page.waitForTimeout(Math.max(0, TAP_DWELL_MS - (Date.now() - armedAt)));
+  const landed = scoreWriteAnswered(page, 'completed');
   await armed.click();
-  // Return once the write has landed, not after a guessed pause. The button
-  // reads "Saving…" from the second tap until the server answers, then either
-  // the editor closes (plain Finish) or it moves to the next match and the
-  // button takes that match's own label (Finish + Start Next). Either way no
-  // button reads the arm or "Saving…" any more, and the arm label covers the
-  // tick before "Saving…" first renders.
-  await modal.locator('button').filter({ hasText: /^(Tap again to (finish|save)|Saving…)/ }).first()
-    .waitFor({ state: 'hidden', timeout: 15000 });
+  // Return once the write has landed, not after a guessed pause. The editor
+  // hands the finish to the outbox and moves on at once (it never waits on
+  // the network), so the editor's own state says nothing about the server:
+  // wait for the server's answer to the finish itself.
+  await landed;
 }
 
 // Start the open match if the editor offers it, and return once the start has
-// landed: "Start match" is offered only while the match is scheduled, so the
-// button leaving is the server having it running.
+// landed. The editor shows its own start at once, before the server has it,
+// so the button leaving is not the server's answer: the start's own answer is.
 export async function startMatch(page) {
   const btn = page.locator(EDITOR).locator('button').filter({ hasText: /^Start match$/ }).first();
   if (!(await btn.count())) return;
+  const landed = scoreWriteAnswered(page, 'running');
   await btn.click();
-  await btn.waitFor({ state: 'hidden', timeout: 15000 });
+  await landed;
+}
+
+// scoreWriteAnswered: resolves once the server has answered a score write of
+// a match (PUT .../matches/:id/score) whose status is `status`, as the outbox
+// sends it. Armed BEFORE the tap that makes the write, so a quick answer is
+// never missed; a refusal (an error status) throws, since a recipe that went
+// on would capture a match the server never took.
+export async function scoreWriteAnswered(page, status, timeout = 15000) {
+  const res = await page.waitForResponse((r) => {
+    const req = r.request();
+    if (req.method() !== 'PUT' || !/\/api\/competitions\/[^/]+\/matches\/[^/]+\/score$/.test(new URL(r.url()).pathname)) return false;
+    try { return (req.postDataJSON() || {}).status === status; } catch { return false; }
+  }, { timeout });
+  if (!res.ok()) throw new Error(`the ${status} score write was refused: HTTP ${res.status()}`);
+  return res;
 }

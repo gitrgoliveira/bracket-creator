@@ -1,7 +1,9 @@
 package mobileapp
 
 import (
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -11,10 +13,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The compiled front-end under /dist/ is served with "Cache-Control: public,
-// max-age=300" plus a content-derived ETag. The two compose: inside the window
-// a returning client makes NO request at all, and once it lapses the ETag turns
-// the re-fetch into a 0-byte 304 unless the bundle actually changed.
+// The compiled front-end is served from a build-scoped directory,
+// /dist/<content hash>/, as immutable (bc-evts stage 3 review 3, F3; see
+// build_scoped_assets_test.go), with a content-derived ETag: a reload never
+// pairs the served page (which names its build, appBuildMeta, and its module
+// directory) with the modules of another build, and makes no request for a
+// module it already holds.
 //
 // Before this, http.FileServer over embed.FS emitted no Cache-Control, no ETag
 // and no Last-Modified (embed's zero modtime makes ServeContent omit it), so a
@@ -72,29 +76,42 @@ func TestSetStaticCacheHeaders(t *testing.T) {
 	etag := buildAssetETag(fstest.MapFS{"dist/a.js": {Data: []byte("x")}})
 	require.NotEmpty(t, etag)
 
-	t.Run("applies the caching policy to a dist asset", func(t *testing.T) {
+	t.Run("a module under the build's own directory is immutable", func(t *testing.T) {
+		// Stage 3 review 3, F3: the page names its modules under
+		// /dist/<content hash>/, so a module there never changes and a load
+		// makes no conditional request for it (mp-6o1a), while the page and
+		// its code are still one build (S2 a, the page is no-store).
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
-		setStaticCacheHeaders(c, etag, "dist/a.js")
-		// Both halves, and they compose: inside the window the client makes no
-		// request at all; after it the ETag turns a re-fetch into a 0-byte 304.
+		setStaticCacheHeaders(c, etag, "dist/a.js", true)
+		assert.Equal(t, "public, max-age=31536000, immutable", c.Writer.Header().Get("Cache-Control"))
+		assert.NotEmpty(t, c.Writer.Header().Get("ETag"))
+	})
+
+	t.Run("a plain dist path keeps the five-minute window", func(t *testing.T) {
+		// Only a page whose content hash could not be made names these.
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		setStaticCacheHeaders(c, etag, "dist/a.js", false)
 		assert.Equal(t, "public, max-age=300", c.Writer.Header().Get("Cache-Control"))
 		assert.NotEmpty(t, c.Writer.Header().Get("ETag"))
 	})
 
-	t.Run("the window is bounded so an upgrade cannot stay invisible", func(t *testing.T) {
-		// An asset cached under max-age is reused WITHOUT asking, so this bound
-		// is how long a mid-event upgrade can go unseen by a loaded client.
-		assert.LessOrEqual(t, staticAssetMaxAge, 15*time.Minute,
-			"a long window would hide a server upgrade from clients already running")
-		assert.Positive(t, staticAssetMaxAge,
-			"zero would restore one conditional request per asset per load")
+	t.Run("a revalidation of an unchanged asset is a 304 with no body", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest("GET", "/dist/a.js", nil)
+		c.Request.Header.Set("If-None-Match", etag)
+		setStaticCacheHeaders(c, etag, "dist/a.js", false)
+		http.ServeContent(c.Writer, c.Request, "a.js", time.Time{}, strings.NewReader("x"))
+		// gin's writer holds a status until something is written; a 304 writes none.
+		assert.Equal(t, http.StatusNotModified, c.Writer.Status())
+		assert.Empty(t, w.Body.String())
 	})
 
 	t.Run("leaves non-dist paths alone", func(t *testing.T) {
 		// index.html carries server-rendered meta tags and is deliberately
 		// no-store; uploaded images set their own policy in their handlers.
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
-		setStaticCacheHeaders(c, etag, "index.html")
+		setStaticCacheHeaders(c, etag, "index.html", true)
 		assert.Empty(t, c.Writer.Header().Get("Cache-Control"))
 		assert.Empty(t, c.Writer.Header().Get("ETag"))
 	})

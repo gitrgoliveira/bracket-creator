@@ -6,7 +6,7 @@
 // a running match's score editor, so the topbar is the persistent home for
 // the parked-queue state once that editor is closed).
 //
-// Real React 18 + RTL, because these are subscribe-then-rerender components:
+// Real React 19 + RTL, because these are subscribe-then-rerender components:
 // the unit suite's fake React stub never invokes useEffect, so the
 // subscription (and the state change it drives) would never fire there.
 
@@ -218,13 +218,13 @@ describe('AdminTopbar: held results', () => {
     expect(held()).toHaveTextContent('Offline: 2 results not sent');
   });
 
-  it('a held running update alone is a score update, and while sending it says so', async () => {
+  it('a held running update alone is a change, and while sending it says so', async () => {
     renderTopbar();
     await act(async () => {
       unsentBus.set({ total: 1, terminal: 0, authBlocked: 0 });
       bus.set('syncing');
     });
-    expect(held()).toHaveTextContent('Sending 1 score update…');
+    expect(held()).toHaveTextContent('Sending 1 change…');
     expect(held().className).not.toContain('topbar__held--offline');
     // Only the write status 'offline' moves the pill.
     expect(screen.getByText('Connected')).toBeTruthy();
@@ -268,7 +268,7 @@ describe('AdminTopbar: held results', () => {
 
 // The held-writes indicator opens the list of what is held (HeldWritesPanel),
 // where a write the server keeps refusing is discarded on its own, whatever it
-// is: a running autosave, a lineup save and a hand-set winner have no editor of
+// is: a running write, a lineup save and a hand-set winner have no editor of
 // their own to offer it. A write only waiting is listed with no Discard.
 describe('AdminTopbar: the held-writes list', () => {
   let bus, unsentBus, saved;

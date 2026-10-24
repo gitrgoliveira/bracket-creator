@@ -22,6 +22,18 @@ function mockFetch(status, body) {
   );
 }
 
+
+// Every rule-bound write carries writeId, basis and session (bc-evts S3d);
+// basis_on_every_write.test.jsx pins them, these tests the door's own fields.
+function untagged({ writeId: _w, basis: _b, session: _s, ...rest }) { return rest; }
+
+// bc-evts: these doors are the outbox's now. A refusal is logged as the queue
+// drops it ("[sync] ... rejected"); only those logs are taken off the record.
+afterEach(() => {
+  const calls = (console.warn && console.warn.mock && console.warn.mock.calls) || [];
+  if (calls.length && calls.every((a) => String(a[0]).startsWith('[sync]'))) console.warn.mockClear();
+});
+
 describe('API.reopenMatch', () => {
   let originalFetch;
   beforeEach(() => { originalFetch = global.fetch; });
@@ -29,7 +41,7 @@ describe('API.reopenMatch', () => {
 
   it('POSTs a reasonless JSON body with the password header', async () => {
     global.fetch = mockFetch(200, { reopenedMatches: [] });
-    const res = await API.reopenMatch('c42', 'm-r1-0', 'secret');
+    const res = await (await API.reopenMatch('c42', 'm-r1-0', 'secret')).settled;
     expect(res).toEqual({ reopenedMatches: [] });
     const [url, opts] = global.fetch.mock.calls[0];
     expect(url).toBe('/api/competitions/c42/matches/m-r1-0/reopen');
@@ -39,16 +51,16 @@ describe('API.reopenMatch', () => {
     expect(opts.headers['Content-Type']).toBe('application/json');
     // An empty OBJECT, not an absent body: a handler that binds JSON fails on
     // an absent one. And no `reason`: this call must never demand one.
-    expect(JSON.parse(opts.body)).toEqual({});
+    expect(untagged(JSON.parse(opts.body))).toEqual({});
   });
 
   // bc-tmfn: Clear withdrawal and reopen collects its reason before the tap
   // posts, and a retry after the downstream confirm carries the force flag.
   it('sends the reason and the downstream confirmation only when given', async () => {
     global.fetch = mockFetch(200, { reopenedMatches: [{ id: 'm-r2-0', number: 2 }] });
-    const res = await API.reopenMatch('c1', 'm1', 'secret', { reason: 'Withdrawal recorded by mistake', force: true });
+    const res = await (await API.reopenMatch('c1', 'm1', 'secret', { reason: 'Withdrawal recorded by mistake', force: true })).settled;
     expect(res.reopenedMatches).toEqual([{ id: 'm-r2-0', number: 2 }]);
-    expect(JSON.parse(global.fetch.mock.calls[0][1].body))
+    expect(untagged(JSON.parse(global.fetch.mock.calls[0][1].body)))
       .toEqual({ reason: 'Withdrawal recorded by mistake', forceDownstreamReopen: true });
   });
 
@@ -61,7 +73,7 @@ describe('API.reopenMatch', () => {
       displaced: 'Ryu',
       message: 'correcting match "m-r1-0" would change the winner ...',
     });
-    const err = await API.reopenMatch('c1', 'm-r1-0', 'secret').then(
+    const err = await (await API.reopenMatch('c1', 'm-r1-0', 'secret')).settled.then(
       () => { throw new Error('expected a rejection'); },
       (e) => e
     );
@@ -86,7 +98,7 @@ describe('API.reopenMatch', () => {
       blockingMatches: [{ id: 'm-r2-0', number: 2 }],
       displaced: 'Ryu',
     });
-    const err = await API.requeueBlockerAndReopen('c1', 'm-r1-0', 'c1', 'm-r1-1', 'secret').then(
+    const err = await (await API.requeueBlockerAndReopen('c1', 'm-r1-0', 'c1', 'm-r1-1', 'secret')).settled.then(
       () => { throw new Error('expected a rejection'); },
       (e) => e
     );
@@ -105,7 +117,7 @@ describe('API.reopenMatch', () => {
       compId: 'c1',
       message: 'Court A already has a running match (m-r1-1). Finish that match before reopening this one.',
     });
-    const err = await API.reopenMatch('c1', 'm1', 'secret').then(
+    const err = await (await API.reopenMatch('c1', 'm1', 'secret')).settled.then(
       () => { throw new Error('expected a rejection'); },
       (e) => e
     );
@@ -135,7 +147,7 @@ describe('API.reopenMatch', () => {
       label: 'Pool A · Match 2',
       message: 'Court A already has a running match (m-r1-1). Finish that match before reopening this one.',
     });
-    const err = await API.reopenMatch('c1', 'm1', 'secret').then(
+    const err = await (await API.reopenMatch('c1', 'm1', 'secret')).settled.then(
       () => { throw new Error('expected a rejection'); },
       (e) => e
     );
@@ -146,7 +158,7 @@ describe('API.reopenMatch', () => {
     global.fetch = mockFetch(409, {
       error: 'court_busy', court: 'A', matchId: 'm-r1-1', compId: 'c1', message: 'x',
     });
-    const err = await API.reopenMatch('c1', 'm1', 'secret').then(
+    const err = await (await API.reopenMatch('c1', 'm1', 'secret')).settled.then(
       () => { throw new Error('expected a rejection'); },
       (e) => e
     );
@@ -169,7 +181,7 @@ describe('API.reopenMatch', () => {
       runningMatches: [{ id: 'm-r2-0', label: 'Match 7 (Final)' }],
       message: 'server copy',
     });
-    const err = await API.reopenMatch('c1', 'm-r1-0', 'secret').then(
+    const err = await (await API.reopenMatch('c1', 'm-r1-0', 'secret')).settled.then(
       () => { throw new Error('expected a rejection'); },
       (e) => e
     );
@@ -183,19 +195,19 @@ describe('API.reopenMatch', () => {
 
   it('surfaces the plain-sentence 409s (not completed, downstream fought) verbatim', async () => {
     global.fetch = mockFetch(409, { error: 'cannot reopen: a downstream knockout match has already been fought' });
-    await expect(API.reopenMatch('c1', 'm1', 'secret'))
+    await expect((await API.reopenMatch('c1', 'm1', 'secret')).settled)
       .rejects.toThrow('cannot reopen: a downstream knockout match has already been fought');
   });
 
   it('surfaces the server 400 verbatim (e.g. a non-kachinuki competition)', async () => {
     global.fetch = mockFetch(400, { error: 'reopen is only available for kachinuki competitions' });
-    await expect(API.reopenMatch('c1', 'm1', 'secret'))
+    await expect((await API.reopenMatch('c1', 'm1', 'secret')).settled)
       .rejects.toThrow('reopen is only available for kachinuki competitions');
   });
 
   it('throws a fallback message when the error body has no error field', async () => {
-    global.fetch = mockFetch(500, {});
-    await expect(API.reopenMatch('c1', 'm1', 'secret'))
+    global.fetch = mockFetch(400, {});
+    await expect((await API.reopenMatch('c1', 'm1', 'secret')).settled)
       .rejects.toThrow('Failed to reopen match');
   });
 });
@@ -211,14 +223,14 @@ describe('API.requeueBlockerAndReopen', () => {
 
   it('POSTs the blocker identity to the atomic endpoint with the password header', async () => {
     global.fetch = mockFetch(200, { reopenedMatches: [] });
-    const res = await API.requeueBlockerAndReopen('tgt', 'm-r1-0', 'blk', 'm-r1-1', 'secret');
+    const res = await (await API.requeueBlockerAndReopen('tgt', 'm-r1-0', 'blk', 'm-r1-1', 'secret')).settled;
     expect(res).toEqual({ reopenedMatches: [] });
     const [url, opts] = global.fetch.mock.calls[0];
     expect(url).toBe('/api/competitions/tgt/matches/m-r1-0/requeue-blocker-and-reopen');
     expect(opts.method).toBe('POST');
     expect(opts.headers['X-Tournament-Password']).toBe('secret');
     expect(opts.headers['Content-Type']).toBe('application/json');
-    expect(JSON.parse(opts.body)).toEqual({ blockerCompId: 'blk', blockerMatchId: 'm-r1-1' });
+    expect(untagged(JSON.parse(opts.body))).toEqual({ blockerCompId: 'blk', blockerMatchId: 'm-r1-1' });
   });
 
   it('surfaces the same structured court-busy shape as reopenMatch', async () => {
@@ -232,7 +244,7 @@ describe('API.requeueBlockerAndReopen', () => {
       compId: 'c9',
       message: 'Court B already has a running match (m-r2-3). Finish that match before reopening this one.',
     });
-    const err = await API.requeueBlockerAndReopen('c9', 'm1', 'c9', 'm-blk', 'secret').then(
+    const err = await (await API.requeueBlockerAndReopen('c9', 'm1', 'c9', 'm-blk', 'secret')).settled.then(
       () => { throw new Error('expected a rejection'); },
       (e) => e
     );
@@ -244,8 +256,8 @@ describe('API.requeueBlockerAndReopen', () => {
   });
 
   it('throws the fallback message when the error body has no error field', async () => {
-    global.fetch = mockFetch(500, {});
-    await expect(API.requeueBlockerAndReopen('c1', 'm1', 'c1', 'm2', 'secret'))
+    global.fetch = mockFetch(400, {});
+    await expect((await API.requeueBlockerAndReopen('c1', 'm1', 'c1', 'm2', 'secret')).settled)
       .rejects.toThrow('Failed to reopen match');
   });
 });

@@ -235,6 +235,9 @@ func TestMarshalledStructsStayFullyMarshalled(t *testing.T) {
 				"the struct from participants.csv (and seeds.csv) at load time; " +
 				"marshalling it into config.md front-matter would store a second " +
 				"copy that the next roster write silently outdates.",
+			"RosterVersion": "worked out from the roster (RosterVersion) on every " +
+				"answer that carries Players, for the roster PUT to send back; a " +
+				"stored copy would be outdated by the next roster write.",
 		}},
 	}
 

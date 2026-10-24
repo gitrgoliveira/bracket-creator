@@ -5,9 +5,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -94,4 +96,57 @@ func TestLineupUpdatedEvent_NamesTheTeamAndTheMatch(t *testing.T) {
 
 	send(http.MethodDelete, team+"/members/"+sato.ID, nil)
 	assert.Equal(t, gin.H{"competitionId": "c1", "teamId": teamID}, hub.last(t), "a member's name cleared")
+}
+
+// Operator decision K1 (c): a kachinuki encounter's bout 1 is whatever the
+// lineup says now, so a lineup write renames bout 1 of the team's running
+// match on every device: the server seats it (engine.ReseatKachinukiOpeners)
+// and announces the match, read fresh, after the lineup event. Its points stay
+// on bout 1.
+func TestLineupWrite_RenamesKachinukiBoutOneAndAnnouncesTheMatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dir := t.TempDir()
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "k1", Kind: "team", TeamSize: 3, TeamMatchType: state.TeamMatchTypeKachinuki}))
+	require.NoError(t, store.SaveParticipants("k1", []domain.Player{{Name: "Tora", Dojo: "Tora Dojo"}, {Name: "Ryu", Dojo: "Ryu Dojo"}}))
+	teams, err := store.LoadParticipants("k1", false)
+	require.NoError(t, err)
+	require.Len(t, teams, 2)
+	a, b := teams[0], teams[1]
+	require.NoError(t, store.SavePoolMatches("k1", []state.MatchResult{{
+		ID: "Pool A-0", SideA: a.Name, SideAID: a.ID, SideB: b.Name, SideBID: b.ID, Status: state.MatchStatusRunning,
+		SubResults: []state.SubMatchResult{{Position: 1, SideA: "Sato", SideB: "Ito", IpponsA: []string{"M"}, IpponsB: []string{}, Winner: "Sato"}},
+	}}))
+	eng := engine.New(store)
+	_, err = eng.RecordScoreEvents("k1", "Pool A-0", engine.ScoreEventsRequest{Session: "s", Events: []domain.ScoreEvent{
+		{ID: "e1", Session: "s", Seq: 1, Stamp: time.Now().UnixMilli() - 1000, Kind: domain.ScoreIpponAdd, Pos: 1, Side: domain.ScoreSideA, Letter: "K"},
+	}})
+	require.NoError(t, err)
+
+	hub := &payloadBroadcaster{}
+	r := gin.New()
+	admin := r.Group("/api")
+	admin.Use(AuthMiddleware(NewFileVerifier(store), store))
+	RegisterLineupHandlers(admin, store, store, store, hub, store, NewFileVerifier(store), eng)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, squadJSONReq(http.MethodPut, "/api/competitions/k1/teams/"+a.ID+"/match-lineups/Pool%20A-0",
+		"secret", LineupRequest{Positions: map[domain.Position]string{domain.PositionNumbered(1): "Ota"}}))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	require.Len(t, hub.events, 2, "the lineup event, then the match it renamed")
+	assert.Equal(t, EventLineupUpdated, hub.events[0].typ)
+	assert.Equal(t, EventMatchUpdated, hub.events[1].typ)
+	pushed, ok := hub.events[1].data.(gin.H)
+	require.True(t, ok)
+	assert.Equal(t, "Pool A-0", pushed["matchId"])
+	assert.NotNil(t, pushed["result"], "the push carries the match as stored now")
+
+	stored, err := store.LoadPoolMatches("k1")
+	require.NoError(t, err)
+	row := stored[0].SubResults[0]
+	assert.Equal(t, "Ota", row.SideA, "bout 1 is the lineup's fighter now")
+	assert.Equal(t, []string{"M", "K"}, row.IpponsA, "its points stay on bout 1")
+	assert.Equal(t, "Ito", row.SideB, "the other team's fighter is left as it was")
 }

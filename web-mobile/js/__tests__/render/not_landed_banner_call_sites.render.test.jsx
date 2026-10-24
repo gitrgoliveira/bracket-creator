@@ -85,7 +85,7 @@ async function renderEditor(match, onSubmit) {
 // Site 2: the INDIVIDUAL editor's [Start match].
 // ---------------------------------------------------------------------------
 // Same shape as the team one: a status:"running" write, the shape
-// _notifyScoreSuperseded stays silent for (a debounced autosave being
+// _notifyScoreSuperseded stays silent for (a running write being
 // superseded is routine noise), so this explicit tap must read the awaited
 // result itself or it silently re-enables the button having saved nothing.
 

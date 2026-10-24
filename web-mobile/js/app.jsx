@@ -6,9 +6,13 @@ import { createTimerPool } from './timer_pool.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, applyPatchToTree, mergeSnapshotIntoTree, deriveLinkState, freshnessMs } from './court_bridge.jsx';
 import { BRANDING_DEFAULTS } from './admin_branding.jsx';
-import { queuedWritesNoun, supersededAlertText, displacedAlertText } from './write_result.jsx';
+import { queuedWritesNoun, supersededAlertText, displacedAlertText, tapNotAppliedAlertText, tapNotAppliedText } from './write_result.jsx';
+import { VersionBanner } from './version_banner.jsx';
+import { useUnsavedInput } from './app_version.jsx';
+import { tapWords } from './match_history_view.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
+import { pushToast } from './toast_queue.jsx';
 
 const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC } = React;
 
@@ -355,47 +359,86 @@ function parseCourtFromSearch() {
 // finished results that have now landed, a success toast (queueAlertToastType).
 //
 // Counts are reported as FINISHED RESULTS when the alert carries any, falling
-// back to raw writes otherwise: an operator counts results, and a queued running
-// autosave is not one (queuedWritesNoun, write_result.jsx). Exported for test.
+// back to changes (or taps) otherwise: an operator counts results, and a queued
+// running autosave, a court move or a lineup save is not one (queuedWritesNoun,
+// isFinishedResultWrite, write_result.jsx, the one owner of both). Exported for test.
 export function queueAlertMessage(alert) {
   if (!alert) return null;
   const { n, one, noun } = queuedWritesNoun(alert.terminalCount, alert.count);
+  // The held-write wording: "result", "tap" or "change", never "finished".
+  const held = queuedWritesNoun(alert.terminalCount, alert.count, { finished: false, taps: !!alert.taps }).noun;
   if (n <= 0 && alert.kind !== "storage_full") return null;
   const detail = alert.detail ? ` (${alert.detail})` : "";
   switch (alert.kind) {
+    case "tap_applied":
+      // A tap the board showed as not applied, from a copy behind the
+      // server, that the server applied (stage 6 review 8, m12).
+      return one
+        ? `A tap shown as not applied was applied after all${alert.where ? ` (${alert.where})` : ""}. Check the score.`
+        : `${n} taps shown as not applied were applied after all${alert.where ? ` (${alert.where})` : ""}. Check the score.`;
+    case "lineup_warning":
+      // The server's own sentence: the change was kept, and it names the
+      // carried lineup that could not follow it (stage 6 review 8, m7).
+      return alert.detail || "The lineup change was kept, but a lineup carried from it could not follow it. Check the team's later lineups.";
     case "unreadable":
       return `${n} queued ${one ? "write" : "writes"} could not be read and ${one ? "was" : "were"} discarded. Check the affected ${one ? "match" : "matches"}.`;
     case "rejected":
       // A refusal that is a whole sentence (`sentence`, api_client.jsx
       // _replayRefusal) says what to do, so it closes the alert as it is:
       // "Re-enter it." after it could contradict it ("Check the scores and finish again").
-      if (alert.sentence && alert.detail) return `A result was refused by the server and cannot be saved. ${alert.detail}`;
-      return `A result was refused by the server${detail} and cannot be saved. Re-enter it.`;
+      // Any other change (terminalCount 0: a running score write, a court move,
+      // a lineup save) is a change, not a result (R5).
+      {
+        const what = Number(alert.terminalCount) > 0 ? "A result" : "A change";
+        if (alert.sentence && alert.detail) return `${what} was refused by the server and cannot be saved. ${alert.detail}`;
+        return `${what} was refused by the server${detail} and cannot be saved. Re-enter it.`;
+      }
     // bc-lww1. Deliberately NOT folded into "rejected": that message ends in
     // "Re-enter it", which here would tell the operator to overwrite the newer
     // result that just won. A supersede is the one drop where re-entering is the
     // wrong move, so it gets its own wording.
     case "superseded":
-      return supersededAlertText(n, one, !!alert.needsWinner, !!alert.defaultWinStands, alert.decision || null);
+      return supersededAlertText(n, one, !!alert.matchClosed);
     case "server_error":
-      // It holds back no other write (each queued write is sent on its own),
-      // and the editor of that match offers to discard it (HeldWriteDiscard).
-      return `The server keeps refusing a queued result${detail}. It is still being retried, and later results are still sent. If it never goes through, open that match, discard the held result and enter it again.`;
+      // The outbox sends each match's writes strictly in order (bc-evts F1), so
+      // a write the server keeps refusing holds back THAT match's later changes
+      // until it lands or is discarded (other matches go on); the editor of the
+      // match and the topbar's held-writes list offer to discard it
+      // (HeldWriteDiscard, HeldWritesPanel). Taps are named as taps.
+      {
+        const what = one ? `a queued ${held}` : `${n} queued ${held}`;
+        return `The server keeps refusing ${what}${detail}. ${one ? "It is" : "They are"} still being retried, and later changes to that match wait until ${one ? "it lands or is" : "they land or are"} discarded. If ${one ? "it never goes" : "they never go"} through, open that match, discard the held ${held} and enter ${one ? "it" : "them"} again.`;
+      }
     case "auth_required":
-      return `Sign in again to save ${n} pending ${one ? "result" : "results"}. ${one ? "It is" : "They are"} still queued.`;
+      return `Sign in again to save ${n} pending ${held}. ${one ? "It is" : "They are"} still queued.`;
     case "storage_full":
       return "Browser storage is full, so unsaved results can no longer be kept safely. Let them sync before reloading this tab.";
     case "discarded":
       return `${n} unsaved ${noun} ${one ? "was" : "were"} discarded because the admin password changed.`;
     case "sent":
       return `${n} ${noun} sent.`;
+    // bc-evts stage 3 review 10, N4: a team member the outbox treated as not
+    // added (so it changed the writes naming it) was kept by the server after
+    // all, or a rename of one was left unsent.
+    case "member_kept":
+      return "A team member this device treated as not added was kept by the server. Check the team's member names and lineups.";
+    case "member_unsent":
+      return "A change to a team member's name was not sent, because the member was never added. Add the member again if the name is still needed.";
     // Held finishes that landed and moved a later change of their match to
-    // its history. `forWinner` of them say the change would have left the
-    // finished match without a winner; the rest carry no such reason, and an
-    // alert without the count words none of them so. Recorded, so not an
-    // error: the history has the change.
+    // its history. Recorded, so not an error: the history has the change.
     case "displaced":
-      return displacedAlertText(n, one, alert.forWinner || 0);
+      return displacedAlertText(n, one);
+    // bc-evts: taps the server did not apply this pass, one alert a pass;
+    // a single one says why in the server's words or the outcome's.
+    // A tap the server turned away after its own answer said it landed
+    // (`turnedAway`) is told away from its match, so the alert names the match
+    // and the tap.
+    case "not_applied":
+      return tapNotAppliedAlertText(n, one,
+        tapNotAppliedText(alert.outcome, alert.where || "", alert.tap ? tapWords(alert.tap) : ""), alert.where || "");
+    // bc-evts S5 b: a batch of taps the server refused is held, not dropped.
+    case "taps_parked":
+      return `The server refused ${one ? "a tap" : `${n} taps`}. ${one ? "It is" : "They are"} held and ${one ? "holds" : "hold"} back that match's later changes: open the held writes list to discard ${one ? "it" : "them"}.`;
     default:
       return null;
   }
@@ -406,8 +449,32 @@ export function queueAlertMessage(alert) {
 // the change it moved aside is in the history); every other kind stays an
 // error. Exported for test.
 export function queueAlertToastType(alert) {
-  if (alert && alert.kind === "displaced") return "info";
+  if (alert && (alert.kind === "displaced" || alert.kind === "tap_applied")) return "info";
+  // The change was kept; a carried lineup could not follow it (F5).
+  if (alert && alert.kind === "lineup_warning") return "warning";
   return alert && alert.kind === "sent" ? "success" : "error";
+}
+
+
+// queueAlertToastOptions: the toast queue's identity and latch for a queue
+// alert (bc-evts stage 6 review 12). Every kind but "N sent" is told ONCE
+// (a tap_applied whose told-tap record was claimed, a displaced result, a
+// refusal...), so it is latched: never replaced by a later toast, it waits
+// for its dwell or a dismiss. The identity is the alert object itself (the
+// outbox builds a fresh one per alert, and the buffered channel replays the
+// same object), so one alert is never shown twice and two alerts with the
+// same words both show. Exported for test.
+const _queueAlertIds = new WeakMap();
+let _queueAlertSeq = 0;
+export function queueAlertToastOptions(alert) {
+  if (!alert || typeof alert !== "object") return { latched: false };
+  let id = _queueAlertIds.get(alert);
+  if (id === undefined) {
+    _queueAlertSeq += 1;
+    id = `queue-alert:${alert.kind}:${_queueAlertSeq}`;
+    _queueAlertIds.set(alert, id);
+  }
+  return { id, latched: alert.kind !== "sent" };
 }
 
 function App() {
@@ -503,7 +570,6 @@ function App() {
   // refetch while the shiaijo operator console is active (mp-9h1f).
   const adminViewRef = useR(adminView);
   useE(() => { adminViewRef.current = adminView; }, [adminView]);
-  const [toast, setToast] = useS(null);
   // T063: SSE connection status, surfaced to display surfaces so the
   // TV / lobby / overlay can render a reconnect indicator during the
   // window between EventSource error and reconnect-onopen. The
@@ -584,8 +650,11 @@ function App() {
   const [authConfig, setAuthConfig] = useS(undefined);
   const authPromptRef = React.useRef(false);
 
-  const showToast = (message, type = 'success') => {
-    setToast({ message, type });
+  // The queue, the toast shown and its timers are toast_queue.jsx's, so they
+  // survive the admin<->viewer switch that remounts <Toast>. `opts.id` dedupes
+  // by identity; `opts.latched` marks a notice told once.
+  const showToast = (message, type = 'success', opts) => {
+    pushToast(message, type, opts);
   };
 
   // bc-qttl: the offline write queue has no other way to reach the operator.
@@ -601,9 +670,9 @@ function App() {
     if (typeof window.subscribeQueueAlert !== "function") return;
     return window.subscribeQueueAlert((alert) => {
       const message = queueAlertMessage(alert);
-      if (message) showToast(message, queueAlertToastType(alert));
+      if (message) showToast(message, queueAlertToastType(alert), queueAlertToastOptions(alert));
     });
-    // Mount-only: showToast closes over setToast, which is stable.
+    // Mount-only: showToast pushes into the module-level toast queue.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1392,12 +1461,10 @@ function App() {
       ? window.API.unsentWrites()
       : { total: 0, terminal: 0, authBlocked: 0 };
     if (unsent.total > 0) {
-      const n = unsent.terminal > 0 ? unsent.terminal : unsent.total;
-      const one = n === 1;
-      const noun = unsent.terminal > 0
-        ? (one ? "finished result has" : "finished results have")
-        : (one ? "score update has" : "score updates have");
-      let message = `${n} ${noun} not reached the server yet. Signing out discards ${one ? "it" : "them"} permanently. Stay signed in until the sync indicator shows everything saved.`;
+      // Worded by the one owner (queuedWritesNoun): finished results when any
+      // are held (unsentWrites().terminal counts only those), else changes.
+      const { n, one, noun } = queuedWritesNoun(unsent.terminal, unsent.total);
+      let message = `${n} ${noun} ${one ? "has" : "have"} not reached the server yet. Signing out discards ${one ? "it" : "them"} permanently. Stay signed in until the sync indicator shows everything saved.`;
       if (unsent.authBlocked > 0) {
         message += ` Use "Sign in to save" instead to keep them and save them with the current password.`;
       }
@@ -1532,7 +1599,7 @@ function App() {
             }}
           />
         )}
-        {toast && <window.Toast {...toast} onClose={() => setToast(null)} />}
+        <window.Toast />
       </>
     );
   }
@@ -1673,7 +1740,7 @@ function App() {
           }}
         />
       )}
-      {toast && <window.Toast {...toast} onClose={() => setToast(null)} />}
+      <window.Toast />
     </>
   );
 }
@@ -1826,6 +1893,9 @@ function CreateTournament({ onCreated, authConfig }) {
   // Chosen once at creation; read-only after that. Default officiated
   // means existing deployments are unaffected.
   const [mode, setMode] = useS("officiated");
+  // A tournament being created is unsaved input: it holds a new build's
+  // automatic reload (app_version.jsx).
+  useUnsavedInput(name.trim() !== "" || venue.trim() !== "" || pass !== "");
   const [saving, setSaving] = useS(false);
   const [error, setError] = useS("");
   // submit's catch sets setSaving(false) post-await; on success the
@@ -2074,6 +2144,8 @@ window.fireNotification = fireNotification;
 ReactDOM.createRoot(document.getElementById("root")).render(
   <ErrorBoundary>
     <App />
+    {/* bc-evts S2: the one new-build banner, for the app and the displays. */}
+    <VersionBanner />
     {/* Single host for confirmDialog()/promptDialog(): sibling to App so it
         is always mounted exactly once, on every screen (incl. the pre-auth
         login screen's "Forgot password?" confirm). */}

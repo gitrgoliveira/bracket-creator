@@ -1,21 +1,29 @@
-// C1: tests for the debounced autosave (useDebouncedRunningWrite) wired into
-// ScoreEditorModal and TeamScoreEditorModal.
+// C1 began as the tests of the debounced running autosave of ScoreEditorModal
+// and TeamScoreEditorModal. Since bc-evts (stage 3 for the individual editor,
+// stage 5 for the team editor) neither editor has one: a scoring gesture on a
+// running match is a tap handed to the outbox at once (API.recordTap), so what
+// these pin is that a gesture is a tap, that nothing waits, and that the
+// representative bout's add and remove show at once and take the server's
+// answer in the right order, with the taps queued around them.
 //
-// These tests live in the render suite (real React 18 + RTL) because the
-// feature is exercised through actual component interaction: ippon tap
-// → local state update → debounce timer → onSubmit call. The unit suite
-// uses a fake React stub and cannot mount stateful components.
-//
-// Timer strategy: vi.useFakeTimers() so we can advance time deterministically
-// without real 300ms waits. We call act() around both the interaction AND the
-// timer advance so React flushes all pending state updates before we assert.
+// These tests live in the render suite (real React 19 + RTL) because the
+// feature is exercised through actual component interaction. Timer strategy:
+// vi.useFakeTimers() so time can be advanced deterministically (WAIT_MS stands
+// in for the 300 ms debounce there used to be: nothing is written after it).
 
 import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
-import { SUPERSEDED_REASON, SUPERSEDED_ADVICE, CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, FETCH_TIMEOUT_MS } from '../../write_result.jsx';
+import { beforeEach as beforeEachTest } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
+
+// bc-evts stage 3: a running individual match is scored by taps handed to
+// the outbox (API.recordTap); each test gets a fresh fake of that surface.
+beforeEachTest(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });
+// Long past the 300 ms debounce the editors used to have.
+const WAIT_MS = 350;
+import { CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE } from '../../write_result.jsx';
 
 // window globals required by admin_scoring_modal.jsx
 // Split into SYNC (evaluated in the component body on every render) and LAZY
@@ -125,197 +133,77 @@ function renderModal(match, extraProps = {}) {
 // Tests
 
 describe('C1 debounced autosave: ScoreEditorModal (individual match)', () => {
+  // bc-evts stage 3: the individual editor has no debounced autosave. A tap on
+  // a running match is handed to the outbox at once (API.recordTap) and no
+  // running score write is ever sent; the engi (stage 4) and team (stage 5)
+  // editors followed.
+  const taps = () => window.API.recordTap.mock.calls.map((c) => c[2]);
 
-  it('an ippon tap on a RUNNING match triggers exactly ONE debounced write after 300ms', async () => {
+  it('an ippon tap on a RUNNING match is one tap, sent at once, and never a running write', async () => {
     renderModal(makeRunningMatch());
-
-    // Tap an "M" (Men) ippon button. Both sides render an identical M button;
-    // this test is side-agnostic: any ippon tap on a running match must
-    // schedule exactly one debounced autosave, so we click the first one.
-    const menButtons = screen.getAllByText('M');
-    expect(menButtons.length).toBeGreaterThanOrEqual(1);
-
-    // Tap: updates local state immediately (optimistic). No network call yet.
-    await act(async () => { fireEvent.click(menButtons[0]); });
+    await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
+    expect(taps()).toEqual([expect.objectContaining({ kind: 'ippon.add', letter: 'M' })]);
+    await act(async () => { vi.advanceTimersByTime(WAIT_MS); });
     expect(window.API.recordScore).toHaveBeenCalledTimes(0);
-
-    // Advance past the 300ms debounce; the trailing-edge timer fires.
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-
-    // The patch must carry status "running" (NOT "completed" / "scheduled").
-    const [, , patch] = window.API.recordScore.mock.calls[0];
-    expect(patch.status).toBe('running');
-    expect(patch.score?.live).toBe(true);
   });
 
-  it('does NOT fire a running autosave if the match completes during the debounce window', async () => {
+  it('a match completed right after a tap gets no running write', async () => {
     const running = makeRunningMatch();
     const { rerender } = renderModal(running);
-
-    const menButtons = screen.getAllByText('M');
-    await act(async () => { fireEvent.click(menButtons[0]); });
-    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
-
-    // The match is completed out from under the operator (an SSE update or
-    // another operator) BEFORE the 300ms debounce fires; re-render completed.
+    await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
     const completed = { ...running, status: 'completed' };
     await act(async () => {
-      rerender(
-        <ScoreEditorModal
-          match={completed}
-          onClose={vi.fn()}
-          onSubmit={makeOnSubmit(completed)}
-          password=""
-        />,
-      );
+      rerender(<ScoreEditorModal match={completed} onClose={vi.fn()} onSubmit={makeOnSubmit(completed)} password="" />);
     });
-
-    // Advance past the debounce. The fire-time isRunning re-check (gate 3) must
-    // suppress the now-stale running write so it can't regress the completed
-    // result.
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await act(async () => { vi.advanceTimersByTime(WAIT_MS); });
     expect(window.API.recordScore).toHaveBeenCalledTimes(0);
   });
 
-  it('rapid double-tap coalesces into ONE write (trailing-edge debounce)', async () => {
+  it('two quick taps are two taps, each its own event', async () => {
     renderModal(makeRunningMatch());
-
-    const menButtons = screen.getAllByText('M');
-
-    // Two taps in quick succession (within the debounce window).
-    await act(async () => {
-      fireEvent.click(menButtons[0]);
-    });
-    // Advance only 100ms; still within debounce window. Timer should reset.
+    await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
     await act(async () => { vi.advanceTimersByTime(100); });
-    // The second tap resets the debounce (ScoreEditorModal caps at 2 ippons
-    // per side, so use a different letter to ensure the second tap is accepted).
-    const koteButtons = screen.getAllByText('K');
-    await act(async () => {
-      fireEvent.click(koteButtons[0]);
-    });
-    // Still before the debounce window from the second tap expires.
+    await act(async () => { fireEvent.click(screen.getAllByText('K')[0]); });
+    expect(taps().map((e) => e.letter)).toEqual(['M', 'K']);
+    await act(async () => { vi.advanceTimersByTime(WAIT_MS); });
     expect(window.API.recordScore).toHaveBeenCalledTimes(0);
-
-    // Now advance past the debounce from the SECOND tap.
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    // Only ONE write despite two taps.
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
   });
 
-  it('an ippon tap on a SCHEDULED match does NOT trigger a write (gate: never auto-start)', async () => {
+  it('an ippon tap on a SCHEDULED match sends nothing (gate: never auto-start)', async () => {
     renderModal(makeScheduledMatch());
-
-    // The "M" buttons are still rendered (the scoring board is always visible).
-    const menButtons = screen.getAllByText('M');
-    await act(async () => { fireEvent.click(menButtons[0]); });
-
-    // Advance well past debounce.
+    await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
     await act(async () => { vi.advanceTimersByTime(500); });
-
-    // Gate: status !== "running" → no write.
+    expect(taps()).toEqual([]);
     expect(window.API.recordScore).toHaveBeenCalledTimes(0);
   });
 
-  it('the autosave write is cancelled when the operator clicks the explicit Finish button', async () => {
+  it('Finish after a tap sends the one finishing write', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
-    render(
-      <ScoreEditorModal
-        match={makeRunningMatch()}
-        onClose={vi.fn()}
-        onSubmit={onSubmit}
-        password=""
-      />,
-    );
-
-    // Tap an ippon to arm the debounce.
-    const menButtons = screen.getAllByText('M');
-    await act(async () => { fireEvent.click(menButtons[0]); });
-    expect(onSubmit).toHaveBeenCalledTimes(0);
-
-    // Click the Finish button (first arm: the label flips to the explicit
-    // "Tap again to finish" instruction; canFinish is true because aTotal>0).
-    const finishBtn = screen.getByText(/Finish/);
-    await act(async () => { fireEvent.click(finishBtn); });
-
-    // Armed state — the label is now "Tap again to finish". Tap it again to
-    // actually submit; the explicit finish must CANCEL the pending autosave.
-    const confirmBtn = screen.queryByText(/Tap again/);
-    if (confirmBtn) {
-      await act(async () => { fireEvent.click(confirmBtn); });
-    }
-
-    // Now advance past the debounce window; the cancelled timer must NOT fire.
+    render(<ScoreEditorModal match={makeRunningMatch()} onClose={vi.fn()} onSubmit={onSubmit} password="" />);
+    await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
+    await act(async () => { fireEvent.click(screen.getByText(/Finish/)); });
+    await act(async () => { fireEvent.click(screen.getByText(/Tap again/)); });
     await act(async () => { vi.advanceTimersByTime(500); });
-
-    // The explicit onSubmit was called (via Finish), but the autosave should
-    // NOT have added an extra call. Any call from the debounce after the
-    // explicit submit would mean double-write; check total calls:
-    // Either 1 (Finish armed only) or 2 (arm + confirm) depending on UI flow,
-    // but the autosave debounce must NOT add an extra call on top.
-    // We verify by checking that every call had the patch from the explicit
-    // submit path; none should have come from the debounce firing AFTER
-    // the explicit submit. The simplest assertion: at most 2 total calls
-    // (arm + confirm), NOT 3 (arm + confirm + stale debounce).
-    expect(onSubmit.mock.calls.length).toBeLessThanOrEqual(2);
-    // And no call should be the stale "running" autosave AFTER the explicit
-    // submit; the last call (if any) must not be a running-status patch
-    // that arrived post-submit.
-    const calls = onSubmit.mock.calls;
-    if (calls.length > 0) {
-      // All completed-or-armed calls should NOT be the stale debounce. If the
-      // last call has status "running" it means the debounce fired after the
-      // explicit Finish. That's the bug we're guarding against.
-      const lastPatch = calls[calls.length - 1][0];
-      // After Finish, the patch should be "completed" or the arm triggered the
-      // 2-tap guard and the patch is pending. Either way it must NOT be a
-      // stale "running" patch fired by the debounce after the explicit submit.
-      // We only assert this if more than 1 call happened (arm + potential debounce).
-      if (calls.length >= 2) {
-        expect(lastPatch.status).not.toBe('running');
-      }
-    }
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0][0].status).toBe('completed');
   });
 
-  it('prop-driven re-render (SSE update) does NOT trigger a write (no feedback loop)', async () => {
-    // Render with a running match, then re-render with updated props (simulating
-    // an SSE match_updated arrival). The autosave must NOT fire because the
-    // dirty flag was never set by a user action.
+  it('prop-driven re-render (SSE update) sends nothing (no feedback loop)', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
-    const { rerender } = render(
-      <ScoreEditorModal
-        match={makeRunningMatch()}
-        onClose={vi.fn()}
-        onSubmit={onSubmit}
-        password=""
-      />,
-    );
-
-    // Simulate SSE: re-render with slightly different match props (e.g.
-    // scheduledAt changed). No user tap occurred.
+    const { rerender } = render(<ScoreEditorModal match={makeRunningMatch()} onClose={vi.fn()} onSubmit={onSubmit} password="" />);
     await act(async () => {
-      rerender(
-        <ScoreEditorModal
-          match={makeRunningMatch({ scheduledAt: '10:05' })}
-          onClose={vi.fn()}
-          onSubmit={onSubmit}
-          password=""
-        />,
-      );
+      rerender(<ScoreEditorModal match={makeRunningMatch({ scheduledAt: '10:05' })} onClose={vi.fn()} onSubmit={onSubmit} password="" />);
     });
-
-    // Advance well past the debounce window.
     await act(async () => { vi.advanceTimersByTime(500); });
-
-    // No user action → dirty flag never set → no write.
     expect(onSubmit).toHaveBeenCalledTimes(0);
+    expect(taps()).toEqual([]);
   });
 });
 
-describe('C1 debounced autosave: TeamScoreEditorModal (team match)', () => {
+describe('C1: TeamScoreEditorModal (team match)', () => {
+  const taps = () => window.API.recordTap.mock.calls.map((c) => c[2]);
 
-  it('a sub-bout ippon tap on a RUNNING team match triggers ONE debounced write', async () => {
+  it('a sub-bout ippon tap on a RUNNING team match is one tap, sent at once, and never a running write', async () => {
     renderModal(makeTeamMatch());
 
     // For a 3-person team match there are 3 rows × 2 sides × 5 buttons = 30+
@@ -324,13 +212,9 @@ describe('C1 debounced autosave: TeamScoreEditorModal (team match)', () => {
     expect(menButtons.length).toBeGreaterThanOrEqual(1);
 
     await act(async () => { fireEvent.click(menButtons[0]); });
+    expect(taps()).toEqual([expect.objectContaining({ kind: 'ippon.add', pos: 1, letter: 'M' })]);
+    await act(async () => { vi.advanceTimersByTime(WAIT_MS); });
     expect(window.API.recordScore).toHaveBeenCalledTimes(0);
-
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-
-    const [, , patch] = window.API.recordScore.mock.calls[0];
-    expect(patch.status).toBe('running');
   });
 
   it('a sub-bout ippon tap on a SCHEDULED team match does NOT write', async () => {
@@ -351,6 +235,7 @@ describe('C1 debounced autosave: TeamScoreEditorModal (team match)', () => {
     await act(async () => { vi.advanceTimersByTime(500); });
 
     expect(window.API.recordScore).toHaveBeenCalledTimes(0);
+    expect(window.API.recordTap).toHaveBeenCalledTimes(0);
   });
 });
 
@@ -369,7 +254,7 @@ describe('C1 debounced autosave: TeamScoreEditorModal (team match)', () => {
 // A tap on an empty cell can therefore cost a real result.
 describe('bc-rvfx: tapping an EMPTY ippon slot is a no-op', () => {
 
-  it('does not schedule an autosave write', async () => {
+  it('sends nothing', async () => {
     renderModal(makeRunningMatch());
 
     // Both sides start with two empty slots; the aria-label is the contract.
@@ -380,25 +265,28 @@ describe('bc-rvfx: tapping an EMPTY ippon slot is a no-op', () => {
     await act(async () => { vi.advanceTimersByTime(500); });
 
     expect(window.API.recordScore).toHaveBeenCalledTimes(0);
+    expect(window.API.recordTap).toHaveBeenCalledTimes(0);
   });
 
-  it('still writes when the tap actually clears a scored mark', async () => {
+  it('still sends a removal when the tap actually clears a scored mark', async () => {
     // The guard must not be over-broad: clearing a REAL mark is the documented
-    // way to take a strike back, and it must still autosave.
+    // way to take a strike back. bc-evts stage 3: it is an ippon.remove tap
+    // naming the mark (here the pending tap's own id).
     renderModal(makeRunningMatch());
 
     const menButtons = screen.getAllByText('M');
     await act(async () => { fireEvent.click(menButtons[0]); });
-    await act(async () => { vi.advanceTimersByTime(500); });
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
+    const { id } = window.API.recordTap.mock.results[0].value;
 
     // That slot now holds a mark, so its label changes from "empty" to "remove".
     const filled = screen.getAllByLabelText(/slot \d: remove /);
     expect(filled.length).toBeGreaterThanOrEqual(1);
 
     await act(async () => { fireEvent.click(filled[0]); });
-    await act(async () => { vi.advanceTimersByTime(500); });
-    expect(window.API.recordScore).toHaveBeenCalledTimes(2);
+    expect(window.API.recordTap).toHaveBeenCalledTimes(2);
+    expect(window.API.recordTap.mock.calls[1][2]).toMatchObject({ kind: 'ippon.remove', target: id });
+    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
   });
 });
 
@@ -409,15 +297,15 @@ describe('bc-emsl: a team-sheet tap that clears nothing writes nothing', () => {
   it('tapping an EMPTY mark slot keeps the bout\'s Tie and sends nothing', async () => {
     renderModal(makeTeamMatch({ id: 'tm-emsl' }));
     await act(async () => { fireEvent.click(tieBoutButton(0)); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
 
     const empty = markSlots(subMatchRows()[0], 'shiro').find((b) => b.textContent === '·');
     expect(empty).toBeTruthy();
     await act(async () => { fireEvent.click(empty); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await act(async () => { vi.advanceTimersByTime(WAIT_MS); });
 
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
+    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
     expect(tieBoutButton(0).textContent).toContain('✓ Tie');
   });
 
@@ -425,60 +313,73 @@ describe('bc-emsl: a team-sheet tap that clears nothing writes nothing', () => {
     renderModal(makeTeamMatch({ id: 'tm-emsl' }));
     const akaFusensho = subMatchRows()[0].querySelector('.team-sub-match__side--aka [data-testid="scoring-modal-fusensho-button"]');
     await act(async () => { fireEvent.click(akaFusensho); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
 
     const circle = markSlots(subMatchRows()[0], 'aka').find((b) => b.textContent === '\u25CB');
     expect(circle).toBeTruthy();
     expect(circle.title).toBe('Awarded by fusensho: use Fusensho to undo');
     await act(async () => { fireEvent.click(circle); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await act(async () => { vi.advanceTimersByTime(WAIT_MS); });
 
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
     expect(subMatchRows()[0].querySelector('.team-sub-match__side--aka [data-testid="scoring-modal-fusensho-button"]').textContent).toContain('✓ Fusensho');
   });
 
-  it('still removes a real mark and autosaves', async () => {
+  it('still removes a real mark, by its id', async () => {
     renderModal(makeTeamMatch({ id: 'tm-emsl' }));
     const shiroM = ipponButton(subMatchRows()[0], 'shiro', 'M');
     await act(async () => { fireEvent.click(shiroM); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
+    const { id } = window.API.recordTap.mock.results[0].value;
 
     const mark = markSlots(subMatchRows()[0], 'shiro').find((b) => b.textContent === 'M');
     expect(mark.title).toBe('Click to remove');
     await act(async () => { fireEvent.click(mark); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    expect(window.API.recordScore).toHaveBeenCalledTimes(2);
+    expect(window.API.recordTap).toHaveBeenCalledTimes(2);
+    expect(window.API.recordTap.mock.calls[1][2]).toMatchObject({ kind: 'ippon.remove', pos: 1, target: id });
     expect(markSlots(subMatchRows()[0], 'shiro').some((b) => b.textContent === 'M')).toBe(false);
   });
 });
 
-describe('an edit inside the autosave window survives Prev/Next', () => {
-  // Prev/Next re-key the editor in its host, which unmounts it. Leaving a
-  // RUNNING match (leaveEditor's common case) does not cancel the debounce
-  // itself; the unmount effect inside useDebouncedRunningWrite is what fires
-  // the pending write, the same mechanism the page-hide flush uses. An ippon
-  // tapped just before either one used to be lost; now the unmount writes it.
+describe('a tap made right before Prev/Next is kept', () => {
+  // Prev/Next re-key the editor in its host, which unmounts it. An ippon
+  // tapped just before either one was once lost; then the unmount wrote the
+  // autosave still in its debounce. Now the tap is in the outbox as it is made,
+  // so leaving owes nothing.
   const neighbour = { id: 'm-next', sideA: { name: 'Sato' }, sideB: { name: 'Ito' } };
   const viaButton = async () => { fireEvent.click(screen.getByText('Next →')); };
   const viaKey = async () => { fireEvent.keyDown(window, { key: 'ArrowRight' }); };
 
+  // bc-evts stage 3: the individual editor's tap is in the outbox as it is
+  // made, so leaving by Next or → owes nothing and writes nothing.
   it.each([
-    ['individual', 'the Next button', makeRunningMatch, viaButton],
-    ['individual', 'the → key', makeRunningMatch, viaKey],
+    ['the Next button', viaButton],
+    ['the → key', viaKey],
+  ])('individual editor: %s right after a tap keeps the tap and writes nothing', async (_via, goNext) => {
+    let view;
+    const onNext = vi.fn(() => view.unmount());
+    view = renderModal(makeRunningMatch(), { nextMatch: neighbour, onNext });
+    await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
+    await act(goNext);
+    await act(async () => { vi.advanceTimersByTime(WAIT_MS); });
+    expect(onNext).toHaveBeenCalledTimes(1);
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
+    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
+  });
+
+  it.each([
     ['team', 'the Next button', makeTeamMatch, viaButton],
     ['team', 'the → key', makeTeamMatch, viaKey],
-  ])('%s editor: %s within 300ms of a tap writes the tap', async (_kind, _via, match, goNext) => {
+  ])('%s editor: %s right after a tap keeps the tap and writes nothing', async (_kind, _via, match, goNext) => {
     let view;
     const onNext = vi.fn(() => view.unmount());
     view = renderModal(match(), { nextMatch: neighbour, onNext });
     await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
     await act(goNext);
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await act(async () => { vi.advanceTimersByTime(WAIT_MS); });
     expect(onNext).toHaveBeenCalledTimes(1);
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    expect(window.API.recordScore.mock.calls[0][2].status).toBe('running');
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
+    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
   });
 });
 
@@ -504,11 +405,17 @@ describe('an edit inside the autosave window survives Prev/Next', () => {
 // admin_shiaijo.render.test.jsx uses under fake timers; `waitFor`'s own
 // polling never fires here since it schedules through the faked clock).
 
+// The three numbered bout rows a running team match holds once its sheet has
+// been written (a tap lands only on a row the server holds; a match with none
+// gets them written before its first tap, team_editor_taps.render.test.jsx).
+const BOUT_ROWS = [1, 2, 3].map((position) => ({ position, sideA: '', sideB: '', ipponsA: [], ipponsB: [], hansokuA: 0, hansokuB: 0, winner: '', decision: '' }));
+
 function makeTeamMatch(overrides = {}) {
   return {
     id: 'tm-running', status: 'running', phase: 'pool', poolName: 'Pool 1', court: 'A',
     compKind: 'team', teamSize: 3,
     sideA: { id: 'teamA', name: 'Team A' }, sideB: { id: 'teamB', name: 'Team B' },
+    subResults: BOUT_ROWS,
     ...overrides,
   };
 }
@@ -518,7 +425,7 @@ function makeTeamMatch(overrides = {}) {
 function makeKnockoutTeamMatch(overrides = {}) {
   return makeTeamMatch({
     id: 'tm-ko', compId: 'comp1', phase: 'bracket', round: 'Final',
-    compFormat: 'knockout', teamMatchType: 'fixed', subResults: [],
+    compFormat: 'knockout', teamMatchType: 'fixed', subResults: BOUT_ROWS,
     ...overrides,
   });
 }
@@ -532,7 +439,7 @@ function daihyosenRow(overrides = {}) {
 }
 
 function makeMatchWithDaihyosen(overrides = {}) {
-  return makeKnockoutTeamMatch({ subResults: [daihyosenRow()], ...overrides });
+  return makeKnockoutTeamMatch({ subResults: [...BOUT_ROWS, daihyosenRow()], ...overrides });
 }
 
 async function settle(times = 8) {
@@ -553,94 +460,76 @@ function markSlot(rowEl, color, letter) {
   return markSlots(rowEl, color).find((b) => b.textContent === letter);
 }
 
-describe('bc-dhas: Add/Remove representative bout races the pending autosave', () => {
+describe('bc-dhas: Add/Remove representative bout never waits, and the taps around it keep their order', () => {
   beforeEach(() => {
     // Reset per test: the file-level beforeEach only clears recordScore.
     window.API.recordDaihyosen = vi.fn();
     window.API.removeDaihyosen = vi.fn();
   });
+  const taps = () => window.API.recordTap.mock.calls.map((c) => c[2]);
+  const order = (fn, i = 0) => fn.mock.invocationCallOrder[i];
 
-  it('T1: Add inside the debounce window cancels the pending autosave first', async () => {
-    window.API.recordDaihyosen.mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [daihyosenRow()] });
+  it('T1: Ties then Add: the ties are taps ahead of the add, and nothing is saved first', async () => {
+    window.API.recordDaihyosen.mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [...BOUT_ROWS, daihyosenRow()] });
     renderModal(makeKnockoutTeamMatch());
 
-    // Tie every bout, the last tap right before Add (mirrors the bead's own
-    // three-Ties-then-Add repro): one pending autosave timer is left armed.
     await act(async () => { fireEvent.click(tieBoutButton(0)); });
     await act(async () => { fireEvent.click(tieBoutButton(1)); });
     await act(async () => { fireEvent.click(tieBoutButton(2)); });
-
     await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
     await settle();
 
-    // The explicit save landed; recordDaihyosen was posted.
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(taps()).toEqual([1, 2, 3].map((pos) => ({ kind: 'bout.decision', pos, value: 'hikiwake' })));
     expect(window.API.recordDaihyosen).toHaveBeenCalledTimes(1);
-
-    // Red on e7cb3af0: the pending timer (armed by the last Tie, never
-    // cancelled by onDaihyosen) fires here with a snapshot built before the
-    // row existed.
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    expect(order(window.API.recordTap, 2)).toBeLessThan(order(window.API.recordDaihyosen));
+    await act(async () => { vi.advanceTimersByTime(WAIT_MS); });
     await settle();
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
   });
 
-  it('T2: a tap right after the add carries the DH row (adopted via setMatchOverride)', async () => {
-    window.API.recordDaihyosen.mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [daihyosenRow()] });
+  it('T2: a tap right after the add lands on the representative bout shown (adopted via setMatchOverride)', async () => {
+    window.API.recordDaihyosen.mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [...BOUT_ROWS, daihyosenRow()] });
     renderModal(makeKnockoutTeamMatch());
 
     await act(async () => { fireEvent.click(tieBoutButton(2)); });
     await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
     await settle();
-    window.API.recordScore.mockClear();
-
-    // A tap made AFTER the add resolves: its debounced write, 350ms later,
-    // must carry the newly adopted position -1 row.
-    await act(async () => { fireEvent.click(tieBoutButton(0)); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    await settle();
-
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    const [, , patch] = window.API.recordScore.mock.calls[0];
-    // Red on e7cb3af0: matchOverride is never set, so the local board still
-    // has no daihyosen row (and the Add button, not Remove, would still show).
-    expect(patch.subResults.some((s) => s.position === -1)).toBe(true);
+    // Red on e7cb3af0: matchOverride is never set, so the board has no
+    // representative bout (and the Add button, not Remove, would still show).
+    expect(subMatchRows()).toHaveLength(4);
+    await act(async () => { fireEvent.click(ipponButton(subMatchRows()[3], 'shiro', 'M')); });
+    expect(taps().slice(1)).toEqual([{ kind: 'ippon.add', pos: -1, side: 'b', letter: 'M' }]);
+    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
   });
 
-  it('T2b: a tap made while the add request is still in flight is kept, with the row', async () => {
+  it('T2b: a tap made while the add request is still in flight is kept, and the row is shown', async () => {
     let view;
-    // Same pattern as "an edit inside the autosave window survives Prev/Next"
-    // above: a host whose onClose unmounts the editor.
+    // A host whose onClose unmounts the editor.
     const onClose = vi.fn(() => view.unmount());
     let resolveDaihyosen;
     window.API.recordDaihyosen.mockImplementation(() => new Promise((resolve) => { resolveDaihyosen = resolve; }));
     view = renderModal(makeKnockoutTeamMatch(), { onClose });
 
     await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
-    await settle(); // the explicit save lands; recordDaihyosen is still pending
+    await settle(); // recordDaihyosen is still pending
 
     // A tap made WHILE the POST is in flight.
     await act(async () => { fireEvent.click(tieBoutButton(0)); });
 
     await act(async () => {
-      resolveDaihyosen({ ...makeKnockoutTeamMatch(), subResults: [daihyosenRow()] });
+      resolveDaihyosen({ ...makeKnockoutTeamMatch(), subResults: [...BOUT_ROWS, daihyosenRow()] });
     });
     await settle();
 
-    // Red on e7cb3af0: onDaihyosen calls onClose() on success, which
-    // unmounts this host; the unmount effect then fires the pending tap
-    // built from the pre-adopt state (no row).
+    // Red on e7cb3af0: onDaihyosen calls onClose() on success.
     expect(onClose).not.toHaveBeenCalled();
-
-    window.API.recordScore.mockClear();
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    expect(taps()).toEqual([{ kind: 'bout.decision', pos: 1, value: 'hikiwake' }]);
+    expect(subMatchRows()).toHaveLength(4);
+    expect(tieBoutButton(0).textContent).toContain('✓ Tie');
+    await act(async () => { vi.advanceTimersByTime(WAIT_MS); });
     await settle();
-
     expect(onClose).not.toHaveBeenCalled();
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    const [, , patch] = window.API.recordScore.mock.calls[0];
-    expect(patch.subResults.some((s) => s.position === -1)).toBe(true);
-    expect(patch.subResults.find((s) => s.position === 1)?.decision).toBe('hikiwake');
+    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
   });
 
   it('adoptServerSubs builds the override from the LATEST match prop, not the one captured at click time', async () => {
@@ -683,175 +572,59 @@ describe('bc-dhas: Add/Remove representative bout races the pending autosave', (
     expect(screen.queryByText('CORRECTION')).toBeTruthy();
   });
 
-  it('a scoring tap mid-request holds the autosave until the request resolves and the row is adopted', async () => {
-    let resolveDaihyosen;
-    window.API.recordDaihyosen.mockImplementation(() => new Promise((resolve) => { resolveDaihyosen = resolve; }));
-    renderModal(makeKnockoutTeamMatch());
-
-    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
-    await settle(); // the pre-save lands; recordDaihyosen is still pending
-    window.API.recordScore.mockClear();
-
-    // A tap made WHILE the POST is in flight arms the debounce.
-    await act(async () => { fireEvent.click(tieBoutButton(0)); });
-
-    // The debounce outlives the request: without the hold, this is exactly
-    // where the timer fires with a patch built before adoptServerSubs ran.
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    await settle();
-    // Red without the hold: the timer already fired here and sent a patch
-    // with no position -1 row.
-    expect(window.API.recordScore).not.toHaveBeenCalled();
-
-    await act(async () => {
-      resolveDaihyosen({ ...makeKnockoutTeamMatch(), subResults: [daihyosenRow()] });
-    });
-    await settle();
-
-    // The FIRST write after the request resolves carries the row: the
-    // deferred edit fires once the render adopting it has landed.
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    const [, , patch] = window.API.recordScore.mock.calls[0];
-    expect(patch.subResults.some((s) => s.position === -1)).toBe(true);
-  });
-
-  it('T3a: Remove inside the debounce window stays removed (onClose does not unmount)', async () => {
-    window.API.removeDaihyosen.mockResolvedValue({ subResults: [] });
-    const onClose = vi.fn();
-    renderModal(makeMatchWithDaihyosen(), { onClose });
-
-    // A point on bout 1 (not the DH row) arms the debounce; Remove at once.
-    await act(async () => { fireEvent.click(ipponButton(subMatchRows()[0], 'shiro', 'M')); });
-    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
-    await settle();
-
-    // Red on e7cb3af0: onRemoveDaihyosen never saves first, so this is 0.
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    expect(window.API.removeDaihyosen).toHaveBeenCalledTimes(1);
-    const saveOrder = window.API.recordScore.mock.invocationCallOrder[0];
-    const deleteOrder = window.API.removeDaihyosen.mock.invocationCallOrder[0];
-    expect(saveOrder).toBeLessThan(deleteOrder);
-    // Red on e7cb3af0: the old code always calls onClose() after a
-    // successful remove.
-    expect(onClose).not.toHaveBeenCalled();
-
-    // The debounce was cancelled before the pre-remove save, so nothing is
-    // left pending to fire a stale write after the delete.
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    await settle();
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    expect(onClose).not.toHaveBeenCalled();
-  });
-
-  it('T3b: Remove inside the debounce window stays removed (onClose unmounts the host)', async () => {
-    window.API.removeDaihyosen.mockResolvedValue({ subResults: [] });
+  it.each([
+    ['onClose does not unmount', false],
+    ['onClose unmounts the host', true],
+  ])('T3: a point then Remove at once: the point is a tap ahead of the remove, and the editor stays open (%s)', async (_what, unmounts) => {
+    window.API.removeDaihyosen.mockResolvedValue({ subResults: BOUT_ROWS });
     let view;
-    const onClose = vi.fn(() => view.unmount());
+    const onClose = vi.fn(() => { if (unmounts) view.unmount(); });
     view = renderModal(makeMatchWithDaihyosen(), { onClose });
 
     await act(async () => { fireEvent.click(ipponButton(subMatchRows()[0], 'shiro', 'M')); });
     await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
     await settle();
 
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+    expect(taps()).toEqual([{ kind: 'ippon.add', pos: 1, side: 'b', letter: 'M' }]);
     expect(window.API.removeDaihyosen).toHaveBeenCalledTimes(1);
-    const saveOrder = window.API.recordScore.mock.invocationCallOrder[0];
-    const deleteOrder = window.API.removeDaihyosen.mock.invocationCallOrder[0];
-    expect(saveOrder).toBeLessThan(deleteOrder);
-    // Red on e7cb3af0: onClose() unmounts this host at once, and the
-    // unmount's own write (built from the pre-removal state) resurrects
-    // the row server-side (R1).
+    expect(order(window.API.recordTap)).toBeLessThan(order(window.API.removeDaihyosen));
+    // Red on e7cb3af0: the old code always calls onClose() after a remove.
     expect(onClose).not.toHaveBeenCalled();
-
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await act(async () => { vi.advanceTimersByTime(WAIT_MS); });
     await settle();
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    expect(onClose).not.toHaveBeenCalled();
+    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
+    expect(subMatchRows()).toHaveLength(3);
   });
 
-  it('T4: a pending DH point take-back is saved before the DELETE', async () => {
-    window.API.removeDaihyosen.mockResolvedValue({ subResults: [] });
-    const match = makeMatchWithDaihyosen();
-    const { rerender } = renderModal(match);
+  it('T4: a representative bout point taken back right before Remove is a tap ahead of the remove', async () => {
+    window.API.removeDaihyosen.mockResolvedValue({ subResults: BOUT_ROWS });
+    const struck = makeMatchWithDaihyosen({ subResults: [...BOUT_ROWS, daihyosenRow({ ipponsB: ['M'], winner: 'Team B', markIds: { b: ['srv-m'] } })] });
+    renderModal(struck);
     const dhRowEl = () => subMatchRows()[3]; // bout1, bout2, bout3, then DH
 
-    // Strike a point on the DH row itself and let it autosave.
-    await act(async () => { fireEvent.click(ipponButton(dhRowEl(), 'shiro', 'M')); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    await settle();
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    const [, , firstPatch] = window.API.recordScore.mock.calls[0];
-    const dhAfterStrike = firstPatch.subResults.find((s) => s.position === -1);
-
-    // The server round-trips the struck point back as the new baseline.
-    const recordedMatch = makeMatchWithDaihyosen({ subResults: [dhAfterStrike] });
-    await act(async () => {
-      rerender(
-        <ScoreEditorModal match={recordedMatch} onClose={vi.fn()} onSubmit={makeOnSubmit(recordedMatch)} password="" />
-      );
-    });
-    window.API.recordScore.mockClear();
-
-    // Take the point back, then Remove at once.
     await act(async () => { fireEvent.click(markSlot(dhRowEl(), 'shiro', 'M')); });
     await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
     await settle();
 
-    // Red on e7cb3af0: the DELETE goes first, so the take-back is lost.
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    const [, , patch] = window.API.recordScore.mock.calls[0];
-    const dh = patch.subResults.find((s) => s.position === -1);
-    expect(dh.ipponsA).toEqual([]);
-    expect(dh.ipponsB).toEqual([]);
-    const saveOrder = window.API.recordScore.mock.invocationCallOrder[0];
-    const deleteOrder = window.API.removeDaihyosen.mock.invocationCallOrder[0];
-    expect(saveOrder).toBeLessThan(deleteOrder);
+    expect(taps()).toEqual([{ kind: 'ippon.remove', pos: -1, side: 'b', target: 'srv-m' }]);
+    expect(order(window.API.recordTap)).toBeLessThan(order(window.API.removeDaihyosen));
+    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
   });
 
-  it('T4b: a pending DH hantei cancel is saved before the DELETE (markless arrays, not omitted)', async () => {
-    window.API.removeDaihyosen.mockResolvedValue({ subResults: [] });
-    const match = makeMatchWithDaihyosen();
-    const { rerender } = renderModal(match);
-
-    // Pick a hantei winner (SHIRO = pickDaihyosenHantei("b") = sideB) and
-    // let it autosave.
-    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-hantei-arm')); });
-    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-hantei-shiro')); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    await settle();
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-
-    // The server round-trips the recorded verdict back as the new baseline
-    // (the normalizeMatch-derived shape every real mount receives, same
-    // fixture convention as team_daihyosen_silence.render.test.jsx).
-    const recordedMatch = makeMatchWithDaihyosen({
-      subResults: [daihyosenRow({ winner: 'Team B', ipponsB: ['Ht'], decidedByHantei: true })],
+  it('T4b: a hantei cancelled right before Remove is a verdict clear ahead of the remove', async () => {
+    window.API.removeDaihyosen.mockResolvedValue({ subResults: BOUT_ROWS });
+    const recorded = makeMatchWithDaihyosen({
+      subResults: [...BOUT_ROWS, daihyosenRow({ winner: 'Team B', ipponsB: ['Ht'], decidedByHantei: true })],
     });
-    await act(async () => {
-      rerender(
-        <ScoreEditorModal match={recordedMatch} onClose={vi.fn()} onSubmit={makeOnSubmit(recordedMatch)} password="" />
-      );
-    });
-    window.API.recordScore.mockClear();
+    renderModal(recorded);
 
-    // Cancel the verdict, then Remove at once.
     await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-hantei-cancel')); });
     await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
     await settle();
 
-    // Red on e7cb3af0: the DELETE goes first, so the cancel is lost.
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    const [, , patch] = window.API.recordScore.mock.calls[0];
-    const dh = patch.subResults.find((s) => s.position === -1);
-    // Touched (armed flipped true -> false): explicit arrays, not omitted
-    // (the daihyosenSilent branch is for a row nothing is known about).
-    expect('ipponsA' in dh).toBe(true);
-    expect('ipponsB' in dh).toBe(true);
-    expect(dh.ipponsA.includes('Ht')).toBe(false);
-    expect(dh.ipponsB.includes('Ht')).toBe(false);
-    const saveOrder = window.API.recordScore.mock.invocationCallOrder[0];
-    const deleteOrder = window.API.removeDaihyosen.mock.invocationCallOrder[0];
-    expect(saveOrder).toBeLessThan(deleteOrder);
+    expect(taps()).toEqual([{ kind: 'daihyosen.verdict', pos: -1, value: 'clear' }]);
+    expect(order(window.API.recordTap)).toBeLessThan(order(window.API.removeDaihyosen));
+    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
   });
 });
 
@@ -874,245 +647,6 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-describe('bc-dhas: an edit owed when the editor goes during an add or remove', () => {
-  beforeEach(() => {
-    window.API.recordDaihyosen = vi.fn();
-    window.API.removeDaihyosen = vi.fn();
-  });
-
-  it('a tap during an add is written once the add lands, with the row it returned', async () => {
-    const add = deferred();
-    window.API.recordDaihyosen.mockReturnValue(add.promise);
-    const view = renderModal(makeKnockoutTeamMatch());
-    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
-    await settle(); // the pre-save lands; the add is out
-    window.API.recordScore.mockClear();
-
-    await act(async () => { fireEvent.click(tieBoutButton(0)); });
-    await act(async () => { view.unmount(); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    // Written at once, the pre-add sheet would drop the row the add is making.
-    expect(window.API.recordScore).not.toHaveBeenCalled();
-
-    const row = serverDaihyosenRow();
-    await act(async () => { add.resolve({ ...makeKnockoutTeamMatch(), subResults: [row] }); });
-    await settle();
-
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    const [, , patch] = window.API.recordScore.mock.calls[0];
-    expect(patch.status).toBe('running');
-    expect(patch.subResults.filter((s) => s.position === -1)).toEqual([row]);
-    expect(patch.subResults.find((s) => s.position === 1)?.decision).toBe('hikiwake');
-  });
-
-  it('a tap during a remove is written once the remove lands, without the row', async () => {
-    const remove = deferred();
-    window.API.removeDaihyosen.mockReturnValue(remove.promise);
-    const view = renderModal(makeMatchWithDaihyosen());
-    // Nothing is pending, so the DELETE goes at once.
-    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
-    await settle();
-    expect(window.API.removeDaihyosen).toHaveBeenCalledTimes(1);
-    window.API.recordScore.mockClear();
-
-    await act(async () => { fireEvent.click(tieBoutButton(0)); });
-    await act(async () => { view.unmount(); });
-    // Written at once, the sheet would put the removed row back.
-    expect(window.API.recordScore).not.toHaveBeenCalled();
-
-    await act(async () => { remove.resolve({ subResults: [] }); });
-    await settle();
-
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    const [, , patch] = window.API.recordScore.mock.calls[0];
-    expect(patch.subResults.some((s) => s.position === -1)).toBe(false);
-    expect(patch.subResults.find((s) => s.position === 1)?.decision).toBe('hikiwake');
-  });
-
-  it.each([
-    ['an add is refused', makeKnockoutTeamMatch, 'scoring-modal-daihyosen-button', 'recordDaihyosen',
-      (d) => d.resolve({ applied: false, reason: 'superseded', message: 'Not saved.' }), false],
-    ['an add fails', makeKnockoutTeamMatch, 'scoring-modal-daihyosen-button', 'recordDaihyosen',
-      (d) => d.reject(new Error('not_tied')), false],
-    ['a remove is refused', makeMatchWithDaihyosen, 'team-daihyosen-remove', 'removeDaihyosen',
-      (d) => d.resolve({ applied: false, reason: 'clock_skew', message: 'Not saved.' }), true],
-  ])('when %s, the tap is written as it stood once it settles', async (_what, makeMatch, button, api, answer, hadRow) => {
-    const request = deferred();
-    window.API[api].mockReturnValue(request.promise);
-    const view = renderModal(makeMatch());
-    await act(async () => { fireEvent.click(screen.getByTestId(button)); });
-    await settle();
-    window.API.recordScore.mockClear();
-
-    await act(async () => { fireEvent.click(tieBoutButton(0)); });
-    await act(async () => { view.unmount(); });
-    expect(window.API.recordScore).not.toHaveBeenCalled();
-
-    await act(async () => { answer(request); });
-    await settle();
-
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    const [, , patch] = window.API.recordScore.mock.calls[0];
-    expect(patch.subResults.some((s) => s.position === -1)).toBe(hadRow);
-    expect(patch.subResults.find((s) => s.position === 1)?.decision).toBe('hikiwake');
-  });
-
-  // The add landing and the editor going in one turn: the render that would
-  // release the hold never commits, so the unmount itself must see that the
-  // request has settled and write the tap with its outcome.
-  it('the editor going after the add landed, before the hold is released, writes the tap at once with the row', async () => {
-    const add = deferred();
-    window.API.recordDaihyosen.mockReturnValue(add.promise);
-    const view = renderModal(makeKnockoutTeamMatch());
-    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
-    await settle();
-    window.API.recordScore.mockClear();
-    await act(async () => { fireEvent.click(tieBoutButton(0)); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    expect(window.API.recordScore).not.toHaveBeenCalled();
-
-    const row = serverDaihyosenRow();
-    await act(async () => {
-      add.resolve({ ...makeKnockoutTeamMatch(), subResults: [row] });
-      for (let i = 0; i < 8; i++) await Promise.resolve();
-      view.unmount();
-    });
-    await settle();
-
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    const [, , patch] = window.API.recordScore.mock.calls[0];
-    expect(patch.subResults.filter((s) => s.position === -1)).toEqual([row]);
-  });
-
-  it('the page going away while the tap waits writes it at once, durably and as it stood, and the add adds nothing', async () => {
-    const add = deferred();
-    window.API.recordDaihyosen.mockReturnValue(add.promise);
-    const view = renderModal(makeKnockoutTeamMatch());
-    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
-    await settle();
-    window.API.recordScore.mockClear();
-    await act(async () => { fireEvent.click(tieBoutButton(0)); });
-    await act(async () => { view.unmount(); });
-
-    await act(async () => { window.dispatchEvent(new Event('pagehide')); });
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    const [, , patch] = window.API.recordScore.mock.calls[0];
-    expect(patch.durable).toBe(true);
-    expect(patch.subResults.some((s) => s.position === -1)).toBe(false);
-
-    await act(async () => { add.resolve({ ...makeKnockoutTeamMatch(), subResults: [serverDaihyosenRow()] }); });
-    await settle();
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-  });
-});
-
-// A hidden tab is not going away: an edit held for an add or remove waits for
-// its outcome there, where a write at once would carry the sheet from before it.
-async function setVisibility(state) {
-  if (state === 'visible') delete document.visibilityState;
-  else Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
-  await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
-}
-
-describe('bc-dhas: the tab hidden while a tap waits for an add or remove', () => {
-  beforeEach(() => {
-    window.API.recordDaihyosen = vi.fn();
-    window.API.removeDaihyosen = vi.fn();
-  });
-  afterEach(() => { delete document.visibilityState; });
-
-  it.each([
-    ['a remove', makeMatchWithDaihyosen, 'team-daihyosen-remove', 'removeDaihyosen', () => ({ subResults: [] }), []],
-    ['an add', makeKnockoutTeamMatch, 'scoring-modal-daihyosen-button', 'recordDaihyosen',
-      () => ({ ...makeKnockoutTeamMatch(), subResults: [serverDaihyosenRow()] }), [serverDaihyosenRow()]],
-  ])('during %s writes nothing until it lands, then writes the tap durably with its outcome', async (_what, makeMatch, button, api, answer, rows) => {
-    const request = deferred();
-    window.API[api].mockReturnValue(request.promise);
-    renderModal(makeMatch());
-    await act(async () => { fireEvent.click(screen.getByTestId(button)); });
-    await settle();
-    window.API.recordScore.mockClear();
-    await act(async () => { fireEvent.click(tieBoutButton(0)); });
-
-    await setVisibility('hidden');
-    expect(window.API.recordScore, 'a write now would carry the sheet from before the request').not.toHaveBeenCalled();
-
-    await act(async () => { request.resolve(answer()); });
-    await settle();
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    const [, , patch] = window.API.recordScore.mock.calls[0];
-    expect(patch.durable).toBe(true);
-    expect(patch.subResults.filter((s) => s.position === -1)).toEqual(rows);
-    expect(patch.subResults.find((s) => s.position === 1)?.decision).toBe('hikiwake');
-
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    await settle();
-    expect(window.API.recordScore, 'written once').toHaveBeenCalledTimes(1);
-  });
-
-  it('shown again before the request lands, the tap is written as usual once the row is adopted', async () => {
-    const remove = deferred();
-    window.API.removeDaihyosen.mockReturnValue(remove.promise);
-    renderModal(makeMatchWithDaihyosen());
-    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
-    await settle();
-    window.API.recordScore.mockClear();
-    await act(async () => { fireEvent.click(tieBoutButton(0)); });
-    await setVisibility('hidden');
-    await setVisibility('visible');
-
-    await act(async () => { remove.resolve({ subResults: [] }); });
-    await settle();
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    await settle();
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    const [, , patch] = window.API.recordScore.mock.calls[0];
-    expect(patch.durable).toBeUndefined();
-    expect(patch.subResults.some((s) => s.position === -1)).toBe(false);
-    expect(patch.subResults.find((s) => s.position === 1)?.decision).toBe('hikiwake');
-  });
-
-  it('a page going away after the tab was hidden still writes the tap at once, as it stood', async () => {
-    const remove = deferred();
-    window.API.removeDaihyosen.mockReturnValue(remove.promise);
-    renderModal(makeMatchWithDaihyosen());
-    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
-    await settle();
-    window.API.recordScore.mockClear();
-    await act(async () => { fireEvent.click(tieBoutButton(0)); });
-    await setVisibility('hidden');
-    expect(window.API.recordScore).not.toHaveBeenCalled();
-
-    await act(async () => { window.dispatchEvent(new Event('pagehide')); });
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    expect(window.API.recordScore.mock.calls[0][2].durable).toBe(true);
-
-    await act(async () => { remove.resolve({ subResults: [] }); });
-    await settle();
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-  });
-
-  it('an editor gone with the tap owed waits for the request while hidden, then writes it durably', async () => {
-    const remove = deferred();
-    window.API.removeDaihyosen.mockReturnValue(remove.promise);
-    const view = renderModal(makeMatchWithDaihyosen());
-    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
-    await settle();
-    window.API.recordScore.mockClear();
-    await act(async () => { fireEvent.click(tieBoutButton(0)); });
-    await act(async () => { view.unmount(); });
-    await setVisibility('hidden');
-    expect(window.API.recordScore).not.toHaveBeenCalled();
-
-    await act(async () => { remove.resolve({ subResults: [] }); });
-    await settle();
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    const [, , patch] = window.API.recordScore.mock.calls[0];
-    expect(patch.durable).toBe(true);
-    expect(patch.subResults.some((s) => s.position === -1)).toBe(false);
-  });
-});
-
 // A running copy older than the add's answer (a push or refetch that read the
 // data before the add committed) is not the match after it, whatever its log.
 describe('bc-dhas: an older running copy does not take the added row off the sheet', () => {
@@ -1125,7 +659,7 @@ describe('bc-dhas: an older running copy does not take the added row off the she
 
   async function addLanded() {
     const base = makeKnockoutTeamMatch({ modifiedAt: 1000 });
-    window.API.recordDaihyosen.mockResolvedValue({ ...base, subResults: [serverDaihyosenRow()], modifiedAt: 2000 });
+    window.API.recordDaihyosen.mockResolvedValue({ ...base, subResults: [...BOUT_ROWS, serverDaihyosenRow()], modifiedAt: 2000 });
     const view = renderModal(base);
     await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
     await settle();
@@ -1137,17 +671,14 @@ describe('bc-dhas: an older running copy does not take the added row off the she
     return { base, show };
   }
 
-  it('keeps the row, and the next tap writes it', async () => {
+  it('keeps the row, and the next tap is a tap on the sheet it shows', async () => {
     const { base, show } = await addLanded();
     await show({ ...base, subResults: [hikiwakeBout1], modifiedAt: 1500 });
     expect(screen.queryByTestId('team-daihyosen-remove')).toBeTruthy();
 
-    window.API.recordScore.mockClear();
-    await act(async () => { fireEvent.click(tieBoutButton(1)); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    await settle();
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    expect(window.API.recordScore.mock.calls[0][2].subResults.some((s) => s.position === -1)).toBe(true);
+    await act(async () => { fireEvent.click(ipponButton(subMatchRows()[3], 'aka', 'K')); });
+    expect(window.API.recordTap.mock.calls.map((c) => c[2])).toEqual([{ kind: 'ippon.add', pos: -1, side: 'a', letter: 'K' }]);
+    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
   });
 
   it.each([
@@ -1161,91 +692,10 @@ describe('bc-dhas: an older running copy does not take the added row off the she
   });
 });
 
-describe('bc-dhas: the sheet is saved until no tap is owed before the add is sent', () => {
-  beforeEach(() => {
-    window.API.recordDaihyosen = vi.fn();
-    window.API.removeDaihyosen = vi.fn();
-  });
-
-  // The add is stamped when it is sent. A tap made while the pre-save was out,
-  // written after the add, would be older than it and dropped.
-  it('a tap made while the pre-save is out is saved before the add goes', async () => {
-    window.API.recordDaihyosen.mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [serverDaihyosenRow()] });
-    const preSave = deferred();
-    window.API.recordScore.mockReturnValueOnce(preSave.promise);
-    renderModal(makeKnockoutTeamMatch());
-    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
-    await settle();
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-
-    await act(async () => { fireEvent.click(tieBoutButton(0)); });
-    await act(async () => { preSave.resolve({}); });
-    await settle();
-
-    expect(window.API.recordScore).toHaveBeenCalledTimes(2);
-    expect(window.API.recordScore.mock.calls[1][2].subResults.find((s) => s.position === 1)?.decision).toBe('hikiwake');
-    expect(window.API.recordDaihyosen).toHaveBeenCalledTimes(1);
-    expect(window.API.recordScore.mock.invocationCallOrder[1]).toBeLessThan(window.API.recordDaihyosen.mock.invocationCallOrder[0]);
-    // Nothing is left owed to go out after the add.
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    await settle();
-    expect(window.API.recordScore).toHaveBeenCalledTimes(2);
-  });
-});
-
 describe('bc-dhas: a refused add or remove is reported and changes nothing', () => {
   beforeEach(() => {
     window.API.recordDaihyosen = vi.fn();
     window.API.removeDaihyosen = vi.fn();
-  });
-
-  it('a superseded add shows the not-saved banner, adopts no row, and releases a held tap', async () => {
-    const add = deferred();
-    window.API.recordDaihyosen.mockReturnValue(add.promise);
-    renderModal(makeKnockoutTeamMatch());
-    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
-    await settle();
-    window.API.recordScore.mockClear();
-    await act(async () => { fireEvent.click(tieBoutButton(0)); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    expect(window.API.recordScore).not.toHaveBeenCalled();
-
-    await act(async () => { add.resolve({ applied: false, reason: 'superseded', message: 'Not saved.' }); });
-    await settle();
-
-    expect(failedBanner()?.textContent).toBe(`Not applied: ${SUPERSEDED_REASON}. ${SUPERSEDED_ADVICE}`);
-    expect(screen.getByTestId('scoring-modal-daihyosen-button')).toBeTruthy();
-    expect(screen.queryByTestId('team-daihyosen-remove')).toBeNull();
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    expect(window.API.recordScore.mock.calls[0][2].subResults.some((s) => s.position === -1)).toBe(false);
-  });
-
-  // The API gives up on an add or remove after 12 s with no answer and throws
-  // this sentence (clock_offset.test.jsx pins that half). The editor reports
-  // it, and the tap it held while the request was out then goes out as the
-  // sheet stood.
-  it.each([
-    ['an add', makeKnockoutTeamMatch, 'scoring-modal-daihyosen-button', 'recordDaihyosen', 'added', false],
-    ['a remove', makeMatchWithDaihyosen, 'team-daihyosen-remove', 'removeDaihyosen', 'removed', true],
-  ])('%s the server never answered is reported, and the held tap is then written as it stood', async (_what, makeMatch, button, api, done, hadRow) => {
-    const request = deferred();
-    window.API[api].mockReturnValue(request.promise);
-    renderModal(makeMatch());
-    await act(async () => { fireEvent.click(screen.getByTestId(button)); });
-    await settle();
-    window.API.recordScore.mockClear();
-    await act(async () => { fireEvent.click(tieBoutButton(0)); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    expect(window.API.recordScore, 'held while the request is out').not.toHaveBeenCalled();
-
-    const sentence = `The representative bout was not ${done}: the server did not answer. Check the connection and try again.`;
-    await act(async () => { request.reject(new Error(sentence)); });
-    await settle();
-
-    expect(screen.getByTestId('team-editor-error').textContent).toBe(sentence);
-    expect(screen.getByTestId(button).disabled).toBe(false);
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    expect(window.API.recordScore.mock.calls[0][2].subResults.some((s) => s.position === -1)).toBe(hadRow);
   });
 
   it('a remove refused for the clock shows the clock banner and keeps the row', async () => {
@@ -1267,8 +717,8 @@ describe('bc-dhas: a refused add or remove is reported and changes nothing', () 
 // Remove answers "No daihyosen to remove", and the next tap saves the row back.
 describe('bc-dhas: Add then Remove with the match prop never refreshed', () => {
   beforeEach(() => {
-    window.API.recordDaihyosen = vi.fn().mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [serverDaihyosenRow()] });
-    window.API.removeDaihyosen = vi.fn().mockResolvedValue({ subResults: [] });
+    window.API.recordDaihyosen = vi.fn().mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [...BOUT_ROWS, serverDaihyosenRow()] });
+    window.API.removeDaihyosen = vi.fn().mockResolvedValue({ subResults: BOUT_ROWS });
   });
 
   it('the removed row leaves the sheet and no later write brings it back', async () => {
@@ -1287,12 +737,13 @@ describe('bc-dhas: Add then Remove with the match prop never refreshed', () => {
     expect(screen.queryByTestId('team-daihyosen-remove')).toBeNull();
     expect(screen.getByTestId('scoring-modal-daihyosen-button')).toBeTruthy();
 
-    window.API.recordScore.mockClear();
+    // The next tap is one on the sheet without the row; nothing writes the row back.
     await act(async () => { fireEvent.click(tieBoutButton(0)); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await act(async () => { vi.advanceTimersByTime(WAIT_MS); });
     await settle();
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    expect(window.API.recordScore.mock.calls[0][2].subResults.some((s) => s.position === -1)).toBe(false);
+    expect(window.API.recordTap.mock.calls.map((c) => c[2]).slice(-1)).toEqual([{ kind: 'bout.decision', pos: 1, value: 'clear' }]);
+    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
+    expect(subMatchRows()).toHaveLength(3);
   });
 });
 
@@ -1303,7 +754,7 @@ describe('bc-dhas: Add then Remove with the match prop never refreshed', () => {
 // organiser to reopen a match that has no reopen).
 describe('bc-dhas: the sheet is saved before an add unless the match has finished', () => {
   beforeEach(() => {
-    window.API.recordDaihyosen = vi.fn().mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [serverDaihyosenRow()] });
+    window.API.recordDaihyosen = vi.fn().mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [...BOUT_ROWS, serverDaihyosenRow()] });
   });
 
   it('an add on a finished match sends no running write first', async () => {
@@ -1326,95 +777,6 @@ describe('bc-dhas: the sheet is saved before an add unless the match has finishe
   });
 });
 
-// A host can wait on more than its write (the admin hosts refetch every
-// competition after it), so the save made before an add or remove has the
-// request's own deadline. Past it the change is reported as not answered and
-// never sent, and the tap held meanwhile goes out.
-describe('bc-dhas: a save before an add or remove that never settles', () => {
-  beforeEach(() => {
-    window.API.recordDaihyosen = vi.fn();
-    window.API.removeDaihyosen = vi.fn();
-  });
-
-  it.each([
-    ['an add', makeKnockoutTeamMatch, 'scoring-modal-daihyosen-button', 'recordDaihyosen', 'added', false],
-    ['a remove', makeMatchWithDaihyosen, 'team-daihyosen-remove', 'removeDaihyosen', 'removed', true],
-  ])('%s is given up on at the deadline, and the held tap is then written', async (_what, makeMatch, button, api, done, hadRow) => {
-    window.API.recordScore.mockReturnValueOnce(new Promise(() => {}));
-    renderModal(makeMatch());
-    // An edit owed, so a remove saves the sheet first too.
-    await act(async () => { fireEvent.click(tieBoutButton(0)); });
-    await act(async () => { fireEvent.click(screen.getByTestId(button)); });
-    await settle();
-    expect(window.API.recordScore, 'the save is out').toHaveBeenCalledTimes(1);
-
-    await act(async () => { fireEvent.click(tieBoutButton(1)); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    await settle();
-    expect(window.API.recordScore, 'held while the save is out').toHaveBeenCalledTimes(1);
-
-    await act(async () => { vi.advanceTimersByTime(FETCH_TIMEOUT_MS); });
-    await settle();
-
-    expect(screen.getByTestId('team-editor-error').textContent)
-      .toBe(`The representative bout was not ${done}: the server did not answer. Check the connection and try again.`);
-    expect(window.API[api]).not.toHaveBeenCalled();
-    expect(window.API.recordScore).toHaveBeenCalledTimes(2);
-    const held = window.API.recordScore.mock.calls[1][2].subResults;
-    expect(held.find((s) => s.position === 2)?.decision).toBe('hikiwake');
-    expect(held.some((s) => s.position === -1)).toBe(hadRow);
-  });
-});
-
-// One overtime counter serves two targets: the representative bout's while it
-// exists, the team match's otherwise. An add or remove moves it between them,
-// and a tap held meanwhile is written from the render that adopts the answer.
-describe('bc-dhas: the overtime count follows the row on an add or remove', () => {
-  beforeEach(() => {
-    window.API.recordDaihyosen = vi.fn();
-    window.API.removeDaihyosen = vi.fn();
-  });
-
-  it("a remove does not write the rep bout's overtime onto the team match", async () => {
-    const remove = deferred();
-    window.API.removeDaihyosen.mockReturnValue(remove.promise);
-    renderModal(makeMatchWithDaihyosen({ subResults: [daihyosenRow({ encho: { periodCount: 1 } })] }));
-    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
-    await settle();
-    await act(async () => { fireEvent.click(tieBoutButton(0)); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    expect(window.API.recordScore).not.toHaveBeenCalled();
-
-    await act(async () => { remove.resolve({ ...makeKnockoutTeamMatch(), subResults: [] }); });
-    await settle();
-
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    const patch = window.API.recordScore.mock.calls[0][2];
-    expect(patch.subResults.some((s) => s.position === -1)).toBe(false);
-    expect(patch.encho).toBeUndefined();
-  });
-
-  it("an add does not write the team match's overtime onto the new rep bout", async () => {
-    const add = deferred();
-    window.API.recordDaihyosen.mockReturnValue(add.promise);
-    renderModal(makeKnockoutTeamMatch({ encho: { periodCount: 1 } }));
-    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
-    await settle(); // the pre-save lands; the add is out
-    window.API.recordScore.mockClear();
-    await act(async () => { fireEvent.click(tieBoutButton(0)); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    expect(window.API.recordScore).not.toHaveBeenCalled();
-
-    await act(async () => { add.resolve({ ...makeKnockoutTeamMatch(), subResults: [serverDaihyosenRow()] }); });
-    await settle();
-
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    const row = window.API.recordScore.mock.calls[0][2].subResults.find((s) => s.position === -1);
-    expect(row).toBeTruthy();
-    expect(row.encho).toBeUndefined();
-  });
-});
-
 // The override that shows an adopted answer gives way to a prop at least as
 // new as that answer, whatever the prop's log reads: a refetch can bring a log
 // that reads as it did before the add (another device removed the row first),
@@ -1427,13 +789,9 @@ describe('bc-dhas: an adopted answer gives way to a prop at least as new', () =>
     return (next) => view.rerender(<ScoreEditorModal match={next} onClose={onClose} onSubmit={onSubmit} password="" />);
   }
 
-  function lastWrittenRepBout() {
-    const calls = window.API.recordScore.mock.calls;
-    return calls[calls.length - 1][2].subResults.find((s) => s.position === -1);
-  }
 
   it('a refetch newer than the add, with the log as it was, takes the added row away', async () => {
-    window.API.recordDaihyosen = vi.fn().mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [serverDaihyosenRow()], modifiedAt: 2000 });
+    window.API.recordDaihyosen = vi.fn().mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [...BOUT_ROWS, serverDaihyosenRow()], modifiedAt: 2000 });
     const rerender = renderLive(makeKnockoutTeamMatch({ modifiedAt: 1000 }));
     await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
     await settle();
@@ -1444,18 +802,15 @@ describe('bc-dhas: an adopted answer gives way to a prop at least as new', () =>
 
     expect(subMatchRows()).toHaveLength(3);
     expect(screen.queryByTestId('team-daihyosen-remove')).toBeNull();
-    window.API.recordScore.mockClear();
-    await act(async () => { fireEvent.click(tieBoutButton(0)); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await act(async () => { vi.advanceTimersByTime(WAIT_MS); });
     await settle();
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    expect(lastWrittenRepBout()).toBeUndefined();
+    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
   });
 
   // The control: the echo of the save made before the add can come back
   // after the add's answer. It is older than the answer, so the row stays.
   it('a refetch older than the add keeps the added row', async () => {
-    window.API.recordDaihyosen = vi.fn().mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [serverDaihyosenRow()], modifiedAt: 2000 });
+    window.API.recordDaihyosen = vi.fn().mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [...BOUT_ROWS, serverDaihyosenRow()], modifiedAt: 2000 });
     const rerender = renderLive(makeKnockoutTeamMatch({ modifiedAt: 1000 }));
     await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
     await settle();
@@ -1477,15 +832,13 @@ describe('bc-dhas: an adopted answer gives way to a prop at least as new', () =>
     await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
     await settle();
     await act(async () => { rerender(makeKnockoutTeamMatch({ modifiedAt: 3000, subResults: [{ ...serverDaihyosenRow(), ipponsA: ['M'], ipponsB: [] }] })); });
-    await act(async () => { add.resolve({ ...makeKnockoutTeamMatch(), subResults: [serverDaihyosenRow()], modifiedAt: 2000 }); });
+    await act(async () => { add.resolve({ ...makeKnockoutTeamMatch(), subResults: [...BOUT_ROWS, serverDaihyosenRow()], modifiedAt: 2000 }); });
     await settle();
 
-    window.API.recordScore.mockClear();
-    await act(async () => { fireEvent.click(tieBoutButton(0)); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    await settle();
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    expect(lastWrittenRepBout()?.ipponsA).toEqual(['M']);
+    // The board shows the other device's point on the representative bout.
+    expect(subMatchRows()).toHaveLength(4);
+    expect(markSlots(subMatchRows()[3], 'aka').some((b) => b.textContent === 'M')).toBe(true);
+    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
   });
 });
 
@@ -1504,8 +857,8 @@ describe("bc-dhas: a status change the answer's log already holds is shown", () 
   }
 
   beforeEach(() => {
-    window.API.recordDaihyosen = vi.fn().mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [serverDaihyosenRow()], modifiedAt: 2000 });
-    window.API.removeDaihyosen = vi.fn().mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [], modifiedAt: 3000 });
+    window.API.recordDaihyosen = vi.fn().mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [...BOUT_ROWS, serverDaihyosenRow()], modifiedAt: 2000 });
+    window.API.removeDaihyosen = vi.fn().mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: BOUT_ROWS, modifiedAt: 3000 });
   });
 
   it('Add then Remove, then a send-back stamped below the answer: the sheet shows it queued', async () => {
@@ -1541,40 +894,6 @@ describe("bc-dhas: a status change the answer's log already holds is shown", () 
   });
 });
 
-// A save given up on at the deadline is still out, and its loop still writes
-// an edit it finds owed. A second add or remove started beside it would lose
-// the edit owed under its own hold to that loop, written from the sheet before
-// the change (an added row removed again). Add is disabled on the save, as
-// Remove always was.
-describe('bc-dhas: no second add beside a save still out', () => {
-  beforeEach(() => {
-    window.API.recordDaihyosen = vi.fn().mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [serverDaihyosenRow()] });
-    window.API.removeDaihyosen = vi.fn();
-  });
-
-  it('after the deadline, Add is not offered again until the save before it settles', async () => {
-    const preSave = deferred();
-    window.API.recordScore.mockReturnValueOnce(preSave.promise);
-    renderModal(makeKnockoutTeamMatch());
-    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
-    await settle();
-    await act(async () => { vi.advanceTimersByTime(FETCH_TIMEOUT_MS); });
-    await settle();
-    expect(screen.getByTestId('team-editor-error').textContent)
-      .toBe('The representative bout was not added: the server did not answer. Check the connection and try again.');
-
-    expect(screen.getByTestId('scoring-modal-daihyosen-button').disabled, 'not offered beside the save still out').toBe(true);
-    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
-    await settle();
-    expect(window.API.recordDaihyosen).not.toHaveBeenCalled();
-    expect(window.API.recordScore, 'no second save beside the first').toHaveBeenCalledTimes(1);
-
-    await act(async () => { preSave.resolve({}); });
-    await settle();
-    expect(screen.getByTestId('scoring-modal-daihyosen-button').disabled, 'offered again once it settles').toBe(false);
-  });
-});
-
 // A newer stamped answer is the match as the add or remove left it: its status
 // and the team match's overtime are the sheet's too, not only its bout log.
 describe('bc-dhas: the sheet takes a newer answer\'s status and overtime', () => {
@@ -1585,85 +904,24 @@ describe('bc-dhas: the sheet takes a newer answer\'s status and overtime', () =>
 
   // The organiser's add on a finished match leaves it running. Read as still
   // finished, a point tapped on the new bout saved nothing, and Close lost it.
-  it('a point tapped right after an add on a finished match is saved as a running write', async () => {
+  it('a point tapped right after an add on a finished match is a tap on the running match', async () => {
     const add = deferred();
     window.API.recordDaihyosen.mockReturnValue(add.promise);
     renderModal(makeKnockoutTeamMatch({ status: 'completed', modifiedAt: 1000 }));
     await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
     await settle();
     expect(window.API.recordScore, 'no save before an add on a finished match').not.toHaveBeenCalled();
-    await act(async () => { add.resolve({ ...makeKnockoutTeamMatch(), status: 'running', subResults: [serverDaihyosenRow()], modifiedAt: 2000 }); });
+    await act(async () => { add.resolve({ ...makeKnockoutTeamMatch(), status: 'running', subResults: [...BOUT_ROWS, serverDaihyosenRow()], modifiedAt: 2000 }); });
     await settle();
 
     await act(async () => { fireEvent.click(ipponButton(subMatchRows()[3], 'shiro', 'M')); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+    await act(async () => { vi.advanceTimersByTime(WAIT_MS); });
     await settle();
 
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    const patch = window.API.recordScore.mock.calls[0][2];
-    expect(patch.status).toBe('running');
-    expect(patch.subResults.find((s) => s.position === -1)).toBeTruthy();
+    expect(window.API.recordTap.mock.calls.map((c) => c[2])).toEqual([{ kind: 'ippon.add', pos: -1, side: 'b', letter: 'M' }]);
+    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
   });
 
-  // A remove clears the team match's overtime. The sheet held the prop's, so
-  // the count was re-seeded to it and the save released after the remove, and
-  // every save after, wrote the cleared overtime back.
-  it("a remove's cleared overtime is not written back, by the released save or the next", async () => {
-    const remove = deferred();
-    window.API.removeDaihyosen.mockReturnValue(remove.promise);
-    renderModal(makeMatchWithDaihyosen({ encho: { periodCount: 1 }, modifiedAt: 1000 }));
-    await act(async () => { fireEvent.click(screen.getByTestId('team-daihyosen-remove')); });
-    await settle();
-    await act(async () => { fireEvent.click(tieBoutButton(0)); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    expect(window.API.recordScore).not.toHaveBeenCalled();
-
-    // The DELETE's answer arrives before its push.
-    await act(async () => { remove.resolve({ ...makeKnockoutTeamMatch(), status: 'running', subResults: [], modifiedAt: 2000 }); });
-    await settle();
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    expect(window.API.recordScore.mock.calls[0][2].encho, 'the released save').toBeUndefined();
-
-    await act(async () => { fireEvent.click(tieBoutButton(1)); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    await settle();
-    expect(window.API.recordScore).toHaveBeenCalledTimes(2);
-    expect(window.API.recordScore.mock.calls[1][2].encho, 'the next save').toBeUndefined();
-  });
-});
-
-// An editor that goes while an add is out writes its owed edit once the add
-// lands. When the last match it saw already holds the add (another device
-// scored the new row, and that push came first), the row it writes is that
-// match's, as a mounted sheet shows it, not the answer's older unscored one.
-describe('bc-dhas: an edit owed at unmount keeps a newer row', () => {
-  it('writes the row the newer push showed, not the older answer', async () => {
-    const add = deferred();
-    window.API.recordDaihyosen = vi.fn().mockReturnValue(add.promise);
-    const match = makeKnockoutTeamMatch({ modifiedAt: 1000 });
-    const onSubmit = makeOnSubmit(match);
-    const onClose = vi.fn();
-    const view = render(<ScoreEditorModal match={match} onClose={onClose} onSubmit={onSubmit} password="" />);
-    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-daihyosen-button')); });
-    await settle(); // the pre-save lands; the add is out
-    window.API.recordScore.mockClear();
-    await act(async () => { fireEvent.click(tieBoutButton(0)); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-
-    const scored = { ...serverDaihyosenRow(), ipponsA: ['M'], ipponsB: [] };
-    await act(async () => {
-      view.rerender(<ScoreEditorModal match={makeKnockoutTeamMatch({ modifiedAt: 3000, subResults: [scored] })} onClose={onClose} onSubmit={onSubmit} password="" />);
-    });
-    await act(async () => { view.unmount(); });
-    expect(window.API.recordScore, 'held until the add lands').not.toHaveBeenCalled();
-
-    await act(async () => { add.resolve({ ...makeKnockoutTeamMatch(), status: 'running', subResults: [serverDaihyosenRow()], modifiedAt: 2000 }); });
-    await settle();
-
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    const row = window.API.recordScore.mock.calls[0][2].subResults.find((s) => s.position === -1);
-    expect(row && row.ipponsA).toEqual(['M']);
-  });
 });
 
 // bc-hlck: an autosave is never stamped older than the match its tap was made
@@ -1672,45 +930,42 @@ describe('bc-dhas: an edit owed at unmount keeps a newer row', () => {
 // than it). The tap records the shown match's stamp as `seenModifiedAt`,
 // which recordScore floors the stamp by and never sends.
 describe('bc-hlck: an autosave carries the stamp of the match as it was at the tap', () => {
-  it('records the stamp shown at the tap, not one that arrived before the send, and a later tap records the newer one', async () => {
+  // bc-evts stage 3: a tap is stamped when it is made, floored by the match
+  // the board showed then (recordTap's `match` argument).
+  it('a tap is floored by the match shown at the tap, and a later tap by the newer one', async () => {
     const first = makeRunningMatch({ modifiedAt: 1_000_000 });
     const { rerender } = renderModal(first);
     await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
-    // Another device's change reaches this editor inside the debounce window.
+    expect(window.API.recordTap.mock.calls[0][4].modifiedAt).toBe(1_000_000);
+    // Another device's change reaches this editor.
     const moved = { ...first, modifiedAt: 2_000_000 };
     await act(async () => {
       rerender(<ScoreEditorModal match={moved} onClose={vi.fn()} onSubmit={makeOnSubmit(moved)} password="" />);
     });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    expect(window.API.recordScore.mock.calls[0][2].seenModifiedAt).toBe(1_000_000);
-    // A tap made now was made against the newer match.
     await act(async () => { fireEvent.click(screen.getAllByText('K')[0]); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    expect(window.API.recordScore).toHaveBeenCalledTimes(2);
-    expect(window.API.recordScore.mock.calls[1][2].seenModifiedAt).toBe(2_000_000);
+    expect(window.API.recordTap.mock.calls[1][4].modifiedAt).toBe(2_000_000);
   });
 });
 
-// bc-hlck in the team editor: its autosave carries the shown match's stamp
-// from the tap, and the representative bout's add is floored by the match as
-// the sheet showed it (the trailing argument).
+// bc-hlck in the team editor: a tap is made against the match the sheet
+// shows (recordTap's `match`, which floors its stamp), and the representative
+// bout's add is floored by the match as the sheet showed it (the trailing
+// argument).
 describe('bc-hlck: the team editor floors its writes by the match it shows', () => {
   beforeEach(() => {
     window.API.recordDaihyosen = vi.fn();
     window.API.removeDaihyosen = vi.fn();
   });
 
-  it('an autosave carries the shown stamp from the tap', async () => {
+  it('a tap is made against the shown match', async () => {
     renderModal(makeTeamMatch({ modifiedAt: 1_000_000 }));
     await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
-    expect(window.API.recordScore.mock.calls[0][2].seenModifiedAt).toBe(1_000_000);
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
+    expect(window.API.recordTap.mock.calls[0][4].modifiedAt).toBe(1_000_000);
   });
 
   it('the representative bout add passes the shown stamp', async () => {
-    window.API.recordDaihyosen.mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [daihyosenRow()] });
+    window.API.recordDaihyosen.mockResolvedValue({ ...makeKnockoutTeamMatch(), subResults: [...BOUT_ROWS, daihyosenRow()] });
     renderModal(makeKnockoutTeamMatch({ modifiedAt: 1_000_000 }));
     await act(async () => { fireEvent.click(tieBoutButton(0)); });
     await act(async () => { fireEvent.click(tieBoutButton(1)); });

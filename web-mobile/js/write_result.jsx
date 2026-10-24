@@ -41,6 +41,31 @@ export function writeDidNotLand(res) {
     return !!res && (res.queued === true || res.applied === false);
 }
 
+// writePending: the write is the OUTBOX's (bc-evts stage 3): handed over in
+// the same tick, sent strictly in its match's order, and the host carries on
+// at once. `res.settled` is the server's answer when it comes. A pending
+// answer is not "did not land" (writeDidNotLand is false for it), so every
+// host closes or advances on it as on a landed write; a refusal later is
+// told by the outbox's alert, or by the caller that claimed it (onRefusal).
+export function writePending(res) {
+    return !!res && res.pending === true;
+}
+
+// writeQueueKey: the outbox's queue key a pending answer carries, for a write
+// that must follow it (`after`: the court console's and the Scores tab's
+// automatic start after a finish or a decision, the start after a send back),
+// else null (an answer that came back direct). bc-evts stage 3 review 11, X1.
+export function writeQueueKey(res) {
+    return (writePending(res) && typeof res.key === 'string' && res.key) || null;
+}
+
+// writeHeldOnDeviceOnly: browser storage refused the write (`persisted:
+// false`): the outbox holds it in this page's memory alone, so a host says so
+// (queuedNotice) rather than calling it saved.
+export function writeHeldOnDeviceOnly(res) {
+    return !!res && typeof res === 'object' && res.persisted === false;
+}
+
 // writeKeepsEditorOpen: does a score editor's host leave the editor open after
 // this write (bc-plcl)? Every host asks it, so none hand-writes its own answer
 // (the Pools tab once closed on every write and the bracket panel on a
@@ -77,103 +102,119 @@ export const SUPERSEDED_LEAD = 'Not applied';
 export const SUPERSEDED_REASON = "a newer change to the same thing was recorded first, so this one was kept in the match's history and nothing is lost";
 export const SUPERSEDED_ADVICE = 'Check the match and its history before entering anything again: entering it again would replace the newer change.';
 
-// supersededAlertText: the queue alert for finished results a replay found
-// superseded (app.jsx queueAlertMessage), worded like the banner above. `n` is
-// how many, `one` whether that is a single result (queuedWritesNoun),
-// `needsWinner` whether any was held because it would leave a finished match
-// without a winner (writeNeedsWinner).
-export function supersededAlertText(n, one, needsWinner = false, defaultWinStands = false, decision = null) {
-    const text = one
+// supersededAlertText: the queue alert for writes a replay found not applied
+// (app.jsx queueAlertMessage), worded like the banner above. `n` is how many,
+// `one` whether that is a single result (queuedWritesNoun), `matchClosed`
+// whether any was turned away because the match was already finished
+// (writeMatchClosed): for that one nothing newer won, and the remedy is
+// Correct.
+export function supersededAlertText(n, one, matchClosed = false) {
+    if (matchClosed) {
+        return one
+            ? `A result was not applied: ${MATCH_CLOSED_REASON}, so nothing is lost. ${MATCH_CLOSED_ADVICE}`
+            : `${n} results were not applied because the matches were already finished or newer changes were recorded first. They were kept in each match's history, so nothing is lost. To change a finished match's result, tap Correct.`;
+    }
+    return one
         ? "A result was not applied because a newer change to the same match was recorded first. It was kept in the match's history, so nothing is lost: check the match and its history before entering anything again."
         : `${n} results were not applied because newer changes to the same matches were recorded first. They were kept in each match's history, so nothing is lost: check those matches and their history before entering anything again.`;
-    if (needsWinner) {
-        // At least one was held because it would leave a finished match
-        // without a winner (writeNeedsWinner): for that one, nothing newer won.
-        return one
-            ? "A result was not applied because it would leave the finished match without a winner, and it needs one. It was kept in the match's history, so nothing is lost: correct the result with a winner."
-            : `${text} Where one would leave a finished match without a winner, correct that result with a winner.`;
-    }
-    if (defaultWinStands) {
-        // At least one was held because a decision already closed the match
-        // (writeDefaultWinStands): the fix is to correct that decision from
-        // the match's score editor, never re-entering the score. `decision`
-        // names it when the whole pass held exactly one kind
-        // (defaultWinStandsWord falls back to "recorded decision" for a
-        // mixed pass or an older server with no heldDecision).
-        const word = defaultWinStandsWord(decision);
-        return one
-            ? `A result was not applied because this match was closed with a ${word}. It was kept in the match's history, so nothing is lost: correct the ${word} from the match's score editor to change the result.`
-            : `${text} Where one was closed with a ${word}, correct the ${word} from the match's score editor to change that result.`;
-    }
-    return text;
 }
 
-// writeNeedsWinner / supersededBanner / NEEDS_WINNER_* (operator ruling
-// 2026-10-04): a scoring change that would leave a FINISHED match without the
-// winner it must have (a knockout match left tied, an engi match left with no
-// valid flag count) is not applied. The match keeps its recorded finish, the
-// change is kept in the match's history, and the server says why with
-// heldReason "needs_winner", on a superseded answer and on one applied in
-// part alike. Here the advice is the opposite of the plain superseded one:
-// nothing newer won, so the operator corrects the result, with a winner.
-// writeNeedsWinner is the one reading of that field; supersededBanner is the
-// one choice of banner for a superseded write, asked by notLandedBanner and by
-// api_client.jsx's not-applied broadcast.
-//
-// The same reason can ride on a second, APPLIED answer (writeDisplacedGroups):
-// a finish that arrived after a newer scoring change which, applied after it,
-// would have left the match without a winner. The finish is recorded and that
-// later change is MOVED to the history (`displacedGroups`, no heldGroups).
-// writeNeedsWinner is therefore true only for a write whose OWN change was
-// held for the reason; a displaced answer is not one, and says "Saved".
-//
-// A change can also be moved for another reason and then carries NO
-// heldReason: a representative's pick stamped after the representative bout's
-// removal has nothing left to stand on. writeDisplacedForWinner is the one
-// question "was the move for a winner": true for heldReason needs_winner only,
-// never for "a reason is present", because the reason is per ANSWER and a
-// decision that stands (default_win_stands) can ride beside displacedGroups
-// too. An answer that both held groups and moved a later change carries the
-// one reason and is worded by it, which is the move's: telling the operator to
-// correct a result that IS recorded would be the worse error.
-export const HELD_REASON_NEEDS_WINNER = 'needs_winner';
+// The closed-match rule (operator ruling 2026-10-15) and the first recorded
+// result (I1, K1, 2026-10-16): the server has ONE code for a change made
+// after the match was finished, heldReason "match_closed", on a superseded
+// answer, on one applied in part, and beside `displacedGroups` when a finish
+// moved a later change of the match to its history. One code, one remedy:
+// Correct. A rival result that would displace one the next knockout
+// round already depends on is held whole with "downstream_knockout_played"
+// or "downstream_knockout_running" (writeResultLocked). The server's own
+// sentence (`message`) wins over these words when it sends one.
+export const HELD_REASON_MATCH_CLOSED = 'match_closed';
+export const HELD_REASON_RESULT_LOCKED_PLAYED = 'downstream_knockout_played';
+export const HELD_REASON_RESULT_LOCKED_RUNNING = 'downstream_knockout_running';
+export const MATCH_CLOSED_REASON = "the match is finished, so this change was kept in the match's history";
+export const MATCH_CLOSED_ADVICE = 'To change the result, tap Correct.';
+// The sentence the partial-apply note (heldGroupsNote) ends on instead of
+// "A newer change to the same thing was recorded first."
+export const MATCH_CLOSED_NOTE = 'The match is finished: to change the result, tap Correct.';
+export const RESULT_LOCKED_PLAYED_REASON = 'the next round was already fought, so the recorded result stands';
+export const RESULT_LOCKED_RUNNING_REASON = 'the next round has already started, so the recorded result stands';
+
 export function writeDisplacedGroups(res) {
     return res && Array.isArray(res.displacedGroups) ? res.displacedGroups.filter((g) => typeof g === 'string') : [];
 }
-export function writeNeedsWinner(res) {
-    return !!res && res.heldReason === HELD_REASON_NEEDS_WINNER
+// writeMatchClosed: this write's OWN change was turned away because the match
+// was finished (superseded, or applied in part). A displaced answer is not
+// one: that finish was recorded, and says "Saved".
+export function writeMatchClosed(res) {
+    return !!res && res.heldReason === HELD_REASON_MATCH_CLOSED
         && writeDisplacedGroups(res).length === 0
         && (writeWasSuperseded(res) || writeHeldGroups(res).length > 0);
 }
-export function writeDisplacedForWinner(res) {
-    return !!res && res.heldReason === HELD_REASON_NEEDS_WINNER && writeDisplacedGroups(res).length > 0;
+// writeDisplacedForClosedMatch: a recorded finish moved a later change, made
+// after the match was finished, to the history.
+export function writeDisplacedForClosedMatch(res) {
+    return !!res && res.heldReason === HELD_REASON_MATCH_CLOSED && writeDisplacedGroups(res).length > 0;
+}
+// writeResultLocked: 'played' or 'running' when the write was held because the
+// next knockout round already depends on the stored result, else null.
+export function writeResultLocked(res) {
+    if (!res) return null;
+    if (res.heldReason === HELD_REASON_RESULT_LOCKED_PLAYED) return 'played';
+    if (res.heldReason === HELD_REASON_RESULT_LOCKED_RUNNING) return 'running';
+    return null;
 }
 // displacedAlertText: the queue alert for queued finishes that landed and
 // moved a later change of the same match to its history (writeDisplacedGroups).
-// `forWinner` is how many of the n answers moved their change for a winner
-// (writeDisplacedForWinner): all of them keeps the winner sentence, none says
-// plainly that the change was moved, and a mix says both. An alert that
-// carries no such count reads as none.
-export function displacedAlertText(n, one, forWinner = 0) {
-    const f = Number(forWinner) || 0;
-    if (one) {
-        return f > 0
-            ? "A held result was saved. A later change to that match would have left it without a winner, so the change was moved to the match's history."
-            : "A held result was saved. A later change to that match was moved to the match's history.";
-    }
-    if (f >= n) {
-        return `${n} held results were saved. Later changes to those matches would have left them without a winner, so the changes were moved to each match's history.`;
-    }
-    const moved = `${n} held results were saved. Later changes to those matches were moved to each match's history.`;
-    return f > 0 ? `${moved} ${f} of those changes would have left a match without a winner.` : moved;
+export function displacedAlertText(n, one) {
+    return one
+        ? "A held result was saved. A later change to that match was moved to the match's history."
+        : `${n} held results were saved. Later changes to those matches were moved to each match's history.`;
 }
-export const NEEDS_WINNER_REASON = "this change would leave the finished match without a winner, and it needs one, so it was kept in the match's history and nothing is lost";
-export const NEEDS_WINNER_ADVICE = 'Correct the result with a winner.';
-// The sentence the partial-apply note (heldGroupsNote) ends on instead of
-// "A newer change to the same thing was recorded first."
-export const NEEDS_WINNER_NOTE = 'It would leave the finished match without a winner, and it needs one: correct the result with a winner.';
 
-// decisionWord / FALLBACK_DECISION_WORD (operator ruling 2026-10-04): "default
+// The tap outcomes the score-events door answers per event (score_events.jsx
+// names them). QUIET ones need no word: the tap is in the match's log.
+// Everything else was not applied, and the server's `message` is its sentence
+// when it sends one.
+const QUIET_TAP_OUTCOMES = new Set(['applied', 'recorded', 'duplicate']);
+export function tapOutcomeQuiet(o) {
+    return !!o && QUIET_TAP_OUTCOMES.has(o.outcome);
+}
+// `where` (the match's label) and `what` (the tap, tapWords) name them when the
+// notice is read away from the match: a tap the server turned away after its
+// own answer said it landed, told by the alert (stage 6 review 5), reads
+// "Not applied in Pool A · Match 1 (Aka M added on bout 1): ...".
+export function tapNotAppliedText(o, where = '', what = '') {
+    const text = tapNotAppliedReasonText(o);
+    if (!text || (!where && !what)) return text;
+    const named = [where && `in ${where}`, what && `(${what})`].filter(Boolean).join(' ');
+    return text.startsWith('Not applied:') ? `Not applied ${named}:${text.slice('Not applied:'.length)}` : `Not applied ${named}: ${text}`;
+}
+function tapNotAppliedReasonText(o) {
+    if (!o || tapOutcomeQuiet(o)) return null;
+    if (typeof o.message === 'string' && o.message) return o.message;
+    switch (o.outcome) {
+        case 'capped': return 'Not applied: the bout was already decided.';
+        case 'matchClosed': return `Not applied: ${MATCH_CLOSED_REASON}. ${MATCH_CLOSED_ADVICE}`;
+        // Rule D5: the result was made on a device that never saw this tap.
+        case 'beforeBaseline': return `Not applied: the result was recorded without this change, so it was kept in the match's history. ${MATCH_CLOSED_ADVICE}`;
+        case 'noTarget': return "Not applied: the mark it takes off is no longer there, so it was kept in the match's history.";
+        case 'notAllowed': return "Not applied: this match does not take that change, so it was kept in the match's history.";
+        case 'notStarted': return 'Not applied: the match is not running. Start it to score it.';
+        // Refused again after its one re-stamp (stage 3 review 11, Y3): the
+        // device clock, which nothing recorded can fix, so it is said.
+        case 'clock_skew': return `Not applied: ${CLOCK_SKEW_REASON_TEXT}. Nothing was recorded, so make that change again.`;
+        default: return 'Not applied: the server refused it.';
+    }
+}
+// tapNotAppliedAlertText: the one queue alert per pass for taps the server did
+// not apply (kind 'not_applied'); `text` is the one tap's sentence.
+export function tapNotAppliedAlertText(n, one, text, where = '') {
+    if (one) return text || 'A tap was not applied.';
+    if (where) return `${n} taps were not applied in ${where}. Open the match to see why; anything the server kept is in the match's history.`;
+    return `${n} taps were not applied. Open their matches to see why; anything the server kept is in the match's history.`;
+}
+
+// decisionWord (operator ruling 2026-10-04): "default
 // win" does not exist in kendo and must never appear in anything a person
 // reads -- every finished match has a result, a scoreline or a registered
 // decision that NAMES the winner (kiken: kiken-voluntary or kiken-injury;
@@ -192,68 +233,23 @@ export function decisionWord(code) {
     return null;
 }
 
-// FALLBACK_DECISION_WORD: what a sentence names when there is no specific
-// decision to name -- an older server answering with no `heldDecision`, or a
-// flushed queue pass that held more than one kind across several matches, so
-// naming the wrong one would be worse than naming none.
-const FALLBACK_DECISION_WORD = 'recorded decision';
-
-// defaultWinStandsWord: decisionWord with that fallback applied, the one
-// place DEFAULT_WIN_STANDS_* and supersededAlertText read a decision code
-// from.
-function defaultWinStandsWord(decision) {
-    return decisionWord(decision) || FALLBACK_DECISION_WORD;
-}
-
-// writeHeldDecision: the decision code the server named alongside heldReason
-// "default_win_stands" (e.g. "fusensho", "kiken-voluntary"), read for the
-// writeDefaultWinStands case only -- null for anything else, including an
-// older server that sends no `heldDecision` at all, in which case callers
-// fall back to FALLBACK_DECISION_WORD through defaultWinStandsWord.
-export function writeHeldDecision(res) {
-    return (res && typeof res.heldDecision === 'string' && res.heldDecision) || null;
-}
-
-// writeDefaultWinStands / DEFAULT_WIN_STANDS_* (bc-mrgc): a running board's
-// scoring, or its overtime, over a match a decision ALREADY closed -- kiken,
-// fusenpai, or a fusensho awarded because the OTHER side is barred by a
-// DIFFERENT match -- is held rather than applied: that decision already
-// settled this match, and a scoreline cannot land beside it without one
-// discarding the other. The server says why with heldReason
-// "default_win_stands" and names which decision with `heldDecision`. Unlike
-// needs_winner, nothing here asks for a correction with a winner: the match
-// already has one. The fix is to correct that decision from the match's
-// score editor, which sends the held scoring on as the real result instead.
-// The copy names no specific button: which control does that (Clear
-// <decision>, Remove <decision>, or none at all on a kachinuki match)
-// depends on the match's format and is owned by admin_scoring_shared.jsx,
-// not restated here.
-export const HELD_REASON_DEFAULT_WIN_STANDS = 'default_win_stands';
-export function writeDefaultWinStands(res) {
-    return !!res && res.heldReason === HELD_REASON_DEFAULT_WIN_STANDS
-        && writeDisplacedGroups(res).length === 0
-        && (writeWasSuperseded(res) || writeHeldGroups(res).length > 0);
-}
-export function DEFAULT_WIN_STANDS_REASON(decision) {
-    const word = defaultWinStandsWord(decision);
-    return `this match was closed with a ${word}, so this change was kept in the match's history and nothing is lost`;
-}
-export function DEFAULT_WIN_STANDS_ADVICE(decision) {
-    const word = defaultWinStandsWord(decision);
-    return `To change the result, correct the ${word} from the match's score editor.`;
-}
-export function DEFAULT_WIN_STANDS_NOTE(decision) {
-    const word = defaultWinStandsWord(decision);
-    return `This match was closed with a ${word}: to change the result, correct the ${word} from the match's score editor.`;
-}
-
+// supersededBanner: the one choice of banner for a superseded write, asked by
+// notLandedBanner and by api_client.jsx's not-applied broadcast. The server's
+// sentence (`message`) is shown as it is when it sends one (notSavedText's
+// `sentence` path).
 export function supersededBanner(res) {
-    if (writeNeedsWinner(res)) {
-        return { lead: SUPERSEDED_LEAD, reason: NEEDS_WINNER_REASON, advice: NEEDS_WINNER_ADVICE };
-    }
-    if (writeDefaultWinStands(res)) {
-        const decision = writeHeldDecision(res);
-        return { lead: SUPERSEDED_LEAD, reason: DEFAULT_WIN_STANDS_REASON(decision), advice: DEFAULT_WIN_STANDS_ADVICE(decision) };
+    const sentence = res && typeof res.message === 'string' && res.message;
+    const locked = writeResultLocked(res);
+    if (locked || writeMatchClosed(res)) {
+        if (sentence) return { lead: SUPERSEDED_LEAD, reason: sentence, sentence: true };
+        if (locked) {
+            return {
+                lead: SUPERSEDED_LEAD,
+                reason: locked === 'played' ? RESULT_LOCKED_PLAYED_REASON : RESULT_LOCKED_RUNNING_REASON,
+                advice: MATCH_CLOSED_ADVICE,
+            };
+        }
+        return { lead: SUPERSEDED_LEAD, reason: MATCH_CLOSED_REASON, advice: MATCH_CLOSED_ADVICE };
     }
     return { lead: SUPERSEDED_LEAD, reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE };
 }
@@ -305,11 +301,9 @@ export function writeWasSuperseded(res) {
 //   - applied:false: superseded or clock_skew (writeWasSuperseded).
 // A QUEUED write is not refused: it lands on reconnect.
 //
-// Callers that must tell the two refusals apart ask writeWasRefusedForClock first:
-// landedAutosave (admin_scoring_autosave.jsx) treats a clock_skew answer as neither
-// landed nor refused, because recordScore keeps a running one silent and leaves the
-// tap on the board for the next save to carry with a corrected stamp, while a
-// superseded one is final and the editor takes the server's copy.
+// Callers that must tell the two refusals apart ask writeWasRefusedForClock first: a
+// clock_skew answer is re-stamped and sent again once by the outbox, while a
+// superseded one is final.
 //
 // The editors ask it to DISARM a two-tap commit (Finish, Finish + Start Next,
 // End match, the engi Save) whose write was refused: left armed, one more tap
@@ -368,12 +362,6 @@ export function writeRetryable(res) {
 export const CLOCK_SKEW_REASON_TEXT = "this device's clock was out of step with the server";
 export const CLOCK_SKEW_ADVICE = 'The clock has been resynced. Nothing was recorded, so enter the result again.';
 
-// CLOCK_SKEW_UNHEALED_ADVICE: the same verdict AFTER the client has already
-// healed and retried once and been refused again. Everything above still holds
-// (nothing is stored, re-entering is safe), but the resync did not fix the
-// frame, so promising that it did would send the operator round the identical
-// refusal with no idea why. The device itself has to be corrected.
-export const CLOCK_SKEW_UNHEALED_ADVICE = 'Nothing was recorded. This device\'s clock needs fixing, or entering the result again will be refused the same way.';
 
 // writeWasRefusedForClock: the NARROW half of writeWasSuperseded. Both are
 // `applied === false`, so every advance-skip and banner gate that asks
@@ -467,7 +455,22 @@ export const QUEUED_UNSAVED_NOTICE = 'Not sent yet: keep this page open until th
 // is fine then, so "sent when the connection returns" would be false; the
 // editor offers to discard it beside this line (HeldWriteDiscard).
 export const QUEUED_REFUSED_NOTICE = 'Not saved yet: the server keeps refusing it. It is still being tried.';
-export function queuedNotice(res, { keepsFailing = false } = {}) {
+// queuedBlockedNotice: the held write is not refused itself: it waits for
+// another write held on this device that the server keeps refusing (a team
+// member's add a lineup or a representative pick follows; stage 3 review 4,
+// G2). The connection is fine then too, so the line names what it waits for
+// and where it can be discarded.
+export function queuedBlockedNotice(blocker) {
+    const what = heldWriteWhatWhere(blocker);
+    // A write on a wait cycle (stage 3 review 5, H1) is not refused: it
+    // waits on a write that waits on it, and only a discard frees them.
+    const why = blocker && blocker.cycled
+        ? `it waits for a ${what} that waits for it in turn, so neither can be sent.`
+        : `it waits for a ${what} the server keeps refusing.`;
+    return `Not sent yet: ${why} Discard that one here or from the "${HELD_WRITES_TITLE}" list.`;
+}
+export function queuedNotice(res, { keepsFailing = false, blockedBy = null } = {}) {
+    if (blockedBy) return queuedBlockedNotice(blockedBy);
     if (keepsFailing) return QUEUED_REFUSED_NOTICE;
     return res && typeof res === 'object' && res.persisted === false ? QUEUED_UNSAVED_NOTICE : QUEUED_NOTICE;
 }
@@ -478,14 +481,23 @@ export function queuedNotice(res, { keepsFailing = false } = {}) {
 // open, so the editor's pending banner offers to discard it, and only it,
 // after this confirm. Named "result" as the operator counts it.
 export const HELD_WRITE_DISCARD_LABEL = 'Discard held result';
+// heldWriteDiscardLabel: the editor's button when what it discards is the
+// write the match waits for (a heldWrites() item), not the match's own result.
+export function heldWriteDiscardLabel(blocker) {
+    return blocker ? `Discard held ${heldWriteWhatWhere(blocker)}` : HELD_WRITE_DISCARD_LABEL;
+}
 export function heldWriteDiscardConfirm(held) {
-    // `held` (from the topbar's list) names any other kind of held write; the
-    // editors' button, which discards a result, passes nothing.
-    const what = held ? heldWriteWhat(held) : 'result';
+    // `held` (from the topbar's list, or the write an editor's match waits
+    // for) names any other kind of held write, with where it is when the
+    // device knows (`where`); the editors' own button, which discards a
+    // result, passes nothing.
+    const what = held ? heldWriteWhatWhere(held) : 'result';
     const where = held && held.kind === 'lineup' ? 'the lineup' : 'the match';
+    const why = held && held.cycled
+        ? `The ${what} held on this device waits for another held write that waits for it, so neither can be sent. `
+        : `The server keeps refusing the ${what} held on this device${held ? '' : ' for this match'}, so it may never be sent. `;
     return {
-        message: `The server keeps refusing the ${what} held on this device${held ? '' : ' for this match'}, so it may never be sent. `
-            + `Discard it? Nothing else is discarded. Check ${where} afterwards, and enter it again if it is still needed.`,
+        message: `${why}Discard it? Nothing else is discarded. Check ${where} afterwards, and enter it again if it is still needed.`,
         confirmLabel: 'Discard it',
         danger: true,
     };
@@ -500,12 +512,34 @@ export function heldWriteWhat(held) {
         case 'decision': return 'decision';
         case 'override': return 'winner set by hand';
         case 'lineup': return 'team lineup';
-        default: return held && held.terminal ? 'finished result' : 'score update';
+        case 'evt': return 'tap';
+        case 'reopen': return 'reopen';
+        case 'requeue': return 'reopen';
+        case 'revert': return 'send back to queue';
+        case 'daihyosen': return 'representative bout change';
+        case 'kachinuki': return 'bout removal';
+        case 'court': return 'court move';
+        case 'time': return 'match time change';
+        case 'member': return 'team member change';
+        case 'lineup-remove': return 'lineup removal';
+        case 'reinstate': return 'reinstatement';
+        case 'pool-ranks': return 'pool order (chusen)';
+        default: return isFinishedResultWrite(held) ? 'finished result' : 'score update';
     }
+}
+
+// heldWriteWhatWhere: the same, with the match (as the score list labels it)
+// or the team it is about when the device knows it (`where`, api_client.jsx
+// _whereOf; stage 3 review 5, H5), e.g. "reopen (Pool A · Match 3)".
+export function heldWriteWhatWhere(held) {
+    const what = heldWriteWhat(held);
+    const where = held && typeof held.where === 'string' ? held.where.trim() : '';
+    return where ? `${what} (${where})` : what;
 }
 
 // heldWriteState: where one held write stands, for the same list.
 export function heldWriteState(held) {
+    if (held && held.cycled) return 'it waits for another held write that waits for it';
     if (held && held.keepsFailing) return 'the server keeps refusing it';
     if (held && held.authBlocked) return 'waiting for you to sign in';
     return 'waiting to be sent';
@@ -530,19 +564,39 @@ export function heldWriteLine(held) {
 
 // queuedWritesNoun: the ONE rule for how held writes are counted to the
 // operator. An operator counts results, and a held running autosave is not
-// one, so a count that includes any finished result (a completed score, a
-// decision, a lineup, a Run now winner) names only those; otherwise it names
-// score updates. Returns { n, one, noun }. `finished` qualifies a result as
+// one, so a count that includes any finished result (isFinishedResultWrite
+// below) names only those; otherwise it names changes, or taps when `taps`
+// says the count is a tap batch's. Returns { n, one, noun }. `finished` qualifies a result as
 // "finished result" where the message wants it (the queue alerts, the sent
 // toast); the topbar's agreed wording says "1 result not sent" and passes false.
-export function queuedWritesNoun(terminal, total, { finished = true } = {}) {
-    const term = Number(terminal) || 0;
+export function queuedWritesNoun(results, total, { finished = true, taps = false } = {}) {
+    const term = Number(results) || 0;
     const n = term > 0 ? term : (Number(total) || 0);
     const one = n === 1;
-    const noun = term > 0
-        ? `${finished ? 'finished ' : ''}${one ? 'result' : 'results'}`
-        : (one ? 'score update' : 'score updates');
+    let noun;
+    if (term > 0) noun = `${finished ? 'finished ' : ''}${one ? 'result' : 'results'}`;
+    else if (taps) noun = one ? 'tap' : 'taps';
+    else noun = one ? 'change' : 'changes';
     return { n, one, noun };
+}
+
+// isFinishedResultWrite: the ONE answer to "is this queued write a finished
+// result" (bc-evts stage 3 review 2, R5): a finished score write, a decision,
+// a winner set by hand, or a representative bout change. Every count and alert
+// that speaks of results asks it (api_client.jsx: the pass's sent and
+// displaced counts, `unsentWrites().terminal`, every alert's `terminalCount`).
+// An entry's own `terminal` flag says only how it is SENT (its own method and
+// url, never the running score PUT), so a court move, a time change, a lineup
+// or member save, a reopen or a send back to the queue carries it and is still
+// no result: those are worded as changes. An entry an older build stored with
+// no kind was a score write.
+export function isFinishedResultWrite(d) {
+    if (!d) return false;
+    switch (d.kind) {
+        case 'decision': case 'override': case 'daihyosen': return true;
+        case 'score': case undefined: case null: case '': return !!d.terminal;
+        default: return false;
+    }
 }
 
 // heldWritesText: the admin topbar's held-writes indicator (bc-offl), shown
@@ -562,35 +616,15 @@ export function heldWritesText(status, counts) {
 }
 
 
-// dependentActionBlocked: the sentence for a queued write that was only a
-// PRE-SAVE gating a second action, the team editor's Add/Remove
-// representative bout (saveRunningSheet). notLandedBanner rightly says
-// nothing about a queued write at the three explicit-tap sites it was written
-// for (Start match in both editors, Record bout in the team one), where the
-// editor's queued/offline surface reports it. Here that surface says the
-// scores did not send, not why the Add or Remove tap did nothing.
-//
-// A refusal (applied:false) is left to notLandedBanner: the caller already
-// shows its banner, so a second message would only repeat it.
-export function dependentActionBlocked(res) {
-    if (writeRetryable(res)) {
-        return "Couldn't save the current scores (offline or server busy). Try again once the connection is back.";
-    }
-    return null;
-}
-
 // FETCH_TIMEOUT_MS: how long a bounded request is waited on before it is
 // reported as not answered. api_client.jsx gives it to every fetchWithTimeout
-// and to _fetchJson (headers AND body there), and the team editor gives it to
-// the save it makes before a representative-bout add or remove, so the hold
-// that save runs under ends too (admin_scoring_team.jsx runRepBoutChange).
+// and to _fetchJson (headers AND body there).
 export const FETCH_TIMEOUT_MS = 12000;
 
 // withinDeadline: a promise's outcome, or TIMED_OUT once `ms` has passed with
 // none. Only the wait ends: the promise itself runs on. It gives a wait that is
-// not a request of its own (the team editor's save before a representative-bout
-// change, the read of a side's lineup that a pick on a side never read makes) the
-// same bound.
+// not a request of its own (the read of a side's lineup that a pick on a side
+// never read makes) the same bound.
 export const TIMED_OUT = Symbol("timed out");
 export function withinDeadline(promise, ms) {
     let timer;
@@ -600,8 +634,7 @@ export function withinDeadline(promise, ms) {
 
 // What a representative-bout add or remove leaves undone when it does not
 // land, and the sentence for one the server never answered, or answered with
-// a body that never completed. The team editor shows it as it is, whichever
-// half (the save before the request, or the request) went unanswered.
+// a body that never completed. The team editor shows it as it is.
 export const REP_BOUT_NOT_ADDED = 'The representative bout was not added';
 export const REP_BOUT_NOT_REMOVED = 'The representative bout was not removed';
 export function noAnswerSentence(notDone) {
@@ -995,15 +1028,64 @@ export function downstreamKnockoutReopenedNotice(matches) {
 // thrown error carries `.downstreamKnockoutPlayedCancelled = true` so the
 // caller can pick DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED instead of the generic
 // error copy.
-export async function attemptScoreWrite({ recordScore, confirmDialog, compId, matchId, result, password, match }) {
-    try {
-        return await recordScore(compId, matchId, result, password, match);
-    } catch (e) {
+export async function attemptScoreWrite({
+    recordScore, confirmDialog, compId, matchId, result, password, match, onRefusal, onDownstreamReopened, onForced,
+}) {
+    // bc-evts: an outbox door answers pending at once and its refusal arrives
+    // later, through `settled`. The downstream-knockout-played 409 is CLAIMED
+    // here (the flush then raises no alert for it): the confirm is shown, and
+    // on OK the forced write is handed to the outbox in its turn, never
+    // awaited. The forceDownstreamReopen guard on `result` stops a second
+    // refusal (a genuine race between two operators) from looping the
+    // confirm: only the first attempt for a given patch is offered it.
+    // Any other refusal goes to the caller's onRefusal (true = claimed).
+    const claimOther = (e) => typeof onRefusal === 'function' && onRefusal(e) === true;
+    const confirmThenForce = async (e, refusal) => {
+        const { message, confirmLabel, danger } = downstreamKnockoutPlayedConfirm(refusal);
+        let ok = false;
+        try { ok = await confirmDialog({ message, confirmLabel, danger }); } catch { ok = false; }
+        if (!ok) {
+            e.downstreamKnockoutPlayedCancelled = true;
+            claimOther(e);
+            return;
+        }
+        let forced;
+        try {
+            forced = await attemptScoreWrite({
+                recordScore, confirmDialog, compId, matchId,
+                result: { ...result, forceDownstreamReopen: true },
+                password, match, onRefusal, onDownstreamReopened,
+            });
+        } catch (err) {
+            claimOther(err);
+            return;
+        }
+        // The forced write is the one the caller's write became: its answer is
+        // the caller's to read (a reopen's own-status token, review 5).
+        if (typeof onForced === 'function') onForced(forced);
+        // Say what the confirmation DID, taken from the SERVER: the forced
+        // write's answer carries reopenedMatches, what it actually reopened.
+        if (writePending(forced)) {
+            forced.settled.then((body) => {
+                if (body && body.reopenedMatches && body.reopenedMatches.length
+                    && typeof onDownstreamReopened === 'function') onDownstreamReopened(body.reopenedMatches);
+            }, () => {});
+        }
+    };
+    const claim = (e) => {
         const refusal = downstreamKnockoutPlayedRefusal(e);
-        // The forceDownstreamReopen guard on `result` stops a second refusal
-        // (e.g. a genuine race between two operators) from looping the confirm
-        // dialog: only the first attempt for a given patch is offered the
-        // override; a refusal on the forced retry is treated like any other error.
+        if (refusal && !result.forceDownstreamReopen) {
+            confirmThenForce(e, refusal);
+            return true;
+        }
+        return claimOther(e);
+    };
+    try {
+        return await recordScore(compId, matchId, result, password, match, { onRefusal: claim });
+    } catch (e) {
+        // A write that still answers directly (a running score write) throws
+        // its refusal: the same confirm, awaited, as before the outbox.
+        const refusal = downstreamKnockoutPlayedRefusal(e);
         if (!refusal || result.forceDownstreamReopen) throw e;
         const { message, confirmLabel, danger } = downstreamKnockoutPlayedConfirm(refusal);
         const ok = await confirmDialog({ message, confirmLabel, danger });
@@ -1011,15 +1093,9 @@ export async function attemptScoreWrite({ recordScore, confirmDialog, compId, ma
             const applied = await attemptScoreWrite({
                 recordScore, confirmDialog, compId, matchId,
                 result: { ...result, forceDownstreamReopen: true },
-                password, match,
+                password, match, onRefusal, onDownstreamReopened,
             });
-            // Say what the confirmation DID, not just that it went through,
-            // and take that from the SERVER: the write's response carries
-            // reopenedMatchIds, which is what it actually reopened. Reusing the
-            // refusal's ids here (as the first cut did) reported the server's
-            // INTENTION -- "m-r2-0 was reopened" because the dialog named it,
-            // whether or not anything was. Absent field means the server
-            // reopened nothing, and nothing is claimed.
+            // Absent field means the server reopened nothing, and nothing is claimed.
             if (applied && typeof applied === 'object' && !writeDidNotLand(applied)
                 && applied.reopenedMatches && applied.reopenedMatches.length) {
                 applied.downstreamReopened = applied.reopenedMatches;

@@ -49,7 +49,7 @@ import { completedRowFor, openShiaijo, sides, upNextCard } from '../fixtures/shi
 import { EXPECT_TIMEOUT_MS, PUBLIC_DEVICE } from '../fixtures/devices.mjs';
 import { INDIVIDUAL_FIGURES, openAdminPools, openViewerPools, playerRowFigures, poolBlocks, poolTeams, teamRow } from '../fixtures/pools.mjs';
 import { ROSTER_7, editorSides, ensureRunning, inlineRunning, playScriptedBout } from '../fixtures/individual.mjs';
-import { awardIppon, finishMatch, nextMatchWrite, writeLanded } from '../fixtures/scoring.mjs';
+import { awardIppon, finishMatch, nextTapWrite, writeLanded, writtenMatchId } from '../fixtures/scoring.mjs';
 import { scoreRows } from '../fixtures/scores.mjs';
 import { bracketSlots, openCompetitionTab, openParticipants, setSeed } from '../fixtures/roster.mjs';
 import { openViewer } from '../fixtures/public.mjs';
@@ -300,10 +300,10 @@ test.describe('pools: minimum pool size and a tie-break bout', () => {
     tbWinner = pair[side];
     tbLoser = pair[side === 'shiro' ? 'aka' : 'shiro'];
     expect(tbWinner, 'role C wins the tie-break bout').toBe(tb.c);
-    const wrote = nextMatchWrite(page);
+    const wrote = nextTapWrite(page);
     await awardIppon(page, side, 'M');
     const res = await writeLanded(wrote, 'the tie-break bout\'s first mark');
-    const id = decodeURIComponent(new URL(res.url()).pathname.split('/matches/')[1].replace(/\/score$/, ''));
+    const id = writtenMatchId(res);
     expect(id, 'the bout is the pool\'s supplementary bout').toMatch(/^Pool [A-Z]-TB-\d+$/);
     await shot(page, 'tie-break-scored');
     await finishMatch(page);
@@ -507,10 +507,10 @@ test.describe('pools: a tie over the extra qualifier place of an oversized pool'
     tbWinner = pair[side];
     tbLoser = pair[side === 'shiro' ? 'aka' : 'shiro'];
     expect(tbWinner, 'role R wins the tie-break bout').toBe(tb.r);
-    const wrote = nextMatchWrite(page);
+    const wrote = nextTapWrite(page);
     await awardIppon(page, side, 'M');
     const res = await writeLanded(wrote, 'the tie-break bout\'s first mark');
-    const id = decodeURIComponent(new URL(res.url()).pathname.split('/matches/')[1].replace(/\/score$/, ''));
+    const id = writtenMatchId(res);
     expect(id, 'the bout is the pool\'s supplementary bout').toMatch(/^Pool [A-Z]-TB-\d+$/);
     await finishMatch(page);
     await expect(completedRowFor(page, pair)).toBeVisible();
@@ -731,10 +731,10 @@ test.describe('pools: a tie over the 2nd place a Fit the knockout draw drafted',
     tbWinner = pair[side];
     tbLoser = pair[side === 'shiro' ? 'aka' : 'shiro'];
     expect(tbWinner, 'role C wins the tie-break bout').toBe(tb.c);
-    const wrote = nextMatchWrite(page);
+    const wrote = nextTapWrite(page);
     await awardIppon(page, side, 'M');
     const res = await writeLanded(wrote, 'the tie-break bout\'s first mark');
-    const id = decodeURIComponent(new URL(res.url()).pathname.split('/matches/')[1].replace(/\/score$/, ''));
+    const id = writtenMatchId(res);
     expect(id, 'the bout is the pool\'s supplementary bout').toMatch(/^Pool [A-Z]-TB-\d+$/);
     await finishMatch(page);
     await expect(completedRowFor(page, pair)).toBeVisible();

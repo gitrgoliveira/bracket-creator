@@ -22,7 +22,8 @@
 
 import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { cssBlock, readStylesheet } from '../helpers/source.js';
 
@@ -196,3 +197,9 @@ describe('team editor: the clear-a-mark hint', () => {
     expect(rule, 'display:none would give the space back').not.toMatch(/display:\s*none/);
   });
 });
+
+// bc-evts stage 5: a running team match is scored by taps handed to the outbox
+// (API.recordTap); each test gets a fresh fake of that surface, whose pending
+// taps the board folds on. Registered last, so it lands on the API the hooks
+// above set up.
+beforeEach(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });

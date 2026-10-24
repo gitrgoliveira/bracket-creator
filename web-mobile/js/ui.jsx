@@ -1,6 +1,8 @@
 // Shared UI primitives used by both admin and viewer modules.
 
 import { useOpenedTapGuard } from './tap_guard.jsx';
+import { toastSnapshot, subscribeToast, dismissToast } from './toast_queue.jsx';
+import { useUnsavedInput } from './app_version.jsx';
 
 // Formats that run their matches through the pool pipeline but are not pools.
 // See the label note inside StatusBadge.
@@ -53,87 +55,50 @@ function formatDate(d) {
   return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
-// Toast: single visible slot. Success toasts auto-dismiss quickly and are
-// polite (announced when the SR is idle). ERROR toasts dwell ≥8s, expose a
-// manual dismiss control, and are assertive (announced immediately) so an
-// operator in a noisy hall doesn't miss a failed action. The Toast component
-// itself (not the host) refuses to overwrite a still-visible error with a
-// later non-error toast: it latches the shown payload and ignores a
-// suppressed prop change (see the effect below). These dwell constants are
-// module-local; they are not exported.
-const TOAST_SUCCESS_DWELL_MS = 2700;
-const TOAST_ERROR_DWELL_MS = 8000;
-
-// Toast renders a single visible slot. The host (app.jsx) keeps one toast in
-// state and RE-RENDERS the same <Toast> instance with new props on each
-// showToast call (no changing key, so it is not remounted). Toast latches the
-// payload it is currently showing in its OWN `shown` state and ignores a
-// parent prop change that would overwrite a still-visible ERROR with a later
-// non-error toast. This protects ops-critical failures from being silently
-// replaced by a routine success, without requiring the host to track dwell
-// windows.
+// Toast: single visible slot, drawn from toast_queue.jsx, the one owner of
+// the queue, the toast shown and its timers (dwells, latching, arrival order
+// and identity dedupe are its rules; see that file).
 //
 //  - success/info: role=status + aria-live=polite, short auto-dismiss.
 //  - pending: the same, with the pending icon instead of the success check: a
 //    write the device holds until the connection returns is not saved yet
 //    (worded by write_result.jsx's queuedNotice).
-//  - error: role=alert + aria-live=assertive, long dwell (>=8s) plus a manual
-//    dismiss control; cannot be clobbered by an incoming non-error toast.
-function Toast({ message, type, onClose }) {
-  // Latch the first non-trivial payload this mount sees. The host re-renders
-  // this component (not remounts) when state.toast changes, so without this
-  // latch an incoming success prop would overwrite a live error in place.
-  const [shown, setShown] = React.useState({ message, type });
-  const [visible, setVisible] = React.useState(true);
-  const onCloseRef = React.useRef(onClose);
-  React.useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+//  - error: role=alert + aria-live=assertive, long dwell (>=8s).
+//  - warning: the warning sign and the long dwell, announced politely.
+//  - a LATCHED toast (an error, a warning, a once-told queue alert) carries a
+//    manual dismiss control and is never replaced by a later toast.
+function Toast() {
+  // Presentational (bc-evts stage 6 review 12): the queue, the toast shown,
+  // its visibility and its timers are toast_queue.jsx's, which survive this
+  // component remounting (the admin and viewer branches each render one). A
+  // remount reads the snapshot again; it never re-pushes or re-times a toast.
+  const [shown, setShown] = React.useState(toastSnapshot);
+  React.useEffect(() => {
+    const off = subscribeToast(setShown);
+    // A change between the first render and this effect is not missed.
+    setShown(toastSnapshot());
+    return off;
+  }, []);
+  if (!shown) return null;
 
   const shownIsError = shown.type === 'error';
-
-  // Accept an incoming prop change only when it is NOT being suppressed: a
-  // later non-error toast is ignored while an error is still visible; anything
-  // else (error→error, error→after-dismiss, non-error→anything) replaces.
-  // Deps are intentionally [message, type]: re-running on shown.*/visible would
-  // defeat the error-latch guard above (see comment).
-  React.useEffect(() => {
-    const incomingIsError = type === 'error';
-    if (shownIsError && visible && !incomingIsError) return; // protect the error
-    if (message === shown.message && type === shown.type) return; // no change
-    setShown({ message, type });
-    setVisible(true);
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [message, type]);
-
-  // Auto-dismiss sequence, keyed on the SHOWN payload identity: NOT on
-  // `visible`. t1 hides at dwell; t2 fires onClose (host setToast(null) →
-  // unmount) 300ms later. `visible` must NOT be a dep: when t1 flips it false
-  // the effect would re-run, and its cleanup would clear the still-pending t2
-  // before it could fire: so onClose never ran and the toast stuck on screen
-  // forever (no CSS hides a non-is-visible toast). Re-triggering on the shown
-  // payload restarts the dwell for each new toast, which is the intent.
-  React.useEffect(() => {
-    const dwell = shownIsError ? TOAST_ERROR_DWELL_MS : TOAST_SUCCESS_DWELL_MS;
-    const t1 = setTimeout(() => setVisible(false), dwell);
-    const t2 = setTimeout(() => onCloseRef.current && onCloseRef.current(), dwell + 300);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [shown.message, shown.type, shownIsError]);
-
+  const shownIsWarning = shown.type === 'warning';
   const role = shownIsError ? 'alert' : 'status';
   const ariaLive = shownIsError ? 'assertive' : 'polite';
 
   return (
     <div
-      className={`toast toast--${shown.type || 'info'} ${visible ? 'is-visible' : ''}`}
+      className={`toast toast--${shown.type || 'info'} ${shown.visible ? 'is-visible' : ''}`}
       role={role}
       aria-live={ariaLive}
     >
-      <div className="toast__icon" aria-hidden="true">{shownIsError ? '⚠️' : shown.type === 'pending' ? '⏳' : '✅'}</div>
+      <div className="toast__icon" aria-hidden="true">{shownIsError || shownIsWarning ? '⚠️' : shown.type === 'pending' ? '⏳' : '✅'}</div>
       <div className="toast__msg">{shown.message}</div>
-      {shownIsError && (
+      {shown.latched && (
         <button type="button"
           className="toast__dismiss"
           aria-label="Dismiss"
-          onClick={() => { setVisible(false); if (onCloseRef.current) onCloseRef.current(); }}
+          onClick={dismissToast}
         >&times;</button>
       )}
     </div>
@@ -152,25 +117,42 @@ function Toast({ message, type, onClose }) {
 // the decideNumericUpdate pattern used by the AdminSettings team/pool
 // inputs at admin_competition.jsx.
 function StableInput({ value, onChange, type, autoSelect = true, ...props }) {
+  // ONE rule for what the box shows (stage 6 review 9, F1/F2): what the
+  // operator typed while that change is theirs (the box has the focus, its
+  // debounce is waiting, or its save is out: `onChange` returned a promise
+  // that has not settled), else the value it is given. So a change whose save
+  // is out stays on screen after a blur, a save that settles shows what is
+  // stored (the new value when taken, the stored one when refused, the
+  // refusal told by the save's own path), and a change made elsewhere shows
+  // at once, or on blur when the box has the focus. A parent whose onChange
+  // returns nothing (a local setter) stores at once.
   const [local, setLocal] = React.useState(value);
+  const [focused, setFocused] = React.useState(false);
+  const [saving, setSaving] = React.useState(0);
   const timer = React.useRef(null);
-  const composing = React.useRef(false);
-
-  // Sync local state when prop changes from outside (e.g. SSE)
-  // Only sync if the user is NOT currently focused/composing.
-  // Deps are intentionally [value]: adding `local` would re-sync on every
-  // keystroke and defeat the "only sync from outside" behavior above.
-  React.useEffect(() => {
-    if (!composing.current && value !== local) setLocal(value);
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
+  // A change typed and not yet sent (its debounce still waiting).
+  const pending = React.useRef(false);
+  const mounted = React.useRef(true);
 
   // Cancel the 200ms debounce on unmount so the timer can't fire
-  // onChange(val) (which is the parent's setState) after teardown.
-  // Pre-existing in this component before the PR but fits the same
-  // teardown-race theme as the admin-side mountedRef sweep: fixing
-  // here while the file is open for the NaN-display changes.
-  React.useEffect(() => () => clearTimeout(timer.current), []);
+  // onChange(val) (which is the parent's setState) after teardown, and
+  // stop a save settling after teardown from setting state.
+  React.useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; clearTimeout(timer.current); };
+  }, []);
+
+  const holds = focused || pending.current || saving > 0;
+
+  const commit = (val) => {
+    pending.current = false;
+    const r = onChange(val);
+    if (r && typeof r.then === 'function') {
+      setSaving((n) => n + 1);
+      const settle = () => { if (mounted.current) setSaving((n) => n - 1); };
+      r.then(settle, settle);
+    }
+  };
 
   const handleChange = (e) => {
     const raw = e.target.value;
@@ -179,37 +161,47 @@ function StableInput({ value, onChange, type, autoSelect = true, ...props }) {
     // (so "2.5" stays 2.5, "abc" becomes NaN: same as before for those).
     const val = type === 'number' ? (raw === "" ? NaN : +raw) : raw;
     setLocal(val);
+    setFocused(true);
 
     // Immediate local update, debounced parent update to avoid race conditions
     // during typing if the parent re-renders the whole tree.
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => onChange(val), 200);
+    pending.current = true;
+    timer.current = setTimeout(() => commit(val), 200);
   };
 
+  // A blur sends only a change still waiting for its debounce: one that has
+  // already gone is not sent again (stage 6 review 7: a seed box re-sent its
+  // saved rank as Generate draw took the focus, and the copy raced the draw
+  // and was refused).
   const handleBlur = (e) => {
-    composing.current = false;
     clearTimeout(timer.current);
-    onChange(local);
+    if (pending.current) commit(local);
+    setFocused(false);
     if (props.onBlur) props.onBlur(e);
   };
 
   const handleFocus = (e) => {
-    composing.current = true;
+    // The box starts from what it shows: the stored value, unless a change
+    // of the operator's is still waiting or out.
+    if (!holds) setLocal(value);
+    setFocused(true);
     if (autoSelect) e.target.select();
     if (props.onFocus) props.onFocus(e);
   };
 
-  // Render NaN / non-finite numeric local state as "" so React doesn't
+  const shown = holds ? local : value;
+  // Render NaN / non-finite numeric state as "" so React doesn't
   // warn ("Received NaN for the value attribute") and the input stays
   // visually empty after the user clears it. Non-number types pass
   // through unchanged.
-  const displayValue = type === 'number' && !Number.isFinite(local) ? "" : local;
+  const displayValue = type === 'number' && !Number.isFinite(shown) ? "" : shown;
 
   return (
     <input
       {...props}
       type={type}
-      value={displayValue}
+      value={displayValue ?? ""}
       onChange={handleChange}
       onBlur={handleBlur}
       onFocus={handleFocus}
@@ -331,6 +323,9 @@ function DialogHost() {
   // a judgement is out (the dialog neither closes nor submits twice meanwhile).
   const [error, setError] = React.useState("");
   const [busy, setBusy] = React.useState(false);
+  // A prompt's answer being typed holds a new build's automatic reload
+  // (app_version.jsx).
+  useUnsavedInput(!!req && req.kind === "prompt" && value.trim() !== String(req.defaultValue || "").trim());
   const inputRef = React.useRef(null);
   const triggerRef = React.useRef(null);
   const trapRef = React.useRef(null);

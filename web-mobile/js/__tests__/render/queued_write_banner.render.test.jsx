@@ -15,7 +15,7 @@ import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { QUEUED_NOTICE, QUEUED_UNSAVED_NOTICE, QUEUED_REFUSED_NOTICE, HELD_WRITE_DISCARD_LABEL } from '../../write_result.jsx';
+import { QUEUED_NOTICE, QUEUED_UNSAVED_NOTICE, QUEUED_REFUSED_NOTICE, HELD_WRITE_DISCARD_LABEL, queuedBlockedNotice } from '../../write_result.jsx';
 import { keyboardClick } from '../helpers/tap_events.js';
 
 const STUBBED_GLOBALS = {
@@ -202,5 +202,86 @@ describe.each(EDITORS)('$name editor: a held write the server keeps refusing can
     await act(async () => { fireEvent.click(discardButton()); });
     expect(window.API.discardFailingHeldWrites).not.toHaveBeenCalled();
     expect(screen.getByRole('status')).toBeTruthy();
+  });
+});
+
+// Stage 3 review 3, F6: a write of the match this sheet never submitted (a
+// lineup save from a name box, held behind a member add the server keeps
+// refusing) still shows the banner, so the operator sees the match holds one.
+describe('team editor: a held write of the match it did not submit', () => {
+  it('shows the pending banner', async () => {
+    window.API.hasHeldWrite = vi.fn(() => true);
+    try {
+      await act(async () => {
+        render(<ScoreEditorModal match={teamMatch} onClose={vi.fn()} onSubmit={vi.fn()} password="pw" />);
+      });
+      const banner = await screen.findByRole('status');
+      expect(banner.className).toContain('pending-write-banner');
+      expect(banner.textContent).toContain(QUEUED_NOTICE);
+    } finally {
+      delete window.API.hasHeldWrite;
+    }
+  });
+});
+
+// Stage 3 review 4, G2: the match's own write is only waiting, but what it waits
+// for (a team member's add) is a write the server keeps refusing. The banner says
+// so, not "sent when the connection returns", and offers to discard THAT write.
+describe('team editor: a held write waiting on a write the server keeps refusing', () => {
+  const blocker = { key: 'lineup:c1:t1:r0\u001fadd', kind: 'member', keepsFailing: true, compID: 'c1', matchID: '' };
+  it('names the write it waits for, and discards that one alone', async () => {
+    window.API.hasHeldWrite = vi.fn(() => true);
+    window.API.heldWriteKeepsFailing = vi.fn(() => true);
+    window.API.heldWriteBlocker = vi.fn(() => blocker);
+    window.API.discardHeldWrite = vi.fn(() => true);
+    window.API.discardFailingHeldWrites = vi.fn(() => 0);
+    window.confirmDialog = vi.fn().mockResolvedValue(true);
+    try {
+      await act(async () => {
+        render(<ScoreEditorModal match={teamMatch} onClose={vi.fn()} onSubmit={vi.fn()} password="pw" />);
+      });
+      const banner = await screen.findByRole('status');
+      expect(banner.textContent).toContain(queuedBlockedNotice(blocker));
+      expect(banner.textContent).not.toContain(QUEUED_NOTICE);
+      const button = screen.getByTestId('held-write-discard');
+      expect(button.textContent).toBe('Discard held team member change');
+      await act(async () => { fireEvent.click(button); });
+      expect(window.confirmDialog.mock.calls[0][0].message).toContain('team member change');
+      expect(window.API.discardHeldWrite).toHaveBeenCalledWith(blocker.key);
+      expect(window.API.discardFailingHeldWrites).not.toHaveBeenCalled();
+    } finally {
+      for (const k of ['hasHeldWrite', 'heldWriteKeepsFailing', 'heldWriteBlocker', 'discardHeldWrite', 'discardFailingHeldWrites']) delete window.API[k];
+    }
+  });
+});
+
+// Stage 3 review 5, H5: the write the match waits for belongs to another match
+// (a send back that frees this court) and is named by that match's label; one
+// on a wait cycle is not said to be refused. The editor tells the queue which
+// match it shows, so the queue can name it and its teams.
+describe('team editor: the write it waits for is another match\'s', () => {
+  const blocker = { key: 'c1:m9\u001fr', kind: 'requeue', keepsFailing: true, cycled: true, where: 'Pool A · Match 3', compID: 'c1', matchID: 'm9' };
+  it('names that match, says the two wait on each other, and tells the queue the match it shows', async () => {
+    window.API.hasHeldWrite = vi.fn(() => true);
+    window.API.heldWriteState = vi.fn(() => ({ keepsFailing: true, blocker }));
+    window.API.noteShownMatch = vi.fn();
+    window.API.discardHeldWrite = vi.fn(() => true);
+    window.confirmDialog = vi.fn().mockResolvedValue(true);
+    try {
+      await act(async () => {
+        render(<ScoreEditorModal match={teamMatch} onClose={vi.fn()} onSubmit={vi.fn()} password="pw" />);
+      });
+      const banner = await screen.findByRole('status');
+      expect(banner.textContent).toContain('reopen (Pool A · Match 3) that waits for it in turn');
+      expect(banner.textContent).not.toContain('keeps refusing');
+      const button = screen.getByTestId('held-write-discard');
+      expect(button.textContent).toBe('Discard held reopen (Pool A · Match 3)');
+      await act(async () => { fireEvent.click(button); });
+      expect(window.confirmDialog.mock.calls[0][0].message).toContain('reopen (Pool A · Match 3)');
+      expect(window.API.discardHeldWrite).toHaveBeenCalledWith(blocker.key);
+      expect(window.API.noteShownMatch).toHaveBeenCalledWith(teamMatch.compId, expect.objectContaining({ id: teamMatch.id }));
+    } finally {
+      for (const k of ['hasHeldWrite', 'heldWriteState', 'noteShownMatch', 'discardHeldWrite']) delete window.API[k];
+    }
   });
 });

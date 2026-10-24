@@ -292,7 +292,7 @@ describe('the kachinuki advisory line', () => {
     await remount(view, kachinukiMatch({ subResults: [BOUT_1, { ...BOUT_2, ipponsA: ['M'], ipponsB: [] }] }));
     await settle();
     expect(window.API.fetchKachinukiRoster).toHaveBeenCalledTimes(1);
-    // Nor does the winner the running autosave writes at a 1-0 lead, or the
+    // Nor does the winner the running board writes at a 1-0 lead, or the
     // hikiwake it writes at 1-1: neither is a result until the bout is
     // recorded (bc-kfnl).
     const won = { ...BOUT_2, winner: 'Kudo', winnerMemberId: 'a1', decision: 'fought', ipponsA: ['M'] };

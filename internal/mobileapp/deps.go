@@ -116,6 +116,10 @@ type ScoringEngine interface {
 	// match that itself created the ineligibility) is permitted.
 	// Score handler wraps fought/hikiwake submissions with this.
 	StartMatchTx(tx state.StoreTx, compID, matchID string) error
+	// RecordScoreEventsTx is the score-events door (bc-evts): it logs the
+	// taps it takes, replays the match's log and writes the derived match,
+	// under the caller's transaction. Mirrors engine.Engine.RecordScoreEventsTx.
+	RecordScoreEventsTx(tx state.StoreTx, compID, matchID string, req engine.ScoreEventsRequest) (*engine.ScoreEventsResult, error)
 	// CheckCrossCompCourtBusy checks whether the court for matchID is
 	// already occupied by a running match in a different competition.
 	// Must be called before entering WithTransaction to avoid a deadlock
@@ -215,6 +219,9 @@ type TeamLineupStore interface {
 	// DeleteTeamLineupForMatch is the match-scoped twin added for
 	// per-match lineups (mp-825).
 	DeleteTeamLineupForMatch(compID, teamID, matchID string) error
+	// RemoveTeamLineupAt takes a lineup away ordered by the removal's own
+	// stamp (0: as it lands), reporting whether one was taken (m1, m8).
+	RemoveTeamLineupAt(compID, teamID, matchID string, round int, at int64) (bool, error)
 }
 
 // LineupEngine is the consumer-boundary view of engine.Engine used by the
@@ -232,12 +239,15 @@ type LineupEngine interface {
 // handlers_squad.go (bc-tmid pass 1, clearing added bc-pnum): a team's
 // squad, the people on it, each with a stable id and a display index
 // (domain.TeamMember), kept in its own per-competition file rather than in
-// Player.Metadata. Mirrors the LoadSquads / AddTeamMember /
+// Player.Metadata. Mirrors the LoadSquads / AddTeamMemberAs /
 // RenameTeamMember / ClearTeamMemberName methods on *state.Store.
 type SquadStore interface {
 	LoadSquads(compID string) (map[string][]domain.TeamMember, error)
-	AddTeamMember(compID, teamID, name string) (domain.TeamMember, error)
-	AddTeamMemberUpTo(compID, teamID, name string, limit int) (domain.TeamMember, error)
+	// The adds take the member's id the device minted ("" mints one) and
+	// report whether they created it: false for a resend of an add that
+	// landed, answered as stored (bc-evts stage 3 review 2, R1).
+	AddTeamMemberAs(compID, teamID, memberID, name string) (domain.TeamMember, bool, error)
+	AddTeamMemberAsUpTo(compID, teamID, memberID, name string, limit int) (domain.TeamMember, bool, error)
 	// The three name writers answer with the member as written, carrying the
 	// server stamp that write gave it (domain.TeamMember.ModifiedAt).
 	RenameTeamMember(compID, teamID, memberID, newName string) (domain.TeamMember, error)
@@ -283,4 +293,26 @@ type CompetitionTransactor interface {
 	// competitions can't both pass the check before either commits (TOCTOU).
 	// Mirrors state.Store.WithCourtExclusivityLock.
 	WithCourtExclusivityLock(fn func() error) error
+}
+
+// KachinukiOpenerSeater seats bout 1 of a team's running kachinuki matches with
+// the fighters its lineup in force names, after a lineup or team-member write
+// (operator decision K1 (c), engine/kachinuki_opener.go), and returns the ids of
+// the matches it changed. *engine.Engine satisfies it.
+type KachinukiOpenerSeater interface {
+	ReseatKachinukiOpeners(compID, teamID string) ([]string, error)
+}
+
+// KachinukiLineupKeeper is a KachinukiOpenerSeater that also carries a lineup
+// save, in the save's transaction, onto the lineups kachinuki matches started
+// with: a change stamped before a match's start reaches it whenever it arrives
+// (engine/kachinuki_opener.go). *engine.Engine satisfies it.
+type KachinukiLineupKeeper interface {
+	KachinukiOpenerSeater
+	FollowLineupSave(tx state.StoreTx, comp *state.Competition, saved domain.TeamLineup, changed []domain.Position) ([]string, error)
+	// UsePreviousLineupAt takes a match's own lineup away, ordered by the
+	// removal's own stamp (0: as it lands); on a kachinuki match that has
+	// started it keeps the lineup in force then as the match's own. It
+	// reports whether anything in force changed.
+	UsePreviousLineupAt(compID, teamID, matchID string, at int64) (bool, error)
 }

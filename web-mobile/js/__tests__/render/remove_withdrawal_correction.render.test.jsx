@@ -283,7 +283,7 @@ describe('individual editor: Remove withdrawal', () => {
     await tap(screen.getByTestId('remove-withdrawal'));
     await tap(navButton('Cancel'));
     expect(window.confirmDialog).toHaveBeenCalledTimes(1);
-    expect(window.confirmDialog.mock.calls[0][0].message).toBe('Discard unsaved scoring changes?');
+    expect(window.confirmDialog.mock.calls[0][0].message).toBe('Your unsaved entries will be discarded. Leave this match anyway?');
     expect(onClose).not.toHaveBeenCalled();
   });
 

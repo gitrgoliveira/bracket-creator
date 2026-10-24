@@ -2,8 +2,10 @@ import React from 'react';
 import { render, act, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { createOwnStatusMoves } from '../helpers/own_status_moves.js';
 import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, startWhileCorrectingMessage, startWhileStartingMessage, correctWhileRunningMessage, CLOCK_SKEW_REASON_TEXT, markToasted, startWasBlockedByStartMessage } from '../../write_result.jsx';
 import { scoreRowMatchName } from '../../pool_ids.jsx';
+import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
 import { START_SUPERSEDED_MESSAGE } from '../../start_match.jsx';
 // Window globals required by admin_shiaijo.jsx.
 // MODULE-EVAL-TIME entries (e.g. `const AdminTopbar = window.AdminTopbar;`)
@@ -20,11 +22,16 @@ import { START_SUPERSEDED_MESSAGE } from '../../start_match.jsx';
 // below), while the rendered markup stays exactly what the pre-existing
 // tests already query (data-testid="score-editor" data-match=...).
 const probe = { props: null };
+// The outbox's status moves the console reads (API.ownStatusMove, M4).
+const outbox = createOwnStatusMoves();
+// The latest topbar and breadcrumb props, so a test can take the console's
+// own exits (Sign out, Public viewer, the Dashboard crumb).
+const chrome = { topbar: null, crumbs: null };
 
 const STUBBED_GLOBALS = {
   // MODULE-EVAL-TIME: captured at import; set before dynamic import below
-  AdminTopbar: ({ children }) => <div data-testid="topbar">{children}</div>,
-  Breadcrumbs: () => null,
+  AdminTopbar: (props) => { chrome.topbar = props; return <div data-testid="topbar">{props.children}</div>; },
+  Breadcrumbs: (props) => { chrome.crumbs = props; return null; },
   // Carries the id of the match the panel is scoring, so a test can tell
   // WHICH match the console selected (captured at import, so it cannot be
   // swapped per test).
@@ -55,6 +62,7 @@ const STUBBED_GLOBALS = {
     startMatch: vi.fn(),
     recordDecision: vi.fn().mockResolvedValue({ applied: true }),
     reinstateCompetitor: vi.fn().mockResolvedValue({}),
+    ...outbox.api,
   },
   // No startPatch: the console imports it from start_match.jsx (a bare vi.fn()
   // here used to make every console start in this suite send `undefined`).
@@ -540,8 +548,8 @@ describe('AdminShiaijoPage render-smoke', () => {
       await act(async () => { utils.getByRole('button', { name: 'Carol' }).click(); });
       await act(async () => { utils.getByRole('button', { name: /record & make startable/i }).click(); });
       expect(overrideBracketWinner).toHaveBeenCalledTimes(2);
-      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-0', 'Alice', expect.anything(), false, 1_700_000_000_000);
-      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-1', 'Carol', expect.anything());
+      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-0', 'Alice', expect.anything(), false, 1_700_000_000_000, expect.objectContaining({ onRefusal: expect.any(Function) }));
+      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-1', 'Carol', expect.anything(), false, expect.anything(), expect.objectContaining({ onRefusal: expect.any(Function) }));
     } finally {
       window.API.overrideBracketWinner = prevOverride;
     }
@@ -654,9 +662,9 @@ describe('AdminShiaijoPage render-smoke', () => {
 
       // The refused feeder is retried with the force flag; the untouched
       // feeder is never offered it.
-      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-0', 'Alice', expect.anything());
-      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-0', 'Alice', expect.anything(), true);
-      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-1', 'Carol', expect.anything());
+      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-0', 'Alice', expect.anything(), false, expect.anything(), expect.objectContaining({ onRefusal: expect.any(Function) }));
+      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-0', 'Alice', expect.anything(), true, expect.anything(), expect.objectContaining({ onRefusal: expect.any(Function) }));
+      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-1', 'Carol', expect.anything(), false, expect.anything(), expect.objectContaining({ onRefusal: expect.any(Function) }));
       expect(overrideBracketWinner).toHaveBeenCalledTimes(3);
     } finally {
       window.API.overrideBracketWinner = prevOverride;
@@ -1241,7 +1249,7 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
       await act(async () => { awardBtn.click(); });
       expect(recordDecision).toHaveBeenCalledWith('c1', 'm-barred', {
         decision: 'fusensho', decisionBy: 'shiro', decisionReason: 'auto: Yama withdrawn',
-      }, '');
+      }, '', expect.objectContaining({ onRefusal: expect.any(Function) }));
     } finally {
       window.API.recordDecision = prevRD;
     }
@@ -1470,7 +1478,7 @@ describe('a barred match is skipped by every auto-pick (bc-cse)', () => {
       const reinstateBtn = utils.getByTestId('barred-match-reinstate');
       expect(reinstateBtn.textContent).toBe('Reinstate Yama');
       await act(async () => { reinstateBtn.click(); });
-      expect(reinstateCompetitor).toHaveBeenCalledWith('c1', 'y', '');
+      expect(reinstateCompetitor).toHaveBeenCalledWith('c1', 'y', '', expect.any(Object));
     } finally {
       window.API.reinstateCompetitor = prevR;
     }
@@ -1570,18 +1578,20 @@ async function mountCourt(initial, opts = {}) {
   window.API.subscribeToEvents = () => () => {};
   window.API.revertMatchToQueue = vi.fn().mockResolvedValue(true);
   const showToast = vi.fn();
+  const exits = { onBack: vi.fn(), onLogout: vi.fn(), onViewerMode: vi.fn(), onSwitchCourt: vi.fn() };
   let utils;
   await act(async () => {
     utils = render(
-      <AdminShiaijoPage tournament={makeMinimalTournament()} court="A" onBack={vi.fn()} onEditScore={opts.onEditScore || vi.fn()}
-        onMoveCourt={vi.fn()} onLogout={vi.fn()} onViewerMode={vi.fn()} password="" showToast={showToast}
-        tweaks={{}} onSwitchCourt={vi.fn()} />
+      <AdminShiaijoPage tournament={makeMinimalTournament()} court="A" onBack={exits.onBack} onEditScore={opts.onEditScore || vi.fn()}
+        onMoveCourt={vi.fn()} onLogout={exits.onLogout} onViewerMode={exits.onViewerMode} password="" showToast={showToast}
+        tweaks={{}} onSwitchCourt={exits.onSwitchCourt} />
     );
   });
   return {
     utils,
     feed,
     showToast,
+    exits,
     editorMatch: () => { const el = utils.queryByTestId('score-editor'); return el ? el.getAttribute('data-match') : null; },
     refresh: async () => { await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); }); },
     restore: () => {
@@ -1621,7 +1631,7 @@ describe('Send back to queue keeps the score and is always offered (bc-sbq)', ()
     try {
       expect(c.editorMatch()).toBe('m1');
       const dialog = await tapSendBack(c);
-      expect(dialog.textContent).toContain('Any score entered is kept');
+      expect(dialog.textContent).toContain('The score already saved is kept');
       expect(dialog.textContent).not.toMatch(/discard|lost/i);
     } finally { c.restore(); }
   });
@@ -1633,8 +1643,102 @@ describe('Send back to queue keeps the score and is always offered (bc-sbq)', ()
       const confirm = [...c.utils.container.querySelectorAll('.shiaijo-move-confirm button')]
         .find((b) => /send back to queue/i.test(b.textContent));
       await act(async () => { confirm.click(); });
-      expect(window.API.revertMatchToQueue).toHaveBeenCalledWith('c1', 'm1', '');
+      expect(window.API.revertMatchToQueue).toHaveBeenCalledWith('c1', 'm1', '', expect.objectContaining({ onRefusal: expect.any(Function) }));
     } finally { c.restore(); }
+  });
+
+  // Stage 6 review 7 (operator rule: "never blocks the UI", "screens display
+  // what the operator changes"): a send back the outbox only holds (offline)
+  // shows at once, as a finish does: the bout leaves the live slot and the
+  // editor and shows queued; a refused or discarded one puts it back.
+  describe('a send back still queued shows at once', () => {
+    beforeEach(() => { outbox.clear(); });
+    const pendingSendBack = () => {
+      let settle;
+      const settled = new Promise((resolve, reject) => { settle = { resolve, reject }; });
+      settled.catch(() => {});
+      return { res: { applied: true, pending: true, key: 'k', settled }, settle };
+    };
+    // The send back door, as the outbox holds it (M4): the move is the
+    // outbox's, read by the console, not the page's.
+    const sendBackDoor = (res) => vi.fn().mockImplementation((c, m) => Promise.resolve(
+      outbox.hold(c, m, { status: 'scheduled', kind: 'revert', payload: {} }, res)));
+    const confirmSendBack = async (c) => {
+      await tapSendBack(c);
+      const confirm = [...c.utils.container.querySelectorAll('.shiaijo-move-confirm button')]
+        .find((b) => /send back to queue/i.test(b.textContent));
+      await act(async () => { confirm.click(); });
+    };
+    const upNextText = (c) => {
+      const card = c.utils.container.querySelector('.shiaijo-upnext__card');
+      return card ? card.textContent : '';
+    };
+    for (const outcome of ['refused', 'discarded']) {
+      it(`leaves the live slot at once offline, and comes back when ${outcome}`, async () => {
+        const c = await mountCourt([courtMatch('m1', 'running', { ipponsA: ['M'], modifiedAt: 100 })]);
+        const { res, settle } = pendingSendBack();
+        window.API.revertMatchToQueue = sendBackDoor(res);
+        try {
+          expect(c.editorMatch()).toBe('m1');
+          await confirmSendBack(c);
+          expect(c.editorMatch(), 'the editor no longer shows the bout').toBeNull();
+          expect(upNextText(c), 'the bout shows queued').toContain('Aka m1');
+          expect(c.utils.queryByRole('button', { name: /^send back to queue$/i })).toBeNull();
+          // The feed still says running (nothing reached the server): no change.
+          await c.refresh();
+          expect(c.editorMatch()).toBeNull();
+          await act(async () => {
+            if (outcome === 'refused') settle.reject(new Error('Not sent back: the match had finished'));
+            else settle.resolve({ discarded: true });
+          });
+          expect(c.editorMatch(), 'put back on the live slot').toBe('m1');
+          expect(upNextText(c)).not.toContain('Aka m1');
+        } finally { c.restore(); }
+      });
+    }
+    it('stays queued once landed until the feed shows it, and ends there', async () => {
+      const c = await mountCourt([courtMatch('m1', 'running', { ipponsA: ['M'], modifiedAt: 100 }), courtMatch('m2', 'scheduled')]);
+      const { res, settle } = pendingSendBack();
+      window.API.revertMatchToQueue = sendBackDoor(res);
+      try {
+        await confirmSendBack(c);
+        await act(async () => { settle.resolve({ applied: true, modifiedAt: 200 }); });
+        expect(c.editorMatch()).toBeNull();
+        // The feed shows the send back: the queued copy is the feed's own.
+        c.feed.current = [courtMatch('m1', 'scheduled', { ipponsA: ['M'], modifiedAt: 200 }), courtMatch('m2', 'scheduled')];
+        await c.refresh();
+        expect(c.editorMatch()).toBeNull();
+        // A later change made elsewhere (started again on another device) shows.
+        c.feed.current = [courtMatch('m1', 'running', { ipponsA: ['M'], modifiedAt: 300 }), courtMatch('m2', 'scheduled')];
+        await c.refresh();
+        expect(c.editorMatch()).toBe('m1');
+      } finally { c.restore(); }
+    });
+
+    // Stage 6 review 8 (M4): the send back is read from the outbox, never kept
+    // in the page, so the console mounted again (the operator went back to
+    // the court, or reloaded) still shows the bout queued, with no editor,
+    // while the outbox holds it; and once the outbox lets it go unanswered
+    // (refused), the bout is live again there too.
+    it('a send back still queued: the console mounted again shows the bout queued', async () => {
+      const feed = [courtMatch('m1', 'running', { ipponsA: ['M'], modifiedAt: 100 })];
+      const c = await mountCourt(feed);
+      const { res, settle } = pendingSendBack();
+      window.API.revertMatchToQueue = sendBackDoor(res);
+      try {
+        await confirmSendBack(c);
+        expect(c.editorMatch()).toBeNull();
+      } finally { c.restore(); }
+      c.utils.unmount();
+      const again = await mountCourt(feed);
+      try {
+        expect(again.editorMatch(), 'no editor on the bout sent back').toBeNull();
+        expect(upNextText(again), 'the bout shows queued').toContain('Aka m1');
+        expect(again.utils.queryByRole('button', { name: /^send back to queue$/i })).toBeNull();
+        await act(async () => { settle.reject(new Error('Not sent back: the match had finished')); });
+        expect(again.editorMatch(), 'refused: live again').toBe('m1');
+      } finally { again.restore(); }
+    });
   });
 
   it('picking another bout sends a scored one back to the queue and starts the pick', async () => {
@@ -1643,8 +1747,75 @@ describe('Send back to queue keeps the score and is always offered (bc-sbq)', ()
       const startNext = c.utils.getAllByRole('button').find((b) => /^start/i.test(b.textContent.trim()));
       expect(startNext, 'the Up Next card offers Start for m2').toBeTruthy();
       await act(async () => { startNext.click(); });
-      expect(window.API.revertMatchToQueue).toHaveBeenCalledWith('c1', 'm1', '');
+      expect(window.API.revertMatchToQueue.mock.calls[0].slice(0, 3)).toEqual(['c1', 'm1', '']);
       expect(c.showToast).not.toHaveBeenCalledWith('Finish or correct the bout in progress first', 'error');
+    } finally { c.restore(); }
+  });
+
+  // bc-evts review 1, minor 7: a send back names what the console showed
+  // (`seen`, the match's scoreVersion), as every rule-bound write does.
+  it('Send back to queue says what the console showed', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { ipponsA: ['M'], scoreVersion: 5 })]);
+    try {
+      await tapSendBack(c);
+      const confirm = [...c.utils.container.querySelectorAll('.shiaijo-move-confirm button')]
+        .find((b) => /send back to queue/i.test(b.textContent));
+      await act(async () => { confirm.click(); });
+      expect(window.API.revertMatchToQueue.mock.calls.at(-1)[3]).toEqual(expect.objectContaining({ seen: 5 }));
+    } finally { c.restore(); }
+  });
+
+  it('the send back of a pick says what the console showed', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { ipponsA: ['M'], scoreVersion: 6 }), courtMatch('m2', 'scheduled')]);
+    try {
+      const startNext = c.utils.getAllByRole('button').find((b) => /^start/i.test(b.textContent.trim()));
+      await act(async () => { startNext.click(); });
+      expect(window.API.revertMatchToQueue.mock.calls.at(-1)[3]).toEqual(expect.objectContaining({ seen: 6 }));
+    } finally { c.restore(); }
+  });
+
+  // bc-evts (the governing rule): the send back is the outbox's and nothing
+  // waits for its answer. The pick's start is queued at once, after it
+  // (`after`: the send back's queue key), so the outbox sends the start only
+  // once the send back has settled, and the console moves on at once.
+  it('the pick does not wait for the send back: the start is queued after it at once', async () => {
+    const onEditScore = vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k-start', settled: new Promise(() => {}) });
+    const c = await mountCourt([courtMatch('m1', 'running', { ipponsA: ['M'] }), courtMatch('m2', 'scheduled')], { onEditScore });
+    window.API.revertMatchToQueue = vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k-back', settled: new Promise(() => {}) });
+    try {
+      const startNext = c.utils.getAllByRole('button').find((b) => /^start/i.test(b.textContent.trim()));
+      await act(async () => { startNext.click(); });
+      await act(async () => {});
+      expect(window.API.revertMatchToQueue).toHaveBeenCalledTimes(1);
+      // The send back's answer never came; the start went to the outbox anyway,
+      // naming the send back it follows.
+      expect(onEditScore).toHaveBeenCalledTimes(1);
+      expect(onEditScore.mock.calls[0][1]).toBe('m2');
+      expect(onEditScore.mock.calls[0][2].after).toBe('k-back');
+    } finally { c.restore(); }
+  });
+
+  // Z1 (stage 3 review 12): the pick pins the panel on the match it started;
+  // a start the server refuses afterwards takes the pin back, so the console
+  // shows what the server holds and not a match that never started.
+  it('a pick whose start is refused later does not keep the panel on the refused match', async () => {
+    probe.props = null;
+    let refuse;
+    const settled = new Promise((r) => { refuse = r; });
+    const onEditScore = vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k-start', settled });
+    const c = await mountCourt([courtMatch('m1', 'running', { ipponsA: ['M'] }), courtMatch('m2', 'scheduled')], { onEditScore });
+    window.API.revertMatchToQueue = vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k-back', settled: new Promise(() => {}) });
+    try {
+      const startNext = c.utils.getAllByRole('button').find((b) => /^start/i.test(b.textContent.trim()));
+      await act(async () => { startNext.click(); });
+      await act(async () => {});
+      expect(probe.props.match?.id).toBe('m2');
+      await act(async () => { refuse({ applied: false, reason: 'clock_skew' }); await settled; });
+      await act(async () => {});
+      // The editor no longer shows the refused match (m1, whose send back is
+      // still queued, reads queued: stage 6 review 7, so the court shows no
+      // live bout and the editor is gone).
+      expect(c.editorMatch()).not.toBe('m2');
     } finally { c.restore(); }
   });
 });
@@ -2152,14 +2323,17 @@ describe('a Start tapped while another start is still out is refused before anyt
       await act(async () => { land({ applied: true }); });
       await act(async () => {});
       // m3 was asked for and never started; the court is not free, so it is not
-      // started on its own, and the row says so.
-      expect(rowOf(c, 'Aka m3').querySelector('[role="alert"]').textContent).toBe(startWasBlockedByStartMessage({ label }));
+      // started on its own, and the row says so. With m2 started, m3 is the Up
+      // next card (stage 6 review 1: a started bout leaves the queue).
+      const m3 = () => rowOf(c, 'Aka m3') || c.utils.container.querySelector('.shiaijo-upnext__card');
+      expect(m3().textContent).toContain('Aka m3');
+      expect(m3().querySelector('.shiaijo-upnext__error').textContent).toBe(startWasBlockedByStartMessage({ label }));
       expect(onEditScore.mock.calls.map((x) => x[1])).toEqual(['m2']);
       // The operator starts it: the sentence goes and the start is sent.
-      await act(async () => { startButton(rowOf(c, 'Aka m3')).click(); });
+      await act(async () => { startButton(m3()).click(); });
       await act(async () => {});
       expect(onEditScore.mock.calls.map((x) => x[1])).toEqual(['m2', 'm3']);
-      expect(rowOf(c, 'Aka m3').querySelector('[role="alert"]')).toBeNull();
+      expect(c.utils.container.querySelector('.shiaijo-upnext__error')).toBeNull();
     } finally { c.restore(); }
   });
 
@@ -2637,7 +2811,8 @@ describe('the console reports a superseded Start that holds its result as a refu
       try {
         await act(async () => { startButton(rowOf(c, 'Aka m2')).click(); });
         await act(async () => {});
-        expect(rowOf(c, 'Aka m2').querySelector('.shiaijo-upnext__error'), 'no refusal sentence on the row').toBeNull();
+        expect(rowOf(c, 'Aka m2'), 'the started bout left the queue (stage 6 review 1)').toBeUndefined();
+        expect(c.utils.container.querySelector('.shiaijo-upnext__error'), 'no refusal sentence').toBeNull();
         expect(c.utils.container.textContent).not.toContain('Not started');
         expect(c.showToast, 'no toast').not.toHaveBeenCalled();
         expect(c.editorMatch(), 'the start went out: the panel is pinned on m2').toBe('m2');
@@ -2807,5 +2982,340 @@ describe('the console writes a Start without any window.startPatch', () => {
       c.restore();
       if (saved) window.startPatch = saved;
     }
+  });
+});
+
+// Operator decision R1 (2026-10-17, stage 5 review 8): every console action
+// that unmounts the score editor or puts another match in it asks first while
+// the editor holds unsaved entries (the editor publishes them through
+// `hostUnsavedRef`; the probe stands in for it here). Keep entries leaves
+// everything as it was; Discard entries goes on. Send back to queue says it in
+// its own confirm. With nothing unsaved nothing asks.
+describe('the console asks before it drops the editor\'s unsaved entries (R1)', () => {
+  const WARN = /^Your unsaved entries will be discarded\. /;
+  const warnings = () => window.confirmDialog.mock.calls.filter(([o]) => WARN.test((o && o.message) || ''));
+  const tapCorrect = async (c, rowText) => {
+    const row = [...c.utils.container.querySelectorAll('.shiaijo-qrow--complete')].find((r) => r.textContent.includes(rowText));
+    const btn = [...row.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Correct');
+    await act(async () => { btn.click(); });
+  };
+  const holdUnsaved = (yes) => { probe.props.hostUnsavedRef.current = () => yes; };
+  const heading = (c) => c.utils.container.querySelector('.shiaijo-context__toggle').textContent;
+  let prevConfirm;
+  beforeEach(() => { prevConfirm = window.confirmDialog; });
+  afterEach(() => { window.confirmDialog = prevConfirm; });
+
+  it('Back to court: Keep entries stays in the correction, Discard entries leaves it', async () => {
+    const c = await mountCourt([courtMatch('m1', 'completed', { modifiedAt: 1000 }), courtMatch('m2', 'scheduled')]);
+    try {
+      await tapCorrect(c, 'Aka m1');
+      holdUnsaved(true);
+      window.confirmDialog = vi.fn().mockResolvedValue(false);
+      await act(async () => { c.utils.getByRole('button', { name: /back to court/i }).click(); });
+      expect(warnings().map(([o]) => o.message)).toEqual(['Your unsaved entries will be discarded. Leave this match anyway?']);
+      expect(heading(c)).toContain('Correcting');
+      expect(c.editorMatch()).toBe('m1');
+      window.confirmDialog = vi.fn().mockResolvedValue(true);
+      await act(async () => { c.utils.getByRole('button', { name: /back to court/i }).click(); });
+      expect(heading(c)).not.toContain('Correcting');
+    } finally { c.restore(); }
+  });
+
+  it('Back to court asks nothing with nothing unsaved', async () => {
+    const c = await mountCourt([courtMatch('m1', 'completed', { modifiedAt: 1000 }), courtMatch('m2', 'scheduled')]);
+    try {
+      await tapCorrect(c, 'Aka m1');
+      holdUnsaved(false);
+      window.confirmDialog = vi.fn().mockResolvedValue(false);
+      await act(async () => { c.utils.getByRole('button', { name: /back to court/i }).click(); });
+      expect(warnings()).toHaveLength(0);
+      expect(heading(c)).not.toContain('Correcting');
+    } finally { c.restore(); }
+  });
+
+  it('Correct on another finished match asks first; Keep entries keeps the editor on its match', async () => {
+    const c = await mountCourt([courtMatch('m1', 'completed', { modifiedAt: 1000 }), courtMatch('m3', 'completed', { modifiedAt: 900 })]);
+    try {
+      await tapCorrect(c, 'Aka m1');
+      holdUnsaved(true);
+      window.confirmDialog = vi.fn().mockResolvedValue(false);
+      await tapCorrect(c, 'Aka m3');
+      expect(warnings()).toHaveLength(1);
+      expect(c.editorMatch()).toBe('m1');
+      window.confirmDialog = vi.fn().mockResolvedValue(true);
+      await tapCorrect(c, 'Aka m3');
+      expect(c.editorMatch()).toBe('m3');
+    } finally { c.restore(); }
+  });
+
+  it('a pick of another bout asks first; Keep entries sends nothing back', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { modifiedAt: 1000 }), courtMatch('m2', 'scheduled')]);
+    try {
+      expect(c.editorMatch()).toBe('m1');
+      holdUnsaved(true);
+      window.confirmDialog = vi.fn().mockResolvedValue(false);
+      const card = c.utils.container.querySelector('.shiaijo-upnext__card');
+      const start = [...card.querySelectorAll('button')].find((b) => /start match/i.test(b.textContent));
+      await act(async () => { start.click(); });
+      expect(warnings()).toHaveLength(1);
+      expect(window.API.revertMatchToQueue).not.toHaveBeenCalled();
+      expect(c.editorMatch()).toBe('m1');
+    } finally { c.restore(); }
+  });
+
+  it('Send back to queue says the unsaved entries are discarded, and only then', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { modifiedAt: 1000 })]);
+    try {
+      holdUnsaved(true);
+      await act(async () => { c.utils.getByRole('button', { name: /send back to queue/i }).click(); });
+      let dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
+      expect(dialog.textContent).toContain('Your unsaved entries will be discarded.');
+      expect(dialog.textContent).not.toContain('Any score entered is kept');
+      await act(async () => { [...dialog.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Cancel').click(); });
+      holdUnsaved(false);
+      await act(async () => { c.utils.getByRole('button', { name: /send back to queue/i }).click(); });
+      dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
+      expect(dialog.textContent).not.toContain('Your unsaved entries will be discarded.');
+      expect(dialog.textContent).toContain('The score already saved is kept');
+    } finally { c.restore(); }
+  });
+
+  // Stage 5 review 9, m1: the confirm says the entries are discarded, so the
+  // editor drops them at once (its published discard), as Discard entries
+  // does everywhere else, never only once the feed shows the match queued.
+  it('Send back to queue over unsaved entries tells the editor to drop them, and only then', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { modifiedAt: 1000 })]);
+    const sendBack = async () => {
+      await act(async () => { c.utils.getByRole('button', { name: /send back to queue/i }).click(); });
+      const dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
+      await act(async () => { dialog.querySelector('.btn--primary').click(); });
+    };
+    try {
+      const discard = vi.fn();
+      const probeFn = () => true;
+      probeFn.discard = discard;
+      probe.props.hostUnsavedRef.current = probeFn;
+      await sendBack();
+      expect(window.API.revertMatchToQueue).toHaveBeenCalledTimes(1);
+      expect(discard).toHaveBeenCalledTimes(1);
+      const quiet = vi.fn();
+      const clean = () => false;
+      clean.discard = quiet;
+      probe.props.hostUnsavedRef.current = clean;
+      await sendBack();
+      expect(quiet).not.toHaveBeenCalled();
+    } finally { c.restore(); }
+  });
+
+
+  // Stage 5 review 11, minor 3: the confirm's wording is decided when it
+  // opens. Entries made while a confirm WITHOUT the warning is open (a scoring
+  // key reaching the console once focus fell to the body) were never named in
+  // it, so confirming must show the warning and wait for a second answer
+  // instead of dropping them silently.
+  it('Send back to queue: entries made while a confirm without the warning is open are asked about, not dropped', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { modifiedAt: 1000 })]);
+    try {
+      const discard = vi.fn();
+      const probeFn = () => true;
+      probeFn.discard = discard;
+      const clean = () => false;
+      clean.discard = vi.fn();
+      probe.props.hostUnsavedRef.current = clean;
+      await act(async () => { c.utils.getByRole('button', { name: /send back to queue/i }).click(); });
+      let dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
+      expect(dialog.textContent).not.toContain('Your unsaved entries will be discarded.');
+      probe.props.hostUnsavedRef.current = probeFn;
+      await act(async () => { dialog.querySelector('.btn--primary').click(); });
+      expect(window.API.revertMatchToQueue).not.toHaveBeenCalled();
+      expect(discard).not.toHaveBeenCalled();
+      dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
+      expect(dialog.textContent).toContain('Your unsaved entries will be discarded.');
+      await act(async () => { dialog.querySelector('.btn--primary').click(); });
+      expect(window.API.revertMatchToQueue).toHaveBeenCalledTimes(1);
+      expect(discard).toHaveBeenCalledTimes(1);
+    } finally { c.restore(); }
+  });
+
+
+  // A confirm that turns warned (entries made while it was open) is one
+  // confirm: the bounce of the tap that re-rendered it must not send the match
+  // or drop the entries, and a later deliberate tap confirms once. Pointer
+  // taps (detail 1) are the ones tap_guard reads as bounces; the clock is a
+  // spy on Date.now, which tap_guard reads.
+  it('Send back to queue: the bounce of the tap that turned the confirm warned does nothing; a later tap confirms once', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { modifiedAt: 1000 })]);
+    let now = Date.now() + 1000;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const discard = vi.fn();
+      const probeFn = () => true; probeFn.discard = discard;
+      const clean = () => false; clean.discard = vi.fn();
+      probe.props.hostUnsavedRef.current = clean;
+      await act(async () => { c.utils.getByRole('button', { name: /send back to queue/i }).click(); });
+      probe.props.hostUnsavedRef.current = probeFn;
+      // The tap that opened the confirm stamped the clock; the first Confirm is a
+      // separate tap, past the bounce window of that one.
+      now += TAP_BOUNCE_MS;
+      const confirmBtn = () => c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"] .btn--primary');
+      await act(async () => { fireEvent.click(confirmBtn(), { detail: 1 }); });
+      expect(c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]').textContent).toContain('Your unsaved entries will be discarded.');
+      now += 30;
+      await act(async () => { fireEvent.click(confirmBtn(), { detail: 1 }); });
+      expect(window.API.revertMatchToQueue).not.toHaveBeenCalled();
+      expect(discard).not.toHaveBeenCalled();
+      now += TAP_BOUNCE_MS;
+      await act(async () => { fireEvent.click(confirmBtn(), { detail: 1 }); });
+      expect(discard).toHaveBeenCalledTimes(1);
+      expect(window.API.revertMatchToQueue).toHaveBeenCalledTimes(1);
+    } finally { spy.mockRestore(); c.restore(); }
+  });
+
+
+  it('the confirm body that gains the unsaved-entries warning is announced (aria-live)', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { modifiedAt: 1000 })]);
+    try {
+      const discard = vi.fn();
+      const probeFn = () => true; probeFn.discard = discard;
+      const clean = () => false; clean.discard = vi.fn();
+      probe.props.hostUnsavedRef.current = clean;
+      await act(async () => { c.utils.getByRole('button', { name: /send back to queue/i }).click(); });
+      const body = () => c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"] .shiaijo-move-confirm__body');
+      probe.props.hostUnsavedRef.current = probeFn;
+      await act(async () => { c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"] .btn--primary').click(); });
+      expect(body().textContent).toContain('Your unsaved entries will be discarded.');
+      expect(body().getAttribute('aria-live')).toBe('polite');
+    } finally { c.restore(); }
+  });
+
+  // Stage 5 review 9, M1: every console exit that drops the editor asks the
+  // same question: the court switcher, the Dashboard crumb, Sign out and
+  // Public viewer. With nothing unsaved each goes in the same tick.
+  it('the court switcher asks first; Keep entries stays on this court', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { modifiedAt: 1000 })]);
+    try {
+      const sel = c.utils.container.querySelector('.shiaijo-title-select__native');
+      holdUnsaved(true);
+      window.confirmDialog = vi.fn().mockResolvedValue(false);
+      await act(async () => { fireEvent.change(sel, { target: { value: 'B' } }); });
+      expect(warnings().map(([o]) => o.message)).toEqual(['Your unsaved entries will be discarded. Leave this match anyway?']);
+      expect(c.exits.onSwitchCourt).not.toHaveBeenCalled();
+      expect(sel.value).toBe('A');
+      window.confirmDialog = vi.fn().mockResolvedValue(true);
+      await act(async () => { fireEvent.change(sel, { target: { value: 'B' } }); });
+      expect(c.exits.onSwitchCourt).toHaveBeenCalledWith('B');
+      holdUnsaved(false);
+      window.confirmDialog = vi.fn().mockResolvedValue(false);
+      fireEvent.change(sel, { target: { value: 'B' } });
+      expect(c.exits.onSwitchCourt).toHaveBeenCalledTimes(2);
+      expect(warnings()).toHaveLength(0);
+    } finally { c.restore(); }
+  });
+
+  it('the Dashboard crumb, Sign out and Public viewer ask first', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { modifiedAt: 1000 })]);
+    try {
+      const exits = [
+        ['onBack', () => chrome.crumbs.items[0].onClick()],
+        ['onLogout', () => chrome.topbar.onLogout()],
+        ['onViewerMode', () => chrome.topbar.onViewerMode()],
+      ];
+      for (const [name, take] of exits) {
+        holdUnsaved(true);
+        window.confirmDialog = vi.fn().mockResolvedValue(false);
+        await act(async () => { take(); });
+        expect(warnings(), name).toHaveLength(1);
+        expect(c.exits[name], name).not.toHaveBeenCalled();
+        window.confirmDialog = vi.fn().mockResolvedValue(true);
+        await act(async () => { take(); });
+        expect(c.exits[name], name).toHaveBeenCalledTimes(1);
+        holdUnsaved(false);
+        window.confirmDialog = vi.fn().mockResolvedValue(false);
+        take();
+        expect(c.exits[name], name).toHaveBeenCalledTimes(2);
+        expect(warnings(), name).toHaveLength(0);
+      }
+    } finally { c.restore(); }
+  });
+
+  // Stage 5 review 9, m3: the guards are judged again once the operator has
+  // answered, on the court as it is then, never on the copy from the tap.
+  it('a pick over unsaved entries is judged on the court as it is after the ask', async () => {
+    const c = await mountCourt([courtMatch('m1', 'running', { modifiedAt: 1000 }), courtMatch('m2', 'scheduled')]);
+    try {
+      holdUnsaved(true);
+      let answer;
+      window.confirmDialog = vi.fn(() => new Promise((res) => { answer = res; }));
+      const card = c.utils.container.querySelector('.shiaijo-upnext__card');
+      const start = [...card.querySelectorAll('button')].find((b) => /start match/i.test(b.textContent));
+      await act(async () => { start.click(); });
+      expect(warnings()).toHaveLength(1);
+      // Another device finishes the running bout while the question is open.
+      c.feed.current = [courtMatch('m1', 'completed', { modifiedAt: 2000 }), courtMatch('m2', 'scheduled')];
+      await c.refresh();
+      await act(async () => { answer(true); });
+      expect(window.API.revertMatchToQueue).not.toHaveBeenCalled();
+    } finally { c.restore(); }
+  });
+
+  it('a Correct over unsaved entries is refused when a bout started while it asked', async () => {
+    const c = await mountCourt([courtMatch('m1', 'completed', { modifiedAt: 1000 }), courtMatch('m3', 'completed', { modifiedAt: 900 }), courtMatch('m2', 'scheduled')]);
+    try {
+      await tapCorrect(c, 'Aka m1');
+      const discard = vi.fn();
+      const unsaved = () => true;
+      unsaved.discard = discard;
+      probe.props.hostUnsavedRef.current = unsaved;
+      let answer;
+      window.confirmDialog = vi.fn(() => new Promise((res) => { answer = res; }));
+      await tapCorrect(c, 'Aka m3');
+      expect(warnings()).toHaveLength(1);
+      c.feed.current = [courtMatch('m1', 'completed', { modifiedAt: 1000 }), courtMatch('m3', 'completed', { modifiedAt: 900 }), courtMatch('m2', 'running', { modifiedAt: 3000 })];
+      await c.refresh();
+      await act(async () => { answer(true); });
+      expect(c.editorMatch()).not.toBe('m3');
+      // Stage 5 review 10, minor 2: Discard entries dropped them, though the
+      // Correct was then refused and the editor stayed.
+      expect(discard).toHaveBeenCalledTimes(1);
+    } finally { c.restore(); }
+  });
+});
+
+// Stage 6 review 1: while this console's own Start is out (and long while
+// offline), the editor runs the match it started, so the Up next card and the
+// Upcoming list never offer that bout again (Start match, Call to court). A
+// start refused later puts it back, as startedFrom's unpin does.
+describe('an own Start still out takes the match out of Up next and Upcoming', () => {
+  const upNextText = (c) => { const el = c.utils.container.querySelector('.shiaijo-upnext__card'); return el ? el.textContent : ''; };
+  const startOnCard = (c) => [...c.utils.container.querySelector('.shiaijo-upnext__card').querySelectorAll('button')].find((b) => /start match/i.test(b.textContent));
+
+  it('the started bout leaves the card at once and the next bout is Up next', async () => {
+    const pendingStart = { applied: true, pending: true, key: 'k', settled: new Promise(() => {}) };
+    const onEditScore = vi.fn().mockImplementation(() => Promise.resolve(pendingStart));
+    const c = await mountCourt([courtMatch('m1', 'scheduled', { modifiedAt: 100 }), courtMatch('m2', 'scheduled', { modifiedAt: 100 })], { onEditScore });
+    try {
+      expect(upNextText(c)).toContain('Aka m1');
+      await act(async () => { startOnCard(c).click(); });
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      expect(c.editorMatch(), 'the editor runs the started bout').toBe('m1');
+      expect(upNextText(c), 'Up next moves on').toContain('Aka m2');
+      expect(upNextText(c)).not.toContain('Aka m1');
+      const queueText = [...c.utils.container.querySelectorAll('.shiaijo-queue-row, .shiaijo-queue__row, li')].map((n) => n.textContent).join(' ');
+      expect(queueText, 'nor is it in Upcoming').not.toContain('Aka m1');
+    } finally { c.restore(); }
+  });
+
+  it('a start refused later puts the bout back on Up next', async () => {
+    const onEditScore = vi.fn().mockImplementation(() => Promise.resolve({ applied: true, pending: true, key: 'k', settled: new Promise(() => {}) }));
+    const c = await mountCourt([courtMatch('m1', 'scheduled', { modifiedAt: 100 }), courtMatch('m2', 'scheduled', { modifiedAt: 100 })], { onEditScore });
+    try {
+      await act(async () => { startOnCard(c).click(); });
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      expect(upNextText(c)).not.toContain('Aka m1');
+      // The outbox hands a later refusal to the caller's onRefusal.
+      const { onRefusal } = onEditScore.mock.calls[0][4];
+      await act(async () => { onRefusal(new Error('Sato is fighting on shiaijo B')); });
+      expect(upNextText(c), 'the refused bout is Up next again').toContain('Aka m1');
+    } finally { c.restore(); }
   });
 });

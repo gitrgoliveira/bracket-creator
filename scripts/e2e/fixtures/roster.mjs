@@ -74,7 +74,8 @@ const seedBox = (page, name) => page.getByLabel(`Seed rank for ${name}`);
 export async function setSeed(page, name, rank) {
   const box = seedBox(page, name);
   // The box saves 200 ms after the last keystroke (or at once when it loses
-  // focus), and a person has gone on to the next box long after that.
+  // focus with a change still waiting; a change already sent is not sent
+  // again), and a person has gone on to the next box long after that.
   // Playwright goes on at once, and a reload then drops the save still
   // pending: wait for the save that carries this rank to be answered.
   const saved = page.waitForResponse((r) => {

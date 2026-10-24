@@ -7,9 +7,9 @@
 //
 // On top of that, "Start match" and kachinuki "Record bout" submit with
 // status:"running", and recordScore deliberately stays SILENT on a superseded
-// running write (a 300ms debounced autosave being superseded is routine noise
+// running write (a running write being superseded is routine noise
 // and would otherwise produce a toast storm). Those two are explicit operator
-// taps rather than autosaves, so they check the awaited result themselves.
+// taps rather than running writes, so they check the awaited result themselves.
 //
 // Net effect before the fix: the operator tapped, the server stored nothing
 // because another device held a newer result, and the button simply re-enabled

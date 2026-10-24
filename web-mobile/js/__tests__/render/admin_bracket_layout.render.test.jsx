@@ -102,3 +102,44 @@ describe('admin Bracket page layout', () => {
     expect(slots[2].textContent).toContain('3rd Place Match');
   });
 });
+
+// Operator decision R1 (stage 5 review 8): choosing another match puts it in
+// the editor's place (keyed by match id), so over the editor's unsaved
+// entries the panel asks first. Keep entries keeps the editor on its match.
+describe('the bracket panel asks before it drops the editor\'s unsaved entries (R1)', () => {
+  it('asks over unsaved entries, and only then', async () => {
+    const m1 = match('m1');
+    const m2 = { ...match('m2'), sideA: { id: 'p3', name: 'Kato' }, sideB: { id: 'p4', name: 'Ito' } };
+    const shown = { props: null };
+    const prevEditor = window.ScoreEditorModal;
+    const prevConfirm = window.confirmDialog;
+    window.ScoreEditorModal = (props) => { shown.props = props; return <div data-testid="probe-score-editor" data-match={props.match.id} />; };
+    window.BracketTree = (props) => (
+      <>
+        <button data-testid="pick1" onClick={() => props.onMatchClick(m1, 0, 0)}>1</button>
+        <button data-testid="pick2" onClick={() => props.onMatchClick(m2, 0, 1)}>2</button>
+      </>
+    );
+    try {
+      await act(async () => { renderPage({ rounds: [[m1, m2]] }); });
+      await act(async () => { fireEvent.click(screen.getByTestId('pick1')); });
+      expect(screen.getByTestId('probe-score-editor').getAttribute('data-match')).toBe('m1');
+      shown.props.hostUnsavedRef.current = () => true;
+      window.confirmDialog = vi.fn().mockResolvedValue(false);
+      await act(async () => { fireEvent.click(screen.getByTestId('pick2')); });
+      expect(window.confirmDialog.mock.calls.map(([o]) => o.message)).toEqual(['Your unsaved entries will be discarded. Leave this match anyway?']);
+      expect(screen.getByTestId('probe-score-editor').getAttribute('data-match')).toBe('m1');
+      window.confirmDialog = vi.fn().mockResolvedValue(true);
+      await act(async () => { fireEvent.click(screen.getByTestId('pick2')); });
+      expect(screen.getByTestId('probe-score-editor').getAttribute('data-match')).toBe('m2');
+      shown.props.hostUnsavedRef.current = () => false;
+      window.confirmDialog = vi.fn().mockResolvedValue(false);
+      await act(async () => { fireEvent.click(screen.getByTestId('pick1')); });
+      expect(window.confirmDialog).not.toHaveBeenCalled();
+      expect(screen.getByTestId('probe-score-editor').getAttribute('data-match')).toBe('m1');
+    } finally {
+      window.ScoreEditorModal = prevEditor;
+      window.confirmDialog = prevConfirm;
+    }
+  });
+});

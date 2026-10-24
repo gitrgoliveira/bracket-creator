@@ -169,7 +169,7 @@ describe('kachinukiRosterKey', () => {
     expect(key('m1', log)).toBe(key('m1', JSON.parse(JSON.stringify(log))));
   });
   it('reads nothing while the live bout is being fought, whatever its score', () => {
-    // The running autosave writes a 1-0 lead's winner and a 1-1's hikiwake on
+    // The running board writes a 1-0 lead's winner and a 1-1's hikiwake on
     // the live row: neither is a result until Record bout records the bout,
     // and the server keeps both fighters on meanwhile (bc-kfnl).
     const pointed = log.map((s, i) => (i === 1 ? { ...s, ipponsA: ['M'] } : s));

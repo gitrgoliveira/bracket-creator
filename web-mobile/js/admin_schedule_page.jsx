@@ -23,7 +23,7 @@ const Breadcrumbs = window.Breadcrumbs;
 const CourtPicker = window.CourtPicker;
 const hasBothSides = window.hasBothSides;
 
-const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange }) => {
+export const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange }) => {
   const [editingTime, setEditingTime] = useStateA(false);
   const [timeVal, setTimeVal] = useStateA(m.scheduledAt || "");
   // bc-pnum: sameCompetitor, never a bare `winner.id === side.id` (see
@@ -34,10 +34,20 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
   // matchShowsScore is the gate: a queued match keeps its score but reads as
   // not started (bc-sbq).
   const scoreStr = matchShowsScore(m) ? window.matchScoreStr(m) : "";
+  // The save reads what the box shows, never the time of the last render: a
+  // time typed and left (or sent with Enter) within the box's debounce has not
+  // reached timeVal yet (stage 6 review 9, F9). One save per edit: the blur a
+  // submit can bring as the box goes sends nothing more.
+  const timeSentRef = React.useRef(false);
   const submitTime = (e) => {
     e.preventDefault();
+    const el = e.currentTarget;
+    const box = el && el.tagName === "FORM" ? el.querySelector("input") : el;
+    const val = box && typeof box.value === "string" ? box.value : timeVal;
     setEditingTime(false);
-    if (onTimeChange && timeEdited(m.scheduledAt, timeVal)) onTimeChange(timeVal);
+    if (timeSentRef.current) return;
+    timeSentRef.current = true;
+    if (onTimeChange && timeEdited(m.scheduledAt, val)) onTimeChange(val);
   };
   return (
     <div
@@ -66,7 +76,7 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
         ) : (
           <button type="button"
             className="tw-match__time tw-match__time--editable"
-            onClick={(e) => { e.stopPropagation(); if (onTimeChange) { setTimeVal(m.scheduledAt || ""); setEditingTime(true); } }}
+            onClick={(e) => { e.stopPropagation(); if (onTimeChange) { setTimeVal(m.scheduledAt || ""); timeSentRef.current = false; setEditingTime(true); } }}
             title="Click to set time"
           >
             {m.scheduledAt || <span style={{ color: "var(--ink-4)", fontWeight: 400 }}>-</span>}
@@ -257,9 +267,13 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
     return formatMinutes(Math.round(diff));
   })() : null;
 
+  // bc-evts M5: an entry of the match's outbox, handed over at once; a refusal
+  // the server gives later is said then.
+  const timeRefused = (e) => { alert("Failed to update time: " + e.message); return true; };
   const saveMatchTime = async (m, newTime) => {
     try {
-      await window.API.updateMatchTime(m.compId, m.id, newTime, password);
+      // Shown at once; a refusal shows the time it had again (R4).
+      await window.API.updateMatchTime(m.compId, m.id, newTime, password, { onRefusal: timeRefused, was: { scheduledAt: m.scheduledAt || "" } });
     } catch (e) {
       alert("Failed to update time: " + e.message);
     }
@@ -290,7 +304,9 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
         // ?? not || so "00:00" (0 minutes: midnight) doesn't fall through to 09:00.
         let cursor = timeToMinutes(autoStart) ?? 540;
         for (const m of list.sort((a, b) => (a.scheduledAt || "99:99").localeCompare(b.scheduledAt || "99:99"))) {
-          await window.API.updateMatchTime(m.compId, m.id, window.addMinutes("00:00", Math.round(cursor)), password);
+          // Handed to the outbox at once (no wait on the network); a refusal
+          // the server gives later is said then.
+          await window.API.updateMatchTime(m.compId, m.id, window.addMinutes("00:00", Math.round(cursor)), password, { onRefusal: timeRefused, was: { scheduledAt: m.scheduledAt || "" } });
           cursor += safeMatchMinutes;
         }
       }

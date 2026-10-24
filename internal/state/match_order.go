@@ -43,7 +43,7 @@ func ParseSwissMatchRound(id string) (int, bool) {
 // trailing "-<digits>" ordinal (0-based on disk, so +1 here). Returns 0 for
 // a supplementary id (DH/TB) or an id with no numeric ordinal at all.
 func PoolPhaseMatchNumber(matchID string) int {
-	if IsPoolDaihyosenMatchID(matchID) || IsTiebreakerMatchID(matchID) {
+	if IsPoolSupplementaryMatchID(matchID) {
 		return 0
 	}
 	i := strings.LastIndexByte(matchID, '-')
@@ -107,7 +107,7 @@ func (m DrawMatch) Place(seq int) (place MatchPlace, ok bool) {
 	if m.Knockout {
 		return MatchPlace{round: m.Round, phase: placeKnockout, index: m.Index, seq: seq}, true
 	}
-	if IsPoolDaihyosenMatchID(m.ID) || IsTiebreakerMatchID(m.ID) {
+	if IsPoolSupplementaryMatchID(m.ID) {
 		return MatchPlace{}, false
 	}
 	swissRound, _ := ParseSwissMatchRound(m.ID)

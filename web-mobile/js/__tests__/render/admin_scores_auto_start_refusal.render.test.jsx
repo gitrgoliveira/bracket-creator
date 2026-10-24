@@ -499,3 +499,89 @@ describe('a completed team row marks the withdrawn team without any window globa
     expect(row.querySelector('.score-edit-row__side--aka').classList.contains('score-edit-row__side--win')).toBe(true);
   });
 });
+
+// bc-evts stage 3: a start is the outbox's. onEditScore hands back the pending
+// answer at once, so Finish + Start Next never waits on the server; a refusal
+// arrives later, either through the onRefusal the Scores tab passes (a thrown
+// refusal on the flush) or as the settled answer (clock_skew, a held result).
+// Either is told on the refused match exactly as a direct one was.
+describe('a start the outbox answers later', () => {
+  const pendingStart = () => {
+    const out = {};
+    out.settled = new Promise((resolve) => { out.resolve = resolve; });
+    out.answer = { applied: true, pending: true, key: 'k-m-2', settled: out.settled };
+    return out;
+  };
+
+  it('a refusal handed to onRefusal is claimed and noted on the refused match', async () => {
+    const start = pendingStart();
+    let opts = null;
+    const onEditScore = vi.fn(async (_c, id, patch, _m, o) => {
+      if (id === 'm-2' && patch.startOnly) { opts = o; return start.answer; }
+      return { status: 'ok' };
+    });
+    const showToast = vi.fn();
+    const utils = await mountAndOpenRunning(onEditScore, showToast);
+
+    // The advance resolves while the start is still unanswered.
+    await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed' }); });
+    expect(noticeIn(rowOf(utils, 'Alice')), 'nothing is refused yet').toBeFalsy();
+    expect(opts && typeof opts.onRefusal, 'the start passes an onRefusal').toBe('function');
+
+    let claimed;
+    await act(async () => { claimed = opts.onRefusal(new Error(WITHDREW)); });
+    expect(claimed, 'the Scores tab tells it itself').toBe(true);
+    const note = noticeIn(rowOf(utils, 'Alice'));
+    expect(note && note.textContent).toBe(WITHDREW);
+    expect(showToast).toHaveBeenCalledWith(WITHDREW, 'error');
+    expect(probe.props.match.id).toBe('m-2');
+  });
+
+  it('a settled clock_skew answer is a refused start, told on its row', async () => {
+    const start = pendingStart();
+    const onEditScore = vi.fn(async (_c, id, patch) => (id === 'm-2' && patch.startOnly ? start.answer : { status: 'ok' }));
+    const showToast = vi.fn();
+    const utils = await mountAndOpenRunning(onEditScore, showToast);
+    await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed' }); });
+    expect(noticeIn(rowOf(utils, 'Alice'))).toBeFalsy();
+
+    await act(async () => { start.resolve({ applied: false, reason: 'clock_skew' }); await start.settled; });
+    const note = noticeIn(rowOf(utils, 'Alice'));
+    expect(note && note.textContent).toContain(CLOCK_SKEW_REASON_TEXT);
+    expect(showToast).toHaveBeenCalledTimes(1);
+  });
+
+  // bc-evts stage 3 review 11, X1: the start is queued after the finish or the
+  // decision it follows, never ahead of it.
+  it('Finish + Start Next queues the start after the finish', async () => {
+    const start = pendingStart();
+    const onEditScore = vi.fn(async (_c, id, patch) => (id === 'm-2' && patch.startOnly
+      ? start.answer : { applied: true, pending: true, key: 'k-finish', settled: new Promise(() => {}) }));
+    await mountAndOpenRunning(onEditScore, vi.fn());
+    await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed' }); });
+    const startCall = onEditScore.mock.calls.find((c) => c[1] === 'm-2');
+    expect(startCall[2].after).toBe('k-finish');
+  });
+
+  it('the start after a decision is queued after the decision', async () => {
+    const start = pendingStart();
+    const onEditScore = vi.fn(async (_c, id, patch) => (id === 'm-2' && patch.startOnly ? start.answer : { status: 'ok' }));
+    await mountAndOpenRunning(onEditScore, vi.fn());
+    await act(async () => {
+      await probe.props.onAfterDecision({ applied: true, pending: true, key: 'k-decision', settled: new Promise(() => {}) });
+    });
+    const startCall = onEditScore.mock.calls.find((c) => c[1] === 'm-2');
+    expect(startCall[2].after).toBe('k-decision');
+  });
+
+  it('a settled answer that landed says nothing', async () => {
+    const start = pendingStart();
+    const onEditScore = vi.fn(async (_c, id, patch) => (id === 'm-2' && patch.startOnly ? start.answer : { status: 'ok' }));
+    const showToast = vi.fn();
+    const utils = await mountAndOpenRunning(onEditScore, showToast);
+    await act(async () => { await probe.props.onSubmitAndNext({ status: 'completed' }); });
+    await act(async () => { start.resolve({ status: 'running' }); await start.settled; });
+    expect(utils.container.querySelectorAll('[data-testid="start-refusal-notice"]')).toHaveLength(0);
+    expect(showToast).not.toHaveBeenCalled();
+  });
+});

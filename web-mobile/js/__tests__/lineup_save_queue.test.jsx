@@ -10,7 +10,7 @@
 // stub, fake timers, the background clock poll never reaching the server).
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { makeLineupServer } from './helpers/lineup_server.js';
+import { makeLineupServer, untagged } from './helpers/lineup_server.js';
 
 let API;
 let _origFetch;
@@ -54,8 +54,8 @@ async function tick(ms = 0) {
   await flushMicrotasks();
 }
 
-const storedEntries = () => JSON.parse(localStorage.getItem('bc_write_queue') || '[]');
-const queuedPayloads = () => storedEntries().map(([, d]) => d.payload);
+const storedEntries = () => JSON.parse(localStorage.getItem('bc_write_queue_v2') || '[]');
+const queuedPayloads = () => storedEntries().map(([, d]) => untagged(d.payload));
 
 // The contract server behind the fetch the API sees; the background clock poll
 // never reaches it. `reconnect` brings the connection back and tells the page.
@@ -80,36 +80,39 @@ const STORED = {
 describe('a save that reaches the server names the positions it changed', () => {
   it('sends the changed positions and their ids, and the list that names them, and nothing else', async () => {
     const s = connect({ own: { m1: STORED } });
-    await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Kato' }, 'pw', { senpo: 'mem-k' }, ['senpo']);
+    await (await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Kato' }, 'pw', { senpo: 'mem-k' }, ['senpo'])).settled;
     expect(s.puts).toEqual([{
       url: '/api/competitions/c1/teams/t1/match-lineups/m1',
       body: {
         teamId: 't1', competitionId: 'c1', matchId: 'm1',
         positions: { senpo: 'Kato' }, memberIds: { senpo: 'mem-k' }, changed: ['senpo'],
+        // When the change was made, in the server's frame (engine.FollowLineupSave).
+        changedAt: { senpo: expect.any(Number) },
       },
     }]);
   });
 
   it('does the same for a team\'s starting lineup, a cleared position being its empty name', async () => {
     const s = connect({ starting: STORED });
-    await API.putTeamLineup('c1', 't1', 0, { jiho: '' }, 'pw', undefined, ['jiho']);
+    await (await API.putTeamLineup('c1', 't1', 0, { jiho: '' }, 'pw', undefined, ['jiho'])).settled;
     expect(s.puts).toEqual([{
       url: '/api/competitions/c1/teams/t1/lineups/0',
-      body: { teamId: 't1', competitionId: 'c1', round: 0, positions: { jiho: '' }, changed: ['jiho'] },
+      body: { teamId: 't1', competitionId: 'c1', round: 0, positions: { jiho: '' }, changed: ['jiho'], changedAt: { jiho: expect.any(Number) } },
     }]);
     expect(s.starting.positions).toEqual({ senpo: 'Sato', taisho: 'Ito' });
   });
 
   it('answers the whole lineup as the server holds it, so a position another device changed shows', async () => {
     connect({ own: { m1: { positions: { ...STORED.positions, taisho: 'Mori' }, memberIds: { ...STORED.memberIds, taisho: 'mem-m' } } } });
-    const answer = await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Kato' }, 'pw', { senpo: 'mem-k' }, ['senpo']);
+    // bc-evts M5: answered at once (pending); `settled` carries the server's answer.
+    const answer = await (await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Kato' }, 'pw', { senpo: 'mem-k' }, ['senpo'])).settled;
     expect(answer.positions).toEqual({ senpo: 'Kato', jiho: 'Tanaka', taisho: 'Mori' });
     expect(answer.memberIds).toEqual({ senpo: 'mem-k', jiho: 'mem-t', taisho: 'mem-m' });
   });
 
   it('a save that names no changed positions is sent as the whole lineup it always was', async () => {
     const s = connect({ own: { m1: STORED } });
-    await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Kato' }, 'pw');
+    await (await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Kato' }, 'pw')).settled;
     expect(s.puts[0].body).toEqual({ teamId: 't1', competitionId: 'c1', matchId: 'm1', positions: { senpo: 'Kato' } });
     expect('changed' in s.puts[0].body).toBe(false);
   });
@@ -120,7 +123,7 @@ describe('a save made offline replays naming only what it changed', () => {
     const s = connect({ own: { m1: STORED } });
     s.offline = true;
     // Device 1, with no connection, changes Senpo and saves.
-    expect(await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Kato' }, 'pw', { senpo: 'mem-k' }, ['senpo'])).toEqual({ queued: true });
+    expect((await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Kato' }, 'pw', { senpo: 'mem-k' }, ['senpo'])).pending).toBe(true);
     await tick(0);
     // Device 2 changed Taisho meanwhile.
     s.own.m1 = { positions: { ...STORED.positions, taisho: 'Mori' }, memberIds: { ...STORED.memberIds, taisho: 'mem-m' } };
@@ -130,7 +133,7 @@ describe('a save made offline replays naming only what it changed', () => {
     expect(s.own.m1.positions).toEqual({ senpo: 'Kato', jiho: 'Tanaka', taisho: 'Mori' });
     expect(s.own.m1.memberIds).toEqual({ senpo: 'mem-k', jiho: 'mem-t', taisho: 'mem-m' });
     expect(API.queuedLineupSave('c1', 't1', { matchId: 'm1' })).toBe(false);
-    expect(localStorage.getItem('bc_write_queue')).toBeNull();
+    expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
   });
 
   it('keeps the names the lineup in force carried when the match has no lineup of its own', async () => {
@@ -150,11 +153,12 @@ describe('a lineup has one entry in the queue', () => {
     await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Kato' }, 'pw', { senpo: 'mem-k' }, ['senpo']);
     vi.advanceTimersByTime(1000);
     const answer = await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Ota', jiho: 'Hara' }, 'pw', { senpo: 'mem-o', jiho: 'mem-h' }, ['senpo', 'jiho']);
-    expect(answer).toEqual({ queued: true });
+    expect(answer.pending).toBe(true);
     expect(storedEntries()).toHaveLength(1);
     expect(queuedPayloads()[0]).toEqual({
       teamId: 't1', competitionId: 'c1', matchId: 'm1',
       positions: { senpo: 'Ota', jiho: 'Hara' }, memberIds: { senpo: 'mem-o', jiho: 'mem-h' }, changed: ['senpo', 'jiho'],
+      changedAt: { senpo: expect.any(Number), jiho: expect.any(Number) },
     });
     await tick(0);
     await s.reconnect();
@@ -166,8 +170,13 @@ describe('a lineup has one entry in the queue', () => {
     const s = connect({ own: { m1: STORED } });
     s.offline = true;
     await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Kato' }, 'pw', { senpo: 'mem-k' }, ['senpo']);
+    vi.advanceTimersByTime(1000);
     await API.putMatchLineup('c1', 't1', 'm1', { taisho: 'Mori' }, 'pw', { taisho: 'mem-m' }, ['taisho']);
     expect(queuedPayloads()[0].changed).toEqual(['senpo', 'taisho']);
+    // Each position keeps when its own change was made: a change made before
+    // a kachinuki match started stays dated before it once joined.
+    const at = queuedPayloads()[0].changedAt;
+    expect(at.taisho - at.senpo).toBeGreaterThanOrEqual(1000);
     await tick(0);
     await s.reconnect();
     expect(s.own.m1.positions).toEqual({ senpo: 'Kato', jiho: 'Tanaka', taisho: 'Mori' });
@@ -226,7 +235,7 @@ describe('a save a previous build queued', () => {
   ];
 
   async function reload() {
-    localStorage.setItem('bc_write_queue', JSON.stringify([oldEntry]));
+    localStorage.setItem('bc_write_queue_v2', JSON.stringify([oldEntry]));
     vi.resetModules();
     API = (await import('../api_client.jsx')).API;
   }
@@ -255,5 +264,34 @@ describe('a save a previous build queued', () => {
     expect(s.puts).toHaveLength(1);
     expect('changed' in s.puts[0].body).toBe(false);
     expect(s.own.m1.positions).toEqual({ senpo: 'Kato', jiho: 'Tanaka', taisho: 'Ito' });
+  });
+
+  // R9 (review 2): the old entry is moved onto its match's base when it loads,
+  // so it is sent in the match's order: behind a write of the match queued
+  // before it that the server keeps refusing, it waits.
+  it('is moved onto its match when it loads, and waits behind an earlier write of the match', async () => {
+    const court = [
+      `c1:m1\u001fold-court`,
+      {
+        enqueuedAt: Date.now() - 120_000, password: 'pw', sortStamp: Date.now() - 120_000,
+        compID: 'c1', matchID: 'm1', kind: 'court', terminal: true, method: 'PUT',
+        url: '/api/competitions/c1/matches/m1/court', payload: { court: 'B' },
+      },
+    ];
+    localStorage.setItem('bc_write_queue_v2', JSON.stringify([court, oldEntry]));
+    const sent = [];
+    global.fetch = vi.fn((url, opts) => {
+      if (String(url).includes('/api/time')) return Promise.reject(new TypeError('clock'));
+      sent.push(`${opts.method} ${url}`);
+      return Promise.resolve({ ok: false, status: 503, headers: { get: () => null }, json: async () => ({ error: 'busy' }), text: async () => '{"error":"busy"}' });
+    });
+    vi.resetModules();
+    API = (await import('../api_client.jsx')).API;
+    await tick(50);
+    expect(sent).toEqual(['PUT /api/competitions/c1/matches/m1/court']);
+    const keys = storedEntries().map(([k]) => k);
+    expect(keys.some((k) => k.startsWith('lineup:'))).toBe(false);
+    expect(keys.filter((k) => k.startsWith('c1:m1\u001f'))).toHaveLength(2);
+    expect(API.queuedLineupSave('c1', 't1', { matchId: 'm1' })).toBe(true);
   });
 });

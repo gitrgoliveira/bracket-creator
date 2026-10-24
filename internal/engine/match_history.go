@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"maps"
 	"slices"
 	"time"
 
@@ -21,8 +22,14 @@ const (
 	DoorDaihyosenAdd = "daihyosen-add"
 	DoorDaihyosenDel = "daihyosen-remove"
 	DoorEngine       = "engine"
+	// DoorEvent is the write engine.ReplayScoring derives from a match's score
+	// event log (bc-evts): the one write whose mark ids and event-log version
+	// are stored (settleDerivedScoreFields). WriteDoor is request-only and
+	// never bound from a body, so no client can name it.
+	DoorEvent = "event"
 	// DoorDisplaced names a history entry for a stored change an earlier-
-	// stamped write arriving after it moved to the history (S2 with R4): the
+	// stamped result arriving after it closed out into the history (the
+	// closed-match rule): the
 	// change came through some door before; this entry records it held.
 	DoorDisplaced = "displaced"
 
@@ -75,7 +82,9 @@ func doorOf(result *state.MatchResult) string {
 // staged, and failing it here would report an error for a result that lands.
 func (e *Engine) recordWriteHistory(h state.StoreTx, compID, matchID string, result *state.MatchResult) {
 	rep := result.Merge
-	if rep == nil {
+	// The score replay's derived write is recorded by its door, one line per
+	// event (RecordScoreEventsTx), never as one write.
+	if rep == nil || result.WriteDoor == DoorEvent {
 		return
 	}
 	outcomes := make(map[string]string, len(rep.Changed))
@@ -94,16 +103,15 @@ func (e *Engine) recordWriteHistory(h state.StoreTx, compID, matchID string, res
 		outcomes[g] = state.HistoryOutcomeHeld
 	}
 	entry := state.MatchHistoryEntry{
-		MatchID:           matchID,
-		Door:              doorOf(result),
-		Stamp:             rep.Stamp,
-		ReceivedAt:        time.Now().UnixMilli(),
-		Session:           result.RevSession,
-		Changed:           rep.Changed,
-		Outcomes:          outcomes,
-		Held:              rep.HeldValues,
-		Reason:            rep.HoldReason,
-		ClearedWithdrawal: rep.ClearedWithdrawal,
+		MatchID:    matchID,
+		Door:       doorOf(result),
+		Stamp:      rep.Stamp,
+		ReceivedAt: time.Now().UnixMilli(),
+		Session:    result.RevSession,
+		Changed:    rep.Changed,
+		Outcomes:   outcomes,
+		Held:       rep.HeldValues,
+		Reason:     rep.HoldReason,
 	}
 	if err := h.AppendMatchHistory(compID, entry); err != nil {
 		log.Printf("engine: match %s/%s: history entry not recorded: %v", compID, matchID, err)
@@ -149,6 +157,13 @@ func (e *Engine) recordDisplacedHistory(h state.StoreTx, compID, matchID string,
 // engi recorder, the kachinuki advance): every group it changed, applied, at
 // stamp. Same failure rule as recordWriteHistory.
 func (e *Engine) recordDirectHistory(h state.StoreTx, compID, matchID, door string, stamp int64, groups ...string) {
+	e.recordDirectHistoryTagged(h, compID, matchID, door, stamp, ForceOptions{}, groups...)
+}
+
+// recordDirectHistoryTagged is recordDirectHistory for a door the client
+// tagged (bc-evts F1): the baseline it leaves carries the write's id, so a
+// resend is answered as recorded (loggedWriteID), and its basis.
+func (e *Engine) recordDirectHistoryTagged(h state.StoreTx, compID, matchID, door string, stamp int64, tag ForceOptions, groups ...string) {
 	outcomes := make(map[string]string, len(groups))
 	for _, g := range groups {
 		outcomes[g] = state.HistoryOutcomeApplied
@@ -164,6 +179,11 @@ func (e *Engine) recordDirectHistory(h state.StoreTx, compID, matchID, door stri
 	if err := h.AppendMatchHistory(compID, entry); err != nil {
 		log.Printf("engine: match %s/%s: history entry not recorded: %v", compID, matchID, err)
 	}
+	// A direct writer has written the match by now: what it set is a
+	// baseline of the score event log once that log has begun, or when the
+	// write carries an id a resend must find (bc-evts).
+	e.noteWriteBaseline(h, compID, matchID, writeBaseline{door: door, stamp: stamp, named: groups,
+		writeID: tag.WriteID, basis: tag.Basis, session: tag.Session})
 }
 
 // noteServerBoutChanges adds to an explicit Changed every bout row the
@@ -229,9 +249,9 @@ func serverNowMs() int64 {
 // together. A HELD override makes no write at all, so there is nothing to
 // share a transaction with: it is appended on its own, directly through the
 // store.
-func (e *Engine) recordOverrideHistory(h state.StoreTx, compID, matchID, winnerName string, stamp int64, applied bool) {
+func (e *Engine) recordOverrideHistory(h state.StoreTx, compID, matchID, winnerName string, stamp int64, applied bool, tag ForceOptions) {
 	if applied {
-		e.recordDirectHistory(h, compID, matchID, doorOverride, stamp, state.GroupResult)
+		e.recordDirectHistoryTagged(h, compID, matchID, doorOverride, stamp, tag, state.GroupResult)
 		return
 	}
 	held, err := json.Marshal(map[string]string{"winner": winnerName})
@@ -259,15 +279,15 @@ type SupersededError struct {
 	Held []string
 	// HeldReason is the merge report's code for why they were held
 	// (state.MergeReport.HeldReason): "" for a newer stored change,
-	// state.HeldReasonNeedsWinner when applying them would have left the
-	// match without the winner it needs.
+	// state.HeldReasonMatchClosed when a finish or a decision stamped before
+	// the write had already closed the match.
 	HeldReason string
-	// HeldDecision is the decision code (state.MergeReport.HeldDecision,
-	// e.g. "fusensho", "kiken-voluntary") that closed the match when
-	// HeldReason is state.HeldReasonDefaultWinStands; "" otherwise. Lets the
-	// handlers name the decision on the wire (heldDecision) instead of the
-	// eliminated "default win" umbrella term.
-	HeldDecision string
+	// TurnedAway and ScoreVersion are the match's as the log stands after the
+	// write (a rival result is logged though held), so the writing device is
+	// told on its own answer of a tap of its that is turned away (stage 6
+	// review 6). Empty when the write logged nothing.
+	TurnedAway   map[string]string
+	ScoreVersion int
 }
 
 func (e *SupersededError) Error() string { return ErrMatchSuperseded.Error() }
@@ -280,8 +300,19 @@ func supersededBy(result *state.MatchResult) error {
 	return &SupersededError{
 		Held:         result.Merge.HeldGroups(),
 		HeldReason:   result.Merge.HeldReason(),
-		HeldDecision: result.Merge.HeldDecision(),
+		TurnedAway:   maps.Clone(result.TurnedAway),
+		ScoreVersion: result.ScoreVersion,
 	}
+}
+
+// TurnedAwayOf returns a superseded write's SupersededError.TurnedAway and
+// ScoreVersion, or nothing.
+func TurnedAwayOf(err error) (map[string]string, int) {
+	var se *SupersededError
+	if errors.As(err, &se) {
+		return se.TurnedAway, se.ScoreVersion
+	}
+	return nil, 0
 }
 
 // HeldReasonOf returns why a superseded write's groups were held (see
@@ -290,16 +321,6 @@ func HeldReasonOf(err error) string {
 	var se *SupersededError
 	if errors.As(err, &se) {
 		return se.HeldReason
-	}
-	return ""
-}
-
-// HeldDecisionOf returns the decision code a superseded write's default-win
-// hold named (see SupersededError.HeldDecision), or "".
-func HeldDecisionOf(err error) string {
-	var se *SupersededError
-	if errors.As(err, &se) {
-		return se.HeldDecision
 	}
 	return ""
 }

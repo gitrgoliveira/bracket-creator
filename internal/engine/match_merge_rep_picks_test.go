@@ -446,8 +446,8 @@ func TestMerge_RepBoutRemove_OlderThanAStoredPick_MovesThePickToTheHistory(t *te
 		require.NotNil(t, rep)
 		assert.Equal(t, []string{repPickAName}, rep.DisplacedGroups(), "the answer names the pick moved to the history")
 		assert.Empty(t, rep.HeldGroups(), "nothing of the removal was held")
-		assert.Empty(t, rep.HeldReason(), "no needs_winner: the pick lost its bout, not its winner")
-		assert.False(t, rep.NeedsWinner)
+		assert.Empty(t, rep.HeldReason(), "no match_closed: the pick lost its bout, the match was not finished")
+		assert.False(t, rep.MatchClosed)
 
 		entries := h.history(t)
 		own := historyOf(entries, DoorDaihyosenDel)
@@ -604,7 +604,7 @@ func TestMerge_RepPick_OnARowAHoldTookOut_IsHeldWithItsValue(t *testing.T) {
 		require.ErrorIs(t, err, ErrMatchSuperseded)
 		assert.ElementsMatch(t, []string{state.GroupPoints, repBoutGroup, repPickAName}, HeldGroupsOf(err))
 		assert.NotContains(t, late.Merge.Applied, repPickAName, "never applied onto nothing")
-		assert.Equal(t, HoldReasonKnockoutNeedsWinner, late.Merge.HoldReason)
+		assert.Equal(t, HoldReasonMatchClosed, late.Merge.HoldReason)
 
 		last := h.history(t)
 		last0 := last[len(last)-1]
@@ -614,11 +614,11 @@ func TestMerge_RepPick_OnARowAHoldTookOut_IsHeldWithItsValue(t *testing.T) {
 		assert.Empty(t, got.SubResults)
 		assert.Zero(t, got.GroupStamps[repPickAName], "and its stamp is the stored one")
 	})
-	t.Run("a write applied in part moves no stamp of the pick", func(t *testing.T) {
+	t.Run("an overtime change beside it is turned away too and moves no stamp of the pick", func(t *testing.T) {
 		h := finished(t)
 		late := tying(h, state.GroupEncho)
 		late.Encho = &state.EnchoMetadata{PeriodCount: 1}
-		require.NoError(t, h.write(late), "the overtime applies")
+		require.ErrorIs(t, h.write(late), ErrMatchSuperseded, "the overtime is stamped after the finish: turned away")
 		assert.NotContains(t, late.Merge.Applied, repPickAName)
 		assert.Contains(t, late.Merge.Held, repPickAName)
 		assert.JSONEq(t, `{"sideAMemberId":"eve"}`, string(late.Merge.HeldValues[repPickAName]))

@@ -62,29 +62,36 @@ func TestScoreHandler_StaleFinishIsHeldNotRefusedForAReason(t *testing.T) {
 		"ipponsA": []string{}, "ipponsB": []string{"K"}, "modifiedAt": now - 20_000,
 	})
 	require.Equal(t, http.StatusOK, code, out)
-	assert.Equal(t, false, out["applied"])
-	assert.Equal(t, "superseded", out["reason"])
+	// The FIRST recorded result stands, in stamp order (operator decision
+	// 2026-10-16): the late finish was made before the stored one, so it is the
+	// first, and the stored one, kept in the history, no longer stands.
+	assert.NotEqual(t, false, out["applied"], "no 400, and no loss: it is applied")
 
 	m := mergeStored(t, store, compID)
-	assert.Equal(t, mgAlice, m.Winner, "the newer finish stands")
+	assert.Equal(t, mgBob, m.Winner, "the first finish stands")
 	entries, err := store.LoadMatchHistory(compID, "Pool A-0")
 	require.NoError(t, err)
-	last := entries[len(entries)-1]
-	assert.Equal(t, state.HistoryOutcomeHeld, last.Outcomes[state.GroupResult])
-	assert.Contains(t, string(last.Held[state.GroupResult]), `"winner":"`+mgBob+`"`, "the stale finish is kept")
+	var displaced bool
+	for _, e := range entries {
+		if e.Door == "displaced" && e.Outcomes[state.GroupResult] == state.HistoryOutcomeHeld {
+			displaced = true
+			assert.Contains(t, string(e.Held[state.GroupResult]), `"winner":"`+mgAlice+`"`, "the later finish is kept")
+		}
+	}
+	assert.True(t, displaced, "the later finish is kept in the history")
 
 	t.Run("an equal stamp is a correction, which still needs its reason", func(t *testing.T) {
 		code, out := mergeReviewPut(t, r, compID, map[string]any{
-			"sideA": mgAlice, "sideB": mgBob, "status": "completed", "winner": mgBob,
-			"ipponsA": []string{}, "ipponsB": []string{"K"}, "modifiedAt": now - 10_000,
+			"sideA": mgAlice, "sideB": mgBob, "status": "completed", "winner": mgAlice,
+			"ipponsA": []string{"M"}, "ipponsB": []string{}, "modifiedAt": now - 20_000,
 		})
 		assert.Equal(t, http.StatusBadRequest, code, out)
 	})
 }
 
-// R4 on the wire: a recount that leaves a finished engi match with no valid
-// count is not applied, and the answer says why (heldReason "needs_winner",
-// with its own message), so the operator corrects the result with a winner.
+// The closed-match rule on the wire: a recount stamped after an engi finish is
+// not applied, and the answer says why (heldReason "match_closed", with its
+// message), so the operator corrects the result with Correct.
 func TestScoreHandler_HeldForAWinnerSaysSo(t *testing.T) {
 	const compID = "merge-review-r4"
 	r, store := mergeServer(t, compID)
@@ -107,8 +114,8 @@ func TestScoreHandler_HeldForAWinnerSaysSo(t *testing.T) {
 	require.Equal(t, http.StatusOK, code, out)
 	assert.Equal(t, false, out["applied"])
 	assert.Equal(t, "superseded", out["reason"], "the not-retried, not-lost shape the queue keys on")
-	assert.Equal(t, state.HeldReasonNeedsWinner, out["heldReason"])
-	assert.Equal(t, NeedsWinnerMessage, out["message"])
+	assert.Equal(t, state.HeldReasonMatchClosed, out["heldReason"])
+	assert.Equal(t, MatchClosedMessage, out["message"])
 	assert.Equal(t, []any{"flags"}, out["heldGroups"])
 
 	m := mergeStored(t, store, compID)
@@ -117,14 +124,11 @@ func TestScoreHandler_HeldForAWinnerSaysSo(t *testing.T) {
 	assert.Equal(t, 3, m.FlagsA)
 }
 
-// R2's fusensho arm (bc-mrgc, the fusensho twin of the R4 test above): a
-// running board's scoring over a match a match-level default win closed (the
-// OTHER side is barred by a DIFFERENT match, recorded from the queue row's
-// Record default win) is not applied either, and the answer says why with its
-// own code and message (heldReason "default_win_stands",
-// DefaultWinStandsMessage), so the operator is sent to correct the default
-// win from the match's score editor rather than told to correct the result
-// with a winner: the match already has one.
+// The closed-match rule's fusensho arm (the twin of the test above): a running
+// board's scoring over a match a match-level fusensho closed (the OTHER side is
+// barred by a DIFFERENT match, recorded from the queue row) is not applied
+// either, and the answer says why with the one code and message
+// (heldReason "match_closed", MatchClosedMessage).
 func TestScoreHandler_HeldForADefaultWinSaysSo(t *testing.T) {
 	const compID = "merge-review-dws"
 	r, store := mergeServer(t, compID)
@@ -145,15 +149,74 @@ func TestScoreHandler_HeldForADefaultWinSaysSo(t *testing.T) {
 	require.Equal(t, http.StatusOK, code, out)
 	assert.Equal(t, false, out["applied"])
 	assert.Equal(t, "superseded", out["reason"], "the not-retried, not-lost shape the queue keys on")
-	assert.Equal(t, state.HeldReasonDefaultWinStands, out["heldReason"])
-	assert.Equal(t, "fusensho", out["heldDecision"])
-	assert.Equal(t, DefaultWinStandsMessage("fusensho"), out["message"])
+	assert.Equal(t, state.HeldReasonMatchClosed, out["heldReason"])
+	assert.NotContains(t, out, "heldDecision", "one code, one remedy: Correct")
+	assert.Equal(t, MatchClosedMessage, out["message"])
 	assert.Equal(t, []any{"points"}, out["heldGroups"])
 
 	m := mergeStored(t, store, compID)
 	assert.Equal(t, state.MatchStatusCompleted, m.Status, "the default win stands")
 	assert.Equal(t, "fusensho", m.Decision)
 	assert.Equal(t, mgAlice, m.Winner)
+}
+
+// bc-evts stage 2b, operator decision 2026-10-16 (I1): the FIRST recorded
+// result stands. A Finish stamped after a recorded kiken from a device that
+// never saw it (no correction reason, no clearWithdrawal) is refused as
+// match_closed in the 200 superseded shape the queue keys on, never the 400
+// "missing correction reason" a queued replay would loop on; the withdrawal
+// stands and its competitor stays barred. The decision arriving AFTER the
+// finish stamped later gives the same match, in either order.
+func TestScoreHandler_ALaterFinishThatNeverSawTheKikenIsMatchClosed(t *testing.T) {
+	finish := func(now int64) map[string]any {
+		return map[string]any{
+			"sideA": mgAlice, "sideB": mgBob, "status": "completed", "winner": mgBob,
+			"ipponsA": []string{}, "ipponsB": []string{"M"},
+			"changed": []string{"points", "result"}, "modifiedAt": now - 10_000,
+		}
+	}
+	decision := func(now int64) map[string]any {
+		return map[string]any{"decision": "kiken-voluntary", "decisionBy": "shiro", "modifiedAt": now - 20_000}
+	}
+	for _, order := range []string{"decision first", "finish first"} {
+		t.Run(order, func(t *testing.T) {
+			compID := "merge-r5-i1-" + map[string]string{"decision first": "a", "finish first": "b"}[order]
+			r, store := mergeServer(t, compID)
+			now := time.Now().UnixMilli()
+			sendDecision := func() int {
+				w := serveJSON(r, "POST", "/api/competitions/"+compID+"/matches/Pool A-0/decision", decision(now))
+				return w.Code
+			}
+			var out map[string]any
+			var code int
+			if order == "decision first" {
+				require.Equal(t, http.StatusOK, sendDecision())
+				code, out = mergeReviewPut(t, r, compID, finish(now))
+				require.Equal(t, http.StatusOK, code, "a queued replay must not be refused 400: %v", out)
+				assert.Equal(t, false, out["applied"])
+				assert.Equal(t, "superseded", out["reason"])
+				assert.Equal(t, state.HeldReasonMatchClosed, out["heldReason"])
+				assert.Equal(t, MatchClosedMessage, out["message"])
+			} else {
+				code, out = mergeReviewPut(t, r, compID, finish(now))
+				require.Equal(t, http.StatusOK, code, out)
+				require.Equal(t, http.StatusOK, sendDecision())
+			}
+			m := mergeStored(t, store, compID)
+			assert.Equal(t, state.MatchStatusCompleted, m.Status)
+			assert.Equal(t, "kiken-voluntary", m.Decision, "the first recorded result stands")
+			assert.Equal(t, mgAlice, m.Winner)
+			statuses, err := store.LoadCompetitorStatus(compID)
+			require.NoError(t, err)
+			barred := 0
+			for _, s := range statuses {
+				if !s.Eligible {
+					barred++
+				}
+			}
+			assert.Equal(t, 1, barred, "the withdrawer stays barred")
+		})
+	}
 }
 
 // The other arrival order of the same two writes: the recount arrives first,
@@ -183,7 +246,7 @@ func TestScoreHandler_FinishMovesANewerTyingChangeToTheHistory(t *testing.T) {
 	require.Equal(t, http.StatusOK, code, out)
 	assert.NotEqual(t, false, out["applied"], "the finish is applied")
 	assert.Equal(t, []any{"flags"}, out["displacedGroups"])
-	assert.Equal(t, state.HeldReasonNeedsWinner, out["heldReason"])
+	assert.Equal(t, state.HeldReasonMatchClosed, out["heldReason"])
 	assert.Nil(t, out["heldGroups"], "nothing of the finish was held")
 
 	m := mergeStored(t, store, compID)

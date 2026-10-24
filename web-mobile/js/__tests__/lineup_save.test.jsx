@@ -126,6 +126,17 @@ describe('joinQueuedLineupSave', () => {
     expect(joinQueuedLineupSave(queued, incoming)).toEqual(incoming);
   });
 
+  it('keeps when each position was changed: the later change\'s stamp where both changed it, the earlier one\'s elsewhere', () => {
+    const queued = { ...save({ senpo: 'Kato', jiho: 'Ito' }, undefined, ['senpo', 'jiho']), changedAt: { senpo: 100, jiho: 100 } };
+    const incoming = { ...save({ jiho: 'Mori', taisho: 'Ota' }, undefined, ['jiho', 'taisho']), changedAt: { jiho: 300, taisho: 300 } };
+    expect(joinQueuedLineupSave(queued, incoming).changedAt).toEqual({ senpo: 100, jiho: 300, taisho: 300 });
+    // A later change with no stamp (an older build's) leaves its position with none.
+    const unstamped = save({ senpo: 'Ota' }, undefined, ['senpo']);
+    expect(joinQueuedLineupSave(queued, unstamped).changedAt).toEqual({ jiho: 100 });
+    // A whole lineup carries none: the server orders it by its arrival.
+    expect('changedAt' in joinQueuedLineupSave(save({ senpo: 'Sato' }), incoming)).toBe(false);
+  });
+
   it('changes neither save it is given', () => {
     const queued = save({ senpo: 'Kato' }, { senpo: 'mem-k' }, ['senpo']);
     const incoming = save({ senpo: 'Ota', jiho: 'Ito' }, { senpo: 'mem-o' }, ['senpo', 'jiho']);

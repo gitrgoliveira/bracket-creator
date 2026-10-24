@@ -121,7 +121,7 @@ func (e *Engine) poolCompletion(loader poolStandingsLoader, compID string, comp 
 		}
 		seen[pn] = true
 		complete := m.Status == state.MatchStatusCompleted
-		if (IsTiebreakerMatchID(m.ID) || IsPoolDaihyosenMatchID(m.ID)) && m.Winner == "" {
+		if state.IsPoolSupplementaryMatchID(m.ID) && m.Winner == "" {
 			complete = false
 		}
 		if !complete {

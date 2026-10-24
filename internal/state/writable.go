@@ -29,7 +29,7 @@ const writeProbePrefix = ".write-check-"
 
 // checkDataWritable tries a write in every folder the server saves into:
 // the data folder, competitions/, the transaction log, each competition's
-// folder and its match history, and the branding and sponsors folders when
+// folder, its match history and its score event logs, and the branding and sponsors folders when
 // they exist. A file's own mode does not matter: a save replaces it by
 // renaming, which needs only its folder. Every folder that fails is named,
 // once (its first failure).
@@ -59,8 +59,10 @@ func checkDataWritable(folder string) error {
 		}
 		compDir := filepath.Join(compsDir, e.Name())
 		dirs = append(dirs, compDir)
-		if history := filepath.Join(compDir, matchHistoryDir); isDir(history) {
-			dirs = append(dirs, history)
+		for _, sub := range []string{matchHistoryDir, scoreLogDir} {
+			if d := filepath.Join(compDir, sub); isDir(d) {
+				dirs = append(dirs, d)
+			}
 		}
 	}
 	for _, d := range dirs {

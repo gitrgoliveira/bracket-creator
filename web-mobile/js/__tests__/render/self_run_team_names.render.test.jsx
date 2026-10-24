@@ -10,6 +10,7 @@
 import React from 'react';
 import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { answered } from '../helpers/team_members.js';
 import { lineupPutStubByTeam } from '../helpers/lineup_server.js';
@@ -59,7 +60,6 @@ beforeEach(() => {
     addTeamMember: vi.fn(async (_c, _t, name) => answered({ id: 'new-1', index: 6 }, { name })),
     recordScore: vi.fn(async () => ({ status: 'running' })),
     hasPendingTerminalWrite: () => false,
-    notePendingEdit: () => () => {},
   };
 });
 
@@ -100,8 +100,8 @@ describe.each(['fixed', 'kachinuki'])('a participant names bout 1 of a %s team m
     await openEditor(teamMatch(tmt), { 'team-A': blank('a'), 'team-B': blank('b') });
     await typeName(akaBout1(), 'Mei Ito');
 
-    expect(window.API.renameTeamMember).toHaveBeenCalledWith('c1', 'team-A', 'a1', 'Mei Ito', '');
-    expect(window.API.putMatchLineup).toHaveBeenCalledWith('c1', 'team-A', 'm1', { senpo: 'Mei Ito' }, '', { senpo: 'a1' }, ['senpo']);
+    expect(window.API.renameTeamMember).toHaveBeenCalledWith('c1', 'team-A', 'a1', 'Mei Ito', '', expect.any(Object));
+    expect(window.API.putMatchLineup).toHaveBeenCalledWith('c1', 'team-A', 'm1', { senpo: 'Mei Ito' }, '', { senpo: 'a1' }, ['senpo'], expect.objectContaining({ onRefusal: expect.any(Function) }));
     noError();
     expect(akaBout1().value).toBe('Mei Ito');
   });
@@ -121,7 +121,7 @@ describe('a participant fills in a fixed-order row from the list (bc-dhas)', () 
     await act(async () => { fireEvent.click(kai); });
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
-    expect(window.API.putMatchLineup).toHaveBeenCalledWith('c1', 'team-A', 'm1', { senpo: 'Kai Mori' }, '', { senpo: 'a2' }, ['senpo']);
+    expect(window.API.putMatchLineup).toHaveBeenCalledWith('c1', 'team-A', 'm1', { senpo: 'Kai Mori' }, '', { senpo: 'a2' }, ['senpo'], expect.objectContaining({ onRefusal: expect.any(Function) }));
     expect(window.API.renameTeamMember).not.toHaveBeenCalled();
     noError();
     expect(akaBout1().value).toBe('Kai Mori');
@@ -139,8 +139,8 @@ describe('a participant fills in a fixed-order row from the list (bc-dhas)', () 
     await act(async () => { fireEvent.click(add); });
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
-    expect(window.API.addTeamMember).toHaveBeenCalledWith('c1', 'team-A', 'Jun Oda', '');
-    expect(window.API.putMatchLineup).toHaveBeenCalledWith('c1', 'team-A', 'm1', { senpo: 'Jun Oda' }, '', { senpo: 'new-1' }, ['senpo']);
+    expect(window.API.addTeamMember).toHaveBeenCalledWith('c1', 'team-A', 'Jun Oda', '', expect.any(Object));
+    expect(window.API.putMatchLineup).toHaveBeenCalledWith('c1', 'team-A', 'm1', { senpo: 'Jun Oda' }, '', { senpo: 'new-1' }, ['senpo'], expect.objectContaining({ onRefusal: expect.any(Function) }));
     noError();
     expect(akaBout1().value).toBe('Jun Oda');
   });
@@ -160,13 +160,15 @@ describe('a participant names a later kachinuki bout\'s fighter (bc-dhas)', () =
     await act(async () => { fireEvent.click(slot); });
     await typeName(shiroNow(), 'Ito');
 
-    expect(window.API.renameTeamMember).toHaveBeenCalledWith('c1', 'team-B', 'b3', 'Ito', '');
+    expect(window.API.renameTeamMember).toHaveBeenCalledWith('c1', 'team-B', 'b3', 'Ito', '', expect.any(Object));
     expect(window.API.putMatchLineup, 'a later kachinuki bout is not a lineup position').not.toHaveBeenCalled();
     noError();
+    // bc-evts stage 5: the fighter is a bout.fighter tap, with the public
+    // page's empty password.
     await waitFor(() => {
-      const sent = window.API.recordScore.mock.calls.map((c) => c[2]).pop();
-      const bout2 = (sent && sent.subResults || []).find((s) => s.position === 2);
-      expect(bout2).toMatchObject({ sideB: 'Ito', sideBMemberId: 'b3' });
+      const sent = window.API.recordTap.mock.calls.at(-1);
+      expect(sent[2]).toEqual({ kind: 'bout.fighter', pos: 2, side: 'b', name: 'Ito', memberId: 'b3' });
+      expect(sent[3]).toBe('');
     }, { timeout: 3000 });
   });
 
@@ -211,3 +213,9 @@ describe('a participant names a later kachinuki bout\'s fighter (bc-dhas)', () =
     expect(warning.textContent).toBe(`"Ito" was used for this bout, but the team member could not be renamed. ${sentence}`);
   });
 });
+
+// bc-evts stage 5: a running team match is scored by taps handed to the outbox
+// (API.recordTap); each test gets a fresh fake of that surface, whose pending
+// taps the board folds on. Registered last, so it lands on the API the hooks
+// above set up.
+beforeEach(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });

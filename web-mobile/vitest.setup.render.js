@@ -3,8 +3,9 @@ import { createRoot } from 'react-dom/client';
 import '@testing-library/jest-dom';
 import { vi, beforeEach, afterEach } from 'vitest';
 import { cleanup } from '@testing-library/react';
+import './vitest.setup.storage.js';
 
-// Provide real React 18 as the window/global that component files destructure:
+// Provide real React 19 as the window/global that component files destructure:
 //   const { useState, useEffect, ... } = React;   ← evaluated at module load
 // This must be set before any component module is dynamically imported.
 global.React = React;
@@ -68,7 +69,14 @@ afterEach(() => {
   // Unmount BEFORE restoring spies so act()/effect warnings emitted during
   // React Testing Library teardown are captured and counted.
   cleanup();
-  const warns = warnSpy.mock?.calls ?? [];
+  // React 19 warns once per process that the classic JSX transform is
+  // "outdated" (it sees the dev transform's __self prop). The classic runtime
+  // is deliberate: the app compiles JSX to the global Preact `h`, and these
+  // tests swap real React in as that global. Only that one message is let
+  // through; every other warning still fails the test.
+  const warns = (warnSpy.mock?.calls ?? []).filter(
+    (a) => !String(a[0]).startsWith('Your app (or one of its dependencies) is using an outdated JSX transform'),
+  );
   const errors = errorSpy.mock?.calls ?? [];
   warnSpy.mockRestore();
   errorSpy.mockRestore();

@@ -13,7 +13,7 @@
 // The fix is a hybrid stamp: max(this device's time, the stamp of the match as
 // the operator saw it + 1). Wall-clock order holds wherever it is right (an
 // offline court's genuinely later action still wins); causality holds where
-// the clocks disagree. For an autosave the match "as seen" is the one shown at
+// the clocks disagree. For a running write the match "as seen" is the one shown at
 // the TAP, not at the send: a tap made before another device finished the
 // match stays older than that finish (operator ruling 2026-09-27).
 //
@@ -166,7 +166,7 @@ describe('wall-clock order stands where it is right', () => {
     });
 });
 
-describe('an autosave is floored by the match as it was at the tap', () => {
+describe('a running write is floored by the match as it was when made', () => {
     // The tap was made against the point stamped 3 s ahead. Before the debounce
     // sent it, another device finished the match (stamped later still), and
     // the editor's prop moved on. The write is floored by what the tap saw,
@@ -217,9 +217,11 @@ describe('every stamped write is floored the same way', () => {
             sent.push({ url: String(url), body: JSON.parse(opts.body) });
             return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ id: 'r1-m1', status: 'running' }) });
         });
-        await API.recordDaihyosen('c1', 'r1-m1', 'pw', seen);
-        await API.removeDaihyosen('c1', 'r1-m1', 'pw', seen);
-        expect(sent.map((r) => r.body.modifiedAt)).toEqual([seen + 1, seen + 1]);
+        await (await API.recordDaihyosen('c1', 'r1-m1', 'pw', seen)).settled;
+        await (await API.removeDaihyosen('c1', 'r1-m1', 'pw', seen)).settled;
+        // bc-evts: a later write of this device for the match is never stamped
+        // at or before its earlier one (the outbox sends them in that order).
+        expect(sent.map((r) => r.body.modifiedAt)).toEqual([seen + 1, seen + 2]);
     });
 });
 
@@ -235,7 +237,7 @@ describe('a queued write keeps its floor when it is re-stamped', () => {
         global.fetch = vi.fn(() => Promise.reject(new TypeError('offline')));
         await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A', ipponsA: ['M', 'M'] }, 'pw', { id: 'm1', compId: 'c1', status: 'running', modifiedAt: seen });
         await flushMicrotasks();
-        const stored = JSON.parse(localStorage.getItem('bc_write_queue'));
+        const stored = JSON.parse(localStorage.getItem('bc_write_queue_v2'));
         expect(stored[0][1].seenModifiedAt).toBe(seen);
         // Back online, the server refuses the first replay for clock skew
         // (its clock is behind this device's); the re-stamp is floored.
@@ -263,9 +265,9 @@ describe('a queued write keeps its floor when it is re-stamped', () => {
 });
 
 describe('a write resent after a clock_skew refusal keeps its floor', () => {
-    // The direct resend (not the queue's) re-stamps with this device's time
-    // once the offset is relearned; it stays after what the write was made
-    // against.
+    // bc-evts: every rule-bound write is the outbox's, so the resend is the
+    // queue's re-stamp (_restampQueuedEntryForSkew) once the offset is
+    // relearned; it stays after what the write was made against.
     function skewOnce() {
         const sent = [];
         let call = 0;
@@ -282,11 +284,11 @@ describe('a write resent after a clock_skew refusal keeps its floor', () => {
     }
 
     // Only a finished result is resent at once (a running update is left to
-    // the next autosave).
+    // the next running write).
     it('a finished result', async () => {
         const seen = Date.now() + 3000;
         const sent = skewOnce();
-        await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A', ipponsA: ['M', 'M'] }, 'pw', { id: 'm1', compId: 'c1', status: 'running', modifiedAt: seen });
+        await (await API.recordScore('c1', 'm1', { status: 'completed', winner: 'A', ipponsA: ['M', 'M'] }, 'pw', { id: 'm1', compId: 'c1', status: 'running', modifiedAt: seen })).settled;
         expect(sent).toHaveLength(2);
         expect(sent[1].modifiedAt).toBe(seen + 1);
     });
@@ -294,7 +296,7 @@ describe('a write resent after a clock_skew refusal keeps its floor', () => {
     it('a hand-set winner', async () => {
         const seen = Date.now() + 3000;
         const sent = skewOnce();
-        await API.overrideBracketWinner('c1', 'r1-m1', 'Team A', 'pw', false, seen);
+        await (await API.overrideBracketWinner('c1', 'r1-m1', 'Team A', 'pw', false, seen)).settled;
         expect(sent).toHaveLength(2);
         expect(sent[1].modifiedAt).toBe(seen + 1);
     });
@@ -312,9 +314,12 @@ describe('a queued write that takes another\'s place keeps the later floor', () 
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'], seenModifiedAt: high }, 'pw', null);
         await flushMicrotasks();
         vi.advanceTimersByTime(5000);
+        // The backoff retry the clock set off fails too: the entry is not out
+        // when the next write comes (one being sent is never replaced).
+        await flushMicrotasks();
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M', 'K'], seenModifiedAt: low }, 'pw', null);
         await flushMicrotasks();
-        const stored = JSON.parse(localStorage.getItem('bc_write_queue'));
+        const stored = JSON.parse(localStorage.getItem('bc_write_queue_v2'));
         expect(stored).toHaveLength(1);
         expect(stored[0][1].seenModifiedAt).toBe(high);
     });

@@ -738,6 +738,11 @@ func migrateMissingNumberPrefixes(store *state.Store, eng *engine.Engine, comps 
 }
 
 func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub) {
+	// A chusen's order and a reset of the overrides are ordered by arrival: a
+	// request the outbox gave up on can land after its resend and after the
+	// next write, so a late duplicate of one already applied is answered as
+	// recorded (writeOnce, Z3).
+	poolRanksOnce := newWriteOnce()
 	r.GET("/competitions", func(c *gin.Context) {
 		comps, err := loadAllCompetitions(store)
 		if err != nil {
@@ -2176,7 +2181,27 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				entries[i] = [2]string{p.Name, p.Dojo}
 			}
 			nearDupWarnings = helper.FindNearDupWarnings(entries)
-			if err := store.SaveParticipants(id, comp.Players); err != nil {
+			// The roster and its seeds land as ONE locked step (SaveRoster):
+			// a PUT built from a roster that is no longer the stored one (the
+			// rosterVersion it sends back) is refused 409 roster_changed with
+			// the roster as it stands and nothing written, so a competitor
+			// another desk added, removed or seeded meanwhile is never lost
+			// to it; the page lays its change on that roster and sends it
+			// again. A check-in is never written here: every competitor keeps
+			// the one stored for them, so another desk's check-in made while
+			// this PUT was out stands (stage 6 review 12, C1).
+			seedsErr, err := store.SaveRoster(id, comp.Players, extractSeeds(comp.Players), comp.RosterVersion)
+			if err != nil {
+				var changed *state.RosterChangedError
+				if errors.As(err, &changed) {
+					c.JSON(http.StatusConflict, gin.H{
+						"error":         "The competitor list was changed on another device after this one was read, so nothing was saved. The list as it stands is included.",
+						"code":          "roster_changed",
+						"players":       changed.Players,
+						"rosterVersion": changed.Version,
+					})
+					return
+				}
 				// A perfect (name, dojo) duplicate, a reserved-pattern name,
 				// or a blank dojo is a client error naming the offending row,
 				// not a server fault; respondRosterWriteError (errors.go) is
@@ -2187,9 +2212,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				internalError(c, err, "failed to save participants")
 				return
 			}
-			assignments := extractSeeds(comp.Players)
-			if err := store.SaveSeeds(id, assignments); err != nil {
-				fmt.Printf("Warning: failed to save seeds: %v\n", err)
+			if seedsErr != nil {
+				fmt.Printf("Warning: failed to save seeds: %v\n", seedsErr)
 			}
 			// Deferred HasParticipantIDs flip, runs ONLY after the
 			// participants file lands successfully. See the roster-only
@@ -2338,20 +2362,29 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			}
 			if players, lerr := store.LoadParticipantsOpt(id, updated.EffectiveWithZekkenName(), loadOpts); lerr == nil {
 				updated.Players = players
+				updated.RosterVersion = state.RosterVersion(players)
 			} else {
 				fmt.Printf("Warning: PUT /api/competitions/%s, failed to re-load participants for roster-PUT response (falling back to request body): %v\n", id, lerr)
 				updated.Players = comp.Players // fallback: echo body
+				// The version of what is echoed, never "": a page given none
+				// would send its next save unchecked. The echo lacks the ids
+				// the save minted, so that save is refused roster_changed
+				// and the page lays its change on the stored roster.
+				updated.RosterVersion = state.RosterVersion(comp.Players)
 			}
 		} else {
 			// Settings-only PUT, load the on-disk roster for the
 			// response so the merge doesn't push null into local state.
 			// Falling back to an empty slice on load failure is safer
 			// than nil (which JSON-encodes as null).
-			if players, lerr := store.LoadParticipants(id, updated.EffectiveWithZekkenName()); lerr == nil {
+			if players, lerr := store.LoadParticipantsOpt(id, updated.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: true, HasIDs: updated.ParticipantIDsHint()}); lerr == nil {
 				updated.Players = players
+				updated.RosterVersion = state.RosterVersion(players)
 			} else {
 				fmt.Printf("Warning: failed to load participants for settings-PUT response: %v\n", lerr)
 				updated.Players = []domain.Player{}
+				// Named for what is answered (see the roster-PUT fallback above).
+				updated.RosterVersion = state.RosterVersion(updated.Players)
 			}
 		}
 		// Embed the competition fields inline and add the near-duplicate
@@ -2719,8 +2752,15 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// and confirming reopens that match with the new qualifier seated
 			// (engine.OverridePoolRanks). Never past downstream_knockout_running.
 			ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
+			// WriteID is the client's id for the write (Z3): one already
+			// applied is answered as recorded, never applied again.
+			WriteID string `json:"writeId,omitempty"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := validWriteID(req.WriteID); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -2802,24 +2842,39 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// correction does: the same 409s, the same confirmation, the same
 		// reopen (engine.OverridePoolRanks), once, for the whole group.
 		var reopened []engine.ReopenedMatch
-		changed, err := eng.OverridePoolRanks(id, poolId, ranks, engine.ForceOptions{
-			Force:    req.ForceDownstreamReopen,
-			Reopened: &reopened,
-		})
-		if err != nil {
-			switch {
-			case respondIfDownstreamKnockoutRunning(c, err):
-			case respondIfDownstreamKnockoutPlayed(c, err):
-			case respondIfEngineWriteError(c, err):
-			default:
-				internalError(c, err)
+		var changed, applied bool
+		ran := poolRanksOnce.do(poolRanksTarget(id), req.WriteID, func() bool {
+			var err error
+			changed, err = eng.OverridePoolRanks(id, poolId, ranks, engine.ForceOptions{
+				Force:    req.ForceDownstreamReopen,
+				Reopened: &reopened,
+			})
+			if err != nil {
+				switch {
+				case respondIfDownstreamKnockoutRunning(c, err):
+				case respondIfDownstreamKnockoutPlayed(c, err):
+				case respondIfEngineWriteError(c, err):
+				default:
+					internalError(c, err)
+				}
+				return false
 			}
+			applied = true
+			return true
+		})
+		if !ran {
+			// A late duplicate of an order already applied: nothing is
+			// recorded again, nothing reopened, nothing announced.
+			c.JSON(http.StatusOK, gin.H{"reopenedMatches": blockedMatchesPayload(nil)})
+			return
+		}
+		if !applied {
 			return
 		}
 		if changed {
 			hub.Broadcast(EventTournamentUpdated, nil)
 		}
-		broadcastReopenedDownstream(hub, id, reopened)
+		broadcastReopenedDownstream(hub, store, id, reopened)
 		if changed && comp.Format == state.CompFormatMixed {
 			// A new order can complete a pool (a chusen settles its last
 			// tie): seating a pool's slots for the first time is the
@@ -2898,26 +2953,43 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
-		changed, err := store.ResetOverridesChanged(id)
-		if err != nil {
-			// ResetOverridesChanged goes through modifyOverridesChanged, which
-			// LOADS the file first -- so it fails identically on the very
-			// corrupt overrides.json this endpoint exists to repair. This IS
-			// that repair door: fall back to Store.ResetOverridesForce, the
-			// load-free primitive (state/overrides.go) that writes a fresh
-			// empty value directly, and treat it as a change (an unreadable
-			// file is never "already empty"). Any OTHER load/save error still
-			// falls through to internalError below.
-			if errors.Is(err, state.ErrCorruptOverrides) {
-				if forceErr := store.ResetOverridesForce(id); forceErr != nil {
-					internalError(c, forceErr)
-					return
+		// The optional {writeId} body (Z3), ordered with the chusen's orders.
+		tag, ok := bindOptionalWriteTag(c)
+		if !ok {
+			return
+		}
+		var changed, applied bool
+		ran := poolRanksOnce.do(poolRanksTarget(id), tag.WriteID, func() bool {
+			var err error
+			changed, err = store.ResetOverridesChanged(id)
+			if err != nil {
+				// ResetOverridesChanged goes through modifyOverridesChanged, which
+				// LOADS the file first -- so it fails identically on the very
+				// corrupt overrides.json this endpoint exists to repair. This IS
+				// that repair door: fall back to Store.ResetOverridesForce, the
+				// load-free primitive (state/overrides.go) that writes a fresh
+				// empty value directly, and treat it as a change (an unreadable
+				// file is never "already empty"). Any OTHER load/save error still
+				// falls through to internalError below.
+				if errors.Is(err, state.ErrCorruptOverrides) {
+					if forceErr := store.ResetOverridesForce(id); forceErr != nil {
+						internalError(c, forceErr)
+						return false
+					}
+					changed, applied = true, true
+					return true
 				}
-				hub.Broadcast(EventTournamentUpdated, nil)
-				c.Status(http.StatusNoContent)
-				return
+				internalError(c, err)
+				return false
 			}
-			internalError(c, err)
+			applied = true
+			return true
+		})
+		if !ran {
+			c.Status(http.StatusNoContent)
+			return
+		}
+		if !applied {
 			return
 		}
 		if changed {

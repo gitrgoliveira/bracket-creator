@@ -310,6 +310,7 @@ describe('DecisionPrompt → /decision POST integration', () => {
       'match-9',
       { decision: 'fusenpai', decisionBy: 'shiro' },
       'tournament-secret',
+      expect.objectContaining({ onRefusal: expect.any(Function) }),
     );
   });
 
@@ -1167,11 +1168,31 @@ describe('item 7: non-points decisions advance to next match', () => {
     it('the body carries the stamp of the match the decision was recorded on', async () => {
       const submit = makeSubmitDecision({ match: { ...makeMatch('m-s'), modifiedAt: 1_700_000_000_000 }, enchoPeriodCount: 0, password: 'pw', ...makeSetters(), onClose: vi.fn() });
       await submit('fusenpai', { decisionBy: 'shiro', decisionReason: '' });
-      expect(window.API.recordDecision).toHaveBeenCalledWith('c1', 'm-s', { decision: 'fusenpai', decisionBy: 'shiro', seenModifiedAt: 1_700_000_000_000 }, 'pw');
+      expect(window.API.recordDecision).toHaveBeenCalledWith('c1', 'm-s', { decision: 'fusenpai', decisionBy: 'shiro', seenModifiedAt: 1_700_000_000_000 }, 'pw', expect.objectContaining({ onRefusal: expect.any(Function) }));
       window.API.recordDecision.mockClear();
       const plain = makeSubmitDecision({ match: makeMatch('m-p'), enchoPeriodCount: 0, password: 'pw', ...makeSetters(), onClose: vi.fn() });
       await plain('fusenpai', { decisionBy: 'shiro', decisionReason: '' });
-      expect(window.API.recordDecision).toHaveBeenCalledWith('c1', 'm-p', { decision: 'fusenpai', decisionBy: 'shiro' }, 'pw');
+      expect(window.API.recordDecision).toHaveBeenCalledWith('c1', 'm-p', { decision: 'fusenpai', decisionBy: 'shiro' }, 'pw', expect.objectContaining({ onRefusal: expect.any(Function) }));
+    });
+
+    // Stage 6 review 8 (M4): the court console reads the decision this device
+    // made from the outbox, so the decided match leaves the live slot, and the
+    // editor goes, as the decision is queued. The host still moves on to the
+    // next bout (the e2e journeys J2 and S2b sat idle).
+    it('calls onAfterDecision for a decision that landed though the editor went meanwhile', async () => {
+      const onAfterDecision = vi.fn().mockResolvedValue(undefined);
+      const setters = makeSetters();
+      const mountedRef = { current: true };
+      window.API.recordDecision.mockImplementationOnce(async () => {
+        mountedRef.current = false; // the console showed the match finished
+        return { applied: true, pending: true, key: 'k', settled: new Promise(() => {}) };
+      });
+      const submit = makeSubmitDecision({
+        match: makeMatch('m1'), enchoPeriodCount: 0, password: 'pw',
+        ...setters, mountedRef, onClose: vi.fn(), onAfterDecision, isComplete: false,
+      });
+      await submit('fusenpai', { decisionBy: 'aka', decisionReason: '' });
+      expect(onAfterDecision).toHaveBeenCalledTimes(1);
     });
 
     it('calls onAfterDecision for fusenpai when provided and match is not a correction', async () => {
@@ -1184,6 +1205,25 @@ describe('item 7: non-points decisions advance to next match', () => {
       await submit('fusenpai', { decisionBy: 'aka', decisionReason: '' });
       expect(onAfterDecision).toHaveBeenCalled();
       expect(onClose).not.toHaveBeenCalled();
+    });
+
+    // bc-evts stage 3 review 11, X3: the outbox answers a decision pending,
+    // with nothing of the decision in it. The host still reads what was
+    // recorded (the kind, the side it names, the winner it gives) and the
+    // queue key its automatic start follows.
+    it('hands a pending decision to onAfterDecision with the decision as recorded here', async () => {
+      const settled = new Promise(() => {});
+      window.API.recordDecision = vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k-dec', settled });
+      const onAfterDecision = vi.fn().mockResolvedValue(undefined);
+      const match = makeMatch('m-pend');
+      const submit = makeSubmitDecision({
+        match, enchoPeriodCount: 0, password: 'pw',
+        ...makeSetters(), onClose: vi.fn(), onAfterDecision, isComplete: false,
+      });
+      await submit('fusenpai', { decisionBy: 'shiro', decisionReason: '' });
+      const got = onAfterDecision.mock.calls[0][0];
+      expect(got).toMatchObject({ pending: true, key: 'k-dec', decision: 'fusenpai', decisionBy: 'shiro' });
+      expect(got.winner).toEqual(match.sideA);
     });
 
     // mp-y3nk: onAfterDecision must receive the resolved result (winner/status),
@@ -1307,18 +1347,16 @@ describe('submitDecisionRequest / makeSubmitDecision: downstream_knockout_played
     expect(window.confirmDialog).toHaveBeenCalledTimes(1);
     const dialogArg = window.confirmDialog.mock.calls[0][0];
     expect(dialogArg.message).toContain('m5');
-    expect(dialogArg.message).toContain('Aoki Taro');
-
-    // recordDecision must still be called with exactly the 4-argument shape
-    // pinned by the regression tests above (compId, matchId, body, password) --
-    // attemptScoreWrite's extra `match` argument must NOT reach it.
+    expect(dialogArg.message).toContain('Aoki Taro');    // recordDecision is called with (compId, matchId, body, password, opts):
+    // attemptScoreWrite's extra `match` argument must NOT reach it, and the
+    // trailing options carry the outbox's refusal claim (bc-evts).
     expect(window.API.recordDecision).toHaveBeenCalledTimes(2);
-    expect(window.API.recordDecision.mock.calls[0]).toHaveLength(4);
+    expect(window.API.recordDecision.mock.calls[0]).toHaveLength(5);
     expect(window.API.recordDecision.mock.calls[0]).toEqual(
-      ['c1', 'm1', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'pw'],
+      ['c1', 'm1', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'pw', expect.objectContaining({ onRefusal: expect.any(Function) })],
     );
     // The retry carries the SAME body plus the force flag.
-    expect(window.API.recordDecision.mock.calls[1]).toHaveLength(4);
+    expect(window.API.recordDecision.mock.calls[1]).toHaveLength(5);
     expect(window.API.recordDecision.mock.calls[1][2]).toEqual(
       { decision: 'kiken-voluntary', decisionBy: 'aka', forceDownstreamReopen: true },
     );

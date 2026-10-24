@@ -124,3 +124,11 @@ export async function tapOnSide(page, side, locator) {
   await locator.tap();
   taps.set(side, Date.now());
 }
+
+// Wait out the dwell since the last tap tapOnSide made on `side`, without
+// tapping: for a tap the journey makes some other way (a doubleTap, a
+// clumsy helper) on a control that shares that guard key.
+export async function dwellOnSide(page, side) {
+  const at = sideTaps.get(page)?.get(side);
+  if (at !== undefined) await dwell(page, at);
+}

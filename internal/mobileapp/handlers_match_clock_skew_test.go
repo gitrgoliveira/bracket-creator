@@ -40,7 +40,6 @@ func TestScoreHandler_FutureStampIsRefusedNotSilentlyApplied(t *testing.T) {
 		ID: "skew-m1", SideA: "Alice", SideB: "Bob",
 		Status: state.MatchStatusRunning, ModifiedAt: storedAt,
 	}}))
-	runningRevStore.Delete("skew:skew-m1")
 
 	// Count broadcasts: a refused write must reach NOBODY, exactly as the
 	// superseded arm skips its broadcast.
@@ -119,7 +118,6 @@ func TestScoreHandler_ClockSkewBoundaries(t *testing.T) {
 			ID: comp + "-m1", SideA: "Alice", SideB: "Bob",
 			Status: state.MatchStatusRunning, ModifiedAt: time.Now().UnixMilli() - 60_000,
 		}}))
-		runningRevStore.Delete(comp + ":" + comp + "-m1")
 
 		fields := map[string]any{
 			"sideA": "Alice", "sideB": "Bob",
@@ -281,19 +279,13 @@ func TestOverrideWinner_SkewedStampIsRefused(t *testing.T) {
 	assert.Empty(t, stored.Rounds[0][0].Winner, "the override must not have been applied")
 }
 
-// The rev-store half of the refusal, mirroring
-// TestScoreHandler_SupersededWriteFollowsTheRevStoreRule. The superseded arm
-// runs AFTER the rev guard, so it has a high-water mark to decide about; the
-// clock-skew arm is deliberately EARLIER, before the engine and before the rev
-// guard stores anything, so a refused write must leave the map exactly as it
-// found it.
-//
-// It matters because runningRevStore is process-lifetime and keyed by
-// competition:match. A refusal that recorded a mark would fence the operator's
-// own next write from the same session behind a rev the server never accepted a
-// result for, and the entry would never be cleaned up (nothing else runs for
-// this match). A skewed device would poison its own recovery.
-func TestScoreHandler_ClockSkewRefusalRecordsNoRunningRev(t *testing.T) {
+// A refused write leaves no revision behind. The older-revision hold reads
+// the score event log (engine.olderRevisionThanLogged, bc-evts stage 2b), and
+// the clock-skew arm runs before the engine, so a refused write logs nothing:
+// a logged revision would fence this session's own later writes behind a rev
+// nothing was ever stored for, and a skewed device would poison its own
+// recovery.
+func TestScoreHandler_ClockSkewRefusalLogsNoRevision(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
@@ -304,14 +296,8 @@ func TestScoreHandler_ClockSkewRefusalRecordsNoRunningRev(t *testing.T) {
 		Status: state.MatchStatusRunning,
 	}}))
 
-	key := "skewrev:skewrev-m1"
-	// Start from nothing, so anything present afterwards was written by THIS
-	// request rather than inherited from another test in the package.
-	runningRevStore.Delete(key)
-	t.Cleanup(func() { runningRevStore.Delete(key) })
-
-	// A RUNNING write carrying the session fence fields: exactly the shape that
-	// makes the rev guard store a high-water mark on the accepted path.
+	// A RUNNING write carrying the session fence fields: exactly the shape
+	// whose baseline keeps its revision on the accepted path.
 	payload, _ := json.Marshal(map[string]any{
 		"sideA": "Alice", "sideB": "Bob",
 		"status": "running", "modifiedAt": time.Now().UnixMilli() + 10_000,
@@ -329,7 +315,8 @@ func TestScoreHandler_ClockSkewRefusalRecordsNoRunningRev(t *testing.T) {
 		"the fixture must actually reach the refusal, or this pins nothing; body: %s", w.Body.String())
 	assert.Equal(t, false, body["applied"])
 
-	_, present := runningRevStore.Load(key)
-	assert.False(t, present,
-		"a refused write must record no high-water mark: it would fence this session's own later writes behind a rev nothing was ever stored for")
+	lines, err := store.LoadScoreLog("skewrev", "skewrev-m1")
+	require.NoError(t, err)
+	assert.Empty(t, lines,
+		"a refused write must log nothing: its revision would fence this session's own later writes behind a rev nothing was ever stored for")
 }

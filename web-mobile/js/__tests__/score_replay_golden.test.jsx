@@ -1,0 +1,138 @@
+// JS half of the shared Go/JS golden table for the score event replay (bc-evts).
+// Go half: TestReplayScoring_GoldenTable (internal/engine/score_replay_golden_test.go),
+// which this file mirrors step for step: every order of a case's `lines` is
+// replayed after its `head`, want.match is a subset of the result (scoreVersion,
+// modifiedAt and groupStamps compared whole), want.outcomes each id's outcomes
+// sorted, and the output replayed again with the same lines changes nothing.
+//
+// Every case marked jsMirror is mirrored, individual, engi, fixed-order team and
+// kachinuki alike (team bouts fold in JS since stage 5); a case whose lines
+// hold a baseline is Go only (a screen folds its taps on top of the server's
+// last confirmed match and never folds a baseline; see the table's own
+// comment).
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { replayHead } from '../score_events.jsx';
+
+const table = JSON.parse(
+  readFileSync(resolve(__dirname, '..', '..', '..', 'internal', 'engine', 'testdata', 'score_replay.json'), 'utf8')
+);
+
+const MIRRORED_KINDS = new Set(['individual', 'engi', 'team', 'kachinuki']);
+const cases = (table.cases || []).filter((c) => c.jsMirror && MIRRORED_KINDS.has(c.shape?.kind));
+
+// The fold's shape options for a case (the Go golden test's competition):
+// a kachinuki competition is a team one too.
+const foldOpts = (shape) => ({
+  engi: shape.kind === 'engi',
+  team: shape.kind === 'team' || shape.kind === 'kachinuki',
+  kachinuki: shape.kind === 'kachinuki',
+  // goldenShape (score_replay_golden_test.go): every team shape has three.
+  teamSize: shape.kind === 'team' || shape.kind === 'kachinuki' ? 3 : 0,
+});
+
+// emptyToNil reads an empty array as null, so a golden [] matches a field the
+// wire omits (Go's emptyToNil); undefined reads as null too.
+function emptyToNil(v) {
+  if (v === undefined) return null;
+  if (Array.isArray(v)) return v.length === 0 ? null : v.map(emptyToNil);
+  if (v && typeof v === 'object') {
+    const out = {};
+    for (const [k, x] of Object.entries(v)) out[k] = emptyToNil(x);
+    return out;
+  }
+  return v;
+}
+
+// subsetOf: every key want names is in got with the same value (Go's subsetOf).
+function subsetOf(want, got, path) {
+  if (want && typeof want === 'object' && !Array.isArray(want)) {
+    if (!got || typeof got !== 'object' || Array.isArray(got)) return `${path}: want an object, got ${JSON.stringify(got)}`;
+    for (const k of Object.keys(want)) {
+      const err = subsetOf(want[k], got[k] ?? null, `${path}.${k}`);
+      if (err) return err;
+    }
+    return null;
+  }
+  if (Array.isArray(want)) {
+    if (!Array.isArray(got) || got.length !== want.length) return `${path}: want ${JSON.stringify(want)}, got ${JSON.stringify(got)}`;
+    for (let i = 0; i < want.length; i++) {
+      const err = subsetOf(want[i], got[i], `${path}[${i}]`);
+      if (err) return err;
+    }
+    return null;
+  }
+  return String(want) === String(got) ? null : `${path}: want ${JSON.stringify(want)}, got ${JSON.stringify(got)}`;
+}
+
+function permutations(n) {
+  if (n === 0) return [[]];
+  const out = [];
+  for (const rest of permutations(n - 1)) {
+    for (let i = 0; i <= rest.length; i++) out.push([...rest.slice(0, i), n - 1, ...rest.slice(i)]);
+  }
+  return out;
+}
+
+// The wire form: a JSON round trip drops undefined fields, as omitempty does.
+const wire = (m) => JSON.parse(JSON.stringify(m));
+
+function byId(outcomes) {
+  const got = {};
+  for (const o of outcomes) (got[o.id] = got[o.id] || []).push(o.outcome);
+  return got;
+}
+
+describe('score replay: the JS mirror answers the Go golden table', () => {
+  // Load-bearing: it.each over an empty array silently produces zero tests.
+  it('the table holds mirrored cases of every kind', () => {
+    for (const kind of MIRRORED_KINDS) {
+      expect(cases.some((c) => c.shape.kind === kind), `score_replay.json has no jsMirror ${kind} case: the mirror would assert nothing for it`).toBe(true);
+    }
+  });
+
+  it.each(cases.map((c) => [c.name, c]))('%s', (_name, c) => {
+    const pinned = ['scoreVersion', 'modifiedAt', 'groupStamps'];
+    for (const k of pinned) expect(c.want.match, `every case pins ${k}`).toHaveProperty(k);
+    const opts = foldOpts(c.shape);
+    const wantMatch = emptyToNil(c.want.match);
+    for (const order of permutations(c.lines.length)) {
+      const lines = order.map((i) => c.lines[i]);
+      const r = replayHead(c.match, c.head, lines, opts);
+      const got = emptyToNil(wire(r.match));
+      expect(subsetOf(wantMatch, got, 'match'), `order ${order}`).toBeNull();
+      for (const k of pinned) expect(got[k], `order ${order}, ${k}`).toEqual(wantMatch[k]);
+      const gotOutcomes = byId(r.outcomes);
+      for (const [id, want] of Object.entries(c.want.outcomes)) {
+        expect([...(gotOutcomes[id] || [])].sort(), `order ${order}, event ${id}`).toEqual([...want].sort());
+      }
+      // The next write replays from this output: doing so changes nothing.
+      const again = replayHead(wire(r.match), c.head, lines, opts);
+      expect(wire(again.match), `order ${order}, replayed from its own output`).toEqual(wire(r.match));
+      expect(again.outcomes, `order ${order}, replayed from its own output`).toEqual(r.outcomes);
+    }
+  });
+
+  it('never mutates the match or the lines it is given', () => {
+    const c = cases[0];
+    const before = JSON.stringify([c.match, c.head, c.lines]);
+    replayHead(c.match, c.head, c.lines, foldOpts(c.shape));
+    expect(JSON.stringify([c.match, c.head, c.lines])).toBe(before);
+  });
+
+  // Mirrors TestScoreLogEventSeqs_ListsEverySession (the golden table holds at
+  // most 6 lines a case): every session that tapped is listed, the first
+  // included, however many tapped after it.
+  it('lists every session that tapped in eventSeqs', () => {
+    const c = cases.find((x) => x.shape.kind === 'individual');
+    const n = 40;
+    const lines = Array.from({ length: n }, (_, i) => {
+      const s = `s${String(i).padStart(2, '0')}`;
+      return { v: 1, event: { id: `${s}.1`, session: s, seq: 1, stamp: 1000 + i, kind: 'encho.add' } };
+    });
+    const r = replayHead(c.match, c.head, lines, foldOpts(c.shape));
+    // The case's head may hold sessions of its own; all 40 are listed beside them.
+    for (const l of lines) expect(r.match.eventSeqs[l.event.session], l.event.session).toBe(1);
+  });
+});

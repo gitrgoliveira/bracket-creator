@@ -9,6 +9,7 @@ import { heldWritesText, heldWriteLine, heldWriteDiscardConfirm, matchLabel, hel
 import { scoreRowMatchLabel } from './pool_ids.jsx';
 import { publishHeight } from './published_height.jsx';
 import { tournamentHasCheckIn } from './competition_shape.jsx';
+import { whenConfirmed } from './unsaved_entries.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA, useLayoutEffect: useLayoutEffectA } = React;
 
@@ -187,7 +188,7 @@ function watchSustainedDisconnect(thresholdMs, onSustained) {
   };
 }
 
-function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip }) {
+function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip, beforeLeave }) {
   // Render running matches as chips below the topbar so admins always
   // know what's under way, regardless of which screen they're on. Clicking
   // a chip jumps to that competition's score editor via the global
@@ -232,10 +233,16 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip }) {
     return () => { monitor.stop(); unsub(); };
   }, []);
 
+  // A chip leaves the page, so a page that shows a score editor inline hands
+  // the topbar its leave question (`beforeLeave`, unsaved_entries.jsx
+  // confirmLeave, R1): `true` goes in the same tick, a promise once answered.
   const onOpenScore = (m) => {
-    if (typeof window.__adminNavigateToScore === "function") {
-      window.__adminNavigateToScore(m.compId);
-    }
+    const go = () => {
+      if (typeof window.__adminNavigateToScore === "function") {
+        window.__adminNavigateToScore(m.compId);
+      }
+    };
+    whenConfirmed(typeof beforeLeave === "function" ? beforeLeave() : true, go);
   };
 
   // bc-qttl: SyncStatusPill (admin_scoring_autosave.jsx) only renders while a

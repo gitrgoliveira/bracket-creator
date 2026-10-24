@@ -48,7 +48,6 @@ func exactReplayServer(t *testing.T, compID string, knockout bool) (http.Handler
 		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 			{ID: "Pool A-0", SideA: mgAlice, SideAID: mgAliceID, SideB: mgBob, SideBID: mgBobID, Court: "A", Status: state.MatchStatusRunning},
 		}))
-		runningRevStore.Delete(compID + ":Pool A-0")
 		return r, store, "Pool A-0", "pool-matches.csv", dataDir
 	}
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{
@@ -60,7 +59,6 @@ func exactReplayServer(t *testing.T, compID string, knockout bool) (http.Handler
 			{ID: "m-r2-0", SideA: "Winner of m-r1-0", MatchNumber: 2, Court: "A"},
 		},
 	}}))
-	runningRevStore.Delete(compID + ":m-r1-0")
 	return r, store, "m-r1-0", "bracket.json", dataDir
 }
 
@@ -306,12 +304,12 @@ func TestScoreHandler_ExactResendAfterALaterPointIsAnsweredAsRecorded(t *testing
 	for _, tc := range []struct {
 		name         string
 		knockout     bool
-		pointArrives string // "after" (R3) or "before" (S2) the finish
+		pointArrives string // "after" or "before" the finish reaches the server
 	}{
-		{name: "pool, R3", pointArrives: "after"},
-		{name: "knockout, R3", knockout: true, pointArrives: "after"},
-		{name: "pool, S2", pointArrives: "before"},
-		{name: "knockout, S2", knockout: true, pointArrives: "before"},
+		{name: "pool, point after", pointArrives: "after"},
+		{name: "knockout, point after", knockout: true, pointArrives: "after"},
+		{name: "pool, point before", pointArrives: "before"},
+		{name: "knockout, point before", knockout: true, pointArrives: "before"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			const compID = "exact-replay-later-point"
@@ -332,13 +330,13 @@ func TestScoreHandler_ExactResendAfterALaterPointIsAnsweredAsRecorded(t *testing
 			require.Equal(t, http.StatusOK, w.Code, "the finish lands: %s", w.Body.String())
 			if tc.pointArrives == "after" {
 				w = serveJSON(r, "PUT", url, exactReplayLaterPoint(at+3_000))
-				require.Equal(t, http.StatusOK, w.Code, "R3: the later point applies to the finished match: %s", w.Body.String())
+				require.Equal(t, http.StatusOK, w.Code, "the later point is turned away with a 200: %s", w.Body.String())
 			}
 			versionBefore := store.FileVersion(compID, file)
 
 			out := requireAnsweredAsRecorded(t, serveJSON(r, "PUT", url, finish()), store, compID, file, versionBefore)
 			assert.Equal(t, mgAlice, out["winner"])
-			assert.Equal(t, []any{"M", "K"}, out["ipponsA"], "the answer is the match as stored, the later point included")
+			assert.Equal(t, []any{"M"}, out["ipponsA"], "the answer is the match as stored: the point stamped after the finish is not in it")
 		})
 	}
 }
@@ -446,4 +444,70 @@ func TestScoreHandler_ExactResendOfATeamOrEngiFinishIsAnsweredAsRecorded(t *test
 		got := requireAnsweredAsRecorded(t, serveJSON(r, "PUT", "/api/competitions/"+compID+"/matches/Pool A-0/score", finish()), store, compID, "pool-matches.csv", versionBefore)
 		assert.Equal(t, mgAlice, got["winner"])
 	})
+}
+
+// A reasoned correction sent over a kept kiken ruling (bc-tmfn) lands with the
+// ruling inherited; sent again with the same stamp (its answer was lost) it is
+// the finish already recorded and is answered as recorded, nothing written
+// (bc-evts review round 13).
+func TestScoreHandler_ExactResendOfACorrectionOverAKeptRulingWritesNothing(t *testing.T) {
+	for _, bulk := range []bool{false, true} {
+		name := "score"
+		if bulk {
+			name = "bulk-score"
+		}
+		t.Run(name, func(t *testing.T) {
+			const compID = "exact-kept-ruling"
+			r, store, mid, file, dataDir := exactReplayServer(t, compID, false)
+			base := "/api/competitions/" + compID + "/matches/"
+			at := time.Now().UnixMilli() - 8_000
+
+			w := serveJSON(r, "POST", base+mid+"/decision", map[string]any{
+				"decision": "kiken-voluntary", "decisionBy": "shiro", "modifiedAt": at,
+			})
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+			correction := func() map[string]any {
+				c := exactReplayFinish(at + 3_000)
+				c["correctionReason"] = "wrong scoreline"
+				return c
+			}
+			send := func() *httptest.ResponseRecorder {
+				if bulk {
+					e := correction()
+					e["id"] = mid
+					return serveJSON(r, "POST", base+"bulk-score", []map[string]any{e})
+				}
+				return serveJSON(r, "PUT", base+mid+"/score", correction())
+			}
+			w = send()
+			require.Equal(t, http.StatusOK, w.Code, "the first send records the correction: %s", w.Body.String())
+
+			path := filepath.Join(dataDir, "competitions", compID, file)
+			bytesBefore, err := os.ReadFile(path)
+			require.NoError(t, err)
+			versionBefore := store.FileVersion(compID, file)
+			historyBefore, err := store.LoadMatchHistory(compID, mid)
+			require.NoError(t, err)
+			logBefore, err := store.LoadScoreLog(compID, mid)
+			require.NoError(t, err)
+
+			w = send()
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+			bytesAfter, err := os.ReadFile(path)
+			require.NoError(t, err)
+			assert.Equal(t, string(bytesBefore), string(bytesAfter), "nothing is written to the match file")
+			assert.Equal(t, versionBefore, store.FileVersion(compID, file))
+			historyAfter, err := store.LoadMatchHistory(compID, mid)
+			require.NoError(t, err)
+			require.Len(t, historyAfter, len(historyBefore)+1, "one line for the resend")
+			for group, outcome := range historyAfter[len(historyAfter)-1].Outcomes {
+				assert.Equal(t, state.HistoryOutcomeUnchanged, outcome, "group %s", group)
+			}
+			logAfter, err := store.LoadScoreLog(compID, mid)
+			require.NoError(t, err)
+			assert.Len(t, logAfter, len(logBefore), "no score-log baseline is appended")
+		})
+	}
 }

@@ -11,9 +11,12 @@ package engine
 //  1. the lineup saved for T at M itself: a match's own lineup always wins,
 //     whole, even one that holds no position (the state layer stores one for a
 //     match v2.1.1 showed a team nothing at, so the match shows none rather than
-//     what an earlier match did);
+//     what an earlier match did); the lineup a kachinuki match started with,
+//     which the server keeps as the match's own (its pin, kachinuki_opener.go),
+//     is one too;
 //  2. else the latest lineup of T placed before M in match order: one saved for
-//     an earlier match of T, or, at the very start, T's starting lineup (the
+//     an earlier match of T, never one an earlier match started with (a pin is
+//     its match's alone), or, at the very start, T's starting lineup (the
 //     Lineups page's lineup, stored as round 0);
 //  3. else, for a match the draw does not hold, the starting lineup.
 //
@@ -47,7 +50,6 @@ package engine
 
 import (
 	"log"
-	"maps"
 	"slices"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -155,6 +157,11 @@ func (r *lineupRule) inForce(teamID, matchID string) InForceLineup {
 		case matchID:
 			own = append(own, l)
 		default:
+			// The lineup an earlier match started with is that match's
+			// alone (its pin, kachinuki_opener.go): never carried on.
+			if l.IsStartPin() {
+				continue
+			}
 			earlier, drawn := r.draw[l.MatchID]
 			if located && drawn && earlier.Seats(teamID) && earlier.Place.Compare(at.Place) < 0 {
 				before = append(before, placedLineup{lineup: l, place: earlier.Place})
@@ -252,7 +259,5 @@ func LineupInForceFrom(lineups map[string]domain.TeamLineup, poolMatches []state
 
 // copyLineup is l with its own copies of the position maps.
 func copyLineup(l domain.TeamLineup) domain.TeamLineup {
-	l.Positions = maps.Clone(l.Positions)
-	l.MemberIDs = maps.Clone(l.MemberIDs)
-	return l
+	return l.Clone()
 }

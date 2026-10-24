@@ -2,6 +2,12 @@ import React from 'react';
 import { render, fireEvent, act, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { beforeEach as beforeEachTest } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
+
+// bc-evts stage 3: a running individual match is scored by taps handed to
+// the outbox (API.recordTap); each test gets a fresh fake of that surface.
+beforeEachTest(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });
 
 // OPERATOR RULING: a scoring result must read the SAME on every surface, and
 // reopening a match to edit changes only that match's result, for every
@@ -149,12 +155,10 @@ describe('the editor shows the verdict the server holds', () => {
   });
 
   it('keeps UNSAVED operator edits rather than overwriting them', async () => {
-    // The limit of the rule: an editor with work in it is not refreshed out
-    // from under the operator. Their edits are not ours to discard — and note
-    // the server ORDERS stamped writes but does not ARBITRATE a two-operator
-    // conflict: whoever saves last wins, deliberately, because more than one
-    // person may legitimately be scoring a court. So this keeps a REAL conflict
-    // visible to the human who owns it rather than resolving it silently.
+    // The limit of the rule: a tap of the operator's is never refreshed out
+    // from under them. bc-evts stage 3: on a running match the tap is in the
+    // outbox, and the board is the server's copy with it folded on top, so a
+    // server copy that moved meanwhile shows both: its change and the tap.
     const { rerender, container } = render(
       <ScoreEditorModal
         match={tiedRunningMatch({ ipponsA: [], ipponsB: [] })}
@@ -168,13 +172,13 @@ describe('the editor shows the verdict the server holds', () => {
 
     await act(async () => { rerender(
       <ScoreEditorModal
-        match={tiedRunningMatch({ ipponsA: ['K', 'K'], ipponsB: ['D'] })}
+        match={tiedRunningMatch({ ipponsA: ['K'], ipponsB: ['D'] })}
         onClose={vi.fn()} onSubmit={vi.fn()} password=""
       />
     ); });
     const cells = [...container.querySelectorAll('.sb-slot')].map(s => s.textContent);
-    expect(cells, 'the operator\u2019s unsaved men must survive').toContain('M');
-    expect(cells).not.toContain('D');
+    expect(cells, 'the operator’s pending men must survive').toContain('M');
+    expect(cells, 'and the server’s change shows').toEqual(expect.arrayContaining(['K', 'D']));
   });
 
   it('cannot be finished past a verdict without ruling on it', async () => {
@@ -293,9 +297,11 @@ describe('the team editor shows the daihyosen verdict the server holds', () => {
 // device's result turns up.
 // The third editor body. All four hosts mount ScoreEditorModal, which dispatches
 // to this one for an engi competition, so a channel missing here is missing on
-// every surface an engi match can be scored from. It has no autosave (flags are
-// entered in one go), which makes the divergence window WIDER than the kendo
-// editors', not narrower: nothing it holds reaches the server until submit.
+// every surface an engi match can be scored from. On a running match each flag
+// is a tap (bc-evts stage 4) and the board is the server's count with this
+// device's pending taps on top; before the start, nothing it holds reaches the
+// server until submit, which makes that divergence window WIDER than a running
+// match's, not narrower.
 describe('the engi editor shows the flag count the server holds', () => {
   const engiMatch = (over = {}) => ({
     id: 'e1', status: 'running', phase: 'pool', court: 'A',
@@ -324,15 +330,30 @@ describe('the engi editor shows the flag count the server holds', () => {
     expect(counts(container), 'the server holds 3-2, so this editor shows 3-2').toEqual({ aka: '3', shiro: '2' });
   });
 
-  it('keeps the operator\'s unsaved flags rather than overwriting them', async () => {
-    // A pair of flag counts is ONE reading of ONE performance: no seam to merge
-    // along, so an operator mid-entry keeps everything they typed.
+  it('keeps the operator\'s pending flag on top of a count recorded elsewhere', async () => {
+    // A running match: the flag is a tap in the outbox, and the board is the
+    // server's count with it folded on, so neither is lost.
     const { rerender, container } = openEngi(engiMatch());
     await act(async () => { fireEvent.click(container.querySelector('[data-testid="engi-aka-inc"]')); });
     expect(counts(container)).toEqual({ aka: '1', shiro: '0' });
 
     await act(async () => { rerender(
       <ScoreEditorModal match={engiMatch({ flagsA: 3, flagsB: 2 })} onClose={vi.fn()} onSubmit={vi.fn()} password="" />
+    ); });
+
+    expect(counts(container), "the server's count with the operator's pending flag on it").toEqual({ aka: '4', shiro: '2' });
+  });
+
+  it('keeps the operator\'s unsaved draft rather than overwriting it', async () => {
+    // Before the start: a pair of flag counts is ONE reading of ONE
+    // performance, no seam to merge along, so an operator mid-entry keeps
+    // everything they typed.
+    const { rerender, container } = openEngi(engiMatch({ status: 'scheduled' }));
+    await act(async () => { fireEvent.click(container.querySelector('[data-testid="engi-aka-inc"]')); });
+    expect(counts(container)).toEqual({ aka: '1', shiro: '0' });
+
+    await act(async () => { rerender(
+      <ScoreEditorModal match={engiMatch({ status: 'scheduled', flagsA: 3, flagsB: 2 })} onClose={vi.fn()} onSubmit={vi.fn()} password="" />
     ); });
 
     expect(counts(container), "the operator's own entry survives").toEqual({ aka: '1', shiro: '0' });
@@ -442,8 +463,11 @@ describe('the team editor shows the bout scoreline the server holds', () => {
     for (let i = 0; i < 2 && finish(); i++) { await act(async () => { fireEvent.click(finish()); }); }
 
     // The display half is not the whole rule: buildPatch sends the FULL board,
-    // so a row the editor dropped is a row it overwrites.
-    const b1 = (onSubmit.mock.calls[0]?.[0]?.subResults || []).find(s => s.position === 1);
+    // so a row the editor dropped is a row it overwrites. (The one write before
+    // it is the rows the match did not hold yet, written ahead of the first
+    // tap, bc-evts stage 5; the Finish is the completed one.)
+    const finished = onSubmit.mock.calls.map((c) => c[0]).find((p) => p.status === 'completed');
+    const b1 = (finished?.subResults || []).find(s => s.position === 1);
     expect(b1 && { ipponsA: b1.ipponsA, ipponsB: b1.ipponsB, decision: b1.decision })
       .toEqual({ ipponsA: [], ipponsB: ['M', 'K'], decision: '' });
   });
@@ -464,16 +488,16 @@ describe('the team editor shows the bout scoreline the server holds', () => {
     const { rerender, container } = open(teamMatch([]));
     await scoreOneForKyoto(container);
 
-    // Their autosave lands: the server now holds exactly what they typed, so
-    // nothing is unsaved any more. With a mount-frozen baseline the editor
-    // stays dirty here forever, and every later adopt is skipped.
-    await reopenWith(rerender, teamMatch([{ ...bout(2, 'a'), ipponsA: ['M'] }]));
+    // Their tap lands: the server now holds exactly what they tapped, and its
+    // copy says so (the tap's mark id and its session's seq, bc-evts), so the
+    // board counts it once. With a mount-frozen baseline the editor stayed
+    // dirty here forever, and every later adopt was skipped.
+    const tapId = window.API.recordTap.mock.results[0].value.id;
+    const landed = { ...bout(2, 'a'), ipponsA: ['M'], markIds: { a: [tapId] } };
+    await reopenWith(rerender, teamMatch([landed], { eventSeqs: { dev1: 1 } }));
 
     // Device B then scores bout 1. This must still arrive.
-    await reopenWith(rerender, teamMatch([
-      { ...bout(2, 'a'), ipponsA: ['M'] },
-      bout(1, 'b'),
-    ]));
+    await reopenWith(rerender, teamMatch([landed, bout(1, 'b')], { eventSeqs: { dev1: 1 } }));
 
     expect(totalsBySide(container), "Osaka's bout must arrive after the operator's own save")
       .toEqual({ [AKA]: 'IV: 1 · PW: 1', [SHIRO]: 'IV: 1 · PW: 2' });
@@ -507,7 +531,8 @@ describe('the team editor shows the bout scoreline the server holds', () => {
 
     const finishBtn = () => [...container.querySelectorAll('button')].find(b => /finish/i.test(b.textContent));
     for (let i = 0; i < 2 && finishBtn(); i++) { await act(async () => { fireEvent.click(finishBtn()); }); }
-    expect((onSubmit.mock.calls[0]?.[0]?.subResults || []).map(s => s.position),
+    const finished = onSubmit.mock.calls.map((c) => c[0]).find((p) => p.status === 'completed');
+    expect((finished?.subResults || []).map(s => s.position),
       'a 3-person team never has a bout 4').toEqual([1, 2, 3]);
   });
 

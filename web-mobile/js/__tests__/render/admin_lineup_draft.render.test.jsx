@@ -161,7 +161,7 @@ describe('a match\'s unsaved picks', () => {
     await click(saveButton(again));
 
     expect(api.putMatchLineup).toHaveBeenCalledWith(
-      'comp-1', 'team-a', 'Pool A-2', { 1: 'Mori' }, 'pw', { 1: 'mem-4' }, ['1'],
+      'comp-1', 'team-a', 'Pool A-2', { 1: 'Mori' }, 'pw', { 1: 'mem-4' }, ['1'], expect.objectContaining({ onRefusal: expect.any(Function) }),
     );
     expect(again.queryByTestId(NOTICE)).toBeNull();
     expect(sessionStorage.getItem(MATCH_KEY)).toBeNull();
@@ -259,7 +259,7 @@ describe('the starting lineup\'s unsaved picks', () => {
     await click(saveButton(again));
 
     expect(api.putTeamLineup).toHaveBeenCalledWith(
-      'comp-1', 'team-a', 0, { 2: 'Mori' }, 'pw', { 2: 'mem-4' }, ['2'],
+      'comp-1', 'team-a', 0, { 2: 'Mori' }, 'pw', { 2: 'mem-4' }, ['2'], expect.objectContaining({ onRefusal: expect.any(Function) }),
     );
     expect(again.queryByTestId(NOTICE)).toBeNull();
     expect(sessionStorage.getItem(START_KEY)).toBeNull();

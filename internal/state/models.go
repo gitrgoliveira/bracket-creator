@@ -579,6 +579,13 @@ type Competition struct {
 	RoundLineupsLegacy []string `yaml:"round_lineups_legacy,omitempty" json:"-"`
 
 	Players []domain.Player `yaml:"-" json:"players"`
+
+	// RosterVersion names the roster Players holds (RosterVersion, the
+	// function), on every answer that carries one. A roster PUT sends back
+	// the version of the roster it was built from; the server refuses it
+	// with 409 roster_changed when the stored roster is no longer that one
+	// (SaveRoster). Never stored: it is worked out from the roster.
+	RosterVersion string `yaml:"-" json:"rosterVersion,omitempty"`
 }
 
 // ParticipantIDsHint returns the LoadParticipantsOpts.HasIDs hint for this
@@ -686,7 +693,7 @@ func (c *Competition) ClearKachinukiEncounterEncho(matchID string, encho **Encho
 	if !c.IsKachinuki() || encho == nil || *encho == nil {
 		return false
 	}
-	if IsPoolDaihyosenMatchID(matchID) || IsTiebreakerMatchID(matchID) {
+	if IsPoolSupplementaryMatchID(matchID) {
 		return false
 	}
 	*encho = nil
@@ -1367,6 +1374,10 @@ type SubMatchResult struct {
 	// bout's result only when it is set. omitempty: absent on every row written
 	// before it, which reads as not recorded, so old data needs no migration.
 	Recorded bool `json:"recorded,omitempty" yaml:"recorded,omitempty"`
+	// MarkIDs names each mark of the bout, as MatchResult.MarkIDs does for a
+	// match (bc-evts). Derived by the replay; not part of the bout's group
+	// value.
+	MarkIDs *MarkIDs `json:"markIds,omitempty" yaml:"mark_ids,omitempty"`
 }
 
 // HanteiDecided reports whether a hantei verdict stands on this sub-bout:
@@ -1579,12 +1590,33 @@ type MatchResult struct {
 	// "daihyosen-add", ...), for the match history entry the write leaves.
 	// Transient, set by the handler; "" reads as "engine" in the history.
 	WriteDoor string `json:"-" yaml:"-"`
+	// WriteID is the client's id for this write, when it sent one (bc-evts
+	// F1): the baseline the write leaves in the match's score event log
+	// carries it, so a resend of a write already logged is answered as
+	// recorded. Request-only, like Changed.
+	WriteID string `json:"-" yaml:"-"`
+	// Basis is what the writer had in view when it built the write (the
+	// score events it had seen and its own still unacknowledged ones), for
+	// the baseline the write leaves. nil: the server judges the write saw
+	// every line already logged. Request-only.
+	Basis *ScoreBasis `json:"-" yaml:"-"`
+	// WriteSession is the writing device's event session (bc-evts S8 b), for
+	// the baseline the write leaves: with it, the basis's Seq counts that
+	// device's own events up to Seq as seen. Request-only.
+	WriteSession string `json:"-" yaml:"-"`
 	// Merge is what engine.mergeMatchWrite decided for THIS write: which
 	// groups applied, which were held (kept in the match history because a
 	// newer change to them is stored), and the held values. Set on the
 	// incoming result only, read by the history writer and the handlers'
 	// heldGroups; never persisted.
-	Merge          *MergeReport     `json:"-" yaml:"-"`
+	Merge *MergeReport `json:"-" yaml:"-"`
+	// LineupWarning is what the write's door tells the operator when a
+	// kachinuki start kept the match's own lineup at the start and a later
+	// match's carried lineup could not follow it (engine.DerivedLineupError,
+	// stage 6 review 9, G1): the start stands, the refused lineup stays as
+	// stored. Set on the incoming result only, answered as `warning`; never
+	// persisted.
+	LineupWarning  string           `json:"-" yaml:"-"`
 	IpponsA        []string         `json:"ipponsA"` // waza letters M/K/D/T/H/S (naginata), or ○ (FIK default-win marker)
 	IpponsB        []string         `json:"ipponsB"`
 	HansokuA       int              `json:"hansokuA"`
@@ -1749,6 +1781,75 @@ type MatchResult struct {
 	// back. Persisted as the last pool-matches.csv column and in bracket.json
 	// (BracketMatch.GroupStamps).
 	GroupStamps map[string]int64 `json:"groupStamps,omitempty" yaml:"-"`
+	// MarkIDs names each mark in IpponsA/IpponsB (bc-evts): the id of the
+	// score event that struck it, the foul event's for an H a second foul
+	// landed, b:<lineID>:<pos>:<side>:<i> for a mark a baseline brought. A
+	// removal names its mark by this id. Derived by engine.ReplayScoring,
+	// never part of a group's value (a write is not "changed" for lacking
+	// it); persisted after GroupStamps in pool-matches.csv and in
+	// bracket.json so a reader shows ids without replaying.
+	MarkIDs *MarkIDs `json:"markIds,omitempty" yaml:"-"`
+	// ScoreVersion is the number of lines in the match's score event log
+	// (state.ScoreLogLine) the stored match was derived from. It only ever
+	// grows, so a client orders two copies of a running match by it before
+	// their stamps: a late older event changes a match without moving its
+	// ModifiedAt. 0 for a match with no log. Persisted after MarkIDs.
+	ScoreVersion int `json:"scoreVersion,omitempty" yaml:"-"`
+	// EventSeqs is, per device event session, the highest Seq of that
+	// session's tap events the match's score log holds (bc-evts), whatever
+	// each tap's outcome: a board folding its own pending taps over this copy
+	// skips a tap whose seq is at or below it, since the server copy already
+	// holds it (an echo that lands before the tap's own answer). Every session
+	// with a seq'd event is listed. Derived by engine.ReplayScoring like
+	// ScoreVersion; persisted after ScoreVersion.
+	EventSeqs map[string]int64 `json:"eventSeqs,omitempty" yaml:"-"`
+	// TurnedAway names, by event id, every device tap the match's score log
+	// holds that the server does not apply now, with its outcome (the
+	// outcomes domain.ScoreOutcome* names other than applied, recorded and
+	// duplicate). A tap answered as applied can be turned away later, when a
+	// finish that never saw it, or one stamped before it, arrives after it
+	// (the closed-match rule): its own answer said applied, so the device
+	// that made it learns of the change from here, on whatever copy of the
+	// match reaches it next (a push, a fetch, an answer), and tells its
+	// operator. The server's own events are never listed. The latest
+	// logged, at most MaxTurnedAwayPerSession of each device session and
+	// MaxTurnedAway in all, shared fairly between sessions. Derived by
+	// engine.ReplayScoring like EventSeqs; persisted after EventSeqs.
+	TurnedAway map[string]string `json:"turnedAway,omitempty" yaml:"-"`
+}
+
+// MaxTurnedAwayPerSession and MaxTurnedAway bound MatchResult.TurnedAway:
+// the latest taps logged that the server does not apply, at most
+// MaxTurnedAwayPerSession of each device event session (one page of one
+// device), and at most MaxTurnedAway on the match. Past MaxTurnedAway every
+// session keeps the same share, the largest that fits (engine.turnedAwayOf),
+// so each session keeps at least MaxTurnedAway divided by the sessions that
+// have any (a device with fewer keeps every one of its own) and another
+// device's later taps never push a device's own out (stage 6 review 7: four
+// sessions of 128 pushed a fifth's ten out entirely). A session reaches its bound only
+// past 128 of its own taps turned away on one match, about twice every tap
+// one device makes on a five-person team match and its representative bout
+// with corrections, and many times an individual match's; the match's
+// bound is four such sessions, about 30 KB at most (each entry an event id
+// and an outcome), and a handful of entries in practice.
+const (
+	MaxTurnedAwayPerSession = 128
+	MaxTurnedAway           = 512
+)
+
+// MarkIDs carries one id per entry of a side's ippon slice, index for index
+// (A names IpponsA[i], B names IpponsB[i]; "" for a placeholder slot).
+type MarkIDs struct {
+	A []string `json:"a,omitempty"`
+	B []string `json:"b,omitempty"`
+}
+
+// Clone deep-copies the ids; nil stays nil.
+func (m *MarkIDs) Clone() *MarkIDs {
+	if m == nil {
+		return nil
+	}
+	return &MarkIDs{A: cloneStrings(m.A), B: cloneStrings(m.B)}
 }
 
 // HanteiDecided reports whether a hantei verdict stands on this match: the
@@ -1854,6 +1955,7 @@ func CloneSubResults(subs []SubMatchResult) []SubMatchResult {
 			copy(out[i].IpponsB, sr.IpponsB)
 		}
 		out[i].Encho = sr.Encho.Clone()
+		out[i].MarkIDs = sr.MarkIDs.Clone()
 		// Clone the tri-state hantei pointer too: a caller mutating a
 		// returned sub through *DecidedByHantei must not corrupt cache.
 		if sr.DecidedByHantei != nil {
@@ -2035,6 +2137,12 @@ type BracketMatch struct {
 	// last applied change to each group of this match, persisted in
 	// bracket.json. nil on a legacy match (every group reads ModifiedAt).
 	GroupStamps map[string]int64 `json:"groupStamps,omitempty"`
+	// MarkIDs, ScoreVersion, EventSeqs and TurnedAway mirror MatchResult's
+	// (bc-evts), persisted in bracket.json.
+	MarkIDs      *MarkIDs          `json:"markIds,omitempty"`
+	ScoreVersion int               `json:"scoreVersion,omitempty"`
+	EventSeqs    map[string]int64  `json:"eventSeqs,omitempty"`
+	TurnedAway   map[string]string `json:"turnedAway,omitempty"`
 	// PlaceholderA / PlaceholderB / PlaceholderWinner record what SideA / SideB /
 	// Winner held at DRAW time, before any pool resolved. They are written once,
 	// by engine.buildBracketFromDraw, for a pool-fed (mixed) knockout whose
@@ -2141,6 +2249,21 @@ type Announcement struct {
 // writer building its write from a stored match never inherits another
 // write's groups, door, merge report or instruction to replace a ruling.
 func (m *MatchResult) ClearRequestFields() {
-	m.Changed, m.WriteDoor, m.Merge = nil, "", nil
+	m.Changed, m.WriteDoor, m.Merge, m.LineupWarning = nil, "", nil, ""
 	m.ClearsWithdrawal = false
+	m.WriteID, m.Basis, m.WriteSession = "", nil, ""
+}
+
+// ClearDerivedScoreFields drops what only the score replay derives (bc-evts):
+// the mark ids, the match's and every bout's, the event-log version and the
+// highest event seq the log holds per device session, and the taps it turned
+// away. The HTTP doors that
+// bind a whole MatchResult from a body (/score, each bulk-score entry) call it
+// as they bind, so no client can name a mark or claim a version or a seq; the
+// engine stores them only from the replay's own write.
+func (m *MatchResult) ClearDerivedScoreFields() {
+	m.MarkIDs, m.ScoreVersion, m.EventSeqs, m.TurnedAway = nil, 0, nil, nil
+	for i := range m.SubResults {
+		m.SubResults[i].MarkIDs = nil
+	}
 }

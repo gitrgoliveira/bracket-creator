@@ -1,21 +1,30 @@
-// Every way out of a score editor keeps a tap still inside the autosave
-// window, and asks first about what the autosave does not carry (operator
+// Every way out of a score editor keeps what was tapped (a tap is in the
+// outbox when it is made), and asks first about what no tap carries (operator
 // rulings 2026-09-27).
 //
 // The unmount used to CANCEL a pending edit, and only Close and Prev/Next saved
 // it first. Every other way out dropped it: another match picked on the court
 // console, a correction opened, a court switch, or the console moving on by
-// itself. The unmount now writes it, stamped with the time of the tap
-// (editedPerf, see sync_queue.test.jsx for the stamp), so a tap made before
-// another device finished the match is older than that finish and cannot
-// reopen it. Discard is the one way out that saves nothing. Prev/Next ask
-// "Discard unsaved scoring changes?" first whenever Close would.
+// itself. Since bc-evts stages 3 to 5 a running edit is a tap, in the outbox
+// and stamped when it is made, so every way out keeps it, and a tap made
+// before another device finished the match is older than that finish and
+// cannot reopen it. Prev/Next ask first whenever Close would, with the one
+// warning every own action and host exit gives (R1, unsaved_entries.jsx):
+// "Your unsaved entries will be discarded. Leave this match anyway?", Discard
+// entries / Keep entries.
 
 import React from 'react';
-import { render, act, fireEvent, screen, cleanup, within } from '@testing-library/react';
+import { render, act, fireEvent, screen, cleanup } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
+import { beforeEach as beforeEachTest } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
+
+// bc-evts stage 3: a running individual match is scored by taps handed to
+// the outbox (API.recordTap); each test gets a fresh fake of that surface.
+beforeEachTest(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });
+// Long past the 300 ms debounce the editors used to have: nothing is written after it.
+const WAIT_MS = 350;
 
 // Every patch recordScore was handed, in order.
 let writes;
@@ -34,7 +43,6 @@ const STUBBED_GLOBALS = {
     removeDaihyosen: vi.fn(),
     putMatchLineup: vi.fn(),
     recordDecision: vi.fn(),
-    notePendingEdit: vi.fn(),
   },
   AdminLineupHelpers: { rosterFor: vi.fn().mockReturnValue([]) },
   compMatches: () => [],
@@ -107,46 +115,38 @@ async function mount(match, { editor = 'kendo', ...props } = {}) {
 }
 
 const click = (el) => act(async () => { fireEvent.click(el); });
-const settle = () => act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
+const settle = () => act(async () => { vi.advanceTimersByTime(WAIT_MS); });
 const teamRow = (i) => [...document.querySelectorAll('.team-sub-match')][i];
 const teamPoint = (i, side, letter) => [...teamRow(i).querySelectorAll(`.team-sub-match__side--${side} button.ipt-btn`)]
   .find((b) => b.textContent === letter);
 
-describe('the unmount writes a tap still inside the autosave window', () => {
+describe('the host moving on by itself owes nothing: a tap is in the outbox as it is made', () => {
+  // bc-evts stage 5: the team editor has no autosave window either (the unmount
+  // used to write a tap still inside it).
+  it('team editor: the host moving on by itself writes nothing, and the tap stands', async () => {
+    const rows = [1, 2, 3].map((position) => ({ position, sideA: '', sideB: '', ipponsA: [], ipponsB: [], winner: '', decision: '' }));
+    const { view } = await mount(team({ subResults: rows }));
+    await click(teamPoint(0, 'shiro', 'K'));
+    expect(window.API.recordTap.mock.calls.map((c) => c[2])).toEqual([{ kind: 'ippon.add', pos: 1, side: 'b', letter: 'K' }]);
+    await act(async () => { view.unmount(); });
+    await settle();
+    expect(writes).toHaveLength(0);
+  });
+
+  // bc-evts stages 3 and 4: the individual and engi editors have no autosave
+  // window. A tap is in the outbox the moment it is made, stamped then, so the
+  // host moving on by itself owes nothing and writes nothing.
   it.each([
     ['individual', () => individual(), 'kendo', () => screen.getAllByText('M')[0]],
-    ['team', () => team(), 'kendo', () => teamPoint(0, 'shiro', 'K')],
-    ['engi', () => engi(), 'engi', () => screen.getByTestId('engi-aka-inc')],
-  ])('%s editor: the host moving on by itself still saves it', async (_kind, make, editor, target) => {
+    ['engi', () => engi({ compId: 'comp1' }), 'engi', () => screen.getByTestId('engi-aka-inc')],
+  ])('%s editor: a tap is in the outbox as it is made, so the unmount writes nothing', async (_kind, make, editor, target) => {
     const { view } = await mount(make(), { editor });
     await click(target());
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
+    await act(async () => { view.unmount(); });
+    await settle();
     expect(writes).toHaveLength(0);
-    await act(async () => { view.unmount(); });
-    expect(writes).toHaveLength(1);
-    expect(writes[0].status).toBe('running');
-    // Written once: the unmount took the timer with it.
-    await settle();
-    expect(writes).toHaveLength(1);
-  });
-
-  it('the write carries the time of the last tap, not of the unmount', async () => {
-    const { view } = await mount(individual());
-    await click(screen.getAllByText('M')[0]);
-    await act(async () => { vi.advanceTimersByTime(100); });
-    await click(screen.getAllByText('K')[1]);
-    const lastTap = performance.now();
-    await act(async () => { vi.advanceTimersByTime(100); });
-    await act(async () => { view.unmount(); });
-    expect(writes).toHaveLength(1);
-    expect(writes[0].editedPerf).toBe(lastTap);
-  });
-
-  it('a write the debounce sends carries the time of the last tap too', async () => {
-    await mount(individual());
-    await click(screen.getAllByText('M')[0]);
-    const lastTap = performance.now();
-    await settle();
-    expect(writes[0].editedPerf).toBe(lastTap);
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -179,11 +179,16 @@ describe('Prev/Next ask first whenever Close would', () => {
     },
   );
 
-  it('individual: Discard changes moves on and writes nothing', async () => {
+  // The one warning (stage 6): the editor's own Close and Prev/Next ask what
+  // every other exit asks, never a prompt of their own.
+  const ONE_WARNING = { message: 'Your unsaved entries will be discarded. Leave this match anyway?', confirmLabel: 'Discard entries', cancelLabel: 'Keep entries' };
+
+  it('individual: Discard entries moves on and writes nothing', async () => {
     const { onNext } = await mount(individual());
     await click(screen.getByTestId('scoring-modal-mark-draw'));
     await viaButton();
     expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(window.confirmDialog).toHaveBeenCalledWith(expect.objectContaining(ONE_WARNING));
     expect(onNext).toHaveBeenCalledTimes(1);
     await settle();
     expect(writes).toHaveLength(0);
@@ -195,6 +200,7 @@ describe('Prev/Next ask first whenever Close would', () => {
     window.confirmDialog = vi.fn().mockResolvedValue(false);
     await viaButton();
     expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(window.confirmDialog).toHaveBeenCalledWith(expect.objectContaining(ONE_WARNING));
     expect(onNext).not.toHaveBeenCalled();
   });
 
@@ -208,16 +214,17 @@ describe('Prev/Next ask first whenever Close would', () => {
     window.confirmDialog = vi.fn().mockResolvedValue(false);
     await viaButton();
     expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(window.confirmDialog).toHaveBeenCalledWith(expect.objectContaining(ONE_WARNING));
     expect(onNext).not.toHaveBeenCalled();
   });
 
   it('engi: an unsaved flag change to a finished match asks', async () => {
     const { onNext } = await mount(engi({ status: 'completed', flagsA: 3, flagsB: 0 }), { editor: 'engi' });
     await click(screen.getByTestId('engi-shiro-inc'));
+    window.confirmDialog = vi.fn().mockResolvedValue(false);
     await viaButton();
-    // The editor is a dialog too: find the confirm by what it asks.
-    const dialog = screen.getByText('Discard unsaved scoring changes?').closest('[role="dialog"]');
-    await click(within(dialog).getByText('Cancel'));
+    expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(window.confirmDialog).toHaveBeenCalledWith(expect.objectContaining(ONE_WARNING));
     expect(onNext).not.toHaveBeenCalled();
   });
 
@@ -227,7 +234,9 @@ describe('Prev/Next ask first whenever Close would', () => {
     await viaButton();
     expect(window.confirmDialog).not.toHaveBeenCalled();
     expect(onNext).toHaveBeenCalledTimes(1);
-    expect(writes).toHaveLength(1);
+    // The tap is kept in the outbox (bc-evts stage 3), not by a write on leaving.
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
+    expect(writes).toHaveLength(0);
   });
 });
 
@@ -240,14 +249,18 @@ describe('the team re-seed follows every untouched bout, whatever else the updat
   const played = (position, ipponsA, winner) => ({ position, sideA: '', sideB: '', ipponsA, ipponsB: [], winner, decision: '' });
   const blank = (position) => ({ position, sideA: '', sideB: '', ipponsA: [], ipponsB: [], winner: '', decision: '' });
 
-  it('another device recording a bout and overtime in one save: the next autosave carries the bout', async () => {
+  // bc-evts stage 5: on a running match the sheet is the board, the server's
+  // copy with the pending taps folded on, so an update is shown whole and a tap
+  // after it is a tap; no write carries the board back.
+  it('another device recording a bout and overtime in one save: the sheet shows it, and the next tap is a tap', async () => {
     const start = team({ subResults: [blank(1), blank(2), blank(3)] });
     const { rerender } = await mount(start);
     await rerender(team({ encho: { periodCount: 1 }, subResults: [blank(1), played(2, ['M', 'M'], 'Kyoto'), blank(3)] }));
     await click(teamPoint(0, 'shiro', 'K'));
     await settle();
-    expect(writes).toHaveLength(1);
-    const bout2 = writes[0].subResults.find((s) => s.position === 2);
-    expect(bout2.ipponsA).toEqual(['M', 'M']);
+    const akaMarks = [...teamRow(1).querySelectorAll('.tsm-center-pts--aka button.editor-side__pt')].map((b) => b.textContent);
+    expect(akaMarks.filter((t) => t === 'M')).toHaveLength(2);
+    expect(window.API.recordTap.mock.calls.map((c) => c[2])).toEqual([{ kind: 'ippon.add', pos: 1, side: 'b', letter: 'K' }]);
+    expect(writes).toHaveLength(0);
   });
 });

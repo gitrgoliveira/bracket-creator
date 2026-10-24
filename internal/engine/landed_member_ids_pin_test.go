@@ -100,6 +100,10 @@ var pinPeople = []struct {
 	{wrTeamBID, []string{"Tanaka", "Ito", "Mori"}},
 }
 
+// pinOpenerIDs are the member ids of each team's first fighter, the ones the
+// kachinuki fixture's bout 1 holds.
+var pinOpenerIDs = map[string]string{wrTeamAID: "k-sato", wrTeamBID: "o-tanaka"}
+
 // pinHome seeds a team match of the given type, running since mmT0 and holding
 // the stored rows, on the pool branch (a league) or the bracket branch (a
 // knockout), with both teams' starting lineups and team members saved.
@@ -124,9 +128,18 @@ func pinHome(t *testing.T, knockout bool, matchType state.TeamMatchType, stored 
 			Positions: map[domain.Position]string{}, MemberIDs: map[domain.Position]string{},
 		}
 		for i, name := range p.names {
+			pos := domain.PositionNumbered(i + 1)
+			if i == 0 {
+				// A kachinuki encounter's first fighters are the lineup's
+				// (operator decision K1 (c), kachinuki_opener.go), seated by
+				// every write: the lineup names the fighters the stored rows
+				// hold, so the seat lands no id of its own and the invariant
+				// is about what the write itself introduces.
+				lineup.Positions[pos], lineup.MemberIDs[pos] = name, pinOpenerIDs[p.teamID]
+				continue
+			}
 			member, err := store.AddTeamMember(h.compID, p.teamID, name)
 			require.NoError(t, err)
-			pos := domain.PositionNumbered(i + 1)
 			lineup.Positions[pos], lineup.MemberIDs[pos] = name, member.ID
 		}
 		require.NoError(t, store.SetTeamLineup(h.compID, lineup, 3))

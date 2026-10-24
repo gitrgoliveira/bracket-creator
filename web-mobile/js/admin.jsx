@@ -1,7 +1,7 @@
 // Admin side: single tournament. Tournament has multiple Competitions.
 // Top-level: Tournament dashboard (all competitions), per-competition pages.
 
-import { applyPatch as patchCompetitionData, checkSeqGap, keepNewerDetail } from './patch.jsx';
+import { applyPatch as patchCompetitionData, checkSeqGap, keepNewerDetail, matchInComp } from './patch.jsx';
 import { createTimerPool } from './timer_pool.jsx';
 // Imported from the leaf, not read off `window`: write_result.jsx is
 // import-only (see its header) and every consumer ES-imports it directly.
@@ -10,9 +10,11 @@ import {
   attemptScoreWrite,
   downstreamKnockoutReopenedNotice,
   writeKeepsEditorOpen,
+  writePending,
   markToasted,
 } from './write_result.jsx';
 import { keptInHistoryNote } from './match_groups.jsx';
+import { normalizeCompetitionDetail } from './api_serializers.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -177,6 +179,25 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
 
+  // R4 (bc-evts stage 3 review 2): a court move or time change this device
+  // makes shows at once, as a push would, and a refusal puts the old value back
+  // (both told by the outbox, subscribeLocalMatchPatch). Applied to the
+  // competition the admin shows and to the tournament every admin page reads.
+  // tRef moves with each patch, so two in one tick (a swap) both stand.
+  useEffectA(() => {
+    if (!window.API || typeof window.API.subscribeLocalMatchPatch !== "function") return undefined;
+    return window.API.subscribeLocalMatchPatch((event) => {
+      const cid = event && event.data && event.data.competitionId;
+      if (!cid) return;
+      setAdminCompData((prev) => (prev && prev.config && prev.config.id === cid ? patchCompetitionData(prev, event) : prev));
+      if (!tRef.current) return;
+      const next = mergeCompetitionsIntoTournament(tRef.current,
+        (comps) => comps.map((c) => (c.id === cid ? patchCompetitionData(c, event) : c)));
+      tRef.current = next;
+      onUpdateRef.current(next);
+    });
+  }, []);
+
   // Best-effort post-mutation refresh. Several mutation handlers below
   // (moveMatchCourt, editMatchScore, addCompetition,
   // startCompetition) used to wrap the mutation AND the follow-up
@@ -201,7 +222,9 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     } catch (e) {
       console.warn(`refresh after ${actionLabel} failed (action did succeed):`, e);
       const toast = refreshFailureToast(actionLabel, e);
-      if (toast && mountedRef.current) showToast(toast, "error");
+      // One notice for a refresh still failing: the toast queue shows each
+      // error in turn, so a repeat of the same hint joins the one waiting.
+      if (toast && mountedRef.current) showToast(toast, "error", { id: `refresh-failed:${actionLabel}` });
     }
   };
 
@@ -250,6 +273,18 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     try {
       updated = await window.API.updateCompetition(cid, next, password);
     } catch (e) {
+      // A roster PUT refused because the roster changed on another desk is
+      // not a failure to tell: the page shows the roster as it stands at once
+      // (the refusal carries it), and the Participants page lays its change
+      // on it and sends it again, or, for a pasted list, says so itself
+      // (stage 6 review 12, C1).
+      if (e && e.code === "roster_changed") {
+        const current = { players: e.players, rosterVersion: e.rosterVersion };
+        onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current,
+          comps => comps.map(c => c.id === cid ? { ...c, ...current } : c)));
+        if (mountedRef.current) setAdminCompData((prev) => storedCompetitionInDetail(prev, cid, current));
+        throw e;
+      }
       showToast(e.message, "error");
       throw e;
     }
@@ -266,6 +301,12 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     // onUpdateRef.current vs the closure-captured onUpdate.
     onUpdateRef.current(mergeCompetitionsIntoTournament(tRef.current,
       comps => comps.map(c => c.id === cid ? { ...c, ...updatedComp } : c)));
+    // The competition page shows what was stored at once, from the PUT's own
+    // answer (stage 6 review 10, m10): the refetch below can fail, and the
+    // page then showed the old value (a seed box its old seed) until a push.
+    if (updated && mountedRef.current) {
+      setAdminCompData((prev) => storedCompetitionInDetail(prev, cid, updatedComp));
+    }
     // Best-effort detail refresh. Isolated from the rethrow above.
     // a transient failure fetching details after a successful save
     // should not make callers (AdminSettings.saveNow, AdminParticipants.apply)
@@ -278,7 +319,17 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
         console.error("Failed to refresh competition details after save:", e);
       }
     }
-    return nearDupWarnings || [];
+    // The version of the roster the save stored rides on the answer (not
+    // enumerable, so the warnings array reads as it always did): a roster
+    // write made before the page shows this one is built on it.
+    const answer = nearDupWarnings || [];
+    Object.defineProperty(answer, "rosterVersion", { value: updatedComp.rosterVersion || "", enumerable: false });
+    // The roster that version names: what the server read back after the
+    // write, which can hold another desk's later change, so a roster write
+    // made before the page shows this one is built on these players and never
+    // on the list that was sent (stage 6 review 13, m3).
+    Object.defineProperty(answer, "rosterPlayers", { value: Array.isArray(updatedComp.players) ? updatedComp.players : null, enumerable: false });
+    return answer;
   };
 
   // Mutation handlers split into two phases:
@@ -287,17 +338,29 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   //      real outcome.
   //   2. Post-mutation refresh: best-effort via refreshCompsBestEffort.
   //      A refresh failure cannot make the mutation "look failed."
-  // Resolves true when the move landed and false when it failed (the failure is
-  // toasted here), so a caller can tell the two apart.
+  // bc-evts M5: the move is an entry of the match's outbox, handed over at once:
+  // this resolves at once with `{ landed }`, a promise that answers true when
+  // the move lands and false when the server refuses it (the refusal is toasted
+  // here) or it is discarded, so a caller can tell the two apart without
+  // waiting on the network.
   const moveMatchCourt = async (compId, matchId, newCourt) => {
+    // The court it had, put back if the server refuses the move (R4).
+    const shown = matchInComp((tRef.current?.competitions || []).find((c) => c.id === compId), matchId);
+    let answer;
     try {
-      await window.API.moveMatchCourt(compId, matchId, newCourt, password);
+      answer = await window.API.moveMatchCourt(compId, matchId, newCourt, password, {
+        onRefusal: (e) => { showToast(e.message, "error"); return true; },
+        ...(shown ? { was: { court: shown.court || "" } } : {}),
+      });
     } catch (e) {
       showToast(e.message, "error");
-      return false;
+      return { landed: Promise.resolve(false) };
     }
-    await refreshCompsBestEffort("Move");
-    return true;
+    const landed = writePending(answer)
+      ? answer.settled.then((v) => !(v && v.discarded), () => false)
+      : Promise.resolve(true);
+    landed.then((ok) => { if (ok) refreshCompsBestEffort("Move"); });
+    return { landed };
   };
 
   // bc-kcdg: THE single chokepoint every score-editor host (the bracket
@@ -306,13 +369,23 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // editor bodies. attemptScoreWrite above owns the downstream-knockout
   // confirm+retry loop; wiring it here means every host and both editors
   // get it for free.
-  const editMatchScore = async (compId, matchId, result, match) => {
+  const editMatchScore = async (compId, matchId, result, match, opts = {}) => {
+    // bc-kcdg: say what the confirmation actually did. The operator agreed to
+    // reopen specific later matches; without this the only evidence is the
+    // board. The forced write's server answer names what it reopened
+    // (attemptScoreWrite hands it here when it comes, the outbox's answer).
+    const toastReopened = (ids) => {
+      const notice = downstreamKnockoutReopenedNotice(ids);
+      if (notice) showToast(notice);
+    };
     let saveRes;
     try {
       saveRes = await attemptScoreWrite({
         recordScore: window.API.recordScore,
         confirmDialog: window.confirmDialog,
         compId, matchId, result, password, match,
+        onRefusal: opts && opts.onRefusal,
+        onDownstreamReopened: toastReopened,
       });
     } catch (e) {
       // Every error toasted here is marked, so a host that catches it to show
@@ -327,13 +400,20 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       showToast(e.message, "error");
       throw markToasted(e);
     }
-    // bc-kcdg: say what the confirmation actually did. The operator agreed to
-    // reopen specific later matches; without this the only evidence is the
-    // board. attemptScoreWrite attaches the ids the refusal named, so the
-    // notice names the same matches the dialog did.
-    if (saveRes && saveRes.downstreamReopened) {
-      const notice = downstreamKnockoutReopenedNotice(saveRes.downstreamReopened);
-      if (notice) showToast(notice);
+    // A collaborator that still answers directly attaches the ids itself.
+    if (saveRes && saveRes.downstreamReopened) toastReopened(saveRes.downstreamReopened);
+    // bc-evts: the outbox has the write. Nothing is on the server yet, so the
+    // editor gets the pending answer at once (never held behind a refetch),
+    // and what the server answered is read when it comes: the kept-in-history
+    // note, then the refresh, as for a write that answered directly.
+    if (writePending(saveRes)) {
+      saveRes.settled.then((body) => {
+        if (!body || body.discarded) return;
+        const late = closingHistoryToast(result, body);
+        if (late) showToast(late);
+        refreshCompsBestEffort("Score");
+      }, () => {});
+      return saveRes;
     }
     const keptNote = closingHistoryToast(result, saveRes);
     if (keptNote) showToast(keptNote);
@@ -885,6 +965,44 @@ function normalizeCreatedRecord(created) {
   return { ...created, players: created.players ?? [] };
 }
 
+// storedCompetitionInDetail lays a competition PUT's answer (the competition
+// as stored, in the server's shape) on the detail the competition page shows,
+// normalized as a fetched detail is, so the page shows what was stored even
+// when the refetch after the save fails (stage 6 review 10, m10). A detail of
+// another competition, or none, is left as it is.
+function storedCompetitionInDetail(prev, cid, stored) {
+  if (!prev || !prev.config || prev.config.id !== cid || !stored) return prev;
+  const { config } = normalizeCompetitionDetail({ config: { ...prev.config, ...stored } });
+  // A competitor's number is composed when the competition is read, never
+  // stored, so the PUT's answer carries none: the number shown stays, by id,
+  // composed again under the prefix the save stored (stage 6 review 11,
+  // minor 10: a changed prefix showed the old one while the refetch failed;
+  // a cleared one numbers nobody). The prefix is trimmed as Go's
+  // EffectiveNumberPrefix trims it. The prefix IS editable after the draw
+  // (it is outside the draw-ready refusal), and every PUT then renumbers
+  // (engine.RenumberCompetitors), composing each number as prefix + the
+  // draw position (helper.CompetitorNumber), the same integer the old number
+  // carried after its prefix; so the number composed here is the one the
+  // refetch will show (stage 6 review 12, m8; pinned in
+  // admin_stored_detail_numbers.test.jsx).
+  const trimmed = (v) => (v == null ? "" : String(v).trim());
+  const oldPrefix = trimmed(prev.config.numberPrefix);
+  const newPrefix = trimmed(config.numberPrefix);
+  const renumber = (n) => {
+    if (oldPrefix === newPrefix) return n;
+    if (!newPrefix || !oldPrefix || !n.startsWith(oldPrefix)) return "";
+    return newPrefix + n.slice(oldPrefix.length);
+  };
+  const numbers = new Map((prev.config.players || [])
+    .filter((p) => p && p.id && p.number)
+    .map((p) => [p.id, renumber(String(p.number))])
+    .filter(([, n]) => n));
+  if (numbers.size && Array.isArray(config.players)) {
+    config.players = config.players.map((p) => (p && !p.number && numbers.has(p.id) ? { ...p, number: numbers.get(p.id) } : p));
+  }
+  return { ...prev, config };
+}
+
 // refreshFailureToast: what the operator is told when the refresh after an
 // action fails (the action itself did succeed): the hint to reload, or nothing
 // for a refresh given up on at its deadline (the bounded request's
@@ -994,4 +1112,4 @@ window.normalizeCreatedRecord = normalizeCreatedRecord;
 // component with no window binding, and its confirm phase now carries the
 // "will NOT be started" list, which is the surface that stops "Start all"
 // offering a competition the server would refuse.
-export { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord, refreshFailureToast, StartAllModal, attemptScoreWrite };
+export { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord, refreshFailureToast, StartAllModal, attemptScoreWrite, storedCompetitionInDetail };

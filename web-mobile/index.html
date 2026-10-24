@@ -16,6 +16,29 @@
     <script src="/vendor/preact-router.umd.js"></script>
 
     <script>
+        // bcModuleFailed: a module of this page's build directory that cannot be
+        // fetched (a deploy restarted the server on a newer build, which serves
+        // only its own directory, so every other answers 404) leaves the page
+        // running nothing. Reload once, so the page comes back from the build the
+        // server runs. Once per build directory per tab (sessionStorage), so a
+        // page that still cannot load its modules never loops; a tab that cannot
+        // note the reload (sessionStorage refusing) does not reload at all, and
+        // neither does a page that knows it is offline. Every /dist/ module tag
+        // below carries onerror="bcModuleFailed(this)".
+        window.bcModuleFailed = function (script) {
+            try {
+                if (navigator.onLine === false) return;
+                var dir = String((script && script.src) || "").replace(/[^/]*$/, "");
+                var key = "bc_module_reload_for:" + dir;
+                if (window.sessionStorage.getItem(key)) return;
+                window.sessionStorage.setItem(key, "1");
+            } catch (_e) {
+                return;
+            }
+            window.location.reload();
+        };
+    </script>
+    <script>
         console.log("Preact loaded:", !!window.preact);
         console.log("PreactHooks loaded:", !!window.preactHooks);
         console.log("PreactCompat loaded:", !!window.preactCompat);
@@ -75,32 +98,34 @@
          here would be a second, distinct URL → double module-eval (mp-zd1v).
          They keep their early position so the window globals they set are
          available to eval-time readers in later modules. -->
-    <script type="module" src="/dist/api_serializers.jsx"></script>
-    <script type="module" src="/dist/api_client.js"></script>
-    <script type="module" src="/dist/data.jsx"></script>
-    <script type="module" src="/dist/patch.jsx"></script>
-    <script type="module" src="/dist/router.js"></script>
+    <script type="module" src="/dist/api_serializers.jsx" onerror="bcModuleFailed(this)"></script>
+    <script type="module" src="/dist/api_client.js" onerror="bcModuleFailed(this)"></script>
+    <script type="module" src="/dist/data.jsx" onerror="bcModuleFailed(this)"></script>
+    <script type="module" src="/dist/patch.jsx" onerror="bcModuleFailed(this)"></script>
+    <script type="module" src="/dist/router.js" onerror="bcModuleFailed(this)"></script>
     <!-- NO tag here carries a "?v=N" query, and that is deliberate.
-         /dist/ is now served with "Cache-Control: public, max-age=300" plus an
-         ETag derived from the CONTENT of the embedded assets (internal/
-         mobileapp/server.go). Two regimes, in order: for five minutes a client
-         reuses an asset WITHOUT asking, and after that the ETag turns the
-         re-fetch into a 0-byte 304 unless the bundle actually changed. The
-         version queries predated both and were busting a cache that did not
-         exist: measured before the change, a page load transferred 1.17 MB
-         across 69 files with NONE served from cache, versioned and unversioned
-         alike.
+         The server names every module this page loads under the build's own
+         directory: it rewrites each script source /dist/X below to
+         /dist/<hash>/X, where <hash> is the CONTENT hash of the embedded
+         front-end (internal/mobileapp/server.go, staticCacheControlScoped,
+         and index_meta.go, withAssetPrefix), and serves that directory
+         "immutable" with an ETag. Every import inside a module is relative,
+         so it resolves under the same directory. A load therefore asks
+         nothing for a module it already holds, and a new build is a new
+         directory. The version queries predated all of this and were busting
+         a cache that did not exist: measured before the change, a page load
+         transferred 1.17 MB across 69 files with NONE served from cache,
+         versioned and unversioned alike.
 
-         Note what the max-age window means for a DEPLOY, since this comment is
-         what you are reading before you reach for "?v=N" again: index.html is
-         no-store (it carries server-rendered meta tags) while the modules are
-         not, so for up to five minutes after an upgrade a reload can pair fresh
-         HTML with cached modules. Renaming a tag — as this change did, from
-         "bracket.js" to "bracket.jsx" — makes that a MIXED graph: the new URL
-         misses the cache and loads new, the unchanged URLs stay old. Wait out
-         the window or hard-reload when verifying a deploy. A "?v=N" would not
-         help: it busts one tag while every IMPORT of that same module keeps its
-         own unversioned URL, which is how the double-load below started.
+         What that means for a DEPLOY, since this comment is what you are
+         reading before you reach for "?v=N" again: index.html is no-store and
+         names the server's build (<meta name="app-build">, which the version
+         reload reads, app_version.jsx) and the build's module directory, so a
+         reload after an upgrade brings the page and its modules from the one
+         new build, and a directory of an older build answers 404. A "?v=N"
+         would not help anyway: it busts one tag while every IMPORT of that
+         same module keeps its own URL, which is how the double-load below
+         started.
 
          They were also actively harmful on three tags: bracket, ui and qr had
          drifted into the exact tag-vs-import URL mismatch described in the
@@ -112,24 +137,24 @@
          from how it is imported, so re-adding a query here is caught rather
          than merely discouraged.
     -->
-    <script type="module" src="/dist/bracket.jsx"></script>
-    <script type="module" src="/dist/ui.jsx"></script>
+    <script type="module" src="/dist/bracket.jsx" onerror="bcModuleFailed(this)"></script>
+    <script type="module" src="/dist/ui.jsx" onerror="bcModuleFailed(this)"></script>
     <!-- glossary_data.js is generated from internal/domain/glossary.go
          via `go generate` (runs as part of `make go/build`). glossary.jsx
          (compiled to dist/glossary.js) imports it via a relative path. -->
-    <script type="module" src="/dist/glossary.js"></script>
-    <script type="module" src="/dist/reset.js"></script>
-    <script type="module" src="/dist/registration.js"></script>
+    <script type="module" src="/dist/glossary.js" onerror="bcModuleFailed(this)"></script>
+    <script type="module" src="/dist/reset.js" onerror="bcModuleFailed(this)"></script>
+    <script type="module" src="/dist/registration.js" onerror="bcModuleFailed(this)"></script>
     <!-- sponsor_strip.js exports SponsorStrip to window. Must load before
          display.js and viewer.js, both consume window.SponsorStrip (mp-c38). -->
-    <script type="module" src="/dist/sponsor_strip.js"></script>
+    <script type="module" src="/dist/sponsor_strip.js" onerror="bcModuleFailed(this)"></script>
     <!-- qr.js exposes window.renderQR; must load before display.js so the
          StreamingOverlay's QR ("scan for results") can draw. -->
-    <script type="module" src="/dist/qr.js"></script>
+    <script type="module" src="/dist/qr.js" onerror="bcModuleFailed(this)"></script>
     <!-- display.js exports queueLabel / queueLabelCompact to window for the
          viewer pills. Must load *before* viewer.js so the first viewer render
          picks up the labels. -->
-    <script type="module" src="/dist/display.js"></script>
+    <script type="module" src="/dist/display.js" onerror="bcModuleFailed(this)"></script>
     <!-- Viewer modules (mp-pxxc split). viewer.js statically imports all ten
          viewer_* helper modules (viewer_utils, viewer_watchlist_core, viewer_alerts,
          viewer_notifications, viewer_match, viewer_standings, viewer_awards,
@@ -144,15 +169,15 @@
          cycle with viewer_home.jsx), so it keeps its own tag and loads exactly once.
          It reads only window.pluralize (from ui.js, above) at module-eval; the
          viewer.jsx-owned deps it uses are read from window at render time. -->
-    <script type="module" src="/dist/viewer_watchlist.js"></script>
-    <script type="module" src="/dist/viewer.js"></script>
-    <script type="module" src="/dist/admin_helpers.jsx"></script>
-    <script type="module" src="/dist/admin_shell.js"></script>
-    <script type="module" src="/dist/admin_scoring_modal.js"></script>
-    <script type="module" src="/dist/admin_lineup.js"></script>
-    <script type="module" src="/dist/admin_participants.js"></script>
-    <script type="module" src="/dist/admin_pools.js"></script>
-    <script type="module" src="/dist/admin_schedule.js"></script>
+    <script type="module" src="/dist/viewer_watchlist.js" onerror="bcModuleFailed(this)"></script>
+    <script type="module" src="/dist/viewer.js" onerror="bcModuleFailed(this)"></script>
+    <script type="module" src="/dist/admin_helpers.jsx" onerror="bcModuleFailed(this)"></script>
+    <script type="module" src="/dist/admin_shell.js" onerror="bcModuleFailed(this)"></script>
+    <script type="module" src="/dist/admin_scoring_modal.js" onerror="bcModuleFailed(this)"></script>
+    <script type="module" src="/dist/admin_lineup.js" onerror="bcModuleFailed(this)"></script>
+    <script type="module" src="/dist/admin_participants.js" onerror="bcModuleFailed(this)"></script>
+    <script type="module" src="/dist/admin_pools.js" onerror="bcModuleFailed(this)"></script>
+    <script type="module" src="/dist/admin_schedule.js" onerror="bcModuleFailed(this)"></script>
     <!-- admin_competition.js (mp-hpe3 split) is the SOLE entry that imports the
          four section modules (overview/settings/bracket/swiss). Like the viewer_*
          split (mp-pxxc / mp-zd1v), those modules must NOT also have their own
@@ -163,24 +188,24 @@
          block runs (ES evaluates imports before the importing module body). The
          globals they read (CourtPicker, compMatchStats, …) come from admin_* files
          tagged earlier, which run before this entry in document order. -->
-    <script type="module" src="/dist/admin_competition.js"></script>
-    <script type="module" src="/dist/admin_announcement.js"></script>
+    <script type="module" src="/dist/admin_competition.js" onerror="bcModuleFailed(this)"></script>
+    <script type="module" src="/dist/admin_announcement.js" onerror="bcModuleFailed(this)"></script>
     <!-- admin_sponsors.js exports SponsorsManager. Loaded before admin_setup.js
          (which embeds it inside the Edit Tournament page), mp-c38. -->
-    <script type="module" src="/dist/admin_sponsors.js"></script>
+    <script type="module" src="/dist/admin_sponsors.js" onerror="bcModuleFailed(this)"></script>
     <!-- admin_branding.js exports BrandingManager. Loaded before admin_setup.js
          (which embeds it inside the Edit Tournament page), mp-scf. -->
-    <script type="module" src="/dist/admin_branding.jsx"></script>
-    <script type="module" src="/dist/admin_setup.js"></script>
+    <script type="module" src="/dist/admin_branding.jsx" onerror="bcModuleFailed(this)"></script>
+    <script type="module" src="/dist/admin_setup.js" onerror="bcModuleFailed(this)"></script>
     <!-- admin_shiaijo.js exports AdminShiaijoPage to window. Must load before
          admin.js which reads window.AdminShiaijoPage (mp-c2yr). -->
-    <script type="module" src="/dist/admin_shiaijo.js"></script>
+    <script type="module" src="/dist/admin_shiaijo.js" onerror="bcModuleFailed(this)"></script>
     <!-- admin_registration_desk.js exports AdminRegistrationDeskPage to window.
          Must load before admin.js which reads window.AdminRegistrationDeskPage
          in its "registrationDesk" view branch (mp-25bk). -->
-    <script type="module" src="/dist/admin_registration_desk.js"></script>
-    <script type="module" src="/dist/admin.js"></script>
-    <script type="module" src="/dist/app.js"></script>
+    <script type="module" src="/dist/admin_registration_desk.js" onerror="bcModuleFailed(this)"></script>
+    <script type="module" src="/dist/admin.js" onerror="bcModuleFailed(this)"></script>
+    <script type="module" src="/dist/app.js" onerror="bcModuleFailed(this)"></script>
 </body>
 
 </html>

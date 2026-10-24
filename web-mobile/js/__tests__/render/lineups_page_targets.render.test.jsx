@@ -231,7 +231,7 @@ describe('the starting lineup', () => {
     await pick(utils, 1, 'mem-1');
     await click(saveButton(utils));
     expect(api.putTeamLineup).toHaveBeenCalledTimes(1);
-    expect(api.putTeamLineup).toHaveBeenCalledWith('comp-1', 'team-a', 0, { 1: 'Aoki' }, 'pw', { 1: 'mem-1' }, ['1']);
+    expect(api.putTeamLineup).toHaveBeenCalledWith('comp-1', 'team-a', 0, { 1: 'Aoki' }, 'pw', { 1: 'mem-1' }, ['1'], expect.objectContaining({ onRefusal: expect.any(Function) }));
     expect(api.putMatchLineup).not.toHaveBeenCalled();
   });
 });
@@ -266,7 +266,7 @@ describe('a match', () => {
 
     expect(api.putMatchLineup).toHaveBeenCalledTimes(1);
     expect(api.putMatchLineup).toHaveBeenCalledWith(
-      'comp-1', 'team-a', 'Pool A-2', { 2: 'Mori' }, 'pw', { 2: 'mem-4' }, ['2'],
+      'comp-1', 'team-a', 'Pool A-2', { 2: 'Mori' }, 'pw', { 2: 'mem-4' }, ['2'], expect.objectContaining({ onRefusal: expect.any(Function) }),
     );
     expect(api.putTeamLineup).not.toHaveBeenCalled();
   });
@@ -340,7 +340,7 @@ describe('Use the previous match\'s lineup', () => {
     // The confirm says what else follows.
     expect(window.confirmDialog).toHaveBeenCalledTimes(1);
     expect(window.confirmDialog.mock.calls[0][0].message).toMatch(/later match.*no lineup of their own/i);
-    expect(api.deleteMatchLineup).toHaveBeenCalledWith('comp-1', 'team-a', 'Pool A-2', 'pw');
+    expect(api.deleteMatchLineup).toHaveBeenCalledWith('comp-1', 'team-a', 'Pool A-2', 'pw', expect.any(Object));
     expect(api.fetchLineupInForce).toHaveBeenCalledTimes(2);
     expect(utils.getByText('Same as Pool A · Match 1')).toBeTruthy();
     expect(utils.queryByRole('button', { name: "Use the previous match's lineup" })).toBeNull();

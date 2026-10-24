@@ -47,10 +47,35 @@ function assignCourt(matchIdx, courts) {
 }
 
 function mergeMatchPatch(existing, patch) {
+  // bc-evts S5: a RUNNING push older by the server's scoreVersion than the
+  // running match held (two pushes answered out of order) changes nothing.
+  if (existing && patch && existing.status === "running" && patch.status === "running"
+      && olderByScoreVersion(patch, existing) === true) return existing;
   const merged = { ...existing, ...patch };
   if (patch.court === "" || patch.court == null) merged.court = existing.court;
   if (patch.scheduledAt === "" || patch.scheduledAt == null) merged.scheduledAt = existing.scheduledAt;
+  // bc-evts stage 4 review 1 (F1): the server leaves a 0 flag count out of a
+  // match (`omitempty`), so the spread above kept the old count. A full match
+  // result (it names a status; a court or time patch names none) that omits a
+  // count says 0, for a match that carries flags: the presence of a count is
+  // how a match is known to be engi, so the server cannot always send one.
+  if (patch.status != null && (existing.flagsA != null || existing.flagsB != null)) {
+    merged.flagsA = patch.flagsA ?? 0;
+    merged.flagsB = patch.flagsB ?? 0;
+  }
   return merged;
+}
+
+// olderByScoreVersion: whether copy `a` is older than copy `b` by the server's
+// scoreVersion (the match's score-log line count, which only grows and reads
+// no device's clock): true or false when both carry one, null when either
+// does not, so the caller falls back to its stamp rule. The ONE reading of
+// the field; patch.jsx isOlderRunningCopy asks it too.
+function olderByScoreVersion(a, b) {
+  const va = Number(a && a.scoreVersion) || 0;
+  const vb = Number(b && b.scoreVersion) || 0;
+  if (va <= 0 || vb <= 0) return null;
+  return va < vb;
 }
 
 function makePlayer(i, prefix, seed) {
@@ -390,12 +415,16 @@ function parseParticipantLines(lines, withZekken) {
     const parts = line.split(",").map((s) => s.trim());
     const name = parts[0] || "";
     let displayName = "", dojo = "", danGrade = "", source = "";
-    let checkedIn = false;
+    let checkInIgnored = false;
 
     // Detect trailing checked_in column: mirrors Go's column-based check (len > 2).
     // Requires at least 3 parts so a bare "Name, Dojo" row is never affected.
+    // The marker is read off the row so it is not taken for a source or a
+    // dan grade, but it is NOT a check-in: a roster save never writes one
+    // (only the check-in actions do), so the row reports it as ignored for
+    // the page to say so.
     if (parts.length > 2 && parts[parts.length - 1]?.toLowerCase() === "checked_in") {
-      checkedIn = true;
+      checkInIgnored = true;
       parts.pop();
     }
 
@@ -416,7 +445,7 @@ function parseParticipantLines(lines, withZekken) {
       dojo = parts[1] || "";
       danGrade = parts[2] || "";
     }
-    return { name, displayName, dojo, danGrade, source, checkedIn };
+    return { name, displayName, dojo, danGrade, source, checkInIgnored };
   });
 }
 
@@ -474,7 +503,7 @@ export {
   buildPools, poolLetterName, simulatePools, computeStandings, poolWinners,
   buildEmptyCompetition, applyFormat, buildCompetition,
   buildTournament, competitionStatus, SAMPLE_TOURNAMENTS, parseParticipantLines,
-  assignCourt, arraysEqual, mergeMatchPatch, normalizeParticipantName, checkinPid, checkinApiPid,
+  assignCourt, arraysEqual, mergeMatchPatch, olderByScoreVersion, normalizeParticipantName, checkinPid, checkinApiPid,
 };
 
 if (typeof window !== 'undefined') {

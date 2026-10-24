@@ -1,8 +1,9 @@
-// bc-dscn: "Discard unsaved scoring changes?" may only appear where closing
-// would really discard something.
+// bc-dscn: the unsaved-entries warning ("Your unsaved entries will be
+// discarded. Leave this match anyway?", the one warning since stage 6) may
+// only appear where closing would really discard something.
 //
 // Three ways it used to lie:
-//  - On a RUNNING match every scoring edit is autosaved (300ms debounce), so
+//  - On a RUNNING match every scoring edit was once autosaved (300ms debounce), so
 //    the autosave landed while the prompt waited and "Discard" discarded
 //    nothing. Closing now saves any edit still inside the debounce window at
 //    once and closes without asking.
@@ -12,7 +13,7 @@
 //  - On a team match the dispatcher's own Esc listener also fired and closed
 //    the editor past the team editor's prompt. It now stands aside.
 //
-// A scheduled match (no autosave) and a correction keep the prompt, and so does
+// A scheduled match (a draft) and a correction keep the prompt, and so does
 // a running individual match whose hikiwake toggle moved, because
 // buildPatch("running") does not carry the draw, and a running kachinuki match
 // with a changed unplayed row, which that patch drops. A hantei ARM alone is a
@@ -21,6 +22,12 @@ import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { beforeEach as beforeEachTest } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
+
+// bc-evts stage 3: a running individual match is scored by taps handed to
+// the outbox (API.recordTap); each test gets a fresh fake of that surface.
+beforeEachTest(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });
 
 const STUBBED_GLOBALS = {
   isHikiwake: (_type) => false,
@@ -90,7 +97,7 @@ function teamMatch(status) {
 }
 
 // Closing unmounts the editor, as every host does: the unmount is what writes
-// an edit still inside the autosave window.
+// an edit not yet sent.
 function mount(match, props = {}) {
   const onSubmit = vi.fn().mockResolvedValue(undefined);
   let utils;
@@ -112,20 +119,19 @@ const clickClose = () => act(async () => { fireEvent.click(screen.getByText('✕
 
 describe('bc-dscn: individual editor', () => {
   it('a RUNNING match closes without the prompt and saves the pending edit now', async () => {
+    // bc-evts stage 3: the point is a tap, in the outbox the moment it is
+    // made, so closing asks nothing and writes nothing more.
     const { onSubmit, onClose } = mount(individualMatch('running'));
     await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
-    expect(onSubmit).not.toHaveBeenCalled(); // still inside the debounce window
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
 
     await clickClose();
 
     expect(window.confirmDialog).not.toHaveBeenCalled();
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit.mock.calls[0][0].status).toBe('running');
     expect(onClose).toHaveBeenCalledTimes(1);
-
-    // The debounce timer was cancelled by the flush, not left to fire again.
     await act(async () => { vi.advanceTimersByTime(350); });
-    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(window.API.recordTap).toHaveBeenCalledTimes(1);
   });
 
   it('an untouched RUNNING match closes without writing', async () => {
@@ -136,7 +142,7 @@ describe('bc-dscn: individual editor', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('a SCHEDULED match (no autosave) still prompts before discarding', async () => {
+  it('a SCHEDULED match (a draft) still prompts before discarding', async () => {
     const { onClose } = mount(individualMatch('scheduled'));
     await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
     await clickClose();
@@ -179,22 +185,19 @@ describe('bc-dscn: individual editor', () => {
 });
 
 describe('bc-dscn: team editor', () => {
-  it('a RUNNING team match closes without the prompt and saves the pending edit now', async () => {
-    const { onSubmit, onClose } = mount(teamMatch('running'));
+  // bc-evts stage 5: a running team match is scored by taps, each in the
+  // outbox as it is made, so closing owes nothing and asks nothing.
+  it('a RUNNING team match closes without the prompt: its tap went as it was made', async () => {
+    const { onSubmit, onClose } = mount({ ...teamMatch('running'), subResults: [1, 2, 3].map((position) => ({ position, sideA: '', sideB: '', ipponsA: [], ipponsB: [], winner: '', decision: '' })) });
     await act(async () => { fireEvent.click(screen.getAllByText('M')[0]); });
-    expect(onSubmit).not.toHaveBeenCalled();
+    expect(window.API.recordTap.mock.calls.map((c) => c[2])).toEqual([expect.objectContaining({ kind: 'ippon.add', pos: 1, letter: 'M' })]);
 
     await clickClose();
 
     expect(window.confirmDialog).not.toHaveBeenCalled();
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    const patch = onSubmit.mock.calls[0][0];
-    expect(patch.status).toBe('running');
-    expect(patch.subResults.some((s) => (s.ipponsA || []).length + (s.ipponsB || []).length > 0)).toBe(true);
     expect(onClose).toHaveBeenCalledTimes(1);
-
     await act(async () => { vi.advanceTimersByTime(350); });
-    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it('a RUNNING team match with only the daihyosen hantei ARMED closes with no prompt and no write', async () => {
@@ -215,9 +218,9 @@ describe('bc-dscn: team editor', () => {
 
   // A fighter picked on the current bout rides the bout, not a lineup PUT.
   // The running patch used to drop every unplayed row, so the pick was not
-  // carried by a flush and closing had to prompt. Since bc-kclr the current
-  // bout is always sent, so closing flushes the pick and asks nothing.
-  it('a RUNNING kachinuki match with a fighter picked on the unscored current bout flushes the pick on close', async () => {
+  // carried by a flush and closing had to prompt. Since bc-evts stage 5 the pick
+  // is a bout.fighter tap, in the outbox as it is made, so closing asks nothing.
+  it('a RUNNING kachinuki match with a fighter picked on the unscored current bout keeps the pick on close', async () => {
     const savedAPI = window.API;
     window.API = {
       ...savedAPI,
@@ -253,10 +256,10 @@ describe('bc-dscn: team editor', () => {
       await clickClose();
       expect(window.confirmDialog).not.toHaveBeenCalled();
       expect(utils.onClose).toHaveBeenCalledTimes(1);
-      expect(utils.onSubmit).toHaveBeenCalledTimes(1);
-      const bout6 = utils.onSubmit.mock.calls[0][0].subResults.find((r) => r.position === 6);
-      expect(bout6, 'the current bout carries the pick').toBeTruthy();
-      expect(bout6.sideAMemberId).toBe('m-fresh');
+      expect(utils.onSubmit).not.toHaveBeenCalled();
+      expect(window.API.recordTap.mock.calls.map((c) => c[2])).toEqual([
+        { kind: 'bout.fighter', pos: 6, side: 'a', name: 'Fresh Fighter', memberId: 'm-fresh' },
+      ]);
     } finally {
       window.API = savedAPI;
     }

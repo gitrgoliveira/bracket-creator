@@ -27,7 +27,7 @@ func PoolMatchesSettled(matches []state.MatchResult) bool {
 		if m.Status != state.MatchStatusCompleted {
 			return false
 		}
-		if (IsPoolDaihyosenMatchID(m.ID) || IsTiebreakerMatchID(m.ID)) && m.Winner == "" {
+		if state.IsPoolSupplementaryMatchID(m.ID) && m.Winner == "" {
 			return false
 		}
 	}
@@ -355,7 +355,7 @@ func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Compet
 	hasIncompleteDH := false
 	hasCompleteDH := false
 	for _, m := range matches {
-		switch {
+		switch { // not state.IsPoolSupplementaryMatchID: TB and DH are counted apart
 		case IsTiebreakerMatchID(m.ID):
 			// A TB match without a winner (malformed payload) leaves standings
 			// still tied, so treat it as unresolved just like DH.
@@ -734,6 +734,10 @@ func (e *Engine) DiscardDraw(id string) error {
 	// reuses the match ids, and its matches must not inherit these.
 	if err := e.store.DeleteMatchHistory(id); err != nil {
 		return fmt.Errorf("DiscardDraw: failed to delete the match history: %w", err)
+	}
+	// And their score event logs (bc-evts), for the same reason.
+	if err := e.store.DeleteScoreLog(id); err != nil {
+		return fmt.Errorf("DiscardDraw: failed to delete the score event logs: %w", err)
 	}
 	// So do the lineups saved for those matches, and the record of the pairs the
 	// round-lineup conversion settled in them: the next draw reuses the match ids,

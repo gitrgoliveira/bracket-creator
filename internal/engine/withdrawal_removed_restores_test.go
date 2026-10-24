@@ -122,7 +122,7 @@ func TestWithdrawalRemoved_SupersededWriteRestoresNothing(t *testing.T) {
 	stale := &state.MatchResult{
 		ID: "Pool A-0", SideA: wrTeamA, SideB: wrTeamB, Winner: wrTeamB, Decision: "fought",
 		Status: state.MatchStatusCompleted, ModifiedAt: stored.ModifiedAt - 1000,
-		SubResults: wrFoughtBouts(),
+		SubResults: wrFoughtBouts(), WriteDoor: DoorScore,
 	}
 	_, err = eng.RecordMatchResultWithIneligibility(compID, "Pool A-0", stale)
 	// bc-mrgc: the write's verdict is older than the withdrawal, so it is held
@@ -140,7 +140,7 @@ func TestWithdrawalRemoved_SupersededWriteRestoresNothing(t *testing.T) {
 	_, err = eng.RecordMatchResultWithIneligibility(compID, "Pool A-0", &state.MatchResult{
 		ID: "Pool A-0", SideA: wrTeamA, SideB: wrTeamB, Winner: wrTeamB, Decision: "fought",
 		Status: state.MatchStatusCompleted, ModifiedAt: 1,
-		SubResults: wrFoughtBouts(),
+		SubResults: wrFoughtBouts(), WriteDoor: DoorScore,
 	})
 	require.ErrorIs(t, err, ErrMatchSuperseded)
 	assert.Equal(t, before, string(readStatusFile(t, dir, compID)))

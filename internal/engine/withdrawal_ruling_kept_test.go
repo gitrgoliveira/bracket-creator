@@ -98,13 +98,22 @@ func readStatusFile(t *testing.T, dir, compID string) []byte {
 // assertRulingKept compares every field of the inherited unit.
 func assertRulingKept(t *testing.T, before, after withdrawalRuling) {
 	t.Helper()
+	// An empty scoreline is one however it is spelled: a match whose score
+	// event log the write extended is saved again with the replay's marks,
+	// and that save writes an empty side as [] (bc-evts).
+	marks := func(s []string) []string {
+		if len(s) == 0 {
+			return nil
+		}
+		return s
+	}
 	assert.Equal(t, before.Decision, after.Decision, "Decision")
 	assert.Equal(t, before.DecisionBy, after.DecisionBy, "DecisionBy")
 	assert.Equal(t, before.DecisionReason, after.DecisionReason, "DecisionReason")
 	assert.Equal(t, before.Winner, after.Winner, "Winner")
 	assert.Equal(t, before.WinnerID, after.WinnerID, "WinnerID")
-	assert.Equal(t, before.IpponsA, after.IpponsA, "IpponsA")
-	assert.Equal(t, before.IpponsB, after.IpponsB, "IpponsB")
+	assert.Equal(t, marks(before.IpponsA), marks(after.IpponsA), "IpponsA")
+	assert.Equal(t, marks(before.IpponsB), marks(after.IpponsB), "IpponsB")
 	assert.Equal(t, before.Encho, after.Encho, "Encho")
 }
 

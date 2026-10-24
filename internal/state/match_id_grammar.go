@@ -23,6 +23,15 @@ func IsTiebreakerMatchID(matchID string) bool {
 	return hasNumericSuffixAfter(matchID, "-TB-")
 }
 
+// IsPoolSupplementaryMatchID reports whether matchID is a pool representative
+// bout ("Pool X-DH-N") or a pool tie-break bout ("Pool X-TB-N"): a match the
+// draw adds after the pool's own matches, which is ONE individual bout even
+// in a team competition. It is the one spelling of that disjunction; a site
+// that asks only one of the two, or adds a condition of its own, says why.
+func IsPoolSupplementaryMatchID(matchID string) bool {
+	return IsPoolDaihyosenMatchID(matchID) || IsTiebreakerMatchID(matchID)
+}
+
 // hasNumericSuffixAfter reports whether id ends with marker followed by one
 // or more digits and nothing else, e.g. hasNumericSuffixAfter("Pool A-DH-3",
 // "-DH-") is true. A plain strings.Contains(id, marker) would also match a

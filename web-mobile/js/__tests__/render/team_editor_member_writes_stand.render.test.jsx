@@ -20,10 +20,10 @@
 import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { answered, namedLater } from '../helpers/team_members.js';
 import { lineupPutStubByTeam } from '../helpers/lineup_server.js';
-import { FETCH_TIMEOUT_MS } from '../../write_result.jsx';
 
 const STUBBED_GLOBALS = {
   isHikiwake: () => false,
@@ -101,7 +101,6 @@ beforeEach(() => {
     removeDaihyosen: vi.fn(),
     recordDecision: vi.fn(),
     hasPendingTerminalWrite: () => false,
-    notePendingEdit: () => () => {},
   };
 });
 
@@ -162,7 +161,7 @@ describe('team editor: a members read that predates the sheet\'s own write does 
     const { container } = await mountWithSecondReadOut(before);
 
     await typeName(bout(container, 0, 'shiro'), 'Ito');
-    expect(window.API.renameTeamMember).toHaveBeenCalledWith('comp1', 'team-B', 'b1', 'Ito', '');
+    expect(window.API.renameTeamMember).toHaveBeenCalledWith('comp1', 'team-B', 'b1', 'Ito', '', expect.any(Object));
 
     // The read begun before the rename answers with the list from before it.
     await act(async () => { memberReads[1](before); });
@@ -184,7 +183,7 @@ describe('team editor: a members read that predates the sheet\'s own write does 
     const { container } = await mountWithSecondReadOut(before, teamMatch({ teamSize: 3 }));
 
     await typeName(bout(container, 1, 'shiro'), 'Ito');
-    expect(window.API.renameTeamMember).toHaveBeenCalledWith('comp1', 'team-B', 'b2', 'Ito', '');
+    expect(window.API.renameTeamMember).toHaveBeenCalledWith('comp1', 'team-B', 'b2', 'Ito', '', expect.any(Object));
     await act(async () => { memberReads[1](before); });
     await flush();
     await typeName(bout(container, 0, 'shiro'), 'Ito');
@@ -200,7 +199,7 @@ describe('team editor: a members read that predates the sheet\'s own write does 
     const { container } = await mountWithSecondReadOut(before);
 
     await typeName(bout(container, 0, 'shiro'), 'Newcomer');
-    expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 'team-B', 'Newcomer', '');
+    expect(window.API.addTeamMember).toHaveBeenCalledWith('comp1', 'team-B', 'Newcomer', '', expect.any(Object));
     expect(label(container, 0, 'shiro')).toBe('T2.6');
 
     await act(async () => { memberReads[1](before); });
@@ -212,25 +211,26 @@ describe('team editor: a members read that predates the sheet\'s own write does 
   // A name typed before the first list arrives waits for it, until the deadline of any
   // request (team_editor_members_read_first.render.test.jsx). Once it has given up, the
   // sheet knows no member and adds one, and the list answering late lacks it.
+  // bc-evts stage 3 review 2, R1: nothing waits for the members. A name typed after
+  // the opening read failed goes on without them (as it always did) and adds the
+  // member; a list read later, which lacks it, does not take it away.
   it('keeps a member added before the first list arrived, which lacks it', async () => {
-    vi.useFakeTimers();
-    try {
-      await act(async () => {
-        render(<ScoreEditorModal match={teamMatch()} onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue(undefined)} password="" />);
-      });
-      const input = bout(document, 0, 'shiro');
-      await act(async () => {
-        fireEvent.focus(input);
-        fireEvent.change(input, { target: { value: 'Newcomer' } });
-        fireEvent.keyDown(input, { key: 'Enter' });
-      });
-      await act(async () => { await vi.advanceTimersByTimeAsync(FETCH_TIMEOUT_MS); });
-      expect(window.API.addTeamMember).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.useRealTimers();
-    }
+    await act(async () => {
+      render(<ScoreEditorModal match={teamMatch()} onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue(undefined)} password="" />);
+    });
+    await act(async () => { memberFailures[0](new TypeError('Failed to fetch')); });
+    await act(async () => { competition.resolve(DETAIL); });
+    await flush();
+    const input = bout(document, 0, 'shiro');
+    await act(async () => {
+      fireEvent.focus(input);
+      fireEvent.change(input, { target: { value: 'Newcomer' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+    });
+    await flush();
+    expect(window.API.addTeamMember).toHaveBeenCalledTimes(1);
 
-    await act(async () => { memberReads[0](teams(SHIRO_NAMED)); });
+    await act(async () => { memberReads[1](teams(SHIRO_NAMED)); });
     await flush();
 
     expect(label(document, 0, 'shiro'), 'the row still carries the added member').toBe('T2.6');
@@ -271,7 +271,7 @@ describe('team editor: a members read that predates the sheet\'s own write does 
     expect(slot, 'the numbered member T2.3 is offered').toBeTruthy();
     await act(async () => { fireEvent.click(slot); });
     await typeName(shiroNow(), 'Ito');
-    expect(window.API.renameTeamMember).toHaveBeenCalledWith('comp1', 'team-B', 'b3', 'Ito', '');
+    expect(window.API.renameTeamMember).toHaveBeenCalledWith('comp1', 'team-B', 'b3', 'Ito', '', expect.any(Object));
 
     await act(async () => { memberReads[1](before); });
     await flush();
@@ -306,7 +306,7 @@ describe('team editor: the host\'s copy of the members that predates the sheet\'
 
   it('keeps the member the sheet named over a copy that predates the write, and a copy that holds the write changes nothing', async () => {
     await typeName(aka(0), 'Mei Ito');
-    expect(window.API.renameTeamMember).toHaveBeenCalledWith('c1', 'team-A', 'a1', 'Mei Ito', '');
+    expect(window.API.renameTeamMember).toHaveBeenCalledWith('c1', 'team-A', 'a1', 'Mei Ito', '', expect.any(Object));
     expect(aka(0).value).toBe('Mei Ito');
 
     // A copy refreshed before the write reached the server: a1 has no name in it, and no
@@ -430,7 +430,7 @@ describe('team editor: the admin sheet follows the members another device change
   it('shows a rename made elsewhere of a member the sheet named, however the sheet\'s own write was read', async () => {
     const { container } = await open(['', ...OTHERS]);
     await typeName(bout(container, 0, 'shiro'), 'Ito');
-    expect(window.API.renameTeamMember).toHaveBeenCalledWith('comp1', 'team-B', 'b1', 'Ito', '');
+    expect(window.API.renameTeamMember).toHaveBeenCalledWith('comp1', 'team-B', 'b1', 'Ito', '', expect.any(Object));
     expect(bout(container, 0, 'shiro').value).toBe('Ito');
     const mine = await window.API.renameTeamMember.mock.results[0].value;
 
@@ -491,7 +491,7 @@ describe('team editor: the admin sheet follows the members another device change
 
     await typeName(bout(container, 0, 'shiro'), 'Ito');
 
-    expect(window.API.renameTeamMember, 'resolved against the list that was read').toHaveBeenCalledWith('comp1', 'team-B', 'b1', 'Ito', '');
+    expect(window.API.renameTeamMember, 'resolved against the list that was read').toHaveBeenCalledWith('comp1', 'team-B', 'b1', 'Ito', '', expect.any(Object));
     expect(notices(container), 'no warning that the members could not be read').toHaveLength(0);
   });
 
@@ -612,9 +612,12 @@ describe('team editor: the admin sheet follows the members another device change
 
     await act(async () => { memberFailures[0](new TypeError('Failed to fetch')); });
     await flush();
+    // The lineups are read once the competition arrives (nothing waits for them).
+    await act(async () => { competition.resolve(DETAIL); });
+    await flush();
     await typeName(bout(utils.container, 0, 'shiro'), 'Ito');
 
-    expect(window.API.renameTeamMember, 'resolved against the list the later read showed').toHaveBeenCalledWith('comp1', 'team-B', 'b1', 'Ito', '');
+    expect(window.API.renameTeamMember, 'resolved against the list the later read showed').toHaveBeenCalledWith('comp1', 'team-B', 'b1', 'Ito', '', expect.any(Object));
     expect(notices(utils.container), 'no warning that the members could not be read').toHaveLength(0);
   });
 
@@ -624,6 +627,8 @@ describe('team editor: the admin sheet follows the members another device change
       utils = render(<ScoreEditorModal match={teamMatch()} onClose={vi.fn()} onSubmit={vi.fn().mockResolvedValue(undefined)} password="" />);
     });
     await act(async () => { memberFailures[0](new TypeError('Failed to fetch')); });
+    await flush();
+    await act(async () => { competition.resolve(DETAIL); });
     await flush();
 
     await typeName(bout(utils.container, 0, 'shiro'), 'Ito');
@@ -679,7 +684,7 @@ describe('team editor: a kachinuki row\'s name box', () => {
     window.API.renameTeamMember = vi.fn(() => rename.promise);
 
     await nameTheThirdMember(container);
-    expect(window.API.renameTeamMember).toHaveBeenCalledWith('comp1', 'team-B', 'b3', 'Ito', '');
+    expect(window.API.renameTeamMember).toHaveBeenCalledWith('comp1', 'team-B', 'b3', 'Ito', '', expect.any(Object));
 
     // Another team is given the Shiro side, and its members are read.
     await act(async () => {
@@ -698,3 +703,9 @@ describe('team editor: a kachinuki row\'s name box', () => {
     expect(notices(container)[0].textContent).toBe('Nothing was saved because another team is now on this side. Type the name again.');
   });
 });
+
+// bc-evts stage 5: a running team match is scored by taps handed to the outbox
+// (API.recordTap); each test gets a fresh fake of that surface, whose pending
+// taps the board folds on. Registered last, so it lands on the API the hooks
+// above set up.
+beforeEach(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });

@@ -12,8 +12,8 @@ import (
 // TestMerge_ADisplacedRowNeverBringsTheWritesRecordedMark pins that a client
 // can never set a kachinuki bout's recorded mark, on the one merge path that
 // copies a row from the write's OWN payload into the merged match: S2's
-// displacement (mergeHold.displaceNewerScoring copies the finish's scoreline
-// over newer stored scoring that would leave a knockout tied). Here the
+// displacement (mergeByReplay: the finish's scoreline is kept over newer
+// stored scoring that would leave a knockout tied). Here the
 // stored match removed bout 2 after the finish was made (a tombstone newer
 // than it), so the merged match lacks the row and the displacement brings the
 // finish's own row back in, the row the client sent with recorded: true.

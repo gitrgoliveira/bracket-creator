@@ -150,6 +150,7 @@ import {
 } from './competition_shape.jsx';
 import { PillGroup, PillButton, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
 import { DurationInput } from './duration.jsx';
+import { useUnsavedInput } from './app_version.jsx';
 
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
   // In locked mode the on-disk Password is irrelevant: auth comes
@@ -241,6 +242,8 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // -> null) so the pre- and post-sync snapshots compare equal.
   const initialSnapRef = useRefA(null);
   const [dirty, setDirty] = useStateA(false);
+  // Unsaved edits hold a new build's automatic reload (app_version.jsx).
+  useUnsavedInput(dirty);
   useEffectA(() => {
     const snap = JSON.stringify({
       name, venue, date, durationDays, courts, openingBlock, lunchBlock, closingBlock,
@@ -681,6 +684,9 @@ const MIN_STACK_BLOCK_MIN = 30;
 
 function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onViewerMode, password }) {
   const [name, setName] = useStateA("");
+  // A competition being named is unsaved input: it holds a new build's
+  // automatic reload (app_version.jsx).
+  useUnsavedInput(name.trim() !== "");
   const [kind, setKind] = useStateA(COMPETITION_DEFAULTS.kind);
   const [format, setFormat] = useStateA(COMPETITION_DEFAULTS.format);
   // FR-050 / T044: per-phase round-robin shape selector. Only meaningful

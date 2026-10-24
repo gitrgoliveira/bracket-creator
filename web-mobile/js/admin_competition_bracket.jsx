@@ -5,6 +5,7 @@
 
 import { realIppons } from './result_slot.jsx';
 import { writeKeepsEditorOpen } from './write_result.jsx';
+import { holdsUnsaved, confirmDiscardUnsaved, LEAVE_MATCH_ANYWAY } from './unsaved_entries.jsx';
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const hasBothSides = window.hasBothSides;
@@ -94,7 +95,7 @@ function loadScoreboardPoints(match) {
   };
 }
 
-const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, onMoveCourt, onEditScore, password }) => {
+const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, onMoveCourt, onEditScore, password, hostUnsavedRef }) => {
   // Reuse the shared components wholesale: both off the window bridge at render
   // time so module load order never matters:
   //   ScoreEditorModal (variant="inline"): the ONE scoring editor the shiaijo /
@@ -160,13 +161,15 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, onMoveC
             key={match.id}
             variant="inline"
             match={match}
+            hostUnsavedRef={hostUnsavedRef}
             // Offer "close" only when there's a result card to fall back to
             // (editing a completed match); an un-played match has nowhere to go.
             canClose={isComplete}
             onClose={() => setEditing(false)}
-            onSubmit={async (patch) => {
+            onSubmit={async (patch, opts) => {
               try {
-                const res = await onEditScore(compId, match.id, patch, match);
+                // opts: the editor's own claim on a refusal (onRefusal).
+                const res = await onEditScore(compId, match.id, patch, match, opts);
                 // Recorded → fall back to the result card, unless the editor's
                 // job is not done (writeKeepsEditorOpen).
                 if (!writeKeepsEditorOpen(patch, res)) setEditing(false);
@@ -197,8 +200,15 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, onMoveC
   );
 });
 RunningMatchPanel.displayName = "RunningMatchPanel";
-function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, password }) {
+function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, password, hostUnsavedRef = null }) {
   const [selected, setSelected] = useStateA(null);
+  // The panel's editor publishes its unsaved entries here: choosing another
+  // match puts it in the editor's place (keyed by match id), so over unsaved
+  // entries that asks first (R1, stage 5 review 8). The competition page
+  // hands its own ref down (`hostUnsavedRef`), so its tabs and exits ask on
+  // the same entries (stage 5 review 9, M1).
+  const ownUnsavedRef = useRefA(null);
+  const editorUnsavedRef = hostUnsavedRef || ownUnsavedRef;
   const scrollRef = useRefA(null);
   const panelRef = useRefA(null);
   const [autoScrollId, setAutoScrollId] = useStateA(null);
@@ -267,7 +277,11 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
     const previewMode = c && c.status === "draw-ready";
     return <EmptyState icon="⚙" title="Bracket not generated yet" message={previewMode ? "Bracket not available for this format preview." : "Start the competition to build the bracket."} />;
   }
-  const select = (m, ri, mi) => setSelected({ matchId: m.id, ri, mi });
+  const select = async (m, ri, mi) => {
+    if (selected && selected.matchId !== m.id && holdsUnsaved(editorUnsavedRef)
+      && !(await confirmDiscardUnsaved(editorUnsavedRef, LEAVE_MATCH_ANYWAY))) return;
+    setSelected({ matchId: m.id, ri, mi });
+  };
   // Look up the selected match by ID rather than [ri][mi] index. The
   // index can go stale if an SSE-driven bracket rebuild (knockout
   // regeneration, source-comp promotion) reorders entries between the
@@ -391,6 +405,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
       <div className="bracket-layout__panel" ref={panelRef}>
         {hasBothSides(selectedMatch) ? (
           <RunningMatchPanel
+            hostUnsavedRef={editorUnsavedRef}
             match={scoringMatch}
             compId={c.id}
             courts={t?.courts || []}

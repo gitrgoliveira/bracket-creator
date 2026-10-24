@@ -9,7 +9,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 //
 //  unit  , pure-logic suite with the fake React global stub (~1572 tests).
 //           Fast: components are never mounted; logic helpers are called directly.
-//  render, render-smoke suite with REAL React 18 + jsdom. Components are
+//  render, render-smoke suite with REAL React 19 + jsdom. Components are
 //           mounted via @testing-library/react so a missing window.* reference
 //           throws a ReferenceError that the unit suite cannot see.
 //
@@ -59,7 +59,7 @@ export default defineConfig({
           name: 'render',
           environment: 'jsdom',
           globals: true,
-          // Real React 18, deliberately does NOT include vitest.setup.js
+          // Real React 19, deliberately does NOT include vitest.setup.js
           // (the fake-React stub). Function bodies execute; missing window.*
           // references throw ReferenceErrors.
           setupFiles: ['./vitest.setup.render.js'],

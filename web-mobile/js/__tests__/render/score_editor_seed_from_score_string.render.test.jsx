@@ -23,7 +23,7 @@
 //     is guarded by `cleanA.length ? ... : ...` and NOT by `||`, because an
 //     empty array is truthy and `||` would make it dead code.
 //
-// Render project (real React 18 + jsdom): the seeding runs in the component
+// Render project (real React 19 + jsdom): the seeding runs in the component
 // body and is only observable through the mounted slot buttons, so there is no
 // lighter home that pins the same behaviour. Mirrors the global-stub setup of
 // admin_scoring_modal.render.test.jsx.

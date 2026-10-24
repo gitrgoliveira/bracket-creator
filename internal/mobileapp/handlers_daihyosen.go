@@ -47,7 +47,7 @@ func respondIfSuperseded(c *gin.Context, err error) bool {
 	if !errors.Is(err, engine.ErrMatchSuperseded) {
 		return false
 	}
-	respondSuperseded(c, engine.HeldGroupsOf(err), engine.HeldReasonOf(err), engine.HeldDecisionOf(err))
+	respondSuperseded(c, engine.HeldGroupsOf(err), engine.HeldReasonOf(err), err)
 	return true
 }
 
@@ -63,19 +63,25 @@ func respondIfSuperseded(c *gin.Context, err error) bool {
 // timestamps like a score write, and a copy of the match read before it is
 // older than the one it returns, which is how a stale refetch is told apart
 // from it (keepNewerMatches, patch.jsx).
-func daihyosenWriteStamp(c *gin.Context) (int64, bool) {
+func daihyosenWriteStamp(c *gin.Context) (int64, writeTag, bool) {
 	var body struct {
 		ModifiedAt int64 `json:"modifiedAt"`
+		// The optional writeId and basis (bc-evts F1).
+		writeTag
 	}
 	if err := c.ShouldBindJSON(&body); err != nil && !errors.Is(err, io.EOF) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return 0, false
+		return 0, writeTag{}, false
+	}
+	if err := body.validateTag(); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return 0, writeTag{}, false
 	}
 	if serverNowMs, aheadMs, refuse := clientClockSkew(body.ModifiedAt); refuse {
 		respondClockSkew(c, serverNowMs, aheadMs)
-		return 0, false
+		return 0, writeTag{}, false
 	}
-	return clampClientModifiedAt(body.ModifiedAt), true
+	return clampClientModifiedAt(body.ModifiedAt), body.writeTag, true
 }
 
 // respondIfValidationError maps a transaction error that is
@@ -126,6 +132,7 @@ type DaihyosenEngine interface {
 	AddDaihyosen(compID, matchID, nameA, nameB string, sideA, sideB engine.TeamSummary, isPool bool, sideAEligible, sideBEligible int) (*state.SubMatchResult, error)
 	RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, opts ...engine.ForceOptions) (*domain.CompetitorStatus, error)
 	MaybeAutoCompletePoolsAfterWrite(compID string, written ...state.MatchResult) (engine.AutoCompleteOutcome, error)
+	WriteIDLogged(h state.StoreTx, compID, matchID, writeID string) bool
 }
 
 // DaihyosenStore is the consumer-boundary view of *state.Store used by
@@ -138,6 +145,7 @@ type DaihyosenEngine interface {
 // inside the closure would deadlock (the lock is non-reentrant), so the
 // store surface here is just the transaction entry point.
 type DaihyosenStore interface {
+	matchPushStore
 	WithTransaction(compID string, fn func(tx state.StoreTx) error) error
 }
 
@@ -179,7 +187,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 		if !ok {
 			return
 		}
-		stamp, ok := daihyosenWriteStamp(c)
+		stamp, tag, ok := daihyosenWriteStamp(c)
 		if !ok {
 			return
 		}
@@ -206,6 +214,16 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			}
 			if !found {
 				resp = &txResponse{status: http.StatusNotFound, body: gin.H{"error": "match not found"}}
+				return nil
+			}
+			// The same removal sent again after its answer was lost (its
+			// writeId is in the match's score log): answered as recorded,
+			// with the match as stored, before the "no representative bout"
+			// refusal its own landing would otherwise draw, and before the
+			// participant's status rule: a change that landed is not
+			// refused because the match has finished or left running since.
+			if eng.WriteIDLogged(stx, id, mid, tag.WriteID) {
+				resp = &txResponse{status: http.StatusOK, body: gin.H{"result": matchForBroadcast(*match)}}
 				return nil
 			}
 			if anonymous {
@@ -274,6 +292,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// of it.
 			u.Changed = daihyosenChangedGroups(match, &u, state.GroupResult, state.GroupEncho, state.GroupRepPickA, state.GroupRepPickB)
 			u.WriteDoor = engine.DoorDaihyosenDel
+			tag.tagOnto(&u)
 			if _, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, &u); err != nil {
 				if errors.Is(err, engine.ErrMatchSuperseded) {
 					// Committed, not aborted: the write's history entry is
@@ -307,7 +326,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			return
 		}
 
-		hub.Broadcast(EventMatchUpdated, gin.H{
+		broadcastMatchNow(hub, store, id, mid, gin.H{
 			"competitionId": id,
 			"matchId":       mid,
 			"result":        matchForBroadcast(updated),
@@ -328,7 +347,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 		if !ok {
 			return
 		}
-		stamp, ok := daihyosenWriteStamp(c)
+		stamp, tag, ok := daihyosenWriteStamp(c)
 		if !ok {
 			return
 		}
@@ -386,6 +405,21 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			}
 			if !found {
 				resp = &txResponse{status: http.StatusNotFound, body: gin.H{"error": "match not found"}}
+				return nil
+			}
+			// The same add sent again after its answer was lost (its writeId
+			// is in the match's score log): answered as recorded, with the
+			// bout and the match as stored, before the participant's status
+			// rule (a change that landed is not refused because the match has
+			// finished or left running since) and before the one-bout refusal
+			// its own landing would otherwise draw.
+			if eng.WriteIDLogged(stx, id, mid, tag.WriteID) {
+				var row *state.SubMatchResult
+				if i := state.DaihyosenSubIndex(match.SubResults); i >= 0 {
+					stored := match.SubResults[i]
+					row = &stored
+				}
+				resp = &txResponse{status: http.StatusOK, body: gin.H{"subResult": row, "result": matchForBroadcast(*match)}}
 				return nil
 			}
 			if anonymous {
@@ -486,6 +520,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// landing on the new bout through the remove's tombstone stamp.
 			u.Changed = daihyosenChangedGroups(match, &u, state.GroupResult, state.GroupRepPickA, state.GroupRepPickB)
 			u.WriteDoor = engine.DoorDaihyosenAdd
+			tag.tagOnto(&u)
 			if _, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, &u); err != nil {
 				if errors.Is(err, engine.ErrMatchSuperseded) {
 					supersededErr = err
@@ -518,7 +553,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			return
 		}
 
-		hub.Broadcast(EventMatchUpdated, gin.H{
+		broadcastMatchNow(hub, store, id, mid, gin.H{
 			"competitionId": id,
 			"matchId":       mid,
 			"result":        matchForBroadcast(updated),

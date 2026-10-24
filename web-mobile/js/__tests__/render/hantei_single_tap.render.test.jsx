@@ -2,7 +2,14 @@ import React from 'react';
 import { render, fireEvent, act, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { AUTOSAVE_DEBOUNCE_MS } from '../../admin_scoring_autosave.jsx';
+import { beforeEach as beforeEachTest } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
+
+// bc-evts stage 3: a running individual match is scored by taps handed to
+// the outbox (API.recordTap); each test gets a fresh fake of that surface.
+beforeEachTest(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });
+// Long past the 300 ms debounce the editors used to have: nothing is written after it.
+const WAIT_MS = 350;
 import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
 import { pointerTap, keyboardClick } from '../helpers/tap_events.js';
 
@@ -132,7 +139,9 @@ describe('hantei side buttons only pick (bc-htsd)', () => {
     expect(screen.getByTestId('scoring-modal-hantei-aka').className).not.toContain('btn--primary');
   });
 
-  it('the running autosave patch never carries the hantei verdict', async () => {
+  it('the running patch never carries the hantei verdict', async () => {
+    // bc-evts stage 3: a running match writes taps, never a running score
+    // write, and no tap carries the verdict: the pick waits for Finish.
     vi.useFakeTimers();
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(<ScoreEditorModal match={tied({ ipponsA: [], ipponsB: [] })} onClose={vi.fn()} onSubmit={onSubmit} password="" />);
@@ -140,12 +149,9 @@ describe('hantei side buttons only pick (bc-htsd)', () => {
     await click(add('aka', 'M'));
     await click(add('shiro', 'K'));
     await armAndPick('scoring-modal-hantei-aka');
-    await act(async () => { vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 50); });
-    expect(onSubmit).toHaveBeenCalled();
-    for (const [patch] of onSubmit.mock.calls) {
-      expect(patch.status).toBe('running');
-      expect(patch.decidedByHantei).not.toBe(true);
-    }
+    await act(async () => { vi.advanceTimersByTime(WAIT_MS); });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(window.API.recordTap.mock.calls.map((c) => c[2].kind)).toEqual(['ippon.add', 'ippon.add']);
   });
 
   it('Enter commits only the picked side', async () => {
@@ -170,6 +176,18 @@ describe('hantei side buttons only pick (bc-htsd)', () => {
     await act(async () => { fireEvent.keyDown(document, { key: 'Escape' }); });
     expect(window.confirmDialog, 'the arm alone is a mode: leaving asks nothing').not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  // Stage 6 review 1 ("Only one behaviour"): a host exit asks the editor's
+  // published thunk; it must answer exactly as Close and Prev/Next decide.
+  it('a host exit asks exactly when Close does: not for the arm alone, and for a picked side', async () => {
+    const hostUnsavedRef = { current: null };
+    render(<ScoreEditorModal match={tied()} onClose={vi.fn()} onSubmit={vi.fn()} password="" hostUnsavedRef={hostUnsavedRef} />);
+    expect(hostUnsavedRef.current()).toBe(false);
+    await click(screen.getByTestId('scoring-modal-hantei-arm'));
+    expect(hostUnsavedRef.current(), 'the arm alone is a mode: a host exit asks nothing').toBe(false);
+    await click(screen.getByTestId('scoring-modal-hantei-aka'));
+    expect(hostUnsavedRef.current(), 'a picked side is an unsaved entry').toBe(true);
   });
 
   it('leaving a running match after picking a side prompts, and staying keeps the editor', async () => {

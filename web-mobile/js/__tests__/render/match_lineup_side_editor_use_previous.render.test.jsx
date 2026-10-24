@@ -130,7 +130,7 @@ describe('Use the previous match\'s lineup', () => {
     const confirm = window.confirmDialog.mock.calls[0][0];
     expect(confirm.message).toContain('Pool D · Match 2');
     expect(confirm.message).toContain('Later matches that have no lineup of their own follow too.');
-    expect(api.deleteMatchLineup).toHaveBeenCalledWith('comp-1', 'uuid-grouped', 'Pool D-1', 'pw');
+    expect(api.deleteMatchLineup).toHaveBeenCalledWith('comp-1', 'uuid-grouped', 'Pool D-1', 'pw', expect.any(Object));
     expect(api.fetchLineupInForce).toHaveBeenCalledTimes(2);
     expect(utils.getByText('Same as Pool D · Match 1')).toBeTruthy();
     expect(utils.getByLabelText('1 player').value).toBe('Aoki');

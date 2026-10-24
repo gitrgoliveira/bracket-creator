@@ -55,7 +55,7 @@ flowchart TB
     caddy --> cvol
 ```
 
-- App runs as **non-root (uid 65534)**. The data volume must be owned by that uid, or the app refuses to start: at startup it tries a write in the data folder, the transaction log, every competition folder and its match history, and the branding and sponsors folders, and names every one it cannot write to. App port 8080 is `expose`d to the proxy only, never published to the host.
+- App runs as **non-root (uid 65534)**. The data volume must be owned by that uid, or the app refuses to start: at startup it tries a write in the data folder, the transaction log, every competition folder, its match history, its score event logs (`events/`), and the branding and sponsors folders, and names every one it cannot write to. App port 8080 is `expose`d to the proxy only, never published to the host.
 - `restart: unless-stopped` (compose) / auto-restart (cloud) brings the app back after reboots.
 
 ## 3. Deployment options
@@ -182,7 +182,7 @@ flowchart LR
     op -->|writes, queued + synced<br/>when the link returns| net["Venue network / app server"]
 ```
 
-This local hub needs no internet, no secure context, and no extra software. It works in every topology (cloud-hosted, on-prem, or bare-IP HTTP). It **complements** the network fixes in [Venue connectivity](#venue-connectivity-a-four-court-event) rather than replacing them. The operator's writes are still queued locally and synced to the server once the link returns, so the authoritative record stays correct. It is per machine
+This local hub needs no internet, no secure context, and no extra software. It works in every topology (cloud-hosted, on-prem, or bare-IP HTTP). It **complements** the network fixes in [Venue connectivity](#venue-connectivity-a-four-court-event) rather than replacing them. The operator's scoring taps and writes are still held in the browser's outbox and synced to the server once the link returns, so the authoritative record stays correct. It is per machine
 and per court. Reloading the **display** tab during an outage is fine. It cold-starts from the operator tab's snapshot over the same channel, as long as an operator tab is still open on that
 machine to answer (it only stays blank if none is). The genuine gap is reloading the **operator**
 tab itself mid-outage, since it holds the court's working data while offline and would have
@@ -197,11 +197,13 @@ flowchart LR
         t["tournament.md (YAML front-matter)"]
         c["competitions/&lt;id&gt;/config.md"]
         p["competitions/&lt;id&gt;/participants.csv · seeds.csv"]
+        e["competitions/&lt;id&gt;/events/&lt;matchId&gt;.jsonl (score event log)<br/>competitions/&lt;id&gt;/history/&lt;matchId&gt;.jsonl (audit trail)"]
         wal["WAL (crash recovery, replayed on startup)"]
     end
 ```
 
-- **No database.** State is human-readable Markdown + CSV on disk. Multi-file changes are made
+- **No database.** State is human-readable Markdown + CSV on disk, and each match keeps an
+  append-only log of its scoring taps and its writes (JSON lines) beside its audit history. Multi-file changes are made
   durable through a write-ahead log replayed on startup. The disk survives reboots and stop/start.
 - Backups are trivial: snapshot the disk or copy `tournament-data/` elsewhere.
 - **Disk sizing is not about data volume.** Tournament state is tiny (KB–MB). The cloud disks

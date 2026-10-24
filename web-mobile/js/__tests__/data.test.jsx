@@ -149,24 +149,28 @@ describe('Data Utils', () => {
 });
 
 describe('parseParticipantLines', () => {
-  it('sets checkedIn=true when last column is "checked_in" and parts > 2', () => {
+  it('reads a trailing "checked_in" column off the row (parts > 2) but never reports a check-in', () => {
+    // A roster save never writes a check-in; the marker is only recognised so
+    // the page can say it was not applied (checkInIgnored).
     const [p] = parseParticipantLines(['Name, Dojo, checked_in'], false);
-    expect(p.checkedIn).toBe(true);
+    expect('checkedIn' in p).toBe(false);
+    expect(p.checkInIgnored).toBe(true);
     expect(p.name).toBe('Name');
     expect(p.dojo).toBe('Dojo');
   });
 
-  it('does NOT set checkedIn when only 2 parts (below threshold)', () => {
-    // "Name, checked_in" has only 2 parts; must not be treated as the flag.
+  it('does NOT read "checked_in" when only 2 parts (below threshold)', () => {
+    // "Name, checked_in" has only 2 parts; must not be treated as the marker.
     const [p] = parseParticipantLines(['Name, checked_in'], false);
-    expect(p.checkedIn).toBe(false);
+    expect(p.checkInIgnored).toBe(false);
     // The second column is read as dojo.
     expect(p.dojo).toBe('checked_in');
   });
 
-  it('detects both source and checkedIn when "..., source, checked_in"', () => {
+  it('reads both source and the marker when "..., source, checked_in"', () => {
     const [p] = parseParticipantLines(['Name, Dojo, registered, checked_in'], false);
-    expect(p.checkedIn).toBe(true);
+    expect('checkedIn' in p).toBe(false);
+    expect(p.checkInIgnored).toBe(true);
     expect(p.source).toBe('registered');
     expect(p.name).toBe('Name');
     expect(p.dojo).toBe('Dojo');

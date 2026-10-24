@@ -199,9 +199,21 @@ export async function tapNameOption(option) {
   optionTaps.set(page, Date.now());
 }
 
+// Wait out the dwell since the last option tapNameOption made, for a journey's
+// own next tap inside the team sheet's bout list (reopening a name box right
+// after a pick), which the sheet ignores within that window.
+export async function dwellAfterNameOption(page) {
+  const last = optionTaps.get(page);
+  if (last !== undefined) await dwell(page, last);
+}
+
 // Tap a LineupNameInput and choose the option containing `text`. Works on the
-// panel and on the score sheet row alike (both render LineupNameInput).
+// panel and on the score sheet row alike (both render LineupNameInput). The
+// box is tapped after the dwell since the last option tap, since on the score
+// sheet that pick stamped the bout list, which ignores a tap inside it for
+// the bounce window (a box tapped sooner never opens its list).
 export async function pickFromNameBox(input, text) {
+  await dwellAfterNameOption(input.page());
   await input.tap();
   const box = input.locator('xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " lineup-name ")][1]');
   const option = box.locator('.pmf__option').filter({ hasText: text }).first();
@@ -291,9 +303,10 @@ export const rowMiddle = (row) => row.locator('.team-sub-match__score');
 export const rowNameBox = (row, side) => rowSide(row, side).locator('.lineup-name input');
 export const rowMemberLabel = (row, side) => row.getByTestId(`team-sub-match-member-label-${side}`);
 
-// Leave bout `n` a drawn bout (X in its centre). The Tie control is a toggle,
-// so it is only tapped when the row does not already read X; the result is
-// waited for, and the autosave with it.
+// Leave bout `n` a drawn bout (X in its centre). The Tie control is a toggle
+// (a bout.decision tap, hikiwake or clear), so it is only tapped when the row
+// does not already read X; the result is waited for, and the tap's answer
+// with it (the sync pill reads the outbox).
 export async function ensureTie(root, n) {
   const row = boutRow(root, n);
   await row.scrollIntoViewIfNeeded();
@@ -313,6 +326,9 @@ export async function teamTotals(root) {
   };
 }
 
+// The sheet's sync pill. Every strike, Tie and fusensho on a running sheet is a
+// tap queued in the device's outbox (bc-evts stage 5); "Synced" means the
+// outbox is empty, so every tap this device made has been answered.
 export const syncPill = (root) => root.locator('.sync-pill__label').first();
 
 // The whole sheet as one line per bout, "shiro marks | middle | aka marks",
@@ -328,8 +344,9 @@ export async function sheetState(root, bouts = 5) {
 }
 
 // Start the Up next team match and return once the court has it running:
-// the sheet shows its autosave pill only once the start has landed (before
-// that it reads PRE-MATCH, and a strike tapped then is not saved).
+// the sheet shows its sync pill only once it holds the match running (before
+// that it reads PRE-MATCH, and a strike tapped then is a draft, sent only by
+// Start).
 export async function startUpNextTeam(page) {
   await upNextCard(page).getByRole('button', { name: 'Start match' }).tap();
   const ed = inlineEditor(page);
@@ -339,7 +356,7 @@ export async function startUpNextTeam(page) {
 }
 
 // Award one strike on a bout row and return once the board shows it and the
-// autosave has landed. `getRow` returns the row (a function, because the
+// tap has been answered (the outbox is empty). `getRow` returns the row (a function, because the
 // kachinuki sheet's live row is a different element after each Record bout);
 // `key` names the bout for pacing, so a second strike for the same side of
 // the same bout waits out the bounce window of the first (fixtures/pace.mjs).

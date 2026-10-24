@@ -2,6 +2,7 @@ package mobileapp
 
 import (
 	"crypto/tls"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -134,6 +135,22 @@ func TestInjectPreviewMeta_NilStore(t *testing.T) {
 	out := injectPreviewMeta(sampleIndexHTML, nil, "https://tora.example.org")
 	assert.Contains(t, out, "<title>Bracket Creator Mobile</title>")
 	assert.Contains(t, out, `<meta property="og:title" content="Bracket Creator Mobile">`)
+}
+
+// bc-evts S2 a (operator decision), review 2 R7: the served page names the
+// server's build, the value X-App-Build and the SSE hello carry, so the bundle
+// knows which build it came with. The page names its modules under the build's
+// own directory (withAssetPrefix, build_scoped_assets_test.go), so a reload
+// brings the modules of the build the page names.
+func TestInjectPreviewMeta_WritesAppBuild(t *testing.T) {
+	out := injectPreviewMeta(sampleIndexHTML, nil, "https://tora.example.org")
+	assert.Contains(t, out, `<meta name="app-build" content="`+html.EscapeString(AppBuild())+`">`)
+	assert.Less(t, strings.Index(out, `name="app-build"`), strings.Index(out, "</head>"), "in the head")
+}
+
+func TestAppBuildMeta_Escapes(t *testing.T) {
+	assert.Equal(t, `    <meta name="app-build" content="a&lt;b&#34;c&amp;">`+"\n", appBuildMeta(`a<b"c&`))
+	assert.Equal(t, `    <meta name="app-build" content="unknown">`+"\n", appBuildMeta("unknown"))
 }
 
 func TestReplaceTitleContent(t *testing.T) {

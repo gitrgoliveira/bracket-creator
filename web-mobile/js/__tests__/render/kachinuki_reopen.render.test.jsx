@@ -18,6 +18,7 @@
 import React from 'react';
 import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 
 const STUBBED_GLOBALS = {
@@ -132,7 +133,7 @@ describe('kachinuki [Reopen match] is one tap', () => {
     expect(window.API.reopenMatch).toHaveBeenCalledTimes(1);
     // No reason and no downstream confirmation: a reason here would mean the
     // operator was asked for one.
-    expect(window.API.reopenMatch).toHaveBeenCalledWith('comp1', 'm1', 'secret', { reason: '', force: false });
+    expect(window.API.reopenMatch).toHaveBeenCalledWith('comp1', 'm1', 'secret', expect.objectContaining({ reason: '', force: false }));
     // The editor follows the match to running in place, as Clear withdrawal
     // and reopen does, so what the reopen reports can still be read here.
     await waitFor(() => expect(screen.getByTestId('kachinuki-reopen-button').textContent).toBe('Reopened'));
@@ -221,7 +222,7 @@ describe('kachinuki reopen: a later knockout match already fought', () => {
     expect(confirmLabel).toBe('Reopen both');
 
     await waitFor(() => expect(window.API.reopenMatch).toHaveBeenCalledTimes(2));
-    expect(window.API.reopenMatch.mock.calls[1][3]).toEqual({ reason: '', force: true });
+    expect(window.API.reopenMatch.mock.calls[1][3]).toEqual(expect.objectContaining({ reason: '', force: true }));
     await waitFor(() => expect(screen.getByTestId('kachinuki-reopen-notice').textContent)
       .toBe('Match 3 was reopened with its points kept: check them, then finish it again.'));
     expect(onClose).not.toHaveBeenCalled();
@@ -361,7 +362,7 @@ describe('kachinuki reopen: a busy court gets a remedy, not a dead end', () => {
 
     // ONE server call: target=(comp1, m1), blocker=(comp1, m-r1-1). No second
     // reopenMatch call — the requeue and reopen commit together server-side.
-    expect(window.API.requeueBlockerAndReopen).toHaveBeenCalledWith('comp1', 'm1', 'comp1', 'm-r1-1', 'secret', { reason: '', force: false });
+    expect(window.API.requeueBlockerAndReopen).toHaveBeenCalledWith('comp1', 'm1', 'comp1', 'm-r1-1', 'secret', expect.objectContaining({ reason: '', force: false }));
     expect(window.API.reopenMatch).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByTestId('kachinuki-reopen-conflict')).toBeNull());
     expect(onClose).not.toHaveBeenCalled();
@@ -414,7 +415,7 @@ describe('kachinuki reopen: a busy court gets a remedy, not a dead end', () => {
 
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-reopen-requeue-button')); });
     expect(window.API.requeueBlockerAndReopen).toHaveBeenLastCalledWith(
-      'comp1', 'm1', 'comp1', 'm-r1-2', 'secret', { reason: '', force: false },
+      'comp1', 'm1', 'comp1', 'm-r1-2', 'secret', expect.objectContaining({ reason: '', force: false }),
     );
   });
 
@@ -520,7 +521,7 @@ describe('kachinuki [× Remove this bout] undoes a bout added by mistake', () =>
     await renderEditor({ match: runningWithAppendedBout() });
     expect(screen.getByTestId('kachinuki-remove-bout-button')).toBeTruthy();
     await act(async () => { fireEvent.click(screen.getByTestId('kachinuki-remove-bout-button')); });
-    expect(window.API.removeKachinukiBout).toHaveBeenCalledWith('comp1', 'm1', 'secret');
+    expect(window.API.removeKachinukiBout).toHaveBeenCalledWith('comp1', 'm1', 'secret', expect.objectContaining({ onRefusal: expect.any(Function) }));
     await waitFor(() => expect(screen.queryByTestId('kachinuki-remove-bout-button')).toBeNull());
   });
 
@@ -648,13 +649,14 @@ describe('kachinuki [× Remove this bout] undoes a bout added by mistake', () =>
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByTestId('kachinuki-record-hint')).not.toBeNull());
 
-    // Shiro men on the appended bout: the autosave that carries it was made
-    // against the match as the answer left it. (Record bout itself is an
-    // explicit tap, floored by the match the host hands recordScore, so it
-    // carries no seenModifiedAt of its own.)
+    // Shiro men on the appended bout: the tap is made against the match as the
+    // answer left it (bc-evts stage 5: recordTap's `match`, which floors its
+    // stamp). (Record bout itself is an explicit write, floored by the match
+    // the host hands recordScore.)
     await act(async () => { fireEvent.keyDown(window, { key: 'm' }); });
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2), { timeout: 3000 });
-    expect(onSubmit.mock.calls[1][0].seenModifiedAt).toBe(7_777);
+    await waitFor(() => expect(window.API.recordTap).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(window.API.recordTap.mock.calls[0][2]).toMatchObject({ kind: 'ippon.add', pos: 2, side: 'b', letter: 'M' });
+    expect(window.API.recordTap.mock.calls[0][4].modifiedAt).toBe(7_777);
   });
 
   // bc-cse: the common case, with NO prior [Remove this bout] -- the override
@@ -679,11 +681,11 @@ describe('kachinuki [× Remove this bout] undoes a bout added by mistake', () =>
     // There is no prior override here, so the parent's `match` prop (never
     // rerendered by this harness, same as the test above) is still what the
     // editor shows -- the point of this test is that the stamp still reaches
-    // the autosave's floor even so, through _recordBoutAnswerStampRef rather
-    // than the override adoption.
+    // the tap's floor even so, through recordBoutStampRef rather than the
+    // override adoption.
     await act(async () => { fireEvent.keyDown(window, { key: 'm' }); });
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2), { timeout: 3000 });
-    expect(onSubmit.mock.calls[1][0].seenModifiedAt).toBe(7_777);
+    await waitFor(() => expect(window.API.recordTap).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(window.API.recordTap.mock.calls[0][4].modifiedAt).toBe(7_777);
   });
 
   // mp-gmcg review F4: the local override that hides the removed bout must
@@ -1053,3 +1055,9 @@ describe('kachinuki End match never sends a match-level encho', () => {
     expect(patch.encho).toBeUndefined();
   });
 });
+
+// bc-evts stage 5: a running team match is scored by taps handed to the outbox
+// (API.recordTap); each test gets a fresh fake of that surface, whose pending
+// taps the board folds on. Registered last, so it lands on the API the hooks
+// above set up.
+beforeEach(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });

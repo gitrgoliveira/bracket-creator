@@ -189,6 +189,26 @@ type Hub struct {
 	// interval and observe a real emitted heartbeat frame rather than asserting
 	// a hard-coded literal.
 	HeartbeatInterval time.Duration
+
+	// heldPushes is the match-update coalescer RegisterMatchHandlers attaches;
+	// broadcastMatchNow reaches it (through pushMatchNow) from the handlers
+	// that broadcast a match_updated of their own. Set once at registration, before serving.
+	heldPushes *matchBroadcastCoalescer
+	// pushClock is the clock RegisterMatchHandlers builds that coalescer
+	// with (newMatchBroadcastCoalescerWithClock); nil is time.Now. Set
+	// before registration, never after, so no timer reads it as it changes.
+	pushClock func() time.Time
+}
+
+// pushMatchNow runs send under the attached coalescer's lock for matchKey
+// (compID:matchID), after cancelling the running push it holds; without a
+// coalescer it just sends. See broadcastMatchNow.
+func (h *Hub) pushMatchNow(matchKey string, send func()) {
+	if h.heldPushes != nil {
+		h.heldPushes.SendNow(matchKey, send)
+		return
+	}
+	send()
 }
 
 func NewHub() *Hub {
@@ -288,6 +308,11 @@ func (h *Hub) subscribeWithReplay(since int64) (ch chan historyEntry, entries []
 // for all new subscribers and Broadcast becomes a no-op observable to
 // clients (no live channels remain).
 func (h *Hub) Close() {
+	// Stop the held running pushes first, outside h.mu: a trailing send
+	// already under way broadcasts, which takes h.mu.
+	if h.heldPushes != nil {
+		h.heldPushes.Close()
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closed {
@@ -468,6 +493,15 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 		if _, err := c.Writer.Write([]byte(": open\n\n")); err == nil {
 			c.Writer.Flush()
 		}
+		// The stream's hello (bc-evts F2): the first data frame names the
+		// server's build, so a tab running an older bundle can tell it must
+		// reload. It is shaped as a heartbeat (no id:, no seq consumed), which
+		// every client already takes as liveness only.
+		if hello, err := json.Marshal(sseHello{Type: "heartbeat", Hello: true, NowMs: time.Now().UnixMilli(), Build: AppBuild()}); err == nil {
+			if _, werr := fmt.Fprintf(c.Writer, "data: %s\n\n", hello); werr == nil {
+				c.Writer.Flush()
+			}
+		}
 
 		// Replay buffered events (T216). We write directly to the
 		// response writer using the SSE wire format `id: N\ndata: …\n\n`
@@ -577,6 +611,15 @@ func (h *Hub) HandleEvents() gin.HandlerFunc {
 // return). The errcheck-friendly Fprintf return is captured and
 // logged so a degraded connection leaves a breadcrumb without
 // stalling the broadcast path.
+// sseHello is the stream's first data frame (bc-evts F2): a heartbeat that
+// also names the server's build (AppBuild).
+type sseHello struct {
+	Type  string `json:"type"`
+	Hello bool   `json:"hello"`
+	NowMs int64  `json:"nowMs"`
+	Build string `json:"build"`
+}
+
 func writeSSEEnvelope(w io.Writer, seq int64, payload string) {
 	if _, err := fmt.Fprintf(w, "id: %d\nevent: message\ndata: %s\n\n", seq, payload); err != nil {
 		// Don't print every write error, a disconnected client

@@ -1,7 +1,7 @@
 // Tier-2 render smoke tests for the three components in admin_schedule.jsx
 // that previously had zero render coverage (mp-d7tl pre-split gate).
 //
-// Goal: each component mounts under real React 18 + jsdom without throwing
+// Goal: each component mounts under real React 19 + jsdom without throwing
 // and renders a key landmark. These are SHALLOW smoke tests; they do NOT
 // test interaction or deep behaviour. The browser smoke pass (make run-mobile)
 // is the authoritative end-to-end gate.

@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
@@ -74,6 +73,9 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, X-Tournament-Password, X-Confirm-Password")
+		// Every answer names the build that gave it (bc-evts F2).
+		c.Writer.Header().Set(BuildHeader, AppBuild())
+		c.Writer.Header().Set("Access-Control-Expose-Headers", BuildHeader)
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -197,8 +199,14 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterDecisionHandlers(adminSmallBody, eng, store, store, hub)
 	RegisterEligibilityHandlers(adminSmallBody, store, hub)
 	RegisterReinstateHandler(adminSmallBody, eng, hub)
-	RegisterLineupHandlers(adminSmallBody, store, store, store, hub, store, verifier)
-	RegisterSquadHandlers(adminSmallBody, store, store, hub, store, verifier)
+	RegisterLineupHandlers(adminSmallBody, store, store, store, hub, store, verifier, eng)
+	// The lineup a kachinuki match started with is kept as the match's own
+	// (engine/kachinuki_opener.go): announced like every lineup write, so the
+	// lineup screens showing the match read it again.
+	store.OnStartLineupKept(func(compID, teamID, matchID string) {
+		hub.Broadcast(EventLineupUpdated, lineupUpdatedPayload(compID, teamID, matchID))
+	})
+	RegisterSquadHandlers(adminSmallBody, store, store, hub, store, verifier, eng)
 	RegisterDaihyosenHandlers(adminSmallBody, eng, store, hub, store, verifier)
 	RegisterLeagueTiebreakHandlers(adminSmallBody, eng, store, hub)
 	RegisterSwissHandlers(adminSmallBody, store, eng, hub)
@@ -259,8 +267,24 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 			// file server so the static bytes are never served bare.
 			if filePath == "index.html" {
 				if data, rerr := fs.ReadFile(subFS, "index.html"); rerr == nil {
-					serveIndexHTML(c, data, store)
+					serveIndexHTML(c, data, store, assetPrefix(assetETag()))
 					return
+				}
+			}
+
+			// A module under a build's own directory, /dist/<prefix>/ (see
+			// staticCacheControlScoped): the current build's is served from
+			// dist/ with the prefix stripped, and any other is a 404, never the
+			// page, which a module import cannot use.
+			scoped := false
+			if rest, ok := strings.CutPrefix(filePath, "dist/"); ok {
+				if seg, tail, found := strings.Cut(rest, "/"); found && isAssetPrefixSegment(seg) {
+					if current := assetPrefix(assetETag()); current == "" || seg != current {
+						c.String(http.StatusNotFound, "Not found")
+						return
+					}
+					filePath, scoped = "dist/"+tail, true
+					c.Request.URL.Path = "/" + filePath
 				}
 			}
 
@@ -270,7 +294,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 				// File exists, serve it. http.ServeContent honours the ETag we
 				// set here against the request's If-None-Match, so an unchanged
 				// build answers 304 without a body.
-				setStaticCacheHeaders(c, assetETag(), filePath)
+				setStaticCacheHeaders(c, assetETag(), filePath, scoped)
 				fileServer := http.FileServer(http.FS(subFS))
 				fileServer.ServeHTTP(c.Writer, c.Request)
 				return
@@ -288,7 +312,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 			if strings.HasPrefix(filePath, "dist/") && strings.HasSuffix(filePath, ".jsx") {
 				rewritten := strings.TrimSuffix(filePath, ".jsx") + ".js"
 				if _, err := fs.Stat(subFS, rewritten); err == nil {
-					setStaticCacheHeaders(c, assetETag(), rewritten)
+					setStaticCacheHeaders(c, assetETag(), rewritten, scoped)
 					c.Request.URL.Path = "/" + rewritten
 					http.FileServer(http.FS(subFS)).ServeHTTP(c.Writer, c.Request)
 					return
@@ -301,7 +325,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 			if ext == "" || ext == ".html" {
 				data, err := fs.ReadFile(subFS, "index.html")
 				if err == nil {
-					serveIndexHTML(c, data, store)
+					serveIndexHTML(c, data, store, assetPrefix(assetETag()))
 					return
 				}
 			}
@@ -325,9 +349,9 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 // Computed once per process, lazily, on the first /dist/ request: one walk and
 // SHA-256 over ~1.2 MB, single-digit milliseconds, off the startup path.
 //
-// Paired with Cache-Control: max-age (see staticAssetMaxAge) plus the ETag, so
-// the two regimes compose: inside the window a repeat load makes NO request at
-// all, and after it the ETag turns a re-download into a 0-byte 304.
+// It also names the build's own module directory (assetPrefix), served
+// immutable (staticCacheControlScoped); the ETag turns any revalidation into a
+// 0-byte 304.
 //
 // Before this, http.FileServer over embed.FS emitted no Cache-Control, no ETag
 // and no Last-Modified (embed's zero modtime makes ServeContent omit it), so a
@@ -361,46 +385,70 @@ func buildAssetETag(subFS fs.FS) string {
 	return fmt.Sprintf("%q", hex.EncodeToString(h.Sum(nil))[:16])
 }
 
-// staticAssetMaxAge is how long a client may reuse a compiled asset WITHOUT
-// asking. It is the deliberate trade in this policy.
+// staticCacheControlScoped is the caching policy for a compiled module served
+// from the build's own directory, /dist/<prefix>/, where <prefix> is the content
+// hash of the whole front-end (assetPrefix, buildAssetETag: never commit.txt,
+// which two development builds of one commit share). The page is no-store and
+// names every module there (withAssetPrefix), and every import inside a module
+// is relative, so a module's imports resolve under the same prefix: a module at
+// such a path never changes, and a load makes no request for one it holds
+// (bc-evts stage 3 review 3, F3). That keeps both rulings: the page and its code
+// always come from one build (operator decision S2 a; within the old five-minute
+// window a reload paired the new page with the previous build's modules, review
+// 2 R7), and a load costs no round of conditional requests (mp-6o1a, 34d358a2:
+// "no-cache" made one per module, 69 per load, on a slow link). A prefix that is
+// not the current build's is a 404 (NewRouterWithHub), never the page.
 //
-// Why not 0 (revalidate always, the safest setting): correctness would be
-// perfect, but every page load still costs one conditional request per asset —
-// 69 of them here. On a LAN that is invisible; on cellular or a hotel-grade
-// operator laptop at ~100ms round-trip over HTTP/1.1 (six connections), it is
-// roughly a dozen serialised waves before anything renders. Operators and
-// spectators reported that latency as a real problem, so the window exists to
-// remove those round trips entirely for a revisit.
-//
-// Why not hours: an asset cached under max-age is used WITHOUT asking, so a
-// server upgraded mid-event is invisible to an already-loaded client until the
-// window expires. Five minutes bounds that to something an operator would not
-// notice, while covering the cases that actually recur — a tab reopened, a
-// second console window, a spectator returning to the schedule between matches.
-//
-// The ETag still backs it: once the window lapses the client revalidates and
-// gets a 0-byte 304 unless the bundle really changed, so this never costs a
-// re-download. Content-hashed filenames plus "immutable" would remove the
-// window entirely, but esbuild here runs without --bundle and does not rewrite
-// import specifiers, so hashing the names would break every `./x.jsx` import.
-const staticAssetMaxAge = 5 * time.Minute
+// staticCacheControlUnscoped is the policy for a plain /dist/ path, which only a
+// page whose content hash could not be made names: the old five-minute window.
 
-// setStaticCacheHeaders applies the revalidation policy to a compiled asset.
+// setStaticCacheHeaders applies the caching policy to a compiled asset: scoped
+// when it was asked for under the build's own directory.
 // Only /dist/ is covered: index.html is deliberately no-store (it carries
 // server-rendered meta tags), and uploaded branding/sponsor images set their
 // own policy in their handlers.
-func setStaticCacheHeaders(c *gin.Context, etag, filePath string) {
+func setStaticCacheHeaders(c *gin.Context, etag, filePath string, scoped bool) {
 	if !strings.HasPrefix(filePath, "dist/") {
 		return
 	}
 	if etag == "" {
 		return
 	}
-	c.Header("Cache-Control", staticCacheControl)
+	if scoped {
+		c.Header("Cache-Control", staticCacheControlScoped)
+	} else {
+		c.Header("Cache-Control", staticCacheControlUnscoped)
+	}
 	c.Header("ETag", etag)
 }
 
-// staticCacheControl is the header value built from staticAssetMaxAge, which is
-// a constant — so this string is fixed for the life of the binary and there is
-// nothing to format per request.
-var staticCacheControl = fmt.Sprintf("public, max-age=%d", int(staticAssetMaxAge.Seconds()))
+// assetPrefixSegmentLen is the length of a build-scoped module directory's
+// name: buildAssetETag's 16 hex characters.
+const assetPrefixSegmentLen = 16
+
+// assetPrefix is the name of the build's own module directory, /dist/<prefix>/:
+// the content hash of the compiled front-end (buildAssetETag) without its
+// quotes, "" when it could not be made.
+func assetPrefix(etag string) string {
+	return strings.Trim(etag, `"`)
+}
+
+// isAssetPrefixSegment reports whether a path segment under /dist/ has the
+// shape of a build's module directory (16 lowercase hex characters). web-mobile/dist
+// has no subdirectories of its own, so such a segment is never a real folder.
+func isAssetPrefixSegment(seg string) bool {
+	if len(seg) != assetPrefixSegmentLen {
+		return false
+	}
+	for _, r := range seg {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+const (
+	staticCacheControlScoped   = "public, max-age=31536000, immutable"
+	staticCacheControlUnscoped = "public, max-age=300"
+)

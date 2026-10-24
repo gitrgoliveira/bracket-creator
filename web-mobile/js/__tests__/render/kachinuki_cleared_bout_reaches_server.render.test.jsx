@@ -4,12 +4,16 @@
 // back to 0-0 is exactly such a row, so the write simply left it out; the
 // server merge (mergeKachinukiSubResults) keeps any stored row a payload omits,
 // so the stored point survived every save and came back on reload. A row the
-// operator cleared, whose stored row still has a result, is now sent as an
-// explicit empty row, which the merge stores; rows never played stay out.
+// operator cleared, whose stored row still has a result, was then sent as an
+// explicit empty row. Since bc-evts stage 5 a running match is scored by taps:
+// taking a mark back is one ippon.remove naming the mark, which no merge can
+// drop, and the board (the server's copy with the pending taps folded on)
+// never shows a lagging copy's point over it.
 
 import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { makeFakeOutbox } from '../helpers/fake_outbox.js';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 
 const STUBBED_GLOBALS = {
@@ -76,103 +80,92 @@ async function tapMark(side, letter) {
 const rowAt = (patch, position) => (patch.subResults || []).find((s) => s.position === position);
 
 describe('a mark taken back on a kachinuki bout reaches the server (bc-kclr)', () => {
-  it('the autosave carries the cleared bout as an explicit empty row', async () => {
+  const taps = () => window.API.recordTap.mock.calls.map((c) => c[2]);
+  const filled = (side) => document.querySelectorAll(`.team-sub-match:not(.team-sub-match--readonly) .tsm-center-pts--${side} .editor-side__pt--filled`).length;
+
+  it('taking the mark back is one ippon.remove naming it, and nothing else is written', async () => {
     const onSubmit = await mount(kachinukiMatch([
-      { position: 1, sideA: 'Aka 1', sideB: 'Shiro 1', ipponsA: ['M'], ipponsB: [] },
+      { position: 1, sideA: 'Aka 1', sideB: 'Shiro 1', ipponsA: ['M'], ipponsB: [], markIds: { a: ['srv-m'] } },
     ]));
     await tapMark('aka', 'M');
     await act(async () => { vi.advanceTimersByTime(400); });
-
-    expect(onSubmit).toHaveBeenCalled();
-    const patch = onSubmit.mock.calls[onSubmit.mock.calls.length - 1][0];
-    expect(patch.status).toBe('running');
-    const bout1 = rowAt(patch, 1);
-    expect(bout1, 'the cleared bout must be on the wire, or the stored point survives').toBeTruthy();
-    expect(bout1.ipponsA).toEqual([]);
-    expect(bout1.ipponsB).toEqual([]);
-    expect(bout1.decision || '').toBe('');
-    // Positions nobody ever played stay off the wire, as before.
-    expect(rowAt(patch, 2)).toBeUndefined();
-    expect(rowAt(patch, 3)).toBeUndefined();
+    expect(taps()).toEqual([{ kind: 'ippon.remove', pos: 1, side: 'a', target: 'srv-m' }]);
+    expect(filled('aka')).toBe(0);
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  // The case the first fix missed, found in the browser: the court feed lags
-  // the editor, so when a point is struck and taken back within a moment,
-  // this board never saw the point stored. The clear must be written anyway.
+  it('a stored mark the copy names no id for is named as the server\'s first baseline names it', async () => {
+    await mount(kachinukiMatch([
+      { position: 1, sideA: 'Aka 1', sideB: 'Shiro 1', ipponsA: ['M'], ipponsB: [] },
+    ]));
+    await tapMark('aka', 'M');
+    expect(taps()).toEqual([{ kind: 'ippon.remove', pos: 1, side: 'a', target: 'b:1:a:M:0' }]);
+    expect(filled('aka')).toBe(0);
+  });
+
+  // The court feed lags the editor: a point struck and taken back within a
+  // moment was never seen stored by this board. The removal names the tap's
+  // own mark, and the bout's row (which the server does not hold yet) is written
+  // ahead of both.
   const strikeAkaMen = async () => {
     await act(async () => { fireEvent.keyDown(window, { key: 'M', shiftKey: true }); });
   };
-  const lastPatch = (onSubmit) => onSubmit.mock.calls[onSubmit.mock.calls.length - 1][0];
 
-  it('writes the clear even when the court feed never showed the stored point', async () => {
+  it('a point struck and taken back on a first bout the server never held: the two taps, and no row write', async () => {
     const onSubmit = await mount(kachinukiMatch([]));
     await strikeAkaMen();
-    await act(async () => { vi.advanceTimersByTime(400); });
-    expect(rowAt(lastPatch(onSubmit), 1).ipponsA, 'precondition: the point was written').toEqual(['M']);
-
+    const { id } = window.API.recordTap.mock.results[0].value;
     await tapMark('aka', 'M');
-    await act(async () => { vi.advanceTimersByTime(400); });
-    const bout1 = rowAt(lastPatch(onSubmit), 1);
-    expect(bout1, 'the bout being fought is always sent').toBeTruthy();
-    expect(bout1.ipponsA).toEqual([]);
+    expect(taps()).toEqual([
+      { kind: 'ippon.add', pos: 1, side: 'a', letter: 'M' },
+      { kind: 'ippon.remove', pos: 1, side: 'a', target: id },
+    ]);
+    // The server makes the first bout's row at its first tap (stage 6).
+    expect(onSubmit, 'no row write ahead of the taps').not.toHaveBeenCalled();
+    expect(filled('aka')).toBe(0);
   });
 
-  it('a lagging snapshot carrying the point does not put it back', async () => {
-    // Each write is stamped when it is sent (server_clock.jsx's frame; the
-    // offset is 0 here), and a snapshot of it carries that stamp.
-    const sentAt = [];
-    const onSubmit = vi.fn().mockImplementation(() => { sentAt.push(Date.now()); return Promise.resolve({ applied: true }); });
-    let utils;
-    const el = (match) => <ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={onSubmit} password="" />;
-    await act(async () => { utils = render(el(kachinukiMatch([]))); });
-    await strikeAkaMen();
-    await act(async () => { vi.advanceTimersByTime(400); });
-    await tapMark('aka', 'M');
-    // The feed now delivers the snapshot of the EARLIER write, with the point:
-    // written before the clear, so it cannot know about it.
-    await act(async () => { vi.advanceTimersByTime(150); });
-    await act(async () => {
-      utils.rerender(el(kachinukiMatch([{ position: 1, sideA: '', sideB: '', ipponsA: ['M'], ipponsB: [] }], sentAt[0])));
-    });
-    const filled = document.querySelectorAll('.team-sub-match:not(.team-sub-match--readonly) .tsm-center-pts--aka .editor-side__pt--filled');
-    expect(filled.length, 'the point taken back stays taken back').toBe(0);
-    await act(async () => { vi.advanceTimersByTime(400); });
-    expect(rowAt(lastPatch(onSubmit), 1).ipponsA, 'and the write carries the clear, not the stale point').toEqual([]);
-  });
-
-  // Review finding: the guard used to be a time window, so a change another
-  // device saved to the same bout right after the operator's edit was never
-  // adopted. It is keyed on the snapshot's stamp now: written after the edit,
-  // it is news, and a row the operator has put back where it was follows it.
-  it('a change saved on another device after the edit is adopted', async () => {
+  it('a lagging copy carrying the point does not put it back', async () => {
     const onSubmit = vi.fn().mockResolvedValue({ applied: true });
     let utils;
     const el = (match) => <ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={onSubmit} password="" />;
-    await act(async () => { utils = render(el(kachinukiMatch([]))); });
+    await act(async () => { utils = render(el(kachinukiMatch([{ position: 1, sideA: '', sideB: '', ipponsA: [], ipponsB: [] }]))); });
     await strikeAkaMen();
-    await act(async () => { vi.advanceTimersByTime(400); });
+    const { id } = window.API.recordTap.mock.results[0].value;
     await tapMark('aka', 'M');
-    await act(async () => { vi.advanceTimersByTime(400); });
-    // Another device records Shiro's K on bout 1, well inside the old window.
+    // The feed now delivers the copy the server made of the strike alone: the
+    // removal is still pending, so it folds over that copy.
+    await act(async () => {
+      utils.rerender(el({ ...kachinukiMatch([{ position: 1, sideA: '', sideB: '', ipponsA: ['M'], ipponsB: [], winner: '', markIds: { a: [id] } }]), eventSeqs: { dev1: 1 } }));
+    });
+    expect(filled('aka'), 'the point taken back stays taken back').toBe(0);
+  });
+
+  it('a change saved on another device after the edit shows', async () => {
+    const onSubmit = vi.fn().mockResolvedValue({ applied: true });
+    let utils;
+    const el = (match) => <ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={onSubmit} password="" />;
+    await act(async () => { utils = render(el(kachinukiMatch([{ position: 1, sideA: '', sideB: '', ipponsA: [], ipponsB: [] }]))); });
+    await strikeAkaMen();
+    await tapMark('aka', 'M');
+    // Another device records Shiro's K on bout 1.
     await act(async () => {
       utils.rerender(el(kachinukiMatch([{ position: 1, sideA: '', sideB: '', ipponsA: [], ipponsB: ['K'] }], Date.now())));
     });
-    const shiroFilled = document.querySelectorAll('.team-sub-match:not(.team-sub-match--readonly) .tsm-center-pts--shiro .editor-side__pt--filled');
-    expect(shiroFilled.length, "the other device's point shows").toBe(1);
+    expect(filled('shiro'), "the other device's point shows").toBe(1);
+    expect(filled('aka')).toBe(0);
   });
 
-  // The close prompt existed because a cleared bout could not be flushed
-  // (runningPatchDropsAnEdit). Now it can, so closing flushes it and asks
-  // nothing.
-  it('closing right after the clear flushes it with no discard prompt', async () => {
+  // The close prompt existed because a cleared bout could not be flushed. Now
+  // its removal went as it was made, so closing asks nothing and owes nothing.
+  it('closing right after the clear asks nothing and writes nothing more', async () => {
     window.confirmDialog = vi.fn().mockResolvedValue(false);
     const onSubmit = vi.fn().mockResolvedValue({ applied: true });
-    // Closing unmounts the editor, as every host does; the unmount writes it.
     let view;
     const onClose = vi.fn(() => view.unmount());
     await act(async () => {
       view = render(<ScoreEditorModal match={kachinukiMatch([
-        { position: 1, sideA: 'Aka 1', sideB: 'Shiro 1', ipponsA: ['M'], ipponsB: [] },
+        { position: 1, sideA: 'Aka 1', sideB: 'Shiro 1', ipponsA: ['M'], ipponsB: [], markIds: { a: ['srv-m'] } },
       ])} onClose={onClose} onSubmit={onSubmit} password="" />);
     });
     await tapMark('aka', 'M');
@@ -180,8 +173,8 @@ describe('a mark taken back on a kachinuki bout reaches the server (bc-kclr)', (
 
     expect(window.confirmDialog).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(rowAt(onSubmit.mock.calls[0][0], 1).ipponsA).toEqual([]);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(taps()).toEqual([{ kind: 'ippon.remove', pos: 1, side: 'a', target: 'srv-m' }]);
   });
 
   it('End match after clearing the current bout stores no stale mark on it', async () => {
@@ -203,3 +196,9 @@ describe('a mark taken back on a kachinuki bout reaches the server (bc-kclr)', (
     expect(bout2.ipponsB).toEqual([]);
   });
 });
+
+// bc-evts stage 5: a running team match is scored by taps handed to the outbox
+// (API.recordTap); each test gets a fresh fake of that surface, whose pending
+// taps the board folds on. Registered last, so it lands on the API the hooks
+// above set up.
+beforeEach(() => { if (window.API) Object.assign(window.API, makeFakeOutbox().api); });

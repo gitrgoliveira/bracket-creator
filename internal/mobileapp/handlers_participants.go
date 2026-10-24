@@ -317,16 +317,29 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			canonicalPlayers[i].Name = helper.TitleCaseName(canonicalPlayers[i].Name)
 			canonicalPlayers[i].Dojo = strings.TrimSpace(canonicalPlayers[i].Dojo)
 		}
-		orphaned, keptSeeds := seedsOrphanedByRosterReplace(existing, canonicalPlayers, seeds)
+		orphaned, _ := seedsOrphanedByRosterReplace(existing, canonicalPlayers, seeds)
 		if len(orphaned) > 0 && rosterReplaceAddsIdentities(existing, canonicalPlayers) {
-			labels := formatOrphanedSeedLabels(orphaned)
-			c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf(
-				"this replace removes or renames %d already-seeded participant(s) (%s), and also adds new participant(s), so a removal can't be told apart from a rename; keep their name and dojo unchanged, do the removal in a request that adds no new participants, or update/clear their seed first via PUT /competitions/:id/participants/:pid or the seeding panel",
-				len(orphaned), strings.Join(labels, ", "))})
+			c.JSON(http.StatusConflict, gin.H{"error": (&orphanedSeedsRefusal{orphaned: orphaned}).Error()})
 			return
 		}
 
-		if err := store.SaveParticipants(id, players); err != nil {
+		// The check-ins carried above were read before the lock; the write
+		// keeps every check-in stored at the moment it lands
+		// (ReplaceRosterKeepingCheckIns), so one another desk made in between
+		// is not erased (stage 6 review 12, C1).
+		//
+		// The orphaned seed rows of an unambiguous removal are dropped in the
+		// same locked step, from the seeds stored when it runs: a seed
+		// another desk set between the read above and the write is kept, and
+		// the 409 above is judged again there, so a seed set in the gap on a
+		// competitor this replace renames refuses it with nothing written.
+		seedsErr, err := store.ReplaceRosterKeepingCheckIns(id, players, rosterReplaceSeedPruner(canonicalPlayers))
+		var orphanedRefusal *orphanedSeedsRefusal
+		if errors.As(err, &orphanedRefusal) {
+			c.JSON(http.StatusConflict, gin.H{"error": orphanedRefusal.Error()})
+			return
+		}
+		if err != nil {
 			// Defense-in-depth: saveParticipantsNoLock also enforces the
 			// Tier-1 (name, dojo) guard and the blank-dojo/reserved-name
 			// floors, so map those to their 4xx rather than 500 in case the
@@ -355,10 +368,8 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// case seedsOrphanedByRosterReplace already tolerates elsewhere --
 		// not a new failure mode -- so there is nothing worth rolling the
 		// roster write back over.
-		if len(orphaned) > 0 {
-			if err := store.SaveSeeds(id, keptSeeds); err != nil {
-				fmt.Printf("Warning: failed to drop orphaned seed(s) after roster removal: %v\n", err)
-			}
+		if seedsErr != nil {
+			fmt.Printf("Warning: failed to drop orphaned seed(s) after roster removal: %v\n", seedsErr)
 		}
 
 		// Reload from disk so the response reflects the persisted roster,

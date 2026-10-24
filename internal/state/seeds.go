@@ -87,7 +87,13 @@ func (s *Store) SaveSeeds(compID string, assignments []domain.SeedAssignment) er
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
+	return s.saveSeedsLocked(compID, assignments)
+}
 
+// saveSeedsLocked is SaveSeeds' body, for a caller already holding the
+// competition's lock (SaveRoster, which writes the roster and its seeds as
+// one locked step).
+func (s *Store) saveSeedsLocked(compID string, assignments []domain.SeedAssignment) error {
 	if len(assignments) > 0 {
 		// Load the roster under the lock already held above: LoadParticipants
 		// would try to re-acquire it and deadlock the non-reentrant mutex, so

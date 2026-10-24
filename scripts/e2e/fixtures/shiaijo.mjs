@@ -41,7 +41,7 @@ export async function editorIdentity(page, root = INLINE_EDITOR) {
   const ed = typeof root === 'string' ? page.locator(root).first() : root.first();
   const first = async (sel) => ((await ed.locator(sel).allInnerTexts())[0] || '').trim();
   const eyebrow = await first('.editor-modal__eyebrow');
-  // The title's first line: the autosave pill beside it is not the match.
+  // The title's first line: the sync pill beside it is not the match.
   const title = (await first('.editor-modal__title')).split('\n')[0].trim();
   const names = (await ed.locator('.numbered-name__text').allInnerTexts()).slice(0, 2).map((t) => t.trim());
   return {
@@ -53,7 +53,9 @@ export async function editorIdentity(page, root = INLINE_EDITOR) {
 
 // Start the Up next match the way the operator does, from its card, and
 // return the pairing once the inline editor holds it. Only the card's own
-// "Start match" is used: every Upcoming row carries one too.
+// "Start match" is used: every Upcoming row carries one too. The Start goes
+// through the outbox and never waits (bc-evts): the editor holds the match at
+// once, and its board shows every tap from then on, answered or not.
 export async function startUpNext(page) {
   const card = upNextCard(page);
   const pair = await sides(card);

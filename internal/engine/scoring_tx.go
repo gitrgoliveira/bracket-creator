@@ -92,8 +92,32 @@ import (
 // competitor-status writes made before K3, and a bracket-only restore would put
 // a downstream match back to a verdict whose competitor stays restored.
 func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, opts ...ForceOptions) (*domain.CompetitorStatus, error) {
+	// The write's own id and stamp, read before an answer as recorded
+	// replaces result with the stored match (afterMatchWrite tells a resend
+	// of the start by its logged line, resentStartWarning).
+	door, stamp, writeID := result.WriteDoor, result.ModifiedAt, result.WriteID
+	if writeID == "" {
+		writeID = firstForceOptions(opts).WriteID
+	}
+	before := e.storedStatus(tx, compID, matchID)
+	status, err := e.recordMatchResultWithIneligibilityTx(tx, compID, matchID, result, opts...)
+	// A kachinuki match keeps the lineups it started with, and bout 1 is
+	// brought to what its lineup says (operator decision K1 (c),
+	// kachinuki_opener.go), only once the write stands.
+	if err == nil {
+		result.LineupWarning, err = e.afterMatchWrite(tx, compID, matchID, before, door, writeID, stamp)
+	}
+	return status, err
+}
+
+// recordMatchResultWithIneligibilityTx is RecordMatchResultWithIneligibilityTx
+// before bout 1 of a kachinuki encounter is seated.
+func (e *Engine) recordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, opts ...ForceOptions) (*domain.CompetitorStatus, error) {
 	fo := firstForceOptions(opts)
 	result.ID = matchID
+	if result.WriteID == "" && fo.WriteID != "" {
+		result.WriteID, result.Basis, result.WriteSession = fo.WriteID, fo.Basis, fo.Session
+	}
 
 	// Engi dispatch seam (tx-aware): a flag-scored competition records via the
 	// engi slice through the SAME tx so the write stays inside the caller's
@@ -103,18 +127,23 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	if loadErr != nil {
 		return nil, fmt.Errorf("RecordMatchResultWithIneligibilityTx: load competition %s: %w", compID, loadErr)
 	}
-	// A write the caller already knows must not apply (the running rev
-	// guard's older revision) is kept whole in the match's history and
-	// answered superseded, before anything else judges it: nothing of it
-	// lands, and nothing about it is lost (bc-mrgc phase 3).
-	if fo.HoldReason != "" {
-		return nil, e.holdWriteTx(tx, compID, matchID, result, comp, fo.HoldReason)
-	}
 	// An exact resend of a finish already recorded (a queued write whose
 	// first send landed but whose answer was lost) answers as recorded and
 	// writes nothing, before anything else judges it (bc-xrpl).
-	if replayed, err := e.answerExactScoreReplay(tx, compID, matchID, result, comp, fo.NoReplayHistory); err != nil || replayed {
-		return nil, err
+	// The score replay's derived write (bc-evts) is built by the server from
+	// the stored match and the event log: it is never a resend, it owns the
+	// hansoku fold and the bout rows it carries, and an engi count reaches it
+	// through flag events, so it skips the client-write shaping below.
+	replayedWrite := result.WriteDoor == DoorEvent
+	if !replayedWrite {
+		// A resend of a write the score event log already holds (its writeId,
+		// bc-evts F1) answers as recorded with no history line for anyone (Q6).
+		if logged, err := e.answerLoggedWrite(tx, compID, matchID, result); err != nil || logged {
+			return nil, err
+		}
+		if replayed, err := e.answerExactScoreReplay(tx, compID, matchID, result, comp, fo.NoReplayHistory); err != nil || replayed {
+			return nil, err
+		}
 	}
 	// Only a COMPLETING write goes through the engi recorder. Engi's flag-total
 	// rule (odd, in {1,3,5}: a 3- or 5-referee panel cannot draw) can only be
@@ -139,7 +168,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// sent back to the queue or switched away from keeps them, and a panel
 	// part-way through its count has no valid total yet.
 	engiRunningWrite := result.Status == state.MatchStatusRunning
-	if comp != nil && comp.Engi && !engiStartWrite && !engiRunningWrite {
+	if comp != nil && comp.Engi && !engiStartWrite && !engiRunningWrite && !replayedWrite {
 		// A pool write in a mixed engi competition answers for the knockout
 		// its pool feeds exactly as a kendo one does (below): prior is read
 		// first, so a refusal can put the pool row back. Only a pool write in
@@ -156,10 +185,31 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		if lerr != nil {
 			return nil, lerr
 		}
+		engiLines := e.snapshotScoreLog(tx, compID, matchID, &state.MatchResult{WriteDoor: doorEngi}, matchWriteForward)
+		engiRival := false
+		// The values a held pool finish keeps in the history: the finish as
+		// the merge judged it (flags and the verdict they decide).
+		var engiValues *state.MatchResult
 		if engiValidTotal(result.FlagsA, result.FlagsB) {
-			if engiFinishHeld(engiPrior, result, comp, !inPool) {
-				e.recordWriteHistory(tx, compID, matchID, result)
+			if engiFinishHeld(engiPrior, result, comp, !inPool, engiLines) {
+				e.recordSupersededWriteHistory(tx, compID, matchID, result)
 				return nil, supersededBy(result)
+			}
+			// The result lock (K1, result_lock.go): an engi finish that
+			// displaced the stored result without having seen it is held, never
+			// refused, once the next knockout match was played or started. A
+			// pool finish is judged by the requalification below.
+			engiRival = rivalDisplacesResult(result.Merge)
+			if engiRival {
+				probe := engiFinishProbe(engiPrior, result)
+				engiValues = &probe
+				if !inPool {
+					if code := e.knockoutLockCode(tx, compID, matchID); code != "" {
+						holdAsLocked(result, engiValues, code)
+						e.recordSupersededWriteHistory(tx, compID, matchID, result)
+						return nil, supersededBy(result)
+					}
+				}
 			}
 		}
 		if comp.Format != state.CompFormatMixed || !IsPoolMatchID(matchID) {
@@ -172,11 +222,11 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		// write's full merge report (result.Merge), per-group outcomes
 		// included, so recordWriteHistory below is the one history entry
 		// for it; recordEngiMatch's own blunt "every changed group
-		// applied" entry would contradict it whenever a group (the flags,
-		// in bc-mrgc's S2 fix) was genuinely held rather than applied. That
-		// call also covers what recordDisplacedHistory used to be called
-		// for separately here (S2 with R4: a newer recount the finish
-		// moved to the history), since recordWriteHistory appends it too.
+		// applied" entry would contradict it whenever a group (the flags)
+		// was genuinely held rather than applied. That call also covers what
+		// recordDisplacedHistory used to be called for separately here (a
+		// newer count the finish closed out), since recordWriteHistory
+		// appends it too.
 		rec, recErr := e.recordEngiMatch(tx, compID, matchID, result.FlagsA, result.FlagsB, result.CorrectionReason, result.ModifiedAt, result.GroupStamps, true, fo)
 		if recErr != nil {
 			return nil, recErr
@@ -188,15 +238,17 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		// entry staged ahead of that would claim "applied" for a write that
 		// was, in the end, refused (bc-cse). The displaced-history behaviour
 		// recordWriteHistory already carries rides along at its new site.
-		if err := e.requalifyMixedPoolWrite(tx, compID, comp, matchID, rec, engiPrior, fo); err != nil {
+		if err := e.requalifyMixedPoolWriteLocked(tx, compID, comp, matchID, rec, engiPrior, result, engiValues, fo, engiRival && inPool); err != nil {
 			return nil, err
 		}
-		e.recordWriteHistory(tx, compID, matchID, result)
+		e.recordLandedWriteHistory(tx, compID, matchID, result)
 		return nil, nil
 	}
 
-	if err := applyHansokuIppons(result); err != nil {
-		return nil, err
+	if !replayedWrite {
+		if err := applyHansokuIppons(result); err != nil {
+			return nil, err
+		}
 	}
 
 	// Capture the prior result so we can roll back the score on
@@ -217,8 +269,15 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// stores: a start's own representative-bout row is discarded above, and a
 	// winner derived from it would stand beside a stored bout that says
 	// otherwise.
-	if err := shapeScoreWrite(comp, prior, result, matchID); err != nil {
-		return nil, err
+	//
+	// The score log is read ONCE here and carried to the write below, which
+	// the merge replays from (bc-evts review round 11: a second read cost a
+	// full LoadScoreLog per /score write).
+	lines := e.snapshotScoreLog(tx, compID, matchID, result, matchWriteForward)
+	if !replayedWrite {
+		if err := shapeScoreWrite(comp, prior, result, matchID, lines); err != nil {
+			return nil, err
+		}
 	}
 
 	// K3 ahead of the write: a withdrawal whose loser a DIFFERENT match has
@@ -233,13 +292,13 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		return nil, err
 	}
 
-	sideMismatch, reopened, inheritedRuling, err := e.writeToPoolOrBracket(tx, compID, matchID, result, matchWriteForward, fo.Force, comp)
+	sideMismatch, reopened, inheritedRuling, err := e.writeToPoolOrBracketLog(tx, compID, matchID, result, matchWriteForward, fo.Force, comp, lines)
 	if errors.Is(err, ErrMatchSuperseded) {
 		// Every change this write makes is outranked by a newer stored one:
 		// nothing of it lands on the match, and all of it is kept in the
 		// match's history (bc-mrgc). The callers commit the transaction on
 		// this error, so the entry lands.
-		e.recordWriteHistory(tx, compID, matchID, result)
+		e.recordSupersededWriteHistory(tx, compID, matchID, result)
 		return nil, supersededBy(result)
 	}
 	if err != nil {
@@ -262,7 +321,12 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// fought now refuses the write. Any refusal restores prior first. Runs for
 	// every pool write, a first completion included: it only ever acts on a
 	// slot that is already occupied, and ignores a pool that is not complete.
-	if err := e.requalifyMixedPoolWrite(tx, compID, comp, matchID, result, prior, fo); err != nil {
+	//
+	// The result lock (K1, result_lock.go): a pool result that displaced the
+	// stored one without having seen it is held, never refused or forced,
+	// when a seated knockout match was played or started (the refusal rolls
+	// the match back); force belongs to an explicit correction only.
+	if err := e.requalifyMixedPoolWriteLocked(tx, compID, comp, matchID, result, prior, result, nil, fo, rivalDisplacesResult(result.Merge)); err != nil {
 		return nil, err
 	}
 
@@ -275,7 +339,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	recordHistory := func() {
 		if !historyRecorded {
 			historyRecorded = true
-			e.recordWriteHistory(tx, compID, matchID, result)
+			e.recordLandedWriteHistory(tx, compID, matchID, result)
 		}
 	}
 
@@ -951,7 +1015,7 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// feeder, or an unrepaired legacy row) still has every id below come
 	// back "", falling through to each consumer's documented name-only
 	// fallback.
-	prior, err := e.lookupExistingResult(tx, compID, matchID)
+	prior, inPool, err := e.lookupExistingResultIn(tx, compID, matchID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -968,6 +1032,24 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	}
 	comp.ClearKachinukiEncounterEncho(matchID, &encho)
 	result := buildDecisionResult(prior, matchID, decision, decisionBy, decisionReason, encho, modifiedAtStamp)
+	// A resend of a decision the score event log already holds (its writeId,
+	// bc-evts F1) is answered as recorded before anything judges it.
+	result.WriteID, result.Basis, result.WriteSession = kcdgOpts.WriteID, kcdgOpts.Basis, kcdgOpts.Session
+	if kcdgOpts.ReopenReason != "" && prior.CorrectionReason == "" {
+		result.CorrectionReason = kcdgOpts.ReopenReason
+	}
+	if logged, err := e.answerLoggedWrite(tx, compID, matchID, result); err != nil || logged {
+		if err != nil {
+			return nil, nil, err
+		}
+		// The decision that last moved a kachinuki match out of
+		// scheduled, sent again, is told what its first answer said
+		// (stage 6 review 11, item 6).
+		if result.LineupWarning, err = e.resentStartWarning(tx, comp, matchID, kcdgOpts.WriteID, modifiedAtStamp, DoorDecision); err != nil {
+			return nil, nil, err
+		}
+		return result, nil, nil
+	}
 
 	// A stale decision (an offline replay older than the stored match) is
 	// superseded before anything judges it: the write below would hold it by
@@ -975,8 +1057,13 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// (already barred, a running later match) would only
 	// misreport it as something to resolve and send again, when a newer
 	// change is already stored. It is kept in the match's history (bc-mrgc).
-	if decisionHeldByMerge(prior, result, comp) {
-		e.recordWriteHistory(tx, compID, matchID, result)
+	// The probes judge the write as the real one will: the branch it lands
+	// on and the score log it replays onto.
+	probeCtx := mergeCtx{comp: comp, knockout: !inPool, lines: e.snapshotScoreLog(tx, compID, matchID, result, matchWriteForward)}
+	if decisionHeldByMerge(comp, prior, result, matchID, probeCtx) {
+		// Kept in the history and in the log: a decision older than the
+		// stored result still closes the match for what is stamped after it.
+		e.recordSupersededWriteHistory(tx, compID, matchID, result)
 		return nil, nil, supersededBy(result)
 	}
 
@@ -989,7 +1076,7 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// nothing; its history entry says so (bc-mrgc phase 3).
 	if exactDecisionReplay(prior, decision, decisionBy, modifiedAtStamp) {
 		probe := *result
-		result.Merge = mergeMatchWrite(prior, &probe, matchWriteForward, mergeCtx{comp: comp})
+		result.Merge = mergeMatchWrite(prior, &probe, matchWriteForward, probeCtx)
 		e.recordWriteHistory(tx, compID, matchID, result)
 		// The replay makes no write, so nothing echoes Court/ScheduledAt onto
 		// prior the way a fresh decision's applyPoolWrite/applyBracketMatchResult
@@ -1010,6 +1097,14 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 				}
 			}
 		}
+		// The decision that last moved a kachinuki match out of
+		// scheduled, sent again, is told what its first answer said
+		// (stage 6 review 11, item 6).
+		warning, werr := e.resentStartWarning(tx, comp, matchID, kcdgOpts.WriteID, modifiedAtStamp, DoorDecision)
+		if werr != nil {
+			return nil, nil, werr
+		}
+		prior.LineupWarning = warning
 		return prior, nil, nil
 	}
 
@@ -1047,8 +1142,13 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	}
 	// bc-rfsw: a decision reaching a later match already being fought is
 	// refused outright (terminal, not confirmable).
-	if err := refuseDecisionReachingRunningMatch(tx, compID, matchID, decisionBy, prior); err != nil {
-		return nil, nil, err
+	// A decision that is a RIVAL displacing the stored result is not refused
+	// here: the result lock holds it when the next match is under way
+	// (applyBracketResultIn), kept in the history, where this 409 lost it.
+	if !rivalDisplacesResult(decisionProbeMerge(comp, prior, result, matchID, probeCtx)) {
+		if err := refuseDecisionReachingRunningMatch(tx, compID, matchID, decisionBy, prior); err != nil {
+			return nil, nil, err
+		}
 	}
 	// kcdgOpts is the caller's own bc-kcdg authorization (confirming the
 	// clearing of an already-played later match). RecordDecisionTx passes an
@@ -1081,6 +1181,15 @@ func decisionChangedGroups() []string {
 // match alone. The winner gets the maru default-win fill; the withdrawing
 // side keeps whatever it had struck and the encounter keeps its prior
 // sub-bouts (FIK Art. 32, preserveLoserScore).
+// matchAsOf is the match the score log held at a decision's stamp: what was
+// stamped before it and nothing after. A decision keeps the loser's struck
+// points (FIK Art. 32) and the bouts already fought, and that is what it
+// stood on when it was made: a tap stamped after it is turned away by the
+// closed-match rule, so its mark must not ride in on the decision's own
+// scoreline just because the tap reached the server first. A match with no
+// log yet is read as its migration baseline reads it, group by group at the
+// stamps it holds. An unstamped decision is ordered after everything, so it
+// stands on the match as stored.
 func buildDecisionResult(prior *state.MatchResult, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, modifiedAtStamp int64) *state.MatchResult {
 	winIppons := domain.DefaultWinIppons(encho.On())
 	result := &state.MatchResult{
@@ -1127,14 +1236,28 @@ func buildDecisionResult(prior *state.MatchResult, matchID, decision, decisionBy
 // the decision makes would be held, and leaves that report on result for
 // the history entry when it would. It is the merge's own rule, not a second
 // statement of it: the write itself is judged by the same mergeMatchWrite.
-func decisionHeldByMerge(prior, result *state.MatchResult, comp *state.Competition) bool {
-	probe := *result
-	rep := mergeMatchWrite(prior, &probe, matchWriteForward, mergeCtx{comp: comp})
-	if !rep.Superseded() {
+func decisionHeldByMerge(comp *state.Competition, prior, result *state.MatchResult, matchID string, mc mergeCtx) bool {
+	rep := decisionProbeMerge(comp, prior, result, matchID, mc)
+	if rep == nil || !rep.Superseded() {
 		return false
 	}
 	result.Merge = rep
 	return true
+}
+
+// decisionProbeMerge asks the merge how the decision would land, on a copy,
+// judged as the real write will be: shaped as it is (the default-win bout
+// padding is part of what the decision writes), so a decision older than the
+// stored result is answered superseded only when it changes nothing. nil when
+// the write cannot be shaped.
+func decisionProbeMerge(comp *state.Competition, prior, result *state.MatchResult, matchID string, mc mergeCtx) *state.MergeReport {
+	probe := *result
+	probe.SubResults = state.CloneSubResults(result.SubResults)
+	probe.Changed = slices.Clone(result.Changed)
+	if err := shapeScoreWrite(comp, prior, &probe, matchID, mc.lines); err != nil {
+		return nil
+	}
+	return mergeMatchWrite(prior, &probe, matchWriteForward, mc)
 }
 
 // exactDecisionReplay reports a decision write the stored match already
@@ -1155,7 +1278,7 @@ func exactDecisionReplay(prior *state.MatchResult, decision, decisionBy string, 
 // RecordMatchResultWithIneligibilityTx and the exact-replay probe
 // (exactScoreReplayProbe), so the probe reads a write exactly as it would land
 // (bc-xrpl). prior is the stored match (never nil here); matchID the match's id.
-func shapeScoreWrite(comp *state.Competition, prior, result *state.MatchResult, matchID string) error {
+func shapeScoreWrite(comp *state.Competition, prior, result *state.MatchResult, matchID string, lines []state.ScoreLogLine) error {
 	deriveDaihyosenWinner(result)
 
 	// The bout rows as the writer sent them, before the server's own changes
@@ -1229,7 +1352,10 @@ func shapeScoreWrite(comp *state.Competition, prior, result *state.MatchResult, 
 		// still pad, since preserveWithdrawalRuling reinstates prior.Decision
 		// downstream regardless of which of the two the correction sent.
 		padDecision := result.Decision
-		if KeepsWithdrawalRuling(prior.Status, prior.Decision, result) {
+		// A finish that names no correction is a rival of the ruling, not a
+		// correction of it (rivalResult): it either loses to the ruling or
+		// displaces it, so it keeps nothing and pads nothing of its own.
+		if KeepsWithdrawalRuling(prior.Status, prior.Decision, result) && !writesAsRival(result, prior, lines, comp, !IsPoolMatchID(matchID)) {
 			padDecision = prior.Decision
 		}
 		if state.NeedsDefaultWinBoutPadding(result.Status, padDecision, prior.SideA, prior.SideB, matchID,
@@ -1254,24 +1380,31 @@ func shapeScoreWrite(comp *state.Competition, prior, result *state.MatchResult, 
 // engi write), the merge owner (mergeMatchWrite) would land its verdict and
 // every group it lands equals the stored value, as sent and as landed. A
 // group the merge would hold because its stored stamp is newer (a later
-// point from another board, R3 or S2) lands nothing and is not compared. A
+// point from another board, turned away if stamped after it) lands nothing and is not compared. A
 // same-stamp write that differs where it would land is a correction and
 // still needs its reason. comp names a kachinuki or engi competition (nil
 // for neither); nilSubsClear is the branch's (true for a pool match, false
 // for a knockout one, see mergeCtx).
-func ExactScoreReplay(stored, incoming *state.MatchResult, comp *state.Competition, nilSubsClear bool) bool {
-	_, ok := exactScoreReplayProbe(stored, incoming, comp, nilSubsClear)
+func ExactScoreReplay(stored, incoming *state.MatchResult, comp *state.Competition, nilSubsClear bool, lines []state.ScoreLogLine) bool {
+	_, ok := exactScoreReplayProbe(stored, incoming, comp, nilSubsClear, lines)
 	return ok
+}
+
+// mayBeExactScoreReplay is the probe's cheap precondition: a stamped finish
+// over a finished match, stamped exactly as the stored result. Only a write
+// that passes it costs the probe its read of the score log.
+func mayBeExactScoreReplay(stored, incoming *state.MatchResult) bool {
+	return stored != nil && incoming != nil && incoming.ModifiedAt > 0 &&
+		incoming.Status == state.MatchStatusCompleted &&
+		stored.Status == state.MatchStatusCompleted &&
+		incoming.ModifiedAt == stored.GroupStamp(state.GroupResult)
 }
 
 // exactScoreReplayProbe is ExactScoreReplay's judgement, handing back the
 // write as the merge would land it (a copy: incoming is not changed), its
 // MergeReport on probe.Merge, which the replay's history entry records.
-func exactScoreReplayProbe(stored, incoming *state.MatchResult, comp *state.Competition, nilSubsClear bool) (*state.MatchResult, bool) {
-	if stored == nil || incoming == nil || incoming.ModifiedAt <= 0 ||
-		incoming.Status != state.MatchStatusCompleted ||
-		stored.Status != state.MatchStatusCompleted ||
-		incoming.ModifiedAt != stored.GroupStamp(state.GroupResult) {
+func exactScoreReplayProbe(stored, incoming *state.MatchResult, comp *state.Competition, nilSubsClear bool, lines []state.ScoreLogLine) (*state.MatchResult, bool) {
+	if !mayBeExactScoreReplay(stored, incoming) {
 		return nil, false
 	}
 	probe := *incoming
@@ -1297,7 +1430,7 @@ func exactScoreReplayProbe(stored, incoming *state.MatchResult, comp *state.Comp
 		if applyHansokuIppons(&probe) != nil {
 			return nil, false
 		}
-		if shapeScoreWrite(comp, stored, &probe, stored.ID) != nil {
+		if shapeScoreWrite(comp, stored, &probe, stored.ID, lines) != nil {
 			return nil, false
 		}
 		if reconcileSides(&probe, storedSides{A: stored.SideA, B: stored.SideB, AID: stored.SideAID, BID: stored.SideBID}) {
@@ -1307,17 +1440,21 @@ func exactScoreReplayProbe(stored, incoming *state.MatchResult, comp *state.Comp
 			return nil, false
 		}
 	}
+	// A reasoned correction over a kept kiken or fusenpai lands with the
+	// stored ruling inherited (applyPoolWrite and the bracket twin do this
+	// after the merge), so the result group is compared as it would land: the
+	// resend of one is the finish already recorded (bc-evts review round 13).
+	preserveWithdrawalRuling(rulingOfMatch(stored), &probe, matchWriteForward)
 	// The merge owner decides which groups of the write would land: a group
 	// whose stored stamp is newer is held and lands nothing (a later point
-	// from another board, R3 or S2), and every whole-write rule (R2, finish
-	// atomicity) applies as it would to the write. Exact means the verdict
-	// lands, and every group that lands equals the stored value both as the
-	// write sent it and as it would land (S2 can re-derive a verdict the
-	// write sent differently, which is still a correction).
+	// from another board, or one stamped after the result), and every
+	// whole-write rule applies as it would to the write. Exact means the
+	// verdict lands, and every group that lands equals the stored value both
+	// as the write sent it and as it would land.
 	sent := probe
 	sent.IpponsA, sent.IpponsB = slices.Clone(probe.IpponsA), slices.Clone(probe.IpponsB)
 	sent.SubResults = state.CloneSubResults(probe.SubResults)
-	rep := mergeMatchWrite(stored, &probe, matchWriteForward, mergeCtx{comp: comp, knockout: !nilSubsClear, nilSubsClear: nilSubsClear})
+	rep := mergeMatchWrite(stored, &probe, matchWriteForward, mergeCtx{comp: comp, knockout: !nilSubsClear, nilSubsClear: nilSubsClear, lines: lines})
 	if rep == nil || !slices.Contains(rep.Applied, state.GroupResult) || len(rep.Displaced) > 0 {
 		return nil, false
 	}
@@ -1347,7 +1484,13 @@ func (e *Engine) answerExactScoreReplay(tx state.StoreTx, compID, matchID string
 	if err != nil {
 		return false, err
 	}
-	probe, ok := exactScoreReplayProbe(prior, result, comp, inPool)
+	if !mayBeExactScoreReplay(prior, result) {
+		return false, nil
+	}
+	// The probe replays the match's own log, as the write would (bc-evts
+	// review round 11: it replayed onto the stored match alone).
+	lines := e.snapshotScoreLog(tx, compID, matchID, result, matchWriteForward)
+	probe, ok := exactScoreReplayProbe(prior, result, comp, inPool, lines)
 	if !ok {
 		return false, nil
 	}
@@ -1357,9 +1500,16 @@ func (e *Engine) answerExactScoreReplay(tx state.StoreTx, compID, matchID string
 	if !noHistory {
 		e.recordWriteHistory(tx, compID, matchID, result)
 	}
-	// A bracket match's prior came through bracketMatchAsResult, which omits
-	// the court and the schedule a landed write echoes (the decision
-	// replay's fill, bc-cse finding 5).
+	answerAsStored(tx, compID, matchID, prior, inPool, result)
+	return true, nil
+}
+
+// answerAsStored makes result the stored match prior, for a write answered as
+// recorded with nothing written (an exact resend, a logged writeId). A bracket
+// match's prior came through bracketMatchAsResult, which omits the court and
+// the schedule a landed write echoes (the decision replay's fill, bc-cse
+// finding 5).
+func answerAsStored(tx state.StoreTx, compID, matchID string, prior *state.MatchResult, inPool bool, result *state.MatchResult) {
 	if !inPool && (prior.Court == "" || prior.ScheduledAt == "") {
 		if bracket, berr := tx.LoadBracket(compID); berr == nil {
 			if court, scheduledAt, found := bracketMatchCourtAndSchedule(bracket, matchID); found {
@@ -1374,26 +1524,6 @@ func (e *Engine) answerExactScoreReplay(tx state.StoreTx, compID, matchID string
 	}
 	*result = *prior
 	result.ClearRequestFields()
-	return true, nil
-}
-
-// holdWriteTx keeps a write whole in the match's history without applying any
-// of it, for ForceOptions.HoldReason. The merge owner decides what the write
-// changes and the values it holds (mergeMatchWrite with holdAll), on a copy,
-// so the stored match is untouched; the entry records the reason. Returns the
-// superseded error the write is answered with.
-func (e *Engine) holdWriteTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, comp *state.Competition, reason string) error {
-	prior, inPool, err := e.lookupExistingResultIn(tx, compID, matchID)
-	if err != nil {
-		return err
-	}
-	probe := *result
-	probe.SubResults = state.CloneSubResults(result.SubResults)
-	result.Merge = mergeMatchWrite(prior, &probe, matchWriteForward, mergeCtx{
-		comp: comp, knockout: !inPool, nilSubsClear: inPool, holdAll: reason,
-	})
-	e.recordWriteHistory(tx, compID, matchID, result)
-	return supersededBy(result)
 }
 
 // refuseDecisionReachingRunningMatch is the decision path's early answer to

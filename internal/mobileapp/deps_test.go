@@ -54,6 +54,10 @@ func (stubScoringEngine) RecordMatchResult(string, string, *state.MatchResult) e
 	return nil
 }
 
+func (stubScoringEngine) RecordScoreEventsTx(state.StoreTx, string, string, engine.ScoreEventsRequest) (*engine.ScoreEventsResult, error) {
+	return &engine.ScoreEventsResult{}, nil
+}
+
 func (stubScoringEngine) RecordMatchResultWithIneligibility(string, string, *state.MatchResult, ...engine.ForceOptions) (*domain.CompetitorStatus, error) {
 	return nil, nil
 }
@@ -142,6 +146,10 @@ func (stubTeamLineupStore) DeleteTeamLineup(string, string, int) error {
 
 func (stubTeamLineupStore) DeleteTeamLineupForMatch(string, string, string) error {
 	return nil
+}
+
+func (stubTeamLineupStore) RemoveTeamLineupAt(string, string, string, int, int64) (bool, error) {
+	return false, nil
 }
 
 // stubCompetitionTransactor is a no-op implementation of

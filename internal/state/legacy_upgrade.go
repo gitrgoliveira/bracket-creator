@@ -2086,6 +2086,18 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 		if needs {
 			break
 		}
+		// A lineup carrying any member id is checked against the team's
+		// members too (stage 3 review 3, F2): an id the team does not hold is
+		// cleared below, which only the squad can tell.
+		for _, id := range l.MemberIDs {
+			if id != "" {
+				needs = true
+				break
+			}
+		}
+		if needs {
+			break
+		}
 		// A lineup already holding ONE member at two positions needs this pass
 		// too, even with every position id-stamped, so the scan cannot stop at
 		// "is an id missing". Such a row is refused by ValidatePositions on
@@ -2110,14 +2122,34 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 		return nil
 	}
 	squads, err := roster.squads()
-	if err != nil || len(squads) == 0 {
+	if err != nil {
 		return err
+	}
+	// The teams the roster holds. Every one of them has members (seeded on
+	// load, by upgradeSquadsFromMetadataLocked before this, and on every
+	// roster save), so a roster team that holds none is one whose seeding
+	// failed: its ids are left as they are (stage 3 review 11, Y9). A roster
+	// that cannot be read says no team is on it for sure, so no team with no
+	// members is judged.
+	rosterTeams, rosterKnown := map[string]bool{}, true
+	if players, rerr := roster.rosterPlayers(); rerr != nil {
+		rosterKnown = false
+	} else {
+		for _, p := range players {
+			if p.ID != "" {
+				rosterTeams[p.ID] = true
+			}
+		}
 	}
 	changed := false
 	for key, l := range lineups {
+		// A lineup whose team is NOT on the roster and holds no members is one
+		// no team member is on: its ids are judged like any other (stage 3
+		// review 4, G7).
 		members := squads[l.TeamID]
-		if len(members) == 0 {
-			continue
+		judgeIDs := len(members) > 0 || (rosterKnown && !rosterTeams[l.TeamID])
+		if !judgeIDs && rosterTeams[l.TeamID] && len(l.MemberIDs) > 0 {
+			log.Printf("state: lineup repair for %s: team %s is on the roster but holds no members (its seeding failed?); its lineup's member ids are left as they are", compID, l.TeamID)
 		}
 		lineupChanged := false
 		// The ids this lineup ALREADY fields, so no member ends up at two
@@ -2143,6 +2175,32 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 		// (domain.ComparePositions), so the position the roster fields first keeps
 		// it: for the named positions senpo, not chuken, which a text order put
 		// first.
+		// An id the team does not hold names nobody: most often the id a device
+		// minted for a member add the server refused, saved by an organiser
+		// before a lineup save dropped such ids (stage 3 review 3, F2). It is
+		// cleared and the position keeps its NAME, so nothing changes on
+		// screen; the name pass below then resolves that name like any id-less
+		// position's (bc-pnum: a record is read by its name only once it
+		// carries no id). Only an id of the shape a
+		// member id is minted in, by the server or a device (a lowercase UUID
+		// v4, IsClientMemberID), is judged: that is the shape the refused add
+		// leaves, and an id of any other shape was written by hand or by a
+		// tool this repair cannot read the intent of, so it is left as it is.
+		heldIDs := make(map[string]struct{}, len(members))
+		for _, m := range members {
+			heldIDs[m.ID] = struct{}{}
+		}
+		for _, pos := range slices.SortedFunc(maps.Keys(l.MemberIDs), domain.ComparePositions) {
+			id := l.MemberIDs[pos]
+			if !judgeIDs || id == "" || !IsClientMemberID(id) {
+				continue
+			}
+			if _, held := heldIDs[id]; !held {
+				delete(l.MemberIDs, pos)
+				lineupChanged = true
+				log.Printf("state: lineup repair for %s: member %s is not one of team %s's; cleared the id at %q, its name is kept", compID, id, l.TeamID, pos)
+			}
+		}
 		used := make(map[string]struct{}, len(l.MemberIDs))
 		for _, pos := range slices.SortedFunc(maps.Keys(l.MemberIDs), domain.ComparePositions) {
 			id := l.MemberIDs[pos]

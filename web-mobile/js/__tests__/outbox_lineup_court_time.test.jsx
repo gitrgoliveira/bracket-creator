@@ -148,6 +148,21 @@ describe('a court move and a time change are entries of their match', () => {
         expect(sent[2].body.scheduledAt).toBe('10:30');
     });
 
+    it('courtMoveQueued is true while a court entry of the match is queued, and not for a time change or another match', async () => {
+        expect(API.courtMoveQueued('c1', 'm1')).toBe(false);
+        await API.updateMatchTime('c1', 'm1', '10:30', 'pw');
+        expect(API.courtMoveQueued('c1', 'm1')).toBe(false);
+        await API.moveMatchCourt('c1', 'm1', 'B', 'pw', { was: { court: 'A' } });
+        expect(API.courtMoveQueued('c1', 'm1')).toBe(true);
+        expect(API.courtMoveQueued('c1', 'm2')).toBe(false);
+
+        const sent = server(() => ({ status: 200, body: {} }));
+        window.dispatchEvent(new Event('online'));
+        await tick(0);
+        expect(sent.map((s) => s.path)).toContain('matches/m1/court');
+        expect(API.courtMoveQueued('c1', 'm1')).toBe(false);
+    });
+
     it('keeps stopsRunning: true across a reload and sends it when rehydrated', async () => {
         await API.moveMatchCourt('c1', 'm1', 'B', 'pw', { stopsRunning: true, was: { court: 'A' } });
         expect(stored()).toHaveLength(1);

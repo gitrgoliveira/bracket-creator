@@ -653,10 +653,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // outlives renders.
     const courtCompsRef = useRefSh(null);
     courtCompsRef.current = courtComps;
-    // Matches whose court was altered only by a local optimistic patch on this
-    // device; skipped by the court call withdraw effect until server data
-    // (SSE push or refetch) shows the match on the other court.
-    const localCourtPatchesRef = useRefSh(new Set());
     // R4 (bc-evts stage 3 review 2): a court move or time change this device
     // makes shows in the court feed at once, as a push would, and a refusal
     // puts the old value back (told by the outbox, subscribeLocalMatchPatch).
@@ -665,18 +661,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         return window.API.subscribeLocalMatchPatch((event) => {
             const cid = event && event.data && event.data.competitionId;
             if (!cid) return;
-            const { court: patchCourt, mid } = eventMatchCourt(event.data);
-            if (event.local && mid != null && patchCourt !== null) {
-                const k = matchKey({ compId: cid, id: mid });
-                if (patchCourt !== String(court || "")) {
-                    localCourtPatchesRef.current.add(k);
-                } else {
-                    localCourtPatchesRef.current.delete(k);
-                }
-            }
             setCourtComps((prev) => (Array.isArray(prev) ? prev.map((c) => (c.id === cid ? applyPatch(c, event) : c)) : prev));
         });
-    }, [court]);
+    }, []);
     // True while a manual "Refresh" is in flight (button feedback only).
     const [refreshing, setRefreshing] = useStateSh(false);
     // Refetch this court's live feed. Hoisted (not an effect-local closure) so
@@ -691,7 +678,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // applies to a push.
             .then(comps => {
                 if (mountedRef.current) {
-                    localCourtPatchesRef.current.clear();
                     setCourtComps((prev) => keepNewerCompetitions(prev, comps));
                 }
             })
@@ -864,7 +850,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         const { court: pushedCourt, mid } = eventMatchCourt(d);
                         if (pushedCourt !== null && d.competitionId != null && mid != null) {
                             const key = matchKey({ compId: d.competitionId, id: mid });
-                            localCourtPatchesRef.current.delete(key);
                             if (callIdsRef.current.has(key) && pushedCourt !== String(court || "")) {
                                 if (withdrawCallRef.current) withdrawCallRef.current(key);
                             }
@@ -1984,13 +1969,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 withdrawCall(key);
                 continue;
             }
-            // A local optimistic court move alone does not withdraw the call:
-            // only server data (a push or a refetch) may take it down.
-            if (localCourtPatchesRef.current.has(key)) {
-                continue;
-            }
             const moved = feedMatches.find((x) => matchKey(x) === key);
-            if (moved && (moved.court || "") !== (court || "")) {
+            // A court move still queued on this device alone does not withdraw
+            // the call, however the feed came by it (a patch or a refetch
+            // overlaid with the queue): only the server's court may.
+            if (moved && (moved.court || "") !== (court || "")
+                && !(window.API && window.API.courtMoveQueued(moved.compId, moved.id))) {
                 withdrawCall(key);
             }
         }

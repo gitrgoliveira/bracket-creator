@@ -6568,6 +6568,11 @@ const API = {
     subscribeLocalMatchPatch(cb) {
         return subscribeLocalMatchPatch(cb);
     },
+    // Whether a court move of this match is still queued here: a feed that
+    // shows the match on that court (the overlay above) is not yet the server's.
+    courtMoveQueued(compID, matchID) {
+        return 'court' in _pendingMatchFields(compID, matchID);
+    },
 
     /**
      * bc-qttl: un-park writes held on a 401 and retry them with a freshly

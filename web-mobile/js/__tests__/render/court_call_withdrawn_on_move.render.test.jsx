@@ -25,6 +25,7 @@ const STUBBED_GLOBALS = {
     recordDecision: vi.fn().mockResolvedValue({ applied: true }),
     reinstateCompetitor: vi.fn().mockResolvedValue({}),
     subscribeLocalMatchPatch: vi.fn(() => () => {}),
+    courtMoveQueued: vi.fn(() => false),
   },
   confirmDialog: vi.fn().mockResolvedValue(true),
   PoolsViewer: () => null,
@@ -45,8 +46,14 @@ afterAll(() => restoreGlobals());
 let sseHandler = null;
 let nextAnnId = 0;
 let localPatchListeners = new Set();
+// The court moves this device still has queued (the outbox's view).
+let queuedMoves = new Set();
 
 function emitLocalMatchPatch(compId, matchId, fields) {
+  if ('court' in fields) {
+    const key = `${compId}/${matchId}`;
+    if (fields.court === 'B') queuedMoves.add(key); else queuedMoves.delete(key);
+  }
   const event = {
     type: 'match_updated',
     local: true,
@@ -59,6 +66,8 @@ beforeEach(() => {
   nextAnnId = 0;
   sseHandler = null;
   localPatchListeners.clear();
+  queuedMoves = new Set();
+  window.API.courtMoveQueued = vi.fn((compId, matchId) => queuedMoves.has(`${compId}/${matchId}`));
   window.API.sendAnnouncement = vi.fn(async () => ({ id: `ann-${++nextAnnId}`, message: 'Call sent' }));
   window.API.deleteAnnouncement = vi.fn(async () => {});
   window.API.subscribeToEvents = vi.fn((cb) => {
@@ -308,6 +317,34 @@ describe('Court call withdrawn on move', () => {
       await Promise.resolve();
     });
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
+  });
+
+  it('m. a refetch overlaid with the queued move does not withdraw the call until the move lands', async () => {
+    const { annId } = await mountConsoleAndCallMatch();
+    await act(async () => {
+      emitLocalMatchPatch('c1', 'm1', { court: 'B' });
+      await Promise.resolve();
+    });
+
+    // fetchCourtMatches puts the queued court on the match, as the outbox does.
+    window.API.fetchCourtMatches.mockResolvedValueOnce([makeComp({ court: 'B' })]);
+    await act(async () => {
+      screen.getByRole('button', { name: /refresh/i }).click();
+      await Promise.resolve();
+    });
+    expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
+
+    // The move lands: the server's push names the other court.
+    queuedMoves.clear();
+    await act(async () => {
+      sseHandler({
+        type: 'match_updated',
+        data: { competitionId: 'c1', matchId: 'm1', court: 'B' },
+      });
+      await Promise.resolve();
+    });
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '');
   });
 
   it('l. a refused move (the court put back) leaves the call up', async () => {

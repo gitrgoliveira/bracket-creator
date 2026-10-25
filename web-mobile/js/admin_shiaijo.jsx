@@ -126,6 +126,15 @@ export function partitionShiaijoMatches(matches) {
 
 const matchKey = (m) => `${m.compId}:${m.id}`;
 
+// The match id and the court a match event names, read off either the event's
+// own fields or its `result` row; court is null when it names none.
+const eventMatchCourt = (d) => {
+    const res = d && d.result;
+    const court = d && typeof d.court === "string" ? d.court : (res && typeof res.court === "string" ? res.court : null);
+    const mid = d && (d.matchId != null ? d.matchId : (res && res.id));
+    return { court, mid };
+};
+
 // _bracketSideName reads a bracket side that may be a normalized {id,name}
 // object or a bare string. Mirrors admin_helpers.sideName without importing it
 // (admin_shiaijo reads its helpers off window; this stays pure for testing).
@@ -656,10 +665,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         return window.API.subscribeLocalMatchPatch((event) => {
             const cid = event && event.data && event.data.competitionId;
             if (!cid) return;
-            const res = event.data && event.data.result;
-            const mid = event.data && (event.data.matchId != null ? event.data.matchId : (res && res.id));
-            if (event.local && mid != null && (event.data.court !== undefined || (res && res.court !== undefined))) {
-                const patchCourt = event.data.court !== undefined ? event.data.court : res.court;
+            const { court: patchCourt, mid } = eventMatchCourt(event.data);
+            if (event.local && mid != null && patchCourt !== null) {
                 const k = matchKey({ compId: cid, id: mid });
                 if (patchCourt !== String(court || "")) {
                     localCourtPatchesRef.current.add(k);
@@ -854,10 +861,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         showRunningPush(event);
                         // A push naming another court takes this console's call down.
                         const d = event.data;
-                        const res = d && d.result;
-                        const pushedCourt = d && (typeof d.court === "string" ? d.court
-                            : (res && typeof res.court === "string" ? res.court : null));
-                        const mid = d && (d.matchId != null ? d.matchId : (res && res.id));
+                        const { court: pushedCourt, mid } = eventMatchCourt(d);
                         if (pushedCourt !== null && d.competitionId != null && mid != null) {
                             const key = matchKey({ compId: d.competitionId, id: mid });
                             localCourtPatchesRef.current.delete(key);
@@ -1972,6 +1976,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // the match shows on another court, whatever its status; a key no list holds is
     // left alone because the list is empty while it loads.
     useEffectSh(() => {
+        if (callIdsRef.current.size === 0) return;
         const feedMatches = window.tournamentMatches({ competitions: courtCompetitions }) || [];
         for (const key of callIdsRef.current.keys()) {
             const m = courtMatchesRaw.find((x) => matchKey(x) === key);

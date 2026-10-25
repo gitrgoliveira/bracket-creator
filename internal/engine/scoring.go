@@ -3644,18 +3644,16 @@ func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string
 				}
 			}
 
-			// Rule 2: stored running and not confirmed.
-			if storedStatus == state.MatchStatusRunning && !mv.StopsRunning {
-				return refuseMove()
-			}
-			// Rule 4: stored not running, but the move was confirmed for a
-			// running match.
-			if storedStatus != state.MatchStatusRunning && mv.StopsRunning {
+			// Rule 2: stored running and not confirmed. Rule 4: stored not
+			// running, but the move was confirmed for a running match. Either
+			// way the screen's view of the status disagrees with the store's.
+			running := storedStatus == state.MatchStatusRunning
+			if running != mv.StopsRunning {
 				return refuseMove()
 			}
 
 			stamp := serverNowMs()
-			requeued := storedStatus == state.MatchStatusRunning && mv.StopsRunning
+			requeued := running
 
 			if inPool {
 				if err := e.withPoolMatch(tx, compId, matchId, func(r *state.MatchResult) error {
@@ -3730,12 +3728,17 @@ func queueSortTime(t string) string {
 	return t
 }
 
-func isCanonicalHHMM(s string) bool {
+// canonicalHHMM parses s as minutes since midnight, accepting only the
+// canonical two-digit HH:MM form.
+func canonicalHHMM(s string) (int, bool) {
 	if len(s) != 5 || s[2] != ':' {
-		return false
+		return 0, false
 	}
 	mins, ok := parseHHMM(s)
-	return ok && fmtHHMM(mins) == s
+	if !ok || fmtHHMM(mins) != s {
+		return 0, false
+	}
+	return mins, true
 }
 
 // firstInQueueTime returns one minute before earliest (the target court's
@@ -3745,14 +3748,8 @@ func isCanonicalHHMM(s string) bool {
 // empty own reads as "99:99"), when earliest is "00:00", or when earliest is
 // unparseable or not in canonical two-digit HH:MM form.
 func firstInQueueTime(own, earliest string) string {
-	if earliest == "" || earliest == "00:00" || !isCanonicalHHMM(earliest) {
-		return own
-	}
-	if queueSortTime(own) < earliest {
-		return own
-	}
-	mins, ok := parseHHMM(earliest)
-	if !ok || mins <= 0 {
+	mins, ok := canonicalHHMM(earliest)
+	if !ok || mins <= 0 || queueSortTime(own) < earliest {
 		return own
 	}
 	return fmtHHMM(mins - 1)
@@ -3765,14 +3762,8 @@ func firstInQueueTime(own, earliest string) string {
 // ""), when latest is "23:59", or when latest is not in canonical two-digit
 // HH:MM form.
 func lastInQueueTime(own, latest string) string {
-	if latest == "" || latest == "23:59" || !isCanonicalHHMM(latest) {
-		return own
-	}
-	if queueSortTime(own) > latest {
-		return own
-	}
-	mins, ok := parseHHMM(latest)
-	if !ok || mins >= 23*60+59 {
+	mins, ok := canonicalHHMM(latest)
+	if !ok || mins >= 23*60+59 || queueSortTime(own) > latest {
 		return own
 	}
 	return fmtHHMM(mins + 1)

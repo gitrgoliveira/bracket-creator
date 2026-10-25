@@ -1395,14 +1395,14 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			"matchId":       mid,
 			"court":         req.Court,
 		}
-		if r, found, err := readStoredMatch(store, id, mid); err != nil {
+		if stored, found, err := readStoredMatch(store, id, mid); err != nil {
 			log.Printf("mobileapp: court move %s/%s: read stored match: %v", id, mid, err)
-		} else if found && r != nil {
+		} else if found && stored != nil {
 			// Name the court the store holds: a resent writeId already
 			// in the match's score log leaves the store unchanged, and a
 			// concurrent move can also make the stored court differ from req.Court.
-			payload["court"] = r.Court
-			payload["result"] = matchPtrForBroadcast(r)
+			payload["court"] = stored.Court
+			payload["result"] = matchPtrForBroadcast(stored)
 		}
 		broadcastMatchNow(hub, store, id, mid, payload)
 		// A pool bout moved onto a court may move that court's knockout

@@ -67,7 +67,7 @@ export function historyDoorWords(door) {
 }
 
 export function historyEntryWords(entry) {
-    const court = entry && typeof entry.court === 'string' ? entry.court.trim() : (entry && entry.court);
+    const court = entry && typeof entry.court === 'string' ? entry.court.trim() : '';
     if (entry && entry.door === 'requeue' && court) {
         return `Moved to Shiaijo ${court} and sent back to the queue`;
     }

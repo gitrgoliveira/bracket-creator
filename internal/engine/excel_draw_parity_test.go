@@ -1091,7 +1091,7 @@ func TestEliminationSheetFollowsOperatorCourtReassignment(t *testing.T) {
 	target := before.Rounds[0][0]
 	require.NotEqual(t, "D", target.Court, "the case needs a bout that is NOT already on the shiaijo it moves to")
 
-	require.NoError(t, eng.UpdateMatchCourt(compID, target.ID, "D"))
+	require.NoError(t, eng.UpdateMatchCourt(compID, target.ID, "D", CourtMove{}))
 
 	after, err := store.LoadBracket(compID)
 	require.NoError(t, err)
@@ -1155,7 +1155,7 @@ func TestPoolSheetFollowsPoolCourtReassignment(t *testing.T) {
 	moved := 0
 	for _, m := range matches {
 		if strings.HasPrefix(m.ID, movedPool+"-") {
-			require.NoError(t, eng.UpdateMatchCourt(compID, m.ID, "A"))
+			require.NoError(t, eng.UpdateMatchCourt(compID, m.ID, "A", CourtMove{}))
 			moved++
 		}
 	}
@@ -1237,7 +1237,7 @@ func TestPoolSheetKeepsASplitPoolOnItsDrawnShiaijo(t *testing.T) {
 		}
 	}
 	require.NotEmpty(t, one)
-	require.NoError(t, eng.UpdateMatchCourt(compID, one, "A"))
+	require.NoError(t, eng.UpdateMatchCourt(compID, one, "A", CourtMove{}))
 
 	after, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
@@ -1289,7 +1289,7 @@ func TestEliminationPrintAreaCoversEveryBand(t *testing.T) {
 	// band beyond the drawn regions.
 	bracket, err := store.LoadBracket(compID)
 	require.NoError(t, err)
-	require.NoError(t, eng.UpdateMatchCourt(compID, bracket.Rounds[0][0].ID, "Z"))
+	require.NoError(t, eng.UpdateMatchCourt(compID, bracket.Rounds[0][0].ID, "Z", CourtMove{}))
 
 	raw, err := eng.ExportCompetitionXlsx(compID)
 	require.NoError(t, err)
@@ -1363,10 +1363,10 @@ func TestEliminationSheetPrintsTheBronzeOnItsOwnShiaijo(t *testing.T) {
 			if m.MatchNumber == 0 {
 				continue
 			}
-			require.NoError(t, eng.UpdateMatchCourt(compID, m.ID, "A"))
+			require.NoError(t, eng.UpdateMatchCourt(compID, m.ID, "A", CourtMove{}))
 		}
 	}
-	require.NoError(t, eng.UpdateMatchCourt(compID, bracket.ThirdPlaceMatch.ID, "B"))
+	require.NoError(t, eng.UpdateMatchCourt(compID, bracket.ThirdPlaceMatch.ID, "B", CourtMove{}))
 
 	after, err := store.LoadBracket(compID)
 	require.NoError(t, err)

@@ -62,6 +62,7 @@ import { isBarredMatch, sideBarredByDecision, involvesCompetitor, sideKeyForDeci
 // side_marks.jsx leaf below, not from bracket.jsx.
 import { BarredMatchNotice } from './barred_match_notice.jsx';
 import { holdsUnsaved, confirmLeave, leaveThen, discardUnsaved, UNSAVED_ENTRIES_DISCARDED } from './unsaved_entries.jsx';
+import { confirmMatchLabel, SCORE_KEPT_SENTENCE, runningCourtMoveText } from './court_move.jsx';
 // The winner cue and a withdrawn team's mark, imported from their leaf (its one
 // import is competitor_identity.jsx), never read off `window`: a missing global
 // used to paint nothing, with no error to say why.
@@ -605,16 +606,6 @@ function ResolveFeedersModal({ match, comp, password, onClose, onResolved, onOpt
 
 // The match with id in one competition of the court feed, pool or knockout.
 
-// confirmMatchLabel: how a confirm names the match it acts on. BOTH
-// competitors, never one: "Ito Rin leaves Shiaijo A" read as a person moving,
-// not a match. Order mirrors the on-court display (Shiro/sideB vs Aka/sideA).
-// Shared by the court move and Send back to queue.
-function confirmMatchLabel(m) {
-    const shiro = (m.sideB && m.sideB.name) || "";
-    const aka = (m.sideA && m.sideA.name) || "";
-    return (shiro && aka) ? `${shiro} vs ${aka}` : (shiro || aka || "this match");
-}
-
 function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, password, showToast, tweaks, onSwitchCourt }) {
     // Normalize once: filterMatchesByCourt trims its param, so a bookmarked URL
     // with stray whitespace must use the trimmed value everywhere.
@@ -839,7 +830,21 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         const cid = event.data && event.data.competitionId;
                         setStartError((prev) => (prev && (!cid || prev.compId === cid) ? null : prev));
                     }
-                    if (event.type === "match_updated") showRunningPush(event);
+                    if (event.type === "match_updated") {
+                        showRunningPush(event);
+                        // A push naming another court takes this console's call down.
+                        const d = event.data;
+                        const res = d && d.result;
+                        const pushedCourt = d && (typeof d.court === "string" ? d.court
+                            : (res && typeof res.court === "string" ? res.court : null));
+                        const mid = d && (d.matchId != null ? d.matchId : (res && res.id));
+                        if (pushedCourt !== null && d.competitionId != null && mid != null) {
+                            const key = matchKey({ compId: d.competitionId, id: mid });
+                            if (callIdsRef.current.has(key) && pushedCourt !== String(court || "")) {
+                                if (withdrawCallRef.current) withdrawCallRef.current(key);
+                            }
+                        }
+                    }
                     scheduleRefresh();
                 },
                 onStatus
@@ -910,6 +915,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // scheduled (bc-cdbl). A reload forgets them; the 5-minute expiry is the
     // backstop.
     const callIdsRef = useRefSh(new Map());
+    const withdrawCallRef = useRefSh(null);
     const [contextOpen, setContextOpen] = useStateSh(true);
     // The whole queue column folds away so the scorer can take the full width;
     // the choice is per device, like the operator's other console preferences.
@@ -1927,6 +1933,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         callIdsRef.current.delete(key);
         takeDown(entry.id);
     };
+    withdrawCallRef.current = withdrawCall;
     // takeDown: delete the announcement whose id `pending` resolves to (none
     // when it resolves to null). Fire and forget, shared by withdrawCall and the
     // earlier call callToCourt replaces.
@@ -1940,16 +1947,23 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     };
 
     // A court call comes down once its match has left scheduled, however that
-    // happened: started here, started from another device, or closed by a
-    // decision. A key the list does not hold is left alone, since the list is
-    // empty while it loads and a match moved off this court is not this
-    // console's to judge.
+    // happened (started here, started elsewhere, closed by a decision), or once
+    // the match, still scheduled, shows on another court; a key no list holds is
+    // left alone because the list is empty while it loads.
     useEffectSh(() => {
+        const feedMatches = window.tournamentMatches({ competitions: courtCompetitions }) || [];
         for (const key of callIdsRef.current.keys()) {
             const m = courtMatchesRaw.find((x) => matchKey(x) === key);
-            if (m && m.status !== "scheduled") withdrawCall(key);
+            if (m && m.status !== "scheduled") {
+                withdrawCall(key);
+                continue;
+            }
+            const moved = feedMatches.find((x) => matchKey(x) === key);
+            if (moved && moved.status === "scheduled" && (moved.court || "") !== (court || "")) {
+                withdrawCall(key);
+            }
         }
-    }, [courtMatchesRaw]);
+    }, [courtMatchesRaw, courtCompetitions]);
 
     // moveMatch: reorder by swapping scheduledAt with the adjacent row.
     // direction: "up" (earlier) or "down" (later). Only scheduled matches
@@ -2087,11 +2101,25 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // once the operator confirms.
     const requestMoveCourt = (compId, matchId, toCourt) => {
         const mm = sorted.find((x) => x.compId === compId && x.id === matchId);
+        // What the confirm words and what goes to the host, fixed when the
+        // confirm OPENS: `sorted` models this console's own send back and
+        // finish but not its own Start, so the start pin reads as running.
+        // (A started match leaves Up next and Upcoming at once, so no queue
+        // row offers it a move today; the pin is read anyway, so a row that
+        // does is asked in running words.)
+        const shown = isStartedSnapshot(mm) ? { ...mm, status: "running" } : mm;
+        const running = !!shown && shown.status === "running";
         // The editor can show a match its row still offers to move: between
         // this console's own Start of a queue row and the feed showing it
         // running. Its unsaved entries (a Mark draw, a hantei pick) go with
         // the move, and the confirm says so (R1, stage 5 review 10).
-        setPendingMove({ compId, matchId, to: toCourt, label: mm ? confirmMatchLabel(mm) : "this match", from: (mm && mm.court) || court, unsaved: editorUnsavedFor(compId, matchId) });
+        setPendingMove({
+            compId, matchId, to: toCourt,
+            shown, running,
+            label: shown ? confirmMatchLabel(shown) : "this match",
+            from: (mm && mm.court) || court,
+            unsaved: editorUnsavedFor(compId, matchId),
+        });
     };
     const confirmMoveCourt = async (ev) => {
         if (!pendingMove || movingCourt) return;
@@ -2111,7 +2139,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // move that did not land leaves this console's call for the match
             // up. The call names the court the match is leaving, so it comes
             // down once the move has landed (bc-cdbl).
-            const handed = await onMoveCourt(compId, matchId, to);
+            const handed = await onMoveCourt(compId, matchId, to, { confirmed: true, shown: pendingMove.shown });
             const withdraw = () => withdrawCall(matchKey({ compId, id: matchId }));
             if (handed === true) withdraw();
             else if (handed && handed.landed && typeof handed.landed.then === "function") {
@@ -2677,30 +2705,39 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 )}
             </div>
 
-            {pendingMove && (
-                <div className="modal-backdrop" ref={confirmOpenedRef} onClickCapture={confirmOnClickCapture}
-                    onClick={() => !movingCourt && setPendingMove(null)}>
-                    <div className="shiaijo-move-confirm" role="dialog" aria-modal="true" ref={confirmBoxRef}
-                        aria-labelledby="shiaijo-move-title" onClick={(e) => e.stopPropagation()}>
-                        <h3 id="shiaijo-move-title" className="shiaijo-move-confirm__title">
-                            Move to Shiaijo {pendingMove.to}?
-                        </h3>
-                        <p className="shiaijo-move-confirm__body" aria-live="polite">
-                            <strong>{pendingMove.label}</strong> leaves Shiaijo {pendingMove.from} and joins
-                            the queue on Shiaijo {pendingMove.to}.
-                            {pendingMove.unsaved ? ` ${UNSAVED_ENTRIES_DISCARDED}` : ""}
-                        </p>
-                        <div className="shiaijo-move-confirm__actions">
-                            <button type="button" className="btn" onClick={() => setPendingMove(null)} disabled={movingCourt}>
-                                Cancel
-                            </button>
-                            <button type="button" className="btn btn--primary" onClick={confirmMoveCourt} disabled={movingCourt}>
-                                {movingCourt ? "Moving…" : `Move to Shiaijo ${pendingMove.to}`}
-                            </button>
+            {pendingMove && (() => {
+                const moveText = pendingMove.running
+                    ? runningCourtMoveText({ label: pendingMove.label, from: pendingMove.from, to: pendingMove.to, unsaved: pendingMove.unsaved })
+                    : null;
+                return (
+                    <div className="modal-backdrop" ref={confirmOpenedRef} onClickCapture={confirmOnClickCapture}
+                        onClick={() => !movingCourt && setPendingMove(null)}>
+                        <div className="shiaijo-move-confirm" role="dialog" aria-modal="true" ref={confirmBoxRef}
+                            aria-labelledby="shiaijo-move-title" onClick={(e) => e.stopPropagation()}>
+                            <h3 id="shiaijo-move-title" className="shiaijo-move-confirm__title">
+                                {moveText ? moveText.title : `Move to Shiaijo ${pendingMove.to}?`}
+                            </h3>
+                            <p className="shiaijo-move-confirm__body" aria-live="polite">
+                                {moveText ? moveText.message : (
+                                    <>
+                                        <strong>{pendingMove.label}</strong> leaves Shiaijo {pendingMove.from} and joins
+                                        the queue on Shiaijo {pendingMove.to}.
+                                        {pendingMove.unsaved ? ` ${UNSAVED_ENTRIES_DISCARDED}` : ""}
+                                    </>
+                                )}
+                            </p>
+                            <div className="shiaijo-move-confirm__actions">
+                                <button type="button" className="btn" onClick={() => setPendingMove(null)} disabled={movingCourt}>
+                                    {moveText ? moveText.cancelLabel : "Cancel"}
+                                </button>
+                                <button type="button" className="btn btn--primary" onClick={confirmMoveCourt} disabled={movingCourt}>
+                                    {movingCourt ? "Moving…" : (moveText ? moveText.confirmLabel : `Move to Shiaijo ${pendingMove.to}`)}
+                                </button>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                );
+            })()}
 
             {pendingRevert && (
                 <div className="modal-backdrop" ref={confirmOpenedRef} onClickCapture={confirmOnClickCapture}
@@ -2712,9 +2749,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         </h3>
                         <p className="shiaijo-move-confirm__body" aria-live="polite">
                             <strong>{pendingRevert.label}</strong> will be returned to the upcoming queue.
-                            {pendingRevert.unsaved
-                                ? ` ${UNSAVED_ENTRIES_DISCARDED} The score already saved is kept: starting it again carries on from there.`
-                                : " The score already saved is kept: starting it again carries on from there."}
+                            {pendingRevert.unsaved ? ` ${UNSAVED_ENTRIES_DISCARDED}` : ""} {SCORE_KEPT_SENTENCE}
                         </p>
                         <div className="shiaijo-move-confirm__actions">
                             <button type="button" className="btn" onClick={() => setPendingRevert(null)} disabled={reverting}>

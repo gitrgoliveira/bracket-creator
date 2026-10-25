@@ -15,6 +15,8 @@ import {
 } from './write_result.jsx';
 import { keptInHistoryNote } from './match_groups.jsx';
 import { normalizeCompetitionDetail } from './api_serializers.jsx';
+import { confirmMatchLabel, confirmRunningCourtMove } from './court_move.jsx';
+import { holdsUnsaved, discardUnsaved } from './unsaved_entries.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -341,16 +343,36 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // bc-evts M5: the move is an entry of the match's outbox, handed over at once:
   // this resolves at once with `{ landed }`, a promise that answers true when
   // the move lands and false when the server refuses it (the refusal is toasted
-  // here) or it is discarded, so a caller can tell the two apart without
-  // waiting on the network.
-  const moveMatchCourt = async (compId, matchId, newCourt) => {
-    // The court it had, put back if the server refuses the move (R4).
-    const shown = matchInComp((tRef.current?.competitions || []).find((c) => c.id === compId), matchId);
+  // here and triggers a refresh), it is cancelled or a same-court no-op, or it is
+  // discarded, so a caller can tell the two apart without waiting on the network.
+  // `opts.shown` is the match as the calling door shows it (falls back to the
+  // host's tournament copy when omitted); `opts.confirmed` skips the running-match
+  // confirm when the caller already asked; `opts.hostUnsavedRef` warns about and
+  // discards unsaved inline-editor entries on confirm.
+  const moveMatchCourt = async (compId, matchId, newCourt, opts = {}) => {
+    // The court and status the door shows; put the old court back if refused (R4).
+    const shown = opts.shown || matchInComp((tRef.current?.competitions || []).find((c) => c.id === compId), matchId);
+    if (shown && (shown.court || "") === (newCourt || "")) {
+      return { landed: Promise.resolve(false) };
+    }
+    const running = !!(shown && shown.status === "running");
+    if (running && !opts.confirmed) {
+      const unsaved = holdsUnsaved(opts.hostUnsavedRef);
+      const ok = await confirmRunningCourtMove({
+        label: confirmMatchLabel(shown),
+        from: shown.court,
+        to: newCourt,
+        unsaved,
+      });
+      if (!ok) return { landed: Promise.resolve(false) };
+      if (unsaved) discardUnsaved(opts.hostUnsavedRef);
+    }
     let answer;
     try {
       answer = await window.API.moveMatchCourt(compId, matchId, newCourt, password, {
-        onRefusal: (e) => { showToast(e.message, "error"); return true; },
+        onRefusal: (e) => { showToast(e.message, "error"); refreshCompsBestEffort("Move"); return true; },
         ...(shown ? { was: { court: shown.court || "" } } : {}),
+        ...(running ? { stopsRunning: true } : {}),
       });
     } catch (e) {
       showToast(e.message, "error");

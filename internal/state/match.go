@@ -94,6 +94,97 @@ func runningOnCourtInBracket(s *Store, compID, court string) (*CourtOccupancy, e
 	return nil, nil
 }
 
+// CourtQueueBounds returns the earliest and latest scheduled times (ScheduledAt)
+// among timed scheduled matches on the given court across all competitions.
+//
+// Lock discipline: cached reads acquire each competition's read lock.
+// Because the RWMutex is not reentrant, the caller must NOT hold any
+// competition's lock, and so must call this method outside any transaction.
+//
+// Snapshot: this reads an instantaneous snapshot of tournament state across
+// competitions.
+//
+// Unlike RunningMatchOnCourt, it does not skip a whole competition.
+// When moving or rescheduling a match, other scheduled matches in the same
+// competition still belong to the court queue. Thus, it skips only the single
+// match whose competition ID matches skipCompID and match ID matches skipMatchID.
+func (s *Store) CourtQueueBounds(court, skipCompID, skipMatchID string) (earliest, latest string, err error) {
+	if court == "" {
+		return "", "", nil
+	}
+	ids, err := s.ListCompetitions()
+	if err != nil {
+		return "", "", err
+	}
+	acc := queueBoundsAcc{
+		court:       court,
+		skipCompID:  skipCompID,
+		skipMatchID: skipMatchID,
+	}
+	for _, compID := range ids {
+		if err := acc.scanPoolMatches(s, compID); err != nil {
+			return "", "", err
+		}
+		if err := acc.scanBracket(s, compID); err != nil {
+			return "", "", err
+		}
+	}
+	return acc.earliest, acc.latest, nil
+}
+
+type queueBoundsAcc struct {
+	court       string
+	skipCompID  string
+	skipMatchID string
+	earliest    string
+	latest      string
+}
+
+func (a *queueBoundsAcc) observe(compID, matchID, court string, status MatchStatus, scheduledAt string) {
+	if court != a.court || status != MatchStatusScheduled || scheduledAt == "" {
+		return
+	}
+	if compID == a.skipCompID && matchID == a.skipMatchID {
+		return
+	}
+	if a.earliest == "" || scheduledAt < a.earliest {
+		a.earliest = scheduledAt
+	}
+	if a.latest == "" || scheduledAt > a.latest {
+		a.latest = scheduledAt
+	}
+}
+
+func (a *queueBoundsAcc) scanPoolMatches(s *Store, compID string) error {
+	matches, err := s.cachedPoolMatches(compID)
+	if err != nil {
+		return err
+	}
+	for i := range matches {
+		a.observe(compID, matches[i].ID, matches[i].Court, matches[i].Status, matches[i].ScheduledAt)
+	}
+	return nil
+}
+
+func (a *queueBoundsAcc) scanBracket(s *Store, compID string) error {
+	bracket, err := s.cachedBracket(compID)
+	if err != nil {
+		return err
+	}
+	if bracket == nil {
+		return nil
+	}
+	for _, round := range bracket.Rounds {
+		for i := range round {
+			a.observe(compID, round[i].ID, round[i].Court, round[i].Status, round[i].ScheduledAt)
+		}
+	}
+	if bm := bracket.ThirdPlaceMatch; bm != nil {
+		a.observe(compID, bm.ID, bm.Court, bm.Status, bm.ScheduledAt)
+	}
+	return nil
+}
+
 // DeriveQueuePositions assigns a 1-indexed queue position to each
 // scheduled match per court. Live (running) and completed matches
 // receive 0.

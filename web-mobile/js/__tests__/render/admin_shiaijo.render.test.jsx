@@ -7,6 +7,8 @@ import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, startWhileCorrectingMessage, star
 import { scoreRowMatchName } from '../../pool_ids.jsx';
 import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
 import { START_SUPERSEDED_MESSAGE } from '../../start_match.jsx';
+import { UNSAVED_ENTRIES_DISCARDED } from '../../unsaved_entries.jsx';
+import { SCORE_KEPT_SENTENCE } from '../../court_move.jsx';
 // Window globals required by admin_shiaijo.jsx.
 // MODULE-EVAL-TIME entries (e.g. `const AdminTopbar = window.AdminTopbar;`)
 // must be set before the dynamic import, or the module captures undefined.
@@ -1578,12 +1580,13 @@ async function mountCourt(initial, opts = {}) {
   window.API.subscribeToEvents = () => () => {};
   window.API.revertMatchToQueue = vi.fn().mockResolvedValue(true);
   const showToast = vi.fn();
+  const onMoveCourt = opts.onMoveCourt || vi.fn();
   const exits = { onBack: vi.fn(), onLogout: vi.fn(), onViewerMode: vi.fn(), onSwitchCourt: vi.fn() };
   let utils;
   await act(async () => {
     utils = render(
       <AdminShiaijoPage tournament={makeMinimalTournament()} court="A" onBack={exits.onBack} onEditScore={opts.onEditScore || vi.fn()}
-        onMoveCourt={vi.fn()} onLogout={exits.onLogout} onViewerMode={exits.onViewerMode} password="" showToast={showToast}
+        onMoveCourt={onMoveCourt} onLogout={exits.onLogout} onViewerMode={exits.onViewerMode} password="" showToast={showToast}
         tweaks={{}} onSwitchCourt={exits.onSwitchCourt} />
     );
   });
@@ -1591,6 +1594,7 @@ async function mountCourt(initial, opts = {}) {
     utils,
     feed,
     showToast,
+    onMoveCourt,
     exits,
     editorMatch: () => { const el = utils.queryByTestId('score-editor'); return el ? el.getAttribute('data-match') : null; },
     refresh: async () => { await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); }); },
@@ -3317,5 +3321,114 @@ describe('an own Start still out takes the match out of Up next and Upcoming', (
       await act(async () => { onRefusal(new Error('Sato is fighting on shiaijo B')); });
       expect(upNextText(c), 'the refused bout is Up next again').toContain('Aka m1');
     } finally { c.restore(); }
+  });
+});
+
+// P1-T6: the console's move confirm snapshots `shown` and `running` when the
+// dialog opens (`isStartedSnapshot(mm) ? { ...mm, status: "running" } : mm`),
+// words a running move with `runningCourtMoveText` and a waiting one as before,
+// re-words the unsaved re-ask with `runningCourtMoveText` when running, and
+// hands `{ confirmed: true, shown: pendingMove.shown }` to `onMoveCourt`.
+describe('court move confirm snapshot and wording (P1-T6)', () => {
+  const rowOf = (c, text) => [...c.utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes(text));
+  const moveDialog = (c) => c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
+
+  it('a waiting match keeps the waiting words and passes { confirmed: true, shown } from when the dialog opened', async () => {
+    const onMoveCourt = vi.fn().mockResolvedValue(true);
+    const m1 = courtMatch('m1', 'scheduled', { modifiedAt: 100 });
+    const m2 = courtMatch('m2', 'scheduled', { modifiedAt: 200 });
+    const c = await mountCourt([m1, m2], { onMoveCourt });
+    try {
+      await act(async () => { within(rowOf(c, 'Aka m2')).getByTestId('move-to-B').click(); });
+      const dialog = moveDialog(c);
+      expect(dialog.querySelector('.shiaijo-move-confirm__title').textContent).toBe('Move to Shiaijo B?');
+      expect(dialog.querySelector('.shiaijo-move-confirm__body').textContent)
+        .toBe('Shiro m2 vs Aka m2 leaves Shiaijo A and joins the queue on Shiaijo B.');
+      expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeTruthy();
+
+      // Even if the feed changes m2 before Confirm is clicked, confirmMoveCourt
+      // sends the snapshot captured when the dialog opened, never re-reading sorted.
+      c.feed.current = [m1, { ...m2, status: 'running', modifiedAt: 900 }];
+      await c.refresh();
+
+      await act(async () => { within(moveDialog(c)).getByRole('button', { name: 'Move to Shiaijo B' }).click(); });
+      expect(onMoveCourt).toHaveBeenCalledTimes(1);
+      expect(onMoveCourt).toHaveBeenCalledWith('c1', 'm2', 'B', {
+        confirmed: true,
+        shown: expect.objectContaining({ id: 'm2', compId: 'c1', status: 'scheduled', modifiedAt: 200 }),
+      });
+    } finally { c.restore(); }
+  });
+
+  // Note: since stage 6 review 1 (commit d8390747), `filteredScheduled` filters
+  // out `isStartedSnapshot(m)`, so a match this console started leaves Up next
+  // and Upcoming as soon as `startedFrom` is set. To reach `requestMoveCourt`
+  // when `isStartedSnapshot(mm)` is true and pin its running snapshot, running
+  // dialog words, and unsaved re-ask in running words, we start m3 (recording
+  // `startedFrom = { key: 'c1:m3', at: 100 }` and pinning the editor on m3),
+  // render its queue row with a non-matching stamp, then restore `modifiedAt: 100`
+  // before opening the move dialog so `isStartedSnapshot(mm)` evaluates true.
+  it('the own-Start snapshot opens the running move words, re-asks with UNSAVED_ENTRIES_DISCARDED in running words, and passes shown with status running', async () => {
+    const onEditScore = vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k-start', settled: new Promise(() => {}) });
+    const onMoveCourt = vi.fn().mockResolvedValue(true);
+    const m2 = courtMatch('m2', 'scheduled', { modifiedAt: 100 });
+    const m3 = courtMatch('m3', 'scheduled', { modifiedAt: 100 });
+    const c = await mountCourt([m2, m3], { onEditScore, onMoveCourt });
+    let now = Date.now() + 1000;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const startBtn = [...rowOf(c, 'Aka m3').querySelectorAll('button')].find((b) => /^start/i.test(b.textContent.trim()));
+      await act(async () => { startBtn.click(); });
+      await act(async () => {});
+      expect(c.editorMatch()).toBe('m3');
+
+      // Render m3's queue row while pickedKey keeps the editor on m3, then align
+      // m3.modifiedAt with startedFrom.at (100) so isStartedSnapshot(mm) is true
+      // at the moment requestMoveCourt opens the dialog.
+      const m3RowObj = courtMatch('m3', 'scheduled', { modifiedAt: 250 });
+      c.feed.current = [m2, m3RowObj];
+      await c.refresh();
+      m3RowObj.modifiedAt = 100;
+
+      const discard = vi.fn();
+      const dirty = () => true; dirty.discard = discard;
+      const clean = () => false; clean.discard = vi.fn();
+      probe.props.hostUnsavedRef.current = clean;
+
+      await act(async () => { within(rowOf(c, 'Aka m3')).getByTestId('move-to-B').click(); });
+      const dialog = moveDialog(c);
+      expect(dialog.querySelector('.shiaijo-move-confirm__title').textContent).toBe('Move to Shiaijo B?');
+      expect(dialog.querySelector('.shiaijo-move-confirm__body').textContent).toBe(
+        `Shiro m3 vs Aka m3 is running on Shiaijo A. It stops there and goes first in the queue on Shiaijo B. ${SCORE_KEPT_SENTENCE}`
+      );
+      expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeTruthy();
+      expect(within(dialog).getByRole('button', { name: 'Move to Shiaijo B' })).toBeTruthy();
+
+      // Entries become unsaved while the running confirm is open: first Confirm
+      // re-words the dialog in running words with UNSAVED_ENTRIES_DISCARDED.
+      probe.props.hostUnsavedRef.current = dirty;
+      now += TAP_BOUNCE_MS;
+      const confirmBtn = () => within(moveDialog(c)).getByRole('button', { name: 'Move to Shiaijo B' });
+      await act(async () => { fireEvent.click(confirmBtn(), { detail: 1 }); });
+      expect(onMoveCourt).not.toHaveBeenCalled();
+      expect(discard).not.toHaveBeenCalled();
+      expect(moveDialog(c).querySelector('.shiaijo-move-confirm__body').textContent).toBe(
+        `Shiro m3 vs Aka m3 is running on Shiaijo A. It stops there and goes first in the queue on Shiaijo B. ${UNSAVED_ENTRIES_DISCARDED} ${SCORE_KEPT_SENTENCE}`
+      );
+
+      // Confirming after the bounce window discards unsaved entries and passes
+      // the open-time running snapshot to onMoveCourt.
+      now += TAP_BOUNCE_MS;
+      await act(async () => { fireEvent.click(confirmBtn(), { detail: 1 }); });
+      expect(discard).toHaveBeenCalledTimes(1);
+      expect(onMoveCourt).toHaveBeenCalledTimes(1);
+      expect(onMoveCourt).toHaveBeenCalledWith('c1', 'm3', 'B', {
+        confirmed: true,
+        shown: expect.objectContaining({ id: 'm3', compId: 'c1', status: 'running' }),
+      });
+    } finally {
+      spy.mockRestore();
+      c.restore();
+    }
   });
 });

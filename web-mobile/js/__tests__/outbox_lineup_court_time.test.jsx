@@ -144,7 +144,48 @@ describe('a court move and a time change are entries of their match', () => {
         await tick(0);
         expect(sent.map((s) => s.path)).toEqual(['matches/m1/score', 'matches/m1/court', 'matches/m1/time']);
         expect(sent[1].body.court).toBe('B');
+        expect(sent[1].body.stopsRunning).toBeUndefined();
         expect(sent[2].body.scheduledAt).toBe('10:30');
+    });
+
+    it('keeps stopsRunning: true across a reload and sends it when rehydrated', async () => {
+        await API.moveMatchCourt('c1', 'm1', 'B', 'pw', { stopsRunning: true, was: { court: 'A' } });
+        expect(stored()).toHaveLength(1);
+        expect(stored()[0][1].payload).toEqual(expect.objectContaining({ court: 'B', stopsRunning: true }));
+
+        // Simulate page reload: re-import api_client over the same localStorage.
+        await load();
+        const sent = server(() => ({ status: 200, body: {} }));
+        window.dispatchEvent(new Event('online'));
+        await tick(0);
+        expect(sent.map((s) => s.path)).toEqual(['matches/m1/court']);
+        expect(sent[0].body).toEqual(expect.objectContaining({ court: 'B', stopsRunning: true }));
+    });
+
+    it('a 409 match_status_changed on the court entry is terminal, fires onRefusal once with the sentence, and puts the old court back', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const sentence = 'Shiro vs Aka was started on Shiaijo A before your move reached the server, so it was not moved. Move it again to stop it there and put it first on Shiaijo B.';
+        const patches = [];
+        API.subscribeLocalMatchPatch((e) => patches.push(e && e.data && e.data.result));
+        const sent = server(() => ({
+            status: 409,
+            body: { code: 'match_status_changed', error: 'match_status_changed', message: sentence },
+        }));
+        const refused = [];
+        const move = await API.moveMatchCourt('c1', 'm1', 'B', 'pw', {
+            was: { court: 'A' },
+            onRefusal: (e) => { refused.push(e.message); return true; },
+        });
+        await tick(0);
+        await expect(move.settled).rejects.toThrow(sentence);
+        expect(refused).toEqual([sentence]);
+        expect(sent).toHaveLength(1);
+        expect(stored()).toHaveLength(0);
+        // Does not retry on later flushes.
+        await tick(10000);
+        expect(sent).toHaveLength(1);
+        expect(patches).toEqual([{ id: 'm1', court: 'B' }, { id: 'm1', court: 'A' }]);
+        warn.mockRestore();
     });
 });
 

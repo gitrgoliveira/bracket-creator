@@ -348,7 +348,7 @@ func TestBronze_UpdateMatchCourtPersists(t *testing.T) {
 	}
 	require.NoError(t, store.SaveBracket(compID, b))
 
-	require.NoError(t, eng.UpdateMatchCourt(compID, "m-bronze", "B"))
+	require.NoError(t, eng.UpdateMatchCourt(compID, "m-bronze", "B", CourtMove{}))
 
 	updated, err := store.LoadBracket(compID)
 	require.NoError(t, err)

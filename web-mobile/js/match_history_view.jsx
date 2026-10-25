@@ -66,6 +66,14 @@ export function historyDoorWords(door) {
     return DOOR_WORDS[door] || 'Updated';
 }
 
+export function historyEntryWords(entry) {
+    const court = entry && typeof entry.court === 'string' ? entry.court.trim() : (entry && entry.court);
+    if (entry && entry.door === 'requeue' && court) {
+        return `Moved to Shiaijo ${court} and sent back to the queue`;
+    }
+    return historyDoorWords(entry ? entry.door : undefined);
+}
+
 // A tap's words (door "event"): the side ("a" is Aka, "b" is Shiro), what it
 // did, and the mark for a point added.
 const EVENT_KIND_WORDS = {
@@ -232,7 +240,7 @@ export function historyEntryView(entry, resolve) {
         : typeof entry.reason === 'string' && entry.reason ? `${moved ? 'Moved to history' : 'Not applied'}: ${entry.reason}` : null;
     return {
         time: historyTime(entry),
-        door: isTap ? eventWords(entry.event) : historyDoorWords(entry.door),
+        door: isTap ? eventWords(entry.event) : historyEntryWords(entry),
         changed: changed.length ? `changed ${changed.join(', ')}` : 'changed nothing',
         held,
         cleared,

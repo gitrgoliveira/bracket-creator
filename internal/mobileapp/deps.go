@@ -167,7 +167,7 @@ type ScoringEngine interface {
 	MaybeAutoCompletePoolsAfterWrite(compID string, written ...state.MatchResult) (engine.AutoCompleteOutcome, error)
 	// UpdateMatchCourt reassigns a match to a different court. Mirrors
 	// engine.Engine.UpdateMatchCourt.
-	UpdateMatchCourt(compID string, matchID string, newCourt string) error
+	UpdateMatchCourt(compID string, matchID string, newCourt string, mv engine.CourtMove) error
 	// OverrideBracketWinner sets the winner of a bracket match by
 	// participant name (used by the admin "manual winner" flow and the
 	// offline force-start feeder assertion). modifiedAt is the

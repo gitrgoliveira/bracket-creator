@@ -1337,6 +1337,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 
 		var req struct {
 			Court string `json:"court"`
+			// StopsRunning: the operator saw the match running and confirmed
+			// stopping it there and putting it first on the new court.
+			StopsRunning bool `json:"stopsRunning"`
 			// The client's id for the move (Y8): one already applied is
 			// answered as recorded, never applied again.
 			WriteID string `json:"writeId,omitempty"`
@@ -1361,7 +1364,13 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 
 		applied := false
 		ran := once.do("match\x1f"+id+"\x1f"+mid, req.WriteID, func() bool {
-			if err := eng.UpdateMatchCourt(id, mid, req.Court); err != nil {
+			if err := eng.UpdateMatchCourt(id, mid, req.Court, engine.CourtMove{
+				StopsRunning: req.StopsRunning,
+				WriteID:      req.WriteID,
+			}); err != nil {
+				if respondIfCourtMoveRefused(c, err) {
+					return false
+				}
 				// A match the competition does not hold is a 404, never a 500:
 				// the outbox retries a 5xx forever and holds the match's later
 				// writes behind it (bc-evts stage 3 review 2, R3).
@@ -1381,11 +1390,17 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
-		broadcastMatchNow(hub, store, id, mid, gin.H{
+		payload := gin.H{
 			"competitionId": id,
 			"matchId":       mid,
 			"court":         req.Court,
-		})
+		}
+		if r, found, err := readStoredMatch(store, id, mid); err != nil {
+			log.Printf("mobileapp: court move %s/%s: read stored match: %v", id, mid, err)
+		} else if found && r != nil {
+			payload["result"] = matchPtrForBroadcast(r)
+		}
+		broadcastMatchNow(hub, store, id, mid, payload)
 		// A pool bout moved onto a court may move that court's knockout
 		// later (bc-kosc), so the schedule is announced as the time edit's is.
 		hub.Broadcast(EventScheduleUpdated, nil)

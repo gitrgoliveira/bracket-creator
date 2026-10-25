@@ -400,7 +400,10 @@ describe('Call to court double tap (bc-cdbl)', () => {
     // The host answers true once the move has landed (admin.jsx moveMatchCourt).
     const onMoveCourt = vi.fn(async () => true);
     await callThenMoveSuzuki(onMoveCourt);
-    expect(onMoveCourt).toHaveBeenCalledWith('c1', 'm2', 'B');
+    expect(onMoveCourt).toHaveBeenCalledWith('c1', 'm2', 'B', {
+      confirmed: true,
+      shown: expect.objectContaining({ id: 'm2', compId: 'c1', status: 'scheduled' }),
+    });
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
     expect(window.API.deleteAnnouncement).toHaveBeenCalledWith('ann-1', '');
   });
@@ -409,7 +412,10 @@ describe('Call to court double tap (bc-cdbl)', () => {
     // The real host catches the failed move, toasts it and resolves false.
     const onMoveCourt = vi.fn(async () => false);
     await callThenMoveSuzuki(onMoveCourt);
-    expect(onMoveCourt).toHaveBeenCalledWith('c1', 'm2', 'B');
+    expect(onMoveCourt).toHaveBeenCalledWith('c1', 'm2', 'B', {
+      confirmed: true,
+      shown: expect.objectContaining({ id: 'm2', compId: 'c1', status: 'scheduled' }),
+    });
     expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
   });
 });

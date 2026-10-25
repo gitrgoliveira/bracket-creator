@@ -429,7 +429,8 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
                       if (!data) return;
                       try {
                         const { compId, matchId } = JSON.parse(data);
-                        onMoveCourt(compId, matchId, cc);
+                        const shown = allMatches.find((m) => m.compId === compId && m.id === matchId);
+                        onMoveCourt(compId, matchId, cc, shown ? { shown } : undefined);
                       } catch (err) {
                         console.error("Failed to parse drop data:", err);
                       }
@@ -443,7 +444,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
                         m={m}
                         highlight={matchHasFilter(m)}
                         courts={courts}
-                        onMove={(toCourt) => onMoveCourt(m.compId, m.id, toCourt)}
+                        onMove={(toCourt) => onMoveCourt(m.compId, m.id, toCourt, { shown: m })}
                         onTimeChange={(newTime) => saveMatchTime(m, newTime)}
                       />
                     ))}
@@ -466,7 +467,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
                       m={m}
                       highlight={matchHasFilter(m)}
                       courts={courts}
-                      onMove={(toCourt) => onMoveCourt(m.compId, m.id, toCourt)}
+                      onMove={(toCourt) => onMoveCourt(m.compId, m.id, toCourt, { shown: m })}
                       onTimeChange={(newTime) => saveMatchTime(m, newTime)}
                     />
                   ))}

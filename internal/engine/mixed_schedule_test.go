@@ -234,7 +234,7 @@ func TestPoolScheduleEdit_CourtMoveMovesTheKnockout(t *testing.T) {
 		ko := numberedKnockoutTimes(bracket(t, store, id))[other]
 		require.NotEmpty(t, ko)
 		require.NoError(t, eng.UpdateMatchTime(id, m.ID, ko[0].Format(scheduleClockLayout)))
-		require.NoError(t, eng.UpdateMatchCourt(id, m.ID, other))
+		require.NoError(t, eng.UpdateMatchCourt(id, m.ID, other, CourtMove{}))
 		comp, err := store.LoadCompetition(id)
 		require.NoError(t, err)
 		tourn, err := store.LoadTournament()
@@ -261,7 +261,7 @@ func TestPoolScheduleEdit_CourtMoveMovesTheKnockout(t *testing.T) {
 		path := filepath.Join(dir, "tournament.md")
 		require.NoError(t, os.RemoveAll(path))
 		require.NoError(t, os.Mkdir(path, 0o755))
-		require.NoError(t, eng.UpdateMatchCourt(id, m.ID, other))
+		require.NoError(t, eng.UpdateMatchCourt(id, m.ID, other, CourtMove{}))
 		for _, r := range pool(t, store, id) {
 			if r.ID == m.ID {
 				assert.Equal(t, other, r.Court, "the court move is saved")

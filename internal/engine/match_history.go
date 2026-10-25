@@ -164,6 +164,18 @@ func (e *Engine) recordDirectHistory(h state.StoreTx, compID, matchID, door stri
 // tagged (bc-evts F1): the baseline it leaves carries the write's id, so a
 // resend is answered as recorded (loggedWriteID), and its basis.
 func (e *Engine) recordDirectHistoryTagged(h state.StoreTx, compID, matchID, door string, stamp int64, tag ForceOptions, groups ...string) {
+	e.recordDirectHistoryWithCourt(h, compID, matchID, door, stamp, tag, "", groups...)
+}
+
+// recordRequeueHistory writes the doorRequeue history entry and its score-log
+// baseline after a send-back write has staged the match. RevertMatchToQueue
+// passes court "" and a confirmed running court move passes the new court, so
+// both paths share one history + baseline writer.
+func (e *Engine) recordRequeueHistory(h state.StoreTx, compID, matchID string, stamp int64, tag ForceOptions, court string) {
+	e.recordDirectHistoryWithCourt(h, compID, matchID, doorRequeue, stamp, tag, court, state.GroupResult)
+}
+
+func (e *Engine) recordDirectHistoryWithCourt(h state.StoreTx, compID, matchID, door string, stamp int64, tag ForceOptions, court string, groups ...string) {
 	outcomes := make(map[string]string, len(groups))
 	for _, g := range groups {
 		outcomes[g] = state.HistoryOutcomeApplied
@@ -175,6 +187,7 @@ func (e *Engine) recordDirectHistoryTagged(h state.StoreTx, compID, matchID, doo
 		ReceivedAt: time.Now().UnixMilli(),
 		Changed:    append([]string(nil), groups...),
 		Outcomes:   outcomes,
+		Court:      court,
 	}
 	if err := h.AppendMatchHistory(compID, entry); err != nil {
 		log.Printf("engine: match %s/%s: history entry not recorded: %v", compID, matchID, err)

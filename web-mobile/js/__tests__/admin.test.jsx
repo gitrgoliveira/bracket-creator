@@ -1,8 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord } from '../admin.jsx';
+import { UNSAVED_ENTRIES_DISCARDED } from '../unsaved_entries.jsx';
+import { SCORE_KEPT_SENTENCE } from '../court_move.jsx';
 
 // /deep-review finding on UI side: AdminApp's async handlers
 // (updateCompetition, moveMatchCourt, editMatchScore, addCompetition,
@@ -366,5 +368,187 @@ describe('the refresh after a write is bounded', () => {
     // clock_offset.test.jsx), so the refresh asks it rather than toasting.
     expect(body).toMatch(/refreshFailureToast\(actionLabel, e\)/);
     expect(body).not.toMatch(/showToast\(`\$\{actionLabel\} succeeded/);
+  });
+});
+
+describe('moveMatchCourt chokepoint', () => {
+  let moveMatchCourtSpy;
+  let fetchCompetitionsSpy;
+  let confirmDialogSpy;
+  let showToast;
+  let onUpdate;
+
+  function makeMoveHandler(tournament) {
+    const el = window.AdminApp({
+      tournament,
+      onUpdate,
+      onLogout: vi.fn(),
+      onViewerMode: vi.fn(),
+      onPasswordChange: vi.fn(),
+      tweaks: {},
+      password: 'pw',
+      view: { kind: 'schedule' },
+      setView: vi.fn(),
+      showToast,
+      authConfig: {},
+    });
+    return el.props.onMoveCourt;
+  }
+
+  beforeEach(() => {
+    showToast = vi.fn();
+    onUpdate = vi.fn();
+    moveMatchCourtSpy = vi.fn(async () => ({
+      applied: true,
+      pending: true,
+      key: 'k1',
+      settled: Promise.resolve({}),
+    }));
+    fetchCompetitionsSpy = vi.fn(async () => []);
+    confirmDialogSpy = vi.fn(async () => true);
+    window.API = {
+      moveMatchCourt: moveMatchCourtSpy,
+      fetchCompetitions: fetchCompetitionsSpy,
+    };
+    window.confirmDialog = confirmDialogSpy;
+  });
+
+  it('same court sends nothing, asks nothing, toasts nothing, and answers landed false', async () => {
+    const onMoveCourt = makeMoveHandler({
+      competitions: [{ id: 'c1', poolMatches: [{ id: 'm1', court: 'A', status: 'running' }] }],
+    });
+    const res = await onMoveCourt('c1', 'm1', 'A', {
+      shown: { id: 'm1', court: 'A', status: 'running', sideA: { name: 'Aka' }, sideB: { name: 'Shiro' } },
+    });
+    expect(await res.landed).toBe(false);
+    expect(confirmDialogSpy).not.toHaveBeenCalled();
+    expect(moveMatchCourtSpy).not.toHaveBeenCalled();
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it('a waiting shown match moves with no confirm and no stopsRunning', async () => {
+    const onMoveCourt = makeMoveHandler({
+      competitions: [{ id: 'c1', poolMatches: [{ id: 'm1', court: 'A', status: 'running' }] }],
+    });
+    const res = await onMoveCourt('c1', 'm1', 'B', {
+      shown: { id: 'm1', court: 'A', status: 'scheduled', sideA: { name: 'Aka' }, sideB: { name: 'Shiro' } },
+    });
+    expect(await res.landed).toBe(true);
+    expect(confirmDialogSpy).not.toHaveBeenCalled();
+    expect(moveMatchCourtSpy).toHaveBeenCalledTimes(1);
+    const [cid, mid, court, pw, opts] = moveMatchCourtSpy.mock.calls[0];
+    expect([cid, mid, court, pw]).toEqual(['c1', 'm1', 'B', 'pw']);
+    expect(opts.stopsRunning).toBeUndefined();
+    expect(opts.was).toEqual({ court: 'A' });
+  });
+
+  it('a running shown match asks first; Cancel sends nothing and landed resolves false', async () => {
+    confirmDialogSpy.mockResolvedValueOnce(false);
+    const onMoveCourt = makeMoveHandler({ competitions: [] });
+    const res = await onMoveCourt('c1', 'm1', 'B', {
+      shown: { id: 'm1', court: 'A', status: 'running', sideA: { name: 'Quinn Walker' }, sideB: { name: 'Jane Austen' } },
+    });
+    expect(await res.landed).toBe(false);
+    expect(confirmDialogSpy).toHaveBeenCalledTimes(1);
+    expect(confirmDialogSpy.mock.calls[0][0]).toEqual({
+      title: 'Move to Shiaijo B?',
+      message: `Jane Austen vs Quinn Walker is running on Shiaijo A. It stops there and goes first in the queue on Shiaijo B. ${SCORE_KEPT_SENTENCE}`,
+      confirmLabel: 'Move to Shiaijo B',
+      cancelLabel: 'Cancel',
+    });
+    expect(moveMatchCourtSpy).not.toHaveBeenCalled();
+  });
+
+  it('a running shown match sends stopsRunning: true once confirmed', async () => {
+    confirmDialogSpy.mockResolvedValueOnce(true);
+    const onMoveCourt = makeMoveHandler({ competitions: [] });
+    const res = await onMoveCourt('c1', 'm1', 'B', {
+      shown: { id: 'm1', court: 'A', status: 'running', sideA: { name: 'Quinn Walker' }, sideB: { name: 'Jane Austen' } },
+    });
+    expect(await res.landed).toBe(true);
+    expect(confirmDialogSpy).toHaveBeenCalledTimes(1);
+    expect(moveMatchCourtSpy).toHaveBeenCalledTimes(1);
+    expect(moveMatchCourtSpy.mock.calls[0][4]).toEqual(expect.objectContaining({
+      stopsRunning: true,
+      was: { court: 'A' },
+    }));
+  });
+
+  it('confirmed: true skips the question and sends stopsRunning: true for a running match', async () => {
+    const onMoveCourt = makeMoveHandler({ competitions: [] });
+    const res = await onMoveCourt('c1', 'm1', 'B', {
+      confirmed: true,
+      shown: { id: 'm1', court: 'A', status: 'running', sideA: { name: 'Aka' }, sideB: { name: 'Shiro' } },
+    });
+    expect(await res.landed).toBe(true);
+    expect(confirmDialogSpy).not.toHaveBeenCalled();
+    expect(moveMatchCourtSpy).toHaveBeenCalledTimes(1);
+    expect(moveMatchCourtSpy.mock.calls[0][4]).toEqual(expect.objectContaining({
+      stopsRunning: true,
+      was: { court: 'A' },
+    }));
+  });
+
+  it('hostUnsavedRef with unsaved entries includes the discard sentence and discards on confirm', async () => {
+    const discard = vi.fn();
+    const thunk = Object.assign(() => true, { discard });
+    const hostUnsavedRef = { current: thunk };
+    const onMoveCourt = makeMoveHandler({ competitions: [] });
+    const res = await onMoveCourt('c1', 'm1', 'B', {
+      shown: { id: 'm1', court: 'A', status: 'running', sideA: { name: 'Quinn Walker' }, sideB: { name: 'Jane Austen' } },
+      hostUnsavedRef,
+    });
+    expect(await res.landed).toBe(true);
+    expect(confirmDialogSpy).toHaveBeenCalledTimes(1);
+    expect(confirmDialogSpy.mock.calls[0][0].message).toContain(UNSAVED_ENTRIES_DISCARDED);
+    expect(discard).toHaveBeenCalledTimes(1);
+    expect(moveMatchCourtSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('was comes from shown.court rather than the host tournament copy', async () => {
+    const onMoveCourt = makeMoveHandler({
+      competitions: [{ id: 'c1', poolMatches: [{ id: 'm1', court: 'A', status: 'scheduled' }] }],
+    });
+    await onMoveCourt('c1', 'm1', 'C', {
+      shown: { id: 'm1', court: 'B', status: 'scheduled' },
+    });
+    expect(moveMatchCourtSpy).toHaveBeenCalledTimes(1);
+    expect(moveMatchCourtSpy.mock.calls[0][4].was).toEqual({ court: 'B' });
+  });
+
+  it('falls back to the host tournament copy when no shown match is passed', async () => {
+    const onMoveCourt = makeMoveHandler({
+      competitions: [{ id: 'c1', poolMatches: [{ id: 'm1', court: 'A', status: 'running', sideA: { name: 'Aka' }, sideB: { name: 'Shiro' } }] }],
+    });
+    await onMoveCourt('c1', 'm1', 'B');
+    expect(confirmDialogSpy).toHaveBeenCalledTimes(1);
+    expect(moveMatchCourtSpy).toHaveBeenCalledTimes(1);
+    expect(moveMatchCourtSpy.mock.calls[0][4]).toEqual(expect.objectContaining({
+      was: { court: 'A' },
+      stopsRunning: true,
+    }));
+  });
+
+  it('a refusal toasts the sentence once and refreshes from onRefusal, answering landed false', async () => {
+    const sentence = 'Jane Austen vs Quinn Walker was started on Shiaijo A before your move reached the server, so it was not moved. Move it again to stop it there and put it first on Shiaijo B.';
+    let rejectSettled;
+    moveMatchCourtSpy.mockImplementationOnce(async (_c, _m, _ct, _pw, opts) => {
+      const settled = new Promise((_res, rej) => { rejectSettled = rej; });
+      queueMicrotask(() => {
+        const claimed = opts.onRefusal(new Error(sentence));
+        expect(claimed).toBe(true);
+        rejectSettled(new Error(sentence));
+      });
+      return { applied: true, pending: true, key: 'k1', settled };
+    });
+    const onMoveCourt = makeMoveHandler({ competitions: [] });
+    const res = await onMoveCourt('c1', 'm1', 'B', {
+      shown: { id: 'm1', court: 'A', status: 'scheduled' },
+    });
+    expect(await res.landed).toBe(false);
+    expect(showToast).toHaveBeenCalledTimes(1);
+    expect(showToast).toHaveBeenCalledWith(sentence, 'error');
+    expect(fetchCompetitionsSpy).toHaveBeenCalledTimes(1);
+    expect(fetchCompetitionsSpy).toHaveBeenCalledWith({ bounded: true });
   });
 });

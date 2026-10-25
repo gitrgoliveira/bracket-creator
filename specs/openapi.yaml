@@ -3510,6 +3510,12 @@ paths:
     put:
       tags: [matches]
       summary: Assign match to court
+      description: >
+        Moves a match to another court. A confirmed running move is sent back to
+        the queue there with its score kept and placed first in that court's queue;
+        a waiting match is placed last in that court's queue; a finished match keeps
+        its time; a move that finds the match no longer as the operator saw it
+        is refused with 409.
       security:
         - TournamentPassword: []
       parameters:
@@ -3527,6 +3533,9 @@ paths:
                   type: string
                   maxLength: 32
                   example: A
+                stopsRunning:
+                  type: boolean
+                  description: True when the operator saw the match running and confirmed that it stops there and goes first on the new court.
                 writeId:
                   $ref: '#/components/schemas/ArrivalWriteId'
       responses:
@@ -3539,6 +3548,27 @@ paths:
             The competition holds no match with this id. Never a 500: the
             app's offline queue retries a 5xx forever, and this refusal would
             never change.
+        '409':
+          description: >
+            The match is no longer as the operator saw it when they asked for the
+            move: an unconfirmed move reached a match that had started on another
+            device, or a move confirmed for a running match reached one that was
+            no longer running.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, reasonHuman, message, error]
+                properties:
+                  code:
+                    type: string
+                    example: match_status_changed
+                  reasonHuman:
+                    type: string
+                  message:
+                    type: string
+                  error:
+                    type: string
 
   /api/competitions/{id}/matches/{mid}/history:
     get:
@@ -5975,6 +6005,9 @@ components:
             and `eventOutcome`; a later `event` line for the same tap says its
             outcome moved), or engine for a write the server made itself.
           example: score
+        court:
+          type: string
+          description: The shiaijo a court move sent the match to, present on a requeue line.
         stamp:
           type: integer
           format: int64

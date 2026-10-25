@@ -85,7 +85,7 @@ function ScoreEditCourtBtn({ m, courts, onMoveCourt }) {
     <CourtPicker
       value={m.court}
       courts={courts}
-      onChange={(cc) => onMoveCourt(m.compId, m.id, cc)}
+      onChange={(cc) => onMoveCourt(m.compId, m.id, cc, { shown: m })}
       btnClassName="score-edit-row__court score-edit-row__court--btn"
     />
   );

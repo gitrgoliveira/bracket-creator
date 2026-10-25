@@ -123,12 +123,27 @@ const selectCourtInPicker = async (container, court) => {
   });
 };
 
+const localPatchListeners = new Set();
+function emitLocalMatchPatch(compId, matchId, fields) {
+  const event = {
+    type: 'match_updated',
+    local: true,
+    data: { competitionId: compId, matchId: matchId, result: { id: matchId, ...fields } },
+  };
+  for (const cb of localPatchListeners) cb(event);
+}
+
 describe('running court move confirmation across all doors', () => {
   let showToast;
   let moveMatchCourtSpy;
   let confirmDialogSpy;
 
   beforeEach(() => {
+    localPatchListeners.clear();
+    window.API.subscribeLocalMatchPatch = vi.fn((cb) => {
+      localPatchListeners.add(cb);
+      return () => { localPatchListeners.delete(cb); };
+    });
     probe.scoreEditor = null;
     probe.bracketTree = null;
     showToast = vi.fn();
@@ -151,7 +166,7 @@ describe('running court move confirmation across all doors', () => {
     const moveDialog = (container) =>
       container.querySelector('.shiaijo-move-confirm[role="dialog"]');
 
-    it('a match shown running asks with running words, Cancel sends nothing, and confirm calls onMoveCourt with confirmed: true', async () => {
+    it('a match this console has just started leaves Up next and the queue, and is not offered a court move on any queue row', async () => {
       const onMoveCourt = vi.fn().mockResolvedValue(true);
       const onEditScore = vi.fn().mockResolvedValue({
         applied: true,
@@ -188,54 +203,18 @@ describe('running court move confirmation across all doors', () => {
         );
       });
 
-      let now = Date.now() + 1000;
-      const dateSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+      // Initially m3 is in the upcoming queue row
+      expect(rowOf(utils.container, 'Aka m3')).toBeTruthy();
 
-      try {
-        // Start m3 to put it in the console's startedFrom snapshot
-        const startBtn = [...rowOf(utils.container, 'Aka m3').querySelectorAll('button')].find((b) =>
-          /^start/i.test(b.textContent.trim())
-        );
-        await act(async () => { startBtn.click(); });
-        await act(async () => {});
+      // Start m3
+      const startBtn = [...rowOf(utils.container, 'Aka m3').querySelectorAll('button')].find((b) =>
+        /^start/i.test(b.textContent.trim())
+      );
+      await act(async () => { startBtn.click(); });
 
-        // Re-render m3 queue row and restore modifiedAt so isStartedSnapshot(mm) is true
-        const m3Row = { ...m3, modifiedAt: 250 };
-        feed.current = [m2, m3Row];
-        await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); });
-        m3Row.modifiedAt = 100;
-
-        // Open move confirm for running match m3
-        await selectCourtInPicker(rowOf(utils.container, 'Aka m3'), 'B');
-
-        const dialog = moveDialog(utils.container);
-        expect(dialog).toBeTruthy();
-        expect(dialog.querySelector('.shiaijo-move-confirm__title').textContent).toBe('Move to Shiaijo B?');
-        expect(dialog.querySelector('.shiaijo-move-confirm__body').textContent).toBe(
-          `Shiro m3 vs Aka m3 is running on Shiaijo A. It stops there and goes first in the queue on Shiaijo B. ${SCORE_KEPT_SENTENCE}`
-        );
-
-        // Cancel sends nothing
-        const cancelBtn = within(dialog).getByRole('button', { name: 'Cancel' });
-        await act(async () => { cancelBtn.click(); });
-        expect(onMoveCourt).not.toHaveBeenCalled();
-        expect(moveDialog(utils.container)).toBeNull();
-
-        // Open again and confirm
-        await selectCourtInPicker(rowOf(utils.container, 'Aka m3'), 'B');
-        const dialog2 = moveDialog(utils.container);
-        now += TAP_BOUNCE_MS;
-        const confirmBtn = within(dialog2).getByRole('button', { name: 'Move to Shiaijo B' });
-        await act(async () => { fireEvent.click(confirmBtn, { detail: 1 }); });
-
-        expect(onMoveCourt).toHaveBeenCalledTimes(1);
-        expect(onMoveCourt).toHaveBeenCalledWith('c1', 'm3', 'B', {
-          confirmed: true,
-          shown: expect.objectContaining({ id: 'm3', compId: 'c1', status: 'running' }),
-        });
-      } finally {
-        dateSpy.mockRestore();
-      }
+      // After starting, m3 leaves Up next and Upcoming: no queue row offers it a move
+      expect(rowOf(utils.container, 'Aka m3')).toBeUndefined();
+      expect(onMoveCourt).not.toHaveBeenCalled();
     });
 
     it('a match shown waiting asks with waiting words, Cancel sends nothing, and confirm calls onMoveCourt with confirmed: true', async () => {
@@ -681,24 +660,35 @@ describe('running court move confirmation across all doors', () => {
 
   // Door 7: Refusal
   describe('door 7: refusal callback', () => {
-    it('refusal shows the server sentence once in a toast and shows the old court in the row', async () => {
-      const sentence = 'Jane Austen vs Quinn Walker was started on Shiaijo A before your move reached the server, so it was not moved. Move it again to stop it there and put it first on Shiaijo B.';
+    const sentence = 'Jane Austen vs Quinn Walker was started on Shiaijo A before your move reached the server, so it was not moved. Move it again to stop it there and put it first on Shiaijo B.';
 
-      moveMatchCourtSpy.mockImplementationOnce(async (_cid, _mid, _court, _pw, opts) => {
+    function StatefulAdminApp(props) {
+      const [t, setT] = React.useState(props.tournament);
+      return <AdminApp {...props} tournament={t} onUpdate={(next) => { setT(next); if (props.onUpdate) props.onUpdate(next); }} />;
+    }
+
+    it('schedule page picker refusal visibly changes to new court, reverts to old court, and toasts once', async () => {
+      let resolveRefusal;
+      moveMatchCourtSpy.mockImplementationOnce(async (cid, mid, court, _pw, opts) => {
+        emitLocalMatchPatch(cid, mid, { court });
+        await new Promise((r) => { resolveRefusal = r; });
         if (opts && typeof opts.onRefusal === 'function') {
           opts.onRefusal(new Error(sentence));
         }
+        const wasCourt = (opts && opts.was && opts.was.court) || 'A';
+        emitLocalMatchPatch(cid, mid, { court: wasCourt });
         return { applied: false, refused: true };
       });
 
       const waiting = mkMatch('m1', 'scheduled', 'A', '10:00', 'Quinn Walker', 'Jane Austen');
       const t = mkTournament([waiting]);
-      window.tournamentMatches = () => [waiting];
+      window.API.fetchCompetitions = vi.fn().mockResolvedValue(t.competitions);
+      window.tournamentMatches = (tourn) => (tourn && tourn.competitions || []).flatMap((c) => (c.poolMatches || []).map((m) => ({ ...m, compId: c.id, compName: c.name || '' })));
 
       let utils;
       await act(async () => {
         utils = render(
-          <AdminApp
+          <StatefulAdminApp
             tournament={t}
             onUpdate={vi.fn()}
             onLogout={vi.fn()}
@@ -715,14 +705,166 @@ describe('running court move confirmation across all doors', () => {
       });
 
       const row = utils.container.querySelector('.tw-match');
+      expect(within(row).getByTitle('Change shiaijo').textContent).toContain('A');
+
       await selectCourtInPicker(row, 'B');
+
+      // Optimistically changed to court B (row is now in Shiaijo B column)
+      const rowB = utils.container.querySelector('.tw-match');
+      expect(within(rowB).getByTitle('Change shiaijo').textContent).toContain('B');
+
+      // Complete refusal
+      await act(async () => {
+        resolveRefusal();
+        await Promise.resolve();
+      });
 
       // Refusal sentence shown once via toast
       expect(showToast).toHaveBeenCalledTimes(1);
       expect(showToast).toHaveBeenCalledWith(sentence, 'error');
 
-      // The match still displays on court A
-      const trigger = within(row).getByTitle('Change shiaijo');
+      // Court reverted to A (row is back in Shiaijo A column)
+      const rowA = utils.container.querySelector('.tw-match');
+      expect(within(rowA).getByTitle('Change shiaijo').textContent).toContain('A');
+    });
+
+    it('scores row picker refusal visibly changes to new court, reverts to old court, and toasts once', async () => {
+      let resolveRefusal;
+      moveMatchCourtSpy.mockImplementationOnce(async (cid, mid, court, _pw, opts) => {
+        emitLocalMatchPatch(cid, mid, { court });
+        await new Promise((r) => { resolveRefusal = r; });
+        if (opts && typeof opts.onRefusal === 'function') {
+          opts.onRefusal(new Error(sentence));
+        }
+        const wasCourt = (opts && opts.was && opts.was.court) || 'A';
+        emitLocalMatchPatch(cid, mid, { court: wasCourt });
+        return { applied: false, refused: true };
+      });
+
+      const running = mkMatch('m1', 'running', 'A', '10:00', 'Quinn Walker', 'Jane Austen');
+      const t = mkTournament([running]);
+      window.API.fetchCompetitions = vi.fn().mockResolvedValue(t.competitions);
+      window.tournamentMatches = (tourn) => (tourn && tourn.competitions || []).flatMap((c) => (c.poolMatches || []).map((m) => ({ ...m, compId: c.id, compName: c.name || '' })));
+
+      let utils;
+      await act(async () => {
+        utils = render(
+          <StatefulAdminApp
+            tournament={t}
+            onUpdate={vi.fn()}
+            onLogout={vi.fn()}
+            onViewerMode={vi.fn()}
+            onPasswordChange={vi.fn()}
+            tweaks={{}}
+            password="pw"
+            view={{ kind: 'scoreEditor' }}
+            setView={vi.fn()}
+            showToast={showToast}
+            authConfig={{}}
+          />
+        );
+      });
+
+      const row = utils.container.querySelector('.score-edit-row');
+      expect(within(row).getByTitle('Change shiaijo').textContent).toContain('A');
+
+      confirmDialogSpy.mockResolvedValueOnce(true);
+      await selectCourtInPicker(row, 'B');
+
+      // Optimistically changed to court B
+      const rowB = utils.container.querySelector('.score-edit-row');
+      expect(within(rowB).getByTitle('Change shiaijo').textContent).toContain('B');
+
+      // Complete refusal
+      await act(async () => {
+        resolveRefusal();
+        await Promise.resolve();
+      });
+
+      expect(showToast).toHaveBeenCalledTimes(1);
+      expect(showToast).toHaveBeenCalledWith(sentence, 'error');
+
+      const rowA = utils.container.querySelector('.score-edit-row');
+      expect(within(rowA).getByTitle('Change shiaijo').textContent).toContain('A');
+    });
+
+    it('bracket panel picker refusal visibly changes to new court, reverts to old court, and toasts once', async () => {
+      let resolveRefusal;
+      moveMatchCourtSpy.mockImplementationOnce(async (cid, mid, court, _pw, opts) => {
+        emitLocalMatchPatch(cid, mid, { court });
+        await new Promise((r) => { resolveRefusal = r; });
+        if (opts && typeof opts.onRefusal === 'function') {
+          opts.onRefusal(new Error(sentence));
+        }
+        const wasCourt = (opts && opts.was && opts.was.court) || 'A';
+        emitLocalMatchPatch(cid, mid, { court: wasCourt });
+        return { applied: false, refused: true };
+      });
+
+      const running = mkMatch('m1', 'running', 'A', '10:00', 'Quinn Walker', 'Jane Austen');
+      const comp = {
+        id: 'c1',
+        name: 'Tournament Cup',
+        status: 'running',
+        format: 'knockout',
+      };
+      const t = {
+        id: 't1',
+        name: 'Tournament 1',
+        courts: ['A', 'B'],
+        competitions: [comp],
+      };
+
+      window.API.fetchCompetitionDetails = vi.fn().mockResolvedValue({
+        config: comp,
+        bracket: {
+          rounds: [[running]],
+        },
+      });
+
+      let utils;
+      await act(async () => {
+        utils = render(
+          <StatefulAdminApp
+            tournament={t}
+            onUpdate={vi.fn()}
+            onLogout={vi.fn()}
+            onViewerMode={vi.fn()}
+            onPasswordChange={vi.fn()}
+            tweaks={{}}
+            password="pw"
+            view={{ kind: 'competition', id: 'c1', section: 'bracket' }}
+            setView={vi.fn()}
+            showToast={showToast}
+            authConfig={{}}
+          />
+        );
+      });
+
+      const matchCard = utils.container.querySelector('.bc-match');
+      expect(matchCard).toBeTruthy();
+      await act(async () => {
+        matchCard.click();
+      });
+
+      const panel = utils.container.querySelector('.running-panel__head');
+      const trigger = within(panel).getByTitle('Change shiaijo');
+      expect(trigger.textContent).toContain('A');
+
+      confirmDialogSpy.mockResolvedValueOnce(true);
+      await selectCourtInPicker(panel, 'B');
+
+      // Optimistically changed to court B
+      expect(trigger.textContent).toContain('B');
+
+      // Complete refusal
+      await act(async () => {
+        resolveRefusal();
+        await Promise.resolve();
+      });
+
+      expect(showToast).toHaveBeenCalledTimes(1);
+      expect(showToast).toHaveBeenCalledWith(sentence, 'error');
       expect(trigger.textContent).toContain('A');
     });
   });

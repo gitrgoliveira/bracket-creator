@@ -3360,74 +3360,26 @@ describe('court move confirm snapshot and wording (P1-T6)', () => {
     } finally { c.restore(); }
   });
 
-  // Note: since stage 6 review 1 (commit d8390747), `filteredScheduled` filters
-  // out `isStartedSnapshot(m)`, so a match this console started leaves Up next
-  // and Upcoming as soon as `startedFrom` is set. To reach `requestMoveCourt`
-  // when `isStartedSnapshot(mm)` is true and pin its running snapshot, running
-  // dialog words, and unsaved re-ask in running words, we start m3 (recording
-  // `startedFrom = { key: 'c1:m3', at: 100 }` and pinning the editor on m3),
-  // render its queue row with a non-matching stamp, then restore `modifiedAt: 100`
-  // before opening the move dialog so `isStartedSnapshot(mm)` evaluates true.
-  it('the own-Start snapshot opens the running move words, re-asks with UNSAVED_ENTRIES_DISCARDED in running words, and passes shown with status running', async () => {
+  // Since commit d8390747, `filteredScheduled` filters out `isStartedSnapshot(m)`,
+  // so a match this console just started leaves Up next and Upcoming as soon as
+  // `startedFrom` is set. No queue row offers it a court move.
+  it('a match this console just started leaves Up next and Upcoming, so no queue row offers it a court move', async () => {
     const onEditScore = vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k-start', settled: new Promise(() => {}) });
     const onMoveCourt = vi.fn().mockResolvedValue(true);
     const m2 = courtMatch('m2', 'scheduled', { modifiedAt: 100 });
     const m3 = courtMatch('m3', 'scheduled', { modifiedAt: 100 });
     const c = await mountCourt([m2, m3], { onEditScore, onMoveCourt });
-    let now = Date.now() + 1000;
-    const spy = vi.spyOn(Date, 'now').mockImplementation(() => now);
     try {
+      expect(rowOf(c, 'Aka m3')).toBeTruthy();
       const startBtn = [...rowOf(c, 'Aka m3').querySelectorAll('button')].find((b) => /^start/i.test(b.textContent.trim()));
       await act(async () => { startBtn.click(); });
       await act(async () => {});
       expect(c.editorMatch()).toBe('m3');
 
-      // Render m3's queue row while pickedKey keeps the editor on m3, then align
-      // m3.modifiedAt with startedFrom.at (100) so isStartedSnapshot(mm) is true
-      // at the moment requestMoveCourt opens the dialog.
-      const m3RowObj = courtMatch('m3', 'scheduled', { modifiedAt: 250 });
-      c.feed.current = [m2, m3RowObj];
-      await c.refresh();
-      m3RowObj.modifiedAt = 100;
-
-      const discard = vi.fn();
-      const dirty = () => true; dirty.discard = discard;
-      const clean = () => false; clean.discard = vi.fn();
-      probe.props.hostUnsavedRef.current = clean;
-
-      await act(async () => { within(rowOf(c, 'Aka m3')).getByTestId('move-to-B').click(); });
-      const dialog = moveDialog(c);
-      expect(dialog.querySelector('.shiaijo-move-confirm__title').textContent).toBe('Move to Shiaijo B?');
-      expect(dialog.querySelector('.shiaijo-move-confirm__body').textContent).toBe(
-        `Shiro m3 vs Aka m3 is running on Shiaijo A. It stops there and goes first in the queue on Shiaijo B. ${SCORE_KEPT_SENTENCE}`
-      );
-      expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeTruthy();
-      expect(within(dialog).getByRole('button', { name: 'Move to Shiaijo B' })).toBeTruthy();
-
-      // Entries become unsaved while the running confirm is open: first Confirm
-      // re-words the dialog in running words with UNSAVED_ENTRIES_DISCARDED.
-      probe.props.hostUnsavedRef.current = dirty;
-      now += TAP_BOUNCE_MS;
-      const confirmBtn = () => within(moveDialog(c)).getByRole('button', { name: 'Move to Shiaijo B' });
-      await act(async () => { fireEvent.click(confirmBtn(), { detail: 1 }); });
+      // The match leaves Up next and Upcoming: no queue row offers it a move
+      expect(rowOf(c, 'Aka m3')).toBeFalsy();
       expect(onMoveCourt).not.toHaveBeenCalled();
-      expect(discard).not.toHaveBeenCalled();
-      expect(moveDialog(c).querySelector('.shiaijo-move-confirm__body').textContent).toBe(
-        `Shiro m3 vs Aka m3 is running on Shiaijo A. It stops there and goes first in the queue on Shiaijo B. ${UNSAVED_ENTRIES_DISCARDED} ${SCORE_KEPT_SENTENCE}`
-      );
-
-      // Confirming after the bounce window discards unsaved entries and passes
-      // the open-time running snapshot to onMoveCourt.
-      now += TAP_BOUNCE_MS;
-      await act(async () => { fireEvent.click(confirmBtn(), { detail: 1 }); });
-      expect(discard).toHaveBeenCalledTimes(1);
-      expect(onMoveCourt).toHaveBeenCalledTimes(1);
-      expect(onMoveCourt).toHaveBeenCalledWith('c1', 'm3', 'B', {
-        confirmed: true,
-        shown: expect.objectContaining({ id: 'm3', compId: 'c1', status: 'running' }),
-      });
     } finally {
-      spy.mockRestore();
       c.restore();
     }
   });

@@ -62,7 +62,7 @@ import { isBarredMatch, sideBarredByDecision, involvesCompetitor, sideKeyForDeci
 // side_marks.jsx leaf below, not from bracket.jsx.
 import { BarredMatchNotice } from './barred_match_notice.jsx';
 import { holdsUnsaved, confirmLeave, leaveThen, discardUnsaved, UNSAVED_ENTRIES_DISCARDED } from './unsaved_entries.jsx';
-import { confirmMatchLabel, SCORE_KEPT_SENTENCE, runningCourtMoveText } from './court_move.jsx';
+import { confirmMatchLabel, SCORE_KEPT_SENTENCE } from './court_move.jsx';
 // The winner cue and a withdrawn team's mark, imported from their leaf (its one
 // import is competitor_identity.jsx), never read off `window`: a missing global
 // used to paint nothing, with no error to say why.
@@ -644,6 +644,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // outlives renders.
     const courtCompsRef = useRefSh(null);
     courtCompsRef.current = courtComps;
+    // Matches whose court was altered only by a local optimistic patch on this
+    // device; skipped by the court call withdraw effect until server data
+    // (SSE push or refetch) shows the match on the other court.
+    const localCourtPatchesRef = useRefSh(new Set());
     // R4 (bc-evts stage 3 review 2): a court move or time change this device
     // makes shows in the court feed at once, as a push would, and a refusal
     // puts the old value back (told by the outbox, subscribeLocalMatchPatch).
@@ -652,9 +656,20 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         return window.API.subscribeLocalMatchPatch((event) => {
             const cid = event && event.data && event.data.competitionId;
             if (!cid) return;
+            const res = event.data && event.data.result;
+            const mid = event.data && (event.data.matchId != null ? event.data.matchId : (res && res.id));
+            if (event.local && mid != null && (event.data.court !== undefined || (res && res.court !== undefined))) {
+                const patchCourt = event.data.court !== undefined ? event.data.court : res.court;
+                const k = matchKey({ compId: cid, id: mid });
+                if (patchCourt !== String(court || "")) {
+                    localCourtPatchesRef.current.add(k);
+                } else {
+                    localCourtPatchesRef.current.delete(k);
+                }
+            }
             setCourtComps((prev) => (Array.isArray(prev) ? prev.map((c) => (c.id === cid ? applyPatch(c, event) : c)) : prev));
         });
-    }, []);
+    }, [court]);
     // True while a manual "Refresh" is in flight (button feedback only).
     const [refreshing, setRefreshing] = useStateSh(false);
     // Refetch this court's live feed. Hoisted (not an effect-local closure) so
@@ -667,7 +682,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // A refetch never puts a row back to an older state
             // (keepNewerCompetitions, patch.jsx): the rule showRunningPush
             // applies to a push.
-            .then(comps => { if (mountedRef.current) setCourtComps((prev) => keepNewerCompetitions(prev, comps)); })
+            .then(comps => {
+                if (mountedRef.current) {
+                    localCourtPatchesRef.current.clear();
+                    setCourtComps((prev) => keepNewerCompetitions(prev, comps));
+                }
+            })
             .catch(err => console.error("Failed to fetch court matches", err));
     }, [court]);
     // Operator-triggered re-sync: the last-resort recovery when a court's tablet
@@ -840,6 +860,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         const mid = d && (d.matchId != null ? d.matchId : (res && res.id));
                         if (pushedCourt !== null && d.competitionId != null && mid != null) {
                             const key = matchKey({ compId: d.competitionId, id: mid });
+                            localCourtPatchesRef.current.delete(key);
                             if (callIdsRef.current.has(key) && pushedCourt !== String(court || "")) {
                                 if (withdrawCallRef.current) withdrawCallRef.current(key);
                             }
@@ -1958,6 +1979,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 withdrawCall(key);
                 continue;
             }
+            // A local optimistic court move alone does not withdraw the call:
+            // only server data (a push or a refetch) may take it down.
+            if (localCourtPatchesRef.current.has(key)) {
+                continue;
+            }
             const moved = feedMatches.find((x) => matchKey(x) === key);
             if (moved && (moved.court || "") !== (court || "")) {
                 withdrawCall(key);
@@ -2101,22 +2127,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // once the operator confirms.
     const requestMoveCourt = (compId, matchId, toCourt) => {
         const mm = sorted.find((x) => x.compId === compId && x.id === matchId);
-        // What the confirm words and what goes to the host, fixed when the
-        // confirm OPENS: `sorted` models this console's own send back and
-        // finish but not its own Start, so the start pin reads as running.
-        // (A started match leaves Up next and Upcoming at once, so no queue
-        // row offers it a move today; the pin is read anyway, so a row that
-        // does is asked in running words.)
-        const shown = isStartedSnapshot(mm) ? { ...mm, status: "running" } : mm;
-        const running = !!shown && shown.status === "running";
-        // The editor can show a match its row still offers to move: between
-        // this console's own Start of a queue row and the feed showing it
-        // running. Its unsaved entries (a Mark draw, a hantei pick) go with
-        // the move, and the confirm says so (R1, stage 5 review 10).
         setPendingMove({
             compId, matchId, to: toCourt,
-            shown, running,
-            label: shown ? confirmMatchLabel(shown) : "this match",
+            shown: mm,
+            label: mm ? confirmMatchLabel(mm) : "this match",
             from: (mm && mm.court) || court,
             unsaved: editorUnsavedFor(compId, matchId),
         });
@@ -2705,39 +2719,30 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 )}
             </div>
 
-            {pendingMove && (() => {
-                const moveText = pendingMove.running
-                    ? runningCourtMoveText({ label: pendingMove.label, from: pendingMove.from, to: pendingMove.to, unsaved: pendingMove.unsaved })
-                    : null;
-                return (
-                    <div className="modal-backdrop" ref={confirmOpenedRef} onClickCapture={confirmOnClickCapture}
-                        onClick={() => !movingCourt && setPendingMove(null)}>
-                        <div className="shiaijo-move-confirm" role="dialog" aria-modal="true" ref={confirmBoxRef}
-                            aria-labelledby="shiaijo-move-title" onClick={(e) => e.stopPropagation()}>
-                            <h3 id="shiaijo-move-title" className="shiaijo-move-confirm__title">
-                                {moveText ? moveText.title : `Move to Shiaijo ${pendingMove.to}?`}
-                            </h3>
-                            <p className="shiaijo-move-confirm__body" aria-live="polite">
-                                {moveText ? moveText.message : (
-                                    <>
-                                        <strong>{pendingMove.label}</strong> leaves Shiaijo {pendingMove.from} and joins
-                                        the queue on Shiaijo {pendingMove.to}.
-                                        {pendingMove.unsaved ? ` ${UNSAVED_ENTRIES_DISCARDED}` : ""}
-                                    </>
-                                )}
-                            </p>
-                            <div className="shiaijo-move-confirm__actions">
-                                <button type="button" className="btn" onClick={() => setPendingMove(null)} disabled={movingCourt}>
-                                    {moveText ? moveText.cancelLabel : "Cancel"}
-                                </button>
-                                <button type="button" className="btn btn--primary" onClick={confirmMoveCourt} disabled={movingCourt}>
-                                    {movingCourt ? "Moving…" : (moveText ? moveText.confirmLabel : `Move to Shiaijo ${pendingMove.to}`)}
-                                </button>
-                            </div>
+            {pendingMove && (
+                <div className="modal-backdrop" ref={confirmOpenedRef} onClickCapture={confirmOnClickCapture}
+                    onClick={() => !movingCourt && setPendingMove(null)}>
+                    <div className="shiaijo-move-confirm" role="dialog" aria-modal="true" ref={confirmBoxRef}
+                        aria-labelledby="shiaijo-move-title" onClick={(e) => e.stopPropagation()}>
+                        <h3 id="shiaijo-move-title" className="shiaijo-move-confirm__title">
+                            Move to Shiaijo {pendingMove.to}?
+                        </h3>
+                        <p className="shiaijo-move-confirm__body" aria-live="polite">
+                            <strong>{pendingMove.label}</strong> leaves Shiaijo {pendingMove.from} and joins
+                            the queue on Shiaijo {pendingMove.to}.
+                            {pendingMove.unsaved ? ` ${UNSAVED_ENTRIES_DISCARDED}` : ""}
+                        </p>
+                        <div className="shiaijo-move-confirm__actions">
+                            <button type="button" className="btn" onClick={() => setPendingMove(null)} disabled={movingCourt}>
+                                Cancel
+                            </button>
+                            <button type="button" className="btn btn--primary" onClick={confirmMoveCourt} disabled={movingCourt}>
+                                {movingCourt ? "Moving…" : `Move to Shiaijo ${pendingMove.to}`}
+                            </button>
                         </div>
                     </div>
-                );
-            })()}
+                </div>
+            )}
 
             {pendingRevert && (
                 <div className="modal-backdrop" ref={confirmOpenedRef} onClickCapture={confirmOnClickCapture}

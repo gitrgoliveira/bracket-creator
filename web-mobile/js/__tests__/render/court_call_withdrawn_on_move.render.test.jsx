@@ -24,6 +24,7 @@ const STUBBED_GLOBALS = {
     updateMatchTime: vi.fn(),
     recordDecision: vi.fn().mockResolvedValue({ applied: true }),
     reinstateCompetitor: vi.fn().mockResolvedValue({}),
+    subscribeLocalMatchPatch: vi.fn(() => () => {}),
   },
   confirmDialog: vi.fn().mockResolvedValue(true),
   PoolsViewer: () => null,
@@ -43,15 +44,30 @@ afterAll(() => restoreGlobals());
 
 let sseHandler = null;
 let nextAnnId = 0;
+let localPatchListeners = new Set();
+
+function emitLocalMatchPatch(compId, matchId, fields) {
+  const event = {
+    type: 'match_updated',
+    local: true,
+    data: { competitionId: compId, matchId: matchId, result: { id: matchId, ...fields } },
+  };
+  for (const cb of localPatchListeners) cb(event);
+}
 
 beforeEach(() => {
   nextAnnId = 0;
   sseHandler = null;
+  localPatchListeners.clear();
   window.API.sendAnnouncement = vi.fn(async () => ({ id: `ann-${++nextAnnId}`, message: 'Call sent' }));
   window.API.deleteAnnouncement = vi.fn(async () => {});
   window.API.subscribeToEvents = vi.fn((cb) => {
     sseHandler = cb;
     return () => { sseHandler = null; };
+  });
+  window.API.subscribeLocalMatchPatch = vi.fn((cb) => {
+    localPatchListeners.add(cb);
+    return () => { localPatchListeners.delete(cb); };
   });
   window.tournamentMatches = STUBBED_GLOBALS.tournamentMatches;
   window.filterMatchesByCourt = STUBBED_GLOBALS.filterMatchesByCourt;
@@ -254,5 +270,67 @@ describe('Court call withdrawn on move', () => {
     });
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
     expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '');
+  });
+
+  it('j. a local optimistic court patch alone does NOT withdraw the call', async () => {
+    await mountConsoleAndCallMatch();
+    await act(async () => {
+      emitLocalMatchPatch('c1', 'm1', { court: 'B' });
+      await Promise.resolve();
+    });
+    expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
+  });
+
+  it('k. after the server push or refetch shows the match on the other court, the call IS withdrawn exactly once', async () => {
+    const { annId } = await mountConsoleAndCallMatch();
+    await act(async () => {
+      emitLocalMatchPatch('c1', 'm1', { court: 'B' });
+      await Promise.resolve();
+    });
+    expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
+
+    // Server push arrives
+    await act(async () => {
+      sseHandler({
+        type: 'match_updated',
+        data: { competitionId: 'c1', matchId: 'm1', court: 'B' },
+      });
+      await Promise.resolve();
+    });
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '');
+
+    // Subsequent refetch also showing it on court B does not withdraw again
+    const compMoved = makeComp({ court: 'B' });
+    window.API.fetchCourtMatches.mockResolvedValueOnce([compMoved]);
+    await act(async () => {
+      screen.getByRole('button', { name: /refresh/i }).click();
+      await Promise.resolve();
+    });
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
+  });
+
+  it('l. a refused move (the court put back) leaves the call up', async () => {
+    await mountConsoleAndCallMatch();
+    await act(async () => {
+      emitLocalMatchPatch('c1', 'm1', { court: 'B' });
+      await Promise.resolve();
+    });
+    expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
+
+    // Refusal reverts the court via _revertLocalFields
+    await act(async () => {
+      emitLocalMatchPatch('c1', 'm1', { court: 'A' });
+      await Promise.resolve();
+    });
+    expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
+
+    // Refetch showing match still on court A leaves call up
+    window.API.fetchCourtMatches.mockResolvedValueOnce([makeComp({ court: 'A' })]);
+    await act(async () => {
+      screen.getByRole('button', { name: /refresh/i }).click();
+      await Promise.resolve();
+    });
+    expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
   });
 });

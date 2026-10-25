@@ -1398,6 +1398,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		if r, found, err := readStoredMatch(store, id, mid); err != nil {
 			log.Printf("mobileapp: court move %s/%s: read stored match: %v", id, mid, err)
 		} else if found && r != nil {
+			// Name the court the store holds: a resent writeId already
+			// in the match's score log leaves the store unchanged, and a
+			// concurrent move can also make the stored court differ from req.Court.
+			payload["court"] = r.Court
 			payload["result"] = matchPtrForBroadcast(r)
 		}
 		broadcastMatchNow(hub, store, id, mid, payload)

@@ -417,6 +417,53 @@ describe('running court move confirmation across all doors', () => {
         was: { court: 'A' },
       }));
     });
+
+    it('dropping waiting (scheduled) match card on another court column moves it with no confirm dialog and API called without stopsRunning', async () => {
+      const waiting = mkMatch('m1', 'scheduled', 'A', '10:00', 'Quinn Walker', 'Jane Austen');
+      const t = mkTournament([waiting]);
+      window.tournamentMatches = () => [waiting];
+
+      let utils;
+      await act(async () => {
+        utils = render(
+          <AdminApp
+            tournament={t}
+            onUpdate={vi.fn()}
+            onLogout={vi.fn()}
+            onViewerMode={vi.fn()}
+            onPasswordChange={vi.fn()}
+            tweaks={{}}
+            password="pw"
+            view={{ kind: 'schedule' }}
+            setView={vi.fn()}
+            showToast={showToast}
+            authConfig={{}}
+          />
+        );
+      });
+
+      const courtColumns = utils.container.querySelectorAll('.tw-court');
+      const courtBCol = [...courtColumns].find((c) => c.textContent.includes('SHIAIJO B'));
+      const courtBList = courtBCol.querySelector('.tw-court__list');
+      expect(courtBList).toBeTruthy();
+
+      const dropEventData = {
+        dataTransfer: {
+          getData: (type) => (type === 'application/json' ? JSON.stringify({ compId: 'c1', matchId: 'm1' }) : ''),
+        },
+      };
+
+      await act(async () => {
+        fireEvent.drop(courtBList, dropEventData);
+      });
+
+      expect(confirmDialogSpy).not.toHaveBeenCalled();
+      expect(moveMatchCourtSpy).toHaveBeenCalledTimes(1);
+      const [compId, matchId, court, pw, opts] = moveMatchCourtSpy.mock.calls[0];
+      expect([compId, matchId, court, pw]).toEqual(['c1', 'm1', 'B', 'pw']);
+      expect(opts.stopsRunning).toBeUndefined();
+      expect(opts.was).toEqual({ court: 'A' });
+    });
   });
 
   // Door 3: Schedule page picker on waiting match

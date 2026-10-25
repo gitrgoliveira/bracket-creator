@@ -412,3 +412,68 @@ func TestCourtMoveRunning_RefusedMoveResendJudgedAgain(t *testing.T) {
 		}
 	}
 }
+
+// (h) a resent move whose writeId is already in the score log broadcasts the
+// court the store holds rather than the request's court if they differ.
+func TestCourtMoveRunning_BroadcastNamesStoredCourtOnDuplicateWithDifferentRequestCourt(t *testing.T) {
+	r, store, _, _, compID, _ := setupCourtMoveFixture(t)
+
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "m-run", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled, Court: "A", ScheduledAt: "11:00"},
+		{ID: "m-b1", SideA: "Carol", SideB: "Dave", Status: state.MatchStatusScheduled, Court: "B", ScheduledAt: "10:00"},
+	}))
+
+	startResp := putScore(t, r, compID, "m-run", map[string]any{
+		"sideA": "Alice", "sideB": "Bob", "status": "running", "startOnly": true,
+	})
+	require.Equal(t, http.StatusOK, startResp.Code, startResp.Body.String())
+
+	writeID := "w-dup-diff-court"
+	resp := putCourtJSON(t, r, compID, "m-run", map[string]any{
+		"court":        "B",
+		"stopsRunning": true,
+		"writeId":      writeID,
+	})
+	require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+
+	// Create a fresh router over the same store so the once.do cache is clear.
+	freshHub := NewHub()
+	t.Cleanup(freshHub.Close)
+	freshRouter := gin.New()
+	admin := freshRouter.Group("/api")
+	eng := engine.New(store)
+	RegisterMatchHandlers(admin, eng, store, store, freshHub, NewFileVerifier(store), store)
+
+	freshCh := freshHub.Subscribe()
+	defer freshHub.Unsubscribe(freshCh)
+
+	// Resend the move with the same writeId but a different requested court "A".
+	// The engine recognizes the logged writeId and is a no-op, leaving the match on court "B".
+	// The broadcast must report the stored match's court "B", not the request's court "A".
+	dupResp := putCourtJSON(t, freshRouter, compID, "m-run", map[string]any{
+		"court":        "A",
+		"stopsRunning": true,
+		"writeId":      writeID,
+	})
+	require.Equal(t, http.StatusOK, dupResp.Code, dupResp.Body.String())
+
+	events := drainHubEvents(t, freshCh, 500*time.Millisecond)
+	require.NotEmpty(t, events, "fresh router must broadcast the stored match again")
+
+	var matchUpdatedEv *SSEEvent
+	for i := range events {
+		if events[i].Type == EventMatchUpdated {
+			matchUpdatedEv = &events[i]
+		}
+	}
+	require.NotNil(t, matchUpdatedEv, "must push match_updated")
+
+	data, ok := matchUpdatedEv.Data.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "B", data["court"], "broadcast top-level court must match store, not request court")
+	assert.NotEqual(t, "A", data["court"])
+
+	res, ok := data["result"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "B", res["court"])
+}

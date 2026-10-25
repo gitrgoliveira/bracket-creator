@@ -430,7 +430,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
                       try {
                         const { compId, matchId } = JSON.parse(data);
                         const shown = allMatches.find((m) => m.compId === compId && m.id === matchId);
-                        onMoveCourt(compId, matchId, cc, shown ? { shown } : undefined);
+                        onMoveCourt(compId, matchId, cc, { shown });
                       } catch (err) {
                         console.error("Failed to parse drop data:", err);
                       }

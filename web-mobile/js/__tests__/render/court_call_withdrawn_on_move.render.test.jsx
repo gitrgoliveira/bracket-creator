@@ -243,4 +243,16 @@ describe('Court call withdrawn on move', () => {
     });
     expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
   });
+
+  it('i. withdraws call when a refetch lists the match on another court already running', async () => {
+    const { annId } = await mountConsoleAndCallMatch();
+    const compMoved = makeComp({ court: 'B', status: 'running' });
+    window.API.fetchCourtMatches.mockResolvedValueOnce([compMoved]);
+    await act(async () => {
+      screen.getByRole('button', { name: /refresh/i }).click();
+      await Promise.resolve();
+    });
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '');
+  });
 });

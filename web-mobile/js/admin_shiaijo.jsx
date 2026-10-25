@@ -1948,7 +1948,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
     // A court call comes down once its match has left scheduled, however that
     // happened (started here, started elsewhere, closed by a decision), or once
-    // the match, still scheduled, shows on another court; a key no list holds is
+    // the match shows on another court, whatever its status; a key no list holds is
     // left alone because the list is empty while it loads.
     useEffectSh(() => {
         const feedMatches = window.tournamentMatches({ competitions: courtCompetitions }) || [];
@@ -1959,7 +1959,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 continue;
             }
             const moved = feedMatches.find((x) => matchKey(x) === key);
-            if (moved && moved.status === "scheduled" && (moved.court || "") !== (court || "")) {
+            if (moved && (moved.court || "") !== (court || "")) {
                 withdrawCall(key);
             }
         }

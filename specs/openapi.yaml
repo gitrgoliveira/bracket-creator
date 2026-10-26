@@ -3535,7 +3535,12 @@ paths:
                   example: A
                 stopsRunning:
                   type: boolean
-                  description: True when the operator saw the match running and confirmed that it stops there and goes first on the new court.
+                  description: >
+                    True when the operator saw the match running and confirmed that it
+                    stops there and goes first on the new court. Has no effect when
+                    the match is no longer running (it is then moved like a waiting
+                    match: last in the target court's queue; a finished match keeps
+                    its time).
                 writeId:
                   $ref: '#/components/schemas/ArrivalWriteId'
       responses:
@@ -3550,10 +3555,10 @@ paths:
             never change.
         '409':
           description: >
-            The match is no longer as the operator saw it when they asked for the
-            move: an unconfirmed move reached a match that had started on another
-            device, or a move confirmed for a running match reached one that was
-            no longer running.
+            The match was started on another device before an unconfirmed move
+            arrived, so it was not moved. This is the only refusal: a move
+            confirmed with stopsRunning for a match that has since stopped
+            running is carried out as for a waiting match.
           content:
             application/json:
               schema:

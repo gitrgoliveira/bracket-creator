@@ -410,12 +410,9 @@ var ErrSwissExportUnsupported = errors.New("not yet implemented: Swiss competiti
 // about it without naming any internal identifier.
 var ErrBracketDrawMismatch = errors.New("this competition's stored bracket does not match its current settings, so the knockout stage cannot be exported; discard and regenerate the draw, or restore the settings the bracket was originally built with")
 
-// CourtMoveRefusedError is returned by UpdateMatchCourt when the stored match's
-// status disagrees with what the operator's screen showed when they asked for
-// the move: either the match started on another device before an unconfirmed
-// move arrived (rule 2), or a move confirmed for a running match arrived after
-// the match was no longer running (rule 4). Handlers return HTTP 409 with
-// Sentence() in reasonHuman, message and error.
+// CourtMoveRefusedError is returned by UpdateMatchCourt when an unconfirmed
+// court move arrives for a match that has already started running (rule 2).
+// Handlers return HTTP 409 with Sentence() in reasonHuman, message and error.
 type CourtMoveRefusedError struct {
 	Label        string
 	StoredStatus state.MatchStatus
@@ -433,14 +430,7 @@ func (e *CourtMoveRefusedError) Sentence() string {
 	label := SentenceCase(e.Label)
 	from := courtMoveShiaijoWords(e.StoredCourt)
 	to := courtMoveShiaijoWords(e.AskedCourt)
-	switch e.StoredStatus {
-	case state.MatchStatusRunning:
-		return fmt.Sprintf("%s was started on %s before your move reached the server, so it was not moved. Move it again to stop it there and put it first on %s.", label, from, to)
-	case state.MatchStatusScheduled:
-		return fmt.Sprintf("%s is no longer running on %s, so it was not moved. Move it again if it should go to %s.", label, from, to)
-	default:
-		return fmt.Sprintf("%s finished on %s before your move reached the server, so it was not moved.", label, from)
-	}
+	return fmt.Sprintf("%s was started on %s before your move reached the server, so it was not moved. Move it again to stop it there and put it first on %s.", label, from, to)
 }
 
 func courtMoveShiaijoWords(court string) string {

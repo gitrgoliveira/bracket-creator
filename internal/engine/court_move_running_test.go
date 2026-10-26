@@ -97,13 +97,9 @@ func TestUpdateMatchCourt_SameCourtNoOpAndRefusalsKeepFileVersion(t *testing.T) 
 	assert.Equal(t, poolVer, store.FileVersion(compID, "pool-matches.csv"), "same-court move must not save pool-matches.csv")
 	assert.Equal(t, bracketVer, store.FileVersion(compID, "bracket.json"), "same-court move must not save bracket.json")
 
-	// Rule 2 and rule 4 refusals on pool, bracket round, and bronze matches.
+	// Rule 2 refusal on running pool and bracket matches.
 	require.Error(t, eng.UpdateMatchCourt(compID, "Pool A-1", "A", CourtMove{StopsRunning: false}))
-	require.Error(t, eng.UpdateMatchCourt(compID, "Pool A-0", "B", CourtMove{StopsRunning: true}))
-	require.Error(t, eng.UpdateMatchCourt(compID, "Pool A-2", "A", CourtMove{StopsRunning: true}))
 	require.Error(t, eng.UpdateMatchCourt(compID, "m-r1-1", "A", CourtMove{StopsRunning: false}))
-	require.Error(t, eng.UpdateMatchCourt(compID, "m-r1-0", "B", CourtMove{StopsRunning: true}))
-	require.Error(t, eng.UpdateMatchCourt(compID, state.BronzeMatchID, "A", CourtMove{StopsRunning: true}))
 
 	assert.Equal(t, poolVer, store.FileVersion(compID, "pool-matches.csv"), "refused moves must not save pool-matches.csv")
 	assert.Equal(t, bracketVer, store.FileVersion(compID, "bracket.json"), "refused moves must not save bracket.json")
@@ -501,11 +497,12 @@ func TestUpdateMatchCourt_RunningMoveNotConfirmedRefused(t *testing.T) {
 	assert.Equal(t, "The 3rd-place match was started on Shiaijo B before your move reached the server, so it was not moved. Move it again to stop it there and put it first on Shiaijo A.", refused.Sentence())
 }
 
-func TestUpdateMatchCourt_ConfirmedOverNonRunningRefused(t *testing.T) {
+func TestUpdateMatchCourt_ConfirmedOverNonRunningMovesAsWaitingOrFinished(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "confirmed-non-running"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "NonRunning"}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-base", SideA: "Grace", SideB: "Heidi", Status: state.MatchStatusScheduled, Court: "A", ScheduledAt: "10:30"},
 		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled, Court: "B", ScheduledAt: "09:00"},
 		{ID: "Pool A-1", SideA: "Carol", SideB: "Dave", Status: state.MatchStatusCompleted, Winner: "Carol", Court: "B", ScheduledAt: "09:10"},
 	}))
@@ -518,23 +515,44 @@ func TestUpdateMatchCourt_ConfirmedOverNonRunningRefused(t *testing.T) {
 		},
 	}))
 
-	var refused *CourtMoveRefusedError
+	// Confirmed move over scheduled pool match lands last on target court A (10:30 + 1m = 10:31).
+	require.NoError(t, eng.UpdateMatchCourt(compID, "Pool A-0", "A", CourtMove{StopsRunning: true}))
+	pm := loadPoolMatchByID(t, store, compID, "Pool A-0")
+	assert.Equal(t, "A", pm.Court)
+	assert.Equal(t, "10:31", pm.ScheduledAt)
+	assert.Equal(t, state.MatchStatusScheduled, pm.Status)
+	assert.Empty(t, historyLen(t, store, compID, "Pool A-0"), "waiting move writes no requeue history line")
 
-	err := eng.UpdateMatchCourt(compID, "Pool A-0", "A", CourtMove{StopsRunning: true})
-	require.ErrorAs(t, err, &refused)
-	assert.Equal(t, "Pool A · Match 1 is no longer running on Shiaijo B, so it was not moved. Move it again if it should go to Shiaijo A.", refused.Sentence())
+	// Confirmed move over completed pool match keeps its time and result.
+	require.NoError(t, eng.UpdateMatchCourt(compID, "Pool A-1", "A", CourtMove{StopsRunning: true}))
+	pm = loadPoolMatchByID(t, store, compID, "Pool A-1")
+	assert.Equal(t, "A", pm.Court)
+	assert.Equal(t, "09:10", pm.ScheduledAt)
+	assert.Equal(t, state.MatchStatusCompleted, pm.Status)
+	assert.Equal(t, "Carol", pm.Winner)
+	assert.Empty(t, historyLen(t, store, compID, "Pool A-1"))
 
-	err = eng.UpdateMatchCourt(compID, "Pool A-1", "A", CourtMove{StopsRunning: true})
-	require.ErrorAs(t, err, &refused)
-	assert.Equal(t, "Pool A · Match 2 finished on Shiaijo B before your move reached the server, so it was not moved.", refused.Sentence())
+	// Confirmed move over scheduled bracket match lands last on target court A (latest is now 10:31 -> 10:32).
+	require.NoError(t, eng.UpdateMatchCourt(compID, "m-r1-0", "A", CourtMove{StopsRunning: true}))
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	bm := b.MatchByID("m-r1-0")
+	require.NotNil(t, bm)
+	assert.Equal(t, "A", bm.Court)
+	assert.Equal(t, "10:32", bm.ScheduledAt)
+	assert.Equal(t, state.MatchStatusScheduled, bm.Status)
+	assert.Empty(t, historyLen(t, store, compID, "m-r1-0"))
 
-	err = eng.UpdateMatchCourt(compID, "m-r1-0", "A", CourtMove{StopsRunning: true})
-	require.ErrorAs(t, err, &refused)
-	assert.Equal(t, "Match 1 (Semifinals) is no longer running on Shiaijo B, so it was not moved. Move it again if it should go to Shiaijo A.", refused.Sentence())
-
-	err = eng.UpdateMatchCourt(compID, state.BronzeMatchID, "A", CourtMove{StopsRunning: true})
-	require.ErrorAs(t, err, &refused)
-	assert.Equal(t, "The 3rd-place match finished on Shiaijo B before your move reached the server, so it was not moved.", refused.Sentence())
+	// Confirmed move over completed bronze match keeps its time and result.
+	require.NoError(t, eng.UpdateMatchCourt(compID, state.BronzeMatchID, "A", CourtMove{StopsRunning: true}))
+	b, err = store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotNil(t, b.ThirdPlaceMatch)
+	assert.Equal(t, "A", b.ThirdPlaceMatch.Court)
+	assert.Equal(t, "10:10", b.ThirdPlaceMatch.ScheduledAt)
+	assert.Equal(t, state.MatchStatusCompleted, b.ThirdPlaceMatch.Status)
+	assert.Equal(t, "Carol", b.ThirdPlaceMatch.Winner)
+	assert.Empty(t, historyLen(t, store, compID, state.BronzeMatchID))
 }
 
 func TestUpdateMatchCourt_RefusedPoolMoveLeavesKnockoutTimesUnchanged(t *testing.T) {
@@ -595,8 +613,8 @@ func TestUpdateMatchCourt_ResendByWriteIDAnsweredAsRecorded(t *testing.T) {
 	poolVer := store.FileVersion(compID, "pool-matches.csv")
 	bracketVer := store.FileVersion(compID, "bracket.json")
 
-	// Resend with the same WriteID after the match is already scheduled on A:
-	// rule 0 answers nil before rule 4 can refuse it, and writes nothing.
+	// Resend with the same WriteID after the match is already on A:
+	// rule 0 answers nil and writes nothing.
 	require.NoError(t, eng.UpdateMatchCourt(compID, "Pool A-0", "A", mvPool))
 	require.NoError(t, eng.UpdateMatchCourt(compID, "m-r1-0", "A", mvBrk))
 

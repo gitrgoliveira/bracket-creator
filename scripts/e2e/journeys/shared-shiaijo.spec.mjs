@@ -865,13 +865,22 @@ test.describe('shared-shiaijo', () => {
     await m6Row.locator('button[aria-haspopup="listbox"]').tap();
     await H.getByRole('listbox', { name: 'Choose shiaijo' }).getByRole('option', { name: 'A', exact: true }).tap();
     await rendered(H);
-    const askedFirst = await H.locator('.modal[role="dialog"]').isVisible().catch(() => false);
+    const confirm = H.getByRole('dialog').filter({ hasText: 'Shiaijo A' });
+    await settled(confirm);
+    const askedFirst = true;
+    await confirm.getByRole('button', { name: /Move/ }).tap();
+    await expect(confirm).toBeHidden();
     const alert = C.locator('.shiaijo-also-running');
-    const alertShown = await alert.waitFor({ state: 'visible', timeout: 10_000 }).then(() => true, () => false);
-    const onA = await runningOnCourt(H, 'A');
+    await expect(alert).toHaveCount(0);
+    const alertShown = false;
+    let onA;
+    await expect.poll(async () => {
+      onA = await runningOnCourt(H, 'A');
+      return onA.length;
+    }).toBe(1);
     r({ step: 'S6a move', action: 'schedule page: move running SI M6 from B onto A while ST runs on A', variant: 'P5 record', askedFirst,
       runningOnA: onA, alert: alertShown ? (await alert.innerText()).replace(/\s+/g, ' ').trim() : null,
-      consoleShot: await shot(C, 's6a-two-running-on-A'), scheduleShot: await shot(H, 's6a-schedule-after-move', { fullPage: true }) });
+      consoleShot: await shot(C, 's6a-one-running-on-A'), scheduleShot: await shot(H, 's6a-schedule-after-move', { fullPage: true }) });
     // Can either bout still take a point? The console's editor holds one of them.
     const held = await liveOnConsole();
     const ed = inlineEditor(C);
@@ -890,16 +899,20 @@ test.describe('shared-shiaijo', () => {
     }
     const sync = await syncState(C).innerText().catch(() => null);
     const toasts = (await C.locator('.toast, .pending-write-banner, .alert--error').allInnerTexts().catch(() => [])).join(' | ').replace(/\s+/g, ' ');
-    r({ step: 'S6a move', action: 'a point on the bout the console shows, two bouts running', variant: 'P5 record', held, pointTried, sync,
-      messages: toasts.slice(0, 400), shot: await shot(C, 's6a-point-with-two-running') });
-    // Recovery the alert points at: send the shown bout back to the queue.
+    r({ step: 'S6a move', action: 'a point on the bout the console shows, ST running with M6 queued on A', variant: 'P5 record', held, pointTried, sync,
+      messages: toasts.slice(0, 400), shot: await shot(C, 's6a-point-st-running') });
+    // Recovery: send the shown bout back to the queue.
     await C.getByRole('button', { name: 'Send back to queue' }).tap();
     const sent = await hastyShiaijoConfirm(C);
     await expect.poll(async () => !same(await liveOnConsole(), held)).toBe(true);
-    const onAafter = await runningOnCourt(H, 'A');
+    let onAafter;
+    await expect.poll(async () => {
+      onAafter = await runningOnCourt(H, 'A');
+      return onAafter.length;
+    }).toBe(0);
     r({ step: 'S6a move', action: 'Send back to queue (the shown bout)', variant: 'V4 hastyShiaijoConfirm (recovery)', ...sent,
       runningOnA: onAafter, court: await courtState(C), shot: await shot(C, 's6a-after-send-back') });
-    expect(onAafter).toHaveLength(1);
+    expect(onAafter).toHaveLength(0);
     // Was the point the board showed (with the pill at "Synced") stored? The
     // match is queued now; an editor shows a queued match's kept score.
     if (pointTried && pointTried.comp === ST) {
@@ -908,10 +921,15 @@ test.describe('shared-shiaijo', () => {
       const hed = H.locator(EDITOR);
       await expect(T.boutRow(hed, 2)).toBeVisible();
       const stored = await T.rowSlots(T.boutRow(hed, 2), 'shiro').count();
-      r({ step: 'S6a move', action: 'the refused point, read back on the head table after the send back', variant: 'P5 record',
-        bout2ShiroOnBoardBefore: pointTried.after, bout2ShiroStored: stored, shot: await shot(H, 's6a-refused-point-read-back') });
+      r({ step: 'S6a move', action: 'the scored point, read back on the head table after the send back', variant: 'P5 record',
+        bout2ShiroOnBoardBefore: pointTried.after, bout2ShiroStored: stored, shot: await shot(H, 's6a-scored-point-read-back') });
       await hed.getByRole('button', { name: /✕ Close/ }).tap().catch(() => {});
     }
+    // Leave ST running on A and M6 queued on A for subsequent steps.
+    await openShiaijo(C, 'A');
+    await pickCompetition(C, ST);
+    await T.startUpNextTeam(C);
+    await expect.poll(async () => ((await liveOnConsole()) || {}).comp, { timeout: EXPECT_TIMEOUT_MS }).toBe(ST);
   });
 
   // bc-mvrq (operator ruling 2026-10-12: "warn about the move; the match then
@@ -922,14 +940,13 @@ test.describe('shared-shiaijo', () => {
   // confirmed M6 stops running, keeps its score (the Send back to queue rule)
   // and is next in A's queue, and only ST's bout runs on A. The other doors
   // (the schedule page's drag, the Scores row picker, the Bracket tab's panel
-  // picker) are pinned by the fix's own tests. Last in the file: S6a's send
-  // back leaves either M6 or ST's semi-final running on A, so this first puts
-  // the courts back into S6a's starting shape through the UI (the fix changes
-  // S6a as well, which records the move as it is today).
-  test.fixme('bc-mvrq: moving a running match to another shiaijo asks first, then queues it next there', async () => {
+  // picker) are pinned by the fix's own tests. Last in the file: S6a leaves
+  // ST running on A and M6 queued on A, so this first puts the courts back into
+  // S6a's starting shape through the UI (moving M6 to B and starting it there).
+  test('bc-mvrq: moving a running match to another shiaijo asks first, then queues it next there', async () => {
     test.setTimeout(300_000);
     if (!/\/admin\/shiaijo\/A$/.test(C.url())) await openShiaijo(C, 'A');
-    // ST's semi-final runs on A; starting it sends a running M6 back to A's queue.
+    // ST's semi-final runs on A.
     await pickCompetition(C, ST);
     if (((await liveOnConsole()) || {}).comp !== ST) await T.startUpNextTeam(C);
     await expect.poll(async () => ((await liveOnConsole()) || {}).comp, { timeout: EXPECT_TIMEOUT_MS }).toBe(ST);
@@ -948,25 +965,50 @@ test.describe('shared-shiaijo', () => {
     await expect(m6Row).toBeVisible();
     await m6Row.locator('button[aria-haspopup="listbox"]').tap();
     await H.getByRole('listbox', { name: 'Choose shiaijo' }).getByRole('option', { name: 'A', exact: true }).tap();
-    const confirm = H.getByRole('dialog').filter({ hasText: 'Shiaijo A' });
+    const confirm = H.getByRole('dialog').filter({ hasText: 'Move to Shiaijo A?' });
     await settled(confirm);
-    await expect(confirm).toContainText(bouts.m6.shiro);
-    await expect(confirm).toContainText(bouts.m6.aka);
+    await expect(confirm.locator('.modal__title')).toHaveText('Move to Shiaijo A?');
+    const expectedMsg = `${bouts.m6.shiro} vs ${bouts.m6.aka} is running on Shiaijo B. It stops there and goes first in the queue on Shiaijo A. The score already saved is kept: starting it again carries on from there.`;
+    await expect(confirm.locator('.dialog-msg')).toHaveText(expectedMsg);
+    await expect(confirm.locator('.btn--ghost', { hasText: 'Cancel' })).toBeVisible();
+    await expect(confirm.getByRole('button', { name: 'Move to Shiaijo A' })).toBeVisible();
+
+    // Cancel sends nothing.
+    await confirm.locator('.btn--ghost', { hasText: 'Cancel' }).tap();
+    await expect(confirm).toBeHidden();
+    await expect(scheduleColumn(H, 'B').locator('.tw-match.tw-match--running').filter({ hasText: bouts.m6.shiro })).toBeVisible();
+
+    // Repeat and accept.
+    await m6Row.locator('button[aria-haspopup="listbox"]').tap();
+    await H.getByRole('listbox', { name: 'Choose shiaijo' }).getByRole('option', { name: 'A', exact: true }).tap();
+    await settled(confirm);
     await confirm.getByRole('button', { name: /Move/ }).tap();
     await expect(confirm).toBeHidden();
+
     // One bout runs on A, ST's; none on B; the console shows no second bout.
-    const onA = await runningOnCourt(H, 'A');
-    expect(onA).toHaveLength(1);
-    expect(onA[0]).toMatchObject({ comp: ST, shiro: stLive.shiro, aka: stLive.aka });
-    expect(await runningOnCourt(H, 'B')).toHaveLength(0);
+    await expect.poll(async () => runningOnCourt(H, 'A')).toMatchObject([{ comp: ST, shiro: stLive.shiro, aka: stLive.aka }]);
+    await expect.poll(async () => runningOnCourt(H, 'B')).toHaveLength(0);
     await expect(C.locator('.shiaijo-also-running')).toHaveCount(0);
-    // M6 is SI's next match on A, with the score it had.
+
+    // M6 is scheduled on A, first in A's queue, with the score it had.
     await pickCompetition(C, SI);
     await expect.poll(async () => same(await sides(upNextCard(C)).catch(() => null), bouts.m6), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     await H.goto(`/admin/competition/${ids.SI}/scores`);
+    await expect.poll(async () => {
+      const row = m6ScoresRow();
+      const court = (await row.locator('.score-edit-row__court').innerText()).replace(/\s*▾$/, '').trim();
+      const isRunning = await row.evaluate((el) => el.classList.contains('score-edit-row--running'));
+      return { court, isRunning };
+    }).toEqual({ court: 'A', isRunning: false });
+
     await m6ScoresRow().getByRole('button', { name: /^Score$/ }).tap();
     await expect(H.locator(EDITOR)).toBeVisible();
     expect({ shiro: await slotMarks(H, 'shiro', EDITOR), aka: await slotMarks(H, 'aka', EDITOR) }).toEqual(marks);
+
+    // Open History and assert the line "Moved to Shiaijo A and sent back to the queue".
+    const hist = H.locator(EDITOR).getByTestId('match-history');
+    await hist.getByTestId('match-history-toggle').tap();
+    await expect.poll(async () => hist.innerText()).toContain('Moved to Shiaijo A and sent back to the queue');
     await H.locator(EDITOR).getByRole('button', { name: /✕ Close/ }).tap();
   });
 });

@@ -235,13 +235,16 @@ func TestCourtMoveRunning_UnconfirmedRunningMoveRefused(t *testing.T) {
 	}
 }
 
-// (e) a confirmed move over a scheduled (not running) match is 409.
-func TestCourtMoveRunning_ConfirmedMoveOverScheduledMatchRefused(t *testing.T) {
-	r, store, _, hub, compID, _ := setupCourtMoveFixture(t)
+// (e) a confirmed move over a scheduled or completed match succeeds (200),
+// moving it as a waiting or finished match, and pushes match_updated with the
+// new court and the stored status.
+func TestCourtMoveRunning_ConfirmedMoveOverScheduledMatchMovesAsWaiting(t *testing.T) {
+	r, store, _, hub, compID, tempDir := setupCourtMoveFixture(t)
 
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "m-sched", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled, Court: "A", ScheduledAt: "09:00"},
 		{ID: "m-b1", SideA: "Carol", SideB: "Dave", Status: state.MatchStatusScheduled, Court: "B", ScheduledAt: "10:00"},
+		{ID: "m-done", SideA: "Alice", SideB: "Carol", Status: state.MatchStatusCompleted, Winner: "Alice", Court: "A", ScheduledAt: "08:30"},
 	}))
 
 	ch := hub.Subscribe()
@@ -251,20 +254,70 @@ func TestCourtMoveRunning_ConfirmedMoveOverScheduledMatchRefused(t *testing.T) {
 		"court":        "B",
 		"stopsRunning": true,
 	})
-	require.Equal(t, http.StatusConflict, resp.Code, resp.Body.String())
+	require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
 
-	var body map[string]any
-	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &body))
-	assert.Equal(t, "match_status_changed", body["code"])
-	reasonHuman, ok := body["reasonHuman"].(string)
+	events := drainHubEvents(t, ch, 500*time.Millisecond)
+	require.NotEmpty(t, events, "must broadcast events")
+
+	var matchUpdatedEv *SSEEvent
+	for i := range events {
+		if events[i].Type == EventMatchUpdated {
+			matchUpdatedEv = &events[i]
+		}
+	}
+	require.NotNil(t, matchUpdatedEv, "must push match_updated")
+
+	data, ok := matchUpdatedEv.Data.(map[string]any)
 	require.True(t, ok)
-	assert.NotEmpty(t, reasonHuman)
-	assert.Equal(t, reasonHuman, body["message"])
-	assert.Equal(t, reasonHuman, body["error"])
-	assert.Contains(t, reasonHuman, "is no longer running on Shiaijo A")
+	assert.Equal(t, compID, data["competitionId"])
+	assert.Equal(t, "m-sched", data["matchId"])
+	assert.Equal(t, "B", data["court"])
 
-	events := drainHubEvents(t, ch, 100*time.Millisecond)
-	assert.Empty(t, events, "a refused move pushes nothing")
+	res, ok := data["result"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "scheduled", res["status"])
+	assert.Equal(t, "B", res["court"])
+	assert.Equal(t, "10:01", res["scheduledAt"])
+
+	// Match in store: court B, scheduledAt 10:01, status scheduled.
+	pms, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for _, m := range pms {
+		if m.ID == "m-sched" {
+			assert.Equal(t, state.MatchStatusScheduled, m.Status)
+			assert.Equal(t, "B", m.Court)
+			assert.Equal(t, "10:01", m.ScheduledAt)
+		}
+	}
+
+	historyFile := filepath.Join(tempDir, "competitions", compID, "history", "m-sched.jsonl")
+	_, err = os.Stat(historyFile)
+	assert.True(t, os.IsNotExist(err), "waiting move must not write history line")
+
+	// Now move completed match with stopsRunning: true -> 200, court B, time and result kept.
+	respDone := putCourtJSON(t, r, compID, "m-done", map[string]any{
+		"court":        "B",
+		"stopsRunning": true,
+	})
+	require.Equal(t, http.StatusOK, respDone.Code, respDone.Body.String())
+
+	doneEvents := drainHubEvents(t, ch, 500*time.Millisecond)
+	require.NotEmpty(t, doneEvents)
+	var doneEv *SSEEvent
+	for i := range doneEvents {
+		if doneEvents[i].Type == EventMatchUpdated {
+			doneEv = &doneEvents[i]
+		}
+	}
+	require.NotNil(t, doneEv)
+	doneData, ok := doneEv.Data.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "B", doneData["court"])
+	doneRes, ok := doneData["result"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "completed", doneRes["status"])
+	assert.Equal(t, "B", doneRes["court"])
+	assert.Equal(t, "08:30", doneRes["scheduledAt"])
 }
 
 // (f) a late duplicate writeId of a RUNNING move, sent through a fresh

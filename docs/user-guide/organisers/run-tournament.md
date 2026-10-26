@@ -315,3 +315,9 @@ Changing a match duration never invalidates a generated draw. Pools, brackets an
 For a kachinuki (winner stays on) competition the number of bouts is not fixed, so the estimate is a range rather than a single figure. The competition Overview shows **Best**, **Average**, and **Worst**: best is a clean sweep where one fighter wins every bout, worst is the longest run where each bout retires one fighter, and average sits between them. Use the worst figure for planning the day and the average for a realistic finish time.
 
 ![The competition Overview schedule estimate for a kachinuki competition, reading Best, Average, and Worst durations followed by a per-court breakdown.](../../screenshots/kachinuki-estimate-range.png)
+
+### Moving matches between shiai-jo
+
+A match can be moved to another shiai-jo from the schedule page (by using its court picker, or by dragging the match to another court's column), as well as from the **Scores** tab row's court picker or the **Bracket** tab's running-match panel picker.
+
+Moving a running match asks for confirmation first: once confirmed, the match stops running, keeps its score, and goes first in the new shiai-jo's queue, ready to be started again there. Moving a waiting match places it last in that shiai-jo's queue. If a waiting match is moved back, it is placed last on the old shiai-jo rather than returning to its previous slot; use the up and down arrows on the court console or edit the match's time on the schedule page to reorder it. A running match moved by mistake is simply started again on the new shiai-jo, or moved back (it is waiting by then, so it goes last) and started from the queue.

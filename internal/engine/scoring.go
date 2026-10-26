@@ -3544,7 +3544,8 @@ func parseWinnerOf(s string, numRounds int) (int, int) {
 // CourtMove is how a court move was asked for.
 type CourtMove struct {
 	// StopsRunning: the operator saw the match running and confirmed stopping it
-	// there and putting it first on the new court.
+	// there and putting it first on the new court. It only has effect when the
+	// stored match is running.
 	StopsRunning bool
 	// WriteID is the client's id for the move, so a resend after a restart is
 	// answered as recorded (loggedWriteID).
@@ -3644,11 +3645,11 @@ func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string
 				}
 			}
 
-			// Rule 2: stored running and not confirmed. Rule 4: stored not
-			// running, but the move was confirmed for a running match. Either
-			// way the screen's view of the status disagrees with the store's.
+			// Rule 2: stored running and not confirmed. If the match is not
+			// running, StopsRunning has no effect (the move proceeds under
+			// rule 5a or 5b).
 			running := storedStatus == state.MatchStatusRunning
-			if running != mv.StopsRunning {
+			if running && !mv.StopsRunning {
 				return refuseMove()
 			}
 

@@ -155,7 +155,11 @@ test.describe('moved-match', () => {
     expect(queueNames(bAfter)).not.toContain(pairText(moved));
     expect(lines).toEqual([{ text: '1 Individual match also waiting on this court.', quiet: true, amber: false }]);
 
-    // 5. B picks Individual: the moved match is Up next.
+    // 5. B picks Individual: the moved match is Up next. A waiting match moved
+    // to a court now goes LAST in that court's queue (one minute after its
+    // latest timed waiting match, bc-mvrq); it is still Up next here because it
+    // is the only Individual match waiting on B, so nothing below depends on its
+    // time, and the console's confirm words (step 3) are unchanged.
     await pickCompetition(B, 'Individual');
     await bStillOpen();
     expect(await sides(upNextCard(B))).toEqual(moved);

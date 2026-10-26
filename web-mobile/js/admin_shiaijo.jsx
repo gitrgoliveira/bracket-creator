@@ -676,11 +676,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // A refetch never puts a row back to an older state
             // (keepNewerCompetitions, patch.jsx): the rule showRunningPush
             // applies to a push.
-            .then(comps => {
-                if (mountedRef.current) {
-                    setCourtComps((prev) => keepNewerCompetitions(prev, comps));
-                }
-            })
+            .then(comps => { if (mountedRef.current) setCourtComps((prev) => keepNewerCompetitions(prev, comps)); })
             .catch(err => console.error("Failed to fetch court matches", err));
     }, [court]);
     // Operator-triggered re-sync: the last-resort recovery when a court's tablet

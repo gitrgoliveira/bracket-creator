@@ -17,22 +17,19 @@ export function runningCourtMoveText(opts = {}) {
     const trimmedFrom = (from != null ? String(from) : "").trim();
     const trimmedTo = (to != null ? String(to) : "").trim();
 
-    const title = trimmedTo ? `Move to Shiaijo ${trimmedTo}?` : "Take it off its shiaijo?";
-    const confirmLabel = trimmedTo ? `Move to Shiaijo ${trimmedTo}` : "Take off its shiaijo";
-    const cancelLabel = "Cancel";
+    const message = [
+        trimmedFrom ? `${label} is running on Shiaijo ${trimmedFrom}.` : `${label} is running.`,
+        trimmedTo ? `It stops there and goes first in the queue on Shiaijo ${trimmedTo}.` : "It stops there and is taken off its shiaijo.",
+        unsaved && UNSAVED_ENTRIES_DISCARDED,
+        SCORE_KEPT_SENTENCE,
+    ].filter(Boolean).join(" ");
 
-    const sentence1 = trimmedFrom ? `${label} is running on Shiaijo ${trimmedFrom}.` : `${label} is running.`;
-    const sentence2 = trimmedTo ? `It stops there and goes first in the queue on Shiaijo ${trimmedTo}.` : "It stops there and is taken off its shiaijo.";
-
-    const parts = [sentence1, sentence2];
-    if (unsaved) {
-        parts.push(UNSAVED_ENTRIES_DISCARDED);
-    }
-    parts.push(SCORE_KEPT_SENTENCE);
-
-    const message = parts.join(" ");
-
-    return { title, message, confirmLabel, cancelLabel };
+    return {
+        title: trimmedTo ? `Move to Shiaijo ${trimmedTo}?` : "Take it off its shiaijo?",
+        message,
+        confirmLabel: trimmedTo ? `Move to Shiaijo ${trimmedTo}` : "Take off its shiaijo",
+        cancelLabel: "Cancel",
+    };
 }
 
 export async function confirmRunningCourtMove(opts) {

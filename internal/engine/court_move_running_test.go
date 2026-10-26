@@ -27,9 +27,12 @@ func TestFirstInQueueTime(t *testing.T) {
 	// minute before earliest rather than kept as "".
 	assert.Equal(t, "09:59", firstInQueueTime("", "10:00"))
 
-	// Earliest at midnight cannot step back a minute: keep own time.
-	assert.Equal(t, "09:00", firstInQueueTime("09:00", "00:00"))
-	assert.Equal(t, "", firstInQueueTime("", "00:00"))
+	// Earliest at midnight cannot step back a minute: the match takes "00:00"
+	// itself and ties for first, since nothing sorts earlier.
+	assert.Equal(t, "00:00", firstInQueueTime("10:00", "00:00"))
+	assert.Equal(t, "00:00", firstInQueueTime("09:00", "00:00"))
+	assert.Equal(t, "00:00", firstInQueueTime("00:00", "00:00"))
+	assert.Equal(t, "00:00", firstInQueueTime("", "00:00"))
 
 	// Legacy non-canonical or unparseable earliest: keep own time.
 	assert.Equal(t, "10:00", firstInQueueTime("10:00", "9:45"))
@@ -53,8 +56,10 @@ func TestLastInQueueTime(t *testing.T) {
 	// after any timed match and keeps "".
 	assert.Equal(t, "", lastInQueueTime("", "10:00"))
 
-	// Latest at 23:59 has no later minute: keep own time.
-	assert.Equal(t, "10:00", lastInQueueTime("10:00", "23:59"))
+	// Latest at 23:59 has no later minute: the match takes "23:59" itself and
+	// ties for last, since nothing sorts later.
+	assert.Equal(t, "23:59", lastInQueueTime("10:00", "23:59"))
+	assert.Equal(t, "23:59", lastInQueueTime("23:59", "23:59"))
 
 	// Legacy non-canonical latest "9:45" sorts after "10:00" as a string, and
 	// "09:46" would sort before it, so the match keeps its own time.
@@ -668,6 +673,47 @@ func TestUpdateMatchCourt_MoveToEmptyCourt(t *testing.T) {
 	require.Len(t, h, 1)
 	assert.Equal(t, doorRequeue, h[0].Door)
 	assert.Equal(t, "", h[0].Court, "requeue line for move to empty court carries no court")
+}
+
+// A confirmed running move onto a court whose earliest waiting match is at
+// "00:00" cannot step back a minute, so the moved match takes "00:00" itself
+// and ties for first rather than keeping its own later time.
+func TestUpdateMatchCourt_RunningMoveOntoMidnightQueueTiesForFirst(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "move-running-midnight"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Midnight"}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-run", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A", ScheduledAt: "10:00", IpponsA: []string{"M"}},
+		{ID: "Pool A-b0", SideA: "Carol", SideB: "Dave", Status: state.MatchStatusScheduled, Court: "B", ScheduledAt: "00:00"},
+		{ID: "Pool A-b1", SideA: "Eve", SideB: "Frank", Status: state.MatchStatusScheduled, Court: "B", ScheduledAt: "09:00"},
+	}))
+
+	require.NoError(t, eng.UpdateMatchCourt(compID, "Pool A-run", "B", CourtMove{StopsRunning: true, WriteID: "w-midnight"}))
+	r := loadPoolMatchByID(t, store, compID, "Pool A-run")
+	assert.Equal(t, "B", r.Court)
+	assert.Equal(t, state.MatchStatusScheduled, r.Status)
+	assert.Equal(t, "00:00", r.ScheduledAt, "ties with the 00:00 match for first, never behind the 09:00 one")
+	assert.Equal(t, []string{"M"}, r.IpponsA)
+}
+
+// A waiting match moved onto a court whose latest waiting match is at "23:59"
+// has no later minute to take, so it takes "23:59" itself and ties for last
+// rather than keeping its own earlier time.
+func TestUpdateMatchCourt_WaitingMoveOntoLastMinuteQueueTiesForLast(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "move-waiting-last-minute"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "LastMinute"}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-wait", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled, Court: "A", ScheduledAt: "10:00"},
+		{ID: "Pool A-b0", SideA: "Carol", SideB: "Dave", Status: state.MatchStatusScheduled, Court: "B", ScheduledAt: "12:00"},
+		{ID: "Pool A-b1", SideA: "Eve", SideB: "Frank", Status: state.MatchStatusScheduled, Court: "B", ScheduledAt: "23:59"},
+	}))
+
+	require.NoError(t, eng.UpdateMatchCourt(compID, "Pool A-wait", "B", CourtMove{}))
+	w := loadPoolMatchByID(t, store, compID, "Pool A-wait")
+	assert.Equal(t, "B", w.Court)
+	assert.Equal(t, state.MatchStatusScheduled, w.Status)
+	assert.Equal(t, "23:59", w.ScheduledAt, "ties with the 23:59 match for last, never ahead of the 12:00 one")
 }
 
 func TestUpdateMatchCourt_BoundsReadErrorKeepsOwnTime(t *testing.T) {

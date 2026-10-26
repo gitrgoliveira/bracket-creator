@@ -3513,9 +3513,12 @@ paths:
       description: >
         Moves a match to another court. A confirmed running move is sent back to
         the queue there with its score kept and placed first in that court's queue;
-        a waiting match is placed last in that court's queue; a finished match keeps
-        its time; a move that finds the match no longer as the operator saw it
-        is refused with 409.
+        a waiting match is placed last in that court's queue; a finished match
+        moves its court only and keeps its time. The only refusal is an
+        unconfirmed move (no stopsRunning) that finds the match running after
+        it was started on another device, answered 409. A confirmed running
+        move whose match has since stopped running is carried out as for a
+        waiting match, or, if it has finished, moves its court only.
       security:
         - TournamentPassword: []
       parameters:

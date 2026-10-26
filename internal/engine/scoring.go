@@ -3710,9 +3710,10 @@ func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string
 
 // movedQueueTime is the ScheduledAt a match carries after a court move: first
 // on the new court when a running match was requeued (ahead of timed waiting
-// matches), last when it was waiting there (after timed waiting matches), and
-// its own time when it had already finished or when the target court has no
-// timed waiting matches.
+// matches), last when it was waiting there (after timed waiting matches), tied
+// with the earliest at "00:00" or the latest at "23:59" when no minute is left
+// beyond it, and its own time when it had already finished or when the target
+// court has no timed waiting matches.
 func movedQueueTime(requeued bool, status state.MatchStatus, own, earliest, latest string) string {
 	switch {
 	case requeued:
@@ -3746,28 +3747,36 @@ func canonicalHHMM(s string) (int, bool) {
 
 // firstInQueueTime returns one minute before earliest (the target court's
 // earliest timed scheduled match) so a confirmed running court move places the
-// requeued match first in the target court's queue. It keeps own when earliest
-// is empty, when own already sorts before earliest in queue order (where an
-// empty own reads as "99:99"), when earliest is "00:00", or when earliest is
-// unparseable or not in canonical two-digit HH:MM form.
+// requeued match first in the target court's queue. When earliest is "00:00"
+// there is no earlier minute, so it returns "00:00" itself and the match ties
+// for first. It keeps own when earliest is empty, when own already sorts before
+// earliest in queue order (where an empty own reads as "99:99"), or when
+// earliest is unparseable or not in canonical two-digit HH:MM form.
 func firstInQueueTime(own, earliest string) string {
 	mins, ok := canonicalHHMM(earliest)
-	if !ok || mins <= 0 || queueSortTime(own) < earliest {
+	if !ok || queueSortTime(own) < earliest {
 		return own
+	}
+	if mins == 0 {
+		return earliest
 	}
 	return fmtHHMM(mins - 1)
 }
 
 // lastInQueueTime returns one minute after latest (the target court's latest
 // timed scheduled match) so a waiting match moved to another court lands last
-// in that court's queue. It keeps own when latest is empty, when own already
-// sorts after latest in queue order (an empty own reads as "99:99" and stays
-// ""), when latest is "23:59", or when latest is not in canonical two-digit
+// in that court's queue. When latest is "23:59" there is no later minute, so it
+// returns "23:59" itself and the match ties for last. It keeps own when latest
+// is empty, when own already sorts after latest in queue order (an empty own
+// reads as "99:99" and stays ""), or when latest is not in canonical two-digit
 // HH:MM form.
 func lastInQueueTime(own, latest string) string {
 	mins, ok := canonicalHHMM(latest)
-	if !ok || mins >= 23*60+59 || queueSortTime(own) > latest {
+	if !ok || queueSortTime(own) > latest {
 		return own
+	}
+	if mins == 23*60+59 {
+		return latest
 	}
 	return fmtHHMM(mins + 1)
 }

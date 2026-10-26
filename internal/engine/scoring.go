@@ -3709,8 +3709,10 @@ func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string
 }
 
 // movedQueueTime is the ScheduledAt a match carries after a court move: first
-// on the new court when a running match was requeued, last when it was waiting
-// there, and its own time when it had already finished.
+// on the new court when a running match was requeued (ahead of timed waiting
+// matches), last when it was waiting there (after timed waiting matches), and
+// its own time when it had already finished or when the target court has no
+// timed waiting matches.
 func movedQueueTime(requeued bool, status state.MatchStatus, own, earliest, latest string) string {
 	switch {
 	case requeued:

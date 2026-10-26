@@ -184,9 +184,9 @@ func TestCourtMoveRunning_FinishedMatch(t *testing.T) {
 	assert.Equal(t, "09:15", res["scheduledAt"], "scheduledAt must remain unchanged for a finished match")
 }
 
-// (d) an unconfirmed move of a running match is 409 with code match_status_changed
-// and the sentence in reasonHuman, message and error, and pushes nothing, and the
-// match is unchanged.
+// (d) an unconfirmed move of a running match is 409 with code match_status_changed,
+// the machine code in error, and the sentence in reasonHuman and message, and
+// pushes nothing, and the match is unchanged.
 func TestCourtMoveRunning_UnconfirmedRunningMoveRefused(t *testing.T) {
 	r, store, _, hub, compID, _ := setupCourtMoveFixture(t)
 
@@ -212,11 +212,11 @@ func TestCourtMoveRunning_UnconfirmedRunningMoveRefused(t *testing.T) {
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &body))
 	assert.Equal(t, "match_status_changed", body["code"])
+	assert.Equal(t, "match_status_changed", body["error"])
 	reasonHuman, ok := body["reasonHuman"].(string)
 	require.True(t, ok)
 	assert.NotEmpty(t, reasonHuman)
 	assert.Equal(t, reasonHuman, body["message"])
-	assert.Equal(t, reasonHuman, body["error"])
 	assert.Contains(t, reasonHuman, "was started on Shiaijo A before your move reached the server")
 
 	// Pushes nothing

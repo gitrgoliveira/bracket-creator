@@ -187,14 +187,15 @@ describe('Court call withdrawn on move', () => {
     expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '');
   });
 
-  it('d. leaves call alone when a refetch no longer lists the competition at all', async () => {
-    await mountConsoleAndCallMatch();
+  it('d. withdraws call when a refetch no longer lists the competition at all', async () => {
+    const { annId } = await mountConsoleAndCallMatch();
     window.API.fetchCourtMatches.mockResolvedValueOnce([]);
     await act(async () => {
       screen.getByRole('button', { name: /refresh/i }).click();
       await Promise.resolve();
     });
-    expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '');
   });
 
   it('e. leaves call alone when match_updated carries no court', async () => {
@@ -228,7 +229,7 @@ describe('Court call withdrawn on move', () => {
     expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
   });
 
-  it('g. leaves call alone while refetch is unresolved or answers empty', async () => {
+  it('g. leaves call alone while refetch is unresolved', async () => {
     await mountConsoleAndCallMatch();
     let resolveRefetch;
     const pendingPromise = new Promise((resolve) => {
@@ -242,7 +243,7 @@ describe('Court call withdrawn on move', () => {
     expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
 
     await act(async () => {
-      resolveRefetch([]);
+      resolveRefetch([makeComp({ court: 'A' })]);
       await Promise.resolve();
     });
     expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
@@ -369,5 +370,107 @@ describe('Court call withdrawn on move', () => {
       await Promise.resolve();
     });
     expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
+  });
+
+  it('n1. withdraws call when refetch returns other competitions but drops this match\'s competition', async () => {
+    const { annId } = await mountConsoleAndCallMatch();
+    const otherComp = {
+      id: 'c2',
+      name: 'Other Cup',
+      status: 'pools',
+      poolMatches: [
+        {
+          id: 'm99',
+          court: 'A',
+          status: 'scheduled',
+          phase: 'pool',
+          poolName: 'Pool X',
+          scheduledAt: '11:00',
+          sideA: { id: 'p10', name: 'Other1' },
+          sideB: { id: 'p11', name: 'Other2' },
+        },
+      ],
+    };
+    window.API.fetchCourtMatches.mockResolvedValueOnce([otherComp]);
+    await act(async () => {
+      screen.getByRole('button', { name: /refresh/i }).click();
+      await Promise.resolve();
+    });
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '');
+  });
+
+  it('n2. before the court feed has loaded (courtComps is null), nothing is withdrawn', async () => {
+    let resolveInitialFetch;
+    const initialFetchPromise = new Promise((resolve) => {
+      resolveInitialFetch = resolve;
+    });
+    window.API.fetchCourtMatches = vi.fn().mockReturnValue(initialFetchPromise);
+    const initialComp = makeComp();
+    render(
+      <AdminShiaijoPage
+        tournament={{ name: 'Test Tournament', courts: ['A', 'B'], competitions: [initialComp] }}
+        court="A"
+        onBack={vi.fn()}
+        onEditScore={vi.fn().mockResolvedValue({ applied: true })}
+        onMoveCourt={vi.fn()}
+        onLogout={vi.fn()}
+        onViewerMode={vi.fn()}
+        password=""
+        showToast={vi.fn()}
+        tweaks={{}}
+        onSwitchCourt={vi.fn()}
+      />
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const callBtn = screen.getAllByTitle(CALL_TITLE)[0];
+    await pointerTap(callBtn);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(window.API.sendAnnouncement).toHaveBeenCalledTimes(1);
+
+    // Feed is still null (initialFetchPromise has not resolved).
+    expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
+
+    // Now resolve initial fetch without the competition:
+    await act(async () => {
+      resolveInitialFetch([]);
+      await Promise.resolve();
+    });
+    // Once feed loads, the call is withdrawn.
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(`ann-${nextAnnId}`, '');
+  });
+
+  it('n3. leaves call alone when court feed drops competition but court move is still queued locally', async () => {
+    const { annId } = await mountConsoleAndCallMatch();
+    // Move is queued locally on this device.
+    await act(async () => {
+      emitLocalMatchPatch('c1', 'm1', { court: 'B' });
+      await Promise.resolve();
+    });
+    expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
+
+    // Refetch returns empty (competition dropped from court feed).
+    window.API.fetchCourtMatches.mockResolvedValueOnce([]);
+    await act(async () => {
+      screen.getByRole('button', { name: /refresh/i }).click();
+      await Promise.resolve();
+    });
+    // Because courtMoveQueued('c1', 'm1') is true, call is NOT withdrawn.
+    expect(window.API.deleteAnnouncement).not.toHaveBeenCalled();
+
+    // Once the move lands / clears local queue:
+    queuedMoves.clear();
+    window.API.fetchCourtMatches.mockResolvedValueOnce([]);
+    await act(async () => {
+      screen.getByRole('button', { name: /refresh/i }).click();
+      await Promise.resolve();
+    });
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledTimes(1);
+    expect(window.API.deleteAnnouncement).toHaveBeenCalledWith(annId, '');
   });
 });

@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, act, fireEvent, screen, within } from '@testing-library/react';
+import { render, act, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
 import { SCORE_KEPT_SENTENCE } from '../../court_move.jsx';

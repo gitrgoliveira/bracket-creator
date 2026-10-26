@@ -189,11 +189,14 @@ describe('a court move and a time change are entries of their match', () => {
         const refused = [];
         const move = await API.moveMatchCourt('c1', 'm1', 'B', 'pw', {
             was: { court: 'A' },
-            onRefusal: (e) => { refused.push(e.message); return true; },
+            onRefusal: (e) => { refused.push(e); return true; },
         });
         await tick(0);
         await expect(move.settled).rejects.toThrow(sentence);
-        expect(refused).toEqual([sentence]);
+        const caught = await move.settled.catch((e) => e);
+        expect(caught.code).toBe('match_status_changed');
+        expect(refused.map((e) => e.message)).toEqual([sentence]);
+        expect(refused[0].code).toBe('match_status_changed');
         expect(sent).toHaveLength(1);
         expect(stored()).toHaveLength(0);
         // Does not retry on later flushes.

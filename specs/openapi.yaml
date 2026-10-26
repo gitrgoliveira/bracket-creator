@@ -3537,10 +3537,11 @@ paths:
                   type: boolean
                   description: >
                     True when the operator saw the match running and confirmed that it
-                    stops there and goes first on the new court. Has no effect when
-                    the match is no longer running (it is then moved like a waiting
-                    match: last in the target court's queue; a finished match keeps
-                    its time).
+                    stops there and goes first on the new court (ahead of timed waiting
+                    matches, or keeping its own time if none are timed). Has no effect
+                    when the match is no longer running (it is then moved like a waiting
+                    match: last in the target court's queue after any timed waiting
+                    matches; a finished match keeps its time).
                 writeId:
                   $ref: '#/components/schemas/ArrivalWriteId'
       responses:
@@ -3570,10 +3571,14 @@ paths:
                     example: match_status_changed
                   reasonHuman:
                     type: string
+                    description: The sentence explaining the refusal to the operator.
                   message:
                     type: string
+                    description: The sentence explaining the refusal to the operator (repeats reasonHuman).
                   error:
                     type: string
+                    description: Repeats the machine code (same value as code).
+                    example: match_status_changed
 
   /api/competitions/{id}/matches/{mid}/history:
     get:

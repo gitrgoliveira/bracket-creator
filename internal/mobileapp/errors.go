@@ -406,7 +406,7 @@ func respondIfDownstreamKnockoutRunning(c *gin.Context, err error) bool {
 }
 
 // respondIfCourtMoveRefused answers engine.CourtMoveRefusedError with HTTP 409
-// {"code":"match_status_changed","reasonHuman":<sentence>,"message":<sentence>,"error":<sentence>}
+// {"code":"match_status_changed","reasonHuman":<sentence>,"message":<sentence>,"error":"match_status_changed"}
 // and reports whether it answered. The sentence comes from err.Sentence().
 func respondIfCourtMoveRefused(c *gin.Context, err error) bool {
 	var refusedErr *engine.CourtMoveRefusedError
@@ -418,7 +418,7 @@ func respondIfCourtMoveRefused(c *gin.Context, err error) bool {
 		"code":        "match_status_changed",
 		"reasonHuman": sentence,
 		"message":     sentence,
-		"error":       sentence,
+		"error":       "match_status_changed",
 	})
 	return true
 }

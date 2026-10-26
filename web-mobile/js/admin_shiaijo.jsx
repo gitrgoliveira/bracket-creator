@@ -1904,7 +1904,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // lands before the answer must still withdraw the call once its id
             // arrives. If the send fails, the earlier call stays up, and so does
             // its entry.
-            const entry = { msg, id: sent.then((ann) => (ann && ann.id) || null, () => (earlier ? earlier.id : null)) };
+            const entry = {
+                compId: m.compId,
+                matchId: m.id,
+                msg,
+                id: sent.then((ann) => (ann && ann.id) || null, () => (earlier ? earlier.id : null)),
+            };
             callIdsRef.current.set(key, entry);
             sent.catch(() => {
                 if (callIdsRef.current.get(key) !== entry) return;
@@ -1953,13 +1958,14 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     };
 
     // A court call comes down once its match has left scheduled, however that
-    // happened (started here, started elsewhere, closed by a decision), or once
-    // the match shows on another court, whatever its status; a key no list holds is
-    // left alone because the list is empty while it loads.
+    // happened (started here, started elsewhere, closed by a decision), once the
+    // match shows on another court, whatever its status, or once the loaded
+    // court feed no longer holds the match (its competition dropped from this
+    // court); a key no list holds is left alone until the court feed has loaded.
     useEffectSh(() => {
         if (callIdsRef.current.size === 0) return;
         const feedMatches = window.tournamentMatches({ competitions: courtCompetitions }) || [];
-        for (const key of callIdsRef.current.keys()) {
+        for (const [key, entry] of callIdsRef.current.entries()) {
             const m = courtMatchesRaw.find((x) => matchKey(x) === key);
             if (m && m.status !== "scheduled") {
                 withdrawCall(key);
@@ -1972,9 +1978,15 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             if (moved && (moved.court || "") !== (court || "")
                 && !(window.API && window.API.courtMoveQueued(moved.compId, moved.id))) {
                 withdrawCall(key);
+                continue;
+            }
+            if (!m && !moved && courtComps !== null) {
+                if (!(window.API && window.API.courtMoveQueued(entry.compId, entry.matchId))) {
+                    withdrawCall(key);
+                }
             }
         }
-    }, [courtMatchesRaw, courtCompetitions]);
+    }, [courtMatchesRaw, courtCompetitions, courtComps]);
 
     // moveMatch: reorder by swapping scheduledAt with the adjacent row.
     // direction: "up" (earlier) or "down" (later). Only scheduled matches

@@ -7,8 +7,6 @@ import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED, startWhileCorrectingMessage, star
 import { scoreRowMatchName } from '../../pool_ids.jsx';
 import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
 import { START_SUPERSEDED_MESSAGE } from '../../start_match.jsx';
-import { UNSAVED_ENTRIES_DISCARDED } from '../../unsaved_entries.jsx';
-import { SCORE_KEPT_SENTENCE } from '../../court_move.jsx';
 // Window globals required by admin_shiaijo.jsx.
 // MODULE-EVAL-TIME entries (e.g. `const AdminTopbar = window.AdminTopbar;`)
 // must be set before the dynamic import, or the module captures undefined.
@@ -3324,12 +3322,11 @@ describe('an own Start still out takes the match out of Up next and Upcoming', (
   });
 });
 
-// P1-T6: the console's move confirm snapshots `shown` and `running` when the
-// dialog opens (`isStartedSnapshot(mm) ? { ...mm, status: "running" } : mm`),
-// words a running move with `runningCourtMoveText` and a waiting one as before,
-// re-words the unsaved re-ask with `runningCourtMoveText` when running, and
-// hands `{ confirmed: true, shown: pendingMove.shown }` to `onMoveCourt`.
-describe('court move confirm snapshot and wording (P1-T6)', () => {
+// P1-T6: the console's move confirm captures `shown: mm` when the dialog
+// opens and hands `{ confirmed: true, shown: pendingMove.shown }` to
+// `onMoveCourt`. A match this console just started leaves the queue,
+// so no queue row offers it a court move.
+describe('court move confirm snapshot (P1-T6)', () => {
   const rowOf = (c, text) => [...c.utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes(text));
   const moveDialog = (c) => c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
 

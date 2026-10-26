@@ -2,9 +2,8 @@ import React from 'react';
 import { render, act, fireEvent, screen, within } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
-import { confirmMatchLabel, SCORE_KEPT_SENTENCE, runningCourtMoveText } from '../../court_move.jsx';
+import { SCORE_KEPT_SENTENCE } from '../../court_move.jsx';
 import { UNSAVED_ENTRIES_DISCARDED } from '../../unsaved_entries.jsx';
-import { TAP_BOUNCE_MS } from '../../tap_guard.jsx';
 
 const probe = {
   scoreEditor: null,

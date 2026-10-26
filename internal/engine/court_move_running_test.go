@@ -610,13 +610,29 @@ func TestUpdateMatchCourt_ResendByWriteIDAnsweredAsRecorded(t *testing.T) {
 	mvBrk := CourtMove{StopsRunning: true, WriteID: "w-dup-brk"}
 	require.NoError(t, eng.UpdateMatchCourt(compID, "m-r1-0", "A", mvBrk))
 
+	// Move each match on to court "B" with a plain CourtMove{} (no WriteID).
+	// The match is now waiting; a waiting move writes no history line.
+	require.NoError(t, eng.UpdateMatchCourt(compID, "Pool A-0", "B", CourtMove{}))
+	require.NoError(t, eng.UpdateMatchCourt(compID, "m-r1-0", "B", CourtMove{}))
+
 	poolVer := store.FileVersion(compID, "pool-matches.csv")
 	bracketVer := store.FileVersion(compID, "bracket.json")
 
-	// Resend with the same WriteID after the match is already on A:
-	// rule 0 answers nil and writes nothing.
+	// Resend the original mvPool and mvBrk to court "A" after the matches have
+	// moved on to court "B". Rule 0 answers nil and writes nothing because the
+	// WriteID is already logged. Rule 1 cannot answer because each match sits
+	// on "B", not "A".
 	require.NoError(t, eng.UpdateMatchCourt(compID, "Pool A-0", "A", mvPool))
 	require.NoError(t, eng.UpdateMatchCourt(compID, "m-r1-0", "A", mvBrk))
+
+	pm := loadPoolMatchByID(t, store, compID, "Pool A-0")
+	assert.Equal(t, "B", pm.Court, "pool match must still sit on court B")
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	bm := b.MatchByID("m-r1-0")
+	require.NotNil(t, bm)
+	assert.Equal(t, "B", bm.Court, "bracket match must still sit on court B")
 
 	assert.Equal(t, poolVer, store.FileVersion(compID, "pool-matches.csv"))
 	assert.Equal(t, bracketVer, store.FileVersion(compID, "bracket.json"))

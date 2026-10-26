@@ -750,7 +750,8 @@ knowing what happened in between.
 history file in the competition's `history/` folder, one line per write that reached it and one
 per tap: when the change was made, when the server received it, which endpoint it came through
 (a tap's is `event`), the groups it changed and, for each, whether it was applied or held, with
-the held values. A `requeue` line written by a court move also holds the optional `court` field, the shiai-jo the match was moved to. A tap's line also holds the tap and what became of it (applied, recorded in a
+the held values. A `requeue` line written by a court move also holds `court`, the shiai-jo the
+match was moved to. A tap's line also holds the tap and what became of it (applied, recorded in a
 finish that had seen it, capped, turned away because the match was finished, and so on). A tap
 whose fate changes later, because a finish made before it arrives afterwards, gets a second line
 saying so. A held group that says exactly what is already stored (for example "no overtime"
@@ -979,10 +980,14 @@ Appending columns and leaving some fields unwritten are the two consequences tha
   contrast, the log-derived `ScoreVersion` is persisted in `pool-matches.csv` and `bracket.json` so readers
   can order running match updates against incoming events. A match's queue position is
   another in-flight field. It is derived from court, status and scheduled time each time a match
-  list is served, so the queue shrinks as matches finish. A court move sets the one thing that places a match in the queue, its scheduled time: a confirmed running match moved to another court takes a time one minute before that court's earliest waiting match, and a waiting match moved to another court takes a time one minute after its latest waiting match (a finished match keeps its time). Persisting it would let a stale copy
+  list is served, so the queue shrinks as matches finish. Persisting it would let a stale copy
   disagree with the schedule it was drawn from, so it is
   excluded from `pool-matches.csv` by name, on top of carrying a tag that already keeps it out
-  of the YAML-marshalled forms.
+  of the YAML-marshalled forms. A court move places a match in its new court's queue through
+  the scheduled time, which is persisted: a confirmed running match takes a time one minute
+  before that court's earliest timed waiting match, and a waiting match a time one minute after
+  the latest. Where that court has no timed waiting match, the moved match keeps its own time,
+  and a finished match always does.
 
 If the storage were rebuilt around queries rather than around people reading it, the shape
 would differ: a match side table would replace the paired columns, and sub bouts would be

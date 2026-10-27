@@ -1616,6 +1616,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         }
         setRefusedTap(null);
     }, [refusedTap, startingKey]);
+    // The stored Start refusal for match `m` (startError), which
+    // startRefusalStands binds to that match: a start's own refusal and a
+    // pick's refused start check (bc-stpf) store it alike.
+    const refusalFor = (m, msg) => ({ key: matchKey(m), compId: m.compId, msg });
     // Returns true when the start went out (landed, or was queued offline), false
     // otherwise: pickMatch relies on this so it only pins pickedKey for a match that
     // actually started (a blocked-by-eligibility start, a clock_skew refusal or a
@@ -1624,10 +1628,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // does pin it).
     // `pick` is the pickingRef entry pickMatch made for THIS start, if it is one:
     // that pick is the start itself, not a start in flight against it.
-    // The stored Start refusal for match `m` (startError), which
-    // startRefusalStands binds to that match: a start's own refusal and a
-    // pick's refused start check (bc-stpf) store it alike.
-    const refusalFor = (m, msg) => ({ key: matchKey(m), compId: m.compId, msg });
     const startMatch = async (m, { pick = null, after = null } = {}) => {
         const key = matchKey(m);
         // bc-evts: the start is the outbox's (a running score write), answered
@@ -1808,9 +1808,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         pickMatch(m);
     };
 
-    // The defer of the running bout and the start of the picked one, after
-    // pickMatch's guards and its pickingRef entry (see pickMatch).
-// bc-stpf (operator ruling 2026-10-12, option A): before a pick sends the
+    // bc-stpf (operator ruling 2026-10-12, option A): before a pick sends the
     // running bout `cur` back, ask the server whether the picked match `m`
     // would start once it has gone (API.checkStart, at most
     // START_CHECK_TIMEOUT_MS; pickMatch's pickingRef holds the pick, so the
@@ -1838,6 +1836,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         }
         return askStartWithoutCheck(cur, m);
     };
+    // The defer of the running bout and the start of the picked one, after
+    // pickMatch's guards and its pickingRef entry (see pickMatch).
     const deferAndStart = async (m, pick) => {
         const cur = running[0] || null;
         const isSame = cur && matchKey(cur) === matchKey(m);

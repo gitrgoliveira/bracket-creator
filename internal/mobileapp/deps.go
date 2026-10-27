@@ -116,6 +116,13 @@ type ScoringEngine interface {
 	// match that itself created the ineligibility) is permitted.
 	// Score handler wraps fought/hikiwake submissions with this.
 	StartMatchTx(tx state.StoreTx, compID, matchID string) error
+	// CheckStartAfterSendBack is the start check (bc-stpf, GET
+	// .../start-check): would starting matchID be accepted once the bout
+	// running on its court is sent back? It runs the same sides gate as
+	// StartMatchTx with that court's running bout left out, writes nothing
+	// and takes no lock. Returns *engine.NotFoundError,
+	// *engine.MatchNotScheduledError or *engine.IneligibleCompetitorError.
+	CheckStartAfterSendBack(compID, matchID string) error
 	// RecordScoreEventsTx is the score-events door (bc-evts): it logs the
 	// taps it takes, replays the match's log and writes the derived match,
 	// under the caller's transaction. Mirrors engine.Engine.RecordScoreEventsTx.

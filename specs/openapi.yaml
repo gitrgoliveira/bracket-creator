@@ -3026,6 +3026,93 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/competitions/{id}/matches/{mid}/start-check:
+    get:
+      tags: [matches]
+      summary: Check that a match could start once the court's running match goes back
+      description: |
+        Answers whether starting match `mid` would be accepted once the
+        match now running on its shiaijo is sent back to the queue. The
+        court console asks this before it sends that running match back for
+        another start, so a start the server would refuse leaves the running
+        match running and shows the reason on the picked match.
+
+        The server works out which match that is (the one running on
+        `mid`'s court), so the caller names only the pick. The check runs
+        the same competitor checks as the start: a competitor fighting now
+        in another match of the competition, with the matches running on
+        `mid`'s own court left out (a pick with no court leaves out
+        nothing), and a competitor barred by a withdrawal. The court checks
+        are not run: the court is taken only by the match being sent back.
+
+        It writes nothing and takes no lock, so it carries no `writeId` or
+        `basis`. Check and start are separate requests: the start judges
+        again under the competition's lock, so a change made between them
+        on another device can still refuse it. Intentionally accessible to
+        court operators in self-run mode (operational play, like starting a
+        match and sending one back).
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - $ref: '#/components/parameters/MatchId'
+      responses:
+        '200':
+          description: The start would be accepted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                    enum: [true]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            The start would be refused. `ineligible_competitor` is the same
+            body, byte for byte, that `PUT .../score` answers a start with for
+            the same state: `reasonHuman` is the operator's sentence, e.g.
+            "Alice is fighting now in Pool A · Match 3 on Shiaijo B. Finish
+            that match first." or "Alice withdrew in Pool A · Match 1 and
+            cannot fight again. Record the fusensho for Carol.".
+            `match_not_scheduled` means the pick is no longer waiting in the
+            queue (another device started or finished it); its
+            `reasonHuman` is shown as it is.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, reasonHuman]
+                properties:
+                  error:
+                    type: string
+                    enum:
+                      - ineligible_competitor
+                      - match_not_scheduled
+                    description: Machine-readable conflict code.
+                  playerId:
+                    type: string
+                    description: The competitor the start would be refused for (ineligible_competitor only).
+                  reason:
+                    type: string
+                    description: The raw refusal reason (ineligible_competitor only).
+                  matchId:
+                    type: string
+                    description: The picked match (match_not_scheduled only).
+                  status:
+                    type: string
+                    description: The picked match's stored status, e.g. `running` or `completed` (match_not_scheduled only).
+                  reasonHuman:
+                    type: string
+                    description: The operator's sentence, shown as it is.
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/competitions/{id}/matches/{mid}/reopen:
     post:
       tags: [matches]

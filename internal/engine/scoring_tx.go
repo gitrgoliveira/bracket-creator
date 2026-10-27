@@ -544,19 +544,97 @@ func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
 	if err := e.checkCourtExclusivityTx(tx, compID, matchID); err != nil {
 		return err
 	}
-	if err := e.checkSimultaneousMatchTx(tx, compID, matchID); err != nil {
+	return e.startSidesGateTx(tx, compID, matchID, false)
+}
+
+// startSidesGateTx is the part of the start gate that judges the match's
+// SIDES rather than its court: a side fighting now in another match of the
+// competition (simultaneity), then a side barred by a withdrawal. It is the
+// ONE owner of "would these sides be refused" for the real start
+// (StartMatchTx) and the start check (CheckStartAfterSendBack), bc-twin.
+//
+// With skipOwnCourt, the simultaneity scan leaves out the running matches on
+// matchID's own court: the bout the console sends back before the start. A
+// match with no court skips nothing, since there is no bout on "its court" to
+// send back. The barred-side check is the same either way: a send back
+// changes no competitor's status.
+func (e *Engine) startSidesGateTx(h state.StoreTx, compID, matchID string, skipOwnCourt bool) error {
+	var skip simultaneitySkip
+	if skipOwnCourt {
+		court, err := lookupMatchCourtTx(h, compID, matchID)
+		if err != nil {
+			return err
+		}
+		skip = simultaneitySkip{court: court, on: court != ""}
+	}
+	if err := e.checkSimultaneousMatchSkippingTx(h, compID, matchID, skip); err != nil {
 		return err
 	}
-	ids, err := e.matchSideParticipantIDs(tx, compID, matchID)
+	ids, err := e.matchSideParticipantIDs(h, compID, matchID)
 	if err != nil {
 		return err
 	}
 
-	statuses, err := tx.LoadCompetitorStatus(compID)
+	statuses, err := h.LoadCompetitorStatus(compID)
 	if err != nil {
 		return err
 	}
 	return eligibilityErrorForSides(statuses, matchID, ids)
+}
+
+// MatchNotScheduledError is CheckStartAfterSendBack's refusal for a pick that
+// is no longer waiting in the queue: another device started or finished it
+// meanwhile, so the console must not send its running bout back for it.
+type MatchNotScheduledError struct {
+	MatchID string
+	Status  state.MatchStatus
+}
+
+func (e *MatchNotScheduledError) Error() string {
+	return fmt.Sprintf("match %q is %s, not scheduled", e.MatchID, e.Status)
+}
+
+// CheckStartAfterSendBack answers whether starting matchID would be accepted
+// once the bout now running on its court is sent back to the queue (bc-stpf).
+// The court console asks it before it sends that bout back, so a start the
+// server would refuse leaves the running bout running.
+//
+// It writes nothing and takes no lock: it reads through the store as
+// StartMatch does, and the real start re-runs the full gate under the
+// competition's lock, so a check never queues behind score writes. Answers:
+// nil (would be accepted), *NotFoundError (unknown match),
+// *MatchNotScheduledError (the pick is running or finished), or the
+// *IneligibleCompetitorError startSidesGateTx gives. Both court checks are
+// skipped by design: the court is taken only by the bout being sent back.
+func (e *Engine) CheckStartAfterSendBack(compID, matchID string) error {
+	status, err := matchStatusTx(e.store, compID, matchID)
+	if err != nil {
+		return err
+	}
+	if status != state.MatchStatusScheduled {
+		return &MatchNotScheduledError{MatchID: matchID, Status: status}
+	}
+	return e.startSidesGateTx(e.store, compID, matchID, true)
+}
+
+// matchStatusTx reads matchID's stored status from the pool matches, then the
+// knockout (rounds and the 3rd-place match).
+func matchStatusTx(h state.StoreTx, compID, matchID string) (state.MatchStatus, error) {
+	poolMatches, err := h.LoadPoolMatches(compID)
+	if err != nil {
+		return "", err
+	}
+	if m, ok := findPoolMatch(poolMatches, matchID); ok {
+		return m.Status, nil
+	}
+	bracket, err := h.LoadBracket(compID)
+	if err != nil {
+		return "", err
+	}
+	if bm := findBracketMatchInBracket(bracket, matchID); bm != nil {
+		return bm.Status, nil
+	}
+	return "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
 }
 
 // checkSimultaneousMatchTx returns *IneligibleCompetitorError if either
@@ -589,6 +667,30 @@ func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
 //
 // Phase 2c simultaneity gate.
 func (e *Engine) checkSimultaneousMatchTx(h state.StoreTx, compID, matchID string) error {
+	return e.checkSimultaneousMatchSkippingTx(h, compID, matchID, simultaneitySkip{})
+}
+
+// simultaneitySkip names the running matches the simultaneity scan leaves
+// out: with on set, every running match on court. The zero value skips
+// nothing, which is what a real start asks. CheckStartAfterSendBack sets it
+// to the pick's own court, whose running bout the console sends back before
+// the start, so a competitor that bout shares with the pick is free by then.
+// The court is never a sentinel on its own: an empty court is the real
+// "unassigned" bucket, so a pick with no court sets on false.
+type simultaneitySkip struct {
+	court string
+	on    bool
+}
+
+// skips reports whether the scan leaves out a running match on court.
+func (s simultaneitySkip) skips(court string) bool {
+	return s.on && court == s.court
+}
+
+// checkSimultaneousMatchSkippingTx is the ONE body of the simultaneity gate
+// (bc-twin): checkSimultaneousMatchTx asks it to skip nothing, the start
+// check to skip the pick's own court.
+func (e *Engine) checkSimultaneousMatchSkippingTx(h state.StoreTx, compID, matchID string, skip simultaneitySkip) error {
 	var sideA, sideB, rawIDA, rawIDB string
 	isPoolMatch := false
 	// Load errors are returned as they are (see lookupExistingResult): an
@@ -675,7 +777,7 @@ func (e *Engine) checkSimultaneousMatchTx(h state.StoreTx, compID, matchID strin
 	}
 
 	for _, m := range poolMatches {
-		if m.ID == matchID || m.Status != state.MatchStatusRunning {
+		if m.ID == matchID || m.Status != state.MatchStatusRunning || skip.skips(m.Court) {
 			continue
 		}
 		if rawIDA != "" && (m.SideAID == rawIDA || m.SideBID == rawIDA) {
@@ -715,7 +817,7 @@ func (e *Engine) checkSimultaneousMatchTx(h state.StoreTx, compID, matchID strin
 		for ri := range bracket.Rounds {
 			for mi := range bracket.Rounds[ri] {
 				bm := &bracket.Rounds[ri][mi]
-				if bm.ID == matchID || bm.Status != state.MatchStatusRunning {
+				if bm.ID == matchID || bm.Status != state.MatchStatusRunning || skip.skips(bm.Court) {
 					continue
 				}
 				if err := checkBracketMatch(bm); err != nil {
@@ -723,7 +825,7 @@ func (e *Engine) checkSimultaneousMatchTx(h state.StoreTx, compID, matchID strin
 				}
 			}
 		}
-		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID != matchID && bm.Status == state.MatchStatusRunning {
+		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID != matchID && bm.Status == state.MatchStatusRunning && !skip.skips(bm.Court) {
 			if err := checkBracketMatch(bm); err != nil {
 				return err
 			}

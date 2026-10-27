@@ -3016,12 +3016,13 @@ const matchOnOtherCourtReasonHuman = "This match was moved to another court. Che
 // starting mid be refused for its status, court or competitors once the bout
 // now running on the console's court is sent back to the queue? The court
 // console asks it before it sends that bout back, so a start the server would
-// refuse leaves the running bout running. The console names its court (the
-// required `court` query parameter, empty for the unassigned bucket) and the
-// check leaves out every match running there. A pick that was moved to another
-// court since the console last refreshed would leave that bout sent back for a
-// start the server then refuses, so a court that is not the pick's stored
-// court is refused here with match_on_other_court.
+// refuse leaves the running bout running. The console names its court
+// (required `court` query parameter; empty for the unassigned bucket), and
+// when it is non-empty the check leaves out every match running on that court;
+// an empty court leaves out nothing. A pick that was moved to another court
+// since the console last refreshed would leave that bout sent back for a start
+// the server then refuses, so a court that is not the pick's stored court is
+// refused here with match_on_other_court.
 //
 // A GET: it writes nothing and is idempotent, so it carries no writeId or
 // basis and never goes through the outbox. Answers 200 {ok: true}; 409
@@ -3083,12 +3084,7 @@ func registerStartCheckHandler(r *gin.RouterGroup, eng ScoringEngine, store Comp
 			})
 			return
 		}
-		var notFoundErr *engine.NotFoundError
-		if errors.As(err, &notFoundErr) {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			return
-		}
-		internalError(c, err)
+		respondEngineError(c, err)
 	})
 }
 

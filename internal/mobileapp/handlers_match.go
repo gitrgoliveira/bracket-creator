@@ -2974,12 +2974,13 @@ func respondCourtBusy(c *gin.Context, store CompetitionStore, err *engine.CourtB
 //
 // bc-rawm/bc-cse: reasonHuman is ONE operator sentence, never the raw
 // kendo-term reason. Simultaneous is how this error type tells its two
-// producers apart: the simultaneity gate (checkSimultaneousMatchTx) already
-// builds a complete operator sentence into Reason itself, while a
-// barred-status refusal (engine.BarredSides) needs the shared builder to name
-// the match and the remedy -- even when that refusal's own MatchID is empty (a
-// status set directly via POST /competitor-status, with no match tied to it),
-// which is why MatchID emptiness alone can no longer be the test.
+// producers apart: the simultaneity gate
+// (checkSimultaneousMatchSkippingTx) already builds a complete operator
+// sentence into Reason itself, while a barred-status refusal
+// (engine.BarredSides) needs the shared builder to name the match and the
+// remedy -- even when that refusal's own MatchID is empty (a status set
+// directly via POST /competitor-status, with no match tied to it), which is
+// why MatchID emptiness alone can no longer be the test.
 func respondStartRefusal(c *gin.Context, store CompetitionStore, compID, matchID string, err *engine.IneligibleCompetitorError) {
 	reasonHuman := err.Reason
 	switch {
@@ -3012,14 +3013,15 @@ const matchOnOtherCourtReasonHuman = "This match was moved to another court. Che
 
 // registerStartCheckHandler registers GET
 // /competitions/:id/matches/:mid/start-check?court=<court> (bc-stpf): would
-// starting mid be accepted once the bout now running on the console's court is
-// sent back to the queue? The court console asks it before it sends that bout
-// back, so a start the server would refuse leaves the running bout running.
-// The console names its court (the required `court` query parameter, empty for
-// the unassigned bucket) and the server derives which bout runs there. A pick
-// that was moved to another court since the console last refreshed would leave
-// that bout sent back for a start the server then refuses, so a court that is
-// not the pick's stored court is refused here with match_on_other_court.
+// starting mid be refused for its status, court or competitors once the bout
+// now running on the console's court is sent back to the queue? The court
+// console asks it before it sends that bout back, so a start the server would
+// refuse leaves the running bout running. The console names its court (the
+// required `court` query parameter, empty for the unassigned bucket) and the
+// check leaves out every match running there. A pick that was moved to another
+// court since the console last refreshed would leave that bout sent back for a
+// start the server then refuses, so a court that is not the pick's stored
+// court is refused here with match_on_other_court.
 //
 // A GET: it writes nothing and is idempotent, so it carries no writeId or
 // basis and never goes through the outbox. Answers 200 {ok: true}; 409

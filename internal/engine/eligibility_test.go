@@ -2077,8 +2077,8 @@ func TestK2ChecksItsHandleIsTransactional(t *testing.T) {
 
 // TestBarredSides pins the ONE "not eligible AND recorded by a different
 // match" check (bc-cse), extracted from what used to be three hand-copied
-// loops in StartMatchTx, startSidesGateTx and (now)
-// mobileapp's ineligibleSides annotation.
+// loops in StartMatchTx, checkEligibilityExcludingMatch (since folded into
+// startSidesGateTx) and mobileapp's ineligibleSides annotation.
 func TestBarredSides(t *testing.T) {
 	statuses := map[string]domain.CompetitorStatus{
 		"p-barred": {

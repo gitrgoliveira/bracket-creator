@@ -601,20 +601,24 @@ func (e *MatchOnOtherCourtError) Error() string {
 	return fmt.Sprintf("match %q is on court %q, not %q", e.MatchID, e.Court, e.ConsoleCourt)
 }
 
-// CheckStartAfterSendBack answers whether starting matchID would be accepted
-// once the bout now running on its court is sent back to the queue (bc-stpf).
-// The court console asks it before it sends that bout back, so a start the
-// server would refuse leaves the running bout running.
+// CheckStartAfterSendBack answers whether starting matchID would be refused
+// for its status, its court or its competitors once the bout now running on
+// its court is sent back to the queue (bc-stpf). The court console asks it
+// before it sends that bout back, so a start the server would refuse leaves
+// the running bout running.
 //
 // It writes nothing and takes no lock: it reads through the store as
 // StartMatch does, and the real start re-runs the full gate under the
 // competition's lock, so a check never queues behind score writes. Answers:
-// nil (would be accepted), *NotFoundError (unknown match),
+// nil (not refused by these checks), *NotFoundError (unknown match),
 // *MatchNotScheduledError (the pick is running or finished),
 // *MatchOnOtherCourtError (the pick is assigned to another court), the
 // *IneligibleCompetitorError startSidesGateTx gives, or a store load error
 // returned as it is. Both court checks are skipped by design: the court is
-// taken only by the bout being sent back.
+// taken only by the bout being sent back. It does not run the gates only the
+// real start has (the cross-competition court-busy check, the self-run judge,
+// the team-finish refusal), so nil is not a promise that the start succeeds;
+// the real start judges again.
 func (e *Engine) CheckStartAfterSendBack(compID, matchID, court string) error {
 	status, found, err := e.store.MatchStatusByID(compID, matchID)
 	if err != nil {
@@ -636,11 +640,29 @@ func (e *Engine) CheckStartAfterSendBack(compID, matchID, court string) error {
 	return e.startSidesGateTx(e.store, compID, matchID, simultaneitySkip{court: court, on: court != ""})
 }
 
-// checkSimultaneousMatchTx returns *IneligibleCompetitorError if either
-// participant in matchID is currently Running in a different match within
-// the same competition. Pool matches and bracket matches are both checked.
-// StartMatch (eligibility.go) calls startSidesGateTx with e.store as h
-// (bc-twin: one body, two doors).
+// simultaneitySkip names the running matches the simultaneity scan leaves
+// out: with on set, every running match on court. The zero value skips
+// nothing, which is what a real start asks. CheckStartAfterSendBack sets it
+// to the console's court, whose running bout the console sends back before
+// the start, so a competitor that bout shares with the pick is free by then.
+// The court is never a sentinel on its own: an empty court is the real
+// "unassigned" bucket, so a pick with no court sets on false.
+type simultaneitySkip struct {
+	court string
+	on    bool
+}
+
+// skips reports whether the scan leaves out a running match on court.
+func (s simultaneitySkip) skips(court string) bool {
+	return s.on && court == s.court
+}
+
+// checkSimultaneousMatchSkippingTx returns *IneligibleCompetitorError if either
+// participant in matchID is currently Running in a different match within the
+// same competition (pool and bracket matches both checked). It is the ONE body
+// of the simultaneity gate (bc-twin): startSidesGateTx calls it, with a zero
+// simultaneitySkip{} for a real start (StartMatch and StartMatchTx) and with
+// the console's court for the start check.
 //
 // matchID's own identity is resolved from the pool-matches slice FIRST, via
 // findPoolMatch: a pool row already carries its own SideAID/SideBID, so
@@ -665,30 +687,6 @@ func (e *Engine) CheckStartAfterSendBack(compID, matchID, court string) error {
 // used to trip on (the live defect bc-brid fixes).
 //
 // Phase 2c simultaneity gate.
-func (e *Engine) checkSimultaneousMatchTx(h state.StoreTx, compID, matchID string) error {
-	return e.checkSimultaneousMatchSkippingTx(h, compID, matchID, simultaneitySkip{})
-}
-
-// simultaneitySkip names the running matches the simultaneity scan leaves
-// out: with on set, every running match on court. The zero value skips
-// nothing, which is what a real start asks. CheckStartAfterSendBack sets it
-// to the console's court, whose running bout the console sends back before
-// the start, so a competitor that bout shares with the pick is free by then.
-// The court is never a sentinel on its own: an empty court is the real
-// "unassigned" bucket, so a pick with no court sets on false.
-type simultaneitySkip struct {
-	court string
-	on    bool
-}
-
-// skips reports whether the scan leaves out a running match on court.
-func (s simultaneitySkip) skips(court string) bool {
-	return s.on && court == s.court
-}
-
-// checkSimultaneousMatchSkippingTx is the ONE body of the simultaneity gate
-// (bc-twin): checkSimultaneousMatchTx asks it to skip nothing, the start
-// check to skip the console's court.
 func (e *Engine) checkSimultaneousMatchSkippingTx(h state.StoreTx, compID, matchID string, skip simultaneitySkip) error {
 	var sideA, sideB, rawIDA, rawIDB string
 	isPoolMatch := false
@@ -758,18 +756,18 @@ func (e *Engine) checkSimultaneousMatchSkippingTx(h state.StoreTx, compID, match
 	// bc-cse: the operator sentence for the gate itself (comp/bracket are
 	// already the ones this call needs to name the OTHER match, m/bm below,
 	// not matchID). comp is loaded LAZILY, inside the closure, not above:
-	// every caller of checkSimultaneousMatchTx returns immediately on the
-	// first conflict found, so this closure runs AT MOST ONCE per call, and
-	// loading comp here means the common case (no conflict) never pays for
-	// it at all. comp is still best-effort: OperatorMatchLabel degrades to
-	// the pool's own name on a nil comp (no League-heading override), so a
-	// load failure still gates the write correctly, only the sentence's
-	// match name gets plainer -- but the error is logged rather than
-	// discarded, per the errcheck rule.
+	// every caller of checkSimultaneousMatchSkippingTx returns immediately
+	// on the first conflict found, so this closure runs AT MOST ONCE per
+	// call, and loading comp here means the common case (no conflict) never
+	// pays for it at all. comp is still best-effort: OperatorMatchLabel
+	// degrades to the pool's own name on a nil comp (no League-heading
+	// override), so a load failure still gates the write correctly, only the
+	// sentence's match name gets plainer -- but the error is logged rather
+	// than discarded, per the errcheck rule.
 	simultaneousReason := func(name, otherMatchID, court string) string {
 		comp, err := h.LoadCompetition(compID)
 		if err != nil {
-			log.Printf("engine: checkSimultaneousMatchTx: LoadCompetition compId=%s: %v (label degrades to pool-phase-only)", compID, err)
+			log.Printf("engine: checkSimultaneousMatchSkippingTx: LoadCompetition compId=%s: %v (label degrades to pool-phase-only)", compID, err)
 		}
 		label := OperatorMatchLabel(comp, bracket, otherMatchID)
 		return fmt.Sprintf("%s is fighting now in %s on Shiaijo %s. Finish that match first.", name, label, court)
@@ -857,7 +855,7 @@ func findBracketMatchInBracket(bracket *state.Bracket, matchID string) *state.Br
 
 // matchesBracketSide reports whether a running bracket match candidate bm
 // includes the competitor identified by (rawID, name) on either of its own
-// sides -- checkSimultaneousMatchTx's bracket-vs-bracket comparison
+// sides -- checkSimultaneousMatchSkippingTx's bracket-vs-bracket comparison
 // (bc-brid).
 //
 // Prefers an id match when rawID and at least one of bm's own side ids are
@@ -1010,7 +1008,7 @@ func courtOccupied(poolMatches []state.MatchResult, bracket *state.Bracket, cour
 
 // resolvePlayerIDs resolves sideA/sideB (display names) against the
 // competition's roster, returning "" for either side with no participant
-// match (no name fallback: checkSimultaneousMatchTx's pool-vs-pool
+// match (no name fallback: checkSimultaneousMatchSkippingTx's pool-vs-pool
 // comparison is id-only by operator ruling bc-pnum, since a name silently
 // substituted for a missing id could never legitimately equal a real
 // SideAID/SideBID anyway).

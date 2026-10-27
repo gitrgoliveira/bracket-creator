@@ -3031,14 +3031,16 @@ paths:
       tags: [matches]
       summary: Check that a match could start once the court's running match goes back
       description: |
-        Answers whether starting match `mid` would be accepted once the
-        match now running on its shiaijo is sent back to the queue. The
-        court console asks this before it sends that running match back for
-        another start, so a start the server would refuse leaves the running
-        match running and shows the reason on the picked match.
+        Answers whether starting match `mid` would be refused for its
+        status, its court or its competitors once the match now running on
+        its shiaijo is sent back to the queue. The court console asks this
+        before it sends that running match back for another start, so a
+        start the server would refuse leaves the running match running and
+        shows the reason on the picked match.
 
-        The caller names the pick and its court; the server still works out
-        which match runs there. The check runs the same competitor checks as
+        The caller names the pick and its court; the server leaves out
+        every match of the competition that is running on that court
+        (normally one). The check runs the same competitor checks as
         the start: a competitor fighting now in another match of the
         competition, with the matches running on that court left out (a pick
         with no court leaves out nothing), and a competitor barred by a
@@ -3048,9 +3050,12 @@ paths:
         It writes nothing and takes no lock, so it carries no `writeId` or
         `basis`. Check and start are separate requests: the start judges
         again under the competition's lock, so a change made between them
-        on another device can still refuse it. Intentionally accessible to
-        court operators in self-run mode (operational play, like starting a
-        match and sending one back).
+        on another device can still refuse it. The check leaves out the
+        gates only the start has (a competitor busy on the same court in
+        another competition, the self-run rules and the team-finish
+        refusal), so a 200 is not a promise that the start succeeds.
+        Intentionally accessible to court operators in self-run mode
+        (operational play, like starting a match and sending one back).
       security:
         - TournamentPassword: []
       parameters:
@@ -3061,10 +3066,11 @@ paths:
           required: true
           schema:
             type: string
-          description: The shiaijo the console is operating; the match running there is the one that gets sent back.
+            maxLength: 32
+          description: The shiaijo the console is operating; the match running there is the one that gets sent back, and a longer court name than 32 characters is a 400.
       responses:
         '200':
-          description: The start would be accepted.
+          description: None of the checks refuses the start.
           content:
             application/json:
               schema:

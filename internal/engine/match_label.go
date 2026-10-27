@@ -30,14 +30,14 @@ import (
 // comp/bracket degrades to the bare id (MatchLabel's own fallback) rather
 // than erroring.
 //
-// Callers already holding a live transaction (checkSimultaneousMatchTx's
-// siblings, kachinuki.go's reopen/court-busy messages) load comp/bracket via
-// their own `h state.StoreTx` handle and call this directly; a handler
-// loads via its CompetitionStore interface (LoadCompetition/LoadBracket are
-// already on it) and does the same. There is no separate "Tx" twin of this
-// function: it takes no store handle at all, so bc-twin's rule (one body,
-// not a hand-copied pair differing only by store handle) has nothing to
-// duplicate here.
+// Callers already holding a live transaction
+// (checkSimultaneousMatchSkippingTx's siblings, kachinuki.go's
+// reopen/court-busy messages) load comp/bracket via their own `h state.StoreTx`
+// handle and call this directly; a handler loads via its CompetitionStore
+// interface (LoadCompetition/LoadBracket are already on it) and does the same.
+// There is no separate "Tx" twin of this function: it takes no store handle at
+// all, so bc-twin's rule (one body, not a hand-copied pair differing only by
+// store handle) has nothing to duplicate here.
 func OperatorMatchLabel(comp *state.Competition, bracket *state.Bracket, matchID string) string {
 	if label, ok := poolPhaseMatchLabel(comp, matchID); ok {
 		return label
@@ -73,7 +73,7 @@ type matchLabelStore interface {
 // acquire (the lock is non-reentrant). A caller inside a transaction
 // already has its `h state.StoreTx` handle's own LoadCompetition/LoadBracket
 // and should call OperatorMatchLabel directly with what it loads through
-// that handle instead (see e.g. checkSimultaneousMatchTx's
+// that handle instead (see e.g. checkSimultaneousMatchSkippingTx's
 // simultaneousReason closure).
 func OperatorMatchLabelFromStore(store matchLabelStore, compID, matchID string) string {
 	comp, err := store.LoadCompetition(compID)

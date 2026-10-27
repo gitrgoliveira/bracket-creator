@@ -92,9 +92,9 @@ func TestMatchLookupsPropagateLoadErrors(t *testing.T) {
 						return err
 					})
 				}},
-				{"checkSimultaneousMatchTx", func() error {
+				{"checkSimultaneousMatchSkippingTx", func() error {
 					return inTxErr(func(tx state.StoreTx) error {
-						return eng.checkSimultaneousMatchTx(tx, compID, matchID)
+						return eng.checkSimultaneousMatchSkippingTx(tx, compID, matchID, simultaneitySkip{})
 					})
 				}},
 				{"findMatchHome", func() error {

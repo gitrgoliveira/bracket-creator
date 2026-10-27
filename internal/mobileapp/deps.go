@@ -117,11 +117,12 @@ type ScoringEngine interface {
 	// Score handler wraps fought/hikiwake submissions with this.
 	StartMatchTx(tx state.StoreTx, compID, matchID string) error
 	// CheckStartAfterSendBack is the start check (bc-stpf, GET
-	// .../start-check): would starting matchID be accepted once the bout
-	// running on court is sent back? It runs the same sides gate as
-	// StartMatchTx with that court's running bout left out, writes nothing
-	// and takes no lock. Returns nil when acceptable; typed errors
-	// *engine.NotFoundError, *engine.MatchNotScheduledError,
+	// .../start-check): would starting matchID be refused for its status,
+	// court or competitors once the bout running on court is sent back? It
+	// runs the same sides gate as StartMatchTx with that court's running
+	// bout left out, writes nothing and takes no lock. Returns nil when none
+	// of those checks refuses it; the real start still judges again; typed
+	// errors *engine.NotFoundError, *engine.MatchNotScheduledError,
 	// *engine.MatchOnOtherCourtError, or *engine.IneligibleCompetitorError
 	// on refusal; any other error (a store load error) comes back as it is
 	// and the handler answers it as a 500.

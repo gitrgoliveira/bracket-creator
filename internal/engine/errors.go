@@ -414,10 +414,9 @@ var ErrBracketDrawMismatch = errors.New("this competition's stored bracket does 
 // court move arrives for a match that has already started running (rule 2).
 // Handlers return HTTP 409 with Sentence() in reasonHuman, message and error.
 type CourtMoveRefusedError struct {
-	Label        string
-	StoredStatus state.MatchStatus
-	StoredCourt  string
-	AskedCourt   string
+	Label       string
+	StoredCourt string
+	AskedCourt  string
 }
 
 func (e *CourtMoveRefusedError) Error() string {
@@ -425,17 +424,15 @@ func (e *CourtMoveRefusedError) Error() string {
 }
 
 // Sentence returns the operator-facing explanation for why the court move was
-// refused. Court X reads "Shiaijo X"; an unassigned court reads "no shiaijo".
+// refused. Court X reads "Shiaijo X"; an unassigned court is not named.
 func (e *CourtMoveRefusedError) Sentence() string {
-	label := SentenceCase(e.Label)
-	from := courtMoveShiaijoWords(e.StoredCourt)
-	to := courtMoveShiaijoWords(e.AskedCourt)
-	return fmt.Sprintf("%s was started on %s before your move reached the server, so it was not moved. Move it again to stop it there and put it first on %s.", label, from, to)
-}
-
-func courtMoveShiaijoWords(court string) string {
-	if court == "" {
-		return "no shiaijo"
+	started := "was started"
+	if e.StoredCourt != "" {
+		started += " on " + helper.ShiaijoLabel(e.StoredCourt)
 	}
-	return helper.ShiaijoLabel(court)
+	again := "leave it without a shiaijo"
+	if e.AskedCourt != "" {
+		again = "put it first on " + helper.ShiaijoLabel(e.AskedCourt)
+	}
+	return fmt.Sprintf("%s %s before your move reached the server, so it was not moved. Move it again to stop it there and %s.", SentenceCase(e.Label), started, again)
 }

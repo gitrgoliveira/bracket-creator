@@ -242,24 +242,31 @@ func TestUpdateMatchCourt_WaitingPoolBoutPushesOwnKnockout(t *testing.T) {
 	}
 	require.NotEmpty(t, moved.ID)
 
-	bBefore, err := store.LoadBracket(compID)
-	require.NoError(t, err)
+	// The competition's own knockout is no queue neighbour of its pool bouts:
+	// the bout lands after B's pool bouts, and the knockout follows the pools.
 	var latestOnB string
-	for _, r := range bBefore.Rounds {
-		for _, bm := range r {
-			if bm.Court == "B" && bm.Status == state.MatchStatusScheduled && bm.ScheduledAt > latestOnB {
-				latestOnB = bm.ScheduledAt
-			}
+	for _, m := range pms {
+		if m.Court == "B" && m.Status == state.MatchStatusScheduled && m.ScheduledAt > latestOnB {
+			latestOnB = m.ScheduledAt
 		}
 	}
-	require.NotEmpty(t, latestOnB, "court B must have a scheduled knockout match")
+	require.NotEmpty(t, latestOnB, "court B must have a scheduled pool bout")
+	bBefore, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	knockoutOnB := false
+	for _, r := range bBefore.Rounds {
+		for _, bm := range r {
+			knockoutOnB = knockoutOnB || (bm.Court == "B" && bm.MatchNumber > 0)
+		}
+	}
+	require.True(t, knockoutOnB, "court B must have a knockout match")
 
 	require.NoError(t, eng.UpdateMatchCourt(compID, moved.ID, "B", CourtMove{}))
 
 	pmAfter := loadPoolMatchByID(t, store, compID, moved.ID)
 	assert.Equal(t, "B", pmAfter.Court)
 	assert.Equal(t, lastInQueueTime(moved.ScheduledAt, latestOnB), pmAfter.ScheduledAt,
-		"the waiting pool bout lands one minute after the latest scheduled match on B")
+		"the waiting pool bout lands one minute after the latest pool bout waiting on B")
 
 	bAfter, err := store.LoadBracket(compID)
 	require.NoError(t, err)
@@ -389,6 +396,8 @@ func TestUpdateMatchCourt_RunningMoveConfirmed(t *testing.T) {
 				{
 					ID:          "m-r1-1",
 					MatchNumber: 2,
+					SideA:       "Carol",
+					SideB:       "Dave",
 					Status:      state.MatchStatusScheduled,
 					Court:       "A",
 					ScheduledAt: "10:15",
@@ -485,10 +494,15 @@ func TestUpdateMatchCourt_RunningMoveNotConfirmedRefused(t *testing.T) {
 	assert.Equal(t, refused.Sentence(), err.Error())
 	assert.Empty(t, historyLen(t, store, compID, "Pool A-0"))
 
-	// Unassigned court reads "no shiaijo".
+	// An unassigned court is not named.
 	err = eng.UpdateMatchCourt(compID, "Pool A-1", "A", CourtMove{StopsRunning: false})
 	require.True(t, errors.As(err, &refused))
-	assert.Equal(t, "Pool A · Match 2 was started on no shiaijo before your move reached the server, so it was not moved. Move it again to stop it there and put it first on Shiaijo A.", refused.Sentence())
+	assert.Equal(t, "Pool A · Match 2 was started before your move reached the server, so it was not moved. Move it again to stop it there and put it first on Shiaijo A.", refused.Sentence())
+
+	// A move off every shiaijo names none to put it on.
+	err = eng.UpdateMatchCourt(compID, "Pool A-0", "", CourtMove{StopsRunning: false})
+	require.True(t, errors.As(err, &refused))
+	assert.Equal(t, "Pool A · Match 1 was started on Shiaijo B before your move reached the server, so it was not moved. Move it again to stop it there and leave it without a shiaijo.", refused.Sentence())
 
 	// Bracket round match.
 	err = eng.UpdateMatchCourt(compID, "m-r1-0", "A", CourtMove{StopsRunning: false})

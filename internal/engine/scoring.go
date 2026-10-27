@@ -3638,10 +3638,9 @@ func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string
 					log.Printf("engine: UpdateMatchCourt: LoadCompetition compId=%s: %v (label degrades to pool-phase-only)", compId, cerr)
 				}
 				return &CourtMoveRefusedError{
-					Label:        OperatorMatchLabel(comp, bracket, matchId),
-					StoredStatus: storedStatus,
-					StoredCourt:  storedCourt,
-					AskedCourt:   newCourt,
+					Label:       OperatorMatchLabel(comp, bracket, matchId),
+					StoredCourt: storedCourt,
+					AskedCourt:  newCourt,
 				}
 			}
 
@@ -3725,26 +3724,6 @@ func movedQueueTime(requeued bool, status state.MatchStatus, own, earliest, late
 	}
 }
 
-func queueSortTime(t string) string {
-	if t == "" {
-		return "99:99"
-	}
-	return t
-}
-
-// canonicalHHMM parses s as minutes since midnight, accepting only the
-// canonical two-digit HH:MM form.
-func canonicalHHMM(s string) (int, bool) {
-	if len(s) != 5 || s[2] != ':' {
-		return 0, false
-	}
-	mins, ok := parseHHMM(s)
-	if !ok || fmtHHMM(mins) != s {
-		return 0, false
-	}
-	return mins, true
-}
-
 // firstInQueueTime returns one minute before earliest (the target court's
 // earliest timed scheduled match) so a confirmed running court move places the
 // requeued match first in the target court's queue. When earliest is "00:00"
@@ -3753,8 +3732,8 @@ func canonicalHHMM(s string) (int, bool) {
 // earliest in queue order (where an empty own reads as "99:99"), or when
 // earliest is unparseable or not in canonical two-digit HH:MM form.
 func firstInQueueTime(own, earliest string) string {
-	mins, ok := canonicalHHMM(earliest)
-	if !ok || queueSortTime(own) < earliest {
+	mins, ok := state.CanonicalQueueTime(earliest)
+	if !ok || state.QueueSortTime(own) < earliest {
 		return own
 	}
 	if mins == 0 {
@@ -3771,8 +3750,8 @@ func firstInQueueTime(own, earliest string) string {
 // reads as "99:99" and stays ""), or when latest is not in canonical two-digit
 // HH:MM form.
 func lastInQueueTime(own, latest string) string {
-	mins, ok := canonicalHHMM(latest)
-	if !ok || queueSortTime(own) > latest {
+	mins, ok := state.CanonicalQueueTime(latest)
+	if !ok || state.QueueSortTime(own) > latest {
 		return own
 	}
 	if mins == 23*60+59 {

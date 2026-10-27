@@ -3514,7 +3514,11 @@ paths:
         Moves a match to another court. A confirmed running move is sent back to
         the queue there with its score kept and placed first in that court's queue;
         a waiting match is placed last in that court's queue; a finished match
-        moves its court only and keeps its time. The only refusal is an
+        moves its court only and keeps its time. First and last are judged on
+        the court's waiting matches with a canonical HH:MM time and both
+        competitors known (a knockout match still waiting on its feeders does
+        not count), and a pool bout is never placed after its own competition's
+        knockout, which follows the pool phase. The only refusal is an
         unconfirmed move (no stopsRunning) that finds the match running after
         it was started on another device, answered 409. A confirmed running
         move whose match has since stopped running is carried out as for a

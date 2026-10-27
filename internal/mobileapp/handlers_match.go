@@ -169,14 +169,7 @@ func annotateBracketQueuePositions(b *state.Bracket) {
 			}
 			// Empty scheduledAt sinks to the end (mirrors the JS
 			// fallback to "99:99" in ScheduleViewer's sort).
-			ai := entries[i].m.ScheduledAt
-			aj := entries[j].m.ScheduledAt
-			if ai == "" {
-				ai = "99:99"
-			}
-			if aj == "" {
-				aj = "99:99"
-			}
+			ai, aj := state.QueueSortTime(entries[i].m.ScheduledAt), state.QueueSortTime(entries[j].m.ScheduledAt)
 			if ai != aj {
 				return ai < aj
 			}

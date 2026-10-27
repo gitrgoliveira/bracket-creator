@@ -91,6 +91,12 @@ func TestCourtQueueBounds_IgnoredMatchesAndOtherCourts(t *testing.T) {
 	}))
 	earliestC, latestC, err := store.CourtQueueBounds("C", "", "")
 	require.NoError(t, err)
+	assert.Equal(t, QueueSortTime(""), earliestC, "a court whose waiting matches are all untimed reads as untimed")
+	assert.Equal(t, QueueSortTime(""), latestC)
+
+	// The moved match itself is not the court's untimed neighbour.
+	earliestC, latestC, err = store.CourtQueueBounds("C", "comp2", "m2-untimed")
+	require.NoError(t, err)
 	assert.Equal(t, "", earliestC)
 	assert.Equal(t, "", latestC)
 }

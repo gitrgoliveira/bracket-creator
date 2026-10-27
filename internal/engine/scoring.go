@@ -3582,7 +3582,7 @@ func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string
 		}
 
 		return e.store.WithTransaction(compId, func(tx state.StoreTx) error {
-			// Rule 0: a resend of a confirmed running court move already logged
+			// A resend of a confirmed running court move already logged
 			// in the match's score event log is answered as recorded, with
 			// nothing written and no second history line.
 			if mv.WriteID != "" && e.loggedWriteID(tx, compId, matchId, mv.WriteID) {
@@ -3625,7 +3625,7 @@ func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string
 				return notFoundErrorf("match %s not found in competition %s", matchId, compId)
 			}
 
-			// Rule 1: moving to the court the match already sits on changes
+			// Moving to the court the match already sits on changes
 			// nothing, whatever its status. Return before any with*Match call
 			// so nothing is saved and no file version moves.
 			if newCourt == storedCourt {
@@ -3644,9 +3644,9 @@ func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string
 				}
 			}
 
-			// Rule 2: stored running and not confirmed. If the match is not
-			// running, StopsRunning has no effect (the move proceeds under
-			// rule 5a or 5b).
+			// Stored running and not confirmed: refused. If the match is not
+			// running, StopsRunning has no effect (the move proceeds as for a
+			// waiting match, or, for a finished one, changes only its court).
 			running := storedStatus == state.MatchStatusRunning
 			if running && !mv.StopsRunning {
 				return refuseMove()
@@ -3712,7 +3712,8 @@ func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string
 // matches), last when it was waiting there (after timed waiting matches), tied
 // with the earliest at "00:00" or the latest at "23:59" when no minute is left
 // beyond it, and its own time when it had already finished or when the target
-// court has no timed waiting matches.
+// court has no timed waiting matches; a waiting match moved onto a court whose
+// waiting matches are all untimed is left untimed, last with them.
 func movedQueueTime(requeued bool, status state.MatchStatus, own, earliest, latest string) string {
 	switch {
 	case requeued:
@@ -3745,11 +3746,16 @@ func firstInQueueTime(own, earliest string) string {
 // lastInQueueTime returns one minute after latest (the target court's latest
 // timed scheduled match) so a waiting match moved to another court lands last
 // in that court's queue. When latest is "23:59" there is no later minute, so it
-// returns "23:59" itself and the match ties for last. It keeps own when latest
+// returns "23:59" itself and the match ties for last. When latest is "99:99"
+// (state.QueueSortTime of an untimed match: the court's waiting matches are all
+// untimed) it returns "", so the match sinks with them. It keeps own when latest
 // is empty, when own already sorts after latest in queue order (an empty own
 // reads as "99:99" and stays ""), or when latest is not in canonical two-digit
 // HH:MM form.
 func lastInQueueTime(own, latest string) string {
+	if latest == state.QueueSortTime("") {
+		return ""
+	}
 	mins, ok := state.CanonicalQueueTime(latest)
 	if !ok || state.QueueSortTime(own) > latest {
 		return own

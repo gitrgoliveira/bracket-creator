@@ -136,7 +136,7 @@ test.describe('moved-match', () => {
     row({ step: '3 move', action: 'Move to Shiaijo B confirm', variant: 'V4 hastyShiaijoConfirm', ...hasty, moved, confirmShot });
     expect(hasty.title).toBe('Move to Shiaijo B?');
     // PR #453 (a): the confirm names the match, both competitors.
-    expect(hasty.message).toBe(`${pairText(moved)} leaves Shiaijo A and joins the queue on Shiaijo B.`);
+    expect(hasty.message).toBe(`${pairText(moved)} leaves Shiaijo A and goes last in the queue on Shiaijo B.`);
     await expect.poll(async () => queueNames(await courtState(A)).includes(pairText(moved)), { timeout: 10_000 }).toBe(false);
     row({ step: '3 move', action: "court A's queue after the move", variant: 'correct path', queue: queueNames(await courtState(A)),
       shot: await shot(A, 'court-A-after-move') });

@@ -409,6 +409,7 @@ describe('moveMatchCourt chokepoint', () => {
     window.API = {
       moveMatchCourt: moveMatchCourtSpy,
       fetchCompetitions: fetchCompetitionsSpy,
+      stoppingCourtMoveQueued: vi.fn(() => false),
     };
     window.confirmDialog = confirmDialogSpy;
   });
@@ -489,6 +490,25 @@ describe('moveMatchCourt chokepoint', () => {
     }));
   });
 
+  // A->B was confirmed and is still queued: the match shows running on B
+  // (only the court is overlaid), but the server stops it with the first
+  // move, so B->C finds it waiting and puts it last on C. It moves as a
+  // waiting match: no question promising "first", no stopsRunning.
+  it('a running shown match whose stopping move is still queued moves as a waiting one', async () => {
+    window.API.stoppingCourtMoveQueued = vi.fn(() => true);
+    const onMoveCourt = makeMoveHandler({ competitions: [] });
+    const res = await onMoveCourt('c1', 'm1', 'C', {
+      shown: { id: 'm1', court: 'B', status: 'running', sideA: { name: 'Quinn Walker' }, sideB: { name: 'Jane Austen' } },
+    });
+    expect(await res.landed).toBe(true);
+    expect(window.API.stoppingCourtMoveQueued).toHaveBeenCalledWith('c1', 'm1');
+    expect(confirmDialogSpy).not.toHaveBeenCalled();
+    expect(moveMatchCourtSpy).toHaveBeenCalledTimes(1);
+    const opts = moveMatchCourtSpy.mock.calls[0][4];
+    expect(opts.stopsRunning).toBeUndefined();
+    expect(opts.was).toEqual({ court: 'B' });
+  });
+
   it('hostUnsavedRef with unsaved entries includes the discard sentence and discards on confirm', async () => {
     const discard = vi.fn();
     const thunk = Object.assign(() => true, { discard });
@@ -530,7 +550,7 @@ describe('moveMatchCourt chokepoint', () => {
   });
 
   it('a refusal toasts the sentence once and refreshes from onRefusal, answering landed false', async () => {
-    const sentence = 'Jane Austen vs Quinn Walker was started on Shiaijo A before your move reached the server, so it was not moved. Move it again to stop it there and put it first on Shiaijo B.';
+    const sentence = 'Jane Austen vs Quinn Walker was started on Shiaijo A before your move reached the server, so it was not moved. To stop it and put it first on Shiaijo B, move it from the Scores tab, the schedule page or the Bracket tab, which ask first.';
     let rejectSettled;
     moveMatchCourtSpy.mockImplementationOnce(async (_c, _m, _ct, _pw, opts) => {
       const settled = new Promise((_res, rej) => { rejectSettled = rej; });

@@ -2725,8 +2725,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                             Move to Shiaijo {pendingMove.to}?
                         </h3>
                         <p className="shiaijo-move-confirm__body" aria-live="polite">
-                            <strong>{pendingMove.label}</strong> leaves Shiaijo {pendingMove.from} and joins
-                            the queue on Shiaijo {pendingMove.to}.
+                            {/* Only a waiting row offers a move here (ShiaijoQueueRow's
+                                showActions), and a waiting match goes last there. */}
+                            <strong>{pendingMove.label}</strong> leaves Shiaijo {pendingMove.from} and goes
+                            last in the queue on Shiaijo {pendingMove.to}.
                             {pendingMove.unsaved ? ` ${UNSAVED_ENTRIES_DISCARDED}` : ""}
                         </p>
                         <div className="shiaijo-move-confirm__actions">

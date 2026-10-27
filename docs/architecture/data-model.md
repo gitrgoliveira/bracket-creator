@@ -984,13 +984,19 @@ Appending columns and leaving some fields unwritten are the two consequences tha
   disagree with the schedule it was drawn from, so it is
   excluded from `pool-matches.csv` by name, on top of carrying a tag that already keeps it out
   of the YAML-marshalled forms. A court move places a match in its new court's queue through
-  the scheduled time, which is persisted: a confirmed running match takes a time one minute
-  before that court's earliest timed waiting match, and a waiting match a time one minute after
-  the latest. Only a time in two-digit `HH:MM` counts, and only a match with both competitors
-  known: a knockout match whose side is still a feeder ("Winner of ...", "Pool A-1st") or a
-  bronze match's empty side is not a queue entry yet. A pool bout ignores its own
-  competition's knockout, which is placed after the pool phase. Where that court has no such
-  match, the moved match keeps its own time, and a finished match always does.
+  the scheduled time, which is persisted. A confirmed running match goes first: it takes a
+  time one minute before the court's earliest timed waiting match, or that same time when it
+  is 00:00. A waiting match goes last: one minute after the court's latest timed waiting
+  match, or that same time when it is 23:59. A match whose own time already sorts ahead of
+  (running) or behind (waiting) every one of them keeps it. Only a waiting match with both
+  competitors known counts: a knockout match whose side is still a feeder ("Winner of ...",
+  "Pool A-1st") or a bronze match's empty side is not a queue entry yet. A time not in
+  two-digit `HH:MM` (a legacy "9:45") is not compared. A pool bout ignores its own
+  competition's knockout, which is then pushed after the pool phase on that court, never past
+  23:59. Where the court's waiting matches have no time at all, a moved waiting match is left
+  without one too and sorts last with them, while a running match keeps its own time and sorts
+  ahead of them. Where the court has no waiting match, the moved match keeps its own time, and
+  a finished match always does.
 
 If the storage were rebuilt around queries rather than around people reading it, the shape
 would differ: a match side table would replace the paired columns, and sub bouts would be

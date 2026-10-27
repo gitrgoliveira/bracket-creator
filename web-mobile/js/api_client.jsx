@@ -6573,6 +6573,13 @@ const API = {
     courtMoveQueued(compID, matchID) {
         return 'court' in _pendingMatchFields(compID, matchID);
     },
+    // Whether a move that stops this running match is still queued here (one
+    // already out included): the server stops it with that move, so a later
+    // move finds it waiting, and the copy shown still says running.
+    stoppingCourtMoveQueued(compID, matchID) {
+        return _entriesFor(_revKey(compID, matchID))
+            .some(([, d]) => d.kind === 'court' && d.payload && d.payload.stopsRunning === true);
+    },
 
     /**
      * bc-qttl: un-park writes held on a 401 and retry them with a freshly

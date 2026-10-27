@@ -163,6 +163,34 @@ describe('a court move and a time change are entries of their match', () => {
         expect(API.courtMoveQueued('c1', 'm1')).toBe(false);
     });
 
+    // The host asks it before a running match's move (admin.jsx
+    // moveMatchCourt): the first confirmed move stops the match on the
+    // server, so a second one made before the answer is a waiting match's.
+    it('stoppingCourtMoveQueued is true while a move that stops the match is queued or out, and not for a plain move', async () => {
+        expect(API.stoppingCourtMoveQueued('c1', 'm1')).toBe(false);
+        await API.moveMatchCourt('c1', 'm1', 'B', 'pw', { was: { court: 'A' } });
+        expect(API.stoppingCourtMoveQueued('c1', 'm1')).toBe(false);
+        await API.moveMatchCourt('c1', 'm1', 'C', 'pw', { stopsRunning: true, was: { court: 'B' } });
+        expect(API.stoppingCourtMoveQueued('c1', 'm1')).toBe(true);
+        expect(API.stoppingCourtMoveQueued('c1', 'm2')).toBe(false);
+
+        // Out (sent, unanswered): still the server's to apply.
+        const release = [];
+        global.fetch = vi.fn((url) => (isClock(url)
+            ? Promise.reject(new TypeError('clock'))
+            : new Promise((r) => { release.push(() => r({ ok: true, status: 200, json: async () => ({}) })); })));
+        window.dispatchEvent(new Event('online'));
+        await tick(0);
+        release.shift()();
+        await tick(0);
+        expect(global.fetch.mock.calls.filter(([u]) => path(u) === 'matches/m1/court')).toHaveLength(2);
+        expect(API.stoppingCourtMoveQueued('c1', 'm1')).toBe(true);
+
+        release.shift()();
+        await tick(0);
+        expect(API.stoppingCourtMoveQueued('c1', 'm1')).toBe(false);
+    });
+
     it('keeps stopsRunning: true across a reload and sends it when rehydrated', async () => {
         await API.moveMatchCourt('c1', 'm1', 'B', 'pw', { stopsRunning: true, was: { court: 'A' } });
         expect(stored()).toHaveLength(1);
@@ -179,7 +207,7 @@ describe('a court move and a time change are entries of their match', () => {
 
     it('a 409 match_status_changed on the court entry is terminal, fires onRefusal once with the sentence, and puts the old court back', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const sentence = 'Shiro vs Aka was started on Shiaijo A before your move reached the server, so it was not moved. Move it again to stop it there and put it first on Shiaijo B.';
+        const sentence = 'Shiro vs Aka was started on Shiaijo A before your move reached the server, so it was not moved. To stop it and put it first on Shiaijo B, move it from the Scores tab, the schedule page or the Bracket tab, which ask first.';
         const patches = [];
         API.subscribeLocalMatchPatch((e) => patches.push(e && e.data && e.data.result));
         const sent = server(() => ({

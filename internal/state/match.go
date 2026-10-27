@@ -136,6 +136,12 @@ func CanonicalQueueTime(s string) (int, bool) {
 // match apart), so a match moved onto the court is never placed behind the
 // later round it feeds.
 //
+// A court whose only such waiting matches carry no time at all answers
+// QueueSortTime("") ("99:99") for both bounds, the time its queue sorts them
+// by, so a waiting match moved there sinks with them (lastInQueueTime,
+// internal/engine). Where any of them is timed, the untimed ones are not a
+// bound. Both bounds are empty when no waiting match counted.
+//
 // A pool bout's own knockout is skipped as well: it follows that competition's
 // pool phase on every court (pushKnockoutPastPools, internal/engine), so a pool
 // bout placed after it would push it later again on every move.
@@ -178,6 +184,9 @@ func (s *Store) CourtQueueBounds(court, skipCompID, skipMatchID string) (earlies
 			return "", "", err
 		}
 	}
+	if acc.latest == "" && acc.untimed {
+		return QueueSortTime(""), QueueSortTime(""), nil
+	}
 	return acc.earliest, acc.latest, nil
 }
 
@@ -187,16 +196,22 @@ type queueBoundsAcc struct {
 	skipMatchID string
 	earliest    string
 	latest      string
+	// untimed: the court holds a waiting match with no ScheduledAt.
+	untimed bool
 }
 
 func (a *queueBoundsAcc) observe(compID, matchID, court string, status MatchStatus, scheduledAt string) {
 	if court != a.court || status != MatchStatusScheduled {
 		return
 	}
-	if _, ok := CanonicalQueueTime(scheduledAt); !ok {
+	if compID == a.skipCompID && matchID == a.skipMatchID {
 		return
 	}
-	if compID == a.skipCompID && matchID == a.skipMatchID {
+	if scheduledAt == "" {
+		a.untimed = true
+		return
+	}
+	if _, ok := CanonicalQueueTime(scheduledAt); !ok {
 		return
 	}
 	if a.earliest == "" || scheduledAt < a.earliest {

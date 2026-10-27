@@ -355,7 +355,11 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     if (shown && (shown.court || "") === (newCourt || "")) {
       return { landed: Promise.resolve(false) };
     }
-    const running = !!(shown && shown.status === "running");
+    // A running match whose confirmed move is still queued is stopped by that
+    // move, so this one finds it waiting on the server and puts it last: it is
+    // a waiting match's move (the copy shown overlays only the court, Q5).
+    const running = !!(shown && shown.status === "running")
+      && !window.API.stoppingCourtMoveQueued(compId, matchId);
     if (running && !opts.confirmed) {
       const unsaved = holdsUnsaved(opts.hostUnsavedRef);
       const ok = await confirmRunningCourtMove({

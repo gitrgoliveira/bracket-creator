@@ -411,8 +411,10 @@ var ErrSwissExportUnsupported = errors.New("not yet implemented: Swiss competiti
 var ErrBracketDrawMismatch = errors.New("this competition's stored bracket does not match its current settings, so the knockout stage cannot be exported; discard and regenerate the draw, or restore the settings the bracket was originally built with")
 
 // CourtMoveRefusedError is returned by UpdateMatchCourt when an unconfirmed
-// court move arrives for a match that has already started running (rule 2).
-// Handlers return HTTP 409 with Sentence() in reasonHuman, message and error.
+// court move arrives for a match that has already started running.
+// respondIfCourtMoveRefused (internal/mobileapp) answers it HTTP 409 with
+// Sentence() in reasonHuman and message, and the code match_status_changed in
+// code and error.
 type CourtMoveRefusedError struct {
 	Label       string
 	StoredCourt string
@@ -424,7 +426,9 @@ func (e *CourtMoveRefusedError) Error() string {
 }
 
 // Sentence returns the operator-facing explanation for why the court move was
-// refused. Court X reads "Shiaijo X"; an unassigned court is not named.
+// refused. Court X reads "Shiaijo X"; an unassigned court is not named. It
+// names the doors that move a running match, since the court console, where
+// a waiting match can also be moved, offers no move for a running one.
 func (e *CourtMoveRefusedError) Sentence() string {
 	started := "was started"
 	if e.StoredCourt != "" {
@@ -434,5 +438,5 @@ func (e *CourtMoveRefusedError) Sentence() string {
 	if e.AskedCourt != "" {
 		again = "put it first on " + helper.ShiaijoLabel(e.AskedCourt)
 	}
-	return fmt.Sprintf("%s %s before your move reached the server, so it was not moved. Move it again to stop it there and %s.", SentenceCase(e.Label), started, again)
+	return fmt.Sprintf("%s %s before your move reached the server, so it was not moved. To stop it and %s, move it from the Scores tab, the schedule page or the Bracket tab, which ask first.", SentenceCase(e.Label), started, again)
 }

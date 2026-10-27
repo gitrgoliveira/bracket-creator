@@ -44,6 +44,7 @@ const STUBBED_GLOBALS = {
   confirmDialog: vi.fn().mockResolvedValue(true),
   API: {
     moveMatchCourt: vi.fn(),
+    stoppingCourtMoveQueued: vi.fn(() => false),
     fetchCompetitions: vi.fn().mockResolvedValue([]),
     fetchCompetitionDetails: vi.fn().mockResolvedValue(null),
     fetchDrawWarnings: vi.fn().mockResolvedValue([]),
@@ -252,7 +253,7 @@ describe('running court move confirmation across all doors', () => {
       expect(dialog).toBeTruthy();
       expect(dialog.querySelector('.shiaijo-move-confirm__title').textContent).toBe('Move to Shiaijo B?');
       expect(dialog.querySelector('.shiaijo-move-confirm__body').textContent).toBe(
-        'Shiro m2 vs Aka m2 leaves Shiaijo A and joins the queue on Shiaijo B.'
+        'Shiro m2 vs Aka m2 leaves Shiaijo A and goes last in the queue on Shiaijo B.'
       );
 
       // Cancel sends nothing
@@ -659,7 +660,7 @@ describe('running court move confirmation across all doors', () => {
 
   // Door 7: Refusal
   describe('door 7: refusal callback', () => {
-    const sentence = 'Jane Austen vs Quinn Walker was started on Shiaijo A before your move reached the server, so it was not moved. Move it again to stop it there and put it first on Shiaijo B.';
+    const sentence = 'Jane Austen vs Quinn Walker was started on Shiaijo A before your move reached the server, so it was not moved. To stop it and put it first on Shiaijo B, move it from the Scores tab, the schedule page or the Bracket tab, which ask first.';
 
     function StatefulAdminApp(props) {
       const [t, setT] = React.useState(props.tournament);

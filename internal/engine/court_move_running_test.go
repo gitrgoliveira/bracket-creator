@@ -38,6 +38,10 @@ func TestFirstInQueueTime(t *testing.T) {
 	assert.Equal(t, "10:00", firstInQueueTime("10:00", "9:45"))
 	assert.Equal(t, "", firstInQueueTime("", "9:45"))
 	assert.Equal(t, "10:00", firstInQueueTime("10:00", "not-a-time"))
+
+	// A court whose waiting matches are all untimed: a timed match already
+	// sorts ahead of them.
+	assert.Equal(t, "10:00", firstInQueueTime("10:00", state.QueueSortTime("")))
 }
 
 func TestLastInQueueTime(t *testing.T) {
@@ -66,6 +70,11 @@ func TestLastInQueueTime(t *testing.T) {
 	assert.Equal(t, "09:00", lastInQueueTime("09:00", "9:45"))
 	assert.Equal(t, "10:00", lastInQueueTime("10:00", "9:45"))
 	assert.Equal(t, "09:00", lastInQueueTime("09:00", "not-a-time"))
+
+	// A court whose waiting matches are all untimed: the moved match sinks
+	// with them.
+	assert.Equal(t, "", lastInQueueTime("09:00", state.QueueSortTime("")))
+	assert.Equal(t, "", lastInQueueTime("", state.QueueSortTime("")))
 }
 
 func TestUpdateMatchCourt_SameCourtNoOpAndRefusalsKeepFileVersion(t *testing.T) {
@@ -91,7 +100,8 @@ func TestUpdateMatchCourt_SameCourtNoOpAndRefusalsKeepFileVersion(t *testing.T) 
 	poolVer := store.FileVersion(compID, "pool-matches.csv")
 	bracketVer := store.FileVersion(compID, "bracket.json")
 
-	// Rule 1: same-court moves on pool, bracket round, and bronze matches, across statuses.
+	// A move to the court a match already sits on, on pool, bracket round and
+	// bronze matches, across statuses, changes nothing.
 	require.NoError(t, eng.UpdateMatchCourt(compID, "Pool A-0", "A", CourtMove{}))
 	require.NoError(t, eng.UpdateMatchCourt(compID, "Pool A-1", "B", CourtMove{}))
 	require.NoError(t, eng.UpdateMatchCourt(compID, "Pool A-1", "B", CourtMove{StopsRunning: true}))
@@ -102,7 +112,7 @@ func TestUpdateMatchCourt_SameCourtNoOpAndRefusalsKeepFileVersion(t *testing.T) 
 	assert.Equal(t, poolVer, store.FileVersion(compID, "pool-matches.csv"), "same-court move must not save pool-matches.csv")
 	assert.Equal(t, bracketVer, store.FileVersion(compID, "bracket.json"), "same-court move must not save bracket.json")
 
-	// Rule 2 refusal on running pool and bracket matches.
+	// An unconfirmed move of a running pool or bracket match is refused.
 	require.Error(t, eng.UpdateMatchCourt(compID, "Pool A-1", "A", CourtMove{StopsRunning: false}))
 	require.Error(t, eng.UpdateMatchCourt(compID, "m-r1-1", "A", CourtMove{StopsRunning: false}))
 
@@ -154,12 +164,13 @@ func TestUpdateMatchCourt_WaitingMoveLandsLast(t *testing.T) {
 	assert.Equal(t, "11:32", b.Rounds[0][0].ScheduledAt)
 	assert.Empty(t, historyLen(t, store, compKo, "m-r1-0"))
 
-	// Moving bronze match to C (which holds only an untimed waiting match) keeps its own time.
+	// Moving bronze match to C (which holds only an untimed waiting match)
+	// leaves it untimed, last with that match.
 	require.NoError(t, eng.UpdateMatchCourt(compKo, state.BronzeMatchID, "C", CourtMove{}))
 	b, err = store.LoadBracket(compKo)
 	require.NoError(t, err)
 	assert.Equal(t, "C", b.ThirdPlaceMatch.Court)
-	assert.Equal(t, "09:45", b.ThirdPlaceMatch.ScheduledAt)
+	assert.Equal(t, "", b.ThirdPlaceMatch.ScheduledAt)
 
 	// Moving an untimed waiting match to B keeps "".
 	require.NoError(t, eng.UpdateMatchCourt(comp1, "Pool A-untimed", "B", CourtMove{}))
@@ -185,6 +196,28 @@ func TestUpdateMatchCourt_TwoWaitingMovesInARowLandInOrder(t *testing.T) {
 	m1 := loadPoolMatchByID(t, store, compID, "Pool A-1")
 	assert.Equal(t, "10:01", m0.ScheduledAt)
 	assert.Equal(t, "10:02", m1.ScheduledAt)
+}
+
+// A court whose waiting matches carry no time sorts them after every timed
+// one, so a waiting match moved there takes no time either and goes last with
+// them; a running match moved there keeps its own time and goes first.
+func TestUpdateMatchCourt_OntoUntimedCourt(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "onto-untimed-court"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Untimed"}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled, Court: "A", ScheduledAt: "09:00"},
+		{ID: "Pool A-1", SideA: "Carol", SideB: "Dave", Status: state.MatchStatusRunning, Court: "A", ScheduledAt: "09:05"},
+		{ID: "Pool B-0", SideA: "Erin", SideB: "Frank", Status: state.MatchStatusScheduled, Court: "B"},
+	}))
+
+	require.NoError(t, eng.UpdateMatchCourt(compID, "Pool A-0", "B", CourtMove{}))
+	require.NoError(t, eng.UpdateMatchCourt(compID, "Pool A-1", "B", CourtMove{StopsRunning: true}))
+
+	assert.Equal(t, "", loadPoolMatchByID(t, store, compID, "Pool A-0").ScheduledAt, "the waiting match goes last, untimed with the court's queue")
+	running := loadPoolMatchByID(t, store, compID, "Pool A-1")
+	assert.Equal(t, state.MatchStatusScheduled, running.Status)
+	assert.Equal(t, "09:05", running.ScheduledAt, "the running match keeps its time, ahead of the untimed queue")
 }
 
 func TestUpdateMatchCourt_FinishedMatchKeepsTime(t *testing.T) {
@@ -243,41 +276,75 @@ func TestUpdateMatchCourt_WaitingPoolBoutPushesOwnKnockout(t *testing.T) {
 	require.NotEmpty(t, moved.ID)
 
 	// The competition's own knockout is no queue neighbour of its pool bouts:
-	// the bout lands after B's pool bouts, and the knockout follows the pools.
-	var latestOnB string
-	for _, m := range pms {
-		if m.Court == "B" && m.Status == state.MatchStatusScheduled && m.ScheduledAt > latestOnB {
-			latestOnB = m.ScheduledAt
-		}
-	}
-	require.NotEmpty(t, latestOnB, "court B must have a scheduled pool bout")
-	bBefore, err := store.LoadBracket(compID)
-	require.NoError(t, err)
-	knockoutOnB := false
-	for _, r := range bBefore.Rounds {
-		for _, bm := range r {
-			knockoutOnB = knockoutOnB || (bm.Court == "B" && bm.MatchNumber > 0)
-		}
-	}
-	require.True(t, knockoutOnB, "court B must have a knockout match")
-
+	// the bout lands one minute after B's last pool bout, not after B's
+	// knockout, and the knockout is then pushed past the pool phase it now ends.
 	require.NoError(t, eng.UpdateMatchCourt(compID, moved.ID, "B", CourtMove{}))
 
 	pmAfter := loadPoolMatchByID(t, store, compID, moved.ID)
 	assert.Equal(t, "B", pmAfter.Court)
-	assert.Equal(t, lastInQueueTime(moved.ScheduledAt, latestOnB), pmAfter.ScheduledAt,
-		"the waiting pool bout lands one minute after the latest pool bout waiting on B")
+	assert.Equal(t, "09:11", pmAfter.ScheduledAt,
+		"the waiting pool bout lands one minute after B's last pool bout (09:10)")
 
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	tourn, err := store.LoadTournament()
+	require.NoError(t, err)
+	pms, err = store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	end := poolPhaseEndByCourt(pms, comp, tourn)["B"]
 	bAfter, err := store.LoadBracket(compID)
 	require.NoError(t, err)
-	for _, r := range bAfter.Rounds {
+	ko := numberedKnockoutTimes(bAfter)["B"]
+	require.NotEmpty(t, ko, "court B must have a knockout match")
+	for _, ts := range ko {
+		assert.Falsef(t, ts.Before(end), "court B knockout at %s before the moved bout ends at %s", ts.Format(scheduleClockLayout), end.Format(scheduleClockLayout))
+	}
+}
+
+// A waiting pool bout moved onto a court whose queue runs late lands at 23:56,
+// and the knockout it now runs into cannot be pushed past the end of the day:
+// a time past midnight would read "00:0x" and sort first, so it ties for last
+// at 23:59, the boundary lastInQueueTime ties at too.
+func TestUpdateMatchCourt_KnockoutPushStopsAtEndOfDay(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "ko-push-end-of-day"
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 3, func(c *state.Competition) {
+		c.Courts = []string{"A", "B"}
+		c.StartTime = "09:00"
+	})
+	saveTestParticipants(t, store, compID, []string{"P1", "P2", "P3", "P4", "P5", "P6"})
+	require.NoError(t, eng.GenerateDraw(compID))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "late-league", Name: "Late"}))
+	require.NoError(t, store.SavePoolMatches("late-league", []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Xavier", SideB: "Yusuf", Status: state.MatchStatusScheduled, Court: "B", ScheduledAt: "23:55"},
+	}))
+
+	pms, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	var moved state.MatchResult
+	for _, m := range pms {
+		if m.Court == "A" {
+			moved = m
+			break
+		}
+	}
+	require.NotEmpty(t, moved.ID)
+
+	require.NoError(t, eng.UpdateMatchCourt(compID, moved.ID, "B", CourtMove{}))
+
+	assert.Equal(t, "23:56", loadPoolMatchByID(t, store, compID, moved.ID).ScheduledAt)
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	onB := 0
+	for _, r := range b.Rounds {
 		for _, bm := range r {
 			if bm.Court == "B" && bm.MatchNumber > 0 {
-				assert.Greater(t, bm.ScheduledAt, pmAfter.ScheduledAt,
-					"moveKnockoutPastPools pushes B's knockout past the moved pool bout")
+				onB++
+				assert.Equalf(t, "23:59", bm.ScheduledAt, "knockout %s on B ties for last instead of wrapping past midnight", bm.ID)
 			}
 		}
 	}
+	require.NotZero(t, onB, "court B must have a knockout match")
 }
 
 func TestUpdateMatchCourt_RunningMoveConfirmed(t *testing.T) {
@@ -490,30 +557,30 @@ func TestUpdateMatchCourt_RunningMoveNotConfirmedRefused(t *testing.T) {
 	err := eng.UpdateMatchCourt(compID, "Pool A-0", "A", CourtMove{StopsRunning: false})
 	var refused *CourtMoveRefusedError
 	require.True(t, errors.As(err, &refused))
-	assert.Equal(t, "Pool A · Match 1 was started on Shiaijo B before your move reached the server, so it was not moved. Move it again to stop it there and put it first on Shiaijo A.", refused.Sentence())
+	assert.Equal(t, "Pool A · Match 1 was started on Shiaijo B before your move reached the server, so it was not moved. To stop it and put it first on Shiaijo A, move it from the Scores tab, the schedule page or the Bracket tab, which ask first.", refused.Sentence())
 	assert.Equal(t, refused.Sentence(), err.Error())
 	assert.Empty(t, historyLen(t, store, compID, "Pool A-0"))
 
 	// An unassigned court is not named.
 	err = eng.UpdateMatchCourt(compID, "Pool A-1", "A", CourtMove{StopsRunning: false})
 	require.True(t, errors.As(err, &refused))
-	assert.Equal(t, "Pool A · Match 2 was started before your move reached the server, so it was not moved. Move it again to stop it there and put it first on Shiaijo A.", refused.Sentence())
+	assert.Equal(t, "Pool A · Match 2 was started before your move reached the server, so it was not moved. To stop it and put it first on Shiaijo A, move it from the Scores tab, the schedule page or the Bracket tab, which ask first.", refused.Sentence())
 
 	// A move off every shiaijo names none to put it on.
 	err = eng.UpdateMatchCourt(compID, "Pool A-0", "", CourtMove{StopsRunning: false})
 	require.True(t, errors.As(err, &refused))
-	assert.Equal(t, "Pool A · Match 1 was started on Shiaijo B before your move reached the server, so it was not moved. Move it again to stop it there and leave it without a shiaijo.", refused.Sentence())
+	assert.Equal(t, "Pool A · Match 1 was started on Shiaijo B before your move reached the server, so it was not moved. To stop it and leave it without a shiaijo, move it from the Scores tab, the schedule page or the Bracket tab, which ask first.", refused.Sentence())
 
 	// Bracket round match.
 	err = eng.UpdateMatchCourt(compID, "m-r1-0", "A", CourtMove{StopsRunning: false})
 	require.True(t, errors.As(err, &refused))
-	assert.Equal(t, "Match 3 (Final) was started on Shiaijo B before your move reached the server, so it was not moved. Move it again to stop it there and put it first on Shiaijo A.", refused.Sentence())
+	assert.Equal(t, "Match 3 (Final) was started on Shiaijo B before your move reached the server, so it was not moved. To stop it and put it first on Shiaijo A, move it from the Scores tab, the schedule page or the Bracket tab, which ask first.", refused.Sentence())
 	assert.Empty(t, historyLen(t, store, compID, "m-r1-0"))
 
 	// Bronze match (starts lowercase in MatchLabel, SentenceCase uppercases "The").
 	err = eng.UpdateMatchCourt(compID, state.BronzeMatchID, "A", CourtMove{StopsRunning: false})
 	require.True(t, errors.As(err, &refused))
-	assert.Equal(t, "The 3rd-place match was started on Shiaijo B before your move reached the server, so it was not moved. Move it again to stop it there and put it first on Shiaijo A.", refused.Sentence())
+	assert.Equal(t, "The 3rd-place match was started on Shiaijo B before your move reached the server, so it was not moved. To stop it and put it first on Shiaijo A, move it from the Scores tab, the schedule page or the Bracket tab, which ask first.", refused.Sentence())
 }
 
 func TestUpdateMatchCourt_ConfirmedOverNonRunningMovesAsWaitingOrFinished(t *testing.T) {
@@ -542,15 +609,6 @@ func TestUpdateMatchCourt_ConfirmedOverNonRunningMovesAsWaitingOrFinished(t *tes
 	assert.Equal(t, state.MatchStatusScheduled, pm.Status)
 	assert.Empty(t, historyLen(t, store, compID, "Pool A-0"), "waiting move writes no requeue history line")
 
-	// Confirmed move over completed pool match keeps its time and result.
-	require.NoError(t, eng.UpdateMatchCourt(compID, "Pool A-1", "A", CourtMove{StopsRunning: true}))
-	pm = loadPoolMatchByID(t, store, compID, "Pool A-1")
-	assert.Equal(t, "A", pm.Court)
-	assert.Equal(t, "09:10", pm.ScheduledAt)
-	assert.Equal(t, state.MatchStatusCompleted, pm.Status)
-	assert.Equal(t, "Carol", pm.Winner)
-	assert.Empty(t, historyLen(t, store, compID, "Pool A-1"))
-
 	// Confirmed move over scheduled bracket match lands last on target court A (latest is now 10:31 -> 10:32).
 	require.NoError(t, eng.UpdateMatchCourt(compID, "m-r1-0", "A", CourtMove{StopsRunning: true}))
 	b, err := store.LoadBracket(compID)
@@ -561,6 +619,15 @@ func TestUpdateMatchCourt_ConfirmedOverNonRunningMovesAsWaitingOrFinished(t *tes
 	assert.Equal(t, "10:32", bm.ScheduledAt)
 	assert.Equal(t, state.MatchStatusScheduled, bm.Status)
 	assert.Empty(t, historyLen(t, store, compID, "m-r1-0"))
+
+	// Confirmed move over completed pool match keeps its time and result.
+	require.NoError(t, eng.UpdateMatchCourt(compID, "Pool A-1", "A", CourtMove{StopsRunning: true}))
+	pm = loadPoolMatchByID(t, store, compID, "Pool A-1")
+	assert.Equal(t, "A", pm.Court)
+	assert.Equal(t, "09:10", pm.ScheduledAt)
+	assert.Equal(t, state.MatchStatusCompleted, pm.Status)
+	assert.Equal(t, "Carol", pm.Winner)
+	assert.Empty(t, historyLen(t, store, compID, "Pool A-1"))
 
 	// Confirmed move over completed bronze match keeps its time and result.
 	require.NoError(t, eng.UpdateMatchCourt(compID, state.BronzeMatchID, "A", CourtMove{StopsRunning: true}))
@@ -638,9 +705,9 @@ func TestUpdateMatchCourt_ResendByWriteIDAnsweredAsRecorded(t *testing.T) {
 	bracketVer := store.FileVersion(compID, "bracket.json")
 
 	// Resend the original mvPool and mvBrk to court "A" after the matches have
-	// moved on to court "B". Rule 0 answers nil and writes nothing because the
-	// WriteID is already logged. Rule 1 cannot answer because each match sits
-	// on "B", not "A".
+	// moved on to court "B". The resend is answered nil with nothing written
+	// because its WriteID is already logged; the same-court check cannot be
+	// what answers it, since each match sits on "B", not "A".
 	require.NoError(t, eng.UpdateMatchCourt(compID, "Pool A-0", "A", mvPool))
 	require.NoError(t, eng.UpdateMatchCourt(compID, "m-r1-0", "A", mvBrk))
 

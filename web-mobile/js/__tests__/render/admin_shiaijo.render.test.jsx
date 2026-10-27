@@ -2063,7 +2063,7 @@ describe('a court shared with another competition', () => {
     try {
       await act(async () => { c.utils.getAllByTestId('move-to-B')[0].click(); });
       const dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
-      expect(dialog.textContent).toMatch(/Shiro m\d vs Aka m\d leaves Shiaijo A and joins the queue on Shiaijo B\./);
+      expect(dialog.textContent).toMatch(/Shiro m\d vs Aka m\d leaves Shiaijo A and goes last in the queue on Shiaijo B\./);
     } finally { c.restore(); }
   });
 });
@@ -3340,7 +3340,7 @@ describe('court move confirm snapshot (P1-T6)', () => {
       const dialog = moveDialog(c);
       expect(dialog.querySelector('.shiaijo-move-confirm__title').textContent).toBe('Move to Shiaijo B?');
       expect(dialog.querySelector('.shiaijo-move-confirm__body').textContent)
-        .toBe('Shiro m2 vs Aka m2 leaves Shiaijo A and joins the queue on Shiaijo B.');
+        .toBe('Shiro m2 vs Aka m2 leaves Shiaijo A and goes last in the queue on Shiaijo B.');
       expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeTruthy();
 
       // Even if the feed changes m2 before Confirm is clicked, confirmMoveCourt
@@ -3354,6 +3354,21 @@ describe('court move confirm snapshot (P1-T6)', () => {
         confirmed: true,
         shown: expect.objectContaining({ id: 'm2', compId: 'c1', status: 'scheduled', modifiedAt: 200 }),
       });
+    } finally { c.restore(); }
+  });
+
+  // Only a waiting row offers a court move on the console (showActions): a
+  // finished row shows Correct alone, so the confirm never speaks for one.
+  it('a finished row offers no court move', async () => {
+    const m1 = courtMatch('m1', 'completed', { modifiedAt: 100, winner: 'Aka m1' });
+    const m2 = courtMatch('m2', 'scheduled', { modifiedAt: 200 });
+    const m3 = courtMatch('m3', 'scheduled', { modifiedAt: 300 });
+    const c = await mountCourt([m1, m2, m3], { onMoveCourt: vi.fn() });
+    try {
+      const done = c.utils.container.querySelector('.shiaijo-qrow--complete');
+      expect(done && done.textContent).toContain('Aka m1');
+      expect(within(done).queryByTestId('move-to-B')).toBeNull();
+      expect(within(rowOf(c, 'Aka m3')).getByTestId('move-to-B')).toBeTruthy();
     } finally { c.restore(); }
   });
 

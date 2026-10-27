@@ -1036,6 +1036,28 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // "Send back to queue" on a running bout. Cleared on confirm or cancel.
     // Shape: {compId, matchId, label}.
     const [pendingRevert, setPendingRevert] = useStateSh(null);
+    // bc-stpf (operator ruling 2026-10-27, Q1): the question a pick of another
+    // bout asks when the app cannot check that the picked match can start (no
+    // answer in time, offline, or writes of its competition not sent yet):
+    // send the running bout back and start the pick, or keep it running. It is
+    // local and never waits on the network, so the court keeps working without
+    // the server. Shape: {curLabel, pickLabel}; the answer goes to the promise
+    // askStartWithoutCheck handed out (startAskResolveRef).
+    const [pendingStartAsk, setPendingStartAsk] = useStateSh(null);
+    const startAskResolveRef = useRefSh(null);
+    const answerStartAsk = (sendBack) => {
+        const resolve = startAskResolveRef.current;
+        startAskResolveRef.current = null;
+        if (mountedRef.current) setPendingStartAsk(null);
+        if (resolve) resolve(sendBack);
+    };
+    const askStartWithoutCheck = (cur, m) => new Promise((resolve) => {
+        startAskResolveRef.current = resolve;
+        setPendingStartAsk({ curLabel: confirmMatchLabel(cur), pickLabel: confirmMatchLabel(m) });
+    });
+    // A console that goes away with the question open answers it "keep it
+    // running": nothing is sent, and the pick's finally runs.
+    useEffectSh(() => () => answerStartAsk(false), []);
     // bc-cfbd: the two confirms below open from a tap; the bounce of that tap
     // must not land on the fresh backdrop or its buttons. One ref serves both
     // (only one is ever open).
@@ -1048,10 +1070,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // for confirmDialog: focus moves into the open one (its first button, Cancel),
     // Escape cancels it while its request is not out, and focus goes back to the
     // control that opened it once it closes, without scrolling the page.
-    const confirmOpen = Boolean(pendingMove || pendingRevert);
+    const confirmOpen = Boolean(pendingMove || pendingRevert || pendingStartAsk);
     const confirmBoxRef = useRefSh(null);
+    // Escape on the pick's question (bc-stpf) is "keep it running".
     window.useEscapeToClose(confirmOpen && !movingCourt && !reverting
-        ? () => { setPendingMove(null); setPendingRevert(null); }
+        ? () => { setPendingMove(null); setPendingRevert(null); if (pendingStartAsk) answerStartAsk(false); }
         : undefined);
     useDialogFocus(confirmBoxRef, confirmOpen);
     // Selected competition for filtering the queue. Default: running match's comp,
@@ -1601,9 +1624,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // does pin it).
     // `pick` is the pickingRef entry pickMatch made for THIS start, if it is one:
     // that pick is the start itself, not a start in flight against it.
+    // The stored Start refusal for match `m` (startError), which
+    // startRefusalStands binds to that match: a start's own refusal and a
+    // pick's refused start check (bc-stpf) store it alike.
+    const refusalFor = (m, msg) => ({ key: matchKey(m), compId: m.compId, msg });
     const startMatch = async (m, { pick = null, after = null } = {}) => {
         const key = matchKey(m);
-        const refusalFor = (msg) => ({ key, compId: m.compId, msg });
         // bc-evts: the start is the outbox's (a running score write), answered
         // pending at once; a refusal arrives later, through `settled`. It is
         // stored on the refused match and toasted once, here, as a refusal the
@@ -1625,7 +1651,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         };
         const refusedLater = (msg) => {
             unpin();
-            if (mountedRef.current) setStartError(refusalFor(msg));
+            if (mountedRef.current) setStartError(refusalFor(m, msg));
             if (showToast) showToast(msg, "error");
         };
         // Claimed only when it was said, on the row or by the (app-wide) toast (R2).
@@ -1673,7 +1699,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // leaves the court idle with that bout waiting in the queue.
             const outcome = classifyStartOutcome(res);
             if (!outcome.ok) {
-                if (mountedRef.current) setStartError(refusalFor(outcome.msg));
+                if (mountedRef.current) setStartError(refusalFor(m, outcome.msg));
                 if (showToast) showToast(outcome.msg, "error");
                 return false;
             }
@@ -1703,7 +1729,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             return true;
         } catch (e) {
             const msg = startFailureMessage(e);
-            if (mountedRef.current) setStartError(refusalFor(msg));
+            if (mountedRef.current) setStartError(refusalFor(m, msg));
             // A thrown refusal onEditScore (editMatchScore, admin.jsx) already
             // toasted is not toasted again: the toast is a single slot, so a
             // second one only restarts its timer. The card or row says it either way.
@@ -1784,6 +1810,34 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
     // The defer of the running bout and the start of the picked one, after
     // pickMatch's guards and its pickingRef entry (see pickMatch).
+// bc-stpf (operator ruling 2026-10-12, option A): before a pick sends the
+    // running bout `cur` back, ask the server whether the picked match `m`
+    // would start once it has gone (API.checkStart, at most
+    // START_CHECK_TIMEOUT_MS; pickMatch's pickingRef holds the pick, so the
+    // button reads "Starting…" and a second Start is refused as in flight
+    // meanwhile). True goes on with today's send back and start; false leaves
+    // the court as it is. A refusal is stored on the picked match and toasted
+    // once, and the running bout keeps running with its score. With no answer,
+    // or when the device already knows an answer cannot be trusted (offline,
+    // or writes of the pick's competition not sent yet), the operator is asked
+    // (Q1, 2026-10-27: the court must keep working without the server).
+    // Console stubs without the check keep today's path.
+    const startMayFollowSendBack = async (m, cur, pick) => {
+        const api = window.API;
+        if (typeof api.checkStart !== "function") return true;
+        const untrusted = typeof api.startCheckUntrusted === "function" && api.startCheckUntrusted(m.compId);
+        const answer = untrusted ? { unknown: true } : await api.checkStart(m.compId, m.id, court, password);
+        if (!mountedRef.current) return false;
+        if (answer && answer.ok) return true;
+        if (answer && answer.refused) {
+            const msg = startFailureMessage(answer.refused);
+            if (pick) pick.refused = true;
+            setStartError(refusalFor(m, msg));
+            if (showToast) showToast(msg, "error");
+            return false;
+        }
+        return askStartWithoutCheck(cur, m);
+    };
     const deferAndStart = async (m, pick) => {
         const cur = running[0] || null;
         const isSame = cur && matchKey(cur) === matchKey(m);
@@ -1798,6 +1852,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // silently 409 the defer. If the revert fails we surface a toast and
             // must NOT start the pick.
             if (!window.API || typeof window.API.revertMatchToQueue !== "function") return;
+            // bc-stpf: a start the server would refuse leaves the running bout
+            // running, so the check comes before anything is sent back.
+            if (m.status === "scheduled" && !(await startMayFollowSendBack(m, cur, pick))) return;
+            if (!mountedRef.current) return;
             // bc-evts (the governing rule): the send back is the outbox's and
             // nothing waits for its answer. The pick's start is queued right
             // after it, naming it (`after`), so the outbox sends the start only
@@ -1812,7 +1870,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 return !!showToast;
             };
             try {
-                const sent = await window.API.revertMatchToQueue(cur.compId, cur.id, password, { onRefusal: deferFailed, seen: cur.scoreVersion });
+                const sent = await window.API.revertMatchToQueue(cur.compId, cur.id, password, { onRefusal: deferFailed, seen: cur.scoreVersion, match: cur });
                 after = writeQueueKey(sent);
                 // Shown queued at once, as the Send back confirm's is.
                 if (mountedRef.current) markSentBackHere(matchKey(cur), sent);
@@ -2055,7 +2113,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         // back, and the confirm says so (R1, the editor's local Mark draw or
         // hantei pick of a running match included).
         const unsaved = editorUnsavedFor(m.compId, m.id);
-        setPendingRevert({ compId: m.compId, matchId: m.id, label: confirmMatchLabel(m), seen: m.scoreVersion, at: m.modifiedAt, key: matchKey(m), unsaved });
+        setPendingRevert({ compId: m.compId, matchId: m.id, match: m, label: confirmMatchLabel(m), seen: m.scoreVersion, at: m.modifiedAt, key: matchKey(m), unsaved });
     };
     // markSentBackHere: the outbox holds a send back of the match keyed `key`
     // (its pending answer `res`): the console shows it queued from the outbox
@@ -2089,6 +2147,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             // once, and a refusal the server gives later is toasted.
             const res = await window.API.revertMatchToQueue(compId, matchId, password, {
                 seen: pendingRevert.seen,
+                match: pendingRevert.match,
                 onRefusal: (e) => {
                     if (!mountedRef.current || !showToast) return false;
                     showToast((e && e.message) || "Could not send match back to queue", "error");
@@ -2761,6 +2820,32 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                             </button>
                             <button type="button" className="btn btn--primary" onClick={confirmRevert} disabled={reverting}>
                                 {reverting ? "Sending…" : "Send back to queue"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {pendingStartAsk && (
+                <div className="modal-backdrop" ref={confirmOpenedRef} onClickCapture={confirmOnClickCapture}
+                    onClick={() => answerStartAsk(false)}>
+                    <div className="shiaijo-move-confirm" role="dialog" aria-modal="true" ref={confirmBoxRef}
+                        aria-labelledby="shiaijo-start-ask-title" data-testid="start-ask" onClick={(e) => e.stopPropagation()}>
+                        <h3 id="shiaijo-start-ask-title" className="shiaijo-move-confirm__title">
+                            Start {pendingStartAsk.pickLabel}?
+                        </h3>
+                        <p className="shiaijo-move-confirm__body" aria-live="polite">
+                            The app could not check with the server that <strong>{pendingStartAsk.pickLabel}</strong> can
+                            start. <strong>{pendingStartAsk.curLabel}</strong> is still running: send it back to the
+                            queue and start {pendingStartAsk.pickLabel}, or keep it running. {SCORE_KEPT_SENTENCE}
+                        </p>
+                        <div className="shiaijo-move-confirm__actions">
+                            <button type="button" className="btn" onClick={() => answerStartAsk(false)}>
+                                Keep it running
+                            </button>
+                            <button type="button" className="btn btn--primary"
+                                onClick={(ev) => { if (acceptTap(confirmTapRef, ev)) answerStartAsk(true); }}>
+                                Send back and start
                             </button>
                         </div>
                     </div>

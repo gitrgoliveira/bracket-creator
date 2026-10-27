@@ -558,6 +558,36 @@ const START_BROADCAST_DROPS = Object.freeze([
     'flagsA', 'flagsB', 'repPlayerA', 'repPlayerB', 'score',
 ]);
 
+// bc-stpf: a send back the outbox holds is told on the court's channel in the
+// tick it is queued, as a start is (_broadcastPatch), so a display window on
+// this machine shows the bout back in the queue at once (offline for the whole
+// outage), and running again when the server refuses it or the operator
+// discards it. Only the status moves: RevertMatchToQueue keeps the score and
+// a running bout holds no verdict, so the patch names no scoreline field (a
+// key present as undefined would wipe the display's copy), and it states the
+// flag counts the match holds, because the display reads a result naming a
+// status that omits a count as 0 (mergeMatchPatch). It carries no
+// scoreVersion, so the put-back is never read as a stale running board
+// (staleRunningOverlay). A court-less match publishes nothing, as
+// _broadcastPatch does.
+function _publishSendBack(compID, matchID, match, status) {
+    const court = (match && match.court) || '';
+    if (!court) return;
+    const result = { id: matchID, status };
+    if (match.sideA && match.sideA.id) result.sideAId = match.sideA.id;
+    if (match.sideB && match.sideB.id) result.sideBId = match.sideB.id;
+    if (match.flagsA != null || match.flagsB != null) {
+        result.flagsA = match.flagsA ?? 0;
+        result.flagsB = match.flagsB ?? 0;
+    }
+    _bridge.publish('patch', court, compID, { result });
+}
+
+// bc-stpf: how long the court console waits for GET .../start-check before a
+// pick of another bout asks the operator instead (API.checkStart). The one
+// bounded wait in front of an outbox write, and only on that pick path.
+const START_CHECK_TIMEOUT_MS = 1500;
+
 const _matchRevCounters = new Map(); // compID:matchID → int
 function _nextRev(compID, matchID) {
     const key = _revKey(compID, matchID);
@@ -3113,15 +3143,23 @@ function _doorValue(d, body) {
 }
 
 // The Error a door's `settled` rejects with: the one the direct call threw.
+// A refusal that carries the operator's sentence, as an Error: the server's
+// `reasonHuman`, else its raw reason or code. The score and decision doors'
+// ineligible arms and the start check (API.checkStart) read it alike, so a
+// start the check refuses shows the sentence the start itself would.
+function _reasonHumanError(b, fallback) {
+    return new Error(b.reasonHuman || b.reason || b.error || fallback);
+}
+
 function _doorRefusal(d, status, body) {
     const b = body || {};
     const ineligible = b.error === 'ineligible_competitor' || b.error === 'already_ineligible';
     switch (d && d.kind) {
         case 'score':
-            if (ineligible) return new Error(b.reasonHuman || b.reason || b.error || 'Failed to record score');
+            if (ineligible) return _reasonHumanError(b, 'Failed to record score');
             return _courtBusyError(b) || _downstreamRefusalError(b) || new Error(_refusalText(b, 'Failed to record score'));
         case 'decision':
-            if (ineligible) return new Error(b.reasonHuman || b.reason || b.error || 'Failed to record decision');
+            if (ineligible) return _reasonHumanError(b, 'Failed to record decision');
             return _downstreamRefusalError(b) || new Error(b.error || 'Failed to record decision');
         case 'override':
             return _downstreamRefusalError(b) || new Error(b.error || 'Failed to override winner');
@@ -5634,11 +5672,61 @@ const API = {
     async revertMatchToQueue(compID, matchID, password, opts = {}) {
         // bc-evts: the outbox's, with a JSON body carrying writeId, basis and
         // session; `settled` resolves true, or rejects with the refusal.
-        return _outboxWrite({
+        const answer = _outboxWrite({
             kind: 'revert', compID, matchID, method: 'POST',
             url: `/api/competitions/${compID}/matches/${matchID}/revert-to-queue`,
             payload: {}, password, seen: opts && opts.seen, onRefusal: opts && opts.onRefusal,
         });
+        // bc-stpf: `match`, the bout as the caller shows it (its court, sides
+        // and flag counts), lets a display on this machine show the send back
+        // at once, and the bout running again when it does not land.
+        const match = opts && opts.match;
+        if (match) {
+            _publishSendBack(compID, matchID, match, 'scheduled');
+            const putBack = () => _publishSendBack(compID, matchID, match, 'running');
+            if (answer.settled) answer.settled.then((body) => { if (body && body.discarded) putBack(); }, putBack);
+        }
+        return answer;
+    },
+
+    // bc-stpf (operator ruling 2026-10-12, option A): would starting `matchID`
+    // be accepted once the bout running on `court` is sent back? A direct read
+    // (GET .../start-check), never the outbox: it writes nothing and must never
+    // be replayed. It waits at most START_CHECK_TIMEOUT_MS, the body read
+    // included, and never throws. Answers {ok: true}; {refused: Error} for a
+    // 409, the Error carrying the server's sentence as the start's own refusal
+    // does (_reasonHumanError); or {unknown: true} for anything else (no answer
+    // in time, a network failure, a 5xx, a 404, a 400, a 401), on which the
+    // court console asks the operator.
+    async checkStart(compID, matchID, court, password) {
+        const url = `/api/competitions/${encodeURIComponent(compID)}/matches/${encodeURIComponent(matchID)}/start-check?court=${encodeURIComponent(court || '')}`;
+        try {
+            const { res, body } = await _fetchJson(url, {
+                method: 'GET',
+                headers: password ? { 'X-Tournament-Password': password } : {},
+            }, START_CHECK_TIMEOUT_MS);
+            if (res.ok && body && body.ok === true) return { ok: true };
+            if (res.status === 409) return { refused: _reasonHumanError(body || {}, 'Could not start the match') };
+            return { unknown: true };
+        } catch (_e) {
+            return { unknown: true };
+        }
+    },
+
+    // bc-stpf: true when a start check's answer could not be trusted, so the
+    // court console asks the operator without asking the server: the device
+    // is offline (the browser says so, or the outbox's last pass failed on the
+    // network), or the outbox still holds a write of `compID` the server has
+    // not seen (a finish, a decision, a start, a send back), whose effect on
+    // who is fighting or barred the check would miss. A tap is not counted: it
+    // moves points, never a status or a bar, and taps leave in a microtask.
+    startCheckUntrusted(compID) {
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+        if (_offlineFlag) return true;
+        for (const d of _writeQueue.values()) {
+            if (d && d.compID === compID && d.kind !== 'evt') return true;
+        }
+        return false;
     },
     // mp-gmcg: reopen a COMPLETED kachinuki team match, or (bc-tmfn) any
     // completed match a withdrawal decided: status back to running,
@@ -6749,7 +6837,7 @@ const API = {
 };
 
 export {
-    API, subscribeSyncStatus, subscribeTerminalWriteFailed, subscribeBracketResync, subscribeQueueAlert,
+    API, START_CHECK_TIMEOUT_MS, subscribeSyncStatus, subscribeTerminalWriteFailed, subscribeBracketResync, subscribeQueueAlert,
     subscribeUnsentWrites,
     enqueueRunningWrite,
     writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock,

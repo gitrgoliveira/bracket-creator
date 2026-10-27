@@ -136,7 +136,7 @@ test.describe('moved-match', () => {
     row({ step: '3 move', action: 'Move to Shiaijo B confirm', variant: 'V4 hastyShiaijoConfirm', ...hasty, moved, confirmShot });
     expect(hasty.title).toBe('Move to Shiaijo B?');
     // PR #453 (a): the confirm names the match, both competitors.
-    expect(hasty.message).toBe(`${pairText(moved)} leaves Shiaijo A and joins the queue on Shiaijo B.`);
+    expect(hasty.message).toBe(`${pairText(moved)} leaves Shiaijo A and goes last in the queue on Shiaijo B.`);
     await expect.poll(async () => queueNames(await courtState(A)).includes(pairText(moved)), { timeout: 10_000 }).toBe(false);
     row({ step: '3 move', action: "court A's queue after the move", variant: 'correct path', queue: queueNames(await courtState(A)),
       shot: await shot(A, 'court-A-after-move') });
@@ -155,7 +155,11 @@ test.describe('moved-match', () => {
     expect(queueNames(bAfter)).not.toContain(pairText(moved));
     expect(lines).toEqual([{ text: '1 Individual match also waiting on this court.', quiet: true, amber: false }]);
 
-    // 5. B picks Individual: the moved match is Up next.
+    // 5. B picks Individual: the moved match is Up next. A waiting match moved
+    // to a court now goes LAST in that court's queue (one minute after its
+    // latest timed waiting match, bc-mvrq); it is still Up next here because it
+    // is the only Individual match waiting on B, so nothing below depends on its
+    // time, and the console's confirm words (step 3) are unchanged.
     await pickCompetition(B, 'Individual');
     await bStillOpen();
     expect(await sides(upNextCard(B))).toEqual(moved);

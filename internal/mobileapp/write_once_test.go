@@ -39,9 +39,11 @@ func (f teamWritesFixture) storedMatchField(t *testing.T, field string) string {
 func TestLateDuplicate_CourtMoveIsAnsweredAsRecorded(t *testing.T) {
 	f := newTeamWritesFixture(t, false)
 	path := "/api/competitions/c1/matches/PoolA-0/court"
-	require.Equal(t, http.StatusOK, f.send(http.MethodPut, path, "main-pw", map[string]string{"court": "B", "writeId": "w-court-1"}).Code)
-	require.Equal(t, http.StatusOK, f.send(http.MethodPut, path, "main-pw", map[string]string{"court": "C", "writeId": "w-court-2"}).Code)
-	w := f.send(http.MethodPut, path, "main-pw", map[string]string{"court": "B", "writeId": "w-court-1"})
+	// PoolA-0 is running, so the first move is the confirmed one that sends it
+	// back to the queue; the second then moves a waiting match.
+	require.Equal(t, http.StatusOK, f.send(http.MethodPut, path, "main-pw", map[string]any{"court": "B", "stopsRunning": true, "writeId": "w-court-1"}).Code)
+	require.Equal(t, http.StatusOK, f.send(http.MethodPut, path, "main-pw", map[string]any{"court": "C", "writeId": "w-court-2"}).Code)
+	w := f.send(http.MethodPut, path, "main-pw", map[string]any{"court": "B", "stopsRunning": true, "writeId": "w-court-1"})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.Equal(t, "C", f.storedMatchField(t, "court"), "the late duplicate puts nothing back")
 }
@@ -100,7 +102,7 @@ func TestLateDuplicate_MemberRenameAfterAClearedName(t *testing.T) {
 func TestLateDuplicate_NoWriteIDAppliesAsBefore(t *testing.T) {
 	f := newTeamWritesFixture(t, false)
 	path := "/api/competitions/c1/matches/PoolA-0/court"
-	require.Equal(t, http.StatusOK, f.send(http.MethodPut, path, "main-pw", map[string]string{"court": "B"}).Code)
+	require.Equal(t, http.StatusOK, f.send(http.MethodPut, path, "main-pw", map[string]any{"court": "B", "stopsRunning": true}).Code)
 	require.Equal(t, http.StatusOK, f.send(http.MethodPut, path, "main-pw", map[string]string{"court": "C"}).Code)
 	require.Equal(t, http.StatusOK, f.send(http.MethodPut, path, "main-pw", map[string]string{"court": "B"}).Code)
 	assert.Equal(t, "B", f.storedMatchField(t, "court"))

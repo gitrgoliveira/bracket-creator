@@ -145,6 +145,73 @@ describe('historyEntryView: a later change moved to the history', () => {
   });
 });
 
+describe('historyEntryView: a requeue entry with or without a court', () => {
+  it('a requeue entry with court \'A\' renders the text "Moved to Shiaijo A and sent back to the queue"', () => {
+    const v = view.historyEntryView({
+      matchId: 'm-ind', door: 'requeue', court: 'A', stamp: at(10, 5, 0), receivedAt: at(10, 6, 0),
+      changed: ['result'], outcomes: { result: 'applied' },
+    });
+    expect(v.door).toBe('Moved to Shiaijo A and sent back to the queue');
+  });
+
+  it('a requeue entry without court renders "Sent back to the queue"', () => {
+    const v = view.historyEntryView({
+      matchId: 'm-ind', door: 'requeue', stamp: at(10, 5, 0), receivedAt: at(10, 6, 0),
+      changed: ['result'], outcomes: { result: 'applied' },
+    });
+    expect(v.door).toBe('Sent back to the queue');
+  });
+
+  it('a requeue entry with court \'\' renders "Sent back to the queue"', () => {
+    const v = view.historyEntryView({
+      matchId: 'm-ind', door: 'requeue', court: '', stamp: at(10, 5, 0), receivedAt: at(10, 6, 0),
+      changed: ['result'], outcomes: { result: 'applied' },
+    });
+    expect(v.door).toBe('Sent back to the queue');
+  });
+});
+
+describe('the History disclosure: a requeue entry with or without a court', () => {
+  it('a requeue entry with court \'A\' renders the text "Moved to Shiaijo A and sent back to the queue"', async () => {
+    window.API.fetchMatchHistory.mockResolvedValue([{
+      matchId: 'm-ind', door: 'requeue', court: 'A', stamp: at(10, 5, 0), receivedAt: at(10, 6, 0),
+      changed: ['result'], outcomes: { result: 'applied' },
+    }]);
+    await act(async () => {
+      render(<view.MatchHistoryDisclosure match={match()} password="pw" />);
+    });
+    await openHistory();
+    expect(screen.getByTestId('match-history-entry').querySelector('.match-history__door').textContent)
+      .toBe('Moved to Shiaijo A and sent back to the queue');
+  });
+
+  it('a requeue entry without court renders "Sent back to the queue"', async () => {
+    window.API.fetchMatchHistory.mockResolvedValue([{
+      matchId: 'm-ind', door: 'requeue', stamp: at(10, 5, 0), receivedAt: at(10, 6, 0),
+      changed: ['result'], outcomes: { result: 'applied' },
+    }]);
+    await act(async () => {
+      render(<view.MatchHistoryDisclosure match={match()} password="pw" />);
+    });
+    await openHistory();
+    expect(screen.getByTestId('match-history-entry').querySelector('.match-history__door').textContent)
+      .toBe('Sent back to the queue');
+  });
+
+  it('a requeue entry with court \'\' renders "Sent back to the queue"', async () => {
+    window.API.fetchMatchHistory.mockResolvedValue([{
+      matchId: 'm-ind', door: 'requeue', court: '', stamp: at(10, 5, 0), receivedAt: at(10, 6, 0),
+      changed: ['result'], outcomes: { result: 'applied' },
+    }]);
+    await act(async () => {
+      render(<view.MatchHistoryDisclosure match={match()} password="pw" />);
+    });
+    await openHistory();
+    expect(screen.getByTestId('match-history-entry').querySelector('.match-history__door').textContent)
+      .toBe('Sent back to the queue');
+  });
+});
+
 describe('heldValueText', () => {
   it.each([
     ['encho', { periodCount: 2 }, 'started'],
@@ -249,6 +316,23 @@ describe('historyDoorWords', () => {
 
   it('falls back for a door it does not know', () => {
     expect(view.historyDoorWords('something-new')).toBe('Updated');
+  });
+});
+
+describe('historyEntryWords', () => {
+  it('returns court-aware words for a requeue entry carrying a court', () => {
+    expect(view.historyEntryWords({ door: 'requeue', court: 'A' }))
+      .toBe('Moved to Shiaijo A and sent back to the queue');
+  });
+
+  it('falls back to historyDoorWords for a requeue entry with no court', () => {
+    expect(view.historyEntryWords({ door: 'requeue' })).toBe('Sent back to the queue');
+    expect(view.historyEntryWords({ door: 'requeue', court: '' })).toBe('Sent back to the queue');
+    expect(view.historyEntryWords({ door: 'requeue', court: null })).toBe('Sent back to the queue');
+  });
+
+  it('falls back to historyDoorWords for other doors', () => {
+    expect(view.historyEntryWords({ door: 'score' })).toBe('Score sheet saved');
   });
 });
 

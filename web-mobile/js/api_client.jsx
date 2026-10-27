@@ -3137,7 +3137,7 @@ function _doorRefusal(d, status, body) {
         case 'lineup':
             return _refusalError(b, d.payload && d.payload.matchId ? 'Failed to save match lineup' : 'Failed to save lineup');
         case 'court':
-            return new Error(b.error || 'Failed to move match court');
+            return _refusalError(b, 'Failed to move match court');
         case 'time':
             return new Error(b.error || 'Failed to update match time');
         case 'member': {
@@ -5622,10 +5622,11 @@ const API = {
         // a refusal comes through `settled` or `opts.onRefusal`.
         // R4: shown at once (_emitLocalMatchPatch), and `opts.was` (the
         // court it had) is put back on a refusal.
+        const payload = opts && opts.stopsRunning ? { court, stopsRunning: true } : { court };
         const answer = _outboxWrite({
             kind: 'court', compID, matchID, method: 'PUT',
             url: `/api/competitions/${compID}/matches/${matchID}/court`,
-            payload: { court }, password, onRefusal: opts && opts.onRefusal, was: opts && opts.was,
+            payload, password, onRefusal: opts && opts.onRefusal, was: opts && opts.was,
         });
         _emitLocalMatchPatch(compID, matchID, { court });
         return answer;
@@ -6566,6 +6567,18 @@ const API = {
     },
     subscribeLocalMatchPatch(cb) {
         return subscribeLocalMatchPatch(cb);
+    },
+    // Whether a court move of this match is still queued here: a feed that
+    // shows the match on that court (the overlay above) is not yet the server's.
+    courtMoveQueued(compID, matchID) {
+        return 'court' in _pendingMatchFields(compID, matchID);
+    },
+    // Whether a move that stops this running match is still queued here (one
+    // already out included): the server stops it with that move, so a later
+    // move finds it waiting, and the copy shown still says running.
+    stoppingCourtMoveQueued(compID, matchID) {
+        return _entriesFor(_revKey(compID, matchID))
+            .some(([, d]) => d.kind === 'court' && d.payload && d.payload.stopsRunning === true);
     },
 
     /**

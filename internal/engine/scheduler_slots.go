@@ -306,9 +306,12 @@ func pushKnockoutPastPools(b *state.Bracket, comp *state.Competition, tournament
 	if len(ends) == 0 {
 		return false
 	}
+	// IsZero, not After alone: a parsed clock is dated year 0, before the
+	// zero time.Time (year 1), so After never moved latest off it and a court
+	// with no pool bout was pushed to "00:00".
 	var latest time.Time
 	for _, t := range ends {
-		if t.After(latest) {
+		if latest.IsZero() || t.After(latest) {
 			latest = t
 		}
 	}
@@ -341,6 +344,10 @@ func pushKnockoutPastPools(b *state.Bracket, comp *state.Competition, tournament
 
 	_, _, lunchMin, lunchStart := parseCeremonyParams(comp, tournament)
 	slot := time.Duration(perMatchElapsedMinutes(comp, tournament, true)) * time.Minute
+	// A push past midnight would write "00:0x", which sorts first: a match it
+	// would carry there ties for last at 23:59 instead, as a court move's
+	// lastInQueueTime does. The date is the one time.Parse gives a bare clock.
+	dayEnd := time.Date(0, time.January, 1, 23, 59, 0, 0, time.UTC)
 	moved := false
 	for court, ms := range byCourt {
 		if started[court] {
@@ -361,6 +368,9 @@ func pushKnockoutPastPools(b *state.Bracket, comp *state.Competition, tournament
 			// time the operator set, even one inside lunch, stays theirs.
 			if t.Before(cursor) {
 				t = skipCeremonyBlocks(cursor, lunchStart, lunchMin)
+			}
+			if t.After(dayEnd) {
+				t = dayEnd
 			}
 			if !t.Equal(x.at) {
 				x.m.ScheduledAt = t.Format(scheduleClockLayout)

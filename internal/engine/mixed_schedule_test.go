@@ -198,6 +198,36 @@ func TestPushKnockoutPastPools_LeavesWhatItNeedNotMove(t *testing.T) {
 	assert.Equal(t, "9.30", got["b1"], "a time that does not parse is left as it is")
 }
 
+// A court with no pool bout waits for the latest pool end on any court, never
+// for "00:00", and a push that would run past midnight ties for last at 23:59
+// rather than wrapping to a time that sorts first.
+func TestPushKnockoutPastPools_NoPoolCourtAndEndOfDay(t *testing.T) {
+	comp := &state.Competition{StartTime: "09:00", KnockoutMatchDurationSeconds: 240, PoolMatchDurationSeconds: 240, Courts: []string{"A", "B"}}
+	ko := func(id, court, at string, n int) state.BracketMatch {
+		return state.BracketMatch{ID: id, Court: court, ScheduledAt: at, MatchNumber: n, Status: state.MatchStatusScheduled}
+	}
+	b := &state.Bracket{Rounds: [][]state.BracketMatch{{
+		ko("a1", "A", "09:00", 1),
+		ko("a2", "A", "09:06", 2),
+		ko("b1", "B", "09:00", 3),
+	}}}
+	// One pool slot is 6 minutes: A's pools end 23:58 + 6 = 00:04 the next day.
+	pm := []state.MatchResult{{ID: "p1", Court: "A", ScheduledAt: "23:58"}}
+	require.True(t, pushKnockoutPastPools(b, comp, nil, pm))
+	got := map[string]string{}
+	for _, m := range b.Rounds[0] {
+		got[m.ID] = m.ScheduledAt
+	}
+	assert.Equal(t, "23:59", got["a1"], "pushed to the end of the day, not past it")
+	assert.Equal(t, "23:59", got["a2"], "ties for last behind a1")
+	assert.Equal(t, "23:59", got["b1"], "a court with no pool bout waits for the latest pool end")
+
+	b = &state.Bracket{Rounds: [][]state.BracketMatch{{ko("b1", "B", "09:00", 1)}}}
+	pm = []state.MatchResult{{ID: "p1", Court: "A", ScheduledAt: "10:00"}}
+	require.True(t, pushKnockoutPastPools(b, comp, nil, pm))
+	assert.Equal(t, "10:06", b.Rounds[0][0].ScheduledAt, "a court with no pool bout waits for the latest pool end")
+}
+
 // bc-kosc: a pool bout moved onto another court moves that court's knockout
 // past it. A time set by hand moves nothing: it is the operator ordering the
 // court, and the queue's up/down is two of them.
@@ -234,7 +264,7 @@ func TestPoolScheduleEdit_CourtMoveMovesTheKnockout(t *testing.T) {
 		ko := numberedKnockoutTimes(bracket(t, store, id))[other]
 		require.NotEmpty(t, ko)
 		require.NoError(t, eng.UpdateMatchTime(id, m.ID, ko[0].Format(scheduleClockLayout)))
-		require.NoError(t, eng.UpdateMatchCourt(id, m.ID, other))
+		require.NoError(t, eng.UpdateMatchCourt(id, m.ID, other, CourtMove{}))
 		comp, err := store.LoadCompetition(id)
 		require.NoError(t, err)
 		tourn, err := store.LoadTournament()
@@ -261,7 +291,7 @@ func TestPoolScheduleEdit_CourtMoveMovesTheKnockout(t *testing.T) {
 		path := filepath.Join(dir, "tournament.md")
 		require.NoError(t, os.RemoveAll(path))
 		require.NoError(t, os.Mkdir(path, 0o755))
-		require.NoError(t, eng.UpdateMatchCourt(id, m.ID, other))
+		require.NoError(t, eng.UpdateMatchCourt(id, m.ID, other, CourtMove{}))
 		for _, r := range pool(t, store, id) {
 			if r.ID == m.ID {
 				assert.Equal(t, other, r.Court, "the court move is saved")

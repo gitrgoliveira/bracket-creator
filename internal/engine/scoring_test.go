@@ -85,7 +85,7 @@ func TestUpdateMatchCourt(t *testing.T) {
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	// Update court
-	err = eng.UpdateMatchCourt(compID, "P1-1", "B")
+	err = eng.UpdateMatchCourt(compID, "P1-1", "B", CourtMove{})
 	require.NoError(t, err)
 
 	// Verify updated
@@ -98,7 +98,7 @@ func TestUpdateMatchCourt(t *testing.T) {
 	}
 	require.NoError(t, store.SaveBracket(compID, bracket))
 
-	err = eng.UpdateMatchCourt(compID, "B1", "C")
+	err = eng.UpdateMatchCourt(compID, "B1", "C", CourtMove{})
 	require.NoError(t, err)
 
 	updatedBracket, _ := store.LoadBracket(compID)
@@ -1804,7 +1804,7 @@ func TestUnresolvedKnockoutMatch_ScoringGated(t *testing.T) {
 	// Scheduling a not-yet-resolved match IS allowed, operators may pre-assign
 	// courts/times before the feeder pools finish.
 	t.Run("UpdateMatchCourt allowed on unresolved match", func(t *testing.T) {
-		require.NoError(t, eng.UpdateMatchCourt(compID, "m-r1-0", "B"))
+		require.NoError(t, eng.UpdateMatchCourt(compID, "m-r1-0", "B", CourtMove{}))
 	})
 	t.Run("UpdateMatchTime allowed on unresolved match", func(t *testing.T) {
 		require.NoError(t, eng.UpdateMatchTime(compID, "m-r1-0", "10:00"))

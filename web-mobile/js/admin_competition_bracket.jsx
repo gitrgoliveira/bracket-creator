@@ -133,7 +133,7 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, onMoveC
             <CourtPicker
               value={match.court}
               courts={courts}
-              onChange={(cc) => onMoveCourt(compId, match.id, cc)}
+              onChange={(cc) => onMoveCourt(compId, match.id, cc, { shown: match, hostUnsavedRef })}
               btnClassName="running-panel__court-btn"
               label="SHIAIJO "
             />

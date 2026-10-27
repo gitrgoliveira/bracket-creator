@@ -405,6 +405,24 @@ func respondIfDownstreamKnockoutRunning(c *gin.Context, err error) bool {
 	return true
 }
 
+// respondIfCourtMoveRefused answers engine.CourtMoveRefusedError with HTTP 409
+// {"code":"match_status_changed","reasonHuman":<sentence>,"message":<sentence>,"error":"match_status_changed"}
+// and reports whether it answered. The sentence comes from err.Sentence().
+func respondIfCourtMoveRefused(c *gin.Context, err error) bool {
+	var refusedErr *engine.CourtMoveRefusedError
+	if !errors.As(err, &refusedErr) {
+		return false
+	}
+	sentence := refusedErr.Sentence()
+	c.JSON(http.StatusConflict, gin.H{
+		"code":        "match_status_changed",
+		"reasonHuman": sentence,
+		"message":     sentence,
+		"error":       "match_status_changed",
+	})
+	return true
+}
+
 // blockedMatchesPayload renders knockout matches for the wire, for every
 // payload that names them to the operator (blockingMatches, runningMatches,
 // reopenedMatches): id for addressing, number, label, the words the operator

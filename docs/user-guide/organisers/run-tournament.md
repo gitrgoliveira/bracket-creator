@@ -243,7 +243,7 @@ For the four competition formats and the Swiss round-by-round flow, refer to [Fo
 
 For team lineups and team scoring rules, refer to [Team tournaments](team-tournaments.md).
 
-For how to enter scores and navigate between matches, refer to [Scoring a match](../court-operators/scoring-a-match.md).
+For how to enter scores and navigate between matches, refer to [Score a match](../court-operators/scoring-a-match.md).
 
 For kiken, fusenpai, daihyosen, and other special decisions, refer to [Recording decisions](../court-operators/recording-decisions.md).
 
@@ -315,3 +315,9 @@ Changing a match duration never invalidates a generated draw. Pools, brackets an
 For a kachinuki (winner stays on) competition the number of bouts is not fixed, so the estimate is a range rather than a single figure. The competition Overview shows **Best**, **Average**, and **Worst**: best is a clean sweep where one fighter wins every bout, worst is the longest run where each bout retires one fighter, and average sits between them. Use the worst figure for planning the day and the average for a realistic finish time.
 
 ![The competition Overview schedule estimate for a kachinuki competition, reading Best, Average, and Worst durations followed by a per-court breakdown.](../../screenshots/kachinuki-estimate-range.png)
+
+### Moving matches between shiai-jo
+
+A match can be moved to another shiai-jo from the schedule page (by using its court picker, or by dragging the match to another court's column), as well as from the **Scores** tab row's court picker, the **Bracket** tab's running-match panel picker, or the court console, which has no court picker for the match running there.
+
+Moving a running match asks for confirmation first: once confirmed, the match stops running, keeps its score, and goes first in the new shiai-jo's queue, ready to be started again there. Moving a waiting match places it last in that shiai-jo's queue. The place is set through the match's scheduled time: one minute before the earliest waiting match there for first (or the same time, when that is 00:00), and one minute after the latest for last (or the same time, when that is 23:59). A match whose own time is already ahead of, or behind, all of them keeps it. Only waiting matches whose two competitors are known count: a knockout match still waiting for the matches that feed it does not. A pool bout always stays ahead of its own competition's knockout, which moves later to follow the pools, though never past 23:59. Where none of the waiting matches on that shiai-jo has a time, a waiting match moved there loses its time and joins them at the end of the queue, while a running match keeps its time and goes ahead of them. A finished match keeps its result and time and only changes shiai-jo. If a waiting match is moved back, it is placed last on the old shiai-jo rather than returning to its previous slot; use the up and down arrows on the court console or edit the match's time on the schedule page to reorder it. A running match moved by mistake can be started again on the new shiai-jo, or moved back (it is waiting by then, so it goes last) and started from the queue. A move that reaches the server after the match was started on another device is refused with the reason; [Score a match](../court-operators/scoring-a-match.md) covers the refusals and the History line a move leaves.

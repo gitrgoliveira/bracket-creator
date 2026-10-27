@@ -94,7 +94,7 @@ func (stubScoringEngine) MaybeAutoCompletePoolsAfterWrite(string, ...state.Match
 	return engine.AutoCompleteNoChange, nil
 }
 
-func (stubScoringEngine) UpdateMatchCourt(string, string, string) error {
+func (stubScoringEngine) UpdateMatchCourt(string, string, string, engine.CourtMove) error {
 	return nil
 }
 

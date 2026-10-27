@@ -76,6 +76,9 @@ type MatchHistoryEntry struct {
 	// moved (a finish that never saw it, D5).
 	Event        *domain.ScoreEvent `json:"event,omitempty"`
 	EventOutcome string             `json:"eventOutcome,omitempty"`
+	// Court is the shiaijo a court move sent the match to (set only on a
+	// requeue line written by a confirmed running court move).
+	Court string `json:"court,omitempty"`
 }
 
 // matchHistoryFile is the file name of a match's history: the match id

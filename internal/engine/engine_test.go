@@ -1589,7 +1589,7 @@ func TestUpdateMatchCourt_Pool(t *testing.T) {
 	require.NoError(t, err)
 	matchID := matches[0].ID
 
-	err = eng.UpdateMatchCourt(compID, matchID, "Court Z")
+	err = eng.UpdateMatchCourt(compID, matchID, "Court Z", CourtMove{})
 	require.NoError(t, err)
 
 	// Verify persistence in matches
@@ -1618,7 +1618,7 @@ func TestUpdateMatchCourt_Bracket(t *testing.T) {
 	require.NoError(t, err)
 	matchID := bracket.Rounds[0][0].ID
 
-	err = eng.UpdateMatchCourt(compID, matchID, "Court X")
+	err = eng.UpdateMatchCourt(compID, matchID, "Court X", CourtMove{})
 	require.NoError(t, err)
 
 	// Verify persistence in bracket
@@ -1634,7 +1634,7 @@ func TestUpdateMatchCourt_NotFound(t *testing.T) {
 	saveTestParticipants(t, store, compID, []string{"A", "B", "C"})
 	require.NoError(t, eng.StartCompetition(compID))
 
-	err := eng.UpdateMatchCourt(compID, "nonexistent", "Z")
+	err := eng.UpdateMatchCourt(compID, "nonexistent", "Z", CourtMove{})
 	assert.Error(t, err)
 }
 

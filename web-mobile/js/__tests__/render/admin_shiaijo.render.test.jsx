@@ -1578,12 +1578,13 @@ async function mountCourt(initial, opts = {}) {
   window.API.subscribeToEvents = () => () => {};
   window.API.revertMatchToQueue = vi.fn().mockResolvedValue(true);
   const showToast = vi.fn();
+  const onMoveCourt = opts.onMoveCourt || vi.fn();
   const exits = { onBack: vi.fn(), onLogout: vi.fn(), onViewerMode: vi.fn(), onSwitchCourt: vi.fn() };
   let utils;
   await act(async () => {
     utils = render(
       <AdminShiaijoPage tournament={makeMinimalTournament()} court="A" onBack={exits.onBack} onEditScore={opts.onEditScore || vi.fn()}
-        onMoveCourt={vi.fn()} onLogout={exits.onLogout} onViewerMode={exits.onViewerMode} password="" showToast={showToast}
+        onMoveCourt={onMoveCourt} onLogout={exits.onLogout} onViewerMode={exits.onViewerMode} password="" showToast={showToast}
         tweaks={{}} onSwitchCourt={exits.onSwitchCourt} />
     );
   });
@@ -1591,6 +1592,7 @@ async function mountCourt(initial, opts = {}) {
     utils,
     feed,
     showToast,
+    onMoveCourt,
     exits,
     editorMatch: () => { const el = utils.queryByTestId('score-editor'); return el ? el.getAttribute('data-match') : null; },
     refresh: async () => { await act(async () => { utils.getByRole('button', { name: /refresh/i }).click(); }); },
@@ -2061,7 +2063,7 @@ describe('a court shared with another competition', () => {
     try {
       await act(async () => { c.utils.getAllByTestId('move-to-B')[0].click(); });
       const dialog = c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
-      expect(dialog.textContent).toMatch(/Shiro m\d vs Aka m\d leaves Shiaijo A and joins the queue on Shiaijo B\./);
+      expect(dialog.textContent).toMatch(/Shiro m\d vs Aka m\d leaves Shiaijo A and goes last in the queue on Shiaijo B\./);
     } finally { c.restore(); }
   });
 });
@@ -3317,5 +3319,80 @@ describe('an own Start still out takes the match out of Up next and Upcoming', (
       await act(async () => { onRefusal(new Error('Sato is fighting on shiaijo B')); });
       expect(upNextText(c), 'the refused bout is Up next again').toContain('Aka m1');
     } finally { c.restore(); }
+  });
+});
+
+// P1-T6: the console's move confirm captures `shown: mm` when the dialog
+// opens and hands `{ confirmed: true, shown: pendingMove.shown }` to
+// `onMoveCourt`. A match this console just started leaves the queue,
+// so no queue row offers it a court move.
+describe('court move confirm snapshot (P1-T6)', () => {
+  const rowOf = (c, text) => [...c.utils.container.querySelectorAll('.shiaijo-qrow')].find((r) => r.textContent.includes(text));
+  const moveDialog = (c) => c.utils.container.querySelector('.shiaijo-move-confirm[role="dialog"]');
+
+  it('a waiting match keeps the waiting words and passes { confirmed: true, shown } from when the dialog opened', async () => {
+    const onMoveCourt = vi.fn().mockResolvedValue(true);
+    const m1 = courtMatch('m1', 'scheduled', { modifiedAt: 100 });
+    const m2 = courtMatch('m2', 'scheduled', { modifiedAt: 200 });
+    const c = await mountCourt([m1, m2], { onMoveCourt });
+    try {
+      await act(async () => { within(rowOf(c, 'Aka m2')).getByTestId('move-to-B').click(); });
+      const dialog = moveDialog(c);
+      expect(dialog.querySelector('.shiaijo-move-confirm__title').textContent).toBe('Move to Shiaijo B?');
+      expect(dialog.querySelector('.shiaijo-move-confirm__body').textContent)
+        .toBe('Shiro m2 vs Aka m2 leaves Shiaijo A and goes last in the queue on Shiaijo B.');
+      expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeTruthy();
+
+      // Even if the feed changes m2 before Confirm is clicked, confirmMoveCourt
+      // sends the snapshot captured when the dialog opened, never re-reading sorted.
+      c.feed.current = [m1, { ...m2, status: 'running', modifiedAt: 900 }];
+      await c.refresh();
+
+      await act(async () => { within(moveDialog(c)).getByRole('button', { name: 'Move to Shiaijo B' }).click(); });
+      expect(onMoveCourt).toHaveBeenCalledTimes(1);
+      expect(onMoveCourt).toHaveBeenCalledWith('c1', 'm2', 'B', {
+        confirmed: true,
+        shown: expect.objectContaining({ id: 'm2', compId: 'c1', status: 'scheduled', modifiedAt: 200 }),
+      });
+    } finally { c.restore(); }
+  });
+
+  // Only a waiting row offers a court move on the console (showActions): a
+  // finished row shows Correct alone, so the confirm never speaks for one.
+  it('a finished row offers no court move', async () => {
+    const m1 = courtMatch('m1', 'completed', { modifiedAt: 100, winner: 'Aka m1' });
+    const m2 = courtMatch('m2', 'scheduled', { modifiedAt: 200 });
+    const m3 = courtMatch('m3', 'scheduled', { modifiedAt: 300 });
+    const c = await mountCourt([m1, m2, m3], { onMoveCourt: vi.fn() });
+    try {
+      const done = c.utils.container.querySelector('.shiaijo-qrow--complete');
+      expect(done && done.textContent).toContain('Aka m1');
+      expect(within(done).queryByTestId('move-to-B')).toBeNull();
+      expect(within(rowOf(c, 'Aka m3')).getByTestId('move-to-B')).toBeTruthy();
+    } finally { c.restore(); }
+  });
+
+  // Since commit d8390747, `filteredScheduled` filters out `isStartedSnapshot(m)`,
+  // so a match this console just started leaves Up next and Upcoming as soon as
+  // `startedFrom` is set. No queue row offers it a court move.
+  it('a match this console just started leaves Up next and Upcoming, so no queue row offers it a court move', async () => {
+    const onEditScore = vi.fn().mockResolvedValue({ applied: true, pending: true, key: 'k-start', settled: new Promise(() => {}) });
+    const onMoveCourt = vi.fn().mockResolvedValue(true);
+    const m2 = courtMatch('m2', 'scheduled', { modifiedAt: 100 });
+    const m3 = courtMatch('m3', 'scheduled', { modifiedAt: 100 });
+    const c = await mountCourt([m2, m3], { onEditScore, onMoveCourt });
+    try {
+      expect(rowOf(c, 'Aka m3')).toBeTruthy();
+      const startBtn = [...rowOf(c, 'Aka m3').querySelectorAll('button')].find((b) => /^start/i.test(b.textContent.trim()));
+      await act(async () => { startBtn.click(); });
+      await act(async () => {});
+      expect(c.editorMatch()).toBe('m3');
+
+      // The match leaves Up next and Upcoming: no queue row offers it a move
+      expect(rowOf(c, 'Aka m3')).toBeFalsy();
+      expect(onMoveCourt).not.toHaveBeenCalled();
+    } finally {
+      c.restore();
+    }
   });
 });

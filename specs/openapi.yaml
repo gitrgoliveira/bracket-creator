@@ -3510,6 +3510,25 @@ paths:
     put:
       tags: [matches]
       summary: Assign match to court
+      description: >
+        Moves a match to another court. A confirmed running move is sent back to
+        the queue there with its score kept and placed first in that court's queue;
+        a waiting match is placed last in that court's queue; a finished match
+        moves its court only and keeps its time. First and last are judged on
+        the court's waiting matches with a canonical HH:MM time and both
+        competitors known (a knockout match still waiting on its feeders does
+        not count), and a pool bout is never placed after its own competition's
+        knockout, which follows the pool phase (a knockout pushed by it never
+        past 23:59). First takes one minute before the earliest such time (tied
+        at 00:00), last one minute after the latest (tied at 23:59), and a match
+        already ahead of or behind them keeps its time. Where the court's
+        waiting matches all have no time, a waiting match moved there loses its
+        time and sorts last with them, while a running one keeps its time. The
+        only refusal besides a malformed request (400) and an unknown match
+        (404) is an unconfirmed move (no stopsRunning) that finds the match
+        running after it was started on another device, answered 409. A confirmed running
+        move whose match has since stopped running is carried out as for a
+        waiting match, or, if it has finished, moves its court only.
       security:
         - TournamentPassword: []
       parameters:
@@ -3527,18 +3546,59 @@ paths:
                   type: string
                   maxLength: 32
                   example: A
+                stopsRunning:
+                  type: boolean
+                  description: >
+                    True when the operator saw the match running and confirmed that it
+                    stops there and goes first on the new court (ahead of timed waiting
+                    matches, or keeping its own time if none are timed). Has no effect
+                    when the match is no longer running (it is then moved like a waiting
+                    match: last in the target court's queue after any timed waiting
+                    matches, or untimed with them when none is timed; a finished
+                    match keeps its time).
                 writeId:
                   $ref: '#/components/schemas/ArrivalWriteId'
       responses:
         '200':
           description: Court updated, or a writeId this door already applied answered as recorded (nothing moved).
         '400':
-          description: Body malformed or the court label too long.
+          description: >
+            Refused before anything is read, with `{error}` naming the fault:
+            an invalid competition id (empty, longer than 64 characters, not
+            starting with an ASCII letter or digit, or holding a character
+            other than those, a hyphen or an underscore), a body that is not valid JSON for this schema, a
+            court longer than 32 characters, or a writeId longer than 128
+            characters.
         '404':
           description: >
             The competition holds no match with this id. Never a 500: the
             app's offline queue retries a 5xx forever, and this refusal would
             never change.
+        '409':
+          description: >
+            The match was started on another device before an unconfirmed move
+            arrived, so it was not moved. This is the only refusal: a move
+            confirmed with stopsRunning for a match that has since stopped
+            running is carried out as for a waiting match.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, reasonHuman, message, error]
+                properties:
+                  code:
+                    type: string
+                    example: match_status_changed
+                  reasonHuman:
+                    type: string
+                    description: The sentence explaining the refusal to the operator.
+                  message:
+                    type: string
+                    description: The sentence explaining the refusal to the operator (repeats reasonHuman).
+                  error:
+                    type: string
+                    description: Repeats the machine code (same value as code).
+                    example: match_status_changed
 
   /api/competitions/{id}/matches/{mid}/history:
     get:
@@ -5975,6 +6035,9 @@ components:
             and `eventOutcome`; a later `event` line for the same tap says its
             outcome moved), or engine for a write the server made itself.
           example: score
+        court:
+          type: string
+          description: The shiaijo a court move sent the match to, present on a requeue line.
         stamp:
           type: integer
           format: int64

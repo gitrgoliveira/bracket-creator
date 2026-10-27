@@ -111,6 +111,9 @@ func TestMatchLookupsPropagateLoadErrors(t *testing.T) {
 					_, err := eng.ReopenMatch(compID, matchID, "")
 					return err
 				}},
+				{"CheckStartAfterSendBack", func() error {
+					return eng.CheckStartAfterSendBack(compID, matchID, "A")
+				}},
 			}
 			for _, l := range lookups {
 				t.Run(l.name, func(t *testing.T) {

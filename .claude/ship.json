@@ -1,0 +1,28 @@
+{
+  "base": "main",
+  "git": true,
+  "forge": "github",
+  "issues": "beads",
+  "gate": "make go/test",
+  "targetedTests": "go -C <wt> test -run TestName ./internal/<pkg>/... ; npm --prefix <wt>/web-mobile test -- js/__tests__/<file>.test.jsx ; npm --prefix <wt>/web-mobile run test:render -- js/__tests__/render/<file>.render.test.jsx (never cd; the full gate only before claiming done or pushing)",
+  "evidence": "make docs/screenshots SINCE=main (or make docs/media SINCE=main) for docs images; PR screenshots from a real browser through the running app's UI (make run-mobile) via the pr-screenshots skill, never injected data",
+  "docsBuild": "make docs/build",
+  "prTemplate": ".github/pull_request_template.md",
+  "prAssets": "PNG piped as base64 to the pr-assets branch (gh api PUT contents/pr-assets/<pr>/<file>), embedded by raw.githubusercontent.com URL and curled back to confirm; see the pr-screenshots skill",
+  "domainDocs": ["CLAUDE.md", ".specify/memory/constitution.md", ".claude/rules/", "docs/architecture/data-model.md", "PRODUCT.md", "DESIGN.md", "running_a_kendo_tournament.md", "specs/openapi.yaml"],
+  "rules": [
+    "Read the .claude/rules/ file for an area before changing code there; Serena edits do not auto-load it.",
+    "Work only in the PR's own worktree under .claude/worktrees/, never the main checkout; address it with git -C / make -C, never cd.",
+    "Use Serena's symbolic tools for Go, TypeScript, SCSS and YAML sources; built-in Read/Edit only for languages Serena does not serve or non-code files.",
+    "Targeted tests while iterating; run the full make go/test once before claiming done or pushing, chained with && from the worktree path.",
+    "Keep the orchestrating session small: delegate reviews and investigations to subagents; Opus for implementers and the final review, Sonnet or Haiku for fixers.",
+    "The person using the app is a tired, distracted, clumsy operator who knows little kendo or Japanese; every mistake must be correctable, so warn about downstream consequences instead of refusing.",
+    "No fallback or backward-compatibility code; a storage change carries a load-time migration covering the last two releases.",
+    "Never write \"default win\" (name the decision: kiken, fusenpai, fusensho, hantei), \"squad\" (say team members) or \"mat\" (say shiaijo or court) in anything a person reads.",
+    "Competitor identity is the participant id, or (name, dojo) only where CLAUDE.md allows; never the name alone.",
+    "Docs under docs/ are public: no bead ids, no internal tooling, no em dashes; run make docs/build.",
+    "A UI change needs a real browser screenshot in the PR and every test-plan box checked before it is review-ready; build the PR body from the repo template.",
+    "Keep the bead in_progress until the PR merges; then run /cleanup. Do not add or run the retired Copilot review loop.",
+    "Do not commit or push beads via git; sync them with bd dolt push, and push all git commits at the finish."
+  ]
+}

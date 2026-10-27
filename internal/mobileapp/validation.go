@@ -75,6 +75,7 @@ const (
 
 	MaxLenMatchSide        = 100 // sideA / sideB / winner
 	MaxLenMatchScheduledAt = 32
+	MaxLenMatchCourt       = 32 // shiaijo label cap
 
 	MaxLenDecisionReason = 200
 	// Operator audit free-text (correction note) shares the same human-readable

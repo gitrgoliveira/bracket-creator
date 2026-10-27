@@ -1022,10 +1022,10 @@ func TestCheckConcurrentIneligibility_SameMatchNotBlocked(t *testing.T) {
 	assert.NoError(t, err, "same-match ineligibility should not block re-scoring")
 }
 
-// TestCheckEligibilityExcludingMatch_ExcludedMatch covers the
+// TestEligibilityErrorForSides_ExcludedMatch covers the
 // st.MatchID == excludeMatchID path: player is ineligible from the exact
 // match being re-scored → not blocked (undo path).
-func TestCheckEligibilityExcludingMatch_ExcludedMatch(t *testing.T) {
+func TestEligibilityErrorForSides_ExcludedMatch(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "excl-match"
 
@@ -1044,9 +1044,9 @@ func TestCheckEligibilityExcludingMatch_ExcludedMatch(t *testing.T) {
 	assert.NoError(t, err, "ineligibility from excluded match must not block re-scoring")
 }
 
-// TestCheckEligibilityExcludingMatch_BlockedByDifferentMatch verifies
+// TestEligibilityErrorForSides_BlockedByDifferentMatch verifies
 // that ineligibility from a DIFFERENT match still blocks.
-func TestCheckEligibilityExcludingMatch_BlockedByDifferentMatch(t *testing.T) {
+func TestEligibilityErrorForSides_BlockedByDifferentMatch(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "excl-different"
 
@@ -1079,9 +1079,9 @@ func TestStartMatch_MatchNotFound(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestCheckEligibilityExcludingMatch_EmptyPlayerID covers the pid==""
+// TestEligibilityErrorForSides_EmptyPlayerID covers the pid==""
 // continue branch: an empty player ID must be silently skipped.
-func TestCheckEligibilityExcludingMatch_EmptyPlayerID(t *testing.T) {
+func TestEligibilityErrorForSides_EmptyPlayerID(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "excl-empty-pid"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))

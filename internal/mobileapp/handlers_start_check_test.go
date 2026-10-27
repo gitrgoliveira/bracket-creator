@@ -299,6 +299,18 @@ func TestStartCheck_OversizedMatchIDIs400(t *testing.T) {
 	assert.Equal(t, "matchId: must be <= 128 characters", body["error"])
 }
 
+func TestStartCheck_OversizedCourtIs400(t *testing.T) {
+	store, _, _ := startCheckFixture(t, "sc-oversized-court")
+	r := startCheckRouter(store)
+
+	court := strings.Repeat("x", MaxLenMatchCourt+1)
+	w := getStartCheck(t, r, "sc-oversized-court", "Pool A-1", court)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, "court: must be <= 32 characters", body["error"])
+}
+
 func TestStartCheck_MissingCourtIs400(t *testing.T) {
 	store, _, _ := startCheckFixture(t, "sc-missing-court")
 	r := startCheckRouter(store)

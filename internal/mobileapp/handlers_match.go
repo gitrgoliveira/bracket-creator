@@ -1346,7 +1346,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// historically accepted longer values in engine tests (e.g.
 		// "Court Z"). 32 is generous enough not to break any real
 		// caller while rejecting abusive payloads.
-		if err := validateMaxLen("court", req.Court, MaxLenMatchScheduledAt); err != nil {
+		if err := validateMaxLen("court", req.Court, MaxLenMatchCourt); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -3047,7 +3047,7 @@ func registerStartCheckHandler(r *gin.RouterGroup, eng ScoringEngine, store Comp
 			c.JSON(http.StatusBadRequest, gin.H{"error": "court is required"})
 			return
 		}
-		if err := validateMaxLen("court", court, MaxLenMatchScheduledAt); err != nil {
+		if err := validateMaxLen("court", court, MaxLenMatchCourt); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}

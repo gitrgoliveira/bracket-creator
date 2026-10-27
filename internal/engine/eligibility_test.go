@@ -962,13 +962,13 @@ func TestParticipantIDByName(t *testing.T) {
 }
 
 // TestResolveMatchParticipantIDs_UnknownMatch covers the lookupMatchSides
-// error path in resolveMatchParticipantIDs.
+// error path in matchSideParticipantIDs.
 func TestResolveMatchParticipantIDs_UnknownMatch(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "resolve-unknown"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
-	_, err := eng.resolveMatchParticipantIDs(compID, "nonexistent-match")
+	_, err := eng.matchSideParticipantIDs(eng.store, compID, "nonexistent-match")
 	assert.Error(t, err)
 }
 
@@ -1038,7 +1038,9 @@ func TestCheckEligibilityExcludingMatch_ExcludedMatch(t *testing.T) {
 		MatchID:  "M-same",
 	}))
 
-	err := eng.checkEligibilityExcludingMatch(compID, []string{playerID}, "M-same")
+	statuses, err := eng.store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	err = eligibilityErrorForSides(statuses, "M-same", []string{playerID})
 	assert.NoError(t, err, "ineligibility from excluded match must not block re-scoring")
 }
 
@@ -1057,7 +1059,9 @@ func TestCheckEligibilityExcludingMatch_BlockedByDifferentMatch(t *testing.T) {
 		MatchID:  "M-other",
 	}))
 
-	err := eng.checkEligibilityExcludingMatch(compID, []string{playerID}, "M-different")
+	statuses, err := eng.store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	err = eligibilityErrorForSides(statuses, "M-different", []string{playerID})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrIneligibleCompetitor))
 }
@@ -1082,8 +1086,10 @@ func TestCheckEligibilityExcludingMatch_EmptyPlayerID(t *testing.T) {
 	compID := "excl-empty-pid"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
 
+	statuses, err := eng.store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
 	// Pass an empty string as one of the player IDs.
-	err := eng.checkEligibilityExcludingMatch(compID, []string{"", ""}, "M1")
+	err = eligibilityErrorForSides(statuses, "M1", []string{"", ""})
 	assert.NoError(t, err, "empty player IDs must be skipped silently")
 }
 
@@ -2071,7 +2077,7 @@ func TestK2ChecksItsHandleIsTransactional(t *testing.T) {
 
 // TestBarredSides pins the ONE "not eligible AND recorded by a different
 // match" check (bc-cse), extracted from what used to be three hand-copied
-// loops in StartMatchTx, checkEligibilityExcludingMatch and (now)
+// loops in StartMatchTx, startSidesGateTx and (now)
 // mobileapp's ineligibleSides annotation.
 func TestBarredSides(t *testing.T) {
 	statuses := map[string]domain.CompetitorStatus{

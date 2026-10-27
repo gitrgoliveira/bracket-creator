@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,9 +62,9 @@ func startCheckRouter(store *state.Store) *gin.Engine {
 	return r
 }
 
-func getStartCheck(t *testing.T, r *gin.Engine, compID, mid string, header ...string) *httptest.ResponseRecorder {
+func getStartCheck(t *testing.T, r *gin.Engine, compID, mid, court string, header ...string) *httptest.ResponseRecorder {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodGet, "/api/competitions/"+compID+"/matches/"+mid+"/start-check", nil)
+	req, err := http.NewRequest(http.MethodGet, "/api/competitions/"+compID+"/matches/"+mid+"/start-check?court="+url.QueryEscape(court), nil)
 	require.NoError(t, err)
 	for i := 0; i+1 < len(header); i += 2 {
 		req.Header.Set(header[i], header[i+1])
@@ -95,7 +96,7 @@ func TestStartCheck_AcceptedWhenOnlyTheBoutOnItsCourtHoldsItsCompetitor(t *testi
 	store, _, _ := startCheckFixture(t, "sc-ok")
 	r := startCheckRouter(store)
 
-	w := getStartCheck(t, r, "sc-ok", "Pool A-1")
+	w := getStartCheck(t, r, "sc-ok", "Pool A-1", "A")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.JSONEq(t, `{"ok": true}`, w.Body.String())
 }
@@ -106,7 +107,7 @@ func TestStartCheck_RefusesACompetitorFightingOnAnotherCourt(t *testing.T) {
 
 	// Bob v Dave waits on court A; Bob's bout there is skipped, Dave's on
 	// court B is not.
-	w := getStartCheck(t, r, "sc-simul", "Pool A-4")
+	w := getStartCheck(t, r, "sc-simul", "Pool A-4", "A")
 	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
@@ -120,7 +121,7 @@ func TestStartCheck_RefusesAPickNoLongerScheduled(t *testing.T) {
 	r := startCheckRouter(store)
 
 	for mid, status := range map[string]string{"Pool A-0": "running", "Pool A-3": "completed"} {
-		w := getStartCheck(t, r, "sc-not-sched", mid)
+		w := getStartCheck(t, r, "sc-not-sched", mid, "A")
 		require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 		var body map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
@@ -135,8 +136,8 @@ func TestStartCheck_UnknownMatchOrCompetitionIs404(t *testing.T) {
 	store, _, _ := startCheckFixture(t, "sc-404")
 	r := startCheckRouter(store)
 
-	assert.Equal(t, http.StatusNotFound, getStartCheck(t, r, "sc-404", "no-such").Code)
-	assert.Equal(t, http.StatusNotFound, getStartCheck(t, r, "no-such-comp", "Pool A-1").Code)
+	assert.Equal(t, http.StatusNotFound, getStartCheck(t, r, "sc-404", "no-such", "A").Code)
+	assert.Equal(t, http.StatusNotFound, getStartCheck(t, r, "no-such-comp", "Pool A-1", "A").Code)
 }
 
 // TestStartCheck_IneligibleBodyIsTheScoreStartsOwn pins that the check and
@@ -154,7 +155,7 @@ func TestStartCheck_IneligibleBodyIsTheScoreStartsOwn(t *testing.T) {
 			})
 			require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
 
-			check := getStartCheck(t, r, compID, "Pool A-1")
+			check := getStartCheck(t, r, compID, "Pool A-1", "")
 			start := putScoreJSON(t, r, compID, "Pool A-1", state.MatchResult{
 				ID: "Pool A-1", Status: state.MatchStatusRunning,
 			})
@@ -176,7 +177,7 @@ func TestStartCheck_WritesNothing(t *testing.T) {
 	before := treeBytes(t, dir)
 
 	for _, mid := range []string{"Pool A-0", "Pool A-1", "no-such"} {
-		getStartCheck(t, r, "sc-no-write", mid)
+		getStartCheck(t, r, "sc-no-write", mid, "A")
 	}
 	assert.Equal(t, before, treeBytes(t, dir))
 }
@@ -191,7 +192,7 @@ func TestStartCheck_OpenToCourtOperatorsInSelfRun(t *testing.T) {
 	seedSelfRunTournament(t, store)
 	r := setupSelfRunRouter(t, store, NewFileVerifier(store))
 
-	w := getStartCheck(t, r, "sc-self-run", "Pool A-1", "X-Tournament-Password", "")
+	w := getStartCheck(t, r, "sc-self-run", "Pool A-1", "A", "X-Tournament-Password", "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.JSONEq(t, `{"ok": true}`, w.Body.String())
 }
@@ -245,7 +246,7 @@ func TestStartCheck_BothSidesBarred(t *testing.T) {
 		compID := "sc-both-barred-pool"
 		r, _, _ := bothBarredPoolFixture(t, compID)
 
-		check := getStartCheck(t, r, compID, "Pool A-2")
+		check := getStartCheck(t, r, compID, "Pool A-2", "")
 		require.Equal(t, http.StatusConflict, check.Code, check.Body.String())
 		var body map[string]any
 		require.NoError(t, json.Unmarshal(check.Body.Bytes(), &body))
@@ -267,7 +268,7 @@ func TestStartCheck_BothSidesBarred(t *testing.T) {
 		compID := "sc-both-barred-knockout"
 		r := bothBarredKnockoutFixture(t, compID)
 
-		check := getStartCheck(t, r, compID, "m-r1-0")
+		check := getStartCheck(t, r, compID, "m-r1-0", "")
 		require.Equal(t, http.StatusConflict, check.Code, check.Body.String())
 		var body map[string]any
 		require.NoError(t, json.Unmarshal(check.Body.Bytes(), &body))
@@ -291,9 +292,55 @@ func TestStartCheck_OversizedMatchIDIs400(t *testing.T) {
 	r := startCheckRouter(store)
 
 	mid := strings.Repeat("x", MaxLenMatchID+1)
-	w := getStartCheck(t, r, "sc-oversized", mid)
+	w := getStartCheck(t, r, "sc-oversized", mid, "A")
 	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	assert.Equal(t, "matchId: must be <= 128 characters", body["error"])
+}
+
+func TestStartCheck_MissingCourtIs400(t *testing.T) {
+	store, _, _ := startCheckFixture(t, "sc-missing-court")
+	r := startCheckRouter(store)
+
+	req, err := http.NewRequest(http.MethodGet, "/api/competitions/sc-missing-court/matches/Pool A-1/start-check", nil)
+	require.NoError(t, err)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, "court is required", body["error"])
+}
+
+func TestStartCheck_CourtMismatchIs409(t *testing.T) {
+	store, _, _ := startCheckFixture(t, "sc-mismatch")
+	r := startCheckRouter(store)
+
+	// Pool A-1 is stored on Court "A"; console operating Court "B" asks.
+	w := getStartCheck(t, r, "sc-mismatch", "Pool A-1", "B")
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, "match_on_other_court", body["error"])
+	assert.Equal(t, "Pool A-1", body["matchId"])
+	assert.Equal(t, "A", body["court"])
+	assert.Equal(t, matchOnOtherCourtReasonHuman, body["reasonHuman"])
+}
+
+func TestStartCheck_EmptyCourtForUnassignedMatch(t *testing.T) {
+	store, _, _ := startCheckFixture(t, "sc-unassigned")
+	aliceID, bobID := helper.NewUUID4(), helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants("sc-unassigned", []domain.Player{
+		{ID: aliceID, Name: "UnassignedAlice", Dojo: "A"},
+		{ID: bobID, Name: "UnassignedBob", Dojo: "B"},
+	}))
+	require.NoError(t, store.SavePoolMatches("sc-unassigned", []state.MatchResult{
+		{ID: "Pool-Free", SideA: "UnassignedAlice", SideB: "UnassignedBob", SideAID: aliceID, SideBID: bobID, Status: state.MatchStatusScheduled, Court: ""},
+	}))
+	r := startCheckRouter(store)
+
+	w := getStartCheck(t, r, "sc-unassigned", "Pool-Free", "")
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.JSONEq(t, `{"ok": true}`, w.Body.String())
 }

@@ -972,7 +972,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 					// naming an internal id and no remedy. Only
 					// *AlreadyIneligibleError is reachable here, never
 					// *IneligibleCompetitorError: bulk-score never calls
-					// StartMatchTx/checkEligibilityExcludingMatch (the only
+					// StartMatchTx/startSidesGateTx (the only
 					// producers of that type besides the simultaneity gate,
 					// which this write path also never reaches), only the K2/K3
 					// concurrent-withdrawal checks inside
@@ -3005,19 +3005,28 @@ func respondStartRefusal(c *gin.Context, store CompetitionStore, compID, matchID
 // is no longer waiting: the console shows it as it is.
 const matchNotScheduledReasonHuman = "This match has already started or finished on another device. Check the court's list."
 
+// matchOnOtherCourtReasonHuman is the start check's sentence when the pick is
+// assigned to another court: the console operator learns it was moved and
+// should refresh the court list.
+const matchOnOtherCourtReasonHuman = "This match was moved to another court. Check the court's list."
+
 // registerStartCheckHandler registers GET
-// /competitions/:id/matches/:mid/start-check (bc-stpf): would starting mid be
-// accepted once the bout now running on its court is sent back to the queue?
-// The court console asks it before it sends that bout back, so a start the
-// server would refuse leaves the running bout running. The SERVER derives
-// which bout that is (the one running on mid's court), so a stale client copy
-// cannot name the wrong one.
+// /competitions/:id/matches/:mid/start-check?court=<court> (bc-stpf): would
+// starting mid be accepted once the bout now running on the console's court is
+// sent back to the queue? The court console asks it before it sends that bout
+// back, so a start the server would refuse leaves the running bout running.
+// The console names its court (the required `court` query parameter, empty for
+// the unassigned bucket) and the server derives which bout runs there. A pick
+// that was moved to another court since the console last refreshed would leave
+// that bout sent back for a start the server then refuses, so a court that is
+// not the pick's stored court is refused here with match_on_other_court.
 //
 // A GET: it writes nothing and is idempotent, so it carries no writeId or
 // basis and never goes through the outbox. Answers 200 {ok: true}; 409
 // ineligible_competitor with the /score start's own body (respondStartRefusal);
-// 409 match_not_scheduled when the pick is running or finished; 404 for an
-// unknown competition or match.
+// 409 match_not_scheduled when the pick is running or finished; 409
+// match_on_other_court when the pick is on another court; 404 for an unknown
+// competition or match.
 //
 // Intentionally NOT in isSelfRunMainGatedConfigRoute: the start check is
 // operational play (same as start-match and revert-to-queue), not organiser
@@ -3033,7 +3042,16 @@ func registerStartCheckHandler(r *gin.RouterGroup, eng ScoringEngine, store Comp
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		err := eng.CheckStartAfterSendBack(id, mid)
+		court, ok := c.GetQuery("court")
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "court is required"})
+			return
+		}
+		if err := validateMaxLen("court", court, MaxLenMatchScheduledAt); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		err := eng.CheckStartAfterSendBack(id, mid, court)
 		if err == nil {
 			c.JSON(http.StatusOK, gin.H{"ok": true})
 			return
@@ -3050,6 +3068,16 @@ func registerStartCheckHandler(r *gin.RouterGroup, eng ScoringEngine, store Comp
 				"matchId":     notScheduledErr.MatchID,
 				"status":      notScheduledErr.Status,
 				"reasonHuman": matchNotScheduledReasonHuman,
+			})
+			return
+		}
+		var otherCourtErr *engine.MatchOnOtherCourtError
+		if errors.As(err, &otherCourtErr) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":       "match_on_other_court",
+				"matchId":     otherCourtErr.MatchID,
+				"court":       otherCourtErr.Court,
+				"reasonHuman": matchOnOtherCourtReasonHuman,
 			})
 			return
 		}

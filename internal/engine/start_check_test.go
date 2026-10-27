@@ -50,7 +50,7 @@ func TestCheckStartAfterSendBack(t *testing.T) {
 			{ID: "P-1", SideA: "Alice", SideB: "Charlie", SideAID: alice, SideBID: charlie, Status: state.MatchStatusScheduled, Court: "A"},
 		}))
 
-		assert.NoError(t, eng.CheckStartAfterSendBack(compID, "P-1"))
+		assert.NoError(t, eng.CheckStartAfterSendBack(compID, "P-1", "A"))
 
 		// The real start, with the bout still running, is refused for the court.
 		assert.ErrorIs(t, startMatchTxErr(t, eng, store, compID, "P-1"), ErrCourtBusy)
@@ -67,7 +67,7 @@ func TestCheckStartAfterSendBack(t *testing.T) {
 			{ID: "P-2", SideA: "Alice", SideB: "Charlie", SideAID: alice, SideBID: charlie, Status: state.MatchStatusScheduled, Court: "A"},
 		}))
 
-		err := eng.CheckStartAfterSendBack(compID, "P-2")
+		err := eng.CheckStartAfterSendBack(compID, "P-2", "A")
 		var ineligErr *IneligibleCompetitorError
 		require.ErrorAs(t, err, &ineligErr)
 		assert.True(t, ineligErr.Simultaneous)
@@ -93,7 +93,7 @@ func TestCheckStartAfterSendBack(t *testing.T) {
 
 		// Alice's knockout bout runs on court A, the pick's own: skipped.
 		// Charlie's 3rd-place bout runs on court C: still refused.
-		err := eng.CheckStartAfterSendBack(compID, "P-0")
+		err := eng.CheckStartAfterSendBack(compID, "P-0", "A")
 		var ineligErr *IneligibleCompetitorError
 		require.ErrorAs(t, err, &ineligErr)
 		assert.True(t, ineligErr.Simultaneous)
@@ -101,7 +101,7 @@ func TestCheckStartAfterSendBack(t *testing.T) {
 
 		// Bob and Dave: Dave's knockout bout is on court A (skipped), Bob's
 		// 3rd-place bout on court C refuses.
-		require.ErrorAs(t, eng.CheckStartAfterSendBack(compID, "P-1"), &ineligErr)
+		require.ErrorAs(t, eng.CheckStartAfterSendBack(compID, "P-1", "A"), &ineligErr)
 		assert.Equal(t, bob, ineligErr.PlayerID)
 	})
 
@@ -116,7 +116,7 @@ func TestCheckStartAfterSendBack(t *testing.T) {
 		}))
 
 		var ineligErr *IneligibleCompetitorError
-		require.ErrorAs(t, eng.CheckStartAfterSendBack(compID, "P-1"), &ineligErr)
+		require.ErrorAs(t, eng.CheckStartAfterSendBack(compID, "P-1", ""), &ineligErr)
 		assert.True(t, ineligErr.Simultaneous)
 	})
 
@@ -137,7 +137,7 @@ func TestCheckStartAfterSendBack(t *testing.T) {
 			RecordedAt: time.Now().UTC(),
 		}))
 
-		err := eng.CheckStartAfterSendBack(compID, "P-1")
+		err := eng.CheckStartAfterSendBack(compID, "P-1", "A")
 		assert.ErrorIs(t, err, ErrIneligibleCompetitor)
 		var ineligErr *IneligibleCompetitorError
 		require.ErrorAs(t, err, &ineligErr)
@@ -166,7 +166,7 @@ func TestCheckStartAfterSendBack(t *testing.T) {
 			"B-1": state.MatchStatusCompleted,
 		} {
 			var notScheduled *MatchNotScheduledError
-			require.ErrorAs(t, eng.CheckStartAfterSendBack(compID, matchID), &notScheduled, matchID)
+			require.ErrorAs(t, eng.CheckStartAfterSendBack(compID, matchID, "A"), &notScheduled, matchID)
 			assert.Equal(t, matchID, notScheduled.MatchID)
 			assert.Equal(t, want, notScheduled.Status)
 			assert.Contains(t, notScheduled.Error(), "not scheduled")
@@ -182,7 +182,7 @@ func TestCheckStartAfterSendBack(t *testing.T) {
 		}))
 
 		var notFound *NotFoundError
-		require.ErrorAs(t, eng.CheckStartAfterSendBack(compID, "no-such"), &notFound)
+		require.ErrorAs(t, eng.CheckStartAfterSendBack(compID, "no-such", "A"), &notFound)
 	})
 
 	t.Run("a scheduled knockout match as the pick", func(t *testing.T) {
@@ -199,7 +199,7 @@ func TestCheckStartAfterSendBack(t *testing.T) {
 				ThirdPlaceMatch: &state.BracketMatch{ID: "B-3", SideA: "Charlie", SideB: "Dave", SideAID: charlie, SideBID: dave, Status: state.MatchStatusScheduled, Court: "B"},
 			}))
 
-			assert.NoError(t, eng.CheckStartAfterSendBack(compID, "B-1"))
+			assert.NoError(t, eng.CheckStartAfterSendBack(compID, "B-1", "A"))
 			assert.ErrorIs(t, startMatchTxErr(t, eng, store, compID, "B-1"), ErrCourtBusy)
 		})
 
@@ -215,7 +215,7 @@ func TestCheckStartAfterSendBack(t *testing.T) {
 				ThirdPlaceMatch: &state.BracketMatch{ID: "B-3", SideA: "Bob", SideB: "Dave", SideAID: bob, SideBID: dave, Status: state.MatchStatusScheduled, Court: "C"},
 			}))
 
-			err := eng.CheckStartAfterSendBack(compID, "B-3")
+			err := eng.CheckStartAfterSendBack(compID, "B-3", "C")
 			var ineligErr *IneligibleCompetitorError
 			require.ErrorAs(t, err, &ineligErr)
 			assert.True(t, ineligErr.Simultaneous)
@@ -241,13 +241,64 @@ func TestCheckStartAfterSendBack(t *testing.T) {
 				RecordedAt: time.Now().UTC(),
 			}))
 
-			err := eng.CheckStartAfterSendBack(compID, "B-1")
+			err := eng.CheckStartAfterSendBack(compID, "B-1", "A")
 			assert.ErrorIs(t, err, ErrIneligibleCompetitor)
 			var ineligErr *IneligibleCompetitorError
 			require.ErrorAs(t, err, &ineligErr)
 			assert.False(t, ineligErr.Simultaneous)
 			assert.Equal(t, bob, ineligErr.PlayerID)
 		})
+	})
+
+	t.Run("the console names a court other than the pick's stored court", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "sc-wrong-court"
+		createTestCompetition(t, store, compID, "league", 4)
+		alice, bob, _, _ := startCheckRoster(t, store, compID)
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P-0", SideA: "Alice", SideB: "Bob", SideAID: alice, SideBID: bob, Status: state.MatchStatusScheduled, Court: "B"},
+		}))
+
+		err := eng.CheckStartAfterSendBack(compID, "P-0", "A")
+		require.Error(t, err)
+		var otherCourtErr *MatchOnOtherCourtError
+		require.ErrorAs(t, err, &otherCourtErr)
+		assert.Equal(t, "P-0", otherCourtErr.MatchID)
+		assert.Equal(t, "B", otherCourtErr.Court)
+		assert.Equal(t, "A", otherCourtErr.ConsoleCourt)
+		assert.Contains(t, otherCourtErr.Error(), `match "P-0" is on court "B", not "A"`)
+	})
+
+	t.Run("regression: pick stored on court B where bout running on B shares competitor, console names court A", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "sc-regression-court"
+		createTestCompetition(t, store, compID, "league", 4)
+		alice, bob, charlie, dave := startCheckRoster(t, store, compID)
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P-A", SideA: "Charlie", SideB: "Dave", SideAID: charlie, SideBID: dave, Status: state.MatchStatusRunning, Court: "A"},
+			{ID: "P-B", SideA: "Alice", SideB: "Charlie", SideAID: alice, SideBID: charlie, Status: state.MatchStatusRunning, Court: "B"},
+			{ID: "P-Pick", SideA: "Alice", SideB: "Bob", SideAID: alice, SideBID: bob, Status: state.MatchStatusScheduled, Court: "B"},
+		}))
+
+		err := eng.CheckStartAfterSendBack(compID, "P-Pick", "A")
+		require.Error(t, err)
+		var otherCourtErr *MatchOnOtherCourtError
+		require.ErrorAs(t, err, &otherCourtErr)
+		assert.Equal(t, "P-Pick", otherCourtErr.MatchID)
+		assert.Equal(t, "B", otherCourtErr.Court)
+		assert.Equal(t, "A", otherCourtErr.ConsoleCourt)
+	})
+
+	t.Run("a pick with no stored court and the console naming empty passes when sides are free", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "sc-unassigned-court-free"
+		createTestCompetition(t, store, compID, "league", 4)
+		alice, bob, _, _ := startCheckRoster(t, store, compID)
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "P-0", SideA: "Alice", SideB: "Bob", SideAID: alice, SideBID: bob, Status: state.MatchStatusScheduled, Court: ""},
+		}))
+
+		assert.NoError(t, eng.CheckStartAfterSendBack(compID, "P-0", ""))
 	})
 }
 

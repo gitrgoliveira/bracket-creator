@@ -3037,13 +3037,13 @@ paths:
         another start, so a start the server would refuse leaves the running
         match running and shows the reason on the picked match.
 
-        The server works out which match that is (the one running on
-        `mid`'s court), so the caller names only the pick. The check runs
-        the same competitor checks as the start: a competitor fighting now
-        in another match of the competition, with the matches running on
-        `mid`'s own court left out (a pick with no court leaves out
-        nothing), and a competitor barred by a withdrawal. The court checks
-        are not run: the court is taken only by the match being sent back.
+        The caller names the pick and its court; the server still works out
+        which match runs there. The check runs the same competitor checks as
+        the start: a competitor fighting now in another match of the
+        competition, with the matches running on that court left out (a pick
+        with no court leaves out nothing), and a competitor barred by a
+        withdrawal. The court checks are not run: the court is taken only by
+        the match being sent back.
 
         It writes nothing and takes no lock, so it carries no `writeId` or
         `basis`. Check and start are separate requests: the start judges
@@ -3056,6 +3056,12 @@ paths:
       parameters:
         - $ref: '#/components/parameters/CompetitionId'
         - $ref: '#/components/parameters/MatchId'
+        - name: court
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The shiaijo the console is operating; the match running there is the one that gets sent back.
       responses:
         '200':
           description: The start would be accepted.
@@ -3069,7 +3075,11 @@ paths:
                     type: boolean
                     enum: [true]
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: Invalid input or missing required `court` query parameter.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -3083,6 +3093,9 @@ paths:
             `match_not_scheduled` means the pick is no longer waiting in the
             queue (another device started or finished it); its
             `reasonHuman` is shown as it is.
+            `match_on_other_court` means the picked match is assigned to
+            another court; its `reasonHuman` tells the operator the match
+            was moved.
           content:
             application/json:
               schema:
@@ -3094,6 +3107,7 @@ paths:
                     enum:
                       - ineligible_competitor
                       - match_not_scheduled
+                      - match_on_other_court
                     description: Machine-readable conflict code.
                   playerId:
                     type: string
@@ -3103,7 +3117,10 @@ paths:
                     description: The raw refusal reason (ineligible_competitor only).
                   matchId:
                     type: string
-                    description: The picked match (match_not_scheduled only).
+                    description: The picked match (match_not_scheduled and match_on_other_court only).
+                  court:
+                    type: string
+                    description: The picked match's stored court (match_on_other_court only).
                   status:
                     type: string
                     description: The picked match's stored status, e.g. `running` or `completed` (match_not_scheduled only).

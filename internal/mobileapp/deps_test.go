@@ -70,7 +70,7 @@ func (stubScoringEngine) StartMatchTx(state.StoreTx, string, string) error {
 	return nil
 }
 
-func (stubScoringEngine) CheckStartAfterSendBack(string, string) error {
+func (stubScoringEngine) CheckStartAfterSendBack(string, string, string) error {
 	return nil
 }
 

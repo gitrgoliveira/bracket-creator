@@ -119,15 +119,14 @@ func (e *AlreadyIneligibleError) Error() string {
 // CompetitorStatus{Eligible: false} recorded by a match OTHER than matchID
 // -- the "not eligible AND the status was recorded by a different match"
 // check, extracted to ONE place (bc-cse) from what used to be three
-// hand-copied loops: StartMatchTx (scoring_tx.go), checkEligibilityExcludingMatch
-// (below), and the mobileapp ineligibleSides read-time annotation
+// hand-copied loops: StartMatchTx (scoring_tx.go), startSidesGateTx,
+// and the mobileapp ineligibleSides read-time annotation
 // (annotateEligibility, handlers_match.go), which needs the SAME
 // per-side answer to stamp a scheduled match without gating a write.
 //
 // A side is barred when it carries a non-empty id, a status entry exists
 // for it, that status is Eligible:false, AND the status's own MatchID does
-// not equal matchID -- the undo-path exemption (checkEligibilityExcludingMatch's
-// prior contract, and StartMatchTx's): a match may always be re-scored even
+// not equal matchID -- the undo-path exemption (startSidesGateTx's): a match may always be re-scored even
 // when ITS OWN prior kiken/fusenpai is what marked a participant ineligible.
 // a/b are independent: either, both, or neither may be non-nil. Returns a
 // COPY of the stored status (never an alias into the caller's map), so a
@@ -150,9 +149,9 @@ func BarredSides(statuses map[string]domain.CompetitorStatus, matchID, sideAID, 
 // exactly [sideAID, sideBID] from every caller's own participant-id
 // resolver, handled defensively rather than assumed to be length 2 -- and
 // applies BarredSides against matchID, returning *IneligibleCompetitorError
-// for the first barred side, A before B. Shared by StartMatchTx and
-// checkEligibilityExcludingMatch, the tx and non-tx pre-flight eligibility
-// gates, so the extraction and A-then-B ordering has one owner.
+// for the first barred side, A before B. startSidesGateTx, which both
+// start doors (StartMatch and StartMatchTx) and the start check run, calls
+// it, so the extraction and A-then-B ordering has one owner.
 func eligibilityErrorForSides(statuses map[string]domain.CompetitorStatus, matchID string, ids []string) error {
 	var sideAID, sideBID string
 	if len(ids) > 0 {
@@ -355,21 +354,15 @@ func withdrawalStatus(playerID, decision, matchID string) domain.CompetitorStatu
 // may proceed.
 //
 // The status transition itself remains with the score handler, this
-// method is the pre-flight gate.
+// method is the pre-flight gate. It runs checkCourtExclusivity, then
+// startSidesGateTx with e.store (bc-twin).
 //
 // FR-035, T084.
 func (e *Engine) StartMatch(compID, matchID string) error {
 	if err := e.checkCourtExclusivity(compID, matchID, ""); err != nil {
 		return err
 	}
-	if err := e.checkSimultaneousMatch(compID, matchID); err != nil {
-		return err
-	}
-	ids, err := e.resolveMatchParticipantIDs(compID, matchID)
-	if err != nil {
-		return err
-	}
-	return e.checkEligibilityExcludingMatch(compID, ids, matchID)
+	return e.startSidesGateTx(e.store, compID, matchID, simultaneitySkip{})
 }
 
 // checkCourtExclusivity rejects StartMatch when the target match's court
@@ -470,26 +463,6 @@ func findPoolMatch(poolMatches []state.MatchResult, matchID string) (state.Match
 		}
 	}
 	return state.MatchResult{}, false
-}
-
-// checkSimultaneousMatch is the non-tx entry point for
-// checkSimultaneousMatchTx (scoring_tx.go), which holds the shared body and
-// its full doc comment.
-func (e *Engine) checkSimultaneousMatch(compID, matchID string) error {
-	return e.checkSimultaneousMatchTx(e.store, compID, matchID)
-}
-
-// checkEligibilityExcludingMatch is like CheckEligibility but skips
-// CompetitorStatus entries whose source MatchID equals excludeMatchID.
-// This lets a match be re-scored (the undo path) even when its
-// own prior kiken/fusenpai created the ineligibility, the status was
-// recorded BY that match, so it should not block writing back to it.
-func (e *Engine) checkEligibilityExcludingMatch(compID string, playerIDs []string, excludeMatchID string) error {
-	statuses, err := e.store.LoadCompetitorStatus(compID)
-	if err != nil {
-		return err
-	}
-	return eligibilityErrorForSides(statuses, excludeMatchID, playerIDs)
 }
 
 // RecordDecision auto-fills the scoreline from decision/decisionBy/encho
@@ -674,18 +647,11 @@ func (e *Engine) matchSideParticipantIDs(h state.StoreTx, compID, matchID string
 	return []string{idA, idB}, nil
 }
 
-// resolveMatchParticipantIDs is the non-transactional door to
-// matchSideParticipantIDs, which holds the body and its full doc comment.
-func (e *Engine) resolveMatchParticipantIDs(compID, matchID string) ([]string, error) {
-	return e.matchSideParticipantIDs(e.store, compID, matchID)
-}
-
 // lookupMatchSides resolves matchID's SideA/SideB names from the
 // pool-matches store, falling back to the bracket store (rounds + the
 // bronze sibling). Takes h state.StoreTx so both the transactional
 // (RecordDecisionTx, StartMatchTx, checkSimultaneousMatchTx) and
-// non-transactional (checkSimultaneousMatch, resolveMatchParticipantIDs,
-// test) callers share one body (bc-twin follow-up).
+// non-transactional (test) callers share one body (bc-twin follow-up).
 func (e *Engine) lookupMatchSides(h state.StoreTx, compID, matchID string) (string, string, error) {
 	// Load errors are returned as they are (see lookupExistingResult): an
 	// unreadable file is not a match that does not exist.

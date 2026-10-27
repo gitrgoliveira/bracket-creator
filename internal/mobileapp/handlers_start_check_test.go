@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -193,4 +194,106 @@ func TestStartCheck_OpenToCourtOperatorsInSelfRun(t *testing.T) {
 	w := getStartCheck(t, r, "sc-self-run", "Pool A-1", "X-Tournament-Password", "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	assert.JSONEq(t, `{"ok": true}`, w.Body.String())
+}
+
+// bothBarredKnockoutFixture builds a competition where Alice is barred by a
+// withdrawal on Pool A-0 and Dave by one on Pool A-1, leaving bracket match
+// m-r1-0 scheduled with both sides already barred.
+func bothBarredKnockoutFixture(t *testing.T, compID string) *gin.Engine {
+	t.Helper()
+	tempDir := t.TempDir()
+	store, err := state.NewStore(tempDir)
+	require.NoError(t, err)
+	eng := engine.New(store)
+	hub := NewHub()
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Format: state.CompFormatMixed, Status: state.CompStatusKnockout,
+	}))
+	aliceID, bobID, carolID, daveID := helper.NewUUID4(), helper.NewUUID4(), helper.NewUUID4(), helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+		{ID: carolID, Name: "Carol", Dojo: "C"},
+		{ID: daveID, Name: "Dave", Dojo: "D"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", SideAID: aliceID, SideBID: bobID, Status: state.MatchStatusScheduled},
+		{ID: "Pool A-1", SideA: "Dave", SideB: "Carol", SideAID: daveID, SideBID: carolID, Status: state.MatchStatusScheduled},
+	}))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{
+		{{ID: "m-r1-0", SideA: "Alice", SideAID: aliceID, SideB: "Dave", SideBID: daveID,
+			Status: state.MatchStatusScheduled, DisplayRound: 1, MatchNumber: 1}},
+	}}))
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	admin := r.Group("/api")
+	RegisterMatchHandlers(admin, eng, store, store, hub, NewFileVerifier(store), store)
+	RegisterDecisionHandlers(admin, eng, store, store, hub)
+
+	require.Equal(t, http.StatusOK, postDecisionJSON(t, r, compID, "Pool A-0",
+		DecisionRequest{Decision: "kiken-voluntary", DecisionBy: "aka", DecisionReason: "test"}).Code)
+	require.Equal(t, http.StatusOK, postDecisionJSON(t, r, compID, "Pool A-1",
+		DecisionRequest{Decision: "kiken-voluntary", DecisionBy: "aka", DecisionReason: "test"}).Code)
+
+	return r
+}
+
+func TestStartCheck_BothSidesBarred(t *testing.T) {
+	t.Run("pool match", func(t *testing.T) {
+		compID := "sc-both-barred-pool"
+		r, _, _ := bothBarredPoolFixture(t, compID)
+
+		check := getStartCheck(t, r, compID, "Pool A-2")
+		require.Equal(t, http.StatusConflict, check.Code, check.Body.String())
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(check.Body.Bytes(), &body))
+		assert.Equal(t, "ineligible_competitor", body["error"])
+		reasonHuman, _ := body["reasonHuman"].(string)
+		assert.Contains(t, reasonHuman, "Neither")
+		assert.Contains(t, reasonHuman, "Alice")
+		assert.Contains(t, reasonHuman, "Dave")
+		assert.Contains(t, reasonHuman, "correct the earlier withdrawal or the draw")
+
+		start := putScoreJSON(t, r, compID, "Pool A-2", state.MatchResult{
+			ID: "Pool A-2", Status: state.MatchStatusRunning,
+		})
+		require.Equal(t, http.StatusConflict, start.Code, start.Body.String())
+		assert.Equal(t, start.Body.String(), check.Body.String())
+	})
+
+	t.Run("bracket match", func(t *testing.T) {
+		compID := "sc-both-barred-knockout"
+		r := bothBarredKnockoutFixture(t, compID)
+
+		check := getStartCheck(t, r, compID, "m-r1-0")
+		require.Equal(t, http.StatusConflict, check.Code, check.Body.String())
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(check.Body.Bytes(), &body))
+		assert.Equal(t, "ineligible_competitor", body["error"])
+		reasonHuman, _ := body["reasonHuman"].(string)
+		assert.Contains(t, reasonHuman, "Neither")
+		assert.Contains(t, reasonHuman, "Alice")
+		assert.Contains(t, reasonHuman, "Dave")
+		assert.Contains(t, reasonHuman, "correct the earlier withdrawal or the draw")
+
+		start := putScoreJSON(t, r, compID, "m-r1-0", state.MatchResult{
+			ID: "m-r1-0", Status: state.MatchStatusRunning,
+		})
+		require.Equal(t, http.StatusConflict, start.Code, start.Body.String())
+		assert.Equal(t, start.Body.String(), check.Body.String())
+	})
+}
+
+func TestStartCheck_OversizedMatchIDIs400(t *testing.T) {
+	store, _, _ := startCheckFixture(t, "sc-oversized")
+	r := startCheckRouter(store)
+
+	mid := strings.Repeat("x", MaxLenMatchID+1)
+	w := getStartCheck(t, r, "sc-oversized", mid)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, "matchId: must be <= 128 characters", body["error"])
 }

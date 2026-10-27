@@ -184,6 +184,71 @@ func TestCheckStartAfterSendBack(t *testing.T) {
 		var notFound *NotFoundError
 		require.ErrorAs(t, eng.CheckStartAfterSendBack(compID, "no-such"), &notFound)
 	})
+
+	t.Run("a scheduled knockout match as the pick", func(t *testing.T) {
+		t.Run("a competitor shared with a bout running on the pick's own court is accepted", func(t *testing.T) {
+			eng, store, _ := setupTestEngine(t)
+			compID := "sc-ko-pick-own-court"
+			createTestCompetition(t, store, compID, "league", 4)
+			alice, bob, charlie, dave := startCheckRoster(t, store, compID)
+			require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+				Rounds: [][]state.BracketMatch{{
+					{ID: "B-0", SideA: "Alice", SideB: "Charlie", SideAID: alice, SideBID: charlie, Status: state.MatchStatusRunning, Court: "A"},
+					{ID: "B-1", SideA: "Alice", SideB: "Bob", SideAID: alice, SideBID: bob, Status: state.MatchStatusScheduled, Court: "A"},
+				}},
+				ThirdPlaceMatch: &state.BracketMatch{ID: "B-3", SideA: "Charlie", SideB: "Dave", SideAID: charlie, SideBID: dave, Status: state.MatchStatusScheduled, Court: "B"},
+			}))
+
+			assert.NoError(t, eng.CheckStartAfterSendBack(compID, "B-1"))
+			assert.ErrorIs(t, startMatchTxErr(t, eng, store, compID, "B-1"), ErrCourtBusy)
+		})
+
+		t.Run("the third-place match refuses when a competitor fights on another court", func(t *testing.T) {
+			eng, store, _ := setupTestEngine(t)
+			compID := "sc-ko-pick-third-place"
+			createTestCompetition(t, store, compID, "league", 4)
+			alice, bob, _, dave := startCheckRoster(t, store, compID)
+			require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+				Rounds: [][]state.BracketMatch{{
+					{ID: "B-1", SideA: "Bob", SideB: "Alice", SideAID: bob, SideBID: alice, Status: state.MatchStatusRunning, Court: "B"},
+				}},
+				ThirdPlaceMatch: &state.BracketMatch{ID: "B-3", SideA: "Bob", SideB: "Dave", SideAID: bob, SideBID: dave, Status: state.MatchStatusScheduled, Court: "C"},
+			}))
+
+			err := eng.CheckStartAfterSendBack(compID, "B-3")
+			var ineligErr *IneligibleCompetitorError
+			require.ErrorAs(t, err, &ineligErr)
+			assert.True(t, ineligErr.Simultaneous)
+			assert.Equal(t, bob, ineligErr.PlayerID)
+		})
+
+		t.Run("a barred side refuses", func(t *testing.T) {
+			eng, store, _ := setupTestEngine(t)
+			compID := "sc-ko-pick-barred"
+			createTestCompetition(t, store, compID, "league", 4)
+			alice, bob, charlie, dave := startCheckRoster(t, store, compID)
+			require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+				Rounds: [][]state.BracketMatch{{
+					{ID: "B-1", SideA: "Alice", SideB: "Bob", SideAID: alice, SideBID: bob, Status: state.MatchStatusScheduled, Court: "A"},
+				}},
+				ThirdPlaceMatch: &state.BracketMatch{ID: "B-3", SideA: "Charlie", SideB: "Dave", SideAID: charlie, SideBID: dave, Status: state.MatchStatusScheduled, Court: "B"},
+			}))
+			require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
+				PlayerID:   bob,
+				Eligible:   false,
+				Reason:     "kiken at m_prev",
+				MatchID:    "m_prev",
+				RecordedAt: time.Now().UTC(),
+			}))
+
+			err := eng.CheckStartAfterSendBack(compID, "B-1")
+			assert.ErrorIs(t, err, ErrIneligibleCompetitor)
+			var ineligErr *IneligibleCompetitorError
+			require.ErrorAs(t, err, &ineligErr)
+			assert.False(t, ineligErr.Simultaneous)
+			assert.Equal(t, bob, ineligErr.PlayerID)
+		})
+	})
 }
 
 // TestStartMatchTx_SidesGateUnchanged pins that splitting the start gate

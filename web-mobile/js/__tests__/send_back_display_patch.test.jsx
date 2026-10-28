@@ -85,16 +85,67 @@ describe('a queued send back is published on the court\'s channel (bc-stpf)', ()
     expect(patchesFor(publish, 'm1')).toEqual([]);
   });
 
-  it('a refused send back publishes the bout running again', async () => {
+  it('a 409-finished refusal does not publish running', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     global.fetch = reply(409, { error: 'match already completed' });
     const res = await API.revertMatchToQueue('c1', 'm1', 'pw', { match: runningBout() });
     await expect(res.settled).rejects.toThrow(/already completed/);
     await flush();
+    expect(patchesFor(publish, 'm1').map(([, , r]) => r.status)).toEqual(['scheduled']);
+    warn.mockRestore();
+  });
+
+  it('a plain refusal publishes the bout running again', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    global.fetch = reply(400, { error: 'invalid request' });
+    const res = await API.revertMatchToQueue('c1', 'm1', 'pw', { match: runningBout() });
+    await expect(res.settled).rejects.toThrow(/invalid request/);
+    await flush();
     expect(patchesFor(publish, 'm1').map(([, , r]) => r.status)).toEqual(['scheduled', 'running']);
     const [court, compId, result] = patchesFor(publish, 'm1')[1];
     expect([court, compId]).toEqual(['A', 'c1']);
     // No scoreVersion: never read as a stale running board by the display.
+    expect('scoreVersion' in result).toBe(false);
+    warn.mockRestore();
+  });
+
+  it('a confirmed running court move publishes the bout as scheduled on its old court', async () => {
+    global.fetch = reply(200, {});
+    const res = API.moveMatchCourt('c1', 'm1', 'B', 'pw', {
+      stopsRunning: true,
+      was: { court: 'A' },
+      match: runningBout({ court: 'A' }),
+    });
+    expect(patchesFor(publish, 'm1')).toEqual([
+      ['A', 'c1', { id: 'm1', status: 'scheduled', sideAId: 'p1', sideBId: 'p2' }],
+    ]);
+    await expect((await res).settled).resolves.toEqual({});
+    await flush();
+    expect(patchesFor(publish, 'm1')).toHaveLength(1);
+  });
+
+  it('a court move without stopsRunning publishes nothing on the bridge', () => {
+    global.fetch = reply(200, {});
+    API.moveMatchCourt('c1', 'm1', 'B', 'pw', {
+      was: { court: 'A' },
+      match: runningBout({ court: 'A' }),
+    });
+    expect(patchesFor(publish, 'm1')).toEqual([]);
+  });
+
+  it('a refused running court move publishes the bout running again on its old court', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    global.fetch = reply(400, { error: 'invalid court' });
+    const res = await API.moveMatchCourt('c1', 'm1', 'B', 'pw', {
+      stopsRunning: true,
+      was: { court: 'A' },
+      match: runningBout({ court: 'A' }),
+    });
+    await expect(res.settled).rejects.toThrow(/invalid court/);
+    await flush();
+    expect(patchesFor(publish, 'm1').map(([, , r]) => r.status)).toEqual(['scheduled', 'running']);
+    const [court, compId, result] = patchesFor(publish, 'm1')[1];
+    expect([court, compId]).toEqual(['A', 'c1']);
     expect('scoreVersion' in result).toBe(false);
     warn.mockRestore();
   });

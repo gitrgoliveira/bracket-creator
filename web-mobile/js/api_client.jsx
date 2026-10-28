@@ -583,6 +583,35 @@ function _publishSendBack(compID, matchID, match, status) {
     _bridge.publish('patch', court, compID, { result });
 }
 
+function _isMatchAlreadyCompletedRefusal(err) {
+    if (!err) return false;
+    const msg = String(err.message || err.error || err);
+    return /already completed/i.test(msg);
+}
+
+// _attachSendBackDisplayPutBack publishes status "scheduled" to the local
+// court bridge at enqueue, and puts it back "running" on a refusal or discard
+// if the match is still running. When the refusal says the match is already
+// completed, we do not tell the display it is running: the display takes the
+// server copy at its next refetch.
+function _attachSendBackDisplayPutBack(compID, matchID, match, answer) {
+    if (!match || !answer || !answer.settled) return;
+    _publishSendBack(compID, matchID, match, 'scheduled');
+    const putBack = () => _publishSendBack(compID, matchID, match, 'running');
+    answer.settled.then(
+        (body) => {
+            if (body && body.discarded) putBack();
+        },
+        (err) => {
+            // When the refusal says the match is already completed, do not tell
+            // the display it is running. The display takes the server copy at
+            // its next refetch.
+            if (_isMatchAlreadyCompletedRefusal(err)) return;
+            putBack();
+        },
+    );
+}
+
 // bc-stpf: how long the court console waits for GET .../start-check before a
 // pick of another bout asks the operator instead (API.checkStart). The one
 // bounded wait in front of an outbox write, and only on that pick path.
@@ -5667,6 +5696,11 @@ const API = {
             payload, password, onRefusal: opts && opts.onRefusal, was: opts && opts.was,
         });
         _emitLocalMatchPatch(compID, matchID, { court });
+        if (opts && opts.stopsRunning && opts.match) {
+            const oldCourt = (opts.was && opts.was.court) || opts.match.court || '';
+            const oldMatch = { ...opts.match, court: oldCourt };
+            _attachSendBackDisplayPutBack(compID, matchID, oldMatch, answer);
+        }
         return answer;
     },
     async revertMatchToQueue(compID, matchID, password, opts = {}) {
@@ -5682,9 +5716,7 @@ const API = {
         // at once, and the bout running again when it does not land.
         const match = opts && opts.match;
         if (match) {
-            _publishSendBack(compID, matchID, match, 'scheduled');
-            const putBack = () => _publishSendBack(compID, matchID, match, 'running');
-            if (answer.settled) answer.settled.then((body) => { if (body && body.discarded) putBack(); }, putBack);
+            _attachSendBackDisplayPutBack(compID, matchID, match, answer);
         }
         return answer;
     },
@@ -5694,10 +5726,10 @@ const API = {
     // (GET .../start-check), never the outbox: it writes nothing and must never
     // be replayed. It waits at most START_CHECK_TIMEOUT_MS, the body read
     // included, and never throws. Answers {ok: true}; {refused: Error} for a
-    // 409, the Error carrying the server's sentence as the start's own refusal
-    // does (_reasonHumanError); or {unknown: true} for anything else (no answer
-    // in time, a network failure, a 5xx, a 404, a 400, a 401), on which the
-    // court console asks the operator.
+    // 409 (the Error carrying the server's sentence as the start's own refusal
+    // does, _reasonHumanError) or a 401 (auth failure); or {unknown: true} for
+    // anything else (no answer in time, a network failure, a 5xx, a 404, a 400),
+    // on which the court console asks the operator.
     async checkStart(compID, matchID, court, password) {
         const url = `/api/competitions/${encodeURIComponent(compID)}/matches/${encodeURIComponent(matchID)}/start-check?court=${encodeURIComponent(court || '')}`;
         try {
@@ -5707,6 +5739,7 @@ const API = {
             }, START_CHECK_TIMEOUT_MS);
             if (res.ok && body && body.ok === true) return { ok: true };
             if (res.status === 409) return { refused: _reasonHumanError(body || {}, 'Could not start the match') };
+            if (res.status === 401) return { refused: new Error('The password was not accepted. Sign in again, then start the match.') };
             return { unknown: true };
         } catch (_e) {
             return { unknown: true };

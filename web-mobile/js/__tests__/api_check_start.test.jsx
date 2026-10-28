@@ -62,11 +62,19 @@ describe('API.checkStart', () => {
     expect(res.refused.message).toBe(sentence);
   });
 
+  it('a 401 is a refusal telling the operator to sign in again', async () => {
+    global.fetch = reply(401, { error: 'invalid admin password' });
+    const res = await API.checkStart('c1', 'm1', 'A', 'secret');
+    expect(res.refused).toBeInstanceOf(Error);
+    expect(res.refused.message).toBe('The password was not accepted. Sign in again, then start the match.');
+    expect(res.ok).toBeUndefined();
+    expect(res.unknown).toBeUndefined();
+  });
+
   it.each([
     ['a 500', 500, { error: 'internal error' }],
     ['a 404', 404, { error: 'not found' }],
     ['a 400', 400, { error: 'court is required' }],
-    ['a 401', 401, { error: 'invalid password' }],
   ])('%s is unknown', async (_name, status, body) => {
     global.fetch = reply(status, body);
     await expect(API.checkStart('c1', 'm1', 'A', 'secret')).resolves.toEqual({ unknown: true });

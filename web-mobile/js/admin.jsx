@@ -376,7 +376,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       answer = await window.API.moveMatchCourt(compId, matchId, newCourt, password, {
         onRefusal: (e) => { showToast(e.message, "error"); refreshCompsBestEffort("Move"); return true; },
         ...(shown ? { was: { court: shown.court || "" } } : {}),
-        ...(running ? { stopsRunning: true } : {}),
+        ...(running ? { stopsRunning: true, match: shown } : {}),
       });
     } catch (e) {
       showToast(e.message, "error");

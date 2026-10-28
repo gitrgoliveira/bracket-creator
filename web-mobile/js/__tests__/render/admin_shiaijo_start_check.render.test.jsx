@@ -242,6 +242,25 @@ describe('a pick of another bout checks the start before it sends the running bo
     expect(starts(onEditScore).map(([id]) => id)).toEqual(['m1']);
   });
 
+  it('when the running bout is the picked match (isSame) no check is made and no question appears', async () => {
+    const sameList = [
+      { ...base, id: 'm1', status: 'running', scoreVersion: 4, ipponsA: ['M'], sideA: { id: 'p1', name: 'Yamada' }, sideB: { id: 'p2', name: 'Tanaka' } },
+      { ...base, id: 'm1', status: 'scheduled', scoreVersion: 4, sideA: { id: 'p1', name: 'Yamada' }, sideB: { id: 'p2', name: 'Tanaka' } },
+      { ...base, id: 'm2', sideA: { id: 'p3', name: 'Suzuki' }, sideB: { id: 'p4', name: 'Sato' } },
+    ];
+    const { onEditScore } = renderConsole(sameList);
+    await pointerTap(upNextStart());
+    await settle();
+
+    expect(window.API.checkStart).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('start-ask')).toBeNull();
+    expect(window.API.revertMatchToQueue).not.toHaveBeenCalled();
+    const started = starts(onEditScore);
+    expect(started.map(([id]) => id)).toEqual(['m1']);
+    expect(started[0][1].after).toBeUndefined();
+    expect(screen.getByTestId('score-editor').dataset.match).toBe('m1');
+  });
+
   it('a second Start while the check is out is refused as in flight', async () => {
     let answer;
     window.API.checkStart = vi.fn(() => new Promise((resolve) => { answer = resolve; }));

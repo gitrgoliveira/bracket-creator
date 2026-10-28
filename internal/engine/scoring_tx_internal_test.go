@@ -552,16 +552,16 @@ func TestStartMatchTx_MatchNotFound(t *testing.T) {
 	require.Error(t, txErr)
 }
 
-// TestCheckSimultaneousMatchSkippingTx_SameNameDifferentIDDoesNotBlock:
+// TestCheckSimultaneousMatchTx_SameNameDifferentIDDoesNotBlock:
 // eligibility_test.go's TestStartMatch_RejectsSimultaneousMatch pins the same
-// gate through StartMatch (which reaches checkSimultaneousMatchSkippingTx via
+// gate through StartMatch (which reaches checkSimultaneousMatchTx via
 // startSidesGateTx), while this test pins it directly: two "Sam"s from
 // different dojos are a legal roster, and one running on another court must
 // not block the other from starting, whatever order the roster happens to list
-// them in. checkSimultaneousMatchSkippingTx resolves the CURRENT match's own
+// them in. checkSimultaneousMatchTx resolves the CURRENT match's own
 // identity via findPoolMatch (its own stored SideAID/SideBID), never by
 // re-deriving it from the bare name.
-func TestCheckSimultaneousMatchSkippingTx_SameNameDifferentIDDoesNotBlock(t *testing.T) {
+func TestCheckSimultaneousMatchTx_SameNameDifferentIDDoesNotBlock(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "csmtx-same-name-diff-id"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
@@ -585,20 +585,20 @@ func TestCheckSimultaneousMatchSkippingTx_SameNameDifferentIDDoesNotBlock(t *tes
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.checkSimultaneousMatchSkippingTx(tx, compID, "A-1", simultaneitySkip{})
+		txErr = eng.checkSimultaneousMatchTx(tx, compID, "A-1", "")
 		return nil
 	})
 	assert.NoError(t, txErr, "a same-name, different-id competitor running elsewhere must not block")
 }
 
-// TestCheckSimultaneousMatchSkippingTx_Bracket_SameNameDifferentIDDoesNotBlock is the
-// bracket twin of TestCheckSimultaneousMatchSkippingTx_SameNameDifferentIDDoesNotBlock
+// TestCheckSimultaneousMatchTx_Bracket_SameNameDifferentIDDoesNotBlock is the
+// bracket twin of TestCheckSimultaneousMatchTx_SameNameDifferentIDDoesNotBlock
 // above (bc-brid): before BracketMatch carried per-side ids, the
 // bracket-vs-bracket comparison was name-only, so two "Sam"s from different
 // dojos falsely blocked each other from starting concurrent knockout bouts.
 // Both round-0 matches carry their own stamped SideAID, exactly as
 // generation now produces, so matchesBracketSide can tell them apart.
-func TestCheckSimultaneousMatchSkippingTx_Bracket_SameNameDifferentIDDoesNotBlock(t *testing.T) {
+func TestCheckSimultaneousMatchTx_Bracket_SameNameDifferentIDDoesNotBlock(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "csmtx-bracket-same-name-diff-id"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
@@ -621,19 +621,19 @@ func TestCheckSimultaneousMatchSkippingTx_Bracket_SameNameDifferentIDDoesNotBloc
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.checkSimultaneousMatchSkippingTx(tx, compID, "m-r1-1", simultaneitySkip{})
+		txErr = eng.checkSimultaneousMatchTx(tx, compID, "m-r1-1", "")
 		return nil
 	})
 	assert.NoError(t, txErr, "a same-name, different-id competitor running elsewhere in the bracket must not block")
 }
 
-// TestCheckSimultaneousMatchSkippingTx_Bracket_SameIDBlocks pins the positive
+// TestCheckSimultaneousMatchTx_Bracket_SameIDBlocks pins the positive
 // direction of the same guard: the SAME competitor (by id), not merely the
 // same display name, already running in another bracket match on a
 // different court, must still block -- confirming the id-preferring
 // comparison in matchesBracketSide has not traded away genuine simultaneity
 // detection while fixing the same-name false positive above.
-func TestCheckSimultaneousMatchSkippingTx_Bracket_SameIDBlocks(t *testing.T) {
+func TestCheckSimultaneousMatchTx_Bracket_SameIDBlocks(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "csmtx-bracket-same-id-blocks"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
@@ -655,7 +655,7 @@ func TestCheckSimultaneousMatchSkippingTx_Bracket_SameIDBlocks(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.checkSimultaneousMatchSkippingTx(tx, compID, "m-r1-1", simultaneitySkip{})
+		txErr = eng.checkSimultaneousMatchTx(tx, compID, "m-r1-1", "")
 		return nil
 	})
 	require.Error(t, txErr)

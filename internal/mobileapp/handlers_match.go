@@ -2975,7 +2975,7 @@ func respondCourtBusy(c *gin.Context, store CompetitionStore, err *engine.CourtB
 // bc-rawm/bc-cse: reasonHuman is ONE operator sentence, never the raw
 // kendo-term reason. Simultaneous is how this error type tells its two
 // producers apart: the simultaneity gate
-// (checkSimultaneousMatchSkippingTx) already builds a complete operator
+// (checkSimultaneousMatchTx) already builds a complete operator
 // sentence into Reason itself, while a barred-status refusal
 // (engine.BarredSides) needs the shared builder to name the match and the
 // remedy -- even when that refusal's own MatchID is empty (a status set

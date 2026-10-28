@@ -285,7 +285,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		// strictly time-aligned. This replaces the round-position court
 		// assignment + per-court slot cursors used by the other single-pool
 		// paths. The runtime simultaneity gate
-		// (checkSimultaneousMatchSkippingTx) remains the defense-in-depth
+		// (checkSimultaneousMatchTx) remains the defense-in-depth
 		// backstop at match start.
 		// scheduleLeagueSlots treats an empty court list as one unnamed court.
 		var slots []int
@@ -297,7 +297,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		// When a round has more matches than courts (e.g. 6 players / 2
 		// courts → 3 matches per round), the extra match is queued on the
 		// same court and runs sequentially; the runtime simultaneity gate
-		// (checkSimultaneousMatchSkippingTx) prevents double-booking at match
+		// (checkSimultaneousMatchTx) prevents double-booking at match
 		// start.
 		if len(pools) == 1 && len(comp.Courts) > 1 {
 			sort.SliceStable(results, func(i, j int) bool {

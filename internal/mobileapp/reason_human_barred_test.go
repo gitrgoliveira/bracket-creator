@@ -180,7 +180,7 @@ func TestDecisionHandler_AlreadyIneligible_ReasonHumanNamesMatchAndRemedy(t *tes
 // TestScoreHandler_SimultaneityReason_IsAlreadyAnOperatorSentence pins that
 // the simultaneity-gate refusal (a DIFFERENT IneligibleCompetitorError
 // producer, MatchID=="") reaches the wire as reasonHuman VERBATIM: it is
-// already a complete operator sentence (checkSimultaneousMatchSkippingTx),
+// already a complete operator sentence (checkSimultaneousMatchTx),
 // so the handler must not run it through the barred-competitor builder
 // (which would only degrade to the domain.ResolveReasonHuman fallback, since
 // this Reason is not the "<decision> at <matchId>" shape at all).

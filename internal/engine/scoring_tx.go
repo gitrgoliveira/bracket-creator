@@ -544,7 +544,7 @@ func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
 	if err := e.checkCourtExclusivityTx(tx, compID, matchID); err != nil {
 		return err
 	}
-	return e.startSidesGateTx(tx, compID, matchID, simultaneitySkip{})
+	return e.startSidesGateTx(tx, compID, matchID, "")
 }
 
 // startSidesGateTx is the part of the start gate that judges the match's
@@ -553,13 +553,12 @@ func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
 // ONE owner of "would these sides be refused" for the real start
 // (StartMatchTx) and the start check (CheckStartAfterSendBack), bc-twin.
 //
-// With skip.on, the simultaneity scan leaves out the running matches on
-// skip.court: the bout the console sends back before the start. A
-// match with no court skips nothing, since there is no bout on "its court" to
-// send back. The barred-side check is the same either way: a send back
+// With skip != "", the simultaneity scan leaves out the running matches on
+// skip: the bout the console sends back before the start. An empty court
+// skips nothing. The barred-side check is the same either way: a send back
 // changes no competitor's status.
-func (e *Engine) startSidesGateTx(h state.StoreTx, compID, matchID string, skip simultaneitySkip) error {
-	if err := e.checkSimultaneousMatchSkippingTx(h, compID, matchID, skip); err != nil {
+func (e *Engine) startSidesGateTx(h state.StoreTx, compID, matchID string, skip skipCourt) error {
+	if err := e.checkSimultaneousMatchTx(h, compID, matchID, skip); err != nil {
 		return err
 	}
 	ids, err := e.matchSideParticipantIDs(h, compID, matchID)
@@ -637,32 +636,25 @@ func (e *Engine) CheckStartAfterSendBack(compID, matchID, court string) error {
 	if storedCourt != court {
 		return &MatchOnOtherCourtError{MatchID: matchID, Court: storedCourt, ConsoleCourt: court}
 	}
-	return e.startSidesGateTx(e.store, compID, matchID, simultaneitySkip{court: court, on: court != ""})
+	return e.startSidesGateTx(e.store, compID, matchID, skipCourt(court))
 }
 
-// simultaneitySkip names the running matches the simultaneity scan leaves
-// out: with on set, every running match on court. The zero value skips
-// nothing, which is what a real start asks. CheckStartAfterSendBack sets it
-// to the console's court, whose running bout the console sends back before
-// the start, so a competitor that bout shares with the pick is free by then.
-// The court is never a sentinel on its own: an empty court is the real
-// "unassigned" bucket, so a pick with no court sets on false.
-type simultaneitySkip struct {
-	court string
-	on    bool
-}
+// skipCourt names the court whose running matches the simultaneity scan leaves
+// out (the bout the console sends back). "" skips nothing; an empty court is
+// never skipped.
+type skipCourt string
 
 // skips reports whether the scan leaves out a running match on court.
-func (s simultaneitySkip) skips(court string) bool {
-	return s.on && court == s.court
+func (s skipCourt) skips(court string) bool {
+	return s != "" && court == string(s)
 }
 
-// checkSimultaneousMatchSkippingTx returns *IneligibleCompetitorError if either
+// checkSimultaneousMatchTx returns *IneligibleCompetitorError if either
 // participant in matchID is currently Running in a different match within the
 // same competition (pool and bracket matches both checked). It is the ONE body
-// of the simultaneity gate (bc-twin): startSidesGateTx calls it, with a zero
-// simultaneitySkip{} for a real start (StartMatch and StartMatchTx) and with
-// the console's court for the start check.
+// of the simultaneity gate (bc-twin): startSidesGateTx calls it, with "" for a
+// real start (StartMatch and StartMatchTx) and with the console's court for the
+// start check.
 //
 // matchID's own identity is resolved from the pool-matches slice FIRST, via
 // findPoolMatch: a pool row already carries its own SideAID/SideBID, so
@@ -687,7 +679,7 @@ func (s simultaneitySkip) skips(court string) bool {
 // used to trip on (the live defect bc-brid fixes).
 //
 // Phase 2c simultaneity gate.
-func (e *Engine) checkSimultaneousMatchSkippingTx(h state.StoreTx, compID, matchID string, skip simultaneitySkip) error {
+func (e *Engine) checkSimultaneousMatchTx(h state.StoreTx, compID, matchID string, skip skipCourt) error {
 	var sideA, sideB, rawIDA, rawIDB string
 	isPoolMatch := false
 	// Load errors are returned as they are (see lookupExistingResult): an
@@ -756,7 +748,7 @@ func (e *Engine) checkSimultaneousMatchSkippingTx(h state.StoreTx, compID, match
 	// bc-cse: the operator sentence for the gate itself (comp/bracket are
 	// already the ones this call needs to name the OTHER match, m/bm below,
 	// not matchID). comp is loaded LAZILY, inside the closure, not above:
-	// every caller of checkSimultaneousMatchSkippingTx returns immediately
+	// every caller of checkSimultaneousMatchTx returns immediately
 	// on the first conflict found, so this closure runs AT MOST ONCE per
 	// call, and loading comp here means the common case (no conflict) never
 	// pays for it at all. comp is still best-effort: OperatorMatchLabel
@@ -767,7 +759,7 @@ func (e *Engine) checkSimultaneousMatchSkippingTx(h state.StoreTx, compID, match
 	simultaneousReason := func(name, otherMatchID, court string) string {
 		comp, err := h.LoadCompetition(compID)
 		if err != nil {
-			log.Printf("engine: checkSimultaneousMatchSkippingTx: LoadCompetition compId=%s: %v (label degrades to pool-phase-only)", compID, err)
+			log.Printf("engine: checkSimultaneousMatchTx: LoadCompetition compId=%s: %v (label degrades to pool-phase-only)", compID, err)
 		}
 		label := OperatorMatchLabel(comp, bracket, otherMatchID)
 		return fmt.Sprintf("%s is fighting now in %s on Shiaijo %s. Finish that match first.", name, label, court)
@@ -855,7 +847,7 @@ func findBracketMatchInBracket(bracket *state.Bracket, matchID string) *state.Br
 
 // matchesBracketSide reports whether a running bracket match candidate bm
 // includes the competitor identified by (rawID, name) on either of its own
-// sides -- checkSimultaneousMatchSkippingTx's bracket-vs-bracket comparison
+// sides -- checkSimultaneousMatchTx's bracket-vs-bracket comparison
 // (bc-brid).
 //
 // Prefers an id match when rawID and at least one of bm's own side ids are
@@ -1008,7 +1000,7 @@ func courtOccupied(poolMatches []state.MatchResult, bracket *state.Bracket, cour
 
 // resolvePlayerIDs resolves sideA/sideB (display names) against the
 // competition's roster, returning "" for either side with no participant
-// match (no name fallback: checkSimultaneousMatchSkippingTx's pool-vs-pool
+// match (no name fallback: checkSimultaneousMatchTx's pool-vs-pool
 // comparison is id-only by operator ruling bc-pnum, since a name silently
 // substituted for a missing id could never legitimately equal a real
 // SideAID/SideBID anyway).

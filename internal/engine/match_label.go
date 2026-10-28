@@ -31,7 +31,7 @@ import (
 // than erroring.
 //
 // Callers already holding a live transaction
-// (checkSimultaneousMatchSkippingTx's siblings, kachinuki.go's
+// (checkSimultaneousMatchTx's siblings, kachinuki.go's
 // reopen/court-busy messages) load comp/bracket via their own `h state.StoreTx`
 // handle and call this directly; a handler loads via its CompetitionStore
 // interface (LoadCompetition/LoadBracket are already on it) and does the same.
@@ -73,7 +73,7 @@ type matchLabelStore interface {
 // acquire (the lock is non-reentrant). A caller inside a transaction
 // already has its `h state.StoreTx` handle's own LoadCompetition/LoadBracket
 // and should call OperatorMatchLabel directly with what it loads through
-// that handle instead (see e.g. checkSimultaneousMatchSkippingTx's
+// that handle instead (see e.g. checkSimultaneousMatchTx's
 // simultaneousReason closure).
 func OperatorMatchLabelFromStore(store matchLabelStore, compID, matchID string) string {
 	comp, err := store.LoadCompetition(compID)

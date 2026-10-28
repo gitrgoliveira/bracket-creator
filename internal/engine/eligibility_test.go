@@ -1525,7 +1525,7 @@ func TestStartMatch_RejectsSimultaneousMatch(t *testing.T) {
 	})
 
 	// bc-pnum review finding 5: the pool-vs-pool half of
-	// checkSimultaneousMatchSkippingTx resolves a side by id only. Two "Sam"s
+	// checkSimultaneousMatchTx resolves a side by id only. Two "Sam"s
 	// from different dojos are a legal roster; one running on another court
 	// must NOT block the other from starting just because they share a bare
 	// name -- that would be exactly the pre-bc-pnum name-comparison bug this

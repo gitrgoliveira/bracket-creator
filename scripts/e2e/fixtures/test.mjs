@@ -60,10 +60,10 @@ const CONSOLE_ALLOWLIST = [
     request: (r) => !!r && (/\/reopen$/.test(r.url) || writeStatus(r.postData) === 'running'),
   },
   {
-    reason: 'The server refuses a start before anything is sent back: competitor fighting elsewhere or barred, court busy, or the knockout match it feeds is running; the operator sees the reason on the picked match.',
+    reason: 'The server refuses a start before anything is sent back: a competitor fighting elsewhere or barred, the match no longer waiting in the queue, or on another court; the operator sees the reason on the picked match.',
     text: /^Failed to load resource: the server responded with a status of 409 \(Conflict\)$/,
     url: /\/api\/competitions\/[^/]+\/matches\/[^/]+\/start-check\?/,
-    code: /^(court_busy|ineligible_competitor|downstream_knockout_running)$/,
+    code: /^(ineligible_competitor|match_not_scheduled|match_on_other_court)$/,
     codeUnreadable: true,
   },
   {

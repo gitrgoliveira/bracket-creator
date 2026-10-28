@@ -2109,6 +2109,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // score (operator ruling 2026-09-26, bc-sbq): starting it again carries on
     // from it, and the operator removes a wrong mark themselves.
     const requestRevert = (m) => {
+        // A pick is checking the start of another match (bc-stpf): it holds the
+        // running bout it will send back, so a confirm opened now would race it.
+        if (pickingRef.current) return;
         // The editor shows this match: its unsaved entries go with the send
         // back, and the confirm says so (R1, the editor's local Mark draw or
         // hantei pick of a running match included).
@@ -2182,6 +2185,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // shiaijo for another court's queue. `onMoveCourt` (the real move) only runs
     // once the operator confirms.
     const requestMoveCourt = (compId, matchId, toCourt) => {
+        // As requestRevert: a pick's start check holds the court.
+        if (pickingRef.current) return;
         const mm = sorted.find((x) => x.compId === compId && x.id === matchId);
         setPendingMove({
             compId, matchId, to: toCourt,

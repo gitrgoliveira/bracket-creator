@@ -117,11 +117,25 @@ describe('API.checkStart', () => {
 describe('API.startCheckUntrusted', () => {
   let originalFetch;
   let onLine;
+  let heldSends;
+  // A send that waits for an answer, so the write stays in the outbox. The
+  // outbox sends one write at a time: afterEach fails every held send, so the
+  // next test's flush is not stuck behind this one's.
+  const holdSends = () => {
+    global.fetch = vi.fn(() => new Promise((_resolve, reject) => { heldSends.push(reject); }));
+  };
   beforeEach(() => {
     originalFetch = global.fetch;
+    heldSends = [];
     onLine = vi.spyOn(window.navigator, 'onLine', 'get').mockReturnValue(true);
   });
-  afterEach(() => { global.fetch = originalFetch; onLine.mockRestore(); });
+  afterEach(async () => {
+    heldSends.forEach((reject) => reject(new TypeError('Failed to fetch')));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    API.clearQueue();
+    global.fetch = originalFetch;
+    onLine.mockRestore();
+  });
 
   it('is false online with nothing of the competition unsent', () => {
     expect(API.startCheckUntrusted('c-none')).toBe(false);
@@ -133,10 +147,27 @@ describe('API.startCheckUntrusted', () => {
   });
 
   it('is true while the outbox holds a write of the competition, false for another competition', async () => {
-    // The write waits on a fetch that never answers, so it stays in the outbox.
-    global.fetch = vi.fn(() => new Promise(() => {}));
+    holdSends();
     await API.revertMatchToQueue('c-held', 'm9', 'secret');
     expect(API.startCheckUntrusted('c-held')).toBe(true);
     expect(API.startCheckUntrusted('c-other')).toBe(false);
+  });
+
+  // A scoring tap moves points, never a status or a bar, so it does not count.
+  const tap = { kind: 'ippon', side: 'a', letter: 'M' };
+
+  it('does not count a scoring tap held in the outbox', () => {
+    holdSends();
+    API.recordTap('c-tap', 'm1', tap, 'secret', null);
+    expect(API.pendingTaps('c-tap', 'm1')).toHaveLength(1);
+    expect(API.startCheckUntrusted('c-tap')).toBe(false);
+  });
+
+  it('is true once a send failed on the network, whatever is held', async () => {
+    global.fetch = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')));
+    API.recordTap('c-flag', 'm1', tap, 'secret', null);
+    await vi.waitFor(() => expect(API.startCheckUntrusted('c-flag')).toBe(true));
+    // Only a tap is held, which the queue scan skips: the failed send says so.
+    expect(API.pendingTaps('c-flag', 'm1')).toHaveLength(1);
   });
 });

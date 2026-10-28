@@ -280,6 +280,22 @@ describe('a pick of another bout checks the start before it sends the running bo
     expect(starts(onEditScore).map(([id]) => id)).toEqual(['m2']);
   });
 
+  it('Send back to queue tapped while the check is out opens no confirm, and the pick sends the bout back once', async () => {
+    let answer;
+    window.API.checkStart = vi.fn(() => new Promise((resolve) => { answer = resolve; }));
+    const { onEditScore } = renderConsole();
+    await pointerTap(upNextStart());
+    await settle();
+    await keyboardClick(screen.getByRole('button', { name: 'Send back to queue' }));
+    await settle();
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    await act(async () => { answer({ ok: true }); });
+    await settle();
+    expect(window.API.revertMatchToQueue).toHaveBeenCalledTimes(1);
+    expect(starts(onEditScore).map(([id]) => id)).toEqual(['m2']);
+  });
+
   it('a second Start while the question is open is refused as in flight', async () => {
     window.API.checkStart = vi.fn(async () => ({ unknown: true }));
     const { onEditScore } = renderConsole();

@@ -21,8 +21,9 @@
     "Never write \"default win\" (name the decision: kiken, fusenpai, fusensho, hantei), \"squad\" (say team members) or \"mat\" (say shiaijo or court) in anything a person reads.",
     "Competitor identity is the participant id, or (name, dojo) only where CLAUDE.md allows; never the name alone.",
     "Docs under docs/ are public: no bead ids, no internal tooling, no em dashes; run make docs/build.",
-    "A UI change needs a real browser screenshot in the PR and every test-plan box checked before it is review-ready; build the PR body from the repo template.",
-    "Keep the bead in_progress until the PR merges; then run /cleanup. Do not add or run the retired Copilot review loop.",
+    "Everything found goes in this one PR.",
+    "Verify UI changes in a real browser, never via curl, and test self-run features from the public page; a UI change needs a real browser screenshot in the PR and every test-plan box checked before it is review-ready; build the PR body from the repo template.",
+    "New beads use the bc- prefix (bd create --id bc-<slug> --force). Keep the bead in_progress until the PR merges; then run /cleanup. Do not add or run the retired Copilot review loop.",
     "Do not commit or push beads via git; sync them with bd dolt push, and push all git commits at the finish."
   ]
 }

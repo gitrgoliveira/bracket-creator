@@ -160,4 +160,42 @@ describe('AdminEditTournament "Show the logo on the lobby display" checkbox', ()
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(onSave.mock.calls[0][0].theme).toEqual({ logoOnLobby: false });
   });
+
+  it('follows tournament prop updates when logoOnLobby changes on reload', async () => {
+    let rerender;
+    await act(async () => {
+      ({ rerender } = render(
+        <AdminEditTournament
+          tournament={baseTournament({ logoOnLobby: false })}
+          onSave={noop}
+          onCancel={noop}
+          onLogout={noop}
+          onViewerMode={noop}
+          authConfig={{ mode: 'file' }}
+          password="pw"
+          showToast={noop}
+        />
+      ));
+    });
+
+    const checkbox = screen.getByLabelText('Show the logo on the lobby display');
+    expect(checkbox.checked).toBe(false);
+
+    await act(async () => {
+      rerender(
+        <AdminEditTournament
+          tournament={baseTournament({ logoOnLobby: true })}
+          onSave={noop}
+          onCancel={noop}
+          onLogout={noop}
+          onViewerMode={noop}
+          authConfig={{ mode: 'file' }}
+          password="pw"
+          showToast={noop}
+        />
+      );
+    });
+
+    expect(checkbox.checked).toBe(true);
+  });
 });

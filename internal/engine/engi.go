@@ -288,15 +288,15 @@ func (e *Engine) recordEngiMatch(
 				// engi write and engi corrections silently repainted a played
 				// downstream match.
 				//
-				// guardOverrideDownstreamKnockoutCorrection, not the
+				// guardBareNameDownstreamKnockoutCorrection, not the
 				// MatchResult-shaped twin: engi decides its winner from the
 				// flag count rather than from a submitted result, so the
-				// override guard's bare-name input is the shape that fits.
+				// bare-name input at the engi dispatch seam is the shape that fits.
 				newWinner := bm.SideB
 				if winnerSide == "A" {
 					newWinner = bm.SideA
 				}
-				if err := guardOverrideDownstreamKnockoutCorrection(b, rIdx, mIdx, bm, newWinner, force); err != nil {
+				if err := guardBareNameDownstreamKnockoutCorrection(b, rIdx, mIdx, bm, newWinner, force); err != nil {
 					return err
 				}
 				priorWinner, priorWinnerID := propagatedWinnerOf(b, rIdx, mIdx, bm)

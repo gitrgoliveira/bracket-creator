@@ -9845,11 +9845,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   padding: 1px 6px;
 }
 .shiaijo-pending .section-title { color: var(--ink-2); }
-/* Resolve-feeders modal rows (mp-y3nk Phase 3): one row per feeder the operator
-   must call, with the two competitors as toggle buttons. */
-.resolve-feeder { padding: 8px 0; border-bottom: 1px solid var(--line-2); }
-.resolve-feeder__label { font-size: 12px; font-weight: 600; color: var(--ink-2); margin-bottom: 6px; }
-.resolve-feeder__opts { display: flex; gap: 8px; flex-wrap: wrap; }
 .shiaijo-qrow__top {
   display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
   font-size: 12px;

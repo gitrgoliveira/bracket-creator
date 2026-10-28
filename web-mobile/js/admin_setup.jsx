@@ -200,7 +200,12 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // otherwise reach the dirty snapshot and the save payload as `{}` (the
   // backend tolerates it but it's cleaner not to rely on that).
   const [theme, setTheme] = useStateA(normalizeTheme(tournament.theme));
-  const [logoOnLobby, setLogoOnLobby] = useStateA(!!(tournament.theme && tournament.theme.logoOnLobby));
+  // Follow a reload of the tournament (another organiser saved) while the form is open.
+  const incomingLogoOnLobby = !!(tournament.theme && tournament.theme.logoOnLobby);
+  const [logoOnLobby, setLogoOnLobby] = useStateA(incomingLogoOnLobby);
+  useEffectA(() => {
+    setLogoOnLobby(incomingLogoOnLobby);
+  }, [incomingLogoOnLobby]);
 
   // mp-sspn: in-flight save state: disables the primary button and swaps its
   // label to "Saving…" so the long form's primary action gives feedback
@@ -319,7 +324,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
         awardsNote: awardsNote.trim() || undefined,
         infoNotes: infoNotes.trim() || undefined,
         contacts: contacts.filter(c => (c.value || "").trim()).map(c => ({ label: (c.label || "").trim(), value: (c.value || "").trim() })),
-        theme: { ...(theme || {}), logoOnLobby: !!logoOnLobby },
+        theme: { ...theme, logoOnLobby: !!logoOnLobby },
       });
     } catch (e) {
       // Server rejection (orphaned shiaijo, immutable mode, duplicate court

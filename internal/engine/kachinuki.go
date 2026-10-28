@@ -2252,7 +2252,7 @@ func propagatedDownstreamOf(bracket *state.Bracket, rIdx, mIdx int) propagatedDo
 // and for a semifinal the bronze it also feeds, bronze first. Nil when
 // neither is closed. Every door that would displace someone from a played
 // match names these (reopenBracketDownstreamCheck,
-// guardDownstreamKnockoutCorrection, guardOverrideDownstreamKnockoutCorrection)
+// guardDownstreamKnockoutCorrection, guardBareNameDownstreamKnockoutCorrection)
 // and forceReopenDownstreamChain reopens exactly these, so the refusal and the
 // confirmation cannot disagree. Its sibling running() names the same two
 // matches when they are being FOUGHT, which every one of those doors refuses
@@ -2284,7 +2284,7 @@ func (d propagatedDownstream) played() []*state.BracketMatch {
 // them) that are being fought right now: the bronze first, then next. It is
 // the one "running downstream" predicate for the reopen door
 // (reopenBracketDownstreamCheck) and the knockout-correction doors
-// (guardDownstreamKnockoutCorrection, guardOverrideDownstreamKnockoutCorrection,
+// (guardDownstreamKnockoutCorrection, guardBareNameDownstreamKnockoutCorrection,
 // and the decision path's pre-lock check), so their refusals cannot disagree
 // (operator decision 2026-09-27: a running later match is refused, never
 // repainted or cleared).

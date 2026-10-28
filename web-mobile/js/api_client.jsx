@@ -473,7 +473,7 @@ function _perfNow() {
 //
 // What "as seen" is belongs to the caller: the match the operator acted on
 // (`match.modifiedAt` for a tap, `seenModifiedAt` in a decision's body or
-// a representative bout's or a hand-set winner's argument, or on a score
+// a representative bout's argument or a score
 // write's patch), never the match at the send: a tap made before another
 // device finished the match stays older than that finish (operator ruling
 // 2026-09-27). 0 or absent: no floor.

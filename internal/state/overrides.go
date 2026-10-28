@@ -13,7 +13,7 @@ import (
 // failure reading overrides.json. Standings computation deliberately fails
 // closed on a corrupt overrides file (a silently-dropped override could
 // resurrect a broken chusen or a stale manual rank), but every override
-// writer -- SaveRankOverridesChanged, SaveWinnerOverride, ResetOverrides --
+// writer -- SaveRankOverridesChanged, ResetOverrides --
 // goes through modifyOverridesChanged, which LOADS the file first, so a
 // corrupt file has no writer that can repair it: even "reset" fails
 // identically. errors.Is(err, ErrCorruptOverrides) lets a caller (the HTTP
@@ -209,12 +209,6 @@ func (s *Store) RestoreRankOverrides(compID, poolID string, prior map[string]Pri
 			}
 			o.PoolRanks[poolID][key] = p.Rank
 		}
-	})
-}
-
-func (s *Store) SaveWinnerOverride(compID, matchID, winnerName string) error {
-	return s.modifyOverrides(compID, func(o *Overrides) {
-		o.Winners[matchID] = winnerName
 	})
 }
 

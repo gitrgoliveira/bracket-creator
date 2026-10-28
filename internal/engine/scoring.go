@@ -3764,12 +3764,12 @@ func matchNotFoundAsNotFound(compId, matchId string, err error) error {
 	return err
 }
 
-// guardOverrideDownstreamKnockoutCorrection applies the bc-kcdg refusal
+// guardBareNameDownstreamKnockoutCorrection applies the bc-kcdg refusal
 // rule adapted to a bare-name input (e.g. engi.go's dispatch seam, which
 // decides its winner from flag counts rather than a submitted result struct).
 // Like its twin it refuses a running later match first, whatever force says,
 // and force skips only the played refusal.
-func guardOverrideDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mIdx int, m *state.BracketMatch, winnerName string, force bool) error {
+func guardBareNameDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mIdx int, m *state.BracketMatch, winnerName string, force bool) error {
 	var newWinnerID string
 	aMatches := winnerName != "" && winnerName == m.SideA
 	bMatches := winnerName != "" && winnerName == m.SideB

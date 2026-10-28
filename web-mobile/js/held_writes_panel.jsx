@@ -1,7 +1,7 @@
 // The one home of the held-writes list, shared by the admin topbar and the
 // public page.
 
-import { heldWriteLine, heldWriteDiscardConfirm, matchLabel, heldLineupLabel, HELD_WRITES_TITLE, HELD_WRITES_EMPTY, HELD_WRITE_DISCARD_ONE_LABEL } from './write_result.jsx';
+import { heldWriteLine, heldWriteDiscardConfirm, matchLabel, heldLineupLabel, HELD_WRITES_TITLE, HELD_WRITES_EMPTY, HELD_WRITE_DISCARD_ONE_LABEL, queuedWritesNoun, isFinishedResultWrite } from './write_result.jsx';
 import { scoreRowMatchLabel } from './pool_ids.jsx';
 
 const { useState, useEffect, useRef } = React;
@@ -48,7 +48,7 @@ export function heldWriteWhere(held, competitions) {
 // HeldWritesPanel: every write held on this device, opened from the topbar's
 // held-writes indicator. A write the server keeps refusing can be discarded
 // here, one at a time and after a confirm, whatever it is: a running
-// autosave, a lineup save or a hand-set winner has no editor of its own to
+// autosave or a lineup save has no editor of its own to
 // offer it (the score editors' banner offers it for a result). A write that is
 // only waiting for the connection, or for a sign-in, is listed without one: it
 // lands on its own. Re-read whenever the sync status or the held count moves.
@@ -106,35 +106,41 @@ export function HeldWritesPanel({ competitions, onClose }) {
   );
 }
 
-function getHeldCount() {
+function getHeldBadgeText() {
   const api = typeof window !== 'undefined' ? window.API : null;
-  if (!api || typeof api.heldWrites !== 'function') return 0;
+  if (!api || typeof api.heldWrites !== 'function') return null;
   const list = api.heldWrites();
-  if (!Array.isArray(list)) return 0;
-  return list.filter((item) => item && item.held === true).length;
+  if (!Array.isArray(list)) return null;
+  const held = list.filter((item) => item && item.held === true);
+  if (held.length === 0) return null;
+  const finished = held.filter(isFinishedResultWrite).length;
+  const { n, noun } = queuedWritesNoun(finished, held.length, { finished: false });
+  return `${n} ${noun} not sent`;
 }
 
 export function PublicHeldWrites({ competitions }) {
-  const [count, setCount] = useState(getHeldCount);
+  const [badgeText, setBadgeText] = useState(getHeldBadgeText);
   const [open, setOpen] = useState(false);
-  useHeldWritesRefresh(() => setCount(getHeldCount()));
+  useHeldWritesRefresh(() => setBadgeText(getHeldBadgeText()));
 
-  if (count === 0) return null;
+  if (!badgeText && !open) return null;
 
   return (
     <>
-      <button
-        type="button"
-        className="public-held"
-        data-testid="public-held"
-        aria-haspopup="dialog"
-        onClick={() => setOpen(true)}
-      >
-        <span aria-hidden="true" className="public-held__dot" />
-        <span role="status" aria-live="polite">
-          {`${count} ${count === 1 ? 'change' : 'changes'} not sent`}
-        </span>
-      </button>
+      {badgeText && (
+        <button
+          type="button"
+          className="public-held"
+          data-testid="public-held"
+          aria-haspopup="dialog"
+          onClick={() => setOpen(true)}
+        >
+          <span aria-hidden="true" className="public-held__dot" />
+          <span role="status" aria-live="polite">
+            {badgeText}
+          </span>
+        </button>
+      )}
       {open && (
         <HeldWritesPanel
           competitions={competitions}

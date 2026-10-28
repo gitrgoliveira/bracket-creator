@@ -81,7 +81,6 @@ const BracketTree = window.BracketTree;
 const Icon = window.Icon;
 
 const QUEUE_OPEN_KEY = "bc_shiaijo_queue_open";
-const Modal = window.Modal;
 const hasBothSides = window.hasBothSides;
 
 // Pure ordering/partition helpers (exported for unit tests). Matches sort
@@ -214,38 +213,6 @@ function finishFieldsOf(patch) {
 
 const _WINNER_OF_RE = /^Winner of r(\d+)-m(\d+)$/;
 
-// pendingFeederSlots maps a pending placeholder final to the feeder matches whose
-// winners would make it runnable (mp-y3nk Phase 3). For each side still reading "Winner of
-// rX-mY" it locates the feeder POSITIONALLY, mirroring the Go parseWinnerOf:
-// roundIndex = rounds.length - X, matchIndex = Y. A slot is `resolvable` only
-// when the feeder exists and both of ITS sides are real competitors (so the
-// operator picks a winner from the two `options`); a feeder that is itself
-// unresolved is returned non-resolvable so the caller disables it. Exported for
-// unit testing; returns [] for a resolved match or a missing bracket.
-export function pendingFeederSlots(finalMatch, rounds) {
-    if (!finalMatch || !Array.isArray(rounds)) return [];
-    const slots = [];
-    for (const side of ["A", "B"]) {
-        const name = _bracketSideName(side === "A" ? finalMatch.sideA : finalMatch.sideB);
-        const mm = _WINNER_OF_RE.exec(name);
-        if (!mm) continue; // resolved competitor (or empty) → not a slot
-        const roundIndex = rounds.length - Number(mm[1]);
-        const matchIndex = Number(mm[2]);
-        const feeder = (rounds[roundIndex] && rounds[roundIndex][matchIndex]) || null;
-        const a = feeder ? _bracketSideName(feeder.sideA) : "";
-        const b = feeder ? _bracketSideName(feeder.sideB) : "";
-        const feederResolved = !!feeder && !!a && !!b &&
-            !_WINNER_OF_RE.test(a) && !_WINNER_OF_RE.test(b);
-        slots.push({
-            side,
-            placeholder: name,
-            feeder,
-            resolvable: feederResolved,
-            options: feederResolved ? [feeder.sideA, feeder.sideB] : [],
-        });
-    }
-    return slots;
-}
 
 // _findMatchInRounds locates a match by id, returning its {R (round), M (index)}
 // position, or {R:-1, M:-1} if absent. Shared by propagateBracketWinnerLocal and

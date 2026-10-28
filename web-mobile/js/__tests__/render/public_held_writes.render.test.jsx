@@ -6,8 +6,9 @@
 import React from 'react';
 import { render, screen, fireEvent, act, cleanup } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { HELD_WRITES_EMPTY } from '../../write_result.jsx';
 
-let PublicHeldWrites, HeldWritesPanel;
+let PublicHeldWrites;
 
 const KEYS = [
   'subscribeSyncStatus',
@@ -38,7 +39,6 @@ describe('PublicHeldWrites', () => {
     saved = KEYS.map((k) => [k, k in window, window[k]]);
     const mod = await import('../../held_writes_panel.jsx');
     PublicHeldWrites = mod.PublicHeldWrites;
-    HeldWritesPanel = mod.HeldWritesPanel;
   });
 
   afterAll(() => {
@@ -306,5 +306,88 @@ describe('PublicHeldWrites', () => {
     unmount();
     expect(syncUnsub).toHaveBeenCalledTimes(1);
     expect(unsentUnsub).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders 1 result not sent when a held item is a finished result', () => {
+    heldList = [
+      {
+        key: 'k-finished',
+        compID: 'c1',
+        matchID: 'm1',
+        kind: 'score',
+        terminal: true,
+        keepsFailing: false,
+        authBlocked: false,
+        held: true,
+        where: 'Match 1',
+      },
+    ];
+
+    render(<PublicHeldWrites competitions={competitions} />);
+    expect(screen.getByTestId('public-held')).toHaveTextContent('1 result not sent');
+  });
+
+  it('keeps panel mounted with empty text when held count drops to 0, and does not pop up afterward until tapped', async () => {
+    heldList = [
+      {
+        key: 'k1',
+        compID: 'c1',
+        matchID: 'm1',
+        kind: 'score',
+        terminal: false,
+        keepsFailing: false,
+        authBlocked: false,
+        held: true,
+        where: 'Match 1',
+      },
+    ];
+
+    render(<PublicHeldWrites competitions={competitions} />);
+    const badge = screen.getByTestId('public-held');
+    await act(async () => {
+      fireEvent.click(badge);
+    });
+
+    expect(screen.getByTestId('modal')).toBeTruthy();
+    expect(screen.getByTestId('held-writes')).toBeTruthy();
+
+    heldList = [];
+    await act(async () => {
+      for (const fn of unsentListeners) fn({ total: 0 });
+    });
+
+    expect(screen.queryByTestId('public-held')).toBeNull();
+    expect(screen.getByTestId('modal')).toBeTruthy();
+    expect(screen.getByText(HELD_WRITES_EMPTY)).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('modal-close'));
+    });
+    expect(screen.queryByTestId('modal')).toBeNull();
+
+    heldList = [
+      {
+        key: 'k2',
+        compID: 'c1',
+        matchID: 'm1',
+        kind: 'score',
+        terminal: false,
+        keepsFailing: false,
+        authBlocked: false,
+        held: true,
+        where: 'Match 1',
+      },
+    ];
+    await act(async () => {
+      for (const fn of unsentListeners) fn({ total: 1 });
+    });
+
+    expect(screen.getByTestId('public-held')).toBeTruthy();
+    expect(screen.queryByTestId('modal')).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('public-held'));
+    });
+    expect(screen.getByTestId('modal')).toBeTruthy();
   });
 });

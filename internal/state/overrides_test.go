@@ -49,21 +49,11 @@ func TestOverrides(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, overrides.PoolRanks["Pool A"][aliceKey])
 
-	// 4. Save winner override
-	err = store.SaveWinnerOverride(compID, "Match-1", "Bob")
-	require.NoError(t, err)
-
-	// 5. Load overrides after save
-	overrides, err = store.LoadOverrides(compID)
-	require.NoError(t, err)
-	assert.Equal(t, "Bob", overrides.Winners["Match-1"])
-	assert.Equal(t, 1, overrides.PoolRanks["Pool A"][aliceKey])
-
-	// 6. Reset overrides
+	// 4. Reset overrides
 	err = store.ResetOverrides(compID)
 	require.NoError(t, err)
 
-	// 7. Load overrides after reset
+	// 5. Load overrides after reset
 	overrides, err = store.LoadOverrides(compID)
 	require.NoError(t, err)
 	assert.Empty(t, overrides.PoolRanks)
@@ -199,8 +189,7 @@ func TestLoadOverrides_InvalidJSON(t *testing.T) {
 }
 
 // TestResetOverridesForce_RepairsCorruptFile is PR #416 finding 10: every
-// OTHER override writer (SaveRankOverridesChanged, SaveWinnerOverride,
-// ResetOverridesChanged) goes through modifyOverridesChanged, which LOADS
+// OTHER override writer (SaveRankOverridesChanged, ResetOverridesChanged) goes through modifyOverridesChanged, which LOADS
 // the file first, so none of them can repair a corrupt overrides.json --
 // including "reset", which one might expect to be the escape hatch.
 // ResetOverridesForce is the one write that does not parse first.

@@ -1433,7 +1433,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 		if err := eng.RevertMatchToQueue(id, mid, tag.tagInto(engine.ForceOptions{})); err != nil {
 			if errors.Is(err, engine.ErrMatchAlreadyCompleted) {
-				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+				c.JSON(http.StatusConflict, gin.H{"error": "match_completed", "message": err.Error()})
 				return
 			}
 			var notFoundErr *engine.NotFoundError

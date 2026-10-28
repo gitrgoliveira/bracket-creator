@@ -45,6 +45,7 @@ describe('a queued send back is published on the court\'s channel (bc-stpf)', ()
     global.fetch = originalFetch;
     publish.mockRestore();
     vi.useRealTimers();
+    API.clearQueue();
   });
 
   it('as the bout back in the queue with its score kept, in the tick it is queued', async () => {
@@ -87,7 +88,7 @@ describe('a queued send back is published on the court\'s channel (bc-stpf)', ()
 
   it('a 409-finished refusal does not publish running', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    global.fetch = reply(409, { error: 'match already completed' });
+    global.fetch = reply(409, { error: 'match_completed', message: 'match already completed' });
     const res = await API.revertMatchToQueue('c1', 'm1', 'pw', { match: runningBout() });
     await expect(res.settled).rejects.toThrow(/already completed/);
     await flush();
@@ -168,6 +169,23 @@ describe('a queued send back is published on the court\'s channel (bc-stpf)', ()
     await flush();
     expect(patchesFor(publish, 'm1').map(([, , r]) => r.status)).toEqual(['scheduled', 'running']);
     warn.mockRestore();
+  });
+
+  it('another tab removing the send back does not publish running', async () => {
+    global.fetch = () => new Promise(() => {});
+    const res = await API.revertMatchToQueue('c1', 'm1', 'pw', { match: runningBout() });
+    expect(patchesFor(publish, 'm1').map(([, , r]) => r.status)).toEqual(['scheduled']);
+    const oldRaw = localStorage.getItem('bc_write_queue_v2');
+    const newRaw = '[]';
+    localStorage.setItem('bc_write_queue_v2', newRaw);
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'bc_write_queue_v2',
+      oldValue: oldRaw,
+      newValue: newRaw,
+    }));
+    await expect(res.settled).resolves.toEqual({ discarded: true, sentByAnotherTab: true });
+    await flush();
+    expect(patchesFor(publish, 'm1').map(([, , r]) => r.status)).toEqual(['scheduled']);
   });
 });
 

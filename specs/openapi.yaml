@@ -3018,11 +3018,19 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The match is already completed; correct it via the score editor instead.
+          description: >
+            The match is already completed (`match_completed`, with a
+            `message` to show); correct it via the score editor instead.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [match_completed]
+                  message:
+                    type: string
         '500':
           $ref: '#/components/responses/InternalError'
 

@@ -2259,6 +2259,10 @@ func TestRevertMatchToQueueHandler(t *testing.T) {
 		req, _ := http.NewRequest("POST", "/api/competitions/rev1/matches/done-1/revert-to-queue", nil)
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusConflict, w.Code)
+		var body map[string]string
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		assert.Equal(t, "match_completed", body["error"])
+		assert.Equal(t, engine.ErrMatchAlreadyCompleted.Error(), body["message"])
 	})
 
 	t.Run("unknown match returns 404", func(t *testing.T) {

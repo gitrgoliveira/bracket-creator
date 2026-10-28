@@ -558,6 +558,30 @@ const START_BROADCAST_DROPS = Object.freeze([
     'flagsA', 'flagsB', 'repPlayerA', 'repPlayerB', 'score',
 ]);
 
+// Shared rules for court bridge match patches: a court-less match publishes
+// nothing; the patch names the match sides ids; a status-only patch states
+// the held flag counts because the display reads a result naming a status that
+// omits a count as 0.
+function _publishMatchPatch(compID, match, result) {
+    const court = (match && match.court) || '';
+    if (!court) return;
+    _bridge.publish('patch', court, compID, { result });
+}
+
+function _sideIdFields(match) {
+    return {
+        ...(match && match.sideA && match.sideA.id ? { sideAId: match.sideA.id } : {}),
+        ...(match && match.sideB && match.sideB.id ? { sideBId: match.sideB.id } : {}),
+    };
+}
+
+function _heldFlagCounts(match) {
+    if (match && (match.flagsA != null || match.flagsB != null)) {
+        return { flagsA: match.flagsA ?? 0, flagsB: match.flagsB ?? 0 };
+    }
+    return {};
+}
+
 // bc-stpf: a send back the outbox holds is told on the court's channel in the
 // tick it is queued, as a start is (_broadcastPatch), so a display window on
 // this machine shows the bout back in the queue at once (offline for the whole
@@ -571,22 +595,17 @@ const START_BROADCAST_DROPS = Object.freeze([
 // (staleRunningOverlay). A court-less match publishes nothing, as
 // _broadcastPatch does.
 function _publishSendBack(compID, matchID, match, status) {
-    const court = (match && match.court) || '';
-    if (!court) return;
-    const result = { id: matchID, status };
-    if (match.sideA && match.sideA.id) result.sideAId = match.sideA.id;
-    if (match.sideB && match.sideB.id) result.sideBId = match.sideB.id;
-    if (match.flagsA != null || match.flagsB != null) {
-        result.flagsA = match.flagsA ?? 0;
-        result.flagsB = match.flagsB ?? 0;
-    }
-    _bridge.publish('patch', court, compID, { result });
+    _publishMatchPatch(compID, match, {
+        id: matchID,
+        ..._sideIdFields(match),
+        ..._heldFlagCounts(match),
+        status,
+    });
 }
 
 function _isMatchAlreadyCompletedRefusal(err) {
     if (!err) return false;
-    const msg = String(err.message || err.error || err);
-    return /already completed/i.test(msg);
+    return err.code === 'match_completed';
 }
 
 // _attachSendBackDisplayPutBack publishes status "scheduled" to the local
@@ -600,7 +619,7 @@ function _attachSendBackDisplayPutBack(compID, matchID, match, answer) {
     const putBack = () => _publishSendBack(compID, matchID, match, 'running');
     answer.settled.then(
         (body) => {
-            if (body && body.discarded) putBack();
+            if (body && body.discarded && !body.sentByAnotherTab) putBack();
         },
         (err) => {
             if (_isMatchAlreadyCompletedRefusal(err)) return;
@@ -1145,8 +1164,8 @@ function _dequeue(key, descriptor, outcome) {
         if (s > (_lastSettledStamp.get(base) || 0)) _lastSettledStamp.set(base, s);
     }
     // Every entry that leaves settles its door's promise: with the answer the
-    // flush passes, else as discarded (a discard, another tab sending it).
-    _settleKey(key, outcome || { value: { discarded: true } });
+    // flush passes, else as discarded (a discard vs another tab sending it).
+    _settleKey(key, outcome || { value: { discarded: true, sentByAnotherTab: true } });
     // Inside a batch the follow-ups below are done once for the batch (K6).
     if (_dequeueBatch) {
         if (d.kind === 'evt') _dequeueBatch.bases.add(_baseOf(key));
@@ -3193,7 +3212,7 @@ function _doorRefusal(d, status, body) {
         case 'requeue':
             return _reopenRefusal(b);
         case 'revert':
-            return new Error(b.error || 'Failed to send match back to queue');
+            return _refusalError(b, 'Failed to send match back to queue');
         case 'kachinuki':
             return new Error(b.error || 'Failed to remove bout');
         case 'daihyosen':
@@ -5433,26 +5452,18 @@ const API = {
             } = fields || {};
             if (startOnly) {
                 for (const k of START_BROADCAST_DROPS) delete rest[k];
-                if (match && (match.flagsA != null || match.flagsB != null)) {
-                    rest.flagsA = match.flagsA ?? 0;
-                    rest.flagsB = match.flagsB ?? 0;
-                }
+                Object.assign(rest, _heldFlagCounts(match));
             }
-            const court = (match && match.court) || '';
             // Do not emit an unscoped (court-less) broadcast: a display can only
             // safely apply a patch it can attribute to its court, and the display
             // guard drops court-less messages anyway. In production every
             // recordScore caller passes the match (so court is set); the
             // court-less case is test-only (match=null), where no broadcast is
             // expected.
-            if (!court) return;
-            _bridge.publish('patch', court, compID, {
-                result: {
-                    id: matchID,
-                    ...(match && match.sideA && match.sideA.id ? { sideAId: match.sideA.id } : {}),
-                    ...(match && match.sideB && match.sideB.id ? { sideBId: match.sideB.id } : {}),
-                    ...rest,
-                },
+            _publishMatchPatch(compID, match, {
+                id: matchID,
+                ..._sideIdFields(match),
+                ...rest,
             });
         };
 

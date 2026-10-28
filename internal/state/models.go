@@ -180,6 +180,12 @@ type Theme struct {
 	LogoOnLobby     bool   `yaml:"logo_on_lobby,omitempty"     json:"logoOnLobby,omitempty"`
 }
 
+// IsEmpty reports whether no field of the theme is set, so a handler drops the
+// block instead of persisting a bare "theme: {}" to tournament.md.
+func (t Theme) IsEmpty() bool {
+	return t == Theme{}
+}
+
 // MarshalJSON adds hasLogo (true when a custom logo is uploaded) to the wire
 // shape, derived from LogoPath, which stays off the wire. A client learns
 // whether a logo exists from the tournament it already holds, so it never

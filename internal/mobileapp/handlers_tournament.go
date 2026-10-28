@@ -775,12 +775,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 					desired.Theme.LogoPath = current.Theme.LogoPath
 				}
 			}
-			if desired.Theme != nil &&
-				desired.Theme.PrimaryColor == "" &&
-				desired.Theme.AccentSoftColor == "" &&
-				desired.Theme.WindowTitle == "" &&
-				desired.Theme.LogoPath == "" &&
-				!desired.Theme.LogoOnLobby {
+			if desired.Theme != nil && desired.Theme.IsEmpty() {
 				desired.Theme = nil
 			}
 
@@ -961,7 +956,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// Also nil-out a fully-empty Theme so tournament.md stays clean.
 		if t.Theme != nil {
 			t.Theme.WindowTitle = strings.TrimSpace(t.Theme.WindowTitle)
-			if t.Theme.PrimaryColor == "" && t.Theme.AccentSoftColor == "" && t.Theme.WindowTitle == "" && !t.Theme.LogoOnLobby {
+			if t.Theme.IsEmpty() {
 				t.Theme = nil
 			}
 		}

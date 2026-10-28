@@ -6,6 +6,23 @@ import { scoreRowMatchLabel } from './pool_ids.jsx';
 
 const { useState, useEffect, useRef } = React;
 
+// useHeldWritesRefresh: runs `refresh` whenever the sync status or this tab's
+// unsent-write count moves, until unmount (never after it). Returns the
+// mounted flag for a caller whose own async work must check it too.
+function useHeldWritesRefresh(refresh) {
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+  useEffect(() => {
+    const onChange = () => { if (mountedRef.current) refresh(); };
+    const offs = [window.subscribeSyncStatus, window.subscribeUnsentWrites]
+      .filter((subscribe) => typeof subscribe === 'function')
+      .map((subscribe) => subscribe(onChange));
+    return () => offs.forEach((off) => { if (typeof off === 'function') off(); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return mountedRef;
+}
+
 // heldWriteWhere: which match (or team) one held write is about, named the
 // way the score list names it (scoreRowMatchLabel) when the competition's
 // matches are loaded, else by the match's number or id (matchLabel). The
@@ -41,18 +58,7 @@ export function HeldWritesPanel({ competitions, onClose }) {
   const read = () => (api && typeof api.heldWrites === 'function' ? api.heldWrites() : []);
   const [items, setItems] = useState(read);
   const [busyKey, setBusyKey] = useState(null);
-  const mountedRef = useRef(true);
-  useEffect(() => () => { mountedRef.current = false; }, []);
-  useEffect(() => {
-    const refresh = () => { if (mountedRef.current) setItems(read()); };
-    const offs = [];
-    if (typeof window !== 'undefined') {
-      if (typeof window.subscribeSyncStatus === 'function') offs.push(window.subscribeSyncStatus(refresh));
-      if (typeof window.subscribeUnsentWrites === 'function') offs.push(window.subscribeUnsentWrites(refresh));
-    }
-    return () => offs.forEach((off) => { if (typeof off === 'function') off(); });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const mountedRef = useHeldWritesRefresh(() => setItems(read()));
   const discard = async (held) => {
     setBusyKey(held.key);
     try {
@@ -111,31 +117,7 @@ function getHeldCount() {
 export function PublicHeldWrites({ competitions }) {
   const [count, setCount] = useState(getHeldCount);
   const [open, setOpen] = useState(false);
-  const mountedRef = useRef(true);
-
-  useEffect(() => () => { mountedRef.current = false; }, []);
-
-  useEffect(() => {
-    const refresh = () => {
-      if (mountedRef.current) {
-        setCount(getHeldCount());
-      }
-    };
-    const offs = [];
-    if (typeof window !== 'undefined') {
-      if (typeof window.subscribeSyncStatus === 'function') {
-        offs.push(window.subscribeSyncStatus(refresh));
-      }
-      if (typeof window.subscribeUnsentWrites === 'function') {
-        offs.push(window.subscribeUnsentWrites(refresh));
-      }
-    }
-    return () => {
-      offs.forEach((off) => {
-        if (typeof off === 'function') off();
-      });
-    };
-  }, []);
+  useHeldWritesRefresh(() => setCount(getHeldCount()));
 
   if (count === 0) return null;
 

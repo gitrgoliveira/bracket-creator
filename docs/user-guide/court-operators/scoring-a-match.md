@@ -35,7 +35,7 @@ Starting a different match from the Upcoming list works the same way: the match 
 
 Before the match in progress goes back, the app checks that the match you picked can start. If it cannot, for example because one of its competitors is fighting now on another shiai-jo, nothing changes: the match in progress keeps running with its score, and the picked match shows the reason.
 
-If the app cannot reach the server to check, for example with no connection, it asks you whether to send the match in progress back to the queue and start the one you picked, or keep the match in progress running. The question says the app could not check with the server and offers **Keep it running** or **Send back and start**. Tap **Keep it running** if you picked the wrong match.
+If the app cannot check with the server, because there is no connection, the server does not answer in time, or a finish, start, send back or court move made on this device has not reached the server yet, it asks you instead: **Keep it running** leaves the match in progress as it is, and **Send back and start** sends it back to the queue with its score and starts the one you picked. Tap **Keep it running** if you picked the wrong match. If the server then refuses the start, the match in progress waits in the Upcoming list with its score: tap **Start match** on it to carry on.
 
 In an engi match each flag is sent the moment you tap it once the match has started, so the flags are kept too.
 

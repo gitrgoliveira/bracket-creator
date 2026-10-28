@@ -109,6 +109,9 @@ describe('a queued send back is published on the court\'s channel (bc-stpf)', ()
     expect('scoreVersion' in result).toBe(false);
     // A send back moves no court, so neither patch names one.
     expect(patchesFor(publish, 'm1').some(([, , r]) => 'court' in r)).toBe(false);
+    // Each names the status the bout moves from, for the display to judge.
+    expect(publish.mock.calls.filter(([type]) => type === 'patch').map(([, , , payload]) => payload.ifStatus))
+      .toEqual(['running', 'scheduled']);
     warn.mockRestore();
   });
 
@@ -227,5 +230,49 @@ describe('a display holding the old bout and the picked one shows the picked one
     const back = applyPatchToTree(tree(), patch({ id: 'm1', status: 'scheduled' }));
     const again = applyPatchToTree(back, patch({ id: 'm1', status: 'running' }));
     expect(findRunningOnCourt(again.competitions, 'A').match.id).toBe('m1');
+  });
+
+  // Another device finished the bout and the display's feed said so first.
+  const finishedHere = () => {
+    const t = tree();
+    t.competitions[0].poolMatches[0] = { ...t.competitions[0].poolMatches[0], status: 'completed', winner: 'p1', scoreVersion: 9 };
+    return t;
+  };
+  const withFrom = (result, ifStatus) => ({ ...patch(result), payload: { result, ifStatus } });
+
+  it('a send back of a bout the display holds finished leaves it finished', () => {
+    const held = finishedHere();
+    const next = applyPatchToTree(held, withFrom({ id: 'm1', status: 'scheduled', sideAId: 'p1', sideBId: 'p2' }, 'running'));
+    expect(next).toBe(held);
+  });
+
+  it('a put back of a bout the display holds finished leaves it finished', () => {
+    const held = finishedHere();
+    const next = applyPatchToTree(held, withFrom({ id: 'm1', status: 'running' }, 'scheduled'));
+    expect(next).toBe(held);
+    expect(findRunningOnCourt(next.competitions, 'A')).toBeFalsy();
+  });
+
+  it('a send back and its put back from the statuses they name still apply', () => {
+    const back = applyPatchToTree(tree(), withFrom({ id: 'm1', status: 'scheduled' }, 'running'));
+    expect(back.competitions[0].poolMatches[0].status).toBe('scheduled');
+    const again = applyPatchToTree(back, withFrom({ id: 'm1', status: 'running' }, 'scheduled'));
+    expect(findRunningOnCourt(again.competitions, 'A').match.id).toBe('m1');
+  });
+
+  it('end to end: a send back published by the outbox leaves a finished copy finished', async () => {
+    const originalFetch = global.fetch;
+    const publish = vi.spyOn(bridge, 'publish');
+    global.fetch = reply(200, {});
+    try {
+      await API.revertMatchToQueue('c1', 'm1', 'pw', { match: runningBout() });
+      const [type, court, compId, payload] = publish.mock.calls.find(([t]) => t === 'patch');
+      const held = finishedHere();
+      expect(applyPatchToTree(held, { type, court, compId, payload })).toBe(held);
+    } finally {
+      publish.mockRestore();
+      global.fetch = originalFetch;
+      API.clearQueue();
+    }
   });
 });

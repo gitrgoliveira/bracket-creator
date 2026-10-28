@@ -1,7 +1,8 @@
 // bc-stpf: API.checkStart asks GET .../start-check whether a pick would start
 // once the bout running on its court is sent back. A direct read, bounded by
 // START_CHECK_TIMEOUT_MS, that never throws and never enters the outbox:
-// {ok}, {refused: Error carrying the server's sentence} or {unknown}.
+// {ok}, {refused: Error carrying the server's sentence} for a definite answer
+// (a 409, 401, 404 or other 4xx), or {unknown} when there is none.
 // API.startCheckUntrusted says when an answer could not be trusted.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -71,10 +72,29 @@ describe('API.checkStart', () => {
     expect(res.unknown).toBeUndefined();
   });
 
+  // A definite answer that the start would fail is a refusal, not a question:
+  // asked, the operator could send the running bout back for a start the
+  // server then refuses, leaving the court empty.
+  it('a 404 (the match or its competition is gone) is a refusal saying so', async () => {
+    global.fetch = reply(404, { error: 'match not found' });
+    const res = await API.checkStart('c1', 'm1', 'A', 'secret');
+    expect(res.refused).toBeInstanceOf(Error);
+    expect(res.refused.message).toBe("This match is no longer in the draw. Check the court's list.");
+    expect(res.unknown).toBeUndefined();
+  });
+
+  it('another 4xx is a refusal carrying the server\'s sentence', async () => {
+    global.fetch = reply(400, { error: 'court is required' });
+    const res = await API.checkStart('c1', 'm1', 'A', 'secret');
+    expect(res.refused.message).toBe('court is required');
+    expect(res.unknown).toBeUndefined();
+  });
+
   it.each([
     ['a 500', 500, { error: 'internal error' }],
-    ['a 404', 404, { error: 'not found' }],
-    ['a 400', 400, { error: 'court is required' }],
+    ['a 503', 503, {}],
+    ['a 429', 429, {}],
+    ['a 403 (the tournament record not usable yet)', 403, {}],
   ])('%s is unknown', async (_name, status, body) => {
     global.fetch = reply(status, body);
     await expect(API.checkStart('c1', 'm1', 'A', 'secret')).resolves.toEqual({ unknown: true });

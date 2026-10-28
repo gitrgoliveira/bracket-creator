@@ -126,10 +126,21 @@ export function applyPatchToTree(tournament, msg) {
     if (idx === -1) return tournament;
 
     const prevComp = competitions[idx];
+    const results = Array.isArray(msg.payload.results) ? msg.payload.results : [msg.payload.result];
+    // A patch that names the status it moves from (`ifStatus`: a send back and
+    // its put-back, bc-stpf) applies only while this display holds the match
+    // in that status: one it already holds finished, from another device's
+    // finish, stays finished. A match it does not hold applies as before.
+    const ifStatus = msg.payload.ifStatus;
+    if (ifStatus && results.some((r) => {
+        const held = r && r.id != null ? _matchInComp(prevComp, r.id) : null;
+        return held && held.status !== ifStatus;
+    })) {
+        return tournament;
+    }
     // A running board never puts back to running a match this display holds
     // finished or not started, unless the board is of a newer server copy
     // (staleRunningOverlay, stage 3 review 11, Y1).
-    const results = Array.isArray(msg.payload.results) ? msg.payload.results : [msg.payload.result];
     if (results.length > 0 && results.every((r) => staleRunningOverlay(r && r.id != null ? _matchInComp(prevComp, r.id) : null, r))) {
         return tournament;
     }

@@ -561,11 +561,12 @@ const START_BROADCAST_DROPS = Object.freeze([
 // Shared rules for court bridge match patches: a court-less match publishes
 // nothing; the patch names the match sides ids; a status-only patch states
 // the held flag counts because the display reads a result naming a status that
-// omits a count as 0.
-function _publishMatchPatch(compID, match, result) {
+// omits a count as 0. `ifStatus`, when given, is the status the display's copy
+// must hold for the patch to apply (applyPatchToTree).
+function _publishMatchPatch(compID, match, result, ifStatus) {
     const court = (match && match.court) || '';
     if (!court) return;
-    _bridge.publish('patch', court, compID, { result });
+    _bridge.publish('patch', court, compID, ifStatus ? { result, ifStatus } : { result });
 }
 
 function _sideIdFields(match) {
@@ -592,8 +593,11 @@ function _heldFlagCounts(match) {
 // flag counts the match holds, because the display reads a result naming a
 // status that omits a count as 0 (mergeMatchPatch). It carries no
 // scoreVersion, so the put-back is never read as a stale running board
-// (staleRunningOverlay). A court-less match publishes nothing, as
-// _broadcastPatch does.
+// (staleRunningOverlay). It names the status the bout moves from (`ifStatus`):
+// a send back applies only to a bout the display holds running, and its
+// put-back only to one it holds queued, so a display that has already taken
+// another device's finish of the bout keeps showing it finished. A court-less
+// match publishes nothing, as _broadcastPatch does.
 function _publishSendBack(compID, matchID, match, status, court) {
     _publishMatchPatch(compID, match, {
         id: matchID,
@@ -601,7 +605,7 @@ function _publishSendBack(compID, matchID, match, status, court) {
         ..._heldFlagCounts(match),
         status,
         ...(court ? { court } : {}),
-    });
+    }, status === 'scheduled' ? 'running' : 'scheduled');
 }
 
 function _isMatchAlreadyCompletedRefusal(err) {
@@ -637,6 +641,20 @@ function _attachSendBackDisplayPutBack(compID, matchID, match, answer, movedTo) 
 // pick of another bout asks the operator instead (API.checkStart). The one
 // bounded wait in front of an outbox write, and only on that pick path.
 const START_CHECK_TIMEOUT_MS = 1500;
+
+// The answers the outbox keeps a write queued on and retries: the server is up
+// but cannot take it yet (a 5xx, the rate limit's 429, or a 403, which on this
+// server is never a bad credential (that is 401) but the tournament record not
+// usable yet, which an admin can repair at any moment). The start check reads
+// them as no answer, since a start queued on one is held, not refused.
+function _serverKeepsRetrying(status) {
+    return status >= 500 || status === 429 || status === 403;
+}
+
+// bc-stpf: the start check's sentence for a 404: the server holds no such
+// match (the draw was discarded or regenerated, or the competition removed,
+// since the console's list was read), so a start would be refused too.
+const START_CHECK_NOT_FOUND_MESSAGE = "This match is no longer in the draw. Check the court's list.";
 
 // bc-stpf: the outbox writes that can change what a start check judges: a
 // match's status (a score write, which a finish or a start is, a decision, a
@@ -3458,7 +3476,7 @@ async function _sendEntry(key, descriptor, pass) {
         leaveQueue({ value: true });
         return 'settled';
     }
-    if (res.status >= 500 || res.status === 429 || res.status === 403) {
+    if (_serverKeepsRetrying(res.status)) {
         // Server is up but erroring: keep in queue and retry with backoff. NOT
         // "offline". 403 is never a bad credential on this server (that is
         // 401): it is the tournament record not usable yet, which an admin can
@@ -3690,7 +3708,7 @@ async function _sendTapBatch(base, batch, pass) {
         _recomputeSyncStatus();
         return result;
     }
-    if (res.status >= 500 || res.status === 429 || res.status === 403) {
+    if (_serverKeepsRetrying(res.status)) {
         let crossed = false;
         for (const [, d] of batch) {
             d.attempts = (Number(d.attempts) || 0) + 1;
@@ -5750,10 +5768,13 @@ const API = {
     // (GET .../start-check), never the outbox: it writes nothing and must never
     // be replayed. It waits at most START_CHECK_TIMEOUT_MS, the body read
     // included, and never throws. Answers {ok: true}; {refused: Error} for a
-    // 409 (the Error carrying the server's sentence as the start's own refusal
-    // does, _reasonHumanError) or a 401 (auth failure); or {unknown: true} for
-    // anything else (no answer in time, a network failure, a 5xx, a 404, a 400),
-    // on which the court console asks the operator.
+    // definite answer that the start would fail: a 409 (the Error carrying the
+    // server's sentence as the start's own refusal does, _reasonHumanError), a
+    // 401 (auth failure), a 404 (the server no longer holds the match or its
+    // competition, so the start would 404 too) or another 4xx; or
+    // {unknown: true} when there is no such answer (no answer in time, a
+    // network failure, or an answer the outbox would retry on, _serverKeepsRetrying), on
+    // which the court console asks the operator.
     async checkStart(compID, matchID, court, password) {
         const url = `/api/competitions/${encodeURIComponent(compID)}/matches/${encodeURIComponent(matchID)}/start-check?court=${encodeURIComponent(court || '')}`;
         try {
@@ -5764,6 +5785,10 @@ const API = {
             if (res.ok && body && body.ok === true) return { ok: true };
             if (res.status === 409) return { refused: _reasonHumanError(body || {}, 'Could not start the match') };
             if (res.status === 401) return { refused: new Error('The password was not accepted. Sign in again, then start the match.') };
+            if (res.status === 404) return { refused: new Error(START_CHECK_NOT_FOUND_MESSAGE) };
+            if (res.status >= 400 && !_serverKeepsRetrying(res.status)) {
+                return { refused: _reasonHumanError(body || {}, 'Could not start the match') };
+            }
             return { unknown: true };
         } catch (_e) {
             return { unknown: true };

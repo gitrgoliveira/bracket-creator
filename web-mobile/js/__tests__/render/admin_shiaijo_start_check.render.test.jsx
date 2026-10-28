@@ -224,6 +224,36 @@ describe('a pick of another bout checks the start before it sends the running bo
       expect(starts(onEditScore)).toEqual([]);
     });
 
+    it('another bout started on the court while the question is open is the one checked, asked about and sent back', async () => {
+      const { onEditScore, courtBecomes } = renderConsole();
+      await pointerTap(upNextStart());
+      await settle();
+      expect(screen.getByTestId('start-ask').textContent).toMatch(/Yamada/);
+      // Another device sent m1 back and started m3 meanwhile.
+      const swapped = matches('scheduled').map((x) => (x.id === 'm3' ? { ...x, status: 'running', scoreVersion: 2 } : x));
+      await act(async () => { courtBecomes(swapped); });
+      await keyboardClick(screen.getByRole('button', { name: 'Send back and start' }));
+      await settle();
+
+      // Judged again from the top: m3 is checked and asked about, nothing sent yet.
+      expect(window.API.checkStart).toHaveBeenCalledTimes(2);
+      expect(window.API.checkStart.mock.calls[1]).toEqual(['c1', 'm2', 'A', 'pw']);
+      const ask = screen.getByTestId('start-ask');
+      expect(ask.textContent).toMatch(/Ito/);
+      expect(ask.textContent).not.toMatch(/Yamada/);
+      expect(window.API.revertMatchToQueue).not.toHaveBeenCalled();
+      expect(starts(onEditScore)).toEqual([]);
+
+      await keyboardClick(screen.getByRole('button', { name: 'Send back and start' }));
+      await settle();
+      // m3 is sent back, never m1, and m2 starts after it.
+      expect(window.API.revertMatchToQueue).toHaveBeenCalledTimes(1);
+      expect(window.API.revertMatchToQueue.mock.calls[0].slice(0, 2)).toEqual(['c1', 'm3']);
+      const started = starts(onEditScore);
+      expect(started.map(([id]) => id)).toEqual(['m2']);
+      expect(started[0][1].after).toBe(REVERT_KEY);
+    });
+
     it('"Keep it running" sends nothing, keeps the running bout live and clears the pick', async () => {
       const { onEditScore } = renderConsole();
       await pointerTap(upNextStart());
@@ -316,15 +346,20 @@ describe('a pick of another bout checks the start before it sends the running bo
     expect(starts(onEditScore).map(([id]) => id)).toEqual(['m2']);
   });
 
-  it('Send back to queue tapped while the check is out opens no confirm, and the pick sends the bout back once', async () => {
+  it('Send back to queue tapped while the check is out opens no confirm, says why, and the pick sends the bout back once', async () => {
     let answer;
     window.API.checkStart = vi.fn(() => new Promise((resolve) => { answer = resolve; }));
-    const { onEditScore } = renderConsole();
+    const { onEditScore, showToast } = renderConsole();
     await pointerTap(upNextStart());
     await settle();
     await keyboardClick(screen.getByRole('button', { name: 'Send back to queue' }));
     await settle();
     expect(screen.queryByRole('dialog')).toBeNull();
+    // Refused, and said: the toast names the match being started.
+    const toasts = errorToasts(showToast);
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0][0]).toMatch(/Suzuki/);
+    expect(toasts[0][0]).toMatch(/still being started on this court\. Try again once it has\./);
 
     await act(async () => { answer({ ok: true }); });
     await settle();

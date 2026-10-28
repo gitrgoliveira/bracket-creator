@@ -19,8 +19,6 @@ import {
   resolveLineupTeamId,
 } from './admin_scoring_team.jsx';
 
-import { SyncStatusPill } from './admin_scoring_autosave.jsx';
-
 import {
   MAX_IPPONS_PER_SIDE,
   isBoutDecided,
@@ -60,7 +58,6 @@ window.EngiScoreEditorModal = withOpenEditorRegistered(EngiScoreEditorModal);
 
 export {
   EngiScoreEditorModal,
-  SyncStatusPill,
   resolveDecisionPassword,
   buildDecisionBody,
   submitDecisionRequest,

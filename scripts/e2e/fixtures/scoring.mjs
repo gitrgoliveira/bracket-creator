@@ -73,19 +73,49 @@ export async function clearMarks(slots, { keep = 0, from = 'last', pauseMs = 0 }
 
 const SIDE_NAME = { shiro: 'Shiro', aka: 'Aka' };
 
+// `root` is an editor's selector or its Locator (the team sheet's callers hold one).
+const within = (page, root) => (typeof root === 'string' ? page.locator(root) : root);
+
+// Return once this device's outbox is empty (all queued writes have landed).
+// Process-wide, not per match, and says nothing about another device.
+export async function settled(page) {
+  return expect.poll(() => page.evaluate(() => window.API.unsentWrites().total), {
+    timeout: EXPECT_TIMEOUT_MS,
+    message: "the device's outbox is empty (all queued writes landed)",
+  }).toBe(0);
+}
+
+// Return the total number of writes currently unsent in this device's outbox.
+export const unsentCount = (page) => page.evaluate(() => window.API.unsentWrites().total);
+
+// Return the held-writes notice in the header or public chrome once visible.
+export async function held(page, { count } = {}) {
+  const loc = page.getByTestId(/^(topbar|public)-held$/);
+  await expect(loc).toBeVisible();
+  if (count !== undefined) {
+    await expect(loc).toContainText(new RegExp('\\b' + count + '\\b'));
+  }
+  return loc;
+}
+
+// Return once no held-writes notice is shown.
+export async function notHeld(page) {
+  const loc = page.getByTestId(/^(topbar|public)-held$/);
+  await expect(loc).toHaveCount(0, { timeout: 20_000 });
+}
+
+// Return once the editor is visible and holds a running bout (no pre-match or correction pill).
+export async function running(page, root = INLINE_EDITOR) {
+  const ed = within(page, root).first();
+  await expect(ed).toBeVisible();
+  await expect(ed.locator('.editor-head-pill')).toHaveCount(0);
+}
+
 // An ippon button: one waza letter (M, K, D, T, H, and S on naginata) on a
 // side of the board. Matched whole, since a substring test would be ambiguous
 // the day a two-letter waza appears.
 export const ipponButton = (page, side, waza, root = INLINE_EDITOR) => page.locator(root)
   .locator(`.sb-side--${side} .ipt-btn`, { hasText: new RegExp(`^${waza}$`) }).first();
-
-// The sync pill on the open editor ("Synced", "Syncing…", "Offline", ...;
-// admin_scoring_autosave.jsx). It reads the device's outbox, where every tap
-// is queued the moment it is made (API.recordTap): "Synced" means the outbox
-// is empty, so every tap this device made has been answered by the server. It
-// is process-wide, not per match, and it says nothing about another device's
-// taps: a check across devices reads the other device's board instead.
-export const syncState = (page, root = INLINE_EDITOR) => page.locator(root).locator('.sync-pill__label').first();
 
 // The slots a side's points fill, outside to inside, that hold a mark. A slot
 // is labelled "<Side> slot <n>: remove <waza>" for a point (a tap clears it),
@@ -102,7 +132,7 @@ export async function awardIppon(page, side, waza = 'M', root = INLINE_EDITOR) {
   const before = await filledSlots(page, side, root).count();
   await tapOnSide(page, `${root} ${side}`, ipponButton(page, side, waza, root));
   await expect(filledSlots(page, side, root)).toHaveCount(before + 1);
-  await expect(syncState(page, root)).toHaveText('Synced');
+  await settled(page);
 }
 
 // The hikiwake toggle of the individual board ("Mark draw", "Cancel draw" while
@@ -114,9 +144,6 @@ export async function markDraw(page, root = INLINE_EDITOR) {
   await expect(toggle).toHaveText('Cancel draw');
 }
 
-// `root` is an editor's selector or its Locator (the team sheet's callers hold one).
-const within = (page, root) => (typeof root === 'string' ? page.locator(root) : root);
-
 // The Finish button in its first state ("Finish" or "Finish + Start Next →"),
 // and the armed state the first tap turns it into.
 export const finishButton = (page, root = INLINE_EDITOR) => within(page, root)
@@ -125,9 +152,9 @@ export const armedFinishButton = (page, root = INLINE_EDITOR) => within(page, ro
   .locator('button').filter({ hasText: /^Tap again to finish/ }).first();
 
 // The server's answer to the next write a match gets, for a journey that must
-// not move on (reload, read the court) before an edit has been saved. The sync
-// pill is process-wide, not per match: it says whether anything is still being
-// written, not that THIS match's edit was, so it cannot stand in for the
+// not move on (reload, read the court) before an edit has been saved. The outbox
+// is process-wide, not per match: it says whether anything is still being
+// written, not that THIS match's edit was, so settled() cannot stand in for the
 // answer to the write itself. Call this BEFORE the tap that
 // causes the write, then `await writeLanded(...)` after it. `tail` is the
 // write's route below /matches/:id: 'score' (PUT, the default: Start, Finish,

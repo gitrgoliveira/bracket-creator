@@ -3181,7 +3181,7 @@ paths:
         completed write with a `correctionReason`) remains the sole sanctioned
         edit of a finished result. Reopening a finalized result is an
         organiser action: the route stays main-password-gated even in self-run
-        mode (same class as override-winner), so a request without a valid
+        mode (an organiser correction), so a request without a valid
         `X-Tournament-Password` gets 401. Broadcasts a `match_updated` event.
 
         Reopening a match a withdrawal (kiken, fusenpai) ended REMOVES the
@@ -3417,7 +3417,7 @@ paths:
 
         Destructive (it discards the target's finalized result; the blocker
         keeps its score), so it is main-password-gated in self-run mode
-        via the central allowlist, the same class as reopen and override-winner.
+        via the central allowlist, the same class as reopen.
       security:
         - TournamentPassword: []
       parameters:
@@ -3565,8 +3565,8 @@ paths:
         identical. A scored bout is never removed. The match stays `running`.
         Broadcasts a `match_updated` event.
 
-        Removing a bout is an organiser correction, the same class as reopen
-        and override-winner: the route stays main-password-gated even in
+        Removing a bout is an organiser correction, the same class as reopen:
+        the route stays main-password-gated even in
         self-run mode, so a request without a valid `X-Tournament-Password`
         gets 401.
       security:
@@ -3834,89 +3834,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-
-  /api/competitions/{id}/matches/{mid}/override-winner:
-    put:
-      tags: [matches]
-      summary: Override bracket winner
-      description: Manually set the winner of a bracket match, bypassing score calculation.
-      security:
-        - TournamentPassword: []
-      parameters:
-        - $ref: '#/components/parameters/CompetitionId'
-        - $ref: '#/components/parameters/MatchId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [winnerName]
-              properties:
-                winnerName:
-                  type: string
-                  maxLength: 100
-                modifiedAt:
-                  type: integer
-                  format: int64
-                  description: >
-                    Client's server-relative timestamp for last-write-wins
-                    reconciliation, unix milliseconds; omit (or 0) when
-                    unstamped. A value implausibly far in the future is refused
-                    with the RefusedWrite shape, see the 200 response.
-                writeId:
-                  $ref: '#/components/schemas/WriteId'
-                basis:
-                  $ref: '#/components/schemas/ScoreBasis'
-                session:
-                  $ref: '#/components/schemas/WriteSession'
-      responses:
-        '200':
-          description: >
-            The body is `{"applied": <bool>}` (mp-y3nk). `applied: true` means
-            the winner was set; `applied: false` means the assertion was not
-            applied — nothing changed and no SSE broadcast is emitted, so a
-            client that advanced its local bracket optimistically should
-            refetch. 200 either way: neither case is a fault and neither can win
-            a retry as-is.
-
-            Two ways it can be false, both the RefusedWrite shape. A newer
-            stored result already decides this match: the assertion is not
-            applied, it is kept in the match's history with the winner it
-            named, and the body is `reason: superseded` with `heldGroups:
-            ["result"]`, exactly like a score write whose every change was held.
-            Or the request's `modifiedAt` was implausibly far in the future:
-            `reason: clock_skew` with a `serverNowMs`, and the client should
-            resync its clock offset from GET /api/time before re-submitting.
-          content:
-            application/json:
-              schema:
-                anyOf:
-                  - type: object
-                    additionalProperties: false
-                    required: [applied]
-                    properties:
-                      applied:
-                        type: boolean
-                        enum: [true]
-                  - $ref: '#/components/schemas/RefusedWrite'
-        '409':
-          description: >
-            The same knockout refusals as PUT .../score, with the same bodies:
-            `downstream_knockout_played` when the new winner would change who
-            a later knockout match with its own result was fought by (retry
-            with `forceDownstreamReopen: true`), and
-            `downstream_knockout_running` when it would change a side of a
-            later knockout match being fought now (`runningMatches`, each with
-            its `court`; not confirmable, `forceDownstreamReopen` does not get
-            past it). Nothing is written.
-          content:
-            application/json:
-              schema:
-                oneOf:
-                  - $ref: '#/components/schemas/Error'
-                  - $ref: '#/components/schemas/DownstreamKnockoutPlayedError'
-                  - $ref: '#/components/schemas/DownstreamKnockoutRunningError'
 
   /api/competitions/{id}/matches/{mid}/time:
     put:
@@ -6044,7 +5961,7 @@ components:
         applied to the match and no SSE broadcast is emitted in either case; a
         superseded write leaves its match history entry and nothing else.
 
-        PUT /score, POST /decision, PUT /override-winner and both /daihyosen
+        PUT /score, POST /decision and both /daihyosen
         paths each carry a client-supplied modifiedAt, so the guard compares
         rather than bypassing and any of them can produce either condition.
         The remaining match-write endpoint, /quick-score, builds its result
@@ -6145,7 +6062,7 @@ components:
             `reseat`: a side of the match was given another team by a
             correction to an earlier match, and the side's representative pick
             went with it): score, bulk-score, quick-score, decision,
-            daihyosen-add, daihyosen-remove, reopen, requeue, override-winner,
+            daihyosen-add, daihyosen-remove, reopen, requeue,
             engi, kachinuki-advance (Record bout appending the next pairing),
             kachinuki-record (Record bout appending none, only marking the bout
             it closes recorded), kachinuki-remove-bout, downstream-reopen,
@@ -6625,7 +6542,7 @@ components:
     DownstreamKnockoutRunningError:
       type: object
       description: >
-        409 body when a write, reopen, override-winner or decision would move
+        409 body when a write, reopen or decision would move
         a qualifier out of, or change a side of, a knockout match being
         fought now: a pool correction in a mixed competition moving the
         qualifier, or a knockout correction whose new winner changes a later
@@ -6862,6 +6779,11 @@ components:
                 Derived by the server, so a value sent on PUT is ignored. A
                 client reads it instead of probing `HEAD /api/branding/logo`,
                 which answers 404 while no logo is set.
+            logoOnLobby:
+              type: boolean
+              description: >
+                When true and a logo is uploaded, the lobby display shows the
+                tournament logo; absent reads false.
     TournamentWithCompetitions:
       description: >
         The response shape for POST and PUT /api/tournament: every Tournament

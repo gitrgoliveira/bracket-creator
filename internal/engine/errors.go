@@ -59,7 +59,7 @@ func notFoundErrorf(format string, args ...any) *NotFoundError {
 var ErrDownstreamKnockoutPlayed = errors.New("downstream knockout match already played")
 
 // DownstreamKnockoutPlayedError is returned when correcting a completed
-// bracket match (via a score write or OverrideBracketWinner) would change
+// bracket match (via a score or decision write) would change
 // the winner already propagated into a downstream match -- the next round,
 // or the bronze/3rd-place match a semifinal also feeds -- that carries a
 // result of its own. propagateBracketWinner repaints a downstream slot's
@@ -208,7 +208,7 @@ var ErrDownstreamKnockoutRunning = errors.New("downstream knockout match is bein
 // it, distinguished by Reopening: a pool correction in a mixed competition
 // (pool_requalify.go's requalifyAfterPoolWrite) and a knockout correction
 // whose new winner reaches a running later match (runningDownstreamRefusal,
-// on the score, decision, override and engi doors; operator decision
+// on the score, decision and engi doors; operator decision
 // 2026-09-27), both the default Reopening:false, and the reopen /
 // requeue-blocker-and-reopen doors (reopenBracketDownstreamCheck,
 // kachinuki.go, Reopening:true). Unlike

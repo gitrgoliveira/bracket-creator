@@ -105,9 +105,6 @@ func TestRunningDownstream_EveryDoorRefuses(t *testing.T) {
 			// aka (Alice) withdraws, so Bob would go on to the final.
 			return map[string]any{"decision": "kiken-voluntary", "decisionBy": "aka", "forceDownstreamReopen": force}
 		}},
-		{"override-winner", "PUT", "/matches/m-r1-0/override-winner", func(force bool) any {
-			return map[string]any{"winnerName": "Bob", "forceDownstreamReopen": force}
-		}},
 	}
 	for _, d := range doors {
 		for _, force := range []bool{false, true} {

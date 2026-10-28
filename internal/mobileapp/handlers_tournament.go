@@ -669,15 +669,14 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 
 		// Trim windowTitle so whitespace-only input doesn't persist as an
 		// effectively-blank browser title instead of falling back to the default.
-		// Also nil-out a fully-empty Theme (no colors, no title set by the
-		// client) so tournament.md stays clean and the UI doesn't treat an
-		// unintentional "theme: {}" as "branding is configured".
-		// LogoPath is excluded: it has json:"-" and is never set via this path.
+		// Do NOT nil-out t.Theme here: an explicit client-sent Theme (such as
+		// {"logoOnLobby": false} when unticking the lobby-logo checkbox with no
+		// colors set) must reach the update callback below as non-nil so the
+		// preserve-merge does not mistake it for an omitted Theme and copy the
+		// stored Theme back over it. The empty-Theme nil-out runs inside the
+		// callback after LogoPath is merged.
 		if t.Theme != nil {
 			t.Theme.WindowTitle = strings.TrimSpace(t.Theme.WindowTitle)
-			if t.Theme.PrimaryColor == "" && t.Theme.AccentSoftColor == "" && t.Theme.WindowTitle == "" {
-				t.Theme = nil
-			}
 		}
 
 		// Validate hex color fields on the optional theme block (mp-scf).
@@ -760,8 +759,14 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 			// Preserve Theme.LogoPath (mp-scf): LogoPath has json:"-" so the
 			// bound body never carries it. The logo is managed via
 			// POST/DELETE /api/branding/logo; this PUT must not clear it.
-			// Also preserve the entire Theme when the client omits it (nil)
-			// so a routine name/venue save doesn't wipe configured colors.
+			// When the client omits Theme (nil), preserve the stored Theme
+			// whole so a name-only save keeps colors, logo, and logoOnLobby.
+			// When the client sends a Theme, it is authoritative for its own
+			// fields (including logoOnLobby: false) and only LogoPath is
+			// carried over. Then nil-out the merged Theme only when all
+			// fields (colors, windowTitle, logoPath, logoOnLobby) are empty/false,
+			// so a Theme holding only a logo or only the flag survives while a
+			// genuinely empty Theme drops cleanly from tournament.md.
 			if current != nil && current.Theme != nil {
 				if desired.Theme == nil {
 					desired.Theme = &state.Theme{}
@@ -769,6 +774,14 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 				} else {
 					desired.Theme.LogoPath = current.Theme.LogoPath
 				}
+			}
+			if desired.Theme != nil &&
+				desired.Theme.PrimaryColor == "" &&
+				desired.Theme.AccentSoftColor == "" &&
+				desired.Theme.WindowTitle == "" &&
+				desired.Theme.LogoPath == "" &&
+				!desired.Theme.LogoOnLobby {
+				desired.Theme = nil
 			}
 
 			// Immutability of Mode (mp-7h7): Mode is chosen once at creation
@@ -948,7 +961,7 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		// Also nil-out a fully-empty Theme so tournament.md stays clean.
 		if t.Theme != nil {
 			t.Theme.WindowTitle = strings.TrimSpace(t.Theme.WindowTitle)
-			if t.Theme.PrimaryColor == "" && t.Theme.AccentSoftColor == "" && t.Theme.WindowTitle == "" {
+			if t.Theme.PrimaryColor == "" && t.Theme.AccentSoftColor == "" && t.Theme.WindowTitle == "" && !t.Theme.LogoOnLobby {
 				t.Theme = nil
 			}
 		}

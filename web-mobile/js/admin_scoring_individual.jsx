@@ -78,7 +78,7 @@ import { individualDraftTaps, rebaseIndividualDraft } from './draft_taps.jsx';
 // one owner of that question.
 import { isBarredMatch } from './ineligible_match.jsx';
 
-import { SyncStatusPill, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
+import { useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
 import { GROUP_POINTS, GROUP_RESULT, GROUP_ENCHO, GROUP_REP } from './match_groups.jsx';
 
@@ -1285,9 +1285,6 @@ export function ScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, onSub
             )}
             <div className="editor-modal__title" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span><TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Now"}</span>
-              {/* C2: sync status indicator: inline on the title line (no dedicated
-                  row); SyncStatusPill renders nothing unless the match is running. */}
-              <SyncStatusPill isRunning={m.status === "running"} />
             </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>

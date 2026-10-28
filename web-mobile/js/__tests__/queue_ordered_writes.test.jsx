@@ -139,14 +139,14 @@ describe('a later running write never replaces a queued Finish', () => {
         // it waits behind the Finish like the decision does.
         const running = await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
         const decision = await API.recordDecision('c1', 'm1', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'pw');
-        const override = await API.overrideBracketWinner('c1', 'm2', 'Alice', 'pw');
+        const m2Write = await API.recordDecision('c1', 'm2', { decision: 'fusensho', decisionBy: 'A' }, 'pw');
         expect(running.pending).toBe(true);
         expect(decision.pending).toBe(true);
-        await expect(override.settled).resolves.toEqual(expect.objectContaining({ applied: true }));
-        const after = s.sent.slice(before).map((w) => w.url.split('/').pop() + (w.body.status ? `:${w.body.status}` : ''));
-        expect(after).toContain('override-winner');
-        expect(after).not.toContain('score:running');
-        expect(after).not.toContain('decision');
+        await expect(m2Write.settled).resolves.toEqual({});
+        const after = s.sent.slice(before).map((w) => w.url.split('/').slice(-2).join('/') + (w.body.status ? `:${w.body.status}` : ''));
+        expect(after).toContain('m2/decision');
+        expect(after).not.toContain('m1/score:running');
+        expect(after).not.toContain('m1/decision');
         // The stuck Finish and the writes behind it are still queued, in order.
         expect(storedEntries().map(([, d]) => d.kind + (d.payload.status ? `:${d.payload.status}` : ''))).toEqual(['score:completed', 'score:running', 'decision']);
     });
@@ -287,10 +287,10 @@ describe('a queue persisted by the previous build', () => {
                 url: '/api/competitions/c1/matches/m1/decision',
                 payload: { decision: 'kiken-voluntary', decisionBy: 'aka', modifiedAt: Date.now() - 60_000 },
             }),
-            oldShape('override:c1:m2', {
-                compID: 'c1', matchID: 'm2', kind: 'override', terminal: true, method: 'PUT',
-                url: '/api/competitions/c1/matches/m2/override-winner',
-                payload: { winnerName: 'Alice', modifiedAt: Date.now() - 60_000 },
+            oldShape('c1:m2', {
+                compID: 'c1', matchID: 'm2', kind: 'decision', terminal: true, method: 'POST',
+                url: '/api/competitions/c1/matches/m2/decision',
+                payload: { decision: 'fusensho', decisionBy: 'A', modifiedAt: Date.now() - 60_000 },
             }),
         ]));
         vi.resetModules();
@@ -305,31 +305,8 @@ describe('a queue persisted by the previous build', () => {
         await tick(50);
         const m1 = s.sent.filter((w) => w.url.includes('/matches/m1/')).map((w) => w.url.split('/').pop());
         expect(m1).toEqual(['decision', 'score']);
-        expect(s.sent.some((w) => w.url.endsWith('/matches/m2/override-winner'))).toBe(true);
+        expect(s.sent.some((w) => w.url.endsWith('/matches/m2/decision'))).toBe(true);
         expect(localStorage.getItem('bc_write_queue_v2')).toBe('[]');
-    });
-});
-
-describe('override-winner: a held assertion is surfaced like a superseded score', () => {
-    it('a direct assertion the server held returns heldGroups', async () => {
-        const s = server({ answer: () => ({ applied: false, reason: 'superseded', heldGroups: ['result'] }) });
-        s.online();
-        await flushMicrotasks();
-        const res = await (await API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw')).settled;
-        expect(res).toMatchObject({ applied: false, reason: 'superseded', heldGroups: ['result'] });
-    });
-
-    it('a queued assertion the server held raises the superseded alert, not only a resync', async () => {
-        const s = server({ answer: () => ({ applied: false, reason: 'superseded', heldGroups: ['result'] }) });
-        await API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw');
-        const alerts = [];
-        const unsub = mod.subscribeQueueAlert((a) => alerts.push(a));
-        s.online();
-        await tick(50);
-        unsub();
-        expect(alerts.filter((a) => a.kind === 'superseded')).toEqual([
-            expect.objectContaining({ count: 1, compID: 'c1', matchID: 'm1' }),
-        ]);
     });
 });
 
@@ -616,8 +593,8 @@ describe('the way past a held write the server keeps refusing', () => {
 });
 
 // The topbar's held-writes list (HeldWritesPanel) reaches the held writes no
-// editor offers to discard: a running write, a lineup save, a hand-set
-// winner. Each is discarded on its own, and only once the server keeps
+// editor offers to discard: a running write, a lineup save, a decision.
+// Each is discarded on its own, and only once the server keeps
 // refusing it; a write only waiting for the connection is never discarded.
 describe('any held write the server keeps refusing can be discarded on its own', () => {
     it('lists every kind, refuses to discard one only waiting, discards each failing one', async () => {
@@ -625,11 +602,11 @@ describe('any held write the server keeps refusing can be discarded on its own',
         const s = server({ status: (url) => (url.includes('/m2/') ? 200 : 500) });
         await API.recordScore('c1', 'm1', { status: 'running', ipponsA: ['M'] }, 'pw', null);
         await API.putTeamLineup('c1', 't1', '1', { 1: 'Ito' }, 'pw');
-        await API.overrideBracketWinner('c1', 'r1-m1', 'Team A', 'pw');
+        await API.recordDecision('c1', 'r1-m1', { decision: 'fusensho', decisionBy: 'A' }, 'pw');
         await API.recordScore('c1', 'm2', { status: 'completed', winner: 'B' }, 'pw', null);
         await settleOfflinePass();
         const waiting = API.heldWrites();
-        expect(waiting.map((h) => h.kind).sort()).toEqual(['lineup', 'override', 'score', 'score']);
+        expect(waiting.map((h) => h.kind).sort()).toEqual(['decision', 'lineup', 'score', 'score']);
         expect(waiting.every((h) => !h.keepsFailing)).toBe(true);
         // Only waiting for the connection: not discarded through this door.
         expect(API.discardHeldWrite(waiting[0].key)).toBe(false);
@@ -639,17 +616,17 @@ describe('any held write the server keeps refusing can be discarded on its own',
         const failing = API.heldWrites();
         // m2 landed; the other three keep failing.
         expect(failing.map((h) => [h.kind, h.terminal, h.keepsFailing]).sort()).toEqual([
-            ['lineup', true, true], ['override', true, true], ['score', false, true],
+            ['decision', true, true], ['lineup', true, true], ['score', false, true],
         ]);
         const lineup = failing.find((h) => h.kind === 'lineup');
         expect(lineup).toMatchObject({ compID: 'c1', teamId: 't1', round: '1' });
-        expect(failing.find((h) => h.kind === 'override')).toMatchObject({ compID: 'c1', matchID: 'r1-m1' });
+        expect(failing.find((h) => h.kind === 'decision')).toMatchObject({ compID: 'c1', matchID: 'r1-m1' });
         const statuses = [];
         const unsub = mod.subscribeSyncStatus((st) => statuses.push(st));
         expect(statuses.at(-1)).toBe('server-error');
         expect(API.discardHeldWrite(lineup.key)).toBe(true);
         expect(API.discardHeldWrite(lineup.key)).toBe(false);
-        expect(API.heldWrites().map((h) => h.kind).sort()).toEqual(['override', 'score']);
+        expect(API.heldWrites().map((h) => h.kind).sort()).toEqual(['decision', 'score']);
         expect(storedEntries()).toHaveLength(2);
         for (const h of API.heldWrites()) expect(API.discardHeldWrite(h.key)).toBe(true);
         unsub();

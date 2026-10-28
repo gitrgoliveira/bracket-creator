@@ -563,9 +563,8 @@ func TestMerge_EchoedOvertimeOverADefaultWinAppliesAsANoOp(t *testing.T) {
 // winner" for it anyway.
 func TestMerge_OvertimeOverAHandSetWinnerAppliesWithNoReason(t *testing.T) {
 	h := mmIndividual(t, true)
-	applied, err := h.eng.OverrideBracketWinner(h.compID, h.matchID, wrTeamA, mmT1)
+	_, _, err := h.eng.RecordDecisionWithOptions(h.compID, h.matchID, "fusensho", "shiro", "fusensho", nil, ForceOptions{}, mmT1)
 	require.NoError(t, err)
-	require.True(t, applied)
 
 	// A hand-set winner is a result: it closes the match like a finish, so an
 	// overtime change stamped after it is turned away.

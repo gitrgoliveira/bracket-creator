@@ -675,95 +675,12 @@ describe('subscribeSyncStatus: state transitions', () => {
 
 // 5. window.online event flushes the queue
 
-// mp-y3nk Phase 4: a feeder-winner assertion (override-winner) must survive an
-// update outage exactly like a score does. Offline it is queued as a terminal
-// write and replayed on reconnect (the server then propagates it into the
-// dependent final). A real 4xx (e.g. the feeder is not yet playable) still throws
-// so the operator sees the rejection instead of a silent no-op.
-describe('overrideBracketWinner: offline durability (Phase 4)', () => {
-    // bc-evts: the assertion is the outbox's at once, whatever the network.
-    it('answers pending and keeps the assertion queued on network failure', async () => {
-        mockFetch(() => Promise.reject(new TypeError('network error')));
-        const result = await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw');
-        expect(result).toMatchObject({ pending: true });
-        await flushMicrotasks();
-        expect(API.unsentWrites().total).toBe(1);
-    });
-
-    it('replays the queued assertion to the override-winner endpoint on reconnect', async () => {
-        mockFetch(() => Promise.reject(new TypeError('network error')));
-        await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw'); // queued offline
-        await flushMicrotasks();
-
-        // Reconnect: fetch now succeeds; the online event drives the flush.
-        mockFetch(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }));
-        window.dispatchEvent(new Event('online'));
-        await tick(50);
-
-        const replay = global.fetch.mock.calls.find(([u]) => String(u).includes('/matches/m-r2-0/override-winner'));
-        expect(replay).toBeTruthy();
-        expect(replay[1].method).toBe('PUT');
-        expect(JSON.parse(replay[1].body)).toMatchObject({ winnerName: 'Alice' });
-    });
-
-    it('rejects on a non-retryable 4xx (feeder not ready to override) so the operator sees it', async () => {
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        mockFetch(() => Promise.resolve({
-            ok: false, status: 400,
-            json: () => Promise.resolve({ error: 'knockout match not ready to override' }),
-        }));
-        await expect(
-            (await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw')).settled
-        ).rejects.toThrow('not ready to override');
-        warnSpy.mockRestore();
-    });
-
-    // mp-y3nk: the backend replies 200 {"applied": <bool>}. The client must
-    // surface that signal (not discard it and always return true), so the
-    // "Run now" flow can tell a landed assertion from a stale reconnect replay
-    // the server dropped.
-    it('returns { applied: false } when the server drops the assertion (LWW)', async () => {
-        mockFetch(() => Promise.resolve({
-            ok: true, status: 200, json: () => Promise.resolve({ applied: false }),
-        }));
-        const r = await (await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw')).settled;
-        expect(r).toEqual({ applied: false });
-    });
-
-    it('returns { applied: true } when the server applies the assertion', async () => {
-        mockFetch(() => Promise.resolve({
-            ok: true, status: 200, json: () => Promise.resolve({ applied: true }),
-        }));
-        const r = await (await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw')).settled;
-        expect(r).toEqual({ applied: true });
-    });
-
-    it('defaults to { applied: true } for a legacy empty-body 200 (back-compat)', async () => {
-        mockFetch(() => Promise.resolve({
-            ok: true, status: 200, json: () => Promise.reject(new SyntaxError('Unexpected end of JSON input')),
-        }));
-        const r = await (await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw')).settled;
-        expect(r).toEqual({ applied: true });
-    });
-});
-
 // mp-y3nk Phase C: writes carry a server-relative modifiedAt so the backend can
 // reconcile a reconnecting offline court's changes by timestamp (last-write-wins
 // on conflict). The offset defaults to 0 in tests (no /api/time learned), so the
 // stamp is ~local time: the contract under test is only that the field is present
 // and numeric.
-describe('client stamping: score/override writes carry a numeric modifiedAt', () => {
-    it('overrideBracketWinner body includes winnerName and a numeric modifiedAt', async () => {
-        let sentBody = null;
-        mockFetch((url, opts) => {
-            if (String(url).includes('/override-winner')) sentBody = JSON.parse(opts.body);
-            return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
-        });
-        await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw');
-        expect(sentBody).toMatchObject({ winnerName: 'Alice' });
-        expect(typeof sentBody.modifiedAt).toBe('number');
-    });
-
+describe('client stamping: score writes carry a numeric modifiedAt', () => {
     it('recordScore payload includes a numeric modifiedAt', async () => {
         let sentBody = null;
         mockFetch((url, opts) => {
@@ -888,9 +805,9 @@ describe('recordScore: queues running writes on network failure', () => {
 
     it('queues a running 5xx as "syncing" (server up, not "offline" or falsely "synced")', async () => {
         // A 5xx (or 429) for a running write is transient: queue it for retry so
-        // the sync pill reflects the unsynced state rather than flipping back to
-        // "Synced" (the running write's caller swallows throws). And because the network
-        // is UP (the server responded), the pill must be "syncing", never
+        // the sync status reflects the unsynced state rather than flipping back to
+        // "synced" (the running write's caller swallows throws). And because the network
+        // is UP (the server responded), the status must be "syncing", never
         // "offline". Non-retryable 4xx still throw; they won't succeed on retry.
         let status = 'synced';
         const unsub = subscribeSyncStatus((s) => { status = s; });
@@ -1499,71 +1416,6 @@ describe('_flushQueue: court_busy 409 on a queued score write (bc-cse)', () => {
     });
 });
 
-// mp-y3nk: a queued override the server LWW-dropped (applied:false) must trigger
-// a bracketResync notification so stale optimistic local bracket state is replaced.
-// The queue entry is drained regardless (retry cannot change the outcome).
-describe('_flushQueue: LWW-dropped queued override triggers bracketResync (mp-y3nk)', () => {
-    it('subscribeBracketResync listener is called with reason lww_dropped when server drops the queued override', async () => {
-        // PRE-FIX: mod.subscribeBracketResync is undefined → expect below fails RED.
-        // POST-FIX: it is a function and the listener fires when applied:false.
-        const subscribeBracketResync = mod.subscribeBracketResync;
-        expect(typeof subscribeBracketResync).toBe('function'); // RED before fix
-
-        const resyncCalls = [];
-        const unsub = subscribeBracketResync((info) => resyncCalls.push(info));
-
-        // Enqueue an override while offline.
-        mockFetch(() => Promise.reject(new TypeError('network error')));
-        const queued = await API.overrideBracketWinner('c1', 'm-f1-0', 'Alice', 'pw');
-        expect(queued).toMatchObject({ pending: true }); // the outbox's (bc-evts)
-        await flushMicrotasks();
-
-        // Reconnect: server LWW-drops the write (applied: false).
-        mockFetch(() => Promise.resolve({
-            ok: true, status: 200,
-            json: () => Promise.resolve({ applied: false }),
-        }));
-        window.dispatchEvent(new Event('online'));
-        await tick(50);
-        unsub();
-
-        // The resync listener must have been called with reason 'lww_dropped'.
-        expect(resyncCalls.length).toBeGreaterThanOrEqual(1);
-        expect(resyncCalls[0]).toMatchObject({ reason: 'lww_dropped' });
-
-        // Queue must be drained: a second flush sends no additional requests.
-        const callsBefore = writeCallCount();
-        window.dispatchEvent(new Event('online'));
-        await tick(50);
-        expect(writeCallCount()).toBe(callsBefore);
-    });
-
-    it('subscribeBracketResync listener is NOT called when server applies the queued override (applied: true)', async () => {
-        // PRE-FIX: mod.subscribeBracketResync is undefined → TypeError when called
-        // below, failing RED. POST-FIX: passes (listener not called for applied:true).
-        const subscribeBracketResync = mod.subscribeBracketResync;
-        const resyncCalls = [];
-        // Will throw TypeError pre-fix (subscribeBracketResync is undefined):
-        const unsub = subscribeBracketResync((info) => resyncCalls.push(info));
-
-        // Enqueue an offline override.
-        mockFetch(() => Promise.reject(new TypeError('network error')));
-        await API.overrideBracketWinner('c1', 'm-f2-0', 'Bob', 'pw');
-        await flushMicrotasks();
-
-        // Reconnect: server APPLIES the write (applied: true).
-        mockFetch(() => Promise.resolve({
-            ok: true, status: 200,
-            json: () => Promise.resolve({ applied: true }),
-        }));
-        window.dispatchEvent(new Event('online'));
-        await tick(50);
-        unsub();
-
-        // Resync listener must NOT be called (applied:true is success, no stale state).
-        expect(resyncCalls.length).toBe(0);
-    });
-});
 
 // ---------------------------------------------------------------------------
 // bc-qttl: "ONLY A CONFIRMED WRITE EMPTIES THE QUEUE"
@@ -1673,8 +1525,8 @@ describe('bc-qttl: 401 parks the entry pending re-authentication', () => {
         expect(API.unsentWrites()).toMatchObject({ total: 1, terminal: 0, authBlocked: 1 });
         // The flush completed a full pass with the parked entry as the ONLY
         // queue member (nothing else failed that pass), which is exactly the
-        // case the sync-status republish fix targets: without it the pill
-        // would have stayed on "Syncing…" instead of showing 'auth-required'.
+        // case the sync-status republish fix targets: without it the status
+        // would have stayed 'syncing' instead of showing 'auth-required'.
         expect(status).toBe('auth-required');
 
         const callsAfterPark = writeCallCount();
@@ -2075,7 +1927,7 @@ describe('recordScore: a superseded write is announced, not reported as saved (b
 
 // bc-lww1: the same drop, discovered when a QUEUED finished result finally
 // reaches the server after a reconnect. This is the case the bead is about: the
-// entry leaves the queue on success and the sync pill returns to "Synced", so
+// entry leaves the queue on success, so
 // this is the last moment anything can tell the operator their result is gone.
 describe('_flushQueue: a superseded queued score is announced before the entry drains (bc-lww1)', () => {
     it('notifies on applied:false for a terminal score and still drains the queue', async () => {

@@ -36,12 +36,13 @@ import {
   openShiaijo, upNextCard, sides, startUpNext, completedRowFor, inlineEditor, editorIdentity,
 } from '../fixtures/shiaijo.mjs';
 import {
-  EDITOR, INLINE_EDITOR, ipponButton, syncState, filledSlots, finishButton, armedFinishButton, armFinish, finishMatch,
+  EDITOR, INLINE_EDITOR, ipponButton, filledSlots, finishButton, armedFinishButton, armFinish, finishMatch, running, settled, unsentCount,
+  held, notHeld,
 } from '../fixtures/scoring.mjs';
 import {
   doubleTap, hastyShiaijoConfirm, interrupt, loudestButton, retapWhileSaving, tapNeighbour,
 } from '../fixtures/clumsy.mjs';
-import { dwell, rendered, settled, untilStable } from '../fixtures/pace.mjs';
+import { dwell, rendered, settled as paceSettled, untilStable } from '../fixtures/pace.mjs';
 import { EXPECT_TIMEOUT_MS } from '../fixtures/devices.mjs';
 import { tapSize } from '../fixtures/pointer.mjs';
 import { openTvBoard, tvBoard } from '../fixtures/public.mjs';
@@ -79,7 +80,8 @@ const bouts = {}; // pairings met on the way, by name
 const row = (journey, r) => audit.record({ journey, ...r });
 const same = (a, b) => !!a && !!b && a.shiro === b.shiro && a.aka === b.aka;
 const pairOf = (r) => ({ shiro: r.shiro, aka: r.aka });
-const settleOn = (page, root = INLINE_EDITOR) => expect(syncState(page, root)).toHaveText('Synced');
+// Return once this device's outbox is empty (all queued writes landed).
+const settleOn = (page) => settled(page);
 // The eyebrow of the bout an editor holds names its competition first.
 const compOfEyebrow = (eyebrow) => {
   const e = (eyebrow || '').toUpperCase();
@@ -451,7 +453,7 @@ test.describe('shared-shiaijo', () => {
     await C.locator('.score-edit-row.score-edit-row--running').filter({ hasText: bouts.b3.shiro }).getByRole('button', { name: /^Score$/ }).tap();
     await expect(C.locator(EDITOR)).toBeVisible();
     await ipponButton(C, winnerOf(bouts.b3), 'M', EDITOR).tap();
-    await settleOn(C, EDITOR);
+    await settleOn(C);
     const s9Label = (await finishButton(C, EDITOR).innerText()).trim();
     await finishMatch(C, EDITOR);
     let ov;
@@ -500,7 +502,7 @@ test.describe('shared-shiaijo', () => {
     expect(lastLabel).toBe('Finish');
     // Leave it running with a point, for S3.
     await ipponButton(C, winnerOf(bouts.b5), 'M', EDITOR).tap();
-    await settleOn(C, EDITOR);
+    await settleOn(C);
     await C.locator(EDITOR).getByRole('button', { name: /✕ Close/ }).tap();
 
     // S3: back on the console, SI's bout running with a point. The operator
@@ -651,7 +653,7 @@ test.describe('shared-shiaijo', () => {
     await startBtn.waitFor({ state: 'visible' });
     await dwell(H, Date.now());
     await startBtn.tap();
-    await expect(T.syncPill(hed)).toBeVisible({ timeout: EXPECT_TIMEOUT_MS });
+    await running(H, hed);
     const alert = C.locator('.shiaijo-also-running');
     await expect(alert).toBeVisible({ timeout: EXPECT_TIMEOUT_MS });
     r({ step: 'S6d reopen', action: `head table starts ${ST}'s semi-final while the console holds an SI correction`, variant: 'two devices',
@@ -762,13 +764,13 @@ test.describe('shared-shiaijo', () => {
       upNext: (await courtState(C)).upNext, shot: await shot(C, 's5-switched-by-tap') });
   });
 
-  // bc-rnrm (operator ruling 2026-10-11 on PR #442 finding 5: "Run now - This
-  // seems to be the wrong button", read on 2026-10-12 as remove it). Relies on
-  // the state S4b-S5 leaves: SI's final waits on M6, running on B, so it is a
-  // Later row on A, the row that offered Run now; ST's final waits on its
-  // second semi-final the same way. Only switches the picker, and leaves the
-  // console on ST, as S6a expects.
-  test.fixme('bc-rnrm: no court console row offers Run now', async () => {
+  // bc-rnrm: the Run now button on court console rows was removed (operator
+  // ruling 2026-10-11 on PR #442 finding 5). Relies on the state S4b-S5 leaves:
+  // SI's final waits on M6, running on B, so it is a Later row on A, the row
+  // that formerly offered Run now; ST's final waits on its second semi-final
+  // the same way. Only switches the picker, and leaves the console on ST, as
+  // S6a expects.
+  test('bc-rnrm: no court console row offers Run now', async () => {
     if (!/\/admin\/shiaijo\/A$/.test(C.url())) await openShiaijo(C, 'A');
     await pickCompetition(C, SI);
     await expect(C.locator('.shiaijo-pending .shiaijo-qrow').first()).toBeVisible();
@@ -814,31 +816,27 @@ test.describe('shared-shiaijo', () => {
   // beside the Connected pill, and goes once it is sent. Relies on the state
   // S4b-S5 leaves: court B's console runs SI's semi-final M6, Shiro or Aka
   // ahead by a men. It adds a kote for the other side while offline, which S6a
-  // and bc-mvrq do not depend on. Flipping it needs the harness to stop
-  // waiting on the pill in the same change (scoring.mjs syncState and
-  // awardIppon, team.mjs syncPill and boutIppon, this file's settleOn), as the
-  // bead says.
-  test.fixme('bc-sypl: score editors show no sync pill; the header shows what is not sent yet', async () => {
+  // and bc-mvrq do not depend on.
+  test('bc-sypl: score editors show no sync pill; the header shows what is not sent yet', async () => {
     if (!/\/admin\/shiaijo\/B$/.test(Bc.url())) await openShiaijo(Bc, 'B');
     await expect.poll(async () => same(await liveBout(Bc), bouts.m6), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     const ed = inlineEditor(Bc);
     await expect(ed.getByText(SYNC_PILL)).toHaveCount(0);
     const conn = Bc.locator('.topbar').getByRole('status').filter({ hasText: 'Connected' });
-    const held = Bc.getByTestId('topbar-held');
     await expect(conn).toBeVisible();
-    await expect(held).toHaveCount(0);
+    await notHeld(Bc);
     const other = winnerOf(bouts.m6) === 'shiro' ? 'aka' : 'shiro';
     const before = await filledSlots(Bc, other).count();
     await Bc.context().setOffline(true);
     try {
       await ipponButton(Bc, other, 'K').tap();
       await expect(filledSlots(Bc, other)).toHaveCount(before + 1);
-      await expect(held).toBeVisible();
+      await held(Bc);
       await expect(ed.getByText(SYNC_PILL)).toHaveCount(0);
     } finally {
       await Bc.context().setOffline(false);
     }
-    await expect(held).toHaveCount(0, { timeout: 20_000 });
+    await notHeld(Bc);
     await expect(conn).toBeVisible();
     // The overlay editor, on the head table, holds the same match.
     await H.goto(`/admin/competition/${ids.SI}/scores`);
@@ -866,7 +864,7 @@ test.describe('shared-shiaijo', () => {
     await H.getByRole('listbox', { name: 'Choose shiaijo' }).getByRole('option', { name: 'A', exact: true }).tap();
     await rendered(H);
     const confirm = H.getByRole('dialog').filter({ hasText: 'Shiaijo A' });
-    await settled(confirm);
+    await paceSettled(confirm);
     const askedFirst = true;
     await confirm.getByRole('button', { name: /Move/ }).tap();
     await expect(confirm).toBeHidden();
@@ -897,9 +895,9 @@ test.describe('shared-shiaijo', () => {
       await C.waitForTimeout(2500);
       pointTried = { comp: SI, marks: await slotMarks(C, winnerOf(held)) };
     }
-    const sync = await syncState(C).innerText().catch(() => null);
+    const unsent = await unsentCount(C).catch(() => null);
     const toasts = (await C.locator('.toast, .pending-write-banner, .alert--error').allInnerTexts().catch(() => [])).join(' | ').replace(/\s+/g, ' ');
-    r({ step: 'S6a move', action: 'a point on the bout the console shows, ST running with M6 queued on A', variant: 'P5 record', held, pointTried, sync,
+    r({ step: 'S6a move', action: 'a point on the bout the console shows, ST running with M6 queued on A', variant: 'P5 record', held, pointTried, unsent,
       messages: toasts.slice(0, 400), shot: await shot(C, 's6a-point-st-running') });
     // Recovery: send the shown bout back to the queue.
     await C.getByRole('button', { name: 'Send back to queue' }).tap();
@@ -913,7 +911,7 @@ test.describe('shared-shiaijo', () => {
     r({ step: 'S6a move', action: 'Send back to queue (the shown bout)', variant: 'V4 hastyShiaijoConfirm (recovery)', ...sent,
       runningOnA: onAafter, court: await courtState(C), shot: await shot(C, 's6a-after-send-back') });
     expect(onAafter).toHaveLength(0);
-    // Was the point the board showed (with the pill at "Synced") stored? The
+    // Was the point the board showed (with the outbox settled) stored? The
     // match is queued now; an editor shows a queued match's kept score.
     if (pointTried && pointTried.comp === ST) {
       await H.goto(`/admin/competition/${ids.ST}/scores`);
@@ -966,7 +964,7 @@ test.describe('shared-shiaijo', () => {
     await m6Row.locator('button[aria-haspopup="listbox"]').tap();
     await H.getByRole('listbox', { name: 'Choose shiaijo' }).getByRole('option', { name: 'A', exact: true }).tap();
     const confirm = H.getByRole('dialog').filter({ hasText: 'Move to Shiaijo A?' });
-    await settled(confirm);
+    await paceSettled(confirm);
     await expect(confirm.locator('.modal__title')).toHaveText('Move to Shiaijo A?');
     const expectedMsg = `${bouts.m6.shiro} vs ${bouts.m6.aka} is running on Shiaijo B. It stops there and goes first in the queue on Shiaijo A. The score already saved is kept: starting it again carries on from there.`;
     await expect(confirm.locator('.dialog-msg')).toHaveText(expectedMsg);
@@ -981,7 +979,7 @@ test.describe('shared-shiaijo', () => {
     // Repeat and accept.
     await m6Row.locator('button[aria-haspopup="listbox"]').tap();
     await H.getByRole('listbox', { name: 'Choose shiaijo' }).getByRole('option', { name: 'A', exact: true }).tap();
-    await settled(confirm);
+    await paceSettled(confirm);
     await confirm.getByRole('button', { name: /Move/ }).tap();
     await expect(confirm).toBeHidden();
 

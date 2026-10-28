@@ -6,7 +6,7 @@
 // opens it as an overlay; the helpers default to the inline one.
 import { expect } from '@playwright/test';
 import { INLINE_EDITOR } from '../../screenshots/lib/editor.mjs';
-import { beforeFinish, finishLanded } from './scoring.mjs';
+import { beforeFinish, finishLanded, settled } from './scoring.mjs';
 import { armTwoTap } from './pace.mjs';
 import { sides, upNextCard } from './shiaijo.mjs';
 
@@ -22,14 +22,9 @@ export const flagButton = (page, side, change, root = INLINE_EDITOR) => engiEdit
 export const engiTotal = (page, root = INLINE_EDITOR) => engiEditor(page, root).getByTestId('engi-total');
 export const engiSubmit = (page, root = INLINE_EDITOR) => engiEditor(page, root).getByTestId('engi-submit');
 
-// The sync pill of the open engi editor ("Synced", "Syncing…", ...). Each
-// flag + or - is a tap queued in the device's outbox (a flag.add or
-// flag.remove event, bc-evts stage 4); the pill reads that outbox.
-export const engiSync = (page, root = INLINE_EDITOR) => engiEditor(page, root).locator('.sync-pill__label').first();
-
 // Wait until every flag tapped on this device has been answered by the server
 // (the outbox is empty).
-export const engiSettle = (page, root = INLINE_EDITOR) => expect(engiSync(page, root)).toHaveText('Synced');
+export const engiSettle = (page) => settled(page);
 
 // The pair each side of the open editor holds, by the first member's line.
 export async function engiPair(page, root = INLINE_EDITOR) {

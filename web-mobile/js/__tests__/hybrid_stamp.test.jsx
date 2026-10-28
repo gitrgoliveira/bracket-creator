@@ -202,13 +202,6 @@ describe('every stamped write is floored the same way', () => {
         expect(res && res.applied).not.toBe(false);
     });
 
-    it('a hand-set winner', async () => {
-        const seen = Date.now() + 3000;
-        const { sent } = server(seen);
-        await API.overrideBracketWinner('c1', 'r1-m1', 'Team A', 'pw', false, seen);
-        expect(sent[0].body.modifiedAt).toBe(seen + 1);
-    });
-
     it('a representative bout added and removed', async () => {
         const seen = Date.now() + 3000;
         const { sent } = server(0);
@@ -293,10 +286,10 @@ describe('a write resent after a clock_skew refusal keeps its floor', () => {
         expect(sent[1].modifiedAt).toBe(seen + 1);
     });
 
-    it('a hand-set winner', async () => {
+    it('a decision', async () => {
         const seen = Date.now() + 3000;
         const sent = skewOnce();
-        await (await API.overrideBracketWinner('c1', 'r1-m1', 'Team A', 'pw', false, seen)).settled;
+        await (await API.recordDecision('c1', 'r1-m1', { decision: 'fusensho', decisionBy: 'A', seenModifiedAt: seen }, 'pw')).settled;
         expect(sent).toHaveLength(2);
         expect(sent[1].modifiedAt).toBe(seen + 1);
     });

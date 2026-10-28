@@ -81,7 +81,7 @@ A correction made while offline never carries a confirmation with it. If it reac
 
 A knockout final cannot be called until the earlier bouts that feed it are scored. While it is still waiting, it appears under a **Later** heading with a **Waiting** tag. Its competitors read "Winner of …" until the feeding bouts are known.
 
-The 3rd-place match waits there too until both semi-finals are scored. A side still waiting reads "Loser of" and the semi-final's match number (for example, `Loser of M5`); once both semi-finals are scored, it moves to your queue as the 3rd-place match. It has no **Run now**: its competitors are the semi-finals' losers, so use the final's **Run now** (refer to [Run a match before results have synced](#run-a-match-before-results-have-synced)), on the court where the final is scheduled, to record both semi-final winners, which also places their losers here.
+The 3rd-place match waits there too until both semi-finals are scored. A side still waiting reads "Loser of" and the semi-final's match number (for example, `Loser of M5`); once both semi-finals are scored, it moves to your queue as the 3rd-place match. A match waits until the results of the matches feeding it are recorded.
 
 You cannot start a match that has no confirmed competitors. The Later heading lets you see that more play is scheduled for your court, so the queue never appears empty when further matches are still pending.
 
@@ -89,16 +89,9 @@ You cannot start a match that has no confirmed competitors. The Later heading le
 
 If the console looks out of date (for example, a bout that finished on another court has not appeared yet), use **Refresh** in the header to re-pull this court's matches from the server. The console also refreshes automatically when it reconnects after a network drop.
 
-## Run a match before results have synced
-
-At a large event, the bouts feeding a final can run on other courts, and their results may take a moment to reach your console. If you already know who won those earlier bouts, open the waiting match's **Run now** action and record each winner. The match becomes startable immediately without waiting for the official result to arrive.
-
-!!! note
-    Recording a winner through **Run now** is provisional. If the official result arrives later and differs, the later result takes over.
-
 ## Score without a connection
 
-The court console keeps working if it loses its connection to the server. You can finish scoring the bout in progress, and use **Run now** to resolve and start the next match, all while offline. Everything you enter is held on the device and sent when the connection returns.
+The court console keeps working if it loses its connection to the server. You can finish scoring the bout in progress while offline. Everything you enter is held on the device and sent when the connection returns.
 
 While a result is held on the device, the score editor says "Not sent yet: saved on this device, and sent when the connection returns." The console moves on to the next match once you finish a bout, so the bar at the top of every admin page also counts what is held, for example "Offline: 1 result not sent", and the connection status beside it reads "Reconnecting…". When the connection returns and the held results reach the server, the count goes and a short message confirms it, for example "1 finished result sent." You do not need to do anything: keep scoring. A result you finish while the connection is working is sent at once, so neither appears.
 
@@ -108,7 +101,7 @@ Results held on the device are kept however long they wait. Everything you enter
 
 If the server keeps failing a held result (an error on every attempt), it is still tried again, the bar at the top reads "Not saving: 1 result" and an alert says so. Your results for other matches are still sent, but later changes to the same match wait behind it until it goes through or you discard it. Its score editor then says "Not saved yet: the server keeps refusing it. It is still being tried." If it never goes through, open that match: its score editor shows **Discard held result** beside that line. After you confirm, that result alone is discarded and nothing else is. Check the match, and enter the result again if it is still needed.
 
-The count in the bar at the top is also a button. Tap it to see everything held on the device: each item names its competition and match (or team, for a lineup), what it is (a score update, a finished result, a decision, a winner set by hand, or a team lineup) and whether it is waiting to be sent, waiting for you to sign in, or the server keeps refusing it. An item the server keeps refusing has a **Discard** button, which works the same way: after you confirm, that item alone is discarded. Use it for anything held that has no score editor of its own to offer it, such as a lineup or a winner set with **Run now**. An item that is only waiting for the connection cannot be discarded: it is sent when the connection returns.
+The count in the bar at the top is also a button. Tap it to see everything held on the device: each item names its competition and match (or team, for a lineup), what it is (a score update, a finished result, a decision, or a team lineup) and whether it is waiting to be sent, waiting for you to sign in, or the server keeps refusing it. An item the server keeps refusing has a **Discard** button, which works the same way: after you confirm, that item alone is discarded. Use it for anything held that has no score editor of its own to offer it, such as a lineup. An item that is only waiting for the connection cannot be discarded: it is sent when the connection returns.
 
 Nothing you enter is thrown away, and changes are put in the order they were made, not the order they arrive. Each save says what it changed: the points, the result, the overtime, the flags, or one bout of a team match. If two courts changed the same match while one was offline, changes to different things both apply, for example one court's points and the other's overtime. Scoring taps (a point, a foul, a flag, an overtime period, or taking one back) are not compared with each other: each is counted, so the taps of two courts add up, up to the most a side can have: two points in an individual bout, five flags in an engi match. Two courts that both tap the same point count it twice, up to that limit. For the other changes, such as the result or a lineup, where both courts changed the same thing the more recent change applies. The other one is kept in the match's history rather than applied (refer to [Match history](#match-history)).
 

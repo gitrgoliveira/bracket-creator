@@ -200,6 +200,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
   // otherwise reach the dirty snapshot and the save payload as `{}` (the
   // backend tolerates it but it's cleaner not to rely on that).
   const [theme, setTheme] = useStateA(normalizeTheme(tournament.theme));
+  const [logoOnLobby, setLogoOnLobby] = useStateA(!!(tournament.theme && tournament.theme.logoOnLobby));
 
   // mp-sspn: in-flight save state: disables the primary button and swaps its
   // label to "Saving…" so the long form's primary action gives feedback
@@ -251,12 +252,13 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
       awardsNote, infoNotes, pass,
       contacts: contacts.map(c => ({ label: c.label || "", value: c.value || "" })),
       theme: normalizeTheme(theme),
+      logoOnLobby,
     });
     if (initialSnapRef.current === null) { initialSnapRef.current = snap; return; }
     setDirty(snap !== initialSnapRef.current);
   }, [name, venue, date, durationDays, courts, openingBlock, lunchBlock, closingBlock,
     publicURL, venueAddress, venueMapURL, openingTime, closingTime, websiteURL,
-    awardsNote, infoNotes, pass, contacts, theme]);
+    awardsNote, infoNotes, pass, contacts, theme, logoOnLobby]);
 
   // mp-sspn: set a field-scoped error, then focus + scroll its input so the
   // message is visible at its cause. Returns false so callers can `return
@@ -317,7 +319,7 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
         awardsNote: awardsNote.trim() || undefined,
         infoNotes: infoNotes.trim() || undefined,
         contacts: contacts.filter(c => (c.value || "").trim()).map(c => ({ label: (c.label || "").trim(), value: (c.value || "").trim() })),
-        theme: theme || undefined,
+        theme: { ...(theme || {}), logoOnLobby: !!logoOnLobby },
       });
     } catch (e) {
       // Server rejection (orphaned shiaijo, immutable mode, duplicate court
@@ -642,6 +644,14 @@ function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerM
             onThemeChange={setTheme}
           />
         )}
+        <div className="card card--pad-lg">
+          <CheckboxField
+            label="Show the logo on the lobby display"
+            checked={logoOnLobby}
+            onChange={setLogoOnLobby}
+            hint="Upload a logo above for this to show."
+          />
+        </div>
         {/* mp-c38: sponsor management lives on the same edit page so admins
             don't need to navigate elsewhere. SponsorsManager owns its own
             sponsors list (seeded from the tournament prop, updated locally

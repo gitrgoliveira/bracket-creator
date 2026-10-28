@@ -230,21 +230,6 @@ func TestReseatAudit_AMatchUnwoundBeyondTheReopenedOneGetsALine(t *testing.T) {
 	assert.Contains(t, playedLines[0].Changed, state.GroupRepPickA)
 }
 
-func TestReseatAudit_OverrideDoorRecordsTheLine(t *testing.T) {
-	eng, store, compID := rpSetup(t, false)
-
-	applied, err := eng.OverrideBracketWinner(compID, "m-r1-0", wrTeamB, 0)
-	require.NoError(t, err)
-	require.True(t, applied)
-
-	next := rpNext(t, store, compID)
-	lines := auLines(t, store, compID, rpNextID)
-	require.Len(t, lines, 1)
-	assert.Equal(t, doorReseat, lines[0].Door)
-	assert.Equal(t, []string{state.GroupRepPickA}, lines[0].Changed)
-	assert.Equal(t, next.GroupStamp(state.GroupRepPickA), lines[0].Stamp)
-}
-
 // The decision door reaches the bracket through the same primitive as a score,
 // so a withdrawal that turns the winner re-seats the next round the same way.
 func TestReseatAudit_DecisionDoorRecordsTheLine(t *testing.T) {

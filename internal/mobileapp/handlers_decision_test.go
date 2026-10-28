@@ -268,8 +268,8 @@ func TestDecisionHandler_CorruptOverrides_TerminalError(t *testing.T) {
 // TestDecisionHandler_DownstreamKnockoutPlayed_409Shape pins the FIXED wire
 // contract (bc-kcdg finding A): a decision that would change an already-
 // propagated bracket winner while a downstream match carries a result of its
-// own is refused with HTTP 409 and the exact body shape /score and
-// /override-winner already build against: {"error":"downstream_knockout_played",
+// own is refused with HTTP 409 and the exact body shape /score
+// already builds against: {"error":"downstream_knockout_played",
 // "matchId":...,"blockingMatchId":...,"displaced":...,"message":...}.
 //
 // Before this fix, *engine.DownstreamKnockoutPlayedError had no arm in this

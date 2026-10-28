@@ -229,9 +229,10 @@ func handleBrandingLogoDelete(store *state.Store, hub *Hub) gin.HandlerFunc {
 			desired.Theme.LogoPath = ""
 			// Nil-out the Theme pointer when all fields are now empty so
 			// tournament.md doesn't persist a bare "theme: {}" block.
-			// Include WindowTitle in the check so deleting only the logo
-			// doesn't silently clear a configured window title.
-			if desired.Theme.PrimaryColor == "" && desired.Theme.AccentSoftColor == "" && desired.Theme.WindowTitle == "" {
+			// Include WindowTitle and LogoOnLobby in the check so deleting
+			// only the logo doesn't silently clear a configured window title
+			// or lobby-logo setting.
+			if desired.Theme.PrimaryColor == "" && desired.Theme.AccentSoftColor == "" && desired.Theme.WindowTitle == "" && !desired.Theme.LogoOnLobby {
 				desired.Theme = nil
 			}
 			return nil

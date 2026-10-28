@@ -112,18 +112,13 @@ describe('a door answers at once and the outbox holds the write', () => {
             await API.reopenMatch('c1', 'm2', 'pw', { reason: 'x' }),
             await API.requeueBlockerAndReopen('c1', 'm3', 'c1', 'm4', 'pw', {}),
             await API.revertMatchToQueue('c1', 'm5', 'pw'),
-            await API.overrideBracketWinner('c1', 'm6', 'Alice', 'pw'),
             await API.recordDaihyosen('c1', 'm7', 'pw', 0),
             await API.removeDaihyosen('c1', 'm8', 'pw', 0),
             await API.removeKachinukiBout('c1', 'm9', 'pw'),
         ];
         for (const a of answers) expect(a.pending).toBe(true);
-        const keys = stored().map(([k]) => k);
-        // The override now lives on its MATCH's base.
-        expect(keys.some((k) => k.startsWith('c1:m6\u001f'))).toBe(true);
-        expect(keys.some((k) => k.startsWith('override:'))).toBe(false);
         const methods = stored().map(([, d]) => d.method).sort();
-        expect(methods).toEqual(['DELETE', 'DELETE', 'POST', 'POST', 'POST', 'POST', 'POST', 'PUT']);
+        expect(methods).toEqual(['DELETE', 'DELETE', 'POST', 'POST', 'POST', 'POST', 'POST']);
     });
 
     it('revert-to-queue sends a JSON body', async () => {

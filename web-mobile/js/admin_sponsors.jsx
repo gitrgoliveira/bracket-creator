@@ -78,7 +78,7 @@ function SponsorsManager({ tournament, password, showToast, maxSponsors }) {
     <div className="card card--pad-lg">
       <div className="card__title">Sponsors</div>
       <div className="field__hint" style={{ marginBottom: 12 }}>
-        Logos shown on the viewer home and on the lobby/TV display surfaces. Up to {cap} sponsors;
+        Logos shown on the public viewer page only, not on the TV lobby boards or scoring displays. Up to {cap} sponsors;
         PNG or JPEG up to 1 MB each.
       </div>
 

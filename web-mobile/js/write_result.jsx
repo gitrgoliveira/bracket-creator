@@ -254,13 +254,6 @@ export function supersededBanner(res) {
     return { lead: SUPERSEDED_LEAD, reason: SUPERSEDED_REASON, advice: SUPERSEDED_ADVICE };
 }
 
-// OVERRIDE_HELD_NOTICE (bc-mrgc phase 3): the court console's toast when a
-// winner the operator picked for an unresolved feeder (Resolve feeders) was
-// not applied because a newer result for that match was recorded first. Like
-// any superseded write it was kept in the match's history, not lost, and the
-// court refreshes to show what is recorded.
-export const OVERRIDE_HELD_NOTICE = "A winner you picked was not applied: a newer result for that match was recorded first. Your pick was kept in the match's history. Refreshing this court to show the current state.";
-
 // writeHeldGroups / writePartlyHeld (bc-mrgc): which groups of a write the
 // server kept in the match's history instead of applying it, because a newer
 // change to the same group was already recorded. The server lists them in
@@ -545,7 +538,7 @@ export function heldWriteState(held) {
     return 'waiting to be sent';
 }
 
-// The topbar's held-writes list (HeldWritesPanel, admin_shell.jsx): its
+// The topbar's held-writes list (HeldWritesPanel, held_writes_panel.jsx): its
 // title, what it says when nothing is held, its per-row discard, and how it
 // names a lineup (a lineup save is about a team, not a match).
 export const HELD_WRITES_TITLE = 'Held on this device';
@@ -582,7 +575,7 @@ export function queuedWritesNoun(results, total, { finished = true, taps = false
 
 // isFinishedResultWrite: the ONE answer to "is this queued write a finished
 // result" (bc-evts stage 3 review 2, R5): a finished score write, a decision,
-// a winner set by hand, or a representative bout change. Every count and alert
+// or a representative bout change. Every count and alert
 // that speaks of results asks it (api_client.jsx: the pass's sent and
 // displaced counts, `unsentWrites().terminal`, every alert's `terminalCount`).
 // An entry's own `terminal` flag says only how it is SENT (its own method and
@@ -593,7 +586,7 @@ export function queuedWritesNoun(results, total, { finished = true, taps = false
 export function isFinishedResultWrite(d) {
     if (!d) return false;
     switch (d.kind) {
-        case 'decision': case 'override': case 'daihyosen': return true;
+        case 'decision': case 'daihyosen': return true;
         case 'score': case undefined: case null: case '': return !!d.terminal;
         default: return false;
     }
@@ -1015,15 +1008,10 @@ export function downstreamKnockoutReopenedNotice(matches) {
 // attemptScoreWrite (bc-kcdg / bc-cse): the generic confirm+retry loop for the
 // refusal above. Takes recordScore/confirmDialog as INJECTED collaborators
 // (never read off `window`, never imported from a host module) so it works
-// from either script-tagged host that needs it: admin.jsx's editMatchScore
+// from the script-tagged host that needs it: admin.jsx's editMatchScore
 // (the single chokepoint every score-editor host and both editor bodies route
-// a score write through) and admin_shiaijo.jsx's ResolveFeedersModal (the
-// override-winner "Run now" recovery). Those two cannot import each other --
-// both are `<script type="module">` entry points in index.html, and a module
-// that is both script-tagged and ES-imported evaluates twice under two URLs,
-// splitting its module-level singleton state (see this file's header) -- so
-// the shared loop lives here instead, beside the refusal shape it orchestrates,
-// which this file is safe to import from anywhere.
+// a score write through). The shared loop lives here beside the refusal shape
+// it orchestrates, which this file is safe to import from anywhere.
 //
 // On a refusal, prompts via confirmDialog with the message/label
 // downstreamKnockoutPlayedConfirm builds; on confirm, resends the SAME result

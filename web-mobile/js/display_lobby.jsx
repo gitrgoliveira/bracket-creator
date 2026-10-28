@@ -316,7 +316,10 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                 letterSpacing: '0.08em', textTransform: 'uppercase',
                 borderBottom: `1px solid ${LOBBY_COLORS.line}`,
             }}>
-                <div style={{ fontWeight: 700, fontSize: '2.4vh', letterSpacing: '0.1em' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontWeight: 700, fontSize: '2.4vh', letterSpacing: '0.1em' }}>
+                    {Boolean(tournament?.theme?.logoOnLobby && tournament?.theme?.hasLogo) && (
+                        <img src="/api/branding/logo" alt="Tournament logo" className="lobby__logo" />
+                    )}
                     {tournament?.name || ''}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>

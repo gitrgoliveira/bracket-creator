@@ -243,42 +243,6 @@ func TestBulkScore_SkewedEntryIsRefusedPerEntry(t *testing.T) {
 	assert.Equal(t, "Erin", byID["bulk-m3"].Winner)
 }
 
-// override-winner takes the same refusal, before the engine is called. Its
-// normal 200 is already {"applied": <bool>}, so the refusal widens that body
-// with the reason rather than changing its shape.
-func TestOverrideWinner_SkewedStampIsRefused(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "", Courts: []string{"A"}}))
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "ow", Courts: []string{"A"}}))
-	require.NoError(t, store.SaveBracket("ow", &state.Bracket{
-		Rounds: [][]state.BracketMatch{{{ID: "b1", SideA: "P1", SideB: "P2"}}},
-	}))
-
-	reqBody, _ := json.Marshal(map[string]any{
-		"winnerName": "P1",
-		"modifiedAt": time.Now().UnixMilli() + 10_000,
-	})
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("PUT", "/api/competitions/ow/matches/b1/override-winner", bytes.NewBuffer(reqBody))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
-	var body map[string]any
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-	assert.Equal(t, false, body["applied"])
-	assert.Equal(t, "clock_skew", body["reason"])
-	assert.NotEmpty(t, body["serverNowMs"])
-	assert.NotEmpty(t, body["message"])
-
-	stored, err := store.LoadBracket("ow")
-	require.NoError(t, err)
-	require.NotNil(t, stored)
-	assert.Empty(t, stored.Rounds[0][0].Winner, "the override must not have been applied")
-}
-
 // A refused write leaves no revision behind. The older-revision hold reads
 // the score event log (engine.olderRevisionThanLogged, bc-evts stage 2b), and
 // the clock-skew arm runs before the engine, so a refused write logs nothing:

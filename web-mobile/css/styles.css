@@ -326,6 +326,48 @@ a:hover {
   }
 }
 
+/* Public page held-writes indicator, shown at bottom-left when this device holds
+   a write it cannot send. Same calm static dot and danger palette as the topbar
+   indicator. Fixed position sits below modals (1000) and announcement cards (900). */
+.public-held {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 850;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--danger);
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.public-held:hover {
+  background: var(--line-2);
+}
+
+.public-held:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.public-held__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: none;
+}
+
 /* The list it opens: one row per held write, what it is and where it stands,
    with Discard on a write the server keeps refusing. */
 .held-writes {
@@ -2537,138 +2579,6 @@ a:hover {
   gap: 6px;
 }
 
-/* C2: Sync-status pill, appears in the scoring-panel header while a match
-   is running. Five variants: synced (accent/navy), syncing (ink-3), offline
-   (amber, expected/transient), auth-required and server-error (danger/red,
-   both mean a queued write is still unsaved, so they read louder than the
-   amber offline state on purpose). auth-required and server-error SHARE the
-   danger palette deliberately -- both are unsaved work, which is danger and
-   not caution -- so what separates them is that auth-required is a button
-   (underlined, tap-target-sized) and server-error is an inert chip.
-   COPY RULE: the word "live" must never appear in .sync-pill__label text. */
-.sync-status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  border-radius: 999px;
-  padding: 2px 8px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--ink-3);
-  transition: color 0.2s var(--ease-out), border-color 0.2s var(--ease-out), background 0.2s var(--ease-out);
-}
-.sync-status-pill .sync-pill__dot {
-  font-size: 8px;
-  line-height: 1;
-}
-.sync-status-pill .sync-pill__label {
-  line-height: 1.2;
-}
-/* bc-qttl: the auth-required pill is a real <button> (it is the operator's
-   entry point to re-authenticate), reusing this same class so the clickable
-   and non-interactive states look identical. Reset the browser's default
-   button chrome so it still reads as a pill, not a form control. */
-button.sync-status-pill {
-  /* font-FAMILY only, never the `font` shorthand: this rule is more specific
-     than .sync-status-pill, so `font: inherit` would reset that class's own
-     font-size (10px) and font-weight (600) to the parent's and the clickable
-     pill would render visibly larger and lighter than every other state. */
-  font-family: inherit;
-  cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
-  /* The read-only variants are 18px status chips, which is under the DESIGN.md
-     §6 floor (>=36px shared, >=44px coarse). That floor is about things you
-     TAP, so it does not bind a chip that only reports -- but this variant is
-     the operator's way back to saving their results, so it does. It is the
-     only variant that is ever a button, and only one status shows at a time,
-     so nothing renders beside it at 18px to look inconsistent with. */
-  min-height: 36px;
-  padding: 4px 12px;
-}
-/* The label is underlined so the actionable variant reads as actionable
-   WITHOUT hover: .sync-pill--auth and .sync-pill--error carry the same danger
-   palette by design (both mean a write is unsaved), so hue cannot be what
-   separates them. On touch there is no hover at all, so an affordance that
-   only appears on hover would not exist for the operators this is for. */
-button.sync-status-pill .sync-pill__label {
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-@media (pointer: coarse) {
-  button.sync-status-pill {
-    min-height: 44px;
-  }
-}
-/* Hover/active move a token-valued property rather than filter: brightness(),
-   which bypasses the ramp and lands on an un-named colour (DESIGN.md §3). */
-button.sync-pill--auth:hover {
-  background: var(--danger-border);
-}
-button.sync-status-pill:active {
-  transform: translateY(1px);
-}
-button.sync-status-pill:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-/* synced, accent (navy), positive/confirmed state */
-.sync-pill--synced {
-  color: var(--accent);
-  border-color: color-mix(in oklch, var(--accent) 25%, transparent);
-  background: var(--accent-soft);
-}
-/* syncing, neutral ink */
-.sync-pill--syncing {
-  color: var(--ink-2);
-  border-color: var(--line);
-  background: var(--surface);
-}
-/* syncing dot pulses to signal the write is in flight. This is a progress
-   indicator, not a status pulse, so DESIGN.md Principle 3 explicitly exempts
-   it: it says "work is under way", not "look here". */
-.sync-pill--syncing .sync-pill__dot {
-  animation: sync-pill-pulse 1s ease-in-out infinite;
-}
-@keyframes sync-pill-pulse {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.35; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .sync-pill--syncing .sync-pill__dot { animation: none; }
-}
-/* offline, amber warning; no red (red is Aka/error-only per DESIGN.md) */
-.sync-pill--offline {
-  color: var(--warn-ink);
-  border-color: var(--warn-strong);
-  background: var(--warn-soft);
-}
-/* auth-required, danger palette; a queued write was refused for lack of
-   auth and is parked, not lost, until the operator signs in again. Danger
-   rather than amber because the operator's finished results are sitting
-   unsaved: that is a failure with data at risk, which is what --danger is
-   for, and it is bigger than the caution --warn carries. (Amber is the
-   customary colour for "you have something to do next", but that never made it
-   the colour of every state wanting an operator action -- a review round read
-   it as general and was wrong.) */
-.sync-pill--auth {
-  color: var(--danger-ink);
-  border-color: var(--danger-border);
-  background: var(--danger-soft);
-}
-/* server-error, danger palette; the write keeps failing but is still
-   queued and retrying automatically. Same danger palette as auth-required
-   because it is the same fact -- work that has not been saved. No action is
-   required here, which is why this one stays an inert chip while
-   auth-required is a button; that difference, not hue, is the signal. */
-.sync-pill--error {
-  color: var(--danger-ink);
-  border-color: var(--danger-border);
-  background: var(--danger-soft);
-}
 
 .viewer__tabs {
   background: var(--surface);
@@ -7416,6 +7326,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    it renders at the 12px base beside ~3.5vh slots. */
 .msb--tv .msb-ht { font-size: calc(2.4vh * var(--msb-scale, 1)); }
 
+/* The lobby header's tournament logo, shown only when the organiser ticks
+   "Show the logo on the lobby display" and a logo is uploaded. Sized to the
+   header's 2.4vh title, in vh like the rest of the lobby chrome. */
+.lobby__logo { height: 3vh; width: auto; object-fit: contain; display: block; }
+
 /* Lobby board (display_lobby.jsx). The lobby renders IndividualScore with no
    `variant`, so it inherited .msb-row's 13px base -- phone-card size on a
    venue TV read from across a hall. It is NOT .msb--tv: that board shows ONE
@@ -7694,7 +7609,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   margin-bottom: 8px;
   animation: pending-write-in 160ms ease-out;
 }
-/* Leading amber dot, matches the offline sync-pill's glance language so the
+/* Leading amber dot, matches the topbar held-writes dot's glance language so the
    two offline signals read as one family. Static (not pulsing): this is passive
    status ("will retry automatically"), and DESIGN.md Principle 3 reserves
    motion for a warning or a demanded next action, which here is the explicit

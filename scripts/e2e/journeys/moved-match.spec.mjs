@@ -29,7 +29,7 @@ import { journeyShots } from '../fixtures/shots.mjs';
 import { auditLog } from '../fixtures/audit.mjs';
 import { enterTournament, login } from '../fixtures/setup.mjs';
 import { openShiaijo, upNextCard, sides, startUpNext } from '../fixtures/shiaijo.mjs';
-import { EDITOR, awardIppon, finishButton, finishMatch } from '../fixtures/scoring.mjs';
+import { EDITOR, awardIppon, finishButton, finishMatch, running } from '../fixtures/scoring.mjs';
 import { hastyShiaijoConfirm } from '../fixtures/clumsy.mjs';
 import { rendered, settled, untilStable } from '../fixtures/pace.mjs';
 import { EXPECT_TIMEOUT_MS } from '../fixtures/devices.mjs';
@@ -260,7 +260,7 @@ test.describe('moved-match', () => {
       await settled(startFinal);
       await startFinal.tap();
     }
-    await expect(T.syncPill(hed)).toBeVisible();
+    await running(H, hed);
     for (const n of [1, 2, 3]) await T.boutIppon(hed, n, 'shiro', 'M');
     await T.finishTeam(hed);
 

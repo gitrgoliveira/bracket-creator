@@ -71,7 +71,7 @@ import { publishBoardOverlay } from './court_bridge.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
 import { isOlderRunningCopy } from './patch.jsx';
 
-import { SyncStatusPill, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
+import { useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
 import { MatchHistoryDisclosure } from './match_history_view.jsx';
 import { GROUP_ENCHO, GROUP_RESULT, GROUP_REP_PICK_A, GROUP_REP_PICK_B, boutGroup } from './match_groups.jsx';
 import { publishHeight } from './published_height.jsx';
@@ -1445,9 +1445,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
   // instead of a button that silently re-enables having saved nothing.
   const [writeFailed, setWriteFailed] = useStateA(null); // { reason, advice? } | null
   // An explicit tap (Start match, Record bout, Finish/End) whose write was
-  // only queued rather than confirmed; autosaves are left to SyncStatusPill,
-  // which renders nothing once a match is finished, so without this a team
-  // result entered on a flaky connection
+  // only queued rather than confirmed. Without this a team result entered
+  // on a flaky connection
   // sat on screen looking saved with no indication it had not reached the
   // server -- the one moment the operator is most likely to walk away from
   // the court. Mirrors ScoreEditorModal's pendingWrite, minus its Retry
@@ -4670,9 +4669,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit: onSub
             </div>
             <div className="editor-modal__title" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span><TermAS name="shiaijo">Shiaijo</TermAS> {m.court} · {m.scheduledAt || "Now"}</span>
-              {/* C2: sync status indicator: inline on the title line (no dedicated
-                  row); SyncStatusPill renders nothing unless the match is running. */}
-              <SyncStatusPill isRunning={m.status === "running"} />
             </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>

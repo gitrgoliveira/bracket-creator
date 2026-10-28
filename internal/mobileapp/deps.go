@@ -160,7 +160,7 @@ type ScoringEngine interface {
 	// forceDownstreamReopen field maps to kcdgOpts.Force.
 	// kcdgOpts.Reopened, when non-nil, is populated with the ids of every
 	// bracket match the write forced open, mirroring
-	// RecordMatchResultWithIneligibility(Tx) and OverrideBracketWinner.
+	// RecordMatchResultWithIneligibility(Tx).
 	RecordDecisionTxWithOptions(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, kcdgOpts engine.ForceOptions, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error)
 	// MaybeAutoCompletePools transitions the competition's status to
 	// "complete" when every pool match is done, or injects supplementary
@@ -179,13 +179,6 @@ type ScoringEngine interface {
 	// UpdateMatchCourt reassigns a match to a different court. Mirrors
 	// engine.Engine.UpdateMatchCourt.
 	UpdateMatchCourt(compID string, matchID string, newCourt string, mv engine.CourtMove) error
-	// OverrideBracketWinner sets the winner of a bracket match by
-	// participant name (used by the admin "manual winner" flow and the
-	// offline force-start feeder assertion). modifiedAt is the
-	// server-relative timestamp for last-write-wins reconciliation (0 =
-	// unstamped). opts: see RecordMatchResultWithIneligibility above. Mirrors
-	// engine.Engine.OverrideBracketWinner.
-	OverrideBracketWinner(compID string, matchID string, winnerName string, modifiedAt int64, opts ...engine.ForceOptions) (bool, error)
 	// UpdateMatchTime updates a match's scheduledAt. Mirrors
 	// engine.Engine.UpdateMatchTime.
 	UpdateMatchTime(compID string, matchID string, scheduledAt string) error

@@ -11,7 +11,7 @@ package engine
 // blocks, and a matchWriteRestore (K3 rollback) is never refused.
 //
 // Every test here fails if the fix in applyBracketResultIn /
-// guardDownstreamKnockoutCorrection / OverrideBracketWinner is reverted --
+// guardDownstreamKnockoutCorrection is reverted --
 // verified by hand by re-running the suite against the pre-fix code (the
 // guard call removed, force ignored): the refusal/force/bronze/override
 // cases all go red (the correction silently applies and repaints), while
@@ -529,44 +529,9 @@ func TestDownstreamKnockoutCorrection_ForceWithUnchangedWinnerClearsNothing(t *t
 	assert.Equal(t, "Alice", b.Rounds[1][0].Winner)
 }
 
-func TestOverrideBracketWinner_DownstreamGuard(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "kcdg-override"
-	seedThreeRoundBracket(t, store, compID)
-
-	t.Run("refused without force", func(t *testing.T) {
-		var reopened []ReopenedMatch
-		applied, err := eng.OverrideBracketWinner(compID, "m-r1-0", "Bob", 0, ForceOptions{Reopened: &reopened})
-		var dkErr *DownstreamKnockoutPlayedError
-		require.ErrorAs(t, err, &dkErr)
-		assert.False(t, applied)
-		assert.Equal(t, "m-r2-0", dkErr.BlockingMatchID)
-		assert.Empty(t, reopened)
-
-		b, lerr := store.LoadBracket(compID)
-		require.NoError(t, lerr)
-		assert.Equal(t, "Alice", b.Rounds[0][0].Winner, "a refused override must not touch the bracket")
-	})
-
-	t.Run("force applies and reopens the chain", func(t *testing.T) {
-		var reopened []ReopenedMatch
-		applied, err := eng.OverrideBracketWinner(compID, "m-r1-0", "Bob", 0, ForceOptions{Force: true, Reopened: &reopened})
-		require.NoError(t, err)
-		assert.True(t, applied)
-		assert.Equal(t, []string{"m-r2-0"}, reopenedIDs(reopened), "one hop, same as the score-write door")
-
-		b, lerr := store.LoadBracket(compID)
-		require.NoError(t, lerr)
-		assert.Equal(t, "Bob", b.Rounds[0][0].Winner)
-		assert.Equal(t, "Bob", b.Rounds[1][0].SideA)
-		assert.Equal(t, state.MatchStatusScheduled, b.Rounds[1][0].Status)
-		assert.Equal(t, state.MatchStatusCompleted, b.Rounds[2][0].Status, "the round beyond waits its turn")
-	})
-}
-
 // TestDownstreamKnockoutCorrection_OverriddenDownstreamBlocks pins the one
-// result shape that carries NO scoreline at all: a downstream match decided
-// by OverrideBracketWinner (the admin bracket panel's manual winner pick).
+// result shape that carries NO scoreline at all: a downstream match stored
+// with IsOverridden: true (a legacy manual winner pick from earlier releases).
 // That path sets Winner/WinnerID/Status=completed and IsOverridden, and
 // nothing else -- no ippons, no decision, no hansoku, no ResultSource -- so a
 // predicate keyed only on a recorded SCORELINE reads it as an untouched slot
@@ -773,7 +738,7 @@ func TestDownstreamKnockoutCorrection_GuardResolvesWinnerFromStoredSidesWhenOmit
 // RecordDecisionTxWithOptions applies the bc-kcdg downstream-knockout-correction
 // guard by default and, once kcdgOpts.Force authorizes the write, surfaces the
 // reopened match ids to the caller, the same contract
-// RecordMatchResultWithIneligibility(Tx) and OverrideBracketWinner already
+// RecordMatchResultWithIneligibility(Tx) already
 // give theirs.
 func TestRecordDecisionTxWithOptions_BcKcdgForce(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)

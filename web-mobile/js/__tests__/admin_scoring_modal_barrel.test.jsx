@@ -29,7 +29,6 @@ import * as M from '../admin_scoring_modal.jsx';
 
 const EXPECTED_EXPORTS = [
   // Autosave / sync (from admin_scoring_autosave.jsx in post-split world)
-  'SyncStatusPill',
   // Pure helpers re-exported from admin_scoring_shared.jsx
   'MAX_IPPONS_PER_SIDE',
   'isBoutDecided',

@@ -1072,8 +1072,8 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 // the bc-kcdg downstream-knockout-correction guard the underlying bracket
 // write applies, and its Reopened field, when non-nil, is populated with
 // the ids of every bracket match the write forced open -- the same contract
-// RecordMatchResultWithIneligibility(Tx) and OverrideBracketWinner already
-// give their callers, so this decision entry point no longer silently drops
+// RecordMatchResultWithIneligibility(Tx) already
+// gives its callers, so this decision entry point no longer silently drops
 // the list and leaves the caller unable to broadcast match_updated for the
 // reopened matches. A caller with no bc-kcdg answer to give calls
 // RecordDecisionTx, which passes an empty ForceOptions.

@@ -340,8 +340,9 @@ through `armTwoTap` (tap, wait for the armed state, out the dwell): `armFinish`
 (so `finishMatch` and `finishTeam`), `endMatch`, `saveEngiResult`. Per side of
 a bout, through `tapOnSide`, which keeps the time of the last tap on each side:
 `awardIppon` and `ipponOnRow` (the strike `boutIppon` makes on the team sheet
-and `awardBoutIppon` on the kachinuki sheet, which both wait for the board and
-the sync pill, which reads the outbox). In a fighter name list, through `tapNameOption`, which keeps the
+and `awardBoutIppon` on the kachinuki sheet, which both wait for the score on
+screen and the `settled` helper, which polls until the outbox is empty:
+`window.API.unsentWrites().total === 0`). In a fighter name list, through `tapNameOption`, which keeps the
 time of the last option tap: a pick stamps the team sheet's bout list, which
 ignores every click inside it for that window, so `pickFromNameBox` and any
 option tapped by hand go through it. A journey that taps such a thing by hand
@@ -356,8 +357,8 @@ copying it, and fails to load if the dwell is not longer than it.
 A journey waits for what it is about to read, and never for a guessed time.
 In order of preference: a state (`expect(...).toHave...`, `expect.poll`); the
 server's answer to a write (`nextMatchWrite(page)` before the tap that causes
-it, `writeLanded(answered)` after: the sync pill is process-wide, not per
-match, so it cannot say that one match's edit was saved); and, when the
+it, `writeLanded(answered)` after: the outbox count is process-wide (it is the
+whole outbox, not one match), so it cannot say that one match's edit was saved); and, when the
 outcome is the thing under audit and no single state names it, one of two
 settle helpers in `fixtures/pace.mjs`:
 
@@ -375,6 +376,15 @@ settle helpers in `fixtures/pace.mjs`:
   write, wait for its answer (`nextMatchWrite` waits for the match's score PUT,
   which is Start match, Finish and a correction; `nextTapWrite` for a tap's
   batch).
+
+Three fixture helpers in `fixtures/scoring.mjs` replace reading the old sync pill:
+
+- `settled(page)` waits until this device's outbox is empty (polled until
+  `window.API.unsentWrites().total === 0`), meaning all queued writes have landed.
+- `held(page, { count } = {})` waits for the held-writes notice in the admin
+  topbar (`topbar-held`) or the public page chrome (`public-held`) once visible.
+- `running(page, root)` waits until the score editor is visible and holds a
+  running bout (no PRE-MATCH or CORRECTION head pill).
 
 `page.waitForTimeout` stays in four places, each marked `Deliberate:` or
 named for what it is: the dwell of a tap's pace (above); the time away of an

@@ -21,11 +21,11 @@ import { enterTournament, login } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
 import { inlineEditor, openShiaijo, sides, upNextCard, completedRows, completedRowFor } from '../fixtures/shiaijo.mjs';
-import { EDITOR, clearMarks, nextMatchWrite, nextTapWrite, writeLanded } from '../fixtures/scoring.mjs';
+import { EDITOR, clearMarks, nextMatchWrite, nextTapWrite, running, settled, unsentCount, writeLanded } from '../fixtures/scoring.mjs';
 import { openScoreEditor } from '../fixtures/scores.mjs';
 import { openTvBoard, openViewer, tvBoard } from '../fixtures/public.mjs';
 import { doubleTap, hastyConfirm, interrupt, retapWhileSaving, tapNeighbour } from '../fixtures/clumsy.mjs';
-import { dwell, rendered, settled, untilStable } from '../fixtures/pace.mjs';
+import { dwell, rendered, settled as paceSettled, untilStable } from '../fixtures/pace.mjs';
 import { auditLog } from '../fixtures/audit.mjs';
 import { tapSize } from '../fixtures/pointer.mjs';
 import * as T from '../fixtures/team.mjs';
@@ -552,7 +552,7 @@ test.describe('knockout-mixed-team', () => {
       const startBox = await tapSize(start);
       const dbl = await doubleTap(start);
       await expect(T.boutRow(ed, 1)).toBeVisible();
-      await expect(T.syncPill(ed)).toBeVisible();
+      await running(page, ed);
       const identity = (await ed.locator('.editor-modal__eyebrow').first().innerText()).trim();
       // Up next moves on once the list has refetched after the start: wait for
       // it to leave the pairing just started before reading where it settled.
@@ -575,7 +575,7 @@ test.describe('knockout-mixed-team', () => {
       const k = T.rowIppon(row, 'shiro', 'K');
       const ipponBox = await tapSize(k);
       const dbl = await doubleTap(k);
-      await expect(T.syncPill(ed)).toHaveText('Synced');
+      await settled(page);
       const slotsAfter = await T.rowSlots(row, 'shiro').allInnerTexts();
       await shot(page, 'bout1-double-tap-kote');
       expect(slotsAfter).toEqual(['K']);
@@ -583,9 +583,9 @@ test.describe('knockout-mixed-team', () => {
       const hint = (await ed.getByTestId('team-scoring-clear-hint').innerText().catch(() => '')).trim();
       await T.rowSlots(row, 'shiro').first().tap();
       await expect(T.rowSlots(row, 'shiro')).toHaveCount(0);
-      await expect(T.syncPill(ed)).toHaveText('Synced');
+      await settled(page);
       await T.boutIppon(ed, 1, 'shiro', 'M');
-      await expect(T.syncPill(ed)).toHaveText('Synced');
+      await settled(page);
       record({ step: 'bout 1', action: 'Shiro kote', variant: 'V2 doubleTap', ...dbl, slotsAfter, hint, tapsToRecover: 1, ipponTapBox: ipponBox,
         slotTapBox: await tapSize(T.rowSlots(row, 'shiro').first()) });
       expect(await T.rowSlots(row, 'shiro').allInnerTexts()).toEqual(['M']);
@@ -604,7 +604,7 @@ test.describe('knockout-mixed-team', () => {
       if (tieOn) { await T.rowTie(row).tap(); undoTaps += 1; }
       const shiroSlots = await T.rowSlots(row, 'shiro').count();
       for (let i = 0; i < shiroSlots; i += 1) { await T.rowSlots(row, 'shiro').first().tap(); undoTaps += 1; }
-      await expect(T.syncPill(ed)).toHaveText('Synced');
+      await settled(page);
       record({ step: 'bout 2', action: 'Aka men', variant: 'V1 tapNeighbour left', ...nb, tieToggled: tieOn, middleAfter: middle, tapsToRecover: undoTaps });
       await T.boutIppon(ed, 2, 'aka', 'M');
       const totals = await T.teamTotals(ed);
@@ -632,11 +632,11 @@ test.describe('knockout-mixed-team', () => {
       await T.boutIppon(ed, 3, 'shiro', 'K');
       await T.rowFusensho(row, 'aka').tap();
       await expect(T.rowSlots(row, 'aka')).toHaveCount(2);
-      await expect(T.syncPill(ed)).toHaveText('Synced');
+      await settled(page);
       const onAka = await T.rowSlots(row, 'aka').allInnerTexts();
       await shot(page, 'bout3-fusensho-aka');
       await T.rowFusensho(row, 'aka').tap();
-      await expect(T.syncPill(ed)).toHaveText('Synced');
+      await settled(page);
       const restored = await T.rowSlots(row, 'shiro').allInnerTexts();
       record({ step: 'bout 3', action: 'Fusensho Aka, then untoggle', variant: 'correct', fusenshoMarks: onAka, shiroAfterUntoggle: restored,
         fusenshoTapBox: await tapSize(T.rowFusensho(row, 'aka')) });
@@ -649,7 +649,7 @@ test.describe('knockout-mixed-team', () => {
       await T.rowFusensho(row, 'aka').tap();
       await expect(T.rowSlots(row, 'aka')).toHaveCount(2);
       await writeLanded(fusenshoSaved, 'the fusensho save');
-      await expect(T.syncPill(ed)).toHaveText('Synced');
+      await settled(page);
       const r = await interrupt(page, 'reload');
       await expect(T.boutRow(ed, 3)).toBeVisible();
       await expect(T.rowFusensho(T.boutRow(ed, 3), 'aka')).toHaveText('✓ Fusensho');
@@ -663,7 +663,7 @@ test.describe('knockout-mixed-team', () => {
       await shot(page, 'bout3-after-reload-before-untoggle');
       await T.rowFusensho(T.boutRow(ed, 3), 'aka').tap();
       await expect(T.rowSlots(T.boutRow(ed, 3), 'aka')).toHaveCount(0);
-      await expect(T.syncPill(ed)).toHaveText('Synced');
+      await settled(page);
       const afterUntoggle = { shiro: await T.rowSlots(T.boutRow(ed, 3), 'shiro').allInnerTexts(), aka: await T.rowSlots(T.boutRow(ed, 3), 'aka').allInnerTexts() };
       await shot(page, 'bout3-untoggle-after-reload');
       record({ step: 'bout 3', action: 'Fusensho Aka, reload, untoggle', variant: 'V3 interrupt reload', ...r, afterReload, afterUntoggle, sheet: await T.sheetState(ed),
@@ -682,26 +682,26 @@ test.describe('knockout-mixed-team', () => {
       await shot(page, 'bout4-before-it-is-fought');
       record({ step: 'bout 4', action: 'look at a bout not yet fought', variant: 'V5 which bout is live', untouched4, sheet: await T.sheetState(ed),
         note: 'bc-unfx when an unfought bout reads X / ✓ Tie' });
-      let offlinePill;
+      let unsentOffline;
       const off = await interrupt(page, 'offline', {
         during: async (p) => {
           await T.rowIppon(T.boutRow(inlineEditor(p), 4), 'aka', 'D').tap();
-          // The pill must stop claiming "Synced" while the point cannot be saved.
-          await expect(T.syncPill(inlineEditor(p))).not.toHaveText('Synced');
-          offlinePill = (await T.syncPill(inlineEditor(p)).innerText()).trim();
+          // The outbox still holds the point while it cannot be saved.
+          await expect.poll(() => unsentCount(p)).toBeGreaterThan(0);
+          unsentOffline = await unsentCount(p);
           await shot(p, 'bout4-offline');
         },
       });
-      const resynced = await expect(T.syncPill(ed)).toHaveText('Synced').then(() => true, () => false);
-      record({ step: 'bout 4', action: 'Aka do while offline', variant: 'V3 interrupt offline', ...off, pillWhileOffline: offlinePill, resynced, sheet: await T.sheetState(ed) });
+      const resynced = await settled(page).then(() => true, () => false);
+      record({ step: 'bout 4', action: 'Aka do while offline', variant: 'V3 interrupt offline', ...off, unsent: unsentOffline, resynced, sheet: await T.sheetState(ed) });
       // A second strike, then the page reloads at once (inside the autosave's
       // debounce): what survives?
       await T.rowIppon(T.boutRow(ed, 4), 'aka', 'K').tap();
-      const pillAtReload = (await T.syncPill(ed).innerText()).trim();
+      const unsentAtReload = await unsentCount(page);
       const quick = await interrupt(page, 'reload');
       await expect(T.boutRow(ed, 4)).toBeVisible();
-      await expect(T.syncPill(ed)).toHaveText('Synced');
-      record({ step: 'bout 4', action: 'Aka kote, reload within 300ms', variant: 'V3 interrupt reload (instant)', ...quick, pillAtReload,
+      await settled(page);
+      record({ step: 'bout 4', action: 'Aka kote, reload within 300ms', variant: 'V3 interrupt reload (instant)', ...quick, unsentAtReload,
         akaAfter: await T.rowSlots(T.boutRow(ed, 4), 'aka').allInnerTexts(), expected: ['D', 'K'], note: 'bc-sync when K is gone' });
       const hidden = await interrupt(page, 'hidden');
       record({ step: 'bout 4', action: 'tab hidden and back', variant: 'V3 interrupt hidden', ...hidden,
@@ -732,9 +732,9 @@ test.describe('knockout-mixed-team', () => {
     await test.step('bout 5 tied: the encounter is level, Finish is held back', async () => {
       const row5 = T.boutRow(ed, 5);
       await row5.scrollIntoViewIfNeeded();
-      await expect(T.syncPill(ed)).toHaveText('Synced');
+      await settled(page);
       await T.ensureTie(ed, 5);
-      await expect(T.syncPill(ed)).toHaveText('Synced');
+      await settled(page);
       await shot(page, 'bout5-scoring-view');
       const totals = await T.teamTotals(ed);
       const finish = T.finishBtn(ed);
@@ -914,7 +914,7 @@ test.describe('knockout-mixed-team', () => {
       // The operator sends the final back (no score entered yet), then corrects.
       await page.getByRole('button', { name: 'Send back to queue' }).tap();
       const revert = page.locator('.shiaijo-move-confirm[role="dialog"]');
-      await settled(revert);
+      await paceSettled(revert);
       await revert.getByRole('button', { name: 'Send back to queue' }).tap();
       await expect(revert).toHaveCount(0);
       await expect(upNextCard(page)).toBeVisible();
@@ -1209,7 +1209,7 @@ test.describe('knockout-mixed-team', () => {
     const ed = await T.startUpNextTeam(page);
     await T.boutIppon(ed, 1, 'shiro', 'K');
     // The kote is saved before the fusensho.
-    await expect(T.syncPill(ed)).toHaveText('Synced');
+    await settled(page);
     // Shiro's fighter cannot continue; the bout goes to Aka as a fusensho.
     const fusenshoSaved = nextTapWrite(page);
     await T.rowFusensho(T.boutRow(ed, 1), 'aka').tap();
@@ -1247,12 +1247,12 @@ test.describe('knockout-mixed-team', () => {
     const finish = T.finishBtn(ed);
     const refusal = ed.getByTestId('team-finish-unfinished-bouts');
     const unfinished = 'Bout 3 has no result. Record a score, a Tie, or a Fusensho before finishing.';
-    await settled(finish);
+    await paceSettled(finish);
     await finish.tap();
     await expect(refusal).toHaveText(unfinished);
     await expect(finish).toHaveText(/^Finish( \+ Start Next →)?$/);
     // A second tap, past the bounce window of the first, is refused the same way.
-    await settled(finish);
+    await paceSettled(finish);
     await finish.tap();
     await expect(refusal).toHaveText(unfinished);
     await expect(finish).toHaveText(/^Finish( \+ Start Next →)?$/);
@@ -1284,7 +1284,7 @@ test.describe('knockout-mixed-team', () => {
     await openShiaijo(page, 'L');
     const ed = await T.startUpNextTeam(page);
     for (const n of [1, 2, 3, 4, 5]) await T.ensureTie(ed, n);
-    // ensureTie saw the last Tie's write land (the pill back at Synced); the
+    // ensureTie saw the last Tie's write land (settled); the
     // operator goes straight on.
     const daihyosenAdded = nextMatchWrite(page, { method: 'POST', tail: 'daihyosen' });
     await ed.getByTestId('scoring-modal-daihyosen-button').tap();

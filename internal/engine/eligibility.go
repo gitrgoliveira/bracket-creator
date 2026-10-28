@@ -525,7 +525,7 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 // once for the whole sequence, then delegates to RecordDecisionTxWithOptions
 // so `kcdgOpts` (bc-kcdg) carries the operator confirmation described
 // there, with kcdgOpts.Reopened populated
-// for the caller exactly as OverrideBracketWinner's does.
+// for the caller exactly as other forced doors do.
 //
 // NEVER call this from inside a transaction, for the same non-reentrant-lock
 // reason documented on RecordDecision; call RecordDecisionTxWithOptions

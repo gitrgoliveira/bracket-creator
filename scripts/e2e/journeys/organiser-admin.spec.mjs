@@ -212,10 +212,11 @@ test.describe('organiser admin (file mode)', () => {
         await expect(phone.getByRole('complementary', { name: 'Sponsors' })).toHaveCount(0);
         await shot(phone, 'tv-board-no-sponsor');
 
-        // The docs also list the lobby display for the logo. Recorded, and held
-        // by the fixme below.
+        // The docs also list the lobby display for the logo. Showing the logo
+        // there is optional and pinned by the bc-lblg test below.
         await phone.goto('/display?court=all');
         await expect(phone.getByTestId('lobby-root')).toBeVisible();
+        await expect(phone.locator('img[alt="Tournament logo"]')).toHaveCount(0);
         record({ journey: 'organiser-admin', step: 'logo on the lobby display', logoImages: await phone.locator('img[alt="Tournament logo"]').count() });
         await shot(phone, 'lobby-display');
       } finally {
@@ -224,23 +225,22 @@ test.describe('organiser admin (file mode)', () => {
     });
   });
 
-  test.fixme('bc-lblg: the lobby display shows the tournament logo only when the organiser turns that setting on', async ({ page, browser, baseURL }) => {
-    // bc-lblg (operator decision 2026-10-13): the logo on the lobby display is an
-    // OPTIONAL organiser setting. run-tournament.md (Branding and sponsors) says
-    // the logo is "shown on the viewer, the lobby displays, and the admin
-    // screens"; today /display?court=all (display_lobby.jsx) draws no logo at
-    // all. The setting does not exist yet, so the step is written against the
-    // most likely control: a checkbox on Edit tournament details whose label
-    // contains "logo on the lobby display", saved by Save changes. Change the
-    // label here to the real one when bc-lblg lands. Runs after the upload test,
-    // so a logo is uploaded.
+  test('bc-lblg: the lobby display shows the tournament logo only when the organiser turns that setting on', async ({ page, browser, baseURL }) => {
+    // bc-lblg: the tournament logo on the lobby display is an optional setting.
+    // The lobby shows the uploaded logo only when the setting is enabled. Runs
+    // after the upload test, so a logo is already uploaded.
     const setLogoOnLobby = async (show) => {
-      await login(page, 'e2e-operator');
+      if (await page.getByRole('button', { name: 'Sign out' }).count() === 0) {
+        await login(page, 'e2e-operator');
+      }
       await openEditTournament(page);
       const toggle = page.getByLabel(/logo on the lobby display/i);
       if (show) await toggle.check(); else await toggle.uncheck();
-      await page.getByRole('button', { name: 'Save changes' }).tap();
-      await expect(toggle).toBeChecked({ checked: show });
+      const save = page.getByRole('button', { name: 'Save changes' });
+      await save.tap();
+      await expect(save).toBeHidden();
+      await openEditTournament(page);
+      await expect(page.getByLabel(/logo on the lobby display/i)).toBeChecked({ checked: show });
     };
     const spectator = await browser.newContext({ ...PUBLIC_DEVICE, baseURL });
     try {

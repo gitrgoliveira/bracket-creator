@@ -28,7 +28,7 @@ import {
   confirmDiscardUnsaved, LEAVE_MATCH_ANYWAY,
 } from './admin_scoring_shared.jsx';
 import { engiDraftTaps } from './draft_taps.jsx';
-import { SyncStatusPill, useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
+import { useChangedGroups, useKeptInHistoryNote, KeptInHistoryNote } from './admin_scoring_autosave.jsx';
 // bc-evts stage 4: a running match is scored by flag events (the outbox's
 // recordTap); MAX_FLAGS is the fold's cap, domain.MaxEngiFlags in Go.
 import { makeEvent, FLAG_ADD, FLAG_REMOVE, MAX_FLAGS } from './score_events.jsx';
@@ -536,7 +536,6 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit: onSubmitProp, o
           {isComplete && (
             <div className="editor-head-pill" style={{ fontSize: 10, fontWeight: 700 }}>CORRECTION</div>
           )}
-          <SyncStatusPill isRunning={m.status === "running"} />
           {canClose && <button className="btn btn--ghost btn--sm" onClick={handleDismiss} disabled={submitting} style={{ padding: "2px 8px" }} aria-label="Close" data-testid="engi-close-btn">✕ Close</button>}
         </div>
       </div>

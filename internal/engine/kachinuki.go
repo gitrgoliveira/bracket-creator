@@ -2022,7 +2022,7 @@ var (
 // the bout in progress when the operator ended it, and the provenance stamps
 // for a result that no longer exists (IsOverridden, ResultSource). Leaving
 // those behind produced a match that was running yet still advertised a
-// winner, a scoreline, and a manual-override badge inherited from the result
+// winner, a scoreline, and an overridden badge inherited from the result
 // the reopen threw away.
 //
 // This clears the verdict fields RevertMatchToQueue clears (engine/scoring.go)

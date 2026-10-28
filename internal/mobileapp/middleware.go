@@ -238,8 +238,7 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 		http.MethodDelete + " /api/competitions/:id/overrides",                             // bc-cmpw: resetting manual ranking overrides, organiser correction
 		http.MethodPut + " /api/competitions/:id/awards",                                   // bc-cmpw: fighting-spirit awards, organiser
 		http.MethodPost + " /api/tournament/import",                                        // bc-cmpw: importing a tournament replaces its data, organiser, destructive
-		http.MethodPut + " /api/competitions/:id/matches/:mid/override-winner",             // Fix 3330080949: result correction, organiser, not participant play
-		http.MethodPost + " /api/competitions/:id/matches/:mid/reopen",                     // mp-gmcg: reopen a finalized kachinuki result, organiser correction, same class as override-winner
+		http.MethodPost + " /api/competitions/:id/matches/:mid/reopen",                     // mp-gmcg: reopen a finalized kachinuki result, an organiser correction
 		http.MethodPost + " /api/competitions/:id/matches/:mid/requeue-blocker-and-reopen", // mp-gmcg A4: destructive (requeues a blocker) organiser correction; same class as reopen
 		http.MethodPut + " /api/competitions/:id/pools/:poolId/override-rank",              // Fix 3330080949: standings correction, organiser, not participant play
 		http.MethodPost + " /api/competitions/:id/competitor-status",                       // Fix 3331033814: eligibility mutation, organiser decision, not operational play
@@ -272,7 +271,7 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 		http.MethodGet + " /api/competitions/:id/team-members",                         // the public page reads team members from the viewer payload
 		http.MethodDelete + " /api/competitions/:id/teams/:tid/members/:memberId",      // bc-pnum: clearing a member's name, Lineups page only
 		http.MethodPost + " /api/competitions/:id/matches/:mid/decision",               // mp-ba3: kiken/fusenpai/fusensho/daihyosen rulings are the organiser's; a participant adds the representative bout via POST .../daihyosen and scores it on /score (bc-dhas)
-		http.MethodDelete + " /api/competitions/:id/matches/:mid/kachinuki-bout",       // mp-gmcg: removing a bout is an organiser correction, same class as reopen/override-winner; the participant score path gates itself via enforceSelfRunPolicy, this route does not
+		http.MethodDelete + " /api/competitions/:id/matches/:mid/kachinuki-bout",       // mp-gmcg: removing a bout is an organiser correction, same class as reopen; the participant score path gates itself via enforceSelfRunPolicy, this route does not
 		http.MethodPost + " /api/sponsors",                                             // mp-c38: sponsor logo upload, organiser setup, not operational play
 		http.MethodDelete + " /api/sponsors/:index",                                    // mp-c38: sponsor deletion, organiser setup, not operational play
 		http.MethodPost + " /api/branding/logo",                                        // mp-scf: tournament logo upload, organiser setup, not operational play

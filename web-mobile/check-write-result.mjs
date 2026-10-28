@@ -70,8 +70,8 @@ const OWNER = 'write_result.jsx';
 // SCOPE, deliberately narrow. An earlier draft of this check policed `.queued`
 // too and flagged ten sites, every one of them legitimate: lineup writes (a
 // different endpoint with a different response shape), the pending-write
-// banners (which are about queued specifically, since pending is not failed),
-// and the override path. A check that cries wolf gets switched off, which is
+// banners (which are about queued specifically, since pending is not failed).
+// A check that cries wolf gets switched off, which is
 // strictly worse than no check.
 //
 // What IS worth enforcing is the shape that caused the incident: `applied`,
@@ -92,12 +92,12 @@ export const FORBIDDEN = [
     // once mirrored on `window` for script-tagged surfaces; every consumer now
     // ES-imports the leaf instead, and the mirrors are gone. Reading one off
     // `window` therefore yields undefined -- which is not merely broken but
-    // SILENTLY broken at the two admin_shiaijo call sites that sit inside
-    // `catch (_e) {}`, where the TypeError is swallowed and the surface
-    // degrades to exactly the "looks saved but was refused" behaviour this
-    // whole rule exists to prevent. A copy constant read off `window` is worse
-    // still: it renders as the literal text "undefined" in an operator banner.
-    // Import from write_result.jsx; do not re-add a mirror.
+    // SILENTLY broken if sitting inside a `catch (_e) {}`, where the
+    // TypeError is swallowed and the surface degrades to exactly the "looks
+    // saved but was refused" behaviour this whole rule exists to prevent.
+    // A copy constant read off `window` is worse still: it renders as the
+    // literal text "undefined" in an operator banner. Import from
+    // write_result.jsx; do not re-add a mirror.
     re: /window\.(writeDidNotLand|writeWasSuperseded|writeWasRefused|writeWasRefusedForClock|writeRetryable|notLandedBanner|SUPERSEDED_LEAD|SUPERSEDED_REASON|SUPERSEDED_ADVICE|supersededAlertText|writeHeldGroups|writePartlyHeld|CLOCK_SKEW_REASON_TEXT|CLOCK_SKEW_ADVICE|QUEUED_NOTICE|QUEUED_UNSAVED_NOTICE|queuedNotice|queuedWritesNoun|heldWritesText|writeMatchClosed|writeDisplacedGroups|writeDisplacedForClosedMatch|writeResultLocked|writePending|tapOutcomeQuiet|tapNotAppliedText|tapNotAppliedAlertText|supersededBanner|displacedAlertText)\b/,
     why: 'reads an owned predicate/copy off window; those mirrors are deleted, import from write_result.jsx instead',
   },

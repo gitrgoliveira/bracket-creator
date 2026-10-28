@@ -285,10 +285,8 @@ describe('team score editor: a failed write disarms the finish confirmation', ()
   });
 });
 
-// The team editor renders SyncStatusPill, but that pill deliberately shows
-// nothing once a match is finished - so a COMPLETED team result that could only
-// be queued (flaky connection) sat on screen looking saved, with nothing saying
-// it had not reached the server. That is the moment an operator is most likely
+// A COMPLETED team result that could only be queued (flaky connection) sat on
+// screen looking saved, with nothing saying it had not reached the server. That is the moment an operator is most likely
 // to walk away from the court believing the result is in.
 describe('team score editor: a queued completed write says so', () => {
   it('shows the not-sent-yet banner when the write was only queued', async () => {

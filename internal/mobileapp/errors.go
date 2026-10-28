@@ -330,8 +330,8 @@ func respondUnexportableCompetitionError(c *gin.Context, err error) bool {
 // to its own remaining arms exactly like the other respondIf* helpers in this
 // file.
 //
-// Correcting a completed bracket match (via /score, /override-winner,
-// /decision, or /quick-score) can change a winner already propagated into a
+// Correcting a completed bracket match (via /score, /decision, or
+// /quick-score) can change a winner already propagated into a
 // downstream match that has since recorded its own result; the engine
 // refuses by default and the operator retries with forceDownstreamReopen
 // once they've confirmed the override. Correcting a POOL match in a mixed
@@ -340,10 +340,9 @@ func respondUnexportableCompetitionError(c *gin.Context, err error) bool {
 // qualifierChange then names each place that moves (from, to), so the
 // operator is told who moves, not only which match reopens; it is an empty
 // list for a knockout correction (see ForceOptions.Force on the
-// matching request field of whichever endpoint they're using). Before this
-// existed, only /score and /override-winner had this mapping hand-copied
-// into their own error switches (identically, since both need the exact
-// same four fields); /decision and /quick-score fell through to a generic
+// matching request field of whichever endpoint they're using). Historically,
+// only /score had this mapping hand-copied
+// into its error switch; /decision and /quick-score fell through to a generic
 // 500, which the SPA's offline write queue retries forever (mp-q8c6
 // poisoned-queue pattern) for a write that can never win.
 func respondIfDownstreamKnockoutPlayed(c *gin.Context, err error) bool {

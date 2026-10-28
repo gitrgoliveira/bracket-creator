@@ -661,7 +661,7 @@ func answerAutoComplete(c *gin.Context, hub Broadcaster, compID string, outcome 
 const bulkScorePushEachMax = 50
 
 // RegisterMatchHandlers wires up the score / quick-score / bulk-score /
-// court / override-winner / time endpoints under the admin group.
+// court / time endpoints under the admin group.
 //
 // The score endpoint is the Slice 0 / NFR-002 demonstration of the
 // interface-based dependency injection pattern (T017): it consumes
@@ -1023,8 +1023,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			}
 			// bc-kcdg: each reopened match is distinct from the entry just
 			// corrected; broadcast it too so a client watching only that
-			// court/match learns its verdict was cleared (mirrors /score and
-			// /override-winner).
+			// court/match learns its verdict was cleared (mirrors /score).
 			broadcastReopenedDownstream(hub, store, id, reopenedThisItem)
 		}
 
@@ -1297,7 +1296,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		broadcastMatchNow(hub, store, id, mid, gin.H{"competitionId": id, "matchId": mid})
 		// bc-kcdg: each reopened match is distinct from the one just corrected;
 		// broadcast it too so a client watching only that court/match learns
-		// its verdict was cleared (mirrors /score and /override-winner).
+		// its verdict was cleared (mirrors /score).
 		broadcastReopenedDownstream(hub, store, id, reopenedDownstream)
 		if engStatus != nil {
 			hub.Broadcast(EventCompetitorStatusUpdated, gin.H{
@@ -1537,8 +1536,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// (anonymous participants are blocked from overwriting finalized
 		// results on the score path via holdSelfReportedWriteUnderTx; an ungated
 		// reopen would be a trivial bypass). The gate lives in the CENTRAL
-		// allowlist, isSelfRunMainGatedConfigRoute (middleware.go), same as
-		// its sibling override-winner — NOT hand-rolled here, so it shares
+		// allowlist, isSelfRunMainGatedConfigRoute (middleware.go) - NOT hand-rolled here, so it shares
 		// AuthMiddleware's verification mechanics including the F4
 		// empty-stored-password fail-closed branch. Pinned by
 		// TestSelfRun_ReopenRequiresMainPassword.
@@ -1622,7 +1620,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	// sibling match can hold this one's court) or in a different one — the body
 	// carries whichever competition owns it. It reopens a recorded result (the
 	// blocker keeps its score), so it is main-password-gated in self-run mode via the
-	// central allowlist, the same class as reopen/override-winner.
+	// central allowlist, the same class as reopen.
 	// Body: {blockerCompId, blockerMatchId, reason?, forceDownstreamReopen?} —
 	// reason and forceDownstreamReopen optional, exactly like reopen (an
 	// absent reason leaves the target ReopenPending). The target may be any
@@ -1764,7 +1762,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 	//
 	// Not court-gated (a running match stays running). It IS self-run
 	// main-gated (isSelfRunMainGatedConfigRoute, middleware.go): removing a
-	// bout is an organiser correction, the same class as reopen/override-winner,
+	// bout is an organiser correction, the same class as reopen,
 	// NOT the participant score path — which self-gates via enforceSelfRunPolicy
 	// (this handler has no such in-handler check), so without the allowlist
 	// entry a self-run pass-through would let an anonymous spectator delete a
@@ -1818,127 +1816,6 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// audit free-text (correctionReason/decisionReason) or another client's
 		// revSession (mp-gmcg review F2).
 		c.JSON(http.StatusOK, gin.H{"result": matchPtrForBroadcast(updated)})
-	})
-
-	r.PUT("/competitions/:id/matches/:mid/override-winner", func(c *gin.Context) {
-		id, ok := requireValidCompID(c)
-		if !ok {
-			return
-		}
-		mid := c.Param("mid")
-		var req struct {
-			WinnerName string `json:"winnerName"`
-			// ModifiedAt is the client's server-relative timestamp for
-			// last-write-wins reconciliation (mp-y3nk); 0 when unstamped.
-			ModifiedAt int64 `json:"modifiedAt"`
-			// ForceDownstreamReopen bypasses bc-kcdg's downstream-knockout-
-			// correction guard, same field name and contract as the score-write
-			// endpoint's (see scoreRequestBody.ForceDownstreamReopen).
-			ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
-			// The optional writeId and basis (bc-evts F1).
-			writeTag
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		if err := req.validateTag(); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		// Trim whitespace from the winner name. Downstream comparisons
-		// (m.Winner == m.SideA / m.SideB in engine/scoring.go and
-		// engine/ranking.go) are exact-string equality, so a padded
-		// "  Foo  " won't match the canonical "Foo" from the roster,
-		// bracket math silently breaks. The JS prompt site at
-		// admin_competition.jsx now trims client-side, but a
-		// hand-crafted API call could still hit this. Mirrors the
-		// override-rank handler's TrimSpace pattern.
-		winnerName := strings.TrimSpace(req.WinnerName)
-		if winnerName == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "winnerName is required"})
-			return
-		}
-		if err := validateMaxLen("winnerName", winnerName, MaxLenMatchSide); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		// Engi competitions decide bouts by referee flag counts. A manual
-		// winner override sets Winner without FlagsA/FlagsB, leaving a
-		// completed engi match with a 0-0 flag total that violates the
-		// {1,3,5} invariant. Reject it (mirrors the quick-score / decision
-		// guards) so flag scoring stays the only engi result path. Fail
-		// CLOSED on a load error, like those siblings: a transient fault must
-		// not let an engi override slip through into inconsistent state.
-		comp, loadErr := store.LoadCompetition(id)
-		if loadErr != nil {
-			internalError(c, loadErr)
-			return
-		}
-		if comp != nil && comp.Engi {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "override-winner is not supported for engi competitions; use flag scoring instead"})
-			return
-		}
-
-		// A stamp implausibly far in the future is refused before the engine is
-		// called at all (see modifiedAtRefuseSkewMs): honouring it would freeze
-		// the match and zeroing it would apply the override unconditionally over
-		// a newer stored result.
-		if serverNowMs, aheadMs, refuse := clientClockSkew(req.ModifiedAt); refuse {
-			respondClockSkew(c, serverNowMs, aheadMs)
-			return
-		}
-
-		// bc-kcdg: reopenedDownstream collects the IDs of any downstream
-		// bracket match reopened by a forced override, populated only when
-		// req.ForceDownstreamReopen actually unblocked one.
-		var reopenedDownstream []engine.ReopenedMatch
-		applied, err := eng.OverrideBracketWinner(id, mid, winnerName, clampClientModifiedAt(req.ModifiedAt), req.tagInto(engine.ForceOptions{
-			Force:    req.ForceDownstreamReopen,
-			Reopened: &reopenedDownstream,
-		}))
-		if err != nil {
-			// Map engine client-errors to their proper status so the offline
-			// terminal-write replay never treats a permanent 4xx (unknown match,
-			// or a feeder not yet finished) as a retryable failure and wedge sync
-			// (mp-y3nk). Mirrors the RevertMatchToQueue mapping above.
-			var notFoundErr *engine.NotFoundError
-			var validationErr *engine.ValidationError
-			switch {
-			case respondIfDownstreamKnockoutRunning(c, err):
-				// bc-rfsw: the override would change a side of a later match
-				// being fought now; terminal, not confirmable, and checked
-				// first like every other door.
-			case respondIfDownstreamKnockoutPlayed(c, err):
-				// Same fixed wire contract as the score-write endpoint's 409;
-				// respondIfDownstreamKnockoutPlayed already wrote the response.
-			case errors.As(err, &notFoundErr):
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			case errors.As(err, &validationErr):
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			default:
-				internalError(c, err)
-			}
-			return
-		}
-
-		if applied {
-			hub.Broadcast(EventTournamentUpdated, nil)
-			broadcastMatchNow(hub, store, id, mid, gin.H{"competitionId": id, "matchId": mid})
-			// bc-kcdg: each reopened match is distinct from the one the
-			// operator just overrode; broadcast it too so a client watching
-			// only that court/match learns its verdict was cleared.
-			broadcastReopenedDownstream(hub, store, id, reopenedDownstream)
-			c.JSON(http.StatusOK, gin.H{"applied": true})
-			return
-		}
-		// A newer result for this match is stored: the override is not
-		// applied and is kept in the match's history with the winner it
-		// named (the engine's recordOverrideHistory). Answered exactly like
-		// any other write whose every change was held (bc-mrgc phase 3): the
-		// result group it held, and the superseded reason the client keys on.
-		respondSuperseded(c, []string{state.GroupResult}, "")
 	})
 
 	r.PUT("/competitions/:id/matches/:mid/time", func(c *gin.Context) {

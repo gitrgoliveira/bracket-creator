@@ -55,7 +55,7 @@ import { createTournament, login } from '../fixtures/setup.mjs';
 import { createCompetition } from '../fixtures/wizard.mjs';
 import { generateDraw, pasteRoster, startCompetition } from '../fixtures/competition.mjs';
 import { editorIdentity, inlineEditor, openShiaijo, sides, startUpNext, upNextCard } from '../fixtures/shiaijo.mjs';
-import { armFinish, ipponButton, syncState } from '../fixtures/scoring.mjs';
+import { armFinish, ipponButton, running, settled, unsentCount } from '../fixtures/scoring.mjs';
 import { toastText } from '../fixtures/roster.mjs';
 import { editorSides, inlineRunning, rosterOf, slotMarks } from '../fixtures/individual.mjs';
 import { holdScoreWrites } from '../fixtures/held-write.mjs';
@@ -65,7 +65,7 @@ import { engiEditor, engiSettle, flagButton, flagCount, startUpNextEngi } from '
 import * as T from '../fixtures/team.mjs';
 import {
   boutIpponButton, boutNames, closeLineupPanel, currentBout, doneRowWinner, doneRows,
-  openLineupFromUpNext, recordBout, recordBoutButton, startUpNextKachinuki, syncPill as kachinukiPill, typeLineup,
+  openLineupFromUpNext, recordBout, recordBoutButton, startUpNextKachinuki, typeLineup,
 } from '../fixtures/kachinuki.mjs';
 
 const JOURNEY = 'concurrent-taps';
@@ -200,8 +200,8 @@ test.describe('concurrent taps from two devices', () => {
 
       const gapMs = await tapAtOnce(ipponButton(d1, 'shiro', 'M'), ipponButton(d2, 'aka', 'K'));
       // Each device's own tap is answered...
-      await expect(syncState(d1)).toHaveText('Synced');
-      await expect(syncState(d2)).toHaveText('Synced');
+      await settled(d1);
+      await settled(d2);
       // ...and both boards show both taps.
       for (const [name, d] of [['device 1', d1], ['device 2', d2]]) {
         await expect.poll(() => slotMarks(d, 'shiro'), { message: `${name} shows Shiro's M` }).toEqual(['M']);
@@ -242,14 +242,14 @@ test.describe('concurrent taps from two devices', () => {
       await sameMatchOnBoth(d1, d2);
       await expect.poll(() => marksOf(d2, 'aka')).toEqual(['K']);
 
-      let pillOffline;
+      let unsentOffline;
       await ctx2.setOffline(true);
       try {
         await tapOnSide(d2, 'aka', ipponButton(d2, 'aka', 'D'));
-        // Device 2 shows its own tap at once, and does not claim it is saved.
+        // Device 2 shows its own tap at once, and the outbox still holds the point.
         await expect.poll(() => marksOf(d2, 'aka'), { message: 'device 2 shows its offline tap' }).toEqual(['D', 'K']);
-        await expect(syncState(d2)).not.toHaveText('Synced');
-        pillOffline = (await syncState(d2).innerText()).trim();
+        await expect.poll(() => unsentCount(d2)).toBeGreaterThan(0);
+        unsentOffline = await unsentCount(d2);
         // Device 1 has not seen it: it has not reached the server. Device 1
         // reads the server's copy afresh (a reload), so its board is the
         // server's match as it stands now, which holds Aka's K and not the D.
@@ -262,13 +262,13 @@ test.describe('concurrent taps from two devices', () => {
         await ctx2.setOffline(false);
       }
       // Back online: the outbox sends the tap, and both boards agree.
-      await expect(syncState(d2)).toHaveText('Synced');
+      await settled(d2);
       for (const [name, d] of [['device 1', d1], ['device 2', d2]]) {
         await expect.poll(() => marksOf(d, 'aka'), { message: `${name} shows Aka's K and D` }).toEqual(['D', 'K']);
         await expect.poll(() => slotMarks(d, 'shiro'), { message: `${name} still shows Shiro's M` }).toEqual(['M']);
       }
       await shot(d1, 'b-device-1-converged');
-      record({ journey: JOURNEY, case: 'b offline', pillOffline });
+      record({ journey: JOURNEY, case: 'b offline', unsent: unsentOffline });
     } finally {
       await ops.close();
     }
@@ -296,7 +296,7 @@ test.describe('concurrent taps from two devices', () => {
         expect(tapsIn(batches.held, 'ippon.add', 'D'), 'the tap-back is not in the held removal batch').toBe(0);
         expect(tapsIn(batches.held, 'ippon.remove'), 'the held batch carries the removal').toBe(1);
         expect(tapsIn(batches.next, 'ippon.add', 'D'), 'the tap-back is in the batch after it').toBe(1);
-        await expect(syncState(d1)).toHaveText('Synced');
+        await settled(d1);
         // Deliberate: a late echo that undoes the tap-back must be given the time to land, so the time is the evidence.
         await d1.waitForTimeout(1000);
         for (const [name, d] of [['device 1', d1], ['device 2', d2]]) {
@@ -312,7 +312,7 @@ test.describe('concurrent taps from two devices', () => {
         // The reverse: D off (answered), then D added and taken off again
         // while the add's batch is held.
         await akaMark('D').tap();
-        await expect(syncState(d1)).toHaveText('Synced');
+        await settled(d1);
         await expect.poll(() => slotMarks(d1, 'aka')).toEqual(['K']);
         held = writes.holdNext();
         await tapOnSide(d1, 'aka', ipponButton(d1, 'aka', 'D'));
@@ -323,7 +323,7 @@ test.describe('concurrent taps from two devices', () => {
         expect(tapsIn(batches.held, 'ippon.remove'), 'the removal is not in the held add batch').toBe(0);
         expect(tapsIn(batches.held, 'ippon.add', 'D'), 'the held batch carries the add').toBe(1);
         expect(tapsIn(batches.next, 'ippon.remove'), 'the removal is in the batch after it').toBe(1);
-        await expect(syncState(d1)).toHaveText('Synced');
+        await settled(d1);
         // Deliberate: a late echo that undoes the removal must be given the time to land, so the time is the evidence.
         await d1.waitForTimeout(1000);
         for (const [name, d] of [['device 1', d1], ['device 2', d2]]) {
@@ -376,7 +376,7 @@ test.describe('concurrent taps from two devices', () => {
       const { d1, d2 } = ops;
       const ed1 = await T.startUpNextTeam(d1);
       const ed2 = inlineEditor(d2);
-      await expect(T.syncPill(ed2), 'device 2 shows the encounter running').toBeVisible();
+      await running(d2, ed2);
       await expect(T.boutRow(ed2, 2)).toBeVisible();
       await sameMatchOnBoth(d1, d2);
       const gaps = [];
@@ -384,8 +384,8 @@ test.describe('concurrent taps from two devices', () => {
       gaps.push(await tapAtOnce(T.rowIppon(T.boutRow(ed1, 1), 'shiro', 'M'), T.rowIppon(T.boutRow(ed2, 2), 'aka', 'K')));
       // Round 2: the other way round.
       gaps.push(await tapAtOnce(T.rowIppon(T.boutRow(ed1, 2), 'shiro', 'K'), T.rowIppon(T.boutRow(ed2, 1), 'aka', 'M')));
-      await expect(T.syncPill(ed1)).toHaveText('Synced');
-      await expect(T.syncPill(ed2)).toHaveText('Synced');
+      await settled(d1);
+      await settled(d2);
       const want = { 1: { shiro: ['M'], aka: ['M'] }, 2: { shiro: ['K'], aka: ['K'] } };
       for (const [name, ed] of [['device 1', ed1], ['device 2', ed2]]) {
         for (const n of [1, 2]) {
@@ -413,7 +413,7 @@ test.describe('concurrent taps from two devices', () => {
       await closeLineupPanel(d1);
       await startUpNextKachinuki(d1);
       await expect(recordBoutButton(d2), 'device 2 shows the encounter running').toBeVisible();
-      await expect(kachinukiPill(d2)).toBeVisible();
+      await running(d2, inlineEditor(d2));
       await sameMatchOnBoth(d1, d2);
 
       // The concurrent taps go on the FIRST bout, which the server holds no row
@@ -427,8 +427,8 @@ test.describe('concurrent taps from two devices', () => {
       }
 
       const gapMs = await tapAtOnce(boutIpponButton(currentBout(d1), 'shiro', 'M'), boutIpponButton(currentBout(d2), 'shiro', 'K'));
-      await expect(kachinukiPill(d1)).toHaveText('Synced');
-      await expect(kachinukiPill(d2)).toHaveText('Synced');
+      await settled(d1);
+      await settled(d2);
       const shiroMarks = async (row) => (await T.rowSlots(row, 'shiro').allInnerTexts()).map((t) => t.trim()).sort();
       // Both devices show both strikes before the bout is recorded, so Record
       // bout is made over a board that holds them.
@@ -445,7 +445,7 @@ test.describe('concurrent taps from two devices', () => {
         await expect.poll(() => boutNames(currentBout(d)), { message: `${name} shows bout 1 renamed by the lineup edit` }).toEqual(opener);
         await expect.poll(() => shiroMarks(currentBout(d)), { message: `${name}: the points stay on bout 1` }).toEqual(['K', 'M']);
       }
-      await expect(kachinukiPill(d1)).toHaveText('Synced');
+      await settled(d1);
       await shot(d1, 'f-kachinuki-before-record');
       await recordBout(d1);
       for (const [name, d] of [['device 1', d1], ['device 2', d2]]) {
@@ -482,7 +482,7 @@ test.describe('concurrent taps from two devices', () => {
         // Then device 2, online, scores for Aka: the server counts it, and its
         // own answer says so.
         await tapOnSide(d2, 'aka', ipponButton(d2, 'aka', 'D'));
-        await expect(syncState(d2)).toHaveText('Synced');
+        await settled(d2);
         await expect.poll(() => marksOf(d2, 'aka'), { message: 'device 2\'s tap is counted at first' }).toEqual(['D', 'K']);
       } finally {
         await ctx1.setOffline(false);

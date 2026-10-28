@@ -8,6 +8,7 @@ import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, apply
 import { BRANDING_DEFAULTS } from './admin_branding.jsx';
 import { queuedWritesNoun, supersededAlertText, displacedAlertText, tapNotAppliedAlertText, tapNotAppliedText } from './write_result.jsx';
 import { VersionBanner } from './version_banner.jsx';
+import { PublicHeldWrites } from './held_writes_panel.jsx';
 import { useUnsavedInput } from './app_version.jsx';
 import { tapWords } from './match_history_view.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
@@ -1607,6 +1608,7 @@ function App() {
   // viewer mode
   return (
     <>
+      <PublicHeldWrites competitions={tournament && tournament.competitions} />
       {announcements.length > 0 && window.AnnouncementBanner && (
         <window.AnnouncementBanner
           announcements={announcements}

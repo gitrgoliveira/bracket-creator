@@ -2224,33 +2224,6 @@ func TestRevertMatchToQueue_ClearsReopenPending(t *testing.T) {
 	})
 }
 
-// TestOverrideBracketWinner_ClearsReopenPending pins the related half of R1:
-// override-winner is a second finalization path that bypasses
-// applyCorrectionReason, so a reopened bracket match closed out via an
-// override must also discharge ReopenPending, or the flag lingers indefinitely.
-func TestOverrideBracketWinner_ClearsReopenPending(t *testing.T) {
-	compID := "override-pending"
-	eng, store, _ := setupKachinukiComp(t, compID, 3)
-	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
-		Rounds: [][]state.BracketMatch{{{
-			ID: "F0", SideA: "RedTeam", SideB: "WhiteTeam", Status: state.MatchStatusCompleted,
-			Winner: "RedTeam", Decision: "kachinuki-exhaustion",
-		}}},
-	}))
-	require.NoError(t, reopenErr(eng, compID, "F0", "")) // reason-less → pending
-	before, err := store.LoadBracket(compID)
-	require.NoError(t, err)
-	require.True(t, before.Rounds[0][0].ReopenPending, "precondition")
-
-	applied, err := eng.OverrideBracketWinner(compID, "F0", "WhiteTeam", 0)
-	require.NoError(t, err)
-	require.True(t, applied)
-	after, err := store.LoadBracket(compID)
-	require.NoError(t, err)
-	assert.Equal(t, "WhiteTeam", after.Rounds[0][0].Winner)
-	assert.False(t, after.Rounds[0][0].ReopenPending, "an override discharges the reopen debt")
-}
-
 // TestReopenKachinukiMatch_DiscardsVerdictKeepsBoutLog pins the split that
 // makes a reopen safe: the BOUT LOG is sacred, the ENCOUNTER VERDICT is not.
 //

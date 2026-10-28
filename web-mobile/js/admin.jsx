@@ -99,10 +99,9 @@ function mergeCompetitionsIntoTournament(currentT, mutator) {
 // bc-kcdg: attemptScoreWrite (imported from write_result.jsx, the shared
 // confirm+retry loop for a 409 downstream_knockout_played refusal) is the
 // single place editMatchScore below -- and therefore every score-editor host
-// and both editor bodies -- gets this behaviour. It is ALSO used by
-// admin_shiaijo.jsx's ResolveFeedersModal for the override-winner "Run now"
-// recovery; see write_result.jsx's doc comment for why the shared loop lives
-// there rather than being defined once per script-tagged host.
+// and both editor bodies -- gets this behaviour; see write_result.jsx's doc
+// comment for why the shared loop lives there rather than being defined
+// once per script-tagged host.
 
 // Pure helper for the "merge a tournament-level patch onto the latest
 // tournament state" pattern used by AdminApp.updateTournament. Same

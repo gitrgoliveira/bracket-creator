@@ -1036,7 +1036,7 @@ func (rp *replayer) judgeOverFinished(line int, b *state.ScoreBaseline, groups [
 // line of the result in force, or is the server's own write (it carries no
 // stamp of a device's: an engine-internal caller, made with the whole match
 // in view). A reopen or a send back to the queue (a result
-// that leaves the match open), a direct writer's result (override-winner, the
+// that leaves the match open), a direct writer's result (the
 // engine's own callers, bulk and quick score: an organiser acting on what the
 // screen shows) is no rival either. Only a finish or a decision from the
 // score, engi or decision doors is, and a drift line that carries a result is

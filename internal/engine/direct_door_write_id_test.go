@@ -2,7 +2,6 @@ package engine
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -11,7 +10,7 @@ import (
 )
 
 // The direct doors (reopen, send back to the queue, the requeue-and-reopen
-// remedy, override-winner, a kachinuki bout's removal) take the optional
+// remedy, a kachinuki bout's removal) take the optional
 // writeId and basis every rule-bound door takes (bc-evts F1): the write's
 // baseline carries them, the log begins with the match if it had none, and a
 // resend of the id is answered as recorded, nothing written and no history
@@ -64,31 +63,6 @@ func TestDirectDoors_WriteIDResendIsRecorded(t *testing.T) {
 		assert.Equal(t, lines, historyLen(t, store, compID, "Pool A-0"))
 		_, err = eng.ReopenMatch(compID, "Pool A-0", "mistake")
 		require.Error(t, err, "without the id the same reopen is refused, as before")
-	})
-	t.Run("override-winner", func(t *testing.T) {
-		eng, store, _ := setupTestEngine(t)
-		const compID = "dd-ko"
-		createTestCompetition(t, store, compID, "knockout", 3)
-		saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
-		require.NoError(t, eng.StartCompetition(compID))
-		bracket, err := store.LoadBracket(compID)
-		require.NoError(t, err)
-		bm := bracket.Rounds[0][0]
-		tag := ForceOptions{WriteID: "w-override"}
-		stamp := time.Now().UnixMilli()
-		applied, err := eng.OverrideBracketWinner(compID, bm.ID, bm.SideB, stamp, tag)
-		require.NoError(t, err)
-		require.True(t, applied)
-		require.NotNil(t, loggedTag(t, store, compID, bm.ID, "w-override"))
-		lines := historyLen(t, store, compID, bm.ID)
-
-		applied, err = eng.OverrideBracketWinner(compID, bm.ID, bm.SideA, stamp, tag)
-		require.NoError(t, err)
-		assert.True(t, applied, "answered as recorded")
-		assert.Equal(t, lines, historyLen(t, store, compID, bm.ID))
-		after, err := store.LoadBracket(compID)
-		require.NoError(t, err)
-		assert.Equal(t, bm.SideB, after.Rounds[0][0].Winner, "the resend writes nothing")
 	})
 	t.Run("a kachinuki bout's removal", func(t *testing.T) {
 		eng, store, comp := setupKachinukiComp(t, "dd-kachinuki", 2)

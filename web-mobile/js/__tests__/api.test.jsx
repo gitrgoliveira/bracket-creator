@@ -1129,8 +1129,8 @@ describe('API Utils', () => {
       });
     });
 
-    // Regression tests for the empty-body bug: three handlers
-    // (override-rank, override-winner, reset-overrides) return `c.Status`
+    // Regression tests for the empty-body bug: handlers such as
+    // override-rank and reset-overrides return `c.Status`
     // with no body. The JS client used to call `return res.json()` on
     // success, which per the Fetch spec rejects with SyntaxError on an
     // empty body; surfacing to the user as alert("Failed: Unexpected
@@ -1232,36 +1232,6 @@ describe('API Utils', () => {
       });
     });
 
-    describe('overrideBracketWinner (applied signal)', () => {
-      // mp-y3nk: the backend now replies 200 {"applied": <bool>}; the client
-      // surfaces it so the "Run now" flow distinguishes a landed assertion from
-      // a stale reconnect replay the server dropped. A legacy empty-body 200
-      // defaults to applied:true so old servers behave exactly as before.
-      it('resolves to { applied: true } on a legacy empty-body 200 (back-compat)', async () => {
-        global.fetch = vi.fn().mockResolvedValue({
-          ok: true, status: 200,
-          json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
-        });        await expect((await API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw')).settled)
-          .resolves.toEqual({ applied: true });
-      });
-
-      it('surfaces { applied: false } when the server drops a stale replay', async () => {
-        global.fetch = vi.fn().mockResolvedValue({
-          ok: true, status: 200, json: async () => ({ applied: false }),
-        });        await expect((await API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw')).settled)
-          .resolves.toEqual({ applied: false });
-      });
-
-      it('throws with server error message on failure', async () => {
-        global.fetch = vi.fn().mockResolvedValue({
-          ok: false,
-          json: async () => ({ error: 'match not found' }),
-        });        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        await expect((await API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw')).settled)
-          .rejects.toThrow('match not found');
-        warn.mockRestore();
-      });
-    });
 
     // T190–T193 (US13; FR-050a / FR-050d / FR-050e): Swiss endpoint
     // wrappers. The generate-round call carries auth and returns the

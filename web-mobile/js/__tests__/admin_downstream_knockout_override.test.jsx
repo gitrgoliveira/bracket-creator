@@ -2,9 +2,7 @@
 // admin.jsx) is the confirm+retry loop behind editMatchScore, the single
 // chokepoint every score-editor host (bracket panel, pools, schedule score
 // editor, per-court shiaijo) and both editor bodies (individual, team) route a
-// score write through. It is ALSO used directly by admin_shiaijo.jsx's
-// ResolveFeedersModal for the override-winner "Run now" recovery (see
-// admin_shiaijo.render.test.jsx). Taking recordScore/confirmDialog as injected
+// score write through. Taking recordScore/confirmDialog as injected
 // collaborators means the contract is pinned here without rendering the whole
 // admin SPA; importing it via admin.jsx's re-export (rather than
 // write_result.jsx directly) additionally pins that the re-export still works.

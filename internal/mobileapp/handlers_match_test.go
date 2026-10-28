@@ -3,7 +3,6 @@ package mobileapp
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -1961,64 +1960,6 @@ func TestScoreHandlers_RejectSideMismatch(t *testing.T) {
 	})
 }
 
-// TestOverrideWinner_EngiGuard verifies the override-winner endpoint rejects
-// engi competitions with 400: a manual winner override sets Winner without
-// FlagsA/FlagsB, which would leave a completed engi match with a 0-0 flag
-// total that violates the {1,3,5} invariant. Flag scoring is the only engi
-// result path. Mirrors TestDecisionHandler_EngiGuard.
-func TestOverrideWinner_EngiGuard(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	cid := "engi-override"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: cid, Engi: true}))
-	require.NoError(t, store.SaveBracket(cid, &state.Bracket{
-		Rounds: [][]state.BracketMatch{{{ID: "b1", SideA: "P1", SideB: "P2"}}},
-	}))
-
-	body, _ := json.Marshal(map[string]string{"winnerName": "P1"})
-	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid+"/matches/b1/override-winner", bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code, "override-winner on engi comp must return 400; body: %s", w.Body.String())
-	assert.Contains(t, w.Body.String(), "engi")
-
-	// The bracket winner must remain unset (the guard returns before the engine).
-	stored, err := store.LoadBracket(cid)
-	require.NoError(t, err)
-	assert.Empty(t, stored.Rounds[0][0].Winner, "engi override must not set a winner")
-}
-
-// TestOverrideWinner_FailsClosedOnLoadError verifies the engi guard on the
-// override-winner endpoint fails CLOSED: when LoadCompetition faults we can't
-// tell whether the comp is engi, so the override is rejected with 500 rather
-// than slipping through into the inconsistent flag-less state the guard exists
-// to prevent. Mirrors the quick-score / daihyosen / decision guards.
-func TestOverrideWinner_FailsClosedOnLoadError(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "override-fail-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-	realStore, err := state.NewStore(tempDir)
-	require.NoError(t, err)
-	eng := engine.New(realStore)
-	hub := NewHub()
-
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	admin := r.Group("/api")
-	RegisterMatchHandlers(admin, eng, failingCompetitionStore{err: errors.New("disk on fire")}, realStore, hub, NewFileVerifier(realStore), realStore)
-
-	body, _ := json.Marshal(map[string]string{"winnerName": "P1"})
-	req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/b1/override-winner", bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	require.Equalf(t, http.StatusInternalServerError, w.Code, "body=%s", w.Body.String())
-}
-
 func TestMatchHandlers_Extended(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -2035,68 +1976,6 @@ func TestMatchHandlers_Extended(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
-	t.Run("Override Bracket Winner", func(t *testing.T) {
-		bracket := &state.Bracket{
-			Rounds: [][]state.BracketMatch{
-				{{ID: "b1", SideA: "P1", SideB: "P2"}},
-			},
-		}
-		store.SaveBracket("c1", bracket)
-
-		reqBody, _ := json.Marshal(map[string]string{"winnerName": "P1"})
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/b1/override-winner", bytes.NewBuffer(reqBody))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code)
-	})
-
-	// Sibling of the rank-override TrimSpace test in
-	// handlers_competition_test.go. Downstream bracket math compares
-	// m.Winner to roster names by exact string equality, so padded
-	// "  Foo  " won't match canonical "Foo", pin the trim contract.
-	t.Run("Override Bracket Winner Trims Whitespace", func(t *testing.T) {
-		bracket := &state.Bracket{
-			Rounds: [][]state.BracketMatch{
-				{{ID: "b-trim", SideA: "P1", SideB: "P2"}},
-			},
-		}
-		store.SaveBracket("c1", bracket)
-
-		reqBody, _ := json.Marshal(map[string]string{"winnerName": "  P1  "})
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/b-trim/override-winner", bytes.NewBuffer(reqBody))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusOK, w.Code)
-
-		stored, err := store.LoadBracket("c1")
-		require.NoError(t, err)
-		require.NotNil(t, stored)
-		var found *state.BracketMatch
-		for i := range stored.Rounds {
-			for j := range stored.Rounds[i] {
-				if stored.Rounds[i][j].ID == "b-trim" {
-					found = &stored.Rounds[i][j]
-				}
-			}
-		}
-		require.NotNil(t, found, "bracket match b-trim not found")
-		assert.Equal(t, "P1", found.Winner, "winner should be trimmed before propagation")
-	})
-
-	t.Run("Override Bracket Winner Rejects Whitespace-Only", func(t *testing.T) {
-		// Whitespace-only winnerName trims to empty, same shape as the
-		// rank-override empty-after-trim rejection.
-		reqBody, _ := json.Marshal(map[string]string{"winnerName": "   "})
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/b1/override-winner", bytes.NewBuffer(reqBody))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "winnerName is required")
 	})
 
 	t.Run("Update Match Time", func(t *testing.T) {
@@ -2119,14 +1998,6 @@ func TestMatchHandlers_Extended(t *testing.T) {
 	t.Run("Match Score - Invalid JSON", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/PoolA-1/score", bytes.NewBufferString("{invalid"))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
-	t.Run("Override Winner - Invalid JSON", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/c1/matches/b1/override-winner", bytes.NewBufferString("{invalid"))
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -2172,45 +2043,6 @@ func TestCourtAndTime_UnknownMatchIsNotFound(t *testing.T) {
 		r.ServeHTTP(w, req)
 		assert.Equalf(t, http.StatusNotFound, w.Code, "%s body=%s", tc.path, w.Body.String())
 	}
-}
-
-// TestOverrideWinner_ErrorStatusMapping pins that the override-winner handler
-// maps engine CLIENT errors to their proper status instead of a blanket 500
-// (Copilot mp-y3nk): an unknown match id -> 404 (engine.NotFoundError) and a
-// not-yet-ready match (unresolved feeder side) -> 400 (engine.ValidationError).
-// Before the mapping both returned 500, which made the offline terminal-write
-// replay treat a permanent client error as retryable and wedge sync status.
-func TestOverrideWinner_ErrorStatusMapping(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	comp := state.Competition{ID: "ovm", Status: "setup", Courts: []string{"A"}}
-	require.NoError(t, store.SaveCompetition(&comp))
-	// b-ready is playable; b-notready has an unresolved (empty) side so
-	// bracketMatchPlayable is false and the engine returns a ValidationError.
-	require.NoError(t, store.SaveBracket("ovm", &state.Bracket{
-		Rounds: [][]state.BracketMatch{
-			{{ID: "b-notready", SideA: "P1", SideB: ""}},
-		},
-	}))
-
-	t.Run("unknown match returns 404", func(t *testing.T) {
-		body, _ := json.Marshal(map[string]string{"winnerName": "P1"})
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/ovm/matches/does-not-exist/override-winner", bytes.NewBuffer(body))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusNotFound, w.Code, "unknown match must be 404, not 500; body: %s", w.Body.String())
-	})
-
-	t.Run("not-ready match returns 400", func(t *testing.T) {
-		body, _ := json.Marshal(map[string]string{"winnerName": "P1"})
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/ovm/matches/b-notready/override-winner", bytes.NewBuffer(body))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusBadRequest, w.Code, "not-ready match must be 400, not 500; body: %s", w.Body.String())
-	})
 }
 
 func TestRevertMatchToQueueHandler(t *testing.T) {
@@ -2643,35 +2475,6 @@ func TestPostScoreKikenInvalidScoreline(t *testing.T) {
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "scoreline")
-}
-
-// failingCompetitionStore returns the configured error from
-// LoadCompetition. Used to drive the fail-closed path in the
-// override-winner handler when config.md can't be loaded.
-type failingCompetitionStore struct{ err error }
-
-func (f failingCompetitionStore) LoadCompetition(string) (*state.Competition, error) {
-	return nil, f.err
-}
-
-func (f failingCompetitionStore) LoadPoolMatches(string) ([]state.MatchResult, error) {
-	return nil, f.err
-}
-
-func (f failingCompetitionStore) LoadBracket(string) (*state.Bracket, error) {
-	return nil, f.err
-}
-
-func (f failingCompetitionStore) MatchStatusByID(string, string) (state.MatchStatus, bool, error) {
-	return "", false, f.err
-}
-
-func (f failingCompetitionStore) MatchSidesByID(string, string) (string, string, string, string, bool, error) {
-	return "", "", "", "", false, f.err
-}
-
-func (f failingCompetitionStore) LoadCompetitorStatus(string) (map[string]domain.CompetitorStatus, error) {
-	return nil, f.err
 }
 
 // TestAnnotateQueuePositions_NonEmpty verifies that annotateQueuePositions

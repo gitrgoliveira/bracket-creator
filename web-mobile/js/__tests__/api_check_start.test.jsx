@@ -163,6 +163,38 @@ describe('API.startCheckUntrusted', () => {
     expect(API.startCheckUntrusted('c-tap')).toBe(false);
   });
 
+  // Only a write that can move a match's status, court or sides, or a bar,
+  // makes the check untrustworthy: a lineup, member or time write held for a
+  // while must not make every pick ask the operator.
+  it.each([
+    ['a team lineup', (c) => API.putTeamLineup(c, 't1', 1, [{ position: 1, name: 'Ann' }], 'secret')],
+    ['a match lineup', (c) => API.putMatchLineup(c, 't1', 'm1', [{ position: 1, name: 'Ann' }], 'secret')],
+    ['a team member', (c) => API.addTeamMember(c, 't1', 'Ann', 'secret')],
+    ['a match time', (c) => API.updateMatchTime(c, 'm1', '10:30', 'secret')],
+  ])('does not count %s held in the outbox', async (_what, write) => {
+    holdSends();
+    const comp = `c-${_what.replace(/ /g, '-')}`;
+    await write(comp);
+    // The write is in the outbox, so the false below is the kind's, not an
+    // empty queue's.
+    expect(API.unsentWrites().total).toBeGreaterThan(0);
+    expect(API.startCheckUntrusted(comp)).toBe(false);
+  });
+
+  it.each([
+    ['a decision', (c) => API.recordDecision(c, 'm1', { decision: 'kiken', decisionBy: 'A' }, 'secret')],
+    ['a reinstatement', (c) => API.reinstateCompetitor(c, 'p1', 'secret')],
+    ['a pool-rank override', (c) => API.overridePoolRanks(c, 'Pool A', ['p1', 'p2'], 'secret', false)],
+    ['a reopen', (c) => API.reopenMatch(c, 'm1', 'secret')],
+    ['a send back', (c) => API.revertMatchToQueue(c, 'm1', 'secret')],
+    ['a court move', (c) => API.moveMatchCourt(c, 'm1', 'B', 'secret')],
+  ])('counts %s held in the outbox', async (_what, write) => {
+    holdSends();
+    const comp = `c-${_what.replace(/ /g, '-')}`;
+    await write(comp);
+    expect(API.startCheckUntrusted(comp)).toBe(true);
+  });
+
   it('is true once a send failed on the network, whatever is held', async () => {
     global.fetch = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')));
     API.recordTap('c-flag', 'm1', tap, 'secret', null);

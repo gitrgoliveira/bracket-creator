@@ -1817,7 +1817,8 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // the court as it is. A refusal is stored on the picked match and toasted
     // once, and the running bout keeps running with its score. With no answer,
     // or when the device already knows an answer cannot be trusted (offline,
-    // or writes of the pick's competition not sent yet), the operator is asked
+    // or writes of the pick's competition not sent yet that move a match or a
+    // bar, API.startCheckUntrusted), the operator is asked
     // (Q1, 2026-10-27: the court must keep working without the server).
     // Console stubs without the check keep today's path.
     const startMayFollowSendBack = async (m, cur, pick) => {
@@ -1839,7 +1840,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // The defer of the running bout and the start of the picked one, after
     // pickMatch's guards and its pickingRef entry (see pickMatch).
     const deferAndStart = async (m, pick) => {
-        const cur = running[0] || null;
+        let cur = running[0] || null;
         const isSame = cur && matchKey(cur) === matchKey(m);
         // The queue key of the send back the start must follow, if any.
         let after = null;
@@ -1854,7 +1855,28 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             if (!window.API || typeof window.API.revertMatchToQueue !== "function") return;
             // bc-stpf: a start the server would refuse leaves the running bout
             // running, so the check comes before anything is sent back.
-            if (m.status === "scheduled" && !(await startMayFollowSendBack(m, cur, pick))) return;
+            if (m.status === "scheduled") {
+                if (!(await startMayFollowSendBack(m, cur, pick))) return;
+                if (!mountedRef.current) return;
+                // The check can wait on the operator for as long as they take
+                // to answer (askStartWithoutCheck), and the court may move
+                // meanwhile (another device finishes the running bout, or
+                // starts another): the bout sent back and the match started
+                // are the court's as it is now, by the latest render, never
+                // this tap's copies, as pickMatch does after its own question.
+                // A court that changed is judged again from the top.
+                const latest = latestRef.current;
+                const fresh = latest.allMatches.find((x) => matchKey(x) === matchKey(m));
+                const freshCur = latest.running[0] || null;
+                if (!fresh || fresh.status !== "scheduled" || !freshCur || matchKey(freshCur) !== matchKey(cur)) {
+                    if (pick && pickingRef.current === pick) pickingRef.current = null;
+                    syncStartingKey();
+                    if (fresh) await latest.pickMatch(fresh, true);
+                    return;
+                }
+                cur = freshCur;
+                m = fresh;
+            }
             if (!mountedRef.current) return;
             // bc-evts (the governing rule): the send back is the outbox's and
             // nothing waits for its answer. The pick's start is queued right
@@ -1932,7 +1954,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // End the correction of the match keyed `key` only if it is still the one
     // open: a write's answer may arrive after another correction was opened.
     const endCorrectionOf = (key) => { setCorrectingKey((k) => (k === key ? null : k)); };
-    latestRef.current = { pickMatch, correctMatch, allMatches };
+    latestRef.current = { pickMatch, correctMatch, allMatches, running };
 
     // Call to court: optional. Broadcasts a tournament announcement so the
     // competitors (and anyone watching the public app) are notified they're

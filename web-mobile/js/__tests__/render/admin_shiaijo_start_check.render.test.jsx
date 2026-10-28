@@ -75,22 +75,25 @@ function renderConsole(list = matches()) {
   window.filterMatchesByCourt = (ms) => ms;
   const onEditScore = vi.fn().mockResolvedValue({ applied: true, status: 'running' });
   const showToast = vi.fn();
-  render(
+  const handlers = { onBack: vi.fn(), onMoveCourt: vi.fn(), onLogout: vi.fn(), onViewerMode: vi.fn(), onSwitchCourt: vi.fn() };
+  const page = () => (
     <AdminShiaijoPage
       tournament={{ name: 'Test Tournament', courts: ['A', 'B'], competitions: [] }}
       court="A"
-      onBack={vi.fn()}
       onEditScore={onEditScore}
-      onMoveCourt={vi.fn()}
-      onLogout={vi.fn()}
-      onViewerMode={vi.fn()}
       password="pw"
       showToast={showToast}
       tweaks={{}}
-      onSwitchCourt={vi.fn()}
-    />,
+      {...handlers}
+    />
   );
-  return { onEditScore, showToast };
+  const { rerender } = render(page());
+  // The court as another device leaves it: the console renders `next`.
+  const courtBecomes = (next) => {
+    window.tournamentMatches = () => next;
+    rerender(page());
+  };
+  return { onEditScore, showToast, courtBecomes };
 }
 
 // The start writes the console made, as [matchId, patch].
@@ -186,6 +189,39 @@ describe('a pick of another bout checks the start before it sends the running bo
       const started = starts(onEditScore);
       expect(started.map(([id]) => id)).toEqual(['m2']);
       expect(started[0][1].after).toBe(REVERT_KEY);
+    });
+
+    // The question waits on the operator for as long as they take; what they
+    // answer is carried out on the court as it is then, never as it was when
+    // they tapped.
+    it('a running bout finished elsewhere while the question is open is not sent back, and the pick starts on the free court', async () => {
+      const { onEditScore, courtBecomes } = renderConsole();
+      await pointerTap(upNextStart());
+      await settle();
+      expect(screen.getByTestId('start-ask')).toBeTruthy();
+      await act(async () => { courtBecomes(matches('completed')); });
+      await keyboardClick(screen.getByRole('button', { name: 'Send back and start' }));
+      await settle();
+
+      expect(window.API.revertMatchToQueue).not.toHaveBeenCalled();
+      const started = starts(onEditScore);
+      expect(started.map(([id]) => id)).toEqual(['m2']);
+      expect(started[0][1].after).toBeFalsy();
+      // Judged again on a court with nothing running: no second check.
+      expect(window.API.checkStart).toHaveBeenCalledTimes(1);
+    });
+
+    it('a pick another device started while the question is open is neither started again nor followed by a send back', async () => {
+      const { onEditScore, courtBecomes } = renderConsole();
+      await pointerTap(upNextStart());
+      await settle();
+      const elsewhere = matches('completed').map((x) => (x.id === 'm2' ? { ...x, status: 'running' } : x));
+      await act(async () => { courtBecomes(elsewhere); });
+      await keyboardClick(screen.getByRole('button', { name: 'Send back and start' }));
+      await settle();
+
+      expect(window.API.revertMatchToQueue).not.toHaveBeenCalled();
+      expect(starts(onEditScore)).toEqual([]);
     });
 
     it('"Keep it running" sends nothing, keeps the running bout live and clears the pick', async () => {

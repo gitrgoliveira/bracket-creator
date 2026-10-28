@@ -107,18 +107,22 @@ describe('a queued send back is published on the court\'s channel (bc-stpf)', ()
     expect([court, compId]).toEqual(['A', 'c1']);
     // No scoreVersion: never read as a stale running board by the display.
     expect('scoreVersion' in result).toBe(false);
+    // A send back moves no court, so neither patch names one.
+    expect(patchesFor(publish, 'm1').some(([, , r]) => 'court' in r)).toBe(false);
     warn.mockRestore();
   });
 
-  it('a confirmed running court move publishes the bout as scheduled on its old court', async () => {
+  it('a confirmed running court move publishes the bout as scheduled on its old court, naming the new one', async () => {
     global.fetch = reply(200, {});
     const res = API.moveMatchCourt('c1', 'm1', 'B', 'pw', {
       stopsRunning: true,
       was: { court: 'A' },
       match: runningBout({ court: 'A' }),
     });
+    // The patch names court B, so the old court's display takes the bout off
+    // its queue at once rather than keeping it as queued on A.
     expect(patchesFor(publish, 'm1')).toEqual([
-      ['A', 'c1', { id: 'm1', status: 'scheduled', sideAId: 'p1', sideBId: 'p2' }],
+      ['A', 'c1', { id: 'm1', status: 'scheduled', sideAId: 'p1', sideBId: 'p2', court: 'B' }],
     ]);
     await expect((await res).settled).resolves.toEqual({});
     await flush();
@@ -147,6 +151,8 @@ describe('a queued send back is published on the court\'s channel (bc-stpf)', ()
     expect(patchesFor(publish, 'm1').map(([, , r]) => r.status)).toEqual(['scheduled', 'running']);
     const [court, compId, result] = patchesFor(publish, 'm1')[1];
     expect([court, compId]).toEqual(['A', 'c1']);
+    // The put-back names the court the bout came from, undoing the move's patch.
+    expect(result.court).toBe('A');
     expect('scoreVersion' in result).toBe(false);
     warn.mockRestore();
   });

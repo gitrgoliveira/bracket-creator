@@ -594,12 +594,13 @@ function _heldFlagCounts(match) {
 // scoreVersion, so the put-back is never read as a stale running board
 // (staleRunningOverlay). A court-less match publishes nothing, as
 // _broadcastPatch does.
-function _publishSendBack(compID, matchID, match, status) {
+function _publishSendBack(compID, matchID, match, status, court) {
     _publishMatchPatch(compID, match, {
         id: matchID,
         ..._sideIdFields(match),
         ..._heldFlagCounts(match),
         status,
+        ...(court ? { court } : {}),
     });
 }
 
@@ -612,11 +613,15 @@ function _isMatchAlreadyCompletedRefusal(err) {
 // court bridge at enqueue, and puts it back "running" on a refusal or discard
 // if the match is still running. When the refusal says the match is already
 // completed, we do not tell the display it is running: the display takes the
-// server copy at its next refetch.
-function _attachSendBackDisplayPutBack(compID, matchID, match, answer) {
+// server copy at its next refetch. `movedTo`, given by a running court move,
+// is the court the bout goes to: the "scheduled" patch names it, so the old
+// court's display takes the bout off its queue at once (the display keeps a
+// match's court when a patch names none, mergeMatchPatch), and the put-back
+// names the court it came from. A send back gives none and names no court.
+function _attachSendBackDisplayPutBack(compID, matchID, match, answer, movedTo) {
     if (!match || !answer || !answer.settled) return;
-    _publishSendBack(compID, matchID, match, 'scheduled');
-    const putBack = () => _publishSendBack(compID, matchID, match, 'running');
+    _publishSendBack(compID, matchID, match, 'scheduled', movedTo);
+    const putBack = () => _publishSendBack(compID, matchID, match, 'running', movedTo && match.court);
     answer.settled.then(
         (body) => {
             if (body && body.discarded && !body.sentByAnotherTab) putBack();
@@ -632,6 +637,17 @@ function _attachSendBackDisplayPutBack(compID, matchID, match, answer) {
 // pick of another bout asks the operator instead (API.checkStart). The one
 // bounded wait in front of an outbox write, and only on that pick path.
 const START_CHECK_TIMEOUT_MS = 1500;
+
+// bc-stpf: the outbox writes that can change what a start check judges: a
+// match's status (a score write, which a finish or a start is, a decision, a
+// representative bout, a kachinuki bout, a reopen, a send back, a requeue, an
+// override of a winner), its court, its sides (a pool-rank override seats
+// other competitors in the knockout), or a competitor's bar (a decision, a
+// reinstatement). API.startCheckUntrusted counts only these.
+const START_CHECK_WRITE_KINDS = new Set([
+    'score', 'decision', 'daihyosen', 'kachinuki', 'reopen',
+    'revert', 'requeue', 'court', 'override', 'reinstate', 'pool-ranks',
+]);
 
 const _matchRevCounters = new Map(); // compID:matchID → int
 function _nextRev(compID, matchID) {
@@ -5707,7 +5723,7 @@ const API = {
         if (opts && opts.stopsRunning && opts.match) {
             const oldCourt = (opts.was && opts.was.court) || opts.match.court || '';
             const oldMatch = { ...opts.match, court: oldCourt };
-            _attachSendBackDisplayPutBack(compID, matchID, oldMatch, answer);
+            _attachSendBackDisplayPutBack(compID, matchID, oldMatch, answer, court);
         }
         return answer;
     },
@@ -5758,14 +5774,18 @@ const API = {
     // court console asks the operator without asking the server: the device
     // is offline (the browser says so, or the outbox's last pass failed on the
     // network), or the outbox still holds a write of `compID` the server has
-    // not seen (a finish, a decision, a start, a send back), whose effect on
-    // who is fighting or barred the check would miss. A tap is not counted: it
-    // moves points, never a status or a bar, and taps leave in a microtask.
+    // not seen that moves who is fighting, where, or who is barred
+    // (START_CHECK_WRITE_KINDS: a finish, a decision, a start, a send back, a
+    // court move, a reinstatement), whose effect the check would miss. A tap is
+    // not counted: it moves points, never a status or a bar, and taps leave in
+    // a microtask. Nor is a lineup, a team member or a time write: none of
+    // them changes a match's status, its court, its sides or a bar, so one held
+    // or failing for a while does not make every pick ask the operator.
     startCheckUntrusted(compID) {
         if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
         if (_offlineFlag) return true;
         for (const d of _writeQueue.values()) {
-            if (d && d.compID === compID && d.kind !== 'evt') return true;
+            if (d && d.compID === compID && START_CHECK_WRITE_KINDS.has(d.kind || 'score')) return true;
         }
         return false;
     },

@@ -107,7 +107,7 @@ func respondEngineError(c *gin.Context, err error) {
 // Both names are read off thisMatchID's OWN stored sides
 // (store.MatchSidesByID) rather than a separate roster lookup: the barred
 // competitor is provably one of thisMatchID's two sides in every producer of
-// these two errors -- StartMatchTx/checkEligibilityExcludingMatch resolve
+// these two errors -- StartMatchTx/startSidesGateTx resolve
 // playerID FROM this match's own ids (engine.BarredSides against
 // matchSideParticipantIDs' return), and checkConcurrentIneligibility's loser
 // is this match's own decisionBy side -- so playerID always equals one of

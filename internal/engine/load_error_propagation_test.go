@@ -94,7 +94,7 @@ func TestMatchLookupsPropagateLoadErrors(t *testing.T) {
 				}},
 				{"checkSimultaneousMatchTx", func() error {
 					return inTxErr(func(tx state.StoreTx) error {
-						return eng.checkSimultaneousMatchTx(tx, compID, matchID)
+						return eng.checkSimultaneousMatchTx(tx, compID, matchID, "")
 					})
 				}},
 				{"findMatchHome", func() error {
@@ -110,6 +110,9 @@ func TestMatchLookupsPropagateLoadErrors(t *testing.T) {
 				{"ReopenMatch", func() error {
 					_, err := eng.ReopenMatch(compID, matchID, "")
 					return err
+				}},
+				{"CheckStartAfterSendBack", func() error {
+					return eng.CheckStartAfterSendBack(compID, matchID, "A")
 				}},
 			}
 			for _, l := range lookups {

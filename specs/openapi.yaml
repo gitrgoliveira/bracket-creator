@@ -3018,11 +3018,129 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The match is already completed; correct it via the score editor instead.
+          description: >
+            The match is already completed (`match_completed`, with a
+            `message` to show); correct it via the score editor instead.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [match_completed]
+                  message:
+                    type: string
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/competitions/{id}/matches/{mid}/start-check:
+    get:
+      tags: [matches]
+      summary: Check that a match could start once the court's running match goes back
+      description: |
+        Answers whether starting match `mid` would be refused for its
+        status, its court or its competitors once the match now running on
+        its shiaijo is sent back to the queue. The court console asks this
+        before it sends that running match back for another start, so a
+        start the server would refuse leaves the running match running and
+        shows the reason on the picked match.
+
+        The caller names the pick and its court; the server leaves out
+        every match of the competition that is running on that court
+        (normally one). The check runs the same competitor checks as
+        the start: a competitor fighting now in another match of the
+        competition, with the matches running on that court left out (a pick
+        with no court leaves out nothing), and a competitor barred by a
+        withdrawal. The court checks are not run: the court is taken only by
+        the match being sent back.
+
+        It writes nothing and takes no lock, so it carries no `writeId` or
+        `basis`. Check and start are separate requests: the start judges
+        again under the competition's lock, so a change made between them
+        on another device can still refuse it. The check leaves out the
+        gates only the start has (a competitor busy on the same court in
+        another competition, the self-run rules and the team-finish
+        refusal), so a 200 is not a promise that the start succeeds.
+        Intentionally accessible to court operators in self-run mode
+        (operational play, like starting a match and sending one back).
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+        - $ref: '#/components/parameters/MatchId'
+        - name: court
+          in: query
+          required: true
+          schema:
+            type: string
+            maxLength: 32
+          description: The shiaijo the console is operating; the match running there is the one that gets sent back, and a longer court name than 32 characters is a 400.
+      responses:
+        '200':
+          description: None of the checks refuses the start.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                    enum: [true]
+        '400':
+          description: Invalid input or missing required `court` query parameter.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >
+            The start would be refused. `ineligible_competitor` is the same
+            body, byte for byte, that `PUT .../score` answers a start with for
+            the same state: `reasonHuman` is the operator's sentence, e.g.
+            "Alice is fighting now in Pool A · Match 3 on Shiaijo B. Finish
+            that match first." or "Alice withdrew in Pool A · Match 1 and
+            cannot fight again. Record the fusensho for Carol.".
+            `match_not_scheduled` means the pick is no longer waiting in the
+            queue (another device started or finished it); its
+            `reasonHuman` is shown as it is.
+            `match_on_other_court` means the picked match is assigned to
+            another court; its `reasonHuman` tells the operator the match
+            was moved.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, reasonHuman]
+                properties:
+                  error:
+                    type: string
+                    enum:
+                      - ineligible_competitor
+                      - match_not_scheduled
+                      - match_on_other_court
+                    description: Machine-readable conflict code.
+                  playerId:
+                    type: string
+                    description: The competitor the start would be refused for (ineligible_competitor only).
+                  reason:
+                    type: string
+                    description: The raw refusal reason (ineligible_competitor only).
+                  matchId:
+                    type: string
+                    description: The picked match (match_not_scheduled and match_on_other_court only).
+                  court:
+                    type: string
+                    description: The picked match's stored court (match_on_other_court only).
+                  status:
+                    type: string
+                    description: The picked match's stored status, e.g. `running` or `completed` (match_not_scheduled only).
+                  reasonHuman:
+                    type: string
+                    description: The operator's sentence, shown as it is.
         '500':
           $ref: '#/components/responses/InternalError'
 

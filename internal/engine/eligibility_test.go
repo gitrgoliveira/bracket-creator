@@ -962,13 +962,13 @@ func TestParticipantIDByName(t *testing.T) {
 }
 
 // TestResolveMatchParticipantIDs_UnknownMatch covers the lookupMatchSides
-// error path in resolveMatchParticipantIDs.
+// error path in matchSideParticipantIDs.
 func TestResolveMatchParticipantIDs_UnknownMatch(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "resolve-unknown"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{}))
-	_, err := eng.resolveMatchParticipantIDs(compID, "nonexistent-match")
+	_, err := eng.matchSideParticipantIDs(eng.store, compID, "nonexistent-match")
 	assert.Error(t, err)
 }
 
@@ -1022,10 +1022,10 @@ func TestCheckConcurrentIneligibility_SameMatchNotBlocked(t *testing.T) {
 	assert.NoError(t, err, "same-match ineligibility should not block re-scoring")
 }
 
-// TestCheckEligibilityExcludingMatch_ExcludedMatch covers the
+// TestEligibilityErrorForSides_ExcludedMatch covers the
 // st.MatchID == excludeMatchID path: player is ineligible from the exact
 // match being re-scored → not blocked (undo path).
-func TestCheckEligibilityExcludingMatch_ExcludedMatch(t *testing.T) {
+func TestEligibilityErrorForSides_ExcludedMatch(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "excl-match"
 
@@ -1038,13 +1038,15 @@ func TestCheckEligibilityExcludingMatch_ExcludedMatch(t *testing.T) {
 		MatchID:  "M-same",
 	}))
 
-	err := eng.checkEligibilityExcludingMatch(compID, []string{playerID}, "M-same")
+	statuses, err := eng.store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	err = eligibilityErrorForSides(statuses, "M-same", []string{playerID})
 	assert.NoError(t, err, "ineligibility from excluded match must not block re-scoring")
 }
 
-// TestCheckEligibilityExcludingMatch_BlockedByDifferentMatch verifies
+// TestEligibilityErrorForSides_BlockedByDifferentMatch verifies
 // that ineligibility from a DIFFERENT match still blocks.
-func TestCheckEligibilityExcludingMatch_BlockedByDifferentMatch(t *testing.T) {
+func TestEligibilityErrorForSides_BlockedByDifferentMatch(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "excl-different"
 
@@ -1057,7 +1059,9 @@ func TestCheckEligibilityExcludingMatch_BlockedByDifferentMatch(t *testing.T) {
 		MatchID:  "M-other",
 	}))
 
-	err := eng.checkEligibilityExcludingMatch(compID, []string{playerID}, "M-different")
+	statuses, err := eng.store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	err = eligibilityErrorForSides(statuses, "M-different", []string{playerID})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrIneligibleCompetitor))
 }
@@ -1075,15 +1079,17 @@ func TestStartMatch_MatchNotFound(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestCheckEligibilityExcludingMatch_EmptyPlayerID covers the pid==""
+// TestEligibilityErrorForSides_EmptyPlayerID covers the pid==""
 // continue branch: an empty player ID must be silently skipped.
-func TestCheckEligibilityExcludingMatch_EmptyPlayerID(t *testing.T) {
+func TestEligibilityErrorForSides_EmptyPlayerID(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "excl-empty-pid"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
 
+	statuses, err := eng.store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
 	// Pass an empty string as one of the player IDs.
-	err := eng.checkEligibilityExcludingMatch(compID, []string{"", ""}, "M1")
+	err = eligibilityErrorForSides(statuses, "M1", []string{"", ""})
 	assert.NoError(t, err, "empty player IDs must be skipped silently")
 }
 
@@ -1519,9 +1525,9 @@ func TestStartMatch_RejectsSimultaneousMatch(t *testing.T) {
 	})
 
 	// bc-pnum review finding 5: the pool-vs-pool half of
-	// checkSimultaneousMatch resolves a side by id only. Two "Sam"s from
-	// different dojos are a legal roster; one running on another court must
-	// NOT block the other from starting just because they share a bare
+	// checkSimultaneousMatchTx resolves a side by id only. Two "Sam"s
+	// from different dojos are a legal roster; one running on another court
+	// must NOT block the other from starting just because they share a bare
 	// name -- that would be exactly the pre-bc-pnum name-comparison bug this
 	// check was fixed to avoid.
 	t.Run("running match for a DIFFERENT id sharing the same name does not block", func(t *testing.T) {
@@ -2071,8 +2077,8 @@ func TestK2ChecksItsHandleIsTransactional(t *testing.T) {
 
 // TestBarredSides pins the ONE "not eligible AND recorded by a different
 // match" check (bc-cse), extracted from what used to be three hand-copied
-// loops in StartMatchTx, checkEligibilityExcludingMatch and (now)
-// mobileapp's ineligibleSides annotation.
+// loops in StartMatchTx, checkEligibilityExcludingMatch (since folded into
+// startSidesGateTx) and mobileapp's ineligibleSides annotation.
 func TestBarredSides(t *testing.T) {
 	statuses := map[string]domain.CompetitorStatus{
 		"p-barred": {

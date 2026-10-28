@@ -41,7 +41,7 @@ describe('API.revertMatchToQueue', () => {
   });
 
   it('rejects with the server error message on a 409 (completed match)', async () => {
-    global.fetch = mockFetch(409, { error: 'match already completed: use the score editor to correct a completed bout' });
+    global.fetch = mockFetch(409, { error: 'match_completed', message: 'match already completed: use the score editor to correct a completed bout' });
     const res = await API.revertMatchToQueue('c1', 'm1', 'secret');
     await expect(res.settled).rejects.toThrow(/already completed/);
     expectWarned();

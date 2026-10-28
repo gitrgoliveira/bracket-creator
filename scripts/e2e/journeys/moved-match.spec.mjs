@@ -306,9 +306,10 @@ test.describe('moved-match', () => {
 
     // 8. Recorded, not asserted: on B the operator starts the first moved match,
     // then taps Start on the second, whose competitor is still fighting on A.
-    // The console sends the running bout back to the queue BEFORE the server
-    // answers the start (pickMatch's defer), and the start is refused for the
-    // competitor, not the court (bc-stpf; its fixme below asserts the fix).
+    // The console first asks the server whether that start would be accepted
+    // (start-check); the competitor is busy, so the start is refused and the
+    // first moved match stays running, with the reason shown (bc-stpf; the
+    // test below asserts it).
     // The pairing's Start, on the Up next card or its Upcoming row, whichever
     // holds it when the tap lands: a start just made moves the next pairing
     // from its row onto the card while a hurried tap is on its way.
@@ -342,7 +343,7 @@ test.describe('moved-match', () => {
     await (await startOf(secondPair)).tap();
     await untilStable(courtB, { from: beforeBusyStart });
     row({ step: '8 competitor busy', action: `Start match on ${pairText(secondPair)} (one of them fights on A) while ${pairText(moved)} runs on B`,
-      variant: 'V5 lost place (the moved match\'s competitor is elsewhere)', notice: await notice(), courtB: await courtState(B),
+      variant: 'V5 start checked first (the moved match\'s competitor is elsewhere)', notice: await notice(), courtB: await courtState(B),
       runningOnB: await runningOnCourt(H, 'B'), shot: await shot(B, 'court-B-start-refused-competitor-busy') });
   });
 
@@ -357,7 +358,7 @@ test.describe('moved-match', () => {
   // Relies on what the main test leaves: A's first Individual bout still
   // running, and step 7's match, which names one of its competitors, waiting
   // on B.
-  test.fixme('bc-stpf: a Start the server would refuse leaves the running bout running and shows why', async () => {
+  test('bc-stpf: a Start the server would refuse leaves the running bout running and shows why', async () => {
     const onA = await runningOnCourt(H, 'A');
     expect(onA, "court A's first Individual bout is still running").toHaveLength(1);
     const busy = [onA[0].shiro, onA[0].aka];
@@ -378,12 +379,13 @@ test.describe('moved-match', () => {
       blocked = r ? { shiro: r.names[0], aka: r.names[1] } : null;
       return !!blocked;
     }, { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
+    const startCheck = B.waitForResponse((r) => r.url().includes('/start-check') && r.request().method() === 'GET', { timeout: 10_000 });
     await startButton(B, blocked).tap();
+    await startCheck;
     const refusal = B.locator('[role="alert"], .toast').filter({ hasText: /is fighting now in .+ on Shiaijo A\. Finish that match first\./ }).first();
     await expect(refusal).toBeVisible({ timeout: 10_000 });
-    // Deliberate: the running bout must STAY running, and a late send back would
-    // pass a single read, so the time is the evidence.
-    await B.waitForTimeout(1500);
+    // The check's answer, then the refusal, are the evidence that nothing was
+    // sent back: the check is made before any send back.
     expect(await runs(moved), 'the moved match is still running on B').toBe(true);
     expect(await slotMarks(B, 'shiro')).toEqual(marks);
     const onB = await runningOnCourt(H, 'B');
@@ -394,7 +396,9 @@ test.describe('moved-match', () => {
     await A.getByRole('button', { name: 'Send back to queue' }).tap();
     await hastyShiaijoConfirm(A);
     await expect.poll(() => liveBout(A), { timeout: 10_000 }).toBeNull();
+    const acceptedCheck = B.waitForResponse((r) => r.url().includes('/start-check') && r.request().method() === 'GET', { timeout: 10_000 });
     await startButton(B, blocked).tap();
+    await acceptedCheck;
     await expect.poll(() => runs(blocked), { timeout: EXPECT_TIMEOUT_MS }).toBe(true);
     const onBafter = await runningOnCourt(H, 'B');
     expect(onBafter).toHaveLength(1);

@@ -1,0 +1,225 @@
+// bc-stpf: API.checkStart asks GET .../start-check whether a pick would start
+// once the bout running on its court is sent back. A direct read, bounded by
+// START_CHECK_TIMEOUT_MS, that never throws and never enters the outbox:
+// {ok}, {refused: Error carrying the server's sentence} for a definite answer
+// (a 409, 401, 404 or other 4xx), or {unknown} when there is none.
+// API.startCheckUntrusted says when an answer could not be trusted.
+
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { API, START_CHECK_TIMEOUT_MS } from '../api_client.jsx';
+
+function reply(status, body) {
+  return vi.fn(() => Promise.resolve({
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: () => null },
+    json: () => Promise.resolve(body),
+  }));
+}
+
+describe('API.checkStart', () => {
+  let originalFetch;
+  beforeEach(() => { originalFetch = global.fetch; });
+  afterEach(() => { global.fetch = originalFetch; vi.useRealTimers(); });
+
+  it('GETs the start-check URL for the court with the password, and answers ok on a 200', async () => {
+    global.fetch = reply(200, { ok: true });
+    await expect(API.checkStart('c 1', 'Pool A-1', 'A/1', 'secret')).resolves.toEqual({ ok: true });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe('/api/competitions/c%201/matches/Pool%20A-1/start-check?court=A%2F1');
+    expect(opts.method).toBe('GET');
+    expect(opts.headers['X-Tournament-Password']).toBe('secret');
+    expect(opts.body).toBeUndefined();
+  });
+
+  it('never enters the outbox', async () => {
+    global.fetch = reply(200, { ok: true });
+    const before = API.unsentWrites().total;
+    await API.checkStart('c1', 'm1', 'A', 'secret');
+    expect(API.unsentWrites().total).toBe(before);
+  });
+
+  it('a 409 ineligible_competitor is a refusal carrying reasonHuman', async () => {
+    const sentence = 'Alice is fighting now in Pool A · Match 3 on Shiaijo B. Finish that match first.';
+    global.fetch = reply(409, { error: 'ineligible_competitor', playerId: 'p1', reason: 'running elsewhere', reasonHuman: sentence });
+    const res = await API.checkStart('c1', 'm1', 'A', 'secret');
+    expect(res.refused).toBeInstanceOf(Error);
+    expect(res.refused.message).toBe(sentence);
+    expect(res.ok).toBeUndefined();
+  });
+
+  it('a 409 match_not_scheduled is a refusal carrying reasonHuman', async () => {
+    const sentence = 'This match has already started or finished on another device. Check the court\'s list.';
+    global.fetch = reply(409, { error: 'match_not_scheduled', matchId: 'm1', status: 'running', reasonHuman: sentence });
+    const res = await API.checkStart('c1', 'm1', 'A', 'secret');
+    expect(res.refused.message).toBe(sentence);
+  });
+
+  it('a 409 match_on_other_court is a refusal carrying reasonHuman', async () => {
+    const sentence = 'This match was moved to Shiaijo B.';
+    global.fetch = reply(409, { error: 'match_on_other_court', matchId: 'm1', court: 'B', reasonHuman: sentence });
+    const res = await API.checkStart('c1', 'm1', 'A', 'secret');
+    expect(res.refused.message).toBe(sentence);
+  });
+
+  it('a 401 is a refusal telling the operator to sign in again', async () => {
+    global.fetch = reply(401, { error: 'invalid admin password' });
+    const res = await API.checkStart('c1', 'm1', 'A', 'secret');
+    expect(res.refused).toBeInstanceOf(Error);
+    expect(res.refused.message).toBe('The password was not accepted. Sign in again, then start the match.');
+    expect(res.ok).toBeUndefined();
+    expect(res.unknown).toBeUndefined();
+  });
+
+  // A definite answer that the start would fail is a refusal, not a question:
+  // asked, the operator could send the running bout back for a start the
+  // server then refuses, leaving the court empty.
+  it('a 404 (the match or its competition is gone) is a refusal saying so', async () => {
+    global.fetch = reply(404, { error: 'match not found' });
+    const res = await API.checkStart('c1', 'm1', 'A', 'secret');
+    expect(res.refused).toBeInstanceOf(Error);
+    expect(res.refused.message).toBe("This match is no longer in the draw. Check the court's list.");
+    expect(res.unknown).toBeUndefined();
+  });
+
+  it('another 4xx is a refusal carrying the server\'s sentence', async () => {
+    global.fetch = reply(400, { error: 'court is required' });
+    const res = await API.checkStart('c1', 'm1', 'A', 'secret');
+    expect(res.refused.message).toBe('court is required');
+    expect(res.unknown).toBeUndefined();
+  });
+
+  it.each([
+    ['a 500', 500, { error: 'internal error' }],
+    ['a 503', 503, {}],
+    ['a 429', 429, {}],
+    ['a 403 (the tournament record not usable yet)', 403, {}],
+  ])('%s is unknown', async (_name, status, body) => {
+    global.fetch = reply(status, body);
+    await expect(API.checkStart('c1', 'm1', 'A', 'secret')).resolves.toEqual({ unknown: true });
+  });
+
+  it('a network failure is unknown', async () => {
+    global.fetch = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')));
+    await expect(API.checkStart('c1', 'm1', 'A', 'secret')).resolves.toEqual({ unknown: true });
+  });
+
+  it('no answer within START_CHECK_TIMEOUT_MS is unknown', async () => {
+    expect(START_CHECK_TIMEOUT_MS).toBe(1500);
+    vi.useFakeTimers();
+    global.fetch = vi.fn((_url, opts) => new Promise((_resolve, reject) => {
+      opts.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+    }));
+    let settled = null;
+    const p = API.checkStart('c1', 'm1', 'A', 'secret').then((r) => { settled = r; });
+    await vi.advanceTimersByTimeAsync(START_CHECK_TIMEOUT_MS - 1);
+    expect(settled).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    await p;
+    expect(settled).toEqual({ unknown: true });
+  });
+
+  it('a body that stalls past the deadline is unknown too', async () => {
+    vi.useFakeTimers();
+    global.fetch = vi.fn(() => Promise.resolve({
+      ok: true, status: 200, headers: { get: () => null },
+      json: () => new Promise(() => {}),
+    }));
+    let settled = null;
+    const p = API.checkStart('c1', 'm1', 'A', 'secret').then((r) => { settled = r; });
+    await vi.advanceTimersByTimeAsync(START_CHECK_TIMEOUT_MS);
+    await p;
+    expect(settled).toEqual({ unknown: true });
+  });
+});
+
+describe('API.startCheckUntrusted', () => {
+  let originalFetch;
+  let onLine;
+  let heldSends;
+  // A send that waits for an answer, so the write stays in the outbox. The
+  // outbox sends one write at a time: afterEach fails every held send, so the
+  // next test's flush is not stuck behind this one's.
+  const holdSends = () => {
+    global.fetch = vi.fn(() => new Promise((_resolve, reject) => { heldSends.push(reject); }));
+  };
+  beforeEach(() => {
+    originalFetch = global.fetch;
+    heldSends = [];
+    onLine = vi.spyOn(window.navigator, 'onLine', 'get').mockReturnValue(true);
+  });
+  afterEach(async () => {
+    heldSends.forEach((reject) => reject(new TypeError('Failed to fetch')));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    API.clearQueue();
+    global.fetch = originalFetch;
+    onLine.mockRestore();
+  });
+
+  it('is false online with nothing of the competition unsent', () => {
+    expect(API.startCheckUntrusted('c-none')).toBe(false);
+  });
+
+  it('is true when the browser says it is offline', () => {
+    onLine.mockReturnValue(false);
+    expect(API.startCheckUntrusted('c-none')).toBe(true);
+  });
+
+  it('is true while the outbox holds a write of the competition, false for another competition', async () => {
+    holdSends();
+    await API.revertMatchToQueue('c-held', 'm9', 'secret');
+    expect(API.startCheckUntrusted('c-held')).toBe(true);
+    expect(API.startCheckUntrusted('c-other')).toBe(false);
+  });
+
+  // A scoring tap moves points, never a status or a bar, so it does not count.
+  const tap = { kind: 'ippon', side: 'a', letter: 'M' };
+
+  it('does not count a scoring tap held in the outbox', () => {
+    holdSends();
+    API.recordTap('c-tap', 'm1', tap, 'secret', null);
+    expect(API.pendingTaps('c-tap', 'm1')).toHaveLength(1);
+    expect(API.startCheckUntrusted('c-tap')).toBe(false);
+  });
+
+  // Only a write that can move a match's status, court or sides, or a bar,
+  // makes the check untrustworthy: a lineup, member or time write held for a
+  // while must not make every pick ask the operator.
+  it.each([
+    ['a team lineup', (c) => API.putTeamLineup(c, 't1', 1, [{ position: 1, name: 'Ann' }], 'secret')],
+    ['a match lineup', (c) => API.putMatchLineup(c, 't1', 'm1', [{ position: 1, name: 'Ann' }], 'secret')],
+    ['a team member', (c) => API.addTeamMember(c, 't1', 'Ann', 'secret')],
+    ['a match time', (c) => API.updateMatchTime(c, 'm1', '10:30', 'secret')],
+  ])('does not count %s held in the outbox', async (_what, write) => {
+    holdSends();
+    const comp = `c-${_what.replace(/ /g, '-')}`;
+    await write(comp);
+    // The write is in the outbox, so the false below is the kind's, not an
+    // empty queue's.
+    expect(API.unsentWrites().total).toBeGreaterThan(0);
+    expect(API.startCheckUntrusted(comp)).toBe(false);
+  });
+
+  it.each([
+    ['a decision', (c) => API.recordDecision(c, 'm1', { decision: 'kiken', decisionBy: 'A' }, 'secret')],
+    ['a reinstatement', (c) => API.reinstateCompetitor(c, 'p1', 'secret')],
+    ['a pool-rank override', (c) => API.overridePoolRanks(c, 'Pool A', ['p1', 'p2'], 'secret', false)],
+    ['a reopen', (c) => API.reopenMatch(c, 'm1', 'secret')],
+    ['a send back', (c) => API.revertMatchToQueue(c, 'm1', 'secret')],
+    ['a court move', (c) => API.moveMatchCourt(c, 'm1', 'B', 'secret')],
+  ])('counts %s held in the outbox', async (_what, write) => {
+    holdSends();
+    const comp = `c-${_what.replace(/ /g, '-')}`;
+    await write(comp);
+    expect(API.startCheckUntrusted(comp)).toBe(true);
+  });
+
+  it('is true once a send failed on the network, whatever is held', async () => {
+    global.fetch = vi.fn(() => Promise.reject(new TypeError('Failed to fetch')));
+    API.recordTap('c-flag', 'm1', tap, 'secret', null);
+    await vi.waitFor(() => expect(API.startCheckUntrusted('c-flag')).toBe(true));
+    // Only a tap is held, which the queue scan skips: the failed send says so.
+    expect(API.pendingTaps('c-flag', 'm1')).toHaveLength(1);
+  });
+});

@@ -972,7 +972,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 					// naming an internal id and no remedy. Only
 					// *AlreadyIneligibleError is reachable here, never
 					// *IneligibleCompetitorError: bulk-score never calls
-					// StartMatchTx/checkEligibilityExcludingMatch (the only
+					// StartMatchTx/startSidesGateTx (the only
 					// producers of that type besides the simultaneity gate,
 					// which this write path also never reaches), only the K2/K3
 					// concurrent-withdrawal checks inside
@@ -1346,7 +1346,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// historically accepted longer values in engine tests (e.g.
 		// "Court Z"). 32 is generous enough not to break any real
 		// caller while rejecting abusive payloads.
-		if err := validateMaxLen("court", req.Court, MaxLenMatchScheduledAt); err != nil {
+		if err := validateMaxLen("court", req.Court, MaxLenMatchCourt); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -1433,7 +1433,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 		if err := eng.RevertMatchToQueue(id, mid, tag.tagInto(engine.ForceOptions{})); err != nil {
 			if errors.Is(err, engine.ErrMatchAlreadyCompleted) {
-				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+				c.JSON(http.StatusConflict, gin.H{"error": "match_completed", "message": err.Error()})
 				return
 			}
 			var notFoundErr *engine.NotFoundError
@@ -1452,6 +1452,12 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 
 		c.Status(http.StatusOK)
 	})
+
+	// GET /competitions/:id/matches/:mid/start-check (bc-stpf): the court
+	// console's check before it sends the running bout back for another
+	// start. Not in isSelfRunMainGatedConfigRoute, like revert-to-queue
+	// above; see registerStartCheckHandler.
+	registerStartCheckHandler(r, eng, store)
 
 	// POST /competitions/:id/matches/:mid/reopen
 	// Sanctioned "Reopen match" for a COMPLETED kachinuki team match
@@ -2960,6 +2966,128 @@ func respondCourtBusy(c *gin.Context, store CompetitionStore, err *engine.CourtB
 	})
 }
 
+// respondStartRefusal writes the 409 ineligible_competitor body a start
+// refused for one of its sides gets. It is ONE place (bc-stpf) because two
+// doors answer it and the console reads both the same way: the /score start
+// and GET .../start-check, which must give the byte-identical body for the
+// same state.
+//
+// bc-rawm/bc-cse: reasonHuman is ONE operator sentence, never the raw
+// kendo-term reason. Simultaneous is how this error type tells its two
+// producers apart: the simultaneity gate
+// (checkSimultaneousMatchTx) already builds a complete operator
+// sentence into Reason itself, while a barred-status refusal
+// (engine.BarredSides) needs the shared builder to name the match and the
+// remedy -- even when that refusal's own MatchID is empty (a status set
+// directly via POST /competitor-status, with no match tied to it), which is
+// why MatchID emptiness alone can no longer be the test.
+func respondStartRefusal(c *gin.Context, store CompetitionStore, compID, matchID string, err *engine.IneligibleCompetitorError) {
+	reasonHuman := err.Reason
+	switch {
+	case err.Simultaneous:
+		// reasonHuman stays err.Reason, already complete.
+	case err.BothSidesBarred:
+		// bc-cse item 10: neither side has an opponent to hand the
+		// decision to, so the single-sided builder's remedy clauses do
+		// not apply.
+		reasonHuman = bothSidesBarredReasonHuman(store, compID, matchID)
+	default:
+		reasonHuman = reasonHumanForBarredCompetitor(store, compID, matchID, err.PlayerID, err.Reason, err.MatchID, err.Decision)
+	}
+	c.JSON(http.StatusConflict, gin.H{
+		"error":       "ineligible_competitor",
+		"playerId":    err.PlayerID,
+		"reason":      err.Reason,
+		"reasonHuman": reasonHuman,
+	})
+}
+
+// matchNotScheduledReasonHuman is the start check's sentence for a pick that
+// is no longer waiting: the console shows it as it is.
+const matchNotScheduledReasonHuman = "This match has already started or finished on another device. Check the court's list."
+
+// matchOnOtherCourtReasonHuman is the start check's sentence when the pick is
+// assigned to another court: the console operator learns it was moved and
+// should refresh the court list.
+const matchOnOtherCourtReasonHuman = "This match was moved to another court. Check the court's list."
+
+// registerStartCheckHandler registers GET
+// /competitions/:id/matches/:mid/start-check?court=<court> (bc-stpf): would
+// starting mid be refused for its status, court or competitors once the bout
+// now running on the console's court is sent back to the queue? The court
+// console asks it before it sends that bout back, so a start the server would
+// refuse leaves the running bout running. The console names its court
+// (required `court` query parameter; empty for the unassigned bucket), and
+// when it is non-empty the check leaves out every match running on that court;
+// an empty court leaves out nothing. A pick that was moved to another court
+// since the console last refreshed would leave that bout sent back for a start
+// the server then refuses, so a court that is not the pick's stored court is
+// refused here with match_on_other_court.
+//
+// A GET: it writes nothing and is idempotent, so it carries no writeId or
+// basis and never goes through the outbox. Answers 200 {ok: true}; 409
+// ineligible_competitor with the /score start's own body (respondStartRefusal);
+// 409 match_not_scheduled when the pick is running or finished; 409
+// match_on_other_court when the pick is on another court; 404 for an unknown
+// competition or match.
+//
+// Intentionally NOT in isSelfRunMainGatedConfigRoute: the start check is
+// operational play (same as start-match and revert-to-queue), not organiser
+// configuration, so it stays accessible to court operators in self-run mode.
+func registerStartCheckHandler(r *gin.RouterGroup, eng ScoringEngine, store CompetitionStore) {
+	r.GET("/competitions/:id/matches/:mid/start-check", func(c *gin.Context) {
+		id, ok := requireValidCompID(c)
+		if !ok {
+			return
+		}
+		mid := c.Param("mid")
+		if err := validateMaxLen("matchId", mid, MaxLenMatchID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		court, ok := c.GetQuery("court")
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "court is required"})
+			return
+		}
+		if err := validateMaxLen("court", court, MaxLenMatchCourt); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		err := eng.CheckStartAfterSendBack(id, mid, court)
+		if err == nil {
+			c.JSON(http.StatusOK, gin.H{"ok": true})
+			return
+		}
+		var ineligErr *engine.IneligibleCompetitorError
+		if errors.As(err, &ineligErr) {
+			respondStartRefusal(c, store, id, mid, ineligErr)
+			return
+		}
+		var notScheduledErr *engine.MatchNotScheduledError
+		if errors.As(err, &notScheduledErr) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":       "match_not_scheduled",
+				"matchId":     notScheduledErr.MatchID,
+				"status":      notScheduledErr.Status,
+				"reasonHuman": matchNotScheduledReasonHuman,
+			})
+			return
+		}
+		var otherCourtErr *engine.MatchOnOtherCourtError
+		if errors.As(err, &otherCourtErr) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":       "match_on_other_court",
+				"matchId":     otherCourtErr.MatchID,
+				"court":       otherCourtErr.Court,
+				"reasonHuman": matchOnOtherCourtReasonHuman,
+			})
+			return
+		}
+		respondEngineError(c, err)
+	})
+}
+
 // matchStatusFromStore is the non-transactional status read used to detect a
 // correction (a completed -> completed overwrite) BEFORE the transaction begins,
 // letting the pre-tx court gate skip it. A benign TOCTOU with a concurrent
@@ -3871,34 +3999,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			}
 			var ineligErr *engine.IneligibleCompetitorError
 			if errors.As(engErr, &ineligErr) {
-				// bc-rawm/bc-cse: reasonHuman is ONE operator sentence, never
-				// the raw kendo-term reason. Simultaneous is how this error
-				// type tells its two producers apart: the simultaneity gate
-				// (checkSimultaneousMatchTx) already builds a complete
-				// operator sentence into Reason itself, while a barred-status
-				// refusal (engine.BarredSides) needs the shared builder to
-				// name the match and the remedy -- even when that refusal's
-				// own MatchID is empty (a status set directly via
-				// POST /competitor-status, with no match tied to it), which
-				// is why MatchID emptiness alone can no longer be the test.
-				reasonHuman := ineligErr.Reason
-				switch {
-				case ineligErr.Simultaneous:
-					// reasonHuman stays ineligErr.Reason, already complete.
-				case ineligErr.BothSidesBarred:
-					// bc-cse item 10: neither side has an opponent to hand the
-					// default win to, so the single-sided builder's remedy
-					// clauses do not apply.
-					reasonHuman = bothSidesBarredReasonHuman(store, id, mid)
-				default:
-					reasonHuman = reasonHumanForBarredCompetitor(store, id, mid, ineligErr.PlayerID, ineligErr.Reason, ineligErr.MatchID, ineligErr.Decision)
-				}
-				c.JSON(http.StatusConflict, gin.H{
-					"error":       "ineligible_competitor",
-					"playerId":    ineligErr.PlayerID,
-					"reason":      ineligErr.Reason,
-					"reasonHuman": reasonHuman,
-				})
+				respondStartRefusal(c, store, id, mid, ineligErr)
 				return
 			}
 			var alreadyIneligErr *engine.AlreadyIneligibleError

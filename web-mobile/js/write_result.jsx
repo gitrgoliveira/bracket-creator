@@ -908,6 +908,13 @@ export function startWhileStartingMessage({ label }) {
     return `${label} is still being started on this court. Start this match once it has.`;
 }
 
+// A Send back or a court move tapped while a pick is still checking its start
+// (bc-stpf): the pick holds the running bout it may send back, so the tap is
+// refused, and said, rather than raced.
+export function courtChangeWhileStartingMessage({ label }) {
+    return `${label} is still being started on this court. Try again once it has.`;
+}
+
 // The same refusal once the start it named has LANDED (bc-aadv, item 4). While
 // that start was out the sentence above was true and was derived from it. When it
 // lands the court has a running bout, the refused match is NOT started on its own

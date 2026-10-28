@@ -60,6 +60,13 @@ const CONSOLE_ALLOWLIST = [
     request: (r) => !!r && (/\/reopen$/.test(r.url) || writeStatus(r.postData) === 'running'),
   },
   {
+    reason: 'The server refuses a start before anything is sent back: a competitor fighting elsewhere or barred, the match no longer waiting in the queue, or on another court; the operator sees the reason on the picked match.',
+    text: /^Failed to load resource: the server responded with a status of 409 \(Conflict\)$/,
+    url: /\/api\/competitions\/[^/]+\/matches\/[^/]+\/start-check\?/,
+    code: /^(ineligible_competitor|match_not_scheduled|match_on_other_court)$/,
+    codeUnreadable: true,
+  },
+  {
     reason: 'The organiser edits a competitor to the same name AND dojo as another one on the roster (organiser-roster journey): the server refuses the participant PUT and the Edit dialog shows its message. Same name in another dojo is not refused.',
     text: /^Failed to load resource: the server responded with a status of 409 \(Conflict\)$/,
     url: /\/api\/competitions\/[^/]+\/participants\/[^/]+$/,

@@ -603,9 +603,6 @@ function _attachSendBackDisplayPutBack(compID, matchID, match, answer) {
             if (body && body.discarded) putBack();
         },
         (err) => {
-            // When the refusal says the match is already completed, do not tell
-            // the display it is running. The display takes the server copy at
-            // its next refetch.
             if (_isMatchAlreadyCompletedRefusal(err)) return;
             putBack();
         },

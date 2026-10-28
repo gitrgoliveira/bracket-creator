@@ -33,19 +33,17 @@ type IneligibleCompetitorError struct {
 	// for a barred-status producer: a status set directly via
 	// POST /competitor-status carries no matchId. So MatchID alone cannot
 	// tell that producer apart from the OTHER producer, the simultaneity
-	// gate (checkSimultaneousMatchTx), which is not about a barred
-	// status at all -- Simultaneous is the explicit discriminator a handler
-	// checks instead (see reasonHumanForBarredCompetitor,
-	// mobileapp/errors.go).
+	// gate (checkSimultaneousMatchTx), which is not about a barred status at
+	// all -- Simultaneous is the explicit discriminator a handler checks
+	// instead (see reasonHumanForBarredCompetitor, mobileapp/errors.go).
 	MatchID  string
 	Decision string
 	// Simultaneous is true ONLY when this error was produced by the
-	// simultaneity gate (checkSimultaneousMatchTx), whose Reason is
-	// already a complete operator sentence. False (including for a
-	// barred-status refusal with no recorded MatchID) for every other
-	// producer, which needs reasonHumanForBarredCompetitor to build one
-	// instead of a handler echoing a raw, possibly free-text Reason to the
-	// operator.
+	// simultaneity gate (checkSimultaneousMatchTx), whose Reason is already
+	// a complete operator sentence. False (including for a barred-status
+	// refusal with no recorded MatchID) for every other producer, which
+	// needs reasonHumanForBarredCompetitor to build one instead of a
+	// handler echoing a raw, possibly free-text Reason to the operator.
 	Simultaneous bool
 	// BothSidesBarred is true when eligibilityErrorForSides found BOTH
 	// sides barred, not just the one this error otherwise names (bc-cse
@@ -447,9 +445,9 @@ func (e *Engine) lookupMatchCourt(compID, matchID string) (string, error) {
 // bracket match, which lives in bracket.json's own slice entirely, never
 // pool-matches.csv).
 //
-// checkSimultaneousMatchTx uses this to resolve the CURRENT match's
-// identity from its own stored SideAID/SideBID instead of re-deriving it from
-// the bare SideA/SideB names via a roster scan (resolvePlayerIDs/
+// checkSimultaneousMatchTx uses this to resolve the CURRENT match's identity
+// from its own stored SideAID/SideBID instead of re-deriving it from the
+// bare SideA/SideB names via a roster scan (resolvePlayerIDs/
 // lookupPlayerID): a pool row already carries its ids, so reading them
 // directly is strictly better than guessing from a name that two different
 // competitors can share. Before this, two "Sam"s from different dojos would
@@ -614,9 +612,9 @@ func (e *Engine) lookupExistingResultIn(h state.StoreTx, compID, matchID string)
 // namesake the roster lists first. The eligibility gate then read the WRONG
 // competitor's status, in both directions -- it refused an eligible competitor's
 // start because their namesake had withdrawn, and it let a withdrawn competitor
-// start because their namesake had not. checkSimultaneousMatchTx was
-// converted to the row's own ids for exactly this reason (see findPoolMatch);
-// this is the other half of the same gate.
+// start because their namesake had not. checkSimultaneousMatchTx was converted to
+// the row's own ids for exactly this reason (see findPoolMatch); this is the
+// other half of the same gate.
 func (e *Engine) matchSideParticipantIDs(h state.StoreTx, compID, matchID string) ([]string, error) {
 	var sideA, sideB, idA, idB string
 	// Load errors are returned as they are (see lookupExistingResult): an

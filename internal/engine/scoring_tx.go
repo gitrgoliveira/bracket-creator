@@ -748,14 +748,14 @@ func (e *Engine) checkSimultaneousMatchTx(h state.StoreTx, compID, matchID strin
 	// bc-cse: the operator sentence for the gate itself (comp/bracket are
 	// already the ones this call needs to name the OTHER match, m/bm below,
 	// not matchID). comp is loaded LAZILY, inside the closure, not above:
-	// every caller of checkSimultaneousMatchTx returns immediately
-	// on the first conflict found, so this closure runs AT MOST ONCE per
-	// call, and loading comp here means the common case (no conflict) never
-	// pays for it at all. comp is still best-effort: OperatorMatchLabel
-	// degrades to the pool's own name on a nil comp (no League-heading
-	// override), so a load failure still gates the write correctly, only the
-	// sentence's match name gets plainer -- but the error is logged rather
-	// than discarded, per the errcheck rule.
+	// every caller of checkSimultaneousMatchTx returns immediately on the
+	// first conflict found, so this closure runs AT MOST ONCE per call, and
+	// loading comp here means the common case (no conflict) never pays for
+	// it at all. comp is still best-effort: OperatorMatchLabel degrades to
+	// the pool's own name on a nil comp (no League-heading override), so a
+	// load failure still gates the write correctly, only the sentence's
+	// match name gets plainer -- but the error is logged rather than
+	// discarded, per the errcheck rule.
 	simultaneousReason := func(name, otherMatchID, court string) string {
 		comp, err := h.LoadCompetition(compID)
 		if err != nil {

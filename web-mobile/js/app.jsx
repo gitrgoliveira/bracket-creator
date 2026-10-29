@@ -15,7 +15,7 @@ import { useOpenedTapGuard } from './tap_guard.jsx';
 import { SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
 import { pushToast } from './toast_queue.jsx';
 import { sharesCourtDay, sharesDay } from './court_queue.jsx';
-import { courtPaceLookup } from './court_pace.jsx';
+import { courtPaceLookup, paceClockNow } from './court_pace.jsx';
 
 const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC, useMemo: useM } = React;
 
@@ -850,10 +850,7 @@ function App() {
 
   const paceLookup = useM(() => {
     if (mode !== "viewer") return null;
-    const d = new Date();
-    const now = d.getHours() * 60 + d.getMinutes();
-    const today = `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
-    return courtPaceLookup(tournament?.competitions, { now, today });
+    return courtPaceLookup(tournament?.competitions, paceClockNow());
   }, [tournament, nowTick, mode]);
 
   // mp-9ukk Phase 2: display-mode BroadcastChannel consumer.

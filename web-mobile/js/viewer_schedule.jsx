@@ -12,7 +12,7 @@ import { resultRecencyDesc } from './result_recency.jsx';
 import { barredNameMark } from './barred_chip.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
 import { withCourtQueuePositions } from './court_queue.jsx';
-import { paceKey } from './court_pace.jsx';
+import { paceDisplayOf, PaceTime } from './court_pace.jsx';
 
 const { useState, useMemo, useRef: useRefV } = React;
 const EmptyState = window.EmptyState;
@@ -347,7 +347,7 @@ export function TWMatch({ m, highlight, onClick, paceLookup }) {
   const queuePill = (window.queueLabelCompact || localQueueLabelCompact)(m);
   const compId = m.compId || m.competitionId || "";
   const matchId = m.id || m.matchId || "";
-  const d = paceLookup?.byMatch?.get(paceKey(compId, matchId))?.display;
+  const d = paceDisplayOf(paceLookup, compId, matchId);
   // Render an interactive <button> only when there is a real click handler;
   // otherwise a plain <div> so the row is not focusable and not announced as a
   // button to keyboard / screen-reader users (a no-op button is confusing).
@@ -356,11 +356,7 @@ export function TWMatch({ m, highlight, onClick, paceLookup }) {
     <Tag className={`tw-match ${m.status === "running" ? "tw-match--running" : ""} ${m.status === "completed" ? "tw-match--done" : ""} ${highlight ? "tw-match--highlight" : ""}`} {...(onClick ? { type: "button", onClick } : {})} style={{ textAlign: "left", border: "none", background: "none", cursor: onClick ? "pointer" : "default" }}>
       <div className="tw-match__meta">
         <div className="tw-match__time">
-          {d?.projected ? (
-            <span className="pace-projected" aria-label={d.ariaLabel}>{d.text}</span>
-          ) : (
-            m.scheduledAt || "-"
-          )}
+          <PaceTime display={d} fallback={m.scheduledAt || "-"} />
         </div>
         <div className="tw-match__phase">{m.phase === "pool" ? poolLabel(m) : m.round}</div>
         {queuePill && (

@@ -2,7 +2,7 @@
 // filterMatchesByCourt, computeCourtPaceStats, CourtPacePanel, suggestRebalances.
 
 import { timeToMinutes } from './admin_schedule_utils.jsx';
-import { projectCourtPace, flatMatchesToPaceEntries, paceDisplay } from './court_pace.jsx';
+import { projectCourtPace, flatMatchesToPaceEntries, paceDisplay, paceClockNow, PaceTime } from './court_pace.jsx';
 
 const { useState: useStateA, useEffect: useEffectA } = React;
 
@@ -147,8 +147,7 @@ export function CourtPacePanel({ byCourt, safeMatchDuration }) {
 
   const suggestion = suggestRebalances(populatedStats, safeMatchDuration);
 
-  const d = new Date();
-  const now = d.getHours() * 60 + d.getMinutes();
+  const { now } = paceClockNow();
 
   const badgeStyle = (drift) => {
     const abs = Math.abs(drift);
@@ -204,11 +203,7 @@ export function CourtPacePanel({ byCourt, safeMatchDuration }) {
                   <div style={{ marginTop: 2 }}>{statusLabel(stat, drift)}</div>
                   {display && (
                     <div style={{ marginTop: 2, color: "var(--ink-2)" }}>
-                      Next {display.projected ? (
-                        <span className="pace-projected" aria-label={display.ariaLabel}>{display.text}</span>
-                      ) : (
-                        display.text
-                      )}
+                      Next <PaceTime display={display} fallback={display.text} />
                     </div>
                   )}
                 </div>

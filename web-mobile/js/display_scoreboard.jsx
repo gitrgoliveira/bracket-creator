@@ -11,7 +11,7 @@ import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPWFrom, teamName
 import { isBarredMatch } from './ineligible_match.jsx';
 import { subBoutHasResult } from './team_default_credit.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
-import { courtPaceLookup, paceKey } from './court_pace.jsx';
+import { courtPaceLookup, paceClockNow, paceDisplayOf, PaceTime } from './court_pace.jsx';
 
 const { useMemo: useMD, useState: useStateD, useEffect: useEffectD } = React;
 
@@ -280,13 +280,7 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
             {next && (
                 <div style={{ display: "flex", alignItems: "center", gap: "1.5vw", borderTop: "1px dashed #d1d5db", paddingTop: "1.6vh", marginTop: "1.6vh" }}>
                     <span style={{ fontSize: "1.8vh", letterSpacing: "0.12em", color: "var(--ink-3)", fontWeight: 700 }}>NEXT</span>
-                    {(() => {
-                        const paceEntry = pace && pace.byMatch ? pace.byMatch.get(paceKey(next._comp?.id, next.id)) : null;
-                        const display = paceEntry && paceEntry.display;
-                        return display && display.projected ? (
-                            <span className="pace-projected" aria-label={display.ariaLabel} data-testid="tvd-next-time" style={{ fontSize: "2.6vh" }}>{display.text}</span>
-                        ) : null;
-                    })()}
+                    <PaceTime display={paceDisplayOf(pace, next._comp?.id, next.id)} data-testid="tvd-next-time" style={{ fontSize: "2.6vh" }} />
                     <NextPair
                         shiro={<NumberedName side="shiro" {...sideLabelParts(next.sideB, next._comp?.withZekkenName)} />}
                         aka={<NumberedName side="aka" {...sideLabelParts(next.sideA, next._comp?.withZekkenName)} />}
@@ -623,13 +617,7 @@ function TvIndividualBoard({ tournament, court, linkState = 'connected', promote
             {next && !nextPool && (
                 <div style={{ display: "flex", alignItems: "center", gap: "1.5vw", borderTop: "1px dashed #d1d5db", paddingTop: "1.6vh", marginTop: "1.6vh" }}>
                     <span style={{ fontSize: "1.8vh", letterSpacing: "0.12em", color: "var(--ink-3)", fontWeight: 700 }}>NEXT</span>
-                    {(() => {
-                        const paceEntry = pace && pace.byMatch ? pace.byMatch.get(paceKey(next._comp?.id, next.id)) : null;
-                        const display = paceEntry && paceEntry.display;
-                        return display && display.projected ? (
-                            <span className="pace-projected" aria-label={display.ariaLabel} data-testid="tvd-next-time" style={{ fontSize: "2.6vh" }}>{display.text}</span>
-                        ) : null;
-                    })()}
+                    <PaceTime display={paceDisplayOf(pace, next._comp?.id, next.id)} data-testid="tvd-next-time" style={{ fontSize: "2.6vh" }} />
                     <NextPair
                         shiro={<NumberedName side="shiro" {...sideLabelParts(next.sideB, next._comp?.withZekkenName ?? zekken)} />}
                         aka={<NumberedName side="aka" {...sideLabelParts(next.sideA, next._comp?.withZekkenName ?? zekken)} />}
@@ -678,15 +666,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
         return () => clearInterval(id);
     }, []);
     const pace = useMD(
-        () => {
-            const d = new Date();
-            const now = d.getHours() * 60 + d.getMinutes();
-            const y = d.getFullYear();
-            const m = String(d.getMonth() + 1).padStart(2, "0");
-            const day = String(d.getDate()).padStart(2, "0");
-            const today = `${y}-${m}-${day}`;
-            return courtPaceLookup(competitions, { now, today });
-        },
+        () => courtPaceLookup(competitions, paceClockNow()),
         // paceTick: trigger 60 s pace recomputation
         // oxlint-disable-next-line react-hooks/exhaustive-deps
         [competitions, paceTick]

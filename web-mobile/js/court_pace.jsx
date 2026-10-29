@@ -70,6 +70,29 @@ export function paceKey(competitionId, matchId) {
     return `${competitionId || ""}\u0000${matchId || ""}`;
 }
 
+// paceClockNow: the ONE reading of the wall clock a pace lookup takes, as local
+// minutes of day plus today's date in the canonical DD-MM-YYYY (the format a
+// competition's own `date` carries, which courtPaceLookup compares it with).
+export function paceClockNow(d = new Date()) {
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    return { now: d.getHours() * 60 + d.getMinutes(), today: `${dd}-${mm}-${d.getFullYear()}` };
+}
+
+// paceDisplayOf: the projected-time display of one match, or null when the
+// lookup is absent or holds nothing for it.
+export function paceDisplayOf(lookup, competitionId, matchId) {
+    return lookup?.byMatch?.get(paceKey(competitionId, matchId))?.display || null;
+}
+
+// PaceTime: the projected time as a marked span when the display is projected,
+// otherwise `fallback` (the planned time). Extra props land on the span.
+export function PaceTime({ display, fallback = null, ...rest }) {
+    return display?.projected ? (
+        <span className="pace-projected" aria-label={display.ariaLabel} {...rest}>{display.text}</span>
+    ) : fallback;
+}
+
 // projectCourtPace: projects waiting match starts for ONE court-day.
 // entries: all entries of the court-day in court_queue entry shape (any status).
 // now: current minutes of day.

@@ -98,7 +98,7 @@ function makeScenario({ drift = 15 } = {}) {
   const c1 = {
     id: 'c1',
     name: 'Competition 1',
-    date: '2026-10-29',
+    date: '29-10-2026',
     startTime: '09:00',
     slotMinutes: 5,
     status: 'running',
@@ -109,7 +109,7 @@ function makeScenario({ drift = 15 } = {}) {
   const c2 = {
     id: 'c2',
     name: 'Competition 2',
-    date: '2026-10-29',
+    date: '29-10-2026',
     startTime: '10:00',
     slotMinutes: 5,
     status: 'running',
@@ -143,7 +143,7 @@ describe('Court projected times on court surfaces (bc-pace)', () => {
     vi.setSystemTime(new Date(2026, 9, 29, 10, 40, 0));
     const { c1, c2, m1Done, m1Sched, m2Done, m2Sched } = makeScenario({ drift: 15 });
 
-    const lookup = courtPaceLookup([c1, c2], { now: 10 * 60 + 40, today: '2026-10-29' });
+    const lookup = courtPaceLookup([c1, c2], { now: 10 * 60 + 40, today: '29-10-2026' });
     const expectedEntry = lookup.byMatch.get(paceKey('c1', 'c1-m2'));
     expect(expectedEntry).toBeDefined();
     expect(expectedEntry.display.projected).toBe(true);
@@ -179,7 +179,7 @@ describe('Court projected times on court surfaces (bc-pace)', () => {
     vi.setSystemTime(new Date(2026, 9, 29, 10, 25, 0));
     const { c1, c2, m1Done, m1Sched, m2Done, m2Sched } = makeScenario({ drift: 0 });
 
-    const lookup = courtPaceLookup([c1, c2], { now: 10 * 60 + 25, today: '2026-10-29' });
+    const lookup = courtPaceLookup([c1, c2], { now: 10 * 60 + 25, today: '29-10-2026' });
     const expectedEntry = lookup.byMatch.get(paceKey('c1', 'c1-m2'));
     expect(expectedEntry).toBeDefined();
     expect(expectedEntry.display.projected).toBe(false);

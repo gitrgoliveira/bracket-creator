@@ -33,7 +33,7 @@ import { NumberedName } from './numbered_name.jsx';
 import { sideWord, sideFillClass } from './side_cell.jsx';
 import { competitorMatchesQuery } from './competitor_search.jsx';
 import { buildWatchlistLink } from './watchlist_link.jsx';
-import { paceKey } from './court_pace.jsx';
+import { paceDisplayOf, PaceTime } from './court_pace.jsx';
 
 // The one line the picker and the hero-empty state show while a competition's
 // participants failed to load (rosterAvailable:false on the aggregate, see
@@ -262,12 +262,9 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick, paceL
   const finished = nextMatch.status === "completed";
   const compId = nextMatch.compId || nextMatch.competitionId || "";
   const matchId = nextMatch.id || nextMatch.matchId || "";
-  const d = paceLookup?.byMatch?.get(paceKey(compId, matchId))?.display;
-  const timeNode = running ? "Now" : (d?.projected ? (
-    <span className="pace-projected" aria-label={d.ariaLabel}>{d.text}</span>
-  ) : (
-    nextMatch.scheduledAt || "Time TBA"
-  ));
+  const timeNode = running ? "Now" : (
+    <PaceTime display={paceDisplayOf(paceLookup, compId, matchId)} fallback={nextMatch.scheduledAt || "Time TBA"} />
+  );
   const whenLine = finished ? "" : (
     <>
       {timeNode}

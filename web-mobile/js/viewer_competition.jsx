@@ -11,7 +11,7 @@ import { poolNameOf, isPoolDaihyosenBout, teamMatchTypeFor } from './pool_ids.js
 import { NumberedName } from './numbered_name.jsx';
 import { resultRecencyDesc } from './result_recency.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
-import { paceKey } from './court_pace.jsx';
+import { paceDisplayOf, PaceTime } from './court_pace.jsx';
 
 const { useState, useMemo, useRef: useRefV } = React;
 const StatusBadge = window.StatusBadge;
@@ -579,16 +579,10 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
             <div className="my-match__chip">
               <span className="l">Time</span>
               <span className="v">
-                {(() => {
-                  const compId = myUpcoming.compId || myUpcoming.competitionId || c.id || "";
-                  const matchId = myUpcoming.id || myUpcoming.matchId || "";
-                  const d = paceLookup?.byMatch?.get(paceKey(compId, matchId))?.display;
-                  return d?.projected ? (
-                    <span className="pace-projected" aria-label={d.ariaLabel}>{d.text}</span>
-                  ) : (
-                    myUpcoming.scheduledAt || "TBA"
-                  );
-                })()}
+                <PaceTime
+                  display={paceDisplayOf(paceLookup, myUpcoming.compId || myUpcoming.competitionId || c.id || "", myUpcoming.id || myUpcoming.matchId || "")}
+                  fallback={myUpcoming.scheduledAt || "TBA"}
+                />
               </span>
             </div>
           </div>

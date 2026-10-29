@@ -7,7 +7,7 @@ import { NumberedName } from './numbered_name.jsx';
 import { teamIVPWScore } from './bracket.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
 import { isSupplementaryBout } from './pool_ids.jsx';
-import { paceKey } from './court_pace.jsx';
+import { paceDisplayOf, PaceTime } from './court_pace.jsx';
 
 const { useState: useSD, useEffect: useED, useMemo: useMD } = React;
 
@@ -195,14 +195,9 @@ function LobbyMatchCell({ slot, rowKind, paceLookup }) {
     const phase = phaseLabel(match, isBracket, roundIndex, totalRounds, competition?.format);
     const compId = competition?.id || competition?.config?.id || "";
     const matchId = match?.id || match?.ID || "";
-    const d = paceLookup?.byMatch?.get(paceKey(compId, matchId))?.display;
     const prefix = [competition?.name, phase].filter(Boolean).join(' · ');
     const hasTime = Boolean(match.scheduledAt);
-    const timeNode = d?.projected ? (
-        <span className="pace-projected" aria-label={d.ariaLabel}>{d.text}</span>
-    ) : (
-        match.scheduledAt || ""
-    );
+    const timeNode = <PaceTime display={paceDisplayOf(paceLookup, compId, matchId)} fallback={match.scheduledAt || ""} />;
     // NO middle-mark chip in the meta strip (operator ruling): the
     // IndividualScore row below carries X/(E)/(DH) in its own FIK centre,
     // the mark's ONE home; a second copy in the corner was an error.

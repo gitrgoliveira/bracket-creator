@@ -22,7 +22,7 @@ import { sameCompetitor } from './competitor_identity.jsx';
 import { barredNameMark } from './barred_chip.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
-import { paceKey } from './court_pace.jsx';
+import { paceDisplayOf, PaceTime } from './court_pace.jsx';
 
 const { useState, useMemo, useRef: useRefV, useCallback } = React;
 
@@ -137,7 +137,7 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
   const { shiro: teamShiroMark, aka: teamAkaMark } = window.teamMatchMarks ? window.teamMatchMarks(match, isTeam) : { shiro: "", aka: "" };
   const compId = match.compId || match.competitionId || "";
   const matchId = match.id || match.matchId || match.ID || "";
-  const d = paceLookup?.byMatch?.get(paceKey(compId, matchId))?.display;
+  const d = paceDisplayOf(paceLookup, compId, matchId);
 
   return (
     <div className="match-detail-card">
@@ -147,11 +147,7 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
           <span><TermV name="shiaijo">Shiaijo</TermV> {match.court}</span>
           <span>·</span>
           <span>{match.phase === "pool" ? poolLabel(match) : (match.round || "")}</span>
-          {match.scheduledAt && <><span>·</span><span>{d?.projected ? (
-            <span className="pace-projected" aria-label={d.ariaLabel}>{d.text}</span>
-          ) : (
-            match.scheduledAt
-          )}</span></>}
+          {match.scheduledAt && <><span>·</span><span><PaceTime display={d} fallback={match.scheduledAt} /></span></>}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {isRunning && <span className="bc-running">● NOW</span>}
@@ -251,16 +247,12 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
     : null;
   const compId = m.compId || m.competitionId || "";
   const matchId = m.id || m.matchId || "";
-  const d = paceLookup?.byMatch?.get(paceKey(compId, matchId))?.display;
+  const d = paceDisplayOf(paceLookup, compId, matchId);
   return (
     <button type="button" className={`vsched-item ${m.status === "running" ? "vsched-item--running" : ""} ${highlight ? "vsched-item--me" : ""}`} onClick={onClick} data-clickable={onClick ? "" : undefined}>
       <div className="vsched-item__head">
         <span className="vsched-item__time">
-          {d?.projected ? (
-            <span className="pace-projected" aria-label={d.ariaLabel}>{d.text}</span>
-          ) : (
-            m.scheduledAt || "-"
-          )}
+          <PaceTime display={d} fallback={m.scheduledAt || "-"} />
         </span>
         <span className="vsched-item__court">SHIAIJO {m.court}</span>
         {queueLabel && (

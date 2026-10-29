@@ -216,11 +216,7 @@ func buildViewerCompetitionPayloads(store *state.Store, courtFilter string) ([]a
 		queue = append(queue, state.CourtQueueEntriesOf(l.comp, l.poolMatches, l.bracket)...)
 	}
 
-	tournament, err := store.LoadTournament()
-	if err != nil {
-		log.Printf("mobileapp: viewer payload: load tournament: %v", err)
-		tournament = nil
-	}
+	tournament := loadTournamentForSlots(store)
 
 	comps := make([]any, 0, len(ids))
 	for _, l := range loaded {
@@ -437,6 +433,18 @@ func stampViewerEligibility(store *state.Store, compID string, poolMatches []sta
 // stampSlotMinutes sets payload["slotMinutes"] and payload["knockoutSlotMinutes"]
 // from engine.SlotMinutes. A mixed competition holds two different slots, so
 // the knockout one rides along for the JS to use on knockout matches.
+// loadTournamentForSlots reads the tournament for the slot minutes a viewer
+// payload carries; an unreadable one is logged and read as nil, which
+// engine.SlotMinutes tolerates, so the payload never fails for it.
+func loadTournamentForSlots(store *state.Store) *state.Tournament {
+	tournament, err := store.LoadTournament()
+	if err != nil {
+		log.Printf("mobileapp: viewer payload: load tournament: %v", err)
+		return nil
+	}
+	return tournament
+}
+
 func stampSlotMinutes(payload gin.H, comp *state.Competition, tournament *state.Tournament) {
 	if payload == nil {
 		return
@@ -950,12 +958,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			if issues := viewerDataIssues(comp, comp.Players, pools, poolMatches, poolMatchesErr, bracketErr, poolsErr); len(issues) > 0 {
 				payload["dataIssues"] = issues
 			}
-			tournament, err := store.LoadTournament()
-			if err != nil {
-				log.Printf("mobileapp: viewer payload: load tournament: %v", err)
-				tournament = nil
-			}
-			stampSlotMinutes(payload, comp, tournament)
+			stampSlotMinutes(payload, comp, loadTournamentForSlots(store))
 			return json.Marshal(payload)
 		})
 

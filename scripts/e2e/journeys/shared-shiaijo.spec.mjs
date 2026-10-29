@@ -93,8 +93,6 @@ const compOfEyebrow = (eyebrow) => {
 // schedule page (/admin/schedule): both title it "SHIAIJO <court>".
 const scheduleColumn = (page, court) => page.locator('.tw-court')
   .filter({ has: page.locator('.tw-court__title', { hasText: new RegExp(`^SHIAIJO ${court}$`) }) });
-// The clock times a text shows (HH:MM) other than `planned`.
-const timesOtherThan = (text, planned) => (text.match(/\b\d{1,2}:\d{2}\b/g) || []).filter((t) => t !== planned);
 // The labels the editors' autosave pill takes (admin_scoring_autosave.jsx).
 const SYNC_PILL = /^(Synced|Syncing…|Offline|Not saving)$/;
 
@@ -189,16 +187,17 @@ test.describe('shared-shiaijo', () => {
   // Auto-schedule, after which the defaults can no longer be read; it only reads
   // the Scores and Bracket tabs and the wizard's form (nothing is created), so
   // S1 starts from the same state. The wizard still offers its start time to the
-  // operator, who can change it as the day goes. The hint's new wording is the
-  // fix's to write: it is recorded here, and only its presence is asserted.
-  test.fixme('bc-seqc: a competition sharing a shiaijo with an earlier one is scheduled after it by default', async () => {
+  // operator, who can change it as the day goes, and its hint under the shiaijo
+  // choice says that competitions on one shiaijo run one after another (read on
+  // the wizard itself: the seeding fixture's hint read predates that wording).
+  test('bc-seqc: a competition sharing a shiaijo with an earlier one is scheduled after it by default', async () => {
     const clock = (t) => /^\d\d:\d\d$/.test(t);
     const siOnA = [
       ...(await readScoresTab(H, ids.SI)).filter((m) => m.court === 'A').map((m) => m.time),
       ...(await bracketSlots(H, ids.SI)).filter((m) => m.court === 'A').map((m) => m.time),
     ].filter(clock).sort();
     const stOnA = (await bracketSlots(H, ids.ST)).filter((m) => m.court === 'A').map((m) => m.time).filter(clock).sort();
-    row('bc-seqc', { step: 'S8 slots', action: 'default slots on Shiaijo A', variant: 'fixme', siOnA, stOnA,
+    row('bc-seqc', { step: 'S8 slots', action: 'default slots on Shiaijo A', variant: 'asserted', siOnA, stOnA,
       hint: draw.defaults.ST.sharedCourtHint, startTimes: { si: draw.defaults.SI.startTime, st: draw.defaults.ST.startTime } });
     expect(siOnA.length).toBeGreaterThan(0);
     expect(stOnA.length).toBeGreaterThan(0);
@@ -209,13 +208,15 @@ test.describe('shared-shiaijo', () => {
     const slot = Math.min(...siStarts.slice(1).map((m, i) => m - siStarts[i]).filter((g) => g > 0), Infinity);
     const siEnds = siStarts[siStarts.length - 1] + (Number.isFinite(slot) ? slot : 1);
     expect(minutes(stOnA[0]), `${ST}'s first match on A (${stOnA[0]}) comes after ${SI}'s last there ends (${siEnds} min)`).toBeGreaterThanOrEqual(siEnds);
-    // The wizard still tells the operator something about sharing a shiaijo, and
-    // still lets them set the start time themselves.
-    expect(draw.defaults.ST.sharedCourtHint, 'the wizard hint about sharing a shiaijo').toBeTruthy();
     // H is shared with the tests after this one: the wizard it opens (a typed
     // start time in it) is left again whatever the checks find.
     try {
       await H.goto('/admin/create-competition');
+      // The wizard tells the operator that competitions sharing a shiaijo run one
+      // after another, and still lets them set the start time themselves.
+      const hint = H.locator('.field__hint', { hasText: 'run one after another' }).first();
+      await expect(hint, 'the wizard hint about sharing a shiaijo').toBeVisible();
+      row('bc-seqc', { step: 'S8 slots', action: 'the wizard hint about sharing a shiaijo', variant: 'asserted', hint: (await hint.innerText()).trim() });
       const startInput = H.locator('#create-start-time');
       await expect(startInput).toBeEditable();
       await startInput.fill('13:45');
@@ -310,46 +311,60 @@ test.describe('shared-shiaijo', () => {
       tvShot: await shot(TV, 's7-tv-A-before-play'), scheduleShot: await shot(P, 's7-public-schedule-before-play', { fullPage: true }) });
   });
 
-  // bc-pubq (operator ruling 2026-10-12, bc-shcr D2: "The view should follow
-  // the queue the scoring operator has"). Before play, with ST re-timed between
-  // SI's pool bouts, the TV board for A names the match the court A console
-  // will start next and nothing of the competition the console is not
-  // running, and the public schedule shows ONE "Next up" on Shiaijo A, on that
-  // match. Relies on the state S1 leaves (nothing played, ST re-timed). It
-  // only navigates C, TV and P, and leaves P on /schedule and TV on A's board,
-  // as S2 expects. Today the schedule's second "Next up" (ST's semi-final) is
-  // what fails here; the TV naming ST's semi-final as NEXT was seen while SI
-  // ran (S7 inside S2), so in this state its check guards a regression.
-  test.fixme('bc-pubq: the TV board and the public schedule follow the court console\'s queue on a shared shiaijo', async () => {
-    await openShiaijo(C, 'A');
-    const s = await courtState(C);
-    expect(s.upNext, 'the court A console has an Up next').not.toBeNull();
-    const [shiro, aka] = s.upNext.names;
-    const otherNames = s.officiating === SI ? TEAMS.map((t) => t[0]) : ROSTER_12.map((p) => p[0]);
+  // bc-pubq (operator decision D3: "Follow the printed times across
+  // competitions"). On a shared shiaijo the public screens keep ONE queue for
+  // the court, in printed-time order across every competition on it (equal
+  // times by the competition starting first), so there is one "Next up" per
+  // court. Before play, with ST re-timed between SI's pool bouts, the TV board
+  // for A promotes the earliest-printed waiting bout on A, its NEXT line (drawn
+  // only when that bout is not already on the board) names the bout printed
+  // after it, whichever competition holds it, and the public schedule shows ONE
+  // "Next up" on Shiaijo A, on the earliest-printed bout. Relies on the state S1
+  // leaves (nothing played, ST re-timed). It only navigates TV and P, and
+  // leaves P on /schedule and TV on A's board, as S2 expects.
+  test('bc-pubq: the TV board and the public schedule follow the printed times across competitions on a shared shiaijo', async () => {
+    // The waiting bouts on A whose sides are both known, in printed-time order:
+    // SI's pool bouts and ST's semi-finals (Scores tab rows, ST's read after
+    // its re-time). Equal times go to the competition that starts first, SI.
+    const startOf = (comp) => (comp === SI ? draw.defaults.SI.startTime : draw.defaults.ST.startTime) || '';
+    // A side still waiting on its feeder ("Winner of M1") is not a known side.
+    const known = (n) => !!n && !/^Winner of\b/i.test(n);
+    const onA = [
+      ...draw.si.map((m) => ({ comp: SI, ...m })),
+      ...draw.st.map((m) => ({ comp: ST, ...m })),
+    ].filter((m) => m.court === 'A' && m.status === 'scheduled' && known(m.shiro) && known(m.aka) && /^\d\d:\d\d$/.test(m.time));
+    const order = onA.map((m, i) => ({ m, i })).sort((a, b) => a.m.time.localeCompare(b.m.time)
+      || startOf(a.m.comp).localeCompare(startOf(b.m.comp)) || a.i - b.i).map((x) => x.m);
+    expect(order.length, 'waiting bouts on Shiaijo A').toBeGreaterThan(1);
+    const [first, second] = order;
+    row('bc-pubq', { step: 'S7 public', action: 'printed-time order on Shiaijo A', variant: 'asserted',
+      first: `${first.comp} ${first.time} ${first.shiro} v ${first.aka}`, second: `${second.comp} ${second.time} ${second.shiro} v ${second.aka}` });
     await openTvBoard(TV, 'A');
     // The board's next-match slots (display_scoreboard.jsx), each on its own. The
     // promoted slot is the match the board puts first before play (its NOW row on an
-    // individual board, the headline on a team board) and must be the console's Up
-    // next; the NEXT line, drawn when a queued match is not already on the board,
-    // must not be the other competition's. The UP NEXT strip lists the next POOL and
-    // is not the next match, so it is not read here.
-    const promoted = s.officiating === SI ? TV.getByTestId('tvd-indiv-row-now').first() : tvBoard(TV);
+    // individual board, the headline on a team board) and must be the
+    // earliest-printed bout; the NEXT line, drawn when the queued match after it
+    // is not already on the board, must be the bout printed after it. The UP
+    // NEXT strip lists the next POOL of the promoted bout's competition and is
+    // not the next match, so it is not read here.
+    const promoted = first.comp === SI ? TV.getByTestId('tvd-indiv-row-now').first() : tvBoard(TV);
     await expect(promoted, 'the TV board promotes a match').toBeVisible();
-    await expect(promoted).toContainText(shiro);
-    await expect(promoted).toContainText(aka);
+    await expect(promoted).toContainText(first.shiro);
+    await expect(promoted).toContainText(first.aka);
     const nextLine = TV.locator('div:has(> span:text-is("NEXT"))');
     // The NEXT line is drawn only when a queued match is not already on the
     // board, so its absence is allowed; the board has to have stopped drawing
     // before it is taken to be absent.
-    if (await untilStable(() => nextLine.count())) for (const name of otherNames) await expect(nextLine).not.toContainText(name);
-    // And the other competition appears nowhere else on the board either.
-    for (const name of otherNames) await expect(tvBoard(TV)).not.toContainText(name);
+    if (await untilStable(() => nextLine.count())) {
+      await expect(nextLine).toContainText(second.shiro);
+      await expect(nextLine).toContainText(second.aka);
+    }
     await P.goto('/schedule');
     const nextUp = scheduleColumn(P, 'A').locator('.tw-match')
       .filter({ has: P.locator('.tw-match__queue', { hasText: /^Next up$/ }) });
     await expect(nextUp).toHaveCount(1);
-    await expect(nextUp).toContainText(shiro);
-    await expect(nextUp).toContainText(aka);
+    await expect(nextUp).toContainText(first.shiro);
+    await expect(nextUp).toContainText(first.aka);
   });
 
   // S2 / S2b the automatic advance; S4a Correct while SI's own bout runs; S9
@@ -795,33 +810,54 @@ test.describe('shared-shiaijo', () => {
   });
 
   // bc-pace (operator ruling 2026-10-12, bc-shcr D2: "The schedule also needs
-  // to adapt if the courts are running late or fast"). How the projection is
-  // computed and shown is planned on the bead before code, so this pins only
-  // the observable its acceptance names: once court A has played matches
-  // (SI's pools, quarter-finals and semi-final, all far off the plan's clock
-  // in a test run),
-  // its next match, ST's second semi-final, shows a time other than its
-  // stored one on the court console, the public schedule and the TV board
-  // (which shows no time at all today), while the Scores tab still shows the
-  // plan. Rewrite the time reads to the planned presentation when the bead is
-  // planned. Relies on the state S4b-S5 leaves (nothing running on A, ST's
+  // to adapt if the courts are running late or fast"; decision D4: "only the
+  // projected time"). Once court A has played matches (SI's pools,
+  // quarter-finals and semi-final, all far off the plan's clock in a test run),
+  // its next match, ST's second semi-final, shows the projected time ALONE, as
+  // "~HH:MM" (spoken "about HH:MM", the plan not beside it), on the court
+  // console's Up next card and the public schedule row, while the Scores tab
+  // still shows the plan. The TV board shows a projected time only on its NEXT
+  // line; here the semi-final is the board's promoted bout (nothing runs on A
+  // and the bouts after it wait on their feeders), so the board is read for the
+  // bout and for the plan's absence, and its NEXT line's time only if one is
+  // drawn. The "~" shows only from 5 minutes off the plan, so a run whose clock
+  // happens to sit within 5 minutes of the semi-final's planned slot shows the
+  // plan instead. Relies on the state S4b-S5 leaves (nothing running on A, ST's
   // semi-final waiting there); it only reads, and leaves the console on ST.
-  test.fixme('bc-pace: court A\'s next match shows a time projected from the court\'s pace, the plan unchanged', async () => {
+  test('bc-pace: court A\'s next match shows a time projected from the court\'s pace, the plan unchanged', async () => {
     const planned = (draw.st.find((m) => same(pairOf(m), bouts.sf2)) || {}).time;
     expect(planned, `${ST}'s second semi-final has a planned time`).toMatch(/^\d\d:\d\d$/);
     const stored = ((await readScoresTab(H, ids.ST)).find((m) => same(pairOf(m), bouts.sf2)) || {}).time;
     expect(stored, 'the Scores tab still shows the plan').toBe(planned);
+    const minutes = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
+    // A PaceTime span (court_pace.jsx): "~HH:MM" shown, "about HH:MM" spoken.
+    // Returns the projected HH:MM once it is drawn, at least 5 minutes off the plan.
+    const projected = async (where, label) => {
+      const pace = where.locator('.pace-projected').first();
+      await expect(pace.locator(':scope > span[aria-hidden="true"]'), `${label}: the projected time`).toHaveText(/^~\d\d:\d\d$/);
+      const hhmm = (await pace.locator(':scope > span[aria-hidden="true"]').innerText()).trim().slice(1);
+      await expect(pace.locator(':scope > .sr-only'), `${label}: the spoken time`).toHaveText(`about ${hhmm}`);
+      expect(Math.abs(minutes(hhmm) - minutes(planned)), `${label}: ~${hhmm} is 5 minutes or more off the plan (${planned})`).toBeGreaterThanOrEqual(5);
+      await expect(where, `${label}: the plan is not shown beside the projection`).not.toContainText(planned);
+      return hhmm;
+    };
     if (!/\/admin\/shiaijo\/A$/.test(C.url())) await openShiaijo(C, 'A');
     if ((await officiatingName(C)) !== ST) await pickCompetition(C, ST);
     expect(same(await sides(upNextCard(C)), bouts.sf2)).toBe(true);
-    expect(timesOtherThan(await upNextCard(C).innerText(), planned), 'a projected time on the console Up next card').not.toEqual([]);
+    const onConsole = await projected(upNextCard(C), 'the console Up next card');
     await P.goto('/schedule');
     const sfRow = scheduleColumn(P, 'A').locator('.tw-match').filter({ hasText: bouts.sf2.shiro }).filter({ hasText: bouts.sf2.aka }).first();
     await expect(sfRow).toBeVisible();
-    expect(timesOtherThan(await sfRow.innerText(), planned), 'a projected time on the public schedule row').not.toEqual([]);
+    const onSchedule = await projected(sfRow, 'the public schedule row');
     await openTvBoard(TV, 'A');
     await expect(tvBoard(TV)).toContainText(bouts.sf2.shiro);
-    expect(timesOtherThan(await tvBoard(TV).innerText(), planned), 'a projected time on the TV board').not.toEqual([]);
+    await expect(tvBoard(TV)).toContainText(bouts.sf2.aka);
+    await expect(tvBoard(TV), 'the TV board does not show the plan').not.toContainText(planned);
+    const tvNext = TV.getByTestId('tvd-next-time');
+    const tvNextTimes = await untilStable(() => tvNext.count());
+    if (tvNextTimes) await expect(tvNext.first().locator(':scope > span[aria-hidden="true"]')).toHaveText(/^~\d\d:\d\d$/);
+    row('bc-pace', { step: 'S5 pace', action: `${ST}'s second semi-final on Shiaijo A`, variant: 'asserted', planned, onConsole, onSchedule,
+      tvNextLine: tvNextTimes ? (await tvNext.first().innerText()).trim() : null });
   });
 
   // bc-sypl (operator ruling 2026-10-12: "You do not need the word/pill saying

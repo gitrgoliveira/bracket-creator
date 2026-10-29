@@ -18,6 +18,7 @@ import { applyPatch, keepNewerCompetitions, matchInComp } from './patch.jsx';
 import { SideCell, WinnerTick } from './side_cell.jsx';
 import { useOpenedTapGuard, acceptTap } from './tap_guard.jsx';
 import { useDialogFocus } from './dialog_focus.jsx';
+import { courtPaceLookup, paceKey } from './court_pace.jsx';
 // Imported DIRECTLY from the leaf rather than read off `window`. Two of the
 // call sites below sit inside a `try { } catch (_e) { }` that swallows, so a
 // missing global there would degrade into exactly the silent not-saved failure
@@ -666,6 +667,26 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // aggregate as a transient fallback. All competition/match derivations below
     // read from this so the page operates only on THIS court's competitions.
     const courtCompetitions = courtComps || tournament.competitions || [];
+
+    const [paceTick, setPaceTick] = useStateSh(0);
+    useEffectSh(() => {
+        const id = setInterval(() => setPaceTick((t) => t + 1), 60000);
+        return () => clearInterval(id);
+    }, []);
+    const paceLookup = useMemoSh(
+        () => {
+            const d = new Date();
+            const now = d.getHours() * 60 + d.getMinutes();
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, "0");
+            const day = String(d.getDate()).padStart(2, "0");
+            const today = `${y}-${m}-${day}`;
+            return courtPaceLookup(courtCompetitions, { now, today });
+        },
+        // paceTick: trigger 60 s pace recomputation
+        // oxlint-disable-next-line react-hooks/exhaustive-deps
+        [courtCompetitions, paceTick]
+    );
 
     // Selected match for the inline scoring panel. `calledKey` marks the match
     // the operator has announced this session (local cue only); `callingKey`
@@ -2230,7 +2251,15 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                     <div className="section-title">Up next</div>
                                     <div className={`shiaijo-upnext__card ${calledKey === matchKey(upNext) ? "is-called" : ""}`}>
                                         <div className="shiaijo-upnext__time">
-                                            {upNext.scheduledAt || "-"} · {upNext.compName}
+                                            {(() => {
+                                                const paceEntry = paceLookup && paceLookup.byMatch ? paceLookup.byMatch.get(paceKey(upNext.compId, upNext.id)) : null;
+                                                const display = paceEntry && paceEntry.display;
+                                                return display && display.projected ? (
+                                                    <span className="pace-projected" aria-label={display.ariaLabel}>{display.text}</span>
+                                                ) : (
+                                                    upNext.scheduledAt || "-"
+                                                );
+                                            })()} · {upNext.compName}
                                             {shiaijoMatchNo(upNext)}
                                             {/* DH-only label: a tiebreaker ("-TB-") is also a rep bout
                                                 (isSupplementaryBout), but it is NOT a daihyosen, so the "DH"

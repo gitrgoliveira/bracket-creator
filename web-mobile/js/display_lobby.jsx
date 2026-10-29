@@ -7,6 +7,7 @@ import { NumberedName } from './numbered_name.jsx';
 import { teamIVPWScore } from './bracket.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
 import { isSupplementaryBout } from './pool_ids.jsx';
+import { paceKey } from './court_pace.jsx';
 
 const { useState: useSD, useEffect: useED, useMemo: useMD } = React;
 
@@ -154,7 +155,7 @@ function teamScoreCell(match, withZekkenName) {
 // Render one match cell (td > .match-cell div) for the cross-court table.
 // rowKind: 'now' | 'next' | 'queue': determines the background/border.
 // slot: the buildCourtSlots entry for this cell (null → empty cell).
-function LobbyMatchCell({ slot, rowKind }) {
+function LobbyMatchCell({ slot, rowKind, paceLookup }) {
     if (!slot) {
         return (
             <td style={{ padding: '4px 8px', verticalAlign: 'top' }}>
@@ -192,7 +193,16 @@ function LobbyMatchCell({ slot, rowKind }) {
     }
 
     const phase = phaseLabel(match, isBracket, roundIndex, totalRounds, competition?.format);
-    const compMeta = [competition?.name, phase, match.scheduledAt].filter(Boolean).join(' · ');
+    const compId = competition?.id || competition?.config?.id || "";
+    const matchId = match?.id || match?.ID || "";
+    const d = paceLookup?.byMatch?.get(paceKey(compId, matchId))?.display;
+    const prefix = [competition?.name, phase].filter(Boolean).join(' · ');
+    const hasTime = Boolean(match.scheduledAt);
+    const timeNode = d?.projected ? (
+        <span className="pace-projected" aria-label={d.ariaLabel}>{d.text}</span>
+    ) : (
+        match.scheduledAt || ""
+    );
     // NO middle-mark chip in the meta strip (operator ruling): the
     // IndividualScore row below carries X/(E)/(DH) in its own FIK centre,
     // the mark's ONE home; a second copy in the corner was an error.
@@ -205,14 +215,16 @@ function LobbyMatchCell({ slot, rowKind }) {
                 minHeight: 54,
                 border: `1px solid ${cellBorder}`,
             }}>
-                {compMeta && (
+                {(prefix || hasTime) && (
                     // One child, so no flex row: the chip that used to sit
                     // beside this text is gone (see the ruling above) and the
                     // truncation moved onto the element that owns the text.
                     // vh, not a fixed 10px: the names beside it are vh-scaled
                     // (.lobby-cell in styles.css), so a pinned size shrinks
                     // away to nothing beside them on a large venue screen.
-                    <div style={{ fontSize: '1.2vh', color: LOBBY_COLORS.inkMuted, marginBottom: 4, letterSpacing: '0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{compMeta}</div>
+                    <div style={{ fontSize: '1.2vh', color: LOBBY_COLORS.inkMuted, marginBottom: 4, letterSpacing: '0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {prefix && hasTime ? <>{prefix} · {timeNode}</> : (prefix || timeNode)}
+                    </div>
                 )}
                 {/* One matchup = one IndividualScore row (same component the
                     per-court board and viewer card use). Owns names, ippon
@@ -245,7 +257,7 @@ function LobbyMatchCell({ slot, rowKind }) {
 // pagination make the cycle visible to spectators.
 //
 // Reconnect indicator (T063) is preserved in the top bar.
-function LobbyDisplay({ tournament, competitions, connected = true }) {
+function LobbyDisplay({ tournament, competitions, connected = true, paceLookup }) {
     const courts = useMD(() => findActiveCourts(tournament, competitions), [tournament, competitions]);
     const totalPages = Math.max(1, Math.ceil(courts.length / LOBBY_PAGE_SIZE));
     const [page, setPage] = useSD(0);
@@ -459,6 +471,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                                 <LobbyMatchCell
                                                     slot={courtSlots[ci][row.slot]}
                                                     rowKind={rowKind}
+                                                    paceLookup={paceLookup}
                                                 />
                                                 {/* Thin vertical separator between courts: decorative, hidden from AT */}
                                                 {ci < visible.length - 1 && (

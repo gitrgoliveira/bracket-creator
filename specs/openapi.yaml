@@ -5683,7 +5683,10 @@ paths:
     get:
       tags: [viewer]
       summary: List competitions with players
-      description: Returns all competitions, each with their player list populated.
+      description: >
+        Returns all competitions, each with their player list populated. Every
+        per-competition entry also carries the request-time `slotMinutes` and
+        `knockoutSlotMinutes` described on CompetitionDetail.
       responses:
         '200':
           description: List of competitions.
@@ -5794,7 +5797,9 @@ paths:
         an operator moves a match to another shiaijo. Per-competition match data
         is full (not court-filtered) so client-side derivations like pool
         "Match N of M" counts stay correct; the right-sizing is by competition
-        count (only comps on this court). Public, no auth.
+        count (only comps on this court). Every per-competition entry also
+        carries the request-time `slotMinutes` and `knockoutSlotMinutes`
+        described on CompetitionDetail. Public, no auth.
       parameters:
         - in: path
           name: court
@@ -8173,6 +8178,20 @@ components:
             place counts only the places the draw seats. A tie over any of these places is
             owed a tie-break bout (a daihyosen for a team pool), and the
             standings mark exactly these places as advancing.
+        slotMinutes:
+          type: integer
+          minimum: 1
+          description: >
+            planned minutes one match of this competition occupies on a court,
+            computed at request time from the competition clock settings and the
+            tournament clock-to-elapsed multiplier, never stored; the pool-phase
+            slot, or the knockout slot for a knockout-only competition
+        knockoutSlotMinutes:
+          type: integer
+          minimum: 1
+          description: >
+            the same for a knockout-stage match; equals slotMinutes for a
+            knockout-only competition
         bracket:
           $ref: '#/components/schemas/Bracket'
 

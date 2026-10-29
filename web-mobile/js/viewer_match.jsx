@@ -22,6 +22,7 @@ import { sameCompetitor } from './competitor_identity.jsx';
 import { barredNameMark } from './barred_chip.jsx';
 import { matchShowsScore } from './match_shows_score.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
+import { paceKey } from './court_pace.jsx';
 
 const { useState, useMemo, useRef: useRefV, useCallback } = React;
 
@@ -89,7 +90,7 @@ export function localQueueLabelCompact(m) {
 // MatchDetailCard
 // ---------------------------------------------------------------------------
 
-export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabel }) {
+export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabel, paceLookup }) {
   window.useEscapeToClose(escapeToClose ? onClose : undefined);
   if (!match) return null;
   const isTeam = match.compKind === "team" || match.teamSize > 0;
@@ -134,6 +135,9 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
   // it only renders the strings handed to it (team_default_credit.jsx's
   // header states why).
   const { shiro: teamShiroMark, aka: teamAkaMark } = window.teamMatchMarks ? window.teamMatchMarks(match, isTeam) : { shiro: "", aka: "" };
+  const compId = match.compId || match.competitionId || "";
+  const matchId = match.id || match.matchId || match.ID || "";
+  const d = paceLookup?.byMatch?.get(paceKey(compId, matchId))?.display;
 
   return (
     <div className="match-detail-card">
@@ -143,7 +147,11 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
           <span><TermV name="shiaijo">Shiaijo</TermV> {match.court}</span>
           <span>·</span>
           <span>{match.phase === "pool" ? poolLabel(match) : (match.round || "")}</span>
-          {match.scheduledAt && <><span>·</span><span>{match.scheduledAt}</span></>}
+          {match.scheduledAt && <><span>·</span><span>{d?.projected ? (
+            <span className="pace-projected" aria-label={d.ariaLabel}>{d.text}</span>
+          ) : (
+            match.scheduledAt
+          )}</span></>}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {isRunning && <span className="bc-running">● NOW</span>}
@@ -197,7 +205,7 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
 // VSchedItem
 // ---------------------------------------------------------------------------
 
-export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight, winnerTick }) => {
+export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight, winnerTick, paceLookup }) => {
   // bc-pnum: sameCompetitor, never a bare `winner.id === side.id` (see
   // bracket.jsx's MatchCard for why the naked equality lights both sides
   // once both are id-less). No presence guard: sameCompetitor(null, x) is
@@ -241,10 +249,19 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
   const queueLabel = (m.status === "scheduled" && Number.isFinite(qp) && qp > 0)
     ? (window.queueLabelCompact ? window.queueLabelCompact(m) : localQueueLabelCompact(m))
     : null;
+  const compId = m.compId || m.competitionId || "";
+  const matchId = m.id || m.matchId || "";
+  const d = paceLookup?.byMatch?.get(paceKey(compId, matchId))?.display;
   return (
     <button type="button" className={`vsched-item ${m.status === "running" ? "vsched-item--running" : ""} ${highlight ? "vsched-item--me" : ""}`} onClick={onClick} data-clickable={onClick ? "" : undefined}>
       <div className="vsched-item__head">
-        <span className="vsched-item__time">{m.scheduledAt || "-"}</span>
+        <span className="vsched-item__time">
+          {d?.projected ? (
+            <span className="pace-projected" aria-label={d.ariaLabel}>{d.text}</span>
+          ) : (
+            m.scheduledAt || "-"
+          )}
+        </span>
         <span className="vsched-item__court">SHIAIJO {m.court}</span>
         {queueLabel && (
           <span className={`vsched-item__queue${qp === 1 ? " vsched-item__queue--next" : ""}`}>
@@ -385,7 +402,7 @@ export function bracketMatchIn(bracket, id) {
 // MatchViewerModal
 // ---------------------------------------------------------------------------
 
-export function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId, slotLabel }) {
+export function MatchViewerModal({ match, onClose, tournament, compId: defaultCompId, slotLabel, paceLookup }) {
   window.useEscapeToClose(onClose);
   // bc-cfbd: the bounce of the tap that opened the modal must not reach its
   // backdrop or its buttons. The node mounts again when the score editor
@@ -492,7 +509,7 @@ export function MatchViewerModal({ match, onClose, tournament, compId: defaultCo
         {/* Reuse the canonical MatchDetailCard so the modal and the inline
             card render identically (DRY): same header, colour badges and
             BoutSubRow team grid. The modal adds only the self-run scoring. */}
-        <MatchDetailCard match={match} onClose={onClose} escapeToClose={false} slotLabel={slotLabel} />
+        <MatchDetailCard match={match} onClose={onClose} escapeToClose={false} slotLabel={slotLabel} paceLookup={paceLookup} />
         {isSelfRun && bothSidesReady && (
           <div className="card" style={{ marginTop: 12, padding: 16 }}>
             {isFinalized ? (

@@ -33,6 +33,7 @@ import { NumberedName } from './numbered_name.jsx';
 import { sideWord, sideFillClass } from './side_cell.jsx';
 import { competitorMatchesQuery } from './competitor_search.jsx';
 import { buildWatchlistLink } from './watchlist_link.jsx';
+import { paceKey } from './court_pace.jsx';
 
 // The one line the picker and the hero-empty state show while a competition's
 // participants failed to load (rosterAvailable:false on the aggregate, see
@@ -217,7 +218,7 @@ function WatchPicker({ roster, rosterLoaded = true, dojos, watchedPlayerIds, wat
 // the "Match details" button. The subject is whichever side belongs to the
 // primary: for a player primary that's the player; for a dojo primary it's the
 // member currently competing (primaryIds covers all members).
-function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
+function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick, paceLookup }) {
   // Cross-boundary helpers from viewer.jsx, read at render time (see header).
   const { matchParticipantIds, poolLabel, mymatchQueueLabel, matchScoreStr, TermV } = window;
   if (!nextMatch) return null;
@@ -259,9 +260,20 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
   // still renders (empty): it is the live region, and removing it is how the
   // "your match has started" announcement was lost once already.
   const finished = nextMatch.status === "completed";
-  const whenLine = finished
-    ? ""
-    : [running ? "Now" : (nextMatch.scheduledAt || "Time TBA"), queueLabel].filter(Boolean).join(" · ");
+  const compId = nextMatch.compId || nextMatch.competitionId || "";
+  const matchId = nextMatch.id || nextMatch.matchId || "";
+  const d = paceLookup?.byMatch?.get(paceKey(compId, matchId))?.display;
+  const timeNode = running ? "Now" : (d?.projected ? (
+    <span className="pace-projected" aria-label={d.ariaLabel}>{d.text}</span>
+  ) : (
+    nextMatch.scheduledAt || "Time TBA"
+  ));
+  const whenLine = finished ? "" : (
+    <>
+      {timeNode}
+      {queueLabel ? ` · ${queueLabel}` : ""}
+    </>
+  );
   // The score through matchScoreStr, the ONE owner every other completed row
   // in the app reads (VSchedItem, the admin schedule, the pool rows), so this
   // card cannot invent a second spelling of a result. It reads Shiro-left /
@@ -484,7 +496,7 @@ function WatchlistShareModal({ base, watchlist, roster, onClose }) {
 // first-added entry, because a card is not a chime and hiding it cost the
 // reader the one thing they opened the page for. Everything visual below reads
 // heroEntry; only the pin hint reads primaryEntry.
-function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, setWatchlist, primaryKey, setPrimaryKey, primaryEntry, heroEntry, heroNextMatch, upcoming, onMatchClick, chimeMuted, onBellToggle, onFirstAdd }) {
+function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, setWatchlist, primaryKey, setPrimaryKey, primaryEntry, heroEntry, heroNextMatch, upcoming, onMatchClick, chimeMuted, onBellToggle, onFirstAdd, paceLookup }) {
   // Cross-boundary helpers from viewer.jsx, read at render time (see header).
   const { effectivePrimaryKey, addPlayerToWatchlist, entryKey, resolveEntryPlayerIds, VSchedItem, WATCHLIST_MAX } = window;
   const rosterById = useMemo(() => new Map(roster.map((p) => [p.id, p])), [roster]);
@@ -757,6 +769,7 @@ function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, se
           primaryIds={new Set(resolveEntryPlayerIds(heroEntry, roster))}
           entityLabel={heroLabel}
           onMatchClick={onMatchClick}
+          paceLookup={paceLookup}
         />
       )}
       {heroEntry && !heroNextMatch && (
@@ -791,6 +804,7 @@ function WatchlistPanel({ tournament, roster, rosterLoaded = true, watchlist, se
               tweaks={{ showDojo: true }}
               showCompetition
               onClick={() => onMatchClick && onMatchClick(m)}
+              paceLookup={paceLookup}
             />
           ))}
         </div>

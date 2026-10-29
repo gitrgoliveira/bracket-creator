@@ -330,6 +330,19 @@ On the spectator views, there is [one "Next up" bout per shiai-jo](../spectators
 
 At the table, note that after a match finishes, the court console stays on the competition you are scoring (it never switches competition or court by itself), while the public screens may name the next match by printed time, which can belong to another competition sharing the shiai-jo. This is rare by default because shared shiai-jo are staggered; it happens when you interleave on purpose with Auto-schedule.
 
+### When a shiai-jo runs ahead or behind
+
+Planned start times stored for matches are never rewritten by the app. When a shiai-jo drifts 5 or more minutes ahead of or behind its plan, public screens, the court console, and TV boards display a projected start time like "~10:52" instead. Refer to [Projected start times](../spectators/following.md#projected-start-times) for details on where these times appear.
+
+On the **Tournament schedule**, the **Court pace** panel tracks this drift for every shiai-jo across all competitions running on it. It shows whether each court is "On track" or "N m behind/ahead", along with the first waiting bout's projected start time. The schedule rows and the **Scores** tab keep showing the original planned times so you can edit the schedule accurately. To change the plan itself, use **Auto-schedule competition** or edit individual match times on the schedule.
+
+The projected time has a few practical limits:
+
+- It is an estimate, not a promise.
+- Correcting the shiai-jo's last finished bout re-stamps that bout and can move the estimate.
+- A bout that starts late after the shiai-jo stood idle shows the next bout at "about now" until the running bout ends.
+- It relies on the device clock and the venue time zone being set correctly.
+
 ### Moving matches between shiai-jo
 
 A match can be moved to another shiai-jo from the schedule page (by using its court picker, or by dragging the match to another court's column), as well as from the **Scores** tab row's court picker, the **Bracket** tab's running-match panel picker, or the court console, which has no court picker for the match running there.

@@ -43,6 +43,29 @@ So there is exactly one "Next up" bout per shiai-jo, and the same one appears ev
 
 The queue updates live; if another competition on the same shiai-jo finishes or starts a bout, your position moves without you reloading.
 
+### Projected start times
+
+Each bout has a planned start time. When a shiai-jo runs behind or ahead of its plan, the viewer shows a projected start time instead, written with a tilde, for example "~10:52" (screen readers announce "about 10:52"). It replaces the planned time. The planned time is not shown beside it.
+
+The projected time is the app's estimate of when the bout will really start. It appears only when the estimate differs from the plan by 5 minutes or more. When a shiai-jo is within 5 minutes of its schedule, the planned time shows as usual.
+
+The app works out the drift for each shiai-jo across every competition sharing it:
+
+- From the last finished bout on that shiai-jo, comparing when it finished with when it was planned to end.
+- When no bout is running, from how long the first waiting bout is already past its planned start.
+- If neither applies, there is no drift.
+
+You see the projected time wherever upcoming bouts appear: on the schedule, on match cards, on your watchlist, on the lobby screen, on the competition match list, and on court scoreboards. Every public screen shows the same time for a bout.
+
+The estimate refreshes every minute and as results arrive. It uses your device's clock and the venue's time zone. A projected start is never earlier than now, never earlier than when the running bout is expected to end, and at least one match slot after the previous waiting bout. If a bout runs long, it pushes the next bout to "about now", minute by minute.
+
+Keep a few limits in mind:
+
+- It is an estimate, not a promise.
+- Correcting the shiai-jo's last finished bout re-stamps that bout and can move the estimate.
+- A bout that starts late after the shiai-jo stood idle shows the next bout at "about now" until the running bout ends.
+- It relies on your device's clock and the venue time zone being set correctly.
+
 ### Searching by competitor number
 
 Once the draw for a competition has run, its competitors are numbered. The number starts with a short prefix that belongs to that competition, so "K12" and "M12" are two different people in two different draws. Swiss competitions are the exception and use no numbers at all.

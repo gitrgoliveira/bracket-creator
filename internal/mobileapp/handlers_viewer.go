@@ -216,10 +216,16 @@ func buildViewerCompetitionPayloads(store *state.Store, courtFilter string) ([]a
 		queue = append(queue, state.CourtQueueEntriesOf(l.comp, l.poolMatches, l.bracket)...)
 	}
 
+	tournament, err := store.LoadTournament()
+	if err != nil {
+		log.Printf("mobileapp: viewer payload: load tournament: %v", err)
+		tournament = nil
+	}
+
 	comps := make([]any, 0, len(ids))
 	for _, l := range loaded {
 		if l != nil && l.inFeed {
-			comps = append(comps, l.payload(queue))
+			comps = append(comps, l.payload(queue, tournament))
 		}
 	}
 	return comps, nil
@@ -428,10 +434,26 @@ func stampViewerEligibility(store *state.Store, compID string, poolMatches []sta
 	return bracket
 }
 
+// stampSlotMinutes sets payload["slotMinutes"] and payload["knockoutSlotMinutes"]
+// from engine.SlotMinutes. A mixed competition holds two different slots, so
+// the knockout one rides along for the JS to use on knockout matches.
+func stampSlotMinutes(payload gin.H, comp *state.Competition, tournament *state.Tournament) {
+	if payload == nil {
+		return
+	}
+	poolSlot, koSlot := engine.SlotMinutes(comp, tournament)
+	slot := poolSlot
+	if comp != nil && comp.EffectiveFormat() == state.CompFormatKnockout {
+		slot = koSlot
+	}
+	payload["slotMinutes"] = slot
+	payload["knockoutSlotMinutes"] = koSlot
+}
+
 // payload numbers the competition's matches on the court-wide queue, redacts
 // operator-only audit fields and builds the public per-competition viewer
 // payload ({config, poolMatches, bracket}).
-func (l *viewerCompetition) payload(queue []state.CourtQueueEntry) gin.H {
+func (l *viewerCompetition) payload(queue []state.CourtQueueEntry, tournament *state.Tournament) gin.H {
 	comp, poolMatches, bracket := l.comp, l.poolMatches, l.bracket
 	isTeamComp, squads := l.isTeamComp, l.squads
 	players, plErr := l.players, l.plErr
@@ -500,6 +522,7 @@ func (l *viewerCompetition) payload(queue []state.CourtQueueEntry) gin.H {
 	if len(issues) > 0 {
 		payload["dataIssues"] = issues
 	}
+	stampSlotMinutes(payload, comp, tournament)
 	return payload
 }
 
@@ -927,6 +950,12 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			if issues := viewerDataIssues(comp, comp.Players, pools, poolMatches, poolMatchesErr, bracketErr, poolsErr); len(issues) > 0 {
 				payload["dataIssues"] = issues
 			}
+			tournament, err := store.LoadTournament()
+			if err != nil {
+				log.Printf("mobileapp: viewer payload: load tournament: %v", err)
+				tournament = nil
+			}
+			stampSlotMinutes(payload, comp, tournament)
 			return json.Marshal(payload)
 		})
 

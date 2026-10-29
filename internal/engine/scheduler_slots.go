@@ -59,6 +59,14 @@ func perMatchElapsedMinutes(comp *state.Competition, tournament *state.Tournamen
 	return perMatchElapsedMinutesBouts(comp, tournament, isKnockout, bouts)
 }
 
+// SlotMinutes returns the planned minutes one pool-phase match and one
+// knockout match of comp occupy on a court; request-time, never stored;
+// nil tournament is tolerated (perMatchElapsedMinutes handles it).
+func SlotMinutes(comp *state.Competition, tournament *state.Tournament) (pool, knockout int) {
+	f := slotMinutesFor(tournament)
+	return f(comp, false), f(comp, true)
+}
+
 // perMatchElapsedMinutesBouts is perMatchElapsedMinutes with an explicit
 // (possibly fractional) bout count, so EstimateForCounts can price the
 // kachinuki best/avg/worst scenarios (mp-gmcg) with the exact same

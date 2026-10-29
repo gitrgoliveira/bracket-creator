@@ -15,8 +15,9 @@ import { useOpenedTapGuard } from './tap_guard.jsx';
 import { SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
 import { pushToast } from './toast_queue.jsx';
 import { sharesCourtDay, sharesDay } from './court_queue.jsx';
+import { courtPaceLookup } from './court_pace.jsx';
 
-const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC } = React;
+const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC, useMemo: useM } = React;
 
 // preact-router wrapper from router.jsx (T005). Used for URL → state
 // synchronisation. The render path itself still drives off
@@ -833,6 +834,28 @@ function App() {
 
   useE(() => { load(); }, []);
 
+  // Periodic 60 s tick updates current minutes of day for pace projections.
+  // In viewer mode when viewing a competition, it also refetches the tournament
+  // list so shared-court pace drift stays current.
+  const [nowTick, setNowTick] = useS(0);
+  useE(() => {
+    const timer = setInterval(() => {
+      setNowTick((t) => t + 1);
+      if (mode === "viewer" && viewerCompId) {
+        load();
+      }
+    }, 60000);
+    return () => clearInterval(timer);
+  }, [mode, viewerCompId]);
+
+  const paceLookup = useM(() => {
+    if (mode !== "viewer") return null;
+    const d = new Date();
+    const now = d.getHours() * 60 + d.getMinutes();
+    const today = `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+    return courtPaceLookup(tournament?.competitions, { now, today });
+  }, [tournament, nowTick, mode]);
+
   // mp-9ukk Phase 2: display-mode BroadcastChannel consumer.
   //
   // When mode === "display" this effect:
@@ -1301,6 +1324,12 @@ function App() {
                 // has already persisted the new status before broadcasting, so
                 // this fetch deterministically picks up the transition.
                 jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                // bc-pace: when viewing a competition, refetch the tournament list for match updates
+                // in the same competition or one sharing its court and day so pace drift stays current.
+                // Unrelated competitions skip the list refetch, preserving the scaling win.
+                if (event.type === "match_updated") {
+                    jitteredTimeout(maybeLoad, listJitter);
+                }
             } else if (event.type === "match_updated" && viewerCompId && event.data?.competitionId !== viewerCompId) {
                 // bc-pubq: queuePosition is court-wide, so another
                 // competition's match moving on a court and day this one
@@ -1311,6 +1340,8 @@ function App() {
                 const courts = eventResults.map(r => r.court).filter(Boolean);
                 if (sharesCourtDay(selectedCompDataRef.current, otherDate, courts)) {
                     jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                    // bc-pace: refetch the tournament list so pace drift updates for the shared court.
+                    jitteredTimeout(maybeLoad, listJitter);
                 }
             }
             // P1 (mp-9afd): fire a full-list refetch for list-level
@@ -1671,12 +1702,14 @@ function App() {
           tweaks={THEME}
           activeTab={viewerTab || "overview"}
           onTabChange={handleTabChange}
+          paceLookup={paceLookup}
         />
       ) : viewerScreen === "schedule" ? (
         <window.ViewerSchedule
           tournament={tournament}
           onBack={() => setViewerScreen("home")}
           tweaks={THEME}
+          paceLookup={paceLookup}
         />
       ) : viewerScreen === "glossary" ? (
         // U1 /glossary: the kendo-term reference page. Lives in
@@ -1737,6 +1770,7 @@ function App() {
           }}
           onOpenResults={() => setViewerScreen("results")}
           sseConnected={sseConnected}
+          paceLookup={paceLookup}
         />
       )}
       {authPrompt && (

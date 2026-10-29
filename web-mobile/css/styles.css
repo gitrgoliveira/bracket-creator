@@ -7050,6 +7050,13 @@ button.vsched-item:not([data-clickable]) {
   border-color: var(--warn-border);
 }
 
+/* A time projected from the court's pace, shown as ~HH:MM. */
+.pace-projected {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--warn);
+}
+
 .field__select {
   width: 100%;
   padding: 6px 8px;

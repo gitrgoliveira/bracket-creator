@@ -2,6 +2,7 @@
 // filterMatchesByCourt, computeCourtPaceStats, CourtPacePanel, suggestRebalances.
 
 import { timeToMinutes } from './admin_schedule_utils.jsx';
+import { projectCourtPace, flatMatchesToPaceEntries, paceDisplay } from './court_pace.jsx';
 
 const { useState: useStateA, useEffect: useEffectA } = React;
 
@@ -114,12 +115,13 @@ export function suggestRebalances(perCourtStats, perMatchMinutes) {
 }
 
 // CourtPacePanel: admin-only collapsible card showing per-court pace status
-// and a rebalancing suggestion. Never rendered in viewer or display views.
+// and a rebalancing suggestion. Court drift comes from court_pace.jsx, the one pace owner.
+// Note: the panel uses safeMatchDuration as every competition's slot because its
+// flattened records carry no per-competition slot.
 export function CourtPacePanel({ byCourt, safeMatchDuration }) {
   const [open, setOpen] = useStateA(false);
-  // setTick forces a re-render every 60 s so computeCourtPaceStats re-reads
-  // the current wall-clock time. paceByCourt is rebuilt on every parent render
-  // so useMemo would never skip the call anyway: compute stats directly.
+  // setTick forces a re-render every 60 s so computeCourtPaceStats and court pace
+  // re-read the current wall-clock time.
   const [, setTick] = useStateA(0);
 
   // hasData is checked inside the effect so the interval only runs (and causes
@@ -145,19 +147,22 @@ export function CourtPacePanel({ byCourt, safeMatchDuration }) {
 
   const suggestion = suggestRebalances(populatedStats, safeMatchDuration);
 
-  const badgeStyle = (delta) => {
-    const abs = Math.abs(delta);
-    if (abs <= 5) return { color: "var(--ok)", fontWeight: 600 };
+  const d = new Date();
+  const now = d.getHours() * 60 + d.getMinutes();
+
+  const badgeStyle = (drift) => {
+    const abs = Math.abs(drift);
+    if (abs < 5) return { color: "var(--ok)", fontWeight: 600 };
     if (abs <= 20) return { color: "var(--warn)", fontWeight: 600 };
     return { color: "var(--danger)", fontWeight: 700 };
   };
 
-  const statusLabel = (stat) => {
+  const statusLabel = (stat, drift) => {
     if (stat.remainingCount === 0) return <span style={{ color: "var(--ink-3)", fontWeight: 500 }}>Done</span>;
-    const abs = Math.abs(stat.delta);
-    if (abs <= 5) return <span style={badgeStyle(stat.delta)}>On track</span>;
-    const dir = stat.delta > 0 ? "behind" : "ahead";
-    return <span style={badgeStyle(stat.delta)}>{Math.round(abs)}m {dir}</span>;
+    const abs = Math.abs(drift);
+    if (abs < 5) return <span style={badgeStyle(drift)}>On track</span>;
+    const dir = drift > 0 ? "behind" : "ahead";
+    return <span style={badgeStyle(drift)}>{Math.round(abs)}m {dir}</span>;
   };
 
   return (
@@ -177,15 +182,38 @@ export function CourtPacePanel({ byCourt, safeMatchDuration }) {
       {open && (
         <div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 8, marginBottom: suggestion ? 12 : 0 }}>
-            {populatedStats.map(stat => (
-              <div key={stat.court} style={{ fontSize: 12, padding: "6px 10px", background: "var(--bg-2)", borderRadius: 4, border: "1px solid var(--bg-3)" }}>
-                <div style={{ fontWeight: 600, marginBottom: 2 }}>Shiaijo {stat.court}</div>
-                <div style={{ color: "var(--ink-3)" }}>
-                  {stat.completedCount}/{stat.completedCount + stat.remainingCount} done
+            {populatedStats.map(stat => {
+              const matches = byCourt[stat.court] || [];
+              const pace = projectCourtPace(flatMatchesToPaceEntries(matches), {
+                now,
+                slotOf: () => safeMatchDuration,
+              });
+              const drift = pace.drift;
+              const firstWaiting = pace.projections[0];
+              const hasProjectableFirst = firstWaiting && typeof firstWaiting.projectedMinutes === 'number';
+              const display = hasProjectableFirst
+                ? paceDisplay(firstWaiting.entry.scheduledAt, firstWaiting.projectedMinutes)
+                : null;
+
+              return (
+                <div key={stat.court} style={{ fontSize: 12, padding: "6px 10px", background: "var(--bg-2)", borderRadius: 4, border: "1px solid var(--bg-3)" }}>
+                  <div style={{ fontWeight: 600, marginBottom: 2 }}>Shiaijo {stat.court}</div>
+                  <div style={{ color: "var(--ink-3)" }}>
+                    {stat.completedCount}/{stat.completedCount + stat.remainingCount} done
+                  </div>
+                  <div style={{ marginTop: 2 }}>{statusLabel(stat, drift)}</div>
+                  {display && (
+                    <div style={{ marginTop: 2, color: "var(--ink-2)" }}>
+                      Next {display.projected ? (
+                        <span className="pace-projected" aria-label={display.ariaLabel}>{display.text}</span>
+                      ) : (
+                        display.text
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div style={{ marginTop: 2 }}>{statusLabel(stat)}</div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           {suggestion && (
             <div style={{ marginTop: 8, padding: "8px 12px", background: "var(--warn-soft)", border: "1px solid var(--warn-border)", borderRadius: 6, fontSize: 13 }}>

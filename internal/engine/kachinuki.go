@@ -1568,14 +1568,14 @@ func (e *Engine) checkTargetReopenable(compID string, comp *state.Competition, m
 // claim they aren't made. The caller holds only the court lock, not a per-comp
 // write lock, so these reads match CheckCrossCompCourtBusy's pre-tx discipline.
 func (e *Engine) requireBlockerHoldsCourt(targetComp, targetMatch, blockerComp, blockerMatch string) error {
-	targetCourt, err := e.lookupMatchCourt(targetComp, targetMatch)
+	targetCourt, err := lookupMatchCourtTx(e.store, targetComp, targetMatch)
 	if err != nil {
 		return err
 	}
 	if targetCourt == "" {
 		return validationErrorf("%s has no court assigned, so no match can be blocking it.", SentenceCase(e.operatorMatchLabel(targetComp, targetMatch)))
 	}
-	blockerCourt, err := e.lookupMatchCourt(blockerComp, blockerMatch)
+	blockerCourt, err := lookupMatchCourtTx(e.store, blockerComp, blockerMatch)
 	if err != nil {
 		return err
 	}

@@ -372,7 +372,7 @@ func (e *Engine) StartMatch(compID, matchID string) error {
 // (passed to store.RunningMatchOnCourt to avoid re-locking a non-reentrant
 // mutex). Pass "" when calling outside a WithTransaction body.
 func (e *Engine) checkCourtExclusivity(compID, matchID, skipCompID string) error {
-	court, err := e.lookupMatchCourt(compID, matchID)
+	court, err := lookupMatchCourtTx(e.store, compID, matchID)
 	if err != nil {
 		return err
 	}
@@ -396,7 +396,7 @@ func (e *Engine) checkCourtExclusivity(compID, matchID, skipCompID string) error
 // circular-wait deadlock if another competition is simultaneously in its
 // own WithTransaction (both goroutines try to read-lock each other's mutex).
 func (e *Engine) CheckCrossCompCourtBusy(compID, matchID string) error {
-	court, err := e.lookupMatchCourt(compID, matchID)
+	court, err := lookupMatchCourtTx(e.store, compID, matchID)
 	if err != nil {
 		return err
 	}
@@ -441,13 +441,6 @@ func (e *Engine) crossCompCourtBusy(compID, court string) error {
 		return &CourtBusyError{Court: court, MatchID: crossOcc.MatchID, CompID: crossOcc.CompID}
 	}
 	return nil
-}
-
-// lookupMatchCourt returns the court assigned to matchID in compID's pool
-// matches or bracket. Returns "" (not an error) when the match exists but
-// has no court assigned.
-func (e *Engine) lookupMatchCourt(compID, matchID string) (string, error) {
-	return lookupMatchCourtTx(e.store, compID, matchID)
 }
 
 // findPoolMatch returns matchID's own row within an already-loaded

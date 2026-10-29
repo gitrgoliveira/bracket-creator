@@ -268,13 +268,3 @@ func (m *BracketMatch) hasBothCompetitors() bool {
 	}
 	return resolved(m.SideA, m.SideAID) && resolved(m.SideB, m.SideBID)
 }
-
-// DeriveQueuePositions assigns a 1-indexed queue position to each
-// scheduled match per court. Live (running), completed, and barred matches
-// receive 0.
-//
-// Numbers ONE competition's matches only. Production viewer payloads use the
-// court-wide stamp (stampCourtQueuePositions).
-func DeriveQueuePositions(matches []MatchResult) []int {
-	return CourtQueuePositions(CourtQueueEntriesOf(&Competition{}, matches, nil))
-}

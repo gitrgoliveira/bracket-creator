@@ -2193,7 +2193,7 @@ func resolvedByByeFrom(bm *state.BracketMatch, feedM int) bool {
 // feeder's placeholder: still completed, with no winner. Completed is
 // deliberate, not an oversight. It is what the latent-bye pass writes so the
 // match is never counted as one to play, and a SCHEDULED one would be: the
-// queue numbers every scheduled match on a court (annotateBracketQueuePositions),
+// queue numbers every scheduled match on a court (stampCourtQueuePositions),
 // so a hidden bye would push "N before yours" up by one. The feeder's next
 // winner re-resolves it through propagateBracketWinner exactly as the first
 // one did.

@@ -163,17 +163,17 @@ func TestAnnotateEligibility(t *testing.T) {
 
 // TestQueuePositions_SkipBarredScheduledMatch pins the "position 0" part of
 // bc-cse: a stamped ineligibleSides match is not counted toward its court's
-// queue, in both the pool (state.DeriveQueuePositions) and bracket
-// (annotateBracketQueuePositions) derivations.
+// queue, in both the pool and bracket derivations.
 func TestQueuePositions_SkipBarredScheduledMatch(t *testing.T) {
+	comp := &state.Competition{ID: "c1"}
 	t.Run("pool", func(t *testing.T) {
 		ms := []state.MatchResult{
 			{ID: "Pool A-0", Court: "A", Status: state.MatchStatusScheduled, IneligibleSides: &state.IneligibleSidesAnnotation{A: "kiken-voluntary"}},
 			{ID: "Pool A-1", Court: "A", Status: state.MatchStatusScheduled},
 		}
-		positions := state.DeriveQueuePositions(ms)
-		assert.Equal(t, 0, positions[0], "the barred match is not queued")
-		assert.Equal(t, 1, positions[1], "the next real match becomes position 1")
+		stampCourtQueuePositions(comp, ms, nil, nil)
+		assert.Equal(t, 0, ms[0].QueuePosition, "the barred match is not queued")
+		assert.Equal(t, 1, ms[1].QueuePosition, "the next real match becomes position 1")
 	})
 
 	t.Run("bracket", func(t *testing.T) {
@@ -181,7 +181,7 @@ func TestQueuePositions_SkipBarredScheduledMatch(t *testing.T) {
 			{ID: "m-r1-0", Court: "A", Status: state.MatchStatusScheduled, IneligibleSides: &state.IneligibleSidesAnnotation{B: "fusenpai"}},
 			{ID: "m-r1-1", Court: "A", Status: state.MatchStatusScheduled},
 		}}}
-		annotateBracketQueuePositions(b)
+		stampCourtQueuePositions(comp, nil, b, nil)
 		assert.Equal(t, 0, b.Rounds[0][0].QueuePosition)
 		assert.Equal(t, 1, b.Rounds[0][1].QueuePosition)
 	})

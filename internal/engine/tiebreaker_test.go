@@ -690,7 +690,7 @@ func TestComputeStandings_TBExcludedFromStats(t *testing.T) {
 }
 
 // TestInjectTiebreakerMatches_PreservesExistingScheduledAt is the
-// regression guard for the 🔴 bug fix: assignPoolMatchSlots must not
+// regression guard for the 🔴 bug fix: assignPoolMatchSlotsFrom must not
 // overwrite operator-adjusted ScheduledAt values on pre-existing matches.
 // Only newly injected TB matches (empty ScheduledAt) should receive fresh
 // slot assignments.

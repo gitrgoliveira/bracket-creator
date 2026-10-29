@@ -619,7 +619,7 @@ func TestViewerCompetitionsList_CorruptBracketShowsNoNumbers(t *testing.T) {
 		for _, p := range comp.Players {
 			assert.Emptyf(t, p.Number, "competitor %q must show NO number over an unreadable bracket.json, got %q", p.Name, p.Number)
 		}
-		// Exactly ONE dataIssues entry, not two: buildViewerCompetitionPayload
+		// Exactly ONE dataIssues entry, not two: loadViewerCompetition
 		// loads the bracket once (for the court-feed check) and the numbering
 		// merge must reuse that same read/error rather than attempting a
 		// second bracket.json load and reporting the identical corrupt-file
@@ -896,12 +896,12 @@ func TestViewerCompetitionDetail_MissingSquadsFileIsNotAnError(t *testing.T) {
 // app.jsx's display route and StreamingOverlay both consume the aggregate
 // GET /api/viewer/competitions (competitions={displayTournament.competitions}),
 // never the detail endpoint, so the TV display and the streaming overlay
-// only ever see squads if buildViewerCompetitionPayload carries them too.
+// only ever see squads if loadViewerCompetition carries them too.
 // Same shape, same gate as the detail endpoint's own three tests above. ---
 
 // TestViewerAggregate_TeamCompetitionCarriesSquads mirrors
 // TestViewerCompetitionDetail_TeamCompetitionCarriesSquads for the
-// aggregate GET /api/viewer/competitions endpoint (buildViewerCompetitionPayload,
+// aggregate GET /api/viewer/competitions endpoint (loadViewerCompetition,
 // shared by the court feed).
 func TestViewerAggregate_TeamCompetitionCarriesSquads(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
@@ -953,7 +953,7 @@ func TestViewerAggregate_TeamCompetitionCarriesSquads(t *testing.T) {
 // TestViewerCompetitionDetail_IndividualCompetitionSkipsSquadsRead for the
 // aggregate endpoint: no "teamMembers" key, and garbage bytes at team-members.yaml's
 // path produce no log line, proving state.LoadSquads was never called for
-// an individual competition even though buildViewerCompetitionPayload runs
+// an individual competition even though loadViewerCompetition runs
 // once per competition in the whole tournament.
 func TestViewerAggregate_IndividualCompetitionSkipsSquadsRead(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
@@ -1020,7 +1020,7 @@ func TestViewerAggregate_MissingSquadsFileIsNotAnError(t *testing.T) {
 	// Same non-pinned-content reasoning as the detail endpoint's twin test:
 	// this function loads participants/pools/bracket sequentially BEFORE
 	// the squads read (never concurrently -- see the squads read's own
-	// comment in buildViewerCompetitionPayload), so by the time it runs,
+	// comment in loadViewerCompetition), so by the time it runs,
 	// the seed-on-touch side effect has deterministically already run for
 	// THIS builder specifically. What matters is that a missing file is
 	// never an error: a present, well-typed map either way.
@@ -1029,7 +1029,7 @@ func TestViewerAggregate_MissingSquadsFileIsNotAnError(t *testing.T) {
 
 // TestViewerCourtFeed_TeamCompetitionCarriesSquads verifies the court feed
 // (GET /api/viewer/court/:court/matches), the OTHER consumer of
-// buildViewerCompetitionPayload, also carries squads: app.jsx's own
+// loadViewerCompetition, also carries squads: app.jsx's own
 // comment (fetchCourtMatches, api_client.jsx) treats this as the cheap
 // per-court alternative to the full aggregate, so it must not silently
 // diverge on payload shape from the aggregate this test suite otherwise

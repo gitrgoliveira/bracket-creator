@@ -122,7 +122,7 @@ func numberingApplies(comp *state.Competition) (needsBracket, ok bool) {
 //
 // bracket is the caller's own already-loaded read when it has one (nil
 // otherwise, meaning "load it here only if the format needs it"):
-// buildViewerCompetitionPayload (below) loads it unconditionally for the
+// loadViewerCompetition (below) loads it unconditionally for the
 // court-feed match check before numbering is ever computed, and
 // currentMatchPlayers (handlers_display.go) holds one on its bracket-branch
 // calls but not its pool-branch call. Passing bracket verbatim -- nil
@@ -175,34 +175,30 @@ var viewerLoadCompetition = func(store *state.Store, compID string) (*state.Comp
 }
 
 // buildViewerCompetitionPayloads lists competitions and builds each public
-// per-comp payload concurrently: one safeGo goroutine per comp writing to a
-// unique index of a pre-allocated results slice (no mutex needed; wg.Wait
-// provides the happens-before), so the wall-clock cost is the slowest single
-// build, not the sum. Shared by GET /competitions (courtFilter "") and the
-// court feed GET /court/:court/matches. Non-nil payloads are returned in
-// listing order; the returned slice is non-nil even when empty so callers
-// marshal [] rather than null.
+// per-comp payload in two passes. The first loads every competition
+// concurrently: one safeGo goroutine per comp writing to a unique index of a
+// pre-allocated slice (no mutex needed; wg.Wait provides the happens-before),
+// so the wall-clock cost is the slowest single load, not the sum. The second
+// numbers the court queue from what the first loaded, so each competition is
+// read once, and finishes the payloads in listing order. Shared by GET
+// /competitions (courtFilter "") and the court feed GET /court/:court/matches.
+// Non-nil payloads are returned in listing order; the returned slice is
+// non-nil even when empty so callers marshal [] rather than null.
 func buildViewerCompetitionPayloads(store *state.Store, courtFilter string) ([]any, error) {
 	ids, err := store.ListCompetitions()
 	if err != nil {
 		return nil, err
 	}
 
-	queue := loadCourtQueueEntries(store)
-
-	results := make([]any, len(ids))
+	loaded := make([]*viewerCompetition, len(ids))
 	var wg sync.WaitGroup
 	var panicRef atomic.Pointer[recoveredPanic]
 	for i, id := range ids {
 		idx, compID := i, id
 		safeGo(&wg, &panicRef, func() {
-			// A nil payload (comp filtered out or failed to load) leaves
-			// results[idx] as a nil `any` so the collect loop below skips
-			// it; assigning a nil gin.H directly would box into a non-nil
-			// interface and slip past that filter.
-			if payload := buildViewerCompetitionPayload(store, compID, courtFilter, queue); payload != nil {
-				results[idx] = payload
-			}
+			// A nil load (comp failed to load, or is in setup on the court
+			// feed) stays a nil pointer, which both passes below skip.
+			loaded[idx] = loadViewerCompetition(store, compID, courtFilter)
 		})
 	}
 	wg.Wait()
@@ -210,28 +206,57 @@ func buildViewerCompetitionPayloads(store *state.Store, courtFilter string) ([]a
 		return nil, p
 	}
 
+	// The queue is court-wide, so a competition the court feed leaves out
+	// still counts toward it; a setup competition has no matches to count.
+	var queue []state.CourtQueueEntry
+	for _, l := range loaded {
+		if l == nil || l.comp.Status == state.CompStatusSetup {
+			continue
+		}
+		queue = append(queue, state.CourtQueueEntriesOf(l.comp, l.poolMatches, l.bracket)...)
+	}
+
 	comps := make([]any, 0, len(ids))
-	for _, comp := range results {
-		if comp != nil {
-			comps = append(comps, comp)
+	for _, l := range loaded {
+		if l != nil && l.inFeed {
+			comps = append(comps, l.payload(queue))
 		}
 	}
 	return comps, nil
 }
 
-// buildViewerCompetitionPayload assembles the public per-competition viewer
-// payload ({config, poolMatches, bracket}) shared by the aggregate
-// GET /competitions and the court-scoped GET /court/:court/matches. It applies
-// the identical participant/number merge, preview-bracket strip, queue-position
-// annotation, and audit-field redaction so every PUBLIC surface sees the same
-// non-sensitive data. Returns nil when the competition cannot be loaded.
+// viewerCompetition is one competition as loadViewerCompetition read it: what
+// the court queue is numbered from and what the payload is built from, with the
+// matches already stamped with ineligibleSides but not yet with queue positions.
+type viewerCompetition struct {
+	comp        *state.Competition
+	poolMatches []state.MatchResult
+	bracket     *state.Bracket
+	// inFeed is false for a competition the court feed leaves out: it still
+	// counts toward the court-wide queue, but nothing else of it was read.
+	inFeed     bool
+	isTeamComp bool
+	players    []domain.Player
+	plErr      error
+	pools      []helper.Pool
+	poolsErr   error
+	pmErr      error
+	brErr      error
+	squads     map[string][]domain.TeamMember
+}
+
+// loadViewerCompetition reads the public per-competition viewer data shared by
+// the aggregate GET /competitions and the court-scoped GET /court/:court/matches.
+// It applies the identical participant/number merge, preview-bracket strip and
+// ineligibility stamp, so every PUBLIC surface sees the same non-sensitive
+// data. Returns nil when the competition cannot be loaded.
 //
 // courtFilter scopes the result for the court feed: when non-empty, the comp is
-// included ONLY if it is not in setup AND has at least one real match physically
-// on that court (matchesPresentOnCourt). The gate runs off the same
+// in the feed ONLY if it is not in setup AND has at least one real match
+// physically on that court (matchesPresentOnCourt). The gate runs off the same
 // poolMatches/bracket this function already loads, no second read. The
 // aggregate passes "" (no filter).
-func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter string, queue []state.CourtQueueEntry) gin.H {
+func loadViewerCompetition(store *state.Store, compID, courtFilter string) *viewerCompetition {
 	// Per-comp read faults degrade to skipping (or thinning) the comp rather
 	// than failing the whole viewer payload — the availability trade for the
 	// public list surfaces — but every failed load below is logged so a
@@ -253,7 +278,7 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 
 	// bc-pnum: "make a team member's label available to the public
 	// surfaces". Same gate as the detail endpoint above (isTeamComp,
-	// buildViewerCompetitionPayload's caller for GET /competitions/:id):
+	// loadViewerCompetition's caller for GET /competitions/:id):
 	// Competition.IsTeam, so an individual competition never
 	// attempts a team-members.yaml read at all. This matters MORE here than on
 	// the detail endpoint: this function runs once per competition in the
@@ -279,7 +304,10 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	// on the RAW bracket (before the preview strip below) so a preview bracket
 	// never qualifies a comp for a court.
 	if courtFilter != "" && !matchesPresentOnCourt(poolMatches, bracket, courtFilter) {
-		return nil
+		// Left out of this feed but still on the queue: stamp what the queue
+		// reads and load nothing else.
+		bracket = stampViewerEligibility(store, compID, poolMatches, bracket)
+		return &viewerCompetition{comp: comp, poolMatches: poolMatches, bracket: bracket}
 	}
 
 	// WithSeeds: true, matching the single-competition detail endpoint below.
@@ -363,6 +391,19 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 		}
 	}
 
+	bracket = stampViewerEligibility(store, compID, poolMatches, bracket)
+
+	return &viewerCompetition{
+		comp: comp, poolMatches: poolMatches, bracket: bracket, inFeed: true,
+		isTeamComp: isTeamComp, players: players, plErr: plErr,
+		pools: pools, poolsErr: poolsErr, pmErr: pmErr, brErr: brErr, squads: squads,
+	}
+}
+
+// stampViewerEligibility strips a preview bracket and stamps ineligibleSides on
+// the matches a viewer payload and the court queue both read, returning the
+// bracket to serve.
+func stampViewerEligibility(store *state.Store, compID string, poolMatches []state.MatchResult, bracket *state.Bracket) *state.Bracket {
 	// mp-9dz: a preview bracket carries pool-origin placeholders ("Pool A-1st")
 	// with assigned times. It MUST NOT leak into the public match-list payloads
 	// (Find-My-Matches / Watchlist / global schedule / TV / operator console),
@@ -372,7 +413,7 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	}
 
 	// bc-cse: stamp ineligibleSides BEFORE the queue-position derivation
-	// below, which reads the stamp back to skip a barred scheduled match.
+	// that payload runs, which reads the stamp back to skip a barred scheduled match.
 	// Gated on anyMatchToAnnotate so a competition with nothing
 	// this annotation could ever act on never pays for the
 	// LoadCompetitorStatus read.
@@ -384,6 +425,17 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 			annotateEligibility(poolMatches, bracket, statuses)
 		}
 	}
+	return bracket
+}
+
+// payload numbers the competition's matches on the court-wide queue, redacts
+// operator-only audit fields and builds the public per-competition viewer
+// payload ({config, poolMatches, bracket}).
+func (l *viewerCompetition) payload(queue []state.CourtQueueEntry) gin.H {
+	comp, poolMatches, bracket := l.comp, l.poolMatches, l.bracket
+	isTeamComp, squads := l.isTeamComp, l.squads
+	players, plErr := l.players, l.plErr
+	pools, poolsErr, pmErr, brErr := l.pools, l.poolsErr, l.pmErr, l.brErr
 
 	// Court-wide queuePosition across every competition on that court on the same day.
 	stampCourtQueuePositions(comp, poolMatches, bracket, queue)
@@ -517,7 +569,7 @@ func missingIDsIssue(file, detail string) *gin.H {
 }
 
 // viewerDataIssues is the ONE place that assembles a competition's
-// dataIssues list, so the aggregate (buildViewerCompetitionPayload) and the
+// dataIssues list, so the aggregate (loadViewerCompetition) and the
 // single-competition detail endpoint (GET /api/viewer/competitions/:id)
 // always report the same issues for the same on-disk state (bc-pnum ruling
 // 1e follow-up).
@@ -528,7 +580,7 @@ func missingIDsIssue(file, detail string) *gin.H {
 // those states are leftovers (a discarded draw, a hand-placed file), not an
 // operator-actionable pools.csv, and must surface neither a missing-ids
 // notice nor a corrupt-file entry. A caller may still gate its OWN read of
-// pools.csv on the same predicate as an I/O saving (buildViewerCompetitionPayload
+// pools.csv on the same predicate as an I/O saving (loadViewerCompetition
 // does); that is redundant with, not a substitute for, the gate here.
 //
 // pools and poolMatches are the RECORDS themselves (not just their load
@@ -759,7 +811,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// viewerDataIssues (compare the call a few lines down, which passes
 			// poolMatchesErr and bracketErr but not standingsErr): this endpoint
 			// is the only one that ever computes standings at all -- the
-			// aggregate (buildViewerCompetitionPayload) never calls
+			// aggregate (loadViewerCompetition) never calls
 			// engine.CalculatePoolStandings -- so feeding standingsErr into the
 			// SHARED viewerDataIssues builder would make the two surfaces report
 			// different issues for the identical competition, which
@@ -793,7 +845,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				return nil, dr.err
 			}
 
-			// bc-cse: same gate and ordering as buildViewerCompetitionPayload's
+			// bc-cse: same gate and ordering as loadViewerCompetition's
 			// own ineligibleSides stamp (this endpoint's sibling aggregate);
 			// see anyMatchToAnnotate for why the read is gated.
 			if anyMatchToAnnotate(poolMatches, bracket) {
@@ -826,7 +878,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			stripBracketAudit(bracket)
 
 			// viewerDataIssues (above) is the SAME function and the SAME
-			// three-error shape buildViewerCompetitionPayload calls, so this
+			// three-error shape loadViewerCompetition calls, so this
 			// competition's dataIssues read identically here and on the
 			// aggregate. Sibling of "config", exactly like the aggregate's
 			// own payload shape; the SPA maps it onto detail.config.dataIssues

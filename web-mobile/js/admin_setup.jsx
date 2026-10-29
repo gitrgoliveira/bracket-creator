@@ -848,7 +848,12 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   useEffectA(() => {
     if (startTimeEditedRef.current) return;
     const candidates = findStackCandidates(tournament.competitions, date, selectedCourts, safeCourts);
-    if (candidates.length === 0) return; // no sharing candidates: keep the 09:00 default
+    if (candidates.length === 0) {
+      if (!startTimeEditedRef.current) {
+        setStartTime(COMPETITION_DEFAULTS.startTime);
+      }
+      return; // no sharing candidates: keep the 09:00 default
+    }
 
     const controller = new AbortController();
     const candidatePromises = candidates.map((cc) =>
@@ -871,14 +876,19 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     Promise.all(candidatePromises).then((ends) => {
       if (controller.signal.aborted || startTimeEditedRef.current) return;
       const validEnds = ends.filter((t) => typeof t === "string" && timeToMinutes(t) !== null);
-      if (validEnds.length === 0) return;
+      if (validEnds.length === 0) {
+        if (!startTimeEditedRef.current) {
+          setStartTime(COMPETITION_DEFAULTS.startTime);
+        }
+        return;
+      }
       const latestEnd = validEnds.reduce((a, b) => (timeToMinutes(b) > timeToMinutes(a) ? b : a));
       if (controller.signal.aborted || startTimeEditedRef.current) return;
       setStartTime(latestEnd);
     });
 
     return () => { controller.abort(); };
-  }, [date, tournament.competitions, password, selectedCourts.join(",")]);
+  }, [date, tournament.competitions, password, selectedCourts.join(","), safeCourts.join(",")]);
 
   // bc-pnum G2/R6: pre-fill the prefix field with the SAME value a save
   // left blank would actually assign server-side (assignDefaultNumberPrefix),

@@ -31,7 +31,7 @@ import (
 //
 // The oracle is GET /api/viewer/competitions/:id, served by the actual
 // router (setupTestRouter wires the production handler chain, including
-// RegisterViewerHandlers), not a direct call into buildViewerCompetitionPayload
+// RegisterViewerHandlers), not a direct call into loadViewerCompetition
 // or numbersFromDrawWithBracket. The export half calls
 // eng.ExportCompetitionXlsx directly (as the engine-level test does): the
 // export endpoint's own HTTP plumbing is not what bc-pnum A8 is about, only

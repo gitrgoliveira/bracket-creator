@@ -139,26 +139,21 @@ func scheduleLeagueSlots(matches []state.MatchResult, courts []string) (ordered 
 	return ordered, slots
 }
 
-// assignLeagueSlotTimes writes ScheduledAt on each match according to its slot:
+// assignLeagueSlotTimesFrom writes ScheduledAt on each match according to its slot:
 // all matches in slot k share one start time; slot k+1 starts one match-duration
 // after slot k (lunch/opening blocks respected via the same rules as
-// assignPoolMatchSlots). Returns matches and the max end cursor.
+// assignPoolMatchSlotsFrom). Anchors the whole grid at the latest of dayStart + opening
+// and the floor of every court the league uses. It does not shift courts independently.
+// Returns matches and the max end cursor.
 //
 // A single global cursor is used: slot k's start = dayStart + OpeningBlock +
 // k*perMatchMin, pushed past LunchBlock via skipCeremonyBlocks. This keeps all
 // courts in the same slot strictly time-aligned, unlike the per-court cursors of
-// assignPoolMatchSlots (which is the defect G2 scheduling is designed to fix).
+// assignPoolMatchSlotsFrom (which is the defect G2 scheduling is designed to fix).
 //
 // Returns the input slice with ScheduledAt populated and the cursor position
 // immediately after the last slot ends. Returns an unmodified slice and zero
 // time.Time when comp is nil.
-func assignLeagueSlotTimes(matches []state.MatchResult, slots []int, comp *state.Competition, tournament *state.Tournament) ([]state.MatchResult, time.Time) {
-	return assignLeagueSlotTimesFrom(matches, slots, comp, tournament, nil)
-}
-
-// assignLeagueSlotTimesFrom writes ScheduledAt on each match according to its slot,
-// anchoring the whole grid at the latest of dayStart + opening and the floor of every
-// court the league uses. It does not shift courts independently.
 func assignLeagueSlotTimesFrom(matches []state.MatchResult, slots []int, comp *state.Competition, tournament *state.Tournament, courtStart map[string]time.Time) ([]state.MatchResult, time.Time) {
 	if comp == nil {
 		return matches, time.Time{}

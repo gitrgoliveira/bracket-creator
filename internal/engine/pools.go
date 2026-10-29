@@ -263,7 +263,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 				Court:   poolCourts[i%len(poolCourts)],
 				Round:   round,
 				// ScheduledAt is populated below by
-				// assignPoolMatchSlots, uniform start times were
+				// assignPoolMatchSlotsFrom, uniform start times were
 				// retired in T150.
 			})
 		}

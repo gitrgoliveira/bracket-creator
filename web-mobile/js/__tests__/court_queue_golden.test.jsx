@@ -7,8 +7,10 @@ import {
     courtQueuePositions,
     courtQueueEntriesOf,
     withCourtQueuePositions,
+    sharesDay,
     sharesCourtDay,
     orderOnCourt,
+    compareCourtDayQueue,
 } from '../court_queue.jsx';
 
 describe('court queue: golden table parity with internal/state/court_queue.go', () => {
@@ -191,6 +193,55 @@ describe('court queue: golden table parity with internal/state/court_queue.go', 
             expect(sharesCourtDay(compBlank, '   ', 'A')).toBe(true);
             expect(sharesCourtDay(compBlank, '2026-11-01', 'A')).toBe(false);
         });
+    });
+
+    describe('sharesDay', () => {
+        const comp = {
+            id: 'c1',
+            date: '2026-11-01',
+        };
+
+        it('returns true when day matches', () => {
+            expect(sharesDay(comp, '2026-11-01')).toBe(true);
+            expect(sharesDay(comp, '  2026-11-01  ')).toBe(true);
+        });
+
+        it('returns false when day does not match', () => {
+            expect(sharesDay(comp, '2026-11-02')).toBe(false);
+        });
+
+        it('matches blank dates as the same day', () => {
+            const compBlank = { id: 'c2', date: '' };
+            expect(sharesDay(compBlank, '')).toBe(true);
+            expect(sharesDay(compBlank, '   ')).toBe(true);
+            expect(sharesDay(compBlank, '2026-11-01')).toBe(false);
+        });
+
+        it('reads date from config.date if top-level date is not present', () => {
+            const compConfig = { id: 'c3', config: { date: '01-06-2026' } };
+            expect(sharesDay(compConfig, '01-06-2026')).toBe(true);
+            expect(sharesDay(compConfig, '31-05-2026')).toBe(false);
+        });
+
+        it('returns false when comp is null or undefined', () => {
+            expect(sharesDay(null, '2026-11-01')).toBe(false);
+            expect(sharesDay(undefined, '2026-11-01')).toBe(false);
+        });
+    });
+});
+
+describe('compareCourtDayQueue', () => {
+    it('a day-2 09:00 scheduled entry sorts after a day-1 10:00 scheduled entry, dates in DD-MM-YYYY, and an empty date sorts first', () => {
+        const day1Late = { date: '31-05-2026', scheduledAt: '10:00', status: 'scheduled' };
+        const day2Early = { date: '01-06-2026', scheduledAt: '09:00', status: 'scheduled' };
+        const emptyDate = { date: '', scheduledAt: '12:00', status: 'scheduled' };
+
+        expect(compareCourtDayQueue(day2Early, day1Late)).toBeGreaterThan(0);
+        expect(compareCourtDayQueue(day1Late, day2Early)).toBeLessThan(0);
+
+        expect(compareCourtDayQueue(emptyDate, day1Late)).toBeLessThan(0);
+        expect(compareCourtDayQueue(emptyDate, day2Early)).toBeLessThan(0);
+        expect(compareCourtDayQueue(day1Late, emptyDate)).toBeGreaterThan(0);
     });
 });
 

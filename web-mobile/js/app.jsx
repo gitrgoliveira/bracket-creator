@@ -14,7 +14,7 @@ import { tapWords } from './match_history_view.jsx';
 import { useOpenedTapGuard } from './tap_guard.jsx';
 import { SELF_RUN_NO_CHECK_IN } from './competition_shape.jsx';
 import { pushToast } from './toast_queue.jsx';
-import { sharesCourtDay } from './court_queue.jsx';
+import { sharesCourtDay, sharesDay } from './court_queue.jsx';
 
 const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC } = React;
 
@@ -1336,6 +1336,12 @@ function App() {
             // tournament list so status badges update.
             if (viewerCompId === event.data?.competitionId) {
                 jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+            } else if (viewerCompId && event.data?.competitionId !== viewerCompId) {
+                const otherComp = (compsRef.current || []).find(c => c.id === event.data?.competitionId);
+                const otherDate = otherComp?.date || "";
+                if (sharesDay(selectedCompDataRef.current, otherDate)) {
+                    jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                }
             }
             jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "swiss_round_generated") {
@@ -1348,6 +1354,12 @@ function App() {
             // needed because the unconditional load() at the end covers it.
             if (viewerCompId === event.data?.competitionId) {
                 jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+            } else if (viewerCompId && event.data?.competitionId !== viewerCompId) {
+                const otherComp = (compsRef.current || []).find(c => c.id === event.data?.competitionId);
+                const otherDate = otherComp?.date || "";
+                if (sharesDay(selectedCompDataRef.current, otherDate)) {
+                    jitteredTimeout(() => window.API.fetchCompetitionDetails(viewerCompId).then(takeCompDetail).catch(err => console.error('SSE refresh failed:', err)), detailJitter);
+                }
             }
             // swiss_round_generated updates the tournament list (swissCurrentRound
             // counter): always do one list refresh: covers display mode, home-

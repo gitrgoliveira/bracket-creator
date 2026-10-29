@@ -849,7 +849,7 @@ func TestEstimateForCounts_CourtsClampedToMax(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestEstimateForCountsVsSlotAssigner_Balanced asserts the cross-path
-// relationship between EstimateForCounts (pre-draw) and assignPoolMatchSlots'
+// relationship between EstimateForCounts (pre-draw) and assignPoolMatchSlotsFrom's
 // end-cursor (post-draw) for a perfectly balanced fixture: they differ ONLY by
 // the slowest-court buffer, which EstimateForCounts applies and the slot
 // assigner does not. So EstimateForCounts.Total == round(slotDuration × (1 +
@@ -880,7 +880,7 @@ func TestEstimateForCountsVsSlotAssigner_Balanced(t *testing.T) {
 			state.MatchResult{ID: fmt.Sprintf("A-%d", i), Court: "A"},
 			state.MatchResult{ID: fmt.Sprintf("B-%d", i), Court: "B"})
 	}
-	_, maxCursor := assignPoolMatchSlots(matches, comp, tournament)
+	_, maxCursor := assignPoolMatchSlotsFrom(matches, comp, tournament, nil)
 
 	dayStart := parseClockHHMM(comp.StartTime)
 	slotDuration := maxCursor.Sub(dayStart).Minutes() // unbuffered (slot assigner ignores buffer)

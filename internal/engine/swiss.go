@@ -149,7 +149,7 @@ func swissFieldKeysFromMatches(matches []state.MatchResult, byID map[string]stri
 //     the win race.
 //
 // Courts are assigned round-robin from comp.Courts. Per-court time
-// slots are populated via assignPoolMatchSlots so the returned matches
+// slots are populated via assignPoolMatchSlotsFrom so the returned matches
 // land on the correct schedule cells.
 func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.MatchResult, error) {
 	if roundNumber < 1 {
@@ -313,7 +313,7 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 	// multiplier tuning.
 	// Apply the team-size default (same guard as competition.go StartCompetition).
 	// GenerateSwissRound reloads comp from disk; if TeamSize was 0 in the stored
-	// config, the default must be applied here so assignPoolMatchSlots uses the
+	// config, the default must be applied here so assignPoolMatchSlotsFrom uses the
 	// correct per-match duration for team competitions.
 	if comp.Kind == "team" && comp.TeamSize == 0 {
 		comp.TeamSize = 5

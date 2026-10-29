@@ -40,7 +40,6 @@
 import { mergeMatchPatch as _mergeMatchPatch, olderByScoreVersion } from './data.jsx';
 import { normalizeMatch, buildPlayerMap } from './api_serializers.jsx';
 import { isBarredMatch } from './ineligible_match.jsx';
-import { withCourtQueuePositions } from './court_queue.jsx';
 
 // bc-cse: _mergeMatchPatchKeepIneligible, which used to live here, is gone.
 // It defended `ineligibleSides` against an explicit `null` in the patch, but
@@ -50,23 +49,56 @@ import { withCourtQueuePositions } from './court_queue.jsx';
 // `{...existing, ...patch}` spread `_mergeMatchPatch` performs unchanged, so
 // the wrapper was defending against a payload the server can never send.
 
-// Recompute queuePosition after an SSE patch moved a match into or out of the
-// queue (a patch carries only the updated match, so a stale position would
-// linger otherwise). It asks the court queue (court_queue.jsx) over this one
-// list, so on a court another competition shares the positions are local to
-// this competition until the host refetches it (the payload carries the
-// court-wide ones) or recomputes over the whole list it holds
-// (withCourtQueuePositions). Identity is kept when nothing changes.
-function recomputeQueuePositions(matches) {
-    if (!matches || matches.length === 0) return matches;
-    return withCourtQueuePositions([{ poolMatches: matches }])[0].poolMatches;
+// Positions are the server court-wide numbers; a patch keeps them, zeroes a
+// match that left the queue, and the host refetches the competition for the rest.
+function dropMatchQueuePosition(m) {
+    if (!m || !m.queuePosition) return m;
+    if (m.status !== 'scheduled' || isBarredMatch(m)) {
+        return { ...m, queuePosition: 0 };
+    }
+    return m;
 }
 
-// Bracket variant of recomputeQueuePositions (rounds and the bronze match);
-// the same court-local caveat and identity guarantee apply.
-function recomputeBracketQueuePositions(bracket) {
+function dropLeftQueuePositions(matches) {
+    if (!matches || matches.length === 0) return matches;
+    let changed = false;
+    const next = matches.map(m => {
+        const dropped = dropMatchQueuePosition(m);
+        if (dropped !== m) changed = true;
+        return dropped;
+    });
+    return changed ? next : matches;
+}
+
+function dropLeftBracketQueuePositions(bracket) {
     if (!bracket || !bracket.rounds || bracket.rounds.length === 0) return bracket;
-    return withCourtQueuePositions([{ bracket }])[0].bracket;
+    let changed = false;
+    const rounds = bracket.rounds.map(round => {
+        let rChanged = false;
+        const nextRound = round.map(m => {
+            const dropped = dropMatchQueuePosition(m);
+            if (dropped !== m) {
+                rChanged = true;
+                changed = true;
+            }
+            return dropped;
+        });
+        return rChanged ? nextRound : round;
+    });
+    let bronze = bracket.thirdPlaceMatch;
+    if (bronze) {
+        const dropped = dropMatchQueuePosition(bronze);
+        if (dropped !== bronze) {
+            bronze = dropped;
+            changed = true;
+        }
+    }
+    if (!changed) return bracket;
+    const res = { ...bracket, rounds };
+    if (bronze !== bracket.thirdPlaceMatch) {
+        res.thirdPlaceMatch = bronze;
+    }
+    return res;
 }
 
 // T099: re-broadcast competitor_status_updated SSE events as a window-level
@@ -239,7 +271,7 @@ function applyPatch(prev, event) {
             if ((prevMatch.scheduledAt || "") !== (nextMatch.scheduledAt || "")) return true;
             // A patch that DOES carry ineligibleSides (the contract only says
             // one "may" arrive without it) can flip whether this still-
-            // scheduled match is barred. recomputeQueuePositions gives a
+            // scheduled match is barred. dropLeftQueuePositions gives a
             // barred match position 0 and skips it in the per-court count, so
             // that flip changes queue membership exactly like leaving/entering
             // `scheduled` does: siblings on either side must re-rank.
@@ -262,7 +294,7 @@ function applyPatch(prev, event) {
             return m;
         });
         if (needsQueueRecompute) {
-            next.poolMatches = recomputeQueuePositions(next.poolMatches);
+            next.poolMatches = dropLeftQueuePositions(next.poolMatches);
         }
     }
 
@@ -288,7 +320,7 @@ function applyPatch(prev, event) {
         if (bChanged) {
             next.bracket = { ...next.bracket, rounds };
             if (bracketNeedsQueueRecompute) {
-                next.bracket = recomputeBracketQueuePositions(next.bracket);
+                next.bracket = dropLeftBracketQueuePositions(next.bracket);
             }
         }
 
@@ -305,7 +337,7 @@ function applyPatch(prev, event) {
                 const merged = normalizeMatch(_mergeMatchPatch(bm, update), getPlayerMap());
                 next.bracket = { ...next.bracket, thirdPlaceMatch: merged };
                 if (isScheduleAffecting(bm.status, merged.status, bm, merged)) {
-                    next.bracket = recomputeBracketQueuePositions(next.bracket);
+                    next.bracket = dropLeftBracketQueuePositions(next.bracket);
                 }
             }
         }
@@ -412,7 +444,7 @@ function matchInComp(comp, id) {
 }
 
 export {
-    applyPatch, applyPatchOrdered, checkSeqGap, recomputeQueuePositions, recomputeBracketQueuePositions,
+    applyPatch, applyPatchOrdered, checkSeqGap, dropLeftQueuePositions, dropLeftBracketQueuePositions,
     keepNewerMatches, keepNewerDetail, keepNewerCompetitions, keepNewerTournament, isOlderRunningCopy,
     matchInComp,
 };

@@ -1,5 +1,5 @@
 import { isBarredMatch } from './ineligible_match.jsx';
-import { compareDmy } from './admin_helpers.jsx';
+import { compareDmy } from './date_order.jsx';
 
 // The JS mirror of internal/state/court_queue.go, pinned by internal/state/testdata/court_queue.json;
 // change the rule there and here together, never at a call site.
@@ -30,6 +30,17 @@ export function compareCourtQueue(a, b) {
     }
 
     return 0;
+}
+
+export function compareCourtDayQueue(a, b) {
+    const da = (a?.date || "").trim();
+    const db = (b?.date || "").trim();
+    if (da !== db) {
+        if (da === "") return -1;
+        if (db === "") return 1;
+        return compareDmy(da, db);
+    }
+    return compareCourtQueue(a, b);
 }
 
 export function courtQueueKey(date, court) {
@@ -175,25 +186,20 @@ export function orderOnCourt(competitions, court) {
         }
     }
 
-    entries.sort((a, b) => {
-        const da = (a.date || "").trim();
-        const db = (b.date || "").trim();
-        if (da !== db) {
-            if (da === "") return -1;
-            if (db === "") return 1;
-            return compareDmy(da, db);
-        }
-        return compareCourtQueue(a, b);
-    });
+    entries.sort(compareCourtDayQueue);
 
     return entries;
 }
 
-export function sharesCourtDay(comp, otherDate, courts) {
+export function sharesDay(comp, otherDate) {
     if (!comp) return false;
     const compDate = (comp.date || comp.config?.date || "").trim();
     const targetDate = (otherDate || "").trim();
-    if (compDate !== targetDate) return false;
+    return compDate === targetDate;
+}
+
+export function sharesCourtDay(comp, otherDate, courts) {
+    if (!sharesDay(comp, otherDate)) return false;
 
     const courtList = Array.isArray(courts) ? courts : [courts];
     if (courtList.length === 0) return false;

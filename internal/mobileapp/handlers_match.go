@@ -84,40 +84,6 @@ func clampClientModifiedAt(v int64) int64 {
 	return v
 }
 
-// annotateQueuePositions fills in MatchResult.QueuePosition for each
-// match in-place.
-//
-// Numbers ONE competition's matches only. Production viewer payloads use the
-// court-wide stamp (stampCourtQueuePositions).
-func annotateQueuePositions(matches []state.MatchResult) {
-	if len(matches) == 0 {
-		return
-	}
-	positions := state.DeriveQueuePositions(matches)
-	for i := range matches {
-		matches[i].QueuePosition = positions[i]
-	}
-}
-
-// annotateBracketQueuePositions fills in BracketMatch.QueuePosition for each
-// bracket match in-place. Non-scheduled matches are explicitly reset to 0 so
-// any stale value previously persisted in bracket.json (or written by future
-// code paths) cannot leak back out to clients via the omitempty JSON tag.
-//
-// Numbers ONE competition's matches only. Production viewer payloads use the
-// court-wide stamp (stampCourtQueuePositions).
-func annotateBracketQueuePositions(b *state.Bracket) {
-	if b == nil {
-		return
-	}
-	entries := state.CourtQueueEntriesOf(&state.Competition{}, nil, b)
-	positions := state.CourtQueuePositions(entries)
-	bracketMatches := state.BracketMatchesInDrawOrder(b)
-	for i, m := range bracketMatches {
-		m.QueuePosition = positions[i]
-	}
-}
-
 // loadCourtQueueEntries gathers the court queue entries of every competition
 // with a draw (setup competitions and preview brackets expose no public
 // matches), eligibility-stamped exactly as a viewer payload stamps its own,
@@ -255,13 +221,12 @@ func anyMatchToAnnotate(poolMatches []state.MatchResult, bracket *state.Bracket)
 // competitor status stands now, which the editor's clear control words its
 // consequence from.
 //
-// Read-only, request-time only, exactly like annotateQueuePositions: called
+// Read-only, request-time only, exactly like stampCourtQueuePositions: called
 // on the copy a viewer endpoint is about to serve, NEVER on a slice/bracket
 // destined for a save, which is what keeps the annotation off
 // pool-matches.csv and bracket.json (see the field's own doc comment,
-// models.go). MUST run BEFORE annotateQueuePositions/
-// annotateBracketQueuePositions, which read the stamp back to decide
-// whether a barred match counts toward the queue (position 0 for one).
+// models.go). MUST run BEFORE stampCourtQueuePositions, which reads the stamp
+// back to decide whether a barred match counts toward the queue (position 0 for one).
 func annotateEligibility(poolMatches []state.MatchResult, bracket *state.Bracket, statuses map[string]domain.CompetitorStatus) {
 	if len(statuses) == 0 {
 		return

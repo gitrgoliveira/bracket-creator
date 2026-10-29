@@ -237,7 +237,7 @@ func TestScheduleLeagueSlots_IDlessMatchesFailClosed(t *testing.T) {
 			"risking two matches that actually share a player colliding")
 }
 
-// --- assignLeagueSlotTimes ---
+// --- assignLeagueSlotTimesFrom ---
 
 func TestAssignLeagueSlotTimes_SameSlotSameTime(t *testing.T) {
 	comp := &state.Competition{
@@ -257,7 +257,7 @@ func TestAssignLeagueSlotTimes_SameSlotSameTime(t *testing.T) {
 	}
 	slots := []int{0, 0, 1}
 
-	out, cursor := assignLeagueSlotTimes(matches, slots, comp, tournament)
+	out, cursor := assignLeagueSlotTimesFrom(matches, slots, comp, tournament, nil)
 
 	require.Len(t, out, 3)
 
@@ -277,7 +277,7 @@ func TestAssignLeagueSlotTimes_SameSlotSameTime(t *testing.T) {
 func TestAssignLeagueSlotTimes_NilComp(t *testing.T) {
 	matches := []state.MatchResult{{ID: "m0"}}
 	slots := []int{0}
-	out, cursor := assignLeagueSlotTimes(matches, slots, nil, nil)
+	out, cursor := assignLeagueSlotTimesFrom(matches, slots, nil, nil, nil)
 	require.Len(t, out, 1)
 	assert.True(t, cursor.IsZero(), "nil comp must return zero cursor")
 }
@@ -287,7 +287,7 @@ func TestAssignLeagueSlotTimes_EmptyMatches(t *testing.T) {
 		StartTime:                "09:00",
 		PoolMatchDurationSeconds: 180,
 	}
-	out, cursor := assignLeagueSlotTimes(nil, nil, comp, nil)
+	out, cursor := assignLeagueSlotTimesFrom(nil, nil, comp, nil, nil)
 	assert.Empty(t, out)
 	assert.False(t, cursor.IsZero(), "cursor for empty input should be dayStart offset")
 }
@@ -310,7 +310,7 @@ func TestAssignLeagueSlotTimes_LunchSkip(t *testing.T) {
 	}
 	slots := []int{0, 1}
 
-	out, _ := assignLeagueSlotTimes(matches, slots, comp, tournament)
+	out, _ := assignLeagueSlotTimesFrom(matches, slots, comp, tournament, nil)
 	require.Len(t, out, 2)
 
 	// Slot 1 must be at or after 13:00 (past the lunch block).
@@ -398,7 +398,7 @@ func TestGeneratePools_League_G1G2(t *testing.T) {
 			// G2: no player appears in two adjacent slots. Wall-clock minute gaps
 			// cannot detect this across a lunch/ceremony boundary (a skip inflates
 			// the gap of an adjacent pair), so map each ScheduledAt back to its
-			// slot INDEX by replaying the same cursor loop assignLeagueSlotTimes
+			// slot INDEX by replaying the same cursor loop assignLeagueSlotTimesFrom
 			// uses (parseCeremonyParams + skipCeremonyBlocks + perMatch steps),
 			// then assert no player has two matches in consecutive slot indices.
 			loadedComp, err := store.LoadCompetition(compID)

@@ -13,7 +13,7 @@
 // local-only UI (per the brief; backend persistence is a follow-up).
 
 import { createTimerPool } from './timer_pool.jsx';
-import { compareCourtQueue, courtQueueEntriesOf } from './court_queue.jsx';
+import { compareCourtDayQueue, courtQueueEntriesOf } from './court_queue.jsx';
 import { applyPatch, keepNewerCompetitions, matchInComp } from './patch.jsx';
 import { SideCell, WinnerTick } from './side_cell.jsx';
 import { useOpenedTapGuard, acceptTap } from './tap_guard.jsx';
@@ -85,7 +85,7 @@ const QUEUE_OPEN_KEY = "bc_shiaijo_queue_open";
 const hasBothSides = window.hasBothSides;
 
 // Pure ordering/partition helpers (exported for unit tests). Running and
-// scheduled bouts sort by compareCourtQueue (running first is rule 1).
+// scheduled bouts sort by compareCourtDayQueue (running first is rule 1).
 export function sortShiaijoMatches(matches) {
     const isQueue = (s) => s === "running" || s === "scheduled";
     const isCompleted = (s) => s === "completed";
@@ -94,19 +94,16 @@ export function sortShiaijoMatches(matches) {
         competitionId: m.competitionId || m.compId || "",
         competitionStartTime: m.competitionStartTime || "",
         date: m.date || "",
-        court: m.court || "",
-        matchId: m.id || m.ID || "",
         status: m.status || "",
         scheduledAt: m.scheduledAt || "",
         drawIndex: m.drawIndex ?? 0,
-        barred: false,
     });
 
     return [...matches].sort((a, b) => {
         const aq = isQueue(a.status);
         const bq = isQueue(b.status);
         if (aq && bq) {
-            return compareCourtQueue(toEntry(a), toEntry(b));
+            return compareCourtDayQueue(toEntry(a), toEntry(b));
         }
         if (aq !== bq) {
             return aq ? -1 : 1;

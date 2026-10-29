@@ -338,7 +338,7 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 // the slowest court will likely run over the mean. The buffer is applied to
 // MATCH time only (matchMin), not to the fixed OpeningBlock offset or LunchBlock
 // dead-time, which have no runtime variance to pad, matching EstimateSchedule's
-// semantics. The post-draw slot assigners (assignPoolMatchSlots /
+// semantics. The post-draw slot assigners (assignPoolMatchSlotsFrom /
 // assignBracketMatchSlots) do NOT apply the buffer at all because a real,
 // assigned schedule needs no extra padding. So do NOT assert RAW cross-regime
 // equality, but the buffered relationship (EstimateForCounts ≈ slot duration ×

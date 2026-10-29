@@ -223,4 +223,41 @@ describe('AdminCreateCompetition default start time stacking (bc-seqc)', () => {
     expect(hint.textContent).toContain('The start time above is filled in that way until you change it.');
     expect(container.textContent).not.toContain('the schedule prevents conflicts');
   });
+
+  it('(h) switching from a shared court back to a free court returns the start time to 09:00, while a hand-edited time stays', async () => {
+    window.API.estimateCompetitionSchedule = vi.fn((id) => {
+      if (id === 'comp-a') return Promise.resolve({ courtEnds: { A: '10:30' } });
+      return Promise.resolve(null);
+    });
+    const tournament = makeTournament({
+      courts: ['A', 'B', 'C'],
+      competitions: [
+        { id: 'comp-a', name: 'Competition A', date: '10-08-2026', startTime: '09:00', courts: ['A'] },
+      ],
+    });
+    const { container } = await mountForm({ tournament });
+    await waitFor(() => {
+      expect(container.querySelector('#create-start-time').value).toBe('10:30');
+    });
+
+    // Deselect court A so only court B (unshared) remains selected
+    await clickPill(container, 'Shiaijo (court) A');
+    await waitFor(() => {
+      expect(container.querySelector('#create-start-time').value).toBe('09:00');
+    });
+
+    // Hand-type a time
+    const timeInput = container.querySelector('#create-start-time');
+    await act(async () => {
+      fireEvent.change(timeInput, { target: { value: '14:00' } });
+    });
+    expect(timeInput.value).toBe('14:00');
+
+    // Re-select court A (now shared again) - hand-edited time must stay 14:00
+    await clickPill(container, 'Shiaijo (court) A');
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(timeInput.value).toBe('14:00');
+  });
 });

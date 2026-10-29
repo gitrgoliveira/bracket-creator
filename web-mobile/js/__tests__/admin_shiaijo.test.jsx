@@ -527,6 +527,27 @@ describe('sortShiaijoMatches', () => {
     ]);
     expect(out.map((x) => x.id)).toEqual(['r', 'x']);
   });
+
+  it('orders scheduled rows by date before scheduled time (31-05-2026 before 01-06-2026)', () => {
+    const june = { id: 'june', status: 'scheduled', scheduledAt: '10:00', date: '01-06-2026' };
+    const may = { id: 'may', status: 'scheduled', scheduledAt: '15:00', date: '31-05-2026' };
+    const out = sortShiaijoMatches([june, may]);
+    expect(out.map((x) => x.id)).toEqual(['may', 'june']);
+  });
+
+  it('sorts a running row first on the same date regardless of scheduled time', () => {
+    const running = { id: 'run', status: 'running', scheduledAt: '16:00', date: '31-05-2026' };
+    const scheduled = { id: 'sched', status: 'scheduled', scheduledAt: '09:00', date: '31-05-2026' };
+    const out = sortShiaijoMatches([scheduled, running]);
+    expect(out.map((x) => x.id)).toEqual(['run', 'sched']);
+  });
+
+  it('orders by date before running status (earlier date scheduled row precedes later date running row)', () => {
+    const runningLate = { id: 'runLate', status: 'running', scheduledAt: '09:00', date: '02-06-2026' };
+    const schedEarly = { id: 'schedEarly', status: 'scheduled', scheduledAt: '15:00', date: '31-05-2026' };
+    const out = sortShiaijoMatches([runningLate, schedEarly]);
+    expect(out.map((x) => x.id)).toEqual(['schedEarly', 'runLate']);
+  });
 });
 
 describe('partitionShiaijoMatches', () => {

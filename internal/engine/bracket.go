@@ -32,7 +32,7 @@ func winnerOfPlaceholder(depth, matchIdx int) string {
 // array. (A mixed competition's pool-fed knockout is NOT built here, it is the
 // preview bracket from generatePoolPreviewBracket, filled in by
 // ResolveQualifiedPools as each pool finishes.)
-func (e *Engine) generateKnockout(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment) error {
+func (e *Engine) generateKnockout(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment, courtFloor map[string]time.Time) error {
 	// helper.Player is a type alias for domain.Player (NFR-007); the
 	// Excel-coupled helpers accept domain values directly.
 	if len(seeds) > 0 {
@@ -77,7 +77,7 @@ func (e *Engine) generateKnockout(comp *state.Competition, players []domain.Play
 	// bracket never carries it, its competitors are numbered pool by pool
 	// instead, and generatePoolPreviewBracket passes nil for exactly that
 	// reason.
-	bracket, err := e.buildBracketFromDraw(comp, draw, drawOrder, nil, true)
+	bracket, err := e.buildBracketFromDraw(comp, draw, drawOrder, nil, courtFloor)
 	if err != nil {
 		return err
 	}
@@ -116,7 +116,7 @@ func (e *Engine) generateKnockout(comp *state.Competition, players []domain.Play
 // poolMatches is the saved pool phase (the draw passes what generatePools
 // saved, the quarantine rebuild what is on disk): each court's knockout is
 // timed after that court's last pool bout (bc-kosc).
-func (e *Engine) generatePoolPreviewBracket(comp *state.Competition, poolMatches []state.MatchResult, applyCourtFloor bool) error {
+func (e *Engine) generatePoolPreviewBracket(comp *state.Competition, poolMatches []state.MatchResult, courtFloor map[string]time.Time) error {
 	pools, err := e.store.LoadPools(comp.ID)
 	if err != nil {
 		return fmt.Errorf("loading pools for preview bracket: %w", err)
@@ -159,7 +159,7 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition, poolMatches
 	// never resolved competitors at draw time, so there is nothing to stamp
 	// (see buildBracketFromDraw's own doc comment). ResolveQualifiedPools
 	// stamps ids as each placeholder resolves to a real pool finisher.
-	bracket, err := e.buildBracketFromDraw(comp, draw, nil, poolMatches, applyCourtFloor)
+	bracket, err := e.buildBracketFromDraw(comp, draw, nil, poolMatches, courtFloor)
 	if err != nil {
 		return err
 	}
@@ -205,7 +205,7 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition, poolMatches
 // applyCourtFloor controls whether the bracket schedule respects floors from
 // other competitions on shared courts. It is true when drawn and false during
 // quarantine rebuilds so a repair never moves times against competitions drawn later.
-func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.KnockoutDraw, drawOrder []string, poolMatches []state.MatchResult, applyCourtFloor bool) (*state.Bracket, error) {
+func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.KnockoutDraw, drawOrder []string, poolMatches []state.MatchResult, courtFloor map[string]time.Time) (*state.Bracket, error) {
 	if draw == nil || draw.Root == nil {
 		return nil, fmt.Errorf("buildBracketFromDraw: no draw to build from")
 	}
@@ -353,10 +353,6 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 	tournament, err := e.store.LoadTournament()
 	if err != nil {
 		return nil, err
-	}
-	var courtFloor map[string]time.Time
-	if applyCourtFloor {
-		courtFloor = e.courtFloorFor(comp, tournament)
 	}
 
 	// Display metadata (mp-7f2w): label each match with its effective round and

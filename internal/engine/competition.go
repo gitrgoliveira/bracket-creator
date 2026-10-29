@@ -1306,7 +1306,10 @@ func (e *Engine) runDrawPipeline(id string) error {
 		if err := clearEarlierDraw(); err != nil {
 			return err
 		}
-		poolMatches, err := e.generatePools(comp, players, seeds)
+		// One scan of the other same-day competitions serves the pools and
+		// the preview bracket alike.
+		courtFloor := e.courtFloorFor(comp, tourn)
+		poolMatches, err := e.generatePools(comp, players, seeds, courtFloor)
 		if err != nil {
 			return err
 		}
@@ -1316,7 +1319,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// source competition at draw time, mirroring the Excel Tree sheet.
 		// League has no knockout stage, so skip it there.
 		if comp.Format == state.CompFormatMixed {
-			if err := e.generatePoolPreviewBracket(comp, poolMatches, true); err != nil {
+			if err := e.generatePoolPreviewBracket(comp, poolMatches, courtFloor); err != nil {
 				return err
 			}
 		}
@@ -1363,7 +1366,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		if err := clearEarlierDraw(); err != nil {
 			return err
 		}
-		if err := e.generateKnockout(comp, players, seeds); err != nil {
+		if err := e.generateKnockout(comp, players, seeds, e.courtFloorFor(comp, tourn)); err != nil {
 			return err
 		}
 		comp.Status = state.CompStatusDrawReady

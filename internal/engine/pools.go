@@ -4,13 +4,18 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-func (e *Engine) generatePools(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment) ([]state.MatchResult, error) {
+// generatePools lays out the pool phase. courtFloor is the earliest start per
+// court that the neighbouring same-day competitions leave (nil for none); the
+// caller scans for it once and hands the same floor to the preview bracket.
+
+func (e *Engine) generatePools(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment, courtFloor map[string]time.Time) ([]state.MatchResult, error) {
 	// PoolSize is the divisor in CreatePools (and is fed to PoolSeeding); a
 	// zero/negative value would otherwise reach helper.CreatePools and the
 	// guard there returns a plain error mapped to HTTP 500. Validate up front
@@ -278,7 +283,6 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	if err != nil {
 		return nil, err
 	}
-	courtFloor := e.courtFloorFor(comp, tournament)
 
 	if comp.Format == state.CompFormatLeague {
 		// League scheduling (mp-sjaz): spread every player's matches so

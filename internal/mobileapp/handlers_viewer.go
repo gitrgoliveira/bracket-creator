@@ -904,7 +904,13 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			}
 
 			// Court-wide queuePosition across every competition on that court on the same day.
-			stampCourtQueuePositions(comp, poolMatches, bracket, loadCourtQueueEntries(store, comp))
+			// A preview bracket's placeholder bouts take no queue place, as in
+			// loadCourtQueueEntries; the Bracket tab still serves it.
+			queueBracket := bracket
+			if queueBracket != nil && queueBracket.Preview {
+				queueBracket = nil
+			}
+			stampCourtQueuePositions(comp, poolMatches, queueBracket, loadCourtQueueEntries(store, comp))
 
 			// mp-13y: merge assigned competitor Number from the draw onto
 			// comp.Players so the numberPrefix-derived "K1", "K2", … surface

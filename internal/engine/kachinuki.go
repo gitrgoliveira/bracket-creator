@@ -1182,7 +1182,10 @@ func (e *Engine) reopenUnderCourtLock(compID string, comp *state.Competition, ma
 		// running on a court that already has a running match would leave it
 		// with two, wedging the exclusivity check for BOTH. DO NOT remove it as
 		// a redundant-looking check. It runs only for a reopen that lands
-		// RUNNING: one that lands scheduled takes no court. It reuses the pool
+		// RUNNING: one that lands scheduled takes no court. A forced reopen
+		// (fo.ForceCourt, the organiser's "Reopen anyway", bc-adna) skips it
+		// on purpose: the court then holds two running bouts, its score table
+		// shows both, and the operator sends one back to the queue. It reuses the pool
 		// matches + bracket findMatchHome already loaded under this tx for the
 		// same-comp scan, instead of the re-load a nil/nil call would do
 		// (mp-gmcg review E4); a nil one (the bracket on a pool home) reloads.
